@@ -1,0 +1,97 @@
+#!/usr/bin/env node
+import { fileURLToPath } from 'node:url'
+import { spawn } from 'node:child_process'
+import { getOrPairSession } from './pairing.js'
+import { runBridge } from './bridge.js'
+import { registerClaudeMcp, registerCodexMcp } from './agents.js'
+
+const selfScript = fileURLToPath(import.meta.url)
+const execPath = process.execPath
+
+function argValue(args: string[], flag: string): string | undefined {
+  const i = args.indexOf(flag)
+  return i === -1 ? undefined : args[i + 1]
+}
+
+function spawnInherit(cmd: string, args: string[], extraEnv: Record<string, string> = {}): Promise<number> {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, args, {
+      stdio: 'inherit',
+      shell: process.platform === 'win32',
+      env: { ...process.env, ...extraEnv }
+    })
+    child.on('exit', (code) => resolve(code ?? 1))
+    child.on('error', (err) => {
+      console.error(`Could not start "${cmd}": ${err.message}`)
+      resolve(1)
+    })
+  })
+}
+
+function printHelp(): void {
+  console.log(`OpsMaxx CLI launcher
+
+Usage:
+  opsmaxx claude            Launch Claude Code with OpsMaxx MCP auto-configured
+  opsmaxx codex             Launch Codex with OpsMaxx MCP auto-configured
+  opsmaxx run -- <command>  Launch any command with OPSMAXX_MCP_COMMAND/ARGS set
+
+Requires OpsMaxx Desktop/Core already running, with AI & MCP enabled (AI & MCP → Security).
+First run pairs with it: a one-time code appears in OpsMaxx for you to type here. Set
+OPSMAXX_PORT if OpsMaxx's MCP bridge is not on the default port 5177.`)
+}
+
+async function main(): Promise<void> {
+  const [cmd, ...rest] = process.argv.slice(2)
+
+  if (cmd === 'bridge') {
+    const token = argValue(rest, '--token')
+    const port = Number(argValue(rest, '--port'))
+    if (!token || !port) {
+      console.error('Usage: opsmaxx bridge --token <token> --port <port>')
+      process.exitCode = 1
+      return
+    }
+    await runBridge(token, port)
+    return
+  }
+
+  if (cmd === 'claude') {
+    const { token, port } = await getOrPairSession('claude', 'Claude Code (CLI)')
+    registerClaudeMcp(execPath, selfScript, token, port)
+    process.exitCode = await spawnInherit('claude', rest)
+    return
+  }
+
+  if (cmd === 'codex') {
+    const { token, port } = await getOrPairSession('codex', 'Codex (CLI)')
+    registerCodexMcp(execPath, selfScript, token, port)
+    process.exitCode = await spawnInherit('codex', rest)
+    return
+  }
+
+  if (cmd === 'run') {
+    const sepIdx = rest.indexOf('--')
+    const target = sepIdx === -1 ? rest : rest.slice(sepIdx + 1)
+    if (target.length === 0) {
+      console.error('Usage: opsmaxx run -- <command> [args...]')
+      process.exitCode = 1
+      return
+    }
+    const [targetCmd, ...targetArgs] = target
+    const { token, port } = await getOrPairSession(targetCmd, `${targetCmd} (CLI)`)
+    process.exitCode = await spawnInherit(targetCmd, targetArgs, {
+      OPSMAXX_MCP_COMMAND: execPath,
+      OPSMAXX_MCP_ARGS: JSON.stringify([selfScript, 'bridge', '--token', token, '--port', String(port)])
+    })
+    return
+  }
+
+  printHelp()
+  process.exitCode = cmd ? 1 : 0
+}
+
+main().catch((err) => {
+  console.error(err instanceof Error ? err.message : String(err))
+  process.exitCode = 1
+})
