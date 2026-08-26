@@ -60,12 +60,18 @@ export async function initPersistence(): Promise<void> {
     if (!st.isWorkspaceAccessible(st.activeWorkspaceId)) st.lockWorkspace(st.activeWorkspaceId)
   }
 
+  // Main owns the vault's idle timer, same as the connection pool below.
+  void window.opsmaxx?.vault?.setAutoLock?.(useApp.getState().settings.vaultAutoLockMinutes)
+
   // Main owns the connection pool, so mirror the retention policy into it.
   void window.opsmaxx?.ssh.setPoolIdle(useApp.getState().settings.sshMasterIdleMinutes)
 
   useApp.subscribe((state, prev) => {
     if (state.settings.sshMasterIdleMinutes !== prev.settings.sshMasterIdleMinutes) {
       void window.opsmaxx?.ssh.setPoolIdle(state.settings.sshMasterIdleMinutes)
+    }
+    if (state.settings.vaultAutoLockMinutes !== prev.settings.vaultAutoLockMinutes) {
+      void window.opsmaxx?.vault?.setAutoLock?.(state.settings.vaultAutoLockMinutes)
     }
     const serversRefChanged = state.servers !== prev.servers
     const monitorGroupsRefChanged = state.monitorGroups !== prev.monitorGroups
