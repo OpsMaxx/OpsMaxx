@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Modal } from '../common/Modal'
 import type { CliPairingRequest } from '../../../../shared/mcp'
+import { bridgeOn } from '../../lib/bridge'
 
 // Mounted once at the app root, like ApprovalWatcher: the `opsmaxx
 // claude|codex|run` CLI launcher can pair from any tab the user happens to
@@ -12,7 +13,7 @@ export function CliPairingBanner(): React.JSX.Element | null {
   const [secondsLeft, setSecondsLeft] = useState(0)
 
   useEffect(() => {
-    const off = window.opsmaxx?.aiMcp.onPairingEvent((e) => {
+    const off = bridgeOn('aiMcp.onPairingEvent', window.opsmaxx?.aiMcp?.onPairingEvent, (e) => {
       if (e.type === 'created') setRequest(e.request)
       else setRequest((r) => (r && r.id === e.request.id ? null : r))
     })
