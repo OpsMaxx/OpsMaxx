@@ -38,12 +38,24 @@ function errorText(s: string): CallToolResult {
   return { content: [{ type: 'text', text: s }], isError: true }
 }
 
+// Creating a session in OpsMaxx does not reconfigure the client: the token
+// lives in the client's own config file, so a new session leaves the old,
+// dead token exactly where it was. "Ask the user to create a new one" was
+// therefore advice that does not work on its own — it is the half of the fix
+// that is easy to do and does nothing, and following it produces the identical
+// error. Say the other half.
+const RE_REGISTER =
+  'Creating a session in OpsMaxx is not enough on its own — the token lives in this ' +
+  "client's own configuration, so it must be pointed at the new one. In OpsMaxx, use " +
+  'AI & MCP > Overview > Connect, which issues a session and gives back the exact command or ' +
+  'config entry to apply, then reconnect this client.'
+
 const AUTH_MESSAGES: Record<AuthFailureReason, string> = {
-  'ai-disabled': 'AI & MCP access is currently disabled in OpsMaxx.',
+  'ai-disabled': 'AI & MCP access is currently disabled in OpsMaxx. Enable it under AI & MCP > Security.',
   'missing-token': 'No bearer token was supplied. Configure this agent with the token from AI & MCP > Agents.',
-  'invalid-token': 'This token is not recognized. It may have been regenerated — reconnect with the current one.',
-  revoked: 'This session has been revoked from OpsMaxx. Ask the user to create a new one.',
-  expired: 'This session has expired. Ask the user to create a new one.'
+  'invalid-token': `This token is not recognized by OpsMaxx. ${RE_REGISTER}`,
+  revoked: `This session has been revoked in OpsMaxx. ${RE_REGISTER}`,
+  expired: `This session has expired. ${RE_REGISTER}`
 }
 
 interface RequestInfoLike {
