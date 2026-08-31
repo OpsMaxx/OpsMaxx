@@ -653,7 +653,7 @@ function describe(e: unknown): string {
 
 /** Why OpenVPN is not here, and what to do about it.
  *
- *  OpsMaxx never bundles it: OpenVPN is GPL-2.0 and OpsMaxx is Apache-2.0
+ *  OpsMaxx never bundles it: OpenVPN is GPL-2.0 and OpsMaxx is MIT
  *  (`THIRD-PARTY-NOTICES.md`), so shipping them together is not a packaging
  *  decision anyone is free to revisit. "Not found" therefore always means
  *  "install it", never "our download failed". */

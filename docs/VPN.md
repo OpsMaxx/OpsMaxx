@@ -75,7 +75,7 @@ platforms with no administrator rights and no driver.
 
 Runs on `opsmaxx-netd`, a small Go program shipped with OpsMaxx that
 embeds the official `wireguard-go` implementation and a userspace TCP/IP stack.
-It is Apache-2.0 like the rest of OpsMaxx, and is built from source in
+It is MIT-licensed like the rest of OpsMaxx, and is built from source in
 this repository (`sidecar/netd/`).
 
 ### Importing a profile
@@ -116,8 +116,7 @@ portal you have not signed into yet.
 ## OpenVPN
 
 **OpenVPN is not bundled with OpsMaxx.** It is GPL-2.0 licensed and
-OpsMaxx is Apache-2.0 — the two are incompatible in that direction, and
-distributing the binary would additionally create a corresponding-source
+OpsMaxx is MIT; distributing the binary would create a corresponding-source
 obligation this project cannot honestly maintain across every platform, in
 perpetuity. See [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md).
 

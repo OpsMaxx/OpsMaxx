@@ -410,7 +410,7 @@ traffic, and every client that matters issues `CONNECT` for `https://`.
 
 ## Licensing
 
-`opsmaxx-netd` is part of OpsMaxx and is Apache-2.0, like the rest of the
+`opsmaxx-netd` is part of OpsMaxx and is MIT, like the rest of the
 repository.
 
 | Dependency | Licence |
