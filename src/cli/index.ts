@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process'
 import { getOrPairSession } from './pairing.js'
 import { runBridge } from './bridge.js'
 import { registerClaudeMcp, registerCodexMcp } from './agents.js'
+import { runVpnCommand } from './vpn.js'
 
 const selfScript = fileURLToPath(import.meta.url)
 const execPath = process.execPath
@@ -35,6 +36,7 @@ Usage:
   opsmaxx claude            Launch Claude Code with OpsMaxx MCP auto-configured
   opsmaxx codex             Launch Codex with OpsMaxx MCP auto-configured
   opsmaxx run -- <command>  Launch any command with OPSMAXX_MCP_COMMAND/ARGS set
+  opsmaxx vpn <subcommand>  List, start or stop VPN profiles (see: opsmaxx vpn help)
 
 Requires OpsMaxx Desktop/Core already running, with AI & MCP enabled (AI & MCP → Security).
 First run pairs with it: a one-time code appears in OpsMaxx for you to type here. Set
@@ -84,6 +86,15 @@ async function main(): Promise<void> {
       OPSMAXX_MCP_COMMAND: execPath,
       OPSMAXX_MCP_ARGS: JSON.stringify([selfScript, 'bridge', '--token', token, '--port', String(port)])
     })
+    return
+  }
+
+  if (cmd === 'vpn') {
+    // Routed through the MCP session rather than straight into the app, so it
+    // inherits the vpnControl capability check, the approval prompt and the
+    // audit entry instead of quietly bypassing all three.
+    const session = await getOrPairSession('cli-vpn', 'OpsMaxx CLI (vpn)')
+    process.exitCode = await runVpnCommand(rest, session)
     return
   }
 
