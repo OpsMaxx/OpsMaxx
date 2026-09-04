@@ -1,0 +1,4 @@
+===OPSMAXX-CORDON===
+node/spk8s-worker already cordoned
+===OPSMAXX-NODE===
+spk8s-worker   Ready,SchedulingDisabled   <none>   7m51s   v1.33.1
