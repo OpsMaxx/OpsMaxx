@@ -1,0 +1,4 @@
+===OPSMAXX-CORDON===
+Error from server (NotFound): nodes "spk8s-nope" not found
+===OPSMAXX-NODE===
+Error from server (NotFound): nodes "spk8s-nope" not found
