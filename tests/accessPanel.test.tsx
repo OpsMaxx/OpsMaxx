@@ -804,3 +804,27 @@ describe('keys nobody is using', () => {
     expect(document.body.textContent).toContain('staged with a rollback')
   })
 })
+
+describe('service accounts with keys', () => {
+  it('names a daemon account that could be logged into', async () => {
+    mount([server('a', 'web-1')], {
+      a: {
+        access: withAccounts([
+          account({ user: 'postgres', uid: 26, shell: '/bin/bash', neverLoggedIn: false, lastLoginAt: Date.now() })
+        ]),
+        at: 1
+      }
+    })
+    await waitFor(() => screen.getByText('Service accounts with keys'))
+    expect(document.body.textContent).toContain('postgres')
+    expect(document.body.textContent).toContain('can log in')
+  })
+
+  it('does not list root, because a key there is how this app connects', async () => {
+    mount([server('a', 'web-1')], {
+      a: { access: withAccounts([account({ user: 'root', uid: 0, shell: '/bin/bash' })]), at: 1 }
+    })
+    await waitFor(() => screen.getByText('Keys nobody is using'))
+    expect(screen.queryByText('Service accounts with keys')).toBeNull()
+  })
+})
