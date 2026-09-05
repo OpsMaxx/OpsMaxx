@@ -39,6 +39,7 @@ import {
 } from './policyEngine'
 import { getGroup, listAssignments } from './policyStore'
 import { fleetCached } from './fleetSampler'
+import type { CapacityReport } from '../../shared/capacity'
 import { requestApproval } from './approvals'
 import { recordAudit } from './auditLog'
 import { redactOutput } from './secretRedaction'
@@ -281,6 +282,22 @@ interface AuditContext {
   serverName: string | null
   action: string
   capability: AiCapability | null
+}
+
+/**
+ * How this module reads capacity, without owning the history store.
+ *
+ * Wired from main the way the fleet sampler is. main owns the store's lifetime
+ * -- it opens asynchronously after this module is constructed, and never at all
+ * on a machine with history switched off -- so a handle captured here would be
+ * null for the first second of every launch and wrong afterwards.
+ */
+let capacityReader: ((hostId: string, windowDays: number) => CapacityReport | null) | null = null
+
+export function setCapacityReader(
+  fn: (hostId: string, windowDays: number) => CapacityReport | null
+): void {
+  capacityReader = fn
 }
 
 async function gate(
@@ -1015,6 +1032,81 @@ function buildServer(): McpServer {
       auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
       const lines = (result.data ?? []).map((e) => `${e.dir ? 'd' : '-'} ${e.perms} ${String(e.size).padStart(10)} ${e.name}`)
       return text(lines.length ? lines.join('\n') : '(empty directory)')
+    }
+  )
+
+  server.registerTool(
+    'get_capacity_trends',
+    {
+      title: 'Get capacity trends',
+      description:
+        'Returns the trend and forecast for a server\'s CPU, memory, disk and inode usage over a window of ' +
+        'days: the direction each is moving, and either when it is projected to cross its threshold or the ' +
+        'REASON no forecast was made. ' +
+        'Use this for "is this server running out of space", "which way is memory going", or any question ' +
+        'about the future rather than the present; use get_server_metrics for what a server looks like right ' +
+        'now. It reads history OpsMaxx has already recorded, so it opens no connection to the server and ' +
+        'works on a server that is currently offline. ' +
+        'A refusal is an answer: "not enough data", "the samples are stale" and "the line is flat" are ' +
+        'returned as reasons rather than as a number, and none of them means the server is fine.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        windowDays: z
+          .number()
+          .int()
+          .min(1)
+          .max(90)
+          .optional()
+          .describe('How many days of history to read. Defaults to 7, clamped to what is retained.')
+      },
+      annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: false }
+    },
+    async ({ serverName, windowDays }, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const resolved = resolveServerOrError(auth.session, serverName)
+      if ('error' in resolved) return resolved.error
+      const { server: s, workspace } = resolved.match
+      // The same capability as get_server_metrics, deliberately. This is those
+      // numbers over time and nothing else: a separate switch would be a second
+      // thing to grant for data the first one already gives.
+      const check = effectiveCapability(auth.session, s.id, 'serverMetrics')
+      const ctx: AuditContext = {
+        session: auth.session,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        serverId: s.id,
+        serverName: s.name,
+        action: 'get_capacity_trends',
+        capability: 'serverMetrics'
+      }
+      const gated = await gate(ctx, check, 'low', extra)
+      if (!gated.ok) return gated.result
+
+      // "History is off" and "this server has no history" are different
+      // sentences and neither is "usage is fine".
+      const report = capacityReader?.(s.id, windowDays ?? 7) ?? null
+      if (report === null) {
+        return errorText(
+          'OpsMaxx is not recording history on this machine, so there is nothing to forecast from. This does not mean the server has spare capacity.'
+        )
+      }
+      recordAudit({
+        agentName: auth.session.agentName,
+        sessionId: auth.session.id,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        serverId: s.id,
+        serverName: s.name,
+        action: 'get_capacity_trends',
+        capability: 'serverMetrics',
+        approval: check.decision === 'ask' ? 'approved' : 'not-required',
+        result: 'success'
+      })
+      // The report carries host names already redacted and no free text -- see
+      // CapacityReport. Returned whole rather than summarised: every field on
+      // it is a conclusion, not a sample.
+      return { content: [{ type: 'text', text: JSON.stringify(report, null, 2) }] }
     }
   )
 

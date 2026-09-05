@@ -55,6 +55,11 @@ const ALLOWED_TOOLS = [
   'write_file',
   'list_files',
   'get_server_metrics',
+  // Item 47. A READ of history OpsMaxx already stores: it opens no
+  // connection, reaches no shell, and answers about a server that is offline.
+  // Gated on `serverMetrics`, the same capability as the tool whose numbers
+  // these are over time.
+  'get_capacity_trends',
   // Roadmap item C. Reads over SSH on a configured server, like every other
   // tool here, and reaches no shell on this machine. Gated on its own
   // `hostFacts` capability rather than serverMetrics.

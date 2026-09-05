@@ -85,7 +85,7 @@ describe('tool metadata', () => {
   })
 
   it('marks the read-only tools read-only', () => {
-    for (const n of ['list_workspaces', 'list_servers', 'get_server_details', 'read_file', 'list_files', 'get_server_metrics', 'list_vpns']) {
+    for (const n of ['list_workspaces', 'list_servers', 'get_server_details', 'read_file', 'list_files', 'get_server_metrics', 'get_capacity_trends', 'list_vpns']) {
       expect(byName(n).annotations?.readOnlyHint, n).toBe(true)
     }
   })

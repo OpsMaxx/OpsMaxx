@@ -327,7 +327,13 @@ import {
 import { listAudit } from './services/auditLog'
 import { recordJobApproval } from './services/approvalLog'
 import { planCronEditOnHost, writeCronEdit } from './services/cronEdit'
-import { startMcpServer, stopMcpServer, mcpServerStatus, explainSessionAccess } from './services/mcpServer'
+import {
+  startMcpServer,
+  stopMcpServer,
+  mcpServerStatus,
+  explainSessionAccess,
+  setCapacityReader
+} from './services/mcpServer'
 
 const isDev = !app.isPackaged
 
@@ -2864,35 +2870,52 @@ ipcMain.handle('alerts:db-events', (_e, limit?: number): StoredDbAlertRow[] => {
 // about seven thousand points per metric; shipping twenty-one thousand of them
 // to the renderer to be averaged down into eight hundred pixels is how "a query
 // and a chart" turns into the metrics warehouse the roadmap says not to build.
-ipcMain.handle(
-  'capacity:trends',
-  (_e, hostId: unknown, windowDays: unknown): CapacityReport | null => {
-    if (!historyStore) return null
-    // Not a string is not a host. The renderer passes a server id; anything
-    // else is a caller bug and must not read the whole time range.
-    if (typeof hostId !== 'string' || hostId === '') return null
-    // Clamped to what the store actually retains. A window wider than the
-    // horizon would return a quarter of data under a label saying a year, and
-    // the forecast states the window it was drawn from — so the label matters.
-    const days =
-      typeof windowDays === 'number' && Number.isFinite(windowDays)
-        ? Math.max(1, Math.min(RETENTION_HOURLY_DAYS, Math.floor(windowDays)))
-        : 7
-    const now = Date.now()
-    const from = now - days * 86_400_000
-    return buildCapacityReport(hostId, historyStore.readTrends(hostId, from, now), {
-      now,
-      from,
-      to: now,
-      thresholds: CAPACITY_THRESHOLDS,
-      // Carried into the report rather than duplicated in the panel: the
-      // renderer cannot import a main-process constant, and a panel with "7
-      // days" typed into it goes on saying that after the policy changes.
-      fullResolutionDays: RETENTION_FULL_DAYS,
-      retainedDays: RETENTION_HOURLY_DAYS
-    })
-  }
+/**
+ * One capacity report, for whoever is asking.
+ *
+ * Named rather than living inside the IPC handler because item 47 gave it a
+ * second caller -- `get_capacity_trends` over MCP -- and an agent that got its
+ * own copy of this arithmetic would eventually disagree with the panel the
+ * operator is looking at. That disagreement is the failure `get_server_metrics`
+ * was rewritten to remove, and it is not worth reintroducing for a chart.
+ */
+function capacityReportFor(hostId: unknown, windowDays: unknown): CapacityReport | null {
+  if (!historyStore) return null
+  // Not a string is not a host. The renderer passes a server id; anything
+  // else is a caller bug and must not read the whole time range.
+  if (typeof hostId !== 'string' || hostId === '') return null
+  // Clamped to what the store actually retains. A window wider than the
+  // horizon would return a quarter of data under a label saying a year, and
+  // the forecast states the window it was drawn from — so the label matters.
+  const days =
+    typeof windowDays === 'number' && Number.isFinite(windowDays)
+      ? Math.max(1, Math.min(RETENTION_HOURLY_DAYS, Math.floor(windowDays)))
+      : 7
+  const now = Date.now()
+  const from = now - days * 86_400_000
+  return buildCapacityReport(hostId, historyStore.readTrends(hostId, from, now), {
+    now,
+    from,
+    to: now,
+    thresholds: CAPACITY_THRESHOLDS,
+    // Carried into the report rather than duplicated in the panel: the
+    // renderer cannot import a main-process constant, and a panel with "7
+    // days" typed into it goes on saying that after the policy changes.
+    fullResolutionDays: RETENTION_FULL_DAYS,
+    retainedDays: RETENTION_HOURLY_DAYS
+  })
+}
+
+ipcMain.handle('capacity:trends', (_e, hostId: unknown, windowDays: unknown) =>
+  capacityReportFor(hostId, windowDays)
 )
+
+// The agent's half of the same answer. Wired the way the fleet sampler is,
+// rather than by mcpServer importing the history store: main owns the store's
+// lifetime, and a module that reached in would be holding a handle that is null
+// for the first second of every launch and forever on a machine with history
+// switched off.
+setCapacityReader(capacityReportFor)
 
 // ---- The change log — roadmap item 14 ----
 //
