@@ -633,9 +633,15 @@ failure is `unknown`, not a failed cordon; the reboot-ordering guard stays in ma
 
 **Size.** 3–5 weeks, and the untested drain-under-pressure path becomes the one that matters.
 **Version upgrades themselves** (kubeadm/k3s/rke2) are 4–6 weeks more and argue against the
-module's own principles; build the *skew and readiness report* (version per node vs server, API
-scan, PDB headroom — 3–4 days) and leave the upgrade to the distribution's tooling, refused in
-the header the way apply is.
+module's own principles, so the upgrade is left to the distribution's tooling. The **skew and
+readiness report is SHIPPED** (`shared/k8sSkew.ts`): version per node against the API server
+with a `KUBELET_SKEW_MINORS` window; a separate `ahead` verdict, because a node NEWER than its
+API server is unsupported under every version of the policy and usually means a control-plane
+upgrade stopped halfway; and PDB headroom, `disruptionsAllowed: 0` being the number that turns a
+routine drain into a command that hangs to its timeout and is invisible until somebody tries. A
+version or a budget that could not be read is `unknown`, never fine, and `null` never reads as
+zero headroom. Both are counted in the readiness headline: a number that improves as the cluster
+gets harder to read points the wrong way. The deprecated-API scan is still open.
 
 ### 42. Docker and Compose, the last quarter
 
