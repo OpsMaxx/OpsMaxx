@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 
+import { planEngineUpgrade } from '../src/shared/engineUpgrade'
 import {
   buildEnginePrecheckCommand,
   ENGINE_PACKAGES,
@@ -10,9 +11,8 @@ import {
   ENGINE_REFUSAL_HELP,
   engineRepoExists,
   parseEnginePrecheck,
-  planEngineUpgrade,
   type EnginePrecheck
-} from '../src/shared/engineUpgrade'
+} from '../src/shared/enginePrecheck'
 
 // Item 42's targeted engine upgrade.
 //

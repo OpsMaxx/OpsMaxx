@@ -146,6 +146,7 @@ import { dbShell } from './services/dbshell'
 import { DB_OPS_ROW_LIMIT, dbOps } from './services/dbOps'
 import { reportSizeSample } from '../shared/dbSizeSample'
 import { forecastBytes } from '../shared/bytesForecast'
+import type { PackageManager } from '../shared/hostFacts'
 import type { DbConnectConfig } from '../shared/db'
 import { notableDbEvents } from '../shared/dbOps'
 import { setSecret, getSecret, deleteSecret, secretsAvailable } from './services/secrets'
@@ -2167,6 +2168,9 @@ ipcMain.handle(
 )
 ipcMain.handle('docker:scan-image', (_e, cfg: unknown, ref: string) =>
   dockerReader.scanImage(cfg, ref)
+)
+ipcMain.handle('docker:engine-precheck', (_e, cfg: unknown, manager: PackageManager) =>
+  dockerReader.enginePrecheck(cfg, manager)
 )
 ipcMain.handle('docker:networks', (_e, cfg: unknown, opts?: { sudo?: boolean; autoSudo?: boolean }) =>
   dockerReader.networks(cfg, opts ?? {})

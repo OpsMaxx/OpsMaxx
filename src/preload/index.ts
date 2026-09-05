@@ -48,6 +48,8 @@ import type { ChangeLogBridge, ChangeLogFilter, ChangeLogPage } from '../shared/
 import type { RunbookNote, RunbookView, RunbooksBridge } from '../shared/runbooks'
 import type { StoreAlertKind } from '../shared/webhook'
 import type { BytesReading } from '../shared/bytesForecast'
+import type { EnginePrecheckProbe } from '../shared/enginePrecheck'
+import type { PackageManager } from '../shared/hostFacts'
 import type { ImageScanProbe } from '../shared/imageScan'
 import type { SecurityListProbe } from '../shared/securityUpdates'
 import type { K8sReviewProbe } from '../shared/k8sReview'
@@ -634,6 +636,8 @@ const api = {
     ): Promise<DockerInspectProbe> => ipcRenderer.invoke('docker:inspect', cfg, ref, opts),
     scanImage: (cfg: unknown, ref: string): Promise<ImageScanProbe> =>
       ipcRenderer.invoke('docker:scan-image', cfg, ref),
+    enginePrecheck: (cfg: unknown, manager: PackageManager): Promise<EnginePrecheckProbe> =>
+      ipcRenderer.invoke('docker:engine-precheck', cfg, manager),
     networks: (
       cfg: unknown,
       opts?: { sudo?: boolean; autoSudo?: boolean }

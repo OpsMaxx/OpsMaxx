@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
+import { useFleet } from '../src/renderer/src/store/fleet'
 import { DockerPanel } from '../src/renderer/src/components/docker/DockerPanel'
 import type {
   DockerDiskDetailProbe,
@@ -828,5 +829,107 @@ describe('DockerPanel — image scan', () => {
     const user = userEvent.setup()
     await openScan(user, { ok: false, detail: 'trivy: command exploded' })
     await screen.findByText(/trivy: command exploded/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The engine upgrade. Item 42.
+// ---------------------------------------------------------------------------
+
+describe('DockerPanel — engine upgrade', () => {
+  const PRECHECK = {
+    ok: true as const,
+    precheck: {
+      liveRestore: false,
+      packagesText: 'docker-ce 5:27.0.3-1~debian.12~bookworm install ok installed',
+      running: 4
+    }
+  }
+
+  const open = async (
+    user: ReturnType<typeof userEvent.setup>,
+    facts: unknown,
+    probe: unknown = PRECHECK
+  ): Promise<void> => {
+    useFleet.setState({ facts: facts as never, errors: {} })
+    stubBridge({
+      docker: {
+        list: (cfg: Cfg) => Promise.resolve(listing(cfg.serverId.replace('srv-', ''))),
+        disk: () => Promise.resolve(DISK),
+        diskDetail: (cfg: Cfg) => diskDetailImpl(cfg),
+        enginePrecheck: () => Promise.resolve(probe)
+      }
+    })
+    render(<DockerPanel servers={[ALPHA, BRAVO]} />)
+    await user.click(btn(/Read containers/))
+    await screen.findByText(/Check the engine/)
+  }
+
+  const withManager = (m: string): unknown => ({
+    'srv-alpha': { facts: { packageManager: m }, at: 1 }
+  })
+
+  // A server whose facts have not been collected gets the refusal rather than a
+  // read built on a guess about its distribution.
+  it('refuses before the facts say which package manager this server has', async () => {
+    const user = userEvent.setup()
+    await open(user, {})
+    await screen.findByText(/Run the precheck first/)
+  })
+
+  // Distinguishes the refusal from a guess: with a precheck already read, a
+  // build that fell back to apt would plan the upgrade here.
+  it('still refuses once a precheck has been read but the manager is unknown', async () => {
+    const user = userEvent.setup()
+    await open(user, {})
+    await user.click(btn(/Check the engine/))
+    await screen.findByText(/docker-ce 5:27\.0\.3/)
+    await user.click(screen.getByLabelText('I have read the package list'))
+    expect(screen.queryByText(/Upgrade the engine/)).toBeNull()
+    await screen.findByText(/Run the precheck first/)
+  })
+
+  // A confirmation is about the list that was on screen when it was given.
+  it('drops the confirmation when the precheck is read again', async () => {
+    const user = userEvent.setup()
+    await open(user, withManager('apt'))
+    await user.click(btn(/Check the engine/))
+    await user.click(await screen.findByLabelText('I have read the package list'))
+    await screen.findByText(/Upgrade the engine/)
+    await user.click(btn(/Check again/))
+    await waitFor(() => expect(screen.queryByText(/Upgrade the engine/)).toBeNull())
+  })
+
+  it('refuses a package manager Docker publishes no repository for', async () => {
+    const user = userEvent.setup()
+    await open(user, withManager('apk'))
+    await screen.findByText(/publishes no repository/)
+  })
+
+  // The package block is SHOWN, not parsed, and the operator is the check.
+  it('shows the package output and will not plan until it is confirmed', async () => {
+    const user = userEvent.setup()
+    await open(user, withManager('apt'))
+    await user.click(btn(/Check the engine/))
+    await screen.findByText(/docker-ce 5:27\.0\.3/)
+    expect(screen.queryByText(/Upgrade the engine/)).toBeNull()
+    await user.click(screen.getByLabelText('I have read the package list'))
+    await screen.findByText(/Upgrade the engine/)
+  })
+
+  // The first caveat is what happens to the containers.
+  it('leads with the containers stopping', async () => {
+    const user = userEvent.setup()
+    await open(user, withManager('apt'))
+    await user.click(btn(/Check the engine/))
+    await user.click(await screen.findByLabelText('I have read the package list'))
+    await screen.findByText(/stops all 4 running container\(s\)/)
+  })
+
+  it('reports a precheck that could not run', async () => {
+    const user = userEvent.setup()
+    await open(user, withManager('apt'), { ok: false, detail: 'ssh said no' })
+    await user.click(btn(/Check the engine/))
+    await screen.findByText(/ssh said no/)
   })
 })

@@ -65,6 +65,8 @@ const MODULE_FILES: Record<string, string[]> = {
     'src/shared/patch.ts',
     'src/shared/securityUpdates.ts',
     'src/shared/engineUpgrade.ts',
+    'src/shared/enginePrecheck.ts',
+    'src/renderer/src/components/docker/EngineUpgrade.tsx',
     'src/shared/topology.ts',
     'src/renderer/src/components/monitor/PatchPanel.tsx'
   ],

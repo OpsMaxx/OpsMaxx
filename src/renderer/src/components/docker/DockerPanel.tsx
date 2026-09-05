@@ -48,6 +48,9 @@ import {
 import type { Server } from '../../types'
 import { ComposePanel } from './ComposePanel'
 import { HealthLogPanel } from './HealthLog'
+import { useFleet } from '../../store/fleet'
+import { EngineUpgradePanel } from './EngineUpgrade'
+import { jobApprovalFor, planJob, type JobSpec } from '../../../../shared/jobs'
 import { ImageScanPanel } from './ImageScan'
 import type { ImageScanProbe } from '../../../../shared/imageScan'
 import { ReclaimDialog, ReclaimOutcome } from './Reclaim'
@@ -153,6 +156,10 @@ function mergeNetworks(
 
 export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Element {
   const [serverId, setServerId] = useState<string>('')
+  // The package manager, from the facts the sampler already collects. Absent
+  // means the facts have not been collected -- which the engine-upgrade panel
+  // refuses on rather than guessing a distribution from.
+  const allFacts = useFleet((st) => st.facts)
   const [probe, setProbe] = useState<DockerProbe | null>(null)
   const [loading, setLoading] = useState(false)
   const [logs, setLogs] = useState<{ name: string; output: string } | null>(null)
@@ -585,6 +592,31 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
       ? disk.rows.reduce((sum, r) => sum + (r.reclaimableBytes ?? 0), 0)
       : null
 
+  /**
+   * The engine upgrade, as a job.
+   *
+   * The approval is minted from the SAME spec and target list the engine will
+   * re-derive its plan from, which is what makes the record checkable. The
+   * typed phrase is the one `planJob` asks for; a panel that invented its own
+   * would be a second place for that to drift.
+   */
+  const launchEngineJob = async (spec: JobSpec): Promise<void> => {
+    if (!server) return
+    const targets = [{ serverId: server.id, serverName: server.name }]
+    const planned = planJob(spec, targets)
+    const phrase =
+      planned.confirmation.kind === 'type-to-confirm' ? planned.confirmation.phrase : null
+    if (phrase !== null && window.prompt(`Type ${phrase} to upgrade the engine on ${server.name}.`) !== phrase) {
+      return
+    }
+    await window.opsmaxx?.jobs?.run?.({
+      jobId: crypto.randomUUID(),
+      spec,
+      approval: jobApprovalFor(spec, targets, { phrase, confirmedAt: Date.now() }),
+      targets: [{ serverId: server.id, serverName: server.name, cfg: cfgFor(server) }]
+    })
+  }
+
   const actionButtons = (c: DockerContainer): React.JSX.Element => (
     <>
       {c.state !== 'running' && (
@@ -945,6 +977,30 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
               containers -- a stopped one's health is whatever it was when it
               stopped, and presenting that beside live answers reads as
               current. */}
+          {/* Item 42's engine upgrade. Beside the health log because both are
+              questions about the DAEMON rather than about a container, and both
+              are asked for rather than read on every refresh. */}
+          <EngineUpgradePanel
+            manager={allFacts[server.id]?.facts?.packageManager ?? null}
+            read={() =>
+              // No fallback to apt. A server whose facts have not been
+              // collected gets the `unchecked` refusal above rather than a
+              // read built on a guess about its distribution.
+              bridge()?.enginePrecheck?.(
+                cfgFor(server),
+                allFacts[server.id]?.facts?.packageManager ?? 'apt'
+              ) ??
+              Promise.resolve({
+                ok: false as const,
+                detail: 'The engine precheck is not wired up in this build.'
+              })
+            }
+            // The plan goes to the JOBS surface with its approval minted the
+            // way every other elevated job's is. An install with sudo is not
+            // something to launch from a read panel on a click.
+            onRun={(spec) => void launchEngineJob(spec)}
+          />
+
           <HealthLogPanel
             refs={probe.containers.filter((c) => c.state === 'running').map((c) => refOf(c))}
             read={(refs) =>
