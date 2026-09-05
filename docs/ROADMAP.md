@@ -521,9 +521,14 @@ bundle and nothing here can open it to check" (`shared/backup.ts:490-493`). Dump
 **In order:**
 
 1. **Schedule, stream, encrypt, retain** — the four things the bundle has and the dump does not.
-   Per-database schedule on the existing tick; stream to a temp file instead of a buffer;
-   encrypt with the destination's passphrase; a retention class for dumps that
-   `planRetention`'s three refusals cover. 1 week.
+   **RETAIN is SHIPPED**: `planDumpRetention` with `planRetention`'s three refusals, counted PER
+   DATABASE — a destination holds dumps of several databases interleaved, so a global "keep 7"
+   would keep seven objects rather than seven of each, and a database dumped hourly would evict
+   one dumped weekly entirely. The two retentions cannot see each other's objects, which is
+   pinned in both directions. `collidingDumpDatabases` surfaces the one real ambiguity: a name
+   with a character outside `[A-Za-z0-9_.-]` sanitises into the object name and can collide with
+   one already spelled with an underscore, so those two share a group. Schedule, streaming and
+   encryption still open.
 2. **Dump on the remote host over SSH** as a job, which is what makes bastion/VPN databases
    dumpable and is the only way a large dump ever finishes. Needs the detached path. 1–2 weeks.
 3. **`mongodump --archive --gzip`** and a Redis path. Mongo is a stated absence, not a refusal

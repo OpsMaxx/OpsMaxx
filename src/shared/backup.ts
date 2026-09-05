@@ -512,8 +512,92 @@ export interface DumpRunReport {
  *  as a generation of one. */
 export function dumpObjectName(target: DumpTarget, when: Date): string {
   const iso = when.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
-  const safe = target.database.replace(/[^A-Za-z0-9_.-]/g, '_')
+  const safe = safeDumpDatabase(target.database)
   return `${BACKUP_OBJECT_PREFIX}dump-${safe}-${iso}.sql`
+}
+
+/**
+ * The safe form of a database name, as it appears inside a dump object.
+ *
+ * Exported because it is LOSSY and callers have to be able to see that: `my-db`
+ * and `my_db` both become `my_db`, and two such databases dumping to one
+ * destination share a retention group. See collidingDumpDatabases().
+ */
+export function safeDumpDatabase(database: string): string {
+  return database.replace(/[^A-Za-z0-9_.-]/g, '_')
+}
+
+/** `shellpilot-dump-<db>-<ISO>.sql`, parsed from the RIGHT: the database name
+ *  may contain `-` and `.`, so only the timestamp's fixed shape makes the
+ *  boundary unambiguous. */
+const DUMP_NAME_RE = new RegExp(
+  `^${BACKUP_OBJECT_PREFIX}dump-(.+)-(\\d{8}T\\d{6}Z)\\.sql$`
+)
+
+export function isDumpObjectName(name: string): boolean {
+  return DUMP_NAME_RE.test(name)
+}
+
+/** The safe database name inside a dump object, or null when the object is not
+ *  one of ours. Never the raw name -- that is not recoverable. */
+export function dumpDatabaseOf(name: string): string | null {
+  const m = DUMP_NAME_RE.exec(name)
+  return m === null ? null : m[1]
+}
+
+/**
+ * Databases whose names collide once sanitised.
+ *
+ * A caller that dumps two of these to one destination is a caller whose
+ * retention will count them together and delete one database's dumps because
+ * the other's are newer. Surfaced rather than worked around: renaming a
+ * database is the operator's decision, and silently keeping more than asked
+ * would be a retention setting that does not mean what it says.
+ */
+export function collidingDumpDatabases(databases: string[]): string[][] {
+  const by = new Map<string, string[]>()
+  for (const d of databases) {
+    const k = safeDumpDatabase(d)
+    by.set(k, [...(by.get(k) ?? []), d])
+  }
+  return [...by.values()].filter((g) => g.length > 1)
+}
+
+/**
+ * Retention for dumps -- item 38's first gap.
+ *
+ * Dumps had none at all: `backupTick` iterates bundle destinations only, and
+ * `isBackupObjectName` deliberately does not match a `.sql`, so a destination
+ * accumulated one dump per run for ever.
+ *
+ * PER DATABASE, which is the difference from the bundle's. Bundles are one
+ * series; a destination holds dumps of several databases interleaved, and a
+ * global "keep 7" would keep seven objects rather than seven of each -- so a
+ * busy database would evict a quiet one entirely.
+ *
+ * The same three refusals as planRetention, because they are the same three
+ * mistakes.
+ */
+export function planDumpRetention(
+  generations: BackupGeneration[],
+  keep: number,
+  database: string
+): RetentionPlan {
+  const safe = safeDumpDatabase(database)
+  const ours = generations.filter((g) => dumpDatabaseOf(g.name) === safe)
+  const sorted = [...ours].sort((a, b) => b.modified - a.modified || b.name.localeCompare(a.name))
+  if (!Number.isFinite(keep) || keep <= 0) {
+    return { keep: sorted, remove: [], refused: 'No limit is set, so no dump is deleted.' }
+  }
+  if (sorted.length <= 1) {
+    return {
+      keep: sorted,
+      remove: [],
+      refused: 'Only one dump of this database is here, and the last one is never deleted.'
+    }
+  }
+  const kept = sorted.slice(0, Math.max(1, keep))
+  return { keep: kept, remove: sorted.slice(kept.length) }
 }
 
 // ---------------------------------------------------------------------------
