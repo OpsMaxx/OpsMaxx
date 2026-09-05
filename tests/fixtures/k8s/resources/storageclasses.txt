@@ -1,0 +1,1 @@
+local-path   rancher.io/local-path   WaitForFirstConsumer   Delete   true
