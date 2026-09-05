@@ -1,0 +1,1 @@
+docker inspect --format '{{.Name}}|{{if .State.Health}}{{json .State.Health}}{{else}}null{{end}}' sphc2-leaky-1 sphc2-plain-1 sphc3-slowstart-1 sphc3-good-1 nope-does-not-exist

@@ -641,6 +641,7 @@ export const DOCKER_MARKERS = {
   act: '===OPSMAXX-ACT===',
   networks: '===OPSMAXX-NETWORKS===',
   netAttach: '===OPSMAXX-NETATTACH===',
+  healthLog: '===OPSMAXX-HEALTHLOG===',
   /**
    * One marker per removal kind, because the four commands are four different
    * programs and their output must never be pooled.
@@ -1568,6 +1569,176 @@ export function parseDockerInspectOutput(output: string, exitCode: number | null
       logDriver: f[15].trim()
     }
   }
+}
+
+// ----------------------------------------------------------- health log
+//
+// `Health.Status` has been read since the inspect probe was written. This is
+// the LOG under it, and reading a real one changed what the panel can claim.
+//
+//  1. `.State.Health` IS NULL FOR A CONTAINER WITH NO HEALTHCHECK. Not
+//     "healthy", not "unknown" -- absent. Three different sentences, and the
+//     one this build must never print for a container nobody wrote a check for
+//     is "healthy".
+//
+//  2. DOCKER KEEPS ONLY THE LAST FIVE ENTRIES. Measured against a container
+//     whose `FailingStreak` was 24 and whose log held 5. The log is a SAMPLE
+//     and the streak is the count, so a panel showing five failures as "the
+//     history" understates a container that has been down for hours.
+//
+//  3. `starting` CAN MEAN "FAILING EVERY CHECK". A container inside its
+//     `start_period` reported `Status: starting` and `FailingStreak: 0` with a
+//     logged check that exited 1. With a 300-second start period, trusting the
+//     status alone shows a hopeful word for five minutes about a container that
+//     has never once passed. The log's exit codes are the only thing that says
+//     otherwise, which is why they are read.
+//
+//  4. THE OUTPUT IS THE HEALTHCHECK'S OWN STDOUT AND CARRIES WHATEVER IT
+//     PRINTS. A measured one contained
+//     `https://user:...@api.example.com/health?token=...` and an
+//     `Authorization: Bearer` header, verbatim. The parse below keeps it as
+//     given -- redaction happens in main, before this crosses IPC, where the
+//     redactor and the known secrets are. A shared parser promising redaction
+//     it cannot enforce would be worse than not promising it.
+
+/** How many entries docker keeps. Measured, not documented from memory. */
+export const DOCKER_HEALTH_LOG_KEPT = 5
+
+export interface DockerHealthEntry {
+  start: string
+  end: string
+  /** null only when docker printed something this could not read. */
+  exitCode: number | null
+  /** RAW. See point 4 above -- redacted in main, never here. */
+  output: string
+}
+
+export interface DockerHealthLog {
+  container: string
+  /** `healthy`, `unhealthy`, `starting` -- or null for NO HEALTHCHECK AT ALL. */
+  status: string | null
+  failingStreak: number | null
+  entries: DockerHealthEntry[]
+  /** The streak is longer than the entries kept, so the log is a sample of it. */
+  sampled: boolean
+}
+
+export function buildDockerHealthLogCommand(refs: string[], opts: { sudo?: boolean } = {}): string {
+  if (!Array.isArray(refs) || refs.length === 0) {
+    throw new Error('refusing to build a health command with no container references')
+  }
+  if (refs.length > DOCKER_ACTION_MAX_REFS) {
+    throw new Error(`refusing to read health for more than ${DOCKER_ACTION_MAX_REFS} containers at once`)
+  }
+  for (const ref of refs) {
+    if (!validateContainerRef(ref)) {
+      throw new Error('refusing to build a command from an invalid container reference')
+    }
+  }
+  const run = runner(opts.sudo)
+  // `{{if .State.Health}}...{{else}}null{{end}}`: without the guard, a
+  // container with no healthcheck makes the template fail for the WHOLE
+  // invocation, so one plain container would cost the health of every other.
+  const tmpl = '{{.Name}}|{{if .State.Health}}{{json .State.Health}}{{else}}null{{end}}'
+  return [
+    resolveBinary('docker', [], ['podman']),
+    `echo "${DOCKER_MARKERS.healthLog}"`,
+    `${run} inspect --format '${tmpl}' ${refs.join(' ')} 2>&1 || true`,
+    `echo "${DOCKER_MARKERS.end}"`
+  ].join('; ')
+}
+
+export function parseDockerHealthLogs(text: string): DockerHealthLog[] {
+  const out: DockerHealthLog[] = []
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (line === '') continue
+    const at = line.indexOf('|')
+    // `error: no such object: ...` has no separator. Skipped rather than
+    // guessed at: docker names the ref it could not find and there is nothing
+    // to report about a container that is not there.
+    if (at <= 0) continue
+    const container = line.slice(0, at).replace(/^\//, '')
+    const body = line.slice(at + 1).trim()
+    if (body === 'null') {
+      out.push({ container, status: null, failingStreak: null, entries: [], sampled: false })
+      continue
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(body)
+    } catch {
+      continue
+    }
+    const h = parsed as {
+      Status?: unknown
+      FailingStreak?: unknown
+      Log?: { Start?: unknown; End?: unknown; ExitCode?: unknown; Output?: unknown }[]
+    }
+    const streak = typeof h.FailingStreak === 'number' ? h.FailingStreak : null
+    const entries: DockerHealthEntry[] = (Array.isArray(h.Log) ? h.Log : []).map((e) => ({
+      start: typeof e.Start === 'string' ? e.Start : '',
+      end: typeof e.End === 'string' ? e.End : '',
+      exitCode: typeof e.ExitCode === 'number' ? e.ExitCode : null,
+      output: typeof e.Output === 'string' ? e.Output : ''
+    }))
+    out.push({
+      container,
+      status: typeof h.Status === 'string' ? h.Status : null,
+      failingStreak: streak,
+      entries,
+      sampled: streak !== null && streak > entries.length
+    })
+  }
+  return out
+}
+
+/**
+ * Worst first, and `starting` is not one bucket.
+ *
+ * A container inside its start period whose every logged check exited non-zero
+ * sorts directly behind the unhealthy ones, because it is failing and the word
+ * on the status does not say so. A container that is genuinely still starting
+ * sorts below both.
+ */
+export function healthRank(log: DockerHealthLog): number {
+  if (log.status === 'unhealthy') return 0
+  if (log.status === 'starting') {
+    const failing = log.entries.length > 0 && log.entries.every((e) => e.exitCode !== 0)
+    return failing ? 1 : 2
+  }
+  if (log.status === 'healthy') return 3
+  // No healthcheck is not a problem and is not an all-clear either, so it sits
+  // below healthy rather than being dropped.
+  if (log.status === null) return 4
+  return 5
+}
+
+export function sortUnhealthyFirst(logs: DockerHealthLog[]): DockerHealthLog[] {
+  return [...logs].sort((a, b) => healthRank(a) - healthRank(b) || a.container.localeCompare(b.container))
+}
+
+/** One line per container, saying the thing the status alone does not. */
+export function healthHeadline(log: DockerHealthLog): string {
+  if (log.status === null) return `${log.container} has no healthcheck, so nothing is checking it.`
+  if (log.status === 'unhealthy') {
+    const streak =
+      log.failingStreak === null
+        ? 'it has been failing'
+        : `it has failed ${log.failingStreak} check${log.failingStreak === 1 ? '' : 's'} in a row`
+    const sample = log.sampled
+      ? `, and docker keeps only the last ${log.entries.length} of them`
+      : ''
+    return `${log.container} is unhealthy: ${streak}${sample}.`
+  }
+  if (log.status === 'starting') {
+    const failing = log.entries.length > 0 && log.entries.every((e) => e.exitCode !== 0)
+    return failing
+      ? `${log.container} still reports "starting" and every check it has run has failed. Its start period is hiding that.`
+      : `${log.container} is inside its start period; docker is not calling it unhealthy yet.`
+  }
+  if (log.status === 'healthy') return `${log.container} is passing its healthcheck.`
+  return `${log.container} reported a health status this build does not know: ${log.status}.`
 }
 
 // ---------------------------------------------------------------- stats
