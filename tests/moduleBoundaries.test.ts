@@ -182,6 +182,7 @@ const MODULE_FILES: Record<string, string[]> = {
   kubernetes: [
     'src/shared/kubernetes.ts',
     'src/shared/k8sSkew.ts',
+    'src/shared/k8sNodes.ts',
     'src/main/services/kubernetes.ts',
     'src/renderer/src/components/kubernetes/KubernetesPanel.tsx'
   ]
