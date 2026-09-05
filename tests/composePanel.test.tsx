@@ -432,3 +432,71 @@ describe('pulling only the services that were picked', () => {
     expect((screen.getByLabelText('Include cache') as HTMLInputElement).checked).toBe(false)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Item 42: rendering what the parser already knows
+// ---------------------------------------------------------------------------
+//
+// `depends_on`, `restart:`, ports and profiles have been parsed since the
+// parser was written and none of them reached the screen. These are the answers
+// to "why did that not start" and "why did that not come back after the
+// reboot", and the panel was showing a name, a state and an image.
+
+/** Opens the project with a single, hand-built service. Not `openProject`,
+ *  which waits for the fixture's own `cache` row. */
+async function openWithService(decl: Record<string, unknown>): Promise<void> {
+  const probe = {
+    ok: true,
+    config: { name: 'edge', namesOnly: false, volumes: [], networks: [], services: [decl] }
+  }
+  stubBridge(panelBridge({ config: vi.fn(async () => probe) }))
+  render(<ComposePanel server={SERVER} cfg={{}} containers={[]} sudo={false} />)
+  await userEvent.click(screen.getByText('Find compose files'))
+  await waitFor(() => screen.getByText(/▸ edge/))
+  await userEvent.click(screen.getByText(/▸ edge/))
+  await waitFor(() => expect(screen.getAllByText(decl.name as string).length).toBeGreaterThan(0))
+}
+
+describe('what the compose file actually says', () => {
+  it('warns that a service with no restart policy will not come back', async () => {
+    // compose defaults to `no`, so a service without one does not restart
+    // after a reboot. The absence is the finding, not a blank cell.
+    await openProject(panelBridge())
+    expect(document.body.textContent).toContain('restart: no (default)')
+  })
+
+  it('shows what a service waits for', async () => {
+    await openWithService({
+      name: 'web',
+      image: 'nginx:1.27',
+      build: false,
+      containerName: null,
+      dependsOn: ['cache'],
+      ports: ['8080:80'],
+      profiles: [],
+      environment: [],
+      envFiles: [],
+      restart: 'unless-stopped'
+    })
+    expect(document.body.textContent).toContain('after cache')
+    expect(document.body.textContent).toContain('8080:80')
+    expect(document.body.textContent).toContain('restart: unless-stopped')
+  })
+
+  it('says a profiled service is not started by a plain up', async () => {
+    // The commonest reason a declared service is "missing".
+    await openWithService({
+      name: 'debug',
+      image: 'busybox',
+      build: false,
+      containerName: null,
+      dependsOn: [],
+      ports: [],
+      profiles: ['tools'],
+      environment: [],
+      envFiles: [],
+      restart: 'no'
+    })
+    expect(document.body.textContent).toContain('not started by a plain up')
+  })
+})
