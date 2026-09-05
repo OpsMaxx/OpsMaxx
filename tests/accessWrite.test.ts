@@ -1246,7 +1246,11 @@ describe('the precondition the probe used to miss, measured on a real RHEL 9', (
   it('refuses to stage when those two are true together', () => {
     // Both conditions, not either: KillUserProcesses with linger is fine, and
     // no linger without KillUserProcesses leaves setsid a chance.
-    expect(cmd()).toContain('[ "$SP_KILL" = yes ] && [ "$SP_LINGER" = no ]')
+    //
+    // `!= no` and `!= absent` rather than `= yes`, so a logind that would not
+    // answer refuses alongside one that answered yes. See the behavioural
+    // tests at the end of this file.
+    expect(cmd()).toContain('[ "$SP_KILL" != no ] && [ "$SP_KILL" != absent ] && [ "$SP_LINGER" = no ]')
     expect(cmd()).toMatch(/nothing was changed/)
   })
 
@@ -1259,5 +1263,70 @@ describe('the precondition the probe used to miss, measured on a real RHEL 9', (
   it('still refuses when the server has no way to detach at all', () => {
     // The older guard, unchanged: no systemd-run, no setsid, no nohup.
     expect(cmd()).toContain('no way to leave a process running after the session ends')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// "Could not ask" is not "answered no"
+// ---------------------------------------------------------------------------
+//
+// SP_KILL used to be two-valued, and `no` meant BOTH "logind answered false"
+// and "we could not ask it". Those are opposite facts. A host with logind and
+// without `busctl` -- a minimal image, a container base -- took the reassuring
+// branch and armed a rollback that logind may have been about to kill.
+//
+// This is also where item 36a's open question is answered: whether a host that
+// fell through to `nohup` may be written to at all. It may, and only where the
+// host positively said it will not kill the process.
+describe('what the staged write does when logind will not answer', () => {
+  const LINGER_OFF = 'echo "Linger=no"'
+
+  it('refuses when logind is present and cannot be asked, rather than assuming the safe answer', () => {
+    const h = fakeHome([`ssh-ed25519 ${A} alice@laptop`, `ssh-ed25519 ${B} bob@desktop`, ''])
+    const before = h.read()
+    // loginctl exists, so this host runs logind. No busctl shim, and the test
+    // platform has none, so the property cannot be read: SP_KILL=unknown.
+    const r = h.run(
+      buildRevokeKeyCommand({ path: h.file, blob: A, token: 'kunknown', rollbackSeconds: 60 }),
+      { shim: { loginctl: LINGER_OFF } }
+    )
+    expect(r.code).not.toBe(0)
+    expect(r.out).toContain('would not say whether it does')
+    expect(h.read()).toBe(before)
+    expect(r.out).not.toContain('STAGED:')
+  })
+
+  it('still refuses when logind answers yes', () => {
+    const h = fakeHome([`ssh-ed25519 ${A} alice@laptop`, `ssh-ed25519 ${B} bob@desktop`, ''])
+    const before = h.read()
+    const r = h.run(
+      buildRevokeKeyCommand({ path: h.file, blob: A, token: 'kyes', rollbackSeconds: 60 }),
+      { shim: { loginctl: LINGER_OFF, busctl: 'echo "b true"' } }
+    )
+    expect(r.code).not.toBe(0)
+    expect(h.read()).toBe(before)
+    expect(r.out).not.toContain('STAGED:')
+  })
+
+  it('proceeds when logind answers no, which is the fact the old code was guessing', () => {
+    const h = fakeHome([`ssh-ed25519 ${A} alice@laptop`, `ssh-ed25519 ${B} bob@desktop`, ''])
+    const r = h.run(
+      buildRevokeKeyCommand({ path: h.file, blob: A, token: 'kno', rollbackSeconds: 60 }),
+      { shim: { loginctl: LINGER_OFF, busctl: 'echo "b false"' } }
+    )
+    expect(r.out).toContain('STAGED:')
+    expect(h.read()).not.toContain(A)
+  })
+
+  it('proceeds on a host with no logind at all, where nohup is a real promise', () => {
+    // Nothing kills the slice when the session ends, so the weakest launcher
+    // is still a launcher. This is the case that must NOT be refused, or the
+    // feature would be unavailable on every non-systemd host.
+    const h = fakeHome([`ssh-ed25519 ${A} alice@laptop`, `ssh-ed25519 ${B} bob@desktop`, ''])
+    const r = h.run(
+      buildRevokeKeyCommand({ path: h.file, blob: A, token: 'kabsent', rollbackSeconds: 60 })
+    )
+    expect(r.out).toContain('STAGED:')
+    expect(h.read()).not.toContain(A)
   })
 })
