@@ -5,6 +5,7 @@ import { jobApprovalFor, planJob } from '../../../../shared/jobs'
 import {
   COMPOSE_ENV_DISCLOSURE,
   COMPOSE_REFUSALS,
+  lintComposeConfig,
   planComposeServiceRestart,
   type ComposeRestartPlan,
   COMPOSE_FAILURE_HELP,
@@ -411,6 +412,31 @@ export function ComposePanel({
                       </div>
                     </div>
                   )}
+                  {/* Item 42's lint. Only over a model compose ACCEPTED -- an
+                      invalid file is reported with compose's own line above and
+                      never reaches here, because a second opinion on a settled
+                      question is noise.
+
+                      A names-only model is refused by `lintComposeConfig`
+                      itself, not here: every field on it is empty because
+                      nothing was read, and linting that would claim every
+                      service has no tag and no restart policy.
+
+                      `no-restart` is filtered for the same reason: the table
+                      below already carries a warn chip reading "restart: no
+                      (default)" on every service that has none, and a second
+                      sentence per service would be twelve paragraphs on a
+                      twelve-service project saying what twelve chips say. The
+                      rule stays in `lintCompose` -- it is a real finding and
+                      other callers have no table. */}
+                  {config?.ok &&
+                    lintComposeConfig(config.config)
+                      .filter((f) => f.rule !== 'no-restart')
+                      .map((f) => (
+                      <div key={`${f.rule} ${f.service}`} className="s-note state-unknown">
+                        {f.because}
+                      </div>
+                    ))}
                   {config?.ok && config.config.namesOnly && (
                     <div className="faint" style={{ fontSize: 11 }}>
                       This engine would only give the service NAMES, so images, ports and
