@@ -659,8 +659,16 @@ obvious from the documentation:
   number.
 
 `bad` is `null` for a forbidden, no-cluster or unauthorized read and for the `--all-namespaces`
-fallback, per `postureAlertReadings`' asymmetry. Still open: the sampler placement (the probe must
-not import `shared/kubernetes`), the alert identity question, and wiring the kind.
+fallback, per `postureAlertReadings`' asymmetry.
+
+**The kind and the identity are SHIPPED too.** `pod-crashloop` is a STATE kind, keyed on the
+CLUSTER CONTEXT rather than a server: a cluster is visible from every host holding a kubeconfig,
+so a serverId key raises one crashloop once per such host — three admin boxes, three alerts, one
+problem. The subject is prefixed `k8s:` so it cannot collide with a server id in the same
+`subject:kind` keyspace, following the `StoredDbAlertRow` precedent for a subject that is not a
+fleet host. The closure constraint is met by construction and pinned by a test: the probe module
+imports NOTHING, so nothing it reaches can pull `shared/kubernetes` into the agent-reachable
+closure. Still open: the poll itself, and which host to run it from.
 
 **Size.** The remaining wiring, now that the probe's shape is settled by measurement.
 
