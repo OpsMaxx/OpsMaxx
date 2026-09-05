@@ -515,3 +515,113 @@ export function dumpObjectName(target: DumpTarget, when: Date): string {
   const safe = target.database.replace(/[^A-Za-z0-9_.-]/g, '_')
   return `${BACKUP_OBJECT_PREFIX}dump-${safe}-${iso}.sql`
 }
+
+// ---------------------------------------------------------------------------
+// Is there actually a backup?
+// ---------------------------------------------------------------------------
+//
+// The roadmap parked this behind item 5 — "there is no backup that could fail"
+// — and item 5 shipped, so here it is.
+//
+// THE TRAP IS `lastRunAt`, and it is documented thirty lines above: it records
+// an ATTEMPT, not a success, deliberately, so a broken SFTP server is not
+// retried every minute. Which means an "is it overdue" check written against
+// it reports a healthy schedule while every single run fails. The question an
+// operator is actually asking is "do I have a backup", and the only field that
+// answers it is the last SUCCESSFUL report.
+//
+// The second trap is quieter: a run can succeed and not be verified. `verified`
+// is true only when the bytes were read back off the destination and matched,
+// and a write nobody read back is a backup nobody has evidence of. That is not
+// an alarm — the file is probably there — but it is not silence either.
+
+export type BackupAlarmReason = 'failed' | 'never' | 'overdue' | 'unverified'
+
+export interface BackupAlarm {
+  destinationId: string
+  destinationName: string
+  reason: BackupAlarmReason
+  level: 'watch' | 'alarm'
+  /** What to say, in the words the panel and the webhook both use. */
+  detail: string
+}
+
+/**
+ * How late a backup may be before it is worth interrupting somebody.
+ *
+ * TWO periods, not one. OpsMaxx only backs up while it is running, so a
+ * daily schedule on a laptop that was shut overnight is routinely a few hours
+ * late and that is not a fault. Two missed periods is not lateness, it is a
+ * schedule that has stopped.
+ */
+export const BACKUP_OVERDUE_PERIODS = 2
+
+export function assessBackups(
+  destinations: BackupDestination[],
+  lastReport: Record<string, BackupRunReport>,
+  now: number
+): BackupAlarm[] {
+  const out: BackupAlarm[] = []
+  for (const d of destinations) {
+    // Not scheduled is not overdue. A destination somebody backs up to by hand
+    // is a choice, and alarming about it would train people to ignore this.
+    if (!Number.isFinite(d.everyHours) || d.everyHours <= 0) continue
+
+    const r = lastReport[d.id]
+    if (r === undefined) {
+      out.push({
+        destinationId: d.id,
+        destinationName: d.name,
+        reason: 'never',
+        level: 'alarm',
+        detail: `${d.name} is scheduled every ${d.everyHours}h and has never produced a backup.`
+      })
+      continue
+    }
+    if (!r.ok) {
+      out.push({
+        destinationId: d.id,
+        destinationName: d.name,
+        reason: 'failed',
+        level: 'alarm',
+        detail: `The last backup to ${d.name} failed: ${r.error ?? 'no reason given'}`
+      })
+      continue
+    }
+
+    const at = Date.parse(r.finishedAt)
+    if (!Number.isFinite(at)) {
+      // A report we cannot date is not a recent one. Reading it as fresh would
+      // be the reassuring half of the guess.
+      out.push({
+        destinationId: d.id,
+        destinationName: d.name,
+        reason: 'overdue',
+        level: 'alarm',
+        detail: `${d.name} has a backup report with an unreadable date, so how old it is cannot be told.`
+      })
+      continue
+    }
+    const lateBy = now - at
+    if (lateBy > d.everyHours * 3600_000 * BACKUP_OVERDUE_PERIODS) {
+      out.push({
+        destinationId: d.id,
+        destinationName: d.name,
+        reason: 'overdue',
+        level: 'alarm',
+        detail: `${d.name} last backed up ${Math.floor(lateBy / 3600_000)}h ago on a ${d.everyHours}h schedule.`
+      })
+      continue
+    }
+    if (!r.verified) {
+      out.push({
+        destinationId: d.id,
+        destinationName: d.name,
+        reason: 'unverified',
+        level: 'watch',
+        detail: `${d.name} was written but not read back, so there is no evidence the backup is intact.`
+      })
+    }
+  }
+  return out
+}

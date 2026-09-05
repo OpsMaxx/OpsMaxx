@@ -34,7 +34,12 @@ export const ALERT_KINDS = [
   'db-alarm',
   'db-watch',
   'oom-kill',
-  'cert-expiry'
+  'cert-expiry',
+  // Parked behind item 5 until there was a backup that could fail. The kind
+  // covers three states an operator cannot tell apart from silence: a run that
+  // failed, a schedule that has stopped, and a destination that has never
+  // produced anything at all. See assessBackups() in ./backup.
+  'backup-failed'
 ] as const
 export type AlertKind = (typeof ALERT_KINDS)[number]
 
@@ -201,7 +206,11 @@ export const STATE_ALERT_KINDS = [
   'host-unreachable',
   'job-failed',
   'tunnel-down',
-  'oom-kill'
+  'oom-kill',
+  // A state, not an occurrence: "there is no recent backup" stays true until a
+  // backup succeeds, so it clears itself the way unreachable does rather than
+  // firing again every tick.
+  'backup-failed'
 ] as const
 export type StateAlertKind = (typeof STATE_ALERT_KINDS)[number]
 

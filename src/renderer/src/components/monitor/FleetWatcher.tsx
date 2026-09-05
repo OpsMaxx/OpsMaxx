@@ -52,6 +52,9 @@ function toTarget(s: Server): FleetTarget {
 }
 
 export function FleetWatcher(): null {
+  // Destinations that were alarming last time, so one that recovers can be
+  // cleared. Nothing else knows which ids to clear.
+  const knownBackupIds = useRef<Set<string>>(new Set())
   const servers = useWorkspaceServers()
   // Read through a ref inside the subscription. The handler is registered once
   // on purpose -- resubscribing on every server edit would drop events during
@@ -206,6 +209,36 @@ export function FleetWatcher(): null {
       live = false
     }
   }, [targets, reportFacts, reportFactsError])
+
+  // Backups, on the same app-root cadence as everything else here.
+  //
+  // A missing backup is not an event anybody receives — a schedule that stopped
+  // produces silence, which is exactly what a healthy one produces — so it has
+  // to be ASKED FOR on a timer rather than waited for. Hourly is enough: the
+  // shortest thing this can catch is a schedule measured in hours, and nothing
+  // here gets better for being asked more often.
+  useEffect(() => {
+    const ask = (): void => {
+      const alarms = window.opsmaxx?.backup?.alarms
+      if (typeof alarms !== 'function') return
+      void alarms().then((list) => {
+        for (const a of list ?? []) {
+          checkStateAlert(`backup:${a.destinationId}`, a.destinationName, 'backup-failed', true, a.detail)
+        }
+        // Anything not in the list has a recent, successful, verified backup.
+        // Cleared by name so a destination that recovered stops alarming
+        // without waiting for anybody to open a panel.
+        const bad = new Set((list ?? []).map((a) => `backup:${a.destinationId}`))
+        for (const d of knownBackupIds.current) {
+          if (!bad.has(d)) checkStateAlert(d, d, 'backup-failed', false)
+        }
+        knownBackupIds.current = new Set([...(list ?? []).map((a) => `backup:${a.destinationId}`)])
+      })
+    }
+    ask()
+    const t = setInterval(ask, 3600_000)
+    return () => clearInterval(t)
+  }, [])
 
   // Reconfigure whenever what should be watched changes. Main treats this as
   // the complete desired state, so removing a server here stops sampling it.

@@ -54,6 +54,7 @@ const KIND_LABEL: Record<RuleAlertKind, string> = {
   'host-unreachable': 'Host unreachable',
   'job-failed': 'Job failed',
   'tunnel-down': 'Tunnel down',
+  'backup-failed': 'Backup failed',
   'db-alarm': 'Database alarm',
   'db-watch': 'Database watch',
   'oom-kill': 'OOM kill',

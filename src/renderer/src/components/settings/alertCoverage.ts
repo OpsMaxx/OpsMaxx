@@ -113,7 +113,11 @@ export const COVERAGE_SOURCE: Record<StoreAlertKind, AlertCoverageSource> = {
   'db-alarm': 'read-on-demand',
   'db-watch': 'read-on-demand',
   'oom-kill': 'posture-sweep',
-  'cert-expiry': 'posture-sweep'
+  'cert-expiry': 'posture-sweep',
+  // Raised from the app root beside the backup tick, so it fires whether or not
+  // anybody has the Backup panel open — a backup that stopped is exactly the
+  // thing nobody is looking at.
+  'backup-failed': 'app-root'
 }
 
 const KINDS_BY_SOURCE = (src: AlertCoverageSource): StoreAlertKind[] =>

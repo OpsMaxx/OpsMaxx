@@ -104,6 +104,10 @@ describe('what a rule may watch', () => {
       'job-failed',
       'tunnel-down',
       'oom-kill',
+      // Parked behind item 5 until there was a backup that could fail. A STATE,
+      // so it sits with the others: "there is no recent backup" stays true until
+      // one succeeds.
+      'backup-failed',
       'db-alarm',
       'db-watch'
     ])

@@ -763,6 +763,7 @@ export const LABEL: Record<AlertKind, string> = {
   'host-unreachable': 'Unreachable',
   'job-failed': 'Job failed',
   'tunnel-down': 'Tunnel down',
+  'backup-failed': 'Backup',
   'db-alarm': 'Database alarm',
   'db-watch': 'Database watch',
   'oom-kill': 'OOM kill',
@@ -874,6 +875,7 @@ const VALUE_PHRASE: Record<NumericAlertKind, (v: number) => string> = {
 // The wire name for each kind. A Record rather than a ternary, so adding a kind
 // is a type error here instead of a metric quietly posting as 'memory'.
 const WEBHOOK_KIND: Record<StoreAlertKind, WebhookAlertKind> = {
+  'backup-failed': 'backup-failed',
   cpu: 'cpu',
   ram: 'memory',
   disk: 'disk',
@@ -1136,6 +1138,13 @@ const STATE_WORDS: Record<
   'host-unreachable': {
     raised: (name) => `${name} did not answer the last check`,
     resolved: (name) => `${name} is answering again`
+  },
+  'backup-failed': {
+    // Named for what is missing rather than for what errored: a schedule that
+    // stopped and a run that failed both end here, and in both the operator
+    // does not have the backup they think they have.
+    raised: (_name, detail) => detail || 'A backup is missing or failed',
+    resolved: () => 'A backup has succeeded again'
   },
   'job-failed': {
     raised: (name, detail) => `${name} failed a job step${detail ? ` (${detail})` : ''}`,
