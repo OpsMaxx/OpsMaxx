@@ -61,7 +61,8 @@ systemd 252, which is where the fact worth having came from: a `--user` service
 stops when the account's last session ends unless that account is lingering, so
 units that read `active running` over SSH can be units that are about to stop.
 The panel says that before it shows the list. The unit-file EDITOR is the
-remaining half and is not built.
+remaining half and SHIPPED in 0.19.1 — write, enable, back up any unit of that
+name first, with the exact bytes previewed before they are sent.
 
 *Item 21b*'s port mappings are STILL unverified, and the blocker is the harness
 rather than the code: podman nested in Docker on Apple Silicon cannot keep a
@@ -354,7 +355,23 @@ each an OFF-by-default module (`modules.ts:82-95`).
 **Order.** 34a first: it is the smallest, it is the one the inbox needs (item 43), and it proves
 the typed-step shape before 34c spends three weeks on it.
 
-### 35. Defects first: the classifier, the silent approval, and the missing rows
+### 35. Defects first: the classifier, the silent approval, and the missing rows — **SHIPPED**
+
+**All four, and one of them was bigger than written.** Defect 3 asked for
+`execute_command` to grade `docker volume rm` as `high`. It does now, and that
+changed nothing on its own: `risk` is read only inside the `decision === 'ask'`
+branch, `terminal` is `allow` in all four built-in groups, and an allowed
+command never opens a card for a grade to appear on. So the DECISION moved too
+— a destructive or elevated command can no longer resolve better than ASK,
+which is the rule this file already stated about `DROP TABLE`. Sudo is exempt,
+because a group that set it to `allow` had that decided by a human.
+
+Defect 1 turned out to be four traps rather than one: the SELECT wrapper, EXPLAIN
+ANALYZE (which executes), SELECT ... INTO, and ANALYZE itself. The existing test
+asserted `pg_terminate_backend(1)` bare — the form nobody types.
+
+The classifier moved to `shared/commandRisk.ts`; `jobsNotExposed.test.ts` caught
+the import dragging the job engine into the agent-reachable closure.
 
 Not a feature. Four things the audit found that should land before anything above is built on
 top of them, because each is a hole in a safety property this document claims.
@@ -1730,14 +1747,15 @@ count as "ours" for expiry. A half-probe that reports "no OOM kills" when it cou
 journal is precisely the alert this item spends its length refusing to ship, because a metric that
 could not be measured is not zero. They are a separate item, not a loose end in this one.
 
-"Backup failed" is not built either, for a shorter reason: item 5 has not been built, so there is
-no backup that could fail. "Replication lag from item 18" IS built, as `db-alarm` and `db-watch` —
+"Backup failed" IS built, since item 5 shipped and gave it something that could fail. It keys on
+the last SUCCESSFUL report rather than `lastRunAt`, which records attempts, and separates four
+reasons: never, failed, overdue, unverified. "Replication lag from item 18" IS built, as `db-alarm` and `db-watch` —
 item 18 already decides the level and writes it to the durable store with the numbers attached, and
 alerting reads that verdict rather than reaching one of its own.
 
 The write-up below is kept as the reasoning, in the past tense where it describes what was wrong.
 
-Three kinds fire today: `cpu`, `memory`, `unit-failed`.
+Four kinds fire today: `cpu`, `memory`, `unit-failed`, `backup-failed`.
 
 **The surprising gap is disk, and it is subtler than "missing".** `hostHealth.ts` treats disk as a
 first-class signal already — `DISK_DANGER = 85`, `diskCritical` per host, `diskHosts` in the fleet
