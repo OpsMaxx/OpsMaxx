@@ -474,7 +474,13 @@ on the HOST, not here: a 2 GB `/etc/sudoers` must not reach the SSH channel. An 
 makes the answer incomplete rather than absent, and the sentence says the usual cause is a sweep
 that was not root.
 
-Still open: rendering it in the access panel.
+**The gate is wired**: `sudoersReadGranted` reads the capability and nothing else, exactly as
+`firewallRulesGranted` does — `ask` collects nothing, because the sweep is unattended and there
+is nobody to answer a prompt — and `readSudoers` is its own exec rather than being folded into
+the hourly access command, so a server whose group has not consented is one this never touches.
+A failed read returns `null`, never `[]`: a read that did not happen is not a host with no
+sudoers rules. Still open: rendering the findings in the access panel, and calling `readSudoers`
+from the sampler.
 
 **36c. Per-account revoke.** Blocked in main, not the planner (`index.ts:1257-1272`). Needs a
 per-host command (the connecting-account write resolves `$HOME` on the host, `:2860`, so one

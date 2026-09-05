@@ -301,3 +301,47 @@ describe('the probe, against a host with drop-in files', () => {
     expect(buildSudoersCommand()).toContain('| sort |')
   })
 })
+
+// ---------------------------------------------------------------------------
+// The gate, in main
+// ---------------------------------------------------------------------------
+
+describe('the read runs only where the group consented', () => {
+  const group = (v: string): never => ({ capabilities: { sudoersRead: v } }) as never
+
+  it('is granted only by allow, never by ask and never by absence', async () => {
+    const { sudoersReadGranted } = await import('../src/main/services/access')
+    expect(sudoersReadGranted(group('allow'))).toBe(true)
+    // `ask` collects nothing: the sweep is unattended and there is nobody to
+    // answer a prompt.
+    expect(sudoersReadGranted(group('ask'))).toBe(false)
+    expect(sudoersReadGranted(group('deny'))).toBe(false)
+    expect(sudoersReadGranted(null)).toBe(false)
+    expect(sudoersReadGranted({ capabilities: {} } as never)).toBe(false)
+  })
+
+  it('is not widened by being allowed to run sudo', async () => {
+    const { sudoersReadGranted } = await import('../src/main/services/access')
+    // The capability has its own line in the grid precisely so that no other
+    // grant reaches it.
+    expect(sudoersReadGranted({ capabilities: { sudo: 'allow', sudoersRead: 'deny' } } as never)).toBe(
+      false
+    )
+  })
+
+  it('returns null when the read failed, not an empty list of files', async () => {
+    const { readSudoers } = await import('../src/main/services/access')
+    // A read that did not happen is not a host with no sudoers rules, and the
+    // two must never render the same.
+    const failed = await readSudoers(async () => ({ ok: false, output: 'permission denied' }), {})
+    expect(failed).toBeNull()
+  })
+
+  it('parses what the host said when it did answer', async () => {
+    const { readSudoers } = await import('../src/main/services/access')
+    const out = `${SUDOERS_MARKER}\n${SUDOERS_FILE_MARKER}/etc/sudoers===\nroot ALL=(ALL) ALL\n`
+    const files = await readSudoers(async () => ({ ok: true, output: out }), {})
+    expect(files).toHaveLength(1)
+    expect(files![0].specs[0].who).toBe('root')
+  })
+})
