@@ -1888,7 +1888,9 @@ function parseDrainPods(text: string): K8sDrainPod[] {
 
 const DRAIN_PDB_FIELDS = 8
 
-function parseDrainPdbs(text: string): K8sPdb[] {
+/** Exported for the cluster review, which reads the same rows for a different
+ *  question. One parser, because two would drift. */
+export function parseDrainPdbs(text: string): K8sPdb[] {
   const out: K8sPdb[] = []
   for (const raw of text.split('\n')) {
     const line = raw.trim()
