@@ -5,7 +5,11 @@ import { useApp } from '../../store/app'
 import { bridgeHas } from '../../lib/bridge'
 import { clsx, duration } from '../../lib/format'
 import { sshHopsFor } from '../../lib/ssh'
-import { staleAccounts, summariseStaleAccounts } from '../../../../shared/staleAccounts'
+import {
+  serviceAccountsWithKeys,
+  staleAccounts,
+  summariseStaleAccounts
+} from '../../../../shared/staleAccounts'
 import {
   ACCESS_STATUS_HELP,
   ACCESS_WRITE_DISABLED_REASON,
@@ -358,6 +362,21 @@ export function AccessPanel({
   )
   const idleSummary = summariseStaleAccounts(idleFindings)
 
+  // Item 46. A different question from the one above -- not "has anyone used
+  // this key" but "should this account have one at all" -- so it is its own
+  // list rather than a column on that one.
+  const serviceKeys = useMemo(
+    () =>
+      serviceAccountsWithKeys(
+        collected.map((h) => ({
+          serverId: h.server.id,
+          serverName: h.server.name,
+          accounts: h.entry!.access!.accounts
+        }))
+      ),
+    [collected]
+  )
+
   /**
    * The by-key view. One row per distinct fingerprint across everything that
    * WAS read — and the header above it says how many hosts were not, because a
@@ -496,6 +515,35 @@ export function AccessPanel({
             Read-only. Removing a key is done from the key rows above, where the change is staged
             with a rollback.
           </div>
+        </div>
+      )}
+
+      {serviceKeys.length > 0 && (
+        <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+          <div className="r-title">Service accounts with keys</div>
+          <div className="r-sub faint">
+            Accounts below uid 1000 — software, not people — that hold a key. Ordered by whether
+            the account&rsquo;s own shell would let somebody in. root is not listed: a key there is
+            how ShellPilot usually connects.
+          </div>
+          <table className="mini-table">
+            <tbody>
+              {serviceKeys.map((f) => (
+                <tr key={`${f.serverId}:${f.user}`}>
+                  <td className="mono">{f.user}</td>
+                  <td className="faint">{f.serverName}</td>
+                  <td className={clsx(f.loginDisabled === false ? 'warn' : 'faint')}>
+                    {f.loginDisabled === false
+                      ? 'can log in'
+                      : f.loginDisabled === true
+                        ? 'shell refuses login'
+                        : 'shell unknown'}
+                  </td>
+                  <td className="faint">{f.because}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 

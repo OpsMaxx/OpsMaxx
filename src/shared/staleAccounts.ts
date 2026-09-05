@@ -164,3 +164,97 @@ export function summariseStaleAccounts(findings: StaleAccountFinding[]): {
   if (unknown > 0) parts.push(`${unknown} that could not be answered`)
   return { stale, neverUsed, unknown, headline: `Accounts holding keys: ${parts.join(', ')}.` }
 }
+
+// ---------------------------------------------------------------------------
+// Item 46: which accounts are people, and which are software
+// ---------------------------------------------------------------------------
+//
+// The finding worth surfacing is narrow and specific: a SYSTEM account holding
+// a key that can still be used to log in. `postgres` with `/bin/bash` and an
+// authorized_keys entry is somebody's leftover convenience, and it is a full
+// shell as a privileged service user. `postgres` with `/usr/sbin/nologin` and
+// the same key is not the same finding, and lumping them together would bury
+// the first under the second.
+
+export type AccountClass =
+  /** uid 0. Its own class because a key on root is how this app usually
+   *  connects: reporting it beside `postgres` would make the list noise. */
+  | 'root'
+  /** Below the conventional 1000 boundary — software, not a person. */
+  | 'system'
+  /** At or above it. */
+  | 'person'
+  /** No uid was read. Never guessed from the name. */
+  | 'unknown'
+
+/** Shells that mean "this account cannot log in", as they are actually spelled
+ *  across distributions. Matched on the whole final path segment so a shell
+ *  called `/opt/nologin-wrapper` is not mistaken for one. */
+const NO_LOGIN = /(^|\/)(nologin|false|sync|shutdown|halt)$/
+
+export interface AccountClassification {
+  klass: AccountClass
+  /** Whether the login shell refuses a session. `null` when no shell was read
+   *  — not `false`, which would claim a login is possible. */
+  loginDisabled: boolean | null
+}
+
+export function classifyAccount(a: Pick<AccessAccount, 'uid' | 'shell'>): AccountClassification {
+  const loginDisabled = a.shell === null ? null : NO_LOGIN.test(a.shell.trim())
+  const klass: AccountClass =
+    a.uid === null ? 'unknown' : a.uid === 0 ? 'root' : a.uid < 1000 ? 'system' : 'person'
+  return { klass, loginDisabled }
+}
+
+export interface ServiceKeyFinding extends StaleAccountFinding {
+  klass: AccountClass
+  loginDisabled: boolean | null
+}
+
+/**
+ * System accounts that hold a usable key.
+ *
+ * Ordered so the ones that can actually be logged into come first: a key on an
+ * account with a working shell is a way in, and a key on a `nologin` account is
+ * a tidiness problem. Both are listed, because sshd's `ForceCommand` and
+ * `authorized_keys` options can make the second into the first and neither this
+ * function nor its caller reads those.
+ */
+export function serviceAccountsWithKeys(
+  hosts: StaleAccountsInput[],
+  now = Date.now()
+): ServiceKeyFinding[] {
+  const out: ServiceKeyFinding[] = []
+  for (const host of hosts) {
+    if (host.accounts === null) continue
+    for (const a of host.accounts) {
+      const { klass, loginDisabled } = classifyAccount(a)
+      if (klass !== 'system') continue
+      // A key that was read and is there. An unreadable file is
+      // staleAccounts()' finding, not this one -- two lists saying the same
+      // thing about the same account is how both get ignored.
+      if (a.keys === null || a.keys.length === 0) continue
+      const idle = a.lastLoginAt === null ? null : Math.floor((now - a.lastLoginAt) / DAY)
+      out.push({
+        serverId: host.serverId,
+        serverName: host.serverName,
+        user: a.user,
+        klass,
+        loginDisabled,
+        keyCount: a.keys.length,
+        daysSinceLogin: idle,
+        verdict: a.neverLoggedIn ? 'never-used' : idle === null ? 'unknown' : 'active',
+        because:
+          loginDisabled === true
+            ? `${a.user} is a system account with ${a.keys.length} key(s); its shell (${a.shell}) refuses a login.`
+            : loginDisabled === false
+              ? `${a.user} is a system account with ${a.keys.length} key(s) and a working login shell (${a.shell}).`
+              : `${a.user} is a system account with ${a.keys.length} key(s); its login shell could not be read.`
+      })
+    }
+  }
+  // Loginable first, then unknown, then the ones a shell already refuses.
+  const rank = (f: ServiceKeyFinding): number =>
+    f.loginDisabled === false ? 0 : f.loginDisabled === null ? 1 : 2
+  return out.sort((x, y) => rank(x) - rank(y))
+}
