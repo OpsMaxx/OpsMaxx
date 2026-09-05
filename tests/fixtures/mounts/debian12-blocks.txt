@@ -1,0 +1,6 @@
+Filesystem     Type    1024-blocks     Used Available Capacity Mounted on
+overlay        overlay    61202244 35400716  22660204      61% /
+tmpfs          tmpfs         65536        0     65536       0% /dev
+shm            tmpfs         65536        0     65536       0% /dev/shm
+/dev/vda1      ext4       61202244 35400716  22660204      61% /etc/hosts
+tmpfs          tmpfs             4        0         4       0% /proc/scsi
