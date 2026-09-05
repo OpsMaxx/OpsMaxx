@@ -731,9 +731,15 @@ capped, no mutation, "could not read `/tmp`" is not empty. **Delete-by-id** (+1 
 paths or packages, typed confirm, never a blanket verb. Cloud snapshots are a provider-API
 product and refused by the DNS/TLS precedent.
 
-**Dead users and keys** (3–5 days): a pure verdict `staleAccounts(hosts, days)` — live key, not
-expired, no login in N days — with "last-login source partial" surfaced so a host without
-`lastlog` is `unknown`, not stale. Revoke stays behind item 36. **Stale Kubernetes objects**:
+**Dead users and keys — SHIPPED.** `staleAccounts(hosts, days)` in `shared/staleAccounts.ts`,
+rendered in the access panel with a 30/90/180/365 window. Four verdicts, and the fourth is the
+point: a server without `lastlog` answers "no login recorded" about EVERY account including the
+one somebody used a minute ago, so that case is `unknown` and the panel says why in those words.
+`expired: null` does not exclude an account — a date nobody could parse is not a date in the past
+— and an unreadable key file is a finding rather than a skip. The unknowns are counted in the
+headline, because a number that shrinks as the estate gets harder to read is the wrong direction
+for one somebody uses to decide they are done. Revoke stays behind item 36, and the panel says so
+rather than offering a button that would act through a path with no rollback. **Stale Kubernetes objects**:
 item 39's last row.
 
 ### 46. Facts the fleet is still missing

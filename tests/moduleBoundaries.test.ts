@@ -70,7 +70,13 @@ const MODULE_FILES: Record<string, string[]> = {
   // gates the COLLECTION and not merely the panel — the probe reads other
   // accounts' authorized_keys with `sudo -n`, which is not a thing to discover
   // in a sudo log. See FleetSamplerDeps.accessEnabled.
-  access: ['src/renderer/src/components/monitor/AccessPanel.tsx'],
+  // `staleAccounts.ts` is the module's, unlike the collector below it: it is a
+  // pure verdict over what the collector already produced, and it exists only
+  // for this panel.
+  access: [
+    'src/shared/staleAccounts.ts',
+    'src/renderer/src/components/monitor/AccessPanel.tsx'
+  ],
   // The collector (src/shared/posture.ts, src/main/services/posture.ts) is not
   // listed, for the reason hostFacts is not listed under `inventory` and the
   // access collector is not listed above: it lives in the sampler, not in the
