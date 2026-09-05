@@ -145,6 +145,7 @@ import { dbTest, dbQuery, dbInfo, dbClose, dbDisposeAll } from './services/db'
 import { dbShell } from './services/dbshell'
 import { DB_OPS_ROW_LIMIT, dbOps } from './services/dbOps'
 import { reportSizeSample } from '../shared/dbSizeSample'
+import { forecastBytes } from '../shared/bytesForecast'
 import type { DbConnectConfig } from '../shared/db'
 import { notableDbEvents } from '../shared/dbOps'
 import { setSecret, getSecret, deleteSecret, secretsAvailable } from './services/secrets'
@@ -2939,6 +2940,37 @@ function capacityReportFor(hostId: unknown, windowDays: unknown): CapacityReport
 
 ipcMain.handle('capacity:trends', (_e, hostId: unknown, windowDays: unknown) =>
   capacityReportFor(hostId, windowDays)
+)
+
+/**
+ * A database's size series, and what it forecasts.
+ *
+ * A separate channel from `capacity:trends` rather than a tenth metric on it,
+ * for the reason `bytesForecast.ts` gives: that report carries percentage
+ * thresholds and a percentage forecaster, and neither means anything in bytes.
+ *
+ * The ceiling comes from the CALLER, because nothing here knows one -- a
+ * database is too big relative to a disk, a quota or somebody's judgement, and
+ * inventing one would put a crossing date on screen that nobody chose.
+ */
+ipcMain.handle(
+  'capacity:db-growth',
+  (_e, connectionId: unknown, windowDays: unknown, ceilingBytes: unknown) => {
+    if (!historyStore) return null
+    if (typeof connectionId !== 'string' || connectionId === '') return null
+    const days =
+      typeof windowDays === 'number' && Number.isFinite(windowDays)
+        ? Math.max(1, Math.min(RETENTION_HOURLY_DAYS, Math.floor(windowDays)))
+        : 30
+    const now = Date.now()
+    const from = now - days * 86_400_000
+    const points = historyStore.readSeries(databaseSubject(connectionId), 'dbBytes', from, now)
+    const ceiling =
+      typeof ceilingBytes === 'number' && Number.isFinite(ceilingBytes) && ceilingBytes > 0
+        ? ceilingBytes
+        : null
+    return forecastBytes(points, ceiling, now)
+  }
 )
 
 // The agent's half of the same answer. Wired the way the fleet sampler is,

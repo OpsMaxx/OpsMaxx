@@ -47,6 +47,7 @@ import type {
 import type { ChangeLogBridge, ChangeLogFilter, ChangeLogPage } from '../shared/changelog'
 import type { RunbookNote, RunbookView, RunbooksBridge } from '../shared/runbooks'
 import type { StoreAlertKind } from '../shared/webhook'
+import type { BytesReading } from '../shared/bytesForecast'
 import type { ImageScanProbe } from '../shared/imageScan'
 import type { SecurityListProbe } from '../shared/securityUpdates'
 import type { K8sReviewProbe } from '../shared/k8sReview'
@@ -445,7 +446,13 @@ const api = {
   // panel calls at runtime and finds undefined.
   capacity: {
     trends: (hostId: string, windowDays: number): Promise<CapacityReport | null> =>
-      ipcRenderer.invoke('capacity:trends', hostId, windowDays)
+      ipcRenderer.invoke('capacity:trends', hostId, windowDays),
+    dbGrowth: (
+      connectionId: string,
+      windowDays: number,
+      ceilingBytes?: number
+    ): Promise<BytesReading | null> =>
+      ipcRenderer.invoke('capacity:db-growth', connectionId, windowDays, ceilingBytes)
   } satisfies CapacityBridge,
   // Roadmap item 27. Four channels and deliberately no fifth: there is no
   // `run` and no `test`, because a button that fired a rule on demand would be
