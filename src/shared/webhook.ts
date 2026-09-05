@@ -39,7 +39,13 @@ export const ALERT_KINDS = [
   // covers three states an operator cannot tell apart from silence: a run that
   // failed, a schedule that has stopped, and a destination that has never
   // produced anything at all. See assessBackups() in ./backup.
-  'backup-failed'
+  'backup-failed',
+  // Two, for the reason STATE_ALERT_KINDS gives: up-but-silent and down are
+  // different conditions with different fixes. `stopped` is neither -- a
+  // person pressing Stop is not an outage -- and no endpoint ever reaches
+  // these payloads.
+  'vpn-down',
+  'vpn-degraded'
 ] as const
 export type AlertKind = (typeof ALERT_KINDS)[number]
 
@@ -210,7 +216,18 @@ export const STATE_ALERT_KINDS = [
   // A state, not an occurrence: "there is no recent backup" stays true until a
   // backup succeeds, so it clears itself the way unreachable does rather than
   // firing again every tick.
-  'backup-failed'
+  'backup-failed',
+  // TWO KINDS, not one with a detail. `degraded` is up-but-not-passing-traffic
+  // -- a WireGuard handshake older than 180s -- and `error` is down. vpn.ts
+  // calls that distinction "the single most useful thing this UI shows", and
+  // the two call for different reactions: one is reconnect, the other is find
+  // out why a tunnel that thinks it is up carries nothing. Folding them into
+  // one kind would tell the operator to do the wrong one half the time.
+  //
+  // `stopped` is neither, and is deliberately not an alert at all: a person
+  // pressing Stop is not an outage.
+  'vpn-down',
+  'vpn-degraded'
 ] as const
 export type StateAlertKind = (typeof STATE_ALERT_KINDS)[number]
 

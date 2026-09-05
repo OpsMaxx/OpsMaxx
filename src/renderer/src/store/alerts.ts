@@ -755,6 +755,8 @@ export function hydrateAlerts(): Promise<void> {
 
 /** Short, for the status-bar chip and the notification title. */
 export const LABEL: Record<AlertKind, string> = {
+  'vpn-down': 'VPN down',
+  'vpn-degraded': 'VPN silent',
   cpu: 'CPU',
   ram: 'Memory',
   disk: 'Disk',
@@ -875,6 +877,8 @@ const VALUE_PHRASE: Record<NumericAlertKind, (v: number) => string> = {
 // The wire name for each kind. A Record rather than a ternary, so adding a kind
 // is a type error here instead of a metric quietly posting as 'memory'.
 const WEBHOOK_KIND: Record<StoreAlertKind, WebhookAlertKind> = {
+  'vpn-down': 'vpn-down',
+  'vpn-degraded': 'vpn-degraded',
   'backup-failed': 'backup-failed',
   cpu: 'cpu',
   ram: 'memory',
@@ -1153,6 +1157,18 @@ const STATE_WORDS: Record<
   'tunnel-down': {
     raised: (name) => `Tunnel ${name} is in error`,
     resolved: (name) => `Tunnel ${name} is carrying traffic again`
+  },
+  'vpn-down': {
+    raised: (name) => `VPN ${name} is in error`,
+    resolved: (name) => `VPN ${name} is connected again`
+  },
+  // Says what is wrong rather than that something is, because the fix is a
+  // different one: a tunnel that is up and silent is not reconnected, it is
+  // investigated. Never an endpoint in the words -- see the note above this
+  // table about what reaches an outbound field.
+  'vpn-degraded': {
+    raised: (name) => `VPN ${name} is up but not passing traffic`,
+    resolved: (name) => `VPN ${name} is passing traffic again`
   },
   // The resolve is a REAL observation and not an assumption, which is what
   // earns this a place among the states rather than among the events: the
