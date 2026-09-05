@@ -392,6 +392,21 @@ export interface JobSpec {
    * are different blast radii.
    */
   gate?: JobGate
+  /**
+   * How to undo this, if the operator wrote one down — item 44.
+   *
+   * NEVER RUN AUTOMATICALLY. Not by the stage gate, not by a halt, not by the
+   * runner. A rollback is a second blast radius: `systemctl stop` to undo a
+   * `start` is still a stop, and the moment a machine decides to run one is
+   * the moment an operator finds out their estate was changed twice by a
+   * decision nobody made. It runs when a human presses the button and answers
+   * a SECOND confirmation, graded on its own commands.
+   *
+   * Carried on the spec rather than remembered elsewhere so it is inside the
+   * approval record: see approvalCommands(). An undo that could be edited
+   * after the fact is not an undo anybody should trust.
+   */
+  rollback?: JobStep[]
 }
 
 /**
@@ -504,6 +519,27 @@ export function planJob(spec: JobSpec, targets: JobTargetRef[]): JobPlan {
 // turned into a record or checked against one, so the two can never drift.
 
 /** The record, minted at the moment the human answers the dialog. */
+/**
+ * The exact strings an approval covers, for one spec.
+ *
+ * ONE implementation, called by the mint and by the verify, because they are
+ * the two halves of a literal comparison: a rollback added to the minting side
+ * and not to the verifying side would be a set of commands recorded as approved
+ * and never checked, which is worse than not recording them.
+ *
+ * The rollback steps are prefixed rather than concatenated plainly, so a job
+ * whose forward step is `X` and whose rollback is `Y` cannot produce the same
+ * approved list as one whose steps are `X` and `Y` -- which would let a
+ * two-step job be re-presented as a one-step job with an undo, under an
+ * approval that verifies.
+ */
+export function approvalCommands(spec: JobSpec): string[] {
+  return [
+    ...spec.steps.map((st) => st.command),
+    ...(spec.rollback ?? []).map((st) => `rollback: ${st.command}`)
+  ]
+}
+
 export function jobApprovalFor(
   spec: JobSpec,
   targets: JobTargetRef[],
@@ -511,7 +547,7 @@ export function jobApprovalFor(
 ): CommandApproval {
   return approvalFor({
     surface: 'job',
-    commands: spec.steps.map((st) => st.command),
+    commands: approvalCommands(spec),
     targets,
     plan: planJob(spec, targets),
     phrase: o.phrase ?? null,
@@ -533,7 +569,7 @@ export function verifyJobApproval(
 ): ApprovalVerdict {
   return verifyApproval(
     approval,
-    { commands: spec.steps.map((st) => st.command), targets },
+    { commands: approvalCommands(spec), targets },
     planJob(spec, targets)
   )
 }
