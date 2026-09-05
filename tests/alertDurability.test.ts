@@ -263,6 +263,9 @@ describe('the row is rebuilt from a whitelist', () => {
       'inode',
       'load',
       'cert-expiry',
+      // A sibling of cert-expiry, not the same kind: a VPN profile is not a
+      // server and the posture sweep never looks at one.
+      'vpn-cert-expiry',
       'host-unreachable',
       'job-failed',
       'tunnel-down',

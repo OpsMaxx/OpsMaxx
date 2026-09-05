@@ -355,3 +355,69 @@ describe('coverage stays honest about where these two come from', () => {
     expect(sampler?.kinds).not.toContain('cert-expiry')
   })
 })
+
+// ---------------------------------------------------------------------------
+// Item 48: the VPN profile's own client certificate
+// ---------------------------------------------------------------------------
+//
+// A sibling of cert-expiry rather than the same kind, and the reason is the
+// coverage page rather than the arithmetic: `cert-expiry` is answered by the
+// posture sweep, and a VPN profile is not a server and is never swept.
+//
+// Before this, the only signal a profile had was openvpn's own "certificate
+// has expired" in the log -- after the connect had already failed.
+
+/** A profile whose certificate expires `days` from now. */
+const vpnCert = (days: number | null | undefined): void =>
+  alerts.checkVpnCertificateAlert(
+    'vpn-1',
+    'Office VPN',
+    days === null || days === undefined ? days : T0 + days * 86_400_000,
+    T0
+  )
+
+describe('a VPN client certificate on its way out', () => {
+  it('warns before the connect fails, rather than after it has', () => {
+    vpnCert(3)
+    expect(recorded.map((r) => r.event.kind)).toContain('vpn-cert-expiry')
+    const raised = recorded.find((r) => r.event.kind === 'vpn-cert-expiry')!
+    expect(raised.event.event).toBe('raised')
+    expect(raised.event.serverName).toBe('Office VPN')
+  })
+
+  it('says nothing about a certificate with months left', () => {
+    vpnCert(200)
+    expect(recorded.filter((r) => r.event.kind === 'vpn-cert-expiry')).toEqual([])
+  })
+
+  it('says nothing at all when the date could not be read, because that is not "fine"', () => {
+    // A pkcs12 bundle, or a block that would not parse. Absent is not healthy.
+    vpnCert(null)
+    vpnCert(undefined)
+    expect(recorded.filter((r) => r.event.kind === 'vpn-cert-expiry')).toEqual([])
+  })
+
+  it('counts an already-expired certificate as negative days, floored not truncated', () => {
+    // A HALF day past, deliberately: floor and trunc agree on every whole
+    // number, so a test using one asserts nothing about which was written.
+    // Expired five and a half days ago is -6 days remaining, the same way
+    // readCertificate floors, and -5 would round towards zero and flatter it.
+    alerts.checkVpnCertificateAlert('vpn-1', 'Office VPN', T0 - 5.5 * 86_400_000, T0)
+    const raised = recorded.find((r) => r.event.kind === 'vpn-cert-expiry')!
+    expect(raised.event.value).toBe(-6)
+  })
+
+  it('resolves when the certificate is renewed', () => {
+    vpnCert(3)
+    recorded.length = 0
+    vpnCert(365)
+    const resolved = recorded.find((r) => r.event.kind === 'vpn-cert-expiry')
+    expect(resolved?.event.event).toBe('resolved')
+  })
+
+  it('does not post under the server certificate kind', () => {
+    vpnCert(3)
+    expect(posted.some((p) => p.kind === 'vpn-cert-expiry')).toBe(true)
+    expect(posted.some((p) => p.kind === 'cert-expiry')).toBe(false)
+  })
+})

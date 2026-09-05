@@ -119,6 +119,10 @@ export const COVERAGE_SOURCE: Record<StoreAlertKind, AlertCoverageSource> = {
   'db-watch': 'read-on-demand',
   'oom-kill': 'posture-sweep',
   'cert-expiry': 'posture-sweep',
+  // NOT the posture sweep, which is the whole reason this is its own kind: a
+  // VPN profile is not a server and is never swept. It is read at import and
+  // checked by the same app-root poll that watches the VPNs themselves.
+  'vpn-cert-expiry': 'app-root',
   // Raised from the app root beside the backup tick, so it fires whether or not
   // anybody has the Backup panel open — a backup that stopped is exactly the
   // thing nobody is looking at.

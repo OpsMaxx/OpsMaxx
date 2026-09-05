@@ -96,6 +96,16 @@ export interface OpenVpnSpec {
   // Summary fields kept out of the encrypted config body so the UI can show
   // something useful without unlocking the vault.
   remotes?: { host: string; port: number; proto: string }[]
+  /**
+   * Epoch ms at which this profile's own client certificate stops being
+   * accepted, or absent when it could not be read -- and absent is not
+   * "fine", it is not known.
+   *
+   * Computed once at import from material the parser already had, so nothing
+   * unlocks the vault to draw a date. Never set for a pkcs12 profile: that is
+   * a password-wrapped container, not a certificate.
+   */
+  clientCertNotAfter?: number
 }
 
 export type FrpProxyType = 'tcp' | 'udp' | 'http' | 'https' | 'stcp' | 'sudp' | 'xtcp' | 'tcpmux'

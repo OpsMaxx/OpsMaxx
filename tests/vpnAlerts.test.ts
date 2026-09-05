@@ -65,3 +65,27 @@ describe('the map is exhaustive, which is why it is a Record', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// The client certificate's remaining days
+// ---------------------------------------------------------------------------
+
+import { NUMERIC_ALERT_KINDS } from '../src/shared/webhook'
+
+describe('a VPN certificate is its own kind, not the posture sweep’s', () => {
+  it('is numeric, because days remaining is a number against a line', () => {
+    expect(NUMERIC_ALERT_KINDS as readonly string[]).toContain('vpn-cert-expiry')
+  })
+
+  // The reason it is not simply `cert-expiry`: the coverage page tells the
+  // operator WHERE an alert comes from, and `cert-expiry` says the posture
+  // sweep. A VPN profile is not a server and is never swept, so raising both
+  // under one name would make that page say something untrue.
+  it('does not claim to come from the posture sweep', async () => {
+    const { COVERAGE_SOURCE } = await import(
+      '../src/renderer/src/components/settings/alertCoverage'
+    )
+    expect(COVERAGE_SOURCE['cert-expiry']).toBe('posture-sweep')
+    expect(COVERAGE_SOURCE['vpn-cert-expiry']).not.toBe('posture-sweep')
+  })
+})
