@@ -402,9 +402,23 @@ export interface ApprovalTargetRef {
  * command, one confirmed target list, one typed phrase) and reuses this record
  * rather than growing a second approval vocabulary beside it.
  */
-export type ApprovalSurface = 'broadcast' | 'job' | 'k8s-exec'
+// `access`, `k8s` and `db-statement` were added together, and the reason is
+// the log rather than any of the three: a decision that is checked and not
+// recorded leaves the approval log describing a subset of what the app
+// actually approved, and a reader cannot tell a quiet week from a missing
+// writer. Key add/revoke is the one wired here; cordon, drain and the database
+// statements are items 37 and 41, and their union member exists so that
+// wiring them is one call rather than one call plus a vocabulary change.
+export type ApprovalSurface = 'broadcast' | 'job' | 'k8s-exec' | 'access' | 'k8s' | 'db-statement'
 
-export const APPROVAL_SURFACES: readonly ApprovalSurface[] = ['broadcast', 'job', 'k8s-exec']
+export const APPROVAL_SURFACES: readonly ApprovalSurface[] = [
+  'broadcast',
+  'job',
+  'k8s-exec',
+  'access',
+  'k8s',
+  'db-statement'
+]
 
 export interface CommandApproval {
   v: 1

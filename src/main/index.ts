@@ -1321,6 +1321,13 @@ ipcMain.handle('access:plan', (_e, req: Omit<AccessRunRequest, 'token' | 'confir
   }
 })
 
+// Names the change in the words the log's reader has -- server count and what
+// it does -- rather than the token, which is a timestamp nobody can place.
+function accessApprovalTitle(plan: { targets: { serverName: string }[] }): string {
+  const n = plan.targets.length
+  return `Key and access change on ${n} server${n === 1 ? '' : 's'}`
+}
+
 ipcMain.handle('access:run', async (_e, req: AccessRunRequest): Promise<AccessRunResult> => {
   // The same gate, first, and not merely because `access:plan` already has one:
   // a caller that never asked for a plan can reach this channel directly, and
@@ -1341,12 +1348,49 @@ ipcMain.handle('access:run', async (_e, req: AccessRunRequest): Promise<AccessRu
   const { plan, refusals } = deriveAccessPlan(req, at)
   const command = plan.write?.command ?? ''
   if (command === '' || command !== req.confirmedCommand) {
+    // WRITTEN DOWN BEFORE IT IS THROWN. This is the tamper case -- what would
+    // run is not what was confirmed -- and it was the one refusal in the app
+    // that left no trace anywhere. The log is the only place a reader can
+    // later see that it happened at all.
+    recordJobApproval({
+      surface: 'access',
+      event: 'refused',
+      jobId: req.token,
+      title: accessApprovalTitle(plan),
+      risk: 'destructive',
+      confirmation: 'confirm',
+      phrase: null,
+      confirmedAt: at,
+      hosts: plan.targets.map((t) => t.serverName),
+      commands: [command],
+      reason: 'what would run on the servers is not what was confirmed'
+    })
     // Not a warning and not a retry. What was agreed to is not what this would
     // run, and there is no version of that worth resolving automatically.
     throw new Error(
       'This change was not started: what would run on the servers is not what was confirmed. The collection has changed since the plan was shown, so look at it again.'
     )
   }
+
+  // The row that says this ran. A key revoke is the most consequential write
+  // this app makes -- it is the one that can lock the operator out of the
+  // machine they are fixing -- and until now the approval log, which exists to
+  // answer "what did this app agree to do", had no record of it whatsoever.
+  //
+  // `destructive` is not a guess. The whole rollback timer beneath this exists
+  // because of what this write does when it is wrong.
+  recordJobApproval({
+    surface: 'access',
+    event: 'granted',
+    jobId: req.token,
+    title: accessApprovalTitle(plan),
+    risk: 'destructive',
+    confirmation: 'confirm',
+    phrase: null,
+    confirmedAt: at,
+    hosts: plan.targets.map((t) => t.serverName),
+    commands: [command]
+  })
 
   const notStaged: AccessStagingFailure[] = []
   const reports: AccessCommitReport[] = []
