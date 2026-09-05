@@ -722,3 +722,85 @@ describe.skipIf(!ACCESS_WRITE_ENABLED)('revoking a key', () => {
     expect(problem.textContent).toContain('the collection has changed since the plan was shown')
   })
 })
+
+// ---------------------------------------------------------------------------
+// Item 45: keys nobody is using
+// ---------------------------------------------------------------------------
+//
+// The verdict itself is tested in tests/staleAccounts.test.ts. What is tested
+// here is that the panel ACTUALLY CALLS IT -- a builder nothing calls is the
+// failure this roadmap section keeps turning up -- and that the two answers it
+// must never merge stay separate on screen.
+
+/** A collection with one account, built directly: the wire parser has its own
+ *  tests and this one is about what the panel does with the result. */
+const withAccounts = (accounts: unknown[]): HostAccess =>
+  ({
+    ...complete(),
+    accounts
+  }) as HostAccess
+
+const account = (over: Record<string, unknown>): Record<string, unknown> => ({
+  user: 'deploy',
+  uid: 1001,
+  shell: '/bin/bash',
+  home: '/home/deploy',
+  keys: [{ type: 'ssh-ed25519', comment: 'laptop', fingerprint: ED25519_FP }],
+  keysStatus: 'ok',
+  keyPath: '/home/deploy/.ssh/authorized_keys',
+  hasLegacyKeyFile: false,
+  passwordLocked: false,
+  accountStatus: 'ok',
+  expiresText: null,
+  expired: false,
+  adminGroups: [],
+  lastLoginText: null,
+  lastLoginAt: null,
+  neverLoggedIn: true,
+  ...over
+})
+
+describe('keys nobody is using', () => {
+  it('names an account that holds a key and has never logged in', async () => {
+    mount([server('a', 'web-1')], { a: { access: withAccounts([account({})]), at: 1 } })
+    await waitFor(() => screen.getByText('Keys nobody is using'))
+    expect(document.body.textContent).toContain('never used')
+    expect(document.body.textContent).toContain('deploy')
+  })
+
+  // The distinction the whole verdict exists for. A server without `lastlog`
+  // answers "no login recorded" about every account, including the one somebody
+  // used a minute ago.
+  it('does not call an account idle when the server could not say', async () => {
+    mount([server('a', 'web-1')], {
+      a: {
+        access: withAccounts([account({ neverLoggedIn: false, lastLoginAt: null, lastLoginText: null })]),
+        at: 1
+      }
+    })
+    await waitFor(() => screen.getByText('Keys nobody is using'))
+    expect(document.body.textContent).toContain('could not tell')
+    expect(document.body.textContent).toContain('lastlog')
+    expect(document.body.textContent).not.toContain('never used')
+  })
+
+  it('says nothing is idle when every key has been used recently', async () => {
+    mount([server('a', 'web-1')], {
+      a: {
+        access: withAccounts([
+          account({ neverLoggedIn: false, lastLoginAt: Date.now() - 86_400_000 })
+        ]),
+        at: 1
+      }
+    })
+    await waitFor(() => screen.getByText('Keys nobody is using'))
+    expect(document.body.textContent).toContain('used recently')
+  })
+
+  // Revoke is item 36's, behind its own gate and its own rollback.
+  it('offers no revoke of its own from this list', async () => {
+    mount([server('a', 'web-1')], { a: { access: withAccounts([account({})]), at: 1 } })
+    await waitFor(() => screen.getByText('Keys nobody is using'))
+    expect(document.body.textContent).toContain('staged with a rollback')
+  })
+})

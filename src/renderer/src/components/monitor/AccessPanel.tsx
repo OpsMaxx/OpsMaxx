@@ -5,6 +5,7 @@ import { useApp } from '../../store/app'
 import { bridgeHas } from '../../lib/bridge'
 import { clsx, duration } from '../../lib/format'
 import { sshHopsFor } from '../../lib/ssh'
+import { staleAccounts, summariseStaleAccounts } from '../../../../shared/staleAccounts'
 import {
   ACCESS_STATUS_HELP,
   ACCESS_WRITE_DISABLED_REASON,
@@ -300,6 +301,11 @@ export function AccessPanel({
   // a subset of `failed`: a host can answer perfectly and still have two home
   // directories this account cannot traverse, and that host's counts are a
   // lower bound exactly as a failed host's are.
+  // 90 days by default. Short enough that a forgotten contractor's key shows
+  // up inside a quarter, long enough that somebody who was on parental leave
+  // does not.
+  const [idleDays, setIdleDays] = useState(90)
+
   const hosts = useMemo(
     () =>
       servers.map((s) => {
@@ -331,6 +337,26 @@ export function AccessPanel({
   // under `unchecked`, and counting it twice would put two numbers in the
   // banner for one machine.
   const incomplete = current.filter((h) => h.summary && !h.summary.certain)
+
+  // Item 45. Which accounts still hold a working key that nobody has used.
+  //
+  // Over `collected` rather than `current`: a host whose last collection is
+  // three weeks old still tells you something true about who had a key then,
+  // and the banner above already says which hosts are stale. Dropping them here
+  // would make this list quietly shrink as the estate got harder to read.
+  const idleFindings = useMemo(
+    () =>
+      staleAccounts(
+        collected.map((h) => ({
+          serverId: h.server.id,
+          serverName: h.server.name,
+          accounts: h.entry!.access!.accounts
+        })),
+        idleDays
+      ),
+    [collected, idleDays]
+  )
+  const idleSummary = summariseStaleAccounts(idleFindings)
 
   /**
    * The by-key view. One row per distinct fingerprint across everything that
@@ -417,6 +443,61 @@ export function AccessPanel({
           </button>
         </div>
       </div>
+
+      {collected.length > 0 && (
+        <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+          <div className="cron-row">
+            <span className="r-title">Keys nobody is using</span>
+            <span className="grow" />
+            <label className="r-sub faint">
+              idle for{' '}
+              <select
+                className="input sm"
+                aria-label="Idle threshold in days"
+                value={idleDays}
+                onChange={(e) => setIdleDays(Number(e.target.value))}
+              >
+                <option value={30}>30 days</option>
+                <option value={90}>90 days</option>
+                <option value={180}>180 days</option>
+                <option value={365}>a year</option>
+              </select>
+            </label>
+          </div>
+          {/* The unknowns are IN the headline, not filtered out of it. A count
+              that shrinks as the estate gets harder to read is the wrong
+              direction for a number somebody uses to decide they are done. */}
+          <div className="r-sub">{idleSummary.headline}</div>
+          {idleFindings.filter((f) => f.verdict !== 'active').length > 0 && (
+            <table className="mini-table">
+              <tbody>
+                {idleFindings
+                  .filter((f) => f.verdict !== 'active')
+                  .map((f) => (
+                    <tr key={`${f.serverId}:${f.user}`}>
+                      <td className="mono">{f.user}</td>
+                      <td className="faint">{f.serverName}</td>
+                      <td className={clsx(f.verdict === 'unknown' ? 'state-unknown' : 'warn')}>
+                        {f.verdict === 'never-used'
+                          ? 'never used'
+                          : f.verdict === 'stale'
+                            ? `${f.daysSinceLogin}d idle`
+                            : 'could not tell'}
+                      </td>
+                      <td className="faint">{f.because}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          )}
+          {/* Revoking is item 36's, behind its own gate and its own rollback.
+              A button here would act through a path that has neither. */}
+          <div className="r-sub faint">
+            Read-only. Removing a key is done from the key rows above, where the change is staged
+            with a rollback.
+          </div>
+        </div>
+      )}
 
       {/* Said once, at the top, before a target is chosen — because the point
           of saying it is that nobody plans around a capability this does not
