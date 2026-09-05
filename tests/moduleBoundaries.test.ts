@@ -34,6 +34,15 @@ const MODULE_FILES: Record<string, string[]> = {
     'src/shared/userUnits.ts',
     'src/renderer/src/components/monitor/ServicesPanel.tsx'
   ],
+  // Item 33's composer. The job ENGINE is not listed, for the reason the
+  // `patch` entry below gives at length: it exists on every install and adopts
+  // its own rows at launch whether or not this module is on. What the module
+  // owns is the vocabulary that turns what somebody typed into a spec, and the
+  // panel that asks for the confirmation `planJob` demands.
+  jobs: [
+    'src/shared/jobCompose.ts',
+    'src/renderer/src/components/monitor/JobsPanel.tsx'
+  ],
   fleetSearch: ['src/renderer/src/lib/fleetSearch.ts', 'src/renderer/src/components/monitor/FleetSearch.tsx'],
   // The main-process half (src/shared/hostFacts.ts, src/main/services/hostFacts.ts)
   // is not listed: it is collected by the fleet sampler on every install

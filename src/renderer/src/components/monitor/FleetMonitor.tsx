@@ -30,6 +30,7 @@ import { PatchPanel } from './PatchPanel'
 import { LogTailPanel } from './LogTailPanel'
 import { CronPanel } from './CronPanel'
 import { ServicesPanel } from './ServicesPanel'
+import { JobsPanel } from './JobsPanel'
 import { RulesPanel } from './RulesPanel'
 import { ChangeLogPanel } from './ChangeLogPanel'
 import { MODULES, moduleEnabled, type ModuleDef, type ModuleId } from '../../../../shared/modules'
@@ -449,6 +450,11 @@ export function FleetMonitor(): React.JSX.Element {
       {moduleEnabled(modules, 'cron') && (
         <div style={show('cron')}>
           <CronPanel servers={servers} />
+        </div>
+      )}
+      {moduleEnabled(modules, 'jobs') && (
+        <div style={show('jobs')}>
+          <JobsPanel servers={servers} />
         </div>
       )}
       {moduleEnabled(modules, 'services') && (
