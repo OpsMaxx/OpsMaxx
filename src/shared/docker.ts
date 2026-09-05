@@ -639,6 +639,8 @@ export const DOCKER_MARKERS = {
   health: '===SHELLPILOT-HEALTH===',
   stats: '===SHELLPILOT-STATS===',
   act: '===SHELLPILOT-ACT===',
+  networks: '===SHELLPILOT-NETWORKS===',
+  netAttach: '===SHELLPILOT-NETATTACH===',
   /**
    * One marker per removal kind, because the four commands are four different
    * programs and their output must never be pooled.
@@ -2108,6 +2110,153 @@ export function buildDockerReclaimPreview(disk: DockerDiskDetail): DockerReclaim
 
   return { items, withheld }
 }
+
+// ---------------------------------------------------------------------------
+// Networks
+// ---------------------------------------------------------------------------
+//
+// `docker system df -v` does not list networks at all, which is why the reclaim
+// preview has never emitted one despite `network rm` being built and parsed.
+// This is that read, and the obvious version of it is WRONG.
+//
+// `docker network inspect` reports the containers ATTACHED RIGHT NOW. Measured:
+// a compose project with one service stopped left its network reporting
+// `len .Containers` == 0 while `docker ps -a` still showed the stopped
+// container on it. Removing that network on the strength of the zero is not
+// recoverable by recreating a network of the same name -- the container is
+// pinned to the network's ID. Measured, end to end: after `docker network rm
+// spnet_back`, `docker compose start b` failed with "network
+// c1fd84b264c9... not found", and only recreating the container fixes it.
+//
+// So attachment is read from `docker ps -a`, whose `{{.Networks}}` column names
+// the networks of STOPPED containers too, and `network inspect` is not used.
+
+export interface DockerNetwork {
+  id: string
+  name: string
+  driver: string
+  scope: string
+}
+
+export interface DockerNetworkUse {
+  containerId: string
+  name: string
+  /** `running`, `exited`, `created`, `paused`... as docker's own State column. */
+  state: string
+  /** Comma-joined by docker, split here. */
+  networks: string[]
+}
+
+/**
+ * Docker's three built-in networks.
+ *
+ * `docker network rm` refuses all three, so offering one is offering a button
+ * that cannot work. They are withheld with that reason rather than filtered,
+ * because a network the operator can see in `docker network ls` and not in this
+ * list is a list that looks broken.
+ */
+export const DOCKER_DEFAULT_NETWORKS: ReadonlySet<string> = new Set(['bridge', 'host', 'none'])
+
+export function buildDockerNetworkCommand(opts: { sudo?: boolean } = {}): string {
+  const run = runner(opts.sudo)
+  return [
+    resolveBinary('docker', [], ['podman']),
+    `echo "${DOCKER_MARKERS.networks}"`,
+    `${run} network ls --format '{{.ID}}|{{.Name}}|{{.Driver}}|{{.Scope}}' 2>&1 || true`,
+    `echo "${DOCKER_MARKERS.netAttach}"`,
+    // `ps -a`, not `ps`: a stopped container still holds its networks, and it is
+    // the only place that shows.
+    `${run} ps -a --format '{{.ID}}|{{.Names}}|{{.State}}|{{.Networks}}' 2>&1`,
+    `SP_RC=$?; echo "${DOCKER_MARKERS.end}"; exit $SP_RC`
+  ].join('; ')
+}
+
+export function parseDockerNetworks(text: string): DockerNetwork[] {
+  const out: DockerNetwork[] = []
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (line === '') continue
+    const f = line.split('|')
+    if (f.length < 4) continue
+    out.push({ id: f[0].trim(), name: f[1].trim(), driver: f[2].trim(), scope: f[3].trim() })
+  }
+  return out
+}
+
+export function parseDockerNetworkUse(text: string): DockerNetworkUse[] {
+  const out: DockerNetworkUse[] = []
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (line === '') continue
+    const f = line.split('|')
+    if (f.length < 4) continue
+    out.push({
+      containerId: f[0].trim(),
+      name: f[1].trim(),
+      state: f[2].trim(),
+      networks: f[3]
+        .split(',')
+        .map((n) => n.trim())
+        .filter((n) => n !== '')
+    })
+  }
+  return out
+}
+
+/**
+ * Which networks may be offered, and why the rest may not.
+ *
+ * The only network offered is one that no container names at all -- not one
+ * whose containers merely are not running. See the header: that difference was
+ * measured, and getting it wrong breaks a `compose start` in a way recreating
+ * the network does not fix.
+ */
+export function buildDockerNetworkPreview(
+  networks: DockerNetwork[],
+  use: DockerNetworkUse[]
+): DockerReclaimPreview {
+  const items: DockerReclaimItem[] = []
+  const withheld: DockerReclaimWithheld[] = []
+
+  const holders = new Map<string, DockerNetworkUse[]>()
+  for (const u of use) {
+    for (const n of u.networks) {
+      const list = holders.get(n)
+      if (list === undefined) holders.set(n, [u])
+      else list.push(u)
+    }
+  }
+
+  for (const net of networks) {
+    if (DOCKER_DEFAULT_NETWORKS.has(net.name)) {
+      withheld.push({
+        kind: 'network',
+        id: net.id,
+        label: net.name,
+        reason: 'docker creates this one and refuses to remove it'
+      })
+      continue
+    }
+    const on = holders.get(net.name) ?? []
+    if (on.length > 0) {
+      const running = on.filter((u) => u.state === 'running').length
+      withheld.push({
+        kind: 'network',
+        id: net.id,
+        label: net.name,
+        reason:
+          running === on.length
+            ? `${on.length} container${on.length === 1 ? '' : 's'} on it`
+            : `${on.length} container${on.length === 1 ? '' : 's'} on it, ${on.length - running} of them stopped and still attached`
+      })
+      continue
+    }
+    items.push({ kind: 'network', id: net.id, label: net.name, size: '', sizeBytes: null })
+  }
+
+  return { items, withheld }
+}
+
 
 export type DockerReclaimRisk = 'elevated' | 'destructive'
 
