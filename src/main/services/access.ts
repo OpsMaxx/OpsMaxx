@@ -7,6 +7,12 @@ import type {
   HostAccess,
   Sha256
 } from '../../shared/access'
+import type { AccessGroup } from '../../shared/mcp'
+import {
+  buildSudoersCommand,
+  parseSudoersOutput,
+  type SudoersFileReading
+} from '../../shared/sudoers'
 import {
   ACCESS_COMMITTED_PREFIX,
   ACCESS_ROLLBACK_SECONDS,
@@ -338,4 +344,38 @@ export class AccessCommitter {
       return { ok: false, code: null, stdout: '', stderr: '', error: e instanceof Error ? e.message : String(e) }
     }
   }
+}
+
+/**
+ * Whether this server's group consented to the sudoers read — item 36b.
+ *
+ * Reads the capability and NOTHING else, exactly as `firewallRulesGranted`
+ * does and for the same reason: it has its own line in the grid because no
+ * other grant should widen it. Being allowed to RUN sudo is not being allowed
+ * to read who else can.
+ */
+export function sudoersReadGranted(group: AccessGroup | null): boolean {
+  return group?.capabilities?.sudoersRead === 'allow'
+}
+
+/**
+ * The sudoers read, as its own exec.
+ *
+ * SEPARATE from the access collection rather than folded into it. That command
+ * is already long and runs on every server every hour; this one runs only
+ * where somebody consented, and a server whose group has not is a server this
+ * never touches at all. Folding them together would make one command whose
+ * shape depends on a capability, which is harder to read and harder to be
+ * sure of.
+ */
+export async function readSudoers(
+  exec: (cfg: unknown, command: string, timeoutMs: number) => Promise<{ ok: boolean; output: string }>,
+  cfg: unknown,
+  opts: { sudo?: boolean; timeoutMs?: number } = {}
+): Promise<SudoersFileReading[] | null> {
+  const r = await exec(cfg, buildSudoersCommand(opts), opts.timeoutMs ?? 20_000)
+  // `null`, not `[]`. A read that did not happen is not a host with no sudoers
+  // rules, and the two must never render the same.
+  if (!r.ok) return null
+  return parseSudoersOutput(r.output)
 }
