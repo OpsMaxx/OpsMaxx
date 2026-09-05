@@ -53,8 +53,24 @@ export const PSEUDO_FS = new Set([
   'autofs',
   'binfmt_misc',
   'efivarfs',
-  'iso9660'
+  'iso9660',
+  // Docker Desktop's bind-mount type. Found by running the wired probe rather
+  // than by reading: a container on macOS reports `fakeowner` at 98% full,
+  // which is the HOST's disk showing through, and it ranked as the worst
+  // mount on the "server".
+  'fakeowner',
+  // The same class from the other virtualisation stacks.
+  'virtiofs',
+  '9p',
+  'vboxsf',
+  'grpcfuse'
 ])
+
+// A DENYLIST, and it cannot be complete. That is the right way round: an
+// unknown type is INCLUDED, because a server this app has never seen might be
+// running xfs, btrfs, zfs or something newer, and silently dropping a real
+// filesystem hides a disk filling up. A wrongly-included one shows up as a
+// visible oddity on screen; a wrongly-excluded one shows up as an outage.
 
 export interface DiskMount {
   device: string

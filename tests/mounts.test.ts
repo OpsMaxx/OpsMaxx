@@ -115,3 +115,34 @@ describe('the one mount that goes into the series', () => {
     expect(worstInodeMount(parseMounts(fixture('debian12-blocks.txt')))).toBeNull()
   })
 })
+
+describe('what running the wired probe found, that reading it did not', () => {
+  // The end-to-end run through the real probe script reported a `fakeowner`
+  // filesystem at 98% as the worst mount on the "server". That is Docker
+  // Desktop's bind-mount type showing the HOST's disk through the container --
+  // not a filesystem of the machine being measured at all. The same class
+  // exists for virtiofs, 9p and vboxsf.
+  it('drops the virtualisation bind-mount types that show the host disk', () => {
+    const raw = fixture('probe-through-docker.txt')
+    expect(raw).toContain('fakeowner')
+    const sec = (n: string): string => (raw.split(`__${n}__`)[1] ?? '').split('__')[0]
+    const mounts = parseMounts(sec('MOUNTS'), sec('MOUNTINODES'))
+    expect(mounts.map((m) => m.type)).not.toContain('fakeowner')
+    // And the worst mount is now the server's own disk rather than the Mac's.
+    expect(worstMount(mounts)!.usedPercent).toBe(61)
+  })
+
+  // The list is a denylist and cannot be complete. An unknown type is
+  // INCLUDED on purpose: a wrongly-included filesystem is a visible oddity on
+  // screen, and a wrongly-excluded one is a disk filling up that nobody sees.
+  it('keeps a filesystem type it has never heard of', () => {
+    const mounts = parseMounts(
+      [
+        'Filesystem Type 1024-blocks Used Available Capacity Mounted on',
+        '/dev/sda1 somethingnew 1000 900 100 90% /data'
+      ].join('\n')
+    )
+    expect(mounts).toHaveLength(1)
+    expect(mounts[0].mount).toBe('/data')
+  })
+})

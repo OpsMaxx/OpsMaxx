@@ -1,0 +1,16 @@
+__MOUNTS__
+Filesystem             Type      1024-blocks      Used Available Capacity Mounted on
+overlay                overlay      61202244  35414396  22646524      61% /
+tmpfs                  tmpfs           65536         0     65536       0% /dev
+shm                    tmpfs           65536         0     65536       0% /dev/shm
+/run/host_mark/private fakeowner   482797652 468507640  14290012      98% /p.sh
+/dev/vda1              ext4         61202244  35414396  22646524      61% /etc/hosts
+tmpfs                  tmpfs               4         0         4       0% /proc/scsi
+__MOUNTINODES__
+Filesystem             Type         Inodes   IUsed     IFree IUse% Mounted on
+overlay                overlay     3907584 1134211   2773373   30% /
+tmpfs                  tmpfs       3071447      16   3071431    1% /dev
+shm                    tmpfs       3071447       1   3071446    1% /dev/shm
+/run/host_mark/private fakeowner 149737890 6837770 142900120    5% /p.sh
+/dev/vda1              ext4        3907584 1134211   2773373   30% /etc/hosts
+tmpfs                  tmpfs             1       1         0  100% /proc/scsi
