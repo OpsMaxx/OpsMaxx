@@ -668,3 +668,50 @@ describe('what the lint puts on screen', () => {
     expect(document.body.textContent).toContain('read the file and refused it')
   })
 })
+
+const BUILT_CONFIG: ComposeConfigProbe = {
+  ok: true,
+  config: {
+    name: 'edge',
+    namesOnly: false,
+    volumes: [],
+    networks: [],
+    services: [
+      {
+        name: 'cache',
+        image: null,
+        build: true,
+        containerName: null,
+        dependsOn: [],
+        ports: [],
+        profiles: [],
+        environment: [],
+        envFiles: [],
+        restart: 'always',
+        networkMode: null
+      }
+    ]
+  }
+}
+
+describe('the build button', () => {
+  it('is not offered for a project of pulled images', async () => {
+    // A build button on a project that builds nothing is a button that does
+    // nothing, and one that runs a Dockerfile is not offered on the chance it
+    // applies.
+    await openProject(panelBridge())
+    expect(screen.queryByTitle(/compose build/)).toBeNull()
+  })
+
+  it('appears once the file declares something built from source', async () => {
+    await openProject(panelBridge({ config: vi.fn(async () => BUILT_CONFIG) }))
+    await waitFor(() => expect(screen.getByTitle(/compose build --pull/)).toBeTruthy())
+  })
+
+  it('says it runs Dockerfiles and changes nothing running', async () => {
+    await openProject(panelBridge({ config: vi.fn(async () => BUILT_CONFIG) }))
+    const title = screen.getByTitle(/compose build --pull/).getAttribute('title')!
+    expect(title).toContain('Runs its Dockerfiles')
+    expect(title).toContain('nothing running changes')
+  })
+})

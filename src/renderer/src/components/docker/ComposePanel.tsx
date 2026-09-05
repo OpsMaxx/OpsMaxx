@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Download, FileText, KeyRound, Layers, Pencil, Play, RotateCw, TriangleAlert } from 'lucide-react'
+import { Download, FileText, Hammer, KeyRound, Layers, Pencil, Play, RotateCw, TriangleAlert } from 'lucide-react'
 import { clsx } from '../../lib/format'
 import { jobApprovalFor, planJob } from '../../../../shared/jobs'
 import {
@@ -397,6 +397,23 @@ export function ComposePanel({
                 >
                   <Play size={13} />
                 </button>
+                {/* Only where the file declares something built from source.
+                    A build button on a project of pulled images is a button
+                    that does nothing, and one that runs a Dockerfile is not a
+                    thing to offer on the chance it applies. */}
+                {open === p.name && config?.ok === true && config.config.services.some((sv) => sv.build) && (
+                  <button
+                    className="icon-btn sm"
+                    title={
+                      picked.length > 0
+                        ? `docker compose build --pull for ${picked.join(', ')} in ${p.name}. Runs their Dockerfiles; nothing running changes.`
+                        : `docker compose build --pull for ${p.name}. Runs its Dockerfiles; nothing running changes until you press start.`
+                    }
+                    onClick={() => runJob('build', p.name)}
+                  >
+                    <Hammer size={13} />
+                  </button>
+                )}
               </div>
               {open === p.name && (
                 <div style={{ paddingLeft: 12 }}>
