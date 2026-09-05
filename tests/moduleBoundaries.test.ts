@@ -125,6 +125,7 @@ const MODULE_FILES: Record<string, string[]> = {
   // below covers.
   capacity: [
     'src/shared/fleetForecast.ts',
+    'src/shared/bytesForecast.ts',
     'src/shared/capacity.ts',
     'src/renderer/src/lib/capacity.ts',
     'src/renderer/src/components/monitor/CapacityPanel.tsx'

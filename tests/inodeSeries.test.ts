@@ -52,7 +52,12 @@ describe('the inode series', () => {
   it('was APPENDED to METRICS, because every id above it is already on disk', () => {
     // The ids are the index + 1 and are stable forever. Inserting rather than
     // appending would silently re-point every stored row of every install.
-    expect(METRICS[METRICS.length - 1]).toBe('inodePct')
+    //
+    // Pinned by INDEX rather than by "is last". `dbBytes` was appended after it
+    // for item 47, and "last" would have had to be re-typed for a change that
+    // did not touch this metric at all -- while the thing that actually matters,
+    // that `inodePct` is still id 9, would have gone unasserted.
+    expect(METRICS.indexOf('inodePct')).toBe(8)
     expect(METRICS.indexOf('cpu')).toBe(0)
     expect(METRICS.indexOf('diskPct')).toBe(3)
   })
