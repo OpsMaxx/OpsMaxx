@@ -110,6 +110,7 @@ const MODULE_FILES: Record<string, string[]> = {
   // vault inside a background sweep, which is the trade this list exists to
   // make visible.
   drift: [
+    'src/shared/driftWatch.ts',
     'src/shared/drift.ts',
     'src/main/services/drift.ts',
     'src/renderer/src/components/monitor/DriftPanel.tsx'

@@ -792,59 +792,7 @@ security counts are.
 | **Access-review export** — **SHIPPED** | — | `shared/accessExport.ts`, CSV and JSON, downloaded from the access panel. A projection of facts the collector already holds, and the three rules it adds are all about the difference between a fact and a gap. A HOST THAT REFUSED IS A ROW — an export is read as a complete list of who can get in, and a host dropping out of it turns "we could not look at that machine" into "nobody can reach it"; a host that answered and listed nothing gets a different sentence again. A `since` FILTER NEVER SILENTLY DROPS AN UNKNOWN: `lastLoginAt` is null both for an undated login and for an account that never logged in, which the collector already separates, and filtering either out would remove exactly the accounts an auditor is looking for — so they are kept and marked `undated`/`never`. NO KEY MATERIAL, asserted by a test rather than left to review. The coverage section is written into the SAME file as the rows (a caveat in a second download is a caveat nobody has when they read the first) and names every unread host, every sshd reading keys from a path this never opened, every `AuthorizedKeysCommand` that generates keys at login time, and every account whose file refused. A CSV cell beginning `=`, `+`, `-` or `@` is prefixed with a quote: a key comment is attacker-controlled text off a host, so that is an injection into the auditor's spreadsheet rather than a formatting nicety. |
 | **Bastion as an access object** — **SHIPPED** | — | `shared/bastion.ts`, the topology graph asked the access question instead of the reboot one. THE TRANSITIVE STEP IS THE FEATURE: `dependentsOf` is one hop deep, so a bastion in front of a bastion looks like it guards two machines when it guards five, and an operator revoking a key there is told about the two. A key on the bastion produces one finding per KEY naming every server it reaches, not one row per key-and-host. Revoking is a CONFIRMATION and not a hard refusal like `rebootBlockFor`, and the difference is deliberate: rebooting a bastion mid-run is a thing a staged run must not contain, whereas revoking a key on one is frequently exactly right — somebody left — and refusing it outright sends people to edit `authorized_keys` by hand where nothing checks anything. An ADDRESS match stays the weaker claim all the way out, and a chain's strength is its FIRST link's, because a path is only as good as its claim about the bastion itself. "Nothing behind it" never renders as silence: `noBastionNote` says what the routes say and appends `unmatchedHopNote` when the graph has holes. The walk is bounded twice on purpose — `seen` makes it correct, a depth ceiling makes a bug in `seen` produce a wrong answer rather than a process that never returns, because a hang reads as broken infrastructure rather than as a defect. |
 | **Certbot timer read** | `systemctl list-timers certbot*`, `/var/log/letsencrypt` last success — the *why* behind a cert inside 30 days, in the spirit of the DNS/TLS cut | days |
-| **Drift, operator-chosen watches** | A stored watch (path under `/etc`, regular file, deny-list of credential stores, comment char, rule set) with a one-time typed approval; the `redact → hash → normalise → preview` order kept | 1–2 wk |
-
-### 47. Storage beyond `/`, and capacity beyond three percentages
-
-**The finding.** `metrics.ts:52` runs `df -kP /` and `df -iP /`. That was brevity, not policy —
-and it means a full `/var` or `/data` never reaches the disk alert, the forecast or the agent.
-Inode is measured every sweep and is not in `METRICS` (`history.ts:76-85`), so it is never stored
-and never forecast. Nothing in `src/` reads `lvs`, `vgs`, `mdstat`, `smartctl`, `zpool` (except
-as a destroy-guard) or `findmnt`.
-
-**Storage, in order.**
-
-1. **Inode series — SHIPPED.** `inodePct` appended to `METRICS` (id 9, so
-   `CAPACITY_METRIC_IDS_FOR_TESTS` is now `1, 2, 4, 9` — that string is what append-only looks
-   like from the outside), to `metricsToSamples` with cpu's null guard, and to `CAPACITY_METRICS`
-   at 90. The guard matters more here than for cpu: btrfs and zfs report no inode figures at all,
-   so a zero would draw exactly those hosts as having none left. The storage-budget test moved
-   from 604,800 rows to 680,400 — a metric is 12.5% more per host per day, and that number is
-   pinned as a literal so spending it fails a test rather than passing quietly.
-2. **Per-mount disk and inode — PARSER SHIPPED** (`shared/mounts.ts`), against real `df -kPT`
-   and `df -iPT` from Debian 12 and Alpine 3. The line above was wrong in one detail and it
-   mattered: **`-l` does not exclude tmpfs.** It means "local filesystems", and tmpfs and overlay
-   are local — so `df -kPl` returns every pseudo-filesystem on the box. Types are excluded by
-   NAME from `-T`, which GNU coreutils and busybox both support.
-
-   Two more traps, both measured. Debian mounts a 4 KB tmpfs on `/proc/scsi` with one inode, one
-   used, **`IUse% 100%`** — a rule alarming on a full filesystem would fire on every server for
-   ever, from the first sweep. And Alpine's `df` lists `/dev/vda1` THREE times, because a bind
-   mount is a separate row for one device: summing triples the estate's apparent disk and
-   alerting per row alerts three times. Deduped by device, shortest mount path kept.
-
-   `worstMount` and `worstInodeMount` are separate, because a mail spool runs out of inodes at
-   30% disk used.
-
-   **WIRED**: the probe asks `df -kPT` and `df -iPT`, and `HostMetrics.mounts` carries the
-   answer — BESIDE `diskPct`, never instead of it, because that field is the root filesystem in
-   every sample already in the history store. Running the wired probe end to end found one more
-   type: Docker Desktop reports `fakeowner` at 98% inside a container, which is the HOST's disk
-   showing through and ranked as the server's worst mount. `virtiofs`, `9p`, `vboxsf` and
-   `grpcfuse` are the same class. The list stays a DENYLIST and an unknown type is included: a
-   wrongly-included filesystem is a visible oddity, a wrongly-excluded one is a disk filling up
-   that nobody sees. Still open: the series, and scoping the `disk` alert kind per mount.
-3. **LVM, mdraid, zfs, SMART as facts and state alerts.** `lvs`/`vgs` for `vg-free`,
-   `/proc/mdstat` for `[U_]`, `zpool status -x`, `smartctl -H -j` (root and a package —
-   `absent` vs `cannot` is what the facts framework already models). Kinds `raid-degraded`,
-   `smart-failing`, `zpool-degraded`. Inside the 45-second probe budget. **1.5–2.5 weeks.**
-4. **Remote mounts.** `findmnt -t nfs,nfs4,cifs,fuse.sshfs -J` as a fact source — time-boxed,
-   because a hung NFS mount blocks `df` and parks the sweep. **2–3 days.**
-5. **PVC state alert** would need the Kubernetes read on a cadence, which is item 40's
-   sampler question again. Not before 40.
-
-**Capacity.**
-
+| **Drift, operator-chosen watches** — **VALIDATION AND APPROVAL SHIPPED** | — | `shared/driftWatch.ts`, the answer to the three things `drift.ts` says a typed path would need first. FOUR GATES, in this order. (1) THE PATH IS INTERPOLATED INTO A SHELL SCRIPT — `buildDriftCommand` embeds each path inside single quotes, which is safe for a fixed catalogue and is a command injection the moment somebody can type one, so the character set is an ALLOWLIST rather than an escape, and it is enforced here rather than at the point of use because a builder that trusts its caller will one day be called by something else. (2) Under `/etc` and nowhere else, with `..` refused as TRAVERSAL rather than accepted for starting with the right four characters. (3) A credential denylist whose bias is the OPPOSITE of `mounts.ts`: there an unknown filesystem is included because a missed one is a disk filling up nobody sees, here a name containing `key`, `secret`, `password`, `token` or a `.pem`/`.env` shape is refused whether or not it holds one, because a wrongly refused config file is a sentence and a wrongly accepted one is a private key in an hourly diff on every host. (4) A one-time typed approval whose phrase CONTAINS THE PATH, so an approval for `/etc/nginx/nginx.conf` cannot be replayed for `/etc/ssl/private/site.key` — the same reason `verifyApproval` compares command text literally. The character check runs before the credential check so a shell-breaking path is named as that rather than as a suspected secret. Still open: the settings UI and the stored-watch persistence. |
 | | New | Size |
 |---|---|---|
 | **DB growth series** | Intern `db:<connectionId>` as a subject (host_key is plain TEXT, `history.ts:650-653`); append `dbBytes` to `METRICS`; record on every `db:ops` read first (gappy, and the forecast's `gap`/`stale` refusals handle gaps honestly), a `dbSampler` later; a *bytes* forecast rule, since `capacity.ts:32-38` accepts percentages only and "flat rise 0.5 %" means nothing in bytes | 1 wk, +3–5 d sampler |
