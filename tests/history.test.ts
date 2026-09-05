@@ -496,17 +496,23 @@ describe('retention', () => {
     // same connection and a write landing while it steps fails it. See the
     // ordering note on 'takes a .bak through the backup API'.
     await expect(s.backupReady).resolves.toBe(true)
-    // The roadmap's reference estate: fifteen hosts, two-minute cadence, eight
-    // metrics. 15 * 8 * 30/hour = 3,600 rows an hour, 86,400 a day.
+    // The roadmap's reference estate: fifteen hosts, two-minute cadence, NINE
+    // metrics. 15 * 9 * 30/hour = 4,050 rows an hour, 97,200 a day.
+    //
+    // Eight until item 47 appended `inodePct`, which is why these numbers moved
+    // by an eighth. That is the point of pinning them as literals: a metric is
+    // 12.5% more storage per host per day, and the decision to spend it should
+    // fail a test and be re-typed rather than pass quietly. Item A's warning is
+    // about the 5x version of exactly this.
     // Literals, not the implementation's own formula retyped: writing
     // `15 * 8 * 30 * 24 * RETENTION_FULL_DAYS` here asserts that multiplication
     // works, and passes for any horizon anybody later changes.
     const expected = steadyStateRows(15, 120_000)
-    expect(expected.samples).toBe(604_800)
-    expect(expected.hourly).toBe(239_040)
+    expect(expected.samples).toBe(680_400)
+    expect(expected.hourly).toBe(268_920)
     expect(RETENTION_FULL_DAYS).toBe(7)
     expect(RETENTION_HOURLY_DAYS).toBe(90)
-    expect(METRICS.length).toBe(8)
+    expect(METRICS.length).toBe(9)
 
     // Writing 604,800 rows in a unit test is a minute of CI for a number that
     // scales linearly, so this writes one host for eight days and checks that
@@ -525,7 +531,8 @@ describe('retention', () => {
           diskUsed: 3,
           netRx: 4,
           netTx: 5,
-          uptime: 6
+          uptime: 6,
+          inodePct: 7
         })
       }
     })
@@ -537,8 +544,8 @@ describe('retention', () => {
     const oneHost = steadyStateRows(1, cadence)
     // Seven days at full resolution, to the row.
     expect(after.samples).toBe(oneHost.samples)
-    expect(after.samples).toBe(7 * 24 * 30 * 8)
-    // And the eighth day folded into 24 hours x 8 metrics.
+    expect(after.samples).toBe(7 * 24 * 30 * 9)
+    // And the eighth day folded into 24 hours x 9 metrics.
     expect(after.hourly).toBe(24 * METRICS.length)
 
     // A second pass with no new data is a no-op: retention converges rather
@@ -1146,7 +1153,11 @@ describe('the three capacity series, in one pass', () => {
     // metric ids are derived from METRICS rather than typed out — inserting a
     // metric into the middle of that array would otherwise silently read three
     // different series.
-    expect(CAPACITY_METRIC_IDS_FOR_TESTS).toBe('1, 2, 4')
+    // `9`, not `4`: `inodePct` was APPENDED in item 47, so it took the next id
+    // rather than displacing anything. An id list of 1, 2, 4, 9 is what
+    // append-only looks like from here, and a reordering would show up as this
+    // string changing shape.
+    expect(CAPACITY_METRIC_IDS_FOR_TESTS).toBe('1, 2, 4, 9')
     expect(METRICS[0]).toBe('cpu')
     expect(METRICS[1]).toBe('memPct')
     expect(METRICS[3]).toBe('diskPct')
@@ -1191,7 +1202,7 @@ describe('the three capacity series, in one pass', () => {
       }
     })
     const trends = s.readTrends('h1', 0, 5 * 60_000)
-    expect(Object.keys(trends).sort()).toEqual(['cpu', 'diskPct', 'memPct'])
+    expect(Object.keys(trends).sort()).toEqual(['cpu', 'diskPct', 'inodePct', 'memPct'])
     expect(trends.cpu.map((p) => p.v)).toEqual([10, 11, 12, 13, 14])
     expect(trends.memPct.map((p) => p.v)).toEqual([20, 21, 22, 23, 24])
     expect(trends.diskPct.map((p) => p.v)).toEqual([30, 31, 32, 33, 34])
@@ -1233,11 +1244,14 @@ describe('the three capacity series, in one pass', () => {
     expect(s.readTrends('h1', 3 * 60_000, 5 * 60_000).diskPct.map((p) => p.v)).toEqual([3, 4, 5])
   })
 
-  it('answers a server it has never seen with three empty series, not with everything', async () => {
+  it('answers a server it has never seen with empty series, not with everything', async () => {
     const s = await open()
     s.recordSamples('h1', 1000, { diskPct: 50 })
     const trends = s.readTrends('h2', 0, 9999)
-    expect(trends).toEqual({ cpu: [], memPct: [], diskPct: [] })
+    // One key per CAPACITY_METRIC and every one of them empty. Empty is the
+    // honest answer for a server nobody has sampled; absent keys would read as
+    // "this server has no disk".
+    expect(trends).toEqual({ cpu: [], memPct: [], diskPct: [], inodePct: [] })
   })
 
   it('does not leak one server samples into another server trends', async () => {

@@ -764,9 +764,13 @@ as a destroy-guard) or `findmnt`.
 
 **Storage, in order.**
 
-1. **Inode series.** Append `inodePct` to `METRICS` — append-only, never reorder — and to
-   `metricsToSamples` with the same null guard as `cpu`; add to `CAPACITY_METRICS` at 90.
-   **1 day.**
+1. **Inode series — SHIPPED.** `inodePct` appended to `METRICS` (id 9, so
+   `CAPACITY_METRIC_IDS_FOR_TESTS` is now `1, 2, 4, 9` — that string is what append-only looks
+   like from the outside), to `metricsToSamples` with cpu's null guard, and to `CAPACITY_METRICS`
+   at 90. The guard matters more here than for cpu: btrfs and zfs report no inode figures at all,
+   so a zero would draw exactly those hosts as having none left. The storage-budget test moved
+   from 604,800 rows to 680,400 — a metric is 12.5% more per host per day, and that number is
+   pinned as a literal so spending it fails a test rather than passing quietly.
 2. **Per-mount disk and inode.** `df -kP -l` excluding `tmpfs|devtmpfs|overlay` into
    `mounts: DiskMount[] | null`. The decision is fact or series: forty mounts as samples is the
    "5× budget" trap item A warned about, so store mounts as facts and only the *worst* as a

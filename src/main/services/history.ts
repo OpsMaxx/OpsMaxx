@@ -71,7 +71,7 @@ import { ALERT_HISTORY_KIND, DB_ALERT_HISTORY_KINDS } from '../../shared/webhook
 // auditLog.ts and localSessionLog.ts are deliberately NOT migrated. They work,
 // they are tested, and they answer a different question.
 
-/** The eight numeric series sampled per host. Ids are the index + 1 and are
+/** The nine numeric series sampled per host. Ids are the index + 1 and are
  *  stable forever: a new metric APPENDS, it never reorders. */
 export const METRICS = [
   'cpu',
@@ -81,7 +81,16 @@ export const METRICS = [
   'diskUsed',
   'netRx',
   'netTx',
-  'uptime'
+  'uptime',
+  // APPENDED, which is the only safe place for it: every id above is a row
+  // already on disk in every install.
+  //
+  // Item 47. Inodes have been MEASURED every sweep since the probe was written
+  // and never stored, so a host running out of them had a number on screen, no
+  // series behind it and no forecast in front of it -- and running out of
+  // inodes looks exactly like a full disk to everything except `df -i`, which
+  // is the one place nobody looks.
+  'inodePct'
 ] as const
 
 export type Metric = (typeof METRICS)[number]

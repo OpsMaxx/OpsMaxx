@@ -29,7 +29,10 @@ const DAY_MS = 86_400_000
 export const METRIC_LABEL: Record<CapacityMetric, string> = {
   cpu: 'CPU',
   memPct: 'Memory',
-  diskPct: 'Disk'
+  diskPct: 'Disk',
+  // Not "Inodes": the word means nothing to most people and the panel is read
+  // in a hurry. What runs out is the ability to create files.
+  inodePct: 'Files (inodes)'
 }
 
 /**

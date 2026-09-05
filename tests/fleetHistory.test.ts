@@ -49,10 +49,10 @@ const metrics = (over: Partial<HostMetrics> = {}): HostMetrics => ({
 })
 
 describe('mapping a sample onto the schema', () => {
-  it('keeps exactly the eight numeric series', () => {
-    const s = metricsToSamples(metrics())
+  it('keeps exactly the nine numeric series', () => {
+    const s = metricsToSamples({ ...metrics(), inodePct: 21 })
     expect(Object.keys(s).sort()).toEqual(
-      ['cpu', 'diskPct', 'diskUsed', 'memPct', 'memUsed', 'netRx', 'netTx', 'uptime'].sort()
+      ['cpu', 'diskPct', 'diskUsed', 'inodePct', 'memPct', 'memUsed', 'netRx', 'netTx', 'uptime'].sort()
     )
     expect(s.cpu).toBe(12)
     expect(s.uptime).toBe(9000)
