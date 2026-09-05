@@ -147,6 +147,12 @@ import { DB_OPS_ROW_LIMIT, dbOps } from './services/dbOps'
 import { reportSizeSample } from '../shared/dbSizeSample'
 import { forecastBytes } from '../shared/bytesForecast'
 import { DbSampler, type DbSamplerConfig } from './services/dbSampler'
+import {
+  forgetVpnEdits,
+  vpnEditCancel,
+  vpnEditCommit,
+  vpnEditRead
+} from './services/vpn/edit'
 import type { PackageManager } from '../shared/hostFacts'
 import type { DbConnectConfig } from '../shared/db'
 import { notableDbEvents } from '../shared/dbOps'
@@ -198,6 +204,7 @@ import type {
   VpnKeygenResult,
   VpnKind,
   VpnMintResult,
+  VpnProfile,
   VpnPublicKeyResult,
   VpnSpec
 } from '../shared/vpn'
@@ -3391,6 +3398,17 @@ ipcMain.handle(
     vpnCommitImport(name, workspaceId, kind, text, baseDir)
 )
 ipcMain.handle('vpn:deleteSecrets', (_e, vaultEntryId: string) => vpnDeleteSecrets(vaultEntryId))
+// Editing a stored .ovpn. Three channels, because an edit is a session: the
+// certificates and keys never leave main, so they have to be held between the
+// read and the commit, and cancel exists so they are not held for the TTL after
+// somebody has already pressed it.
+ipcMain.handle('vpn:editRead', (_e, profile: VpnProfile) => vpnEditRead(profile))
+ipcMain.handle(
+  'vpn:editCommit',
+  (_e, editId: string, name: string, workspaceId: string, edited: string) =>
+    vpnEditCommit(editId, name, workspaceId, edited)
+)
+ipcMain.handle('vpn:editCancel', (_e, editId: string) => vpnEditCancel(editId))
 // Two channels, because they do two different things to the vault.
 //
 // `wireguardKeygen` writes; `wireguardMint` does not. The profile form
@@ -3502,6 +3520,10 @@ ipcMain.handle('vault:lock', () => {
   // A session-scoped biometric key must not outlive the unlocked state, or
   // "lock" would not mean locked.
   forgetSessionKey()
+  // Nor may a half-finished VPN edit: it is holding the certificates and keys
+  // out of a profile, in memory, and they were readable only because the vault
+  // was open. Same rule, one line down.
+  forgetVpnEdits()
   return vaultLock()
 })
 ipcMain.handle('vault:list', () => vaultList())
