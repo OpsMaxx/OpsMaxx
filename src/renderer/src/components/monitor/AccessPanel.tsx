@@ -10,6 +10,7 @@ import {
   staleAccounts,
   summariseStaleAccounts
 } from '../../../../shared/staleAccounts'
+import { sudoAcrossFiles } from '../../../../shared/sudoers'
 import {
   ACCESS_STATUS_HELP,
   ACCESS_WRITE_DISABLED_REASON,
@@ -515,6 +516,55 @@ export function AccessPanel({
             Read-only. Removing a key is done from the key rows above, where the change is staged
             with a rollback.
           </div>
+        </div>
+      )}
+
+      {/* Item 36b. THREE states, and the type exists to keep them apart:
+          `undefined` is nobody consented, `null` is the read failed, and an
+          array is an answer. Rendering all three the same would be the whole
+          point of the feature lost. */}
+      {collected.some((h) => h.entry!.access!.sudoers !== undefined) && (
+        <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+          <div className="r-title">What sudo actually grants</div>
+          <div className="r-sub faint">
+            Read from <code>/etc/sudoers</code> and <code>/etc/sudoers.d</code>, which replaces
+            the guess this app makes otherwise — that anyone in <code>wheel</code> or{' '}
+            <code>sudo</code> has root. That guess is wrong in both directions.
+          </div>
+          <table className="mini-table">
+            <tbody>
+              {collected
+                .filter((h) => h.entry!.access!.sudoers !== undefined)
+                .flatMap((h) => {
+                  const files = h.entry!.access!.sudoers
+                  if (files === null) {
+                    return [
+                      <tr key={`${h.server.id}:failed`}>
+                        <td className="mono">{h.server.name}</td>
+                        <td className="state-unknown">could not be read</td>
+                        <td className="faint">
+                          The read was asked for and did not answer. This is not a server with no
+                          sudo rules.
+                        </td>
+                      </tr>
+                    ]
+                  }
+                  return h.entry!.access!.accounts.map((a) => {
+                    const r = sudoAcrossFiles(a.user, a.adminGroups ?? [], files ?? [])
+                    if (r.findings.length === 0 && r.unreadable.length === 0) return null
+                    return (
+                      <tr key={`${h.server.id}:${a.user}`}>
+                        <td className="mono">{a.user}</td>
+                        <td className="faint">{h.server.name}</td>
+                        <td className={clsx(r.findings.some((f) => f.grantsAll && f.noPassword === 'all') && 'warn')}>
+                          {r.sentence}
+                        </td>
+                      </tr>
+                    )
+                  }).filter(Boolean)
+                })}
+            </tbody>
+          </table>
         </div>
       )}
 
