@@ -1,0 +1,8 @@
+default   InvalidDiskCapacity   Node   5cd9f89829d3            1     2026-09-05T19:42:47Z   invalid capacity 0 on image filesystem
+default   BackOff               Pod    broken-addon-fzc4f      7     2026-09-05T19:44:19Z   Back-off restarting failed container c in pod broken-addon-fzc4f_default(b8010ad0-4bf2-4405-a3f9-1f2842298ae8)
+default   Failed                Pod    stuck-9867d5fb9-7rxmc   4     2026-09-05T19:44:25Z   Failed to pull image "busybox:1.36-does-not-exist": rpc error: code = NotFound desc = failed to pull and unpack image "docker.io/library/busybox:1.36-does-not-exist": failed to resolve reference "docker.io/library/busybox:1.36-does-not-exist": docker.io/library/busybox:1.36-does-not-exist: not found
+default   Failed                Pod    stuck-9867d5fb9-7rxmc   4     2026-09-05T19:44:25Z   Error: ErrImagePull
+default   Failed                Pod    stuck-9867d5fb9-7rxmc   4     2026-09-05T19:44:08Z   Error: ImagePullBackOff
+default   Failed                Pod    stuck-9867d5fb9-ts292   4     2026-09-05T19:44:29Z   Failed to pull image "busybox:1.36-does-not-exist": rpc error: code = NotFound desc = failed to pull and unpack image "docker.io/library/busybox:1.36-does-not-exist": failed to resolve reference "docker.io/library/busybox:1.36-does-not-exist": docker.io/library/busybox:1.36-does-not-exist: not found
+default   Failed                Pod    stuck-9867d5fb9-ts292   4     2026-09-05T19:44:29Z   Error: ErrImagePull
+default   Failed                Pod    stuck-9867d5fb9-ts292   4     2026-09-05T19:44:14Z   Error: ImagePullBackOff
