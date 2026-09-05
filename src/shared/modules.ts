@@ -18,6 +18,7 @@
 // `backfillModules`, which mirrors `backfillCapabilities`.
 
 export type ModuleId =
+  | 'jobs'
   | 'services'
   | 'docker'
   | 'kubernetes'
@@ -223,6 +224,16 @@ export const MODULES: ModuleDef[] = [
     label: 'Scheduled jobs',
     detail: 'Read crontabs, /etc/cron.d and systemd timers across the estate. Read-only.',
     defaultEnabled: true
+  },
+  {
+    id: 'jobs',
+    label: 'Jobs',
+    detail:
+      'Compose a multi-step job, pick the servers, run it in waves and watch it. Every job asks for the confirmation its own risk demands, and the answer is recorded before anything runs.',
+    // OFF by default, and more deliberately than the read-only modules above:
+    // this one WRITES. It is the surface the job engine shipped without, and a
+    // module that switches itself on is a module that decided for the operator.
+    defaultEnabled: false
   },
   {
     id: 'services',

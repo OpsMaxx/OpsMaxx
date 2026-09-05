@@ -313,7 +313,17 @@ so a future request can be answered by citation rather than re-argued.
 
 ---
 
-### 33. A job composer, and a job list
+### 33. A job composer, and a job list — **SHIPPED**
+
+A `jobs` module (OFF by default, and more deliberately than the read-only ones:
+this one writes), `shared/jobCompose.ts` for the vocabulary, and a `JobsPanel`
+with list, detail, live output, cancel and a composer. The confirmation is the
+one `planJob` demands — the panel does not decide for itself that a verb is
+safe, which is the mistake item 35 had to fix in ComposePanel. Waves are
+`cohort` labels, so twelve servers three at a time is a blast radius of three
+and asks for less than twelve at once. Still open from this item: seeding a
+selection from a folder or tag, halt-remaining-across-hosts, and saved
+templates.
 
 **The finding above, made concrete.** `src/preload/index.ts:168-199` exposes
 `list/get/run/cancel/setDetached/capabilities/onProgress/onOutput`; IPC is wired at
