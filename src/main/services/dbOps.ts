@@ -173,6 +173,12 @@ const STATEMENT_TIMEOUT_MS = 8000
  *  judgement and not a data dump the operator has to scroll. */
 const ROW_LIMIT = 20
 
+/** The same limit, for the one caller outside this file that has to know it:
+ *  `reportSizeSample` refuses a MySQL total that came back AT the limit,
+ *  because that total is then the biggest N tables rather than the schema. A
+ *  second literal would be a second thing to keep in step. */
+export const DB_OPS_ROW_LIMIT = ROW_LIMIT
+
 // ---------------------------------------------------------------------------
 // Postgres
 // ---------------------------------------------------------------------------

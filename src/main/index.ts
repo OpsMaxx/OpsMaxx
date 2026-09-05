@@ -66,6 +66,7 @@ import {
 import {
   RETENTION_FULL_DAYS,
   RETENTION_HOURLY_DAYS,
+  databaseSubject,
   loadHistory,
   type EventCursor,
   type HistoryStore
@@ -142,7 +143,8 @@ import type { AlertPayload, StoredAlertRow, StoredDbAlertRow } from '../shared/w
 import { ALERT_HISTORY_KIND, DB_ALERT_HISTORY_KINDS, sanitiseStoredAlert } from '../shared/webhook'
 import { dbTest, dbQuery, dbInfo, dbClose, dbDisposeAll } from './services/db'
 import { dbShell } from './services/dbshell'
-import { dbOps } from './services/dbOps'
+import { DB_OPS_ROW_LIMIT, dbOps } from './services/dbOps'
+import { reportSizeSample } from '../shared/dbSizeSample'
 import type { DbConnectConfig } from '../shared/db'
 import { notableDbEvents } from '../shared/dbOps'
 import { setSecret, getSecret, deleteSecret, secretsAvailable } from './services/secrets'
@@ -3069,6 +3071,25 @@ const dbVerdictSeen = new Map<string, string>()
 
 ipcMain.handle('db:ops', async (_e, cfg: DbConnectConfig) => {
   const report = await dbOps(withVpnTransportDb(resolveDbSecrets(cfg)))
+  // Item 47's growth series. Recorded HERE rather than inside `dbOps` so that
+  // function stays a pure read with no store dependency, and recorded only
+  // when the report yields a number this can honestly plot -- see
+  // shared/dbSizeSample.ts, where MySQL's capped total and an unmatched
+  // database name are both refusals rather than rows.
+  //
+  // A failure to write is swallowed on purpose: an operational read that
+  // answered every question must not report itself as failed because a series
+  // nobody asked for could not be appended to.
+  try {
+    const sample = reportSizeSample(report, cfg.database ?? '', DB_OPS_ROW_LIMIT)
+    if (sample.ok) {
+      historyStore?.recordSamples(databaseSubject(report.connectionId), report.at, {
+        dbBytes: sample.bytes
+      })
+    }
+  } catch {
+    /* the read is the answer; the series is a by-product */
+  }
   if (report.ok) {
     // Every answer, not just the notable ones: a question that has gone back to
     // `ok` has to be forgotten, or the next time it alarms it looks like the
