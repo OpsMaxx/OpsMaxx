@@ -146,6 +146,7 @@ import { dbShell } from './services/dbshell'
 import { DB_OPS_ROW_LIMIT, dbOps } from './services/dbOps'
 import { reportSizeSample } from '../shared/dbSizeSample'
 import { forecastBytes } from '../shared/bytesForecast'
+import { DbSampler, type DbSamplerConfig } from './services/dbSampler'
 import type { PackageManager } from '../shared/hostFacts'
 import type { DbConnectConfig } from '../shared/db'
 import { notableDbEvents } from '../shared/dbOps'
@@ -1183,6 +1184,44 @@ ipcMain.handle('fleet:configure', (_e, cfg: FleetSamplerConfig) => {
   return fleetSampler.status()
 })
 ipcMain.handle('fleet:status', () => fleetSampler.status())
+
+/**
+ * Item 47's database size sampler.
+ *
+ * Its own instance and its own toggle rather than a metric on the fleet sweep,
+ * because what it costs is different in kind: a metrics sweep is an SSH exec
+ * channel and this takes a CONNECTION on somebody's database server. It is
+ * handed resolved configs, exactly as the fleet sampler is handed targets, so
+ * the vault-shaped decisions stay in one place.
+ *
+ * The probe reuses `dbOps` and `reportSizeSample` -- the same read and the same
+ * refusals the panel uses. A second path to a size number would be a second
+ * place for MySQL's capped total to be recorded by mistake.
+ */
+const dbSampler = new DbSampler({
+  probe: async (t) => {
+    const cfg = t.cfg as DbConnectConfig
+    const report = await dbOps(withVpnTransportDb(resolveDbSecrets(cfg)))
+    const sample = reportSizeSample(report, cfg.database ?? '', DB_OPS_ROW_LIMIT)
+    return sample.ok ? sample.bytes : null
+  },
+  record: (connectionId, at, bytes) => {
+    historyStore?.recordSamples(databaseSubject(connectionId), at, { dbBytes: bytes })
+  },
+  // The same reading the fleet sampler takes, and for the same reason: a vault
+  // that does not exist is not a locked one -- those users keep credentials in
+  // the OS keychain or inline and sampling works fine.
+  vaultUnlocked: () => {
+    const st = vaultStatus()
+    return !st.exists || st.unlocked
+  }
+})
+
+ipcMain.handle('db:sampler-configure', (_e, cfg: DbSamplerConfig) => {
+  dbSampler.configure(cfg)
+  return dbSampler.status()
+})
+ipcMain.handle('db:sampler-status', () => dbSampler.status())
 // The hourly host-facts collection for one server, as the sampler last saw it.
 //
 // A read of what the sweep already has — it never triggers a probe. A view that

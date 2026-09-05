@@ -129,6 +129,7 @@ const MODULE_FILES: Record<string, string[]> = {
     'src/shared/fleetForecast.ts',
     'src/shared/bytesForecast.ts',
     'src/shared/dbSizeSample.ts',
+    'src/main/services/dbSampler.ts',
     'src/shared/capacity.ts',
     'src/renderer/src/lib/capacity.ts',
     'src/renderer/src/components/monitor/CapacityPanel.tsx'
