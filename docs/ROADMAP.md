@@ -436,11 +436,28 @@ may be written to only where it positively said it will not kill the process:
 logind absent, or logind answering false. Four behavioural tests, each driving
 a shimmed `loginctl`/`busctl` rather than asserting on the command text.
 
-**36b. Sudoers read.** Independent of the gate. Today "sudo" means membership of
-`ADMIN_GROUPS` (`access.ts:387`) and the comment at `:1048` says so. Read `/etc/sudoers` and
-`sudoers.d/*` as root, parse `Defaults`, specs, aliases, `NOPASSWD`; per-account "can run X as Y
-without a password". Attacker-controlled text: tagged-line format, per-value cap, and — like
-firewall rule lines — behind its own consent line, not on by default. **1–2 weeks.**
+**36b. Sudoers read — PARSER SHIPPED.** `shared/sudoers.ts` parses `Defaults`, aliases, specs,
+tags and include directives, and answers "what does sudo grant this account" by NAME, by GROUP
+and through a `User_Alias` — replacing the ADMIN_GROUPS guess, which is wrong in both directions.
+Verified against the real `/etc/sudoers` from `debian:12` and `almalinux:9`, captured as
+fixtures.
+
+Three things the item did not say and each changed the shape:
+
+`NOPASSWD` is not a boolean. Tags apply to the commands that FOLLOW them, so
+`NOPASSWD: /bin/ls, PASSWD: /bin/rm` is one spec where one command needs a password and one does
+not — and a boolean answers it wrongly whichever way it is set, the wrong direction reporting
+passwordless ROOT for an account with passwordless `ls`. It is `'all' | 'some' | 'none'`.
+
+`#includedir` is a DIRECTIVE that begins with the comment character. Both fixtures use it and
+both keep their real rules in `/etc/sudoers.d`, so a parser that treats it as a comment concludes
+the host has almost no sudo configuration.
+
+A line that could not be parsed is CARRIED OUT, never dropped, and makes the per-account sentence
+say the reading is incomplete. A sudoers parser that silently ignores what it cannot read will
+one day ignore the line granting root.
+
+Still open: reading the files off the host (the probe, the consent line, `sudoers.d` traversal).
 
 **36c. Per-account revoke.** Blocked in main, not the planner (`index.ts:1257-1272`). Needs a
 per-host command (the connecting-account write resolves `$HOME` on the host, `:2860`, so one
