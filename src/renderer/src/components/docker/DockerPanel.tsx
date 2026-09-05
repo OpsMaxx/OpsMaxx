@@ -45,6 +45,7 @@ import {
 } from '../../../../shared/docker'
 import type { Server } from '../../types'
 import { ComposePanel } from './ComposePanel'
+import { HealthLogPanel } from './HealthLog'
 import { ReclaimDialog, ReclaimOutcome } from './Reclaim'
 
 // Containers on a server, and what an operator does with them.
@@ -871,6 +872,24 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
               Docker is running and has no containers.
             </div>
           )}
+
+          {/* Healthchecks, worst first. Asked for rather than read on every
+              refresh: it is one `docker inspect` per open panel and the answer
+              only matters when somebody is looking. It covers RUNNING
+              containers -- a stopped one's health is whatever it was when it
+              stopped, and presenting that beside live answers reads as
+              current. */}
+          <HealthLogPanel
+            refs={probe.containers.filter((c) => c.state === 'running').map((c) => refOf(c))}
+            read={(refs) =>
+              bridge()?.healthLogs?.(cfgFor(server), refs, { sudo: useSudo }) ??
+              Promise.resolve({
+                ok: false as const,
+                reason: 'unknown' as const,
+                detail: 'Healthcheck logs are not wired up in this build.'
+              })
+            }
+          />
 
           {groups.map((g) => (
             <div key={g.project ?? ' ungrouped'}>

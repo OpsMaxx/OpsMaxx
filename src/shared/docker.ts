@@ -1648,6 +1648,23 @@ export function buildDockerHealthLogCommand(refs: string[], opts: { sudo?: boole
   ].join('; ')
 }
 
+export type DockerHealthLogProbe =
+  | { ok: true; logs: DockerHealthLog[]; usedSudo?: boolean }
+  | { ok: false; reason: DockerFailure; detail: string }
+
+/** The probe shape its siblings use, so it goes through the same failover. */
+export function parseDockerHealthLogOutput(
+  output: string,
+  exitCode: number | null
+): DockerHealthLogProbe {
+  const body = section(output, DOCKER_MARKERS.healthLog)
+  if (body === undefined) {
+    const detail = nonEmptyLines(output)[0] ?? 'docker did not run'
+    return { ok: false, reason: classifyDockerFailure(output, exitCode), detail }
+  }
+  return { ok: true, logs: parseDockerHealthLogs(body) }
+}
+
 export function parseDockerHealthLogs(text: string): DockerHealthLog[] {
   const out: DockerHealthLog[] = []
   for (const raw of text.split('\n')) {
@@ -2882,6 +2899,13 @@ export interface DockerBridge {
   diskDetail(cfg: unknown, opts?: { sudo?: boolean; autoSudo?: boolean }): Promise<DockerDiskDetailProbe>
   inspect(cfg: unknown, ref: string, opts?: { sudo?: boolean; autoSudo?: boolean }): Promise<DockerInspectProbe>
   stats(cfg: unknown, refs: string[], opts?: { sudo?: boolean; autoSudo?: boolean }): Promise<DockerStatsProbe>
+  /** Healthcheck logs. Whatever the check printed, REDACTED IN MAIN before it
+   *  reaches this boundary -- see the reader. */
+  healthLogs(
+    cfg: unknown,
+    refs: string[],
+    opts?: { sudo?: boolean; autoSudo?: boolean }
+  ): Promise<DockerHealthLogProbe>
   act(
     cfg: unknown,
     action: DockerAction,

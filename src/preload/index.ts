@@ -53,6 +53,7 @@ import type {
   DockerBridge,
   DockerDiskDetailProbe,
   DockerDiskProbe,
+  DockerHealthLogProbe,
   DockerInspectProbe,
   DockerLogsOptions,
   DockerProbe,
@@ -618,6 +619,11 @@ const api = {
       ref: string,
       opts?: { sudo?: boolean; autoSudo?: boolean }
     ): Promise<DockerInspectProbe> => ipcRenderer.invoke('docker:inspect', cfg, ref, opts),
+    healthLogs: (
+      cfg: unknown,
+      refs: string[],
+      opts?: { sudo?: boolean; autoSudo?: boolean }
+    ): Promise<DockerHealthLogProbe> => ipcRenderer.invoke('docker:health-logs', cfg, refs, opts),
     stats: (
       cfg: unknown,
       refs: string[],
