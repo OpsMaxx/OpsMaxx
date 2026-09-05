@@ -13,6 +13,7 @@ import type {
   VpnProfile,
   VpnStartResult,
   VpnState,
+  VpnPeerStat,
   VpnStats,
   VpnStatus,
   VpnValidation,
@@ -192,7 +193,7 @@ interface NetdUpResult {
   assignedIp?: string
 }
 
-interface NetdStatsResult {
+export interface NetdStatsResult {
   tunnelId: string
   rxBytes: number
   txBytes: number
@@ -201,7 +202,17 @@ interface NetdStatsResult {
   remoteEndpoint?: string
   assignedIp?: string
   peers: number
+  peerRows?: NetdPeerStats[]
   sampledAt: number
+}
+
+export interface NetdPeerStats {
+  publicKey: string
+  endpoint?: string
+  rxBytes: number
+  txBytes: number
+  /** ABSOLUTE unix seconds, like the aggregate. Zero means never. */
+  lastHandshakeUnixSec?: number
 }
 
 interface NetdForwardOpenResult {
@@ -821,7 +832,7 @@ async function awaitHandshake(run: Run): Promise<void> {
   for (;;) {
     const stats = await send<NetdStatsResult>(run, 'wg.stats', { tunnelId: run.profile.id })
     if (handshakeAgeSec(stats.lastHandshakeUnixSec, run.clock) !== undefined) {
-      publish(run, { stats: toStats(run, stats) })
+      publish(run, { stats: toStats(run.clock, stats) })
       return
     }
     if (run.clock.nowMs() >= deadline) throw handshakeTimeout(run)
@@ -830,17 +841,42 @@ async function awaitHandshake(run: Run): Promise<void> {
   }
 }
 
-function toStats(run: Run, s: NetdStatsResult): VpnStats {
-  const age = handshakeAgeSec(s.lastHandshakeUnixSec, run.clock)
+/**
+ * One peer's row, with the absolute stamp turned into an age exactly as the
+ * aggregate's is -- two conversions of the same field would drift.
+ *
+ * Takes a CLOCK rather than the whole `Run`, which is all it ever used, and is
+ * exported for the same reason `handshakeAgeSec` is: the conversion is the part
+ * worth pinning and a test should not have to build a tunnel to reach it.
+ */
+export function toPeerStat(clock: MonotonicClock, p: NetdPeerStats): VpnPeerStat {
+  const age = handshakeAgeSec(p.lastHandshakeUnixSec, clock)
+  return {
+    publicKey: p.publicKey,
+    ...(p.endpoint ? { endpoint: p.endpoint } : {}),
+    rxBytes: p.rxBytes ?? 0,
+    txBytes: p.txBytes ?? 0,
+    ...(age === undefined ? {} : { lastHandshakeSec: age })
+  }
+}
+
+/** The whole sample. Exported, and taking a clock rather than a `Run`, for the
+ *  reason `toPeerStat` above does. */
+export function toStats(clock: MonotonicClock, s: NetdStatsResult): VpnStats {
+  const age = handshakeAgeSec(s.lastHandshakeUnixSec, clock)
   return {
     rxBytes: s.rxBytes ?? 0,
     txBytes: s.txBytes ?? 0,
     ...(age === undefined ? {} : { lastHandshakeSec: age }),
     ...(s.assignedIp ? { assignedIp: s.assignedIp } : {}),
     ...(s.remoteEndpoint ? { remoteEndpoint: s.remoteEndpoint } : {}),
+    // Absent rather than empty when the sidecar sent no rows: a tunnel whose
+    // peers were removed and a sidecar that does not report rows are different
+    // answers, and only the first is a fact about this tunnel.
+    ...(s.peerRows && s.peerRows.length > 0 ? { peers: s.peerRows.map((p) => toPeerStat(clock, p)) } : {}),
     // The pinned clock, for the same reason the age uses it: a status card
     // whose "as of" time jumps backwards is a card nobody trusts.
-    sampledAt: Math.round(run.clock.nowMs())
+    sampledAt: Math.round(clock.nowMs())
   }
 }
 
@@ -853,7 +889,7 @@ async function sampleHealth(run: Run): Promise<void> {
   const state = stateFromHandshakeAge(age)
   publish(run, {
     state,
-    stats: toStats(run, stats),
+    stats: toStats(run.clock, stats),
     error: state === 'degraded' ? describeVpnError('handshake-timeout', staleDetail(run, stats.remoteEndpoint)) : undefined,
     errorCode: state === 'degraded' ? 'handshake-timeout' : undefined
   })
@@ -1830,7 +1866,7 @@ export const wireguardDriver: VpnDriver<WireGuardSpec> & {
       // That is not a statistic worth an error dialog.
       return null
     }
-    const stats = toStats(run, raw)
+    const stats = toStats(run.clock, raw)
     const state = stateFromHandshakeAge(stats.lastHandshakeSec)
     publish(run, {
       state,
