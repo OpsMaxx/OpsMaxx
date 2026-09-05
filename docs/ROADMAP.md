@@ -643,8 +643,8 @@ Everything here is small. Listed in the order the operator meets it.
 
 | | Exists | New | Size |
 |---|---|---|---|
-| **Compose dialog** (item 35.2) | — | — | ½ d |
-| **Per-service pull/up** | Builder accepts `services` and validates each (`compose.ts:1131-1137`); `ComposePanel.tsx:165` never passes them | A service picker | 1 d |
+| **Compose dialog** (item 35.2) — **SHIPPED** | — | Done as item 35's second defect: the panel asks whenever `planJob` says to, rather than filling in its own phrase. | done |
+| **Per-service pull/up** — **SHIPPED** | — | A checkbox per service in the open project; the picks are cleared with the project, because a selection carried across would name another project's services. Empty still means every service, which is what compose means by no argument. Another builder that had validated a `services` list since it was written and never received one. | done |
 | **Compose `restart` one service** | Neither in `COMPOSE_ACTIONS` nor `COMPOSE_REFUSALS` | Route to the existing container `act` via `joinComposeState` rather than a new job verb; if a job, add the `ELEVATED` rule so it confirms like `docker stop` | 1–2 d |
 | **Validation wording and lint** | `compose config` runs on every open; errors outside `BLOCK_FAILURE` become "returned nothing this parser could read" (`:856-860`) | Surface the validator's own line; a `config --quiet` block; lint over the parsed model: `:latest`, no `restart:`, `depends_on` naming an undeclared service, interpolated var no `.env` declares | 1–2 d + 2–3 d |
 | **Render what is parsed** | `depends_on`, volumes, networks, `restart:` all parsed (`:658-734`), none rendered | Chips per service; declared-vs-running restart policy via one bounded inspect per container; volume join on `<project>_<volume>` | 1 d + 3–4 d |
