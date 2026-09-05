@@ -1,0 +1,4 @@
+default       sp-crash                                  Running   <none>   <none>   3     bd671a34e685
+default       sp-ok                                     Running   <none>   <none>   0     bd671a34e685
+kube-system   coredns-ccb96694c-lllqm                   Running   <none>   <none>   0     bd671a34e685
+kube-system   local-path-provisioner-5cf85fd84d-9t4sm   Running   <none>   <none>   0     bd671a34e685

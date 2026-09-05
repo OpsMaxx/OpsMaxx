@@ -642,7 +642,27 @@ module declaring only the summary shape — pod, reason, restarts, read verdict 
 `K`. The cached summary carries names and counts and nothing else, because `get_server_metrics`
 sees the cache.
 
-**Size.** 1–2 weeks, with a fixture recorded from a real crashlooping pod.
+**The probe vocabulary is SHIPPED** (`shared/k8sCrashloop.ts`), with fixtures recorded from a
+real crashlooping pod on k3s v1.31.5 — a container exiting 1 after two seconds, sampled every
+three seconds. What that measurement showed is why the file is shaped as it is, and none of it is
+obvious from the documentation:
+
+- **`phase` is always `Running`.** It never says anything, and a probe keyed on it reports a
+  crashlooping pod as healthy for ever.
+- **`waiting.reason` is NOT always `CrashLoopBackOff`.** Between restarts the container is
+  briefly up and the field is empty, with `terminated.reason: Error` instead. A probe keyed only
+  on CrashLoopBackOff misses the pod on a fair share of samples — which, on an alert that
+  resolves itself, means it flaps.
+- **A restart COUNT is not a restart RATE.** Four restarts is "restarted four times", which a pod
+  that crashed an hour ago and has been up since also reports. Only the delta between two samples
+  separates them, so the first sweep after launch reads `unknown` rather than alarming on a
+  number.
+
+`bad` is `null` for a forbidden, no-cluster or unauthorized read and for the `--all-namespaces`
+fallback, per `postureAlertReadings`' asymmetry. Still open: the sampler placement (the probe must
+not import `shared/kubernetes`), the alert identity question, and wiring the kind.
+
+**Size.** The remaining wiring, now that the probe's shape is settled by measurement.
 
 ### 41. Cordon → patch → reboot → uncordon as one job
 
