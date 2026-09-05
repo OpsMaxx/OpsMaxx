@@ -13,6 +13,12 @@ import {
 } from '../../store/alerts'
 import { postureAlertReadings } from '../../../../shared/posture'
 import { VPN_ALERT_READINGS } from '../../../../shared/vpn'
+import {
+  crashloopReading,
+  crashloopSubject,
+  type CrashPodMinimal,
+  type CrashReadState
+} from '../../../../shared/k8sCrashloop'
 import { bridgeHas, bridgeOn } from '../../lib/bridge'
 import { sshHopsFor } from '../../lib/ssh'
 import type { FleetTarget } from '../../../../shared/fleet'
@@ -366,6 +372,75 @@ export function FleetWatcher(): null {
       if (live) read()
     })
     const timer = setInterval(read, 10_000)
+    return () => {
+      live = false
+      clearInterval(timer)
+    }
+  }, [])
+
+  // Item 40: pods restarting.
+  //
+  // Polled from the renderer, not the fleet sampler, and that is the item's own
+  // constraint rather than convenience: the sampler is inside the
+  // agent-reachable import closure, and `shared/kubernetes` may not enter it.
+  // The probe module this uses imports nothing at all for the same reason.
+  //
+  // KEYED ON THE CLUSTER CONTEXT. A cluster is visible from every server
+  // holding a kubeconfig, so a serverId key would raise one crashloop once per
+  // such server.
+  //
+  // The previous sample is held in a ref because the reading is a DELTA: a
+  // restart count is not a restart rate, and the first sweep after launch has
+  // nothing to compare against and says so.
+  const lastPods = useRef<Map<string, CrashPodMinimal[]>>(new Map())
+  useEffect(() => {
+    if (!bridgeHas(window.shellpilot?.k8s as Record<string, unknown> | undefined, 'read')) return
+    let live = true
+    const read = (): void => {
+      // Only what the operator asked for. Nothing is polled until they name a
+      // server and a context, because nothing else can know which server holds
+      // a kubeconfig.
+      const watches = useApp.getState().settings.k8sWatch ?? []
+      const servers = useApp.getState().servers
+      for (const w of watches) {
+        const s = servers.find((x) => x.id === w.serverId)
+        if (!s) continue
+        void window.shellpilot?.k8s
+          ?.read(s, w.context || undefined)
+          .then((probe) => {
+            if (!live || !probe) return
+            const context = w.context || (probe.ok ? probe.currentContext : null) || ''
+            const subject = crashloopSubject(context)
+            const state: CrashReadState = !probe.ok
+              ? probe.reason === 'forbidden'
+                ? 'forbidden'
+                : probe.reason === 'unauthorized'
+                  ? 'unauthorized'
+                  : 'no-cluster'
+              : probe.allNamespaces
+                ? 'ok'
+                : // RBAC limited the list to one namespace, so "nothing is
+                  // crashlooping" would be a claim about a fraction of the
+                  // cluster stated as a claim about all of it.
+                  'one-namespace'
+            const pods = probe.ok ? probe.pods : []
+            const r = crashloopReading(state, pods, lastPods.current.get(subject) ?? null)
+            if (probe.ok) lastPods.current.set(subject, pods)
+            if (r.bad !== null) {
+              checkStateAlert(subject, context || 'the current context', 'pod-crashloop', r.bad, r.detail)
+            }
+          })
+          .catch(() => {
+            // A throw is not an observation that nothing is crashlooping.
+          })
+      }
+    }
+    void hydrateAlerts().then(() => {
+      if (live) read()
+    })
+    // Slower than the tunnel and VPN polls: this one shells out to kubectl on
+    // a remote server, and a crashloop is measured in minutes.
+    const timer = setInterval(read, 120_000)
     return () => {
       live = false
       clearInterval(timer)

@@ -668,7 +668,15 @@ problem. The subject is prefixed `k8s:` so it cannot collide with a server id in
 `subject:kind` keyspace, following the `StoredDbAlertRow` precedent for a subject that is not a
 fleet host. The closure constraint is met by construction and pinned by a test: the probe module
 imports NOTHING, so nothing it reaches can pull `shared/kubernetes` into the agent-reachable
-closure. Still open: the poll itself, and which host to run it from.
+closure.
+
+**The poll is wired** — in the renderer beside the tunnel and VPN polls, not in the fleet
+sampler, which is that closure constraint rather than convenience. "From which host" is answered
+by a SETTING (`settings.k8sWatch`), empty by default: nothing can guess which servers hold a
+kubeconfig, and trying every server would run `kubectl` across the estate every two minutes to
+find out. The reading works off `K8sPod` from the read the app already makes, via a structural
+minimum — naming that type in the probe module would mean importing `shared/kubernetes`, which is
+the one thing it may not do. Still open: a UI for adding a watch.
 
 **Size.** The remaining wiring, now that the probe's shape is settled by measurement.
 
