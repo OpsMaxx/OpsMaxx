@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
+import { useApp } from '../src/renderer/src/store/app'
 import { DriftPanel } from '../src/renderer/src/components/monitor/DriftPanel'
 import type { DriftReading, HostDrift } from '../src/shared/drift'
 import type { Server } from '../src/renderer/src/types'
@@ -261,5 +262,70 @@ describe('before anything has been collected', () => {
     render(<DriftPanel servers={SERVERS} />)
     expect(await screen.findByText(/No configuration files have been read yet/)).toBeTruthy()
     expect(screen.queryByText('identical')).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Watching a file the operator chose. Item 46.
+// ---------------------------------------------------------------------------
+
+describe('adding a watch', () => {
+  const open = async (): Promise<ReturnType<typeof userEvent.setup>> => {
+    useApp.setState((s) => ({ settings: { ...s.settings, driftWatches: [] } }))
+    stubBridge({ fleet: { drift: async () => ({ intervalMs: 3_600_000 }), sampleNow: async () => undefined } })
+    const user = userEvent.setup()
+    render(<DriftPanel servers={SERVERS} />)
+    await user.click(screen.getByText('Watch a file'))
+    return user
+  }
+
+  it('refuses a path that could break out of the collector script, and says so', async () => {
+    const user = await open()
+    await user.type(screen.getByLabelText('Path'), "/etc/x'; id; '")
+    await waitFor(() => expect(screen.getByText(/could change what that script runs/)).toBeTruthy())
+    // No approval box while the path is refused: there is nothing to approve.
+    expect(screen.queryByLabelText(/to confirm/)).toBeNull()
+  })
+
+  it('refuses a credential store with its own sentence', async () => {
+    const user = await open()
+    await user.type(screen.getByLabelText('Path'), '/etc/ssl/private/site.pem')
+    await waitFor(() =>
+      expect(screen.getByText(/no redaction pattern catches every secret format/)).toBeTruthy()
+    )
+  })
+
+  it('says what is being asserted before the phrase is typed', async () => {
+    const user = await open()
+    await user.type(screen.getByLabelText('Path'), '/etc/logrotate.conf')
+    await waitFor(() =>
+      expect(screen.getByText(/Confirm it is configuration and not a credential store/)).toBeTruthy()
+    )
+    expect(screen.getByLabelText('Type WATCH /etc/logrotate.conf to confirm')).toBeTruthy()
+  })
+
+  it('will not add until the phrase naming that path is typed', async () => {
+    const user = await open()
+    await user.type(screen.getByLabelText('Path'), '/etc/logrotate.conf')
+    const add = await screen.findByText('Add')
+    expect((add as HTMLButtonElement).disabled).toBe(true)
+    // The phrase for a DIFFERENT path is not enough.
+    await user.type(screen.getByLabelText(/to confirm/), 'WATCH /etc/fstab')
+    expect((screen.getByText('Add') as HTMLButtonElement).disabled).toBe(true)
+    await user.clear(screen.getByLabelText(/to confirm/))
+    await user.type(screen.getByLabelText(/to confirm/), 'WATCH /etc/logrotate.conf')
+    await waitFor(() => expect((screen.getByText('Add') as HTMLButtonElement).disabled).toBe(false))
+  })
+
+  it('stores the proposal and lists it, and can stop watching it', async () => {
+    const user = await open()
+    await user.type(screen.getByLabelText('Path'), '/etc/logrotate.conf')
+    await user.type(await screen.findByLabelText(/to confirm/), 'WATCH /etc/logrotate.conf')
+    await user.click(screen.getByText('Add'))
+    await waitFor(() =>
+      expect(useApp.getState().settings.driftWatches.map((w) => w.path)).toEqual(['/etc/logrotate.conf'])
+    )
+    await user.click(screen.getByLabelText('Stop watching /etc/logrotate.conf'))
+    await waitFor(() => expect(useApp.getState().settings.driftWatches).toEqual([]))
   })
 })

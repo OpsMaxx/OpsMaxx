@@ -75,9 +75,17 @@ export interface DriftDeps {
   exec: DriftExec
   /** Injectable so a test can pin the clock a collection is stamped with. */
   now?: () => number
-  /** Overridable so a test does not have to build a tree at seven absolute
-   *  paths. Production always uses the catalogue. */
-  watches?: DriftWatch[]
+  /**
+   * The watches to read.
+   *
+   * A FUNCTION or an array. Production passes a function, because the list is
+   * the catalogue plus whatever the operator has added and that changes when
+   * settings are saved -- a snapshot taken at construction would go on reading
+   * a watch the operator removed, which is the version of this that matters.
+   * Tests pass an array so they do not have to build a tree at seven absolute
+   * paths.
+   */
+  watches?: DriftWatch[] | (() => DriftWatch[])
 }
 
 export type DriftFailure =
@@ -186,7 +194,8 @@ export class DriftReader {
   constructor(private readonly deps: DriftDeps) {}
 
   async read(cfg: unknown, ctx: DriftNormaliseContext = {}): Promise<DriftProbe> {
-    const watches = this.deps.watches ?? DRIFT_WATCHES
+    const w = this.deps.watches
+    const watches = typeof w === 'function' ? w() : (w ?? DRIFT_WATCHES)
     const command = buildDriftCommand({ watches })
     try {
       const r = await this.deps.exec(cfg, command, DRIFT_TIMEOUT_MS)

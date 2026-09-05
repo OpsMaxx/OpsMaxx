@@ -101,6 +101,7 @@ import {
   planAccessChange
 } from '../shared/access'
 import { isAccessWriteEnabled, syncAccessWriteEnabled } from './services/accessWriteGate'
+import { driftWatchesForCollection, syncDriftWatches } from './services/driftWatchStore'
 import type { JobHostCapabilityReport, JobRunRequest } from '../shared/jobs'
 import { JOB_DETACHED_STALL_GRACE_MS, jobCohorts, restartsTheMachine } from '../shared/jobs'
 import type { GateHost } from '../shared/patch'
@@ -1078,7 +1079,12 @@ function groupForServer(serverId: string): AccessGroup | null {
 // them would put the vault inside a background sweep to make a display nicer.
 const driftReader = new DriftReader({
   exec: (cfg, command, timeoutMs) =>
-    sshExec(cfg as Parameters<typeof sshExec>[0], command, timeoutMs, false)
+    sshExec(cfg as Parameters<typeof sshExec>[0], command, timeoutMs, false),
+  // A FUNCTION, not the array. The list changes when the operator saves
+  // settings, and a snapshot taken at construction would keep reading the
+  // watches that existed at launch — including one the operator has since
+  // removed, which is the version of this bug that matters.
+  watches: driftWatchesForCollection
 })
 
 const fleetSampler = new FleetSampler({
@@ -3455,6 +3461,11 @@ ipcMain.handle('data:save', (_e, data: unknown) => {
   // refreshed from the same blob, and every local:* handler consults that.
   syncLocalTerminalEnabled(data)
   syncAccessWriteEnabled(data)
+  // Same pattern again, and the sharpest instance of it: a custom drift watch's
+  // PATH is interpolated into the collector script, so the process that runs
+  // the script re-validates every stored watch rather than trusting a dialog it
+  // cannot see. See services/driftWatchStore.ts.
+  syncDriftWatches(data)
   // Same pattern, same reason: a module that gates a background probe has to be
   // read by the process that runs the probe. See syncAccessModule.
   syncAccessModule(data)
@@ -3745,6 +3756,7 @@ app.whenReady().then(() => {
   // rather than starting from a default it would later have to correct.
   syncLocalTerminalEnabled(loadData())
 syncAccessWriteEnabled(loadData())
+syncDriftWatches(loadData())
   // Before the MCP server: the bridge asks the manager what is running, and a
   // bridge that answered "nothing" because the manager had not booted would be
   // lying about the state of the user's network. This also reaps any engine a
