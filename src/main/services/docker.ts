@@ -31,8 +31,15 @@ import {
   parseDockerNetworkOutput,
   parseDockerInspectOutput,
   parseDockerOutput,
-  parseDockerStatsOutput
+  parseDockerStatsOutput,
+  validateImageRef
 } from '../../shared/docker'
+import {
+  buildScannerProbeCommand,
+  buildTrivyCommand,
+  parseTrivyOutput,
+  type ImageScanProbe
+} from '../../shared/imageScan'
 import { redactOutput } from './secretRedaction'
 
 // Reading docker on a remote host, and the three lifecycle verbs.
@@ -377,6 +384,50 @@ export class DockerReader {
       return result.ok && usedSudo ? { ...result, usedSudo: true } : result
     } catch (e) {
       return { ok: false, reason: 'unknown', detail: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  /**
+   * A vulnerability scan of one image, if the host already has a scanner.
+   *
+   * NO SUDO, and no failover to it. Every other read here escalates when the
+   * socket refuses; this one does not, because escalating means running a
+   * THIRD-PARTY BINARY as root on somebody's server to satisfy a panel. A scan
+   * that cannot reach the socket says so.
+   *
+   * TWO COMMANDS AND NEVER AN INSTALL. The probe is `command -v trivy`; if it
+   * says nothing, the answer is "no scanner", which is its own class and is not
+   * a clean image. Putting a security tool on somebody's server because a panel
+   * wanted a number is not a decision this app makes.
+   */
+  async scanImage(cfg: unknown, ref: string): Promise<ImageScanProbe> {
+    if (!validateImageRef(ref)) {
+      return { ok: false, detail: 'refusing to scan an image reference that could not be validated' }
+    }
+    try {
+      const probe = await this.deps.exec(cfg, buildScannerProbeCommand(), 15_000)
+      if (!probe.ok) return { ok: false, detail: probe.error ?? 'could not reach the server' }
+      if ((probe.stdout ?? '').trim() === '') {
+        return { ok: true, scannerPresent: false, reading: null }
+      }
+      // 10 minutes: a first scan downloads a ~111 MB vulnerability database,
+      // measured, and reporting that as a failure part way through would be
+      // reporting a working scan as broken.
+      const run = await this.deps.exec(cfg, buildTrivyCommand(ref), 600_000)
+      if (!run.ok) return { ok: false, detail: run.error ?? 'the scan did not run' }
+      // Joined the way `readWithFailover` joins them and for the same reason:
+      // the builder already redirects trivy's stderr into stdout, so anything
+      // left on stderr came from the shell or the transport, and gluing it on
+      // directly would weld it to the last vulnerability row.
+      const out = run.stdout ?? ''
+      const err = run.stderr ?? ''
+      return {
+        ok: true,
+        scannerPresent: true,
+        reading: parseTrivyOutput(err === '' ? out : `${out}\n${err}`)
+      }
+    } catch (e) {
+      return { ok: false, detail: e instanceof Error ? e.message : String(e) }
     }
   }
 

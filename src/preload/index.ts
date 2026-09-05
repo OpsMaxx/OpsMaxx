@@ -47,6 +47,7 @@ import type {
 import type { ChangeLogBridge, ChangeLogFilter, ChangeLogPage } from '../shared/changelog'
 import type { RunbookNote, RunbookView, RunbooksBridge } from '../shared/runbooks'
 import type { StoreAlertKind } from '../shared/webhook'
+import type { ImageScanProbe } from '../shared/imageScan'
 import type { K8sReviewProbe } from '../shared/k8sReview'
 import type {
   DockerAction,
@@ -623,6 +624,8 @@ const api = {
       ref: string,
       opts?: { sudo?: boolean; autoSudo?: boolean }
     ): Promise<DockerInspectProbe> => ipcRenderer.invoke('docker:inspect', cfg, ref, opts),
+    scanImage: (cfg: unknown, ref: string): Promise<ImageScanProbe> =>
+      ipcRenderer.invoke('docker:scan-image', cfg, ref),
     networks: (
       cfg: unknown,
       opts?: { sudo?: boolean; autoSudo?: boolean }

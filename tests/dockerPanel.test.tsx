@@ -717,3 +717,116 @@ describe('DockerPanel — networks in the preview', () => {
     await waitFor(() => expect(document.body.textContent).toContain('network ls exploded'))
   })
 })
+
+// ---------------------------------------------------------------------------
+// The image scan, on screen. Item 42's scanner row.
+// ---------------------------------------------------------------------------
+
+const INSPECT = {
+  ok: true as const,
+  inspect: {
+    id: 'a'.repeat(64),
+    name: 'alpha-api',
+    image: 'alpine:3.18',
+    imageId: 'sha256:' + 'b'.repeat(64),
+    status: 'running',
+    exitCode: null,
+    startedAt: 'now',
+    createdAt: 'now',
+    restartPolicy: 'always',
+    restartMaxRetries: null,
+    restartCount: 0,
+    health: null,
+    envCount: 3,
+    ports: [],
+    mounts: [],
+    networks: [],
+    logDriver: 'json-file'
+  }
+}
+
+const EOSL_SCAN = {
+  ok: true as const,
+  scannerPresent: true,
+  reading: {
+    rows: [],
+    endOfSupport: true,
+    warnings: ['The vulnerability detection may be insufficient because security updates are not provided'],
+    failure: null
+  }
+}
+
+async function openScan(
+  user: ReturnType<typeof userEvent.setup>,
+  scanImage: unknown
+): Promise<void> {
+  stubBridge({
+    docker: {
+      list: (cfg: Cfg) => Promise.resolve(listing(cfg.serverId.replace('srv-', ''))),
+      disk: () => Promise.resolve(DISK),
+      diskDetail: (cfg: Cfg) => diskDetailImpl(cfg),
+      inspect: () => Promise.resolve(INSPECT),
+      scanImage: () => Promise.resolve(scanImage)
+    }
+  })
+  render(<DockerPanel servers={[ALPHA, BRAVO]} />)
+  await user.click(btn(/Read containers/))
+  await user.click(btn(/Ports, mounts/))
+  await screen.findByText(/Scan this image/)
+  await user.click(btn(/Scan this image/))
+}
+
+describe('DockerPanel — image scan', () => {
+  // Measured: alpine:3.18 reports ZERO vulnerabilities and is past its
+  // distribution's end of support. Zero there means nobody is issuing
+  // advisories, not that nothing is wrong.
+  it('does not render zero findings on an unsupported image as clean', async () => {
+    const user = userEvent.setup()
+    await openScan(user, EOSL_SCAN)
+    const note = await screen.findByText(/nobody is issuing advisories for it any more/)
+    // The TONE comes from the level, not the count. This case is zero findings
+    // and an alarm, so anything deriving the colour from the number renders it
+    // as calm.
+    expect(note.className).toContain('is-alarm')
+  })
+
+  it('shows the scanner’s own warning under the headline', async () => {
+    const user = userEvent.setup()
+    await openScan(user, EOSL_SCAN)
+    await screen.findByText(/security updates are not provided/)
+  })
+
+  it('puts the fixable count on every severity, not just the total', async () => {
+    const user = userEvent.setup()
+    await openScan(user, {
+      ok: true,
+      scannerPresent: true,
+      reading: {
+        rows: [
+          { severity: 'CRITICAL', fixed: false, id: 'CVE-1', pkg: 'perl-base' },
+          { severity: 'UNKNOWN', fixed: true, id: 'CVE-2', pkg: 'zlib1g' }
+        ],
+        endOfSupport: false,
+        warnings: [],
+        failure: null
+      }
+    })
+    await screen.findByText('critical 1 (0 fixable)')
+    expect(screen.getByText('unknown 1 (1 fixable)')).toBeTruthy()
+  })
+
+  // A host with no scanner looks identical to a clean one from here, and only
+  // one of those is true.
+  it('does not report a host with no scanner as clean', async () => {
+    const user = userEvent.setup()
+    await openScan(user, { ok: true, scannerPresent: false, reading: null })
+    await screen.findByText(/Nothing here installs one/)
+    expect(document.body.textContent).toContain('grype')
+  })
+
+  it('reports a scan that could not run', async () => {
+    const user = userEvent.setup()
+    await openScan(user, { ok: false, detail: 'trivy: command exploded' })
+    await screen.findByText(/trivy: command exploded/)
+  })
+})
