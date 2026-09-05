@@ -216,3 +216,173 @@ func TestParseIPCGetIgnoresPrePeerCounters(t *testing.T) {
 		t.Fatalf("rx/tx = %d/%d, want 5/6", snap.RxBytes, snap.TxBytes)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Per-peer rows. The aggregate answers "is this tunnel alive"; these answer
+// "which peer", which is the question somebody asks when a site-to-site link
+// is half up and the aggregate looks fine.
+// ---------------------------------------------------------------------------
+
+func TestPerPeerRowsCarryEachPeersOwnNumbers(t *testing.T) {
+	snap, err := parseIPCGet(fixtureTwoPeers)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(snap.PeerRows) != 2 {
+		t.Fatalf("want 2 rows, got %d", len(snap.PeerRows))
+	}
+	// Not the aggregate, and not the best peer's: each row is its own.
+	if snap.PeerRows[0].RxBytes != 2000 || snap.PeerRows[0].TxBytes != 1000 {
+		t.Errorf("first peer rx/tx = %d/%d", snap.PeerRows[0].RxBytes, snap.PeerRows[0].TxBytes)
+	}
+	if snap.PeerRows[1].RxBytes != 40 || snap.PeerRows[1].TxBytes != 30 {
+		t.Errorf("second peer rx/tx = %d/%d", snap.PeerRows[1].RxBytes, snap.PeerRows[1].TxBytes)
+	}
+	// And the aggregate is still the sum, unchanged.
+	if snap.RxBytes != 2040 || snap.TxBytes != 1030 {
+		t.Errorf("aggregate rx/tx = %d/%d", snap.RxBytes, snap.TxBytes)
+	}
+}
+
+func TestPerPeerRowsKeepEachPeersEndpointAndHandshake(t *testing.T) {
+	snap, err := parseIPCGet(fixtureTwoPeers)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if snap.PeerRows[0].Endpoint != "203.0.113.9:51820" {
+		t.Errorf("first endpoint = %q", snap.PeerRows[0].Endpoint)
+	}
+	if snap.PeerRows[1].Endpoint != "198.51.100.4:51820" {
+		t.Errorf("second endpoint = %q", snap.PeerRows[1].Endpoint)
+	}
+	// The aggregate follows the NEWEST handshake; the rows keep their own, so
+	// "this peer last spoke on Tuesday" is answerable.
+	if snap.PeerRows[0].LastHandshakeSec != 1716999000 {
+		t.Errorf("first handshake = %d", snap.PeerRows[0].LastHandshakeSec)
+	}
+	if snap.PeerRows[1].LastHandshakeSec != 1717000500 {
+		t.Errorf("second handshake = %d", snap.PeerRows[1].LastHandshakeSec)
+	}
+}
+
+// A peer has no other stable name. A row nobody can identify is not worth a
+// round trip.
+func TestPerPeerRowsNameThePeer(t *testing.T) {
+	snap, err := parseIPCGet(fixtureTwoPeers)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	want := "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+	if snap.PeerRows[1].PublicKey != want {
+		t.Errorf("second public key = %q", snap.PeerRows[1].PublicKey)
+	}
+	if snap.PeerRows[0].PublicKey == snap.PeerRows[1].PublicKey {
+		t.Error("both rows carry the same key")
+	}
+}
+
+// Zero means never, and it must survive into the row: a caller that read it as
+// "a long time ago" would age a peer that has never once answered.
+func TestPerPeerRowKeepsNeverHandshakedAsZero(t *testing.T) {
+	snap, err := parseIPCGet(fixtureNoHandshake)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(snap.PeerRows) != 1 {
+		t.Fatalf("want 1 row, got %d", len(snap.PeerRows))
+	}
+	if snap.PeerRows[0].LastHandshakeSec != 0 {
+		t.Errorf("handshake = %d, want 0", snap.PeerRows[0].LastHandshakeSec)
+	}
+	// It still has an endpoint and a tx count: configured, and never answered.
+	if snap.PeerRows[0].Endpoint == "" || snap.PeerRows[0].TxBytes == 0 {
+		t.Error("a peer that never answered still has an endpoint and sent bytes")
+	}
+}
+
+// A device whose peers were removed is not one peer with zeroed counters.
+func TestNoPeersProducesNoRows(t *testing.T) {
+	snap, err := parseIPCGet(fixtureNoPeers)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(snap.PeerRows) != 0 {
+		t.Errorf("want no rows, got %d", len(snap.PeerRows))
+	}
+	if snap.Peers != 0 {
+		t.Errorf("peers = %d", snap.Peers)
+	}
+}
+
+// `Peers` is kept rather than derived, because every existing caller reads it.
+func TestPeerCountStillMatchesTheRows(t *testing.T) {
+	for name, fixture := range map[string]string{
+		"one":  fixtureOnePeer,
+		"two":  fixtureTwoPeers,
+		"none": fixtureNoPeers,
+	} {
+		snap, err := parseIPCGet(fixture)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if snap.Peers != len(snap.PeerRows) {
+			t.Errorf("%s: peers=%d rows=%d", name, snap.Peers, len(snap.PeerRows))
+		}
+	}
+}
+
+// A corrupt device response must not reach a caller as a negative age, in a row
+// any more than in the aggregate.
+func TestPerPeerNegativeHandshakeIsClamped(t *testing.T) {
+	bad := strings.Replace(fixtureOnePeer, "last_handshake_time_sec=1717000000", "last_handshake_time_sec=-5", 1)
+	snap, err := parseIPCGet(bad)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if snap.PeerRows[0].LastHandshakeSec != 0 {
+		t.Errorf("row handshake = %d, want clamped to 0", snap.PeerRows[0].LastHandshakeSec)
+	}
+	if snap.LastHandshakeSec != 0 {
+		t.Errorf("aggregate handshake = %d", snap.LastHandshakeSec)
+	}
+}
+
+// CONSTRUCTED: no recorded device output omits a counter, so nothing above
+// distinguishes a per-peer reset from none. The bug it guards is real and would
+// be silent -- a peer block that leaves a field out inherits the PREVIOUS
+// peer's, and a row reading "2.2 MB" for a peer that has moved nothing is worse
+// than no row.
+const fixturePeerOmitsCounters = `private_key=c809f3e5317e9575c9b5ed78b638b7ce530dabe85ddab6142202418001ddf066
+listen_port=51820
+public_key=c53201039adba14be71f886da1d8dbe9eefbed08cb111b7534007899aa9ff038
+endpoint=203.0.113.9:51820
+last_handshake_time_sec=1716999000
+tx_bytes=1000
+rx_bytes=2000
+public_key=000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
+errno=0
+`
+
+func TestAPeerBlockDoesNotInheritThePreviousPeersNumbers(t *testing.T) {
+	snap, err := parseIPCGet(fixturePeerOmitsCounters)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(snap.PeerRows) != 2 {
+		t.Fatalf("want 2 rows, got %d", len(snap.PeerRows))
+	}
+	second := snap.PeerRows[1]
+	if second.RxBytes != 0 || second.TxBytes != 0 {
+		t.Errorf("second peer inherited rx/tx = %d/%d", second.RxBytes, second.TxBytes)
+	}
+	if second.Endpoint != "" {
+		t.Errorf("second peer inherited endpoint %q", second.Endpoint)
+	}
+	if second.LastHandshakeSec != 0 {
+		t.Errorf("second peer inherited handshake %d", second.LastHandshakeSec)
+	}
+	// And its own identity survived.
+	if second.PublicKey != "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" {
+		t.Errorf("second public key = %q", second.PublicKey)
+	}
+}

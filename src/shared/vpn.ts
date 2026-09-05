@@ -296,6 +296,29 @@ export interface FrpProxyStatus {
   remoteAddr?: string
 }
 
+/**
+ * One WireGuard peer's own numbers.
+ *
+ * THE AGGREGATE ABOVE ANSWERS "IS THIS TUNNEL ALIVE"; this answers "which
+ * peer", which is a different question and the one somebody asks when a
+ * site-to-site link is half up and the totals still look fine.
+ *
+ * `publicKey` is an identity rather than a secret -- a WireGuard public key is
+ * meant to be shared -- but it is still what names a person's device, and
+ * `list_vpns` promises an agent is never shown keys of any kind. Nothing that
+ * builds an agent-facing answer may read this field, and a test asserts it.
+ */
+export interface VpnPeerStat {
+  publicKey: string
+  endpoint?: string
+  rxBytes: number
+  txBytes: number
+  /** AGE in seconds, converted from the sidecar's absolute stamp the same way
+   *  the aggregate is. Absent means this peer has never completed a handshake,
+   *  which is not the same as a long time ago. */
+  lastHandshakeSec?: number
+}
+
 export interface VpnStats {
   rxBytes: number
   txBytes: number
@@ -304,6 +327,10 @@ export interface VpnStats {
   assignedIp?: string
   remoteEndpoint?: string
   latencyMs?: number
+  // WireGuard only, and absent rather than empty when the sidecar reported no
+  // rows: a tunnel whose peers were removed and one from a build that does not
+  // report rows are different, and only the first is a fact about the tunnel.
+  peers?: VpnPeerStat[]
   // frp only; frp exposes no client-side byte counters, so the proxy table is
   // the telemetry rather than faked rx/tx numbers.
   proxies?: FrpProxyStatus[]

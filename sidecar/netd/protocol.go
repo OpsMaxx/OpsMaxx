@@ -222,6 +222,23 @@ type AuthResult struct {
 // negative — age. Zero/absent means there has never been a handshake (E22,
 // E27), which the parent turns into `handshake-timeout` once its own 30 s
 // grace window expires.
+// One peer's own numbers.
+//
+// PUBLICKEY IS AN IDENTITY, NOT A SECRET -- a WireGuard public key is meant to
+// be shared -- but it is still the thing that names a person's device, and
+// `list_vpns` promises an agent never sees key material of any kind. The parent
+// is what keeps that promise; this reports the key because a peer has no other
+// stable name and a row nobody can identify is not worth a round trip.
+type PeerStats struct {
+	PublicKey string `json:"publicKey"`
+	Endpoint  string `json:"endpoint,omitempty"`
+	RxBytes   int64  `json:"rxBytes"`
+	TxBytes   int64  `json:"txBytes"`
+	// Absolute unix seconds, like the aggregate above. Zero means this peer has
+	// never completed a handshake, which is NOT the same as a long time ago.
+	LastHandshakeUnixSec int64 `json:"lastHandshakeUnixSec,omitempty"`
+}
+
 type StatsResult struct {
 	TunnelID             string `json:"tunnelId"`
 	RxBytes              int64  `json:"rxBytes"`
@@ -230,6 +247,10 @@ type StatsResult struct {
 	RemoteEndpoint       string `json:"remoteEndpoint,omitempty"`
 	AssignedIP           string `json:"assignedIp,omitempty"`
 	Peers                int    `json:"peers"`
+	// One row per peer, in the order the device listed them. `Peers` stays: it
+	// is what every existing caller reads, and removing it would be a protocol
+	// change for no gain.
+	PeerRows []PeerStats `json:"peerRows,omitempty"`
 	// Unix millis at which netd sampled. Lets the parent age the sample.
 	SampledAt int64 `json:"sampledAt"`
 }
