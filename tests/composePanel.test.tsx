@@ -338,3 +338,51 @@ describe('the image tag edit', () => {
     )
   })
 })
+
+// THE PANEL USED TO ANSWER ITS OWN CONFIRMATION. It read the phrase the plan
+// asked for straight off the plan, stamped `confirmedAt: Date.now()` and ran.
+// Harmless exactly while the plan says `none`, which is a plain pull on one
+// server -- and not the case with the sudo toggle on.
+async function openWithSudo(bridgeStub: Record<string, unknown>): Promise<void> {
+  stubBridge(bridgeStub)
+  render(<ComposePanel server={SERVER} cfg={{}} containers={[RUNNING_CACHE]} sudo={true} />)
+  await userEvent.click(screen.getByText('Find compose files'))
+  await waitFor(() => screen.getByText(/▸ edge/))
+}
+
+describe('a compose job that needs confirming is confirmed by a person', () => {
+  it('does not run an elevated job on a confirmation it wrote itself', async () => {
+    const stub = panelBridge()
+    await openWithSudo(stub)
+    await userEvent.click(screen.getByTitle(/docker compose up -d/))
+    const run = (stub.jobs as { run: ReturnType<typeof vi.fn> }).run
+    // The dialog is up and the job has not started.
+    await waitFor(() => screen.getByText('Run'))
+    expect(run).not.toHaveBeenCalled()
+    // It says why it is asking, and shows the command it would run.
+    expect(document.body.textContent).toContain('runs as root')
+    expect(document.body.textContent).toContain('up -d')
+  })
+
+  it('runs it once the person answers, carrying an approval the engine re-checks', async () => {
+    const stub = panelBridge()
+    await openWithSudo(stub)
+    await userEvent.click(screen.getByTitle(/docker compose up -d/))
+    await waitFor(() => screen.getByText('Run'))
+    await userEvent.click(screen.getByText('Run'))
+    const run = (stub.jobs as { run: ReturnType<typeof vi.fn> }).run
+    await waitFor(() => expect(run).toHaveBeenCalled())
+    const req = run.mock.calls[0][0] as { approval: unknown; spec: { steps: { command: string }[] } }
+    expect(req.approval).toBeTruthy()
+    expect(req.spec.steps[0].command).toContain('up -d')
+  })
+
+  it('runs nothing at all when the person says no', async () => {
+    const stub = panelBridge()
+    await openWithSudo(stub)
+    await userEvent.click(screen.getByTitle(/docker compose up -d/))
+    await waitFor(() => screen.getByText('Cancel'))
+    await userEvent.click(screen.getByText('Cancel'))
+    expect((stub.jobs as { run: ReturnType<typeof vi.fn> }).run).not.toHaveBeenCalled()
+  })
+})
