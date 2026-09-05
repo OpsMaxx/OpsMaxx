@@ -526,6 +526,17 @@ what a server with no replication returns AND what one whose slots were dropped 
 empty list is `unknown`, never `ok`. An INACTIVE slot is the alarm — the server keeps every WAL
 segment it might need, for ever, and the first symptom is a full disk.
 
+**MySQL top-N, Mongo index sizes and Redis persistence are SHIPPED** too
+(`shared/dbSlowReads.ts`), against fixtures from MySQL 8.4.11, MongoDB 7 and Redis 7.4.11. Two of
+the three thresholds changed because of what those servers returned: a Mongo collection of two
+documents holds 58 bytes of data and 24,576 bytes of index — a ratio over 400, because an index
+has a minimum size — so a size FLOOR comes before the ratio or every small collection in an
+estate is on screen; and three of MySQL's four real digests returned no rows at all, so
+`examinedPerRow` is null rather than Infinity, which would sort every INSERT above the statement
+actually scanning. `no_index_used` is MySQL's own count and is the signal used, because it is
+true on a table too small for a ratio to mean anything. Redis's stock image keeps snapshots only
+and can lose an hour.
+
 Still open: the PG slow-statement threshold in `DB_THRESHOLDS`; MySQL top-N from
 `performance_schema.events_statements_summary_by_digest`; Mongo index sizes (the collector never
 passes `sizes`, `services/dbOps.ts:700-720`); Redis `CONFIG GET dir dbfilename`. Fixtures for
