@@ -1179,6 +1179,10 @@ ipcMain.handle('fleet:status', () => fleetSampler.status())
 // wants fresher facts asks for a sweep, so there is exactly one thing deciding
 // when a package manager is shelled out to.
 ipcMain.handle('fleet:facts', (_e, serverId: string) => fleetSampler.factsFor(serverId))
+// The security-update LIST, on demand. Not part of the hourly facts sweep --
+// see `HostFactsReader.securityList` for why the counts are sampled and the
+// list is asked for.
+ipcMain.handle('fleet:security-list', (_e, cfg: unknown) => hostFactsReader.securityList(cfg))
 // Who can get into one server, as the sweep last saw it — roadmap item 23.
 //
 // A read of what the sweep already has; it never triggers a probe, for the same

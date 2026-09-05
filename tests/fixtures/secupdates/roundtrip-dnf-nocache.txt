@@ -1,0 +1,8 @@
+===OPSMAXX-SECPM===
+dnf
+===OPSMAXX-SECCHECK===
+Error: Cache-only enabled but no cache for 'appstream'
+===OPSMAXX-SECLIST===
+Error: Cache-only enabled but no cache for 'appstream'
+===OPSMAXX-SECSUM===
+Error: Cache-only enabled but no cache for 'appstream'

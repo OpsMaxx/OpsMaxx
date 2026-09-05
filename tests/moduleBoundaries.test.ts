@@ -63,6 +63,7 @@ const MODULE_FILES: Record<string, string[]> = {
   // panel that drives it.
   patch: [
     'src/shared/patch.ts',
+    'src/shared/securityUpdates.ts',
     'src/shared/topology.ts',
     'src/renderer/src/components/monitor/PatchPanel.tsx'
   ],
