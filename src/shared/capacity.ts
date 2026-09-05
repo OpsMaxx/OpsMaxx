@@ -608,8 +608,23 @@ export const CAPACITY_THRESHOLDS: Partial<Record<CapacityMetric, number>> = {
  * preload half has not landed must show a panel that says so rather than throw
  * `undefined is not a function`.
  */
+import type { BytesReading } from './bytesForecast'
+
 export interface CapacityBridge {
   trends(hostId: string, windowDays: number): Promise<CapacityReport | null>
+  /**
+   * A database's size series, forecast in BYTES.
+   *
+   * A separate channel and a separate return type, not a tenth metric on
+   * `trends`: this file is percentages only and says so at the top, and its
+   * thresholds and flat rule mean nothing against a byte count. `ceilingBytes`
+   * comes from the caller because nothing in this app knows one.
+   */
+  dbGrowth?(
+    connectionId: string,
+    windowDays: number,
+    ceilingBytes?: number
+  ): Promise<BytesReading | null>
 }
 
 /** The windows the panel offers. A day, a week (exactly the full-resolution
