@@ -1,0 +1,3 @@
+kubectl get pods -A -o jsonpath={range .items[*]}{.metadata.namespace}{"|"}{.metadata.name}{"|cm:"}{range .spec.volumes[*]}{.configMap.name}{";"}{range .projected.sources[*]}{.configMap.name}{";"}{end}{end}{"|env:"}{range .spec.containers[*]}{range .envFrom[*]}{.configMapRef.name}{";"}{end}{range .env[*]}{.valueFrom.configMapKeyRef.name}{";"}{end}{end}{"|pvc:"}{range .spec.volumes[*]}{.persistentVolumeClaim.claimName}{";"}{end}{"\n"}{end}
+kubectl get cm -A --no-headers -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,AGE:.metadata.creationTimestamp
+kubectl get pvc -A --no-headers -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,PHASE:.status.phase,AGE:.metadata.creationTimestamp
