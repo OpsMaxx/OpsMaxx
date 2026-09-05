@@ -104,6 +104,20 @@ export interface AppSettings {
   resourceAlertsEnabled: boolean
   resourceAlertThreshold: number
   /**
+   * Clusters to watch for restarting pods — item 40's "from which host".
+   *
+   * EMPTY BY DEFAULT, and the emptiness is the point. A background poll cannot
+   * guess which servers hold a kubeconfig, and trying every server would run
+   * `kubectl` across the estate every couple of minutes to find out. So the
+   * operator names the one server to ask, per context, and nothing is polled
+   * until they do.
+   *
+   * One entry per CLUSTER, not per server: a cluster reachable from three
+   * admin boxes is one thing to watch, and the alert is keyed on the context
+   * for the same reason.
+   */
+  k8sWatch?: { serverId: string; context: string }[]
+  /**
    * Per-host overrides of the CPU/memory threshold, by server id.
    *
    * An estate is not uniform: a build box at 95% is working and a database at

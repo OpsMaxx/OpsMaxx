@@ -98,10 +98,21 @@ export interface CrashloopReading {
   detail: string
 }
 
+/** The least this needs to know about a pod. Structural on purpose: the
+ *  existing `K8sPod` from the overview read satisfies it, so the reading works
+ *  off the list the app already fetches rather than a second parse of the same
+ *  objects. Naming that type here would mean importing `shared/kubernetes`,
+ *  which is the one thing this module may not do. */
+export interface CrashPodMinimal {
+  namespace: string
+  name: string
+  restarts: number
+}
+
 export function crashloopReading(
   state: CrashReadState,
-  now: CrashPodRow[],
-  previous: CrashPodRow[] | null
+  now: CrashPodMinimal[],
+  previous: CrashPodMinimal[] | null
 ): CrashloopReading {
   if (state !== 'ok') {
     const why =

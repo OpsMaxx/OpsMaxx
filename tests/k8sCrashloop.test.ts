@@ -132,3 +132,52 @@ describe('which thing the alert is about', () => {
     expect(src).not.toMatch(/^import /m)
   })
 })
+
+// ---------------------------------------------------------------------------
+// The wire
+// ---------------------------------------------------------------------------
+//
+// Every module in this stretch of work has been a parser with no caller, so
+// this asserts the poll exists and asks for the right things. Read off the
+// source for the reason moduleBoundaries reads its tab guards that way:
+// mounting FleetWatcher pulls in the whole app store.
+
+describe('the crashloop poll is actually wired', () => {
+  const src = (): string => {
+    const { readFileSync } = require('node:fs') as typeof import('node:fs')
+    const { resolve } = require('node:path') as typeof import('node:path')
+    return readFileSync(
+      resolve(__dirname, '..', 'src/renderer/src/components/monitor/FleetWatcher.tsx'),
+      'utf8'
+    )
+  }
+
+  it('calls the reading and raises the kind', () => {
+    expect(src()).toContain('crashloopReading(')
+    expect(src()).toContain("'pod-crashloop'")
+  })
+
+  it('keys the alert on the cluster subject, never on a server id', () => {
+    // A cluster reachable from three admin boxes is one thing to watch.
+    expect(src()).toContain('crashloopSubject(')
+    expect(src()).toMatch(/checkStateAlert\(\s*subject,/)
+  })
+
+  it('polls only the clusters the operator named', () => {
+    // Nothing else can know which server holds a kubeconfig, and trying every
+    // server would run kubectl across the estate every two minutes.
+    expect(src()).toContain('settings.k8sWatch')
+  })
+
+  it('passes the PREVIOUS sample to the reading, because it is a delta', () => {
+    // Asserting that `lastPods` merely appears is not enough: the `.set` that
+    // stores it satisfies that while the read passes the current sample
+    // instead, which would compare every pod against itself and never alarm.
+    expect(src()).toMatch(/crashloopReading\(\s*state,\s*pods,\s*lastPods\.current\.get\(/)
+  })
+
+  it('says nothing rather than "fine" when the reading could not be made', () => {
+    // `r.bad === null` must not reach checkStateAlert as `false`.
+    expect(src()).toContain('if (r.bad !== null)')
+  })
+})
