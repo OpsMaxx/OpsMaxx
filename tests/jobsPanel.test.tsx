@@ -375,3 +375,51 @@ describe('the typed package step', () => {
     expect(document.body.textContent).toContain('different package manager')
   })
 })
+
+// Item 34d, through the panel.
+describe('the typed account step', () => {
+  async function userMode(stub: Record<string, unknown>): Promise<void> {
+    stubBridge(stub)
+    render(<JobsPanel servers={[server(0)]} />)
+    await userEvent.click(screen.getByRole('button', { name: /New job/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Account' }))
+    await userEvent.click(screen.getByRole('button', { name: 'web-0' }))
+  }
+
+  it('offers no password field, and says where one would have gone', async () => {
+    const stub = jobsStub()
+    await userMode(stub)
+    expect(screen.queryByLabelText(/password/i)).toBeNull()
+    expect(document.body.textContent).toContain('outlives the job')
+  })
+
+  it('refuses root, and says it can take away the way back in', async () => {
+    const stub = jobsStub()
+    await userMode(stub)
+    await userEvent.type(screen.getByLabelText('Account'), 'root')
+    expect(document.body.textContent).toContain('only way back into a server')
+    expect((screen.getByRole('button', { name: 'Review' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('locks the password AND expires the account, because -L alone leaves keys working', async () => {
+    const stub = jobsStub()
+    await userMode(stub)
+    await userEvent.type(screen.getByLabelText('Account'), 'deploy')
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Run' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }))
+    await waitFor(() => expect(runOf(stub)).toHaveBeenCalled())
+    const spec = (runOf(stub).mock.calls[0][0] as { spec: { steps: { command: string }[] } }).spec
+    expect(spec.steps[0].command).toContain('-L')
+    expect(spec.steps[0].command).toContain('-e 1')
+  })
+
+  it('asks separately about the home directory, and only for a delete', async () => {
+    const stub = jobsStub()
+    await userMode(stub)
+    expect(screen.queryByLabelText(/remove the home directory/)).toBeNull()
+    await userEvent.selectOptions(screen.getByLabelText('Account action'), 'delete')
+    expect(screen.getByLabelText(/remove the home directory/)).toBeTruthy()
+    expect(document.body.textContent).toContain('nothing puts back')
+  })
+})
