@@ -191,6 +191,7 @@ const MODULE_FILES: Record<string, string[]> = {
     'src/shared/k8sRollout.ts',
     'src/shared/k8sPv.ts',
     'src/shared/k8sAddon.ts',
+    'src/shared/k8sUnused.ts',
     'src/main/services/kubernetes.ts',
     'src/renderer/src/components/kubernetes/KubernetesPanel.tsx'
   ]
