@@ -11,6 +11,7 @@ import {
   hostThreshold,
   acknowledgeAlert,
   chipValue,
+  openMaintenanceWindow,
   readRunbook,
   saveRunbookNote,
   snoozeAlert,
@@ -19,6 +20,11 @@ import {
   type ActiveAlert
 } from '../../store/alerts'
 import { alertCoverage, alertCoverageLines, type AlertCoverage } from '../settings/alertCoverage'
+import {
+  checkMaintenanceWindow,
+  describeMaintenanceWindow,
+  type MaintenanceWindow
+} from '../../../../shared/maintenance'
 import { openSettings } from '../../store/nav'
 import { clsx } from '../../lib/format'
 import type { StoredAlertRow, StoreAlertKind } from '../../../../shared/webhook'
@@ -472,6 +478,10 @@ export function AlertsPanel(): React.JSX.Element {
   const [rows, setRows] = useState<StoredAlertRow[] | null>(null)
   const [reading, setReading] = useState(false)
   const [failed, setFailed] = useState(false)
+  const [windowHours, setWindowHours] = useState(2)
+  const [windowNote, setWindowNote] = useState('')
+  const [windowPlan, setWindowPlan] = useState<{ w: MaintenanceWindow; text: string } | null>(null)
+  const [windowError, setWindowError] = useState<string | null>(null)
   // Which runbook is open. A kind on its own is the fleet-wide note; a kind
   // and a host is an incident. Held here rather than in the section so the
   // Runbook button on an outstanding row can point at that row's own pair.
@@ -610,6 +620,78 @@ export function AlertsPanel(): React.JSX.Element {
           </button>
         </div>
       )}
+
+      {/* Item 44's maintenance window. A window is a standing authorisation to
+          be silent across an estate, so it is human-only and it says what it
+          does NOT stop as prominently as what it does. */}
+      <div className="alerts-section-head">
+        <span className="alerts-heading">Maintenance window</span>
+      </div>
+      <div className="alerts-banner" style={{ flexWrap: 'wrap', gap: 6 }}>
+        {windowPlan === null ? (
+          <>
+            <span className="grow">
+              Stop announcing alerts on some servers for a while. They keep being sampled, their
+              chips stay up, and webhook endpoints still receive everything.
+            </span>
+            <select
+              className="input sm"
+              aria-label="Window length"
+              value={windowHours}
+              onChange={(e) => setWindowHours(Number(e.target.value))}
+            >
+              <option value={1}>1 hour</option>
+              <option value={2}>2 hours</option>
+              <option value={4}>4 hours</option>
+              <option value={8}>8 hours</option>
+            </select>
+            <input
+              className="input sm"
+              aria-label="What the window is for"
+              placeholder="What it is for"
+              value={windowNote}
+              onChange={(e) => setWindowNote(e.target.value)}
+            />
+            <button
+              className="btn"
+              disabled={servers.length === 0}
+              onClick={() => {
+                const w = {
+                  serverIds: servers.map((x) => x.id),
+                  until: Date.now() + windowHours * 3_600_000,
+                  note: windowNote
+                }
+                const c = checkMaintenanceWindow(w)
+                setWindowPlan(c.ok ? { w, text: describeMaintenanceWindow(w, servers.map((x) => x.name)) } : null)
+                setWindowError(c.ok ? null : c.reason)
+              }}
+            >
+              Open a window
+            </button>
+          </>
+        ) : (
+          <>
+            {/* Said before it happens, and it names the servers. Silencing an
+                estate is not something to discover afterwards. */}
+            <span className="grow">{windowPlan.text}</span>
+            <button
+              className="btn primary"
+              onClick={() => {
+                const n = openMaintenanceWindow(windowPlan.w)
+                setWindowPlan(null)
+                setWindowNote('')
+                setWindowError(n === 0 ? 'The window was not opened.' : null)
+              }}
+            >
+              Confirm
+            </button>
+            <button className="btn" onClick={() => setWindowPlan(null)}>
+              Cancel
+            </button>
+          </>
+        )}
+      </div>
+      {windowError && <div className="alerts-quiet-line warn">{windowError}</div>}
 
       {/* ---------------------------------------------------------------
           Outstanding. The page.

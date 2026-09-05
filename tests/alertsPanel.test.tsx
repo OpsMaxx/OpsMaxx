@@ -3,9 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
+import { STORE_ALERT_KINDS } from '../src/shared/webhook'
 import { AlertsPanel, rowSubject } from '../src/renderer/src/components/monitor/AlertsPanel'
 import { StatusBar } from '../src/renderer/src/components/layout/StatusBar'
-import { useAlerts, resetAlertsForTests } from '../src/renderer/src/store/alerts'
+import { useAlerts, resetAlertsForTests, openMaintenanceWindow } from '../src/renderer/src/store/alerts'
 import { useApp } from '../src/renderer/src/store/app'
 import { useNav } from '../src/renderer/src/store/nav'
 import { useFleetStatus } from '../src/renderer/src/store/fleetStatus'
@@ -606,5 +607,104 @@ describe('the quiet state', () => {
     // state says where the things that DID happen went.
     expect(screen.getByText(/Anything that has been raised and cleared is in the history/)).toBeTruthy()
     expect(screen.queryAllByTestId('outstanding-alert')).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Item 44: the maintenance window
+// ---------------------------------------------------------------------------
+//
+// A window is a standing authorisation to be silent across an estate, so what
+// is tested here is that it says what it does BEFORE it does it, and that the
+// rows it writes are the ordinary durable snoozes rather than a second, quieter
+// mechanism.
+
+describe('opening a maintenance window', () => {
+  beforeEach(() => {
+    // `workspaceServers()` filters by the RESOLVED active workspace, so the
+    // workspace has to exist as well as be named.
+    useApp.setState({
+      workspaces: [{ id: 'ws', name: 'Production' } as never],
+      activeWorkspaceId: 'ws',
+      servers: [
+        { id: 's1', name: 'web-1', workspaceId: 'ws', folderId: null } as never,
+        { id: 's2', name: 'db-1', workspaceId: 'ws', folderId: null } as never
+      ]
+    })
+  })
+
+  it('will not open without a reason somebody can read in three weeks', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<AlertsPanel />)
+    await user.click(screen.getByText('Open a window'))
+    expect(document.body.textContent).toContain('why it went quiet')
+    expect(recorded).not.toHaveBeenCalled()
+  })
+
+  it('says which servers go quiet, and what does NOT stop, before anything happens', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<AlertsPanel />)
+    await user.type(screen.getByLabelText('What the window is for'), 'Kernel patching')
+    await user.click(screen.getByText('Open a window'))
+    // The confirmation names them and is explicit about the three things a
+    // window must not do.
+    expect(document.body.textContent).toContain('web-1, db-1')
+    expect(document.body.textContent).toContain('keep being sampled')
+    expect(document.body.textContent).toContain('Webhook endpoints still receive')
+    // And nothing has been written yet.
+    expect(recorded).not.toHaveBeenCalled()
+  })
+
+  it('writes an ordinary durable snooze per server per kind once confirmed', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<AlertsPanel />)
+    await user.type(screen.getByLabelText('What the window is for'), 'Kernel patching')
+    await user.click(screen.getByText('Open a window'))
+    await user.click(screen.getByText('Confirm'))
+    const rows = recorded.mock.calls.map((c) => c[0] as { event: string; kind: string; serverId: string })
+    expect(rows.length).toBe(2 * STORE_ALERT_KINDS.length)
+    // Snoozed rows, which are already durable, already absolute, and already
+    // replayed at launch. Not a new kind of silence.
+    expect(rows.every((r) => r.event === 'snoozed')).toBe(true)
+    expect(new Set(rows.map((r) => r.serverId))).toEqual(new Set(['s1', 's2']))
+    expect(new Set(rows.map((r) => r.kind))).toEqual(new Set(STORE_ALERT_KINDS))
+  })
+
+  it('runs nothing when the operator backs out', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    render(<AlertsPanel />)
+    await user.type(screen.getByLabelText('What the window is for'), 'Kernel patching')
+    await user.click(screen.getByText('Open a window'))
+    await user.click(screen.getByText('Cancel'))
+    expect(recorded).not.toHaveBeenCalled()
+  })
+})
+
+describe('the window API refuses on its own, not only because the panel asked nicely', () => {
+  // The panel checks before it calls, so the guard inside
+  // `openMaintenanceWindow` is not reached by anything above. That makes it
+  // exactly the kind of check that rots: a second caller, or a panel someone
+  // simplifies later, silences an estate with no validation at all.
+  it('writes nothing for a window that would not pass the check', () => {
+    for (const bad of [
+      { serverIds: [], until: T0 + 3_600_000, note: 'x' },
+      { serverIds: ['s1'], until: T0 - 1, note: 'x' },
+      { serverIds: ['s1'], until: T0 + 3_600_000, note: '   ' },
+      { serverIds: ['s1'], until: T0 + 48 * 3_600_000, note: 'x' }
+    ]) {
+      recorded.mockClear()
+      expect(openMaintenanceWindow(bad, T0), JSON.stringify(bad)).toBe(0)
+      expect(recorded).not.toHaveBeenCalled()
+    }
+  })
+
+  it('writes one row per server per kind for a window that does', () => {
+    recorded.mockClear()
+    const n = openMaintenanceWindow(
+      { serverIds: ['s1', 's2'], until: T0 + 2 * 3_600_000, note: 'Kernel patching' },
+      T0
+    )
+    expect(n).toBe(2 * STORE_ALERT_KINDS.length)
+    expect(recorded).toHaveBeenCalledTimes(n)
   })
 })

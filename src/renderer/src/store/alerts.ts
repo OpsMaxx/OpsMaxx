@@ -1,5 +1,10 @@
 import { create } from 'zustand'
 import { useApp } from './app'
+import {
+  checkMaintenanceWindow,
+  maintenanceSnoozes,
+  type MaintenanceWindow
+} from '../../../shared/maintenance'
 import { onServerForgotten } from './serverCleanup'
 import { DISK_DANGER, isDiskCritical } from '../components/monitor/hostHealth'
 // The certificate line and its comparison, taken from the module that owns the
@@ -1466,6 +1471,30 @@ export function snoozeAlert(serverId: string, kind: AlertKind, ms: number): void
     until,
     at: Date.now()
   })
+}
+
+/**
+ * Open a maintenance window — item 44.
+ *
+ * Written as ordinary snooze rows, one per server per kind, because those are
+ * already durable, already carry an absolute end, and are already replayed at
+ * launch. A window with its own storage would be a second way to silence an
+ * estate, and only one of the two would have been thought about.
+ *
+ * Deliberately NOT: pausing the sampler (a gap reads as "could not tell" and
+ * the patch gate needs fresh samples), touching `webhookNotify` (that is the
+ * silent discard the webhook module refuses by name), or clearing the chips
+ * (the condition is still true; what stops is the announcing).
+ *
+ * Returns how many rows it wrote, so the caller can say so rather than assert
+ * it worked.
+ */
+export function openMaintenanceWindow(w: MaintenanceWindow, now = Date.now()): number {
+  const check = checkMaintenanceWindow(w, now)
+  if (!check.ok) return 0
+  const planned = maintenanceSnoozes(w, now)
+  for (const p of planned) snoozeAlert(p.serverId, p.kind, p.ms)
+  return planned.length
 }
 
 /** End a snooze early. Written to the log as a zero-length snooze rather than

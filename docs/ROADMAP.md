@@ -691,14 +691,18 @@ line.
 
 ### 44. Change management: windows, rollback, incidents
 
-**Maintenance window.** `MaintenanceWindow {hosts[], from, until, note}` in main. On open,
-write a `snoozed` row for every kind on those hosts with an absolute `until` — durable, replayed
-at launch (`store/alerts.ts:630-640`) — and optionally disable named rules, whose `armedAt` reset
-(`rules.ts:316-327`) means re-enabling replays nothing. **Do not** pause the sampler: a gap in
-the store is "could not tell", and the patch gate needs fresh samples. **Do not** suppress in
-`webhookNotify`: that is the silent discard `webhookAlerts.ts:246-253` forbids. Patch plans may
-refuse to start reboots outside a window. 1–1.5 weeks. A window is a standing authorisation to
-be silent, so the revocation argument keeps it human-only.
+**Maintenance window — SHIPPED.** A window is not a new suppression mechanism: it is "snooze
+every kind on these servers until T", written as the snooze rows the alert store already has,
+which are durable, carry an absolute `until` and are replayed at launch. A second way to silence
+an estate would be a second thing to reason about, and only one of them would have been.
+
+All three refusals kept, and said on screen rather than only in a comment: the sampler is not
+paused, `webhookNotify` is untouched, and the chips stay up — what stops is the announcing. Two
+limits the roadmap did not ask for and both earned their place: a window may not run longer than
+24 hours (a silence nobody has to renew is one nobody remembers setting), and it may not open
+without a note, because somebody reading the alert log in three weeks will want to know why it
+went quiet. Human-only, per the revocation argument. Disabling named rules and the patch-plan
+reboot refusal are still open.
 
 **Rollback on the approval — SHIPPED.** `rollback?: JobStep[]` on `JobSpec`, written in the
 composer beside the steps because that is the only moment anybody knows how to undo the thing.
