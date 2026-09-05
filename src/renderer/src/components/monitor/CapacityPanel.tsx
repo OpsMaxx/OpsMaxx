@@ -20,6 +20,11 @@ import {
   shortDate,
   span
 } from '../../lib/capacity'
+import {
+  buildFleetForecast,
+  type FleetForecast,
+  type FleetForecastInput
+} from '../../../../shared/fleetForecast'
 import type { Server } from '../../types'
 
 // "This disk fills in eleven days." — roadmap item 26.
@@ -234,6 +239,54 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
 
   const refresh = (): void => setNonce((n) => n + 1)
 
+  /**
+   * The estate strip -- item 47's fleet expansion forecast.
+   *
+   * Reuses the per-host `trends` channel across every server rather than adding
+   * an IPC of its own: that channel reads the LOCAL history store, not a host,
+   * so N calls are N queries against a database this process already has open.
+   * A second channel would be a second place for the forecast policy to drift.
+   *
+   * `over` and `refused` rows are the point. On a real estate most hosts
+   * produce no forecast, and a strip that showed only crossings would read as
+   * an all-clear on an estate nobody has measured.
+   */
+  const [fleet, setFleet] = useState<FleetForecast | null>(null)
+  const [fleetLoading, setFleetLoading] = useState(false)
+  const fleetGen = useRef(0)
+
+  const loadFleet = async (): Promise<void> => {
+    if (typeof trends !== 'function') return
+    const mine = ++fleetGen.current
+    setFleetLoading(true)
+    try {
+      const inputs: FleetForecastInput[] = []
+      for (const s of servers) {
+        const r = await trends(s.id, days).catch(() => null)
+        if (fleetGen.current !== mine) return
+        // A server whose read FAILED is not silently absent: it goes in as a
+        // refusal with no data, which is exactly what it is.
+        if (r === null) {
+          inputs.push({
+            hostId: s.id,
+            hostName: s.name,
+            metric: 'diskPct',
+            forecast: { ok: false, reason: 'no-data', from: 0, to: 0, points: 0 }
+          })
+          continue
+        }
+        for (const t of r.trends) {
+          if (t.forecast === null) continue
+          inputs.push({ hostId: s.id, hostName: s.name, metric: t.metric, forecast: t.forecast })
+        }
+      }
+      if (fleetGen.current !== mine) return
+      setFleet(buildFleetForecast(inputs))
+    } finally {
+      if (fleetGen.current === mine) setFleetLoading(false)
+    }
+  }
+
   return (
     <div className="bc-panel">
       <div className="panel-head">
@@ -281,6 +334,48 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
         </button>
         </div>
       </div>
+
+      {/* Item 47's estate strip. Asked for, because it queries the store once
+          per server and the answer only matters when somebody is asking the
+          estate question rather than the one-host one. */}
+      {typeof trends === 'function' && servers.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <button className="btn ghost sm" disabled={fleetLoading} onClick={() => void loadFleet()}>
+            {fleet === null ? 'Forecast the whole estate' : 'Forecast again'}
+            {fleetLoading && <span className="faint"> reading…</span>}
+          </button>
+          {fleet !== null && (
+            <>
+              {/* The denominator is in the headline, not behind a hover: a
+                  status line reading "nothing fills within 90 days" on an
+                  estate where most hosts could not be forecast is the most
+                  reassuring thing this app could print and one of the least
+                  true. */}
+              <div className="s-note">{fleet.headline}</div>
+              <table className="mini-table">
+                <tbody>
+                  {fleet.rows.map((r) => (
+                    <tr key={`${r.hostId} ${r.metric}`}>
+                      <td>
+                        <span
+                          className={clsx(
+                            'chip',
+                            r.band === 'over' ? 'danger' : r.band === 'crossing' ? 'warn' : 'state-unknown'
+                          )}
+                        >
+                          {r.band === 'refused' ? 'no forecast' : r.band}
+                        </span>
+                      </td>
+                      <td className="mono">{r.hostName}</td>
+                      <td>{r.because}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
+      )}
 
       {typeof trends !== 'function' ? (
         <div className="panel-note is-alarm">

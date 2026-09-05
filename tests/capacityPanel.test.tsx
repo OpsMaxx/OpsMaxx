@@ -294,3 +294,68 @@ describe('before the saved servers have been read back', () => {
     expect(screen.queryByText('No servers to chart.')).toBeNull()
   })
 })
+
+// ---------------------------------------------------------------------------
+// The estate strip. Item 47's fleet expansion forecast.
+// ---------------------------------------------------------------------------
+
+/** Flat: no rate, so `capacity.ts` refuses. The majority case on a real estate. */
+const FLAT = points(T0, 145, HOUR, 'hourly', () => 40)
+
+describe('forecasting the whole estate', () => {
+  const openStrip = async (
+    trends: (id: string, days: number) => Promise<unknown>
+  ): Promise<void> => {
+    stubBridge({ capacity: { trends } })
+    render(<CapacityPanel servers={[ALPHA, BRAVO]} />)
+    await userEvent.click(await screen.findByText('Forecast the whole estate'))
+  }
+
+  it('keeps a host that could not be forecast in the list', async () => {
+    // Dropping it would make "nothing is filling up" and "one host could not be
+    // forecast" render identically.
+    await openStrip((id) =>
+      Promise.resolve(report(id === 'srv-alpha' ? FILLING : FLAT, 7, id))
+    )
+    await waitFor(() => expect(screen.getByText(/bravo: no disk forecast/)).toBeTruthy())
+    expect(screen.getByText(/not moving enough to call a trend/)).toBeTruthy()
+  })
+
+  it('puts the denominator in the headline', async () => {
+    await openStrip((id) =>
+      Promise.resolve(report(id === 'srv-alpha' ? FILLING : FLAT, 7, id))
+    )
+    await waitFor(() => expect(document.body.textContent).toContain('could be forecast'))
+    expect(document.body.textContent).toContain('alpha in 11 day(s)')
+  })
+
+  it('puts a read that failed in as a refusal rather than leaving it out', async () => {
+    // A server whose read threw is not silently absent from an estate forecast.
+    await openStrip((id) =>
+      id === 'srv-alpha' ? Promise.resolve(report(FILLING, 7, id)) : Promise.reject(new Error('nope'))
+    )
+    // Scoped to bravo: alpha's own memory and inode series are empty in this
+    // fixture, so they refuse for the same reason and would match too. That
+    // they appear at all is the point -- every metric with a threshold gets a
+    // row, and none of them is silently dropped.
+    await waitFor(() =>
+      expect(screen.getByText('bravo: no disk forecast — nothing was sampled in this window.')).toBeTruthy()
+    )
+  })
+
+  it('is not run until it is asked for', async () => {
+    let calls = 0
+    stubBridge({
+      capacity: {
+        trends: (id: string) => {
+          calls += 1
+          return Promise.resolve(report(FILLING, 7, id))
+        }
+      }
+    })
+    render(<CapacityPanel servers={[ALPHA, BRAVO]} />)
+    await waitFor(() => expect(screen.getByText('Forecast the whole estate')).toBeTruthy())
+    // One read for the selected host's own chart, and none for the estate.
+    expect(calls).toBe(1)
+  })
+})

@@ -121,6 +121,7 @@ const MODULE_FILES: Record<string, string[]> = {
   // preload bridge rather than imported, which is what the second assertion
   // below covers.
   capacity: [
+    'src/shared/fleetForecast.ts',
     'src/shared/capacity.ts',
     'src/renderer/src/lib/capacity.ts',
     'src/renderer/src/components/monitor/CapacityPanel.tsx'
