@@ -185,3 +185,67 @@ describe('how hard you have to press', () => {
     expect(target({ action: 'uncordon' }).risk).toBe('elevated')
   })
 })
+
+// ---------------------------------------------------------------------------
+// Item 41: the API server's version, and every budget in the cluster
+// ---------------------------------------------------------------------------
+//
+// The probe reads only the CLIENT version (`version --client`, deliberately, so
+// it works with no cluster at all). The skew report needs the other side, and a
+// kubectl that could not reach the cluster prints its own version plus an
+// error -- reading that as the server's would report a cluster in perfect skew
+// because the operator's laptop agrees with itself.
+
+import { parseServerVersion, buildK8sOverviewCommand, parseK8sOverview } from '../src/shared/kubernetes'
+import { assessNodeSkew } from '../src/shared/k8sSkew'
+
+describe('the API server version', () => {
+  it('reads gitVersion out of kubectl version -o json', () => {
+    const out = JSON.stringify({
+      clientVersion: { gitVersion: 'v1.31.0' },
+      serverVersion: { gitVersion: 'v1.29.4+k3s1' }
+    })
+    // The SERVER's, not the client's. They are different fields and the client
+    // is the one that is always present.
+    expect(parseServerVersion(out)).toBe('v1.29.4+k3s1')
+  })
+
+  it('is null when kubectl could not reach the cluster', () => {
+    // What that actually looks like: the client version, and an error.
+    const out = JSON.stringify({ clientVersion: { gitVersion: 'v1.31.0' } })
+    expect(parseServerVersion(out)).toBeNull()
+    expect(parseServerVersion('The connection to the server was refused')).toBeNull()
+    expect(parseServerVersion('')).toBeNull()
+  })
+
+  it('does not let a failed read report a cluster as in perfect skew', () => {
+    // The whole reason the field is null rather than falling back to the
+    // client: every node would match, and the report would say ready.
+    const server = parseServerVersion(JSON.stringify({ clientVersion: { gitVersion: 'v1.31.0' } }))
+    const verdicts = assessNodeSkew(server, [{ name: 'n1', kubeletVersion: 'v1.31.0' }])
+    expect(verdicts[0].verdict).toBe('unknown')
+  })
+})
+
+describe('the overview reads what the readiness report needs', () => {
+  it('asks for the server version and for every budget', () => {
+    const cmd = buildK8sOverviewCommand()
+    expect(cmd).toContain('version -o json')
+    expect(cmd).toContain('poddisruptionbudgets --all-namespaces')
+  })
+
+  it('reports a REFUSED budget read as a failure, not as "no budgets"', () => {
+    // This is what stops an empty list reading as "nothing would block a
+    // drain". An empty SECTION is `ok: []` for every block in this file, by
+    // the convention readBlock sets -- what has to be distinguished is the
+    // read that answered with an error.
+    const out =
+      '===SHELLPILOT-PDBS===\nError from server (Forbidden): poddisruptionbudgets is forbidden\n'
+    const o = parseK8sOverview(out, 1)
+    expect(o.pdbs.ok).toBe(false)
+  })
+
+  it('has no server version when nothing answered', () => {
+    expect(parseK8sOverview('', 1).serverVersion).toBeNull()
+  })
+})

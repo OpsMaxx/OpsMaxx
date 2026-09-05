@@ -172,13 +172,17 @@ export function pdbHeadroom(
 /** The one line an operator reads before deciding to start. */
 export function summariseUpgradeReadiness(
   skews: NodeSkew[],
-  budgets: PdbHeadroom[]
+  /** `null` when the budget read itself was refused or failed. NOT `[]`, which
+   *  would say the cluster has no budgets and therefore nothing that could
+   *  block a drain -- a claim nobody measured. */
+  budgets: PdbHeadroom[] | null
 ): { ready: boolean; headline: string } {
   const ahead = skews.filter((s) => s.verdict === 'ahead').length
   const unsupported = skews.filter((s) => s.verdict === 'unsupported').length
   const unknown = skews.filter((s) => s.verdict === 'unknown').length
-  const blocking = budgets.filter((b) => b.blocksDrain).length
-  const unreadable = budgets.filter((b) => b.allowed === null).length
+  const blocking = (budgets ?? []).filter((b) => b.blocksDrain).length
+  const unreadable =
+    budgets === null ? -1 : budgets.filter((b) => b.allowed === null).length
 
   const problems: string[] = []
   if (ahead > 0) problems.push(`${ahead} node(s) newer than the API server`)
@@ -188,7 +192,8 @@ export function summariseUpgradeReadiness(
   // account summary carries its unknowns: a readiness number that improves as
   // the cluster gets harder to read is pointing the wrong way.
   if (unknown > 0) problems.push(`${unknown} node(s) whose version could not be read`)
-  if (unreadable > 0) problems.push(`${unreadable} budget(s) that could not be read`)
+  if (unreadable === -1) problems.push('the disruption budgets could not be read at all')
+  else if (unreadable > 0) problems.push(`${unreadable} budget(s) that could not be read`)
 
   return problems.length === 0
     ? { ready: true, headline: 'Every node is inside the skew window and no budget would block a drain.' }

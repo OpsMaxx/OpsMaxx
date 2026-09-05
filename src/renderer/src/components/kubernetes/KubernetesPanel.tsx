@@ -52,6 +52,11 @@ import {
   type K8sUsage,
   type K8sWorkload
 } from '../../../../shared/kubernetes'
+import {
+  assessNodeSkew,
+  pdbHeadroom,
+  summariseUpgradeReadiness
+} from '../../../../shared/k8sSkew'
 import { approvalFor, type CommandApproval } from '../../../../shared/broadcast'
 import type { Server } from '../../types'
 
@@ -298,7 +303,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
       const fn = bridge().overview
       if (!fn) {
         const f = { ok: false, reason: 'unknown', detail: NOT_WIRED } as const
-        setOverview({ deployments: f, statefulSets: f, daemonSets: f, nodes: f, events: f })
+        setOverview({ deployments: f, statefulSets: f, daemonSets: f, nodes: f, serverVersion: null, pdbs: f, events: f })
         return
       }
       setOverview(await fn(cfgFor(server), context || undefined, (ns ?? namespace) || undefined))
@@ -308,7 +313,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         reason: 'unknown',
         detail: e instanceof Error ? e.message : String(e)
       } as const
-      setOverview({ deployments: f, statefulSets: f, daemonSets: f, nodes: f, events: f })
+      setOverview({ deployments: f, statefulSets: f, daemonSets: f, nodes: f, serverVersion: null, pdbs: f, events: f })
     } finally {
       setOverviewLoading(false)
     }
@@ -945,6 +950,41 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                       </div>
                       {workloadRows(overview.daemonSets, 'DaemonSets')}
                     </>
+                  )}
+
+                  {/* Item 41's readiness report. The item itself -- cordon,
+                      patch, reboot, uncordon as one job -- argues against being
+                      built; what it asks for instead is the read that says
+                      whether an upgrade is safe to start, and this is where it
+                      belongs. */}
+                  {overview.nodes.ok && overview.nodes.items.length > 0 && (
+                    <div className="s-note" style={{ marginTop: 10 }}>
+                      <b>
+                        {
+                          summariseUpgradeReadiness(
+                            assessNodeSkew(
+                              overview.serverVersion,
+                              overview.nodes.items.map((n) => ({ name: n.name, kubeletVersion: n.version }))
+                            ),
+                            // `null`, not `[]`. An empty list would say the
+                            // cluster has no budgets and so nothing that could
+                            // block a drain, which is a measurement nobody
+                            // took.
+                            overview.pdbs.ok ? pdbHeadroom(overview.pdbs.items) : null
+                          ).headline
+                        }
+                      </b>
+                      {assessNodeSkew(
+                        overview.serverVersion,
+                        overview.nodes.items.map((n) => ({ name: n.name, kubeletVersion: n.version }))
+                      )
+                        .filter((k) => k.verdict !== 'ok')
+                        .map((k) => (
+                          <div key={k.node} className="r-sub faint">
+                            {k.because}
+                          </div>
+                        ))}
+                    </div>
                   )}
 
                   <div className="s-title" style={{ marginTop: 10 }}>

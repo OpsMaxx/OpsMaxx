@@ -129,3 +129,33 @@ describe('the line somebody reads before starting an upgrade', () => {
     expect(s.headline).toContain('no disruptions')
   })
 })
+
+describe('a budget read that failed is not a cluster with no budgets', () => {
+  // `[]` would say the cluster has nothing that could block a drain. That is a
+  // measurement nobody took, and it is the difference between "ready" and "we
+  // could not tell".
+  it('refuses to call the cluster ready when the budgets could not be read', () => {
+    const skews = assessNodeSkew('v1.30.0', nodes('v1.30.0'))
+    expect(summariseUpgradeReadiness(skews, []).ready).toBe(true)
+    const s = summariseUpgradeReadiness(skews, null)
+    expect(s.ready).toBe(false)
+    expect(s.headline).toContain('could not be read at all')
+  })
+})
+
+describe('the panel passes the distinction on rather than flattening it', () => {
+  // Read off the source, the same way moduleBoundaries reads its tab guards:
+  // mounting KubernetesPanel pulls in the whole app store, and the bug this
+  // guards against is one character wide -- `[]` where `null` belongs, which
+  // turns "we could not read the budgets" into "there are none".
+  it('hands summariseUpgradeReadiness null when the budget read failed', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { resolve } = await import('node:path')
+    const src = readFileSync(
+      resolve(__dirname, '..', 'src/renderer/src/components/kubernetes/KubernetesPanel.tsx'),
+      'utf8'
+    )
+    expect(src).toContain('summariseUpgradeReadiness(')
+    expect(src).toMatch(/overview\.pdbs\.ok \? pdbHeadroom\(overview\.pdbs\.items\) : null/)
+  })
+})

@@ -142,7 +142,10 @@ export class KubernetesReader {
   async overview(cfg: unknown, context?: string, namespace?: string): Promise<K8sOverview> {
     const fail = (detail: string): K8sOverview => {
       const f = { ok: false, reason: 'unknown', detail } as const
-      return { deployments: f, statefulSets: f, daemonSets: f, nodes: f, events: f }
+      // `serverVersion: null` is the honest value for a failed read: it means
+      // the skew report says "unknown" rather than comparing nodes against a
+      // version nobody got.
+      return { deployments: f, statefulSets: f, daemonSets: f, nodes: f, serverVersion: null, pdbs: f, events: f }
     }
     try {
       // 45s rather than the read's 30s: five kubectl calls at up to 10s each,
