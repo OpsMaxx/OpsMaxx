@@ -47,6 +47,7 @@ import type {
 import type { ChangeLogBridge, ChangeLogFilter, ChangeLogPage } from '../shared/changelog'
 import type { RunbookNote, RunbookView, RunbooksBridge } from '../shared/runbooks'
 import type { StoreAlertKind } from '../shared/webhook'
+import type { K8sReviewProbe } from '../shared/k8sReview'
 import type {
   DockerAction,
   DockerActionResult,
@@ -588,6 +589,8 @@ const api = {
       ipcRenderer.invoke('k8s:resources', cfg, context, namespace),
     apiScan: (cfg: unknown, context?: string): Promise<K8sApiScan> =>
       ipcRenderer.invoke('k8s:api-scan', cfg, context),
+    review: (cfg: unknown, context?: string): Promise<K8sReviewProbe> =>
+      ipcRenderer.invoke('k8s:review', cfg, context),
     helm: (cfg: unknown, context?: string): Promise<K8sHelmList> =>
       ipcRenderer.invoke('k8s:helm', cfg, context),
     execPlan: (target: K8sExecTarget): Promise<{ plan: K8sExecPlan; command: string }> =>

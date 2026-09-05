@@ -643,6 +643,9 @@ filled, which is the guard. **2–3 days, and it should go before anything else 
 
 ### 39. Kubernetes reads that are cheap and missing
 
+**All rows below are reachable.** `shared/k8sReview.ts` runs the thirteen reads in one round trip and `KubernetesPanel`'s **Cluster review** button renders them worst-first, with what was NOT read printed above the findings — a short list of findings otherwise reads as a clean cluster. Building it found a real defect: reading PodDisruptionBudgets in the wrong shape made `parseDrainPdbs` return nothing and every workload was then reported as having no budget, so text that yields no objects is now a blind spot rather than an empty cluster.
+
+
 All reads, all per-`--context`, all with their own `K8sRead` verdict, none agent-reachable. Each
 is a few days and none needs a new principle.
 

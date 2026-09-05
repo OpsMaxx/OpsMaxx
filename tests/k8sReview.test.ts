@@ -226,3 +226,39 @@ describe('restarts, which need two readings', () => {
     expect(crashloopFindings('ok', pods, [{ namespace: 'default', name: 'other', restarts: 0 }])).toEqual([])
   })
 })
+
+describe('the panel passes the review on rather than flattening it', () => {
+  // Read off the source, the same way `k8sSkew.test.ts` reads its guard and for
+  // the same reason: mounting KubernetesPanel pulls in the whole app store, and
+  // the mistakes worth guarding here are all one edit wide.
+  const src = (): string =>
+    readFileSync(
+      fileURLToPath(new URL('../src/renderer/src/components/kubernetes/KubernetesPanel.tsx', import.meta.url)),
+      'utf8'
+    )
+
+  it('renders the blind spots, not only the findings', () => {
+    // A short list of findings reads as a clean cluster. The denied read is the
+    // difference, and it has to be on screen.
+    expect(src()).toMatch(/r\.blind\.map\(/)
+    expect(src()).toContain('was not read, so nothing here says anything about it')
+  })
+
+  it('renders the notes that make the unused list a candidate list', () => {
+    expect(src()).toMatch(/r\.notes\.map\(/)
+  })
+
+  it('does not run the review inside the refresh', () => {
+    // Thirteen kubectl calls. Folding it in would make every refresh wait on
+    // it, which is how a read that is worth having gets turned off.
+    const body = src()
+    const loader = body.slice(body.indexOf('setApiScan('), body.indexOf('setApiScan(') + 800)
+    expect(loader).not.toContain('review(')
+    expect(body).toContain('const runReview = async')
+  })
+
+  it('reports a review that could not run at all rather than an empty one', () => {
+    expect(src()).toMatch(/!review\.ok && \(/)
+    expect(src()).toContain('Nothing was read:')
+  })
+})
