@@ -2391,6 +2391,26 @@ export function parseDockerNetworkUse(text: string): DockerNetworkUse[] {
   return out
 }
 
+export type DockerNetworkProbe =
+  | { ok: true; networks: DockerNetwork[]; use: DockerNetworkUse[]; usedSudo?: boolean }
+  | { ok: false; reason: DockerFailure; detail: string }
+
+export function parseDockerNetworkOutput(
+  output: string,
+  exitCode: number | null
+): DockerNetworkProbe {
+  const nets = section(output, DOCKER_MARKERS.networks)
+  const attach = section(output, DOCKER_MARKERS.netAttach)
+  // BOTH sections or neither. A network listing without the attachment read is
+  // a list of networks with nothing known about what holds them, and the whole
+  // module exists to not offer one of those.
+  if (nets === undefined || attach === undefined) {
+    const detail = nonEmptyLines(output)[0] ?? 'docker did not run'
+    return { ok: false, reason: classifyDockerFailure(output, exitCode), detail }
+  }
+  return { ok: true, networks: parseDockerNetworks(nets), use: parseDockerNetworkUse(attach) }
+}
+
 /**
  * Which networks may be offered, and why the rest may not.
  *
@@ -2906,6 +2926,8 @@ export interface DockerBridge {
     refs: string[],
     opts?: { sudo?: boolean; autoSudo?: boolean }
   ): Promise<DockerHealthLogProbe>
+  /** Networks, with what is attached to each -- INCLUDING stopped containers. */
+  networks(cfg: unknown, opts?: { sudo?: boolean; autoSudo?: boolean }): Promise<DockerNetworkProbe>
   act(
     cfg: unknown,
     action: DockerAction,

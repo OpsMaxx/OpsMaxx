@@ -18,6 +18,7 @@ import { sshHopsFor } from '../../lib/ssh'
 import { clsx } from '../../lib/format'
 import {
   DOCKER_FAILURE_HELP,
+  buildDockerNetworkPreview,
   buildDockerReclaimPreview,
   diffDockerReclaim,
   dockerReclaimBlocked,
@@ -37,6 +38,7 @@ import {
   type DockerInspectProbe,
   type DockerProbe,
   type DockerReclaimDiff,
+  type DockerNetworkProbe,
   type DockerReclaimItem,
   type DockerReclaimPlan,
   type DockerReclaimPreview,
@@ -108,6 +110,45 @@ function humanBytes(bytes: number): string {
   return `${n < 10 && i > 0 ? n.toFixed(2) : Math.round(n)}${units[i]}`
 }
 
+/**
+ * Fold the network read into the disk-derived preview.
+ *
+ * Networks are a SECOND read -- `system df -v` lists none -- and this is where
+ * the two meet. Two things it must not do.
+ *
+ * It must not silently omit networks when the read failed: the preview would
+ * then look complete while offering nothing from a whole category, and nobody
+ * on screen could tell that from a host with no removable networks. The failure
+ * goes in as a withheld row, where it is visible.
+ *
+ * And it must be a pure function of the two reads, for the reason the disk
+ * preview is: the confirm-time re-check compares a fresh preview against the
+ * planned items, and that comparison only means something if the same reads
+ * always produce the same offer set.
+ */
+function mergeNetworks(
+  base: DockerReclaimPreview,
+  nets: DockerNetworkProbe | null
+): DockerReclaimPreview {
+  if (nets === null) return base
+  if (!nets.ok) {
+    return {
+      items: base.items,
+      withheld: [
+        ...base.withheld,
+        {
+          kind: 'network',
+          id: '',
+          label: 'networks',
+          reason: `they could not be read, so none is offered: ${nets.detail}`
+        }
+      ]
+    }
+  }
+  const add = buildDockerNetworkPreview(nets.networks, nets.use)
+  return { items: [...base.items, ...add.items], withheld: [...base.withheld, ...add.withheld] }
+}
+
 export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Element {
   const [serverId, setServerId] = useState<string>('')
   const [probe, setProbe] = useState<DockerProbe | null>(null)
@@ -128,6 +169,11 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
   // image and volume on the host, so an operator who only wanted the four
   // category totals should not pay for it.
   const [diskItems, setDiskItems] = useState<DockerDiskDetailProbe | null>(null)
+  // Networks come from their OWN read: `system df -v` lists none. Held beside
+  // the disk listing and re-read with it, so the preview stays a pure function
+  // of the reads on screen -- which is what makes the confirm-time re-check
+  // mean anything.
+  const [netItems, setNetItems] = useState<DockerNetworkProbe | null>(null)
   const [diskItemsLoading, setDiskItemsLoading] = useState(false)
   // Reclaim. NOTHING is pre-selected and there is no select-all: the lifecycle
   // model's rule is that targets are explicit, and a select-all checkbox is
@@ -304,12 +350,18 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
     setDiskItemsLoading(true)
     const gen = generation.current
     try {
-      const r = await bridge()?.diskDetail?.(cfgFor(server), { sudo: useSudo })
+      const [r, n] = await Promise.all([
+        bridge()?.diskDetail?.(cfgFor(server), { sudo: useSudo }),
+        bridge()?.networks?.(cfgFor(server), { sudo: useSudo })
+      ])
       if (generation.current !== gen) return
       // A fresh listing invalidates a selection made against the old one.
       clearReclaim()
       setDiskItems(
         r ?? { ok: false, reason: 'unknown', detail: 'The itemised disk view is not wired up in this build.' }
+      )
+      setNetItems(
+        n ?? { ok: false, reason: 'unknown', detail: 'The network read is not wired up in this build.' }
       )
     } catch (e) {
       if (generation.current !== gen) return
@@ -329,8 +381,8 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
    * two of them is a difference on the host rather than in this function.
    */
   const preview: DockerReclaimPreview | null = useMemo(
-    () => (diskItems?.ok === true ? buildDockerReclaimPreview(diskItems.disk) : null),
-    [diskItems]
+    () => (diskItems?.ok === true ? mergeNetworks(buildDockerReclaimPreview(diskItems.disk), netItems) : null),
+    [diskItems, netItems]
   )
   const pickedItems: DockerReclaimItem[] = useMemo(
     () => (preview === null ? [] : preview.items.filter((i) => picked.has(dockerReclaimKey(i)))),
@@ -365,8 +417,14 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
     setReclaimChecking(true)
     const gen = generation.current
     try {
-      const fresh = await bridge()?.diskDetail?.(cfgFor(server), { sudo: useSudo })
+      const [fresh, freshNets] = await Promise.all([
+        bridge()?.diskDetail?.(cfgFor(server), { sudo: useSudo }),
+        bridge()?.networks?.(cfgFor(server), { sudo: useSudo })
+      ])
       if (generation.current !== gen) return
+      setNetItems(
+        freshNets ?? { ok: false, reason: 'unknown', detail: 'The network read is not wired up in this build.' }
+      )
       if (!fresh || !fresh.ok) {
         setDiskItems(
           fresh ?? { ok: false, reason: 'unknown', detail: 'The itemised disk view is not wired up in this build.' }
@@ -382,7 +440,13 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
         })
         return
       }
-      const again = buildDockerReclaimPreview(fresh.disk)
+      // `?? null` is not a shrug: an unwired bridge is exactly the case the
+      // withheld row above is for, and the ?? keeps it on that path rather
+      // than letting `undefined` mean "no networks".
+      const again = mergeNetworks(
+        buildDockerReclaimPreview(fresh.disk),
+        freshNets ?? { ok: false, reason: 'unknown', detail: 'The network read is not wired up in this build.' }
+      )
       const diff = diffDockerReclaim(reclaimPlan.items, again)
       // The listing is replaced either way, so whatever happens next is chosen
       // against what the host actually holds now.
@@ -1228,6 +1292,13 @@ function DiskItems({
   const d = probe.disk
   const offered = new Map(preview.items.map((i) => [dockerReclaimKey(i), i]))
   const refused = new Map(preview.withheld.map((w) => [dockerReclaimKey(w), w]))
+  // Offered first, then the refused ones with their reason. Both, always: a
+  // network the operator can see in `docker network ls` and not here is a list
+  // that looks broken.
+  const networks = [
+    ...preview.items.filter((i) => i.kind === 'network'),
+    ...preview.withheld.filter((w) => w.kind === 'network')
+  ]
 
   /**
    * The checkbox, or the reason there isn't one.
@@ -1411,8 +1482,29 @@ function DiskItems({
         </div>
       ))}
 
+      {/* Networks come from their own read -- `system df -v` lists none -- so
+          they are rendered from the preview rather than from a table of `d`.
+          Both halves: the offered ones and the ones this will not offer, with
+          the reason. A network attached only to a STOPPED container reports
+          zero attachments to `docker network inspect`, and removing it on that
+          basis breaks a `compose start` in a way recreating the network does
+          not fix, so the withheld reason is the point of the row. */}
+      {networks.length > 0 && heading('Networks', networks.length)}
+      {networks.map((n) => (
+        <div key={n.id === '' ? n.label : n.id} className="cron-row">
+          {pick('network', n.id)}
+          <span className="mono cron-when" style={nameCell} title={n.id}>
+            {n.label}
+          </span>
+          <span className="faint cron-desc">{'reason' in n ? n.reason : 'nothing is attached to it'}</span>
+          <span className="grow" />
+          {/* No size. Docker says nothing about a network's footprint and
+              `0 B` would read as a measurement of it. */}
+        </div>
+      ))}
+
       {/* An answer, and one worth printing: four headings with nothing under
-          any of them renders as silence otherwise, which reads like a view
+          any of them renders as silence otherwise, which reads like a host
           that failed to load rather than a host holding nothing. */}
       {empty && (
         <div className="faint" style={{ fontSize: 11 }}>

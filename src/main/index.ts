@@ -2151,6 +2151,9 @@ ipcMain.handle(
   (_e, cfg: unknown, ref: string, opts?: { sudo?: boolean; autoSudo?: boolean }) =>
     dockerReader.inspect(cfg, ref, opts ?? {})
 )
+ipcMain.handle('docker:networks', (_e, cfg: unknown, opts?: { sudo?: boolean; autoSudo?: boolean }) =>
+  dockerReader.networks(cfg, opts ?? {})
+)
 ipcMain.handle(
   'docker:health-logs',
   (_e, cfg: unknown, refs: string[], opts?: { sudo?: boolean; autoSudo?: boolean }) =>

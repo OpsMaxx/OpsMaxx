@@ -54,6 +54,7 @@ import type {
   DockerDiskDetailProbe,
   DockerDiskProbe,
   DockerHealthLogProbe,
+  DockerNetworkProbe,
   DockerInspectProbe,
   DockerLogsOptions,
   DockerProbe,
@@ -619,6 +620,10 @@ const api = {
       ref: string,
       opts?: { sudo?: boolean; autoSudo?: boolean }
     ): Promise<DockerInspectProbe> => ipcRenderer.invoke('docker:inspect', cfg, ref, opts),
+    networks: (
+      cfg: unknown,
+      opts?: { sudo?: boolean; autoSudo?: boolean }
+    ): Promise<DockerNetworkProbe> => ipcRenderer.invoke('docker:networks', cfg, opts),
     healthLogs: (
       cfg: unknown,
       refs: string[],
