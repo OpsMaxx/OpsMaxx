@@ -457,7 +457,14 @@ A line that could not be parsed is CARRIED OUT, never dropped, and makes the per
 say the reading is incomplete. A sudoers parser that silently ignores what it cannot read will
 one day ignore the line granting root.
 
-Still open: reading the files off the host (the probe, the consent line, `sudoers.d` traversal).
+**The consent line is SHIPPED**: `sudoersRead`, a new `AiCapability`, denied on every seeded
+group and opted into by none — so an upgraded install backfills it to deny rather than inheriting
+an `ask` nobody can answer during an unattended sweep, which is exactly the argument
+`firewallRules` makes one line above it. Being allowed to RUN sudo and being allowed to READ who
+else can are different grants, and the Sudo Access group has the first and not the second. No MCP
+tool exposes it whatever it is set to.
+
+Still open: the probe itself and `sudoers.d` traversal.
 
 **36c. Per-account revoke.** Blocked in main, not the planner (`index.ts:1257-1272`). Needs a
 per-host command (the connecting-account write resolves `$HOME` on the host, `:2860`, so one

@@ -59,6 +59,12 @@ function allowAll(overrides: Partial<AccessGroup['capabilities']> = {}): AccessG
     // this gates is an unattended hourly collection with nobody at the screen,
     // so there is no prompt an 'ask' could raise; only 'allow' collects.
     firewallRules: 'deny',
+    // The same, and for a stronger reason. Firewall rules say what a server is
+    // exposed on; sudoers says who can become root on it and whether they need
+    // a password. Denied on every seeded group and opted into by none, so an
+    // upgraded install backfills it to deny rather than inheriting an 'ask'
+    // nobody can answer during an unattended sweep.
+    sudoersRead: 'deny',
     // Not 'allow', despite the name. Every other capability here is an action
     // performed ON a server the user already added; this one edits ShellPilot's
     // own connection list and stores a credential. Groups that predate it never

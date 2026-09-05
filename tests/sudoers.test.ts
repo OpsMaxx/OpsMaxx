@@ -161,3 +161,47 @@ describe('what it refuses to pretend it read', () => {
     expect(sudoPrivilegesFor('alice', [], r)).toEqual([])
   })
 })
+
+// ---------------------------------------------------------------------------
+// The consent line
+// ---------------------------------------------------------------------------
+//
+// Item 36b requires this behind its own consent line, "like firewall rule
+// lines", and not on by default. Firewall rules say what a server is exposed
+// on; sudoers says who can become root on it and whether they need a password,
+// which is the shortest description of how to take the machine.
+
+describe('reading sudoers is consented to separately, and never by an agent', () => {
+  it('is denied on every group the app ships', async () => {
+    const { listGroups, resetPolicyCacheForTests } = await import(
+      '../src/main/services/policyStore'
+    )
+    resetPolicyCacheForTests()
+    for (const g of listGroups()) {
+      // Including Full Access. A new capability backfills to deny for every
+      // existing group, and seeding it at `ask` on the permissive ones would
+      // hand upgraded installs an `ask` instead of a `deny`.
+      expect(g.capabilities.sudoersRead, g.name).toBe('deny')
+    }
+  })
+
+  it('is not something an access group can be talked into by allowing sudo', async () => {
+    // Being allowed to RUN sudo and being allowed to READ who else can are
+    // different grants, and the second is the inventory.
+    const { listGroups, resetPolicyCacheForTests } = await import(
+      '../src/main/services/policyStore'
+    )
+    resetPolicyCacheForTests()
+    const sudoGroup = listGroups().find((g) => g.id === 'grp-sudo')!
+    expect(sudoGroup.capabilities.sudo).not.toBe('deny')
+    expect(sudoGroup.capabilities.sudoersRead).toBe('deny')
+  })
+
+  it('says on the consent line what the reading actually is', async () => {
+    const { AI_CAPABILITIES } = await import('../src/shared/mcp')
+    const cap = AI_CAPABILITIES.find((c) => c.id === 'sudoersRead')!
+    expect(cap.detail).toContain('never by an agent')
+    // And that it replaces a guess, which is the reason to turn it on.
+    expect(cap.detail).toContain('wrong in both directions')
+  })
+})

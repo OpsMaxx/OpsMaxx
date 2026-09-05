@@ -20,6 +20,7 @@ export type AiCapability =
   | 'serverMetrics'
   | 'hostFacts'
   | 'firewallRules'
+  | 'sudoersRead'
   | 'manageServers'
   | 'vpnControl'
 
@@ -126,6 +127,19 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
     label: 'Firewall rules: the addresses and ports this server accepts',
     detail:
       'The rule lines themselves, as ufw, firewalld, nft or iptables print them — every address, port and protocol named in them, capped and stripped of control characters on the server. That is an inventory of what this server is exposed on and to whom, which is the thing an attacker would otherwise have to scan for. No agent can read it whatever this is set to: it is not behind any MCP tool. Setting it to allow lets ShellPilot COLLECT the rules for this server, for a person to read in Security posture; anything else and they are never asked for.'
+  },
+  // Item 36b, and the same argument one step further. Firewall rules say what
+  // this server is exposed on; sudoers says who can become root on it and
+  // whether they need a password to do it. That is the shortest description of
+  // how to take the machine, so it is consented to separately and read for a
+  // person, never for an agent.
+  //
+  // 'ask' collects nothing here for the same reason: the sweep is unattended.
+  {
+    id: 'sudoersRead',
+    label: 'Sudoers: who can become root on this server',
+    detail:
+      'The rules in /etc/sudoers and /etc/sudoers.d — which accounts and groups may run which commands as root, and which of them need no password. ShellPilot reads it to replace a guess it makes today, that anyone in wheel or sudo has root, which is wrong in both directions. It is also the shortest description of how to take this machine, so it is asked for separately and never by an agent: no MCP tool exposes it whatever this is set to. Setting it to allow lets ShellPilot COLLECT it for a person to read in Keys and access; anything else and it is never asked for.'
   },
   {
     id: 'manageServers',
