@@ -970,3 +970,50 @@ describe('the report', () => {
     expect(maria?.flavour).toBe('mariadb')
   })
 })
+
+// ---------------------------------------------------------------------------
+// Item 37: the session holding the lock
+// ---------------------------------------------------------------------------
+//
+// `PG_QUERIES.locks` filtered on `cardinality(pg_blocking_pids(a.pid)) > 0`,
+// which is "sessions that are blocked" -- and the session HOLDING the lock is
+// not itself blocked. Measured against PostgreSQL 16.15 with a three-deep
+// chain: the query returned two rows and the blocker was not among them. The
+// screen showed two stuck queries and nothing to act on.
+//
+// Fixing the query alone would have been a bug: `judgePgLocks` counted every
+// returned row as a blocked session, so the blocker would have inflated the
+// count it reports and the `blockedSessions` metric it stores.
+
+describe('the blocking chain includes the session at the head of it', () => {
+  it('asks for the blockers as well as the blocked', () => {
+    expect(PG_QUERIES.locks).toContain('pg_blocking_pids(a.pid)) > 0')
+    // The half that was missing: sessions that block somebody.
+    expect(PG_QUERIES.locks).toContain('a.pid = ANY(pg_blocking_pids(b.pid))')
+  })
+
+  // Row shapes as PostgreSQL 16.15 actually returned them: the blocker has an
+  // empty blocked_by, the waiter names it.
+  const root = { pid: 124, username: 'postgres', state: 'active', waitingSeconds: 30, blockedBy: [], waitEventType: 'Timeout', waitEvent: 'PgSleep', query: 'update t set v=$1', redacted: false }
+  const waiter = { pid: 131, username: 'postgres', state: 'active', waitingSeconds: 28, blockedBy: [124], waitEventType: 'Lock', waitEvent: 'transactionid', query: 'update t set v=$2', redacted: false }
+
+  it('counts the blocked sessions, not the rows', () => {
+    // Two rows, one blocked session. Counting rows would say two.
+    const v = judgePgLocks([root, waiter] as never)
+    expect(v.headline).toContain('1 session')
+    expect(v.headline).not.toContain('2 session')
+  })
+
+  it('names what the blocker is doing, which is the point of returning it', () => {
+    // "waiting on pid 124" is not actionable; "waiting on pid 124, which is
+    // running this" is.
+    const v = judgePgLocks([root, waiter] as never)
+    expect(v.because).toContain('124')
+    expect(v.because).toContain('update t set v=$1')
+  })
+
+  it('still says nothing is waiting when only a blocker-shaped row appears', () => {
+    // A session that blocks nobody and waits for nothing is not a finding.
+    expect(judgePgLocks([root] as never).level).toBe('ok')
+  })
+})

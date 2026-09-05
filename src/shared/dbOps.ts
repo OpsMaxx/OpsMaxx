@@ -1047,12 +1047,24 @@ export const PG_QUERIES = Object.freeze({
        MAX(EXTRACT(EPOCH FROM (now() - state_change)))::bigint AS oldest_seconds
   FROM pg_stat_activity WHERE backend_type = 'client backend' GROUP BY 1 ORDER BY 2 DESC`,
 
+  // THE SESSION HOLDING THE LOCK IS NOT ITSELF BLOCKED, so a filter of
+  // "blocked sessions" omits the only one an operator can act on. Measured on
+  // PostgreSQL 16.15 with a three-deep chain: this query returned two rows and
+  // the blocker was not among them. The screen showed two stuck queries and
+  // nothing to do about either.
+  //
+  // The EXISTS clause adds the sessions that block somebody. It is a
+  // correlated subquery over pg_stat_activity, which is a handful of rows on
+  // any real server -- pg_stat_activity is a view over shared memory, not a
+  // table -- so the cost is the same order as the original.
   locks: `SELECT a.pid, a.usename AS username, a.state,
        EXTRACT(EPOCH FROM (now() - a.query_start))::bigint AS waiting_seconds,
        pg_blocking_pids(a.pid) AS blocked_by, a.wait_event_type, a.wait_event,
        left(a.query, 200) AS query
   FROM pg_stat_activity a
-  WHERE cardinality(pg_blocking_pids(a.pid)) > 0 ORDER BY 4 DESC NULLS LAST LIMIT $1`,
+  WHERE cardinality(pg_blocking_pids(a.pid)) > 0
+     OR EXISTS (SELECT 1 FROM pg_stat_activity b WHERE a.pid = ANY(pg_blocking_pids(b.pid)))
+  ORDER BY 4 DESC NULLS LAST LIMIT $1`,
 
   databases: `SELECT datname AS name, pg_database_size(oid)::bigint AS bytes
   FROM pg_database WHERE datallowconn ORDER BY 2 DESC`,
@@ -1612,33 +1624,45 @@ export function judgePgConnections(v: PgConnectionsValue): DbVerdict {
 
 export function judgePgLocks(locks: PgLock[]): DbVerdict {
   if (locks.length === 0) return { level: 'ok', headline: 'Nothing is waiting on a lock.' }
+  // BLOCKED sessions only, for the counting. The query now also returns the
+  // sessions that are BLOCKING -- the ones an operator can actually act on,
+  // which it used to omit -- and those are not themselves waiting. Counting
+  // every returned row would report three sessions blocked where two are, and
+  // the third is the one holding the lock.
+  const blocked = locks.filter((l) => l.blockedBy.length > 0)
+  const roots = locks.filter((l) => l.blockedBy.length === 0)
+  if (blocked.length === 0) return { level: 'ok', headline: 'Nothing is waiting on a lock.' }
   // `?? 0` here was the bug: a role without pg_read_all_stats gets NULL for
   // query_start on a backend it does not own, so a session blocked for two
   // hours rendered as "briefly blocked (0s)" — a watch instead of an alarm.
   // A wait nobody could time is not a wait of zero.
-  const timed = locks.filter((l) => l.waitingSeconds !== null)
-  const hidden = locks.length - timed.length
+  const timed = blocked.filter((l) => l.waitingSeconds !== null)
+  const hidden = blocked.length - timed.length
   const worst = timed.length > 0 ? timed.reduce((a, b) => ((b.waitingSeconds ?? 0) > (a.waitingSeconds ?? 0) ? b : a)) : null
   const s = worst?.waitingSeconds ?? null
-  const blockers = [...new Set(locks.flatMap((l) => l.blockedBy))]
-  const target = worst ?? locks[0]
+  const blockers = [...new Set(blocked.flatMap((l) => l.blockedBy))]
+  const target = worst ?? blocked[0]
+  // The root's own query, when the query returned it. This is the whole point
+  // of including blockers: "waiting on pid 124" is not actionable and
+  // "waiting on pid 124, which is running <this>" is.
+  const root = roots.find((r) => target.blockedBy.includes(r.pid))
   const because = `pid ${target.pid} is waiting on ${target.blockedBy.join(', ') || 'another session'}${
-    blockers.length > 1 ? `; ${blockers.length} sessions are blocking in total` : ''
-  }.`
+    root ? ` (${root.state}${root.query ? `: ${root.query}` : ''})` : ''
+  }${blockers.length > 1 ? `; ${blockers.length} sessions are blocking in total` : ''}.`
   if (s !== null && s >= T.lockWaitAlarmSeconds) {
-    return { level: 'alarm', headline: `${locks.length} session${locks.length === 1 ? ' has' : 's have'} been blocked for up to ${formatSeconds(s)}.`, because }
+    return { level: 'alarm', headline: `${blocked.length} session${blocked.length === 1 ? ' has' : 's have'} been blocked for up to ${formatSeconds(s)}.`, because }
   }
   if (hidden > 0) {
     return {
       level: 'unknown',
-      headline: `${locks.length} session${locks.length === 1 ? ' is' : 's are'} blocked, and this account cannot see for how long.`,
+      headline: `${blocked.length} session${blocked.length === 1 ? ' is' : 's are'} blocked, and this account cannot see for how long.`,
       because: `query_start came back NULL for ${hidden} of them, which is what Postgres returns instead of an error when the role lacks pg_read_all_stats. The wait could be two seconds or two hours. ${because}`
     }
   }
   if (s !== null && s >= T.lockWaitWatchSeconds) {
-    return { level: 'watch', headline: `${locks.length} session${locks.length === 1 ? ' is' : 's are'} blocked, the longest for ${formatSeconds(s)}.`, because }
+    return { level: 'watch', headline: `${blocked.length} session${blocked.length === 1 ? ' is' : 's are'} blocked, the longest for ${formatSeconds(s)}.`, because }
   }
-  return { level: 'watch', headline: `${locks.length} session${locks.length === 1 ? ' is' : 's are'} briefly blocked (${formatSeconds(s ?? 0)}).`, because }
+  return { level: 'watch', headline: `${blocked.length} session${blocked.length === 1 ? ' is' : 's are'} briefly blocked (${formatSeconds(s ?? 0)}).`, because }
 }
 
 export function judgePgSizes(v: PgSizesValue): DbVerdict {
@@ -4577,8 +4601,12 @@ export function dbEventMetrics(a: DbAnswer<unknown>): Record<string, number> {
     }
     case 'locks': {
       const locks = (Array.isArray(v) ? v : []) as PgLock[]
-      put('blockedSessions', locks.length)
-      const waits = locks.map((l) => l.waitingSeconds).filter((n): n is number => n !== null)
+      // BLOCKED rows only. The query also returns the sessions doing the
+      // blocking, which are not themselves waiting -- counting them would
+      // inflate this metric by one per chain, silently, in a stored series.
+      const blocked = locks.filter((l) => l.blockedBy.length > 0)
+      put('blockedSessions', blocked.length)
+      const waits = blocked.map((l) => l.waitingSeconds).filter((n): n is number => n !== null)
       if (waits.length > 0) put('longestWaitSeconds', Math.max(...waits))
       put('redactedSessions', locks.filter((l) => l.redacted).length)
       break
