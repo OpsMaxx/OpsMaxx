@@ -2079,6 +2079,7 @@ ipcMain.handle('k8s:resources', (_e, cfg: unknown, context?: string, namespace?:
 ipcMain.handle('k8s:api-scan', (_e, cfg: unknown, context?: string) =>
   k8sReader.apiScan(cfg, context)
 )
+ipcMain.handle('k8s:review', (_e, cfg: unknown, context?: string) => k8sReader.review(cfg, context))
 ipcMain.handle('k8s:helm', (_e, cfg: unknown, context?: string) => k8sReader.helm(cfg, context))
 ipcMain.handle('k8s:exec-plan', (_e, target: K8sExecTarget) => k8sReader.execPlan(target))
 ipcMain.handle('k8s:exec', (_e, cfg: unknown, target: K8sExecTarget, approval: unknown) =>

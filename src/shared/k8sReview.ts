@@ -215,6 +215,10 @@ export function splitReview(output: string): ReviewBlocks {
   return out
 }
 
+/** The review as it crosses IPC: the split blocks, or the one reason nothing
+ *  could be read at all. Not an empty `ReviewBlocks` -- see `splitReview`. */
+export type K8sReviewProbe = { ok: true; blocks: ReviewBlocks } | { ok: false; detail: string }
+
 /** kubectl's own denials, which arrive as ordinary text on a section. */
 const DENIED_RE = /^(error|Error from server|The connection to the server)/m
 

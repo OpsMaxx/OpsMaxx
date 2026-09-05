@@ -58,6 +58,11 @@ import {
   pdbHeadroom,
   summariseUpgradeReadiness
 } from '../../../../shared/k8sSkew'
+import {
+  reviewFindings,
+  type K8sReviewProbe,
+  type ReviewFinding
+} from '../../../../shared/k8sReview'
 import { approvalFor, type CommandApproval } from '../../../../shared/broadcast'
 import type { Server } from '../../types'
 
@@ -138,6 +143,7 @@ interface K8sBridge {
   exec?: (cfg: unknown, target: K8sExecTarget, approval: unknown) => Promise<K8sExecResult>
   resources?: (cfg: unknown, context?: string, namespace?: string) => Promise<K8sResources>
   apiScan?: (cfg: unknown, context?: string) => Promise<K8sApiScan>
+  review?: (cfg: unknown, context?: string) => Promise<K8sReviewProbe>
   helm?: (cfg: unknown, context?: string) => Promise<K8sHelmList>
 }
 
@@ -236,6 +242,28 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   // The state change, and everything it needs to be deliberate.
   const [resources, setResources] = useState<K8sResources | null>(null)
   const [apiScan, setApiScan] = useState<K8sApiScan | null>(null)
+  // The whole-cluster review. Its OWN button, not part of the refresh: it is
+  // thirteen kubectl calls and the answer only matters when somebody is asking
+  // the question it answers.
+  const [review, setReview] = useState<K8sReviewProbe | null>(null)
+  const [reviewLoading, setReviewLoading] = useState(false)
+
+  const runReview = async (): Promise<void> => {
+    if (!server) return
+    setReviewLoading(true)
+    try {
+      const b = bridge()
+      setReview(
+        b.review
+          ? await b.review(cfgFor(server), context || undefined)
+          : { ok: false, detail: NOT_WIRED }
+      )
+    } catch (e) {
+      setReview({ ok: false, detail: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setReviewLoading(false)
+    }
+  }
   const [helm, setHelm] = useState<K8sHelmList | null>(null)
   const [resourcesLoading, setResourcesLoading] = useState(false)
 
@@ -1252,6 +1280,61 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                       </div>
                     ))
                   )}
+
+                  <div className="s-title" style={{ marginTop: 10 }}>
+                    <TriangleAlert size={12} /> Cluster review
+                  </div>
+                  {/* Its own button. Thirteen kubectl calls, and the answer only
+                      matters when somebody is asking the question it answers —
+                      folding it into the refresh would make every refresh wait
+                      on it. */}
+                  <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                    <button
+                      className="btn ghost sm"
+                      disabled={reviewLoading}
+                      onClick={() => void runReview()}
+                    >
+                      {review === null ? 'Review this cluster' : 'Review again'}
+                    </button>
+                    {reviewLoading && <span className="faint" style={{ fontSize: 11 }}>reading…</span>}
+                  </div>
+                  {review !== null && !review.ok && (
+                    <div className="s-note is-alarm">
+                      Nothing was read: {review.detail}
+                    </div>
+                  )}
+                  {review?.ok === true &&
+                    (() => {
+                      const r = reviewFindings(review.blocks, Date.now())
+                      const tone = (f: ReviewFinding): string =>
+                        f.level === 'alarm' ? 'danger' : f.level === 'watch' ? 'warn' : ''
+                      return (
+                        <>
+                          {/* WHAT WAS NOT LOOKED AT, first and always. A short
+                              list of findings reads as a clean cluster, and a
+                              denied read is the difference. */}
+                          {r.blind.map((b2) => (
+                            <div key={`${b2.section} ${b2.detail}`} className="s-note is-alarm">
+                              <b>{b2.section}</b> was not read, so nothing here says anything about it:{' '}
+                              <span className="mono">{b2.detail}</span>
+                            </div>
+                          ))}
+                          {r.findings.map((f) => (
+                            <div key={`${f.section} ${f.subject} ${f.because}`} className="cron-row">
+                              <span className={clsx('chip', tone(f))}>{f.level}</span>
+                              <span className="faint cron-desc">{f.section}</span>
+                              <span className="mono cron-when">{f.subject}</span>
+                              <span className="grow cron-cmd">{f.because}</span>
+                            </div>
+                          ))}
+                          {r.notes.map((n) => (
+                            <div key={n} className="faint" style={{ fontSize: 11 }}>
+                              {n}
+                            </div>
+                          ))}
+                        </>
+                      )
+                    })()}
 
                   <div className="s-title" style={{ marginTop: 10 }}>
                     <TriangleAlert size={12} /> Deprecated APIs

@@ -19,6 +19,11 @@ import type {
   K8sWorkloadKind
 } from '../../shared/kubernetes'
 import {
+  buildK8sReviewCommand,
+  splitReview,
+  type K8sReviewProbe
+} from '../../shared/k8sReview'
+import {
   buildK8sCordonCommand,
   buildK8sDiagnoseCommand,
   buildK8sDrainCommand,
@@ -470,6 +475,23 @@ export class KubernetesReader {
       return parseK8sResources(merge(r), r.code ?? null)
     } catch (e) {
       return fail(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  /**
+   * The whole-cluster review: thirteen reads, one round trip.
+   *
+   * 60s, because it is thirteen kubectl calls rather than five. A transport
+   * failure returns the sections as MISSING with the reason on each -- not an
+   * empty review, which is the shape that reads as a clean cluster.
+   */
+  async review(cfg: unknown, context?: string): Promise<K8sReviewProbe> {
+    try {
+      const r = await this.deps.exec(cfg, buildK8sReviewCommand('kubectl', context), 60_000)
+      if (!r.ok) return { ok: false, detail: r.error ?? 'could not reach the server' }
+      return { ok: true, blocks: splitReview(merge(r)) }
+    } catch (e) {
+      return { ok: false, detail: e instanceof Error ? e.message : String(e) }
     }
   }
 
