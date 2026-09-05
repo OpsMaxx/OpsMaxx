@@ -80,6 +80,7 @@ const MODULE_FILES: Record<string, string[]> = {
   access: [
     'src/shared/staleAccounts.ts',
     'src/shared/accessExport.ts',
+    'src/shared/bastion.ts',
     'src/shared/sudoers.ts',
     'src/renderer/src/components/monitor/AccessPanel.tsx'
   ],
