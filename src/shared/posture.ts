@@ -829,15 +829,49 @@ export const CERT_SEARCH_ROOTS = [
   '/etc/pki/tls/certs',
   '/etc/nginx',
   '/etc/apache2',
-  '/etc/httpd'
+  '/etc/httpd',
+  // Item 39. Kubernetes control-plane certificates, and the reason this is the
+  // best-value line in that table: kubeadm issues them for ONE YEAR and renews
+  // them on upgrade. A cluster that is not upgraded for a year stops -- every
+  // component at once, with `x509: certificate has expired` in every log -- and
+  // there is no warning anywhere before it happens. It is the single most
+  // common way a self-managed cluster dies.
+  //
+  // No new alert kind: these are certificates on a server, so the `cert-expiry`
+  // kind that already exists fires for them. That is the whole point of putting
+  // them here rather than building a Kubernetes-specific probe.
+  //
+  // Ordered AFTER the web roots deliberately. `find` walks its arguments in
+  // order and the cap below is a `head`, so on a host that is somehow both a
+  // busy web server and a control plane, the certificates somebody is more
+  // likely to be renewing by hand survive the truncation -- and `truncated`
+  // says the list is a prefix either way.
+  '/etc/kubernetes/pki',
+  '/var/lib/kubelet/pki',
+  // k3s and rke2 keep their own, in the same shape, under rancher's tree.
+  '/var/lib/rancher/k3s/server/tls',
+  '/var/lib/rancher/rke2/server/tls'
 ] as const
 
 /** Deep enough for `/etc/letsencrypt/live/<domain>/fullchain.pem` and for the
  *  `ssl/<site>/` layout people give nginx, and no deeper. */
 export const CERT_SEARCH_MAX_DEPTH = 3
 
-/** The cap on files read. `truncated` says when it was reached. */
-export const CERT_SEARCH_MAX_FILES = 16
+/**
+ * The cap on files read. `truncated` says when it was reached.
+ *
+ * Raised from 16 with the Kubernetes roots, because a kubeadm control plane
+ * holds about thirteen certificates in `/etc/kubernetes/pki` alone once
+ * `etcd/` is counted, plus the kubelet's own -- so at 16 a control-plane node
+ * would have reported a truncated list of its own certificates and nothing
+ * else, which is the shape of answer this probe exists to avoid.
+ *
+ * The wire cost is the number that matters and it is stated rather than
+ * guessed: 32 x CERT_B64_CAP is 64 KB of base64 per host in the worst case,
+ * on the posture sweep's cadence and not the sampler's. Still a cap, and still
+ * low enough that a pathological tree cannot hold an SSH channel open.
+ */
+export const CERT_SEARCH_MAX_FILES = 32
 
 /** The most base64 transmitted per certificate. A leaf certificate is 1.1 to
  *  2.2 KB of base64, so this holds a whole normal one; a certificate longer
