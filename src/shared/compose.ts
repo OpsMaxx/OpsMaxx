@@ -75,8 +75,15 @@
 // written reason rather than a scarier dialog, and this follows that shape
 // exactly.
 
-import type { DockerContainer, DockerFailure } from './docker'
-import { DOCKER_MARKERS, classifyDockerFailure, resolveBinary, section } from './docker'
+import type { DockerActionPlan, DockerContainer, DockerFailure } from './docker'
+import {
+  DOCKER_ACTION_MAX_REFS,
+  DOCKER_MARKERS,
+  classifyDockerFailure,
+  planDockerAction,
+  resolveBinary,
+  section
+} from './docker'
 import type { JobSpec, JobStep } from './jobs'
 
 // ---------------------------------------------------------------- failure
@@ -1088,6 +1095,80 @@ export const COMPOSE_REFUSALS: Record<string, string> = {
 export function composeRefusal(action: string): string | null {
   const key = String(action).trim().toLowerCase()
   return COMPOSE_REFUSALS[key] ?? null
+}
+
+// ------------------------------------------------------- restart one service
+
+/**
+ * Restarting one service, and why it is NOT a compose verb here.
+ *
+ * `docker compose restart <svc>` exists and does the obvious thing, and it was
+ * measured before this was written. Two facts came out of that:
+ *
+ *  1. IT DOES NOT APPLY AN EDITED COMPOSE FILE. With a service declared
+ *     `V: one`, the file changed to `V: two` and `docker compose restart a`
+ *     run, the container came back still carrying `V=one`. `up -d` recreated it
+ *     and it became `V=two`. Somebody who edits the file and reaches for
+ *     restart gets the old configuration and no indication of it.
+ *
+ *  2. IT TOUCHES EVERY REPLICA. A service with `replicas: 2` restarted both,
+ *     naming them one at a time in its output.
+ *
+ * So this routes to the container lifecycle path instead of adding a compose
+ * verb: `planDockerAction('restart', ...)` already grades a restart as
+ * elevated, already escalates past one container to a typed phrase -- which is
+ * exactly what the two-replica case deserves -- and, crucially, the containers
+ * are NAMED, so the fan-out is visible before it happens rather than hidden
+ * behind a service name.
+ */
+export interface ComposeRestartPlan {
+  service: string
+  /** Container names, as the dialog will list them. */
+  targets: string[]
+  plan: DockerActionPlan | null
+  /** Why this cannot be offered for this service, or null. */
+  refusal: string | null
+  /** What restarting will not do. Never empty when `plan` is set. */
+  caveats: string[]
+}
+
+export function planComposeServiceRestart(service: ComposeServiceState): ComposeRestartPlan {
+  const name = service.declared.name
+  const targets = service.containers.map((c) => (c.name === '' ? c.id : c.name))
+
+  if (targets.length === 0) {
+    // `restart` on a service with no container does not create one -- it is a
+    // lifecycle verb over containers that exist. The verb that creates is `up`,
+    // which is already offered, so say that rather than running something that
+    // will not do what the button implies.
+    return {
+      service: name,
+      targets,
+      plan: null,
+      refusal: `${name} has no container to restart. Starting it from the file is \`up\`, which is on this panel already.`,
+      caveats: []
+    }
+  }
+  if (targets.length > DOCKER_ACTION_MAX_REFS) {
+    return {
+      service: name,
+      targets,
+      plan: null,
+      refusal: `${name} has ${targets.length} containers, more than the ${DOCKER_ACTION_MAX_REFS} this acts on at once.`,
+      caveats: []
+    }
+  }
+
+  const caveats = [
+    'This restarts the containers as they are. A change to the compose file is not applied by a restart — measured: a container whose file said one thing and whose environment said another came back with the environment it already had. `up` is what applies the file.'
+  ]
+  if (targets.length > 1) {
+    caveats.push(
+      `${name} is ${targets.length} containers and all of them restart, which is what \`docker compose restart ${name}\` would also do.`
+    )
+  }
+
+  return { service: name, targets, plan: planDockerAction('restart', targets), refusal: null, caveats }
 }
 
 // ----------------------------------------------------------------- jobs
