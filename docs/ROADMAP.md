@@ -641,7 +641,13 @@ upgrade stopped halfway; and PDB headroom, `disruptionsAllowed: 0` being the num
 routine drain into a command that hangs to its timeout and is invisible until somebody tries. A
 version or a budget that could not be read is `unknown`, never fine, and `null` never reads as
 zero headroom. Both are counted in the readiness headline: a number that improves as the cluster
-gets harder to read points the wrong way. The deprecated-API scan is still open.
+gets harder to read points the wrong way. Wired into the Kubernetes panel above the node list, which needed two reads that did not exist:
+the API SERVER's version (the probe reads only the client's, deliberately, so it works with no
+cluster — and a kubectl that cannot reach the cluster prints its own version, which read as the
+server's would report perfect skew because the operator's laptop agrees with itself), and a
+cluster-wide PDB read using the drain preflight's OWN parser rather than a second, thinner shape.
+A refused budget read reaches the summary as `null`, never `[]`: an empty list would say the
+cluster has nothing that could block a drain. The deprecated-API scan is still open.
 
 ### 42. Docker and Compose, the last quarter
 

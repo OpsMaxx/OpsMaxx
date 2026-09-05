@@ -697,6 +697,14 @@ export interface K8sOverview {
   statefulSets: K8sRead<K8sWorkload>
   daemonSets: K8sRead<K8sWorkload>
   nodes: K8sRead<K8sNode>
+  /** The API SERVER's version, for the skew report. Null when it could not be
+   *  read -- which includes a kubectl that could not reach the cluster and
+   *  printed its own version instead. */
+  serverVersion: string | null
+  /** Every budget in the cluster, for the readiness report. The drain
+   *  preflight reads the same objects with the same parser; this one is not
+   *  scoped to a node. */
+  pdbs: K8sRead<K8sPdb>
   events: K8sRead<K8sEvent>
 }
 
@@ -812,6 +820,18 @@ export function buildK8sOverviewCommand(context?: string, namespace?: string): s
     // be a lie about what is being read. A namespace-scoped token is denied
     // here, which is a normal answer and is reported as one.
     call('NODES', `get nodes --no-headers${ctx}`),
+    // Item 41's readiness report needs the API SERVER's version, and the probe
+    // reads only the client's (`version --client`, deliberately, so it works
+    // with no cluster at all). `-o json` without `--client` contacts the API
+    // server, so it belongs here with the other cluster reads rather than in
+    // the probe -- and it fails like they do, which the parser reads as
+    // "unknown" rather than as a version.
+    call('SRVVER', `version -o json${ctx}`),
+    // The SAME read and the SAME parser the drain preflight uses, rather than a
+    // thinner second one. Two shapes for one object is two answers to the
+    // question "how much headroom is there", and only one of them would get
+    // fixed when the field moves.
+    call('PDBS', `get poddisruptionbudgets --all-namespaces -o ${DRAIN_PDB_JSONPATH}${ctx}`),
     `${call('EVENTS', `get events${ns} --no-headers -o ${EVENT_COLS}${ctx}`)} | head -c ${EVENT_BYTE_CAP}`
   ].join('; ')
 }
@@ -1097,12 +1117,34 @@ export function parseK8sDiagnosis(
   }
 }
 
+/**
+ * The API server's version out of `kubectl version -o json`.
+ *
+ * Null on anything unexpected, which includes the common case: a kubectl that
+ * could not reach the cluster prints the CLIENT version and an error, and
+ * reading that as the server's would report a cluster in perfect skew because
+ * the operator's laptop agrees with itself.
+ */
+export function parseServerVersion(text: string): string | null {
+  const t = text.trim()
+  if (t === '') return null
+  try {
+    const j = JSON.parse(t) as { serverVersion?: { gitVersion?: unknown } }
+    const v = j.serverVersion?.gitVersion
+    return typeof v === 'string' && v !== '' ? v : null
+  } catch {
+    return null
+  }
+}
+
 export function parseK8sOverview(output: string, exitCode: number | null): K8sOverview {
   return {
     deployments: readBlock(section(output, 'DEPLOY'), (t) => parseWorkloads(t, 'deployment'), exitCode),
     statefulSets: readBlock(section(output, 'STS'), (t) => parseWorkloads(t, 'statefulset'), exitCode),
     daemonSets: readBlock(section(output, 'DS'), (t) => parseWorkloads(t, 'daemonset'), exitCode),
     nodes: readBlock(section(output, 'NODES'), parseNodes, exitCode),
+    serverVersion: parseServerVersion(section(output, 'SRVVER')),
+    pdbs: readBlock(section(output, 'PDBS'), parseDrainPdbs, exitCode),
     events: readBlock(section(output, 'EVENTS'), parseEvents, exitCode)
   }
 }
