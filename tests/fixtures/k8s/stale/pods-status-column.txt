@@ -1,0 +1,2 @@
+bad-job-n8n86   0/1   Error       0     45s
+ok-job-jmjvl    0/1   Completed   0     45s
