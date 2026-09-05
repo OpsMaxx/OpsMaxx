@@ -236,8 +236,14 @@ describe('what the panel refuses', () => {
     await openProject(panelBridge())
     // Asserted as the whole set rather than as an absence of the word "down".
     // An absence check passes the moment somebody spells the button
-    // differently; this fails the moment a third action button appears at all,
+    // differently; this fails the moment another action button appears at all,
     // whatever it is called.
+    //
+    // The restart below is deliberately in this list and is NOT a third compose
+    // verb: it runs `docker restart` against the named containers, on the
+    // container path, for the reasons in `planComposeServiceRestart`. Any
+    // FOURTH button, or a restart whose title stops naming its blast radius,
+    // still fails here.
     const titled = screen
       .getAllByRole('button')
       .map((b) => b.getAttribute('title'))
@@ -245,6 +251,7 @@ describe('what the panel refuses', () => {
     expect(titled).toEqual([
       'docker compose pull for edge. Fetches images; nothing running changes.',
       'docker compose up -d for edge. Starts what is declared; removes nothing.',
+      "Restart cache's container. Every connection they are serving is interrupted, and a change to the compose file is NOT applied by a restart.",
       "Change cache's image tag in the compose file. Nothing is pulled or restarted.",
       "Change worker's image tag in the compose file. Nothing is pulled or restarted."
     ])
@@ -498,5 +505,90 @@ describe('what the compose file actually says', () => {
       restart: 'no'
     })
     expect(document.body.textContent).toContain('not started by a plain up')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Restarting one service. Item 42's row, and everything asserted here was
+// measured against a real compose project first -- see planComposeServiceRestart.
+// ---------------------------------------------------------------------------
+
+const SECOND_CACHE: DockerContainer = { ...RUNNING_CACHE, name: 'edge-cache-2' }
+
+async function openWith(containers: DockerContainer[], over: Record<string, unknown> = {}) {
+  const b = { ...panelBridge(), docker: { act: vi.fn(async () => ({ ok: true })) }, ...over }
+  stubBridge(b)
+  render(<ComposePanel server={SERVER} cfg={{}} containers={containers} sudo={false} />)
+  await userEvent.click(screen.getByText('Find compose files'))
+  await waitFor(() => screen.getByText(/▸ edge/))
+  await userEvent.click(screen.getByText(/▸ edge/))
+  await waitFor(() => expect(screen.getAllByText('cache').length).toBeGreaterThan(0))
+  return b
+}
+
+describe('restarting one compose service', () => {
+  it('offers no restart for a service that has no container', async () => {
+    await openWith([RUNNING_CACHE])
+    // `worker` is declared and has never been created. `restart` does not
+    // create a container, so there is no button rather than a button that
+    // cannot work.
+    expect(screen.queryByTitle(/^Restart worker/)).toBeNull()
+    expect(screen.getByTitle(/^Restart cache/)).toBeTruthy()
+  })
+
+  it('names the containers, and says the file is not applied by a restart', async () => {
+    await openWith([RUNNING_CACHE])
+    await userEvent.click(screen.getByTitle(/^Restart cache/))
+    await waitFor(() => screen.getByText('Restart cache'))
+    expect(screen.getByText('edge-cache-1')).toBeTruthy()
+    expect(screen.getByText(/not applied by a restart/)).toBeTruthy()
+    expect(screen.getByText(/`up` is what applies the file/)).toBeTruthy()
+  })
+
+  it('makes two replicas a typed phrase, and shows both names', async () => {
+    await openWith([RUNNING_CACHE, SECOND_CACHE])
+    await userEvent.click(screen.getByTitle(/^Restart cache/))
+    await waitFor(() => screen.getByText(/This restarts 2 containers/))
+    expect(screen.getByText(/edge-cache-1\s*\n?\s*edge-cache-2/)).toBeTruthy()
+    expect(screen.getByPlaceholderText('Type RESTART to confirm')).toBeTruthy()
+  })
+
+  it('will not run the two-replica restart until the phrase is typed', async () => {
+    const b = await openWith([RUNNING_CACHE, SECOND_CACHE])
+    await userEvent.click(screen.getByTitle(/^Restart cache/))
+    await waitFor(() => screen.getByPlaceholderText('Type RESTART to confirm'))
+    const go = screen.getByText('Restart', { selector: 'button' }) as HTMLButtonElement
+    expect(go.disabled).toBe(true)
+    await userEvent.type(screen.getByPlaceholderText('Type RESTART to confirm'), 'RESTART')
+    await waitFor(() =>
+      expect((screen.getByText('Restart', { selector: 'button' }) as HTMLButtonElement).disabled).toBe(
+        false
+      )
+    )
+    await userEvent.click(screen.getByText('Restart', { selector: 'button' }))
+    await waitFor(() =>
+      expect((b.docker.act as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1)
+    )
+    // BOTH names, not just the one the row is keyed on. `docker compose
+    // restart cache` would restart both containers, and a panel that sent one
+    // while saying "This restarts 2 containers" would be lying in the
+    // direction that leaves half the service on the old process.
+    expect((b.docker.act as ReturnType<typeof vi.fn>).mock.calls[0][2]).toEqual([
+      'edge-cache-1',
+      'edge-cache-2'
+    ])
+  })
+
+  it('sends the container names to the container path, never a compose verb', async () => {
+    const b = await openWith([RUNNING_CACHE])
+    await userEvent.click(screen.getByTitle(/^Restart cache/))
+    await waitFor(() => screen.getByText('Restart cache'))
+    await userEvent.click(screen.getByText('Restart', { selector: 'button' }))
+    await waitFor(() => expect((b.docker.act as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1))
+    const call = (b.docker.act as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(call[1]).toBe('restart')
+    expect(call[2]).toEqual(['edge-cache-1'])
+    // The compose bridge is not how a restart happens.
+    expect(Object.keys(b.compose)).not.toContain('restart')
   })
 })

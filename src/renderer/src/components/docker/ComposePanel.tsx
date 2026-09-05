@@ -1,10 +1,12 @@
 import { useState } from 'react'
-import { Download, FileText, KeyRound, Layers, Pencil, Play, TriangleAlert } from 'lucide-react'
+import { Download, FileText, KeyRound, Layers, Pencil, Play, RotateCw, TriangleAlert } from 'lucide-react'
 import { clsx } from '../../lib/format'
 import { jobApprovalFor, planJob } from '../../../../shared/jobs'
 import {
   COMPOSE_ENV_DISCLOSURE,
   COMPOSE_REFUSALS,
+  planComposeServiceRestart,
+  type ComposeRestartPlan,
   COMPOSE_FAILURE_HELP,
   composeJobSpec,
   joinComposeState,
@@ -113,8 +115,60 @@ export function ComposePanel({
   // pulled twelve images to update one. Empty means every service, which is
   // what compose itself means by no argument.
   const [picked, setPicked] = useState<string[]>([])
+  // Restarting ONE service, which is a container action and not a compose verb.
+  // See planComposeServiceRestart: `docker compose restart` does not apply an
+  // edited file, and the containers are what actually get restarted, so they
+  // are what the dialog names.
+  const [restart, setRestart] = useState<ComposeRestartPlan | null>(null)
+  const [restartPhrase, setRestartPhrase] = useState('')
+  const [restartResult, setRestartResult] = useState<string | null>(null)
+  const [restarting, setRestarting] = useState(false)
 
   if (!server) return null
+
+  /**
+   * The container lifecycle bridge, the same one the container panel uses.
+   *
+   * NOT a compose call. `docker compose restart <svc>` would restart the same
+   * containers and name none of them, and it would leave the operator thinking
+   * their edited file had been applied. See `planComposeServiceRestart`.
+   */
+  const runRestart = async (plan: ComposeRestartPlan): Promise<void> => {
+    setRestarting(true)
+    setRestartResult(null)
+    try {
+      const act = (
+        window.opsmaxx as
+          | {
+              docker?: {
+                act?: (
+                  t: unknown,
+                  a: string,
+                  refs: string[],
+                  o: { sudo: boolean }
+                ) => Promise<{ ok: boolean; detail?: string }>
+              }
+            }
+          | undefined
+      )?.docker?.act
+      if (typeof act !== 'function') {
+        setRestartResult('This build cannot run container actions. Restart the app to rebuild it.')
+        return
+      }
+      const r = await act(cfg, 'restart', plan.targets, { sudo })
+      setRestartResult(
+        r?.ok === true
+          ? `Restarted ${plan.targets.join(', ')}.`
+          : (r?.detail ?? 'The restart did not report success.')
+      )
+    } catch (e) {
+      setRestartResult(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRestarting(false)
+      setRestart(null)
+      setRestartPhrase('')
+    }
+  }
 
   const projectFor = (name: string): ComposeProjectRef | null => {
     const found = list?.ok ? list.projects.find((p) => p.name === name) : undefined
@@ -383,6 +437,20 @@ export function ComposePanel({
                         {s.declared.image ?? (s.declared.build ? 'built from source' : '—')}
                       </span>
                       <span className="grow" />
+                      {s.containers.length > 0 && (
+                        <button
+                          className="icon-btn sm"
+                          disabled={restarting}
+                          title={`Restart ${s.declared.name}'s ${s.containers.length === 1 ? 'container' : `${s.containers.length} containers`}. Every connection they are serving is interrupted, and a change to the compose file is NOT applied by a restart.`}
+                          onClick={() => {
+                            setRestartResult(null)
+                            setRestartPhrase('')
+                            setRestart(planComposeServiceRestart(s))
+                          }}
+                        >
+                          <RotateCw size={13} />
+                        </button>
+                      )}
                       {s.declared.image !== null && (
                         <button
                           className="icon-btn sm"
@@ -642,6 +710,70 @@ export function ComposePanel({
           </div>
         </div>
       )}
+      {restart !== null && (
+        <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+          <div className="r-title">Restart {restart.service}</div>
+          {restart.refusal !== null ? (
+            <>
+              <div className="s-note warn">{restart.refusal}</div>
+              <div className="row-actions">
+                <button className="btn" onClick={() => setRestart(null)}>
+                  Close
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* The CONTAINERS, named. This is the reason the restart goes
+                  through the container path rather than a compose verb: a
+                  service is one row and can be several containers, and all of
+                  them go down. */}
+              <div className="r-sub">
+                {restart.targets.length === 1
+                  ? 'This restarts one container:'
+                  : `This restarts ${restart.targets.length} containers, all of them:`}
+              </div>
+              <pre className="mono" style={{ fontSize: 11, whiteSpace: 'pre-wrap', margin: 0 }}>
+                {restart.targets.join('\n')}
+              </pre>
+              {restart.plan !== null && restart.plan.reasons.length > 0 && (
+                <div className="s-note warn">This {restart.plan.reasons.join(', and ')}.</div>
+              )}
+              {restart.caveats.map((c) => (
+                <div key={c} className="s-note state-unknown">
+                  {c}
+                </div>
+              ))}
+              {restart.plan?.confirmation.kind === 'type-to-confirm' && (
+                <input
+                  className="input mono"
+                  aria-label={`Type ${restart.plan.confirmation.phrase} to confirm`}
+                  placeholder={`Type ${restart.plan.confirmation.phrase} to confirm`}
+                  value={restartPhrase}
+                  onChange={(e) => setRestartPhrase(e.target.value)}
+                />
+              )}
+              <div className="row-actions">
+                <button
+                  className="btn primary"
+                  disabled={
+                    restarting ||
+                    (restart.plan?.confirmation.kind === 'type-to-confirm' &&
+                      restartPhrase.trim() !== restart.plan.confirmation.phrase)
+                  }
+                  onClick={() => void runRestart(restart)}
+                >
+                  Restart
+                </button>
+                <button className="btn" onClick={() => setRestart(null)}>
+                  Cancel
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+      {restartResult !== null && <div className="s-desc mono">{restartResult}</div>}
       {launched !== null && <div className="s-desc">{launched}</div>}
     </div>
   )
