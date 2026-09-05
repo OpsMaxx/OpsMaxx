@@ -873,12 +873,21 @@ as a destroy-guard) or `findmnt`.
    so a zero would draw exactly those hosts as having none left. The storage-budget test moved
    from 604,800 rows to 680,400 — a metric is 12.5% more per host per day, and that number is
    pinned as a literal so spending it fails a test rather than passing quietly.
-2. **Per-mount disk and inode.** `df -kP -l` excluding `tmpfs|devtmpfs|overlay` into
-   `mounts: DiskMount[] | null`. The decision is fact or series: forty mounts as samples is the
-   "5× budget" trap item A warned about, so store mounts as facts and only the *worst* as a
-   series, or accept a `(metric, label)` schema change. `disk` is one number per host today
-   (`webhook.ts:173`); scoping the kind is the second half. `get_server_metrics` prints the
-   extra mounts for free once they are in `HostMetrics`. **1 week, +1 for per-mount series.**
+2. **Per-mount disk and inode — PARSER SHIPPED** (`shared/mounts.ts`), against real `df -kPT`
+   and `df -iPT` from Debian 12 and Alpine 3. The line above was wrong in one detail and it
+   mattered: **`-l` does not exclude tmpfs.** It means "local filesystems", and tmpfs and overlay
+   are local — so `df -kPl` returns every pseudo-filesystem on the box. Types are excluded by
+   NAME from `-T`, which GNU coreutils and busybox both support.
+
+   Two more traps, both measured. Debian mounts a 4 KB tmpfs on `/proc/scsi` with one inode, one
+   used, **`IUse% 100%`** — a rule alarming on a full filesystem would fire on every server for
+   ever, from the first sweep. And Alpine's `df` lists `/dev/vda1` THREE times, because a bind
+   mount is a separate row for one device: summing triples the estate's apparent disk and
+   alerting per row alerts three times. Deduped by device, shortest mount path kept.
+
+   `worstMount` and `worstInodeMount` are separate, because a mail spool runs out of inodes at
+   30% disk used. Still open: the sampler wiring, `HostMetrics.mounts`, and scoping the `disk`
+   alert kind.
 3. **LVM, mdraid, zfs, SMART as facts and state alerts.** `lvs`/`vgs` for `vg-free`,
    `/proc/mdstat` for `[U_]`, `zpool status -x`, `smartctl -H -j` (root and a package —
    `absent` vs `cannot` is what the facts framework already models). Kinds `raid-degraded`,

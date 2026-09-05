@@ -1,0 +1,6 @@
+Filesystem     Type     Inodes   IUsed   IFree IUse% Mounted on
+overlay        overlay 3907584 1132102 2775482   29% /
+tmpfs          tmpfs   3071447      16 3071431    1% /dev
+shm            tmpfs   3071447       1 3071446    1% /dev/shm
+/dev/vda1      ext4    3907584 1132102 2775482   29% /etc/hosts
+tmpfs          tmpfs         1       1       0  100% /proc/scsi

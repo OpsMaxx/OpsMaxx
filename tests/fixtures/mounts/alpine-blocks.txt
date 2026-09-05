@@ -1,0 +1,13 @@
+Filesystem           Type       1024-blocks    Used Available Capacity Mounted on
+overlay              overlay     61202244  35400708  22660212  61% /
+tmpfs                tmpfs          65536         0     65536   0% /dev
+shm                  tmpfs          65536         0     65536   0% /dev/shm
+/dev/vda1            ext4        61202244  35400708  22660212  61% /etc/resolv.conf
+/dev/vda1            ext4        61202244  35400708  22660212  61% /etc/hostname
+/dev/vda1            ext4        61202244  35400708  22660212  61% /etc/hosts
+tmpfs                tmpfs          65536         0     65536   0% /proc/interrupts
+tmpfs                tmpfs          65536         0     65536   0% /proc/kcore
+tmpfs                tmpfs          65536         0     65536   0% /proc/keys
+tmpfs                tmpfs              4         0         4   0% /proc/scsi
+tmpfs                tmpfs          65536         0     65536   0% /proc/timer_list
+tmpfs                tmpfs              4         0         4   0% /sys/firmware
