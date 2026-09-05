@@ -15,6 +15,13 @@ import {
   SERVICE_ACTIONS,
   type ServiceAction
 } from '../../../../shared/serviceStep'
+import {
+  checkPackageStep,
+  packageJobSpec,
+  PACKAGE_ACTIONS,
+  type PackageAction
+} from '../../../../shared/packageStep'
+import { PACKAGE_MANAGERS, type PackageManager } from '../../../../shared/hostFacts'
 import { jobApprovalFor, planJob } from '../../../../shared/jobs'
 import { useFleet } from '../../store/fleet'
 import type { JobDetail, JobHostResult, JobProgress, JobRecord } from '../../../../shared/jobs'
@@ -69,10 +76,17 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
   const [phrase, setPhrase] = useState('')
   // Item 34a. A free-text step is a line somebody typed; a typed step is an
   // action and a unit, checked before the command exists.
-  const [mode, setMode] = useState<'command' | 'service'>('command')
+  const [mode, setMode] = useState<'command' | 'service' | 'package'>('command')
   const [action, setAction] = useState<ServiceAction>('restart')
   const [unit, setUnit] = useState('')
   const [sudo, setSudo] = useState(true)
+  // Item 34b. The manager is chosen ONCE for the job, not per server: a job is
+  // one step list for every server in it, and `verifyApproval` compares that
+  // text literally, so a command substituted per server could not be checked
+  // against its own approval at all.
+  const [manager, setManager] = useState<PackageManager>('apt')
+  const [pkgAction, setPkgAction] = useState<PackageAction>('install')
+  const [pkgNames, setPkgNames] = useState('')
   const openId = useRef<string | null>(null)
   const sampled = useFleet((s) => s.hosts)
 
@@ -161,12 +175,14 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
   })()
 
   const serviceCheck = checkServiceStep(action, unit, knownUnits)
+  const packageCheck = checkPackageStep(manager, pkgAction, pkgNames.split(/[\s,]+/))
+  const typedCheck = mode === 'service' ? serviceCheck : packageCheck
   const check =
-    mode === 'service'
-      ? picked.length === 0
+    mode === 'command'
+      ? checkJobDraft(draft, picked.length)
+      : picked.length === 0
         ? ({ ok: false, reason: 'Pick at least one server.' } as const)
-        : serviceCheck
-      : checkJobDraft(draft, picked.length)
+        : typedCheck
 
   const review = (): void => {
     if (!check.ok) return
@@ -175,7 +191,12 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
       chosen.map((s) => ({ serverId: s.id, serverName: s.name })),
       draft.waveSize
     )
-    const spec = mode === 'service' ? serviceJobSpec(action, unit, { sudo }) : composeJobSpec(draft)
+    const spec =
+      mode === 'service'
+        ? serviceJobSpec(action, unit, { sudo })
+        : mode === 'package'
+          ? packageJobSpec(manager, pkgAction, pkgNames.split(/[\s,]+/), { sudo })
+          : composeJobSpec(draft)
     setPhrase('')
     setPending({ spec, targets, plan: planJob(spec, targets) })
   }
@@ -307,9 +328,68 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
             >
               Service action
             </button>
+            <button
+              className={clsx('btn sm', mode === 'package' && 'primary')}
+              aria-pressed={mode === 'package'}
+              onClick={() => setMode('package')}
+            >
+              Package
+            </button>
           </div>
 
-          {mode === 'service' ? (
+          {mode === 'package' ? (
+            <>
+              <div className="row-actions" style={{ gap: 6 }}>
+                <select
+                  className="input"
+                  aria-label="Package action"
+                  value={pkgAction}
+                  onChange={(e) => setPkgAction(e.target.value as PackageAction)}
+                >
+                  {PACKAGE_ACTIONS.map((a) => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="input"
+                  aria-label="Package manager"
+                  value={manager}
+                  onChange={(e) => setManager(e.target.value as PackageManager)}
+                >
+                  {PACKAGE_MANAGERS.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className="input mono"
+                  aria-label="Packages"
+                  placeholder="nginx openssl"
+                  value={pkgNames}
+                  onChange={(e) => setPkgNames(e.target.value)}
+                />
+              </div>
+              <label className="r-sub">
+                <input
+                  type="checkbox"
+                  aria-label="Run as root with sudo"
+                  checked={sudo}
+                  onChange={(e) => setSudo(e.target.checked)}
+                />{' '}
+                Run as root (<code>sudo -n</code>)
+              </label>
+              {/* Chosen once for the whole job, and said so: a server running a
+                  different manager is not a target for this job, because the
+                  approval covers this exact command text. */}
+              <div className="r-sub faint">
+                The command is built for <b>{manager}</b> and is the same on every server you
+                picked. Do not include servers that run a different package manager.
+              </div>
+            </>
+          ) : mode === 'service' ? (
             <>
               <div className="row-actions" style={{ gap: 6 }}>
                 <select

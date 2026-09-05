@@ -42,6 +42,7 @@ const MODULE_FILES: Record<string, string[]> = {
   jobs: [
     'src/shared/jobCompose.ts',
     'src/shared/serviceStep.ts',
+    'src/shared/packageStep.ts',
     'src/renderer/src/components/monitor/JobsPanel.tsx'
   ],
   fleetSearch: ['src/renderer/src/lib/fleetSearch.ts', 'src/renderer/src/components/monitor/FleetSearch.tsx'],

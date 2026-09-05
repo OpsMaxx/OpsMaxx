@@ -323,3 +323,55 @@ describe('rolling a job back', () => {
     expect(req.spec.title).toContain('Roll back')
   })
 })
+
+// Item 34b, through the panel.
+describe('the typed package step', () => {
+  async function packageMode(stub: Record<string, unknown>): Promise<void> {
+    stubBridge(stub)
+    render(<JobsPanel servers={[server(0)]} />)
+    await userEvent.click(screen.getByRole('button', { name: /New job/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Package' }))
+    await userEvent.click(screen.getByRole('button', { name: 'web-0' }))
+  }
+
+  it('builds the command for the chosen manager, and verifies afterwards', async () => {
+    const stub = jobsStub()
+    await packageMode(stub)
+    await userEvent.type(screen.getByLabelText('Packages'), 'nginx')
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Run' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }))
+    await waitFor(() => expect(runOf(stub)).toHaveBeenCalled())
+    const spec = (runOf(stub).mock.calls[0][0] as { spec: { steps: { command: string }[] } }).spec
+    expect(spec.steps[0].command).toContain("apt-get -y -o Dpkg::Options::=--force-confdef")
+    expect(spec.steps[0].command).toContain("'nginx'")
+    // `apt-get install` exits 0 having installed nothing when the name matched
+    // a virtual package, so the second step asks what is actually there.
+    expect(spec.steps[1].command).toContain('dpkg-query')
+  })
+
+  it('says a manager cannot hold rather than building a command that does nothing', async () => {
+    const stub = jobsStub()
+    await packageMode(stub)
+    await userEvent.selectOptions(screen.getByLabelText('Package action'), 'hold')
+    await userEvent.selectOptions(screen.getByLabelText('Package manager'), 'apk')
+    await userEvent.type(screen.getByLabelText('Packages'), 'nginx')
+    expect(document.body.textContent).toContain('no way to hold a package')
+    expect((screen.getByRole('button', { name: 'Review' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('refuses a package name that is not one', async () => {
+    const stub = jobsStub()
+    await packageMode(stub)
+    await userEvent.type(screen.getByLabelText('Packages'), 'nginx;')
+    expect(document.body.textContent).toContain('is not a package name')
+  })
+
+  it('warns that the command is the same on every server picked', async () => {
+    // A job is one step list for every server in it, and the approval covers
+    // that exact text.
+    const stub = jobsStub()
+    await packageMode(stub)
+    expect(document.body.textContent).toContain('different package manager')
+  })
+})
