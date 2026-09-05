@@ -111,6 +111,7 @@ const MODULE_FILES: Record<string, string[]> = {
   // make visible.
   drift: [
     'src/shared/driftWatch.ts',
+    'src/main/services/driftWatchStore.ts',
     'src/shared/drift.ts',
     'src/main/services/drift.ts',
     'src/renderer/src/components/monitor/DriftPanel.tsx'

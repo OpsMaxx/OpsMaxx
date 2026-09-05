@@ -2,6 +2,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FileDiff, Info, Pin, RefreshCw } from 'lucide-react'
 import { bridgeHas } from '../../lib/bridge'
 import { openSettings } from '../../store/nav'
+import { useApp } from '../../store/app'
+import {
+  checkDriftWatch,
+  driftWatchApprovalSentence,
+  driftWatchId,
+  driftWatchPhrase,
+  verifyDriftWatchApproval,
+  type DriftWatchProposal
+} from '../../../../shared/driftWatch'
 import { clsx } from '../../lib/format'
 import type { Server } from '../../types'
 import {
@@ -15,6 +24,7 @@ import {
   driftRule,
   type DriftHostResult,
   type DriftVerdict,
+  type DriftWatch,
   type HostDrift
 } from '../../../../shared/drift'
 
@@ -135,6 +145,52 @@ function Row({
 export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Element {
   const [entries, setEntries] = useState<Record<string, Entry>>({})
   const [watchId, setWatchId] = useState<string>(DRIFT_WATCHES[0].id)
+  // Item 46's operator-chosen watches, beside the catalogue rather than instead
+  // of it. Re-validated here so a settings blob edited by hand cannot put a
+  // path in the picker -- and AGAIN in main, which is the check that counts:
+  // see services/driftWatchStore.ts.
+  const stored = useApp((st) => st.settings.driftWatches)
+  const setSettings = useApp((st) => st.setSettings)
+  const custom = useMemo(() => {
+    const out: DriftWatch[] = []
+    for (const p of stored) {
+      const c = checkDriftWatch(p, [...DRIFT_WATCHES, ...out])
+      if (c.ok) out.push(c.watch)
+    }
+    return out
+  }, [stored])
+  const allWatches = useMemo(() => [...DRIFT_WATCHES, ...custom], [custom])
+  const [adding, setAdding] = useState(false)
+  const [draft, setDraft] = useState<DriftWatchProposal>({
+    path: '',
+    label: '',
+    comment: '#',
+    rules: [...DRIFT_RULE_ORDER]
+  })
+  const [phrase, setPhrase] = useState('')
+  const check = checkDriftWatch(draft, allWatches)
+
+  const addWatch = (): void => {
+    // Both guards are the function's own preconditions and BOTH are currently
+    // redundant with the disabled button below -- a mutation removing the
+    // approval check survives the tests for exactly that reason, and it is
+    // recorded here rather than defended with a test that would only be
+    // testing the mutation. They stay because a disabled button is a UI state
+    // and this is a function: the next caller may not be a button. What is NOT
+    // redundant is main's own re-validation, which is the check that counts —
+    // see services/driftWatchStore.ts.
+    if (!check.ok) return
+    if (!verifyDriftWatchApproval(draft.path.trim(), phrase)) return
+    setSettings({ driftWatches: [...stored, { ...draft, path: draft.path.trim() }] })
+    setAdding(false)
+    setPhrase('')
+    setDraft({ path: '', label: '', comment: '#', rules: [...DRIFT_RULE_ORDER] })
+  }
+
+  const removeWatch = (path: string): void => {
+    setSettings({ driftWatches: stored.filter((p) => p.path.trim() !== path) })
+    if (watchId === driftWatchId(path)) setWatchId(DRIFT_WATCHES[0].id)
+  }
   const [pinned, setPinned] = useState<string | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [showRules, setShowRules] = useState(false)
@@ -168,7 +224,7 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
     }
   }
 
-  const watch = DRIFT_WATCHES.find((x) => x.id === watchId) ?? DRIFT_WATCHES[0]
+  const watch = allWatches.find((x) => x.id === watchId) ?? allWatches[0]
 
   const comparison = useMemo(
     () =>
@@ -206,12 +262,15 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
             value={watchId}
             onChange={(e) => setWatchId(e.target.value)}
           >
-            {DRIFT_WATCHES.map((x) => (
+            {allWatches.map((x) => (
               <option key={x.id} value={x.id}>
                 {x.label}
               </option>
             ))}
           </select>
+          <button className="btn ghost sm" onClick={() => setAdding((a) => !a)}>
+            {adding ? 'Cancel' : 'Watch a file'}
+          </button>
           <button
             className="btn primary"
             disabled={busy || servers.length === 0}
@@ -230,6 +289,79 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
       <div className="panel-note" data-testid="drift-no-push">
         {DRIFT_NO_PUSH}
       </div>
+
+      {adding && (
+        <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+          <div className="r-title">Watch another file</div>
+          <input
+            className="input mono"
+            aria-label="Path"
+            placeholder="/etc/logrotate.conf"
+            value={draft.path}
+            onChange={(e) => setDraft({ ...draft, path: e.target.value })}
+          />
+          <input
+            className="input"
+            aria-label="Label"
+            placeholder="What it is, in one line"
+            value={draft.label}
+            onChange={(e) => setDraft({ ...draft, label: e.target.value })}
+          />
+          {/* The refusal, with its own sentence. Every one of these is a
+              different thing to do about it, and "invalid path" would be none
+              of them. */}
+          {!check.ok ? (
+            draft.path.trim() === '' ? (
+              <div className="s-note faint">A path under /etc.</div>
+            ) : (
+              <div className="s-note is-alarm">{check.detail}</div>
+            )
+          ) : (
+            <>
+              {/* What is being asserted, said before it is typed. */}
+              <div className="s-note warn">{driftWatchApprovalSentence(check.watch.path)}</div>
+              <input
+                className="input mono"
+                aria-label={`Type ${driftWatchPhrase(check.watch.path)} to confirm`}
+                placeholder={driftWatchPhrase(check.watch.path)}
+                value={phrase}
+                onChange={(e) => setPhrase(e.target.value)}
+              />
+            </>
+          )}
+          <div className="row-actions">
+            <button
+              className="btn primary"
+              disabled={!check.ok || !verifyDriftWatchApproval(draft.path.trim(), phrase)}
+              onClick={addWatch}
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      )}
+
+      {custom.length > 0 && (
+        <table className="mini-table">
+          <tbody>
+            {custom.map((w) => (
+              <tr key={w.id}>
+                <td className="mono">{w.path}</td>
+                <td className="faint">{w.label}</td>
+                <td>
+                  <button
+                    className="btn ghost sm"
+                    aria-label={`Stop watching ${w.path}`}
+                    onClick={() => removeWatch(w.path)}
+                  >
+                    Stop watching
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
 
       {collected === 0 ? (
         <div className="panel-empty">

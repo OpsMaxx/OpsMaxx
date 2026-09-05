@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
 import { FLEET_INTERVAL_DEFAULT_MS } from '../../../shared/fleet'
 import { defaultModuleState, type ModuleState } from '../../../shared/modules'
+import type { DriftWatchProposal } from '../../../shared/driftWatch'
 import { forgetServer } from './serverCleanup'
 import type {
   ActivityView,
@@ -175,6 +176,18 @@ export interface AppSettings {
    * an honest renderer.
    */
   accessWriteEnabled: boolean
+  /**
+   * Configuration files the operator added to the drift read, beyond the fixed
+   * catalogue -- item 46.
+   *
+   * Stored as the PROPOSAL, not as a `DriftWatch`: the id, the label fallback
+   * and the rule ordering are derived by `checkDriftWatch`, and a settings blob
+   * that could assert them would be asserting things main is about to
+   * recompute. Main re-validates every entry before the collector sees it --
+   * services/driftWatchStore.ts -- because the path ends up inside a shell
+   * script and a renderer-side check constrains only an honest renderer.
+   */
+  driftWatches: DriftWatchProposal[]
   vaultAutoBiometricPrompt: boolean
   // Tightens row heights and paddings across the app.
   compactDensity: boolean
@@ -226,6 +239,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   webhookAlertsEnabled: false,
   webhookNotifyOnResolved: true,
   accessWriteEnabled: false,
+  driftWatches: [],
   vaultAutoBiometricPrompt: true,
   compactDensity: false,
   externalEditorCommand: 'code',
