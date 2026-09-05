@@ -395,6 +395,62 @@ export function ComposePanel({
                     </div>
                   ))}
 
+                  {/* Item 42. `depends_on`, `restart:`, ports and profiles have
+                      been parsed since the parser was written and none of them
+                      reached the screen, so the panel showed a name, a state
+                      and an image and nothing about what the file actually
+                      says. Rendered under the row rather than in it: these are
+                      the answers to "why did that not start" and they are read
+                      once, not scanned. */}
+                  {/* EVERY service, not only the ones with something set. A
+                      service with no `restart:` is the finding rather than the
+                      blank row: compose defaults to `no`, so it does not come
+                      back after a reboot and nothing else on this screen says
+                      so.
+
+                      `view.services` holds every DECLARED service, carrying
+                      state `missing` when it has no container -- `view.missing`
+                      is only the names of those, not a separate set. So a
+                      service in a profile, which has no container by design, is
+                      in here and gets its explanation. */}
+                  {view !== null && view.services.length > 0 && (
+                    <table className="mini-table">
+                      <tbody>
+                        {view.services
+                          .map((s) => (
+                            <tr key={`d-${s.declared.name}`}>
+                              <td className="mono">{s.declared.name}</td>
+                              <td>
+                                {/* No `restart:` at all is the finding, not a
+                                    blank: compose defaults to `no`, so a
+                                    service without one does not come back
+                                    after a reboot. */}
+                                <span className={clsx('chip', s.declared.restart === null && 'warn')}>
+                                  restart: {s.declared.restart ?? 'no (default)'}
+                                </span>
+                                {s.declared.dependsOn.length > 0 && (
+                                  <span className="chip">after {s.declared.dependsOn.join(', ')}</span>
+                                )}
+                                {s.declared.ports.map((port) => (
+                                  <span key={port} className="chip mono">
+                                    {port}
+                                  </span>
+                                ))}
+                                {s.declared.profiles.length > 0 && (
+                                  <span className="chip">
+                                    {/* A service in a profile does NOT start
+                                        with a plain `up`, which is the
+                                        commonest reason one is "missing". */}
+                                    profile {s.declared.profiles.join(', ')} — not started by a plain up
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  )}
+
                   {view !== null && view.missing.length > 0 && (
                     <div className="faint" style={{ fontSize: 11 }}>
                       Declared but never created: {view.missing.join(', ')}. These have no container
