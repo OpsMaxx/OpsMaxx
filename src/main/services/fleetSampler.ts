@@ -148,6 +148,10 @@ export function metricsToSamples(host: HostMetrics): Record<string, number> {
     // that was genuinely quiet.
     ...(host.cpu === null ? {} : { cpu: host.cpu }),
     ...(host.memPct === null ? {} : { memPct: host.memPct }),
+    // Same guard as cpu, and it is needed more here: a filesystem that reports
+    // no inode figures at all -- btrfs and zfs among them -- answers `df -i`
+    // with dashes, and a zero would draw those hosts as having none left.
+    ...(host.inodePct === null ? {} : { inodePct: host.inodePct }),
     memUsed: host.memUsed,
     diskPct: host.diskPct,
     diskUsed: host.diskUsed,

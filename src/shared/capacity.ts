@@ -48,7 +48,7 @@
 
 /** The three series a capacity question is asked about. A subset of item A's
  *  METRICS, by name, checked against it where main wires the two together. */
-export const CAPACITY_METRICS = ['cpu', 'memPct', 'diskPct'] as const
+export const CAPACITY_METRICS = ['cpu', 'memPct', 'diskPct', 'inodePct'] as const
 
 export type CapacityMetric = (typeof CAPACITY_METRICS)[number]
 
@@ -591,7 +591,12 @@ export function buildCapacityReport(
  */
 export const CAPACITY_THRESHOLDS: Partial<Record<CapacityMetric, number>> = {
   diskPct: 90,
-  memPct: 90
+  memPct: 90,
+  // The same 90 as disk, and for the same reason -- but the failure it
+  // forecasts is nastier. A filesystem out of inodes cannot create a file while
+  // `df -h` still reports free space, so the error every program gives is "No
+  // space left on device" on a disk that visibly has some.
+  inodePct: 90
 }
 
 /**
