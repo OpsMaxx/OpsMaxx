@@ -391,6 +391,11 @@ describe('the AI permission model has no word for a local shell', () => {
     // addresses and ports a host accepts traffic on belongs, not because a
     // bridge tool answers with it.
     'firewallRules',
+  // Item 36b. A HUMAN-ONLY consent line, like firewallRules above it: no MCP
+  // tool exposes sudoers whatever it is set to. It is here because the grid it
+  // lives in is shared, not because an agent can reach it -- and it is the
+  // shortest description of how to take the machine, so it stays that way.
+  'sudoersRead',
     'manageServers',
     'vpnControl'
   ]

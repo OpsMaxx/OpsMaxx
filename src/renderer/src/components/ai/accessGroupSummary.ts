@@ -49,6 +49,10 @@ const PHRASING: Record<AiCapability, Phrasing> = {
   // "collect", not "read": no agent can read these at all, and the verb has to
   // survive being read quickly. What the grant does is let OpsMaxx's own
   // hourly posture probe ASK the host for its rule lines.
+  sudoersRead: {
+    verb: 'collect this server’s sudoers rules',
+    gerund: 'collecting this server’s sudoers rules'
+  },
   firewallRules: {
     verb: 'collect this server’s firewall rule list',
     gerund: 'collecting this server’s firewall rule list'

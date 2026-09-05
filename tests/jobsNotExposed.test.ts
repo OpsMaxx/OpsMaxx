@@ -602,6 +602,11 @@ describe('the AI permission model has no word for a job', () => {
     // accepts traffic on — for a person to look at. The bridge cannot reach
     // them at any setting; section 4 below holds that by name.
     'firewallRules',
+  // Item 36b. A HUMAN-ONLY consent line, like firewallRules above it: no MCP
+  // tool exposes sudoers whatever it is set to. It is here because the grid it
+  // lives in is shared, not because an agent can reach it -- and it is the
+  // shortest description of how to take the machine, so it stays that way.
+  'sudoersRead',
     'manageServers',
     'vpnControl'
   ]
