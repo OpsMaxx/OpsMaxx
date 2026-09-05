@@ -676,7 +676,9 @@ by a SETTING (`settings.k8sWatch`), empty by default: nothing can guess which se
 kubeconfig, and trying every server would run `kubectl` across the estate every two minutes to
 find out. The reading works off `K8sPod` from the read the app already makes, via a structural
 minimum — naming that type in the probe module would mean importing `shared/kubernetes`, which is
-the one thing it may not do. Still open: a UI for adding a watch.
+the one thing it may not do. The Kubernetes panel offers the watch, keyed on the context to match
+how the alert is keyed, and says what watching does — including that a restart COUNT is not a
+restart RATE, which is why the first check after adding one says nothing. Item 40 is complete.
 
 **Size.** The remaining wiring, now that the probe's shape is settled by measurement.
 

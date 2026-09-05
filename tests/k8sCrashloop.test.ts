@@ -181,3 +181,33 @@ describe('the crashloop poll is actually wired', () => {
     expect(src()).toContain('if (r.bad !== null)')
   })
 })
+
+describe('a watch can be added, or the alert fires for nobody', () => {
+  // A setting with no UI is a feature that alerts on nothing, for every user,
+  // for ever. This is the other half of the poll.
+  const panel = (): string => {
+    const { readFileSync } = require('node:fs') as typeof import('node:fs')
+    const { resolve } = require('node:path') as typeof import('node:path')
+    return readFileSync(
+      resolve(__dirname, '..', 'src/renderer/src/components/kubernetes/KubernetesPanel.tsx'),
+      'utf8'
+    )
+  }
+
+  it('writes the same setting the poll reads', () => {
+    expect(panel()).toContain('k8sWatch')
+    expect(panel()).toContain('setSettings({ k8sWatch')
+  })
+
+  it('keys the watch on the context, matching how the alert is keyed', () => {
+    // Keyed on the server instead would watch one cluster three times from
+    // three admin boxes.
+    expect(panel()).toMatch(/w\.context !== watchContext/)
+  })
+
+  it('says what watching does and what it does not', () => {
+    // Specifically that a restart COUNT is not a restart RATE, since that is
+    // the whole reason the first sweep says nothing.
+    expect(panel()).toContain('restart count goes up between checks')
+  })
+})
