@@ -700,10 +700,16 @@ the store is "could not tell", and the patch gate needs fresh samples. **Do not*
 refuse to start reboots outside a window. 1–1.5 weeks. A window is a standing authorisation to
 be silent, so the revocation argument keeps it human-only.
 
-**Rollback on the approval.** An optional `rollback: JobStep[]` on `JobSpec`, shown in the
-dialog, covered by the same `verifyJobApproval` hash, run only by a human pressing "roll back"
-under a *second* approval — a second blast radius. The gate-halt path must never auto-run it.
-1 week.
+**Rollback on the approval — SHIPPED.** `rollback?: JobStep[]` on `JobSpec`, written in the
+composer beside the steps because that is the only moment anybody knows how to undo the thing.
+Inside the approval hash via `approvalCommands()` — ONE derivation called by the mint and the
+verify, since they are two halves of a literal comparison — and prefixed `rollback: ` so a
+one-step job with an undo cannot produce the same approved list as a two-step job. Editing or
+removing the rollback after the approval is minted fails verification, which is the property the
+"covered by the same hash" line was asking for. Running it composes an ordinary job from those
+steps and goes through the same dialog, so `planJob` grades it on its OWN commands: undoing a
+`start` with a `stop` is still a stop. Offered only once the job has stopped, and a test asserts
+`jobRunner.ts` contains no reference to the field at all.
 
 **Deployment rollback.** Compose: a revert is an image edit to the previous tag, and the app
 does not remember the previous tag — a small per-project "last applied image" record is new.

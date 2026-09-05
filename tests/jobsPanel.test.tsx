@@ -268,3 +268,58 @@ describe('the typed service step', () => {
     expect((screen.getByRole('button', { name: 'Review' }) as HTMLButtonElement).disabled).toBe(false)
   })
 })
+
+// Item 44, through the panel.
+describe('rolling a job back', () => {
+  const withRollback = {
+    id: 'j9',
+    title: 'Restart nginx',
+    state: 'done',
+    risk: 'elevated',
+    spec: { steps: [{ command: 'systemctl restart nginx' }], rollback: [{ command: 'systemctl stop nginx' }] }
+  }
+
+  async function listing(stub: Record<string, unknown>, rows: unknown[]): Promise<void> {
+    ;(stub.jobs as { list: ReturnType<typeof vi.fn> }).list = vi.fn(async () => rows)
+    stubBridge(stub)
+    render(<JobsPanel servers={[server(0)]} />)
+    await userEvent.click(screen.getByRole('button', { name: /Read jobs/ }))
+    await waitFor(() => screen.getByText(/Restart nginx/))
+  }
+
+  it('offers it only on a job that has one, and only once that job has stopped', async () => {
+    const stub = jobsStub()
+    await listing(stub, [
+      withRollback,
+      { ...withRollback, id: 'j8', title: 'Still going', state: 'running' },
+      { id: 'j7', title: 'No undo', state: 'done', risk: 'ordinary', spec: { steps: [] } }
+    ])
+    // Rolling back underneath a run that is still going is two jobs racing on
+    // one server.
+    expect(screen.getAllByRole('button', { name: /Roll back/ })).toHaveLength(1)
+  })
+
+  it('asks again before running it, and never runs it from the click alone', async () => {
+    const stub = jobsStub()
+    await listing(stub, [withRollback])
+    await userEvent.click(screen.getByRole('button', { name: /Roll back/ }))
+    await waitFor(() => screen.getByRole('button', { name: 'Run' }))
+    expect(runOf(stub)).not.toHaveBeenCalled()
+    // Graded on the ROLLBACK's own commands: undoing a start with a stop is
+    // still a stop, and `systemctl stop` is destructive.
+    expect(screen.getByLabelText(/Type RUN to confirm/)).toBeTruthy()
+  })
+
+  it('runs the rollback steps as their own job once confirmed', async () => {
+    const stub = jobsStub()
+    await listing(stub, [withRollback])
+    await userEvent.click(screen.getByRole('button', { name: /Roll back/ }))
+    await waitFor(() => screen.getByRole('button', { name: 'Run' }))
+    await userEvent.type(screen.getByLabelText(/Type RUN to confirm/), 'RUN')
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }))
+    await waitFor(() => expect(runOf(stub)).toHaveBeenCalled())
+    const req = runOf(stub).mock.calls[0][0] as { spec: { steps: { command: string }[]; title: string } }
+    expect(req.spec.steps.map((s) => s.command)).toEqual(['systemctl stop nginx'])
+    expect(req.spec.title).toContain('Roll back')
+  })
+})

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ListChecks, Plus, RefreshCw, Square } from 'lucide-react'
+import { ListChecks, Plus, RefreshCw, Square, Undo2 } from 'lucide-react'
 import { clsx } from '../../lib/format'
 import { sshHopsFor } from '../../lib/ssh'
 import {
@@ -180,6 +180,31 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
     setPending({ spec, targets, plan: planJob(spec, targets) })
   }
 
+  /**
+   * Compose the rollback as its own job, and put it through the same dialog.
+   *
+   * NOT a resume and not a special execution path: it becomes an ordinary job
+   * whose steps are the rollback steps, so `planJob` grades it on what it
+   * actually does. Undoing a `start` with a `stop` is still a stop, and it gets
+   * the confirmation a stop deserves rather than the one the forward job got.
+   */
+  const rollBack = (j: JobRecord): void => {
+    if (!j.spec.rollback || j.spec.rollback.length === 0 || servers.length === 0) return
+    const chosen = servers.filter((s) => picked.includes(s.id))
+    const targets = assignWaves(
+      (chosen.length > 0 ? chosen : servers).map((s) => ({ serverId: s.id, serverName: s.name })),
+      0
+    )
+    const spec = {
+      kind: 'command' as const,
+      title: `Roll back — ${j.title}`,
+      steps: j.spec.rollback
+    }
+    setPhrase('')
+    setComposing(false)
+    setPending({ spec, targets, plan: planJob(spec, targets) })
+  }
+
   const start = async (): Promise<void> => {
     if (!pending) return
     const b = bridge()
@@ -339,6 +364,18 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
                 value={draft.steps}
                 onChange={(e) => setDraft({ ...draft, steps: e.target.value })}
               />
+              {/* Item 44. Written down NOW, because now is the only moment
+                  anybody knows how to undo this. It is approved with the job
+                  -- it is inside the approval record -- and it never runs on
+                  its own: not on a gate halt, not on a failure. */}
+              <textarea
+                className="input mono"
+                aria-label="Rollback"
+                rows={3}
+                placeholder={'How to undo this, one command per line. Optional.\nIt is never run automatically — only when you press Roll back and confirm again.'}
+                value={draft.rollback}
+                onChange={(e) => setDraft({ ...draft, rollback: e.target.value })}
+              />
             </>
           )}
 
@@ -425,6 +462,14 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
               .map((s) => `${s.command}${s.reboot ? '   # declared: restarts the machine' : ''}`)
               .join('\n')}
           </pre>
+          {pending.spec.rollback && (
+            <div className="s-note">
+              Rollback, approved with this job and run only if you ask for it:
+              <pre className="mono" style={{ fontSize: 11, whiteSpace: 'pre-wrap', margin: 0 }}>
+                {pending.spec.rollback.map((st) => st.command).join('\n')}
+              </pre>
+            </div>
+          )}
           <div className="r-sub faint mono">
             {pending.targets.map((t) => `${t.serverName} (${t.cohort})`).join('  ')}
           </div>
@@ -482,6 +527,19 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
                   onClick={() => void bridge()?.cancel?.(j.id)}
                 >
                   <Square size={12} />
+                </button>
+              )}
+              {/* A SECOND blast radius, so a second confirmation, graded on
+                  the rollback's own commands rather than on the job's. Offered
+                  only once the job has stopped: rolling back underneath a run
+                  that is still going is two jobs racing on one server. */}
+              {j.spec.rollback && j.state !== 'running' && j.state !== 'queued' && (
+                <button
+                  className="btn ghost sm"
+                  title={`Run the rollback that was approved with ${j.title}. It asks again.`}
+                  onClick={() => rollBack(j)}
+                >
+                  <Undo2 size={12} /> Roll back
                 </button>
               )}
             </div>

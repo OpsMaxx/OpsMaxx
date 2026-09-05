@@ -35,6 +35,9 @@ export interface JobDraft {
    *  a declared reboot gets the reboot-and-wait treatment and a sniffed one
    *  gets `unreachable`. */
   rebootLast: boolean
+  /** How to undo it. Written down at the same time as the job, because that is
+   *  the only moment anybody knows -- item 44. Never run automatically. */
+  rollback: string
 }
 
 export const EMPTY_JOB_DRAFT: JobDraft = {
@@ -42,7 +45,8 @@ export const EMPTY_JOB_DRAFT: JobDraft = {
   steps: '',
   waveSize: 0,
   gate: false,
-  rebootLast: false
+  rebootLast: false,
+  rollback: ''
 }
 
 /**
@@ -77,6 +81,11 @@ export function checkJobDraft(draft: JobDraft, targetCount: number): JobDraftChe
   if (steps.length === 0) return { ok: false, reason: 'Add at least one command. Blank lines and # comments do not count.' }
   if (steps.length > JOB_MAX_STEPS) {
     return { ok: false, reason: `${steps.length} steps is more than the ${JOB_MAX_STEPS} this dialog can show you at once, and a confirmation nobody can read is not one.` }
+  }
+
+  const rollback = parseJobSteps(draft.rollback)
+  if (rollback.length > JOB_MAX_STEPS) {
+    return { ok: false, reason: `The rollback has more than ${JOB_MAX_STEPS} steps, which is more than the dialog can show you.` }
   }
 
   if (targetCount === 0) return { ok: false, reason: 'Pick at least one server.' }
@@ -114,11 +123,16 @@ export function composeJobSpec(draft: JobDraft): JobSpec {
     const last = i === commands.length - 1
     return draft.rebootLast && last ? { command, reboot: true } : { command }
   })
+  const rollback = parseJobSteps(draft.rollback).map((command) => ({ command }))
   return {
     kind: 'command',
     title: draft.title.trim(),
     steps,
-    ...(draft.gate ? { gate: 'health' as const } : {})
+    ...(draft.gate ? { gate: 'health' as const } : {}),
+    // Absent rather than empty: `rollback: []` on the spec would read as "an
+    // undo was written and it does nothing", and the panel would offer a
+    // button for it.
+    ...(rollback.length > 0 ? { rollback } : {})
   }
 }
 
