@@ -1,0 +1,3 @@
+manual-delete                              2Gi    Delete   Available   <none>    <none>         manual       <none>
+manual-retain                              1Gi    Retain   Released    default   takes-manual   manual       <none>
+pvc-dd77949d-01cd-4fdb-8f47-4cddcb53c825   64Mi   Delete   Bound       default   bound-claim    local-path   <none>

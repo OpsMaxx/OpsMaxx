@@ -1,0 +1,1 @@
+kubectl get pv --no-headers -o custom-columns=NAME:.metadata.name,CAP:.spec.capacity.storage,RECLAIM:.spec.persistentVolumeReclaimPolicy,STATUS:.status.phase,CNS:.spec.claimRef.namespace,CNAME:.spec.claimRef.name,SC:.spec.storageClassName,REASON:.status.reason
