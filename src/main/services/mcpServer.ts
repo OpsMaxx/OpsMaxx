@@ -6,6 +6,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { HostMetrics } from '../../shared/ssh'
+import { assessCommand } from '../../shared/commandRisk'
 
 import { authenticate, getSession, getMcpConfig, type AuthFailureReason } from './mcpAuth'
 import { startCliPairing, confirmCliPairing } from './cliPairing'
@@ -827,7 +828,20 @@ function buildServer(): McpServer {
         action: command,
         capability: 'terminal'
       }
-      const risk = check.decision === 'deny' ? 'high' : /sudo\b/.test(command) ? 'high' : 'medium'
+      // ONE CLASSIFIER, NOT TWO. This path graded `high` on the word `sudo`
+      // and on nothing else, so `docker volume rm` -- which the operator's own
+      // broadcast screen has called elevated since it shipped -- arrived from
+      // an agent as `medium`. assessCommand is the side that has the rules.
+      //
+      // The `sudo` test stays OR'd in so this can only ever raise a grade:
+      // assessCommand anchors `sudo` to a command start, which is the better
+      // rule, but swapping one rule for another would quietly lower some
+      // command somewhere and this is not the change to discover that in.
+      const assessed = assessCommand(command)
+      const risk =
+        check.decision === 'deny' || assessed.risk !== 'ordinary' || /sudo\b/.test(command)
+          ? 'high'
+          : 'medium'
       const gated = await gate(ctx, check, risk, extra)
       if (!gated.ok) return gated.result
 
