@@ -1,4 +1,5 @@
 import type {
+  ApprovalSurface,
   ApprovalVerdict,
   BroadcastConfirmation,
   BroadcastHostOutcome,
@@ -554,7 +555,11 @@ export function verifyJobApproval(
 export interface JobApprovalEntry {
   id: string
   timestamp: string
-  surface: 'broadcast' | 'job'
+  /** ONE vocabulary. This was its own narrower copy -- `'broadcast' | 'job'` --
+   *  beside ApprovalSurface, so the two disagreed about `k8s-exec` and a row
+   *  the k8s path wrote could not be described by the type of the log it was
+   *  written to. */
+  surface: ApprovalSurface
   event: JobApprovalEvent
   /** The job id, or a broadcast run id. */
   jobId: string

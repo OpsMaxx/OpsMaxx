@@ -331,6 +331,27 @@ describe('ordering', () => {
   })
 })
 
+describe('the surfaces the reader can name', () => {
+  // A row whose surface the reader does not know reads as a bare "Approval",
+  // which is the log saying it does not know what it recorded. The key and
+  // access write is the one that can lock an operator out of the machine they
+  // are fixing, and it had no row at all until item 35.
+  it('names a key and access change rather than calling it an approval', () => {
+    writeJsonl(APPROVAL_FILE, [
+      approvalRow({
+        id: 'a-access',
+        surface: 'access',
+        title: 'Key and access change on 2 servers',
+        risk: 'destructive'
+      })
+    ])
+    const page = readChangeLog(deps())
+    const row = page.entries.find((e) => e.source === 'approvals')!
+    expect(row.summary).toContain('Key and access')
+    expect(row.summary).not.toMatch(/^Approval /)
+  })
+})
+
 describe('metadata, never content', () => {
   it('never carries a secret out of a local session row', () => {
     // localSessionLog.ts does NOT redact at write — nothing it stores is
