@@ -880,3 +880,86 @@ describe('what sudo actually grants', () => {
     expect(document.body.textContent).toContain('not root')
   })
 })
+
+// ---------------------------------------------------------------------------
+// The access-review export. Item 46.
+// ---------------------------------------------------------------------------
+
+describe('exporting the review', () => {
+  /** The download, captured. jsdom has no file save, and what matters is the
+   *  BYTES this hands over — an export whose gaps are invisible is the failure
+   *  this feature is written against. */
+  function captureDownload(): { body: () => string; name: () => string } {
+    let body = ''
+    let name = ''
+    const realCreate = URL.createObjectURL
+    const realRevoke = URL.revokeObjectURL
+    const realClick = HTMLAnchorElement.prototype.click
+    ;(URL as unknown as { createObjectURL: (b: Blob) => string }).createObjectURL = (b: Blob): string => {
+      void b.text().then((t) => {
+        body = t
+      })
+      return 'blob:x'
+    }
+    ;(URL as unknown as { revokeObjectURL: () => void }).revokeObjectURL = (): void => {}
+    HTMLAnchorElement.prototype.click = function click(this: HTMLAnchorElement): void {
+      name = this.download
+    }
+    return {
+      body: () => {
+        URL.createObjectURL = realCreate
+        URL.revokeObjectURL = realRevoke
+        HTMLAnchorElement.prototype.click = realClick
+        return body
+      },
+      name: () => name
+    }
+  }
+
+  it('puts a server that could not be read into the file, not out of it', async () => {
+    // The whole point. A host missing from an access review reads as a host
+    // nobody can reach.
+    mount([server('a', 'web-1'), server('b', 'db-1')], {
+      a: { access: complete(), at: 1 },
+      b: { error: 'permission denied', errorAt: 1 }
+    })
+    await waitFor(() => expect(screen.getByText('Export CSV')).toBeTruthy())
+    const cap = captureDownload()
+    await userEvent.click(screen.getByText('Export CSV'))
+    await waitFor(() => expect(cap.body()).toContain('db-1'))
+    const csv = cap.body()
+    expect(csv).toContain('permission denied')
+    expect(csv).toContain('web-1')
+  })
+
+  it('writes the coverage into the same file as the rows', async () => {
+    // A caveat in a second download is a caveat nobody has when they read the
+    // first.
+    mount([server('a', 'web-1')], { a: { access: complete(), at: 1 } })
+    await waitFor(() => expect(screen.getByText('Export CSV')).toBeTruthy())
+    const cap = captureDownload()
+    await userEvent.click(screen.getByText('Export CSV'))
+    await waitFor(() => expect(cap.body()).toContain('# coverage'))
+    expect(cap.body()).toContain('accountsWithUnreadKeys')
+  })
+
+  it('writes JSON with the coverage first', async () => {
+    mount([server('a', 'web-1')], { a: { access: complete(), at: 1 } })
+    await waitFor(() => expect(screen.getByText('Export JSON')).toBeTruthy())
+    const cap = captureDownload()
+    await userEvent.click(screen.getByText('Export JSON'))
+    await waitFor(() => expect(cap.body()).toContain('"coverage"'))
+    const json = cap.body()
+    expect(json.indexOf('"coverage"')).toBeLessThan(json.indexOf('"accounts"'))
+    expect(cap.name()).toMatch(/^access-review-\d{4}-\d\d-\d\d\.json$/)
+  })
+
+  it('never writes key material', async () => {
+    mount([server('a', 'web-1')], { a: { access: complete(), at: 1 } })
+    await waitFor(() => expect(screen.getByText('Export CSV')).toBeTruthy())
+    const cap = captureDownload()
+    await userEvent.click(screen.getByText('Export CSV'))
+    await waitFor(() => expect(cap.body().length).toBeGreaterThan(0))
+    expect(cap.body()).not.toContain(ED25519)
+  })
+})

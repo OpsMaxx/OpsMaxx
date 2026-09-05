@@ -1,4 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  accessCoverageCsv,
+  accessExportCoverage,
+  accessExportCsv,
+  accessExportJson,
+  buildAccessExport
+} from '../../../../shared/accessExport'
 import { KeyRound, RefreshCw, ShieldAlert } from 'lucide-react'
 import { openSettings } from '../../store/nav'
 import { useApp } from '../../store/app'
@@ -181,6 +188,41 @@ export function AccessPanel({
   const [result, setResult] = useState<AccessRunResult | null>(null)
   const [running, setRunning] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
+
+  /**
+   * The review, as a file.
+   *
+   * EVERY server goes in, not just the ones that answered. A host missing from
+   * an access review reads as a host nobody can reach, and `buildAccessExport`
+   * gives an unread one a row saying otherwise.
+   *
+   * The coverage section is written into the SAME file rather than offered
+   * separately: it is the part that says whether the rows are the whole story,
+   * and a caveat in a second download is a caveat nobody has when they read the
+   * first.
+   */
+  const exportReview = (format: 'csv' | 'json'): void => {
+    const inputs = servers.map((s) => ({
+      serverId: s.id,
+      serverName: s.name,
+      access: entries[s.id]?.access ?? null,
+      error: entries[s.id]?.error ?? null
+    }))
+    const rows = buildAccessExport(inputs)
+    const coverage = accessExportCoverage(inputs)
+    const at = Date.now()
+    const body =
+      format === 'json'
+        ? accessExportJson(rows, coverage, { generatedAt: at, since: null })
+        : `${accessExportCsv(rows)}\n\n# coverage\n${accessCoverageCsv(coverage)}`
+    const blob = new Blob([body], { type: format === 'json' ? 'application/json' : 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `access-review-${new Date(at).toISOString().slice(0, 10)}.${format}`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   const load = useCallback(async (): Promise<void> => {
     if (!bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'access')) return
@@ -453,6 +495,25 @@ export function AccessPanel({
               {view === 'keys' ? 'By server' : 'By key'}
             </button>
           )}
+          {/* Item 46's access review. Downloaded rather than shown: the thing
+              somebody wants is a file to hand over, and rendering four thousand
+              rows in a panel is not that. */}
+          <button
+            className="btn ghost sm"
+            disabled={servers.length === 0}
+            title="Every account and key across this estate as a CSV, with a coverage section naming every host that could not be read and every sshd that reads keys from somewhere this did not look."
+            onClick={() => exportReview('csv')}
+          >
+            Export CSV
+          </button>
+          <button
+            className="btn ghost sm"
+            disabled={servers.length === 0}
+            title="The same review as JSON, coverage first."
+            onClick={() => exportReview('json')}
+          >
+            Export JSON
+          </button>
           <button
             className="btn primary"
             disabled={busy || servers.length === 0}
