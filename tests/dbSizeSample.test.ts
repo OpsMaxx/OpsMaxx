@@ -188,8 +188,23 @@ describe('the db:ops handler records it', () => {
   // Read off the source, the way `k8sSkew.test.ts` and `k8sReview.test.ts` do:
   // reaching this handler for real means an Electron main process and a live
   // database, and the mistakes worth catching here are each one edit wide.
-  const src = (): string =>
+  const whole = (): string =>
     readFileSync(fileURLToPath(new URL('../src/main/index.ts', import.meta.url)), 'utf8')
+
+  /**
+   * Just the `db:ops` handler.
+   *
+   * Scoped rather than searched across the file: the sampler added later uses
+   * the same helper, so an unscoped `indexOf` finds ITS call and these
+   * assertions quietly start describing a different piece of code. That
+   * happened, and the suite caught it.
+   */
+  const src = (): string => {
+    const body = whole()
+    const at = body.indexOf("ipcMain.handle('db:ops'")
+    expect(at).toBeGreaterThan(0)
+    return body.slice(at, at + 2000)
+  }
 
   it('writes the sample under the database subject, not the connection id', () => {
     // `db:<connectionId>` is the interned subject. Writing the bare id would
