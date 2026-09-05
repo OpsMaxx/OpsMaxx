@@ -12,6 +12,7 @@ import {
   type HostAccess,
   type Sha256
 } from '../src/shared/access'
+import { parseSudoers } from '../src/shared/sudoers'
 import type { Server } from '../src/renderer/src/types'
 
 // Fleet keys and access — roadmap item 23, renderer half.
@@ -826,5 +827,56 @@ describe('service accounts with keys', () => {
     })
     await waitFor(() => screen.getByText('Keys nobody is using'))
     expect(screen.queryByText('Service accounts with keys')).toBeNull()
+  })
+})
+
+describe('what sudo actually grants', () => {
+  // THREE states, and the panel has to keep them apart: `undefined` is nobody
+  // consented to the read, `null` is the read was asked for and failed, and an
+  // array is an answer. Rendering all three the same loses the whole feature.
+  const withSudoers = (sudoers: unknown): HostAccess =>
+    ({
+      ...complete(),
+      accounts: [account({ user: 'ops', adminGroups: ['wheel'] })],
+      sudoers
+    }) as unknown as HostAccess
+
+  it('shows nothing at all when nobody consented to the read', async () => {
+    mount([server('a', 'web-1')], { a: { access: withSudoers(undefined), at: 1 } })
+    await waitFor(() => screen.getByText('Keys nobody is using'))
+    expect(screen.queryByText('What sudo actually grants')).toBeNull()
+  })
+
+  it('says the read failed rather than showing a server with no sudo rules', async () => {
+    mount([server('a', 'web-1')], { a: { access: withSudoers(null), at: 1 } })
+    await waitFor(() => screen.getByText('What sudo actually grants'))
+    expect(document.body.textContent).toContain('could not be read')
+    expect(document.body.textContent).toContain('not a server with no sudo rules')
+  })
+
+  it('reports what a rule grants, matched through the account’s group', async () => {
+    const files = [
+      {
+        path: '/etc/sudoers',
+        unreadable: false,
+        ...parseSudoers('%wheel ALL=(ALL) NOPASSWD: ALL\n')
+      }
+    ]
+    mount([server('a', 'web-1')], { a: { access: withSudoers(files), at: 1 } })
+    await waitFor(() => screen.getByText('What sudo actually grants'))
+    // `ops` is not named in the file; it is in `wheel`, which is.
+    expect(document.body.textContent).toContain('ANY command')
+    expect(document.body.textContent).toContain('WITHOUT a password')
+  })
+
+  it('says the picture is incomplete when a file could not be read', async () => {
+    const files = [
+      { path: '/etc/sudoers', unreadable: false, ...parseSudoers('%wheel ALL=(ALL) ALL\n') },
+      { path: '/etc/sudoers.d/10-ops', unreadable: true, ...parseSudoers('') }
+    ]
+    mount([server('a', 'web-1')], { a: { access: withSudoers(files), at: 1 } })
+    await waitFor(() => screen.getByText('What sudo actually grants'))
+    expect(document.body.textContent).toContain('could not be read')
+    expect(document.body.textContent).toContain('not root')
   })
 })

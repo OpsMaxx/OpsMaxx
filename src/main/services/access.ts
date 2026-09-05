@@ -133,6 +133,20 @@ export class AccessReader {
         sha256: this.deps.sha256 ?? nodeSha256,
         now: (this.deps.now ?? Date.now)()
       })
+      // Item 36b, and only where somebody consented. A second exec rather than
+      // part of the command above: a server whose group has not granted this
+      // is one the sudoers read never touches, which is easier to be sure of
+      // than a command whose shape depends on a capability.
+      if (opts.sudoers === true) {
+        access.sudoers = await readSudoers(
+          async (c, command, timeoutMs) => {
+            const r = await this.deps.exec(c, command, timeoutMs)
+            return { ok: r.ok === true, output: r.stdout ?? '' }
+          },
+          cfg,
+          { sudo: opts.sudo }
+        )
+      }
       return { ok: true, access }
     } catch (e) {
       return { ok: false, reason: 'unknown', detail: e instanceof Error ? e.message : String(e) }

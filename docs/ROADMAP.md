@@ -479,8 +479,11 @@ that was not root.
 is nobody to answer a prompt — and `readSudoers` is its own exec rather than being folded into
 the hourly access command, so a server whose group has not consented is one this never touches.
 A failed read returns `null`, never `[]`: a read that did not happen is not a host with no
-sudoers rules. Still open: rendering the findings in the access panel, and calling `readSudoers`
-from the sampler.
+sudoers rules. The sampler passes the capability per server, exactly as it does for the firewall rules, and the
+access panel renders the findings. THREE STATES are kept apart there and the type exists to force
+that: `undefined` is nobody consented, `null` is the read was asked for and failed, and an array
+is an answer. A server whose read failed says so rather than appearing as a server with no sudo
+rules. **Item 36b is complete.**
 
 **36c. Per-account revoke.** Blocked in main, not the planner (`index.ts:1257-1272`). Needs a
 per-host command (the connecting-account write resolves `$HOME` on the host, `:2860`, so one

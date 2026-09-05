@@ -79,7 +79,7 @@ import { BroadcastRunner } from './services/broadcast'
 import { JobRunner, type JobStore } from './services/jobRunner'
 import { attachedJobExecutor } from './services/jobExec'
 import { detachedJobExecutor } from './services/jobDetached'
-import { AccessCommitter, AccessReader } from './services/access'
+import { AccessCommitter, AccessReader, sudoersReadGranted } from './services/access'
 import { PostureReader, firewallRulesGranted } from './services/posture'
 import { DriftReader } from './services/drift'
 import { readChangeLog } from './services/changelog'
@@ -1105,8 +1105,15 @@ const fleetSampler = new FleetSampler({
   // reading who can log in to a host must never be what raises a host-key trust
   // dialog the user cannot connect to anything they just did.
   accessEnabled: () => accessModuleOn,
-  sampleAccess: async (_key, cfg) => {
-    const probe = await accessReader.read(resolveChainSecrets(cfg as SshConnectConfig))
+  sampleAccess: async (key, cfg) => {
+    // Item 36b's consent, read per server exactly as the firewall rules are
+    // below: the sampler keys on 'fleet:<serverId>' and the capability is per
+    // server, so the id comes back out rather than the gate being widened to
+    // the estate.
+    const serverId = key.startsWith('fleet:') ? key.slice('fleet:'.length) : key
+    const probe = await accessReader.read(resolveChainSecrets(cfg as SshConnectConfig), {
+      sudoers: sudoersReadGranted(groupForServer(serverId))
+    })
     return probe.ok ? { ok: true, access: probe.access } : { ok: false, error: `${probe.reason}: ${probe.detail}` }
   },
   // The security posture half — roadmap item 24. Injected like `sampleAccess`,

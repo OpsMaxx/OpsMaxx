@@ -1,3 +1,4 @@
+import type { SudoersFileReading } from './sudoers'
 // Who can get into a host, and with which key — roadmap item 23, the read half.
 //
 // One `authorized_keys` file per user per host is the whole dataset, and no GUI
@@ -479,6 +480,17 @@ export function shellIsNoLogin(shell: string | null): boolean {
 export interface HostAccess {
   accounts: AccessAccount[]
   /**
+   * What sudo actually grants, from /etc/sudoers and /etc/sudoers.d — item 36b.
+   *
+   * `undefined` when nobody consented: `sudoersRead` is its own capability,
+   * denied on every seeded group, so this is absent on almost every host and
+   * that absence means "not asked for". `null` means it was asked for and the
+   * read failed. Neither is a host with no sudo rules, and the panel has to
+   * tell all three apart -- which is why this is not an array that can be
+   * empty for three different reasons.
+   */
+  sudoers?: SudoersFileReading[] | null
+  /**
    * The `AuthorizedKeysFile` directives found in sshd's config, verbatim.
    *
    * More than one means the config disagrees with itself across
@@ -587,6 +599,14 @@ export const ACCESS_INTERVAL_MS = 60 * 60 * 1000
 // ---- Building the command -------------------------------------------------
 
 export interface AccessCollectOptions {
+  /**
+   * Also read /etc/sudoers and /etc/sudoers.d — item 36b.
+   *
+   * Set by main from the `sudoersRead` capability on the group that governs
+   * the server, which is that item's own consent line. Absent means the read
+   * does not happen at all: it is not a default anybody can drift into.
+   */
+  sudoers?: boolean
   /**
    * Retry a refused read as root, with `sudo -n` only.
    *
