@@ -611,7 +611,7 @@ is a few days and none needs a new principle.
 | **RBAC rules and `can-i --list`** | What a binding grants; the question `forbidden`'s help text sends people to answer (`:181-183`). Makes the not-exposed argument sharper, not weaker | 2–3 d |
 | **PVs, StorageClasses** | Reclaim policy, `claimRef`, `Released`; provisioner and `volumeBindingMode` (the fixture's Pending PVC is `WaitForFirstConsumer`) | 2–3 d |
 | **`rollout history` and `rollout status`** on demand | Plain reads; the preview `rollout undo` would need if item 44 ever reverses the header | 1–2 d |
-| **Helm** | A recorded `helm list -o json` fixture — the parse at `:3043-3075` is unproven (`tests/fixtures/k8s/README.md:158-160`); then `history` and `status`. `get values` is a secrets read and must be key-only or refused | 2–3 d |
+| **Helm** — **parse PROVEN** | — | Fixtures recorded from helm v3.16.2 against k3s v1.31.5 with two releases in two namespaces, plus a real empty list. The parse is correct. The field worth taking a fixture for was `revision`: helm sends it as a STRING, and the parser's `str()` returns `''` for anything else, so a numeric revision would have vanished silently — a release showing a blank revision with nothing to say why. `app_version` → `appVersion` is the one renamed field and is now pinned. `history`, `status` and the `get values` decision are still open. | parse done |
 | **Stale objects** | `jobs` Complete/Failed with age; pods `Evicted`/`Succeeded`/`Failed`; PVCs and configmaps no pod references. Report only; deletion stays refused (`:39-52`) | 1 wk |
 | **Add-on verification view** | For a label selector: DaemonSet rollout per node, recent Warning events, one-shot `rollout status`. The half of "upgrade the CNI" that is buildable | 2–3 d |
 
