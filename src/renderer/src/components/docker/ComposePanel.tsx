@@ -96,6 +96,16 @@ export function ComposePanel({
   const [editError, setEditError] = useState<string | null>(null)
   const [editDone, setEditDone] = useState<string | null>(null)
   const [launched, setLaunched] = useState<string | null>(null)
+  // A job that asks for confirmation gets asked. Held here between the plan
+  // and the run, because those were one step and the phrase was filled in by
+  // the panel on the operator's behalf.
+  const [pending, setPending] = useState<{
+    plan: ReturnType<typeof composeJobSpec>
+    targets: { serverId: string; serverName: string }[]
+    confirmation: ReturnType<typeof planJob>['confirmation']
+    reasons: string[]
+  } | null>(null)
+  const [phrase, setPhrase] = useState('')
 
   if (!server) return null
 
@@ -159,18 +169,46 @@ export function ComposePanel({
     }
   }
 
-  const runJob = async (action: ComposeAction, name: string): Promise<void> => {
+  // THE PANEL USED TO FILL IN ITS OWN CONFIRMATION. It read the phrase the
+  // plan asked for straight off the plan, stamped `confirmedAt: Date.now()`
+  // and ran -- an approval record that says a human confirmed this, written
+  // by the code that wanted to proceed.
+  //
+  // That was harmless exactly while `confirmationFor(ordinary, 1)` is `none`,
+  // which is the case for a plain `compose pull` on one server and is NOT the
+  // case with the sudo toggle on: `sudo docker compose up -d` is elevated, and
+  // an elevated job on one server asks. It was answering that question itself.
+  //
+  // Now the plan decides, and anything but `none` stops here and asks. Every
+  // compose verb added after this inherits that, because the check is on the
+  // plan's own answer rather than on a list of verbs somebody has to remember
+  // to extend.
+  const runJob = (action: ComposeAction, name: string): void => {
     const ref = projectFor(name)
     if (ref === null || !server) return
     const plan = composeJobSpec(action, ref, { sudo })
     const targets = [{ serverId: server.id, serverName: server.name }]
     const jobPlan = planJob(plan.spec, targets)
+    if (jobPlan.confirmation.kind !== 'none') {
+      setPhrase('')
+      setLaunched(null)
+      setPending({ plan, targets, confirmation: jobPlan.confirmation, reasons: jobPlan.reasons })
+      return
+    }
+    void launch(plan, targets, null)
+  }
+
+  const launch = async (
+    plan: ReturnType<typeof composeJobSpec>,
+    targets: { serverId: string; serverName: string }[],
+    typed: string | null
+  ): Promise<void> => {
+    if (!server) return
     // The engine re-derives this same plan from the same spec and refuses the
-    // run if the record disagrees, so the phrase has to be the one the plan
-    // asked for rather than one this panel decided was enough.
-    const phrase =
-      jobPlan.confirmation.kind === 'type-to-confirm' ? jobPlan.confirmation.phrase : null
-    const approval = jobApprovalFor(plan.spec, targets, { phrase, confirmedAt: Date.now() })
+    // run if the record disagrees, so the phrase carried here has to be the
+    // one the operator actually typed.
+    const approval = jobApprovalFor(plan.spec, targets, { phrase: typed, confirmedAt: Date.now() })
+    setPending(null)
     await jobsBridge()?.run({
       jobId: crypto.randomUUID(),
       spec: plan.spec,
@@ -270,14 +308,14 @@ export function ComposePanel({
                 <button
                   className="icon-btn sm"
                   title={`docker compose pull for ${p.name}. Fetches images; nothing running changes.`}
-                  onClick={() => void runJob('pull', p.name)}
+                  onClick={() => runJob('pull', p.name)}
                 >
                   <Download size={13} />
                 </button>
                 <button
                   className="icon-btn sm"
                   title={`docker compose up -d for ${p.name}. Starts what is declared; removes nothing.`}
-                  onClick={() => void runJob('up', p.name)}
+                  onClick={() => runJob('up', p.name)}
                 >
                   <Play size={13} />
                 </button>
@@ -469,6 +507,50 @@ export function ComposePanel({
       )}
 
       {editDone !== null && <div className="s-desc">{editDone}</div>}
+      {pending !== null && (
+        <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+          <div className="r-title">{pending.plan.spec.title}</div>
+          <div className="r-sub">{pending.plan.detail}</div>
+          {pending.reasons.length > 0 && (
+            <div className="s-note warn">
+              This job {pending.reasons.join(', and ')}.
+            </div>
+          )}
+          <pre className="mono" style={{ fontSize: 11, whiteSpace: 'pre-wrap', margin: 0 }}>
+            {pending.plan.spec.steps.map((st) => st.command).join('\n')}
+          </pre>
+          {pending.confirmation.kind === 'type-to-confirm' && (
+            <input
+              className="input mono"
+              aria-label={`Type ${pending.confirmation.phrase} to confirm`}
+              placeholder={`Type ${pending.confirmation.phrase} to confirm`}
+              value={phrase}
+              onChange={(e) => setPhrase(e.target.value)}
+            />
+          )}
+          <div className="row-actions">
+            <button
+              className="btn primary"
+              disabled={
+                pending.confirmation.kind === 'type-to-confirm' &&
+                phrase.trim() !== pending.confirmation.phrase
+              }
+              onClick={() =>
+                void launch(
+                  pending.plan,
+                  pending.targets,
+                  pending.confirmation.kind === 'type-to-confirm' ? phrase.trim() : null
+                )
+              }
+            >
+              Run
+            </button>
+            <button className="btn" onClick={() => setPending(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       {launched !== null && <div className="s-desc">{launched}</div>}
     </div>
   )
