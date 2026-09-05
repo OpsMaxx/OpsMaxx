@@ -220,6 +220,11 @@ export const MYSQL_QUESTIONS = [
   'replication',
   'binlogs',
   'slowlog',
+  // Item 37. NOT the slow log: that says how many statements crossed a time
+  // threshold, and this says WHICH statements read the table without an index.
+  // A query can be fast on today's data and still be the one that stops
+  // working when the table grows, which the slow log cannot see.
+  'digests',
   'connections',
   'processlist',
   'bufferpool',
@@ -316,6 +321,7 @@ export type DbQuestionId =
   | MssqlQuestionId
 
 export const DB_QUESTION_LABEL: Record<DbQuestionId, string> = {
+  digests: 'Statements that scan',
   alwayson: 'Availability groups',
   backups: 'Backups',
   logspace: 'Transaction log space',
@@ -347,6 +353,8 @@ export const DB_QUESTION_LABEL: Record<DbQuestionId, string> = {
 /** Why this one is on the page. Shown in the UI, so the editorial choice is
  *  visible to the operator rather than only to whoever wrote it. */
 export const DB_QUESTION_WHY: Record<DbQuestionId, string> = {
+  digests:
+    'Which statements read a table without using an index. Not the slow log: that counts statements which crossed a time threshold, and a statement can be fast on today’s data and still be the one that stops working when the table grows. MySQL counts the index-less executions itself, so this is its number rather than a ratio inferred from row counts — a query examining four rows to return two is scanning, and no threshold on time or rows would notice.',
   alwayson:
     'Whether every replica is joined, synchronising and caught up. Zero replicas is not zero problems — a server with no availability group returns the same empty list as one whose replicas have all gone, so this reports whether AlwaysOn is configured at all before it reports health.',
   backups:
@@ -1856,6 +1864,21 @@ export const MYSQL_QUERIES = Object.freeze({
   binlogExpireDays: 'SELECT @@expire_logs_days AS expire_days',
   binaryLogs: 'SHOW BINARY LOGS',
 
+  // Item 37. `sum_no_index_used` is MySQL's OWN count of executions that read
+  // the table without an index -- not a ratio inferred from rows, which on a
+  // small table says nothing: the scanning statement measured on MySQL 8.4.11
+  // examined four rows to return two.
+  //
+  // `digest_text` is normalised by the server before it is read, so a user's
+  // literal cannot arrive here. Table and column names still can, and it is
+  // treated as remote text on that basis.
+  digests: `SELECT COALESCE(schema_name,'') AS schema_name, COALESCE(LEFT(digest_text,120),'') AS digest_text,
+       count_star, ROUND(sum_timer_wait/1000000000,1) AS total_ms,
+       ROUND(max_timer_wait/1000000000,1) AS max_ms,
+       sum_rows_examined, sum_rows_sent, sum_no_index_used
+  FROM performance_schema.events_statements_summary_by_digest
+  WHERE digest_text IS NOT NULL
+  ORDER BY sum_timer_wait DESC LIMIT ?`,
   slowSettings: `SELECT @@slow_query_log AS slow_query_log, @@long_query_time AS long_query_time,
        @@slow_query_log_file AS slow_query_log_file, @@log_output AS log_output`,
 

@@ -896,9 +896,12 @@ describe('the two statements that cannot bind a parameter', () => {
 // ===========================================================================
 
 describe('the report', () => {
-  it('covers eight questions per SQL engine', () => {
+  it('covers the questions each SQL engine can answer', () => {
     expect(PG_QUESTIONS).toHaveLength(8)
-    expect(MYSQL_QUESTIONS).toHaveLength(8)
+    // Nine for MySQL since item 37 added `digests`: which statements read a
+    // table without an index, which the slow log cannot see because a scan of
+    // a small table is fast.
+    expect(MYSQL_QUESTIONS).toHaveLength(9)
     expect(MSSQL_QUESTIONS).toHaveLength(8)
     for (const id of [...PG_QUESTIONS, ...MYSQL_QUESTIONS, ...MSSQL_QUESTIONS]) {
       expect(DB_QUESTION_LABEL[id], id).toBeTruthy()
