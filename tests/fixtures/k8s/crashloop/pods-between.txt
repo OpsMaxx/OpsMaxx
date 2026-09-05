@@ -1,0 +1,3 @@
+default       sp-crash                                  Running   <none>   Error   3     bd671a34e685
+default       sp-ok                                     Running   <none>   <none>   0     bd671a34e685
+kube-system   coredns-ccb96694c-lllqm                   Running   <none>   <none>   0     bd671a34e685
