@@ -108,6 +108,11 @@ export const COVERAGE_SOURCE: Record<StoreAlertKind, AlertCoverageSource> = {
   inode: 'sampler',
   load: 'sampler',
   'host-unreachable': 'sampler',
+  // The VPN poll runs in FleetWatcher, which is mounted at the app root, so it
+  // is watched whenever the app is open and not only on the monitor page --
+  // the same claim `tunnel-down` makes and for the same reason.
+  'vpn-down': 'app-root',
+  'vpn-degraded': 'app-root',
   'job-failed': 'app-root',
   'tunnel-down': 'app-root',
   'db-alarm': 'read-on-demand',

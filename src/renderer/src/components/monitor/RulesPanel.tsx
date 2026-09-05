@@ -47,6 +47,8 @@ function bridge(): Partial<RulesBridge> | undefined {
 }
 
 const KIND_LABEL: Record<RuleAlertKind, string> = {
+  'vpn-down': 'VPN down',
+  'vpn-degraded': 'VPN up but silent',
   cpu: 'CPU',
   disk: 'Disk',
   inode: 'Inodes',

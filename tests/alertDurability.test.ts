@@ -271,6 +271,9 @@ describe('the row is rebuilt from a whitelist', () => {
       // so it sits with the others: "there is no recent backup" stays true until
       // one succeeds.
       'backup-failed',
+      // Two, not one: up-but-silent and down have different fixes.
+      'vpn-down',
+      'vpn-degraded',
       'db-alarm',
       'db-watch'
     ])

@@ -244,6 +244,39 @@ export type VpnState =
   | 'degraded'
   | 'error'
 
+/**
+ * What a VPN's state says about the two conditions worth alerting on.
+ *
+ * A pure map, exported and exhaustive, because the map IS the feature -- the
+ * poll around it is ten lines of timer. Written as a Record so a state added to
+ * VpnState is a type error here rather than a silent `null` that makes a new
+ * failure mode invisible.
+ *
+ * `null` is "this state is not an observation of that condition", and it is not
+ * `false`. The two that matter:
+ *
+ *   stopped   NOT an outage. A person pressed Stop. It is also not evidence
+ *             the VPN is healthy, so it is null in both columns rather than
+ *             false -- resolving a down alert because somebody stopped the
+ *             profile would be the app marking its own alert as fixed.
+ *   degraded  Up and not passing traffic. `down: false` because it IS up, and
+ *             `silent: true`, which is a different alert with a different fix.
+ *             vpn.ts calls that distinction the single most useful thing this
+ *             UI shows.
+ */
+export const VPN_ALERT_READINGS: Record<VpnState, { down: boolean | null; silent: boolean | null }> = {
+  error: { down: true, silent: null },
+  connected: { down: false, silent: false },
+  degraded: { down: false, silent: true },
+  // Coming up, or going round again. Neither condition is observable yet, and
+  // announcing a failure every time somebody starts a VPN is how an alert
+  // becomes one people turn off.
+  starting: { down: null, silent: null },
+  authenticating: { down: null, silent: null },
+  reconnecting: { down: null, silent: null },
+  stopped: { down: null, silent: null }
+}
+
 export interface FrpProxyStatus {
   name: string
   type: string

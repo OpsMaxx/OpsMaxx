@@ -11,6 +11,7 @@ import {
   noteAlertEvent
 } from '../../store/alerts'
 import { postureAlertReadings } from '../../../../shared/posture'
+import { VPN_ALERT_READINGS } from '../../../../shared/vpn'
 import { bridgeHas, bridgeOn } from '../../lib/bridge'
 import { sshHopsFor } from '../../lib/ssh'
 import type { FleetTarget } from '../../../../shared/fleet'
@@ -322,6 +323,44 @@ export function FleetWatcher(): null {
     }
   }, [])
 
+
+  // A VPN in error, and a VPN that is up and silent.
+  //
+  // Polled over `vpn.list()` on the tunnel poll's cadence and for the tunnel
+  // poll's reason: `vpn.onStatus` is per profile id, so a subscription set here
+  // would have to be added and dropped as profiles come and go, and a
+  // subscription set that can be wrong is worse than a read ten seconds late
+  // for a condition measured in minutes.
+  //
+  // THE STATE MAP IS THE WHOLE FEATURE, and it lives in VPN_ALERT_READINGS so
+  // it can be tested exhaustively without a timer. Read it before changing
+  // anything here.
+  useEffect(() => {
+    if (!bridgeHas(window.opsmaxx?.vpn as Record<string, unknown> | undefined, 'list')) return
+    let live = true
+    const read = (): void => {
+      void window.opsmaxx?.vpn?.list().then((list) => {
+        if (!live || !Array.isArray(list)) return
+        for (const v of list) {
+          // The friendly name, from the profile list, for the reason the tunnel
+          // poll above does the same: VpnStatus carries an id and no name, and
+          // a uuid in an alert is a row nobody can place.
+          const name = useApp.getState().vpns.find((p) => p.id === v.id)?.name ?? v.id
+          const { down, silent } = VPN_ALERT_READINGS[v.state]
+          if (down !== null) checkStateAlert(v.id, name, 'vpn-down', down)
+          if (silent !== null) checkStateAlert(v.id, name, 'vpn-degraded', silent)
+        }
+      })
+    }
+    void hydrateAlerts().then(() => {
+      if (live) read()
+    })
+    const timer = setInterval(read, 10_000)
+    return () => {
+      live = false
+      clearInterval(timer)
+    }
+  }, [])
 
   // Item 19b's two deferred kinds: OOM kills and certificate expiry.
   //
