@@ -264,3 +264,82 @@ describe('a sample that did not measure the CPU or the memory', () => {
     expect(parsed.memPct).toBeCloseTo(75, 5)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Item 47: every filesystem, through the probe
+// ---------------------------------------------------------------------------
+//
+// The parser has its own tests in tests/mounts.test.ts. What is tested here is
+// the WIRING -- that the probe asks for the mounts and that the answer reaches
+// HostMetrics. Without this, deleting `df -kPT` from the script breaks nothing
+// and the feature quietly stops existing, which is the exact failure this
+// roadmap section keeps documenting.
+
+describe('the per-mount read reaches HostMetrics', () => {
+  const probe = [
+    '__DISK__',
+    '/dev/sda1 1000000 610000 390000 61% /',
+    '__INODE__',
+    '/dev/sda1 3907584 1132102 2775482 29% /',
+    '__MOUNTS__',
+    'Filesystem     Type    1024-blocks     Used Available Capacity Mounted on',
+    '/dev/sda1      ext4        1000000   610000    390000      61% /',
+    '/dev/sdb1      xfs        10000000  9300000    700000      93% /var/lib/data',
+    'tmpfs          tmpfs         65536        0     65536       0% /dev',
+    '__MOUNTINODES__',
+    'Filesystem     Type     Inodes   IUsed   IFree IUse% Mounted on',
+    '/dev/sda1      ext4    3907584 1132102 2775482   29% /',
+    '/dev/sdb1      xfs      500000  480000   20000   96% /var/lib/data'
+  ].join('\n')
+
+  it('carries every real filesystem, not just the root', () => {
+    const m = parseMetricsForTests(probe)
+    expect(m.mounts?.map((x) => x.mount)).toEqual(['/', '/var/lib/data'])
+  })
+
+  it('leaves diskPct meaning the root filesystem, as every stored sample already does', () => {
+    // Beside, not instead of. Changing what `diskPct` means would silently
+    // re-interpret every sample in the history store.
+    const m = parseMetricsForTests(probe)
+    expect(m.diskPct).toBeCloseTo(61, 0)
+  })
+
+  it('drops the pseudo filesystems on the way through', () => {
+    expect(parseMetricsForTests(probe).mounts?.map((x) => x.type)).not.toContain('tmpfs')
+  })
+
+  it('finds the filesystem that is nearly full and is not the root', () => {
+    // The whole point of the item: /var/lib/data at 93% never reached the
+    // alert, the forecast or the agent.
+    const m = parseMetricsForTests(probe)
+    const worst = (m.mounts ?? []).find((x) => x.mount === '/var/lib/data')!
+    expect(worst.usedPercent).toBe(93)
+    expect(worst.inodesUsedPercent).toBe(96)
+  })
+
+  it('reports no mounts rather than crashing when df could not be run', () => {
+    // A busybox without `-T` leaves the section empty. That is no mounts, and
+    // it must not be read as a server whose disks are all fine.
+    const m = parseMetricsForTests(['__DISK__', '/dev/sda1 100 61 39 61% /'].join('\n'))
+    expect(m.mounts).toEqual([])
+  })
+
+  // The parser tests above feed a synthetic probe string, so they say nothing
+  // about whether the SCRIPT still asks for any of it. Deleting `df -kPT` from
+  // the probe left every one of them passing -- which is the same shape as the
+  // job engine with no composer and the log tail with no caller.
+  it('actually asks the server for the mounts', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { resolve } = await import('node:path')
+    const src = readFileSync(resolve(__dirname, '..', 'src/main/services/metrics.ts'), 'utf8')
+    // The QUOTED COMMAND, not the bare string. `df -kPT` also appears in a
+    // comment in that file, so `toContain('df -kPT')` passed with the command
+    // deleted -- which is this test being vacuous in the exact way it exists
+    // to prevent.
+    expect(src).toContain("'df -kPT 2>/dev/null'")
+    expect(src).toContain("'df -iPT 2>/dev/null'")
+    expect(src).toContain('__MOUNTS__')
+    // `-T` specifically: `-l` does not exclude tmpfs, so without the type
+    // column every pseudo-filesystem on the box comes back.
+  })
+})

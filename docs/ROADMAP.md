@@ -886,8 +886,16 @@ as a destroy-guard) or `findmnt`.
    alerting per row alerts three times. Deduped by device, shortest mount path kept.
 
    `worstMount` and `worstInodeMount` are separate, because a mail spool runs out of inodes at
-   30% disk used. Still open: the sampler wiring, `HostMetrics.mounts`, and scoping the `disk`
-   alert kind.
+   30% disk used.
+
+   **WIRED**: the probe asks `df -kPT` and `df -iPT`, and `HostMetrics.mounts` carries the
+   answer — BESIDE `diskPct`, never instead of it, because that field is the root filesystem in
+   every sample already in the history store. Running the wired probe end to end found one more
+   type: Docker Desktop reports `fakeowner` at 98% inside a container, which is the HOST's disk
+   showing through and ranked as the server's worst mount. `virtiofs`, `9p`, `vboxsf` and
+   `grpcfuse` are the same class. The list stays a DENYLIST and an unknown type is included: a
+   wrongly-included filesystem is a visible oddity, a wrongly-excluded one is a disk filling up
+   that nobody sees. Still open: the series, and scoping the `disk` alert kind per mount.
 3. **LVM, mdraid, zfs, SMART as facts and state alerts.** `lvs`/`vgs` for `vg-free`,
    `/proc/mdstat` for `[U_]`, `zpool status -x`, `smartctl -H -j` (root and a package —
    `absent` vs `cannot` is what the facts framework already models). Kinds `raid-degraded`,
