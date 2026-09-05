@@ -658,10 +658,17 @@ Everything here is small. Listed in the order the operator meets it.
 
 ### 43. Logs, and getting from an alert to one
 
-**Alert → tail deep-link.** `AlertsPanel.tsx` has no navigation to `LogTailPanel.tsx`, and
-`unit-failed` already carries the unit names a tail needs (`webhook.ts:73-77`). Seed
-`{kind:'unit', target, priority:'err', since:<raise time>}` and re-validate in main as
-`logTail.ts:93-98` already does. 2–3 days, and the most-used thing in this item.
+**Failed unit → tail deep-link — SHIPPED.** Not from `AlertsPanel`, which this item assumed:
+`unit-failed` is deliberately not a store kind (`webhook.ts:154` — failed units are a SET of
+names, not a threshold crossing), so no row exists there to click. The failed units render in
+`FleetHealth.tsx`, and that is where the link went.
+
+It was not a missing feature so much as a missing WIRE. `LogTailPanel` has taken a `jump` prop
+since it shipped and its own comment names the caller it was written for — "the failed-unit list
+is the one that matters" — and nothing ever passed it. The same shape as item 33's job engine.
+The request is held in `nav` beside `monitorTab`, for the same reason: the list that sets it is
+several components from the panel that reads it. A test asserts FleetMonitor actually hands the
+prop over, because asserting the store alone would have passed on the broken code.
 
 **Search across hosts.** A one-shot query mode — `journalctl -u U -g PATTERN --since … -n N`,
 `grep -F -m N`, `docker logs --since … | grep -F` — fanned out with the non-streaming exec the

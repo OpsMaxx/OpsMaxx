@@ -30,6 +30,28 @@ export type SettingsSection =
  *  fixed; the rest are whichever optional modules are enabled. */
 export type MonitorTab = 'overview' | 'alerts' | ModuleId
 
+/**
+ * A jump into the log tail asked for from elsewhere in the monitor -- item 43.
+ *
+ * `LogTailPanel` has taken a `jump` prop since it shipped, and its own comment
+ * names the caller this is for: "the failed-unit list is the one that matters".
+ * Nothing ever passed it. This is the other half.
+ *
+ * Held in nav rather than lifted into FleetMonitor's state for the reason
+ * `monitorTab` is: the failed-unit list is several components down, and
+ * threading a setter through them to reach a sibling is how that prop came to
+ * be unused in the first place.
+ *
+ * `nonce` rather than a value comparison, because tailing the same unit on the
+ * same server twice in a row is a thing people do -- LogTailJump's own note.
+ */
+export interface LogTailJumpRequest {
+  kind: 'unit' | 'file' | 'container'
+  target: string
+  serverId: string
+  nonce: number
+}
+
 interface NavState {
   aiSection: AiSection
   /** An access group the Access Groups page should open on, set by whoever
@@ -45,6 +67,8 @@ interface NavState {
    * this moves which one is visible, not whether it exists.
    */
   monitorTab: MonitorTab
+  /** Consumed by LogTailPanel's `jump` prop; see LogTailJumpRequest. */
+  logTailJump: LogTailJumpRequest | null
   setAiSection: (s: AiSection) => void
   setSettingsSection: (s: SettingsSection) => void
   setMonitorTab: (t: MonitorTab) => void
@@ -56,6 +80,7 @@ export const useNav = create<NavState>((set) => ({
   aiGroupId: null,
   settingsSection: 'appearance',
   monitorTab: 'overview',
+  logTailJump: null,
   setAiSection: (s) => set({ aiSection: s, aiGroupId: null }),
   setSettingsSection: (s) => set({ settingsSection: s }),
   setMonitorTab: (t) => set({ monitorTab: t }),
@@ -66,6 +91,21 @@ export const useNav = create<NavState>((set) => ({
 export function openAi(section: AiSection, groupId?: string | null): void {
   useNav.setState({ aiSection: section, aiGroupId: groupId ?? null })
   useApp.getState().setActivity('ai')
+}
+
+/**
+ * Open the log tail on one unit on one server, and start it.
+ *
+ * It lands on LINES rather than on a filled-in form, which is LogTailPanel's
+ * own decision about what a jump means: somebody who clicked a failed unit
+ * asked to see its log, not to be shown a form about it.
+ */
+export function openLogTail(serverId: string, target: string, kind: LogTailJumpRequest['kind'] = 'unit'): void {
+  useNav.setState({
+    monitorTab: 'logTail',
+    logTailJump: { kind, target, serverId, nonce: Date.now() }
+  })
+  useApp.getState().setActivity('monitor')
 }
 
 /** Open the Fleet Monitor on a particular panel. */

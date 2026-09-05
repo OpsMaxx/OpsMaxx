@@ -255,6 +255,9 @@ export function FleetMonitor(): React.JSX.Element {
   // already paid for, and this tab is a table over rows that exist either way.
   const tab = useNav((s) => s.monitorTab)
   const setTab = useNav((s) => s.setMonitorTab)
+  // Item 43. Held in nav for the same reason the tab is: the failed-unit list
+  // that sets it is several components away from the panel that consumes it.
+  const logTailJump = useNav((s) => s.logTailJump)
   const tabs = useMemo<ModuleDef[]>(
     () => MODULES.filter((m) => moduleEnabled(modules, m.id)),
     [modules]
@@ -444,7 +447,7 @@ export function FleetMonitor(): React.JSX.Element {
       )}
       {moduleEnabled(modules, 'logTail') && (
         <div style={show('logTail')}>
-          <LogTailPanel servers={servers} />
+          <LogTailPanel servers={servers} jump={logTailJump ?? undefined} />
         </div>
       )}
       {moduleEnabled(modules, 'cron') && (

@@ -6,11 +6,12 @@ import {
   CircleCheck,
   Clock,
   HardDrive,
+  ScrollText,
   Unplug
 } from 'lucide-react'
 import { useApp } from '../../store/app'
 import { useFleet } from '../../store/fleet'
-import { openSettings } from '../../store/nav'
+import { openLogTail, openSettings } from '../../store/nav'
 import { bytes, clsx, duration } from '../../lib/format'
 import type { PortListener } from '../../../../shared/ssh'
 // Aliased: the summary type and the component below share a name, and the
@@ -172,7 +173,20 @@ function HostRowView({
           {failed.map((u) => (
             <li key={u.name}>
               <b>{u.name}</b>
-              {u.description ? ` — ${u.description}` : ''}
+              {u.description ? ` — ${u.description}` : ''}{' '}
+              {/* Item 43. LogTailPanel has taken a `jump` prop since it
+                  shipped and its own comment names this list as the caller it
+                  was for -- "the failed-unit list is the one that matters".
+                  Nothing ever passed it, so the shortest path from "nginx
+                  failed" to "why" was to read the unit name, change tab, pick
+                  the server again and type the name back in. */}
+              <button
+                className="btn ghost sm"
+                title={`Tail ${u.name} on ${row.name}`}
+                onClick={() => openLogTail(row.id, u.name)}
+              >
+                <ScrollText size={11} /> Logs
+              </button>
             </li>
           ))}
         </ul>
