@@ -408,9 +408,23 @@ code: stage a revoke on a RHEL 9 host with `KillUserProcesses=yes` and no linger
 session, and watch whether `authorized_keys` comes back. The residual the design admits is at
 `docs/plans/roadmap-execution.md:603-608` — the arming proof catches a watchdog that never
 started and cannot catch one killed afterwards — and the five things to try are at `:614-625`.
-Then rewrite the guard test `tests/accessWrite.test.ts:51-58`, keep `:62-84`, and decide whether
-a host whose launcher fell through to `nohup` is allowed at all (nothing refuses it today,
-`:3018-3019`). **Days, plus a lab host.**
+**36a is ANSWERED.** The RHEL 9.8 check was run (systemd 252, logind
+`KillUserProcesses=yes`, real PAM sessions), and it produced the measured table
+now in `access.ts`: only a `systemd-run --user --scope` on a LINGERING account
+ever survived; `setsid` and `nohup` never fired in either column. So the write
+refuses to stage when logind kills user processes and the account does not
+linger, and `ACCESS_WRITE_ENABLED = false` became the DEFAULT rather than the
+whole gate — `settings.accessWriteEnabled` is the operator's opt-in and main
+enforces it in both handlers.
+
+The `nohup` question is answered too, and the answer is not about the launcher.
+`SP_KILL` was two-valued, and `no` meant both "logind answered false" and "we
+could not ask" — opposite facts, one of which armed a rollback that logind may
+have been about to kill. It is three-valued now (`absent`/`no`/`yes`/`unknown`)
+and `unknown` refuses alongside `yes`. So a host that fell through to `nohup`
+may be written to only where it positively said it will not kill the process:
+logind absent, or logind answering false. Four behavioural tests, each driving
+a shimmed `loginctl`/`busctl` rather than asserting on the command text.
 
 **36b. Sudoers read.** Independent of the gate. Today "sudo" means membership of
 `ADMIN_GROUPS` (`access.ts:387`) and the comment at `:1048` says so. Read `/etc/sudoers` and

@@ -3085,13 +3085,34 @@ function buildStagedWrite(o: {
     // KillUserProcesses is asked of logind itself rather than read out of a
     // config file, because the file is one of four that can set it and the bus
     // knows the answer.
-    'SP_KILL=no',
-    'command -v busctl >/dev/null 2>&1 && busctl get-property org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager KillUserProcesses 2>/dev/null | grep -q "true" && SP_KILL=yes',
+    // THREE-VALUED, and the reason is that `no` was doing double duty. It
+    // meant BOTH "logind answered false" and "we could not ask", and those are
+    // opposite facts: the first says nothing will kill the watchdog, the
+    // second says we do not know. A host with logind and without `busctl` --
+    // a minimal image, a container base -- read as the safe answer and armed a
+    // rollback that logind may have been about to kill. That is the same
+    // mistake this file spends its length refusing elsewhere: a property
+    // nobody could measure is not the reassuring value.
+    //
+    //   absent   no logind on this host at all, so nothing kills the slice
+    //            when the session ends and even `nohup` is a real promise
+    //   no       logind said KillUserProcesses=false
+    //   yes      logind said true
+    //   unknown  logind is here and would not answer -- treated as `yes`
+    'SP_KILL=unknown',
+    'command -v loginctl >/dev/null 2>&1 || SP_KILL=absent',
+    'if [ "$SP_KILL" = unknown ] && command -v busctl >/dev/null 2>&1; then SP_KILLV=$(busctl get-property org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager KillUserProcesses 2>/dev/null || true); case "$SP_KILLV" in *true*) SP_KILL=yes ;; *false*) SP_KILL=no ;; esac; fi',
     'if command -v systemd-run >/dev/null 2>&1 && systemd-run --user --scope --quiet --collect true >/dev/null 2>&1; then SP_L="systemd-run --user --scope --quiet --collect"; elif command -v setsid >/dev/null 2>&1; then SP_L=setsid; elif command -v nohup >/dev/null 2>&1; then SP_L=nohup; fi',
     '[ -n "$SP_L" ] || { rm -f "$SP_T" "$SP_B"; echo "this server has no way to leave a process running after the session ends, so the rollback could not be armed and nothing was changed" >&2; exit 5; }',
     // Refuse rather than arm something that cannot fire. A staged write whose
     // rollback is already dead is the one shape this feature must not take.
-    '[ "$SP_KILL" = yes ] && [ "$SP_LINGER" = no ] && { rm -f "$SP_T" "$SP_B"; echo "this server kills a user\'s processes when their last session ends (logind KillUserProcesses=yes) and this account is not lingering, so the rollback would be killed before it could restore anything; nothing was changed. Run: loginctl enable-linger $(id -un)" >&2; exit 6; }',
+    // `!= no` and `!= absent`, so UNKNOWN refuses with `yes`. This is also the
+    // answer to the question item 36a left open -- whether a host that fell
+    // through to `nohup` may be written to at all. It may, and only when the
+    // host has positively said it will not kill the process: with logind
+    // absent, or with logind answering false. Where the answer could not be
+    // had, the weakest launcher is not given the benefit of the doubt.
+    '[ "$SP_KILL" != no ] && [ "$SP_KILL" != absent ] && [ "$SP_LINGER" = no ] && { rm -f "$SP_T" "$SP_B"; echo "this server either kills a user\'s processes when their last session ends (logind KillUserProcesses=yes) or would not say whether it does, and this account is not lingering, so the rollback could be killed before it restored anything; nothing was changed. Run: loginctl enable-linger $(id -un)" >&2; exit 6; }',
     // Unquoted on purpose: `$SP_L` is one of three literals this file wrote,
     // and the systemd one is four words.
     `$SP_L sh -c ': > "$3"; sleep ${wait}; [ -f "$0" ] || cp -p "$1" "$2"; rm -f "$0" "$1" "$3"' "$SP_M" "$SP_B" "$SP_F" "$SP_ARM" </dev/null >/dev/null 2>&1 &`,
