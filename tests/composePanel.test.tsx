@@ -386,3 +386,49 @@ describe('a compose job that needs confirming is confirmed by a person', () => {
     expect((stub.jobs as { run: ReturnType<typeof vi.fn> }).run).not.toHaveBeenCalled()
   })
 })
+
+// ---------------------------------------------------------------------------
+// Item 42: pulling one service instead of twelve
+// ---------------------------------------------------------------------------
+//
+// `buildComposeActionCommand` has accepted and validated a `services` list
+// since it was written, and the panel never passed one -- so `pull` on a
+// twelve-service project pulled twelve images to update one. The same shape as
+// the job engine with no composer and the log tail with no caller.
+
+describe('pulling only the services that were picked', () => {
+  it('names them in the command, instead of the whole project', async () => {
+    const stub = panelBridge()
+    await openProject(stub)
+    await userEvent.click(screen.getByLabelText('Include cache'))
+    await userEvent.click(screen.getByTitle(/docker compose pull/))
+    const run = (stub.jobs as { run: ReturnType<typeof vi.fn> }).run
+    await waitFor(() => expect(run).toHaveBeenCalled())
+    const cmd = (run.mock.calls[0][0] as { spec: { steps: { command: string }[] } }).spec.steps[0]
+      .command
+    expect(cmd).toMatch(/pull 'cache'$/)
+  })
+
+  it('still means the whole project when nothing is picked', async () => {
+    // Which is what compose itself means by no argument.
+    const stub = panelBridge()
+    await openProject(stub)
+    await userEvent.click(screen.getByTitle(/docker compose pull/))
+    const run = (stub.jobs as { run: ReturnType<typeof vi.fn> }).run
+    await waitFor(() => expect(run).toHaveBeenCalled())
+    const cmd = (run.mock.calls[0][0] as { spec: { steps: { command: string }[] } }).spec.steps[0]
+      .command
+    expect(cmd).toMatch(/pull$/)
+  })
+
+  it('forgets the picks when the project is collapsed', async () => {
+    // A selection carried across would name another project's services.
+    const stub = panelBridge()
+    await openProject(stub)
+    await userEvent.click(screen.getByLabelText('Include cache'))
+    await userEvent.click(screen.getByText(/▾ edge/))
+    await userEvent.click(screen.getByText(/▸ edge/))
+    await waitFor(() => screen.getByLabelText('Include cache'))
+    expect((screen.getByLabelText('Include cache') as HTMLInputElement).checked).toBe(false)
+  })
+})

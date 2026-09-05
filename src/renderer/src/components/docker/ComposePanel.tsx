@@ -106,6 +106,13 @@ export function ComposePanel({
     reasons: string[]
   } | null>(null)
   const [phrase, setPhrase] = useState('')
+  // Which services the next pull/up applies to, for the project that is open.
+  //
+  // The builder has accepted and validated a `services` list since it was
+  // written and nothing ever passed one, so `pull` on a twelve-service project
+  // pulled twelve images to update one. Empty means every service, which is
+  // what compose itself means by no argument.
+  const [picked, setPicked] = useState<string[]>([])
 
   if (!server) return null
 
@@ -137,10 +144,14 @@ export function ComposePanel({
   const openProject = async (name: string): Promise<void> => {
     if (open === name) {
       setOpen(null)
+      setPicked([])
       return
     }
     const ref = projectFor(name)
     setOpen(name)
+    // Cleared with the project. A selection carried across would silently name
+    // another project's services on the next run.
+    setPicked([])
     setConfig(null)
     setEnvFiles(null)
     setEnvError(null)
@@ -186,7 +197,11 @@ export function ComposePanel({
   const runJob = (action: ComposeAction, name: string): void => {
     const ref = projectFor(name)
     if (ref === null || !server) return
-    const plan = composeJobSpec(action, ref, { sudo })
+    // Only for the project that is open: the picks belong to that list, and
+    // sending them with a different project's job would name services it does
+    // not have. The builder would refuse, but far too late to be useful.
+    const services = open === name ? picked : []
+    const plan = composeJobSpec(action, ref, { sudo, services })
     const targets = [{ serverId: server.id, serverName: server.name }]
     const jobPlan = planJob(plan.spec, targets)
     if (jobPlan.confirmation.kind !== 'none') {
@@ -307,14 +322,22 @@ export function ComposePanel({
                 <span className="grow" />
                 <button
                   className="icon-btn sm"
-                  title={`docker compose pull for ${p.name}. Fetches images; nothing running changes.`}
+                  title={
+                    open === p.name && picked.length > 0
+                      ? `docker compose pull for ${picked.join(', ')} in ${p.name}. Fetches those images; nothing running changes.`
+                      : `docker compose pull for ${p.name}. Fetches images; nothing running changes.`
+                  }
                   onClick={() => runJob('pull', p.name)}
                 >
                   <Download size={13} />
                 </button>
                 <button
                   className="icon-btn sm"
-                  title={`docker compose up -d for ${p.name}. Starts what is declared; removes nothing.`}
+                  title={
+                    open === p.name && picked.length > 0
+                      ? `docker compose up -d for ${picked.join(', ')} in ${p.name}. Starts those; removes nothing.`
+                      : `docker compose up -d for ${p.name}. Starts what is declared; removes nothing.`
+                  }
                   onClick={() => runJob('up', p.name)}
                 >
                   <Play size={13} />
@@ -342,6 +365,18 @@ export function ComposePanel({
                   )}
                   {view?.services.map((s) => (
                     <div key={s.declared.name} className="cron-row">
+                      <input
+                        type="checkbox"
+                        aria-label={`Include ${s.declared.name}`}
+                        checked={picked.includes(s.declared.name)}
+                        onChange={() =>
+                          setPicked((cur) =>
+                            cur.includes(s.declared.name)
+                              ? cur.filter((x) => x !== s.declared.name)
+                              : [...cur, s.declared.name]
+                          )
+                        }
+                      />
                       <span className="mono cron-when">{s.declared.name}</span>
                       <span className={clsx('chip', STATE_TONE[s.state])}>{STATE_WORD[s.state]}</span>
                       <span className="faint cron-desc mono">
