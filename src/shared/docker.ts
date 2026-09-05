@@ -2299,6 +2299,8 @@ export function buildDockerReclaimPreview(disk: DockerDiskDetail): DockerReclaim
   return { items, withheld }
 }
 
+import type { ImageScanProbe } from './imageScan'
+
 // ------------------------------------------------------------ pull / build
 //
 // Item 42's row. Two verbs that look alike on a panel and are not alike at all.
@@ -3000,6 +3002,9 @@ export interface DockerBridge {
     refs: string[],
     opts?: { sudo?: boolean; autoSudo?: boolean }
   ): Promise<DockerHealthLogProbe>
+  /** One image's vulnerabilities, if the host already has a scanner. Never
+   *  installs one -- see `DockerReader.scanImage`. */
+  scanImage(cfg: unknown, ref: string): Promise<ImageScanProbe>
   /** Networks, with what is attached to each -- INCLUDING stopped containers. */
   networks(cfg: unknown, opts?: { sudo?: boolean; autoSudo?: boolean }): Promise<DockerNetworkProbe>
   act(

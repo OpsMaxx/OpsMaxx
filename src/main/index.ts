@@ -2152,6 +2152,9 @@ ipcMain.handle(
   (_e, cfg: unknown, ref: string, opts?: { sudo?: boolean; autoSudo?: boolean }) =>
     dockerReader.inspect(cfg, ref, opts ?? {})
 )
+ipcMain.handle('docker:scan-image', (_e, cfg: unknown, ref: string) =>
+  dockerReader.scanImage(cfg, ref)
+)
 ipcMain.handle('docker:networks', (_e, cfg: unknown, opts?: { sudo?: boolean; autoSudo?: boolean }) =>
   dockerReader.networks(cfg, opts ?? {})
 )

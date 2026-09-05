@@ -48,6 +48,8 @@ import {
 import type { Server } from '../../types'
 import { ComposePanel } from './ComposePanel'
 import { HealthLogPanel } from './HealthLog'
+import { ImageScanPanel } from './ImageScan'
+import type { ImageScanProbe } from '../../../../shared/imageScan'
 import { ReclaimDialog, ReclaimOutcome } from './Reclaim'
 
 // Containers on a server, and what an operator does with them.
@@ -1033,7 +1035,16 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
                       )}
                     </div>
 
-                    {open && <InspectDetail probe={detail?.probe ?? null} />}
+                    {open && (
+                      <InspectDetail
+                        probe={detail?.probe ?? null}
+                        scan={
+                          bridge()?.scanImage
+                            ? (ref) => bridge()!.scanImage!(cfgFor(server), ref)
+                            : null
+                        }
+                      />
+                    )}
                   </div>
                 )
               })}
@@ -1176,7 +1187,13 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
  * credentials do not leak. A "show env" button would be a one-line change and
  * that is exactly why the reason for its absence is written down here.
  */
-function InspectDetail({ probe }: { probe: DockerInspectProbe | null }): React.JSX.Element {
+function InspectDetail({
+  probe,
+  scan
+}: {
+  probe: DockerInspectProbe | null
+  scan: ((ref: string) => Promise<ImageScanProbe>) | null
+}): React.JSX.Element {
   if (probe === null) {
     return (
       <div className="faint" style={{ fontSize: 11, padding: '4px 0 8px 12px' }}>
@@ -1212,6 +1229,11 @@ function InspectDetail({ probe }: { probe: DockerInspectProbe | null }): React.J
         <span className="chip">logs: {i.logDriver === '' ? 'unknown' : i.logDriver}</span>
       </div>
       <div className="mono">image {i.image}</div>
+      {/* The scan lives beside the image reference because that is what it is
+          about -- a container's vulnerabilities are its image's. Asked for, not
+          run on open: it is a scanner invocation that may download a 111 MB
+          database. */}
+      {scan !== null && <ImageScanPanel image={i.image} scan={scan} />}
       {/* The reference and the digest disagree constantly, and that
           disagreement — "latest" is not the latest here — is frequently the
           bug being hunted. */}

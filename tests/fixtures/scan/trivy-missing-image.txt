@@ -1,0 +1,14 @@
+2026-09-06T01:06:18+04:00	INFO	[vuln] Vulnerability scanning is enabled
+
+📣 [34mNotices:[0m
+  - Version 0.74.0 of Trivy is now available, current version is 0.64.1
+
+To suppress version checks, run Trivy scans with the --skip-version-check flag
+
+2026-09-06T01:06:20+04:00	FATAL	Fatal error	run error: image scan error: scan error: unable to initialize a scan service: unable to initialize an image scan service: unable to find the specified image "no-such-image:9" in ["docker" "containerd" "podman" "remote"]: 4 errors occurred:
+	* docker error: unable to inspect the image (no-such-image:9): Error response from daemon: No such image: no-such-image:9
+	* containerd error: containerd socket not found: /run/containerd/containerd.sock
+	* podman error: unable to initialize Podman client: no podman socket found: stat podman/podman.sock: no such file or directory
+	* remote error: GET https://index.docker.io/v2/library/no-such-image/manifests/9: UNAUTHORIZED: authentication required; [map[Action:pull Class: Name:library/no-such-image Type:repository]]
+
+

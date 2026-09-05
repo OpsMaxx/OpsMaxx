@@ -178,7 +178,7 @@ const MODULE_FILES: Record<string, string[]> = {
     'src/main/services/processes.ts',
     'src/renderer/src/components/processes/ProcessesPanel.tsx'
   ],
-  docker: ['src/shared/docker.ts', 'src/main/services/docker.ts', 'src/renderer/src/components/docker/DockerPanel.tsx'],
+  docker: ['src/shared/imageScan.ts', 'src/shared/docker.ts', 'src/main/services/docker.ts', 'src/renderer/src/components/docker/DockerPanel.tsx'],
   kubernetes: [
     'src/shared/kubernetes.ts',
     'src/shared/k8sSkew.ts',
