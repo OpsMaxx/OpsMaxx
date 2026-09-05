@@ -28,6 +28,7 @@ import {
   USER_ACTIONS,
   type UserAction
 } from '../../../../shared/userStep'
+import { checkFilePush, filePushJobSpec } from '../../../../shared/fileStep'
 import { jobApprovalFor, planJob } from '../../../../shared/jobs'
 import { useFleet } from '../../store/fleet'
 import type { JobDetail, JobHostResult, JobProgress, JobRecord } from '../../../../shared/jobs'
@@ -82,7 +83,7 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
   const [phrase, setPhrase] = useState('')
   // Item 34a. A free-text step is a line somebody typed; a typed step is an
   // action and a unit, checked before the command exists.
-  const [mode, setMode] = useState<'command' | 'service' | 'package' | 'user'>('command')
+  const [mode, setMode] = useState<'command' | 'service' | 'package' | 'user' | 'file'>('command')
   const [action, setAction] = useState<ServiceAction>('restart')
   const [unit, setUnit] = useState('')
   const [sudo, setSudo] = useState(true)
@@ -100,6 +101,32 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
   const [userGroup, setUserGroup] = useState('')
   const [userExpiry, setUserExpiry] = useState('')
   const [removeHome, setRemoveHome] = useState(false)
+  // Item 34c. The hash is computed here and travels in the command, so the
+  // approval covers the bytes rather than a description of them.
+  const [filePath, setFilePath] = useState('')
+  const [fileBody, setFileBody] = useState('')
+  const [fileMode, setFileMode] = useState('0644')
+  const [fileAfter, setFileAfter] = useState('')
+  const [fileSha, setFileSha] = useState('')
+
+  useEffect(() => {
+    let live = true
+    if (fileBody === '') {
+      setFileSha('')
+      return
+    }
+    void crypto.subtle
+      .digest('SHA-256', new TextEncoder().encode(fileBody))
+      .then((d) => {
+        if (!live) return
+        setFileSha(
+          [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('')
+        )
+      })
+    return () => {
+      live = false
+    }
+  }, [fileBody])
   const openId = useRef<string | null>(null)
   const sampled = useFleet((s) => s.hosts)
 
@@ -196,8 +223,17 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
     expiry: userExpiry,
     removeHome
   }
+  const fileCheck = checkFilePush(filePath, fileBody)
   const typedCheck =
-    mode === 'service' ? serviceCheck : mode === 'package' ? packageCheck : checkUserStep(userInput)
+    mode === 'service'
+      ? serviceCheck
+      : mode === 'package'
+        ? packageCheck
+        : mode === 'file'
+          ? fileSha === ''
+            ? ({ ok: false, reason: 'Working out the file’s checksum…' } as const)
+            : fileCheck
+          : checkUserStep(userInput)
   const check =
     mode === 'command'
       ? checkJobDraft(draft, picked.length)
@@ -219,7 +255,19 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
           ? packageJobSpec(manager, pkgAction, pkgNames.split(/[\s,]+/), { sudo })
           : mode === 'user'
             ? userJobSpec(userInput, { sudo })
-            : composeJobSpec(draft)
+            : mode === 'file'
+              ? filePushJobSpec(filePath, fileBody, fileSha, {
+                  sudo,
+                  // Always a NEW file from this panel. Replacing one needs the
+                  // sha256 of what is there, which needs a per-server read
+                  // first -- and a job is one command for every server, so
+                  // "what is there" is not one answer. That read is the rest
+                  // of item 34c.
+                  expectedBefore: null,
+                  mode: fileMode,
+                  after: fileAfter
+                })
+              : composeJobSpec(draft)
     setPhrase('')
     setPending({ spec, targets, plan: planJob(spec, targets) })
   }
@@ -365,9 +413,70 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
             >
               Account
             </button>
+            <button
+              className={clsx('btn sm', mode === 'file' && 'primary')}
+              aria-pressed={mode === 'file'}
+              onClick={() => setMode('file')}
+            >
+              File
+            </button>
           </div>
 
-          {mode === 'user' ? (
+          {mode === 'file' ? (
+            <>
+              <div className="row-actions" style={{ gap: 6 }}>
+                <input
+                  className="input mono"
+                  aria-label="File path"
+                  placeholder="/etc/myapp/config.toml"
+                  value={filePath}
+                  onChange={(e) => setFilePath(e.target.value)}
+                />
+                <input
+                  className="input mono"
+                  aria-label="Mode"
+                  style={{ width: 80 }}
+                  value={fileMode}
+                  onChange={(e) => setFileMode(e.target.value)}
+                />
+              </div>
+              <textarea
+                className="input mono"
+                aria-label="File contents"
+                rows={6}
+                placeholder="The exact bytes to write."
+                value={fileBody}
+                onChange={(e) => setFileBody(e.target.value)}
+              />
+              <input
+                className="input mono"
+                aria-label="Run afterwards"
+                placeholder="Run afterwards, only if the write succeeded — nginx -t && systemctl reload nginx"
+                value={fileAfter}
+                onChange={(e) => setFileAfter(e.target.value)}
+              />
+              <label className="r-sub">
+                <input
+                  type="checkbox"
+                  aria-label="Run as root with sudo"
+                  checked={sudo}
+                  onChange={(e) => setSudo(e.target.checked)}
+                />{' '}
+                Run as root (<code>sudo -n</code>)
+              </label>
+              {/* The hash is shown because it is what the server checks the
+                  arriving bytes against, and what the approval covers. */}
+              <div className="r-sub faint mono">
+                sha256 {fileSha === '' ? '…' : fileSha}
+              </div>
+              <div className="r-sub faint">
+                Writes a NEW file only. The server refuses if one is already
+                there, and refuses again if the bytes that arrive are not these
+                ones. Replacing an existing file needs its current checksum
+                read from each server first, which this does not do yet.
+              </div>
+            </>
+          ) : mode === 'user' ? (
             <>
               <div className="row-actions" style={{ gap: 6 }}>
                 <select

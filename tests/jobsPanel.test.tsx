@@ -423,3 +423,48 @@ describe('the typed account step', () => {
     expect(document.body.textContent).toContain('nothing puts back')
   })
 })
+
+// Item 34c, through the panel.
+describe('the typed file push', () => {
+  async function fileMode(stub: Record<string, unknown>): Promise<void> {
+    stubBridge(stub)
+    render(<JobsPanel servers={[server(0)]} />)
+    await userEvent.click(screen.getByRole('button', { name: /New job/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'File' }))
+    await userEvent.click(screen.getByRole('button', { name: 'web-0' }))
+  }
+
+  it('carries the bytes and the checksum the server will check them against', async () => {
+    const stub = jobsStub()
+    await fileMode(stub)
+    await userEvent.type(screen.getByLabelText('File path'), '/etc/myapp.conf')
+    await userEvent.type(screen.getByLabelText('File contents'), 'hello')
+    // sha256("hello")
+    const sha = '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'
+    await waitFor(() => expect(document.body.textContent).toContain(sha))
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Run' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }))
+    await waitFor(() => expect(runOf(stub)).toHaveBeenCalled())
+    const cmd = (runOf(stub).mock.calls[0][0] as { spec: { steps: { command: string }[] } }).spec
+      .steps[0].command
+    // The bytes, as base64, and the hash the host compares against.
+    expect(cmd).toContain(Buffer.from('hello', 'utf8').toString('base64'))
+    expect(cmd).toContain(sha)
+  })
+
+  it('refuses authorized_keys and points at the screen with a rollback', async () => {
+    const stub = jobsStub()
+    await fileMode(stub)
+    await userEvent.type(screen.getByLabelText('File path'), '/root/.ssh/authorized_keys')
+    await userEvent.type(screen.getByLabelText('File contents'), 'x')
+    await waitFor(() => expect(document.body.textContent).toContain('puts it back if that fails'))
+    expect((screen.getByRole('button', { name: 'Review' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('says it writes a new file only, rather than implying it can replace one', async () => {
+    const stub = jobsStub()
+    await fileMode(stub)
+    expect(document.body.textContent).toContain('Writes a NEW file only')
+  })
+})
