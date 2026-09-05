@@ -155,3 +155,22 @@ export function crashloopReading(
 export function looksLikeCrashloop(p: CrashPodRow): boolean {
   return p.waiting === 'CrashLoopBackOff' || p.terminated === 'Error'
 }
+
+/**
+ * The alert subject.
+ *
+ * NOT a server id. A cluster is visible from every host that holds a
+ * kubeconfig for it, so keying on the server would raise the same crashloop
+ * once per such host -- three admin boxes, three alerts, one problem. The
+ * subject is the cluster context, which is the thing that is actually
+ * crashlooping.
+ *
+ * Prefixed so it cannot collide with a server id in the same `subject:kind`
+ * keyspace, following the StoredDbAlertRow precedent for a subject that is not
+ * a fleet host.
+ */
+export const CRASHLOOP_SUBJECT_PREFIX = 'k8s:'
+
+export function crashloopSubject(context: string): string {
+  return `${CRASHLOOP_SUBJECT_PREFIX}${context || 'current-context'}`
+}

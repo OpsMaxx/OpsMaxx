@@ -48,6 +48,7 @@ function bridge(): Partial<RulesBridge> | undefined {
 
 const KIND_LABEL: Record<RuleAlertKind, string> = {
   'vpn-down': 'VPN down',
+  'pod-crashloop': 'Pods restarting',
   'vpn-degraded': 'VPN up but silent',
   cpu: 'CPU',
   disk: 'Disk',

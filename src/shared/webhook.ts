@@ -46,7 +46,8 @@ export const ALERT_KINDS = [
   // these payloads.
   'vpn-down',
   'vpn-degraded',
-  'vpn-cert-expiry'
+  'vpn-cert-expiry',
+  'pod-crashloop'
 ] as const
 export type AlertKind = (typeof ALERT_KINDS)[number]
 
@@ -243,7 +244,16 @@ export const STATE_ALERT_KINDS = [
   // `stopped` is neither, and is deliberately not an alert at all: a person
   // pressing Stop is not an outage.
   'vpn-down',
-  'vpn-degraded'
+  'vpn-degraded',
+  // Item 40. A STATE, like oom-kill: the condition can be observed to become
+  // false -- a sweep in which no pod's restart count moved is a real
+  // observation that nothing is restarting, not an assumption.
+  //
+  // KEYED ON THE CLUSTER, not on a server. A cluster is visible from every
+  // host holding a kubeconfig, so a serverId key would raise the same
+  // crashloop once per such host. The `StoredDbAlertRow` precedent already
+  // covers a subject that is not a fleet host.
+  'pod-crashloop'
 ] as const
 export type StateAlertKind = (typeof STATE_ALERT_KINDS)[number]
 

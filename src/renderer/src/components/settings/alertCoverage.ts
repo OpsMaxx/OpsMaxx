@@ -112,6 +112,10 @@ export const COVERAGE_SOURCE: Record<StoreAlertKind, AlertCoverageSource> = {
   // is watched whenever the app is open and not only on the monitor page --
   // the same claim `tunnel-down` makes and for the same reason.
   'vpn-down': 'app-root',
+  // Polled where the VPNs are, and for the same reason: it is a read of a
+  // cluster rather than of a server, and the fleet sampler is inside the
+  // agent-reachable closure this probe must stay out of.
+  'pod-crashloop': 'app-root',
   'vpn-degraded': 'app-root',
   'job-failed': 'app-root',
   'tunnel-down': 'app-root',

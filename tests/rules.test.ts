@@ -114,6 +114,9 @@ describe('what a rule may watch', () => {
       // Two, not one: up-but-silent and down have different fixes.
       'vpn-down',
       'vpn-degraded',
+      // Keyed on the cluster context rather than a server: a cluster is
+      // visible from every host holding a kubeconfig.
+      'pod-crashloop',
       'db-alarm',
       'db-watch'
     ])

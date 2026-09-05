@@ -770,6 +770,7 @@ export function hydrateAlerts(): Promise<void> {
 /** Short, for the status-bar chip and the notification title. */
 export const LABEL: Record<AlertKind, string> = {
   'vpn-down': 'VPN down',
+  'pod-crashloop': 'Pods restarting',
   'vpn-degraded': 'VPN silent',
   cpu: 'CPU',
   ram: 'Memory',
@@ -907,6 +908,7 @@ const VALUE_PHRASE: Record<NumericAlertKind, (v: number) => string> = {
 // is a type error here instead of a metric quietly posting as 'memory'.
 const WEBHOOK_KIND: Record<StoreAlertKind, WebhookAlertKind> = {
   'vpn-down': 'vpn-down',
+  'pod-crashloop': 'pod-crashloop',
   'vpn-degraded': 'vpn-degraded',
   'backup-failed': 'backup-failed',
   cpu: 'cpu',
@@ -1191,6 +1193,12 @@ const STATE_WORDS: Record<
   'vpn-down': {
     raised: (name) => `VPN ${name} is in error`,
     resolved: (name) => `VPN ${name} is connected again`
+  },
+  // The name here is a cluster context, not a server -- see the note on the
+  // kind. The detail carries which pod, already scrubbed.
+  'pod-crashloop': {
+    raised: (name, detail) => `${name}: ${detail || 'a pod is restarting repeatedly'}`,
+    resolved: (name) => `${name}: no pod restarted since the last check`
   },
   // Says what is wrong rather than that something is, because the fix is a
   // different one: a tunnel that is up and silent is not reconnected, it is
