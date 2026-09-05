@@ -1,0 +1,6 @@
+===SHELLPILOT-ENGLR===
+false
+===SHELLPILOT-ENGPKG===
+dpkg-query: no packages found matching docker-ce
+===SHELLPILOT-ENGRUN===
+      10
