@@ -2299,6 +2299,8 @@ export function buildDockerReclaimPreview(disk: DockerDiskDetail): DockerReclaim
   return { items, withheld }
 }
 
+import type { EnginePrecheckProbe } from './enginePrecheck'
+import type { PackageManager } from './hostFacts'
 import type { ImageScanProbe } from './imageScan'
 
 // ------------------------------------------------------------ pull / build
@@ -3005,6 +3007,9 @@ export interface DockerBridge {
   /** One image's vulnerabilities, if the host already has a scanner. Never
    *  installs one -- see `DockerReader.scanImage`. */
   scanImage(cfg: unknown, ref: string): Promise<ImageScanProbe>
+  /** The engine-upgrade precheck. Read-only and unelevated; its package block
+   *  is shown rather than parsed -- see `shared/engineUpgrade.ts`. */
+  enginePrecheck(cfg: unknown, manager: PackageManager): Promise<EnginePrecheckProbe>
   /** Networks, with what is attached to each -- INCLUDING stopped containers. */
   networks(cfg: unknown, opts?: { sudo?: boolean; autoSudo?: boolean }): Promise<DockerNetworkProbe>
   act(

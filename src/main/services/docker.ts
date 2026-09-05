@@ -40,6 +40,12 @@ import {
   parseTrivyOutput,
   type ImageScanProbe
 } from '../../shared/imageScan'
+import {
+  buildEnginePrecheckCommand,
+  parseEnginePrecheck,
+  type EnginePrecheckProbe
+} from '../../shared/enginePrecheck'
+import type { PackageManager } from '../../shared/hostFacts'
 import { redactOutput } from './secretRedaction'
 
 // Reading docker on a remote host, and the three lifecycle verbs.
@@ -426,6 +432,26 @@ export class DockerReader {
         scannerPresent: true,
         reading: parseTrivyOutput(err === '' ? out : `${out}\n${err}`)
       }
+    } catch (e) {
+      return { ok: false, detail: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  /**
+   * The engine-upgrade precheck -- item 42.
+   *
+   * Read-only and unelevated. Its package block is SHOWN rather than parsed;
+   * the only thing this returns parsed is the live-restore flag, which was
+   * measured. See `shared/engineUpgrade.ts` for why the installed set is left
+   * to a person.
+   */
+  async enginePrecheck(cfg: unknown, manager: PackageManager): Promise<EnginePrecheckProbe> {
+    try {
+      const r = await this.deps.exec(cfg, buildEnginePrecheckCommand(manager), READ_TIMEOUT_MS)
+      if (!r.ok) return { ok: false, detail: r.error ?? 'could not reach the server' }
+      const out = r.stdout ?? ''
+      const err = r.stderr ?? ''
+      return { ok: true, precheck: parseEnginePrecheck(err === '' ? out : `${out}\n${err}`) }
     } catch (e) {
       return { ok: false, detail: e instanceof Error ? e.message : String(e) }
     }
