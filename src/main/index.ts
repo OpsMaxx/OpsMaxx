@@ -268,6 +268,8 @@ import {
   parseUserUnits
 } from '../shared/userUnits'
 import type { UnitDraft, UserUnitsReading } from '../shared/userUnits'
+import { assessBackups } from '../shared/backup'
+import type { BackupAlarm } from '../shared/backup'
 import { Supervisor } from './services/vpn/supervisor'
 import { DEFAULT_CRED_PROXY_PORT } from '../shared/credproxy'
 import type { CredProxyCall, CredProxyStatus, CredProxyToken } from '../shared/credproxy'
@@ -3064,6 +3066,19 @@ ipcMain.handle('backup:inspect', (_e, password: string, path?: string) => backup
 ipcMain.handle('backup:import', (_e, password: string, path: string) =>
   backupImport(password, path, closeHistoryNow)
 )
+// Whether there is actually a backup, as opposed to whether one errored. See
+// assessBackups(): `lastRunAt` records an ATTEMPT, so a schedule whose every
+// run fails looks current through it, and only the last SUCCESSFUL report
+// answers the question an operator is asking.
+ipcMain.handle('backup:alarms', (): BackupAlarm[] => {
+  try {
+    const f = readTargets()
+    return assessBackups(f.destinations, f.lastReport ?? {}, Date.now())
+  } catch (err) {
+    console.error('[backup] could not assess:', err)
+    return []
+  }
+})
 ipcMain.handle('backup:deleteAll', () => deleteAllData(closeHistoryNow))
 ipcMain.handle('backup:relaunch', () => relaunchApp())
 

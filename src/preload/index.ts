@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, clipboard, webUtils } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import type { AutoStartSettings, AutoStartState } from '../shared/autostart'
 import type { UnitDraft, UserUnitsReading } from '../shared/userUnits'
+import type { BackupAlarm } from '../shared/backup'
 import type {
   SshConnectConfig,
   SshStatus,
@@ -874,6 +875,7 @@ const api = {
     // entry, and main resolves both — so the renderer can configure where the
     // vault gets uploaded without ever holding the key to the place it lands.
     destinations: (): Promise<BackupTargetsFile> => ipcRenderer.invoke('backup:destinations'),
+    alarms: (): Promise<BackupAlarm[]> => ipcRenderer.invoke('backup:alarms'),
     saveDestinations: (destinations: BackupDestination[]): Promise<BackupTargetsFile> =>
       ipcRenderer.invoke('backup:saveDestinations', destinations),
     runDestination: (id: string, password: string): Promise<BackupRunReport> =>
