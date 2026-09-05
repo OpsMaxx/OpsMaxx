@@ -22,6 +22,12 @@ import {
   type PackageAction
 } from '../../../../shared/packageStep'
 import { PACKAGE_MANAGERS, type PackageManager } from '../../../../shared/hostFacts'
+import {
+  checkUserStep,
+  userJobSpec,
+  USER_ACTIONS,
+  type UserAction
+} from '../../../../shared/userStep'
 import { jobApprovalFor, planJob } from '../../../../shared/jobs'
 import { useFleet } from '../../store/fleet'
 import type { JobDetail, JobHostResult, JobProgress, JobRecord } from '../../../../shared/jobs'
@@ -76,7 +82,7 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
   const [phrase, setPhrase] = useState('')
   // Item 34a. A free-text step is a line somebody typed; a typed step is an
   // action and a unit, checked before the command exists.
-  const [mode, setMode] = useState<'command' | 'service' | 'package'>('command')
+  const [mode, setMode] = useState<'command' | 'service' | 'package' | 'user'>('command')
   const [action, setAction] = useState<ServiceAction>('restart')
   const [unit, setUnit] = useState('')
   const [sudo, setSudo] = useState(true)
@@ -87,6 +93,13 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
   const [manager, setManager] = useState<PackageManager>('apt')
   const [pkgAction, setPkgAction] = useState<PackageAction>('install')
   const [pkgNames, setPkgNames] = useState('')
+  // Item 34d. No password field, and there is no action that would take one --
+  // see the note at the top of userStep.ts about what a step's text becomes.
+  const [userAction, setUserAction] = useState<UserAction>('lock')
+  const [userName, setUserName] = useState('')
+  const [userGroup, setUserGroup] = useState('')
+  const [userExpiry, setUserExpiry] = useState('')
+  const [removeHome, setRemoveHome] = useState(false)
   const openId = useRef<string | null>(null)
   const sampled = useFleet((s) => s.hosts)
 
@@ -176,7 +189,15 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
 
   const serviceCheck = checkServiceStep(action, unit, knownUnits)
   const packageCheck = checkPackageStep(manager, pkgAction, pkgNames.split(/[\s,]+/))
-  const typedCheck = mode === 'service' ? serviceCheck : packageCheck
+  const userInput = {
+    action: userAction,
+    user: userName,
+    group: userGroup,
+    expiry: userExpiry,
+    removeHome
+  }
+  const typedCheck =
+    mode === 'service' ? serviceCheck : mode === 'package' ? packageCheck : checkUserStep(userInput)
   const check =
     mode === 'command'
       ? checkJobDraft(draft, picked.length)
@@ -196,7 +217,9 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
         ? serviceJobSpec(action, unit, { sudo })
         : mode === 'package'
           ? packageJobSpec(manager, pkgAction, pkgNames.split(/[\s,]+/), { sudo })
-          : composeJobSpec(draft)
+          : mode === 'user'
+            ? userJobSpec(userInput, { sudo })
+            : composeJobSpec(draft)
     setPhrase('')
     setPending({ spec, targets, plan: planJob(spec, targets) })
   }
@@ -335,9 +358,85 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
             >
               Package
             </button>
+            <button
+              className={clsx('btn sm', mode === 'user' && 'primary')}
+              aria-pressed={mode === 'user'}
+              onClick={() => setMode('user')}
+            >
+              Account
+            </button>
           </div>
 
-          {mode === 'package' ? (
+          {mode === 'user' ? (
+            <>
+              <div className="row-actions" style={{ gap: 6 }}>
+                <select
+                  className="input"
+                  aria-label="Account action"
+                  value={userAction}
+                  onChange={(e) => setUserAction(e.target.value as UserAction)}
+                >
+                  {USER_ACTIONS.map((a) => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className="input mono"
+                  aria-label="Account"
+                  placeholder="deploy"
+                  value={userName}
+                  onChange={(e) => setUserName(e.target.value)}
+                />
+                {userAction === 'add-group' && (
+                  <input
+                    className="input mono"
+                    aria-label="Group"
+                    placeholder="docker"
+                    value={userGroup}
+                    onChange={(e) => setUserGroup(e.target.value)}
+                  />
+                )}
+                {userAction === 'set-expiry' && (
+                  <input
+                    className="input mono"
+                    aria-label="Expiry date"
+                    placeholder="YYYY-MM-DD, or empty to clear"
+                    value={userExpiry}
+                    onChange={(e) => setUserExpiry(e.target.value)}
+                  />
+                )}
+              </div>
+              {userAction === 'delete' && (
+                <label className="r-sub">
+                  <input
+                    type="checkbox"
+                    aria-label="Also remove the home directory"
+                    checked={removeHome}
+                    onChange={(e) => setRemoveHome(e.target.checked)}
+                  />{' '}
+                  Also remove the home directory — this is the part nothing puts back
+                </label>
+              )}
+              <label className="r-sub">
+                <input
+                  type="checkbox"
+                  aria-label="Run as root with sudo"
+                  checked={sudo}
+                  onChange={(e) => setSudo(e.target.checked)}
+                />{' '}
+                Run as root (<code>sudo -n</code>)
+              </label>
+              {/* Said where somebody would go looking for the field. */}
+              <div className="r-sub faint">
+                An account is created with no password and locked. There is no password field here
+                and no action that takes one: a step&rsquo;s text is stored in the approval record,
+                hashed, compared and shown, so a password in a step is a password in a record that
+                outlives the job. Give access with a key instead.
+              </div>
+            </>
+          ) : mode === 'package' ? (
             <>
               <div className="row-actions" style={{ gap: 6 }}>
                 <select
