@@ -1,0 +1,6 @@
+===OPSMAXX-ENGLR===
+false
+===OPSMAXX-ENGPKG===
+dpkg-query: no packages found matching docker-ce
+===OPSMAXX-ENGRUN===
+      10
