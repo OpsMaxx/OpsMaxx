@@ -3,8 +3,12 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 
+import { assessCommand } from '../src/shared/commandRisk'
+import { buildDockerBuildCommand, buildDockerPullCommand } from '../src/shared/docker'
 import {
+  buildComposeActionCommand,
   COMPOSE_FAILURE_HELP,
+  COMPOSE_STEP_TIMEOUT_MS,
   COMPOSE_MARKERS,
   lintCompose,
   lintComposeConfig,
@@ -170,5 +174,107 @@ describe('files compose accepts and an operator still needs told about', () => {
     // and a second opinion on a settled question is noise.
     expect(probe('depends-on-undefined').ok).toBe(false)
     expect(lintCompose([svc({ dependsOn: ['nope'] })])).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Item 42's build row. `pull` fetches bytes; `build` runs a program.
+// ---------------------------------------------------------------------------
+
+describe('building is not pulling', () => {
+  const ref = { name: 'edge', files: ['/srv/edge/compose.yaml'] }
+
+  it('builds `build --pull`, so a build cannot reuse a stale base image', () => {
+    // A build that reuses a cached base is a build that does not contain the
+    // security update somebody just asked for.
+    const cmd = buildComposeActionCommand('build', ref)
+    expect(cmd).toContain('compose')
+    expect(cmd).toContain('build --pull')
+  })
+
+  it('passes no build args at all', () => {
+    // A build arg is free text that reaches a `RUN` line, and nothing here can
+    // show an operator what that will do.
+    expect(buildComposeActionCommand('build', ref)).not.toContain('--build-arg')
+  })
+
+  it('still refuses to put --build on up', () => {
+    // Building and starting are separate decisions. Folding one into the other
+    // runs a Dockerfile behind a button labelled start.
+    expect(buildComposeActionCommand('up', ref)).not.toContain('--build')
+  })
+
+  it('scopes a build to the services that were picked', () => {
+    expect(buildComposeActionCommand('build', ref, { services: ['web'] })).toMatch(/build --pull ['"]?web/)
+  })
+
+  it('refuses a service name it cannot prove safe', () => {
+    expect(() => buildComposeActionCommand('build', ref, { services: ['web; rm -rf /'] })).toThrow(
+      /invalid service name/
+    )
+  })
+
+  // The row asked whether a build needs an ELEVATED rule. It does: a Dockerfile
+  // is a program, and `RUN curl ... | sh` is an ordinary line in one.
+  it('grades a build as elevated, and says why in the operator’s words', () => {
+    const a = assessCommand('docker compose build --pull web')
+    expect(a.risk).toBe('elevated')
+    expect(a.reasons.join(' ')).toContain('runs a Dockerfile')
+  })
+
+  it('grades a plain build the same way', () => {
+    expect(assessCommand('docker build -t app:1 .').risk).toBe('elevated')
+    expect(assessCommand('podman build .').risk).toBe('elevated')
+  })
+
+  // `pull` fetches bytes and runs none of them. Grading it elevated would put a
+  // confirmation on the safest thing on the panel and teach people to click
+  // through the ones that matter.
+  it('does not grade a pull as elevated', () => {
+    expect(assessCommand('docker compose pull web').risk).toBe('ordinary')
+    expect(assessCommand('docker pull nginx:1.27').risk).toBe('ordinary')
+  })
+
+  it('gives a build its own budget, because a build is not a fetch', () => {
+    expect(COMPOSE_STEP_TIMEOUT_MS.build).toBeGreaterThan(COMPOSE_STEP_TIMEOUT_MS.pull)
+  })
+})
+
+describe('the standalone pull and build builders', () => {
+  it('pulls exactly the reference it was given', () => {
+    expect(buildDockerPullCommand('nginx:1.27.3')).toContain('pull nginx:1.27.3')
+  })
+
+  it('refuses a reference it cannot prove safe', () => {
+    for (const bad of ['nginx; rm -rf /', '../etc/passwd', '$(id)', '']) {
+      expect(() => buildDockerPullCommand(bad)).toThrow(/invalid image reference/)
+    }
+  })
+
+  it('always builds with --pull, so a stale base layer cannot survive', () => {
+    const cmd = buildDockerBuildCommand({ context: '/srv/app', tag: 'app:1.2.3' })
+    expect(cmd).toContain('build --pull -t app:1.2.3 /srv/app')
+  })
+
+  it('takes no build args', () => {
+    expect(buildDockerBuildCommand({ context: '/srv/app', tag: 'app:1' })).not.toContain('--build-arg')
+  })
+
+  it('refuses a context that is not a plain path', () => {
+    // `docker build https://github.com/x/y.git` is a real form that fetches and
+    // builds code off the internet. Not something to accept from a text box.
+    for (const bad of ['https://github.com/x/y.git', '/srv/../etc', '/srv/app; id', '']) {
+      expect(() => buildDockerBuildCommand({ context: bad, tag: 'app:1' })).toThrow(/invalid context/)
+    }
+  })
+
+  it('refuses a tag it cannot prove safe', () => {
+    expect(() => buildDockerBuildCommand({ context: '/srv/app', tag: 'app:1 && id' })).toThrow(
+      /invalid tag/
+    )
+  })
+
+  it('accepts a relative context, which is what a compose project uses', () => {
+    expect(buildDockerBuildCommand({ context: 'services/api', tag: 'api:1' })).toContain('services/api')
   })
 })

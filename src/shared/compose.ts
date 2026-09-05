@@ -82,7 +82,8 @@ import {
   classifyDockerFailure,
   planDockerAction,
   resolveBinary,
-  section
+  section,
+  validateImageRef
 } from './docker'
 import type { JobSpec, JobStep } from './jobs'
 
@@ -1303,8 +1304,8 @@ export function planComposeServiceRestart(service: ComposeServiceState): Compose
  * which is the line — and the line is drawn here in a list rather than in a
  * dialog, so a verb cannot be added by someone editing a UI file.
  */
-export type ComposeAction = 'pull' | 'up'
-export const COMPOSE_ACTIONS: readonly ComposeAction[] = ['pull', 'up']
+export type ComposeAction = 'pull' | 'up' | 'build'
+export const COMPOSE_ACTIONS: readonly ComposeAction[] = ['pull', 'up', 'build']
 
 /**
  * The shell for one compose verb.
@@ -1319,6 +1320,17 @@ export const COMPOSE_ACTIONS: readonly ComposeAction[] = ['pull', 'up']
  * `up` is `up -d` and nothing else. Not `--remove-orphans` (that removes
  * containers, see COMPOSE_REFUSALS), not `--force-recreate` (that restarts
  * services the operator did not ask about), not `--build`.
+ *
+ * `build` is `build --pull` and NO BUILD ARGS. `--pull` because a build that
+ * reuses a cached base image is a build that does not contain the security
+ * update somebody just asked for. No `--build-arg`, because a build arg is
+ * free text that reaches a `RUN` line, and this module does not have a way to
+ * show an operator what that will do.
+ *
+ * `up` STILL does not carry `--build`. Building and starting are separate
+ * decisions and a Dockerfile is code -- see the ELEVATED rule in
+ * `shared/commandRisk.ts`, which grades a build accordingly. Folding a build
+ * into `up` would run that code behind a button labelled start.
  */
 export function buildComposeActionCommand(
   action: ComposeAction,
@@ -1338,7 +1350,7 @@ export function buildComposeActionCommand(
     }
   }
   const tail = services.length === 0 ? '' : ` ${services.map(quote).join(' ')}`
-  const verb = action === 'up' ? 'up -d' : 'pull'
+  const verb = action === 'up' ? 'up -d' : action === 'build' ? 'build --pull' : 'pull'
   const run = opts.sudo ? 'sudo -n docker' : 'docker'
   return `${run} compose ${flags} ${verb}${tail}`
 }
@@ -1384,7 +1396,7 @@ export function composeJobSpec(
     detail,
     spec: {
       kind: 'command',
-      title: `Compose ${action === 'up' ? 'up -d' : 'pull'} · ${project.name}`,
+      title: `Compose ${action === 'up' ? 'up -d' : action === 'build' ? 'build --pull' : 'pull'} · ${project.name}`,
       steps
     }
   }
@@ -1400,34 +1412,22 @@ export function composeJobSpec(
  */
 export const COMPOSE_STEP_TIMEOUT_MS: Record<ComposeAction, number> = {
   pull: 1_800_000,
-  up: 900_000
+  up: 900_000,
+  // The same reasoning as `pull`, more so: a build fetches base layers AND
+  // runs every `RUN` line, and a compile step measured in tens of minutes is
+  // slow rather than broken.
+  build: 3_600_000
 }
 
 // ------------------------------------------------------- the image tag edit
 
-/**
- * An image reference, validated before it is written into someone's file.
- *
- * Deliberately strict about the tag and permissive about the registry: a
- * registry host can carry a port and a path, a tag cannot carry a slash, and a
- * digest is hex of a stated length. The thing being prevented is not a shell
- * injection — this value is written into a file, not a command — it is a file
- * edit that leaves the project unparseable, which is a worse outcome than a
- * refused edit because it is discovered at the next deploy.
- */
-const IMAGE_RE =
-  /^(?:[a-zA-Z0-9._-]+(?::\d+)?\/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*(?::[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127})?(?:@sha256:[a-f0-9]{64})?$/
-
-export function validateImageRef(ref: unknown): boolean {
-  if (typeof ref !== 'string' || ref.length === 0 || ref.length > 512) return false
-  // Checked BEFORE the pattern, because the pattern alone accepted
-  // `../etc/passwd`: a registry component is `[a-zA-Z0-9._-]+`, which `..`
-  // satisfies, so a path traversal read as `registry `..`, image `etc/passwd``
-  // and was written straight into someone's compose file. Found by the test
-  // below rather than by review, which is why it is spelled out here.
-  if (ref.startsWith('.') || ref.startsWith('/') || ref.includes('..')) return false
-  return IMAGE_RE.test(ref)
-}
+// `validateImageRef` and its pattern live in `shared/docker.ts` and are
+// re-exported here. They moved when the pull/build builders needed them: this
+// module imports docker.ts, so keeping them here would have made that import
+// circular -- the same reason `commandRisk.ts` was split out of
+// `broadcast.ts`. Re-exported rather than relocated silently, so every existing
+// caller and every test keeps its import path.
+export { validateImageRef } from './docker'
 
 export type ComposeImageEditPlan =
   | {

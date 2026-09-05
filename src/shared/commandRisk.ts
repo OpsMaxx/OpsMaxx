@@ -184,6 +184,15 @@ const ELEVATED = [
       String.raw`(docker|podman)\s+(?:(?:container|image|volume|network|system|compose)\s+)?(rm|rmi|stop|kill|prune|down)\b`
     ),
     why: 'removes or stops containers'
+  },
+  // A BUILD RUNS A DOCKERFILE, and a Dockerfile is a program: `RUN curl ... |
+  // sh` is a normal line in one. It is not a read, it is not reversible in the
+  // sense a `pull` is, and it executes code the operator has probably not
+  // opened. `pull` is deliberately NOT here: it fetches bytes and runs none of
+  // them.
+  {
+    rx: commandStart(String.raw`(docker|podman)\s+(?:compose\s+)?build\b`),
+    why: 'runs a Dockerfile, which can execute anything its author wrote'
   }
 ]
 

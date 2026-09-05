@@ -563,8 +563,10 @@ describe('what compose will not run', () => {
     ).toThrow(/removes every container/)
   })
 
-  it('offers exactly two verbs', () => {
-    expect(COMPOSE_ACTIONS).toEqual(['pull', 'up'])
+  it('offers exactly three verbs, and none that removes anything', () => {
+    // The list is the line, and it is here rather than in a UI file so a verb
+    // cannot be added by somebody editing a panel.
+    expect(COMPOSE_ACTIONS).toEqual(['pull', 'up', 'build'])
     for (const verb of Object.keys(COMPOSE_REFUSALS)) {
       expect(COMPOSE_ACTIONS).not.toContain(verb)
     }

@@ -2299,6 +2299,80 @@ export function buildDockerReclaimPreview(disk: DockerDiskDetail): DockerReclaim
   return { items, withheld }
 }
 
+// ------------------------------------------------------------ pull / build
+//
+// Item 42's row. Two verbs that look alike on a panel and are not alike at all.
+//
+// `pull` fetches bytes and runs none of them. It is graded ordinary in
+// `shared/commandRisk.ts` deliberately -- putting a confirmation on the safest
+// thing here teaches people to click through the ones that matter.
+//
+// `build` RUNS A DOCKERFILE, which is a program: `RUN curl ... | sh` is an
+// ordinary line in one. It is graded elevated for that reason, and it takes no
+// build args, because a build arg is free text that reaches a `RUN` line and
+// nothing here can show an operator what it will do.
+
+/** A build context, made safe to interpolate and to reason about.
+ *
+ *  Absolute, or a plain relative path with no traversal. Not a URL: `docker
+ *  build https://github.com/x/y.git` is a real form and it fetches and builds
+ *  code from the internet, which is not a thing to accept from a text box. */
+export function validateBuildContext(path: unknown): boolean {
+  if (typeof path !== 'string' || path === '' || path.length > 4096) return false
+  if (/[^A-Za-z0-9._/-]/.test(path)) return false
+  if (path.includes('..')) return false
+  return true
+}
+
+/**
+ * An image reference, validated before it is written into someone's file.
+ *
+ * Deliberately strict about the tag and permissive about the registry: a
+ * registry host can carry a port and a path, a tag cannot carry a slash, and a
+ * digest is hex of a stated length. The thing being prevented is not a shell
+ * injection — this value is written into a file, not a command — it is a file
+ * edit that leaves the project unparseable, which is a worse outcome than a
+ * refused edit because it is discovered at the next deploy.
+ */
+const IMAGE_RE =
+  /^(?:[a-zA-Z0-9._-]+(?::\d+)?\/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*(?::[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127})?(?:@sha256:[a-f0-9]{64})?$/
+
+export function validateImageRef(ref: unknown): boolean {
+  if (typeof ref !== 'string' || ref.length === 0 || ref.length > 512) return false
+  // Checked BEFORE the pattern, because the pattern alone accepted
+  // `../etc/passwd`: a registry component is `[a-zA-Z0-9._-]+`, which `..`
+  // satisfies, so a path traversal read as `registry `..`, image `etc/passwd``
+  // and was written straight into someone's compose file. Found by the test
+  // below rather than by review, which is why it is spelled out here.
+  if (ref.startsWith('.') || ref.startsWith('/') || ref.includes('..')) return false
+  return IMAGE_RE.test(ref)
+}
+
+export function buildDockerPullCommand(ref: string, opts: { sudo?: boolean } = {}): string {
+  if (!validateImageRef(ref)) {
+    throw new Error('refusing to build a pull command from an invalid image reference')
+  }
+  return [resolveBinary('docker', [], ['podman']), `${runner(opts.sudo)} pull ${ref}`].join('; ')
+}
+
+export function buildDockerBuildCommand(
+  spec: { context: string; tag: string },
+  opts: { sudo?: boolean } = {}
+): string {
+  if (!validateBuildContext(spec.context)) {
+    throw new Error('refusing to build a build command from an invalid context path')
+  }
+  if (!validateImageRef(spec.tag)) {
+    throw new Error('refusing to build a build command with an invalid tag')
+  }
+  // `--pull`, always. A build that reuses a cached base image is a build that
+  // does not contain the security update somebody just asked for.
+  return [
+    resolveBinary('docker', [], ['podman']),
+    `${runner(opts.sudo)} build --pull -t ${spec.tag} ${spec.context}`
+  ].join('; ')
+}
+
 // ---------------------------------------------------------------------------
 // Networks
 // ---------------------------------------------------------------------------
