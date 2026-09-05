@@ -9,8 +9,7 @@ import {
   mysqlScanFindings,
   parseMongoCollStats,
   parseMysqlDigests,
-  parseRedisPersistence,
-  redisPersistenceVerdict
+  parseRedisPersistence
 } from '../src/shared/dbSlowReads'
 
 // Item 37's remaining ride-along reads. Every fixture came off a real server in
@@ -99,7 +98,7 @@ describe('Mongo: indexes against the data they index', () => {
   })
 })
 
-describe('Redis: what a restart would lose', () => {
+describe('Redis: where the RDB file is', () => {
   const p = parseRedisPersistence(fixture('redis/persistence.txt'))
 
   it('reads the default image exactly as it is configured', () => {
@@ -111,23 +110,16 @@ describe('Redis: what a restart would lose', () => {
     })
   })
 
-  // The case worth naming: the stock image keeps snapshots only, and the
-  // newest can be an hour old. Redis is called a cache often enough that
-  // people find this out after a restart.
-  it('says how much the default configuration can lose, in minutes', () => {
-    const v = redisPersistenceVerdict(p)
-    expect(v.level).toBe('watch')
-    expect(v.because).toContain('60 minutes')
-    expect(v.because).toContain('/data/dump.rdb')
+  // NO VERDICT is asserted here, and that is the point. `judgeRedisPersistence`
+  // in dbOps.ts already answers "what would a restart cost", from RUNTIME
+  // state -- last BGSAVE status, last AOF write status, save age, changes
+  // since. This parse answers a different question, the one item 38 needs:
+  // where the file to copy actually is.
+  it('gives item 38 the path it needs to fetch a snapshot', () => {
+    expect(`${p.dir}/${p.dbfilename}`).toBe('/data/dump.rdb')
   })
 
-  it('calls a server that writes nothing at all an alarm', () => {
-    const v = redisPersistenceVerdict({ ...p, save: '' })
-    expect(v.level).toBe('alarm')
-    expect(v.because).toContain('loses everything')
-  })
-
-  it('is content when the append-only file is on', () => {
-    expect(redisPersistenceVerdict({ ...p, appendonly: true }).level).toBe('ok')
+  it('says whether an AOF exists, which decides whether the RDB is the whole backup', () => {
+    expect(p.appendonly).toBe(false)
   })
 })

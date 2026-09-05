@@ -55,6 +55,7 @@ import {
   mssqlConnectionCeiling
 } from './dbOpsMssql'
 import type { DbConnectConfig } from '../../shared/db'
+import { parseMysqlDigests, mysqlScanFindings } from '../../shared/dbSlowReads'
 import {
   DB_QUESTION_LABEL,
   MONGO_COMMANDS,
@@ -522,6 +523,63 @@ async function collectMysql(client: any): Promise<DbAnswer<unknown>[]> {
         return { value, verdict, status: statusFailure.status, detail: statusFailure.detail }
       }
       return { value, verdict, status: value.enabled ? undefined : ('absent' as const) }
+    }, mysqlFailure)
+  )
+
+  // ---- statements that scan (item 37)
+  //
+  // performance_schema can be compiled out or switched off, and then this
+  // table does not exist. That is `absent` -- a first-class answer -- and not
+  // an error, and certainly not "no statements are scanning".
+  answers.push(
+    await answer('digests', async () => {
+      let rows: Row[]
+      try {
+        rows = await myRows(client, MYSQL_QUERIES.digests, [ROW_LIMIT])
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        if (/performance_schema|doesn't exist|denied/i.test(msg)) {
+          return {
+            value: [],
+            status: 'absent' as const,
+            verdict: {
+              level: 'unknown' as const,
+              headline: 'performance_schema is not readable on this server.',
+              because:
+                'It can be compiled out, switched off with performance_schema=0, or readable only by an account with SELECT on it. Without it MySQL keeps no per-statement history, so there is nothing to show — which is different from no statement scanning a table.'
+            }
+          }
+        }
+        throw e
+      }
+      const value = parseMysqlDigests(
+        rows
+          .map((r) =>
+            [
+              str(r.schema_name),
+              str(r.digest_text),
+              num(r.count_star),
+              num(r.total_ms),
+              num(r.max_ms),
+              num(r.sum_rows_examined),
+              num(r.sum_rows_sent),
+              num(r.sum_no_index_used)
+            ].join('|')
+          )
+          .join('\n')
+      )
+      const findings = mysqlScanFindings(value)
+      return {
+        value: findings,
+        verdict:
+          findings.length === 0
+            ? { level: 'ok' as const, headline: 'No statement is reading a table without an index.' }
+            : {
+                level: 'watch' as const,
+                headline: `${findings.length} statement(s) read a table without an index.`,
+                because: `${findings[0].digest} — ${findings[0].because}.`
+              }
+      }
     }, mysqlFailure)
   )
 

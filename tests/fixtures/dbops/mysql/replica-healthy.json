@@ -385,5 +385,50 @@
         "free_bytes": 0
       }
     ]
+  },
+  "digests": {
+    "ok": true,
+    "rows": [
+      {
+        "schema_name": "spt",
+        "digest_text": "CREATE TABLE `t` ( `id` INTEGER PRIMARY KEY , `v` VARCHARACTER (?) )",
+        "count_star": 1,
+        "total_ms": 7.3,
+        "max_ms": 7.3,
+        "sum_rows_examined": 0,
+        "sum_rows_sent": 0,
+        "sum_no_index_used": 0
+      },
+      {
+        "schema_name": "spt",
+        "digest_text": "INSERT INTO `t` VALUES (...) /* , ... */",
+        "count_star": 1,
+        "total_ms": 3.3,
+        "max_ms": 3.3,
+        "sum_rows_examined": 0,
+        "sum_rows_sent": 0,
+        "sum_no_index_used": 0
+      },
+      {
+        "schema_name": "spt",
+        "digest_text": "SELECT COUNT ( * ) FROM `t`",
+        "count_star": 1,
+        "total_ms": 0.7,
+        "max_ms": 0.7,
+        "sum_rows_examined": 0,
+        "sum_rows_sent": 1,
+        "sum_no_index_used": 0
+      },
+      {
+        "schema_name": "spt",
+        "digest_text": "SELECT `v` FROM `t` WHERE `v` = ?",
+        "count_star": 2,
+        "total_ms": 0.3,
+        "max_ms": 0.2,
+        "sum_rows_examined": 4,
+        "sum_rows_sent": 2,
+        "sum_no_index_used": 2
+      }
+    ]
   }
 }

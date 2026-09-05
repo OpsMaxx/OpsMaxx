@@ -542,8 +542,19 @@ has a minimum size — so a size FLOOR comes before the ratio or every small col
 estate is on screen; and three of MySQL's four real digests returned no rows at all, so
 `examinedPerRow` is null rather than Infinity, which would sort every INSERT above the statement
 actually scanning. `no_index_used` is MySQL's own count and is the signal used, because it is
-true on a table too small for a ratio to mean anything. Redis's stock image keeps snapshots only
-and can lose an hour.
+true on a table too small for a ratio to mean anything.
+
+**The MySQL half is WIRED** as a ninth question, `digests`, with a capture recorded from MySQL
+8.4. It is not the slow log: that counts statements crossing a time threshold, and a scan of a
+small table is fast. `performance_schema` being off or unreadable is `absent` — a first-class
+answer — never "no statement is scanning".
+
+**The Redis verdict was DELETED rather than shipped.** `judgeRedisPersistence` already answers
+"what would a restart cost" and answers it better, from runtime state — last BGSAVE status, last
+AOF write status, save age, changes since. Mine read only configuration, and a server whose last
+BGSAVE failed is healthy by the config and broken in fact. Two judgements of one question is two
+things to keep in step and the weaker would have been on screen half the time. What survives is
+the parse, because item 38 needs `dir` and `dbfilename` to know where the RDB file is.
 
 Still open: the PG slow-statement threshold in `DB_THRESHOLDS`; MySQL top-N from
 `performance_schema.events_statements_summary_by_digest`; Mongo index sizes (the collector never

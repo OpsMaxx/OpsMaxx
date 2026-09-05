@@ -200,43 +200,18 @@ export function parseRedisPersistence(text: string): RedisPersistence {
 }
 
 /**
- * What a restart would cost.
+ * NO VERDICT HERE, deliberately.
  *
- * The default image is the case worth naming: `appendonly no` with a `save` of
- * `3600 1 300 100 60 10000`, which means the newest snapshot can be an hour
- * old. Redis is called a cache often enough that people are surprised by that
- * only after a restart.
+ * `judgeRedisPersistence` in dbOps.ts already answers "what would a restart
+ * cost", and it answers it BETTER: it reads runtime state --
+ * `rdb_last_bgsave_status`, `aof_last_write_status`, the age of the last save
+ * and the changes since it -- where this reads only configuration. A server
+ * configured with save points whose last BGSAVE FAILED is healthy by the
+ * config and broken in fact, and only the existing answer can tell.
  *
- * BOTH OFF is the alarm: no AOF and no save directive is a server that keeps
- * nothing at all, and a restart is an empty database.
+ * I wrote a second verdict here before finding that one. Two judgements of one
+ * question is two things to keep in step, and the weaker of them would have
+ * been the one on screen half the time. What survives is the parse, because
+ * item 38 needs `dir` and `dbfilename` to know where the RDB file IS -- a
+ * different question, and one nothing else answers.
  */
-export function redisPersistenceVerdict(p: RedisPersistence): {
-  level: DbVerdictLevel
-  because: string
-} {
-  if (!p.appendonly && p.save.trim() === '') {
-    return {
-      level: 'alarm',
-      because:
-        'This server writes nothing to disk: no append-only file and no save points. A restart loses everything in it.'
-    }
-  }
-  if (p.appendonly) {
-    return { level: 'ok', because: 'The append-only file is on, so a restart loses at most the last second.' }
-  }
-  // `save 3600 1` means "after 3600 seconds if at least 1 key changed", so the
-  // FIRST number of the last pair is the worst case.
-  const pairs = p.save.trim().split(/\s+/)
-  const seconds = pairs
-    .filter((_, i) => i % 2 === 0)
-    .map((n) => Number(n))
-    .filter((n) => Number.isFinite(n))
-  const worst = seconds.length > 0 ? Math.max(...seconds) : null
-  return {
-    level: 'watch',
-    because:
-      worst === null
-        ? `Snapshots only, into ${p.dir}/${p.dbfilename}. A restart loses whatever is newer than the last one.`
-        : `Snapshots only, into ${p.dir}/${p.dbfilename}. With these save points a restart can lose up to ${Math.round(worst / 60)} minutes of writes.`
-  }
-}
