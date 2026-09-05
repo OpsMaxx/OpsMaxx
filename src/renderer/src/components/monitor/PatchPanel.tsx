@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { sortBySeverity, type SecurityListProbe } from '../../../../shared/securityUpdates'
 import { AlertTriangle, Ban, RefreshCw, ShieldQuestion, Wrench } from 'lucide-react'
 import { useFleet } from '../../store/fleet'
 import { useApp } from '../../store/app'
@@ -101,6 +102,11 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   const samplingEnabled = useApp((s) => s.settings.fleetSamplingEnabled)
 
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  // The security-update LIST for one host — item 46. One at a time and asked
+  // for: it is a fresh SSH read per host, and the counts beside it come from
+  // the hourly sample.
+  const [secList, setSecList] = useState<{ serverName: string; probe: SecurityListProbe } | null>(null)
+  const [secLoading, setSecLoading] = useState<string | null>(null)
   // `all`, not `security`, and it is a deliberate choice rather than a default
   // nobody thought about. apt has NO security-only command — every recipe that
   // claims to have one installs dependencies the operator did not ask for — so
@@ -119,6 +125,34 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   const [healthGate, setHealthGate] = useState(true)
   const [phrase, setPhrase] = useState('')
   const [confirming, setConfirming] = useState(false)
+
+  const loadSecurityList = async (serverId: string): Promise<void> => {
+    const server = servers.find((sv) => sv.id === serverId)
+    if (!server) return
+    setSecLoading(serverId)
+    setSecList(null)
+    try {
+      const call = (
+        window.shellpilot as
+          | { fleet?: { securityList?: (cfg: unknown) => Promise<SecurityListProbe> } }
+          | undefined
+      )?.fleet?.securityList
+      setSecList({
+        serverName: server.name,
+        probe:
+          typeof call === 'function'
+            ? await call(server)
+            : { ok: false, detail: 'This build cannot list security updates. Restart the app to rebuild it.' }
+      })
+    } catch (e) {
+      setSecList({
+        serverName: server.name,
+        probe: { ok: false, detail: e instanceof Error ? e.message : String(e) }
+      })
+    } finally {
+      setSecLoading(null)
+    }
+  }
   const [busy, setBusy] = useState(false)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -466,6 +500,23 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                     </td>
                     <td data-col="security" className="num">
                       <Count count={r.security} />
+                      {/* The list behind the number — item 46. Asked for per
+                          host rather than sampled: it is tens of rows nobody
+                          reads most of the time, and paying for it hourly on
+                          every host is the wrong trade. */}
+                      {/* Only where there is a number and it is above zero. A
+                          `null` count is "we could not tell", and offering a
+                          list for that would imply there is one to fetch. */}
+                      {r.security.value !== null && r.security.value > 0 && (
+                        <button
+                          className="btn ghost sm"
+                          aria-label={`Which packages on ${r.serverName}`}
+                          disabled={secLoading === r.serverId}
+                          onClick={() => void loadSecurityList(r.serverId)}
+                        >
+                          which
+                        </button>
+                      )}
                     </td>
                     <td data-col="reboot">
                       {r.rebootGap !== null ? (
@@ -482,6 +533,32 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 ))}
               </tbody>
             </table>
+            {secList !== null && (
+              <div className="bc-controls" style={{ marginTop: 8 }}>
+                <div className="s-title">Security updates on {secList.serverName}</div>
+                {!secList.probe.ok ? (
+                  // NOT an empty list. A read that could not happen and a host
+                  // with nothing pending are different answers.
+                  <div className="s-note is-alarm">{secList.probe.detail}</div>
+                ) : (
+                  <>
+                    <div className="s-note">{secList.probe.listing.note}</div>
+                    <table className="mini-table">
+                      <tbody>
+                        {sortBySeverity(secList.probe.listing.updates).map((u) => (
+                          <tr key={u.name}>
+                            <td>{u.severity === '' ? <span className="faint">—</span> : u.severity}</td>
+                            <td className="mono">{u.name}</td>
+                            <td className="mono faint">{u.candidate}</td>
+                            <td className="faint">{u.advisories.join(', ')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </>
       )}

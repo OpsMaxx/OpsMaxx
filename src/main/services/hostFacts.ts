@@ -1,4 +1,9 @@
 import type { HostFacts, HostFactsCollectOptions } from '../../shared/hostFacts'
+import {
+  buildSecurityListCommand,
+  parseSecurityListOutput,
+  type SecurityListProbe
+} from '../../shared/securityUpdates'
 import { FACTS_STATUS_MARKER, buildHostFactsCommand, parseHostFacts } from '../../shared/hostFacts'
 
 // Reading host facts over SSH — roadmap item C, main-process half.
@@ -77,6 +82,31 @@ export const HOST_FACTS_TIMEOUT_MS = 45_000
 
 export class HostFactsReader {
   constructor(private readonly deps: HostFactsDeps) {}
+
+  /**
+   * The security-update LIST -- item 46's row, on demand rather than sampled.
+   *
+   * Deliberately not folded into the hourly collector. The counts belong there;
+   * the list is tens of rows per host that nobody is looking at most of the
+   * time, and paying for it on every host every hour to have it read once a
+   * month is the wrong trade.
+   *
+   * Same timeout as the collector, and for the same reason: `dnf -C` walks the
+   * cached repository set and takes seconds on a host with a dozen repos.
+   */
+  async securityList(cfg: unknown): Promise<SecurityListProbe> {
+    try {
+      const r = await this.deps.exec(cfg, buildSecurityListCommand(), HOST_FACTS_TIMEOUT_MS)
+      // A transport failure is not a host answer. "No security updates" for a
+      // connection that never opened is the fabrication this file exists to
+      // avoid.
+      if (!r.ok) return { ok: false, detail: r.error ?? 'could not reach the server' }
+      const merged = (r.stderr ?? '') === '' ? (r.stdout ?? '') : `${r.stdout ?? ''}\n${r.stderr}`
+      return parseSecurityListOutput(merged)
+    } catch (e) {
+      return { ok: false, detail: e instanceof Error ? e.message : String(e) }
+    }
+  }
 
   async read(cfg: unknown, opts: HostFactsCollectOptions = {}): Promise<HostFactsProbe> {
     const command = buildHostFactsCommand(opts)

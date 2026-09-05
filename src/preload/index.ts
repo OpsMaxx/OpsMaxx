@@ -48,6 +48,7 @@ import type { ChangeLogBridge, ChangeLogFilter, ChangeLogPage } from '../shared/
 import type { RunbookNote, RunbookView, RunbooksBridge } from '../shared/runbooks'
 import type { StoreAlertKind } from '../shared/webhook'
 import type { ImageScanProbe } from '../shared/imageScan'
+import type { SecurityListProbe } from '../shared/securityUpdates'
 import type { K8sReviewProbe } from '../shared/k8sReview'
 import type {
   DockerAction,
@@ -792,6 +793,10 @@ const api = {
       serverId: string
     ): Promise<{ facts?: HostFacts; at?: number; error?: string; errorAt?: number; intervalMs: number }> =>
       ipcRenderer.invoke('fleet:facts', serverId),
+    // The security-update LIST, asked for rather than sampled: the counts come
+    // with `facts` every hour, and this is the tens of rows behind them.
+    securityList: (cfg: unknown): Promise<SecurityListProbe> =>
+      ipcRenderer.invoke('fleet:security-list', cfg),
     // Who can get into a server, as the sampler last collected it — roadmap
     // item 23. Read-only and never a trigger, exactly like `facts`.
     //

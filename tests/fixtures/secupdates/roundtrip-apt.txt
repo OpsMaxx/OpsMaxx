@@ -1,0 +1,6 @@
+===SHELLPILOT-SECPM===
+apt
+===SHELLPILOT-SECCHECK===
+Inst libpcre2-8-0 [10.42-1] (10.42-1+deb12u1 Debian-Security:12/oldstable-security [arm64])
+===SHELLPILOT-SECLIST===
+===SHELLPILOT-SECSUM===

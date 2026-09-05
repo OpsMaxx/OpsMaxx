@@ -545,3 +545,74 @@ describe('what a colour claims', () => {
     expect(cell?.querySelector('.warn')).toBeNull()
   })
 })
+
+// ---------------------------------------------------------------------------
+// The list behind the security count. Item 46.
+// ---------------------------------------------------------------------------
+
+describe('which packages, per host', () => {
+  const withList = (probe: unknown): ReturnType<typeof vi.fn> => {
+    const call = vi.fn(async () => probe)
+    stubBridge({
+      jobs: { onProgress: () => () => {}, run: vi.fn() },
+      fleet: { securityList: call }
+    })
+    return call
+  }
+
+  it('offers the list only where there is a count above zero', async () => {
+    withList({ ok: true, listing: { source: 'apt', updates: [], advisories: null, note: '' } })
+    seedFacts({
+      a: facts({ securityUpdates: 3 }),
+      b: facts({ securityUpdates: 0 }),
+      // `null` is "we could not tell", not zero. Offering a list for it would
+      // imply there is one to fetch.
+      c: facts({ securityUpdates: null, sources: sources({ 'security-updates': 'unsupported' }) })
+    })
+    render(<PatchPanel servers={[server('a', 'has-some'), server('b', 'clean'), server('c', 'cannot-say')]} />)
+    await waitFor(() => expect(screen.getByLabelText('Which packages on has-some')).toBeTruthy())
+    expect(screen.queryByLabelText('Which packages on clean')).toBeNull()
+    expect(screen.queryByLabelText('Which packages on cannot-say')).toBeNull()
+  })
+
+  it('shows the packages worst first, with the advisories that cover them', async () => {
+    withList({
+      ok: true,
+      listing: {
+        source: 'dnf',
+        advisories: 133,
+        note: '55 package(s) will change, covered by 133 advisories',
+        updates: [
+          { name: 'zlib', candidate: '1.2', current: '', advisories: ['ALSA-1:1'], severity: 'Low' },
+          { name: 'expat', candidate: '2.5', current: '', advisories: ['ALSA-1:2', 'ALSA-1:3'], severity: 'Important' }
+        ]
+      }
+    })
+    seedFacts({ a: facts({ securityUpdates: 2 }) })
+    render(<PatchPanel servers={[server('a', 'alma-1')]} />)
+    await userEvent.click(await screen.findByLabelText('Which packages on alma-1'))
+    await screen.findByText('Security updates on alma-1')
+    const body = document.body.textContent!
+    expect(body.indexOf('expat')).toBeLessThan(body.indexOf('zlib'))
+    expect(body).toContain('ALSA-1:2, ALSA-1:3')
+    expect(body).toContain('covered by 133 advisories')
+  })
+
+  // A read that could not happen and a host with nothing pending are different
+  // answers, and only one of them is good news.
+  it('reports a read that failed rather than an empty list', async () => {
+    withList({ ok: false, detail: "Cache-only enabled but no cache for 'appstream'" })
+    seedFacts({ a: facts({ securityUpdates: 2 }) })
+    render(<PatchPanel servers={[server('a', 'alma-1')]} />)
+    await userEvent.click(await screen.findByLabelText('Which packages on alma-1'))
+    await screen.findByText(/Cache-only enabled but no cache/)
+  })
+
+  it('says so when the build has no such channel', async () => {
+    stubBridge({ jobs: { onProgress: () => () => {}, run: vi.fn() } })
+    seedFacts({ a: facts({ securityUpdates: 2 }) })
+    render(<PatchPanel servers={[server('a', 'alma-1')]} />)
+    await userEvent.click(await screen.findByLabelText('Which packages on alma-1'))
+    await screen.findByText(/cannot list security updates/)
+  })
+})
