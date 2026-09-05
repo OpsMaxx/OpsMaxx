@@ -510,10 +510,23 @@ file *from the replicas* (cross-connection, new); PG `VACUUM`/`ANALYZE` and MySQ
 today (`dbOps.ts:2612`); Mongo `killOp` fetching `command` for the one opid named; Redis
 `BGSAVE` with a poll on `rdb_bgsave_in_progress`; Redis `CONFIG SET` for `maxmemory-policy`.
 
-**Reads that ride along and need no surface** (each 1–3 days, fixtures required): PG
-`pg_replication_slots` and `pg_ls_waldir()`; a PG slow-statement threshold in `DB_THRESHOLDS`
-(the judge is `ok`/`unknown` only, `:1604-1625`); the PG blocking *tree* (the blocker row is not
-fetched unless it is itself blocked, `:1002`); MySQL top-N from
+**Reads that ride along and need no surface** (each 1–3 days, fixtures required). **PG
+`pg_replication_slots` and the blocking TREE are SHIPPED** in `shared/pgBlocking.ts`, both
+against fixtures from a real PostgreSQL 16.15 in Docker.
+
+The blocking tree measured out worse than the item describes: with a three-deep chain made from
+three concurrent transactions on one row, the session actually HOLDING the lock is not itself
+blocked — so the existing read, which returns rows that are blocked, omits the only session an
+operator could act on. The tree reports the root first, counts waiters transitively (a count of
+direct waiters says one where two are stuck), and carries a seen-set on every walk because a
+snapshot taken across a deadlock's resolution can contain a cycle.
+
+Slots repeat `mssqlAlwaysOnStatus`'s trap and it was confirmed on the live server: zero rows is
+what a server with no replication returns AND what one whose slots were dropped returns, so an
+empty list is `unknown`, never `ok`. An INACTIVE slot is the alarm — the server keeps every WAL
+segment it might need, for ever, and the first symptom is a full disk.
+
+Still open: the PG slow-statement threshold in `DB_THRESHOLDS`; MySQL top-N from
 `performance_schema.events_statements_summary_by_digest`; Mongo index sizes (the collector never
 passes `sizes`, `services/dbOps.ts:700-720`); Redis `CONFIG GET dir dbfilename`. Fixtures for
 Redis AOF, Sentinel and Cluster and a Mongo sharded cluster remain captured-or-nothing
