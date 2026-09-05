@@ -77,7 +77,8 @@ const CONFIG: ComposeConfigProbe = {
           { name: 'REDIS_PASSWORD', origin: 'interpolated', variable: 'REDIS_PASSWORD', set: true }
         ],
         envFiles: ['/srv/edge/.env'],
-        restart: null
+        restart: null,
+        networkMode: null
       },
       {
         name: 'worker',
@@ -89,7 +90,8 @@ const CONFIG: ComposeConfigProbe = {
         profiles: [],
         environment: [],
         envFiles: [],
-        restart: null
+        restart: null,
+        networkMode: null
       }
     ]
   }
@@ -590,5 +592,79 @@ describe('restarting one compose service', () => {
     expect(call[2]).toEqual(['edge-cache-1'])
     // The compose bridge is not how a restart happens.
     expect(Object.keys(b.compose)).not.toContain('restart')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The lint, on screen. Item 42's validation row.
+// ---------------------------------------------------------------------------
+
+const FLOATING_CONFIG: ComposeConfigProbe = {
+  ok: true,
+  config: {
+    name: 'edge',
+    namesOnly: false,
+    volumes: [],
+    networks: [],
+    services: [
+      {
+        name: 'cache',
+        image: 'redis:latest',
+        build: false,
+        containerName: null,
+        dependsOn: [],
+        ports: ['8080:80'],
+        profiles: [],
+        environment: [],
+        envFiles: [],
+        restart: null,
+        networkMode: 'host'
+      }
+    ]
+  }
+}
+
+describe('what the lint puts on screen', () => {
+  it('says what a moving tag will do', async () => {
+    await openProject(panelBridge({ config: vi.fn(async () => FLOATING_CONFIG) }))
+    await waitFor(() =>
+      expect(document.body.textContent).toContain('can change what is running without any change to this file')
+    )
+  })
+
+  it('says the host-network ports do nothing', async () => {
+    await openProject(panelBridge({ config: vi.fn(async () => FLOATING_CONFIG) }))
+    await waitFor(() => expect(document.body.textContent).toContain('ignores the mappings'))
+  })
+
+  // The table already carries a warn chip per service. A second sentence each
+  // would be twelve paragraphs on a twelve-service project saying what twelve
+  // chips say.
+  it('does not repeat the restart chip as a sentence', async () => {
+    await openProject(panelBridge({ config: vi.fn(async () => FLOATING_CONFIG) }))
+    await waitFor(() => expect(document.body.textContent).toContain('restart: no (default)'))
+    expect(document.body.textContent).not.toContain('does not come back after a reboot')
+  })
+
+  it('shows compose’s own line when compose refused the file', async () => {
+    // Not via openProject: a refused config renders no service rows, which is
+    // the state under test.
+    stubBridge(
+      panelBridge({
+        config: vi.fn(async () => ({
+          ok: false as const,
+          reason: 'invalid-project' as const,
+          detail: 'service "web" depends on undefined service "nope": invalid compose project'
+        }))
+      })
+    )
+    render(<ComposePanel server={SERVER} cfg={{}} containers={[RUNNING_CACHE]} sudo={false} />)
+    await userEvent.click(screen.getByText('Find compose files'))
+    await waitFor(() => screen.getByText(/▸ edge/))
+    await userEvent.click(screen.getByText(/▸ edge/))
+    await waitFor(() =>
+      expect(document.body.textContent).toContain('depends on undefined service "nope"')
+    )
+    expect(document.body.textContent).toContain('read the file and refused it')
   })
 })

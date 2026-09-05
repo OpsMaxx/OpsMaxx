@@ -97,7 +97,7 @@ import type { JobSpec, JobStep } from './jobs'
  * minimal install that did not ship the CLI plugin. Folding it into
  * `not-installed` would send someone to install docker on a host that has it.
  */
-export type ComposeFailure = DockerFailure | 'compose-unavailable'
+export type ComposeFailure = DockerFailure | 'compose-unavailable' | 'invalid-project'
 
 export const COMPOSE_FAILURE_HELP: Record<ComposeFailure, string> = {
   'not-installed':
@@ -108,8 +108,29 @@ export const COMPOSE_FAILURE_HELP: Record<ComposeFailure, string> = {
     'This user cannot talk to the docker socket, so compose cannot be asked anything. The compose FILES may still be readable — the filesystem search below does not go through the daemon.',
   'compose-unavailable':
     'Docker is here, but `docker compose` is not. That is normal on servers still running the v1 `docker-compose` script, which is a separate program with a different command line. ShellPilot does not drive v1: its flags differ enough that guessing would be running an unverified command on someone else\u2019s server.',
+  'invalid-project':
+    'Compose read the file and refused it. The line below is compose\u2019s own, verbatim \u2014 it names the service and the problem, and this panel has nothing to add to it.',
   unknown: 'Compose returned an error that could not be classified. The raw message is below.'
 }
+
+/**
+ * Compose refusing a file it could read, as its own validator words it.
+ *
+ * Measured against compose v5.1.4 on four broken files, and the finding is that
+ * NONE of these matches `BLOCK_FAILURE`:
+ *
+ *   service "web" depends on undefined service "nope": invalid compose project
+ *   yaml: while scanning a quoted scalar at line 5, column 9: ...
+ *   validating /srv/app/compose.yaml: services.web additional properties 'imagz' not allowed
+ *   service "web" has neither an image nor a build context specified: invalid compose project
+ *
+ * So all four fell through to \u201cdocker compose config returned nothing this
+ * parser could read\u201d \u2014 a sentence about this program, printed instead of the
+ * sentence compose wrote about the operator\u2019s file. Every one of them names
+ * the service and the problem.
+ */
+const COMPOSE_INVALID =
+  /invalid compose project|^yaml:|^validating .*:|additional properties .* not allowed|has neither an image nor a build context|depends on undefined service|dependency cycle detected|^env file .* not found|is invalid because|non-string key/i
 
 /** The `docker compose` plugin is missing, as the CLI words it. */
 const COMPOSE_MISSING =
@@ -161,6 +182,15 @@ function blockFailure(
   const lines = nonEmptyLines(text)
   const missing = lines.find((l) => COMPOSE_MISSING.test(l))
   if (missing) return { reason: 'compose-unavailable', detail: missing }
+  // Before the generic classifier. The two patterns are disjoint on everything
+  // measured, so the order is not currently load-bearing -- a mutation swapping
+  // them changes nothing, and that is recorded here rather than defended with a
+  // test that would only be testing the mutation. It is this way round because
+  // a validator line is compose ANSWERING, and if one ever arrives carrying a
+  // word like "denied" it should still be printed as compose's own sentence
+  // rather than as a daemon failure.
+  const invalid = lines.find((l) => COMPOSE_INVALID.test(l))
+  if (invalid) return { reason: 'invalid-project', detail: invalid }
   const failing = lines.filter((l) => BLOCK_FAILURE.test(l))
   if (failing.length === 0) return null
   return {
@@ -671,6 +701,9 @@ export interface ComposeServiceDecl {
   /** Paths only. Their CONTENTS are never read by anything in this module. */
   envFiles: string[]
   restart: string | null
+  /** `host`, `none`, `service:x`, or null. Read because `host` makes a `ports:`
+   *  block do nothing at all, and compose accepts that file. */
+  networkMode: string | null
 }
 
 export interface ComposeProjectConfig {
@@ -722,7 +755,8 @@ export function parseComposeConfigJson(text: string): ComposeProjectConfig | nul
       profiles: stringsOf(s.profiles),
       environment: environmentOf(s.environment),
       envFiles: envFilesOf(s.env_file),
-      restart: typeof s.restart === 'string' ? s.restart : null
+      restart: typeof s.restart === 'string' ? s.restart : null,
+      networkMode: typeof s.network_mode === 'string' ? s.network_mode : null
     })
   }
   services.sort((a, b) => a.name.localeCompare(b.name))
@@ -880,7 +914,8 @@ export function parseComposeConfigOutput(output: string, exitCode: number | null
         profiles: [],
         environment: [],
         envFiles: [],
-        restart: null
+        restart: null,
+        networkMode: null
       })),
       volumes: [],
       networks: [],
@@ -1095,6 +1130,93 @@ export const COMPOSE_REFUSALS: Record<string, string> = {
 export function composeRefusal(action: string): string | null {
   const key = String(action).trim().toLowerCase()
   return COMPOSE_REFUSALS[key] ?? null
+}
+
+// ------------------------------------------------------------------- lint
+//
+// Item 42's lint over the PARSED model. Not a style checker: every rule here is
+// something that will surprise somebody at 3am, and each says what it will do
+// rather than that it is wrong.
+//
+// Compose's own validator already refuses the file for the things that are
+// invalid -- an undefined `depends_on` target, an unknown key, a service with
+// neither image nor build. Those arrive as `invalid-project` with compose's own
+// line, and repeating them here would be a second opinion on a settled
+// question. What is left is the set of files compose accepts and an operator
+// still needs told about.
+
+export type ComposeLintRule = 'floating-tag' | 'no-restart' | 'host-network-ports'
+
+export interface ComposeLintFinding {
+  rule: ComposeLintRule
+  service: string
+  because: string
+}
+
+/** A tag that means "whatever was pushed last". `latest` is the famous one and
+ *  it is not the only one: an untagged reference resolves to `latest` too. */
+function floatingTag(image: string): string | null {
+  const at = image.lastIndexOf(':')
+  const slash = image.lastIndexOf('/')
+  // `registry:5000/app` has a colon that is a PORT, not a tag.
+  if (at < 0 || at < slash) return ''
+  const tag = image.slice(at + 1)
+  return tag === 'latest' || tag === 'stable' || tag === 'main' || tag === 'edge' ? tag : null
+}
+
+/**
+ * The lint over a whole config, which is the entry point callers should use.
+ *
+ * A NAMES-ONLY MODEL IS NOT A MODEL. When the engine would only give service
+ * names, every field on every service is null or empty because nothing was
+ * read -- so `lintCompose` would say each one has no restart policy, no tag and
+ * no ports, confidently, about a file it never saw. That is the "absence is not
+ * a fact" bug in its purest form, and the guard lives here rather than in the
+ * panel so a caller cannot skip it.
+ */
+export function lintComposeConfig(config: ComposeProjectConfig): ComposeLintFinding[] {
+  if (config.namesOnly) return []
+  return lintCompose(config.services)
+}
+
+export function lintCompose(services: ComposeServiceDecl[]): ComposeLintFinding[] {
+  const out: ComposeLintFinding[] = []
+  for (const s of services) {
+    if (s.image !== null) {
+      const tag = floatingTag(s.image)
+      if (tag !== null) {
+        out.push({
+          rule: 'floating-tag',
+          service: s.name,
+          because:
+            tag === ''
+              ? `${s.name} has no tag on ${s.image}, which means \`latest\`. What \`up\` starts tomorrow is whatever was pushed by then, and the digest on the host is not the digest in the file.`
+              : `${s.name} runs ${s.image}. A \`${tag}\` tag moves, so \`pull\` then \`up\` can change what is running without any change to this file.`
+        })
+      }
+    }
+    // Compose's default is `no`. Not "unset and therefore fine": the container
+    // does not come back after a reboot, and nothing else on the panel says so.
+    if (s.restart === null || s.restart === '' || s.restart === 'no') {
+      out.push({
+        rule: 'no-restart',
+        service: s.name,
+        because: `${s.name} has no restart policy, so compose's default of \`no\` applies: it does not come back after a reboot or a daemon restart.`
+      })
+    }
+    // Measured: compose ACCEPTS this file and exits 0. The container joins the
+    // host's network stack, where a port mapping has nothing to map, so the
+    // `ports:` block does nothing and the service is reachable on whatever port
+    // it binds inside -- which is not the one written here.
+    if (s.networkMode === 'host' && s.ports.length > 0) {
+      out.push({
+        rule: 'host-network-ports',
+        service: s.name,
+        because: `${s.name} is on the host's network and also declares ${s.ports.length} port mapping(s). Compose accepts that and ignores the mappings: the service listens on whatever port it binds inside, not on ${s.ports[0]}.`
+      })
+    }
+  }
+  return out
 }
 
 // ------------------------------------------------------- restart one service
