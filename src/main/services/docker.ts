@@ -9,11 +9,13 @@ import type {
   DockerReclaimItem,
   DockerReclaimResult,
   DockerHealthLogProbe,
+  DockerNetworkProbe,
   DockerStatsProbe
 } from '../../shared/docker'
 import {
   SUDO_PROBE,
   buildDockerHealthLogCommand,
+  buildDockerNetworkCommand,
   buildDockerActionCommand,
   buildDockerReclaimCommand,
   parseDockerReclaimOutput,
@@ -26,6 +28,7 @@ import {
   parseDockerDiskDetailOutput,
   parseDockerDiskOutput,
   parseDockerHealthLogOutput,
+  parseDockerNetworkOutput,
   parseDockerInspectOutput,
   parseDockerOutput,
   parseDockerStatsOutput
@@ -348,6 +351,30 @@ export class DockerReader {
         entries: l.entries.map((e) => ({ ...e, output: redactOutput(e.output) }))
       }))
       return usedSudo ? { ok: true, logs, usedSudo: true } : { ok: true, logs }
+    } catch (e) {
+      return { ok: false, reason: 'unknown', detail: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  /**
+   * Networks, and what holds each one.
+   *
+   * A separate read from `system df -v`, which lists no networks at all. Two
+   * commands rather than a `network inspect`: inspect counts the containers
+   * attached RIGHT NOW, and a stopped container still holds its network. See
+   * the builder.
+   */
+  async networks(cfg: unknown, opts: DockerListOptions = {}): Promise<DockerNetworkProbe> {
+    try {
+      const { result, usedSudo } = await this.readWithFailover<DockerNetworkProbe>(
+        cfg,
+        (sudo) => buildDockerNetworkCommand({ sudo }),
+        parseDockerNetworkOutput,
+        (detail) => ({ ok: false, reason: 'unknown', detail }),
+        opts,
+        READ_TIMEOUT_MS
+      )
+      return result.ok && usedSudo ? { ...result, usedSudo: true } : result
     } catch (e) {
       return { ok: false, reason: 'unknown', detail: e instanceof Error ? e.message : String(e) }
     }

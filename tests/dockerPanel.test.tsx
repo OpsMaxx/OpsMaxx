@@ -653,3 +653,67 @@ describe('DockerPanel — healthchecks', () => {
     await screen.findByText(/docker: command not found/)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Networks in the reclaim preview. `system df -v` lists none, so they come from
+// their own read and meet the disk listing in `mergeNetworks`.
+// ---------------------------------------------------------------------------
+
+const NETWORKS = {
+  ok: true as const,
+  networks: [
+    { id: 'e742a9db8c51', name: 'bridge', driver: 'bridge', scope: 'local' },
+    { id: '1a48ad199a4f', name: 'sp-orphan', driver: 'bridge', scope: 'local' },
+    { id: '9330583d766b', name: 'sp-free', driver: 'bridge', scope: 'local' }
+  ],
+  use: [
+    // Stopped, and still holding sp-orphan. This is the case the whole module
+    // exists for: `docker network inspect` would report zero here.
+    { containerId: '2eaf0cebaa73', name: 'alpha-old', state: 'exited', networks: ['sp-orphan'] }
+  ]
+}
+
+describe('DockerPanel — networks in the preview', () => {
+  const itemiseWith = async (
+    user: ReturnType<typeof userEvent.setup>,
+    nets: unknown = NETWORKS
+  ): Promise<void> => {
+    stubBridge({
+      docker: {
+        list: (cfg: Cfg) => Promise.resolve(listing(cfg.serverId.replace('srv-', ''))),
+        disk: () => Promise.resolve(DISK),
+        diskDetail: (cfg: Cfg) => diskDetailImpl(cfg),
+        networks: () => Promise.resolve(nets)
+      }
+    })
+    render(<DockerPanel servers={[ALPHA, BRAVO]} />)
+    await openDiskCard(user)
+    await user.click(btn(/Itemise/))
+  }
+
+  it('offers the network nothing is attached to', async () => {
+    const user = userEvent.setup()
+    await itemiseWith(user)
+    await waitFor(() => expect(document.body.textContent).toContain('sp-free'))
+  })
+
+  it('does not offer one a STOPPED container is still on', async () => {
+    const user = userEvent.setup()
+    await itemiseWith(user)
+    await waitFor(() => expect(screen.getByText('sp-free')).toBeTruthy())
+    // Listed, with the reason -- what it must never be is offered.
+    expect(document.body.textContent).toContain('sp-orphan')
+    expect(document.body.textContent).toContain('stopped and still attached')
+    expect(screen.queryByLabelText(/sp-orphan/)).toBeNull()
+    // ...while the free one IS selectable.
+    expect(screen.getByLabelText(/sp-free/)).toBeTruthy()
+  })
+
+  it('says networks were not read rather than showing a complete-looking list', async () => {
+    const user = userEvent.setup()
+    await itemiseWith(user, { ok: false, reason: 'no-docker', detail: 'network ls exploded' })
+    // A silently network-free preview is indistinguishable from a host with no
+    // removable networks, and only one of those is true.
+    await waitFor(() => expect(document.body.textContent).toContain('network ls exploded'))
+  })
+})
