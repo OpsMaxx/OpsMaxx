@@ -78,6 +78,7 @@ const MODULE_FILES: Record<string, string[]> = {
   // for this panel.
   access: [
     'src/shared/staleAccounts.ts',
+    'src/shared/sudoers.ts',
     'src/renderer/src/components/monitor/AccessPanel.tsx'
   ],
   // The collector (src/shared/posture.ts, src/main/services/posture.ts) is not
