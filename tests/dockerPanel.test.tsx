@@ -509,3 +509,147 @@ describe('DockerPanel — reclaim by id', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// Healthchecks, worst first. Item 42's row, rendered.
+// ---------------------------------------------------------------------------
+
+const HEALTH_LOGS = {
+  ok: true as const,
+  logs: [
+    {
+      container: 'alpha-good',
+      status: 'healthy',
+      failingStreak: 0,
+      entries: [{ start: '2026-09-05T20:14:09Z', end: '2026-09-05T20:14:09Z', exitCode: 0, output: 'ok\n' }],
+      sampled: false
+    },
+    {
+      // Measured shape: inside a start period, every check failing, status
+      // still the hopeful word and the streak still zero.
+      container: 'alpha-slowstart',
+      status: 'starting',
+      failingStreak: 0,
+      entries: [{ start: '2026-09-05T20:14:11Z', end: '2026-09-05T20:14:11Z', exitCode: 1, output: '' }],
+      sampled: false
+    },
+    {
+      container: 'alpha-plain',
+      status: null,
+      failingStreak: null,
+      entries: [],
+      sampled: false
+    },
+    {
+      container: 'alpha-sick',
+      status: 'unhealthy',
+      failingStreak: 24,
+      entries: [
+        {
+          start: '2026-09-05T20:14:03Z',
+          end: '2026-09-05T20:14:03Z',
+          exitCode: 1,
+          output: 'probing https://user:[REDACTED]@api.example.com/health?token=[REDACTED]\n'
+        }
+      ],
+      sampled: true
+    }
+  ]
+}
+
+describe('DockerPanel — healthchecks', () => {
+  const openHealth = async (
+    user: ReturnType<typeof userEvent.setup>,
+    probe: unknown = HEALTH_LOGS
+  ): Promise<{ calls: unknown[][] }> => {
+    const calls: unknown[][] = []
+    stubBridge({
+      docker: {
+        list: (cfg: Cfg) => {
+          // A STOPPED container alongside the running one. Without it the
+          // running-only filter is unfalsifiable, and a stopped container's
+          // health is whatever it was when it stopped.
+          const base = listing(cfg.serverId.replace('srv-', ''))
+          if (!base.ok) return Promise.resolve(base)
+          return Promise.resolve({
+            ...base,
+            containers: [
+              ...base.containers,
+              { ...base.containers[0], id: 'stopped01234', shortId: 'stopped0', name: 'alpha-old', state: 'exited', status: 'Exited (0) 2 days ago' }
+            ]
+          })
+        },
+        disk: () => Promise.resolve(DISK),
+        diskDetail: (cfg: Cfg) => diskDetailImpl(cfg),
+        healthLogs: (...args: unknown[]) => {
+          calls.push(args)
+          return Promise.resolve(probe)
+        }
+      }
+    })
+    render(<DockerPanel servers={[ALPHA, BRAVO]} />)
+    await user.click(btn(/Read containers/))
+    await screen.findByText(/Read healthchecks/)
+    await user.click(btn(/Read healthchecks/))
+    return { calls }
+  }
+
+  it('reads healthchecks only when asked, and only for running containers', async () => {
+    const user = userEvent.setup()
+    const { calls } = await openHealth(user)
+    await waitFor(() => expect(calls.length).toBe(1))
+    // A stopped container's health is whatever it was when it stopped; shown
+    // beside live answers it reads as current.
+    expect(calls[0][1]).toEqual(['alpha0123456789ab'])
+  })
+
+  it('puts the unhealthy first and the failing starter above the healthy one', async () => {
+    const user = userEvent.setup()
+    await openHealth(user)
+    await screen.findByText(/is unhealthy/)
+    const order = ['alpha-sick', 'alpha-slowstart', 'alpha-good', 'alpha-plain']
+    const positions = order.map((n) => document.body.textContent!.indexOf(n))
+    expect(positions).toEqual([...positions].sort((a, b) => a - b))
+    expect(positions.every((p) => p >= 0)).toBe(true)
+  })
+
+  it('says the start period is hiding a container that has never passed', async () => {
+    const user = userEvent.setup()
+    await openHealth(user)
+    await screen.findByText(/start period is hiding that/)
+  })
+
+  it('says how long the streak is and that the log is only part of it', async () => {
+    const user = userEvent.setup()
+    await openHealth(user)
+    await screen.findByText(/failed 24 checks in a row/)
+    expect(screen.getByText(/keeps only the last 1/)).toBeTruthy()
+  })
+
+  it('does not call a container with no healthcheck healthy', async () => {
+    const user = userEvent.setup()
+    await openHealth(user)
+    await screen.findByText(/no healthcheck, so nothing is checking it/)
+    expect(screen.getByText('no healthcheck')).toBeTruthy()
+  })
+
+  it('says a silent check printed nothing rather than showing an empty cell', async () => {
+    const user = userEvent.setup()
+    await openHealth(user)
+    await screen.findByText('printed nothing')
+  })
+
+  it('shows what main redacted, and never a secret', async () => {
+    const user = userEvent.setup()
+    await openHealth(user)
+    await screen.findByText(/is unhealthy/)
+    expect(document.body.textContent).toContain('[REDACTED]')
+    expect(document.body.textContent).not.toContain('s3cr3t')
+  })
+
+  it('reports a failed read instead of an empty list', async () => {
+    const user = userEvent.setup()
+    await openHealth(user, { ok: false, reason: 'no-docker', detail: 'docker: command not found' })
+    await screen.findByText(/docker: command not found/)
+  })
+})

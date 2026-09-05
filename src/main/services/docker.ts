@@ -8,10 +8,12 @@ import type {
   DockerProbe,
   DockerReclaimItem,
   DockerReclaimResult,
+  DockerHealthLogProbe,
   DockerStatsProbe
 } from '../../shared/docker'
 import {
   SUDO_PROBE,
+  buildDockerHealthLogCommand,
   buildDockerActionCommand,
   buildDockerReclaimCommand,
   parseDockerReclaimOutput,
@@ -23,10 +25,12 @@ import {
   parseDockerActionOutput,
   parseDockerDiskDetailOutput,
   parseDockerDiskOutput,
+  parseDockerHealthLogOutput,
   parseDockerInspectOutput,
   parseDockerOutput,
   parseDockerStatsOutput
 } from '../../shared/docker'
+import { redactOutput } from './secretRedaction'
 
 // Reading docker on a remote host, and the three lifecycle verbs.
 //
@@ -302,6 +306,48 @@ export class DockerReader {
         READ_TIMEOUT_MS
       )
       return result.ok && usedSudo ? { ...result, usedSudo: true } : result
+    } catch (e) {
+      return { ok: false, reason: 'unknown', detail: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  /**
+   * The healthcheck log for named containers, REDACTED HERE.
+   *
+   * The one place in this file where a read is rewritten before it is returned.
+   * A healthcheck's `Output` is whatever the check printed, and a measured one
+   * carried a URL with a password in it, a query token and an
+   * `Authorization: Bearer` header. Everything below this line -- the renderer,
+   * the panel, anything that later logs what the panel showed -- sees the
+   * redacted form and never the original, which is the property that could not
+   * be had by redacting in the shared parser.
+   *
+   * `redactOutput` with no known secrets: the pattern rules are what apply to a
+   * healthcheck's stdout, and the per-server secrets are not this reader's to
+   * resolve.
+   */
+  async healthLogs(
+    cfg: unknown,
+    refs: string[],
+    opts: DockerListOptions = {}
+  ): Promise<DockerHealthLogProbe> {
+    const build = (sudo: boolean): string => buildDockerHealthLogCommand(refs, { sudo })
+    build(opts.sudo === true)
+    try {
+      const { result, usedSudo } = await this.readWithFailover<DockerHealthLogProbe>(
+        cfg,
+        build,
+        parseDockerHealthLogOutput,
+        (detail) => ({ ok: false, reason: 'unknown', detail }),
+        opts,
+        READ_TIMEOUT_MS
+      )
+      if (!result.ok) return result
+      const logs = result.logs.map((l) => ({
+        ...l,
+        entries: l.entries.map((e) => ({ ...e, output: redactOutput(e.output) }))
+      }))
+      return usedSudo ? { ok: true, logs, usedSudo: true } : { ok: true, logs }
     } catch (e) {
       return { ok: false, reason: 'unknown', detail: e instanceof Error ? e.message : String(e) }
     }
