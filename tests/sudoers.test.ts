@@ -4,9 +4,16 @@ import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 
 import {
+  buildSudoersCommand,
   describeSudo,
   parseSudoers,
+  parseSudoersOutput,
+  sudoAcrossFiles,
   sudoPrivilegesFor,
+  SUDOERS_FILE_MARKER,
+  SUDOERS_MARKER,
+  SUDOERS_MAX_BYTES,
+  SUDOERS_MAX_FILES,
   SUDOERS_MAX_LINES
 } from '../src/shared/sudoers'
 
@@ -203,5 +210,94 @@ describe('reading sudoers is consented to separately, and never by an agent', ()
     expect(cap.detail).toContain('never by an agent')
     // And that it replaces a guess, which is the reason to turn it on.
     expect(cap.detail).toContain('wrong in both directions')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Reading the files off a host
+// ---------------------------------------------------------------------------
+//
+// The fixture is the probe's own output, run against debian:12 with sudo
+// installed and four drop-in files placed in /etc/sudoers.d: two real ones,
+// one ending `.bak` and one ending `~`.
+
+describe('the probe, against a host with drop-in files', () => {
+  const files = (): ReturnType<typeof parseSudoersOutput> =>
+    parseSudoersOutput(fixture('probe-debian12.txt'))
+
+  it('keeps each file apart, because "which file grants this" is the first question', () => {
+    const paths = files().map((f) => f.path)
+    expect(paths).toContain('/etc/sudoers')
+    expect(paths).toContain('/etc/sudoers.d/10-ops')
+    expect(paths).toContain('/etc/sudoers.d/20-deploy')
+  })
+
+  // sudo SKIPS a file with a dot or a trailing tilde. Reading them would
+  // report rules that are NOT in effect, which is worse than missing ones: an
+  // operator would go and remove a grant that was never granted.
+  it('skips exactly the files sudo itself skips', () => {
+    const paths = files().map((f) => f.path)
+    expect(paths).not.toContain('/etc/sudoers.d/99-disabled.bak')
+    expect(paths).not.toContain('/etc/sudoers.d/50-old~')
+    // And the rules in them are nowhere in the result.
+    expect(JSON.stringify(files())).not.toContain('should-be-skipped')
+    expect(JSON.stringify(files())).not.toContain('also-skipped')
+  })
+
+  it('finds a grant that lives only in a drop-in file', () => {
+    // The whole reason to traverse the directory: Debian's own /etc/sudoers
+    // grants nothing to `ops`.
+    const r = sudoAcrossFiles('ops', [], files())
+    expect(r.findings).toHaveLength(1)
+    expect(r.sentence).toContain('without a password')
+  })
+
+  it('matches a group named only in a drop-in file', () => {
+    const r = sudoAcrossFiles('alice', ['deployers'], files())
+    expect(r.findings.map((f) => f.via)).toEqual(['group'])
+  })
+
+  // The include was FOLLOWED. Counting it as a gap would have every host on
+  // earth report an unread include and every sentence say "not the whole
+  // picture".
+  it('does not call the directory it just read an unread include', () => {
+    const r = sudoAcrossFiles('ops', [], files())
+    expect(r.sentence).not.toContain('not the whole picture')
+  })
+
+  it('says a file it could not read made the answer incomplete', () => {
+    // The commonest cause is a sweep that was not root, and a host reporting
+    // "no rules name this account" when it could not read the file is the
+    // exact wrong answer this module exists to avoid.
+    const denied = parseSudoersOutput(
+      `${SUDOERS_MARKER}\n${SUDOERS_FILE_MARKER}/etc/sudoers===\nSP_UNREADABLE\n`
+    )
+    expect(denied[0].unreadable).toBe(true)
+    const r = sudoAcrossFiles('ops', [], denied)
+    expect(r.unreadable).toEqual(['/etc/sudoers'])
+    expect(r.sentence).toContain('not root')
+  })
+
+  it('bounds the read on the host, not here', () => {
+    // A 2 GB /etc/sudoers must not reach the SSH channel at all.
+    const cmd = buildSudoersCommand()
+    expect(cmd).toContain(`head -c ${SUDOERS_MAX_BYTES}`)
+    expect(cmd).toContain(`head -n ${SUDOERS_MAX_FILES}`)
+    // `sudo -n`: the one escalation that cannot sit waiting for a password on
+    // an unattended sweep.
+    expect(cmd).toContain('sudo -n ')
+  })
+
+  // THE FIXTURE CANNOT CATCH THIS. It was captured with the command as it
+  // stands, so deleting the skip from the command does not change a recorded
+  // file -- the fixture proves what happened once, and this proves what the
+  // command still says.
+  it('still tells the shell to skip them, which the fixture cannot show', () => {
+    expect(buildSudoersCommand()).toContain('case "$SP_F" in *.*|*~) continue ;; esac')
+  })
+
+  it('reads the directory in sudo’s order, not the shell’s', () => {
+    // Glob order is locale-dependent; sudo's is not.
+    expect(buildSudoersCommand()).toContain('| sort |')
   })
 })
