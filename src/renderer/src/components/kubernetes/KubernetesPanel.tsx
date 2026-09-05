@@ -52,6 +52,7 @@ import {
   type K8sUsage,
   type K8sWorkload
 } from '../../../../shared/kubernetes'
+import { useApp } from '../../store/app'
 import {
   assessNodeSkew,
   pdbHeadroom,
@@ -210,6 +211,18 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   const [loading, setLoading] = useState(false)
   const [logs, setLogs] = useState<{ pod: string; output: string } | null>(null)
   const [filter, setFilter] = useState('')
+
+  // Item 40's watch list. Keyed on the CONTEXT rather than the server, because
+  // a cluster reachable from three admin boxes is one thing to watch.
+  const k8sWatch = useApp((st) => st.settings.k8sWatch) ?? []
+  const watchContext = context || (probe?.ok ? probe.currentContext : null) || ''
+  const watched = k8sWatch.some((w) => w.context === watchContext)
+  const setWatch = (on: boolean): void => {
+    const rest = k8sWatch.filter((w) => w.context !== watchContext)
+    useApp
+      .getState()
+      .setSettings({ k8sWatch: on ? [...rest, { serverId, context: watchContext }] : rest })
+  }
 
   const [view, setView] = useState<'pods' | 'cluster' | 'usage' | 'resources'>('pods')
   const [overview, setOverview] = useState<K8sOverview | null>(null)
@@ -950,6 +963,35 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                       </div>
                       {workloadRows(overview.daemonSets, 'DaemonSets')}
                     </>
+                  )}
+
+                  {/* Item 40. A watch is what makes the pod-crashloop alert
+                      fire at all: nothing can guess which server holds a
+                      kubeconfig, so until an operator says "ask THIS server
+                      about THIS cluster", the poll has nothing to do. */}
+                  {serverId !== '' && (
+                    <div className="s-note" style={{ marginTop: 10 }}>
+                      {watched ? (
+                        <>
+                          <b>Watching this cluster for restarting pods.</b> Checked every two
+                          minutes from {servers.find((x) => x.id === serverId)?.name}. An alert is
+                          raised when a pod&rsquo;s restart count goes up between checks — a count
+                          on its own cannot tell a pod that is restarting now from one that
+                          restarted last week.
+                          <button className="btn ghost sm" onClick={() => setWatch(false)}>
+                            Stop watching
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          Not watching this cluster. Nothing is polled until you say which server
+                          to ask, because nothing else can know which of them holds a kubeconfig.
+                          <button className="btn ghost sm" onClick={() => setWatch(true)}>
+                            Watch for restarting pods
+                          </button>
+                        </>
+                      )}
+                    </div>
                   )}
 
                   {/* Item 41's readiness report. The item itself -- cordon,
