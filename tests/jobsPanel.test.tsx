@@ -197,3 +197,74 @@ describe('the list', () => {
     expect((stub.jobs as { cancel: ReturnType<typeof vi.fn> }).cancel).toHaveBeenCalledWith('j1')
   })
 })
+
+// Item 34a, through the panel. The unit test covers the vocabulary; this
+// covers that the composer actually uses it -- a builder nothing calls is the
+// shape this whole gap audit is about.
+describe('the typed service step', () => {
+  async function serviceMode(stub: Record<string, unknown>, servers: Server[]): Promise<void> {
+    stubBridge(stub)
+    render(<JobsPanel servers={servers} />)
+    await userEvent.click(screen.getByRole('button', { name: /New job/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Service action' }))
+  }
+
+  it('builds the command from an action and a unit, and verifies afterwards', async () => {
+    const stub = jobsStub()
+    await serviceMode(stub, [server(0)])
+    await userEvent.click(screen.getByRole('button', { name: 'web-0' }))
+    await userEvent.type(screen.getByLabelText('Unit'), 'nginx')
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Run' }))
+    // `restart` on one server is elevated, which asks for a click and not a
+    // typed phrase. The panel asks for what the plan demands, no more.
+    expect(screen.queryByLabelText(/Type RUN to confirm/)).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Run' }))
+    await waitFor(() => expect(runOf(stub)).toHaveBeenCalled())
+    const spec = (runOf(stub).mock.calls[0][0] as { spec: { steps: { command: string }[]; title: string } }).spec
+    expect(spec.title).toBe('Restart nginx.service')
+    expect(spec.steps[0].command).toBe("sudo -n systemctl restart 'nginx.service'")
+    // `systemctl restart` exits 0 having asked. The second step is the answer.
+    expect(spec.steps[1].command).toContain("is-active 'nginx.service'")
+  })
+
+  it('will not build a restart of the service it reaches the server through', async () => {
+    const stub = jobsStub()
+    await serviceMode(stub, [server(0)])
+    await userEvent.click(screen.getByRole('button', { name: 'web-0' }))
+    await userEvent.type(screen.getByLabelText('Unit'), 'sshd')
+    expect(document.body.textContent).toContain('cut the connection')
+    expect((screen.getByRole('button', { name: 'Review' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('checks the unit against what the picked servers reported, when they have', async () => {
+    const { useFleet } = await import('../src/renderer/src/store/fleet')
+    useFleet.setState({
+      hosts: {
+        s0: {
+          services: [{ name: 'nginx.service', active: 'active', sub: 'running' }]
+        } as never
+      }
+    })
+    const stub = jobsStub()
+    await serviceMode(stub, [server(0)])
+    await userEvent.click(screen.getByRole('button', { name: 'web-0' }))
+    await userEvent.type(screen.getByLabelText('Unit'), 'ngnix')
+    // A misspelt unit is a job that fails on every server at once, and the
+    // failure reads as an outage rather than a typo.
+    expect(document.body.textContent).toContain('has reported a unit called')
+    expect((screen.getByRole('button', { name: 'Review' }) as HTMLButtonElement).disabled).toBe(true)
+    useFleet.setState({ hosts: {} })
+  })
+
+  it('does not treat "never sampled" as "runs no units"', async () => {
+    const { useFleet } = await import('../src/renderer/src/store/fleet')
+    useFleet.setState({ hosts: {} })
+    const stub = jobsStub()
+    await serviceMode(stub, [server(0)])
+    await userEvent.click(screen.getByRole('button', { name: 'web-0' }))
+    await userEvent.type(screen.getByLabelText('Unit'), 'anything')
+    expect(document.body.textContent).toContain('not checked against anything')
+    expect((screen.getByRole('button', { name: 'Review' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+})

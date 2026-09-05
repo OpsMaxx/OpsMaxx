@@ -9,7 +9,14 @@ import {
   EMPTY_JOB_DRAFT,
   type JobDraft
 } from '../../../../shared/jobCompose'
+import {
+  checkServiceStep,
+  serviceJobSpec,
+  SERVICE_ACTIONS,
+  type ServiceAction
+} from '../../../../shared/serviceStep'
 import { jobApprovalFor, planJob } from '../../../../shared/jobs'
+import { useFleet } from '../../store/fleet'
 import type { JobDetail, JobHostResult, JobProgress, JobRecord } from '../../../../shared/jobs'
 import type { Server } from '../../types'
 
@@ -60,7 +67,14 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
     plan: ReturnType<typeof planJob>
   } | null>(null)
   const [phrase, setPhrase] = useState('')
+  // Item 34a. A free-text step is a line somebody typed; a typed step is an
+  // action and a unit, checked before the command exists.
+  const [mode, setMode] = useState<'command' | 'service'>('command')
+  const [action, setAction] = useState<ServiceAction>('restart')
+  const [unit, setUnit] = useState('')
+  const [sudo, setSudo] = useState(true)
   const openId = useRef<string | null>(null)
+  const sampled = useFleet((s) => s.hosts)
 
   const bridge = (): NonNullable<typeof window.shellpilot>['jobs'] | undefined =>
     window.shellpilot?.jobs
@@ -128,7 +142,31 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
     }
   }, [])
 
-  const check = checkJobDraft(draft, picked.length)
+  // The units the PICKED servers have actually reported, and `undefined` when
+  // none of them has reported any. Absent is not empty: a server whose facts
+  // have never been collected must not make every unit name look misspelt.
+  const knownUnits = ((): string[] | undefined => {
+    const names = new Set<string>()
+    let anyKnown = false
+    for (const id of picked) {
+      // `null` is not `[]`. A server with no systemd, or one whose probe has
+      // not run, reports null -- and treating that as "this server runs no
+      // units" would make every correctly spelled unit name look misspelt.
+      const units = sampled[id]?.services
+      if (!units) continue
+      anyKnown = true
+      for (const u of units) names.add(u.name)
+    }
+    return anyKnown ? [...names] : undefined
+  })()
+
+  const serviceCheck = checkServiceStep(action, unit, knownUnits)
+  const check =
+    mode === 'service'
+      ? picked.length === 0
+        ? ({ ok: false, reason: 'Pick at least one server.' } as const)
+        : serviceCheck
+      : checkJobDraft(draft, picked.length)
 
   const review = (): void => {
     if (!check.ok) return
@@ -137,7 +175,7 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
       chosen.map((s) => ({ serverId: s.id, serverName: s.name })),
       draft.waveSize
     )
-    const spec = composeJobSpec(draft)
+    const spec = mode === 'service' ? serviceJobSpec(action, unit, { sudo }) : composeJobSpec(draft)
     setPhrase('')
     setPending({ spec, targets, plan: planJob(spec, targets) })
   }
@@ -226,21 +264,83 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
 
       {composing && pending === null && (
         <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
-          <input
-            className="input"
-            aria-label="Job title"
-            placeholder="What this job is, in a few words"
-            value={draft.title}
-            onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-          />
-          <textarea
-            className="input mono"
-            aria-label="Steps"
-            rows={5}
-            placeholder={'One command per line.\n# Lines starting with # are notes and are not run.'}
-            value={draft.steps}
-            onChange={(e) => setDraft({ ...draft, steps: e.target.value })}
-          />
+          {/* Item 34a. A typed step is an action and a unit, checked before
+              any command exists; a free-text step is a line somebody typed and
+              says so. */}
+          <div className="row-actions">
+            <button
+              className={clsx('btn sm', mode === 'command' && 'primary')}
+              aria-pressed={mode === 'command'}
+              onClick={() => setMode('command')}
+            >
+              Commands
+            </button>
+            <button
+              className={clsx('btn sm', mode === 'service' && 'primary')}
+              aria-pressed={mode === 'service'}
+              onClick={() => setMode('service')}
+            >
+              Service action
+            </button>
+          </div>
+
+          {mode === 'service' ? (
+            <>
+              <div className="row-actions" style={{ gap: 6 }}>
+                <select
+                  className="input"
+                  aria-label="Service action"
+                  value={action}
+                  onChange={(e) => setAction(e.target.value as ServiceAction)}
+                >
+                  {SERVICE_ACTIONS.map((a) => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className="input mono"
+                  aria-label="Unit"
+                  placeholder="nginx"
+                  value={unit}
+                  onChange={(e) => setUnit(e.target.value)}
+                />
+              </div>
+              <label className="r-sub">
+                <input
+                  type="checkbox"
+                  aria-label="Run as root with sudo"
+                  checked={sudo}
+                  onChange={(e) => setSudo(e.target.checked)}
+                />{' '}
+                Run as root (<code>sudo -n</code>)
+              </label>
+              <div className="r-sub faint">
+                {knownUnits === undefined
+                  ? 'No server in this selection has reported its units, so the name is not checked against anything.'
+                  : `Checked against the ${knownUnits.length} unit(s) these servers have reported.`}
+              </div>
+            </>
+          ) : (
+            <>
+              <input
+                className="input"
+                aria-label="Job title"
+                placeholder="What this job is, in a few words"
+                value={draft.title}
+                onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+              />
+              <textarea
+                className="input mono"
+                aria-label="Steps"
+                rows={5}
+                placeholder={'One command per line.\n# Lines starting with # are notes and are not run.'}
+                value={draft.steps}
+                onChange={(e) => setDraft({ ...draft, steps: e.target.value })}
+              />
+            </>
+          )}
 
           <div className="r-sub faint">Servers ({picked.length} of {servers.length})</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
