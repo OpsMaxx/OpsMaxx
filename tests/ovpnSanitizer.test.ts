@@ -445,3 +445,66 @@ describe('fixture coverage', () => {
     expect(files.length).toBeGreaterThanOrEqual(20)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Revocation, which was being dropped
+// ---------------------------------------------------------------------------
+//
+// `crl-verify` fell through the switch's default branch into "not a setting
+// ShellPilot carries over". Every other drop makes the imported profile refuse
+// to do something; this one made it ACCEPT a certificate the issuer had
+// withdrawn, silently, on a profile that was configured to check.
+
+const CRL =
+  '-----BEGIN X509 CRL-----\nMIIBODCB4gIBATANBgkqhkiG9w0BAQsFADAA\n-----END X509 CRL-----\n'
+
+describe('a profile that checks revocation still checks it after import', () => {
+  it('carries an inline <crl-verify> block through into the generated config', () => {
+    const r = parseOvpn(
+      `client\ndev tun\nremote vpn.example.com 1194\n<ca>\n-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n</ca>\n<crl-verify>\n${CRL}</crl-verify>\n`,
+      undefined,
+      { hostHasIpv6: false }
+    )
+    expect(r.ok).toBe(true)
+    const config = body(r)
+    expect(config).toContain('<crl-verify>')
+    expect(config).toContain('BEGIN X509 CRL')
+  })
+
+  it('reads a crl-verify given as a file beside the config, and inlines it', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'sp-crl-'))
+    try {
+      writeFileSync(join(tmp, 'ca.crt'), '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n')
+      writeFileSync(join(tmp, 'crl.pem'), CRL)
+      const r = parseOvpn(
+        'client\ndev tun\nremote vpn.example.com 1194\nca ca.crt\ncrl-verify crl.pem\n',
+        tmp,
+        { hostHasIpv6: false }
+      )
+      expect(r.ok).toBe(true)
+      expect(body(r)).toContain('BEGIN X509 CRL')
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('says so when the profile uses a CRL directory, which has no inline form', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'sp-crl-'))
+    try {
+      writeFileSync(join(tmp, 'ca.crt'), '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n')
+      mkdirSync(join(tmp, 'crls'))
+      const r = parseOvpn(
+        'client\ndev tun\nremote vpn.example.com 1194\nca ca.crt\ncrl-verify crls dir\n',
+        tmp,
+        { hostHasIpv6: false }
+      )
+      // Imports, and says what it could not bring. A profile that fails to
+      // start would be a worse answer than one that reports the gap.
+      expect(r.ok).toBe(true)
+      expect(body(r)).not.toContain('crl-verify')
+      expect(JSON.stringify(r.stripped)).toContain('Revocation will not be checked')
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+})

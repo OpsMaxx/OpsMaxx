@@ -248,7 +248,15 @@ const PROXY_AUTH_METHODS = new Set(['basic', 'ntlm', 'ntlm2', 'none'])
 
 /** The only blocks allowed inline, and the only directives allowed to name a
  *  file. Everything here ends up inside the re-emitted config as a block. */
-const INLINE_TAGS = ['ca', 'cert', 'key', 'tls-auth', 'tls-crypt', 'tls-crypt-v2', 'dh', 'pkcs12'] as const
+// `crl-verify` is here for item 48: it was falling through the switch's default
+// branch into "not a setting ShellPilot carries over", which silently turned a
+// profile that CHECKS REVOCATION into one that does not. That is the one
+// direction a dropped directive must never go -- every other drop makes the
+// profile refuse to do something, and this one made it accept a certificate the
+// issuer had withdrawn.
+const INLINE_TAGS = [
+  'ca', 'cert', 'key', 'tls-auth', 'tls-crypt', 'tls-crypt-v2', 'dh', 'pkcs12', 'crl-verify'
+] as const
 const INLINE_TAG_SET: ReadonlySet<string> = new Set<string>(INLINE_TAGS)
 
 // Dropped with a report rather than rejected: nothing an attacker reaches
@@ -812,9 +820,22 @@ function directive(ctx: Ctx, tokens: string[], lineNo: number, raw: string): voi
     case 'tls-crypt':
     case 'tls-crypt-v2':
     case 'dh':
+    case 'crl-verify':
     case 'pkcs12': {
       const p = args[0] ?? ''
       if (!p) return drop(ctx, name, 'Expected a file name.')
+      // `crl-verify DIR dir` names a DIRECTORY of hash-named CRLs, which has no
+      // inline form at all. Dropped with its own reason rather than read as a
+      // file: openvpn would reject the re-emitted config, and a profile that
+      // fails to start is a worse answer than one that says what it could not
+      // carry.
+      if (name === 'crl-verify' && args[1] === 'dir') {
+        return drop(
+          ctx,
+          name,
+          'This profile checks revocation against a DIRECTORY of CRLs, which cannot be carried inline. Revocation will not be checked.'
+        )
+      }
       // Some exporters write both `ca [inline]` and a <ca> block.
       if (p === '[inline]') return
       const bytes = readContained(ctx, p, lineNo, raw, name)
