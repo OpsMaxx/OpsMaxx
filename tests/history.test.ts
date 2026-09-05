@@ -6,6 +6,9 @@ import {
   DISABLE_ENV,
   HISTORY_FILE,
   METRICS,
+  SWEEP_METRICS,
+  databaseSubject,
+  historySubjectIsDatabase,
   RETENTION_FULL_DAYS,
   RETENTION_HOURLY_DAYS,
   eventRetentionDays,
@@ -512,7 +515,14 @@ describe('retention', () => {
     expect(expected.hourly).toBe(268_920)
     expect(RETENTION_FULL_DAYS).toBe(7)
     expect(RETENTION_HOURLY_DAYS).toBe(90)
-    expect(METRICS.length).toBe(9)
+    // NINE sweep metrics and TEN metrics in all. `dbBytes` was appended for
+    // item 47's database growth series and is written when somebody opens a
+    // database panel, not on the sweep -- so it costs a handful of rows a day
+    // rather than 30 an hour per host, and the budget above is arithmetic over
+    // the sweep ones. Both numbers are pinned: appending a SWEEP metric should
+    // still fail this test and be re-typed.
+    expect(SWEEP_METRICS.length).toBe(9)
+    expect(METRICS.length).toBe(10)
 
     // Writing 604,800 rows in a unit test is a minute of CI for a number that
     // scales linearly, so this writes one host for eight days and checks that
@@ -536,7 +546,9 @@ describe('retention', () => {
         })
       }
     })
-    const written = days * 24 * 30 * METRICS.length
+    // Nine, because this loop writes the nine SWEEP metrics -- which is what a
+    // real sweep writes. `dbBytes` is not one of them and is not written here.
+    const written = days * 24 * 30 * SWEEP_METRICS.length
     expect(s.counts().samples).toBe(written)
 
     s.retain(now)
@@ -545,8 +557,8 @@ describe('retention', () => {
     // Seven days at full resolution, to the row.
     expect(after.samples).toBe(oneHost.samples)
     expect(after.samples).toBe(7 * 24 * 30 * 9)
-    // And the eighth day folded into 24 hours x 9 metrics.
-    expect(after.hourly).toBe(24 * METRICS.length)
+    // And the eighth day folded into 24 hours x the nine SWEEP metrics.
+    expect(after.hourly).toBe(24 * SWEEP_METRICS.length)
 
     // A second pass with no new data is a no-op: retention converges rather
     // than eating into the window it is supposed to keep.
@@ -1529,5 +1541,37 @@ describe('jobsForHost', () => {
     db.close()
     expect(plan).toContain('job_target_server')
     expect(plan).not.toContain('SCAN t')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Item 47's database growth series: a subject that is not a server.
+// ---------------------------------------------------------------------------
+
+describe('a database as a history subject', () => {
+  it('interns beside a host without a schema change', () => {
+    // `host_key` is opaque TEXT and always has been, which is the whole reason
+    // this needed no migration.
+    expect(databaseSubject('conn-7')).toBe('db:conn-7')
+    expect(historySubjectIsDatabase(databaseSubject('conn-7'))).toBe(true)
+    expect(historySubjectIsDatabase('srv-7')).toBe(false)
+  })
+
+  // The budget is arithmetic over what a SWEEP writes. Counting an on-demand
+  // series there would overstate the cost of adding one by four orders of
+  // magnitude, which would make the budget useless for the decision it exists
+  // to force.
+  it('is not counted in the per-host sweep budget', () => {
+    expect(SWEEP_METRICS).not.toContain('dbBytes')
+    expect(METRICS).toContain('dbBytes')
+    expect(steadyStateRows(1, 120_000).samples).toBe(7 * 24 * 30 * SWEEP_METRICS.length)
+  })
+
+  // Ids are the index + 1 and never move. A reordering would silently
+  // reinterpret every row already on disk.
+  it('took the next id rather than displacing one', () => {
+    expect(METRICS.indexOf('dbBytes')).toBe(METRICS.length - 1)
+    expect(METRICS.indexOf('cpu')).toBe(0)
+    expect(METRICS.indexOf('inodePct')).toBe(8)
   })
 })

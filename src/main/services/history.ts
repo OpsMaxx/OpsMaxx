@@ -71,8 +71,14 @@ import { ALERT_HISTORY_KIND, DB_ALERT_HISTORY_KINDS } from '../../shared/webhook
 // auditLog.ts and localSessionLog.ts are deliberately NOT migrated. They work,
 // they are tested, and they answer a different question.
 
-/** The nine numeric series sampled per host. Ids are the index + 1 and are
- *  stable forever: a new metric APPENDS, it never reorders. */
+/**
+ * Every numeric series this store knows. Ids are the index + 1 and are stable
+ * forever: a new metric APPENDS, it never reorders.
+ *
+ * NOT all of them are written per host per sweep -- see `SWEEP_METRICS`. The
+ * storage budget is arithmetic over the sweep ones, and conflating the two
+ * would make an on-demand series look like it costs 15 hosts × 30 rows an hour.
+ */
 export const METRICS = [
   'cpu',
   'memPct',
@@ -90,8 +96,40 @@ export const METRICS = [
   // series behind it and no forecast in front of it -- and running out of
   // inodes looks exactly like a full disk to everything except `df -i`, which
   // is the one place nobody looks.
-  'inodePct'
+  'inodePct',
+  // APPENDED, like `inodePct` before it, and NOT sampled per host per sweep --
+  // which is the whole reason `SWEEP_METRICS` below exists.
+  //
+  // Item 47's database growth series. Its subject is `db:<connectionId>` rather
+  // than a server: `host_key` is opaque TEXT and always has been, so a database
+  // interns beside a host without a schema change. It is written when somebody
+  // opens a database panel, so the series is GAPPY by construction -- which is
+  // exactly what `bytesForecast`'s `stale`, `too-few-points` and
+  // `window-too-short` refusals are for.
+  'dbBytes'
 ] as const
+
+/**
+ * The subset written for every host on every metrics sweep.
+ *
+ * The storage budget in `tests/history.test.ts` is arithmetic over THIS list,
+ * not over `METRICS`: `dbBytes` is written when an operator opens a database
+ * panel, which is a handful of rows a day rather than 30 an hour per host, and
+ * counting it in the sweep budget would overstate the cost of adding it by
+ * about four orders of magnitude.
+ */
+export const SWEEP_METRICS = METRICS.filter((m) => m !== 'dbBytes')
+
+/** `db:<connectionId>`, the subject a database's size series is stored under.
+ *  A function rather than a template at each call site so the prefix is in one
+ *  place and cannot drift from the one `historySubjectIsDatabase` matches. */
+export function databaseSubject(connectionId: string): string {
+  return `db:${connectionId}`
+}
+
+export function historySubjectIsDatabase(subject: string): boolean {
+  return subject.startsWith('db:')
+}
 
 export type Metric = (typeof METRICS)[number]
 
@@ -554,10 +592,14 @@ export function steadyStateRows(hosts: number, cadenceMs: number): {
   hourly: number
   total: number
 } {
-  const perHostPerHour = (HOUR_MS / cadenceMs) * METRICS.length
+  // SWEEP_METRICS, not METRICS. A series written when somebody opens a panel
+  // is not 30 rows an hour per host, and counting it here would overstate the
+  // cost of adding one by about four orders of magnitude -- which would make
+  // this budget useless for the decision it exists to force.
+  const perHostPerHour = (HOUR_MS / cadenceMs) * SWEEP_METRICS.length
   const samples = Math.round(hosts * perHostPerHour * 24 * RETENTION_FULL_DAYS)
   const hourly = Math.round(
-    hosts * METRICS.length * 24 * (RETENTION_HOURLY_DAYS - RETENTION_FULL_DAYS)
+    hosts * SWEEP_METRICS.length * 24 * (RETENTION_HOURLY_DAYS - RETENTION_FULL_DAYS)
   )
   return { samples, hourly, total: samples + hourly }
 }
