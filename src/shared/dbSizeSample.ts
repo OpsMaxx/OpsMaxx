@@ -112,3 +112,33 @@ export function unsupportedSizeSample(engine: string): DbSizeSample {
     detail: `${engine}: ${DB_SIZE_REFUSAL_WORDS.unsupported}`
   }
 }
+
+/**
+ * The sample a whole `db:ops` report yields, or the reason it yields none.
+ *
+ * Takes the report's shape structurally rather than importing `DbOpsReport`:
+ * this module deliberately has no dependency on the three-thousand-line ops
+ * file, and the two fields it needs are the two it names.
+ *
+ * A report that FAILED yields nothing. A size series with a row for every
+ * attempt would be a series whose gaps are invisible, and gaps are the whole
+ * reason `bytesForecast` has `stale` and `too-few-points`.
+ */
+export function reportSizeSample(
+  report: { ok: boolean; engine: string; answers: { id: string; value?: unknown }[] },
+  database: string,
+  rowLimit: number
+): DbSizeSample {
+  if (!report.ok) return { ok: false, reason: 'no-number', detail: DB_SIZE_REFUSAL_WORDS['no-number'] }
+  const sizes = report.answers.find((a) => a.id === 'sizes')
+  if (sizes === undefined || sizes.value === undefined || sizes.value === null) {
+    return { ok: false, reason: 'no-number', detail: DB_SIZE_REFUSAL_WORDS['no-number'] }
+  }
+  if (report.engine === 'postgres') {
+    return pgSizeSample(sizes.value as PgSizesLike, database)
+  }
+  if (report.engine === 'mysql') {
+    return mysqlSizeSample(sizes.value as MysqlSizesLike, rowLimit)
+  }
+  return unsupportedSizeSample(report.engine)
+}
