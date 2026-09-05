@@ -514,6 +514,14 @@ today (`dbOps.ts:2612`); Mongo `killOp` fetching `command` for the one opid name
 `pg_replication_slots` and the blocking TREE are SHIPPED** in `shared/pgBlocking.ts`, both
 against fixtures from a real PostgreSQL 16.15 in Docker.
 
+**The live query is FIXED**, which is the part that matters more than the tree module:
+`PG_QUERIES.locks` filtered on `cardinality(pg_blocking_pids(a.pid)) > 0` — sessions that are
+BLOCKED — and the session holding the lock is not itself blocked. Proven against PostgreSQL
+16.15: the old query returned two pids, the fixed one returns three, and the extra one is the
+only session an operator can act on. Fixing the query alone would have been a bug — `judgePgLocks`
+counted every returned row as a blocked session and `blockedSessions` stored that as a metric, so
+both now count blocked rows only, and the verdict names what the blocker is running.
+
 The blocking tree measured out worse than the item describes: with a three-deep chain made from
 three concurrent transactions on one row, the session actually HOLDING the lock is not itself
 blocked — so the existing read, which returns rows that are blocked, omits the only session an
