@@ -464,7 +464,17 @@ an `ask` nobody can answer during an unattended sweep, which is exactly the argu
 else can are different grants, and the Sudo Access group has the first and not the second. No MCP
 tool exposes it whatever it is set to.
 
-Still open: the probe itself and `sudoers.d` traversal.
+**The probe is SHIPPED** and verified against `debian:12` with four drop-in files planted in
+`/etc/sudoers.d`. It reads each file SEPARATELY — "which file grants this" is the first question
+anybody asks and the last a concatenation can answer — in `sort` order, because the shell's glob
+order is locale-dependent and sudo's is not, and it skips the names sudo itself skips (a `.`
+anywhere, or a trailing `~`). Reading those would report rules that are NOT in effect, which is
+worse than missing ones: an operator would go and remove a grant that was never granted. Bounded
+on the HOST, not here: a 2 GB `/etc/sudoers` must not reach the SSH channel. An unreadable file
+makes the answer incomplete rather than absent, and the sentence says the usual cause is a sweep
+that was not root.
+
+Still open: rendering it in the access panel.
 
 **36c. Per-account revoke.** Blocked in main, not the planner (`index.ts:1257-1272`). Needs a
 per-host command (the connecting-account write resolves `$HOME` on the host, `:2860`, so one

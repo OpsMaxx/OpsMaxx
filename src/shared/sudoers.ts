@@ -281,3 +281,122 @@ export function describeSudo(findings: SudoFinding[], reading: SudoersReading): 
   }
   return `Named by ${findings.length} rule(s), with a password${tail || '.'}`
 }
+
+// ---------------------------------------------------------------------------
+// Reading the files off the host
+// ---------------------------------------------------------------------------
+//
+// TWO SEPARATE READS, joined by a marker, and the sudoers.d traversal is the
+// reason. `/etc/sudoers` is one file; `/etc/sudoers.d` is a directory whose
+// contents sudo itself reads in C-collation order, skipping anything with a
+// `.` or ending `~`. A single `cat` over both would lose which line came from
+// which file, and a finding an operator cannot locate is a finding they cannot
+// act on.
+//
+// EVERYTHING IS BOUNDED ON THE HOST. The file is attacker-controlled text on a
+// machine this app does not own, so the line count, the file count and the
+// bytes are capped there rather than here -- a 2 GB /etc/sudoers must not
+// reach the SSH channel at all, let alone the parser.
+
+/** Files read from sudoers.d. sudo itself has no limit; this does. */
+export const SUDOERS_MAX_FILES = 40
+/** Bytes per file. A real sudoers is a few kilobytes. */
+export const SUDOERS_MAX_BYTES = 64 * 1024
+
+export const SUDOERS_MARKER = '===OPSMAXX-SUDOERS==='
+export const SUDOERS_FILE_MARKER = '===OPSMAXX-SUDOERS-FILE:'
+
+/**
+ * The command. Root, because /etc/sudoers is 0440 and unreadable otherwise --
+ * and an unreadable sudoers is reported as unreadable rather than as a host
+ * with no rules.
+ *
+ * `sudo -n` only: the one escalation that cannot sit waiting for a password on
+ * an unattended sweep, which is the rule the rest of this codebase follows.
+ */
+export function buildSudoersCommand(opts: { sudo?: boolean } = {}): string {
+  const s = opts.sudo === false ? '' : 'sudo -n '
+  return [
+    'LC_ALL=C',
+    'export LC_ALL',
+    `echo "${SUDOERS_MARKER}"`,
+    // The main file first, named like the rest so the parser has one shape.
+    `echo "${SUDOERS_FILE_MARKER}/etc/sudoers==="`,
+    `${s}head -c ${SUDOERS_MAX_BYTES} /etc/sudoers 2>/dev/null || echo "SP_UNREADABLE"`,
+    // Then the drop-in directory, in the order sudo reads it. `sort` because
+    // the shell's glob order is locale-dependent and sudo's is not.
+    `for SP_F in $(${s}ls -1 /etc/sudoers.d 2>/dev/null | sort | head -n ${SUDOERS_MAX_FILES}); do`,
+    // sudo SKIPS these itself. Reading them would report rules that are not in
+    // effect, which is worse than missing ones: an operator would go and
+    // remove a grant that was never granted.
+    '  case "$SP_F" in *.*|*~) continue ;; esac',
+    `  echo "${SUDOERS_FILE_MARKER}/etc/sudoers.d/$SP_F==="`,
+    `  ${s}head -c ${SUDOERS_MAX_BYTES} "/etc/sudoers.d/$SP_F" 2>/dev/null || echo "SP_UNREADABLE"`,
+    'done'
+  ].join('\n')
+}
+
+export interface SudoersFileReading extends SudoersReading {
+  path: string
+  /** True when the file could not be read -- almost always "not root". */
+  unreadable: boolean
+}
+
+/**
+ * Every file, kept apart.
+ *
+ * A reading per file rather than one merged reading, because "which file
+ * grants this" is the first thing anybody asks and the last thing a
+ * concatenation can answer.
+ */
+export function parseSudoersOutput(output: string): SudoersFileReading[] {
+  const body = output.includes(SUDOERS_MARKER) ? output.split(SUDOERS_MARKER)[1] ?? '' : output
+  const out: SudoersFileReading[] = []
+  for (const chunk of body.split(SUDOERS_FILE_MARKER).slice(1)) {
+    const end = chunk.indexOf('===')
+    if (end === -1) continue
+    const path = chunk.slice(0, end).trim()
+    const text = chunk.slice(end + 3)
+    const unreadable = text.trim() === 'SP_UNREADABLE' || text.trim() === ''
+    out.push({ path, unreadable, ...parseSudoers(unreadable ? '' : text) })
+  }
+  return out
+}
+
+/**
+ * What the whole estate's answer is for one account, across every file.
+ *
+ * An UNREADABLE file makes the answer incomplete rather than absent: the
+ * commonest cause is that the sweep was not root, and a host that reported
+ * "no rules name this account" when it could not read the file at all is the
+ * exact shape of wrong answer this whole module exists to avoid.
+ */
+export function sudoAcrossFiles(
+  user: string,
+  groups: string[],
+  files: SudoersFileReading[]
+): { findings: SudoFinding[]; unreadable: string[]; sentence: string } {
+  const unreadable = files.filter((f) => f.unreadable).map((f) => f.path)
+  const findings = files.flatMap((f) => sudoPrivilegesFor(user, groups, f))
+  // The gaps of every file, merged, so describeSudo can say the reading is
+  // partial for the right reason.
+  const merged: SudoersReading = {
+    aliases: files.flatMap((f) => f.aliases),
+    specs: files.flatMap((f) => f.specs),
+    defaults: files.flatMap((f) => f.defaults),
+    // An include that was FOLLOWED is not a gap. `/etc/sudoers.d` is read
+    // here, so it is dropped from the list before describeSudo counts it --
+    // otherwise every host on earth reports one unread include.
+    includes: files
+      .flatMap((f) => f.includes)
+      .filter((i) => !files.some((f) => f.path.startsWith(i.replace(/\/$/, '')))),
+    unparsed: files.flatMap((f) => f.unparsed),
+    truncated: files.some((f) => f.truncated)
+  }
+  const base = describeSudo(findings, merged)
+  const sentence =
+    unreadable.length > 0
+      ? `${base.replace(/\.$/, '')} — and ${unreadable.length} file(s) could not be read (${unreadable.join(', ')}), which usually means this sweep was not root.`
+      : base
+  return { findings, unreadable, sentence }
+}
