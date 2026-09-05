@@ -45,7 +45,8 @@ export const ALERT_KINDS = [
   // person pressing Stop is not an outage -- and no endpoint ever reaches
   // these payloads.
   'vpn-down',
-  'vpn-degraded'
+  'vpn-degraded',
+  'vpn-cert-expiry'
 ] as const
 export type AlertKind = (typeof ALERT_KINDS)[number]
 
@@ -181,7 +182,22 @@ export function validateWebhookUrl(raw: string): { ok: true; url: string } | { o
  * direction per kind so the arithmetic is inverted in one place instead of the
  * comparison being written down twice.
  */
-export const NUMERIC_ALERT_KINDS = ['cpu', 'ram', 'disk', 'inode', 'load', 'cert-expiry'] as const
+export const NUMERIC_ALERT_KINDS = [
+  'cpu',
+  'ram',
+  'disk',
+  'inode',
+  'load',
+  'cert-expiry',
+  // A SIBLING of cert-expiry rather than the same kind, and the reason is the
+  // coverage page rather than the arithmetic. `cert-expiry` is answered by the
+  // posture sweep, and a VPN profile has no posture -- it is not a server and
+  // is never swept. Raising both under one name would have the coverage page
+  // tell an operator this alert comes from a sweep that never looks at it.
+  //
+  // Numeric, and inverted like its sibling: days remaining, smaller is worse.
+  'vpn-cert-expiry'
+] as const
 export type NumericAlertKind = (typeof NUMERIC_ALERT_KINDS)[number]
 
 /**

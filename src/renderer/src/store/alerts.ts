@@ -113,7 +113,10 @@ const REPEAT: Record<NumericAlertKind, number> = {
   // about one certificate nobody can renew faster by being told again. Daily
   // is "you will hear about this every morning until it is fixed", and
   // escalation covers the fortnight where a day is too long to wait.
-  'cert-expiry': 24 * 60 * 60 * 1000
+  'cert-expiry': 24 * 60 * 60 * 1000,
+  // Same daily cadence: a certificate's remaining days change once a day, and
+  // a profile's certificate is no different from a server's.
+  'vpn-cert-expiry': 24 * 60 * 60 * 1000
 }
 
 // How far below the threshold a value must fall before a later crossing counts
@@ -143,7 +146,8 @@ const RECOVER_MARGIN: Record<NumericAlertKind, number> = {
   // this can never be the thing that decides anything; it exists so a
   // certificate cannot sit exactly on thirty and earn a fresh raise every
   // sweep, which is the only way this kind could oscillate at all.
-  'cert-expiry': 5
+  'cert-expiry': 5,
+  'vpn-cert-expiry': 5
 }
 
 // A rise of this much since the last thing we said re-opens the repeat window.
@@ -159,7 +163,8 @@ const ESCALATE_BY: Record<NumericAlertKind, number> = {
   // A WEEK closer than the figure last announced. 30 → 21 → 14 → 7 → 0 is
   // monotone movement towards an outage, and it is the one shape a flap never
   // has, so each of those steps speaks even under a damp or a snooze.
-  'cert-expiry': 7
+  'cert-expiry': 7,
+  'vpn-cert-expiry': 7
 }
 
 // The floor under every reason to speak, per kind. Nothing may notify faster
@@ -187,7 +192,8 @@ const MIN_GAP: Record<NumericAlertKind, number> = {
   // escalation bypasses ARE the feature for a condition that does not fix
   // itself, and a certificate cannot flap in a sample — the probe behind it
   // runs hourly and the number moves by one a day.
-  'cert-expiry': 0
+  'cert-expiry': 0,
+  'vpn-cert-expiry': 0
 }
 
 // ---------------------------------------------------------------------------
@@ -211,7 +217,10 @@ const LOWER_IS_WORSE: Record<NumericAlertKind, boolean> = {
   disk: false,
   inode: false,
   load: false,
-  'cert-expiry': true
+  'cert-expiry': true,
+  // Inverted, like its sibling: the number is days REMAINING, so smaller is
+  // worse and the arithmetic runs the other way.
+  'vpn-cert-expiry': true
 }
 
 /**
@@ -769,7 +778,8 @@ export const LABEL: Record<AlertKind, string> = {
   'db-alarm': 'Database alarm',
   'db-watch': 'Database watch',
   'oom-kill': 'OOM kill',
-  'cert-expiry': 'Certificate'
+  'cert-expiry': 'Certificate',
+  'vpn-cert-expiry': 'VPN certificate'
 }
 
 // What the number is measuring, for the sentences a person reads. Disk says
@@ -787,7 +797,8 @@ const SUBJECT: Record<NumericAlertKind, string> = {
   // "on this host" and it means it: the probe reads a bounded set of named
   // directories, so a certificate somewhere else on the box raises nothing
   // here — the same caveat disk states about `df -kP /`.
-  'cert-expiry': 'The soonest certificate on this server'
+  'cert-expiry': 'The soonest certificate on this server',
+  'vpn-cert-expiry': 'This VPN profile’s own client certificate'
 }
 
 // How each kind's line reads in a sentence, because the kinds do not compare
@@ -802,7 +813,8 @@ const OVER_WORD: Record<NumericAlertKind, string> = {
   load: 'at or above',
   // At or below, matching isCertificateExpiringSoon: a certificate ON thirty
   // days is inside the window certbot would already have renewed in.
-  'cert-expiry': 'at or below'
+  'cert-expiry': 'at or below',
+  'vpn-cert-expiry': 'at or below'
 }
 const backBelow: Record<NumericAlertKind, (threshold: number) => string> = {
   cpu: (t) => `back below ${t}%`,
@@ -812,7 +824,8 @@ const backBelow: Record<NumericAlertKind, (threshold: number) => string> = {
   load: (t) => `back below ${t} per core`,
   // Which is what a renewal looks like from here, and the only thing that
   // produces it: nothing else moves this number upwards.
-  'cert-expiry': (t) => `renewed and back above ${t} days`
+  'cert-expiry': (t) => `renewed and back above ${t} days`,
+  'vpn-cert-expiry': (t) => `renewed and back above ${t} days`
 }
 
 // The unit each kind's number is in. Not everything alerting measures is a
@@ -824,7 +837,8 @@ export const UNIT: Record<NumericAlertKind, string> = {
   disk: '%',
   inode: '%',
   load: ' per core',
-  'cert-expiry': ' days'
+  'cert-expiry': ' days',
+  'vpn-cert-expiry': ' days'
 }
 
 // One decimal at most, trailing zero dropped. Rounding to whole points made a
@@ -859,7 +873,8 @@ const VALUE_CHIP: Record<NumericAlertKind, (v: number) => string> = {
   disk: (v) => `${fmt(v)}%`,
   inode: (v) => `${fmt(v)}%`,
   load: (v) => `${fmt(v)} per core`,
-  'cert-expiry': (v) => (v < 0 ? `${fmt(-v)}d overdue` : `${fmt(v)}d left`)
+  'cert-expiry': (v) => (v < 0 ? `${fmt(-v)}d overdue` : `${fmt(v)}d left`),
+  'vpn-cert-expiry': (v) => (v < 0 ? `${fmt(-v)}d overdue` : `${fmt(v)}d left`)
 }
 
 /** The value in a sentence, preposition and all. The five percentages and the
@@ -871,7 +886,16 @@ const VALUE_PHRASE: Record<NumericAlertKind, (v: number) => string> = {
   inode: (v) => `at ${fmt(v)}%`,
   load: (v) => `at ${fmt(v)} per core`,
   'cert-expiry': (v) =>
-    v < 0 ? `${fmt(-v)} days PAST expiry` : v === 0 ? 'expiring today' : `${fmt(v)} days from expiry`
+    v < 0 ? `${fmt(-v)} days PAST expiry` : v === 0 ? 'expiring today' : `${fmt(v)} days from expiry`,
+  // Says what stops working, not just that a date passed. An expired client
+  // certificate does not degrade the VPN -- the connect fails outright, and
+  // openvpn's own log only says so afterwards, which is the gap this closes.
+  'vpn-cert-expiry': (v) =>
+    v < 0
+      ? `${fmt(-v)} days PAST expiry — this profile can no longer connect`
+      : v === 0
+        ? 'expiring today'
+        : `${fmt(v)} days from expiry`
 }
 
 // The wire name for each kind. A Record rather than a ternary, so adding a kind
@@ -891,7 +915,8 @@ const WEBHOOK_KIND: Record<StoreAlertKind, WebhookAlertKind> = {
   'db-alarm': 'db-alarm',
   'db-watch': 'db-watch',
   'oom-kill': 'oom-kill',
-  'cert-expiry': 'cert-expiry'
+  'cert-expiry': 'cert-expiry',
+  'vpn-cert-expiry': 'vpn-cert-expiry'
 }
 
 function evaluate(
@@ -1818,6 +1843,41 @@ export function checkResourceAlerts(serverId: string, serverName: string, s: Res
  * so the panel and the alert can never disagree about which certificate is the
  * worst one or about whether a refused directory counts.
  */
+/**
+ * A VPN profile's own client certificate, against the same threshold.
+ *
+ * Its own kind rather than `cert-expiry`, and the reason is the coverage page:
+ * `cert-expiry` is answered by the posture sweep, and a VPN profile is not a
+ * server and is never swept. Same threshold and same comparison as its
+ * sibling, from the same module, because an alert that fires at a different
+ * number from the panel it points at is worse than no alert.
+ *
+ * `null` returns without a word. A profile whose certificate could not be read
+ * -- a pkcs12 bundle, an unparseable block -- has not told us it is fine.
+ */
+export function checkVpnCertificateAlert(
+  profileId: string,
+  profileName: string,
+  notAfter: number | null | undefined,
+  now = Date.now()
+): void {
+  if (!useApp.getState().settings.resourceAlertsEnabled) return
+  if (notAfter === null || notAfter === undefined) return
+  // Floored, so "12 days" means at least twelve whole days and an expiry three
+  // days ago is -3 rather than -2.something rounded towards zero -- the same
+  // arithmetic readCertificate does, for the same reason.
+  const days = Math.floor((notAfter - now) / 86_400_000)
+  evaluate(
+    profileId,
+    profileName,
+    'vpn-cert-expiry',
+    days,
+    CERT_EXPIRY_DAYS,
+    now,
+    isCertificateExpiringSoon(days)
+  )
+}
+
 export function checkCertificateAlert(
   serverId: string,
   serverName: string,

@@ -10,7 +10,8 @@ import {
   OVPN_REJECT_RULES,
   ovpnArgs,
   ovpnRejectRuleFor,
-  parseOvpn
+  parseOvpn,
+  clientCertNotAfter
 } from '../src/main/services/vpn/parsers/ovpn'
 import type { OpenVpnSpec, VpnImportResultInternal } from '../src/shared/vpn'
 
@@ -506,5 +507,66 @@ describe('a profile that checks revocation still checks it after import', () => 
     } finally {
       rmSync(tmp, { recursive: true, force: true })
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The client certificate's expiry date
+// ---------------------------------------------------------------------------
+//
+// Plan E31 promised this and it was never built, so the only signal a profile
+// had was openvpn's own "certificate has expired" in the log -- after the
+// connect had already failed, on a certificate that had been dead for however
+// long nobody looked.
+//
+// The certificate below is REAL: generated with openssl, not hand-assembled,
+// because a DER walker tested only against bytes written to satisfy it is a
+// walker tested against itself.
+
+const CLIENT_CERT = readFileSync(join(DIR, 'client-cert.pem'), 'utf8')
+// `openssl x509 -noout -enddate` on that exact file.
+const CLIENT_CERT_NOT_AFTER = Date.parse('Sep 2 15:11:06 2036 GMT')
+
+describe('when the profile stops being able to connect', () => {
+  it('reads the date off a real certificate, to the second', () => {
+    expect(clientCertNotAfter(CLIENT_CERT)).toBe(CLIENT_CERT_NOT_AFTER)
+  })
+
+  it('puts it on the spec, where the UI can read it without unlocking the vault', () => {
+    const r = parseOvpn(
+      `client\ndev tun\nremote vpn.example.com 1194\n<ca>\n${CLIENT_CERT}</ca>\n<cert>\n${CLIENT_CERT}</cert>\n`,
+      undefined,
+      { hostHasIpv6: false }
+    )
+    expect(r.ok).toBe(true)
+    expect(ovpn(r).clientCertNotAfter).toBe(CLIENT_CERT_NOT_AFTER)
+  })
+
+  it('leaves it absent rather than guessing, and absent is not "fine"', () => {
+    for (const bad of [undefined, '', 'not a certificate', '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n']) {
+      expect(clientCertNotAfter(bad), String(bad)).toBeNull()
+    }
+  })
+
+  it('does not date a pkcs12 profile, which is a container and not a certificate', () => {
+    // Walking a password-wrapped bundle as DER would produce a wrong date at
+    // worst and a meaningless one at best.
+    const r = parseOvpn(
+      `client\ndev tun\nremote vpn.example.com 1194\n<pkcs12>\nAAAA\n</pkcs12>\n`,
+      undefined,
+      { hostHasIpv6: false }
+    )
+    expect(r.ok).toBe(true)
+    expect(ovpn(r).clientCertNotAfter).toBeUndefined()
+  })
+
+  it('is absent on a profile with a CA and no client certificate of its own', () => {
+    const r = parseOvpn(
+      `client\ndev tun\nremote vpn.example.com 1194\n<ca>\n${CLIENT_CERT}</ca>\n`,
+      undefined,
+      { hostHasIpv6: false }
+    )
+    expect(r.ok).toBe(true)
+    expect(ovpn(r).clientCertNotAfter).toBeUndefined()
   })
 })

@@ -7,6 +7,7 @@ import {
   checkResourceAlerts,
   checkStateAlert,
   checkUnitAlerts,
+  checkVpnCertificateAlert,
   hydrateAlerts,
   noteAlertEvent
 } from '../../store/alerts'
@@ -349,6 +350,15 @@ export function FleetWatcher(): null {
           const { down, silent } = VPN_ALERT_READINGS[v.state]
           if (down !== null) checkStateAlert(v.id, name, 'vpn-down', down)
           if (silent !== null) checkStateAlert(v.id, name, 'vpn-degraded', silent)
+          // Item 48's second row. The date was read once at import and lives on
+          // the spec beside `remotes`, so this costs no vault unlock and no
+          // parse -- and it warns BEFORE the connect fails, which was the whole
+          // complaint: openvpn's own "certificate has expired" arrives after.
+          const profile = useApp.getState().vpns.find((p) => p.id === v.id)
+          const spec = profile?.spec
+          if (spec?.kind === 'openvpn') {
+            checkVpnCertificateAlert(v.id, name, spec.clientCertNotAfter)
+          }
         }
       })
     }
