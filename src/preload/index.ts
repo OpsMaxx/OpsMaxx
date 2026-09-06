@@ -128,6 +128,7 @@ import type { DbConnectConfig, DbInfo, DbQueryResult, DbTestResult } from '../sh
 import type { DbShellResult } from '../shared/dbshell'
 import type { DbOpsReport } from '../shared/dbOps'
 import type { VaultEntry, VaultListResult, VaultResult, VaultStatus } from '../shared/vault'
+import type { KernelStatus } from '../shared/kernelStatus'
 import type { TunnelConfig, TunnelResult, TunnelSshConfig, TunnelStatus } from '../shared/tunnel'
 import type {
   FrpTokenResult,
@@ -837,6 +838,9 @@ const api = {
     // with `facts` every hour, and this is the tens of rows behind them.
     securityList: (cfg: unknown): Promise<SecurityListProbe> =>
       ipcRenderer.invoke('fleet:security-list', cfg),
+    /** Running vs installed kernels. Asked for, not sampled. */
+    kernel: (cfg: unknown): Promise<KernelStatus | { error: string }> =>
+      ipcRenderer.invoke('fleet:kernel', cfg),
     // Who can get into a server, as the sampler last collected it — roadmap
     // item 23. Read-only and never a trigger, exactly like `facts`.
     //
