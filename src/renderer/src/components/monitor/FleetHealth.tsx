@@ -12,6 +12,7 @@ import {
 import { useApp } from '../../store/app'
 import { useFleet } from '../../store/fleet'
 import { openLogTail, openSettings } from '../../store/nav'
+import { alertLogTarget } from '../../../../shared/alertLogs'
 import { bytes, clsx, duration } from '../../lib/format'
 import type { PortListener } from '../../../../shared/ssh'
 // Aliased: the summary type and the component below share a name, and the
@@ -183,7 +184,22 @@ function HostRowView({
               <button
                 className="btn ghost sm"
                 title={`Tail ${u.name} on ${row.name}`}
-                onClick={() => openLogTail(row.id, u.name)}
+                onClick={() => {
+                  // Item 43 landed the jump; this gives it a filter. It used to
+                  // tail the unit's WHOLE history at every priority, which for
+                  // a busy unit is the reason nobody reads it. `alertLogTarget`
+                  // is the one place that decides what a failed unit's log
+                  // should be -- err and worse -- and it omits a time window
+                  // here on purpose, because `systemctl list-units` reports no
+                  // failure time and "the last fifteen minutes" would hide the
+                  // reason for anything that failed this morning.
+                  const t = alertLogTarget({ kind: 'unit-failed', since: null, units: [u.name] })
+                  if (!t.ok) return
+                  openLogTail(row.id, t.source.target, 'unit', {
+                    priority: t.source.priority,
+                    since: t.source.since
+                  })
+                }}
               >
                 <ScrollText size={11} /> Logs
               </button>

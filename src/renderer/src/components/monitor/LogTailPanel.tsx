@@ -59,6 +59,9 @@ export interface LogTailJump {
   target: string
   serverId: string
   nonce: number
+  /** journald filters carried through the jump. Unit jumps only. */
+  priority?: LogPriority
+  since?: string
 }
 
 export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogTailJump }): React.JSX.Element {
@@ -323,7 +326,20 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
     setKind(jump.kind)
     setTarget(jump.target)
     setSelected(new Set([jump.serverId]))
-    void begin({ kind: jump.kind, target: jump.target }, [jump.serverId])
+    // A jump may carry journald filters — an alert lands on the window that
+    // explains it rather than on the unit's whole history. Absent means absent:
+    // the form is left as the operator had it rather than cleared.
+    if (jump.priority !== undefined) setPriority(jump.priority)
+    if (jump.since !== undefined) setSince(jump.since)
+    void begin(
+      {
+        kind: jump.kind,
+        target: jump.target,
+        ...(jump.priority !== undefined ? { priority: jump.priority } : {}),
+        ...(jump.since !== undefined ? { since: jump.since } : {})
+      },
+      [jump.serverId]
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jump])
 

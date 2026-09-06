@@ -1562,6 +1562,22 @@ export function acknowledgeAlert(serverId: string, kind: AlertKind): void {
 // reading.
 const failedUnits = new Map<string, Set<string>>()
 
+/**
+ * Which units are currently failed on one host.
+ *
+ * Exists so the alert inbox can offer the failed unit's own log. The ACTIVE
+ * alert deliberately carries no unit name -- it is one chip for the condition,
+ * however many units are in it -- and parsing the names back out of its summary
+ * would be reading a sentence written for a person. This returns the set the
+ * diff above already keeps.
+ *
+ * A COPY, and in insertion order. The caller renders from it and must not be
+ * able to mutate the set the next sweep diffs against.
+ */
+export function failedUnitsFor(serverId: string): string[] {
+  return [...(failedUnits.get(serverId) ?? [])]
+}
+
 export function checkUnitAlerts(serverId: string, serverName: string, units: string[] | null): void {
   // null is "we could not see systemd", not "nothing is failing" — the same
   // distinction HostMetrics is careful about. Treating it as an empty set
