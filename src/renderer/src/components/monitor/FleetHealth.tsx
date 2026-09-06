@@ -6,13 +6,15 @@ import {
   CircleCheck,
   Clock,
   HardDrive,
+  RotateCw,
   ScrollText,
   Unplug
 } from 'lucide-react'
 import { useApp } from '../../store/app'
 import { useFleet } from '../../store/fleet'
-import { openLogTail, openSettings } from '../../store/nav'
+import { openLogTail, openServiceJob, openSettings } from '../../store/nav'
 import { alertLogTarget } from '../../../../shared/alertLogs'
+import { checkServiceStep } from '../../../../shared/serviceStep'
 import { bytes, clsx, duration } from '../../lib/format'
 import type { PortListener } from '../../../../shared/ssh'
 // Aliased: the summary type and the component below share a name, and the
@@ -203,6 +205,23 @@ function HostRowView({
               >
                 <ScrollText size={11} /> Logs
               </button>
+              {/* The other half of the same moment. `serviceStep` already had
+                  restart, checked and with its protected units; it was reachable
+                  only by going to Jobs and retyping the unit name you are
+                  looking at.
+
+                  The button is ABSENT, not disabled, where the check refuses:
+                  sshd is refused at any strength of confirmation, and a button
+                  that always says no teaches people that refusals are noise. */}
+              {checkServiceStep('restart', u.name).ok && (
+                <button
+                  className="btn ghost sm"
+                  title={`Fill a restart job for ${u.name} on ${row.name}. Nothing runs until you confirm it.`}
+                  onClick={() => openServiceJob(row.id, 'restart', u.name)}
+                >
+                  <RotateCw size={11} /> Restart
+                </button>
+              )}
             </li>
           ))}
         </ul>

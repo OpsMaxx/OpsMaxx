@@ -258,6 +258,9 @@ export function FleetMonitor(): React.JSX.Element {
   // Item 43. Held in nav for the same reason the tab is: the failed-unit list
   // that sets it is several components away from the panel that consumes it.
   const logTailJump = useNav((s) => s.logTailJump)
+  // Item 43's sibling: a prefilled service step, set from the same failed-unit
+  // list and consumed several components away.
+  const jobComposerJump = useNav((s) => s.jobComposerJump)
   const tabs = useMemo<ModuleDef[]>(
     () => MODULES.filter((m) => moduleEnabled(modules, m.id)),
     [modules]
@@ -457,7 +460,7 @@ export function FleetMonitor(): React.JSX.Element {
       )}
       {moduleEnabled(modules, 'jobs') && (
         <div style={show('jobs')}>
-          <JobsPanel servers={servers} />
+          <JobsPanel servers={servers} jump={jobComposerJump ?? undefined} />
         </div>
       )}
       {moduleEnabled(modules, 'services') && (

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ListChecks, Plus, RefreshCw, Square, Undo2 } from 'lucide-react'
+import type { JobComposerJump } from '../../store/nav'
 import { clsx } from '../../lib/format'
 import { sshHopsFor } from '../../lib/ssh'
 import {
@@ -54,6 +55,8 @@ import type { Server } from '../../types'
 
 interface Props {
   servers: Server[]
+  /** A prefilled service step. Fills the form; runs nothing. */
+  jump?: JobComposerJump
 }
 
 const STATE_CLASS: Record<string, string> = {
@@ -65,7 +68,7 @@ const STATE_CLASS: Record<string, string> = {
   halted: 'danger'
 }
 
-export function JobsPanel({ servers }: Props): React.JSX.Element {
+export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
   // `null` until asked, never `[]`. An empty list drawn before the question is
   // "you have never run a job", which is a different sentence.
   const [jobs, setJobs] = useState<JobRecord[] | null>(null)
@@ -75,6 +78,22 @@ export function JobsPanel({ servers }: Props): React.JSX.Element {
   const [composing, setComposing] = useState(false)
   const [draft, setDraft] = useState<JobDraft>(EMPTY_JOB_DRAFT)
   const [picked, setPicked] = useState<string[]>([])
+  // A prefilled service step, from wherever the operator saw they needed one.
+  //
+  // It FILLS THE FORM AND STOPS. Nothing is planned, nothing is confirmed and
+  // nothing runs: this is a write on somebody's server, and the confirmation is
+  // the point of the composer rather than a step to skip by arriving with an
+  // intention. Keyed on `nonce` so asking twice for the same unit re-fills.
+  const lastJump = useRef(0)
+  useEffect(() => {
+    if (!jump || jump.nonce === lastJump.current) return
+    lastJump.current = jump.nonce
+    setMode(jump.mode)
+    setAction(jump.action)
+    setUnit(jump.unit)
+    setPicked([jump.serverId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jump])
   const [pending, setPending] = useState<{
     spec: ReturnType<typeof composeJobSpec>
     targets: { serverId: string; serverName: string; cohort: string }[]
