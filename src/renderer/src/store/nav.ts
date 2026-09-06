@@ -59,6 +59,36 @@ export interface LogTailJumpRequest {
   since?: string
 }
 
+/**
+ * A prefilled job step, from wherever the operator noticed they needed one.
+ *
+ * DELIBERATELY NOT A JUMP THAT RUNS. `openLogTail` lands on lines because
+ * reading is safe; this lands on a FILLED FORM because a service action is a
+ * write on somebody's server, and the confirmation it goes through is the point
+ * of the composer rather than a step to be skipped by arriving with an
+ * intention.
+ */
+/**
+ * A strictly increasing jump id.
+ *
+ * NOT `Date.now()`, which is what this used to be on both jump kinds. Both
+ * panels ignore a jump whose nonce equals the last one they honoured -- so that
+ * asking twice for the same unit re-fills rather than being swallowed -- and
+ * two clicks inside one millisecond produce the SAME `Date.now()`. The second
+ * one then did nothing, which is exactly the case the nonce exists to handle.
+ * A counter cannot collide.
+ */
+let jumpSeq = 0
+const nextNonce = (): number => (jumpSeq += 1)
+
+export interface JobComposerJump {
+  serverId: string
+  mode: 'service'
+  action: 'start' | 'stop' | 'restart' | 'reload' | 'enable' | 'disable'
+  unit: string
+  nonce: number
+}
+
 interface NavState {
   aiSection: AiSection
   /** An access group the Access Groups page should open on, set by whoever
@@ -76,6 +106,8 @@ interface NavState {
   monitorTab: MonitorTab
   /** Consumed by LogTailPanel's `jump` prop; see LogTailJumpRequest. */
   logTailJump: LogTailJumpRequest | null
+  /** Consumed by JobsPanel; see JobComposerJump. */
+  jobComposerJump: JobComposerJump | null
   setAiSection: (s: AiSection) => void
   setSettingsSection: (s: SettingsSection) => void
   setMonitorTab: (t: MonitorTab) => void
@@ -88,6 +120,7 @@ export const useNav = create<NavState>((set) => ({
   settingsSection: 'appearance',
   monitorTab: 'overview',
   logTailJump: null,
+  jobComposerJump: null,
   setAiSection: (s) => set({ aiSection: s, aiGroupId: null }),
   setSettingsSection: (s) => set({ settingsSection: s }),
   setMonitorTab: (t) => set({ monitorTab: t }),
@@ -119,12 +152,31 @@ export function openLogTail(
       kind,
       target,
       serverId,
-      nonce: Date.now(),
+      nonce: nextNonce(),
       // Spread rather than assigned: an absent filter must stay absent, or a
       // jump with no window would clear one the operator had set by hand.
       ...(kind === 'unit' && filters.priority !== undefined ? { priority: filters.priority } : {}),
       ...(kind === 'unit' && filters.since !== undefined ? { since: filters.since } : {})
     }
+  })
+  useApp.getState().setActivity('monitor')
+}
+
+/**
+ * Open the job composer with a service step filled in, on one server.
+ *
+ * Nothing runs. The operator still picks the wave, reads the plan and confirms,
+ * which is exactly what they would have done had they typed it — the only thing
+ * removed is the retyping of a unit name they are looking at.
+ */
+export function openServiceJob(
+  serverId: string,
+  action: JobComposerJump['action'],
+  unit: string
+): void {
+  useNav.setState({
+    monitorTab: 'jobs',
+    jobComposerJump: { serverId, mode: 'service', action, unit, nonce: nextNonce() }
   })
   useApp.getState().setActivity('monitor')
 }

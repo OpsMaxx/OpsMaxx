@@ -16,6 +16,21 @@ const jump = (): Record<string, unknown> =>
   useNav.getState().logTailJump as unknown as Record<string, unknown>
 
 describe('openLogTail', () => {
+  // Both panels ignore a jump whose nonce matches the last one they honoured,
+  // so that asking twice re-fills rather than being swallowed. This used to be
+  // `Date.now()` on both jump kinds, and two clicks inside one millisecond
+  // produced the same value -- so the second did nothing, which is precisely
+  // the case the nonce exists to handle.
+  it('gives every jump a distinct nonce, even in the same millisecond', () => {
+    const seen = new Set<number>()
+    for (let i = 0; i < 50; i++) {
+      openLogTail('srv-1', 'nginx.service')
+      seen.add(jump().nonce as number)
+    }
+    expect(seen.size).toBe(50)
+  })
+
+
   it('carries journald filters on a unit jump', () => {
     openLogTail('srv-1', 'nginx.service', 'unit', { priority: 'err', since: '2026-09-06 12:00:00 UTC' })
     expect(jump()).toMatchObject({
