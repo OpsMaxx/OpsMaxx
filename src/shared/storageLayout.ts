@@ -36,6 +36,7 @@
 
 export const STORAGE_MARKERS = {
   df: '===SP-STORE-DF===',
+  dfBsd: '===SP-STORE-DFBSD===',
   lsblk: '===SP-STORE-LSBLK===',
   findmnt: '===SP-STORE-FINDMNT===',
   vgs: '===SP-STORE-VGS===',
@@ -57,6 +58,17 @@ export function buildStorageLayoutCommand(): string {
     // fixture had an empty section for exactly that reason, which is the whole
     // argument for recording fixtures through the builder rather than by hand.
     `echo "${STORAGE_MARKERS.df}"; df --output=source,fstype,size,used,avail,pcent,ipcent,target 2>/dev/null | head -n ${STORAGE_MAX_ROWS} || true`,
+    // THE BSD FORM, and it is not optional politeness: `freebsd`, `netbsd` and
+    // `openbsd` are all in this build's distro allow-list, and BSD `df` rejects
+    // `--output` exactly as it rejected `-P` alongside it -- measured on a BSD
+    // userland, where the GNU section came back EMPTY and the whole read
+    // reported no filesystems. `df -Y -k` is the form that carries a Type
+    // column there, which is what the filtering above is entirely built on.
+    //
+    // Both always run. GNU `df` rejects `-Y` with "invalid option" and writes
+    // nothing to stdout, and BSD `df` rejects `--output` the same way, so
+    // whichever host this lands on fills exactly one section.
+    `echo "${STORAGE_MARKERS.dfBsd}"; df -Y -k 2>/dev/null | head -n ${STORAGE_MAX_ROWS} || true`,
     `echo "${STORAGE_MARKERS.lsblk}"; lsblk -J -o NAME,KNAME,TYPE,SIZE,FSTYPE,MOUNTPOINT,ROTA,PKNAME 2>/dev/null || true`,
     `echo "${STORAGE_MARKERS.findmnt}"; findmnt -J -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null || true`,
     // `command -v` first: a missing binary and an empty report are different
@@ -86,6 +98,15 @@ export const PSEUDO_FSTYPES = new Set([
   'overlay',
   'tmpfs',
   'devtmpfs',
+  // BSD/macOS names for the same kinds of thing. `devfs` was measured showing
+  // 382 blocks at 100% -- a filesystem that is permanently "full" and that
+  // nobody can do anything about, which is an alert every host would fire.
+  'devfs',
+  'fdescfs',
+  'procfs',
+  'nullfs',
+  'kernfs',
+  'map',
   'squashfs',
   'proc',
   'sysfs',
@@ -127,6 +148,9 @@ export interface ExcludedGroup {
 }
 
 export interface DfRead {
+  /** Which `df` answered. Null when neither did, which is a failed read rather
+   *  than a host with no filesystems. */
+  flavour: 'gnu' | 'bsd' | null
   mounts: MountRow[]
   /** What was dropped, by type and count. Never silent: see the header. */
   excluded: ExcludedGroup[]
@@ -162,6 +186,23 @@ const kb = (v: string): number | null => {
  * it twice would double a host's apparent capacity.
  */
 export function parseDf(text: string): DfRead {
+  return parseDfRows(text, 'gnu')
+}
+
+/**
+ * BSD `df -Y -k`.
+ *
+ * Ten columns: Filesystem, Type, 1024-blocks, Used, Available, Capacity, iused,
+ * ifree, %iused, Mounted on. The first six line up with the GNU order this
+ * module already reads, and the inode percentage moves from position seven to
+ * position nine -- which is the whole difference, and the reason this is a
+ * separate function rather than a widened one.
+ */
+export function parseDfBsd(text: string): DfRead {
+  return parseDfRows(text, 'bsd')
+}
+
+function parseDfRows(text: string, flavour: 'gnu' | 'bsd'): DfRead {
   const mounts: MountRow[] = []
   const excludedBy = new Map<string, number>()
   const seenSource = new Set<string>()
@@ -172,12 +213,39 @@ export function parseDf(text: string): DfRead {
     if (t === '' || t.startsWith('Filesystem')) continue
     // The target is last and may contain spaces; everything before it does not.
     const f = t.split(/\s+/)
-    if (f.length < 8) {
+    // ANCHOR ON THE FIRST ALL-DIGIT FIELD, rather than counting from either
+    // end. Measured on a BSD userland, where ONE `df` listing contains both
+    // failures at once:
+    //
+    //   map auto_home   autofs   0 0 0 100% 0 0 -  /System/Volumes/Data/home
+    //   /dev/disk10s1   hfs      406196 ...   /Volumes/OpsMaxx 0.14.0-arm64
+    //
+    // The first has a SOURCE containing a space, which shifts every field if
+    // you count from the left. The second has a TARGET containing spaces, which
+    // shifts them if you count from the right. The size column is the first
+    // run of pure digits on the line, so it is the one thing both agree on:
+    // the type is the token before it, the source is everything before that,
+    // and the target is whatever is left after the fixed numeric columns.
+    const sizeAt = f.findIndex((v, i) => i > 0 && /^\d+$/.test(v))
+    if (sizeAt < 1) {
       unreadable += 1
       continue
     }
-    const [source, fstype, size, used, avail, use, iuse] = f
-    const target = f.slice(7).join(' ')
+    // GNU: size, used, avail, use%, iuse%, then the target.
+    // BSD:  size, used, avail, capacity%, iused, ifree, %iused, then the target.
+    const after = flavour === 'gnu' ? 4 : 6
+    if (f.length < sizeAt + after + 2) {
+      unreadable += 1
+      continue
+    }
+    const fstype = f[sizeAt - 1]
+    const source = f.slice(0, sizeAt - 1).join(' ')
+    const size = f[sizeAt]
+    const used = f[sizeAt + 1]
+    const avail = f[sizeAt + 2]
+    const use = f[sizeAt + 3]
+    const iuse = flavour === 'gnu' ? f[sizeAt + 4] : f[sizeAt + 6]
+    const target = f.slice(sizeAt + after + 1).join(' ')
     if (PSEUDO_FSTYPES.has(fstype)) {
       excludedBy.set(fstype, (excludedBy.get(fstype) ?? 0) + 1)
       continue
@@ -201,7 +269,7 @@ export function parseDf(text: string): DfRead {
   const excluded = [...excludedBy]
     .map(([fstype, count]) => ({ fstype, count }))
     .sort((a, b) => b.count - a.count)
-  return { mounts, excluded, unreadable }
+  return { flavour, mounts, excluded, unreadable }
 }
 
 export type LvmState = 'present' | 'none' | 'no-tool' | 'failed' | 'unknown'
@@ -269,8 +337,18 @@ export interface StorageLayout {
 
 export function parseStorageLayout(output: string): StorageLayout {
   const mdstatText = section(output, STORAGE_MARKERS.mdstat)
+  // Whichever `df` answered. Neither having answered is a failed read, and the
+  // headline says so rather than reporting a host with no filesystems.
+  const gnu = parseDf(section(output, STORAGE_MARKERS.df))
+  const bsd = parseDfBsd(section(output, STORAGE_MARKERS.dfBsd))
+  const df =
+    gnu.mounts.length > 0 || gnu.unreadable > 0
+      ? gnu
+      : bsd.mounts.length > 0 || bsd.unreadable > 0
+        ? bsd
+        : { ...gnu, flavour: null }
   return {
-    df: parseDf(section(output, STORAGE_MARKERS.df)),
+    df,
     lvm: parseLvm(section(output, STORAGE_MARKERS.vgs), section(output, STORAGE_MARKERS.lvs)),
     raidArrays: parseMdstat(mdstatText),
     mdstatRead: mdstatText.trim() !== ''
@@ -286,6 +364,34 @@ export function parseMdstat(text: string): string[] {
     if (m !== null) out.push(m[1])
   }
   return out
+}
+
+/**
+ * Mounts that share one pool of free space.
+ *
+ * MEASURED ON APFS: six volumes on the test Mac report the SAME total and the
+ * SAME available -- 482797652 and 11531876 blocks -- with different used
+ * figures, because they are volumes in one container. They are genuinely
+ * separate filesystems, so dropping them would be wrong; but rendering six rows
+ * each saying "11 GB free" invites the reading that there is 66 GB, and filling
+ * any one of them fills all six.
+ *
+ * Grouped on total AND available together, and only reported when a group has
+ * more than one member. Two unrelated disks of identical size would have to
+ * also have byte-identical free space to collide, and if they did the sentence
+ * this produces is still true of them.
+ *
+ * ZFS and btrfs subvolumes do the same thing, which is why this is not named
+ * after APFS.
+ */
+export function sharedPools(mounts: MountRow[]): MountRow[][] {
+  const by = new Map<string, MountRow[]>()
+  for (const m of mounts) {
+    if (m.sizeKb === null || m.availKb === null) continue
+    const key = `${m.sizeKb}:${m.availKb}`
+    by.set(key, [...(by.get(key) ?? []), m])
+  }
+  return [...by.values()].filter((g) => g.length > 1).sort((a, b) => b.length - a.length)
 }
 
 /**
@@ -311,6 +417,15 @@ export function storageHeadline(s: StorageLayout): string {
   }
   parts.push(s.lvm.state === 'present' ? `LVM in use` : s.lvm.detail.replace(/\.$/, ''))
   if (s.raidArrays.length > 0) parts.push(`software RAID: ${s.raidArrays.join(', ')}`)
+  const pools = sharedPools(s.df.mounts)
+  if (pools.length > 0) {
+    const biggest = pools[0]
+    parts.push(
+      `${biggest.length} of them share one pool of free space (${biggest
+        .map((m) => m.target)
+        .join(', ')}), so filling any one fills all of them`
+    )
+  }
   return `${parts.join('. ')}.`
 }
 

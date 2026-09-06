@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 import {
   PSEUDO_FSTYPES,
+  sharedPools,
   STORAGE_MARKERS,
   buildStorageLayoutCommand,
   parseDf,
@@ -233,6 +234,98 @@ describe('a container, measured', () => {
   it('drops the container’s overlay root and keeps what is really backed', () => {
     expect(s.df.mounts.map((m) => m.target)).not.toContain('/')
     expect(s.df.excluded.some((e) => e.fstype === 'overlay')).toBe(true)
+  })
+})
+
+// A BSD USERLAND. `freebsd`, `netbsd` and `openbsd` are all in this build's
+// distro allow-list, and BSD `df` rejects `--output` exactly as it rejected `-P`
+// beside it -- so before this fixture the GNU section came back empty and the
+// whole read reported no filesystems on every one of them.
+describe('BSD df, which the allow-listed BSD targets use', () => {
+  const s = parseStorageLayout(read('macos-bsd-df.txt'))
+
+  it('falls back to the form that carries a Type column', () => {
+    expect(s.df.flavour).toBe('bsd')
+    expect(s.df.mounts.length).toBeGreaterThan(10)
+    expect(buildStorageLayoutCommand()).toContain('df -Y -k')
+  })
+
+  // Both engines reject the other's flag with "invalid option" and write
+  // nothing, so exactly one section fills on any given host.
+  it('still prefers the GNU read where there is one', () => {
+    expect(parseStorageLayout(read('ubuntu-2404-docker-k3s.txt')).df.flavour).toBe('gnu')
+  })
+
+  // BSD puts iused and ifree between the capacity and the inode percentage, so
+  // the inode column is at a different offset from GNU's.
+  it('reads the inode percentage from BSD’s own column', () => {
+    const root = s.df.mounts.find((m) => m.target === '/')!
+    expect(root.fstype).toBe('apfs')
+    expect(root.usePct).toBeGreaterThan(0)
+    expect(root.inodePct).toBe(0)
+  })
+
+  // `devfs` reports 382 blocks at 100% -- permanently full, and nothing anyone
+  // can do about it. Every BSD host would have fired an alert on it.
+  it('excludes the BSD pseudo filesystems by their own names', () => {
+    expect(s.df.excluded.map((e) => e.fstype)).toContain('devfs')
+    expect(s.df.mounts.some((m) => m.target === '/dev')).toBe(false)
+  })
+
+  // ONE listing, both failure modes. `map auto_home` has a SOURCE containing a
+  // space, which shifts every field if you count from the left; the mounted
+  // disk images have TARGETS containing spaces, which shift them if you count
+  // from the right. Anchoring on the size column is what survives both.
+  it('parses a row whose source has a space and one whose target has spaces', () => {
+    expect(read('macos-bsd-df.txt')).toContain('map auto_home')
+    // The autofs row is recognised well enough to be excluded as pseudo, which
+    // only happens if `autofs` was read as the TYPE and not as the source.
+    expect(s.df.excluded.map((e) => e.fstype)).toContain('autofs')
+
+    const dmg = s.df.mounts.find((m) => m.target.startsWith('/Volumes/OpsMaxx'))!
+    expect(dmg.target).toMatch(/^\/Volumes\/OpsMaxx \S+$/)
+    expect(dmg.source).toMatch(/^\/dev\/disk\d+s\d+$/)
+    expect(dmg.fstype).toBe('hfs')
+  })
+
+  // MEASURED: six APFS volumes report the same total AND the same available,
+  // with different used figures, because they are volumes in one container.
+  // They are real filesystems, so they are not dropped -- but six rows each
+  // saying "11 GB free" reads as 66 GB, and filling any one fills all six.
+  it('says which mounts share one pool of free space', () => {
+    const pools = sharedPools(s.df.mounts)
+    expect(pools[0].length).toBe(6)
+    expect(pools[0].map((m) => m.target)).toContain('/')
+    expect(storageHeadline(s)).toContain('share one pool of free space')
+    expect(storageHeadline(s)).toContain('filling any one fills all of them')
+  })
+
+  // CONSTRUCTED: no mount on either measured host has a size twin with
+  // different free space. Grouping on size ALONE would call these a pool, and
+  // they are two ordinary disks that happen to be the same model.
+  it('does not call two same-sized disks a pool when their free space differs', () => {
+    const df = [
+      'Filesystem     Type  1024-blocks     Used     Avail Use% IUse% Mounted on',
+      '/dev/sdb1      ext4    500000000 10000000 490000000   2%    1% /data1',
+      '/dev/sdc1      ext4    500000000 90000000 410000000  18%    1% /data2'
+    ].join('\n')
+    const two = parseStorageLayout(`${STORAGE_MARKERS.df}\n${df}\n`)
+    expect(two.df.mounts).toHaveLength(2)
+    expect(sharedPools(two.df.mounts)).toEqual([])
+  })
+
+  it('claims no shared pool on a host that has none', () => {
+    expect(sharedPools(parseStorageLayout(read('ubuntu-2404-docker-k3s.txt')).df.mounts)).toEqual([])
+    expect(storageHeadline(parseStorageLayout(read('ubuntu-2404-docker-k3s.txt')))).not.toContain(
+      'share one pool'
+    )
+  })
+
+  // Neither `df` answering is a failed read, not a host with no disks.
+  it('reports no flavour at all as a failed read', () => {
+    const none = parseStorageLayout(`${STORAGE_MARKERS.df}\n${STORAGE_MARKERS.dfBsd}\n`)
+    expect(none.df.flavour).toBeNull()
+    expect(storageHeadline(none)).toContain('read did not work')
   })
 })
 

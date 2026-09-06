@@ -6,6 +6,39 @@
 |---|---|
 | `ubuntu-2404-docker-k3s.txt` | A **real Ubuntu 24.04.4 host running both Docker and k3s** |
 | `debian12-container-bind-mounts.txt` | A `debian:12` container whose root is an overlay |
+| `macos-bsd-df.txt` | A **BSD userland**, standing in for the `freebsd`/`netbsd`/`openbsd` targets in this build's distro allow-list |
+
+## What the BSD reading found
+
+**BSD `df` rejects `--output`**, exactly as it rejected `-P` beside it. Before this
+fixture the GNU section came back empty and the whole read reported *no
+filesystems* on every BSD target. `df -Y -k` is the form that carries a Type
+column, which is what all the filtering is built on. Both forms are always sent:
+each engine rejects the other's flag with "invalid option" and writes nothing, so
+exactly one section fills.
+
+**One listing contained both parsing failures at once**, which is why the fields are
+now located by anchoring on the first run of digits rather than counted from either
+end:
+
+```
+map auto_home   autofs   0 0 0 100% 0 0 -   /System/Volumes/Data/home
+/dev/disk10s1   hfs      406196 ...         /Volumes/OpsMaxx 0.14.0-arm64
+```
+
+The first has a **source** containing a space; the second has a **target**
+containing spaces.
+
+**`devfs` reports 382 blocks at 100%** — permanently full, and nothing anyone can do
+about it. Every BSD host would have raised an alert on it, so the BSD pseudo names
+are excluded alongside the Linux ones.
+
+**Six APFS volumes report the same total AND the same available** (482797652 and
+11531876 blocks) with different used figures, because they are volumes in one
+container. They are real filesystems, so they are not dropped — but six rows each
+saying "11 GB free" reads as 66 GB, and filling any one fills all six. `sharedPools`
+groups on total *and* available together; grouping on size alone would call two
+ordinary same-model disks a pool, which is covered by a constructed row.
 
 Both are the verbatim output of `buildStorageLayoutCommand()`.
 
