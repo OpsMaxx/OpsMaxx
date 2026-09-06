@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
+import { COMPOSE_FAILURE_HELP, parseComposeConfigOutput } from '../src/shared/compose'
 import {
   buildDockerDiskCommand,
   buildDockerDiskDetailCommand,
@@ -184,5 +185,80 @@ describe('the commands work on both engines', () => {
   // would turn "your disk is full" into "this host is broken".
   it('asks for the plain table rather than a Go template', () => {
     expect(buildDockerDiskCommand()).not.toContain('--format')
+  })
+})
+
+
+// ---------------------------------------------------------------- compose
+
+describe('podman delegates compose, and what it delegates to leaks', () => {
+  const out = fx('compose-provider.txt')
+
+  // MEASURED on podman 5.8.4 + podman-compose 1.6.0. `podman compose` is not an
+  // implementation; it looks up an external provider and runs that.
+  it('prints a provider banner on every command, ANSI-wrapped', () => {
+    expect(out).toContain('Executing external compose provider "/usr/bin/podman-compose"')
+    // `--no-ansi` does not remove it -- measured.
+    expect(out).toMatch(/\u001b\[4m/)
+  })
+
+  // THE finding, and it is a credential one. `shared/compose.ts` exists because
+  // `docker compose config` resolves `${SECRET}` out of `.env` and prints it;
+  // the whole module is built on `--no-interpolate --no-env-resolution` making
+  // that impossible. podman-compose REJECTS BOTH FLAGS -- exit 2, a usage
+  // error -- and plain `config` printed the password.
+  it('rejects the two flags that stop a compose read printing passwords', () => {
+    expect(out).toContain('usage: podman-compose')
+    expect(out).toContain('EXIT=2')
+  })
+
+  it('prints a .env password in plaintext without them', () => {
+    // The dummy value written into the throwaway project for this measurement.
+    expect(out).toContain('SECRET: hunter2')
+  })
+
+  // So the project is refused, and refused on the BANNER -- not on a failure.
+  // podman prints it on successful commands too, and a `config` that leaked a
+  // password would otherwise be read as a project this build can show.
+  it('refuses a host whose compose provider is podman-compose', () => {
+    const leaked = out.slice(out.indexOf('### podman compose config, plain'), out.indexOf('### podman compose config with'))
+    const p = parseComposeConfigOutput(leaked, 0)
+    expect(p.ok).toBe(false)
+    if (p.ok) return
+    expect(p.reason).toBe('compose-provider-unsupported')
+    // The ANSI escapes are stripped rather than rendered into the panel.
+    expect(p.detail).not.toMatch(/\u001b/)
+    expect(p.detail).toContain('external compose provider')
+  })
+
+  it('says why in the operator’s terms, naming the measurement', () => {
+    const help = COMPOSE_FAILURE_HELP['compose-provider-unsupported']
+    expect(help).toContain('--no-interpolate --no-env-resolution')
+    expect(help).toContain('plaintext')
+    expect(help).toContain('podman-compose')
+  })
+
+  // No provider AT ALL is compose being absent, which is a different fact and
+  // a different sentence. Exit 125, and no banner.
+  it('separates no provider installed from a provider it will not drive', () => {
+    const none = out.slice(out.indexOf('### no provider at all'))
+    expect(none).toContain('looking up compose provider failed')
+    expect(none).not.toContain('Executing external compose provider')
+    const p = parseComposeConfigOutput(none, 125)
+    expect(p.ok).toBe(false)
+    expect(p.ok === false && p.reason).not.toBe('compose-provider-unsupported')
+  })
+})
+
+describe('rootless podman', () => {
+  // Measured as the `podman` user: storage moves to $HOME and
+  // `Host.Security.Rootless` is true, but the `system df` TABLE IS UNCHANGED --
+  // which is the only thing this build reads.
+  it('reports the same table shape as rootful', () => {
+    const p = parseDockerDiskOutput(fx('system-df-rootless.txt'), 0)
+    expect(p.ok).toBe(true)
+    if (!p.ok) return
+    expect(p.rows.map((r) => r.type)).toEqual(['Images', 'Containers', 'Local Volumes'])
+    expect(p.rows.find((r) => r.type === 'Images')?.sizeBytes).toBe(4_660_000)
   })
 })

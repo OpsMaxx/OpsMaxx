@@ -1,0 +1,5 @@
+===SHELLPILOT-DF===
+TYPE           TOTAL       ACTIVE      SIZE        RECLAIMABLE
+Images         1           1           4.66MB      0B (0%)
+Containers     1           1           11.03kB     0B (0%)
+Local Volumes  0           0           0B          0B (0%)
