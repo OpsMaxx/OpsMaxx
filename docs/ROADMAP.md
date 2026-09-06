@@ -275,7 +275,7 @@ missing, with the item that closes it. Sizes are for one focused person.
 | **Docker** | Start/stop/restart graded; exec; logs one-shot and followed; stats; `system df -v` per item; reclaim by id with re-preview; health status parsed | No `pull`/`build` as a job (comment-only today); networks reclaimable but never listed; no targeted engine upgrade; no scanner consumer; podman unproven | 42 |
 | **Compose** | Discover, parse, declared-vs-running, edit image tag with stale-check, `pull` and `up -d` as jobs, `.env` names only | Per-service scope built but not wired; no compose `restart`; validation errors surface as "nothing this parser could read"; `depends_on`/volumes/`restart:` parsed and not rendered; no `.env` write; approval minted without a dialog | 35, 42 |
 | **Kubernetes** | Pods with reason-over-phase, workloads ready/desired, events, describe, previous logs, `top`, PVCs, ingress, RBAC bindings, secret names, deprecated APIs, helm list; rollout restart, cordon/uncordon, drain with seven refusals, exec | No node conditions/allocatable/taints; no requests/limits; no HPA; PDBs only inside the drain; no Role rules; no PV/StorageClass; no cert expiry of any kind; helm list parse unproven | 39 |
-| **K8s lifecycle** | Chain PLANNED as one job (`shared/nodeMaintenance.ts`); node-aware wave gate BUILT (`shared/nodeGate.ts`); API scan with stated blind spots | The gate's node reading has **no producer wired** — see item 44 — so it is proven and not yet live. Upgrades, helm upgrade/rollback, `rollout undo` contradict the module's own reasoning | 40, 41 |
+| **K8s lifecycle** | Chain as one job (`shared/nodeMaintenance.ts`); node-aware wave gate, wired and live (`shared/nodeGate.ts`), fed by asking the wave's own hosts; API scan with stated blind spots | A chain is ONE node — staged multi-node needs per-target step templating. A wave that cannot reach any API server stays `unknown`, so a plain kubeadm worker gets no node check. Upgrades, helm upgrade/rollback, `rollout undo` contradict the module's own reasoning | 40, 41 |
 | **PostgreSQL** | Dump to local/SFTP/S3 with read-back; replication, archiver, vacuum age, connections, locks, sizes, `pg_stat_statements` — nine judged questions | Dumps are manual, plaintext, 512 MB in memory, no restore. No slots/`pg_wal` size. Slow queries have no alarm level. Locks show the blocked, not the blocker. No write of any kind (routed to jobs by `dbOps.ts:33-35`) | 37, 38 |
 | **MySQL/MariaDB** | As Postgres, plus binlog inventory and buffer pool | No top-N slow statements (only whether the log is on); binlog purge is REFUSED BY DESIGN, not missing — `dbOps.ts`'s own header says deleting binlogs is deleting the only thing standing between a replica that fell behind and a rebuild; no `KILL`/`OPTIMIZE`; no binlog position in dumps | 37, 38 |
 | **MongoDB** | Replica set, oplog window, index usage, connections, current ops, sizes, asserts | `mongodump` SHIPPED — measured against a real authenticated MongoDB 7, and both halves of the old refusal turned out to name the actual problems. `--archive` is required or mongodump writes a DIRECTORY of BSON files and this pipeline, which reads stdout, captures nothing; and mongodump HAS NO PASSWORD ENVIRONMENT VARIABLE — `PGPASSWORD` and `MYSQL_PWD` have no counterpart and `--password` is the argv exposure the interface exists to avoid — so the credential goes in a 0600 `--config` file, proven to be read by dumping with the right password and failing `AuthenticationFailed` with a wrong one. The archive is named `.archive` rather than `.sql`, and the retention regex accepts both, because a dump retention does not recognise is one it never removes. Redis stays refused for a stated reason rather than an omission: pg_dump, mysqldump and mongodump are CLIENTS that ask a server for its contents, and Redis's persistence is a snapshot the server writes to its own disk. No index build monitor; `mongos` out of scope; index sizes never populated (`dbOps.ts:700-720` does not pass `sizes`) | 37, 38 |
@@ -805,7 +805,7 @@ recorded reversal in the header, graded like drain, with a caveat that live now 
 source; `rollout history` as a read is safe now (item 39). Package downgrade should be refused
 in-file for the reason `dist-upgrade` is.
 
-**Node lifecycle chaining — PLANNER SHIPPED, GATE BUILT, GATE NOT YET WIRED.** Three named gaps,
+**Node lifecycle chaining — SHIPPED.** Three named gaps,
 and they did not turn out to be one piece of work.
 
 *The chain* (`shared/nodeMaintenance.ts`, shipped). `planNodeMaintenance` emits cordon → patch →
@@ -855,13 +855,32 @@ changes what an approval record covers. It is stated in the module rather than l
 discovered as a cordon naming the wrong machine. It also means the chain and the node-aware gate
 serve different shapes of run and cannot be wired to each other.
 
-*What is NOT done, and it is the reason this is not marked shipped.* **Nothing populates the gate's
-node reading.** `gateHealthFor` reads the fleet sampler's cache, deliberately and correctly — a gate
-with its own health probe would be a second opinion on "is this host healthy". There is no cached
-node state to read, and a worker node cannot be asked directly. The producer needs a NOMINATED host
-that answers for the cluster, carried on the spec and therefore inside the approval record, which is
-a UI decision as much as a code one. Wiring the consumer to a stale cache would newly halt every
-gated run that touches a node — a regression dressed as a safety feature — so it was not done.
+*The producer — SHIPPED, by asking the wave's own hosts.* The nomination design was rejected: it
+needed a new spec field inside the approval record and a composer screen. Instead the gate asks each
+host in the finished wave what it is CALLED and whether it can see a cluster, in one command. The
+hostname comes from the machine itself, which removes the matching problem rather than solving it —
+there is no cached "hostname this host reported", the friendly name is a label somebody typed, and
+the SSH host is often an IP. Any single host with a kubeconfig answers for the whole wave, since
+they are all in one run against one cluster.
+
+TWO PASSES, and the order is a cost decision: the node read is an SSH round trip per host inside a
+loop that polls every five seconds for up to five minutes, so the machines are judged first from the
+cached snapshot and the cluster is asked only once they are clean — one read on a healthy wave, none
+on a broken one. `health` stays a snapshot and is still not a second opinion on host health; this
+asks a different question nothing samples, through `judgeNodes`, the app's single derivation of it.
+
+A probe that throws changes nothing: a read that did not happen must be neither the thing that halts
+an estate nor the thing that waves it through. 9 mutations, 9 killed; three found real gaps,
+including the subtlest one here — with kubectl's stderr merged, `error: You must be logged in to the
+server (Unauthorized)` is ten whitespace-separated fields and parses as a NODE. It matches no
+hostname so nothing halts, but the wave now HAS a node list and every genuine node in it is demoted
+from `unknown` to `not-a-node`: the check silently does nothing while reporting that it looked.
+
+**The stated limit.** A plain kubeadm worker has a kubelet and no kubeconfig, so unless something
+else in its wave can reach the API server, nothing here can tell whether it came back Ready — those
+hosts stay `unknown`, which does not block and is exactly the behaviour of every previous build.
+Verified end to end against a live single-node k3s: the machine's own hostname and the node name
+matched exactly, and the row parsed to a Ready, unpressured, uncordoned node.
 
 **Incident record.** A named span — start at raise, end at resolve — with a note and the alert
 rows and jobs inside it, joined by `runbookJobWindow` (`runbooks.ts:333-340`); its own JSON file

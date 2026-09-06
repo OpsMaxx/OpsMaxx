@@ -46,7 +46,7 @@
 // the systemd rules that have always applied.
 
 import type { K8sNodeHealth, NodeFinding } from './k8sNodes'
-import { judgeNodes } from './k8sNodes'
+import { judgeNodes, parseNodeHealth } from './k8sNodes'
 
 /**
  * What the gate knows about one host's role in a cluster.
@@ -244,4 +244,117 @@ export function summariseNodeGate(
     }
   }
   return s
+}
+
+// ---------------------------------------------------------------------------
+// ASKING THE WAVE'S OWN HOSTS
+// ---------------------------------------------------------------------------
+//
+// The gate needs two things per host: what this machine is CALLED, and what the
+// control plane says about the node of that name. Both come from one command
+// run on the host itself, and that choice removes the hardest part of the
+// problem rather than solving it.
+//
+// THE HOSTNAME COMES FROM THE HOST. There is no cached "hostname this machine
+// reported" to match against, and the alternatives were worse: the friendly
+// name is a label somebody typed, and the SSH host is frequently an IP or a
+// jump alias. A machine asked what it is called answers definitively, and it is
+// the same string the kubelet registered with.
+//
+// THE NODE LIST COMES FROM WHOEVER CAN GIVE IT. Every host in the wave is
+// asked; the ones with a kubeconfig answer with the whole cluster, and the ones
+// without say so. They are all in the same wave of the same run, so any single
+// answer describes every node in it. A wave where NOBODY can run kubectl yields
+// no node list at all, and every host in it comes back `unknown` -- which does
+// not block, and is exactly today's behaviour for an estate with no Kubernetes
+// in it.
+//
+// This is why a plain kubeadm worker gets no protection from this: it has a
+// kubelet and no kubeconfig, so unless something else in its wave can reach the
+// API server, nothing here can tell whether it came back Ready. That is a
+// stated limit, not a silent one.
+
+export const GATE_NODE_MARKERS = {
+  host: '===SP-GATE-HOST===',
+  kubectl: '===SP-GATE-KUBECTL===',
+  nodes: '===SP-GATE-NODES==='
+} as const
+
+/** The same nine columns `parseNodeHealth` reads, and deliberately the same
+ *  string the review module already uses: two spellings of one read is two
+ *  parsers waiting to disagree. */
+export const GATE_NODE_COLUMNS =
+  'custom-columns=NAME:.metadata.name,MEM:.status.conditions[?(@.type=="MemoryPressure")].status,DISK:.status.conditions[?(@.type=="DiskPressure")].status,PID:.status.conditions[?(@.type=="PIDPressure")].status,READY:.status.conditions[?(@.type=="Ready")].status,CPU:.status.allocatable.cpu,MEM2:.status.allocatable.memory,PODS:.status.allocatable.pods,TAINTS:.spec.taints[*].key'
+
+/**
+ * One read, run on a host in the finished wave.
+ *
+ * Never `sudo`. This is a read of a cluster an operator's own kubeconfig can
+ * already see, and escalating to root to answer a health question would be a
+ * larger privilege than the question needs.
+ */
+export function buildGateNodeCommand(context?: string): string {
+  const ctx = context !== undefined && context !== '' ? ` --context=${context}` : ''
+  return [
+    `echo "${GATE_NODE_MARKERS.host}"`,
+    'hostname 2>/dev/null || echo',
+    `echo "${GATE_NODE_MARKERS.kubectl}"`,
+    'command -v kubectl >/dev/null 2>&1 || { echo absent; exit 0; }',
+    'echo present',
+    `echo "${GATE_NODE_MARKERS.nodes}"`,
+    // Stderr discarded, so an API server that refuses does not put an error
+    // message where a node table goes -- the journal lesson, in another module.
+    `kubectl get nodes --no-headers -o '${GATE_NODE_COLUMNS}'${ctx} 2>/dev/null || true`
+  ].join('; ')
+}
+
+export interface GateNodeRead {
+  /** What the machine says it is called, or null if it would not say. */
+  hostname: string | null
+  /** The cluster as this host sees it, or null when it could not look. */
+  nodes: K8sNodeHealth[] | null
+  kubectl: 'present' | 'absent' | 'unknown'
+}
+
+function section(output: string, marker: string): string {
+  const i = output.indexOf(marker)
+  if (i === -1) return ''
+  const rest = output.slice(i + marker.length)
+  const next = rest.search(/^===SP-GATE-/m)
+  return (next === -1 ? rest : rest.slice(0, next)).trim()
+}
+
+export function parseGateNodeRead(output: string): GateNodeRead {
+  const hostname = section(output, GATE_NODE_MARKERS.host).split('\n')[0]?.trim() ?? ''
+  const k = section(output, GATE_NODE_MARKERS.kubectl).split('\n')[0]?.trim()
+  const table = section(output, GATE_NODE_MARKERS.nodes)
+  const nodes = table === '' ? null : parseNodeHealth(table)
+  return {
+    hostname: hostname === '' ? null : hostname,
+    // An EMPTY table is not an empty cluster. `kubectl` printing nothing here
+    // means it could not answer -- the command swallows its stderr -- and a
+    // cluster with no nodes is not a thing that happens to a wave running on
+    // one. Null, so every host in the wave stays unread rather than becoming
+    // "not a node".
+    nodes: nodes !== null && nodes.length === 0 ? null : nodes,
+    kubectl: k === 'present' ? 'present' : k === 'absent' ? 'absent' : 'unknown'
+  }
+}
+
+/**
+ * Fold the wave's answers into one verdict per host.
+ *
+ * The node list is taken from whichever host could produce one; the hostname is
+ * always the host's OWN answer. A host that did not answer at all keeps a null
+ * hostname and therefore matches nothing, which is the safe direction: it falls
+ * back to the systemd rules rather than being matched to a node by guesswork.
+ */
+export function gateNodesFromWave(
+  answers: { serverId: string; read: GateNodeRead | null }[]
+): Map<string, GateNode> {
+  const cluster = answers.find((a) => a.read?.nodes != null)?.read?.nodes ?? null
+  return matchNodes(
+    answers.map((a) => ({ serverId: a.serverId, hostname: a.read?.hostname ?? null })),
+    cluster
+  )
 }

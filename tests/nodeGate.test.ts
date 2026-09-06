@@ -4,9 +4,13 @@ import { fileURLToPath } from 'node:url'
 
 import { parseNodeHealth } from '../src/shared/k8sNodes'
 import {
+  GATE_NODE_MARKERS,
   NODE_BLOCKING_VERDICTS,
+  buildGateNodeCommand,
   type GateNode,
+  gateNodesFromWave,
   matchNodes,
+  parseGateNodeRead,
   summariseNodeGate
 } from '../src/shared/nodeGate'
 import { evaluateGate, type GateHost } from '../src/shared/patch'
@@ -257,5 +261,179 @@ describe('the summary keeps the four states apart', () => {
     expect(s.notNodes).toEqual(['c'])
     // An absent reading is the same as nobody having asked.
     expect(s.unasked).toEqual(['d', 'e'])
+  })
+})
+
+
+// ---------------------------------------------------------------------------
+// Asking the wave's own hosts, which is what makes this need no nomination
+// ---------------------------------------------------------------------------
+
+const NODE_ROW = 'e9b442a99227   False   False   False   True   12    24571576Ki   110   <none>'
+
+describe('the read that runs on the host', () => {
+  it('asks the machine what it is called and never escalates', () => {
+    const c = buildGateNodeCommand()
+    expect(c).toContain('hostname')
+    expect(c).toContain('get nodes --no-headers')
+    // A read of a cluster the operator's own kubeconfig can already see. Root
+    // is a larger privilege than the question needs.
+    expect(c).not.toContain('sudo')
+  })
+
+  // The journal lesson, in another module: an error message must not land where
+  // a table goes and get parsed as data.
+  it('discards kubectl’s stderr so a refusal is not read as a node', () => {
+    expect(buildGateNodeCommand()).toContain('2>/dev/null')
+  })
+
+  it('carries a context when there is one, and nothing when there is not', () => {
+    expect(buildGateNodeCommand('prod')).toContain('--context=prod')
+    expect(buildGateNodeCommand()).not.toContain('--context')
+    expect(buildGateNodeCommand('')).not.toContain('--context')
+  })
+
+  it('reads a host that answered with both halves', () => {
+    const out = [
+      `${GATE_NODE_MARKERS.host}`,
+      'e9b442a99227',
+      `${GATE_NODE_MARKERS.kubectl}`,
+      'present',
+      `${GATE_NODE_MARKERS.nodes}`,
+      NODE_ROW
+    ].join('\n')
+    const r = parseGateNodeRead(out)
+    expect(r.hostname).toBe('e9b442a99227')
+    expect(r.kubectl).toBe('present')
+    expect(r.nodes).toHaveLength(1)
+  })
+
+  // AN EMPTY TABLE IS NOT AN EMPTY CLUSTER. The command swallows kubectl's
+  // stderr, so a refusal arrives as no output — and a cluster with no nodes at
+  // all is not something that happens to a wave running on one. Null keeps
+  // every host in the wave unmatched rather than turning them into "not a node".
+  it('does not read a host with no kubeconfig as a cluster with no nodes', () => {
+    const out = [
+      `${GATE_NODE_MARKERS.host}`,
+      'worker-3',
+      `${GATE_NODE_MARKERS.kubectl}`,
+      'absent',
+      `${GATE_NODE_MARKERS.nodes}`
+    ].join('\n')
+    const r = parseGateNodeRead(out)
+    expect(r.kubectl).toBe('absent')
+    expect(r.nodes).toBeNull()
+  })
+})
+
+describe('what kubectl prints when it cannot answer', () => {
+  // THE reason stderr is discarded. `error: You must be logged in to the server
+  // (Unauthorized)` is ten whitespace-separated fields, and `parseNodeHealth`
+  // takes any line with nine or more — so with the streams merged it becomes a
+  // NODE named `error:` whose Ready condition is `Unknown`, which judges as
+  // `unreported` and HALTS the run. A false outage produced by an error message.
+  it('keeps kubectl’s stderr out of the table it parses', () => {
+    // The harm is not a false halt, it is a SILENT FALSE PASS, and it takes a
+    // moment to see. `error: You must be logged in to the server
+    // (Unauthorized)` is ten whitespace-separated fields and `parseNodeHealth`
+    // takes any line with nine or more, so with the streams merged it becomes a
+    // node named `error:`. It matches no real hostname, so nothing halts —
+    // but the wave now HAS a node list, and every genuine node in it is judged
+    // `not-a-node` instead of `unknown`. The check quietly does nothing while
+    // reporting that it looked.
+    // Scoped to the node read itself. An unscoped search finds the `2>&1` on
+    // the `command -v kubectl` probe, which is a legitimate use, and then
+    // passes or fails on the wrong line.
+    const read = buildGateNodeCommand().split('kubectl get nodes')[1] ?? ''
+    expect(read).toContain('2>/dev/null')
+    expect(read).not.toContain('2>&1')
+
+    // What arrives with the redirect in place: nothing, so the host is unknown
+    // — the honest answer, and the one that says the question went unanswered.
+    const quiet = parseGateNodeRead(
+      [GATE_NODE_MARKERS.host, NODE, GATE_NODE_MARKERS.kubectl, 'present', GATE_NODE_MARKERS.nodes].join('\n')
+    )
+    expect(gateNodesFromWave([{ serverId: 's1', read: quiet }]).get('s1')?.role).toBe('unknown')
+
+    // And what would arrive without it: a real node demoted to "not a node".
+    const merged = parseGateNodeRead(
+      [
+        GATE_NODE_MARKERS.host,
+        NODE,
+        GATE_NODE_MARKERS.kubectl,
+        'present',
+        GATE_NODE_MARKERS.nodes,
+        'error: You must be logged in to the server (Unauthorized)'
+      ].join('\n')
+    )
+    expect(
+      gateNodesFromWave([{ serverId: 's1', read: merged }]).get('s1')?.role,
+      'a merged stderr silently demoted a real node to “not a node”'
+    ).not.toBe('node')
+  })
+
+  // A table that arrives but yields no rows is not a cluster with no nodes —
+  // that is not a thing that happens to a wave running on one. Null keeps the
+  // wave unmatched instead of quietly declaring every host "not a node", which
+  // is a silent loss of the whole check.
+  it('does not read an unparseable table as a cluster with no nodes', () => {
+    const r = parseGateNodeRead(
+      [GATE_NODE_MARKERS.host, 'web-1', GATE_NODE_MARKERS.kubectl, 'present', GATE_NODE_MARKERS.nodes, '   ', 'garbage'].join('\n')
+    )
+    expect(r.nodes).toBeNull()
+    expect(gateNodesFromWave([{ serverId: 's1', read: r }]).get('s1')?.role).toBe('unknown')
+  })
+})
+
+describe('folding a wave’s answers together', () => {
+  const answered = (id: string, hostname: string, nodes: boolean): {
+    serverId: string
+    read: ReturnType<typeof parseGateNodeRead>
+  } => ({
+    serverId: id,
+    read: parseGateNodeRead(
+      [
+        GATE_NODE_MARKERS.host,
+        hostname,
+        GATE_NODE_MARKERS.kubectl,
+        nodes ? 'present' : 'absent',
+        GATE_NODE_MARKERS.nodes,
+        ...(nodes ? [NODE_ROW] : [])
+      ].join('\n')
+    )
+  })
+
+  // One host with a kubeconfig answers for the whole wave: they are all in the
+  // same run against the same cluster.
+  it('uses the node list from whichever host could produce one', () => {
+    const m = gateNodesFromWave([
+      answered('a', 'worker-3', false),
+      answered('b', NODE, true)
+    ])
+    expect(m.get('b')?.role).toBe('node')
+    // And the host that is genuinely not in that cluster is not a node.
+    expect(m.get('a')?.role).toBe('not-a-node')
+  })
+
+  // The stated limit: a wave where nobody can reach the API server gets no
+  // protection, and says `unknown` rather than pretending to have looked.
+  it('leaves a wave that cannot reach any cluster entirely unknown', () => {
+    const m = gateNodesFromWave([answered('a', 'worker-3', false), answered('b', 'worker-4', false)])
+    expect([...m.values()].map((v) => v.role)).toEqual(['unknown', 'unknown'])
+    const hosts = [...m.entries()].map(([id, node]) => host({ serverId: id, node }))
+    expect(evaluateGate(hosts, { since: 0 }).ok).toBe(true)
+  })
+
+  // A host that did not answer at all matches nothing rather than being matched
+  // by guesswork, and falls back to the systemd rules.
+  // A host that did not answer must match NOTHING. The serverId is not a
+  // hostname, and falling back to it would match a node whenever the two
+  // happened to coincide — gating on a machine that never said who it was.
+  it('does not guess a node for a host that never answered', () => {
+    const m = gateNodesFromWave([{ serverId: 'a', read: null }, answered('b', NODE, true)])
+    expect(m.get('a')?.role).toBe('not-a-node')
+    // The trap, with an id that WOULD match if the serverId were used.
+    const m2 = gateNodesFromWave([{ serverId: NODE, read: null }, answered('b', NODE, true)])
+    expect(m2.get(NODE)?.role).toBe('not-a-node')
   })
 })

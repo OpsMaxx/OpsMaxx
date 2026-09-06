@@ -106,6 +106,8 @@ import { driftWatchesForCollection, syncDriftWatches } from './services/driftWat
 import type { JobHostCapabilityReport, JobRunRequest } from '../shared/jobs'
 import { JOB_DETACHED_STALL_GRACE_MS, jobCohorts, restartsTheMachine } from '../shared/jobs'
 import type { GateHost } from '../shared/patch'
+import type { GateNode } from '../shared/nodeGate'
+import { buildGateNodeCommand, gateNodesFromWave, parseGateNodeRead } from '../shared/nodeGate'
 import {
   buildTopology,
   rebootBlockFor,
@@ -1848,10 +1850,56 @@ function gateHealthFor(serverIds: string[]): GateHost[] {
   })
 }
 
+/**
+ * What the control plane says about the hosts in a finished wave — item 5.
+ *
+ * ASKS THE WAVE'S OWN HOSTS, and that is what makes it need no nomination, no
+ * new field on the spec and no screen. Each host is asked what it is called and
+ * whether it can see a cluster; the ones with a kubeconfig answer with the
+ * whole node table, and any single answer describes every node in the wave,
+ * because they are all in the same run against the same cluster.
+ *
+ * A wave where NOBODY can run kubectl produces no node list, and every host in
+ * it comes back `unknown` — which does not block, and is exactly the behaviour
+ * of every build before this. That is also the stated limit: a plain kubeadm
+ * worker has a kubelet and no kubeconfig, so unless something else in its wave
+ * can reach the API server, nothing here can tell whether it came back Ready.
+ *
+ * Failures are per host and never fatal. A host that does not answer keeps a
+ * null hostname, matches no node, and falls back to the systemd rules — a read
+ * that did not happen must not be the thing that halts an estate any more than
+ * it may be the thing that waves it through.
+ */
+async function gateNodesFor(serverIds: string[]): Promise<Map<string, GateNode>> {
+  const answers = await Promise.all(
+    serverIds.map(async (serverId) => {
+      const cfg = getCachedServer(serverId)
+      if (cfg === undefined) return { serverId, read: null }
+      try {
+        const r = await sshExec(
+          resolveChainSecrets(cfg as unknown as SshConnectConfig),
+          buildGateNodeCommand(),
+          GATE_NODE_TIMEOUT_MS
+        )
+        if (!r.ok) return { serverId, read: null }
+        return { serverId, read: parseGateNodeRead(`${r.stdout ?? ''}${r.stderr ?? ''}`) }
+      } catch {
+        return { serverId, read: null }
+      }
+    })
+  )
+  return gateNodesFromWave(answers)
+}
+
+/** Short. The gate is already inside its own five-minute budget and polls every
+ *  five seconds; a node read that hangs must not eat the wait it lives in. */
+const GATE_NODE_TIMEOUT_MS = 15_000
+
 const jobRunner = new JobRunner({
   exec: detachedExec,
   guard: rebootOrderingRefusal,
   health: gateHealthFor,
+  nodes: gateNodesFor,
   // B3. Injected rather than imported inside the runner, so the runner stays
   // constructible without an Electron `app` object and a test can hand in an
   // array. The refusal happens with or without this; what a missing one loses

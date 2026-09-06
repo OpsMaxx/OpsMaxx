@@ -12,6 +12,7 @@ import { JobRunner, type JobExecResult } from '../src/main/services/jobRunner'
 import type { JobProgress, JobRunRequest, JobSpec, JobTargetRef } from '../src/shared/jobs'
 import { JOB_TERMINAL_STATES, jobApprovalFor, jobCohorts, planJob, verifyJobApproval } from '../src/shared/jobs'
 import { GATE_POLL_MS, GATE_WAIT_MS, type GateHost } from '../src/shared/patch'
+import type { GateNode } from '../src/shared/nodeGate'
 
 // B4's staging and its health gate, and item 17's hard refusal — the three
 // things that decide whether an estate upgrade keeps rolling.
@@ -100,6 +101,7 @@ function harness(
     guard?: (req: JobRunRequest) => string | null
     health?: (ids: string[]) => GateHost[]
     withoutHealth?: boolean
+    nodes?: (ids: string[]) => Promise<Map<string, GateNode>>
   } = {}
 ) {
   const progress: JobProgress[] = []
@@ -131,6 +133,7 @@ function harness(
                 failedUnits: []
               }
           ))),
+    nodes: over.nodes,
     sleep: (ms) =>
       new Promise<void>((resolve) => {
         gateWaited.push(ms)
@@ -223,6 +226,104 @@ describe('waves', () => {
 // =========================================================================
 // The health gate
 // =========================================================================
+
+describe('the gate can see a Kubernetes node, not just a machine', () => {
+  const asNode = (verdict: 'not-ready' | 'ok'): ((ids: string[]) => Promise<Map<string, GateNode>>) =>
+    async (ids) =>
+      new Map(
+        ids.map((id) => [
+          id,
+          verdict === 'ok'
+            ? ({ role: 'node', nodeName: `node-${id}`, finding: null } as GateNode)
+            : ({
+                role: 'node',
+                nodeName: `node-${id}`,
+                finding: {
+                  node: `node-${id}`,
+                  verdict: 'not-ready',
+                  because: `node-${id} is reporting NotReady.`
+                }
+              } as GateNode)
+        ])
+      )
+
+  // THE BUG. Nothing wrong with the machine — it answers SSH and runs no failed
+  // units — and everything wrong with the node. Before this, wave 2 opened.
+  it('stops the run when a rebooted node came back NotReady on a healthy machine', async () => {
+    const store = await openStore()
+    const h = harness(store, { nodes: asNode('not-ready') })
+    const req = approved({ jobId: 'jn', spec: spec(), targets: waved(['a', 'b', 'c']) })
+    const run = h.runner.run(req)
+    await h.settle()
+    h.tick(1)
+    h.observe('a')
+    await h.finish('a')
+
+    expect(h.isOpening('b')).toBe(false)
+    await run
+    const job = store.readJob('jn')!
+    expect(job.state).toBe('halted')
+    const rows = Object.fromEntries(job.targets.map((t) => [t.serverId, t]))
+    expect(rows.b.error).toContain('NotReady')
+  })
+
+  it('rolls on when the node came back Ready', async () => {
+    const store = await openStore()
+    const h = harness(store, { nodes: asNode('ok') })
+    const req = approved({ jobId: 'jo', spec: spec(), targets: waved(['a', 'b']) })
+    const run = h.runner.run(req)
+    await h.settle()
+    h.tick(1)
+    h.observe('a')
+    await h.finish('a')
+    expect(h.isOpening('b')).toBe(true)
+    await h.finish('b')
+    h.observe('b')
+    await run
+  })
+
+  // The cost decision. The node read is an SSH round trip per host inside a
+  // loop that polls every five seconds; asking the control plane about a host
+  // that is not answering SSH buys nothing, because the gate is already saying
+  // no.
+  it('does not ask the cluster about a wave whose machines already failed', async () => {
+    const store = await openStore()
+    let asked = 0
+    const h = harness(store, {
+      nodes: async (ids) => {
+        asked += 1
+        return new Map(ids.map((id) => [id, { role: 'unknown' } as GateNode]))
+      }
+    })
+    const req = approved({ jobId: 'jp', spec: spec(), targets: waved(['a', 'b']) })
+    const run = h.runner.run(req)
+    await h.settle()
+    h.tick(1)
+    h.observe('a', { failedUnits: ['nginx.service'] })
+    await h.finish('a')
+    await run
+    expect(asked).toBe(0)
+  })
+
+  // A probe that throws is not an answer, and must be neither the thing that
+  // halts an estate nor the thing that waves it through.
+  it('rolls on as before when the node read itself fails', async () => {
+    const store = await openStore()
+    const h = harness(store, {
+      nodes: () => Promise.reject(new Error('ssh blew up'))
+    })
+    const req = approved({ jobId: 'jq', spec: spec(), targets: waved(['a', 'b']) })
+    const run = h.runner.run(req)
+    await h.settle()
+    h.tick(1)
+    h.observe('a')
+    await h.finish('a')
+    expect(h.isOpening('b')).toBe(true)
+    await h.finish('b')
+    h.observe('b')
+    await run
+  })
+})
 
 describe('the health gate between waves', () => {
   it('stops the run when the finished wave left a server with a failed unit', async () => {
