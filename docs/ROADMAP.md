@@ -275,7 +275,7 @@ missing, with the item that closes it. Sizes are for one focused person.
 | **Docker** | Start/stop/restart graded; exec; logs one-shot and followed; stats; `system df -v` per item; reclaim by id with re-preview; health status parsed | No `pull`/`build` as a job (comment-only today); networks reclaimable but never listed; no targeted engine upgrade; no scanner consumer; podman unproven | 42 |
 | **Compose** | Discover, parse, declared-vs-running, edit image tag with stale-check, `pull` and `up -d` as jobs, `.env` names only | Per-service scope built but not wired; no compose `restart`; validation errors surface as "nothing this parser could read"; `depends_on`/volumes/`restart:` parsed and not rendered; no `.env` write; approval minted without a dialog | 35, 42 |
 | **Kubernetes** | Pods with reason-over-phase, workloads ready/desired, events, describe, previous logs, `top`, PVCs, ingress, RBAC bindings, secret names, deprecated APIs, helm list; rollout restart, cordon/uncordon, drain with seven refusals, exec | No node conditions/allocatable/taints; no requests/limits; no HPA; PDBs only inside the drain; no Role rules; no PV/StorageClass; no cert expiry of any kind; helm list parse unproven | 39 |
-| **K8s lifecycle** | Each primitive as a separate click; API scan with stated blind spots | Nothing chains cordon → patch → reboot → uncordon; the job engine does not know a host is a node; gate is systemd-only. Upgrades, helm upgrade/rollback, `rollout undo` contradict the module's own reasoning | 40, 41 |
+| **K8s lifecycle** | Chain PLANNED as one job (`shared/nodeMaintenance.ts`); node-aware wave gate BUILT (`shared/nodeGate.ts`); API scan with stated blind spots | The gate's node reading has **no producer wired** — see item 44 — so it is proven and not yet live. Upgrades, helm upgrade/rollback, `rollout undo` contradict the module's own reasoning | 40, 41 |
 | **PostgreSQL** | Dump to local/SFTP/S3 with read-back; replication, archiver, vacuum age, connections, locks, sizes, `pg_stat_statements` — nine judged questions | Dumps are manual, plaintext, 512 MB in memory, no restore. No slots/`pg_wal` size. Slow queries have no alarm level. Locks show the blocked, not the blocker. No write of any kind (routed to jobs by `dbOps.ts:33-35`) | 37, 38 |
 | **MySQL/MariaDB** | As Postgres, plus binlog inventory and buffer pool | No top-N slow statements (only whether the log is on); binlog purge is REFUSED BY DESIGN, not missing — `dbOps.ts`'s own header says deleting binlogs is deleting the only thing standing between a replica that fell behind and a rebuild; no `KILL`/`OPTIMIZE`; no binlog position in dumps | 37, 38 |
 | **MongoDB** | Replica set, oplog window, index usage, connections, current ops, sizes, asserts | `mongodump` SHIPPED — measured against a real authenticated MongoDB 7, and both halves of the old refusal turned out to name the actual problems. `--archive` is required or mongodump writes a DIRECTORY of BSON files and this pipeline, which reads stdout, captures nothing; and mongodump HAS NO PASSWORD ENVIRONMENT VARIABLE — `PGPASSWORD` and `MYSQL_PWD` have no counterpart and `--password` is the argv exposure the interface exists to avoid — so the credential goes in a 0600 `--config` file, proven to be read by dumping with the right password and failing `AuthenticationFailed` with a wrong one. The archive is named `.archive` rather than `.sql`, and the retention regex accepts both, because a dump retention does not recognise is one it never removes. Redis stays refused for a stated reason rather than an omission: pg_dump, mysqldump and mongodump are CLIENTS that ask a server for its contents, and Redis's persistence is a snapshot the server writes to its own disk. No index build monitor; `mongos` out of scope; index sizes never populated (`dbOps.ts:700-720` does not pass `sizes`) | 37, 38 |
@@ -804,6 +804,41 @@ the file's own definition of `edit` (`kubernetes.ts:52-58`, `:1167-1172`). If wa
 recorded reversal in the header, graded like drain, with a caveat that live now differs from
 source; `rollout history` as a read is safe now (item 39). Package downgrade should be refused
 in-file for the reason `dist-upgrade` is.
+
+**Node lifecycle chaining — PLANNER SHIPPED, GATE BUILT, GATE NOT YET WIRED.** Three named gaps,
+and they did not turn out to be one piece of work.
+
+*The chain* (`shared/nodeMaintenance.ts`, shipped). `planNodeMaintenance` emits cordon → patch →
+reboot → uncordon as one `JobSpec`, with the uncordon ALSO as the job's `rollback` — never run
+automatically, per item 44. A run that fails partway leaves the node cordoned, which is correct
+rather than a gap: a node whose patch did not finish should not be taking work. It **refuses** a
+node that cannot run `kubectl` against its own cluster, and says why that is normal — the steps run
+ON the node, which a k3s or control-plane node can do and a typical kubeadm worker cannot. An
+unknown refuses as firmly as a no: cordoning on a maybe is how a node ends up out of service by a
+chain that then cannot uncordon it. It does NOT drain, and says so: a cordon evicts nothing, the
+running pods are killed by the reboot, and folding the module's most destructive verb into a button
+labelled "patch" is not on. 12 mutations, 12 killed.
+
+*The gate* (`shared/nodeGate.ts`, built and tested). The gate read systemd and nothing else, and
+**systemd and Kubernetes disagree exactly when it matters**: a node that reboots into a broken
+kubelet answers SSH, runs no failed units, and is NotReady. The gate passed it and started the next
+wave — a three-node cluster taken out one wave at a time by the mechanism meant to prevent that.
+`evaluateGate` now also halts on `not-ready`, `unreported` and a node still cordoned after its own
+wave; `pressure` is reported and does not block, because it is usually a condition the run did not
+cause. A node whose state could not be read is a WAIT, not a pass. Matching a server to a node is
+EXACT on the host's own reported hostname, because the failure mode is not "no match" — it is
+gating the WRONG machine. The systemd checks still run first, so a host that is switched off reads
+as "not answering" rather than "NotReady". 12 mutations, 12 killed, including one that caught a real
+inversion: `judgeNodes` reports only PROBLEMS, so a healthy node has no finding, and reading that as
+"could not be read" made every healthy node a gate that waits until it times out.
+
+*What is NOT done, and it is the reason this is not marked shipped.* **Nothing populates the gate's
+node reading.** `gateHealthFor` reads the fleet sampler's cache, deliberately and correctly — a gate
+with its own health probe would be a second opinion on "is this host healthy". There is no cached
+node state to read, and a worker node cannot be asked directly. The producer needs a NOMINATED host
+that answers for the cluster, carried on the spec and therefore inside the approval record, which is
+a UI decision as much as a code one. Wiring the consumer to a stale cache would newly halt every
+gated run that touches a node — a regression dressed as a safety feature — so it was not done.
 
 **Incident record.** A named span — start at raise, end at resolve — with a note and the alert
 rows and jobs inside it, joined by `runbookJobWindow` (`runbooks.ts:333-340`); its own JSON file

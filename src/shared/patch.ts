@@ -1,3 +1,5 @@
+import type { GateNode } from './nodeGate'
+import { summariseNodeGate } from './nodeGate'
 import {
   FACT_STATUS_HELP,
   factSource,
@@ -973,6 +975,20 @@ export interface GateHost {
    * hostHealth.ts's rule, and it decides a different outcome here.
    */
   failedUnits: string[] | null
+  /**
+   * What the CONTROL PLANE says about this host, when it is a node.
+   *
+   * OPTIONAL, and absent means "nobody asked" rather than "it is fine" — see
+   * `summariseNodeGate`. Every caller written before this existed supplies
+   * nothing and keeps exactly the behaviour it had.
+   *
+   * It exists because systemd and Kubernetes disagree precisely when it
+   * matters: a node that reboots into a broken kubelet answers SSH, runs no
+   * failed units, and is NotReady. The gate passed it, started the next wave,
+   * and took a cluster out one wave at a time using the mechanism meant to
+   * prevent that.
+   */
+  node?: GateNode
 }
 
 export type GateVerdict =
@@ -1051,15 +1067,47 @@ export function evaluateGate(
       reason: `${parts.join('; ')}. The remaining waves were not started.`
     }
   }
+  // ---- and then, for the hosts that are nodes ---------------------------
+  //
+  // AFTER the systemd checks, not instead of them: a node is still a server,
+  // and a machine with failed units is a problem whatever the control plane
+  // thinks of it. This only ever adds reasons to stop.
+  const nodes = summariseNodeGate(hosts)
+  if (nodes.blocking.length > 0) {
+    return {
+      ok: false,
+      kind: 'unhealthy',
+      hosts: nodes.blocking.map((b) => b.serverName),
+      reason: `${nodes.blocking.map((b) => b.because).join('; ')}. The remaining waves were not started.`
+    }
+  }
+  // A node we could not read is a WAIT, not a failure, and for the same reason
+  // a stale sample is: "we still cannot tell" is not permission to continue.
+  // The runner polls, and halts at the timeout if it is still unread.
+  if (nodes.unread.length > 0) {
+    return {
+      ok: false,
+      kind: 'stale',
+      hosts: nodes.unread.map((u) => u.serverName),
+      reason:
+        `${nodes.unread.map((u) => `${u.serverName} is the node ${u.nodeName} and its state could not be read (${u.why})`).join('; ')}. ` +
+        'A node this run just rebooted is not assumed Ready because the cluster did not answer, so the gate is waiting.'
+    }
+  }
+
   const unverified = hosts.filter((h) => h.failedUnits === null).map((h) => h.serverName)
+  const nodeNote =
+    nodes.pressure.length > 0
+      ? ` ${nodes.pressure.join('; ')} — reported rather than blocked, because pressure is usually a condition the node already had.`
+      : ''
   return {
     ok: true,
     unverified,
     note:
-      unverified.length === 0
+      (unverified.length === 0
         ? `All ${hosts.length} ${hosts.length === 1 ? 'host' : 'hosts'} in this wave answered with no failed units.`
         : `${hosts.length - unverified.length} of ${hosts.length} servers answered with no failed units; ` +
-          `${unverified.join(', ')} cannot report unit state at all, so nothing here vouches for ${unverified.length === 1 ? 'it' : 'them'}.`
+          `${unverified.join(', ')} cannot report unit state at all, so nothing here vouches for ${unverified.length === 1 ? 'it' : 'them'}.`) + nodeNote
   }
 }
 
