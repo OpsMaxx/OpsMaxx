@@ -52,7 +52,14 @@ describe('the config file mongodump is pointed at', () => {
     expect(path).not.toBe('')
     // The process has exited, so the file is gone — but its mode was checked
     // by the script below while it still existed.
-    const modeRun = await runWithConfig('stat -f "%OLp" "$2" 2>/dev/null || stat -c "%a" "$2"')
+    // GNU FIRST, and the order is the fix rather than a preference. The BSD
+    // spelling was first and the `||` never fired on Linux: `stat -f` there is
+    // not "a format string", it is FILESYSTEM STATUS, so it succeeds with exit
+    // 0 and prints a block-size report that is not a mode. A fallback chain
+    // only works when the first branch FAILS on the platform it is wrong for,
+    // and this one did not. `stat -c` is rejected outright by BSD stat, so this
+    // order does fail correctly on macOS and falls through.
+    const modeRun = await runWithConfig('stat -c "%a" "$2" 2>/dev/null || stat -f "%OLp" "$2"')
     expect(modeRun.stdout.trim()).toBe('600')
     void path
   })
