@@ -91,6 +91,7 @@ import type {
   K8sHelmList,
   K8sResources,
   K8sDiagnosis,
+  K8sAllocatableProbe,
   K8sOverview,
   K8sProbe,
   K8sRolloutResult,
@@ -574,6 +575,10 @@ const api = {
       ipcRenderer.invoke('k8s:overview', cfg, context, namespace),
     usage: (cfg: unknown, context?: string, namespace?: string): Promise<K8sUsage> =>
       ipcRenderer.invoke('k8s:usage', cfg, context, namespace),
+    /** Takes NO namespace: a node's load is every pod on it, whatever namespace
+     *  the operator is looking at. See the command builder. */
+    allocatable: (cfg: unknown, context?: string): Promise<K8sAllocatableProbe> =>
+      ipcRenderer.invoke('k8s:allocatable', cfg, context),
     rolloutRestart: (
       cfg: unknown,
       target: K8sRolloutTarget,

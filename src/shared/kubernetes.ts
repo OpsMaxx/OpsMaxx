@@ -844,6 +844,56 @@ export function buildK8sOverviewCommand(context?: string, namespace?: string): s
  * a majority of clusters, and would tempt the parser into showing an empty
  * usage table — which reads as "idle" rather than "not measured".
  */
+/**
+ * Allocatable against requested, one round trip.
+ *
+ * ALWAYS ALL NAMESPACES, whatever namespace the operator has selected. What a
+ * node is holding is the sum of every pod on it, and a namespace-scoped read
+ * would produce a number that is confidently wrong -- it would report a node as
+ * empty because the things filling it are in `kube-system`. The scope helper is
+ * therefore not used here, and that is the one place in this file that ignores
+ * the selected namespace on purpose.
+ */
+export function buildK8sAllocatableCommand(context?: string): string {
+  const ctx = context && validateContext(context) ? ` --context=${context}` : ''
+  return [
+    k8sResolve(),
+    call('ALLOCNODES', `get nodes -o custom-columns='${ALLOC_NODE_COLS}'${ctx}`),
+    call('ALLOCPODS', `get pods --all-namespaces -o custom-columns='${ALLOC_POD_COLS}'${ctx}`)
+  ].join('; ')
+}
+
+export interface K8sAllocatableProbe {
+  ok: boolean
+  report?: AllocationReport
+  headline?: string
+  detail?: string
+}
+
+/**
+ * A read that produced no rows is a BLIND SPOT, not an empty cluster.
+ *
+ * The rule the PDB read had to learn: text kubectl wrote that yields no objects
+ * means the read did not work, and reporting it as "nothing is scheduled" turns
+ * a failure into an all-clear. A cluster with no nodes cannot exist while
+ * kubectl is answering.
+ */
+export function parseK8sAllocatable(output: string, code: number | null): K8sAllocatableProbe {
+  const nodeText = section(output, 'ALLOCNODES')
+  const podText = section(output, 'ALLOCPODS')
+  const nodes = parseNodeAllocatable(nodeText)
+  const pods = parsePodRequests(podText)
+  if (nodes.length === 0) {
+    const line = nodeText.trim().split('\n').find((l) => l.trim() !== '')
+    return {
+      ok: false,
+      detail: line ? line.trim() : `the node list came back empty (exit ${code ?? 'unknown'})`
+    }
+  }
+  const report = allocationReport(nodes, pods)
+  return { ok: true, report, headline: allocationHeadline(report) }
+}
+
 export function buildK8sTopCommand(context?: string, namespace?: string): string {
   const { ctx, ns } = scope(context, namespace)
   return [
@@ -1213,6 +1263,15 @@ export function parseK8sRolloutResult(output: string, exitCode: number | null): 
 // times a day. Making them type a word for that is how the word stops meaning
 // anything by the time a StatefulSet is selected.
 
+import {
+  ALLOC_NODE_COLS,
+  ALLOC_POD_COLS,
+  allocationHeadline,
+  allocationReport,
+  parseNodeAllocatable,
+  parsePodRequests,
+  type AllocationReport
+} from './k8sAllocatable'
 import type { BroadcastConfirmation, BroadcastRisk } from './broadcast'
 
 export interface K8sRolloutTarget {

@@ -1,0 +1,4 @@
+NAME                     CPU   MEM          PODS   SCHED
+sp-alloc-control-plane   12    24571576Ki   110    <none>
+sp-alloc-worker          12    24571576Ki   110    <none>
+sp-alloc-worker2         12    24571576Ki   110    <none>

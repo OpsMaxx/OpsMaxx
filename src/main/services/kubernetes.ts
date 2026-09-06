@@ -1,4 +1,5 @@
 import type {
+  K8sAllocatableProbe,
   K8sCordonResult,
   K8sCordonTarget,
   K8sDrainAssessment,
@@ -24,6 +25,8 @@ import {
   type K8sReviewProbe
 } from '../../shared/k8sReview'
 import {
+  buildK8sAllocatableCommand,
+  parseK8sAllocatable,
   buildK8sCordonCommand,
   buildK8sDiagnoseCommand,
   buildK8sDrainCommand,
@@ -162,6 +165,23 @@ export class KubernetesReader {
       return parseK8sOverview(merge(r), r.code ?? null)
     } catch (e) {
       return fail(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  /**
+   * What each node can hold against what is booked on it.
+   *
+   * Its own call rather than a block in `overview`: it reads EVERY namespace
+   * whatever the operator has selected, and folding a read with different scope
+   * into the overview would make the overview's namespace mean two things.
+   */
+  async allocatable(cfg: unknown, context?: string): Promise<K8sAllocatableProbe> {
+    try {
+      const r = await this.deps.exec(cfg, buildK8sAllocatableCommand(context), 30_000)
+      if (!r.ok) return { ok: false, detail: r.error ?? 'could not reach the server' }
+      return parseK8sAllocatable(merge(r), r.code ?? null)
+    } catch (e) {
+      return { ok: false, detail: e instanceof Error ? e.message : String(e) }
     }
   }
 
