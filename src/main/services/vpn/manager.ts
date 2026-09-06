@@ -14,11 +14,14 @@ import type {
   VpnStats,
   VpnStatus,
   VpnValidation,
+  VpnDiagnoseCheck,
   VpnDiagnoseRefusal,
   VpnDiagnoseResult,
   VpnDiagnoseTarget
 } from '../../../shared/vpn'
 import { isVpnRunning } from '../../../shared/vpn'
+import { ipv6LeakCheck } from '../../../shared/vpnChecks'
+import { normalizeCidr, routeManagerFor } from './routing/index'
 import { isVaultLockedError, resolveVpnSecrets } from '../credentialResolver'
 import { listCachedVpns } from '../mcpDataCache'
 import { redactOutput } from '../secretRedaction'
@@ -558,13 +561,63 @@ export async function vpnDiagnose(
     }
   }
   try {
-    const res = await driver.diagnose(id, target)
-    if (res) return res
+    const res = await driver.diagnose(profile as never, target)
+    if (res) return { ...res, checks: [...res.checks, await ipv6Row(profile)] }
     return { id, unsupported: 'This VPN is not running, so nothing was sent.' }
   } catch (e) {
     const r = toVpnResult(e)
     return { id, unsupported: r.error ?? 'The probe could not be run.' }
   }
+}
+
+/**
+ * The one check that is about THIS machine.
+ *
+ * It is appended here rather than asked of the sidecar because netd has no view
+ * of the host's routing table -- it sees its own netstack and the UDP socket
+ * underneath it, and nothing else. The reading itself is `ipv6LeakCheck`, and
+ * the wording is `detectIpv6Leak`'s, so an operator warned at connect time and
+ * an operator reading this checklist are told the same thing about the same
+ * fact rather than being left to work out whether they match.
+ */
+async function ipv6Row(profile: VpnProfile): Promise<VpnDiagnoseCheck> {
+  const spec = profile.spec
+  // OpenVPN and frp are not userspace in the sense this check means: openvpn
+  // owns a real device and takes its routes from the server, and only
+  // WireGuard has a mode in which nothing is captured at all.
+  const mode = spec.kind === 'wireguard' && spec.mode !== 'system' ? 'userspace' : 'system'
+  const claimsIpv6 =
+    spec.kind === 'wireguard'
+      ? (spec.peers ?? []).some((p) =>
+          (p.allowedIps ?? []).some((a) => normalizeCidr(a.trim(), 'inet6') === '::/0')
+        )
+      : // Pushed at connect time and absent from the stored profile. Null is
+        // the honest answer; `false` would warn about a leak on every working
+        // IPv6 OpenVPN profile.
+        null
+
+  let hostHasIpv6Default: boolean | null = null
+  let where: string | undefined
+  try {
+    const snap = await routeManagerFor().snapshot()
+    const v6 = snap.defaults.find(
+      (d) => d.family === 'inet6' && normalizeCidr(d.destination, 'inet6') === '::/0'
+    )
+    // Assigned only once the read SUCCEEDED. Leaving it null on the throw is
+    // the whole point: a routing table nobody could read is not a routing
+    // table with no IPv6 in it.
+    hostHasIpv6Default = v6 !== undefined
+    if (v6) {
+      where = v6.gateway
+        ? `via ${v6.gateway}${v6.interfaceName ? ` on ${v6.interfaceName}` : ''}`
+        : v6.interfaceName
+          ? `on ${v6.interfaceName}`
+          : 'on this machine'
+    }
+  } catch {
+    // Unsupported platform, or `route` missing. Stays null.
+  }
+  return ipv6LeakCheck({ mode, claimsIpv6, hostHasIpv6Default, where })
 }
 
 // ---------------------------------------------------------------- dependents

@@ -903,7 +903,7 @@ export function toDiagnose(id: string, r: NetdDiagnoseResult): VpnDiagnoseResult
   }
 }
 
-const CHECK_NAMES: readonly VpnCheckName[] = ['handshake', 'dns', 'tcp']
+const CHECK_NAMES: readonly VpnCheckName[] = ['handshake', 'dns', 'tcp', 'ipv6', 'server']
 const CHECK_STATUSES: readonly VpnCheckStatus[] = ['ok', 'failed', 'skipped']
 
 function isCheckName(v: string): v is VpnCheckName {
@@ -1942,7 +1942,11 @@ export const wireguardDriver: VpnDriver<WireGuardSpec> & {
    * ask this repeatedly would have a port scanner pointed through somebody's
    * VPN. `tests/vpnDiagnose.test.ts` fails if that changes.
    */
-  async diagnose(id: string, target: VpnDiagnoseTarget): Promise<VpnDiagnoseResult | null> {
+  async diagnose(
+    profile: VpnProfile,
+    target: VpnDiagnoseTarget
+  ): Promise<VpnDiagnoseResult | null> {
+    const id = profile.id
     const run = runs.get(id)
     // Not an error: a tunnel that is stopping has nothing to probe, and the
     // manager turns a null into the same sentence it uses for a profile that

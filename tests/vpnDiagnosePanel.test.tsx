@@ -155,3 +155,23 @@ it('renders nothing when the preload has no such method', () => {
   const { container } = render(<VpnDiagnose id="v1" />)
   expect(container.textContent).toBe('')
 })
+
+// An input the probe ignores is worse than no input: it invites somebody to
+// type a host and then quietly does something else.
+describe('an engine whose probe may only reach its own remotes', () => {
+  it('renders no target fields', async () => {
+    const spy = vi.fn(async () => ({ id: 'v1', checks: [], sampledAt: 1 }))
+    stubBridge({ vpn: { diagnose: spy } })
+    render(<VpnDiagnose id="v1" showTarget={false} />)
+    expect(screen.queryByPlaceholderText(/Host or address/i)).toBeNull()
+    expect(screen.queryByPlaceholderText('Port')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: /run/i }))
+    await waitFor(() => expect(spy).toHaveBeenCalledWith('v1', { host: undefined, port: undefined }))
+  })
+
+  it('says it will not connect anywhere the profile does not already name', () => {
+    stubBridge({ vpn: { diagnose: async () => ({ id: 'v1', checks: [], sampledAt: 1 }) } })
+    render(<VpnDiagnose id="v1" showTarget={false} />)
+    expect(screen.getByText(/will not connect anywhere else/i)).toBeTruthy()
+  })
+})
