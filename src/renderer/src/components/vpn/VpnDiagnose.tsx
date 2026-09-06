@@ -27,7 +27,9 @@ import { bridgeHas } from '../../lib/bridge'
 const ROW_LABEL: Record<VpnDiagnoseCheck['name'], string> = {
   handshake: 'Handshake',
   dns: 'DNS through the tunnel',
-  tcp: 'TCP reach'
+  tcp: 'TCP reach',
+  ipv6: 'IPv6 outside the tunnel',
+  server: 'Reaching the VPN server'
 }
 
 /** Milliseconds for the probes, seconds for the handshake's age -- the units
@@ -48,7 +50,18 @@ function isRefusal(r: VpnDiagnoseResult | VpnDiagnoseRefusal): r is VpnDiagnoseR
   return 'unsupported' in r
 }
 
-export function VpnDiagnose({ id }: { id: string }): React.JSX.Element | null {
+/**
+ * `showTarget` is false for an engine whose probe may only be pointed at the
+ * profile's own remotes. Rendering fields the probe ignores would be an input
+ * that silently does nothing, which is worse than no input.
+ */
+export function VpnDiagnose({
+  id,
+  showTarget = true
+}: {
+  id: string
+  showTarget?: boolean
+}): React.JSX.Element | null {
   const [host, setHost] = useState('')
   const [port, setPort] = useState('')
   const [busy, setBusy] = useState(false)
@@ -83,32 +96,36 @@ export function VpnDiagnose({ id }: { id: string }): React.JSX.Element | null {
     <div className="col" style={{ gap: 6 }}>
       <span className="field-label">Diagnose</span>
       <div className="row" style={{ gap: 6 }}>
-        <input
-          className="input"
-          style={{ flex: 1, minWidth: 0 }}
-          placeholder="Host or address on the far side"
-          value={host}
-          onChange={(e) => setHost(e.target.value)}
-          disabled={busy}
-        />
-        <input
-          className="input"
-          style={{ width: 76 }}
-          placeholder="Port"
-          inputMode="numeric"
-          value={port}
-          onChange={(e) => setPort(e.target.value)}
-          disabled={busy}
-        />
+        {showTarget && (
+          <input
+            className="input"
+            style={{ flex: 1, minWidth: 0 }}
+            placeholder="Host or address on the far side"
+            value={host}
+            onChange={(e) => setHost(e.target.value)}
+            disabled={busy}
+          />
+        )}
+        {showTarget && (
+          <input
+            className="input"
+            style={{ width: 76 }}
+            placeholder="Port"
+            inputMode="numeric"
+            value={port}
+            onChange={(e) => setPort(e.target.value)}
+            disabled={busy}
+          />
+        )}
         <button className="btn" onClick={() => void run()} disabled={busy}>
           {busy ? <Loader2 size={13} className="spin" /> : null}
           {busy ? 'Probing' : 'Run'}
         </button>
       </div>
       <span className="faint" style={{ fontSize: 11 }}>
-        Everything is sent through the tunnel from inside this app: the name is resolved by the
-        tunnel&rsquo;s own DNS server, never the host resolver. Leave both empty to check only the
-        handshake.
+        {showTarget
+          ? 'Everything is sent through the tunnel from inside this app: the name is resolved by the tunnel’s own DNS server, never the host resolver. Leave both empty to check only the handshake.'
+          : 'This checks whether this machine can reach the server addresses already stored on this profile. It will not connect anywhere else, and it does not validate the server’s certificate.'}
       </span>
 
       {res !== null && isRefusal(res) && (

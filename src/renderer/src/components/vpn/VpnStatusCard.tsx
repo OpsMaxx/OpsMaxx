@@ -263,6 +263,14 @@ export function VpnStatusCard({ profile, status }: VpnStatusCardProps): React.JS
         <VpnDiagnose id={profile.id} />
       )}
 
+      {/* Offered whether or not it is up, which is the difference that matters:
+          the question "can this machine reach the server" is the one somebody
+          has when the profile will NOT connect, and a button that only appears
+          once it has connected would never be there when it was wanted. The
+          target fields are hidden because that probe may only be pointed at the
+          addresses already on the profile. */}
+      {profile.spec.kind === 'openvpn' && <VpnDiagnose id={profile.id} showTarget={false} />}
+
       {listeners.length > 0 && (
         <div className="col" style={{ gap: 6 }}>
           <span className="field-label">Local listeners</span>

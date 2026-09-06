@@ -85,11 +85,18 @@ export interface VpnDriver<S extends VpnSpec = VpnSpec> {
 
   stats(id: string): Promise<VpnStats | null>
 
-  /** Probe the live tunnel FROM THE INSIDE. Optional, and its absence is a
-   *  fact the manager reports rather than an empty checklist: only the
-   *  userspace WireGuard path has a netstack to dial through, and every other
-   *  engine would need a probe that leaves the tunnel to answer. */
-  diagnose?(id: string, target: VpnDiagnoseTarget): Promise<VpnDiagnoseResult | null>
+  /**
+   * Probe this profile. Optional, and its absence is a fact the manager reports
+   * rather than an empty checklist.
+   *
+   * Takes the PROFILE rather than an id because the most useful probe is the
+   * one somebody runs when the tunnel will not come up, and then there is no
+   * run to look anything up in.
+   */
+  diagnose?(
+    profile: VpnProfile & { spec: S },
+    target: VpnDiagnoseTarget
+  ): Promise<VpnDiagnoseResult | null>
 
   /** Apply a changed spec without dropping the connection. frp only today.
    *  Absent means the manager does a stop then a start. */

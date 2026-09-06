@@ -384,7 +384,13 @@ export interface VpnBoundListener {
  */
 export type VpnCheckStatus = 'ok' | 'failed' | 'skipped'
 
-export type VpnCheckName = 'handshake' | 'dns' | 'tcp'
+/**
+ * `handshake`, `dns` and `tcp` come from the sidecar and are about the far
+ * side. `ipv6` is decided HERE and is about this machine: whether traffic the
+ * tunnel was supposed to carry is going somewhere else instead, which netd
+ * cannot see because it has no view of the host's routing table.
+ */
+export type VpnCheckName = 'handshake' | 'dns' | 'tcp' | 'ipv6' | 'server'
 
 export interface VpnDiagnoseCheck {
   name: VpnCheckName
