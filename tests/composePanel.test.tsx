@@ -244,8 +244,14 @@ describe('what the panel refuses', () => {
     // The restart below is deliberately in this list and is NOT a third compose
     // verb: it runs `docker restart` against the named containers, on the
     // container path, for the reasons in `planComposeServiceRestart`. Any
-    // FOURTH button, or a restart whose title stops naming its blast radius,
+    // FURTHER button, or a restart whose title stops naming its blast radius,
     // still fails here.
+    //
+    // Nor is the roll-back a new verb, and its title has to keep saying so: it
+    // reads the backup beside the file, opens the SAME tag edit pre-filled with
+    // the previous value, and writes nothing until that edit is confirmed. A
+    // roll-back that wrote on click would be a second write path with its own
+    // rules, and this assertion is where that would show up.
     const titled = screen
       .getAllByRole('button')
       .map((b) => b.getAttribute('title'))
@@ -255,7 +261,9 @@ describe('what the panel refuses', () => {
       'docker compose up -d for edge. Starts what is declared; removes nothing.',
       "Restart cache's container. Every connection they are serving is interrupted, and a change to the compose file is NOT applied by a restart.",
       "Change cache's image tag in the compose file. Nothing is pulled or restarted.",
-      "Change worker's image tag in the compose file. Nothing is pulled or restarted."
+      'Put cache back to the tag it had before ShellPilot last edited this file. Opens the same edit, pre-filled — nothing is written until you confirm.',
+      "Change worker's image tag in the compose file. Nothing is pulled or restarted.",
+      'Put worker back to the tag it had before ShellPilot last edited this file. Opens the same edit, pre-filled — nothing is written until you confirm.'
     ])
   })
 

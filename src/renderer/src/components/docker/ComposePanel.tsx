@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Download, FileText, Hammer, KeyRound, Layers, Pencil, Play, RotateCw, TriangleAlert } from 'lucide-react'
+import { Download, FileText, Hammer, KeyRound, Layers, Pencil, Play, RotateCw, TriangleAlert, Undo2 } from 'lucide-react'
 import { clsx } from '../../lib/format'
 import { jobApprovalFor, planJob } from '../../../../shared/jobs'
 import {
@@ -12,6 +12,7 @@ import {
   composeJobSpec,
   joinComposeState,
   planComposeImageEdit,
+  revertDescription,
   validateImageRef,
   type ComposeAction,
   type ComposeBridge,
@@ -99,6 +100,12 @@ export function ComposePanel({
   const [editing, setEditing] = useState<{ service: string; from: string; to: string } | null>(null)
   const [editError, setEditError] = useState<string | null>(null)
   const [editDone, setEditDone] = useState<string | null>(null)
+  // What a revert is about to do, in the app's own words. Held beside the edit
+  // form rather than replacing it, because a revert IS an edit here: the same
+  // form, the same confirm and the same write, pre-filled with the previous
+  // tag. A second write path in the UI would be a second set of rules.
+  const [revertNote, setRevertNote] = useState<string | null>(null)
+  const [reverting, setReverting] = useState(false)
   const [launched, setLaunched] = useState<string | null>(null)
   // A job that asks for confirmation gets asked. Held here between the plan
   // and the run, because those were one step and the phrase was filled in by
@@ -188,6 +195,7 @@ export function ComposePanel({
     setConfig(null)
     setEnvFiles(null)
     setEditing(null)
+    setRevertNote(null)
     setEditDone(null)
     setLaunched(null)
     try {
@@ -311,7 +319,42 @@ export function ComposePanel({
   const startEdit = (service: string, from: string): void => {
     setEditError(null)
     setEditDone(null)
+    setRevertNote(null)
     setEditing({ service, from, to: from })
+  }
+
+  /**
+   * Ask the host what this service was pinned to before ShellPilot last wrote
+   * the file, and pre-fill the ordinary edit form with it.
+   *
+   * The plan comes from main, which reads the backup beside the file. Every
+   * refusal is shown as itself: "there is no backup" and "the server did not
+   * answer" are different sentences, and only one of them means there is
+   * nothing to go back to.
+   */
+  const startRevert = async (service: string): Promise<void> => {
+    if (open === null) return
+    const path = projectFor(open)?.files[0]
+    if (path === undefined) return
+    setEditError(null)
+    setEditDone(null)
+    setRevertNote(null)
+    setReverting(true)
+    try {
+      const r = await bridge()?.planRevert?.(cfg, { path, service }, { sudo })
+      if (r === undefined) {
+        setEditError('this build cannot ask the server for a previous tag')
+        return
+      }
+      if (!r.ok) {
+        setEditError(r.reason)
+        return
+      }
+      setEditing({ service, from: r.from, to: r.to })
+      setRevertNote(revertDescription(r))
+    } finally {
+      setReverting(false)
+    }
   }
 
   const commitEdit = async (): Promise<void> => {
@@ -520,6 +563,16 @@ export function ComposePanel({
                           <Pencil size={13} />
                         </button>
                       )}
+                      {s.declared.image !== null && (
+                        <button
+                          className="icon-btn sm"
+                          disabled={reverting}
+                          title={`Put ${s.declared.name} back to the tag it had before ShellPilot last edited this file. Opens the same edit, pre-filled — nothing is written until you confirm.`}
+                          onClick={() => void startRevert(s.declared.name)}
+                        >
+                          <Undo2 size={13} />
+                        </button>
+                      )}
                     </div>
                   ))}
 
@@ -722,6 +775,9 @@ export function ComposePanel({
             <b>{editing.service}</b> — change the image in the compose file. This writes one line and
             nothing else: no image is pulled and no container is restarted.
           </div>
+          {revertNote !== null && (
+            <div className="faint" style={{ fontSize: 11, marginTop: 4 }}>{revertNote}</div>
+          )}
           <input
             className="input"
             value={editing.to}

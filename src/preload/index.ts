@@ -75,6 +75,7 @@ import type {
   ComposePreloadBridge,
   ComposeImageWriteRequest,
   ComposeImageWriteResult,
+  ComposeRevertPlan,
   ComposeListProbe,
   ComposeProjectRef
 } from '../shared/compose'
@@ -728,6 +729,12 @@ const api = {
       opts?: { sudo?: boolean }
     ): Promise<ComposeEnvWriteResult> =>
       ipcRenderer.invoke('compose:write-env-value', cfg, req, ref, opts),
+    /** Reads the backup beside the file and returns a plan. Writes nothing. */
+    planRevert: (
+      cfg: unknown,
+      req: { path: string; service: string },
+      opts?: { sudo?: boolean }
+    ): Promise<ComposeRevertPlan> => ipcRenderer.invoke('compose:plan-revert', cfg, req, opts),
     writeImageTag: (
       cfg: unknown,
       req: ComposeImageWriteRequest,
