@@ -1251,6 +1251,9 @@ ipcMain.handle('fleet:security-list', (_e, cfg: unknown) => hostFactsReader.secu
 // than sampled: the hourly sweep already carries the restart flag, and this is
 // the explanation behind it.
 ipcMain.handle('fleet:kernel', (_e, cfg: unknown) => hostFactsReader.kernel(cfg))
+// Disks, filesystems, LVM and software RAID — roadmap item 46. Asked for rather
+// than sampled: a partition table does not move between hourly sweeps.
+ipcMain.handle('fleet:storage', (_e, cfg: unknown) => hostFactsReader.storage(cfg))
 // Who can get into one server, as the sweep last saw it — roadmap item 23.
 //
 // A read of what the sweep already has; it never triggers a probe, for the same

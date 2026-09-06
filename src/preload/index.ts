@@ -129,6 +129,7 @@ import type { DbShellResult } from '../shared/dbshell'
 import type { DbOpsReport } from '../shared/dbOps'
 import type { VaultEntry, VaultListResult, VaultResult, VaultStatus } from '../shared/vault'
 import type { KernelStatus } from '../shared/kernelStatus'
+import type { StorageLayout } from '../shared/storageLayout'
 import type { TunnelConfig, TunnelResult, TunnelSshConfig, TunnelStatus } from '../shared/tunnel'
 import type {
   FrpTokenResult,
@@ -841,6 +842,9 @@ const api = {
     /** Running vs installed kernels. Asked for, not sampled. */
     kernel: (cfg: unknown): Promise<KernelStatus | { error: string }> =>
       ipcRenderer.invoke('fleet:kernel', cfg),
+    /** Disks, filesystems, LVM, software RAID. Asked for, not sampled. */
+    storage: (cfg: unknown): Promise<StorageLayout | { error: string }> =>
+      ipcRenderer.invoke('fleet:storage', cfg),
     // Who can get into a server, as the sampler last collected it — roadmap
     // item 23. Read-only and never a trigger, exactly like `facts`.
     //

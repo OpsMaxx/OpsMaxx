@@ -1,5 +1,10 @@
 import type { HostFacts, HostFactsCollectOptions } from '../../shared/hostFacts'
 import {
+  buildStorageLayoutCommand,
+  parseStorageLayout,
+  type StorageLayout
+} from '../../shared/storageLayout'
+import {
   buildKernelStatusCommand,
   parseKernelStatus,
   type KernelStatus
@@ -131,6 +136,27 @@ export class HostFactsReader {
       if (!r.ok) return { error: r.error ?? 'could not reach the server' }
       const merged = (r.stderr ?? '') === '' ? (r.stdout ?? '') : `${r.stdout ?? ''}\n${r.stderr}`
       return parseKernelStatus(merged)
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  /**
+   * Disks, filesystems, LVM and software RAID.
+   *
+   * Asked for rather than sampled, like `kernel` and `securityList`: a
+   * partition table does not change between hourly sweeps, and this is the read
+   * behind a row somebody has clicked.
+   */
+  async storage(cfg: unknown): Promise<StorageLayout | { error: string }> {
+    try {
+      const r = await this.deps.exec(cfg, buildStorageLayoutCommand(), HOST_FACTS_TIMEOUT_MS)
+      // A transport failure is not a host answer. "No filesystems" for a
+      // connection that never opened is the fabrication this file exists to
+      // avoid.
+      if (!r.ok) return { error: r.error ?? 'could not reach the server' }
+      const merged = (r.stderr ?? '') === '' ? (r.stdout ?? '') : `${r.stdout ?? ''}\n${r.stderr}`
+      return parseStorageLayout(merged)
     } catch (e) {
       return { error: e instanceof Error ? e.message : String(e) }
     }
