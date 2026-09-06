@@ -1247,6 +1247,10 @@ ipcMain.handle('fleet:facts', (_e, serverId: string) => fleetSampler.factsFor(se
 // see `HostFactsReader.securityList` for why the counts are sampled and the
 // list is asked for.
 ipcMain.handle('fleet:security-list', (_e, cfg: unknown) => hostFactsReader.securityList(cfg))
+// Running kernel against installed kernels — roadmap item 46. Asked for rather
+// than sampled: the hourly sweep already carries the restart flag, and this is
+// the explanation behind it.
+ipcMain.handle('fleet:kernel', (_e, cfg: unknown) => hostFactsReader.kernel(cfg))
 // Who can get into one server, as the sweep last saw it — roadmap item 23.
 //
 // A read of what the sweep already has; it never triggers a probe, for the same

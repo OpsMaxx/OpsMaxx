@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { sortBySeverity, type SecurityListProbe } from '../../../../shared/securityUpdates'
+import { kernelReport, type KernelReport, type KernelStatus } from '../../../../shared/kernelStatus'
 import { AlertTriangle, Ban, RefreshCw, ShieldQuestion, Wrench } from 'lucide-react'
 import { useFleet } from '../../store/fleet'
 import { useApp } from '../../store/app'
@@ -106,6 +107,12 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   // for: it is a fresh SSH read per host, and the counts beside it come from
   // the hourly sample.
   const [secList, setSecList] = useState<{ serverName: string; probe: SecurityListProbe } | null>(null)
+  const [kernel, setKernel] = useState<{
+    serverName: string
+    report?: KernelReport
+    error?: string
+  } | null>(null)
+  const [kernelLoading, setKernelLoading] = useState<string | null>(null)
   const [secLoading, setSecLoading] = useState<string | null>(null)
   // `all`, not `security`, and it is a deliberate choice rather than a default
   // nobody thought about. apt has NO security-only command — every recipe that
@@ -125,6 +132,44 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   const [healthGate, setHealthGate] = useState(true)
   const [phrase, setPhrase] = useState('')
   const [confirming, setConfirming] = useState(false)
+
+  /**
+   * Which kernel is running here, and is a newer one installed?
+   *
+   * On demand, per row, exactly like the security list beside it: the sweep
+   * already carries the restart flag, and this is the explanation behind it
+   * rather than a second thing to collect hourly.
+   */
+  const loadKernel = async (serverId: string, rebootRequired: boolean | null): Promise<void> => {
+    const server = servers.find((sv) => sv.id === serverId)
+    if (!server) return
+    setKernelLoading(serverId)
+    setKernel(null)
+    try {
+      const call = (
+        window.opsmaxx as
+          | { fleet?: { kernel?: (cfg: unknown) => Promise<KernelStatus | { error: string }> } }
+          | undefined
+      )?.fleet?.kernel
+      if (typeof call !== 'function') {
+        setKernel({
+          serverName: server.name,
+          error: 'This build cannot read kernels. Restart the app to rebuild it.'
+        })
+        return
+      }
+      const res = await call(server)
+      if ('error' in res) {
+        setKernel({ serverName: server.name, error: res.error })
+        return
+      }
+      setKernel({ serverName: server.name, report: kernelReport(res, rebootRequired) })
+    } catch (e) {
+      setKernel({ serverName: server.name, error: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setKernelLoading(null)
+    }
+  }
 
   const loadSecurityList = async (serverId: string): Promise<void> => {
     const server = servers.find((sv) => sv.id === serverId)
@@ -474,6 +519,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                   <th>Packages</th>
                   <th className="num">Updates</th>
                   <th className="num">Security</th>
+                  <th>Kernel</th>
                   <th>Reboot</th>
                 </tr>
               </thead>
@@ -518,6 +564,17 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                         </button>
                       )}
                     </td>
+                    <td data-col="kernel">
+                      {/* Asked for rather than sampled. A row shows nothing
+                          until somebody wants the explanation. */}
+                      <button
+                        className="btn-ghost sm"
+                        disabled={kernelLoading === r.serverId}
+                        onClick={() => void loadKernel(r.serverId, r.rebootRequired ?? null)}
+                      >
+                        {kernelLoading === r.serverId ? 'reading' : 'kernel'}
+                      </button>
+                    </td>
                     <td data-col="reboot">
                       {r.rebootGap !== null ? (
                         <span className="faint">{PATCH_GAP_LABEL[r.rebootGap]}</span>
@@ -533,6 +590,24 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 ))}
               </tbody>
             </table>
+            {kernel !== null && (
+              <div className="bc-controls" style={{ marginTop: 8 }}>
+                <div className="s-title">Kernel on {kernel.serverName}</div>
+                {kernel.error !== undefined ? (
+                  // NOT "up to date". A read that could not happen and a host
+                  // whose kernel is current are different answers.
+                  <div className="s-note is-alarm">{kernel.error}</div>
+                ) : (
+                  <div
+                    className={
+                      kernel.report!.verdict === 'current' ? 's-note' : 's-note is-alarm'
+                    }
+                  >
+                    {kernel.report!.detail}
+                  </div>
+                )}
+              </div>
+            )}
             {secList !== null && (
               <div className="bc-controls" style={{ marginTop: 8 }}>
                 <div className="s-title">Security updates on {secList.serverName}</div>

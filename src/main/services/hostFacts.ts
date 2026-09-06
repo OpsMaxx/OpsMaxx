@@ -1,5 +1,10 @@
 import type { HostFacts, HostFactsCollectOptions } from '../../shared/hostFacts'
 import {
+  buildKernelStatusCommand,
+  parseKernelStatus,
+  type KernelStatus
+} from '../../shared/kernelStatus'
+import {
   buildSecurityListCommand,
   parseSecurityListOutput,
   type SecurityListProbe
@@ -105,6 +110,29 @@ export class HostFactsReader {
       return parseSecurityListOutput(merged)
     } catch (e) {
       return { ok: false, detail: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  /**
+   * Which kernel is running against which are installed.
+   *
+   * ASKED FOR RATHER THAN SAMPLED, like `securityList` above and for the same
+   * reason: it answers a question somebody is looking at a row and asking, and
+   * the hourly sweep already carries the restart flag that says whether it
+   * matters. `rebootRequired` is passed back in by the caller from the facts it
+   * already has -- this does not read that file a second time.
+   */
+  async kernel(cfg: unknown): Promise<KernelStatus | { error: string }> {
+    try {
+      const r = await this.deps.exec(cfg, buildKernelStatusCommand(), HOST_FACTS_TIMEOUT_MS)
+      // A transport failure is not a host answer, and "no kernels installed"
+      // for a connection that never opened is the fabrication this file exists
+      // to avoid.
+      if (!r.ok) return { error: r.error ?? 'could not reach the server' }
+      const merged = (r.stderr ?? '') === '' ? (r.stdout ?? '') : `${r.stdout ?? ''}\n${r.stderr}`
+      return parseKernelStatus(merged)
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) }
     }
   }
 
