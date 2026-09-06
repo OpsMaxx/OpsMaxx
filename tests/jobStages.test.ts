@@ -10,7 +10,7 @@ import {
 } from '../src/main/services/history'
 import { JobRunner, type JobExecResult } from '../src/main/services/jobRunner'
 import type { JobProgress, JobRunRequest, JobSpec, JobTargetRef } from '../src/shared/jobs'
-import { JOB_TERMINAL_STATES, jobApprovalFor, jobCohorts, planJob } from '../src/shared/jobs'
+import { JOB_TERMINAL_STATES, jobApprovalFor, jobCohorts, planJob, verifyJobApproval } from '../src/shared/jobs'
 import { GATE_POLL_MS, GATE_WAIT_MS, type GateHost } from '../src/shared/patch'
 
 // B4's staging and its health gate, and item 17's hard refusal — the three
@@ -512,6 +512,68 @@ describe('a patch run and its approval record', () => {
     )
     await expect(h.runner.run(req)).rejects.toThrow(/edited command needs a fresh confirmation/)
     expect(store.readJob('jc')).toBeNull()
+  })
+
+  // THE GATE WAS NOT CHECKED, and the file said it was. `JobSpec.gate`'s own
+  // comment has always claimed a job confirmed with a gate cannot be resumed
+  // without one, "because the two are different blast radii" — and nothing
+  // enforced it: verifyApproval compares commands, targets and the re-derived
+  // plan, and the gate is in none of the three. A spec approved with
+  // `gate: 'health'` verified CLEAN with the gate deleted, which turns a staged
+  // run that checks between every wave into one that rolls through all of them
+  // unchecked, on a confirmation given for the careful version.
+  it('refuses a run whose stage gate was removed after it was approved', async () => {
+    const store = await openStore()
+    const h = harness(store)
+    const req = approved(
+      { jobId: 'jg', spec: { ...spec(), gate: 'none' }, targets: waved(['a', 'b']) },
+      { spec: spec() }
+    )
+    await expect(h.runner.run(req)).rejects.toThrow(/different blast radii/)
+    expect(store.readJob('jg')).toBeNull()
+  })
+
+  // Deleting the field outright is the likelier edit than setting it to
+  // 'none', and an earlier version of this check let exactly that through.
+  it('refuses a run whose gate field was deleted, not merely set to none', async () => {
+    const store = await openStore()
+    const h = harness(store)
+    const bare = { ...spec() }
+    delete (bare as { gate?: unknown }).gate
+    const req = approved(
+      { jobId: 'jj', spec: bare, targets: waved(['a', 'b']) },
+      { spec: spec() }
+    )
+    await expect(h.runner.run(req)).rejects.toThrow(/different blast radii/)
+  })
+
+  // A record carrying something this build cannot interpret refuses. Treating
+  // it as "cannot tell, carry on" would make a corrupt approval the way past
+  // the check.
+  it('refuses an approval whose recorded gate is not a gate at all', () => {
+    const targets = waved(['a', 'b'])
+    const approval = jobApprovalFor(spec(), targets, { confirmedAt: 1 })
+    const tampered = { ...approval, gate: 7 } as unknown
+    expect(verifyJobApproval(tampered, spec(), targets).ok).toBe(false)
+  })
+
+  it('refuses a gate added after the approval as firmly as one removed', async () => {
+    const store = await openStore()
+    const h = harness(store)
+    const req = approved(
+      { jobId: 'jh', spec: spec(), targets: waved(['a', 'b']) },
+      { spec: { ...spec(), gate: 'none' } }
+    )
+    await expect(h.runner.run(req)).rejects.toThrow(/different blast radii/)
+  })
+
+  // The positive control, asserted on the verifier rather than on a run: a
+  // matching gate must not be the thing that refuses. Without this the two
+  // cases above would pass just as well against a check that refuses always.
+  it('passes verification when the gate is the one that was approved', () => {
+    const targets = waved(['a', 'b'])
+    const approval = jobApprovalFor(spec(), targets, { confirmedAt: 1 })
+    expect(verifyJobApproval(approval, spec(), targets)).toEqual({ ok: true })
   })
 
   it('refuses a reboot step that was not in what was approved', async () => {

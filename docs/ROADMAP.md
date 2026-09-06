@@ -832,6 +832,20 @@ as "not answering" rather than "NotReady". 12 mutations, 12 killed, including on
 inversion: `judgeNodes` reports only PROBLEMS, so a healthy node has no finding, and reading that as
 "could not be read" made every healthy node a gate that waits until it times out.
 
+*A hole found on the way, and closed.* `JobSpec.gate`'s own comment has always said a job
+confirmed with a gate cannot be resumed without one, "because the two are different blast radii".
+**Nothing enforced it.** `verifyApproval` compares commands, targets and the re-derived plan, and
+the gate is in none of the three — measured, not inferred: a spec approved with `gate: 'health'`
+verified `{ok:true}` with the gate deleted. That turns a staged run which checks between every wave
+into one that rolls through all of them unchecked, on a confirmation somebody gave for the careful
+version. The gate now rides on the approval RECORD (not in `approvalCommands`, which was the first
+attempt and made a one-step job report itself as "2 step(s)" in the refusal an operator reads), and
+`verifyJobApproval` compares it. A record with no gate field predates the check and is allowed, so
+runs launched by the previous build stay resumable; that trade is written down where it is made. 7
+mutations, 7 killed — two of which found real defects in the first version: a deleted `gate` field
+(likelier than `'none'`) slipped through, and a `typeof` guard turned a corrupt recorded value into
+"cannot tell, carry on" instead of a refusal.
+
 *What is NOT done, and it is the reason this is not marked shipped.* **Nothing populates the gate's
 node reading.** `gateHealthFor` reads the fleet sampler's cache, deliberately and correctly — a gate
 with its own health probe would be a second opinion on "is this host healthy". There is no cached

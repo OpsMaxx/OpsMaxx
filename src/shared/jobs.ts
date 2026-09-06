@@ -551,7 +551,11 @@ export function jobApprovalFor(
     targets,
     plan: planJob(spec, targets),
     phrase: o.phrase ?? null,
-    confirmedAt: o.confirmedAt
+    confirmedAt: o.confirmedAt,
+    // Recorded so the check below has something to compare against. Not a
+    // command, so it does not appear in the approved step list and does not
+    // make a one-step job report as two.
+    gate: spec.gate
   })
 }
 
@@ -567,11 +571,54 @@ export function verifyJobApproval(
   spec: JobSpec,
   targets: JobTargetRef[]
 ): ApprovalVerdict {
-  return verifyApproval(
+  const verdict = verifyApproval(
     approval,
     { commands: approvalCommands(spec), targets },
     planJob(spec, targets)
   )
+  if (!verdict.ok) return verdict
+
+  // ---- the gate, which nothing used to check -----------------------------
+  //
+  // The comment on `JobSpec.gate` has always said a job confirmed with a gate
+  // cannot be resumed without one, "because the two are different blast radii".
+  // NOTHING ENFORCED IT. `verifyApproval` compares commands, targets and the
+  // re-derived plan, and the gate is in none of the three, so a spec approved
+  // with `gate: 'health'` verified CLEAN with the gate deleted -- measured, not
+  // inferred. That turns a staged run which checks between every wave into one
+  // that rolls through all of them unchecked, on the strength of a confirmation
+  // somebody gave for the careful version.
+  //
+  // Checked HERE rather than by adding a line to `approvalCommands`, which was
+  // the first attempt: a gate is not a command, and putting it in that list
+  // made a one-step job report itself as "2 step(s)" in the refusal an operator
+  // reads.
+  const record = approval as { gate?: unknown }
+  // Any value that is PRESENT is the approved gate, including one that is not a
+  // string. A `typeof` filter was here first and made things worse: it turned a
+  // corrupt or tampered value into `undefined`, which takes the
+  // pre-upgrade-record branch below and ALLOWS the run. A value nobody can
+  // interpret must refuse, not wave through.
+  const approvedGate = record.gate === undefined ? undefined : record.gate
+  // An absent `gate` on the SPEC is `none` — no gate — and must compare as
+  // such. Reading it as "whatever was approved" would make deleting the field
+  // outright, which is the likelier edit, the one way past this check.
+  const now: unknown = spec.gate ?? 'none'
+  // A record with NO gate field predates this check and cannot say what it was
+  // confirmed with. Refusing every such job would strand runs launched by the
+  // previous build mid-flight, and the risk it guards against needs an operator
+  // to have edited a spec between launch and resume. It is allowed, and this
+  // comment is the record of that trade.
+  if (approvedGate !== undefined && approvedGate !== now) {
+    return {
+      ok: false,
+      reason:
+        `this run was confirmed with the stage gate set to \`${approvedGate}\` and it is now ` +
+        `\`${now}\`. The gate decides whether each wave is checked before the next one starts, ` +
+        'so the two are different blast radii. Confirm it again.'
+    }
+  }
+  return verdict
 }
 
 /**

@@ -432,6 +432,20 @@ export interface CommandApproval {
   /** The phrase typed, where one was required. Null where none was. */
   phrase: string | null
   confirmedAt: number
+  /**
+   * The stage gate this run was confirmed with, where the surface has one.
+   *
+   * A STRING rather than a `JobGate`, because this file must not import from
+   * jobs.ts -- jobs.ts imports from here. The job layer owns the vocabulary and
+   * is the only thing that compares it.
+   *
+   * ABSENT means two different things and only one of them is a hole: a surface
+   * with no gates at all (the broadcast panel), and a record minted before this
+   * field existed. `verifyJobApproval` treats the second as "cannot tell",
+   * which keeps a job launched by an older build resumable — see the comment
+   * there for why that is the safe end of the compatibility trade.
+   */
+  gate?: string
 }
 
 export type ApprovalVerdict = { ok: true } | { ok: false; reason: string }
@@ -476,6 +490,7 @@ export function approvalFor(o: {
   plan: { risk: BroadcastRisk; confirmation: BroadcastConfirmation }
   phrase?: string | null
   confirmedAt: number
+  gate?: string
 }): CommandApproval {
   return {
     v: 1,
@@ -492,7 +507,8 @@ export function approvalFor(o: {
     risk: o.plan.risk,
     confirmation: o.plan.confirmation,
     phrase: o.phrase ?? null,
-    confirmedAt: o.confirmedAt
+    confirmedAt: o.confirmedAt,
+    ...(o.gate === undefined ? {} : { gate: o.gate })
   }
 }
 
