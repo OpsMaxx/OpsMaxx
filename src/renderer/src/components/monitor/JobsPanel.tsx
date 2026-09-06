@@ -92,7 +92,6 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
     setAction(jump.action)
     setUnit(jump.unit)
     setPicked([jump.serverId])
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jump])
   const [pending, setPending] = useState<{
     spec: ReturnType<typeof composeJobSpec>
