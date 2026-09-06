@@ -1,0 +1,9 @@
+===SP-KERNEL-RUNNING===
+6.8.0-136-generic
+===SP-KERNEL-BOOT===
+===SP-KERNEL-DPKG===
+===SP-KERNEL-DPKGARCH===
+===SP-KERNEL-RPM===
+package kernel is not installed
+===SP-KERNEL-RPMNAME===
+x86_64

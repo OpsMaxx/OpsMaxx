@@ -45,17 +45,42 @@
 // kernel is running against which is installed, and that is a question the
 // restart marker does not answer either way.
 //
-// ON RPM HOSTS THIS REPORTS UNKNOWN, DELIBERATELY. `rpm -q kernel` and
-// `needs-restarting -r` were not measured -- there is no RHEL-family host here
-// -- and an unverified parser standing between an operator and "you must
-// reboot" is worse than saying it was not read. That is the same call
-// `engineUpgrade` made about the installed set, for the same reason.
+// THE RPM SIDE WAS MEASURED TOO, in an almalinux:9 container with TWO kernels
+// installed -- which is a real case rather than a contrived one, because RPM
+// treats the kernel as an "installonly" package and genuinely keeps versions
+// side by side. Three findings there:
+//
+//  * `rpm -qa 'kernel*'` IS THE WRONG QUERY. Two installed kernels produce
+//    EIGHT rows, because `kernel-core`, `kernel-modules` and
+//    `kernel-modules-core` all match the glob and none of them is a kernel.
+//    Prefix-matching on `kernel-` does not help: `kernel-core-5.14.0-...` has
+//    that prefix too. `rpm -q kernel` queries the package NAME exactly and
+//    returns only the two.
+//  * `needs-restarting -r` EXITS 1 WHEN A REBOOT IS REQUIRED and 0 when not,
+//    measured both ways in two containers. THAT READ IS NOT REPEATED HERE:
+//    `hostFacts` already runs it on this family and takes its exit code, and a
+//    second reader of one fact is one of them drifting -- the same rule the
+//    Debian side follows. What was learned in passing, and is NOT collected
+//    today, is that it also NAMES what changed (`kernel`, `linux-firmware` in
+//    the two-kernel container), which is the RHEL counterpart of Debian's
+//    `.pkgs` file and which hostFacts discards.
+//  * rpm's own `labelCompare` orders `687.39 < 687.42`, `99 < 100`, `9 < 10`
+//    and `1.0~rc1 < 1.0` -- the same four answers dpkg gave, so one comparator
+//    serves both.
+//
+// What is still NOT verified is the join between `uname -r` and the package
+// version on a running RHEL host, because a container reports the kernel of the
+// machine underneath it. So the running kernel is matched against the installed
+// list and, when it matches NONE of them, that is reported as such rather than
+// assumed to be the oldest or the newest.
 
 export const KERNEL_MARKERS = {
   running: '===SP-KERNEL-RUNNING===',
   boot: '===SP-KERNEL-BOOT===',
   dpkg: '===SP-KERNEL-DPKG===',
-  dpkgArch: '===SP-KERNEL-DPKGARCH==='
+  dpkgArch: '===SP-KERNEL-DPKGARCH===',
+  rpm: '===SP-KERNEL-RPM===',
+  rpmName: '===SP-KERNEL-RPMNAME==='
 } as const
 
 /**
@@ -74,7 +99,17 @@ export function buildKernelStatusCommand(): string {
     // RPM hosts answer nothing above. Asking dpkg's architecture is how the
     // parser knows it was talking to a dpkg host at all, rather than reading an
     // empty section as "no kernels installed".
-    `echo "${KERNEL_MARKERS.dpkgArch}"; dpkg --print-architecture 2>/dev/null || true`
+    `echo "${KERNEL_MARKERS.dpkgArch}"; dpkg --print-architecture 2>/dev/null || true`,
+    // `rpm -q kernel`, NOT `rpm -qa 'kernel*'`: the glob returns kernel-core,
+    // kernel-modules and kernel-modules-core as well, which is eight rows for
+    // two kernels. Measured.
+    `echo "${KERNEL_MARKERS.rpm}"; rpm -q kernel 2>/dev/null || true`,
+    // NOT `needs-restarting`. `hostFacts` already runs it, on this family
+    // specifically, and takes its exit code -- so running it here would be the
+    // second reader of one fact that the Debian side is explicitly arranged to
+    // avoid. What is asked instead is whether rpm is even here, so that "no
+    // kernels" can be told apart from "not an rpm host".
+    `echo "${KERNEL_MARKERS.rpmName}"; rpm --eval '%{_arch}' 2>/dev/null || true`
   ].join('; ')
 }
 
@@ -101,6 +136,8 @@ export interface KernelStatus {
   installed: string[]
   /** Images actually present in /boot, newest last. */
   onBoot: string[]
+  /** Which package manager answered, or null when neither did. */
+  family: 'dpkg' | 'rpm' | null
   /**
    * Whether this host answered as a dpkg host at all.
    *
@@ -139,7 +176,20 @@ export function parseKernelStatus(output: string): KernelStatus {
 
   const dpkg = section(output, KERNEL_MARKERS.dpkgArch).trim() !== ''
 
-  return { running, installed, onBoot, dpkg }
+  // `kernel-5.14.0-687.42.1.el9_8.x86_64` -> `5.14.0-687.42.1.el9_8.x86_64`,
+  // which is the shape `uname -r` uses on this family. A host with no kernel
+  // package prints `package kernel is not installed`, which matches nothing.
+  const rpmInstalled: string[] = []
+  for (const line of section(output, KERNEL_MARKERS.rpm).split('\n')) {
+    const m = line.trim().match(/^kernel-(\d[\w.+-]*)$/)
+    if (m !== null) rpmInstalled.push(m[1])
+  }
+  rpmInstalled.sort(compareKernelVersions)
+
+  const rpm = section(output, KERNEL_MARKERS.rpmName).trim() !== ''
+  const family = dpkg ? 'dpkg' : rpm ? 'rpm' : null
+
+  return { running, installed: dpkg ? installed : rpmInstalled, onBoot, dpkg, family }
 }
 
 /**
@@ -233,13 +283,22 @@ export function kernelReport(s: KernelStatus, rebootRequired: boolean | null): K
           : `This host is running ${s.running} and its package manager has recorded that a restart is required. The reason is not a newer kernel — nothing newer than the running one is installed.`
     }
   }
-  if (!s.dpkg) {
+  if (s.family === null) {
     return {
       ...base,
       verdict: 'unknown',
-      // The RPM path was never measured. An unverified parser standing between
-      // an operator and "you must reboot" is worse than saying it was not read.
-      detail: `This host is running ${s.running}. Its installed kernels were not read: this build only knows how to ask dpkg, so on an RPM host the question is unanswered rather than answered no.`
+      detail: `This host is running ${s.running}. Neither dpkg nor rpm answered, so its installed kernels are unknown rather than absent.`
+    }
+  }
+  // The running kernel should be one of the installed ones. When it is not, say
+  // so: on RPM the join between `uname -r` and the package version is a
+  // convention this build has not verified against a running RHEL kernel, and
+  // guessing which end of the list it belongs at would be inventing the answer.
+  if (newest !== null && !s.installed.includes(s.running)) {
+    return {
+      ...base,
+      verdict: 'unknown',
+      detail: `This host is running ${s.running}, which is not among the kernels its package manager reports installed (${s.installed.join(', ')}). That usually means the kernel came from somewhere the package manager does not know about, and whether a newer one is waiting cannot be answered from here.`
     }
   }
   if (newest === null) {
