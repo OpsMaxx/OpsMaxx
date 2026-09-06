@@ -23,6 +23,7 @@ import {
   type ComposeServiceRunState
 } from '../../../../shared/compose'
 import type { DockerContainer } from '../../../../shared/docker'
+import { EnvValueWrite } from './EnvValueWrite'
 import type { Server } from '../../types'
 
 // Compose, the file half, sitting under the container list that already groups
@@ -194,6 +195,22 @@ export function ComposePanel({
     } finally {
       setLoading(false)
     }
+  }
+
+  /** Re-read the env summaries for the paths already on screen.
+   *
+   *  NAMES ONLY, through the same `envNames` channel as the first read -- a
+   *  write does not earn a different, looser read afterwards. What it refreshes
+   *  is the `(set)` / `(empty)` marker, which is the only thing about a
+   *  variable this panel is ever allowed to know. */
+  const reloadEnvNames = async (): Promise<void> => {
+    const paths = (envFiles ?? []).map((f) => f.path)
+    if (paths.length === 0) return
+    const env = await bridge()?.envNames?.(cfg, paths, { sudo })
+    if (env?.ok) {
+      setEnvFiles(env.files)
+      setEnvError(null)
+    } else setEnvError(env ? env.detail : 'the env files could not be read')
   }
 
   const openProject = async (name: string): Promise<void> => {
@@ -604,18 +621,45 @@ export function ComposePanel({
                   {envFiles !== null && (
                     <div style={{ marginTop: 6 }}>
                       {envFiles.map((f) => (
-                        <div key={f.path} className="cron-row">
-                          <FileText size={12} className="faint" />
-                          <span className="mono cron-when">{f.path}</span>
-                          <span className="faint cron-desc mono">
-                            {!f.readable
-                              ? 'could not be read'
-                              : f.names.length === 0
-                                ? 'declares nothing'
-                                : f.names
-                                    .map((n) => `${n.name}=${n.set ? '(set)' : '(empty)'}`)
-                                    .join('  ')}
-                          </span>
+                        <div key={f.path} className="col" style={{ gap: 2 }}>
+                          <div className="cron-row">
+                            <FileText size={12} className="faint" />
+                            <span className="mono cron-when">{f.path}</span>
+                            <span className="faint cron-desc mono">
+                              {!f.readable
+                                ? 'could not be read'
+                                : f.names.length === 0
+                                  ? 'declares nothing'
+                                  : ''}
+                            </span>
+                          </div>
+                          {/* One row per variable rather than one joined line,
+                              so each name can carry its own write button. The
+                              marker is still all this panel knows: `(set)` says
+                              the right-hand side is non-empty and nothing
+                              anywhere here says what it is. */}
+                          {f.readable &&
+                            f.names.map((n) => (
+                              <div
+                                key={n.name}
+                                className="row"
+                                style={{ gap: 8, paddingLeft: 20, flexWrap: 'wrap' }}
+                              >
+                                <span className="mono faint" style={{ fontSize: 11 }}>
+                                  {n.name}={n.set ? '(set)' : '(empty)'}
+                                </span>
+                                {server !== undefined && (
+                                  <EnvValueWrite
+                                    cfg={cfg}
+                                    serverId={server.id}
+                                    path={f.path}
+                                    name={n.name}
+                                    sudo={sudo}
+                                    onWritten={() => void reloadEnvNames()}
+                                  />
+                                )}
+                              </div>
+                            ))}
                         </div>
                       ))}
                     </div>

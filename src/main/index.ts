@@ -120,6 +120,7 @@ import { DockerReader } from './services/docker'
 import { ComposeReader } from './services/compose'
 import { buildDockerLogsCommand } from '../shared/docker'
 import type { DockerAction, DockerLogsOptions, DockerReclaimItem } from '../shared/docker'
+import { toVaultDescriptor, type VaultIndexResult } from '../shared/vaultIndex'
 import type {
   ComposeEnvWriteResult,
   ComposeImageWriteRequest,
@@ -2353,6 +2354,22 @@ ipcMain.handle(
  * the host and unredacted in that host's output, which is the worse of the two
  * orderings -- registering first can at worst redact a value that never landed.
  */
+/**
+ * The vault as a list of NAMES, for a picker that hands main a reference.
+ *
+ * Deliberately not a flag on `vault:list`: that channel returns entries with
+ * their passwords, and the modules that need to offer a choice are exactly the
+ * ones forbidden to call it. The projection happens HERE, in main, so nothing
+ * downstream can decide to include a little more.
+ */
+ipcMain.handle('vault-index:list', (): VaultIndexResult => {
+  const r = vaultList()
+  if (!r.ok || !r.entries) return { ok: false, error: r.error ?? 'The vault is locked.' }
+  // `toVaultDescriptor` rather than an inline literal: see its own comment,
+  // an inline one here type-checked with `password` added to it.
+  return { ok: true, entries: r.entries.map(toVaultDescriptor) }
+})
+
 ipcMain.handle(
   'compose:write-env-value',
   async (

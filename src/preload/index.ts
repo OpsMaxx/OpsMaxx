@@ -149,6 +149,7 @@ import type {
   VpnDiagnoseResult,
   VpnDiagnoseTarget
 } from '../shared/vpn'
+import type { VaultIndexResult } from '../shared/vaultIndex'
 import type { KnownHost } from '../main/services/knownhosts'
 import type { SshConfigHost } from '../shared/sshconfig'
 import type {
@@ -1091,6 +1092,17 @@ const api = {
     },
     replyPrompt: (id: string, value: string | null): void =>
       ipcRenderer.send('vpn:prompt-reply', id, value)
+  },
+  /**
+   * The vault as NAMES, for a picker.
+   *
+   * A separate namespace from `vault` on purpose: `vault.list()` returns
+   * passwords, `vault` is forbidden to modules, and a names-only method sitting
+   * inside it would make the whole namespace legal for them again. See
+   * `shared/vaultIndex.ts`.
+   */
+  vaultIndex: {
+    list: (): Promise<VaultIndexResult> => ipcRenderer.invoke('vault-index:list')
   },
   vault: {
     status: (): Promise<VaultStatus> => ipcRenderer.invoke('vault:status'),
