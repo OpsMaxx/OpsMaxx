@@ -846,6 +846,15 @@ mutations, 7 killed — two of which found real defects in the first version: a 
 (likelier than `'none'`) slipped through, and a `typeof` guard turned a corrupt recorded value into
 "cannot tell, carry on" instead of a refusal.
 
+*A second limit, found by trying to wire the two together.* A chain is a job for **one node**:
+`kubectl cordon <node>` names its node, and a `JobSpec` carries one list of steps for every target.
+So patching three nodes is three jobs, and nothing sequences them or holds the second until the
+first is Ready again — which is exactly what waves are for. Staged multi-node maintenance therefore
+needs per-target step templating in the job engine, a spec whose commands differ per host, which
+changes what an approval record covers. It is stated in the module rather than left to be
+discovered as a cordon naming the wrong machine. It also means the chain and the node-aware gate
+serve different shapes of run and cannot be wired to each other.
+
 *What is NOT done, and it is the reason this is not marked shipped.* **Nothing populates the gate's
 node reading.** `gateHealthFor` reads the fleet sampler's cache, deliberately and correctly — a gate
 with its own health probe would be a second opinion on "is this host healthy". There is no cached

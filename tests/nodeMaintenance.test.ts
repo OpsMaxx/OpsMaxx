@@ -137,6 +137,21 @@ describe('it does not pretend to have drained anything', () => {
   })
 })
 
+describe('one node per job, which is a limit and not an oversight', () => {
+  // `kubectl cordon <node>` names its node and a JobSpec carries one list of
+  // steps for every target, so a chain is a job for exactly one node. Patching
+  // three is three jobs, and nothing sequences them — which is what waves are
+  // for and is why staged multi-node maintenance is not expressible yet.
+  it('bakes exactly one node name into the plan', () => {
+    const p = okPlan()
+    const named = [...p.steps, ...p.rollback].filter((s) => s.command.includes('k3s-node-1'))
+    expect(named).toHaveLength(3)
+    for (const s of [...p.steps, ...p.rollback]) {
+      expect(s.command).not.toMatch(/\{node\}|\$NODE|%s/)
+    }
+  })
+})
+
 describe('the sentence the operator reads', () => {
   it('says what happens to the node and when it takes work again', () => {
     const s = nodeMaintenanceSummary('k3s-node-1', okPlan())
