@@ -771,9 +771,34 @@ steps and goes through the same dialog, so `planJob` grades it on its OWN comman
 `start` with a `stop` is still a stop. Offered only once the job has stopped, and a test asserts
 `jobRunner.ts` contains no reference to the field at all.
 
-**Deployment rollback.** Compose: a revert is an image edit to the previous tag, and the app
-does not remember the previous tag — a small per-project "last applied image" record is new.
-1 week. Kubernetes: `rollout undo` **contradicts the header** — it rewrites `.spec.template`,
+**Deployment rollback — SHIPPED for compose.** The premise above was wrong, and finding that out
+was most of the work. The app does not need to remember the previous tag: `buildComposeWriteCommand`
+has always run `cp -p <file> <file>.opsmaxx-bak` BEFORE writing, so the previous version of the
+file is already on the host. That record beats anything the app could keep — it survives the app
+being closed, reinstalled or run from a colleague's laptop, and it cannot drift from the file it
+describes because it IS the file. No new store.
+
+A revert is an image edit, NOT a file restore: copying the backup over the file would also undo
+every unrelated change made since — a port, an env var, a service somebody added this morning. The
+backup is read for ONE value, and the revert is then an ordinary edit of the current file back to
+it: same planner, same approval, same `expect` check, same write. The panel button opens the
+existing edit form pre-filled, so there is no second write path in the UI either, and
+`composePanel`'s "exactly these verbs" guard is where a roll-back that wrote on click would show up.
+
+`planComposeRevert` + `composeServiceImage` in `shared/compose.ts`, sharing ONE `locateComposeImage`
+with the editor — they were the same twenty lines twice for an hour, which is long enough for the
+two to disagree about which `image:` belongs to a service. Refusals are separate answers, not one:
+`no-backup`, `not-in-backup`, `not-in-file`, `same-image`, `backup-denied`, `unreachable`. The
+three-way backup read exists because the ordinary compose read ends in `2>&1`, so a missing file
+comes back as a successful read whose "content" is `head: cannot open` — three facts collapsed into
+one wrong sentence. **A host that did not answer is never reported as "nothing to roll back."**
+
+It says what it is and promises nothing: one level deep, "the file as it was immediately before
+OpsMaxx last wrote to it" — not the last known good version and not what is running. 11
+mutations, 11 killed, including one that revealed a real bug: an empty `.opsmaxx-bak` was being
+called a missing one. All three read states verified against a real host.
+
+Kubernetes: `rollout undo` **contradicts the header** — it rewrites `.spec.template`,
 diverges from git, and "leaves the cluster somewhere the user has to remember to undo", which is
 the file's own definition of `edit` (`kubernetes.ts:52-58`, `:1167-1172`). If wanted it is a
 recorded reversal in the header, graded like drain, with a caveat that live now differs from

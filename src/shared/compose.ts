@@ -1498,15 +1498,40 @@ export type ComposeImageEditPlan =
  * service key's level ends it — which is also why a service whose `image:` is
  * inside a nested map is not matched and is refused rather than guessed at.
  */
-export function planComposeImageEdit(
-  fileText: string,
-  service: string,
-  newRef: string
-): ComposeImageEditPlan {
-  if (!validateComposeService(service)) return { ok: false, reason: 'not a valid service name' }
-  if (!validateImageRef(newRef)) {
-    return { ok: false, reason: `\`${newRef}\` is not a valid image reference` }
-  }
+/** Where a service's own `image:` line is, and what is on it. */
+interface ComposeImageLine {
+  /** 1-based, as the panel shows it. */
+  line: number
+  raw: string
+  /** The whitespace before `image:`, and between the colon and the value. */
+  indent: string
+  gap: string
+  /** `'`, `"` or empty — whatever the file already used, preserved. */
+  quoteChar: string
+  /** The reference itself, trimmed. */
+  value: string
+  /** Anything after the value, comment included. */
+  trailing: string
+}
+
+type ComposeImageLocation = { ok: true; at: ComposeImageLine } | { ok: false; reason: string }
+
+/**
+ * Find the ONE line, and nothing else.
+ *
+ * ONE derivation, called by the edit and by the read of what a service is
+ * currently pinned to. They were the same twenty lines twice for about an hour
+ * and that is exactly long enough for the two to disagree about which `image:`
+ * belongs to the service -- the failure mode being a revert that reads a tag
+ * out of a `build:` block and writes it over the real one.
+ *
+ * Locate `services:`, locate the service key one indent level below it, locate
+ * that block's `image:` line. The indentation is what bounds the block -- the
+ * next line indented at or above the service key's level ends it -- which is
+ * also why a service whose `image:` is inside a nested map is not matched and
+ * is refused rather than guessed at.
+ */
+function locateComposeImage(fileText: string, service: string): ComposeImageLocation {
   const lines = fileText.split('\n')
 
   let inServices = false
@@ -1556,17 +1581,232 @@ export function planComposeImageEdit(
     if (m === null) continue
     const rest = m[3]
     const valueMatch = rest.match(/^(['"]?)([^'"#]*?)\1(\s*(?:#.*)?)$/)
-    if (valueMatch === null) return { ok: false, reason: `could not read the image value on line ${i + 1}` }
-    const quoteChar = valueMatch[1]
-    const from = valueMatch[2].trim()
-    if (from === '') return { ok: false, reason: `\`${service}\` has an empty image value` }
-    const trailing = valueMatch[3]
-    const after = `${m[1]}image:${m[2]}${quoteChar}${newRef}${quoteChar}${trailing}`
-    return { ok: true, service, line: i + 1, from, to: newRef, before: line, after }
+    if (valueMatch === null) {
+      return { ok: false, reason: `could not read the image value on line ${i + 1}` }
+    }
+    const value = valueMatch[2].trim()
+    if (value === '') return { ok: false, reason: `\`${service}\` has an empty image value` }
+    return {
+      ok: true,
+      at: {
+        line: i + 1,
+        raw: line,
+        indent: m[1],
+        gap: m[2],
+        quoteChar: valueMatch[1],
+        value,
+        trailing: valueMatch[3]
+      }
+    }
   }
 
   if (!inService) return { ok: false, reason: `\`${service}\` is not declared in this file` }
   return { ok: false, reason: `\`${service}\` declares no image in this file — it is built, not pulled` }
+}
+
+/**
+ * What a service is pinned to in this text, as written.
+ *
+ * A READ, and the reason it is exported: a revert needs to know what the
+ * previous file said without planning an edit against it, and planning a throw
+ * away edit just to read the `from` field would tie the read to the validity of
+ * a reference nobody intends to write.
+ */
+export function composeServiceImage(
+  fileText: string,
+  service: string
+): { ok: true; image: string } | { ok: false; reason: string } {
+  if (!validateComposeService(service)) return { ok: false, reason: 'not a valid service name' }
+  const at = locateComposeImage(fileText, service)
+  return at.ok ? { ok: true, image: at.at.value } : { ok: false, reason: at.reason }
+}
+
+/**
+ * Find the ONE line to change, and change nothing else.
+ *
+ * A text edit rather than a YAML round trip, and that is the decision here. The
+ * round trip is easy to write and it rewrites the whole file: it drops every
+ * comment, reorders keys, reflows anchors and normalises quoting. The operator
+ * asked to change a tag; handing them a diff touching two hundred lines means
+ * they cannot review it, and a compose file's comments are frequently the only
+ * documentation a stack has.
+ */
+export function planComposeImageEdit(
+  fileText: string,
+  service: string,
+  newRef: string
+): ComposeImageEditPlan {
+  if (!validateComposeService(service)) return { ok: false, reason: 'not a valid service name' }
+  if (!validateImageRef(newRef)) {
+    return { ok: false, reason: `\`${newRef}\` is not a valid image reference` }
+  }
+  const found = locateComposeImage(fileText, service)
+  if (!found.ok) return { ok: false, reason: found.reason }
+  const { at } = found
+  const after = `${at.indent}image:${at.gap}${at.quoteChar}${newRef}${at.quoteChar}${at.trailing}`
+  return { ok: true, service, line: at.line, from: at.value, to: newRef, before: at.raw, after }
+}
+
+// ---------------------------------------------------------------------------
+// DEPLOYMENT ROLLBACK
+// ---------------------------------------------------------------------------
+//
+// "We shipped v2, it is bad, put v1 back."
+//
+// THE APP REMEMBERS NOTHING, AND DOES NOT NEED TO. The roadmap assumed a new
+// per-project "last applied image" record, because the app does not remember
+// the previous tag. It does not have to: `buildComposeWriteCommand` has always
+// run `cp -p <file> <file>.opsmaxx-bak` BEFORE the write, so the previous
+// version of the file is already on the host. That record is better than
+// anything this app could keep -- it survives the app being closed,
+// reinstalled, or run from somebody else's laptop, and it cannot drift from
+// the file it describes because it IS the file.
+//
+// A REVERT IS AN IMAGE EDIT, NOT A FILE RESTORE. Copying the backup over the
+// file would also undo every unrelated change anybody made in between --
+// a port, an environment variable, a service added by a colleague this morning.
+// So the backup is read for ONE value, the tag that service used to be pinned
+// to, and the revert is then an ordinary edit of the current file back to it:
+// same planner, same approval, same dialog, same write.
+//
+// WHAT IT IS, SAID PLAINLY. One level deep, and it is "the file as it was
+// immediately before OpsMaxx last wrote to it" -- NOT "the last known good
+// version" and not "what is running". Those are three different claims and only
+// the first is true. A stack whose bad tag was applied by two OpsMaxx edits
+// has a backup holding the first bad tag, and `revertDescription` says which
+// edit it is undoing so nobody reads it as a guarantee.
+
+/**
+ * Reading the backup, with ABSENT and COULD-NOT-ASK kept apart.
+ *
+ * The ordinary compose read cannot answer this. It ends in `2>&1`, so a missing
+ * file comes back as a successful read whose "content" is `head: cannot open
+ * ...` — which parses as a compose file declaring no services, and would be
+ * reported as "this service is not in the backup". Three different facts
+ * collapsed into one wrong sentence.
+ *
+ * The distinction is the whole point here. "There is nothing to roll back" is a
+ * fine thing to tell somebody; saying it to somebody whose SERVER JUST DID NOT
+ * ANSWER is telling them their stack is fine because we could not look.
+ */
+export const COMPOSE_BACKUP_MARKER = '===SP-COMPOSE-BAK==='
+
+export type ComposeBackupState = 'present' | 'absent' | 'denied'
+
+export function composeBackupPath(path: string): string {
+  return `${path}.opsmaxx-bak`
+}
+
+export function buildComposeBackupReadCommand(
+  path: string,
+  opts: { sudo?: boolean } = {}
+): string {
+  if (!validateComposePath(path)) throw new Error('refusing to read an invalid compose file path')
+  const bak = quote(composeBackupPath(path))
+  const head = opts.sudo ? 'sudo -n head' : 'head'
+  // The state is printed BEFORE the content and read from the first line, so a
+  // compose file that happens to contain the marker cannot restate it.
+  return [
+    `if [ ! -f ${bak} ]; then echo "${COMPOSE_BACKUP_MARKER} absent"; exit 0; fi`,
+    `if [ ! -r ${bak} ]; then echo "${COMPOSE_BACKUP_MARKER} denied"; exit 0; fi`,
+    `echo "${COMPOSE_BACKUP_MARKER} present"`,
+    `${head} -c ${COMPOSE_MAX_FILE_BYTES} ${bak}`
+  ].join('\n')
+}
+
+export function parseComposeBackupRead(
+  output: string
+): { state: ComposeBackupState; text: string } | null {
+  const i = output.indexOf(COMPOSE_BACKUP_MARKER)
+  if (i === -1) return null
+  const rest = output.slice(i + COMPOSE_BACKUP_MARKER.length)
+  const nl = rest.indexOf('\n')
+  const state = (nl === -1 ? rest : rest.slice(0, nl)).trim()
+  if (state !== 'present' && state !== 'absent' && state !== 'denied') return null
+  return { state, text: nl === -1 ? '' : rest.slice(nl + 1) }
+}
+
+export type ComposeRevertRefusal =
+  | 'no-backup'
+  | 'not-in-backup'
+  | 'not-in-file'
+  | 'same-image'
+  /** The backup is there and this account may not read it. NOT the same as
+   *  absent, and never reported as "nothing to roll back". */
+  | 'backup-denied'
+  /** The server did not answer. The loudest of the five, because it is the one
+   *  that must never read as an all-clear. */
+  | 'unreachable'
+  | 'unreadable'
+
+export type ComposeRevertPlan =
+  | { ok: true; plan: Extract<ComposeImageEditPlan, { ok: true }>; from: string; to: string }
+  | { ok: false; refusal: ComposeRevertRefusal; reason: string }
+
+/**
+ * Plan a revert of one service to the tag the backup file has for it.
+ *
+ * Both texts are passed in rather than read here, for the reason every other
+ * planner in this file takes text: the caller re-reads BOTH from the host at
+ * the moment of the write, and a plan that fetched its own inputs would be
+ * planning against something nobody looked at.
+ */
+export function planComposeRevert(
+  fileText: string,
+  backupText: string | null,
+  service: string
+): ComposeRevertPlan {
+  if (!validateComposeService(service)) {
+    return { ok: false, refusal: 'unreadable', reason: 'not a valid service name' }
+  }
+  // A file this app has never written has no backup, and that is the common
+  // case rather than an error: it means there is nothing here to undo.
+  //
+  // ONLY NULL. An EMPTY backup is a different thing — the file is there and has
+  // nothing in it, which is what a `cp` that was interrupted leaves behind —
+  // and saying "there is no backup beside this file" about a file that is
+  // sitting right there is false in the direction that stops somebody looking.
+  // It falls through and is refused below for what it actually is.
+  if (backupText === null) {
+    return {
+      ok: false,
+      refusal: 'no-backup',
+      reason:
+        'there is no OpsMaxx backup beside this compose file on the server, so there is no previous tag to go back to. A backup is only written when OpsMaxx itself edits the file.'
+    }
+  }
+  const was = composeServiceImage(backupText, service)
+  if (!was.ok) {
+    return {
+      ok: false,
+      refusal: 'not-in-backup',
+      reason: `the backup file does not say what \`${service}\` was pinned to: ${was.reason}`
+    }
+  }
+  const now = composeServiceImage(fileText, service)
+  if (!now.ok) {
+    return { ok: false, refusal: 'not-in-file', reason: now.reason }
+  }
+  // Not an error and not a no-op worth hiding: it is the answer to "can I go
+  // back", and the answer is that this service never moved.
+  if (now.image === was.image) {
+    return {
+      ok: false,
+      refusal: 'same-image',
+      reason: `\`${service}\` is already on \`${was.image}\` — the last edit to this file did not change it.`
+    }
+  }
+  // Validated as an image reference on the way OUT of the backup as well as on
+  // the way in. The backup is a file on a host: it is input, not a record this
+  // app wrote and can vouch for.
+  const plan = planComposeImageEdit(fileText, service, was.image)
+  if (!plan.ok) return { ok: false, refusal: 'unreadable', reason: plan.reason }
+  return { ok: true, plan, from: now.image, to: was.image }
+}
+
+/** What the button is about to do, in one sentence, with no promise in it. */
+export function revertDescription(r: Extract<ComposeRevertPlan, { ok: true }>): string {
+  return `Put \`${r.plan.service}\` back to \`${r.to}\`, which is what it was pinned to immediately before OpsMaxx last edited this file. It is on \`${r.from}\` now. This is not a guarantee that \`${r.to}\` was working — it is the previous line, nothing more.`
 }
 
 /**
@@ -1681,6 +1921,13 @@ export interface ComposeBridge {
     path: string,
     opts?: { sudo?: boolean }
   ): Promise<{ ok: boolean; text?: string; error?: string }>
+  /** A read. Returns the plan for putting a service back to the tag the backup
+   *  beside the file holds, and writes nothing itself. */
+  planRevert(
+    cfg: unknown,
+    req: { path: string; service: string },
+    opts?: { sudo?: boolean }
+  ): Promise<ComposeRevertPlan>
   writeImageTag(
     cfg: unknown,
     req: ComposeImageWriteRequest,

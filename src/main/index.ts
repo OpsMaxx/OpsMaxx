@@ -2353,6 +2353,17 @@ ipcMain.handle(
 ipcMain.handle('compose:read-file', (_e, cfg: unknown, path: string, opts?: { sudo?: boolean }) =>
   composeReader.readFile(cfg, path, opts ?? {})
 )
+// A READ, and deliberately a separate channel from the write. It answers "what
+// was this service pinned to before OpsMaxx last edited this file" by reading
+// the backup the write path has always left beside it, and returns a PLAN.
+// Applying that plan goes back out through `compose:write-image-tag` like any
+// other tag change, so a revert cannot become a second write path with its own
+// weaker rules.
+ipcMain.handle(
+  'compose:plan-revert',
+  (_e, cfg: unknown, req: { path: string; service: string }, opts?: { sudo?: boolean }) =>
+    composeReader.planRevert(cfg, req, opts ?? {})
+)
 // The only compose channel that changes anything, and it changes one line.
 ipcMain.handle(
   'compose:write-image-tag',

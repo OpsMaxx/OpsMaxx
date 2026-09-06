@@ -3,6 +3,7 @@ import type {
   ComposeEnvProbe,
   ComposeFailure,
   ComposeImageEditPlan,
+  ComposeRevertPlan,
   ComposeImageWriteRequest,
   ComposeImageWriteResult,
   ComposeListProbe,
@@ -11,6 +12,9 @@ import type {
 } from '../../shared/compose'
 import {
   applyComposeImageEdit,
+  buildComposeBackupReadCommand,
+  parseComposeBackupRead,
+  planComposeRevert,
   buildComposeConfigCommand,
   buildComposeEnvNamesCommand,
   buildComposeListCommand,
@@ -343,6 +347,82 @@ export class ComposeReader {
    *
    * No sudo failover. See the header: a write is not a read.
    */
+  /**
+   * Plan putting one service back to the tag it had before OpsMaxx's last
+   * edit to this file.
+   *
+   * BOTH FILES ARE RE-READ HERE, at the moment the revert is planned, for the
+   * same reason `writeImageTag` re-derives its plan: the renderer is not a
+   * trust boundary, and a revert computed against a file somebody has changed
+   * since is a write aimed at a line that has moved.
+   *
+   * It returns a PLAN and writes nothing. Applying it goes back through
+   * `writeImageTag` — same approval, same confirmation, same `expect` check —
+   * because a revert is an ordinary image edit and must not become a second
+   * write path with its own weaker rules.
+   */
+  async planRevert(
+    cfg: unknown,
+    req: { path: string; service: string },
+    opts: { sudo?: boolean } = {}
+  ): Promise<ComposeRevertPlan> {
+    if (!validateComposePath(req?.path)) {
+      return { ok: false, refusal: 'unreadable', reason: 'not a valid compose file path' }
+    }
+    let backupText: string | null
+    try {
+      const r = await this.deps.exec(
+        cfg,
+        buildComposeBackupReadCommand(req.path, opts),
+        READ_TIMEOUT_MS
+      )
+      // A host that did not answer says so. This is the branch the whole
+      // three-way read exists for: reporting it as "no backup" would tell an
+      // operator there is nothing to roll back on the strength of a question
+      // nobody got an answer to.
+      if (!r.ok) {
+        return {
+          ok: false,
+          refusal: 'unreachable',
+          reason: r.error ?? 'could not reach the server, so whether there is a backup is unknown'
+        }
+      }
+      const read = parseComposeBackupRead(`${r.stdout ?? ''}${r.stderr ?? ''}`)
+      if (read === null) {
+        return {
+          ok: false,
+          refusal: 'unreadable',
+          reason: 'the server did not say whether a backup is there, so nothing was assumed about it'
+        }
+      }
+      if (read.state === 'denied') {
+        return {
+          ok: false,
+          refusal: 'backup-denied',
+          reason:
+            'a OpsMaxx backup is beside this compose file and this account may not read it. There may well be a tag to go back to — this is not a report that there is none.'
+        }
+      }
+      backupText = read.state === 'present' ? read.text : null
+    } catch (e) {
+      return {
+        ok: false,
+        refusal: 'unreachable',
+        reason: e instanceof Error ? e.message : String(e)
+      }
+    }
+
+    const current = await this.readFile(cfg, req.path, opts)
+    if (!current.ok || current.text === undefined) {
+      return {
+        ok: false,
+        refusal: 'unreachable',
+        reason: current.error ?? 'could not read the compose file'
+      }
+    }
+    return planComposeRevert(current.text, backupText, req.service)
+  }
+
   async writeImageTag(
     cfg: unknown,
     req: ComposeImageWriteRequest,
