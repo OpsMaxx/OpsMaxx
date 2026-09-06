@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { useApp } from './app'
 import type { ModuleId } from '../../../shared/modules'
+import type { LogPriority } from '../../../shared/logtail'
 
 // Which page of AI & MCP, and which page of Settings, is open. Both used to be
 // local `useState` inside their panel, which meant nothing outside the panel
@@ -50,6 +51,12 @@ export interface LogTailJumpRequest {
   target: string
   serverId: string
   nonce: number
+  /** journald filters, carried through a jump so an alert can land on the
+   *  window that explains it rather than on the whole unit's history. Unit
+   *  jumps only; the panel ignores them for files and containers, which is the
+   *  same rule `validateLogSource` enforces. */
+  priority?: LogPriority
+  since?: string
 }
 
 interface NavState {
@@ -100,10 +107,24 @@ export function openAi(section: AiSection, groupId?: string | null): void {
  * own decision about what a jump means: somebody who clicked a failed unit
  * asked to see its log, not to be shown a form about it.
  */
-export function openLogTail(serverId: string, target: string, kind: LogTailJumpRequest['kind'] = 'unit'): void {
+export function openLogTail(
+  serverId: string,
+  target: string,
+  kind: LogTailJumpRequest['kind'] = 'unit',
+  filters: { priority?: LogPriority; since?: string } = {}
+): void {
   useNav.setState({
     monitorTab: 'logTail',
-    logTailJump: { kind, target, serverId, nonce: Date.now() }
+    logTailJump: {
+      kind,
+      target,
+      serverId,
+      nonce: Date.now(),
+      // Spread rather than assigned: an absent filter must stay absent, or a
+      // jump with no window would clear one the operator had set by hand.
+      ...(kind === 'unit' && filters.priority !== undefined ? { priority: filters.priority } : {}),
+      ...(kind === 'unit' && filters.since !== undefined ? { since: filters.since } : {})
+    }
   })
   useApp.getState().setActivity('monitor')
 }
