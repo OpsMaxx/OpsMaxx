@@ -1122,6 +1122,8 @@ const fleetSampler = new FleetSampler({
   // allowPrompt: false for the same reason. This is the unattended caller, and
   // a background inventory probe must never be what raises a host-key trust
   // dialog the user cannot connect to anything they just did.
+  // The inventory, on the facts probe's own clock and only after it succeeded.
+  samplePackages: async (_key, cfg, manager) => hostFactsReader.packages(cfg, manager),
   sampleFacts: async (_key, cfg) => {
     const probe = await hostFactsReader.read(resolveChainSecrets(cfg as SshConnectConfig))
     return probe.ok ? { ok: true, facts: probe.facts } : { ok: false, error: `${probe.reason}: ${probe.detail}` }

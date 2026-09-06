@@ -20,8 +20,15 @@ import {
   HOST_FACTS_INTERVAL_MIN_MS,
   HOST_FACTS_INTERVAL_MS,
   HOST_FACT_PREFIX,
-  hostFactsToFacts
+  hostFactsToFacts,
+  type PackageManager
 } from '../../shared/hostFacts'
+import {
+  PKG_FACT_PREFIX,
+  packageFacts,
+  type InstalledPackage,
+  type InstalledPackagesRead
+} from '../../shared/installedPackages'
 import { POSTURE_FACT_PREFIX, postureToFacts } from '../../shared/posture'
 import { DRIFT_FACT_PREFIX, driftToFacts } from './drift'
 
@@ -201,6 +208,20 @@ export function metricsToFacts(host: HostMetrics): Record<string, string> {
 export interface FleetSamplerDeps {
   // metricsSample, injected so the schedule can be tested without SSH.
   sample: Sampler
+  /**
+   * The installed-package inventory, on the SAME clock as the facts probe.
+   *
+   * Optional for the reason `sampleFacts` is: a sampler built without it
+   * behaves exactly as it did before packages existed. It runs only after a
+   * successful facts probe, because it needs that probe's `packageManager` to
+   * know what to ask -- and because a host that just refused one read will
+   * refuse the next.
+   */
+  samplePackages?: (
+    key: string,
+    cfg: unknown,
+    manager: PackageManager | null
+  ) => Promise<InstalledPackagesRead>
   /**
    * The hourly host-facts probe. Optional: a sampler built without it behaves
    * exactly as it did before facts existed, which is what keeps every existing
@@ -461,6 +482,10 @@ interface PendingWrite {
   recovered?: boolean
   /** Present only on the sweeps where the facts probe was also due. */
   facts?: HostFacts
+  /** Present only when the inventory read SUCCEEDED. Absent covers both "not
+   *  due" and "the read failed", and both must leave the stored inventory
+   *  alone rather than retire it. */
+  packages?: InstalledPackage[]
   /** Present only on the sweeps where the access probe was also due. */
   access?: HostAccess
   /** Present only on the sweeps where the posture probe was also due. */
@@ -981,6 +1006,21 @@ export class FleetSampler {
             store.retireFacts(w.serverId, w.at, HOST_FACT_PREFIX, Object.keys(hostFacts))
           }
 
+          // The installed-package inventory — roadmap item 46.
+          //
+          // `w.packages` is present ONLY when the read succeeded, and that is
+          // the whole guard: an empty list here would retire every `pkg:` fact
+          // the host has and record over a thousand fact-removed events, once,
+          // the first time dpkg was busy. It is the same rule units and ports
+          // follow, and it matters more here because of the volume.
+          if (w.packages) {
+            const pkgFacts = packageFacts(w.packages)
+            for (const [key, value] of Object.entries(pkgFacts)) {
+              store.upsertFact(w.serverId, key, value, w.at)
+            }
+            store.retireFacts(w.serverId, w.at, PKG_FACT_PREFIX, Object.keys(pkgFacts))
+          }
+
           // Key and access facts — roadmap item 23, into the SAME store.
           //
           // The retirement here is the delicate part, and it is deliberately
@@ -1172,6 +1212,21 @@ export class FleetSampler {
                 this.rememberFacts(t.serverId, factsAt, probe.facts)
                 write.facts = probe.facts
                 factsEvent = { facts: probe.facts }
+                // The inventory, sequentially after the facts probe and only
+                // when it succeeded: the manager it reports is what decides
+                // which query to run, and there is nothing to ask without it.
+                if (this.deps.samplePackages) {
+                  const pkgs = await this.deps
+                    .samplePackages(fleetKey(t.serverId), t.cfg, probe.facts.packageManager)
+                    .catch((err) => ({
+                      ok: false as const,
+                      detail: err instanceof Error ? err.message : String(err)
+                    }))
+                  if (gen !== this.generation || this.disposed) return
+                  // ONLY on ok. See the write below: an empty inventory would
+                  // retire every package fact this host has.
+                  if (pkgs.ok) write.packages = pkgs.packages
+                }
               } else {
                 const error = probe.error ?? 'unavailable'
                 this.rememberFacts(t.serverId, factsAt, undefined, error)
