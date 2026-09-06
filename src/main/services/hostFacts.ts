@@ -1,4 +1,9 @@
-import type { HostFacts, HostFactsCollectOptions } from '../../shared/hostFacts'
+import type { HostFacts, HostFactsCollectOptions, PackageManager } from '../../shared/hostFacts'
+import {
+  buildInstalledPackagesCommand,
+  parseInstalledPackages,
+  type InstalledPackagesRead
+} from '../../shared/installedPackages'
 import {
   buildTimerDetailCommand,
   parseTimerDetail
@@ -194,6 +199,29 @@ export class HostFactsReader {
       return parseTimerDetail(merged)
     } catch (e) {
       return { error: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  /**
+   * Every package this host has installed.
+   *
+   * Takes the MANAGER rather than probing for one: `read()` above already
+   * establishes it, runs on the same clock, and a second detection here is a
+   * second thing to keep in step.
+   */
+  async packages(cfg: unknown, manager: PackageManager | null): Promise<InstalledPackagesRead> {
+    const command = buildInstalledPackagesCommand(manager)
+    // No manager, or one this build has no query for. Not an empty inventory.
+    if (command === null) {
+      return { ok: false, detail: 'this host has no package manager this build can query' }
+    }
+    try {
+      const r = await this.deps.exec(cfg, command, HOST_FACTS_TIMEOUT_MS)
+      if (!r.ok) return { ok: false, detail: r.error ?? 'could not reach the server' }
+      const merged = (r.stderr ?? '') === '' ? (r.stdout ?? '') : `${r.stdout ?? ''}\n${r.stderr}`
+      return parseInstalledPackages(merged)
+    } catch (e) {
+      return { ok: false, detail: e instanceof Error ? e.message : String(e) }
     }
   }
 
