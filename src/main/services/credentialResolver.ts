@@ -129,6 +129,8 @@ export function resolveChainSecrets<T extends SshHop & { serverId?: string; hops
 // Raw secret values known for a server, used only to redact them out of
 // command/file output returned to an AI agent — never returned to a caller
 // directly.
+import { envSecretRefsForServer } from './envSecretRegistry'
+
 export function knownSecretValuesForServer(serverId: string): string[] {
   const raw = getSecret(serverId)
   if (!raw) return []
@@ -145,10 +147,35 @@ export function knownSecretValuesForServer(serverId: string): string[] {
         /* locked: nothing to redact, because nothing could be resolved either */
       }
     }
-    return values.filter((v): v is string => !!v)
+    return [...values, ...envSecretValuesForServer(serverId)].filter((v): v is string => !!v)
   } catch {
     return []
   }
+}
+
+/**
+ * Values this app has WRITTEN into a file on that server, resolved now.
+ *
+ * A `.env` value comes from a vault entry the operator picked, which is
+ * frequently not the entry the SSH connection uses, so it is not in the blob
+ * above. Without this the app would put a secret on a host and then print it
+ * back unredacted from that host's own output.
+ *
+ * Resolved at call time and never cached: a locked vault yields nothing to
+ * redact, which is the same answer the block above gives and for the same
+ * reason -- with the vault locked, nothing could have been written either.
+ */
+function envSecretValuesForServer(serverId: string): string[] {
+  const out: string[] = []
+  for (const ref of envSecretRefsForServer(serverId)) {
+    try {
+      const v = resolveVaultField(ref)
+      if (v) out.push(v)
+    } catch {
+      /* locked, or the entry is gone: nothing to redact */
+    }
+  }
+  return out
 }
 
 
