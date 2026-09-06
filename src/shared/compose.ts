@@ -98,7 +98,11 @@ import type { JobSpec, JobStep } from './jobs'
  * minimal install that did not ship the CLI plugin. Folding it into
  * `not-installed` would send someone to install docker on a host that has it.
  */
-export type ComposeFailure = DockerFailure | 'compose-unavailable' | 'invalid-project'
+export type ComposeFailure =
+  | DockerFailure
+  | 'compose-unavailable'
+  | 'invalid-project'
+  | 'compose-provider-unsupported'
 
 export const COMPOSE_FAILURE_HELP: Record<ComposeFailure, string> = {
   'not-installed':
@@ -109,6 +113,8 @@ export const COMPOSE_FAILURE_HELP: Record<ComposeFailure, string> = {
     'This user cannot talk to the docker socket, so compose cannot be asked anything. The compose FILES may still be readable — the filesystem search below does not go through the daemon.',
   'compose-unavailable':
     'Docker is here, but `docker compose` is not. That is normal on servers still running the v1 `docker-compose` script, which is a separate program with a different command line. OpsMaxx does not drive v1: its flags differ enough that guessing would be running an unverified command on someone else\u2019s server.',
+  'compose-provider-unsupported':
+    'This host runs podman, and podman delegates `compose` to an external provider — here, `podman-compose`, which is a different program with a different command line. OpsMaxx does not drive it, and the reason is not tidiness: the ONE thing that keeps a compose read from printing every password in the project is `--no-interpolate --no-env-resolution`, and podman-compose rejects both flags outright. Measured on podman 5.8.4 with podman-compose 1.6.0, `podman compose config` printed a `.env` password in plaintext and there is no flag that stops it. Reading these projects here would mean choosing between an unverified command line and a credential dump.',
   'invalid-project':
     'Compose read the file and refused it. The line below is compose\u2019s own, verbatim \u2014 it names the service and the problem, and this panel has nothing to add to it.',
   unknown: 'Compose returned an error that could not be classified. The raw message is below.'
@@ -132,6 +138,23 @@ export const COMPOSE_FAILURE_HELP: Record<ComposeFailure, string> = {
  */
 const COMPOSE_INVALID =
   /invalid compose project|^yaml:|^validating .*:|additional properties .* not allowed|has neither an image nor a build context|depends on undefined service|dependency cycle detected|^env file .* not found|is invalid because|non-string key/i
+
+/**
+ * podman delegating `compose` to an external provider, in its own words.
+ *
+ * MEASURED on podman 5.8.4. Two shapes, and they mean different things:
+ *
+ *   * `Error: looking up compose provider failed` -- exit 125, no provider
+ *     installed at all. That is compose being absent, and it is classified as
+ *     such rather than as this.
+ *   * `>>>> Executing external compose provider "/usr/bin/podman-compose"` --
+ *     a provider IS present, printed on every single command, wrapped in ANSI
+ *     escapes that `--no-ansi` does not remove.
+ *
+ * Only the second is this failure. See `COMPOSE_FAILURE_HELP` for why a present
+ * provider is refused rather than driven.
+ */
+const COMPOSE_PODMAN_PROVIDER = /Executing external compose provider/i
 
 /** The `docker compose` plugin is missing, as the CLI words it. */
 const COMPOSE_MISSING =
@@ -183,6 +206,22 @@ function blockFailure(
   const lines = nonEmptyLines(text)
   const missing = lines.find((l) => COMPOSE_MISSING.test(l))
   if (missing) return { reason: 'compose-unavailable', detail: missing }
+  // BEFORE the validator and the generic classifier, and here the order IS
+  // load-bearing. podman prints the provider banner on every command including
+  // successful ones, so a `config` that leaked a password would otherwise be
+  // read as a successful project rather than as a host this build must not
+  // read. Refusing on the banner alone is deliberate: the refusal is about
+  // WHICH PROGRAM would run, not about whether this particular run failed.
+  const provider = lines.find((l) => COMPOSE_PODMAN_PROVIDER.test(l))
+  if (provider) {
+    return {
+      reason: 'compose-provider-unsupported',
+      // The banner carries ANSI escapes; they are stripped so the panel does
+      // not render control codes into a sentence about safety.
+      // eslint-disable-next-line no-control-regex
+      detail: provider.replace(/\u001b\[[0-9;]*m/g, '').trim()
+    }
+  }
   // Before the generic classifier. The two patterns are disjoint on everything
   // measured, so the order is not currently load-bearing -- a mutation swapping
   // them changes nothing, and that is recorded here rather than defended with a
