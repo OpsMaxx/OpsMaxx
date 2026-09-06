@@ -331,11 +331,20 @@ export function extractDockerVersion(text: string): string | null {
 
 /** `<no value>` is what a Go template prints for a field the binary does not
  *  have - docker before 20.10 has no `.State`. A chip reading `<no value>` is
- *  worse than one derived from the status line everybody already reads. */
+ *  worse than one derived from the status line everybody already reads.
+ *
+ *  THE STATUS WORD IS NOT THE SAME ON BOTH ENGINES. Docker's `system df -v`
+ *  writes `Up 2 hours` and `Exited (0) 3 minutes ago`; PODMAN's writes the bare
+ *  state -- `running`, `exited`, `created` -- measured on podman 5.8.4. Two of
+ *  those matched the existing branches by luck, because `exited` and `created`
+ *  are the same word either way. `running` matched nothing and every running
+ *  container on a podman host was reported `unknown`. `podman ps` is not
+ *  affected: it emits `Up …` like docker, and a real `.State` besides. */
 function stateFrom(state: string, status: string): string {
   const s = state.trim()
   if (s !== '' && s !== '<no value>') return s
   if (/^up\b/i.test(status)) return 'running'
+  if (/^running\b/i.test(status)) return 'running'
   if (/^exited\b/i.test(status)) return 'exited'
   if (/^created\b/i.test(status)) return 'created'
   if (/^restarting\b/i.test(status)) return 'restarting'

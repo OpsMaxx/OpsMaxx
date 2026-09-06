@@ -1,0 +1,10 @@
+===SP-KERNEL-RUNNING===
+6.8.0-136-generic
+===SP-KERNEL-BOOT===
+===SP-KERNEL-DPKG===
+===SP-KERNEL-DPKGARCH===
+===SP-KERNEL-RPM===
+kernel-5.14.0-687.39.1.el9_8.x86_64
+kernel-5.14.0-687.42.1.el9_8.x86_64
+===SP-KERNEL-RPMNAME===
+x86_64

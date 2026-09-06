@@ -100,6 +100,110 @@ describe('against the real host', () => {
   })
 })
 
+// MEASURED in almalinux:9 containers on the test host. RPM treats the kernel as
+// an "installonly" package, so two versions genuinely coexist -- this is a real
+// configuration, not a contrived one.
+describe('the RPM family, measured', () => {
+  const TWO = readFileSync(
+    fileURLToPath(new URL('./fixtures/host/kernel/almalinux9-two-kernels.txt', import.meta.url)),
+    'utf8'
+  )
+  const CLEAN = readFileSync(
+    fileURLToPath(new URL('./fixtures/host/kernel/almalinux9-no-kernel.txt', import.meta.url)),
+    'utf8'
+  )
+
+  it('reads both installed kernels and knows which family answered', () => {
+    const s = parseKernelStatus(TWO)
+    expect(s.family).toBe('rpm')
+    expect(s.dpkg).toBe(false)
+    expect(s.installed).toEqual([
+      '5.14.0-687.39.1.el9_8.x86_64',
+      '5.14.0-687.42.1.el9_8.x86_64'
+    ])
+  })
+
+  // THE query finding: `rpm -qa 'kernel*'` returns EIGHT rows for two kernels,
+  // because kernel-core, kernel-modules and kernel-modules-core match too --
+  // and `kernel-core-5.14.0-…` even has the `kernel-` prefix.
+  it('asks rpm for the package name exactly, not for a glob', () => {
+    const cmd = buildKernelStatusCommand()
+    expect(cmd).toContain('rpm -q kernel')
+    expect(cmd).not.toContain("rpm -qa 'kernel*'")
+    expect(cmd).not.toContain('rpm -qa "kernel*"')
+  })
+
+  // `needs-restarting -r` was measured on this family -- exit 1 when a reboot
+  // is required, exit 0 when not -- and is deliberately NOT run here, because
+  // `hostFacts` already runs it and takes its exit code. Two readers of one
+  // fact is one of them drifting, which is the rule the Debian side follows.
+  it('does not run needs-restarting, which hostFacts already owns', () => {
+    expect(buildKernelStatusCommand()).not.toContain('needs-restarting')
+  })
+
+  // The restart answer is handed in for RPM exactly as it is for dpkg.
+  it('takes the restart answer from its caller on this family too', () => {
+    const s = parseKernelStatus(TWO)
+    expect(kernelReport(s, true).verdict).toBe('reboot-needed')
+    expect(kernelReport(s, false).verdict).not.toBe('reboot-needed')
+  })
+
+  // `package kernel is not installed` matches nothing, which is right: a
+  // container owns no kernel.
+  it('reads a container with no kernel package as unknown, not as up to date', () => {
+    const s = parseKernelStatus(CLEAN)
+    expect(s.installed).toEqual([])
+    expect(kernelReport(s, null).verdict).toBe('unknown')
+  })
+
+  // The running kernel here is the Docker host's Ubuntu one, so it is genuinely
+  // not among the rpm kernels -- and that is a real state on a host whose
+  // kernel came from outside the package manager.
+  it('refuses to guess when the running kernel is not one it lists', () => {
+    const s = parseKernelStatus(TWO)
+    // Restart outranks it, so ask the question with the restart absent.
+    const r = kernelReport(s, null)
+    expect(r.verdict).toBe('unknown')
+    expect(r.detail).toContain('not among the kernels')
+    expect(r.detail).toContain('cannot be answered from here')
+  })
+
+  // MEASURED: `rpm -qa 'kernel*'` in the same container, verbatim. EIGHT rows
+  // for TWO kernels, because kernel-core, kernel-modules and
+  // kernel-modules-core all match -- and `kernel-core-5.14.0-…` even carries
+  // the `kernel-` prefix, so prefix-matching does not save you. The digit after
+  // the dash is what separates a version from a sub-package name.
+  //
+  // It is also REVERSE SORTED, which makes it the ordering case as well: parsed
+  // in file order the newest kernel would be read as -687.39.
+  it('excludes sub-packages and re-orders, against the glob output itself', () => {
+    const glob = readFileSync(
+      fileURLToPath(new URL('./fixtures/host/kernel/almalinux9-rpm-qa-glob.txt', import.meta.url)),
+      'utf8'
+    )
+    expect(glob.trim().split('\n')).toHaveLength(9) // marker + 8 rows
+    const s = parseKernelStatus(`${glob}\n${KERNEL_MARKERS.rpmName}\nx86_64\n`)
+    expect(s.installed).toEqual([
+      '5.14.0-687.39.1.el9_8.x86_64',
+      '5.14.0-687.42.1.el9_8.x86_64'
+    ])
+    expect(s.installed.join(' ')).not.toContain('modules')
+    expect(s.installed.join(' ')).not.toContain('core')
+  })
+
+  // rpm's own labelCompare gave -1 for all four of these, matching dpkg.
+  it('orders rpm versions the way rpm does', () => {
+    for (const [a, b] of [
+      ['5.14.0-687.39.1.el9_8', '5.14.0-687.42.1.el9_8'],
+      ['5.14.0-99.el9', '5.14.0-100.el9'],
+      ['5.14.0-687.9.1.el9_8', '5.14.0-687.10.1.el9_8'],
+      ['1.0~rc1', '1.0']
+    ]) {
+      expect(compareKernelVersions(a, b), `${a} < ${b}`).toBeLessThan(0)
+    }
+  })
+})
+
 describe('ordering versions', () => {
   // Pinned against `dpkg --compare-versions` on the measured host. This is the
   // pair that makes a string comparison wrong: "99" > "100" lexically, so a
@@ -168,13 +272,13 @@ describe('what it refuses to conclude', () => {
 
   // An RPM host runs every section and produces nothing. An empty installed
   // list read as "no kernels installed" would be a confident wrong answer.
-  it('says unknown on an RPM host rather than reporting no kernels', () => {
+  it('says unknown when neither package manager answered', () => {
     const s = parseKernelStatus(sect(KERNEL_MARKERS.running, '5.14.0-427.el9.x86_64'))
-    expect(s.dpkg).toBe(false)
+    expect(s.family).toBeNull()
     const r = kernelReport(s, null)
     expect(r.verdict).toBe('unknown')
-    expect(r.detail).toContain('only knows how to ask dpkg')
-    expect(r.detail).toContain('unanswered rather than answered no')
+    expect(r.detail).toContain('Neither dpkg nor rpm answered')
+    expect(r.detail).toContain('unknown rather than absent')
   })
 
   // The section ran and the file was absent: that IS an answer.
@@ -232,7 +336,8 @@ describe('the command', () => {
   // sections that did answer.
   it('lets every section fail without taking the others with it', () => {
     const cmd = buildKernelStatusCommand()
-    expect(cmd.split('|| true').length - 1).toBe(4)
+    // One per section: running, /boot, dpkg-query, dpkg arch, rpm -q, rpm arch.
+    expect(cmd.split('|| true').length - 1).toBe(Object.keys(KERNEL_MARKERS).length)
     for (const m of Object.values(KERNEL_MARKERS)) expect(cmd).toContain(m)
   })
 
@@ -255,8 +360,9 @@ describe('the wiring', () => {
 
   // Two readers of one fact is one of them drifting. `hostFacts` already reads
   // the restart marker on BOTH package families; this read must not.
-  it('does not read the reboot marker a second time', () => {
+  it('does not read the reboot marker a second time, on either family', () => {
     const k = code('../src/shared/kernelStatus.ts')
+    // Debian's flag file and RHEL's needs-restarting are BOTH hostFacts'.
     expect(k).not.toContain('reboot-required')
     expect(k).not.toContain('needs-restarting')
   })
