@@ -1,5 +1,9 @@
 import type { HostFacts, HostFactsCollectOptions } from '../../shared/hostFacts'
 import {
+  buildTimerDetailCommand,
+  parseTimerDetail
+} from '../../shared/systemdTimers'
+import {
   buildStorageLayoutCommand,
   parseStorageLayout,
   type StorageLayout
@@ -157,6 +161,37 @@ export class HostFactsReader {
       if (!r.ok) return { error: r.error ?? 'could not reach the server' }
       const merged = (r.stderr ?? '') === '' ? (r.stdout ?? '') : `${r.stdout ?? ''}\n${r.stderr}`
       return parseStorageLayout(merged)
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  /**
+   * One timer, and the service it activates.
+   *
+   * BOTH, because a timer can fire perfectly every day into a service that
+   * fails every time -- which the test host had two live examples of. Reading
+   * only the timer answers "is it scheduled" when the question is "is it
+   * working".
+   */
+  async timer(
+    cfg: unknown,
+    timerUnit: string,
+    serviceUnit: string
+  ): Promise<{ timer: Record<string, string>; service: Record<string, string> } | { error: string }> {
+    let command: string
+    try {
+      command = buildTimerDetailCommand(timerUnit, serviceUnit)
+    } catch {
+      // The names are interpolated into a shell command, so a name that is not
+      // one is refused here rather than escaped.
+      return { error: 'that is not a systemd unit name' }
+    }
+    try {
+      const r = await this.deps.exec(cfg, command, HOST_FACTS_TIMEOUT_MS)
+      if (!r.ok) return { error: r.error ?? 'could not reach the server' }
+      const merged = (r.stderr ?? '') === '' ? (r.stdout ?? '') : `${r.stdout ?? ''}\n${r.stderr}`
+      return parseTimerDetail(merged)
     } catch (e) {
       return { error: e instanceof Error ? e.message : String(e) }
     }

@@ -845,6 +845,14 @@ const api = {
     /** Disks, filesystems, LVM, software RAID. Asked for, not sampled. */
     storage: (cfg: unknown): Promise<StorageLayout | { error: string }> =>
       ipcRenderer.invoke('fleet:storage', cfg),
+    /** One timer and the service it activates. Both, because a timer that fires
+     *  into a failing service looks healthy from the timer alone. */
+    timer: (
+      cfg: unknown,
+      timerUnit: string,
+      serviceUnit: string
+    ): Promise<{ timer: Record<string, string>; service: Record<string, string> } | { error: string }> =>
+      ipcRenderer.invoke('fleet:timer', cfg, timerUnit, serviceUnit),
     // Who can get into a server, as the sampler last collected it — roadmap
     // item 23. Read-only and never a trigger, exactly like `facts`.
     //
