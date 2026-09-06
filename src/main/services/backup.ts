@@ -1,6 +1,15 @@
 import { app, dialog, BrowserWindow } from 'electron'
 import { join } from 'node:path'
-import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  renameSync,
+  unlinkSync
+} from 'node:fs'
+import { tmpdir } from 'node:os'
 import { randomBytes, scrypt, createCipheriv, createDecipheriv } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { exportSecrets, importSecrets } from './secrets'
@@ -781,10 +790,43 @@ export type DumpSpawner = (cmd: DumpCommand) => Promise<SpawnedDump>
  *  needing pg_dump installed. */
 export const spawnDump: DumpSpawner = (cmd) =>
   new Promise((resolve, reject) => {
-    const child = spawn(cmd.binary, cmd.args, {
+    // mongodump has no password environment variable, so its credential goes in
+    // a config file it is pointed at. Written 0600 in a private directory and
+    // removed in `finally` below, whatever happens -- including a throw, which
+    // is the path that would otherwise leave a password on disk.
+    let configDir: string | null = null
+    const args = [...cmd.args]
+    if (cmd.configFile) {
+      configDir = mkdtempSync(join(tmpdir(), 'opsmaxx-dump-'))
+      const file = join(configDir, 'config.yaml')
+      writeFileSync(file, cmd.configFile.contents, { mode: 0o600 })
+      args.push('--config', file)
+    }
+    const cleanup = (): void => {
+      if (configDir === null) return
+      try {
+        rmSync(configDir, { recursive: true, force: true })
+      } catch {
+        /* the dump matters more than the tidy-up, and the file is 0600 */
+      }
+      configDir = null
+    }
+    const child = spawn(cmd.binary, args, {
       env: { ...process.env, ...cmd.env },
       stdio: ['ignore', 'pipe', 'pipe']
     })
+    // ON EXIT, NOT ON SPAWN. The first version deleted it as soon as the
+    // process existed, and a test caught that immediately: `spawn` fires when
+    // the child has been created, which is BEFORE it has run, let alone read
+    // anything -- so the config was gone by the time the command looked for it
+    // and the run failed outright.
+    //
+    // So the password is on disk for the length of the dump. That is the real
+    // trade and it is worth stating plainly: a 0600 file readable by this user
+    // and root, for as long as a dump takes, against an argv readable by every
+    // user on the machine for the same period. Better, not free.
+    child.once('error', cleanup)
+    child.once('close', cleanup)
     const out: Buffer[] = []
     let size = 0
     let err = ''

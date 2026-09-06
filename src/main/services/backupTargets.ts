@@ -672,11 +672,27 @@ interface StoredDatabase {
 /** Databases a dump can actually be taken from, for the panel to offer. Only
  *  the two engines item 18 already knows how to reach, and only the ones this
  *  machine can reach directly — see databaseDumpTarget for why. */
+/**
+ * Which dump engine a stored database maps to, or null.
+ *
+ * ONE mapping, used by both the list and the target builder. They had a copy
+ * each, which was harmless while both said "postgres or mysql" and became a bug
+ * the moment MongoDB was added to one of them: the panel offered a database the
+ * builder would have refused, or the reverse. A second place a decision is made
+ * is a second place it can be made differently.
+ */
+export function dumpEngineFor(kind: string | undefined): DumpEngine | null {
+  if (kind === 'postgres') return 'postgres'
+  if (kind === 'mysql') return 'mysql'
+  if (kind === 'mongodb') return 'mongo'
+  return null
+}
+
 export function dumpableDatabases(): { id: string; name: string; engine: DumpEngine }[] {
   const data = loadData() as { databases?: StoredDatabase[] } | null
   const out: { id: string; name: string; engine: DumpEngine }[] = []
   for (const db of data?.databases ?? []) {
-    const engine = db.kind === 'postgres' ? 'postgres' : db.kind === 'mysql' ? 'mysql' : null
+    const engine = dumpEngineFor(db.kind)
     if (!engine) continue
     if (db.sshServerId || db.vpnProfileId || db.uri) continue
     if (!db.host || !db.database) continue
@@ -699,8 +715,11 @@ export function dumpableDatabases(): { id: string; name: string; engine: DumpEng
  *  - A connection defined by a URI carries its own credentials and options in
  *    a string, and taking a host and port out of it to rebuild an argv is how
  *    a dump ends up pointed at the wrong database.
- *  - Only Postgres and MySQL: there is no mongodump or redis equivalent here,
- *    and pretending otherwise would produce an empty file with a .sql name.
+ *  - Postgres, MySQL and MongoDB. Redis is still refused, and for the reason
+ *    the others are allowed: `pg_dump`, `mysqldump` and `mongodump` are clients
+ *    that ask a server for its contents and stream them, and Redis has no such
+ *    client -- its persistence is a snapshot the SERVER writes to its own disk,
+ *    which is a different act on a different machine.
  */
 export function databaseDumpTarget(
   databaseId: string
@@ -708,10 +727,11 @@ export function databaseDumpTarget(
   const data = loadData() as { databases?: StoredDatabase[] } | null
   const db = data?.databases?.find((d) => d.id === databaseId)
   if (!db) return { error: 'That database is no longer configured.' }
-  const engine: DumpEngine | null =
-    db.kind === 'postgres' ? 'postgres' : db.kind === 'mysql' ? 'mysql' : null
+  const engine = dumpEngineFor(db.kind)
   if (!engine) {
-    return { error: `Dumps are only supported for PostgreSQL and MySQL, and this one is ${db.kind ?? 'of an unknown kind'}.` }
+    return {
+      error: `Dumps are supported for PostgreSQL, MySQL and MongoDB, and this one is ${db.kind ?? 'of an unknown kind'}. Redis is not among them: its own persistence is a snapshot the server writes, not something a client can ask for and stream.`
+    }
   }
   if (db.sshServerId || db.vpnProfileId) {
     return {

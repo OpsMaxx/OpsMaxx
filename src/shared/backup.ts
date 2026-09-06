@@ -428,12 +428,28 @@ export interface RemoteListResult {
 // Database dumps as a source
 // ---------------------------------------------------------------------------
 
-export const DUMP_ENGINES = ['postgres', 'mysql'] as const
+export const DUMP_ENGINES = ['postgres', 'mysql', 'mongo'] as const
 export type DumpEngine = (typeof DUMP_ENGINES)[number]
 
 export const DUMP_BINARY: Record<DumpEngine, string> = {
   postgres: 'pg_dump',
-  mysql: 'mysqldump'
+  mysql: 'mysqldump',
+  mongo: 'mongodump'
+}
+
+/**
+ * What a dump of each engine actually is on disk.
+ *
+ * `.sql` for the two that emit SQL text, and `.archive` for mongo -- which is
+ * BSON, not SQL, and naming it `.sql` would be a lie an operator only finds out
+ * about when they try to read it. The retention regex below accepts both,
+ * because a dump whose name it does not recognise is a dump retention never
+ * counts and never removes.
+ */
+export const DUMP_EXTENSION: Record<DumpEngine, string> = {
+  postgres: 'sql',
+  mysql: 'sql',
+  mongo: 'archive'
 }
 
 export interface DumpTarget {
@@ -450,6 +466,21 @@ export interface DumpCommand {
   /** Passed through the environment, never on the command line: an argv is
    *  world-readable in /proc and lands in shell history. */
   env: Record<string, string>
+  /**
+   * A configuration file the runner must write, pass by path, and delete.
+   *
+   * Only mongodump needs one, and only because it HAS NO PASSWORD ENVIRONMENT
+   * VARIABLE -- `PGPASSWORD` and `MYSQL_PWD` have no counterpart, and its
+   * `--password` flag is the argv exposure this whole interface exists to
+   * avoid. `--config` was measured to work: the same dump succeeded with the
+   * real password in the file and failed with `AuthenticationFailed` when the
+   * file held a wrong one, so the file is genuinely what is read.
+   *
+   * The trade is stated rather than hidden: an argv is readable by every user
+   * on the machine, and this is a 0600 file readable by this user and root that
+   * exists for the length of one dump. Better, not free.
+   */
+  configFile?: { contents: string }
 }
 
 /**
@@ -460,6 +491,28 @@ export interface DumpCommand {
  * listing on the machine, and pg_dump has no password flag at all.
  */
 export function dumpCommand(target: DumpTarget, password: string): DumpCommand {
+  if (target.engine === 'mongo') {
+    return {
+      binary: 'mongodump',
+      args: [
+        '--host', target.host,
+        '--port', String(target.port),
+        '--username', target.username,
+        // The authentication database, not the one being dumped. Getting this
+        // wrong is the commonest mongodump failure and it reports as an auth
+        // error rather than as a missing database.
+        '--authenticationDatabase', 'admin',
+        '--db', target.database,
+        // Measured: writes the archive to STDOUT, which is what the existing
+        // pipeline reads. Without it mongodump writes a DIRECTORY of BSON
+        // files and this would capture nothing at all.
+        '--archive'
+      ],
+      env: {},
+      // See DumpCommand.configFile. mongodump has no password env var.
+      ...(password ? { configFile: { contents: `password: ${password}\n` } } : {})
+    }
+  }
   if (target.engine === 'postgres') {
     return {
       binary: 'pg_dump',
@@ -513,7 +566,7 @@ export interface DumpRunReport {
 export function dumpObjectName(target: DumpTarget, when: Date): string {
   const iso = when.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
   const safe = safeDumpDatabase(target.database)
-  return `${BACKUP_OBJECT_PREFIX}dump-${safe}-${iso}.sql`
+  return `${BACKUP_OBJECT_PREFIX}dump-${safe}-${iso}.${DUMP_EXTENSION[target.engine]}`
 }
 
 /**
@@ -531,7 +584,7 @@ export function safeDumpDatabase(database: string): string {
  *  may contain `-` and `.`, so only the timestamp's fixed shape makes the
  *  boundary unambiguous. */
 const DUMP_NAME_RE = new RegExp(
-  `^${BACKUP_OBJECT_PREFIX}dump-(.+)-(\\d{8}T\\d{6}Z)\\.sql$`
+  `^${BACKUP_OBJECT_PREFIX}dump-(.+)-(\\d{8}T\\d{6}Z)\\.(?:sql|archive)$`
 )
 
 export function isDumpObjectName(name: string): boolean {
