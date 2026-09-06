@@ -38,6 +38,7 @@ import {
   stepNotice
 } from '../../shared/jobs'
 import type { GateHost } from '../../shared/patch'
+import type { GateNode } from '../../shared/nodeGate'
 import { GATE_POLL_MS, GATE_WAIT_MS, evaluateGate, gateTimeoutReason } from '../../shared/patch'
 import { redactOutput } from './secretRedaction'
 
@@ -314,6 +315,26 @@ export interface JobRunnerDeps {
    * not a pass. See gateAfterWave.
    */
   health?: (serverIds: string[]) => GateHost[]
+  /**
+   * What the CONTROL PLANE says about the hosts in a finished wave.
+   *
+   * A probe, unlike `health` above, and the distinction the comment there draws
+   * is why that is allowed: `health` must not be a second implementation of "is
+   * this host healthy", and this is not one. It asks a DIFFERENT question that
+   * nothing samples in the background -- is this machine a Kubernetes node, and
+   * did it come back Ready -- and it answers it through `judgeNodes`, which is
+   * already the app's single derivation of what a node's conditions mean.
+   *
+   * It exists because systemd and Kubernetes disagree exactly when it matters:
+   * a node that reboots into a broken kubelet answers SSH, runs no failed
+   * units, and is NotReady. Without this the gate passes it and starts the next
+   * wave.
+   *
+   * OPTIONAL. Absent means the node question is never asked and every host is
+   * `unknown`, which does not block -- exactly the behaviour of every build
+   * before this existed.
+   */
+  nodes?: (serverIds: string[]) => Promise<Map<string, GateNode>>
   /** Injected so the gate's wait is advanced by the test rather than slept
    *  through. Same contract as `schedule`. */
   sleep?: (ms: number) => Promise<void>
@@ -1151,6 +1172,26 @@ export class JobRunner {
    *     on a real timer is a test that gets flakier as this grows, and this is
    *     the piece most likely to grow.
    */
+  /**
+   * Attach what the control plane says to each host in the wave.
+   *
+   * A failure to ask is not an answer: if the probe throws, every host keeps
+   * whatever it had, which is nothing, and stays `unknown`. That is the same
+   * direction the rest of the gate leans -- it can only ever ADD a reason to
+   * stop, never remove one, and a read that did not happen must not be the
+   * thing that lets a wave through OR the thing that halts an estate.
+   */
+  private async withNodes(hosts: GateHost[]): Promise<GateHost[]> {
+    const read = this.deps.nodes
+    if (read === undefined) return hosts
+    try {
+      const map = await read(hosts.map((h) => h.serverId))
+      return hosts.map((h) => ({ ...h, node: map.get(h.serverId) }))
+    } catch {
+      return hosts
+    }
+  }
+
   private async gateAfterWave(
     req: JobRunContext,
     wave: string,
@@ -1181,7 +1222,21 @@ export class JobRunner {
     let lastStale = ''
     for (;;) {
       if (!owns() || state.cancelled) return null
-      const verdict = evaluateGate(health(serverIds), { since })
+      const base = health(serverIds)
+      // TWO PASSES, and the order is a cost decision as much as a logical one.
+      //
+      // The node read is an SSH round trip per host, and this loop runs every
+      // five seconds for up to five minutes. Asking the control plane about a
+      // host that is not answering SSH, or whose sample is older than the wave,
+      // buys nothing: the gate is already saying no. So the machines are judged
+      // first from the cached snapshot, and the cluster is only asked once they
+      // are clean -- which on a healthy wave is one read, and on a broken one is
+      // none at all.
+      const machines = evaluateGate(base, { since })
+      const verdict =
+        machines.ok && this.deps.nodes !== undefined
+          ? evaluateGate(await this.withNodes(base), { since })
+          : machines
       if (verdict.ok) {
         this.deps.store.recordEvent(
           'job-gate',
