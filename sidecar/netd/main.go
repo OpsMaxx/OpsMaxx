@@ -327,6 +327,8 @@ func (s *Server) dispatch(req *Request) {
 		s.handle(req, s.wgDown)
 	case "wg.stats":
 		s.handle(req, s.wgStats)
+	case "wg.diagnose":
+		s.handle(req, s.wgDiagnose)
 	case "wg.forward.open":
 		s.handle(req, s.forwardOpen)
 	case "wg.forward.close":
@@ -497,6 +499,20 @@ func (s *Server) wgStats(req *Request) (interface{}, error) {
 		return nil, err
 	}
 	return t.stats()
+}
+
+// wgDiagnose probes one tunnel from the inside. Read-only: it opens a TCP
+// connection and closes it, and changes nothing about the tunnel or the host.
+func (s *Server) wgDiagnose(req *Request) (interface{}, error) {
+	var p DiagnoseParams
+	if err := decodeParams(req, &p); err != nil {
+		return nil, err
+	}
+	t, err := s.lookup(p.TunnelID)
+	if err != nil {
+		return nil, err
+	}
+	return t.diagnose(&p)
 }
 
 // wgKeygen is the only method with no tunnel, no device and no state. It lives

@@ -255,6 +255,40 @@ type StatsResult struct {
 	SampledAt int64 `json:"sampledAt"`
 }
 
+// DiagnoseParams asks for the checklist in `diagnose.go`.
+//
+// Host and Port are OPTIONAL and there is no default: see that file's header.
+// Without them the handshake is still checked and the other two say, in words,
+// that nothing was asked of them.
+type DiagnoseParams struct {
+	TunnelID string `json:"tunnelId"`
+	Host     string `json:"host,omitempty"`
+	Port     int    `json:"port,omitempty"`
+}
+
+// One line of the checklist.
+type DiagnoseCheck struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	// Always present, including on `ok`. A checklist whose passing rows say
+	// nothing teaches people that the words only matter when something breaks.
+	Detail string `json:"detail"`
+	// Milliseconds for a probe that ran, SECONDS for the handshake's age --
+	// the two things this field carries are the two things those checks
+	// measured, and neither has a second meaning. Absent when nothing was
+	// timed, which is not the same as zero.
+	Elapsed int64 `json:"elapsed,omitempty"`
+}
+
+type DiagnoseResult struct {
+	TunnelID string          `json:"tunnelId"`
+	Checks   []DiagnoseCheck `json:"checks"`
+	// TCP connect time through the tunnel, present only when that check
+	// succeeded. Never a ping: see `connectCheck`.
+	LatencyMs int64 `json:"latencyMs,omitempty"`
+	SampledAt int64 `json:"sampledAt"`
+}
+
 type ForwardOpenParams struct {
 	TunnelID string `json:"tunnelId"`
 	Host     string `json:"host"`

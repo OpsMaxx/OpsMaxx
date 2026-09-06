@@ -14,6 +14,11 @@ import type {
   VpnStartResult,
   VpnState,
   VpnPeerStat,
+  VpnCheckName,
+  VpnCheckStatus,
+  VpnDiagnoseCheck,
+  VpnDiagnoseResult,
+  VpnDiagnoseTarget,
   VpnStats,
   VpnStatus,
   VpnValidation,
@@ -191,6 +196,15 @@ interface NetdUpResult {
   ifaceName?: string
   listeners: NetdListenerOut[]
   assignedIp?: string
+}
+
+/** The sidecar's `wg.diagnose` reply. Field-for-field with `DiagnoseResult` in
+ *  `sidecar/netd/protocol.go`; the shapes are two halves of one wire format. */
+interface NetdDiagnoseResult {
+  tunnelId: string
+  checks: { name: string; status: string; detail: string; elapsed?: number }[]
+  latencyMs?: number
+  sampledAt: number
 }
 
 export interface NetdStatsResult {
@@ -858,6 +872,45 @@ export function toPeerStat(clock: MonotonicClock, p: NetdPeerStats): VpnPeerStat
     txBytes: p.txBytes ?? 0,
     ...(age === undefined ? {} : { lastHandshakeSec: age })
   }
+}
+
+/**
+ * The sidecar's checklist, narrowed to this side's vocabulary.
+ *
+ * A row whose status is NOT one of the three words is dropped rather than
+ * carried through as an unknown string. The renderer switches on the status to
+ * pick a colour, and a word it has no case for renders as neither pass nor
+ * fail -- which is the one outcome a checklist may not have.
+ */
+export function toDiagnose(id: string, r: NetdDiagnoseResult): VpnDiagnoseResult {
+  const checks: VpnDiagnoseCheck[] = []
+  for (const c of r.checks ?? []) {
+    if (!isCheckName(c.name) || !isCheckStatus(c.status)) continue
+    checks.push({
+      name: c.name,
+      status: c.status,
+      detail: c.detail,
+      ...(typeof c.elapsed === 'number' && Number.isFinite(c.elapsed) ? { elapsed: c.elapsed } : {})
+    })
+  }
+  return {
+    id,
+    checks,
+    // Only ever from a connect that succeeded. A zero here would be a latency
+    // of nothing rather than a latency nobody measured.
+    ...(typeof r.latencyMs === 'number' && r.latencyMs > 0 ? { latencyMs: r.latencyMs } : {}),
+    sampledAt: typeof r.sampledAt === 'number' ? r.sampledAt : Date.now()
+  }
+}
+
+const CHECK_NAMES: readonly VpnCheckName[] = ['handshake', 'dns', 'tcp']
+const CHECK_STATUSES: readonly VpnCheckStatus[] = ['ok', 'failed', 'skipped']
+
+function isCheckName(v: string): v is VpnCheckName {
+  return (CHECK_NAMES as readonly string[]).includes(v)
+}
+function isCheckStatus(v: string): v is VpnCheckStatus {
+  return (CHECK_STATUSES as readonly string[]).includes(v)
 }
 
 /** The whole sample. Exported, and taking a clock rather than a `Run`, for the
@@ -1875,6 +1928,32 @@ export const wireguardDriver: VpnDriver<WireGuardSpec> & {
       errorCode: state === 'degraded' ? 'handshake-timeout' : undefined
     })
     return stats
+  },
+
+  /**
+   * Run the sidecar's checklist against a live tunnel.
+   *
+   * The TARGET COMES FROM THE OPERATOR and is passed through unexamined: this
+   * is a person naming a host on their own network to see whether their VPN
+   * reaches it, and a list of addresses this app considers acceptable would be
+   * wrong on every estate but the one it was written for. What keeps that
+   * honest is WHERE the call can come from: `vpn:diagnose` is a renderer
+   * channel and the MCP bridge has no route to it, because an agent that could
+   * ask this repeatedly would have a port scanner pointed through somebody's
+   * VPN. `tests/vpnDiagnose.test.ts` fails if that changes.
+   */
+  async diagnose(id: string, target: VpnDiagnoseTarget): Promise<VpnDiagnoseResult | null> {
+    const run = runs.get(id)
+    // Not an error: a tunnel that is stopping has nothing to probe, and the
+    // manager turns a null into the same sentence it uses for a profile that
+    // is not running.
+    if (!run || !run.transport || run.stopping) return null
+    const raw = await send<NetdDiagnoseResult>(run, 'wg.diagnose', {
+      tunnelId: id,
+      host: target.host,
+      port: target.port
+    })
+    return toDiagnose(id, raw)
   },
 
   openForward,

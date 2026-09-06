@@ -143,7 +143,10 @@ import type {
   VpnSpec,
   VpnStartResult,
   VpnStatus,
-  VpnValidation
+  VpnValidation,
+  VpnDiagnoseRefusal,
+  VpnDiagnoseResult,
+  VpnDiagnoseTarget
 } from '../shared/vpn'
 import type { KnownHost } from '../main/services/knownhosts'
 import type { SshConfigHost } from '../shared/sshconfig'
@@ -986,6 +989,14 @@ const api = {
       ipcRenderer.invoke('vpn:commitImport', profileName, workspaceId, kind, text, baseDir),
     logs: (id: string, limit?: number): Promise<VpnLogLine[]> =>
       ipcRenderer.invoke('vpn:logs', id, limit),
+    /** Probe a running tunnel from the inside. The host and port are the
+     *  operator's; there is no default, and a probe with neither still reports
+     *  the handshake. */
+    diagnose: (
+      id: string,
+      target: VpnDiagnoseTarget
+    ): Promise<VpnDiagnoseResult | VpnDiagnoseRefusal> =>
+      ipcRenderer.invoke('vpn:diagnose', id, target),
     dependents: (id: string): Promise<VpnDependent[]> => ipcRenderer.invoke('vpn:dependents', id),
     // A WireGuard keypair, stored the same way an imported one is: the main
     // handler puts the private key in the vault and hands back a ref. The key

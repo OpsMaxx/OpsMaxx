@@ -372,6 +372,55 @@ export interface VpnBoundListener {
   targetPort?: number
 }
 
+// ------------------------------------------------------- diagnose
+
+/**
+ * One line of the connectivity checklist.
+ *
+ * THREE WORDS AND NO FOURTH. `skipped` is not a soft `ok`: it means the check
+ * did not run, it always carries the reason in `detail`, and rendering it as a
+ * pass would put a green tick over a question nobody asked. That is the whole
+ * reason this is a vocabulary rather than a boolean.
+ */
+export type VpnCheckStatus = 'ok' | 'failed' | 'skipped'
+
+export type VpnCheckName = 'handshake' | 'dns' | 'tcp'
+
+export interface VpnDiagnoseCheck {
+  name: VpnCheckName
+  status: VpnCheckStatus
+  /** Present on every row, including the passing ones. */
+  detail: string
+  /** Milliseconds for a probe, SECONDS for the handshake's age. Absent when
+   *  nothing was timed, which is not the same as zero. */
+  elapsed?: number
+}
+
+/** What the operator asks the probe to reach. There is no default: see
+ *  `sidecar/netd/diagnose.go`. A probe that picked an address would be this app
+ *  opening a connection to a third party through somebody's VPN. */
+export interface VpnDiagnoseTarget {
+  host?: string
+  port?: number
+}
+
+export interface VpnDiagnoseResult {
+  id: string
+  checks: VpnDiagnoseCheck[]
+  /** TCP connect time through the tunnel, present only when that check passed.
+   *  NOT a ping: it includes the peer's forwarding and the far service's
+   *  accept, and the field is named for what was measured. */
+  latencyMs?: number
+  sampledAt: number
+}
+
+/** A driver with no probe says so in words. An empty checklist would render
+ *  exactly like a tunnel where everything passed. */
+export interface VpnDiagnoseRefusal {
+  id: string
+  unsupported: string
+}
+
 export interface VpnStatus {
   id: string
   kind: VpnKind

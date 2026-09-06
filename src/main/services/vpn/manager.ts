@@ -13,7 +13,10 @@ import type {
   VpnStartResult,
   VpnStats,
   VpnStatus,
-  VpnValidation
+  VpnValidation,
+  VpnDiagnoseRefusal,
+  VpnDiagnoseResult,
+  VpnDiagnoseTarget
 } from '../../../shared/vpn'
 import { isVpnRunning } from '../../../shared/vpn'
 import { isVaultLockedError, resolveVpnSecrets } from '../credentialResolver'
@@ -527,6 +530,40 @@ export async function vpnStats(id: string): Promise<VpnStats | null> {
     return await driverFor(profile.spec.kind).stats(id)
   } catch {
     return null
+  }
+}
+
+/**
+ * Probe a live tunnel from the inside.
+ *
+ * A driver with no probe is reported IN WORDS rather than as an empty
+ * checklist: "this engine cannot be probed from here" and "everything passed"
+ * must never render the same, and an empty array is the second one by
+ * accident. The same goes for a profile that is not running -- there is
+ * nothing to ask, and a checklist of failures would blame the far side for the
+ * fact that nothing was sent.
+ */
+export async function vpnDiagnose(
+  id: string,
+  target: VpnDiagnoseTarget
+): Promise<VpnDiagnoseResult | VpnDiagnoseRefusal> {
+  const profile = live.get(id)?.profile ?? vpnProfile(id)
+  if (!profile) return { id, unsupported: 'There is no such VPN profile.' }
+  const driver = driverFor(profile.spec.kind)
+  if (!driver.diagnose) {
+    return {
+      id,
+      unsupported:
+        'This engine cannot be probed from inside its own tunnel. Only WireGuard in userspace mode runs its network stack in this process; anything else would have to leave the tunnel to answer, which measures a different route.'
+    }
+  }
+  try {
+    const res = await driver.diagnose(id, target)
+    if (res) return res
+    return { id, unsupported: 'This VPN is not running, so nothing was sent.' }
+  } catch (e) {
+    const r = toVpnResult(e)
+    return { id, unsupported: r.error ?? 'The probe could not be run.' }
   }
 }
 

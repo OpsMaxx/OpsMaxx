@@ -177,6 +177,7 @@ import {
   setVpnPrompter,
   vpnAttachRenderer,
   vpnDependentsOf,
+  vpnDiagnose,
   vpnDetachRenderer,
   vpnDisposeAll,
   vpnInit,
@@ -204,6 +205,7 @@ import type {
   VpnKeygenResult,
   VpnKind,
   VpnMintResult,
+  VpnDiagnoseTarget,
   VpnProfile,
   VpnPublicKeyResult,
   VpnSpec
@@ -3455,6 +3457,13 @@ ipcMain.handle(
   ): Promise<FrpTokenResult> => storeFrpToken(req)
 )
 ipcMain.handle('vpn:logs', (_e, id: string, limit?: number) => vpnLogs(id, limit))
+// The renderer only. There is deliberately no MCP tool for this: the target is
+// an arbitrary host and port, and an agent able to call it repeatedly would
+// have a port scanner pointed through the operator's own VPN. See `diagnose`
+// in `drivers/wireguard.ts` and `tests/vpnDiagnose.test.ts`.
+ipcMain.handle('vpn:diagnose', (_e, id: string, target: VpnDiagnoseTarget) =>
+  vpnDiagnose(id, target)
+)
 ipcMain.handle('vpn:dependents', (_e, id: string) => vpnDependentsOf(id))
 // Log lines stop at the ring buffer unless a drawer is open. Refcounted, so
 // two windows watching the same profile do not silence each other.

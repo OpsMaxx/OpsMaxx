@@ -9,6 +9,7 @@ import type {
   VpnStatus
 } from '../../types'
 import { bytes, clsx } from '../../lib/format'
+import { VpnDiagnose } from './VpnDiagnose'
 
 // How healthy a profile is, as the UI cares about it. Deliberately coarser than
 // VpnState in one place and finer in another: `reconnecting` and `degraded`
@@ -214,6 +215,52 @@ export function VpnStatusCard({ profile, status }: VpnStatusCardProps): React.JS
           <AlertTriangle size={13} />
           <span>{degradedReason(profile.spec.kind, status)}</span>
         </div>
+      )}
+
+      {/* One row per peer. The aggregate above is the SUM: a site-to-site link
+          with one dead peer and one busy one shows the busy peer's traffic and
+          the busy peer's handshake, and looks healthy. Only rendered when the
+          sidecar sent rows -- an older one sends none, and an empty table would
+          say this tunnel has no peers. */}
+      {profile.spec.kind === 'wireguard' && (stats?.peers?.length ?? 0) > 0 && (
+        <div className="col" style={{ gap: 6 }}>
+          <span className="field-label">Peers</span>
+          <table className="mini-table">
+            <thead>
+              <tr>
+                <th>Peer</th>
+                <th>Handshake</th>
+                <th>Received</th>
+                <th>Sent</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(stats?.peers ?? []).map((p) => (
+                <tr key={p.publicKey}>
+                  {/* Truncated because a base64 key is 44 characters of noise
+                      and the first few identify it among a handful of peers.
+                      The whole key is on hover for anyone matching it against
+                      a server config. */}
+                  <td className="mono" title={p.publicKey}>
+                    {p.publicKey.slice(0, 10)}…
+                  </td>
+                  <td>{handshakeLabel(p.lastHandshakeSec)}</td>
+                  <td>{bytes(p.rxBytes)}</td>
+                  <td>{bytes(p.txBytes)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Userspace WireGuard only: it is the one engine whose network stack
+          runs in this process, so it is the one that can be probed without
+          leaving the tunnel and measuring a different route. The manager says
+          so in words for every other kind; this card does not offer a button
+          that can only refuse. */}
+      {profile.spec.kind === 'wireguard' && status?.state === 'connected' && (
+        <VpnDiagnose id={profile.id} />
       )}
 
       {listeners.length > 0 && (
