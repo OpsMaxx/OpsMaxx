@@ -199,6 +199,7 @@ describe('podman delegates compose, and what it delegates to leaks', () => {
   it('prints a provider banner on every command, ANSI-wrapped', () => {
     expect(out).toContain('Executing external compose provider "/usr/bin/podman-compose"')
     // `--no-ansi` does not remove it -- measured.
+    // eslint-disable-next-line no-control-regex
     expect(out).toMatch(/\u001b\[4m/)
   })
 
@@ -227,6 +228,7 @@ describe('podman delegates compose, and what it delegates to leaks', () => {
     if (p.ok) return
     expect(p.reason).toBe('compose-provider-unsupported')
     // The ANSI escapes are stripped rather than rendered into the panel.
+    // eslint-disable-next-line no-control-regex
     expect(p.detail).not.toMatch(/\u001b/)
     expect(p.detail).toContain('external compose provider')
   })
