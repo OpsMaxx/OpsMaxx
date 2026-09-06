@@ -130,6 +130,7 @@
 // guessing, which is exactly what a certificate body coming off a host needs,
 // and it is in a shared file with no `node:` imports so the renderer can bundle
 // it. See the note there on why this codebase decodes rather than shelling out.
+import { ERROR_RATE_WINDOW_MINUTES, errorRatePerMinute } from './errorRate'
 import { decodeBase64 } from './access'
 import { SUDO_PROBE, resolveBinary } from './docker'
 import type { FactStatus, HostFacts } from './hostFacts'
@@ -194,13 +195,18 @@ export const POSTURE_STATUS_HELP: Record<PostureStatus, string> = {
   unknown: 'The probe ran and its answer could not be read, or the collector never reported on it.'
 }
 
-/** The six things the collector reports on, each read independently. */
+/** The seven things the collector reports on, each read independently. */
 export type PostureSourceId =
   | 'firewall'
   | 'mandatory-access'
   | 'sshd-hardening'
   | 'failed-logins'
   | 'oom-kills'
+  // Between the OOM read and the certificates, matching the order the
+  // collector emits its notes in -- the `sources` array is built in that order,
+  // and a second ordering here would put the same seven rows on screen
+  // differently depending on which list a panel happened to iterate.
+  | 'error-rate'
   | 'certificates'
 
 export const POSTURE_SOURCE_IDS: PostureSourceId[] = [
@@ -209,6 +215,7 @@ export const POSTURE_SOURCE_IDS: PostureSourceId[] = [
   'sshd-hardening',
   'failed-logins',
   'oom-kills',
+  'error-rate',
   'certificates'
 ]
 
@@ -218,6 +225,7 @@ export const POSTURE_SOURCE_LABEL: Record<PostureSourceId, string> = {
   'sshd-hardening': 'sshd configuration',
   'failed-logins': 'Failed logins',
   'oom-kills': 'OOM kills',
+  'error-rate': 'Journal error rate',
   certificates: 'Certificate expiry'
 }
 
@@ -989,6 +997,22 @@ export interface CertificateInventory {
 
 // ---- The posture itself ---------------------------------------------------
 
+/**
+ * How much this host is complaining, and over what.
+ *
+ * The WINDOW travels with the count for the same reason it does on
+ * OomKillSummary: a number of lines means nothing without the period it was
+ * counted over, and the two must not be able to drift apart. `count` is null
+ * for a journal that answered nothing readable -- never zero, which is a
+ * reading.
+ */
+export interface ErrorRateSummary {
+  /** Lines at err or worse in the window, or null when none was counted. */
+  count: number | null
+  /** The collector's own words for the period. Null when it said nothing. */
+  window: string | null
+}
+
 export interface HostPosture {
   firewall: FirewallState | null
   mandatoryAccess: MandatoryAccess | null
@@ -996,6 +1020,7 @@ export interface HostPosture {
   failedLogins: FailedLoginSummary | null
   oomKills: OomKillSummary | null
   certificates: CertificateInventory | null
+  errorRate: ErrorRateSummary | null
   /** Epoch milliseconds this collection ran, by OUR clock. */
   collectedAt: number
   sources: PostureSourceReport[]
@@ -1849,6 +1874,66 @@ export function buildPostureCommand(opts: PostureCollectOptions = {}): string {
     'sp_note oom-kills "$SP_OOM_ST" "$SP_OOM_W" "$SP_OOM_D"',
 
     // =====================================================================
+    // JOURNAL ERROR RATE
+    // =====================================================================
+    //
+    // How many lines at err-or-worse this host wrote in the last hour. The one
+    // logging fact worth alerting on: the tailer and the search both require
+    // somebody to already be looking.
+    //
+    // THE WINDOW MATCHES THE SWEEP, and that is the whole reason it is sixty
+    // minutes rather than a livelier ten. A window shorter than the interval
+    // between collections leaves time nobody looked at, and the answer would
+    // still be presented as this host's error rate. Hourly sweep, hourly
+    // window, no gap. Measured cost of the read on a real host: 0.213s.
+    //
+    // ITS OWN READABILITY PROBE, not SP_JRUN and not SP_OOMRUN. SP_JRUN is
+    // resolved only on the branch where lastb failed, so it is frequently
+    // unset; SP_OOMRUN answers for `-k`, which is a DIFFERENT permission --
+    // an account in `adm` may read one and not the other. Reusing either would
+    // report a refusal as a zero.
+    //
+    // `-q` AND `2>/dev/null` AND `grep -c .`, all three, because journald
+    // writes `-- No entries --` TO STDERR: a count taken with the streams
+    // merged is 1 for a host with no errors at all, which is a permanent
+    // low-grade false alert on every quiet machine in the estate. Measured
+    // both ways on systemd 255.
+    'SP_ERR_ST=no-tool',
+    'SP_ERR_W="-"',
+    'SP_ERR_D="this server has no journalctl, so how many errors it is writing could not be established"',
+    'SP_ERRUN=""',
+    'if [ -n "$SP_JCTL" ]; then',
+    // `-n 0` opens the journal, prints nothing and exits non-zero when this
+    // account may not read it -- the same cheap probe the other two use, and
+    // for the same reason: without it the count below reports 0 for a refusal.
+    '"$SP_JCTL" --no-pager -q -n 0 >/dev/null 2>&1 && SP_ERRUN="$SP_JCTL"',
+    ...ifSudo(
+      'if [ -z "$SP_ERRUN" ] && [ "$SP_SUDO" = 1 ]; then',
+      'sudo -n "$SP_JCTL" --no-pager -q -n 0 >/dev/null 2>&1 && { SP_ERRUN="sudo -n $SP_JCTL"; SP_ERR_W=root; }',
+      'fi'
+    ),
+    'fi',
+    'if [ -n "$SP_ERRUN" ]; then',
+    'sp_val err-tool journal',
+    `SP_ERRA="--no-pager -q -p err --since -${ERROR_RATE_WINDOW_MINUTES}min"`,
+    // Taken from the substitution's OUTPUT rather than its exit status, as
+    // every other count here is: `grep -c` exits 1 when it counts none and
+    // still PRINTS 0, so a probe reading the status would turn a quiet host
+    // into one that could not be asked.
+    `sp_val err-count "$($SP_ERRUN $SP_ERRA 2>/dev/null | grep -c . || true)"`,
+    `sp_val err-window "the last ${ERROR_RATE_WINDOW_MINUTES} minutes of the journal"`,
+    'SP_ERR_ST=ok',
+    `SP_ERR_D="journalctl -p err over the last ${ERROR_RATE_WINDOW_MINUTES} minutes"`,
+    'elif [ -n "$SP_JCTL" ]; then',
+    // The same distinction SP_OOM_REF exists for: "there is nothing here to
+    // ask" and "there is, and you may not" have different fixes, and only one
+    // is a gap a person can close.
+    'SP_ERR_ST=denied',
+    'SP_ERR_D="the journal is present on this server and this account may not read it. This is NOT a report of no errors."',
+    'fi',
+    'sp_note error-rate "$SP_ERR_ST" "$SP_ERR_W" "$SP_ERR_D"',
+
+    // =====================================================================
     // CERTIFICATES
     // =====================================================================
     //
@@ -2011,6 +2096,9 @@ const VALUE_KEYS = [
   'oom-window',
   'cert-refused',
   'cert-searched',
+  'err-tool',
+  'err-count',
+  'err-window',
 ] as const
 type ValueKey = (typeof VALUE_KEYS)[number]
 
@@ -2638,6 +2726,20 @@ export function parsePosture(output: string, now = Date.now()): HostPosture {
           window: freeText(values.get('oom-window'))
         }
 
+  // ---- journal error rate -------------------------------------------------
+  //
+  // Null when the journal answered nothing, exactly as oomKills and
+  // failedLogins are null: a summary carrying a null count would render as a
+  // real reading of a very quiet host, and the reason belongs on the source
+  // report where a person can see it.
+  const errorRate: ErrorRateSummary | null =
+    values.get('err-tool') === undefined
+      ? null
+      : {
+          count: parseCount(values.get('err-count')),
+          window: freeText(values.get('err-window'))
+        }
+
   // ---- certificates ------------------------------------------------------
   //
   // Null ONLY when the block never ran. `cert-searched` is emitted on every
@@ -2693,6 +2795,11 @@ export function parsePosture(output: string, now = Date.now()): HostPosture {
       'the OOM probe reported success and returned no count, so whether this server has killed anything for memory was not established'
     ),
     confirm(
+      'error-rate',
+      errorRate !== null && errorRate.count !== null,
+      'the error-rate probe reported success and returned no count, so how much this server is complaining was not established'
+    ),
+    confirm(
       'certificates',
       certificates !== null,
       'the certificate probe reported success and returned no search at all, so nothing about what expires on this server was established'
@@ -2706,6 +2813,7 @@ export function parsePosture(output: string, now = Date.now()): HostPosture {
     failedLogins,
     oomKills,
     certificates,
+    errorRate,
     collectedAt: now,
     sources
   }
@@ -2790,10 +2898,32 @@ export interface PostureAlertReadings {
    * different sentence rather than as a small number.
    */
   certDays: number | null
+  /**
+   * Journal lines at error or worse, PER MINUTE, or null.
+   *
+   * Null for every host that was not actually counted -- no journalctl, a
+   * journal this account may not read, a probe that did not report ok. A zero
+   * would be the most reassuring possible way to say nobody looked, and this is
+   * the alert most able to make that mistake: an unreadable journal produces no
+   * lines, and "no lines" and "no errors" are the same empty output.
+   */
+  errorPerMinute: number | null
+  /** The window those lines were counted over, for the sentence. */
+  errorWindowMinutes: number
+  /** Our words for why there is no number, when there is none. */
+  errorDetail: string
 }
 
 export function postureAlertReadings(posture: HostPosture | null): PostureAlertReadings {
-  if (posture === null) return { oomKills: null, oomDetail: '', certDays: null }
+  if (posture === null)
+    return {
+      oomKills: null,
+      oomDetail: '',
+      certDays: null,
+      errorPerMinute: null,
+      errorWindowMinutes: ERROR_RATE_WINDOW_MINUTES,
+      errorDetail: 'this server has not been collected yet'
+    }
 
   const oom = posture.oomKills
   const oomStatus = postureSource(posture, 'oom-kills').status
@@ -2818,7 +2948,35 @@ export function postureAlertReadings(posture: HostPosture | null): PostureAlertR
   // contributes nothing rather than contributing reassurance: it is counted as
   // a gap by the panel and by the roll-up, and the alert simply has one fewer
   // number to be worst.
-  return { oomKills, oomDetail, certDays: soonestCertificateExpiry(posture.certificates) }
+  // The error rate, and ONLY from a probe that said ok. `partial` has no
+  // meaning here and is never emitted for this source -- there is one way to
+  // count the journal and either it was readable or it was not -- but the
+  // status is checked rather than assumed, so a future source that can only
+  // half-answer cannot arrive as a clean reading without someone deciding what
+  // it means.
+  const errStatus = postureSource(posture, 'error-rate').status
+  const err = posture.errorRate
+  const errorPerMinute =
+    errStatus === 'ok' && err !== null
+      ? errorRatePerMinute(err.count, ERROR_RATE_WINDOW_MINUTES)
+      : null
+  const errorDetail =
+    errorPerMinute !== null
+      ? ''
+      : errStatus === 'denied'
+        ? 'this account may not read the journal on this server'
+        : errStatus === 'no-tool'
+          ? 'this server has no journalctl'
+          : 'the journal was not counted on this collection'
+
+  return {
+    oomKills,
+    oomDetail,
+    certDays: soonestCertificateExpiry(posture.certificates),
+    errorPerMinute,
+    errorWindowMinutes: ERROR_RATE_WINDOW_MINUTES,
+    errorDetail
+  }
 }
 
 /**

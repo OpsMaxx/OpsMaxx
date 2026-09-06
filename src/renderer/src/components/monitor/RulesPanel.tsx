@@ -62,7 +62,8 @@ const KIND_LABEL: Record<RuleAlertKind, string> = {
   'db-watch': 'Database watch',
   'oom-kill': 'OOM kill',
   'cert-expiry': 'Certificate expiry',
-  'vpn-cert-expiry': 'VPN certificate expiry'
+  'vpn-cert-expiry': 'VPN certificate expiry',
+  'error-rate': 'Journal error rate'
 }
 
 const WINDOWS: { ms: number; label: string }[] = [

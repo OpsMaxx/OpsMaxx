@@ -1559,8 +1559,8 @@ describe.skipIf(process.platform === 'win32')('the collector, run against a host
 
   it('returns every source and exits 0 on a server that can answer nothing', () => {
     // No firewall tool, no MAC, no /etc/ssh, no lastb, no journal. The
-    // collector still returns a status for all four and exits cleanly, which is
-    // what "no set -e, every read conditional" buys.
+    // collector still returns a status for every source and exits cleanly,
+    // which is what "no set -e, every read conditional" buys.
     const p = host().collect({ have: [] })
     expect(p.sources.map((s) => `${s.id}=${s.status}`)).toEqual([
       'firewall=unsupported',
@@ -1568,6 +1568,10 @@ describe.skipIf(process.platform === 'win32')('the collector, run against a host
       'sshd-hardening=absent',
       'failed-logins=no-tool',
       'oom-kills=no-tool',
+      // The journal error rate answers the same way and for the same reason:
+      // no journalctl is `no-tool`, which is a different sentence from the
+      // `denied` a present-but-unreadable journal earns.
+      'error-rate=no-tool',
       'certificates=absent'
     ])
   })

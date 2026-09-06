@@ -333,16 +333,19 @@ describe('a server killing processes for memory', () => {
 // What the coverage row is allowed to claim about them
 // ---------------------------------------------------------------------------
 
-describe('coverage stays honest about where these two come from', () => {
+describe('coverage stays honest about where these come from', () => {
   it('does not file them under the sampler, the app root or read-on-demand', () => {
     expect(COVERAGE_SOURCE['oom-kill']).toBe('posture-sweep')
     expect(COVERAGE_SOURCE['cert-expiry']).toBe('posture-sweep')
+    // Item 5's error rate is counted in the same hourly pass, so it makes the
+    // same claim and inherits the same second switch.
+    expect(COVERAGE_SOURCE['error-rate']).toBe('posture-sweep')
   })
 
   it('names the SECOND switch the other three sources do not have', () => {
     const row = alertCoverageLines(true, true).find((l) => l.source === 'posture-sweep')
     expect(row, 'no posture-sweep row — this assertion checked nothing').toBeDefined()
-    expect(row?.kinds.sort()).toEqual(['cert-expiry', 'oom-kill'])
+    expect(row?.kinds.sort()).toEqual(['cert-expiry', 'error-rate', 'oom-kill'])
     expect(row?.text).toContain('Security posture module')
     // And it must not borrow the sampler's promise, which is the sentence this
     // whole file exists to keep honest.
@@ -353,6 +356,7 @@ describe('coverage stays honest about where these two come from', () => {
     const sampler = alertCoverageLines(true, true).find((l) => l.source === 'sampler')
     expect(sampler?.kinds).not.toContain('oom-kill')
     expect(sampler?.kinds).not.toContain('cert-expiry')
+    expect(sampler?.kinds).not.toContain('error-rate')
   })
 })
 
@@ -419,5 +423,78 @@ describe('a VPN client certificate on its way out', () => {
     vpnCert(3)
     expect(posted.some((p) => p.kind === 'vpn-cert-expiry')).toBe(true)
     expect(posted.some((p) => p.kind === 'cert-expiry')).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Item 5: the journal error rate, which rides the same hourly sweep
+// ---------------------------------------------------------------------------
+//
+// NUMERIC and the RIGHT way up, which is the thing these cases pin. It is the
+// first numeric kind added after cert-expiry taught the store that a number can
+// run downwards, so the risk is not that the direction is unknown but that it
+// is inherited: a kind filed beside two inverted ones and left pointing their
+// way would treat a host screaming into its journal as the healthiest in the
+// fleet, and say nothing at all.
+
+const rate = (perMinute: number | null): void =>
+  alerts.checkErrorRateAlert('s1', 'web-1', perMinute, 5)
+
+describe('the journal error rate is numeric and not inverted', () => {
+  it('raises when the rate climbs above the line', () => {
+    rate(40)
+    expect(raises().map((p) => p.kind)).toEqual(['error-rate'])
+    expect(chips()).toContain('error-rate')
+  })
+
+  // The mutation this exists to kill: with the direction inverted, forty errors
+  // a minute is "well above the line" read as "well clear of it" and nothing is
+  // ever said.
+  it('says nothing when the rate is comfortably below it', () => {
+    rate(0)
+    rate(1)
+    expect(raises()).toEqual([])
+    expect(chips()).not.toContain('error-rate')
+  })
+
+  it('clears when the host goes quiet again', () => {
+    rate(40)
+    vi.setSystemTime(T0 + 2 * 60 * 60 * 1000)
+    rate(0)
+    expect(resolves().map((p) => p.kind)).toEqual(['error-rate'])
+    expect(chips()).not.toContain('error-rate')
+  })
+
+  // The floor, and the reason escalation is inert for this kind. The number is
+  // produced by the hourly posture sweep, so a worse reading does not exist
+  // inside the window to escalate on — and even a synthetic one must not beat
+  // the floor, or a host mid-incident earns a notification per sample.
+  it('says nothing more inside the window, however much worse it gets', () => {
+    rate(40)
+    expect(raises()).toHaveLength(1)
+    posted.length = 0
+    vi.setSystemTime(T0 + 59 * 60_000)
+    rate(400)
+    expect(posted).toEqual([])
+  })
+
+  it('repeats once the window has passed and the host is still noisy', () => {
+    rate(40)
+    posted.length = 0
+    vi.setSystemTime(T0 + 61 * 60_000)
+    rate(40)
+    expect(raises().map((p) => p.kind)).toEqual(['error-rate'])
+  })
+
+  // A rate nobody measured is not a quiet host. This kind is the one most able
+  // to get that wrong: an unreadable journal produces no lines, and "no lines"
+  // and "no errors" are the same empty output.
+  it('neither raises nor resolves on a null', () => {
+    rate(40)
+    posted.length = 0
+    rate(null)
+    expect(posted).toEqual([])
+    // And the chip STAYS. A read that did not happen is not an all-clear.
+    expect(chips()).toContain('error-rate')
   })
 })

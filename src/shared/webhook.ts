@@ -47,7 +47,12 @@ export const ALERT_KINDS = [
   'vpn-down',
   'vpn-degraded',
   'vpn-cert-expiry',
-  'pod-crashloop'
+  'pod-crashloop',
+  // Item 5. How many error-priority journal lines a host is writing per
+  // minute. The logging feature could tail and search; neither NOTICES, and a
+  // host that starts writing errors at three in the morning is one nobody is
+  // watching the journal for.
+  'error-rate'
 ] as const
 export type AlertKind = (typeof ALERT_KINDS)[number]
 
@@ -197,7 +202,14 @@ export const NUMERIC_ALERT_KINDS = [
   // tell an operator this alert comes from a sweep that never looks at it.
   //
   // Numeric, and inverted like its sibling: days remaining, smaller is worse.
-  'vpn-cert-expiry'
+  'vpn-cert-expiry',
+  // Numeric, and the RIGHT way up: errors per minute, bigger is worse. It is
+  // numeric rather than a state because the whole numeric apparatus is real for
+  // it -- a host settling from forty a minute back to two is a recovery a
+  // margin exists to debounce, and 5 -> 20 -> 80 is the monotone movement
+  // escalation exists for. A state kind would throw all of that away and answer
+  // only "errors: yes".
+  'error-rate'
 ] as const
 export type NumericAlertKind = (typeof NUMERIC_ALERT_KINDS)[number]
 
