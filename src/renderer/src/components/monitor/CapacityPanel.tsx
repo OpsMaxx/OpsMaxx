@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, RefreshCw, TrendingUp } from 'lucide-react'
 import { openSettings } from '../../store/nav'
 import { useApp } from '../../store/app'
-import { clsx } from '../../lib/format'
+import {
+  storageHeadline,
+  type StorageLayout
+} from '../../../../shared/storageLayout'
+import { bytes, clsx } from '../../lib/format'
 import {
   CAPACITY_THRESHOLDS,
   CAPACITY_WINDOWS,
@@ -212,6 +216,39 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
    *  one host's disk presented as another's, and there is nothing on screen
    *  that would give it away. */
   const generation = useRef(0)
+  /**
+   * The filesystems this host actually has.
+   *
+   * READ ON DEMAND, not with the trends. The trends come from stored samples
+   * and touch no host; this opens an SSH channel, and a panel that did it on
+   * every server change would probe a machine because somebody used a
+   * dropdown.
+   */
+  const [storage, setStorage] = useState<StorageLayout | { error: string } | null>(null)
+  const [storageLoading, setStorageLoading] = useState(false)
+
+  const loadStorage = async (): Promise<void> => {
+    const server = servers.find((sv) => sv.id === serverId)
+    if (!server) return
+    setStorageLoading(true)
+    setStorage(null)
+    try {
+      const call = (
+        window.opsmaxx as
+          | { fleet?: { storage?: (cfg: unknown) => Promise<StorageLayout | { error: string }> } }
+          | undefined
+      )?.fleet?.storage
+      setStorage(
+        typeof call === 'function'
+          ? await call(server)
+          : { error: 'This build cannot read filesystems. Restart the app to rebuild it.' }
+      )
+    } catch (e) {
+      setStorage({ error: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setStorageLoading(false)
+    }
+  }
 
   const selected = servers.find((s) => s.id === serverId) ?? null
   const trends = bridge()?.trends
@@ -304,7 +341,13 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
           style={{ maxWidth: 200 }}
           aria-label="Server"
           value={serverId}
-          onChange={(e) => setServerId(e.target.value)}
+          onChange={(e) => {
+              setServerId(e.target.value)
+              // Cleared with the server, for the reason `generation` exists
+              // above: one host's filesystems left on screen under another
+              // host's name is a wrong answer nothing on screen gives away.
+              setStorage(null)
+            }}
         >
           {servers.map((s) => (
             <option key={s.id} value={s.id}>
@@ -434,6 +477,58 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
             {report.retainedDays} days of {RES_LABEL.hourly}. Older than that is gone, which is why
             a longer window is not always more line.
           </div>
+
+          {/* THE TREND ABOVE IS `/` ONLY. This says which other filesystems
+              exist, because a full /var or /data is invisible to a single disk
+              percentage — and on a host running containers most of what `df`
+              lists is not a filesystem at all. */}
+          <div className="row" style={{ gap: 8, marginTop: 14, alignItems: 'center' }}>
+            <span className="grow faint" style={{ fontSize: 11 }}>
+              The trend above is the root filesystem. This host may have others.
+            </span>
+            <button
+              className="btn ghost sm"
+              disabled={storageLoading}
+              onClick={() => void loadStorage()}
+            >
+              {storageLoading ? 'Reading…' : 'Read filesystems'}
+            </button>
+          </div>
+          {storage !== null && 'error' in storage && (
+            // NOT an empty list: a read that could not happen and a host with
+            // one filesystem are different answers.
+            <div className="panel-note is-alarm">The filesystems could not be read: {storage.error}</div>
+          )}
+          {storage !== null && !('error' in storage) && (
+            <>
+              <div className="faint" style={{ fontSize: 11 }}>
+                {storageHeadline(storage)}
+              </div>
+              <table className="mini-table">
+                <thead>
+                  <tr>
+                    <th>Mounted on</th>
+                    <th>Type</th>
+                    <th className="num">Size</th>
+                    <th className="num">Used</th>
+                    <th className="num">Inodes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {storage.df.mounts.map((m) => (
+                    <tr key={m.target}>
+                      <td className="mono">{m.target}</td>
+                      <td>{m.fstype}</td>
+                      <td className="num">{m.sizeKb === null ? '?' : bytes(m.sizeKb * 1024)}</td>
+                      <td className="num">{m.usePct === null ? '?' : `${m.usePct}%`}</td>
+                      {/* `-` from vfat is unknown, not zero. */}
+                      <td className="num">{m.inodePct === null ? '—' : `${m.inodePct}%`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
         </>
       )}
     </div>
