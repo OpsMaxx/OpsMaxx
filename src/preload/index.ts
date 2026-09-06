@@ -69,9 +69,10 @@ import type {
   DockerStatsProbe
 } from '../shared/docker'
 import type {
-  ComposeBridge,
   ComposeConfigProbe,
   ComposeEnvProbe,
+  ComposeEnvWriteResult,
+  ComposePreloadBridge,
   ComposeImageWriteRequest,
   ComposeImageWriteResult,
   ComposeListProbe,
@@ -671,7 +672,7 @@ const api = {
       opts?: { sudo?: boolean }
     ): Promise<DockerReclaimResult> => ipcRenderer.invoke('docker:reclaim', cfg, items, opts)
   } satisfies DockerBridge,
-  // The file half. `satisfies ComposeBridge` for the same reason as above: a
+  // The file half. `satisfies ComposePreloadBridge` for the same reason as above: a
   // channel added to the contract and forgotten here becomes a compile error
   // rather than a method the panel calls and finds undefined.
   //
@@ -700,13 +701,32 @@ const api = {
       opts?: { sudo?: boolean }
     ): Promise<{ ok: boolean; text?: string; error?: string }> =>
       ipcRenderer.invoke('compose:read-file', cfg, path, opts),
+    /**
+     * Write one `.env` variable from the vault.
+     *
+     * TAKES A REFERENCE, NOT A VALUE, and that asymmetry is the point: this
+     * function has no parameter that could carry a secret, so the renderer
+     * cannot send one even by mistake. Main resolves the entry, writes it, and
+     * answers with a line number.
+     */
+    writeEnvValue: (
+      cfg: unknown,
+      req: { path: string; name: string; serverId: string },
+      ref: {
+        vaultEntryId: string
+        slot: 'password' | 'privateKey' | 'username' | 'field'
+        fieldKey?: string
+      },
+      opts?: { sudo?: boolean }
+    ): Promise<ComposeEnvWriteResult> =>
+      ipcRenderer.invoke('compose:write-env-value', cfg, req, ref, opts),
     writeImageTag: (
       cfg: unknown,
       req: ComposeImageWriteRequest,
       opts?: { sudo?: boolean }
     ): Promise<ComposeImageWriteResult> =>
       ipcRenderer.invoke('compose:write-image-tag', cfg, req, opts)
-  } satisfies ComposeBridge,
+  } satisfies ComposePreloadBridge,
   services: {
     collect: (
       targets: { serverId: string; serverName: string; cfg: unknown }[]

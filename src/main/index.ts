@@ -120,7 +120,11 @@ import { DockerReader } from './services/docker'
 import { ComposeReader } from './services/compose'
 import { buildDockerLogsCommand } from '../shared/docker'
 import type { DockerAction, DockerLogsOptions, DockerReclaimItem } from '../shared/docker'
-import type { ComposeImageWriteRequest, ComposeProjectRef } from '../shared/compose'
+import type {
+  ComposeEnvWriteResult,
+  ComposeImageWriteRequest,
+  ComposeProjectRef
+} from '../shared/compose'
 
 // The one refusal worth retrying as root. Deliberately narrow: a container that
 // simply has no logs, or a dead daemon, is not something root fixes.
@@ -258,6 +262,7 @@ import {
   resolveVaultField,
   type SecretBlob
 } from './services/credentialResolver'
+import { registerEnvSecret } from './services/envSecretRegistry'
 import {
   CredProxy,
   appendCredProxyAudit,
@@ -2333,6 +2338,49 @@ ipcMain.handle(
   'compose:write-image-tag',
   (_e, cfg: unknown, req: ComposeImageWriteRequest, opts?: { sudo?: boolean }) =>
     composeReader.writeImageTag(cfg, req, opts ?? {})
+)
+
+/**
+ * Write one `.env` variable from the vault.
+ *
+ * THIS HANDLER IS THE PLACE THE VALUE EXISTS. It arrives here as a vault
+ * reference, is resolved here, is handed to the reader, and is never returned,
+ * logged, or put in an error. The renderer sends an id and gets back a line
+ * number.
+ *
+ * The value is registered for redaction BEFORE the write, not after. A write
+ * that succeeds and a registration that then fails would leave the secret on
+ * the host and unredacted in that host's output, which is the worse of the two
+ * orderings -- registering first can at worst redact a value that never landed.
+ */
+ipcMain.handle(
+  'compose:write-env-value',
+  async (
+    _e,
+    cfg: unknown,
+    req: { path: string; name: string; serverId: string },
+    ref: { vaultEntryId: string; slot: 'password' | 'privateKey' | 'username' | 'field'; fieldKey?: string },
+    opts?: { sudo?: boolean }
+  ): Promise<ComposeEnvWriteResult> => {
+    let value: string | null
+    try {
+      value = resolveVaultField(ref)
+    } catch {
+      return { ok: false, reason: 'Unlock the vault before writing a value from it.' }
+    }
+    if (value === null) {
+      return { ok: false, reason: 'that vault entry has nothing in the field you picked' }
+    }
+    if (typeof req?.serverId === 'string' && req.serverId !== '') {
+      registerEnvSecret({
+        serverId: req.serverId,
+        vaultEntryId: ref.vaultEntryId,
+        slot: ref.slot,
+        fieldKey: ref.fieldKey
+      })
+    }
+    return composeReader.writeEnvValue(cfg, { path: req.path, name: req.name }, value, opts ?? {})
+  }
 )
 
 // ---- What is scheduled across the estate ----

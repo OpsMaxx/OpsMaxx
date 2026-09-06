@@ -1617,6 +1617,14 @@ export function buildComposeReadCommand(path: string, opts: { sudo?: boolean } =
 
 // ------------------------------------------------------------- the bridge
 
+// `writeEnvValue` is deliberately NOT on this interface.
+//
+// `ComposeBridge` is the shape the PRELOAD implements, and the compiler checks
+// that it does. A `writeEnvValue(cfg, req, value)` member here would therefore
+// require the preload to expose a method taking a VALUE -- which would put the
+// secret in the renderer, the one thing this whole module is arranged to
+// prevent. It stays a method on the main-process class, and what the preload
+// exposes takes a vault REFERENCE instead.
 export interface ComposeBridge {
   list(cfg: unknown, opts?: { sudo?: boolean; autoSudo?: boolean; search?: boolean }): Promise<ComposeListProbe>
   config(
@@ -1641,6 +1649,28 @@ export interface ComposeBridge {
   ): Promise<ComposeImageWriteResult>
 }
 
+/**
+ * What the preload exposes: everything main's reader does, PLUS a write that
+ * takes a vault reference.
+ *
+ * Split from `ComposeBridge` rather than added to it so the two signatures
+ * cannot converge by accident. Main's method takes a `value: string`; this one
+ * has no such parameter and no way to grow one without a reviewer seeing this
+ * comment.
+ */
+export interface ComposePreloadBridge extends ComposeBridge {
+  writeEnvValue(
+    cfg: unknown,
+    req: { path: string; name: string; serverId: string },
+    ref: {
+      vaultEntryId: string
+      slot: 'password' | 'privateKey' | 'username' | 'field'
+      fieldKey?: string
+    },
+    opts?: { sudo?: boolean }
+  ): Promise<ComposeEnvWriteResult>
+}
+
 export type ComposeEnvProbe =
   | { ok: true; files: ComposeEnvFileSummary[]; usedSudo?: boolean }
   | { ok: false; reason: ComposeFailure; detail: string }
@@ -1652,6 +1682,12 @@ export interface ComposeImageWriteRequest {
   /** The plan the operator was shown. Re-derived and compared before anything is written. */
   expect: { line: number; before: string }
 }
+
+/** What comes back from an env write. Every field is a fact about WHERE the
+ *  change landed; there is no field that could carry a value. */
+export type ComposeEnvWriteResult =
+  | { ok: true; name: string; line: number | null; action: 'replace' | 'append'; backup: string }
+  | { ok: false; reason: string }
 
 export type ComposeImageWriteResult =
   | { ok: true; plan: Extract<ComposeImageEditPlan, { ok: true }>; backup: string }
