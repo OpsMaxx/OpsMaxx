@@ -50,7 +50,8 @@ import {
   type K8sSchedulingAction,
   type K8sTextRead,
   type K8sUsage,
-  type K8sWorkload
+  type K8sWorkload,
+  type K8sAllocatableProbe
 } from '../../../../shared/kubernetes'
 import { useApp } from '../../store/app'
 import {
@@ -105,6 +106,7 @@ import type { Server } from '../../types'
  * has no diagnose channel" is a sentence, not a mystery.
  */
 interface K8sBridge {
+  allocatable?: (cfg: unknown, context?: string) => Promise<K8sAllocatableProbe>
   read?: (cfg: unknown, context?: string, namespace?: string) => Promise<K8sProbe>
   logs?: (
     cfg: unknown,
@@ -235,6 +237,8 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   const [overviewLoading, setOverviewLoading] = useState(false)
   const [usage, setUsage] = useState<K8sUsage | null>(null)
   const [usageLoading, setUsageLoading] = useState(false)
+  const [alloc, setAlloc] = useState<K8sAllocatableProbe | null>(null)
+  const [allocLoading, setAllocLoading] = useState(false)
   const [diag, setDiag] = useState<{ pod: string; result: K8sDiagnosis | null; error?: string } | null>(
     null
   )
@@ -357,6 +361,24 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
       setOverview({ deployments: f, statefulSets: f, daemonSets: f, nodes: f, serverVersion: null, pdbs: f, events: f })
     } finally {
       setOverviewLoading(false)
+    }
+  }
+
+  /** Booked capacity. Takes no namespace: a node holds every pod on it. */
+  const loadAllocatable = async (): Promise<void> => {
+    if (!server) return
+    setAllocLoading(true)
+    try {
+      const fn = bridge().allocatable
+      if (!fn) {
+        setAlloc({ ok: false, detail: NOT_WIRED })
+        return
+      }
+      setAlloc(await fn(cfgFor(server), context || undefined))
+    } catch (e) {
+      setAlloc({ ok: false, detail: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setAllocLoading(false)
     }
   }
 
@@ -1133,6 +1155,71 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                 </button>
               </div>
               {!usage && usageLoading && <div className="faint" style={{ fontSize: 12 }}>Reading…</div>}
+
+              {/* USAGE AND BOOKED CAPACITY ARE DIFFERENT QUESTIONS, and putting
+                  them under one heading is how they get confused. `kubectl top`
+                  says what the pods are consuming right now; this says what the
+                  scheduler has promised them. A node at 5% usage can be fully
+                  booked and refuse the next pod, and only the second number
+                  explains why. */}
+              <div className="row muted" style={{ fontSize: 11, marginTop: 12 }}>
+                <span className="grow">
+                  Requested against allocatable — what the scheduler has promised, not what is
+                  being used. Every namespace, whichever one is selected above.
+                </span>
+                <button
+                  className="btn ghost sm"
+                  disabled={allocLoading}
+                  onClick={() => void loadAllocatable()}
+                >
+                  <RefreshCw size={12} className={clsx(allocLoading && 'spin')} /> Read
+                </button>
+              </div>
+              {!alloc && allocLoading && (
+                <div className="faint" style={{ fontSize: 12 }}>Reading…</div>
+              )}
+              {alloc && !alloc.ok && (
+                <div className="faint" style={{ fontSize: 12 }}>
+                  Requested-against-allocatable could not be read: {alloc.detail}
+                </div>
+              )}
+              {alloc?.ok && alloc.report && (
+                <>
+                  {/* The headline carries the unsized count beside the
+                      percentage, because a cluster at 8% whose pods are unsized
+                      has headroom nobody can compute. */}
+                  <div className="faint" style={{ fontSize: 11, marginBottom: 4 }}>
+                    {alloc.headline}
+                  </div>
+                  {alloc.report.nodes.map((n) => (
+                    <div key={n.node} className="cron-row">
+                      <span className="chip">
+                        {n.cpuPct === null ? 'cpu ?' : `${Math.round(n.cpuPct)}% cpu`}
+                      </span>
+                      <span className="chip">
+                        {n.memPct === null ? 'mem ?' : `${Math.round(n.memPct)}% mem`}
+                      </span>
+                      <span className="mono grow cron-cmd">{n.node}</span>
+                      <span className="faint" style={{ fontSize: 11 }}>
+                        {n.podCount} pod(s)
+                        {/* Never folded into the percentage: these contribute
+                            nothing to it and can grow into whatever is left. */}
+                        {n.cpuUnsetPods > 0 ? `, ${n.cpuUnsetPods} request no cpu` : ''}
+                        {n.partialPods > 0 ? `, ${n.partialPods} sized in part` : ''}
+                        {n.cordoned ? ' — cordoned, so this is not headroom' : ''}
+                      </span>
+                    </div>
+                  ))}
+                  {alloc.report.unplaced.length > 0 && (
+                    <div className="faint" style={{ fontSize: 11, marginTop: 4 }}>
+                      Not scheduled anywhere:{' '}
+                      {alloc.report.unplaced
+                        .map((u) => `${u.namespace}/${u.name} (${u.phase})`)
+                        .join(', ')}
+                    </div>
+                  )}
+                </>
+              )}
               {usage && (
                 <>
                   {!usage.nodes.ok ? (

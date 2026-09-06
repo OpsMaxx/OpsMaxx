@@ -2095,6 +2095,10 @@ ipcMain.handle(
 ipcMain.handle('k8s:overview', (_e, cfg: unknown, context?: string, namespace?: string) =>
   k8sReader.overview(cfg, context, namespace)
 )
+// All namespaces by design -- a node's load is every pod on it. See the builder.
+ipcMain.handle('k8s:allocatable', (_e, cfg: unknown, context?: string) =>
+  k8sReader.allocatable(cfg, context)
+)
 ipcMain.handle('k8s:usage', (_e, cfg: unknown, context?: string, namespace?: string) =>
   k8sReader.usage(cfg, context, namespace)
 )
