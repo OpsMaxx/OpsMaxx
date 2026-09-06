@@ -282,6 +282,69 @@ describe('the read itself', () => {
   })
 })
 
+// A SECOND, INDEPENDENT CLUSTER. Everything above is `kind`; this is a live
+// single-node k3s on a different distribution, with different node naming and a
+// different set of system pods. A parser tuned to one implementation passes its
+// own fixtures and fails here, which is the only thing that check can catch.
+//
+// PROVENANCE: verbatim except the node name, which was replaced with
+// `k3s-node-1` because it identifies a real host and this repository is public.
+// Nothing else in either file was altered, and the describe block is the same
+// ground truth the kind tests use.
+describe('a different cluster, to catch a parser tuned to one', () => {
+  const k3s = (): ReturnType<typeof parseK8sAllocatable> =>
+    parseK8sAllocatable(fx('k3s-single-node.txt'), 0)
+
+  function k3sBooked(): { cpuMilli: number; memBytes: number } {
+    const block = fx('k3s-describe-allocated.txt')
+    return {
+      cpuMilli: parseCpuMilli(block.match(/^\s*cpu\s+(\S+)\s/m)![1])!,
+      memBytes: parseMemBytes(block.match(/^\s*memory\s+(\S+)\s/m)![1])!
+    }
+  }
+
+  it('computes k3s’s own numbers to the byte', () => {
+    const p = k3s()
+    expect(p.ok).toBe(true)
+    const n = p.report!.nodes[0]
+    const truth = k3sBooked()
+    expect(n.cpuRequestedMilli).toBe(truth.cpuMilli)
+    expect(n.memRequestedBytes).toBe(truth.memBytes)
+  })
+
+  // k3s ships `local-path-provisioner` with no requests at all -- a different
+  // unsized system pod from kind's `kube-proxy`, and the same lesson: the
+  // unsized count is never zero on a real cluster.
+  it('finds an unsized system pod here too, a different one', () => {
+    const n = k3s().report!.nodes[0]
+    expect(n.cpuUnsetPods).toBe(1)
+    expect(fx('k3s-single-node.txt')).toContain('local-path-provisioner')
+  })
+
+  // `describe node` prints the node's OWN percentage beside each figure --
+  // `cpu 200m (3%)`. That is the scheduler dividing by its own allocatable, so
+  // it validates the allocatable read and the arithmetic together, and it
+  // catches a units mistake that the request totals alone cannot: k3s reports
+  // `6` cores and `12247552Ki`, neither of which the kind fixture exercises.
+  it('matches the percentage the node itself printed', () => {
+    const block = fx('k3s-describe-allocated.txt')
+    const cpuPct = Number(block.match(/^\s*cpu\s+\S+\s+\((\d+)%\)/m)![1])
+    const memPct = Number(block.match(/^\s*memory\s+\S+\s+\((\d+)%\)/m)![1])
+    const n = k3s().report!.nodes[0]
+    expect(n.cpuAllocatableMilli).toBe(6000)
+    expect(n.memAllocatableBytes).toBe(12247552 * 1024)
+    expect(Math.round(n.cpuPct!)).toBe(cpuPct)
+    expect(Math.round(n.memPct!)).toBe(memPct)
+  })
+
+  it('reads a single-node cluster without treating it as a failure', () => {
+    const p = k3s()
+    expect(p.report!.nodes).toHaveLength(1)
+    expect(p.report!.unplaced).toEqual([])
+    expect(p.headline).toContain('1 schedulable node(s)')
+  })
+})
+
 describe('the round trip', () => {
   // A read that produced no rows is a BLIND SPOT, not an empty cluster. This is
   // the rule the PDB read had to learn: text kubectl wrote that yields no
