@@ -1,0 +1,16 @@
+===SP-TIMER-UNIT===
+NextElapseUSecRealtime=Mon 2026-09-07 00:00:00 CEST
+LastTriggerUSec=Sun 2026-09-06 00:00:01 CEST
+Result=success
+Id=logrotate.timer
+LoadState=loaded
+ActiveState=active
+SubState=waiting
+===SP-TIMER-SERVICE===
+Result=success
+ExecMainExitTimestamp=Sun 2026-09-06 00:00:04 CEST
+ExecMainStatus=0
+Id=logrotate.service
+LoadState=loaded
+ActiveState=inactive
+SubState=dead

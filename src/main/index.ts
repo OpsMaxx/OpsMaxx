@@ -1254,6 +1254,12 @@ ipcMain.handle('fleet:kernel', (_e, cfg: unknown) => hostFactsReader.kernel(cfg)
 // Disks, filesystems, LVM and software RAID — roadmap item 46. Asked for rather
 // than sampled: a partition table does not move between hourly sweeps.
 ipcMain.handle('fleet:storage', (_e, cfg: unknown) => hostFactsReader.storage(cfg))
+// One systemd timer AND the service it activates — roadmap item 46's certbot
+// row, generalised. A timer that fires into a failing service is the case the
+// row is about, and reading only the timer cannot see it.
+ipcMain.handle('fleet:timer', (_e, cfg: unknown, timerUnit: string, serviceUnit: string) =>
+  hostFactsReader.timer(cfg, timerUnit, serviceUnit)
+)
 // Who can get into one server, as the sweep last saw it — roadmap item 23.
 //
 // A read of what the sweep already has; it never triggers a probe, for the same

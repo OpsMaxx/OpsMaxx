@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { timerHealth, type TimerHealth } from '../../../../shared/systemdTimers'
 import { CalendarClock, Pencil, Plus, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react'
 import { sshHopsFor } from '../../lib/ssh'
 import { clsx } from '../../lib/format'
@@ -220,6 +221,63 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
 
   const bridge = editBridge()
   const eligible = useMemo(() => servers.filter((s) => s.status !== 'offline'), [servers])
+  /**
+   * "Did it actually work?" for one systemd timer.
+   *
+   * On demand, per timer, and it reads the SERVICE too: a timer can fire
+   * perfectly every day into a service that fails every time, which is the case
+   * this answers and which the schedule above cannot see.
+   */
+  const [timerHealthState, setTimerHealthState] = useState<{
+    key: string
+    health?: TimerHealth
+    error?: string
+  } | null>(null)
+  const [timerLoading, setTimerLoading] = useState<string | null>(null)
+
+  const loadTimerHealth = async (serverId: string, unit: string): Promise<void> => {
+    const server = servers.find((sv) => sv.id === serverId)
+    // A timer unit activates the service of the same stem. systemd allows an
+    // explicit `Unit=`, and when it differs this reads the wrong service --
+    // which is why the verdict names the unit it actually read.
+    const service = unit.replace(/\.timer$/, '.service')
+    const key = `${serverId}:${unit}`
+    if (!server) return
+    setTimerLoading(key)
+    setTimerHealthState(null)
+    try {
+      const call = (
+        window.shellpilot as
+          | {
+              fleet?: {
+                timer?: (
+                  cfg: unknown,
+                  t: string,
+                  s: string
+                ) => Promise<
+                  { timer: Record<string, string>; service: Record<string, string> } | { error: string }
+                >
+              }
+            }
+          | undefined
+      )?.fleet?.timer
+      if (typeof call !== 'function') {
+        setTimerHealthState({ key, error: 'This build cannot read timers. Restart the app to rebuild it.' })
+        return
+      }
+      const res = await call(server, unit, service)
+      if ('error' in res) {
+        setTimerHealthState({ key, error: res.error })
+        return
+      }
+      setTimerHealthState({ key, health: timerHealth({ ...res, nowMs: Date.now() }) })
+    } catch (e) {
+      setTimerHealthState({ key, error: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setTimerLoading(null)
+    }
+  }
+
   const serverById = useMemo(() => new Map(servers.map((s) => [s.id, s])), [servers])
 
   /**
@@ -609,6 +667,18 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
                     <span className="mono cron-when">
                       {e.kind === 'systemd-timer' ? (e.nextRun ? `next ${e.nextRun}` : 'no next run') : e.schedule}
                     </span>
+                    {/* The schedule above says WHEN. This says whether the last
+                        run worked, which is a different question and the only
+                        one that catches a timer firing into a failing service. */}
+                    {e.kind === 'systemd-timer' && (
+                      <button
+                        className="btn-ghost sm"
+                        disabled={timerLoading === `${h.serverId}:${e.origin}`}
+                        onClick={() => void loadTimerHealth(h.serverId, e.origin)}
+                      >
+                        {timerLoading === `${h.serverId}:${e.origin}` ? 'reading' : 'did it run?'}
+                      </button>
+                    )}
                     {/* Null means "a valid schedule I decline to describe".
                         A wrong sentence about when a job runs is worse than
                         none. */}
@@ -627,6 +697,22 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
                     {e.user && <span className="faint">{e.user}</span>}
                     {bridge && rowControls(h, e)}
                   </div>
+                  {timerHealthState?.key === `${h.serverId}:${e.origin}` && (
+                    <div
+                      className={
+                        timerHealthState.error !== undefined ||
+                        (timerHealthState.health !== undefined &&
+                          timerHealthState.health.verdict !== 'ok')
+                          ? 'panel-note is-alarm'
+                          : 'panel-note'
+                      }
+                      style={{ fontSize: 11 }}
+                    >
+                      {/* A failed READ is not a verdict, and must not render
+                          like one. */}
+                      {timerHealthState.error ?? timerHealthState.health?.detail}
+                    </div>
+                  )}
                   {draft?.serverId === h.serverId && draft.line !== undefined && draft.line === e.line && (
                     <JobForm
                       draft={draft}
