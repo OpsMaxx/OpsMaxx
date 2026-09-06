@@ -70,9 +70,11 @@ export function alertCoverageText(running: boolean | undefined, enabled: boolean
 //                   reads it. Nothing produces them in the background at all.
 //                   This is the one that must never be described as "alerts
 //                   fire wherever you are in the app".
-//   posture-sweep   oom-kill and cert-expiry. Item 19b's two deferred kinds
-//                   come off the hourly security posture probe, which is a
-//                   FOURTH answer and not a variant of the three above.
+//   posture-sweep   oom-kill, cert-expiry and error-rate. Item 19b's two
+//                   deferred kinds, and item 5's journal error rate, which is
+//                   counted in the same hourly pass that counts OOM kills.
+//                   They come off the hourly security posture probe, which is
+//                   a FOURTH answer and not a variant of the three above.
 //
 // Why posture-sweep is its own row rather than being filed under one of the
 // existing three, given that this file exists to stop coverage rows claiming
@@ -130,7 +132,13 @@ export const COVERAGE_SOURCE: Record<StoreAlertKind, AlertCoverageSource> = {
   // Raised from the app root beside the backup tick, so it fires whether or not
   // anybody has the Backup panel open — a backup that stopped is exactly the
   // thing nobody is looking at.
-  'backup-failed': 'app-root'
+  'backup-failed': 'app-root',
+  // The posture sweep, beside the OOM read, because that is literally where
+  // the journal is counted -- one hourly collection asks for both. Filing it
+  // under `sampler` would promise a two-minute readout that does not exist, and
+  // the window is sized to this sweep precisely so the claim stays true: sixty
+  // minutes counted once an hour leaves no unobserved time.
+  'error-rate': 'posture-sweep'
 }
 
 const KINDS_BY_SOURCE = (src: AlertCoverageSource): StoreAlertKind[] =>

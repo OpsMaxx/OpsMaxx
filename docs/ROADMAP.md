@@ -698,10 +698,45 @@ interpolated, results capped per host, and a "hosts that could not answer" list.
 need the picker to stop excluding `.gz` (`logtail.ts:680`). Storage of lines stays refused;
 a live grep is not storage. 1–1.5 weeks, +3 days for `zgrep`.
 
-**An error-rate kind.** `journalctl -p err --since -Xmin | wc -l` per unit on the facts cadence,
-a `log-errors` STATE kind, a threshold row. The scope decision comes first — which units, which
-window — exactly as item 19 said for OOM, and "could not read the journal" is not zero. 1–2
-weeks after the decision.
+**An error-rate kind — SHIPPED.** `error-rate`, and three of the four guesses above were wrong
+once the thing was measured.
+
+NOT `wc -l`. `journalctl` writes `-- No entries --` TO STDERR, so a count taken with the streams
+merged is **1 for a host with no errors at all** — measured both ways on systemd 255 against an
+empty window and against one holding three real errors, where every form answered 3. That is a
+permanent low-grade false alert on every quiet machine in the estate, which is precisely how
+people learn to ignore an alert. The read discards stderr, passes `-q`, and counts with
+`grep -c .`.
+
+NOT a STATE kind. NUMERIC, and the first one added after `cert-expiry` that runs the normal way
+up. The whole numeric apparatus is real for it: a host settling from forty a minute back to two
+is a recovery a margin exists to debounce. A state kind would answer only "errors: yes".
+
+NOT per unit, and NOT on the facts cadence. It rides the **hourly posture sweep**, beside the OOM
+and failed-login probes — which is what makes the coverage row honest, and it is where the hard
+half of asking a journal anything (which `journalctl`, and may this account read it, with `sudo -n`
+as a stated fallback) was already solved. A second command builder would have been a second place
+that decision is made.
+
+The window is **60 minutes because the sweep is hourly**: a window shorter than the interval
+between reads leaves time nobody looked at and still presents its answer as this host's error
+rate. A test asserts `window >= POSTURE_INTERVAL_MS` so the two cannot drift apart. Measured cost
+of the read: 0.213s.
+
+"Could not read the journal" is not zero, and this is the kind most able to get that wrong — an
+unreadable journal produces no lines, and "no lines" and "no errors" are the same empty output.
+`denied`, `no-tool` and a downgraded `ok` all yield a null rate that neither raises nor resolves
+nor clears a standing chip. The status is checked rather than the count trusted on the strength
+of its own presence, because the collector's output is host-controlled text.
+
+Escalation and the re-raise bypass are **inert** for this kind and say so in the source: the
+reading only changes once per sweep, so there is no sooner-than-repeat to escalate to. The
+`ESCALATE_BY` and `LOWER_IS_WORSE` entries are filled in correctly and cannot fire today.
+
+`src/shared/errorRate.ts` (interpretation only — it reads nothing), the collector block in
+`posture.ts`, `checkErrorRateAlert` in the alert store. 14 mutations, 13 killed; the survivor is
+the inert direction flag above, left documented rather than covered by a test that would only
+appear to cover it. Verified end to end against a real Ubuntu 24.04 host.
 
 **Host rotation and audit posture.** `journalctl --disk-usage`, `SystemMaxUse`,
 `logrotate.timer`, top-N under `/var/log` (3–5 days); `auditd` installed/active/enabled,

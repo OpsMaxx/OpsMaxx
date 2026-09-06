@@ -4,6 +4,7 @@ import { useFleet } from '../../store/fleet'
 import { useFleetStatus } from '../../store/fleetStatus'
 import {
   checkCertificateAlert,
+  checkErrorRateAlert,
   checkResourceAlerts,
   checkStateAlert,
   checkUnitAlerts,
@@ -478,7 +479,7 @@ export function FleetWatcher(): null {
           if (!live || !r) return
           const name = serversRef.current.find((s) => s.id === t.serverId)?.name ?? t.serverId
           // `r.posture` absent is "never collected", and postureAlertReadings
-          // turns that into two nulls rather than into two clean bills of
+          // turns that into nulls rather than into clean bills of
           // health. Every other honesty rule in this pair — a ring-buffer zero,
           // a refused /etc/letsencrypt, a certificate that would not parse —
           // is decided in shared/posture.ts for the same reason isDiskCritical
@@ -487,6 +488,11 @@ export function FleetWatcher(): null {
           const reading = postureAlertReadings(r.posture ?? null)
           checkStateAlert(t.serverId, name, 'oom-kill', reading.oomKills, reading.oomDetail)
           checkCertificateAlert(t.serverId, name, reading.certDays)
+          // Rides this same sweep because it is READ on this same sweep: the
+          // hourly posture collection counts the journal in the same pass it
+          // counts OOM kills, which is why the coverage row can honestly say
+          // sixty minutes of counting once an hour leaves no gap.
+          checkErrorRateAlert(t.serverId, name, reading.errorPerMinute)
         })
       }
     }

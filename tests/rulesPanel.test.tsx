@@ -270,6 +270,7 @@ describe('writing a job rule', () => {
       // A sibling of cert-expiry, not the same kind: a VPN profile is not a
       // server and the posture sweep never looks at one.
       'vpn-cert-expiry',
+      'error-rate',
       'host-unreachable',
       'job-failed',
       'tunnel-down',
