@@ -42,6 +42,25 @@
 // drain stays the separate, heavily graded thing it already is.
 //
 // ---------------------------------------------------------------------------
+// ONE NODE PER JOB, AND WHY THAT IS A REAL LIMIT
+// ---------------------------------------------------------------------------
+//
+// `kubectl cordon <node>` names its node, and a `JobSpec` carries ONE list of
+// steps run against every target. So a chain built here is a job for exactly
+// one node, and patching three of them is three jobs.
+//
+// That matters because it is precisely what waves are for, and it means a
+// staged multi-node maintenance CANNOT be expressed as one chain today: nothing
+// sequences the three jobs or holds the second until the first node is Ready
+// again. Making it possible needs per-target step templating in the job engine
+// -- a spec whose commands differ per host -- which changes what an approval
+// record covers and is not a thing to bolt on.
+//
+// It is written here rather than discovered later. A caller that hands this a
+// list of nodes and expects one job is going to be surprised, and the surprise
+// would arrive as a cordon command naming the wrong machine.
+//
+// ---------------------------------------------------------------------------
 // THE HALF-FINISHED CHAIN
 // ---------------------------------------------------------------------------
 //
