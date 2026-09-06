@@ -608,8 +608,15 @@ describe('where the broadcast approval is enforced', () => {
     expect(shared.match(/export function verifyApproval/g)).toHaveLength(1)
     expect(main).not.toMatch(/function verifyApproval/)
     const jobs = readFileSync(resolve(__dirname, '../src/shared/jobs.ts'), 'utf8')
-    // jobs.ts adapts it, it does not restate it.
-    expect(jobs).toContain('return verifyApproval(')
+    // jobs.ts ADAPTS it and does not restate it. Adapting includes adding a
+    // check the shared verifier cannot make — it compares commands, targets and
+    // the plan, and knows nothing about a stage gate — so `verifyJobApproval`
+    // calls it, keeps its verdict, and adds the gate comparison on top. What
+    // this forbids is a second implementation of the comparison itself.
+    expect(jobs).toMatch(/verifyApproval\(\n?\s*approval,/)
     expect(jobs).not.toMatch(/export function verifyApproval\s*\(/)
+    // The shared verdict is never discarded: a job-specific check may only add
+    // a refusal, never overturn one.
+    expect(jobs).toContain('if (!verdict.ok) return verdict')
   })
 })
