@@ -915,11 +915,24 @@ describe('databaseDumpTarget', () => {
     })
   })
 
-  it('refuses an engine there is no dump binary for, by name', () => {
+  // MongoDB is now among them: `mongodump` streams an archive to stdout, which
+  // is what this pipeline reads. Redis is not, and the reason is not that
+  // nobody got to it -- pg_dump, mysqldump and mongodump are CLIENTS that ask a
+  // server for its contents, and Redis has no such client. Its persistence is a
+  // snapshot the server writes to its own disk, which is a different act on a
+  // different machine.
+  it('refuses an engine there is no dump client for, by name', () => {
+    saveDatabases([{ ...direct, kind: 'redis' }])
+    const r = databaseDumpTarget('db-orders') as { error: string }
+    expect(r.error).toContain('PostgreSQL, MySQL and MongoDB')
+    expect(r.error).toContain('this one is redis')
+    expect(r.error).toContain('not something a client can ask for and stream')
+  })
+
+  it('accepts a MongoDB database and asks mongodump for it', () => {
     saveDatabases([{ ...direct, kind: 'mongodb' }])
-    expect(databaseDumpTarget('db-orders')).toEqual({
-      error: 'Dumps are only supported for PostgreSQL and MySQL, and this one is mongodb.'
-    })
+    const r = databaseDumpTarget('db-orders') as { target: { engine: string } }
+    expect(r.target.engine).toBe('mongo')
   })
 
   it('offers only the databases a dump could actually be taken from', () => {
@@ -927,12 +940,16 @@ describe('databaseDumpTarget', () => {
       direct,
       { ...direct, id: 'db-mysql', name: 'billing', kind: 'mysql', port: 3306 },
       { ...direct, id: 'db-mongo', name: 'events', kind: 'mongodb' },
+      { ...direct, id: 'db-redis', name: 'cache', kind: 'redis' },
       { ...direct, id: 'db-bastion', name: 'behind-bastion', sshServerId: 'srv-1' },
       { ...direct, id: 'db-uri', name: 'by-uri', uri: true }
     ])
+    // Mongo is offered now; redis, the bastion one and the URI one are not,
+    // each for its own stated reason.
     expect(dumpableDatabases()).toEqual([
       { id: 'db-orders', name: 'orders-prod', engine: 'postgres' },
-      { id: 'db-mysql', name: 'billing', engine: 'mysql' }
+      { id: 'db-mysql', name: 'billing', engine: 'mysql' },
+      { id: 'db-mongo', name: 'events', engine: 'mongo' }
     ])
   })
 

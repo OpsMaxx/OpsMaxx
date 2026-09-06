@@ -8,7 +8,8 @@ import {
   isDumpObjectName,
   planDumpRetention,
   planRetention,
-  safeDumpDatabase
+  safeDumpDatabase,
+  type DumpEngine
 } from '../src/shared/backup'
 
 // Item 38's first gap. Dumps had NO retention at all: `backupTick` iterates
@@ -21,8 +22,35 @@ const gen = (name: string, modified: number): { name: string; modified: number; 
   bytes: 1
 })
 
-const at = (db: string, day: number): string =>
-  dumpObjectName({ database: db } as never, new Date(Date.UTC(2026, 0, day)))
+// The engine is REAL rather than cast away. It used to be `{ database } as
+// never`, which was harmless while every dump was named `.sql` and stopped
+// being so the moment the extension came from the engine: the lookup returned
+// undefined and every name ended `.undefined`, invisible to retention.
+// `Record<DumpEngine, string>` means a new engine cannot be added without an
+// extension, so the only way to reach that state was to lie to the type.
+const at = (db: string, day: number, engine: DumpEngine = 'postgres'): string =>
+  dumpObjectName(
+    { engine, host: 'h', port: 1, username: 'u', database: db },
+    new Date(Date.UTC(2026, 0, day))
+  )
+
+// A mongo dump is `.archive`, and retention must count it exactly as it counts
+// a `.sql`. A dump whose name retention does not recognise is one it never
+// removes, so the destination accumulates them for ever -- which is the very
+// gap item 38 closed for `.sql`.
+describe('retention counts a mongo archive too', () => {
+  it('groups .archive dumps with the same database and removes the oldest', () => {
+    const gens = [gen(at('appdb', 1, 'mongo'), 1), gen(at('appdb', 2, 'mongo'), 2)] as never
+    expect(at('appdb', 1, 'mongo').endsWith('.archive')).toBe(true)
+    expect(planDumpRetention(gens, 1, 'appdb').remove).toHaveLength(1)
+  })
+
+  // And still never as a generation of an encrypted bundle.
+  it('does not let bundle retention touch a mongo archive either', () => {
+    expect(isBackupObjectName(at('appdb', 1, 'mongo'))).toBe(false)
+    expect(isDumpObjectName(at('appdb', 1, 'mongo'))).toBe(true)
+  })
+})
 
 describe('a dump is not a bundle, and neither retention sees the other', () => {
   it('does not let bundle retention touch a dump', () => {
