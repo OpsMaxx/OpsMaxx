@@ -1,0 +1,24 @@
+===SP-LV-VGS===
+  {
+      "report": [
+          {
+              "vg": [
+                  {"vg_name":"spvg", "vg_free":"2541748224B", "vg_size":"4286578688B"}
+              ]
+          }
+      ]
+  }
+===SP-LV-LVS===
+  {
+      "report": [
+          {
+              "lv": [
+                  {"lv_name":"lvext", "vg_name":"spvg", "lv_size":"872415232B", "lv_path":"/dev/spvg/lvext"},
+                  {"lv_name":"lvxfs", "vg_name":"spvg", "lv_size":"872415232B", "lv_path":"/dev/spvg/lvxfs"}
+              ]
+          }
+      ]
+  }
+===SP-LV-BLK===
+spvg-lvext ext4 /mnt/spext
+spvg-lvxfs xfs /mnt/spxfs
