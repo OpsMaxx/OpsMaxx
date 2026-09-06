@@ -1284,11 +1284,19 @@ describe('what the staged write does when logind will not answer', () => {
   it('refuses when logind is present and cannot be asked, rather than assuming the safe answer', () => {
     const h = fakeHome([`ssh-ed25519 ${A} alice@laptop`, `ssh-ed25519 ${B} bob@desktop`, ''])
     const before = h.read()
-    // loginctl exists, so this host runs logind. No busctl shim, and the test
-    // platform has none, so the property cannot be read: SP_KILL=unknown.
+    // loginctl exists, so this host runs logind, and busctl EXISTS AND FAILS --
+    // which is the `SP_KILL=unknown` case: the script's `|| true` swallows the
+    // error and the `case` matches neither true nor false.
+    //
+    // The shim is the fix for a real CI failure. This used to rely on the test
+    // platform having no `busctl` at all, which is true on macOS and FALSE on
+    // an Ubuntu runner -- where a real busctl answered and the host was read as
+    // `no` rather than `unknown`, so the refusal never came. A test whose case
+    // is produced by the absence of a binary is a test about the machine it
+    // runs on.
     const r = h.run(
       buildRevokeKeyCommand({ path: h.file, blob: A, token: 'kunknown', rollbackSeconds: 60 }),
-      { shim: { loginctl: LINGER_OFF } }
+      { shim: { loginctl: LINGER_OFF, busctl: 'exit 1' } }
     )
     expect(r.code).not.toBe(0)
     expect(r.out).toContain('would not say whether it does')
