@@ -4,6 +4,7 @@ import { useApp } from '../../store/app'
 import { sshTargetFor } from '../../lib/ssh'
 import { createHttpTransport, type HttpTransportOptions } from '../../lib/httpTransport'
 import { useResolvedTheme } from '../../hooks/useResolvedTheme'
+import type { TraversedEntry } from '@scalar/workspace-store/schemas/navigation'
 import type { ApiCollection } from '../../types'
 
 /**
@@ -74,13 +75,17 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
           { createWorkspaceStore },
           { createWorkspaceEventBus },
           { getActiveEnvironment },
-          { createApp, h }
+          { createApp, h, ref },
+          { Sidebar },
+          { createSidebarState }
         ] = await Promise.all([
             import('@scalar/api-client/v2/features/operation'),
             import('@scalar/workspace-store/client'),
             import('@scalar/workspace-store/events'),
             import('@scalar/workspace-store/request-example'),
             import('vue'),
+            import('@scalar/api-client/v2/components/sidebar'),
+            import('@scalar/sidebar'),
             // The stylesheet rides the same dynamic import as the code, so it
             // is not in the main CSS bundle either.
             import('@scalar/api-client/style.css')
@@ -147,16 +152,52 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
         const active = workspaceStore.workspace.documents[collection.id]
         const openApiDocument = active && 'openapi' in active ? active : null
         const documentRef = { value: openApiDocument }
+        // The operation tree, which the modal wrapper never showed.
+        //
+        // Its entries come from the navigation the workspace store builds for
+        // the document; a scratch collection has one operation and a
+        // description has as many as it describes, which is exactly the list
+        // someone needs to move around an API rather than retyping paths.
+        // Typed as the store's own navigation entries rather than loosely:
+        // the sidebar keys, sorts and renders by fields that a `{ id }` shape
+        // does not carry, and a cast that hid that would fail at render.
+        const navigation = (
+          openApiDocument as { 'x-scalar-navigation'?: { children?: TraversedEntry[] } } | null
+        )?.['x-scalar-navigation']
+        const entries: TraversedEntry[] = navigation?.children ?? []
+        const sidebarState = createSidebarState(entries)
+        const sidebarWidth = ref(280)
+        // Selecting an entry re-points the operation view at it. Held in refs
+        // so a click re-renders without rebuilding the client and losing what
+        // the user has typed.
+        const currentPath = ref(landingPath)
+        const currentMethod = ref<HttpMethodName>(landingMethod)
+        sidebarState.setSelected(null)
+
         const vueApp = createApp({
           render: () =>
-            h(Operation, {
+            h('div', { class: 'flex h-full min-h-0 w-full' }, [
+              entries.length > 1
+                ? h(Sidebar, {
+                    sidebarState,
+                    layout: 'web',
+                    eventBus,
+                    activeWorkspace: { id: 'shellpilot' },
+                    workspaces: [],
+                    documents: openApiDocument ? [openApiDocument] : [],
+                    isDroppable: () => false,
+                    sidebarWidth: sidebarWidth.value,
+                    'onUpdate:sidebarWidth': (v: number) => (sidebarWidth.value = v)
+                  })
+                : null,
+              h(Operation, {
               documentSlug: collection.id,
               document: documentRef.value,
               eventBus,
               // The whole point of the change.
               layout: 'web',
-              path: landingPath,
-              method: landingMethod,
+              path: currentPath.value,
+              method: currentMethod.value,
               environment: getActiveEnvironment(workspaceStore, documentRef.value).environment,
               workspaceStore,
               plugins: [],
@@ -166,7 +207,8 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
                 // production. What the toolbar shows is what gets sent.
                 ...(baseUrl ? { baseServerURL: scratchOriginOf(baseUrl) } : {})
               }
-            })
+              })
+            ])
         })
         vueApp.mount(el)
         app = vueApp
