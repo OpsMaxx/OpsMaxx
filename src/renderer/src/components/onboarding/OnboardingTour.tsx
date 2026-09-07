@@ -3,7 +3,7 @@ import { ArrowLeft, ArrowRight, Check, Compass } from 'lucide-react'
 import { useOnboarding } from '../../store/onboarding'
 import { useApp } from '../../store/app'
 import { clsx } from '../../lib/format'
-import { TOUR_STEPS } from './tourSteps'
+import { FULL_WALKTHROUGH, TOUR_STEPS } from './tourSteps'
 
 // A first-run walkthrough, mounted once at the app root.
 //
@@ -19,13 +19,21 @@ export function OnboardingTour(): React.JSX.Element | null {
   const goTo = useOnboarding((s) => s.goTo)
   const finish = useOnboarding((s) => s.finish)
   const openIfFirstRun = useOnboarding((s) => s.openIfFirstRun)
+  const full = useOnboarding((s) => s.full)
   const setActivity = useApp((s) => s.setActivity)
+
+  // A first run gets the two steps that matter; the six that used to sit
+  // between them arrive as tips when the user opens the view each describes.
+  // Somebody who reopens this from Settings asked for the walkthrough, so they
+  // get all of it — deferring six of eight to triggers they have already passed
+  // would hand them two panels and nothing else.
+  const steps = full ? FULL_WALKTHROUGH : TOUR_STEPS
 
   useEffect(() => {
     openIfFirstRun()
   }, [openIfFirstRun])
 
-  const current = TOUR_STEPS[step]
+  const current = steps[step]
 
   // Move the app to whatever this step is about.
   useEffect(() => {
@@ -39,17 +47,17 @@ export function OnboardingTour(): React.JSX.Element | null {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') finish()
       if (e.key === 'ArrowRight') {
-        if (step < TOUR_STEPS.length - 1) next()
+        if (step < steps.length - 1) next()
         else finish()
       }
       if (e.key === 'ArrowLeft') back()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, step, next, back, finish])
+  }, [open, step, steps.length, next, back, finish])
 
   if (!open || !current) return null
-  const last = step === TOUR_STEPS.length - 1
+  const last = step === steps.length - 1
 
   return (
     <div className="tour-card" role="dialog" aria-label="ShellPilot walkthrough">
@@ -58,7 +66,7 @@ export function OnboardingTour(): React.JSX.Element | null {
         <b>{current.title}</b>
         <span className="spacer" />
         <span className="server-meta">
-          {step + 1} / {TOUR_STEPS.length}
+          {step + 1} / {steps.length}
         </span>
       </div>
 
@@ -73,7 +81,7 @@ export function OnboardingTour(): React.JSX.Element | null {
       )}
 
       <div className="tour-dots">
-        {TOUR_STEPS.map((s, i) => (
+        {steps.map((s, i) => (
           <button
             key={s.id}
             className={clsx('tour-dot', i === step && 'active')}
