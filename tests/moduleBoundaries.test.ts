@@ -39,14 +39,26 @@ const MODULE_FILES: Record<string, string[]> = {
   // its own rows at launch whether or not this module is on. What the module
   // owns is the vocabulary that turns what somebody typed into a spec, and the
   // panel that asks for the confirmation `planJob` demands.
+  // The two sub-tab panels are listed here rather than under `cron` and
+  // `services`, because a file belongs to the module whose TOGGLE decides
+  // whether it renders — and with the write half split out of those two read
+  // panels, that toggle is this one. See the sub-tab strip in OperationsView for
+  // why the writes landed under Jobs at all.
   jobs: [
     'src/shared/jobCompose.ts',
     'src/shared/serviceStep.ts',
     'src/shared/packageStep.ts',
     'src/shared/userStep.ts',
     'src/shared/fileStep.ts',
-    'src/renderer/src/components/monitor/JobsPanel.tsx'
+    'src/renderer/src/components/monitor/JobsPanel.tsx',
+    'src/renderer/src/components/operations/CronEditPanel.tsx',
+    'src/renderer/src/components/operations/UnitInstallPanel.tsx'
   ],
+  // The write half of what used to be the `access` tab. The collector and the
+  // shared reading stay with `access` above: this module owns the panel that
+  // ACTS, and nothing else — it reads the sweep's results through the same
+  // bridge and never runs a probe of its own.
+  keyRevoke: ['src/renderer/src/components/operations/KeyRevokePanel.tsx'],
   fleetSearch: ['src/renderer/src/lib/fleetSearch.ts', 'src/renderer/src/components/monitor/FleetSearch.tsx'],
   // The main-process half (src/shared/hostFacts.ts, src/main/services/hostFacts.ts)
   // is not listed: it is collected by the fleet sampler on every install

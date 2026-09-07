@@ -4,6 +4,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
 import { ServicesPanel } from '../src/renderer/src/components/monitor/ServicesPanel'
+import { UnitInstallPanel } from '../src/renderer/src/components/operations/UnitInstallPanel'
 import type { Server } from '../src/renderer/src/types'
 
 const server = (id: string, name: string): Server =>
@@ -77,6 +78,14 @@ describe('the services panel', () => {
   })
 })
 
+// The install moved to its own panel on the Operations rail when the fleet
+// destination was split by surface: Server services reads what a machine
+// supervises, and Monitoring's contract is that nothing in it writes. The
+// behaviours are unchanged, so they are asserted against the panel that owns
+// them now — the split moved where the write lives, not whether it is checked.
+//
+// The installer picks ONE server rather than reading the estate, because it
+// writes to one machine; there is no fleet read in front of it.
 describe('installing a unit', () => {
   const rows = async () => [
     { serverId: 'a', serverName: 'web-1', reading: reading() }
@@ -87,9 +96,8 @@ describe('installing a unit', () => {
     // is not a preview, so the rendered unit is on screen before Install is
     // pressable.
     stubBridge({ services: { collect: rows, write: vi.fn() } } as never)
-    render(<ServicesPanel servers={[server('a', 'web-1')]} />)
-    await userEvent.click(await screen.findByRole('button', { name: /Read services/ }))
-    await userEvent.click(await screen.findByRole('button', { name: /New service/ }))
+    render(<UnitInstallPanel servers={[server('a', 'web-1')]} />)
+    await userEvent.selectOptions(screen.getByLabelText('Server'), 'a')
 
     await userEvent.type(screen.getByLabelText('Unit name'), 'worker.service')
     await userEvent.type(screen.getByLabelText('Description'), 'Queue worker')
@@ -103,22 +111,23 @@ describe('installing a unit', () => {
     // The same refusal main enforces, said here so nobody types a unit name
     // and learns it was wrong from a server round trip.
     stubBridge({ services: { collect: rows, write: vi.fn() } } as never)
-    render(<ServicesPanel servers={[server('a', 'web-1')]} />)
-    await userEvent.click(await screen.findByRole('button', { name: /Read services/ }))
-    await userEvent.click(await screen.findByRole('button', { name: /New service/ }))
+    render(<UnitInstallPanel servers={[server('a', 'web-1')]} />)
+    await userEvent.selectOptions(screen.getByLabelText('Server'), 'a')
 
     await userEvent.type(screen.getByLabelText('Unit name'), 'worker')
     expect(((await screen.findByRole('button', { name: 'Install' })) as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.getByText(/has to end in .service/)).toBeTruthy()
+    // getAllBy: the installer states the naming rule twice on purpose — once as
+    // a standing note beside the field, and again as the refusal once a draft
+    // breaks it. Both are the same sentence, which is the point.
+    expect(screen.getAllByText(/has to end in .service/).length).toBeGreaterThan(0)
   })
 
   it('asks before writing, and does not write when the answer is no', async () => {
     const write = vi.fn(async () => ({ ok: true, output: 'WROTE: x' }))
     stubBridge({ services: { collect: rows, write } } as never)
     vi.spyOn(window, 'confirm').mockReturnValue(false)
-    render(<ServicesPanel servers={[server('a', 'web-1')]} />)
-    await userEvent.click(await screen.findByRole('button', { name: /Read services/ }))
-    await userEvent.click(await screen.findByRole('button', { name: /New service/ }))
+    render(<UnitInstallPanel servers={[server('a', 'web-1')]} />)
+    await userEvent.selectOptions(screen.getByLabelText('Server'), 'a')
     await userEvent.type(screen.getByLabelText('Unit name'), 'worker.service')
     await userEvent.type(screen.getByLabelText('Description'), 'w')
     await userEvent.type(screen.getByLabelText('ExecStart'), '/bin/true')
@@ -138,9 +147,8 @@ describe('installing a unit', () => {
     }))
     stubBridge({ services: { collect: rows, write } } as never)
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    render(<ServicesPanel servers={[server('a', 'web-1')]} />)
-    await userEvent.click(await screen.findByRole('button', { name: /Read services/ }))
-    await userEvent.click(await screen.findByRole('button', { name: /New service/ }))
+    render(<UnitInstallPanel servers={[server('a', 'web-1')]} />)
+    await userEvent.selectOptions(screen.getByLabelText('Server'), 'a')
     await userEvent.type(screen.getByLabelText('Unit name'), 'worker.service')
     await userEvent.type(screen.getByLabelText('Description'), 'w')
     await userEvent.type(screen.getByLabelText('ExecStart'), '/bin/true')

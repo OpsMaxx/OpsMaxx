@@ -7,11 +7,10 @@ import {
   buildAccessExport
 } from '../../../../shared/accessExport'
 import { KeyRound, RefreshCw, ShieldAlert } from 'lucide-react'
-import { openSettings } from '../../store/nav'
+import { openKeyRevoke, openSettings } from '../../store/nav'
 import { useApp } from '../../store/app'
 import { bridgeHas } from '../../lib/bridge'
 import { clsx, duration } from '../../lib/format'
-import { sshHopsFor } from '../../lib/ssh'
 import {
   serviceAccountsWithKeys,
   staleAccounts,
@@ -27,9 +26,6 @@ import {
   accessSource,
   summariseAccess,
   type AccessAccount,
-  type AccessChangePreview,
-  type AccessCommitOutcome,
-  type AccessRunResult,
   type AccessStatus,
   type HostAccess
 } from '../../../../shared/access'
@@ -150,27 +146,6 @@ function KeyCount({ account }: { account: AccessAccount }): React.JSX.Element {
   )
 }
 
-/**
- * What one host's key change came to.
- *
- * THREE OUTCOMES AND NOT TWO, and the styling says so as loudly as the words.
- * "Reverted because a second session could not get in" is the host rejecting
- * the change and there is something to look at; "reverted because nothing
- * confirmed it in time" is the dead-man's switch doing exactly what it promised
- * and there is nothing wrong at all. Rendering both as one red row would teach
- * an operator that the safety net is a fault, and an operator who believes that
- * is an operator who will want it switched off.
- */
-const OUTCOME_LABEL: Record<AccessCommitOutcome, string> = {
-  committed: 'Committed',
-  'reverted-verification-failed': 'Reverted — the server would not let a new session in',
-  'reverted-unconfirmed': 'Reverted — nothing confirmed it in time'
-}
-
-function outcomeClass(outcome: AccessCommitOutcome): string {
-  return outcome === 'committed' ? 'ok' : outcome === 'reverted-verification-failed' ? 'loud' : 'warn'
-}
-
 export function AccessPanel({
   servers,
   onOpen
@@ -181,14 +156,6 @@ export function AccessPanel({
   const [entries, setEntries] = useState<Record<string, Entry>>({})
   const [busy, setBusy] = useState(false)
   const [view, setView] = useState<'keys' | 'hosts'>('keys')
-  // The revoke flow, and it is three states rather than one boolean: nothing
-  // asked, a plan main has derived and the operator has not agreed to, and what
-  // happened. A single "revoking" flag would have had to invent one of them.
-  const [pending, setPending] = useState<{ fingerprint: string; preview: AccessChangePreview } | null>(null)
-  const [result, setResult] = useState<AccessRunResult | null>(null)
-  const [running, setRunning] = useState(false)
-  const [problem, setProblem] = useState<string | null>(null)
-
   /**
    * The review, as a file.
    *
@@ -251,96 +218,6 @@ export function AccessPanel({
       await load()
     } finally {
       setBusy(false)
-    }
-  }
-
-  /** The accounts this key is on, as targets main can look up for itself. The
-   *  renderer names the key and the servers; it does not decide anything. */
-  const targetsFor = useCallback(
-    (fingerprint: string): { serverId: string; serverName: string; user: string; cfg: unknown }[] => {
-      const out: { serverId: string; serverName: string; user: string; cfg: unknown }[] = []
-      for (const s of servers) {
-        const access = entries[s.id]?.access
-        if (!access) continue
-        for (const a of access.accounts) {
-          if ((a.keys ?? []).some((k) => k.fingerprint === fingerprint)) {
-            out.push({
-              serverId: s.id,
-              serverName: s.name,
-              user: a.user,
-              // The same shape broadcast and patch send, and for the same
-              // reason: no secret is carried here. Main resolves them per host
-              // at the moment it connects, so a vault unlocked or a credential
-              // edited since this panel rendered is honoured rather than baked
-              // in. Handing over the `Server` row from the store instead
-              // typechecks — `cfg` is `unknown` on the wire — and main would
-              // open nothing, on the one operation where "nothing happened" is
-              // reported as a host that refused the change.
-              cfg: {
-                sessionId: `access-${s.id}`,
-                cols: 80,
-                rows: 24,
-                serverId: s.id,
-                host: s.host,
-                port: s.port,
-                username: s.username,
-                auth: s.auth === 'password' || s.auth === 'agent' ? s.auth : 'key',
-                hops: sshHopsFor(s),
-                // Carried where broadcast does not, because the confirmation
-                // opens a SECOND connection: one that came up over the tunnel
-                // and one that did not would be two different hosts as far as
-                // this rule is concerned.
-                vpnProfileId: s.vpnProfileId ?? undefined
-              }
-            })
-          }
-        }
-      }
-      return out
-    },
-    [servers, entries]
-  )
-
-  const planRevoke = async (fingerprint: string): Promise<void> => {
-    setProblem(null)
-    setResult(null)
-    setRunning(true)
-    try {
-      const preview = await window.shellpilot?.fleet?.accessPlan({
-        kind: 'revoke',
-        fingerprint,
-        targets: targetsFor(fingerprint)
-      })
-      if (preview) setPending({ fingerprint, preview })
-    } catch (e) {
-      setProblem(e instanceof Error ? e.message : String(e))
-    } finally {
-      setRunning(false)
-    }
-  }
-
-  const runRevoke = async (): Promise<void> => {
-    if (!pending) return
-    setRunning(true)
-    setProblem(null)
-    try {
-      const r = await window.shellpilot?.fleet?.accessRun({
-        kind: 'revoke',
-        fingerprint: pending.fingerprint,
-        token: pending.preview.token,
-        // The command text as it was SHOWN. Main re-derives and refuses if the
-        // two differ, so what was agreed to is what runs or nothing runs.
-        confirmedCommand: pending.preview.command,
-        targets: targetsFor(pending.fingerprint)
-      })
-      setPending(null)
-      if (r) setResult(r)
-      // The estate has changed, whichever way each host went.
-      await load()
-    } catch (e) {
-      setProblem(e instanceof Error ? e.message : String(e))
-    } finally {
-      setRunning(false)
     }
   }
 
@@ -460,19 +337,19 @@ export function AccessPanel({
   }, [collected])
 
   const unchecked = failed.length + never.length + stale.length
-  // GATED OFF in this build — see ACCESS_WRITE_ENABLED in shared/access.ts for
-  // the argument. The bridge check stays beside it because both have to be true
-  // and they fail for different reasons: the constant is a decision about this
-  // build, the bridge is a fact about this install.
+  // Whether there is anywhere to POINT at, which is all this decides now that
+  // the plan-and-apply flow lives in Operations › Revoke a key.
   //
-  // The button is not merely hidden. Main refuses `access:plan` and
-  // `access:run` outright, and the notice below says the buttons were withdrawn
-  // rather than leaving an operator to conclude they have not arrived.
   // Three things, and they fail for different reasons. The BUILD ceiling is a
   // decision about this release; the SETTING is the operator's, off unless they
   // turned it on; the bridge is a fact about this install. Main enforces the
-  // setting again in both handlers, so this is the honest UI and not the
-  // boundary.
+  // first two again in both handlers, so this is the honest UI and not the
+  // boundary — and the panel it points at re-states every one of them rather
+  // than trusting that this one got it right.
+  //
+  // The pointer is hidden rather than shown-and-disabled when the write half is
+  // off, and the notice below is what keeps that honest: it says the control
+  // was WITHDRAWN, so nobody concludes the feature has not arrived.
   const writeOptIn = useApp((st) => st.settings.accessWriteEnabled)
   const canWrite =
     (ACCESS_WRITE_ENABLED || writeOptIn) &&
@@ -748,113 +625,6 @@ export function AccessPanel({
             </div>
           )}
 
-          {problem !== null && (
-            <div className="s-desc warn" data-testid="access-problem">
-              <b>Nothing was changed.</b> {problem}
-            </div>
-          )}
-
-          {pending !== null && (
-            <div className="s-desc" data-testid="revoke-confirm">
-              <b>
-                Revoke {pending.fingerprint} from {pending.preview.hosts.length} account
-                {pending.preview.hosts.length === 1 ? '' : 's'}?
-              </b>{' '}
-              This is staged, not applied. Each server takes a timestamped backup, replaces the file,
-              and arms its OWN rollback before ShellPilot lets go — so if this app dies in the next
-              instant, the server puts the previous file back by itself after{' '}
-              {pending.preview.rollbackSeconds} seconds. Nothing becomes permanent until a second
-              connection has authenticated against the changed file.
-              {pending.preview.hosts.length > 0 && (
-                <div className="mono" style={{ fontSize: 10, marginTop: 6 }}>
-                  {pending.preview.hosts.map((h) => (
-                    <div key={h.serverId}>
-                      {h.serverName} · {h.user}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {(pending.preview.blocks.length > 0 || pending.preview.refusals.length > 0) && (
-                <div style={{ marginTop: 8 }} data-testid="revoke-blocked">
-                  <b>
-                    {pending.preview.blocks.length + pending.preview.refusals.length} left out, and
-                    not by choice:
-                  </b>
-                  <ul style={{ margin: '4px 0 0 16px' }}>
-                    {pending.preview.blocks.map((b, i) => (
-                      <li key={`b${i}`}>
-                        <b>
-                          {b.serverName} · {b.user}
-                        </b>{' '}
-                        — {b.reason}
-                      </li>
-                    ))}
-                    {pending.preview.refusals.map((r, i) => (
-                      <li key={`r${i}`}>
-                        <b>
-                          {r.serverName} · {r.user}
-                        </b>{' '}
-                        — {r.reason}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              <div style={{ marginTop: 6 }}>
-                <details>
-                  <summary className="muted" style={{ fontSize: 11 }}>
-                    What will run on each server
-                  </summary>
-                  {/* Shown, and sent back with the run: main derives it again
-                      and refuses to touch a host if the two differ. */}
-                  <pre className="mono" style={{ fontSize: 10, whiteSpace: 'pre-wrap' }}>
-                    {pending.preview.command || 'nothing — every server was left out'}
-                  </pre>
-                </details>
-              </div>
-              <div className="row" style={{ gap: 8, marginTop: 8 }}>
-                <button
-                  className="btn danger"
-                  data-testid="revoke-go"
-                  disabled={running || pending.preview.hosts.length === 0}
-                  onClick={() => void runRevoke()}
-                >
-                  Stage the revocation
-                </button>
-                <button className="btn ghost" disabled={running} onClick={() => setPending(null)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-
-          {result !== null && (
-            <div className="s-desc" data-testid="revoke-result">
-              {result.reports.map((r) => (
-                <div
-                  key={`${r.serverId}:${r.token}`}
-                  data-testid={`outcome-${r.serverId}`}
-                  data-outcome={r.outcome}
-                  style={{ marginBottom: 6 }}
-                >
-                  <span className={clsx('chip', outcomeClass(r.outcome))}>
-                    {OUTCOME_LABEL[r.outcome]}
-                  </span>{' '}
-                  {r.detail}
-                </div>
-              ))}
-              {result.notStaged.map((n) => (
-                <div key={n.serverId} data-testid={`not-staged-${n.serverId}`} style={{ marginBottom: 6 }}>
-                  <span className="chip loud">Not staged</span> Nothing was changed on {n.serverName}:{' '}
-                  {n.detail}
-                </div>
-              ))}
-              {result.reports.length === 0 && result.notStaged.length === 0 && (
-                <span>Nothing ran: every server was left out.</span>
-              )}
-            </div>
-          )}
-
           {view === 'keys' ? (
             <div className="inv-scroll">
               <table className="table inv-table">
@@ -949,14 +719,19 @@ export function AccessPanel({
                           </span>
                         ))}
                       </td>
+                      {/* A POINTER, not the plan-and-apply flow that used to
+                          live in this cell. It carries the fingerprint the
+                          operator is looking at, and lands before the plan,
+                          the confirmation and the staged write — so arriving
+                          with an intention skips no question, exactly as
+                          `openServiceJob` decided for the job composer. */}
                       {canWrite && (
                         <td>
                           <button
                             className="btn ghost sm"
                             data-testid={`revoke-${k.fingerprint}`}
-                            disabled={running || pending !== null}
-                            onClick={() => void planRevoke(k.fingerprint)}
-                            title="Shows exactly what would run on which servers. Nothing is written until you confirm it, and nothing becomes permanent until a second, independent session has proved the server still lets ShellPilot in."
+                            onClick={() => openKeyRevoke(k.fingerprint)}
+                            title="Opens Operations › Revoke a key, with this key chosen. Nothing is written until you confirm it there, and nothing becomes permanent until a second, independent session has proved the server still lets ShellPilot in."
                           >
                             Revoke…
                           </button>

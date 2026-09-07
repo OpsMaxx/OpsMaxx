@@ -1,15 +1,8 @@
 import { useCallback, useState } from 'react'
 import { Plus, RefreshCw, ServerCog } from 'lucide-react'
 import { clsx } from '../../lib/format'
-import { openSettings } from '../../store/nav'
-import {
-  checkUnitDraft,
-  renderUnitFile,
-  summariseUserUnits,
-  type UnitDraft,
-  type UnitRestart,
-  type UserUnitsReading
-} from '../../../../shared/userUnits'
+import { openSettings, openUnitInstall } from '../../store/nav'
+import { summariseUserUnits, type UserUnitsReading } from '../../../../shared/userUnits'
 import type { Server } from '../../types'
 
 // What each server supervises for this account, read from its own systemd.
@@ -19,6 +12,14 @@ import type { Server } from '../../types'
 // lingering, so a list of `running` units read over SSH can be a list of things
 // that are about to stop. summariseUserUnits() decides that; this renders it
 // first and the units underneath.
+//
+// READ-ONLY, AND NOW ACTUALLY. This panel used to carry a New service form that
+// wrote a unit file onto a host, under a subtitle that said "Read-only —
+// nothing is started, stopped or written here". The form has moved to
+// Operations › Jobs › Install a service (see UnitInstallPanel), which is what
+// made the sentence above it true. `openUnitInstall` is what is left in its
+// place: a pointer, because a control that simply vanishes teaches a person the
+// feature broke rather than that it moved.
 
 interface Row {
   serverId: string
@@ -32,47 +33,6 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
   const [rows, setRows] = useState<Row[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // Which server the form is open against, or null. One at a time on purpose:
-  // "install this on all of them" is not a thing to make easy.
-  const [writingFor, setWritingFor] = useState<{ id: string; name: string } | null>(null)
-  const [draft, setDraft] = useState<UnitDraft>({
-    name: '',
-    description: '',
-    execStart: '',
-    restart: 'on-failure'
-  })
-  const [writeResult, setWriteResult] = useState<{ ok: boolean; text: string } | null>(null)
-
-  const check = checkUnitDraft(draft)
-
-  const install = async (): Promise<void> => {
-    const target = servers.find((s) => s.id === writingFor?.id)
-    if (!target) return
-    const w = (
-      window.shellpilot as
-        | { services?: { write?: (t: unknown, d: UnitDraft) => Promise<{ ok: boolean; output?: string; error?: string }> } }
-        | undefined
-    )?.services?.write
-    if (typeof w !== 'function') {
-      setWriteResult({ ok: false, text: 'This build cannot write units. Restart the app to rebuild it.' })
-      return
-    }
-    // Asked before it happens, and it names the server and the unit, because a
-    // file is about to appear on a machine the operator is not looking at.
-    if (
-      !window.confirm(
-        `Install ${draft.name} on ${writingFor?.name}?\n\nIt writes ~/.config/systemd/user/${draft.name} and enables it. It does NOT start it, and any existing unit of that name is backed up first.`
-      )
-    ) {
-      return
-    }
-    const res = await w({ cfg: target }, draft)
-    setWriteResult({ ok: res.ok === true, text: res.output ?? res.error ?? 'No answer.' })
-    if (res.ok) {
-      setWritingFor(null)
-      await read()
-    }
-  }
 
   const bridge = (): { collect?: (t: unknown[]) => Promise<Row[]> } | undefined =>
     (window.shellpilot as { services?: { collect?: (t: unknown[]) => Promise<Row[]> } } | undefined)
@@ -107,7 +67,8 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
           <div className="panel-subtitle">
             What each server&rsquo;s own systemd supervises for your account. Read-only — nothing is
             started, stopped or written here, because the server&rsquo;s supervisor is the one that
-            is still there when ShellPilot is not.
+            is still there when ShellPilot is not. Installing a unit writes a file onto a host, so
+            it lives on the Operations rail.
           </div>
         </div>
         <button className="btn primary" disabled={loading || servers.length === 0} onClick={() => void read()}>
@@ -116,73 +77,6 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
       </div>
 
       {error && <div className="panel-note is-alarm">{error}</div>}
-
-      {writingFor && (
-        <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
-          <div className="r-title">New service on {writingFor.name}</div>
-          <div className="r-sub faint">
-            Written to <code>~/.config/systemd/user/</code> and enabled, not started. The server’s
-            own systemd owns the restart policy from then on — which is the point: it is there when
-            ShellPilot is not.
-          </div>
-          <input
-            className="input"
-            placeholder="worker.service"
-            aria-label="Unit name"
-            value={draft.name}
-            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-          />
-          <input
-            className="input"
-            placeholder="What it is, in one line"
-            aria-label="Description"
-            value={draft.description}
-            onChange={(e) => setDraft({ ...draft, description: e.target.value })}
-          />
-          <input
-            className="input mono"
-            placeholder="/usr/local/bin/worker --queue main"
-            aria-label="ExecStart"
-            value={draft.execStart}
-            onChange={(e) => setDraft({ ...draft, execStart: e.target.value })}
-          />
-          <select
-            className="input"
-            aria-label="Restart policy"
-            value={draft.restart}
-            onChange={(e) => setDraft({ ...draft, restart: e.target.value as UnitRestart })}
-          >
-            <option value="on-failure">Restart on failure</option>
-            <option value="always">Always restart</option>
-            <option value="no">Never restart</option>
-          </select>
-
-          {/* The exact bytes, before they are written. A file is about to appear
-              on a machine nobody is looking at, and "trust me" is not a preview. */}
-          {check.ok ? (
-            <pre className="mono" style={{ fontSize: 11, whiteSpace: 'pre-wrap', margin: 0 }}>
-              {renderUnitFile(draft)}
-            </pre>
-          ) : (
-            <div className="s-note state-unknown">{check.reason}</div>
-          )}
-
-          <div className="row-actions">
-            <button className="btn primary" disabled={!check.ok} onClick={() => void install()}>
-              Install
-            </button>
-            <button className="btn" onClick={() => setWritingFor(null)}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      {writeResult && (
-        <div className={clsx('panel-note', writeResult.ok ? '' : 'is-alarm')}>
-          <span className="mono">{writeResult.text}</span>
-        </div>
-      )}
 
       {rows === null ? (
         <div className="panel-empty">
@@ -215,15 +109,19 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
                   is what people look at and the sentence is what they need. */}
               <div className={clsx('r-sub', s.level === 'alarm' && 'danger')}>{s.headline}</div>
               {r.reading.detail && <div className="r-sub faint mono">{r.reading.detail}</div>}
+              {/* A POINTER, not the form it replaced. It lands on the installer
+                  with this server already chosen, which is the one fact the
+                  operator was looking at when they pressed it — and it lands
+                  before the preview, the confirmation and the write, so
+                  arriving with an intention skips no question. */}
               <div className="row-actions" style={{ marginTop: 6 }}>
                 <button
                   className="btn sm"
-                  onClick={() => {
-                    setWriteResult(null)
-                    setWritingFor({ id: r.serverId, name: r.serverName })
-                  }}
+                  data-testid={`install-on-${r.serverId}`}
+                  title="Opens Operations › Jobs › Install a service, with this server chosen. Writing a unit file changes a server, so it lives on the rail where everything does."
+                  onClick={() => openUnitInstall(r.serverId)}
                 >
-                  <Plus size={12} /> New service
+                  <Plus size={12} /> New service…
                 </button>
               </div>
               {shown.length > 0 && (

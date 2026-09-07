@@ -30,7 +30,25 @@ import type { Server } from '../../types'
 // here — and when root was used to get an answer, that is said for the tail's
 // whole life rather than once, at the top, where it scrolls away in a second.
 
-const HOST_COLOURS = ['var(--accent)', '#d98d4b', '#7ab87a', '#b57edc', '#4bb5d9', '#d97b7b']
+// Host identity, from tokens that exist for nothing else.
+//
+// This used to be `['var(--accent)', '#d98d4b', …]`: the first host wore the
+// app's accent and the second wore amber, so an ordinary line from the second
+// host read as a warning in a stream whose whole job is to show you which lines
+// are warnings. The hardcoded five also failed AA in the light theme at 2.0:1
+// to 2.6:1 — hostnames are exactly the strings a person cross-references
+// against another window.
+//
+// The hostname is the real carrier. Colour is the shortcut for somebody
+// scanning, and it has to survive being taken away.
+const HOST_COLOURS = [
+  'var(--host-blue)',
+  'var(--host-rust)',
+  'var(--host-jade)',
+  'var(--host-violet)',
+  'var(--host-pink)',
+  'var(--host-olive)'
+]
 
 /**
  * Pause and resume, which main gained and the preload bridge has not yet been

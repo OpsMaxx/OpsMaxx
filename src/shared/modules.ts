@@ -25,6 +25,7 @@ export type ModuleId =
   | 'cron'
   | 'logTail'
   | 'broadcast'
+  | 'keyRevoke'
   | 'fleetSearch'
   | 'inventory'
   | 'patch'
@@ -63,26 +64,31 @@ export type ModuleSurface = 'read' | 'operate'
 /**
  * Modules on the `read` surface that can still write to a server.
  *
- * The contract is "nothing on a read surface writes", and these two break it
- * TODAY. They are listed rather than quietly reclassified because both are
- * mostly-read panels with one mutating action bolted on, and moving the whole
- * module to `operate` would exile a large read-only view — the authorized_keys
- * inventory, the crontab listing — into a destination built for things that
- * change servers. That is the wrong shape and it would make Operations a
- * dumping ground.
+ * EMPTY, and the export stays anyway. That is the point of it.
  *
- * Naming them here rather than softening the contract's wording is deliberate.
- * A contract with a silent exception is not a contract; a contract with a
- * two-item list that a test pins is one whose violations are countable, and a
- * third cannot be added without someone editing this array and being asked why.
+ * It held `access`, `cron` and `services` — three mostly-read panels with one
+ * mutating action bolted onto each: revoking an SSH key across the estate,
+ * writing a crontab, installing a `systemd --user` unit. Each has now been
+ * split rather than reclassified. Moving a whole module to `operate` would have
+ * exiled the authorized_keys inventory, the crontab listing and the unit
+ * listing into a destination built for things that change servers, which is the
+ * wrong shape and would make Operations a dumping ground. So the READ VIEW
+ * stayed where it was and the WRITE moved on its own:
  *
- * The real fix in both cases is the same and is a separate piece of work: split
- * the panel so the read view stays on Monitoring and the mutating action moves
- * to Operations as its own entry. Until then, note that both modules' `detail`
- * strings claimed "Read-only." while doing this — that copy has been corrected,
- * because a false safety claim is worse than the write it was covering for.
+ *  - revoking a key became `keyRevoke`, an operate module of its own;
+ *  - writing a crontab and installing a unit became sub-tabs of `jobs`, whose
+ *    subject is already "make this server run something" — see the sub-tab
+ *    strip in OperationsView for the argument, which is per case rather than
+ *    per convenience.
+ *
+ * Each read panel keeps a pointer at where its write went, because a control
+ * that simply vanishes reads as a feature that broke.
+ *
+ * The array survives the fix so that a fourth exception cannot be introduced by
+ * silence: adding one means editing this line, and the test that pins it empty
+ * turns "we'll split it later" into a diff somebody has to defend today.
  */
-export const READ_SURFACE_WRITE_EXCEPTIONS: ModuleId[] = ['access', 'cron', 'services']
+export const READ_SURFACE_WRITE_EXCEPTIONS: ModuleId[] = []
 
 export interface ModuleDef {
   id: ModuleId
@@ -153,7 +159,7 @@ export const MODULES: ModuleDef[] = [
     surface: 'read',
     label: 'Fleet keys and access',
     detail:
-      'Which key opens which server and whose it is: every authorized_keys file across the estate, fingerprinted, with locked and expired accounts and administrative group membership alongside. A server whose files could not be read is shown as unreadable and excluded from every count — never as a server with no keys. Reading is the whole of it apart from revoking a key, which is planned against the server and confirmed before anything changes.',
+      'Which key opens which server and whose it is: every authorized_keys file across the estate, fingerprinted, with locked and expired accounts and administrative group membership alongside. A server whose files could not be read is shown as unreadable and excluded from every count — never as a server with no keys. Reading is the whole of it: nothing on this tab writes to a server, and removing a key is a separate module on the Operations side.',
     // OFF by default, and this one's toggle gates the COLLECTION rather than
     // just the panel — see FleetSamplerDeps.accessEnabled.
     //
@@ -167,6 +173,34 @@ export const MODULES: ModuleDef[] = [
     // Every one of those reads is a read a person could do by hand, none of
     // them mutates anything, and no private key is touched anywhere. It is
     // still not something to discover after the fact.
+    defaultEnabled: false
+  },
+  {
+    id: 'keyRevoke',
+    surface: 'operate',
+    label: 'Revoke a key',
+    detail:
+      'Remove one SSH key from every account across the estate that trusts it. Each server takes a timestamped backup, arms its own rollback before ShellPilot lets go, and keeps the change only once a second, independent session has authenticated against the changed file. Accounts it may not touch are listed by name with the reason, and a key is never reported as gone from an estate that could not be fully read.',
+    // A module of its own rather than a sub-tab, and the case is different from
+    // the other two splits.
+    //
+    // Cron editing and unit installation both answer "make this server run
+    // something", which is already the Jobs tab's sentence, so they became
+    // sub-tabs of it. Nothing in Operations has a sentence this fits under.
+    // Broadcast is "one command, many hosts"; patch is "packages, in waves";
+    // jobs is "composed work, in waves". Filing a key revocation under any of
+    // them would classify it by MECHANISM — it does fan out — where every tab
+    // on this rail is named by CONSEQUENCE, and the consequence here is that
+    // somebody loses access. It also does not run through the job engine or the
+    // broadcast runner at all: `access:plan` / `access:run` are its own
+    // protocol, with a dead-man's rollback neither of those has.
+    //
+    // OFF by default, and `backfillModules` keeps it off for every existing
+    // install regardless — an upgrade that switched this on would hand a fleet
+    // key-removal button to somebody who never asked for one. The write is
+    // gated a second and third time besides: ACCESS_WRITE_ENABLED is a build
+    // ceiling, `settings.accessWriteEnabled` is the operator's own switch, and
+    // main re-checks both in each handler.
     defaultEnabled: false
   },
   {
@@ -285,7 +319,7 @@ export const MODULES: ModuleDef[] = [
     surface: 'read',
     label: 'Scheduled jobs',
     detail:
-      'Read crontabs, /etc/cron.d and systemd timers across the estate. Editing a schedule is planned against the server and confirmed before it is written; nothing else here changes anything.',
+      'Read crontabs, /etc/cron.d and systemd timers across the estate, and say which of those sources this account was actually allowed to read. Read-only: changing a schedule is a write, and it lives on the Operations side under Jobs.',
     defaultEnabled: true
   },
   {
@@ -303,13 +337,13 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: 'services',
-    // Mostly a read, with one install action bolted on — the same shape as
-    // `access` and `cron`, and handled the same way. See
-    // READ_SURFACE_WRITE_EXCEPTIONS.
+    // Read-only now that installing a unit has moved to Operations › Jobs. It
+    // used to be the third entry in READ_SURFACE_WRITE_EXCEPTIONS; see the note
+    // on that array for what happened to all three.
     surface: 'read',
     label: 'Server services',
     detail:
-      'Read what each server supervises for your account with `systemd --user` — what is running, what has failed, and whether it survives you logging out. Nothing is started or stopped here; the one thing it writes is a new unit file, and that asks first.',
+      'Read what each server supervises for your account with `systemd --user` — what is running, what has failed, and whether it survives you logging out. Read-only: nothing is started, stopped or written, and installing a new unit is a write that lives on the Operations side under Jobs.',
     // OFF by default like the rest. It reads only, but it reads something most
     // operators have never looked at, and a module that switches itself on is a
     // module that decides for them.
@@ -370,9 +404,14 @@ export const MODULES: ModuleDef[] = [
  * two agree. Adding an `operate` module then fails a test rather than quietly
  * producing a tab that exists in one half of the app and not the other.
  */
-export type OperateModuleId = Extract<ModuleId, 'broadcast' | 'patch' | 'jobs'>
+export type OperateModuleId = Extract<ModuleId, 'broadcast' | 'patch' | 'jobs' | 'keyRevoke'>
 
-export const OPERATE_MODULE_IDS: readonly OperateModuleId[] = ['broadcast', 'patch', 'jobs']
+export const OPERATE_MODULE_IDS: readonly OperateModuleId[] = [
+  'broadcast',
+  'patch',
+  'jobs',
+  'keyRevoke'
+]
 
 /** Whether this module's destination is Operations rather than Monitoring. */
 export function isOperateModule(id: ModuleId): id is OperateModuleId {
