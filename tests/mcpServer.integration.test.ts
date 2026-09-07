@@ -175,4 +175,68 @@ describe('MCP server (integration)', () => {
     expect(detailsText).toContain('Workspace: Development')
     await client.close()
   })
+
+// The container tools, and specifically the two decisions that are easy to
+// reverse by accident later: that reading containers is its own capability
+// rather than folded into an existing one, and that the tier meant to be handed
+// out without thinking does not grant it.
+    describe('container tools', () => {
+    it('offers both container tools to an agent', async () => {
+      const client = await connectedClient(token)
+      const names = (await client.listTools()).tools.map((t) => t.name)
+      expect(names).toContain('list_containers')
+      expect(names).toContain('container_logs')
+      await client.close()
+    })
+
+    it('refuses both on the Read Only tier, whose promise is that it needs no thought', async () => {
+      // grp-observer, NOT grp-read-only — the latter is named "Commands, no
+      // writes" and is far more permissive than its id suggests. The tier this
+      // is about is the one a cautious user picks first and then stops thinking
+      // about, and a container log carries the application's own connection
+      // strings, so it is denied there for the same reason host facts are.
+      setAssignment({ level: 'workspace', workspaceId: 'ws-prod' }, 'grp-observer')
+      const observer = createSession({
+        agentName: 'Observer Agent',
+        workspaces: [{ id: 'ws-prod', name: 'Production' }],
+        groupId: 'grp-observer',
+        groupName: 'Read Only',
+        ttlMinutes: 60
+      })
+      const client = await connectedClient(observer.token)
+      try {
+        for (const name of ['list_containers', 'container_logs']) {
+          const res = (await client.callTool({
+            name,
+            arguments:
+              name === 'container_logs'
+                ? { serverName: 'Nginx Server Prod', container: 'api', intent: 'checking' }
+                : { serverName: 'Nginx Server Prod', intent: 'checking' }
+          })) as { content: { text?: string }[] }
+          const said = res.content.map((c) => c.text ?? '').join(' ')
+          expect(said, `${name} must be refused on the Read Only tier`).toMatch(
+            /not permitted|denied|refus/i
+          )
+        }
+      } finally {
+        await client.close()
+        setAssignment({ level: 'workspace', workspaceId: 'ws-prod' }, 'grp-read-only')
+      }
+    })
+
+    it('never offers a way to follow a log', async () => {
+      // A stream would outlive the approval that authorised it, which is the
+      // durability argument the job engine is excluded on. The schema is the
+      // enforcement: there is no parameter to ask for it.
+      const client = await connectedClient(token)
+      const logs = (await client.listTools()).tools.find((t) => t.name === 'container_logs')
+      const props = Object.keys(
+        (logs?.inputSchema as { properties?: Record<string, unknown> })?.properties ?? {}
+      )
+      expect(props).not.toContain('follow')
+      expect(props).not.toContain('stream')
+      expect(props).toContain('since')
+      await client.close()
+    })
+  })
 })
