@@ -665,6 +665,23 @@ export interface K8sNode {
   version: string
 }
 
+/**
+ * Nodes that could actually take a new pod right now.
+ *
+ * `kubectl get nodes` reports schedulability inside STATUS as a suffix —
+ * "Ready,SchedulingDisabled" — rather than as its own column, so this is a
+ * string check and not a boolean field. A NotReady node is not schedulable
+ * either, whatever its cordon state: the scheduler will not place work on it.
+ *
+ * Used to decide whether cordoning THIS node leaves the cluster with anywhere
+ * to run, which is the difference between a routine cordon and taking the
+ * cluster out of service. See planK8sCordon.
+ */
+export function countSchedulableNodes(nodes: readonly K8sNode[]): number {
+  return nodes.filter((n) => /\bReady\b/.test(n.status) && !/SchedulingDisabled/i.test(n.status))
+    .length
+}
+
 export interface K8sPodUsage {
   namespace: string
   name: string
@@ -1385,10 +1402,18 @@ export function planK8sRollout(target: K8sRolloutTarget): K8sRolloutPlan {
   return {
     target,
     risk,
-    // Type-to-confirm says RESTART rather than broadcast's RUN: the word you
-    // type should name what is about to happen, in a dialog whose whole job is
-    // to interrupt an autopilot.
-    confirmation: type ? { kind: 'type-to-confirm', phrase: 'RESTART' } : { kind: 'confirm' },
+    // The word is the WORKLOAD, not the verb.
+    //
+    // It used to be the literal string 'RESTART', identical for every workload
+    // in every namespace in every cluster. Typing it proves you can type a
+    // word; it builds muscle memory that transfers straight to the next
+    // dialog, which is the exact failure a typed confirmation exists to
+    // prevent. The mistake anyone actually makes here is target selection —
+    // prod and staging sitting three pixels apart in a list — and only the
+    // object name forces the second look at the target.
+    confirmation: type
+      ? { kind: 'type-to-confirm', phrase: target.name }
+      : { kind: 'confirm' },
     reasons,
     caveats
   }
@@ -1587,6 +1612,15 @@ export interface K8sCordonTarget {
    * it did.
    */
   podCount: number | null
+  /**
+   * Schedulable nodes in the cluster right now, INCLUDING this one, or null
+   * when it was not read.
+   *
+   * Null is not "plenty". It is the absence of a reading, and it is treated as
+   * one — see planK8sCordon, which will not claim this is the last node and
+   * will not pretend it is not.
+   */
+  schedulableNodes: number | null
   context?: string | null
 }
 
@@ -1601,11 +1635,33 @@ export interface K8sCordonPlan {
 /**
  * How hard the user has to press to change one node's schedulability.
  *
- * Never type-to-confirm, in either direction, and that is the point of having
- * a separate plan function rather than reusing the rollout's. Nothing is
+ * Ordinarily a plain confirm in both directions, and that is the point of
+ * having a separate plan function rather than reusing the rollout's. Nothing is
  * evicted and nothing is deleted; the state is one boolean and the undo is the
- * other button on the same row. Demanding a typed word here is how the typed
- * word stops meaning anything by the time a drain asks for one.
+ * other button on the same row. Demanding a typed word for the routine case is
+ * how the typed word stops meaning anything by the time a drain asks for one.
+ *
+ * ---------------------------------------------------------------------------
+ * THE EXCEPTION: THE LAST SCHEDULABLE NODE
+ * ---------------------------------------------------------------------------
+ *
+ * Friction here was calibrated on how frightening the verb sounds rather than
+ * on what the action costs. A rollout restart — reversible, self-healing as
+ * pods come back — asked for a typed word. A cordon, which this same function
+ * warns has NO EXPIRY and leaves rollouts sitting Pending, was one click. On a
+ * single-node cluster, cordoning is the more dangerous of the two by a wide
+ * margin: it takes the whole cluster out of service until somebody remembers,
+ * and nothing anywhere records why it was done.
+ *
+ * So the escalation keys on persistence and blast radius: cordoning the last
+ * schedulable node earns the typed word, and the word is the node's name for
+ * the same reason the rollout's is the workload's.
+ *
+ * When the count was not read this does NOT escalate, and does not pretend the
+ * question was settled either — it says so in a caveat. Escalating on every
+ * unknown would put a typed word in front of the routine case again and undo
+ * the paragraph above; staying silent about it would render a reading nobody
+ * took as an all-clear, which is the rule this codebase runs on.
  */
 export function planK8sCordon(target: K8sCordonTarget): K8sCordonPlan {
   const reasons: string[] = []
@@ -1632,13 +1688,26 @@ export function planK8sCordon(target: K8sCordonTarget): K8sCordonPlan {
     reasons.push(`"${prodHit}" reads as production`)
   }
 
+  // Only for a cordon: uncordoning the last node RESTORES the cluster, and
+  // putting friction in front of the recovery is how an outage gets longer.
+  const last = target.action === 'cordon' && target.schedulableNodes === 1
+  if (last) {
+    reasons.push(
+      'this is the only schedulable node left, so nothing in the cluster will be able to start anywhere'
+    )
+  } else if (target.action === 'cordon' && target.schedulableNodes === null) {
+    caveats.push(
+      'how many other schedulable nodes the cluster has was not read, so whether this leaves anywhere for pods to run could not be checked'
+    )
+  }
+
   return {
     target,
     // `elevated` rather than `ordinary` even for uncordon: both directions move
     // a machine in or out of a fleet's capacity, and neither is something to
     // do while looking at something else.
-    risk: 'elevated',
-    confirmation: { kind: 'confirm' },
+    risk: last ? 'destructive' : 'elevated',
+    confirmation: last ? { kind: 'type-to-confirm', phrase: target.node } : { kind: 'confirm' },
     reasons,
     caveats
   }

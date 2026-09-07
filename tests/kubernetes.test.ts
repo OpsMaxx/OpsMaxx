@@ -352,10 +352,13 @@ import {
   parseK8sUsage,
   parseK8sRolloutResult,
   planK8sRollout,
+  planK8sCordon,
+  countSchedulableNodes,
   k8sRelativeTime,
   workloadIsDegraded,
   nodeIsUnhealthy,
-  K8S_FAILURE_HELP
+  K8S_FAILURE_HELP,
+  type K8sNode
 } from '../src/shared/kubernetes'
 
 const block = (parts: Record<string, string>): string =>
@@ -719,7 +722,11 @@ describe('the one thing that changes the cluster', () => {
       desired: 3,
       strategy: 'RollingUpdate'
     })
-    expect(p.confirmation).toEqual({ kind: 'type-to-confirm', phrase: 'RESTART' })
+    // The word is the WORKLOAD, not the verb. 'RESTART' was identical for every
+    // workload in every namespace, so typing it proved nothing about the target
+    // and built muscle memory that transferred to the next dialog — the exact
+    // failure a typed confirmation exists to prevent.
+    expect(p.confirmation).toEqual({ kind: 'type-to-confirm', phrase: 'postgres' })
     expect(p.risk).toBe('destructive')
     expect(p.reasons.join(' ')).toMatch(/one at a time/)
   })
@@ -1091,5 +1098,77 @@ describe('changing the namespace re-reads', () => {
       usage: false,
       resources: false
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Friction on blast radius, not on how frightening the verb sounds
+// ---------------------------------------------------------------------------
+//
+// A rollout restart — reversible, self-healing as pods come back — asked for a
+// typed word. A cordon, which the same plan warns has NO EXPIRY and leaves
+// rollouts sitting Pending, was one click. On a single-node cluster cordoning
+// is the more dangerous of the two by a wide margin: it takes the whole cluster
+// out of service until somebody remembers, and nothing records why.
+describe('cordoning the last schedulable node', () => {
+  const target = (over: Partial<Parameters<typeof planK8sCordon>[0]> = {}): Parameters<
+    typeof planK8sCordon
+  >[0] => ({ node: 'k3s-node-1', action: 'cordon', podCount: 3, schedulableNodes: 3, ...over })
+
+  it('stays a plain confirm while the cluster has somewhere else to run', () => {
+    expect(planK8sCordon(target()).confirmation).toEqual({ kind: 'confirm' })
+  })
+
+  it('demands the node name when this is the only schedulable node left', () => {
+    const p = planK8sCordon(target({ schedulableNodes: 1 }))
+    expect(p.confirmation).toEqual({ kind: 'type-to-confirm', phrase: 'k3s-node-1' })
+    expect(p.risk).toBe('destructive')
+    expect(p.reasons.join(' ')).toMatch(/only schedulable node/)
+  })
+
+  // Putting friction in front of the recovery is how an outage gets longer.
+  it('never escalates an uncordon, which is the thing that restores service', () => {
+    const p = planK8sCordon(target({ action: 'uncordon', schedulableNodes: 1 }))
+    expect(p.confirmation).toEqual({ kind: 'confirm' })
+  })
+
+  // Escalating on every unknown would put a typed word in front of the routine
+  // case and devalue it; staying silent would render a reading nobody took as
+  // an all-clear. It says so instead.
+  it('does not escalate on an unread count, and does not pretend it checked', () => {
+    const p = planK8sCordon(target({ schedulableNodes: null }))
+    expect(p.confirmation).toEqual({ kind: 'confirm' })
+    expect(p.caveats.join(' ')).toMatch(/was not read/)
+  })
+
+  it('says nothing about the count when it did check and found others', () => {
+    expect(planK8sCordon(target({ schedulableNodes: 2 })).caveats.join(' ')).not.toMatch(
+      /was not read/
+    )
+  })
+})
+
+describe('counting what can actually take a pod', () => {
+  const n = (name: string, status: string): K8sNode => ({
+    name,
+    status,
+    roles: '',
+    age: '1d',
+    version: 'v1.30'
+  })
+
+  // kubectl reports schedulability inside STATUS as a suffix rather than as its
+  // own column, so this is a string check and not a boolean field.
+  it('excludes a cordoned node', () => {
+    expect(countSchedulableNodes([n('a', 'Ready'), n('b', 'Ready,SchedulingDisabled')])).toBe(1)
+  })
+
+  // A NotReady node is not schedulable either, whatever its cordon state.
+  it('excludes a node that is not Ready', () => {
+    expect(countSchedulableNodes([n('a', 'Ready'), n('b', 'NotReady'), n('c', 'Unknown')])).toBe(1)
+  })
+
+  it('counts nothing in an empty cluster rather than guessing', () => {
+    expect(countSchedulableNodes([])).toBe(0)
   })
 })
