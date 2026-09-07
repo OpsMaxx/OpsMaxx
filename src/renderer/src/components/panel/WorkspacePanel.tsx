@@ -12,9 +12,16 @@ import {
   SplitSquareVertical,
   Columns3,
   Search,
-  Server as ServerIcon
+  Server as ServerIcon,
+  Download
 } from 'lucide-react'
-import { MAX_PANES, splitDirectionOf, useApp, useWorkspaceTabs } from '../../store/app'
+import {
+  MAX_PANES,
+  splitDirectionOf,
+  useApp,
+  useWorkspaceServers,
+  useWorkspaceTabs
+} from '../../store/app'
 import type { TabPanes } from '../../store/app'
 import { ContextMenu, MenuEntry } from '../connections/ContextMenu'
 import { clsx } from '../../lib/format'
@@ -142,6 +149,84 @@ function Terminals({ tab, tp }: { tab: Tab; tp: TabPanes | undefined }): React.J
         : sshTransport(server, setServerStatus)
       : undefined
   return <TerminalView transport={transport} server={server} tabId={tab.id} />
+}
+
+// Two different empty states wearing one set of words.
+//
+// It used to say, always: "No open sessions. Select a server from the sidebar
+// to open a terminal, or add your first connection to get started." On a fresh
+// install the sidebar it points at reads `CONNECTIONS 0`, so the first half of
+// the sentence describes an action the reader cannot take — and the headline
+// names a session problem when the actual state is "there are no servers".
+//
+// The other half of the defect is what it did NOT offer. This audience
+// overwhelmingly already has a ~/.ssh/config; the tour promotes importing it and
+// the command palette advertises it as "Bulk-import servers you already have,
+// ProxyJump included". Here it appeared only as an unlabelled download arrow in
+// the sidebar header, so the fastest path in was the one nobody could see.
+//
+// The config is probed rather than assumed. `sshConfig.read()` already
+// separates "no such file" from "could not read it", and Import is only made
+// the primary action when a file was actually found — promoting it on a machine
+// with no config would send a first-run user to a dialog that can only tell
+// them there is nothing there.
+function NoTabs(): React.JSX.Element {
+  const setModal = useApp((s) => s.setModal)
+  const servers = useWorkspaceServers()
+  // null while the probe is outstanding: not "no config", which would make the
+  // buttons jump once the answer arrives.
+  const [config, setConfig] = useState<{ found: boolean; count: number } | null>(null)
+
+  useEffect(() => {
+    let live = true
+    void window.shellpilot?.sshConfig?.read().then((r) => {
+      if (!live) return
+      setConfig(r?.ok ? { found: true, count: r.hosts?.length ?? 0 } : { found: false, count: 0 })
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  // Servers exist, so the original sentence is finally true.
+  if (servers.length > 0) {
+    return (
+      <EmptyState
+        icon={<ServerIcon size={26} />}
+        title="No open sessions"
+        message="Select a server from the sidebar to open a terminal."
+      />
+    )
+  }
+
+  const importFirst = config?.found === true
+  return (
+    <EmptyState
+      icon={<ServerIcon size={26} />}
+      title="No servers yet"
+      message={
+        importFirst
+          ? `ShellPilot found ${config.count} host${config.count === 1 ? '' : 's'} in your ~/.ssh/config. Import them, or add one by hand.`
+          : 'Add a connection to get started, or import the ones you already have from ~/.ssh/config.'
+      }
+      action={
+        <div className="row" style={{ gap: 8, justifyContent: 'center' }}>
+          <button
+            className={clsx('btn', importFirst && 'primary')}
+            onClick={() => setModal('import-ssh')}
+          >
+            <Download size={15} /> Import from ~/.ssh/config
+          </button>
+          <button
+            className={clsx('btn', !importFirst && 'primary')}
+            onClick={() => setModal('add-server')}
+          >
+            <Plus size={15} /> Add Server
+          </button>
+        </div>
+      }
+    />
+  )
 }
 
 export function WorkspacePanel(): React.JSX.Element {
@@ -337,18 +422,7 @@ export function WorkspacePanel(): React.JSX.Element {
       <div className="panel-body">
         {/* Rendered inline rather than as an early return: returning early
             would unmount every pane, killing sessions in other workspaces. */}
-        {tabs.length === 0 && (
-          <EmptyState
-            icon={<ServerIcon size={26} />}
-            title="No open sessions"
-            message="Select a server from the sidebar to open a terminal, or add your first connection to get started."
-            action={
-              <button className="btn primary" onClick={() => setModal('add-server')}>
-                <Plus size={15} /> Add Server
-              </button>
-            }
-          />
-        )}
+        {tabs.length === 0 && <NoTabs />}
         {allTabs.map((t) => (
           <div
             key={t.id}
