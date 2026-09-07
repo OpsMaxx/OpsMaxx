@@ -12,11 +12,22 @@ import {
 describe('policy store', () => {
   beforeEach(() => resetPolicyCacheForTests())
 
-  it('seeds the four default access groups on first use', () => {
+  it('seeds the five default access groups on first use', () => {
     const groups = listGroups()
     const names = groups.map((g) => g.name).sort()
-    expect(names).toEqual(['Full Access', 'Read & Write', 'Read Only', 'Sudo Access'].sort())
+    expect(names).toEqual(
+      ['Read Only', 'Commands, no writes', 'Read & Write', 'Sudo Access', 'Full Access'].sort()
+    )
     expect(groups.every((g) => g.builtIn)).toBe(true)
+  })
+
+  // The ladder used to start at a group called "Read Only" that left `terminal`
+  // at 'allow'. The name now belongs to a tier that cannot run anything, and
+  // the ordering matters because the first card is the one a cautious user
+  // picks — see tests/accessTiers.test.ts for the full guarantee.
+  it('puts the tier that can change nothing first', () => {
+    expect(listGroups()[0].name).toBe('Read Only')
+    expect(listGroups()[0].capabilities.terminal).toBe('deny')
   })
 
   it('supports creating a custom group', () => {

@@ -145,9 +145,48 @@ function defaultFilePolicies(): AccessGroup['filePolicies'] {
 
 function defaultGroups(): AccessGroup[] {
   return [
+    // THE genuinely read-only tier, and the reason the group below was renamed.
+    //
+    // "Read Only" used to name a group that left `terminal` at 'allow', so the
+    // most conservative-sounding option in the list granted an agent unattended
+    // arbitrary shell — `rm -rf`, `dd`, `curl | sh` are all "commands". A user
+    // picking it BECAUSE of the name was getting the opposite of what the name
+    // promised, and it is the first card, so it is the one a cautious person
+    // lands on.
+    //
+    // `databaseAccess` is denied here for the same reason `terminal` is: the
+    // capability "runs queries", and a query is `DROP TABLE` as readily as it
+    // is `SELECT`. Nothing in this group can change anything on a host.
+    {
+      id: 'grp-observer',
+      name: 'Read Only',
+      builtIn: true,
+      capabilities: {
+        viewServer: 'allow',
+        readFiles: 'allow',
+        sftpDownload: 'allow',
+        serverMetrics: 'allow',
+        terminal: 'deny',
+        writeFiles: 'deny',
+        sftpUpload: 'deny',
+        sshTunnel: 'deny',
+        databaseAccess: 'deny',
+        sudo: 'deny',
+        hostFacts: 'deny',
+        firewallRules: 'deny',
+        manageServers: 'deny',
+        vpnControl: 'deny'
+      },
+      filePolicies: defaultFilePolicies()
+    },
+    // Was called "Read Only", which it never was. The id is unchanged so every
+    // existing assignment keeps pointing at exactly the grant it already had —
+    // renaming a group must not move anybody's permissions, and this rename
+    // deliberately does not. What changes is that the name now says the thing
+    // that was hidden: this group runs commands.
     {
       id: 'grp-read-only',
-      name: 'Read Only',
+      name: 'Commands, no writes',
       builtIn: true,
       capabilities: allowAll({
         writeFiles: 'deny',
@@ -234,6 +273,56 @@ function backfillCapabilities(state: PolicyState): PolicyState {
   return state
 }
 
+// Built-in groups an upgrade has to introduce, and built-in names an upgrade
+// has to correct.
+//
+// Two different operations with two different risk profiles, which is why they
+// are separate lists rather than one "make it look like a fresh seed" pass:
+//
+//   ADDING a group grants nobody anything. A new group arrives with no
+//   assignment pointing at it, so it changes no agent's permissions and only
+//   becomes live when a human picks it. It is therefore safe to add
+//   unconditionally, unlike backfilling a *capability*, which is why that one
+//   is careful and this one is not.
+//
+//   RENAMING is only safe while the name is still the one we shipped. The
+//   moment a user has edited it, that edit is intent on record and outranks
+//   anything here — the same rule `retire` follows for file policies. So a
+//   rename matches on the exact stale string and does nothing otherwise.
+//
+// Neither operation ever touches `capabilities`. The whole point of renaming
+// "Read Only" rather than tightening it is that an existing install's grants do
+// not move underneath it: an agent that could run commands yesterday can still
+// run them today, and the name now admits it.
+const STALE_BUILTIN_NAMES: { id: string; was: string; now: string }[] = [
+  // Shipped as "Read Only" while leaving `terminal` at 'allow'.
+  { id: 'grp-read-only', was: 'Read Only', now: 'Commands, no writes' }
+]
+
+function backfillGroups(state: PolicyState): PolicyState {
+  // Rename first, though nothing depends on the order: the match below is
+  // scoped by id, so the freshly inserted "Read Only" cannot be caught by a
+  // rename aimed at a different group even if the insert ran first. Written in
+  // this order because it reads as the sequence it is — correct the names we
+  // already shipped, then add the ones we did not.
+  for (const { id, was, now } of STALE_BUILTIN_NAMES) {
+    const group = state.groups.find((g) => g.id === id && g.builtIn)
+    if (group && group.name === was) group.name = now
+  }
+
+  // Insert missing built-ins at the position a fresh seed would have put them,
+  // so the list a user upgrading into sees is ordered the same as the list a
+  // fresh install sees — and, since the first card is what a cautious person
+  // picks, so that the safest tier is first on both.
+  const seeded = defaultGroups()
+  const have = new Set(state.groups.map((g) => g.id))
+  seeded.forEach((fresh, index) => {
+    if (have.has(fresh.id)) return
+    state.groups.splice(Math.min(index, state.groups.length), 0, fresh)
+  })
+  return state
+}
+
 // Seeded file-policy generations. Each entry is what changed at that
 // generation; a file records the highest one it has been brought up to.
 //
@@ -301,6 +390,11 @@ const LATEST_FILE_POLICY_GENERATION = FILE_POLICY_GENERATIONS.at(-1)?.generation
 // `generations` is injectable so a test can exercise the migration mechanism
 // itself — retire, replace, no-op-when-already-past — without inventing a fake
 // generation in the shipped list to do it.
+/** Group add/rename migration, exposed so a test can drive it directly. */
+export function migrateGroupsForTests(state: PolicyState): PolicyState {
+  return backfillGroups(state)
+}
+
 export function migrateForTests(
   state: PolicyState,
   generations: FilePolicyGeneration[] = FILE_POLICY_GENERATIONS
@@ -345,7 +439,7 @@ function read(): PolicyState {
     if (existsSync(FILE)) {
       const parsed = JSON.parse(readFileSync(FILE, 'utf8')) as PolicyState
       if (parsed && Array.isArray(parsed.groups)) {
-        return backfillFilePolicies(backfillCapabilities(parsed))
+        return backfillFilePolicies(backfillCapabilities(backfillGroups(parsed)))
       }
     }
   } catch {
