@@ -90,7 +90,8 @@ export interface HostRow {
   /** null when the host has neither ss nor netstat. */
   listeners: PortListener[] | null
   listenerSource: HostMetrics['listenerSource']
-  diskPct: number
+  /** Null when `df` said nothing — never 0, which is an empty disk. */
+  diskPct: number | null
   diskUsed: number
   diskTotal: number
   diskCritical: boolean
@@ -153,10 +154,11 @@ function isFailed(u: ServiceUnit): boolean {
 function toRow(server: ServerRef, host: HostMetrics): HostRow {
   const failed = host.services === null ? null : host.services.filter(isFailed)
   const running = host.services === null ? null : host.services.filter((u) => u.sub === 'running').length
-  // `df` returning nothing yields diskPct 0 with diskTotal 0, and a host that
-  // reported no disk at all must not read as a disk that is empty. The check
-  // stays here, at the only site holding the answer.
-  const diskCritical = host.diskTotal > 0 && isDiskCritical(host.diskPct)
+  // A host that reported no disk at all must not read as a disk that is
+  // empty. This used to ask `diskTotal > 0`, which was the same question
+  // asked sideways; diskPct is null when it could not be measured, so the
+  // check now asks the field that holds the answer.
+  const diskCritical = host.diskPct !== null && isDiskCritical(host.diskPct)
   return {
     id: server.id,
     name: server.name,

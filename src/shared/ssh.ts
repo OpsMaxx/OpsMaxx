@@ -102,7 +102,20 @@ export interface HostMetrics {
   memPct: number | null
   memUsed: number // bytes
   memTotal: number
-  diskPct: number
+  /**
+   * Root filesystem usage as a percentage, or null when `df` said nothing.
+   *
+   * Null, never zero, for the same reason cpu, memPct, inodePct and load1 are:
+   * a probe that could not measure a disk is not a disk that is empty, and 0%
+   * is the most reassuring number this field can hold.
+   *
+   * It used to be `number`, paired with `diskTotal > 0` as the "was this
+   * measured" signal. That convention worked where it was applied — the alert
+   * path checks it and says so — but four other call sites did not, and each
+   * printed or recorded a confident 0%. A type that cannot be dereferenced
+   * without answering the question is the version nobody can forget.
+   */
+  diskPct: number | null
   diskUsed: number
   diskTotal: number
   /**

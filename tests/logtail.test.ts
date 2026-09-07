@@ -135,16 +135,40 @@ describe('what the fan-out paths ask of an unknown server', () => {
     // Each fan-out call passes allowPrompt explicitly false.
     expect(main).toMatch(/sshExec\(resolveChainSecrets\(cfg as SshConnectConfig\), command, timeoutMs, false\)/)
     expect(main).toMatch(/sshExecStream\([\s\S]{0,120}handlers,\s*false\s*\)/)
-    expect(main).toMatch(/CRON_COLLECT_COMMAND,\s*\n\s*20_000,\s*\n\s*false\s*\n?\s*\)/)
+    // Cron's collect reaches sshExec through `targetExecQuiet` now — the same
+    // dispatch the local target uses — so the property is asserted where it
+    // lives. Both halves are required: collect must use the quiet dispatch,
+    // and the quiet dispatch must pass allowPrompt false.
+    expect(main).toMatch(/targetExecQuiet\(t\.cfg, CRON_COLLECT_COMMAND, 20_000\)/)
+    const quiet = main.slice(
+      main.indexOf('const targetExecQuiet ='),
+      main.indexOf("// Host facts, on the sampler's slow clock.")
+    )
+    expect(quiet).toMatch(/command, timeoutMs, false\)/)
   })
 
-  it('still prompts for docker, which reads one server the user just picked', () => {
+  it('still prompts for docker, which reads one host the user just picked', () => {
     // The distinction is the point: one host, chosen deliberately, is when a
     // fingerprint question can actually be answered.
+    //
+    // Docker reaches sshExec through `targetExec` now, which is the same
+    // function the local-target dispatch uses — so the property is asserted
+    // where it actually lives. Two halves, both required: docker must use
+    // targetExec, and targetExec must not pass allowPrompt false.
     const main = read('src/main/index.ts')
     const dockerBlock = main.slice(main.indexOf('const dockerReader'), main.indexOf('ipcMain.handle(\'docker:list\''))
-    expect(dockerBlock).toMatch(/sshExec\(resolveChainSecrets\(cfg as SshConnectConfig\), command, timeoutMs\)/)
+    expect(dockerBlock).toMatch(/exec:\s*targetExec/)
     expect(dockerBlock).not.toMatch(/timeoutMs,\s*false/)
+
+    // Bounded at the quiet variant that follows it, not at dockerReader: the
+    // two dispatches sit near the top of the file now, and a slice running all
+    // the way down would sweep in every fan-out reader's `timeoutMs, false`.
+    const targetExecBlock = main.slice(
+      main.indexOf('const targetExec ='),
+      main.indexOf('const targetExecQuiet =')
+    )
+    expect(targetExecBlock).toMatch(/sshExec\(resolveChainSecrets\(cfg as SshConnectConfig\), command, timeoutMs\)/)
+    expect(targetExecBlock).not.toMatch(/timeoutMs,\s*false/)
   })
 
   it('brings connection setup inside the caller timeout', () => {

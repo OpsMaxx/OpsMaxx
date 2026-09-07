@@ -496,6 +496,21 @@ const COLUMNS: { id: string; label: string; help: string }[] = [
   { id: 'certs', label: 'Certificates', help: 'Days left on the soonest certificate in a bounded set of named directories on this server. Not a TLS scanner: nothing is fetched over the network, the distribution trust store is deliberately not searched, and a directory that could not be entered is never rendered as a server with no certificates.' }
 ]
 
+/**
+ * This machine, alongside the estate.
+ *
+ * A sentinel id, never a row in `servers` — that list is persisted and mirrored
+ * into the MCP data cache. See shared/execTarget.ts.
+ *
+ * Its reading is taken on demand rather than by the fleet sweep, and that is
+ * not an implementation shortcut: the sweep persists posture facts into the
+ * durable history store keyed by host, and this machine's firewall state does
+ * not belong in the same record as the estate's. `fleet:posture-local` returns
+ * a reading and keeps nothing.
+ */
+const LOCAL_ID = 'local'
+const LOCAL_NAME = 'This machine'
+
 export function PosturePanel({
   servers,
   onOpen
@@ -517,8 +532,27 @@ export function PosturePanel({
     if (!bridgeHas(fleet, 'posture')) return
     const nextEntries: Record<string, Entry> = {}
     const nextFacts: Record<string, HostFacts | null> = {}
-    await Promise.all(
-      servers.map(async (s) => {
+
+    // Taken now, not read from the sweep — the sweep does not visit this
+    // machine. A probe answers `{ ok }`, so it is adapted into the same Entry
+    // the cached servers use and every cell below stays one code path.
+    const readLocal = async (): Promise<void> => {
+      if (!bridgeHas(fleet, 'postureLocal')) return
+      const at = Date.now()
+      try {
+        const r = await window.opsmaxx?.fleet?.postureLocal?.()
+        if (!r) return
+        nextEntries[LOCAL_ID] = r.ok
+          ? { posture: r.posture, at }
+          : { error: `${r.reason}: ${r.detail}`, errorAt: at }
+      } catch (e) {
+        nextEntries[LOCAL_ID] = { error: e instanceof Error ? e.message : String(e), errorAt: at }
+      }
+    }
+
+    await Promise.all([
+      readLocal(),
+      ...servers.map(async (s) => {
         const r = await window.opsmaxx?.fleet?.posture(s.id)
         if (r) nextEntries[s.id] = { posture: r.posture, at: r.at, error: r.error, errorAt: r.errorAt }
         // Item C's collection, read alongside. The security update count is
@@ -528,7 +562,7 @@ export function PosturePanel({
           nextFacts[s.id] = f?.facts ?? null
         }
       })
-    )
+    ])
     setEntries(nextEntries)
     setFacts(nextFacts)
   }, [servers])
@@ -551,9 +585,23 @@ export function PosturePanel({
     }
   }
 
+  /** The estate, then this machine — last, so the fleet reads first. */
+  const hosts = useMemo(
+    () => [
+      ...servers.map((s) => ({ id: s.id, name: s.name })),
+      // Only when the channel is actually wired. A build without it would
+      // otherwise show a row that can never be filled, which reads as a host
+      // that has never been collected rather than as a missing feature.
+      ...(bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'postureLocal')
+        ? [{ id: LOCAL_ID, name: LOCAL_NAME }]
+        : [])
+    ],
+    [servers]
+  )
+
   const rows = useMemo(
     () =>
-      servers.map((s) => {
+      hosts.map((s) => {
         const e = entries[s.id]
         const posture = e?.posture ?? null
         return {
@@ -587,7 +635,7 @@ export function PosturePanel({
               }
         }
       }),
-    [servers, entries, facts]
+    [hosts, entries, facts]
   )
 
   const summary = useMemo(() => summarisePosture(rows.map((r) => ({ posture: r.posture }))), [rows])
@@ -596,7 +644,7 @@ export function PosturePanel({
   const checkNow = (primary: boolean): React.JSX.Element => (
     <button
       className={primary ? 'btn primary sm' : 'btn ghost sm'}
-      disabled={busy || servers.length === 0}
+      disabled={busy}
       onClick={() => void refresh()}
       title="Sweeps the estate now and re-reads what has already been collected. Posture is re-collected at most once an hour per server. Nothing is changed by this: no firewall is enabled, no SELinux mode is set and no configuration is written."
     >
@@ -637,7 +685,9 @@ export function PosturePanel({
         <>
           <div className="panel-stats">
             <span>
-              {summary.hosts} server{summary.hosts === 1 ? '' : 's'} · posture for {summary.collected}
+              {/* "hosts", not "servers": this machine is one of the rows now, and it
+              is not a server. summarisePosture has always called them hosts. */}
+          {summary.hosts} host{summary.hosts === 1 ? '' : 's'} · posture for {summary.collected}
             </span>
             {/* Every count here has its gap beside it. A security roll-up drawn
                 over only the hosts that answered is the exact shape of
@@ -740,7 +790,10 @@ export function PosturePanel({
                       title={r.at === undefined ? 'Never collected.' : `Read ${duration(r.at)} ago.`}
                     >
                       <td data-host={r.serverName} data-col="host">
-                        {onOpen ? (
+                        {/* This machine has no server tab to open, so its name
+                            is plain text rather than a control that goes
+                            nowhere. */}
+                        {onOpen && r.serverId !== LOCAL_ID ? (
                           <button className="inv-host" onClick={() => onOpen(r.serverId)} title={`Open ${r.serverName}`}>
                             {r.serverName}
                           </button>

@@ -157,8 +157,50 @@ export interface DatabaseConn {
   vpnProfileId: UUID | null
 }
 
+/**
+ * A saved API in the HTTP client.
+ *
+ * `specUrl` names an OpenAPI document to load, which gives the client every
+ * operation, schema and example the API describes. Without one the collection
+ * is a scratch pad: a single request against `baseUrl`, which is how most
+ * "does this endpoint work" questions actually start.
+ */
+export interface ApiCollection {
+  id: UUID
+  workspaceId: UUID
+  name: string
+  // OpenAPI/Swagger document URL, or null for a scratch collection.
+  specUrl: string | null
+  // Where requests are sent. Overrides the servers the document declares,
+  // because the document usually names production and the user rarely means it.
+  baseUrl: string
+  /**
+   * Send requests down this server's SSH connection instead of from this
+   * machine. Null is a direct request.
+   *
+   * This is the reason the HTTP client lives in OpsMaxx rather than beside
+   * it: the host is resolved ON the server, so `localhost:9090` reaches a
+   * service bound to that host's loopback and exposed to nothing else.
+   */
+  viaServerId: UUID | null
+  /**
+   * Skip TLS certificate verification. Per collection and never implicit: an
+   * internal service with a private CA is the common case, and silently not
+   * verifying would be worse than failing.
+   */
+  insecureTls: boolean
+}
+
 export type PanelView = 'terminal' | 'monitor' | 'files'
-export type ActivityView = 'connections' | 'databases' | 'tunnels' | 'monitor' | 'vault' | 'ai' | 'settings'
+export type ActivityView =
+  | 'connections'
+  | 'databases'
+  | 'tunnels'
+  | 'http'
+  | 'monitor'
+  | 'vault'
+  | 'ai'
+  | 'settings'
 
 interface TabBase {
   id: UUID
@@ -215,8 +257,20 @@ export interface LocalTab extends TabBase {
   shellId: string
   // Where the shell was started, when the user asked for somewhere specific.
   cwd?: string
-  // Only 'terminal' is meaningful; Monitor and Files are SSH-only views.
-  view: 'terminal'
+  /**
+   * Terminal and Files. Monitor stays SSH-only.
+   *
+   * Files earned its place because main serves this machine's half from
+   * node:fs behind the same channel and the same result shape, so the view
+   * needs no server — it takes `server?: Server` and absent means here.
+   *
+   * Monitor does not, and the reason is not that it is harder: MonitorStrip
+   * and MonitorView both take a non-optional Server, and the collector behind
+   * them reads /proc and Linux `df` semantics, so on anything but a Linux
+   * workstation it would draw numbers that look right and are not. See
+   * services/localMetrics.ts.
+   */
+  view: 'terminal' | 'files'
 }
 
 export type Tab = SshTab | LocalTab

@@ -133,7 +133,17 @@ export function ComposePanel({
   const [restartResult, setRestartResult] = useState<string | null>(null)
   const [restarting, setRestarting] = useState(false)
 
-  if (!server) return null
+  // The panel used to bail here, which hid compose entirely on a target that
+  // is not a saved server — even though every READ below runs off `cfg`, which
+  // main resolves to this machine perfectly well. The reads stay; only the
+  // job-backed actions need a server, and they say so where they are drawn.
+  //
+  // `cfg` is always present: the parent passes its resolved target.
+  const serverBacked = server !== undefined
+  /** Why pull/up/build are off when the target is not a saved server. */
+  const jobsNeedServer =
+    'Compose pull, start and build run as jobs, and a job records its confirmation against a saved server. On this machine, run docker compose in a terminal.'
+
 
   /**
    * The container lifecycle bridge, the same one the container panel uses.
@@ -437,8 +447,11 @@ export function ComposePanel({
                 <span className="grow" />
                 <button
                   className="icon-btn sm"
+                  disabled={!serverBacked}
                   title={
-                    open === p.name && picked.length > 0
+                    !serverBacked
+                      ? jobsNeedServer
+                      : open === p.name && picked.length > 0
                       ? `docker compose pull for ${picked.join(', ')} in ${p.name}. Fetches those images; nothing running changes.`
                       : `docker compose pull for ${p.name}. Fetches images; nothing running changes.`
                   }
@@ -448,8 +461,11 @@ export function ComposePanel({
                 </button>
                 <button
                   className="icon-btn sm"
+                  disabled={!serverBacked}
                   title={
-                    open === p.name && picked.length > 0
+                    !serverBacked
+                      ? jobsNeedServer
+                      : open === p.name && picked.length > 0
                       ? `docker compose up -d for ${picked.join(', ')} in ${p.name}. Starts those; removes nothing.`
                       : `docker compose up -d for ${p.name}. Starts what is declared; removes nothing.`
                   }
@@ -464,8 +480,11 @@ export function ComposePanel({
                 {open === p.name && config?.ok === true && config.config.services.some((sv) => sv.build) && (
                   <button
                     className="icon-btn sm"
-                    title={
-                      picked.length > 0
+                    disabled={!serverBacked}
+                  title={
+                      !serverBacked
+                        ? jobsNeedServer
+                        : picked.length > 0
                         ? `docker compose build --pull for ${picked.join(', ')} in ${p.name}. Runs their Dockerfiles; nothing running changes.`
                         : `docker compose build --pull for ${p.name}. Runs its Dockerfiles; nothing running changes until you press start.`
                     }

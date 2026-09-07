@@ -157,9 +157,11 @@ export function FleetWatcher(): null {
       // A sample arrived, so the host answered. Before any threshold is looked
       // at, because "it is reachable again" is true whatever the numbers say.
       checkStateAlert(e.serverId, name, 'host-unreachable', false)
-      // `null`, not 0, when df reported nothing: a failed probe yields diskPct
-      // 0, and passing that would resolve a disk alert on a host that is still
-      // full — a false all-clear manufactured out of a measurement failure.
+      // `null`, not 0, when df reported nothing: passing a zero would resolve a
+      // disk alert on a host that is still full — a false all-clear
+      // manufactured out of a measurement failure. diskPct carries that null
+      // itself now; this used to ask `diskTotal > 0`, which was the same
+      // question asked sideways and which four other call sites forgot.
       checkResourceAlerts(e.serverId, name, {
         // Already null when the probe read no CPU section and no MemTotal, and
         // passed through unchanged. `?? null` covers a sample taken by an older
@@ -167,7 +169,7 @@ export function FleetWatcher(): null {
         // absent — which costs nothing and cannot turn a reading into one.
         cpu: e.host.cpu ?? null,
         ram: e.host.memPct ?? null,
-        disk: e.host.diskTotal > 0 ? e.host.diskPct : null,
+        disk: e.host.diskPct ?? null,
         // Null, not zero, for both. `df -i` is absent on some busybox
         // userlands and btrfs and zfs honestly report no inode table; a
         // container without /proc has no load average. Zero for either would be

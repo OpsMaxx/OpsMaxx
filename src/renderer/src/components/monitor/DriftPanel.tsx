@@ -143,6 +143,20 @@ function Row({
   )
 }
 
+/**
+ * This machine, alongside the estate.
+ *
+ * A sentinel id, never a row in `servers` — that list is persisted and mirrored
+ * into the MCP data cache. See shared/execTarget.ts.
+ *
+ * Read on demand rather than by the fleet sweep. The sweep writes a hash per
+ * watched file into the durable history store keyed by host, and a record of
+ * this machine's configuration files does not belong in the estate's history.
+ * `fleet:drift-local` returns a reading and keeps nothing.
+ */
+const LOCAL_ID = 'local'
+const LOCAL_NAME = 'This machine'
+
 export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Element {
   const [entries, setEntries] = useState<Record<string, Entry>>({})
   const [watchId, setWatchId] = useState<string>(DRIFT_WATCHES[0].id)
@@ -200,12 +214,29 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
     const fleet = window.opsmaxx?.fleet as Record<string, unknown> | undefined
     if (!bridgeHas(fleet, 'drift')) return
     const next: Record<string, Entry> = {}
-    await Promise.all(
-      servers.map(async (s) => {
+
+    // Taken now, not read from the sweep — the sweep does not visit this
+    // machine. A probe answers `{ ok }`, so it is adapted into the same Entry
+    // the cached servers use and the comparison below stays one code path.
+    const readLocal = async (): Promise<void> => {
+      if (!bridgeHas(fleet, 'driftLocal')) return
+      const at = Date.now()
+      try {
+        const r = await window.opsmaxx?.fleet?.driftLocal?.({ serverName: LOCAL_NAME })
+        if (!r) return
+        next[LOCAL_ID] = r.ok ? { drift: r.drift, at } : { error: `${r.reason}: ${r.detail}`, at }
+      } catch (e) {
+        next[LOCAL_ID] = { error: e instanceof Error ? e.message : String(e), at }
+      }
+    }
+
+    await Promise.all([
+      readLocal(),
+      ...servers.map(async (s) => {
         const r = await window.opsmaxx?.fleet?.drift(s.id)
         if (r) next[s.id] = { drift: r.drift, at: r.at, error: r.error }
       })
-    )
+    ])
     setEntries(next)
   }, [servers])
 
@@ -227,23 +258,37 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
 
   const watch = allWatches.find((x) => x.id === watchId) ?? allWatches[0]
 
+  /** The estate, then this machine — last, so the fleet reads first. */
+  const hosts = useMemo(
+    () => [
+      ...servers.map((s) => ({ id: s.id, name: s.name })),
+      // Only when the channel is actually wired. A build without it would
+      // otherwise show a row that can never be filled, which reads as a host
+      // that has never been collected rather than as a missing feature.
+      ...(bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'driftLocal')
+        ? [{ id: LOCAL_ID, name: LOCAL_NAME }]
+        : [])
+    ],
+    [servers]
+  )
+
   const comparison = useMemo(
     () =>
       compareDrift({
         watch,
         baselineServerId: pinned,
-        hosts: servers.map((s) => ({
+        hosts: hosts.map((s) => ({
           serverId: s.id,
           serverName: s.name,
           drift: entries[s.id]?.drift,
           error: entries[s.id]?.error
         }))
       }),
-    [watch, pinned, servers, entries]
+    [watch, pinned, hosts, entries]
   )
 
   const sentence = driftCoverageSentence(comparison.coverage)
-  const collected = servers.filter((s) => entries[s.id]?.drift).length
+  const collected = hosts.filter((s) => entries[s.id]?.drift).length
 
   return (
     <PanelShell
@@ -282,7 +327,7 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
           </button>
           <button
             className="btn ghost sm"
-            disabled={busy || servers.length === 0}
+            disabled={busy}
             onClick={() => void refresh()}
             title="Sweeps the estate now and re-reads what has already been collected. Watched files are re-read at most once an hour per server. Nothing is written to any server by this."
           >

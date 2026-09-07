@@ -159,7 +159,7 @@ function HostRowView({
             )}
             {row.diskCritical && (
               <span className="chip warn">
-                <HardDrive size={11} /> disk {row.diskPct.toFixed(0)}%
+                <HardDrive size={11} /> disk {row.diskPct?.toFixed(0)}%
               </span>
             )}
           </>

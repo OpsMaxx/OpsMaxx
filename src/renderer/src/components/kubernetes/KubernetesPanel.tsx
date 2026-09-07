@@ -15,6 +15,7 @@ import {
   TriangleAlert
 } from 'lucide-react'
 import { sshHopsFor } from '../../lib/ssh'
+import { LOCAL_TARGET } from '../../../../shared/execTarget'
 import { clsx } from '../../lib/format'
 import {
   K8S_FAILURE_HELP,
@@ -213,6 +214,9 @@ function readEmpty<T>(r: K8sRead<T>): boolean {
   return r.ok && r.items.length === 0
 }
 
+/** Not a server id: no server can have it, because ids are UUIDs. */
+const LOCAL_ID = 'local'
+
 export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.Element {
   const [serverId, setServerId] = useState('')
   const [context, setContext] = useState('')
@@ -255,13 +259,13 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   const [reviewLoading, setReviewLoading] = useState(false)
 
   const runReview = async (): Promise<void> => {
-    if (!server) return
+    if (!hasTarget) return
     setReviewLoading(true)
     try {
       const b = bridge()
       setReview(
         b.review
-          ? await b.review(cfgFor(server), context || undefined)
+          ? await b.review(targetCfg(), context || undefined)
           : { ok: false, detail: NOT_WIRED }
       )
     } catch (e) {
@@ -314,7 +318,28 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   const [restartResult, setRestartResult] = useState<{ name: string; r: K8sRolloutResult } | null>(null)
 
   const eligible = useMemo(() => servers.filter((s) => s.status !== 'offline'), [servers])
-  const server = eligible.find((s) => s.id === serverId) ?? eligible[0]
+
+  /**
+   * "This machine" as a target.
+   *
+   * A sentinel in this panel's own selection state, never a row in `servers`:
+   * that list is persisted and mirrored into the MCP data cache, so a pseudo
+   * server would become an agent-addressable target the moment it was written.
+   * See shared/execTarget.ts.
+   *
+   * Resolved rather than read straight off `serverId` so the dropdown and the
+   * target can never disagree — with nothing online the browser would render
+   * the only option as selected while the state was still ''.
+   */
+  const selectedId = serverId || eligible[0]?.id || LOCAL_ID
+  const localSelected = selectedId === LOCAL_ID
+  const server = localSelected ? undefined : eligible.find((s) => s.id === selectedId)
+  // A local kubeconfig is the one most developers actually have — kind,
+  // minikube, Docker Desktop, or a context pointing at a real cluster.
+  const hasTarget = localSelected || !!server
+  /** What main is told to run kubectl against. */
+  const targetCfg = (): unknown => (localSelected ? LOCAL_TARGET : cfgFor(server as Server))
+  const targetName = localSelected ? 'This machine' : server?.name
 
   const cfgFor = (s: Server): unknown => ({
     sessionId: `k8s-${s.id}`,
@@ -334,12 +359,12 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   // selection the user just moved away from. `??` and not `||`: empty string is
   // "all namespaces", a real choice, not an absent one.
   const load = async (ctx?: string, ns?: string): Promise<void> => {
-    if (!server) return
+    if (!hasTarget) return
     setLoading(true)
     setLogs(null)
     setDiag(null)
     try {
-      const r = await bridge().read?.(cfgFor(server), ctx || undefined, (ns ?? namespace) || undefined)
+      const r = await bridge().read?.(targetCfg(), ctx || undefined, (ns ?? namespace) || undefined)
       setProbe(r ?? null)
     } catch (e) {
       setProbe({ ok: false, reason: 'unknown', detail: e instanceof Error ? e.message : String(e) })
@@ -351,7 +376,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   }
 
   const loadOverview = async (ns?: string): Promise<void> => {
-    if (!server) return
+    if (!hasTarget) return
     setOverviewLoading(true)
     try {
       const fn = bridge().overview
@@ -360,7 +385,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         setOverview({ deployments: f, statefulSets: f, daemonSets: f, nodes: f, serverVersion: null, pdbs: f, events: f })
         return
       }
-      setOverview(await fn(cfgFor(server), context || undefined, (ns ?? namespace) || undefined))
+      setOverview(await fn(targetCfg(), context || undefined, (ns ?? namespace) || undefined))
     } catch (e) {
       const f = {
         ok: false,
@@ -375,7 +400,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
 
   /** Booked capacity. Takes no namespace: a node holds every pod on it. */
   const loadAllocatable = async (): Promise<void> => {
-    if (!server) return
+    if (!hasTarget) return
     setAllocLoading(true)
     try {
       const fn = bridge().allocatable
@@ -383,7 +408,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         setAlloc({ ok: false, detail: NOT_WIRED })
         return
       }
-      setAlloc(await fn(cfgFor(server), context || undefined))
+      setAlloc(await fn(targetCfg(), context || undefined))
     } catch (e) {
       setAlloc({ ok: false, detail: e instanceof Error ? e.message : String(e) })
     } finally {
@@ -392,7 +417,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   }
 
   const loadUsage = async (ns?: string): Promise<void> => {
-    if (!server) return
+    if (!hasTarget) return
     setUsageLoading(true)
     try {
       const fn = bridge().usage
@@ -401,7 +426,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         setUsage({ pods: f, nodes: f })
         return
       }
-      setUsage(await fn(cfgFor(server), context || undefined, (ns ?? namespace) || undefined))
+      setUsage(await fn(targetCfg(), context || undefined, (ns ?? namespace) || undefined))
     } catch (e) {
       const f = {
         ok: false,
@@ -415,7 +440,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   }
 
   const loadResources = async (ns?: string): Promise<void> => {
-    if (!server) return
+    if (!hasTarget) return
     setResourcesLoading(true)
     const ctx = context || undefined
     try {
@@ -423,17 +448,17 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
       const f = { ok: false, reason: 'unknown', detail: NOT_WIRED } as const
       setResources(
         b.resources
-          ? await b.resources(cfgFor(server), ctx, (ns ?? namespace) || undefined)
+          ? await b.resources(targetCfg(), ctx, (ns ?? namespace) || undefined)
           : { pvcs: f, ingresses: f, roleBindings: f, secrets: f }
       )
       // Three separate round trips, not one, and the two extra ones are the
       // reads whose ABSENCE is normal: an api-scan against a cluster that will
       // not answer, and helm on a host that does not have it. Folding them into
       // the resources call would make every refresh wait on them.
-      setApiScan(b.apiScan ? await b.apiScan(cfgFor(server), ctx) : null)
+      setApiScan(b.apiScan ? await b.apiScan(targetCfg(), ctx) : null)
       setHelm(
         b.helm
-          ? await b.helm(cfgFor(server), ctx)
+          ? await b.helm(targetCfg(), ctx)
           : { ok: false, reason: 'failed', detail: NOT_WIRED }
       )
     } catch (e) {
@@ -482,7 +507,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
     try {
       const fn = bridge().cordon
       const r = fn
-        ? await fn(cfgFor(server), t, true)
+        ? await fn(targetCfg(), t, true)
         : {
             ok: false,
             action: t.action,
@@ -506,7 +531,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
    * happens before any dialog and its answer is shown rather than summarised.
    */
   const checkDrain = async (node: string): Promise<void> => {
-    if (!server) return
+    if (!hasTarget) return
     setNodeResult(null)
     setNodePending(null)
     setDrainResult(null)
@@ -517,7 +542,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         setDrainCheck({ node, assessment: null, plan: null, loading: false })
         return
       }
-      const a = await fn(cfgFor(server), node, context || undefined)
+      const a = await fn(targetCfg(), node, context || undefined)
       setDrainCheck({ node, assessment: a, plan: planK8sDrain(a), loading: false })
     } catch {
       setDrainCheck({ node, assessment: null, plan: null, loading: false })
@@ -532,7 +557,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
       // The main process takes the preflight AGAIN and refuses on its own
       // reading — what is passed here is a confirmation, not a verdict.
       const r = fn
-        ? await fn(cfgFor(server), drainCheck.node, context || undefined, true)
+        ? await fn(targetCfg(), drainCheck.node, context || undefined, true)
         : {
             ok: false,
             node: drainCheck.node,
@@ -549,7 +574,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
       setDrainCheck(null)
       setPhrase('')
       void loadOverview()
-      void load(context)
+      void load(effectiveContext)
     } finally {
       setNodeBusy('')
     }
@@ -590,7 +615,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         phrase: execPhrase.trim(),
         confirmedAt: Date.now()
       })
-      setExecResult({ pod: execFor.name, r: await b.exec(cfgFor(server), target, approval) })
+      setExecResult({ pod: execFor.name, r: await b.exec(targetCfg(), target, approval) })
       setExecFor(null)
       setExecCommand('')
       setExecContainer('')
@@ -612,7 +637,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   }
 
   const openLogs = async (p: K8sPod): Promise<void> => {
-    if (!server) return
+    if (!hasTarget) return
     // buildK8sLogsCommand refuses a name it cannot prove safe rather than
     // escaping it, so asking first turns a rejected invoke into a sentence.
     if (!validatePodName(p.name)) {
@@ -621,7 +646,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
     }
     setLogs({ pod: p.name, output: 'Loading…' })
     try {
-      const r = await bridge().logs?.(cfgFor(server), p.namespace, p.name, 200, context || undefined)
+      const r = await bridge().logs?.(targetCfg(), p.namespace, p.name, 200, context || undefined)
       setLogs({ pod: p.name, output: r?.output || r?.error || 'No output.' })
     } catch (e) {
       setLogs({ pod: p.name, output: e instanceof Error ? e.message : String(e) })
@@ -630,7 +655,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
 
   /** The first thing anyone runs on a pod that is not Running. */
   const diagnose = async (p: K8sPod): Promise<void> => {
-    if (!server) return
+    if (!hasTarget) return
     if (!validatePodName(p.name) ) {
       setDiag({ pod: p.name, result: null, error: 'This pod has a name kubectl cannot be asked about safely.' })
       return
@@ -642,7 +667,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         setDiag({ pod: p.name, result: null, error: NOT_WIRED })
         return
       }
-      const r = await fn(cfgFor(server), p.namespace, p.name, context || undefined, 200)
+      const r = await fn(targetCfg(), p.namespace, p.name, context || undefined, 200)
       setDiag({ pod: p.name, result: r })
     } catch (e) {
       setDiag({ pod: p.name, result: null, error: e instanceof Error ? e.message : String(e) })
@@ -674,7 +699,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
       const fn = bridge().rolloutRestart
       const target = pending.plan.target
       const r = fn
-        ? await fn(cfgFor(server), target, true)
+        ? await fn(targetCfg(), target, true)
         : { ok: false, output: '', status: '', reason: 'unknown' as const, detail: NOT_WIRED }
       setRestartResult({ name: `${target.kind}/${target.name}`, r })
       setPending(null)
@@ -699,6 +724,22 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   }
 
   const q = filter.trim().toLowerCase()
+  // Contexts come off either branch: a failed read carries them when kubectl
+  // read the kubeconfig before the cluster went quiet.
+  const contextChoices = probe ? (probe.ok ? probe.contexts : (probe.contexts ?? [])) : []
+  const currentContext = probe ? (probe.ok ? probe.currentContext : (probe.currentContext ?? null)) : null
+  /**
+   * The context a read will actually use.
+   *
+   * Falls through to the first listed one, because a kubeconfig need not mark
+   * any context as current — and when none is marked, the picker rendered the
+   * first entry as selected while the state behind it was still empty. Pressing
+   * Refresh then re-read with no context at all and failed identically, which
+   * looks like a control that does nothing. Display and behaviour read the same
+   * value here.
+   */
+  const effectiveContext = context || currentContext || contextChoices[0]?.name || ''
+
   const allPods = probe?.ok ? probe.pods : []
   const pods =
     q === ''
@@ -762,7 +803,8 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         <select
           className="input"
           style={{ maxWidth: 170 }}
-          value={server?.id ?? ''}
+          aria-label="Kubernetes host"
+          value={selectedId}
           onChange={(e) => {
             setServerId(e.target.value)
             setProbe(null)
@@ -772,6 +814,9 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
             setUsage(null)
           }}
         >
+          {/* First, and present even with no servers: a local kubeconfig is
+              what most developers have in front of them. */}
+          <option value={LOCAL_ID}>This machine</option>
           {eligible.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
@@ -781,11 +826,17 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         {/* Choosing a context here passes --context for THIS read only. It does
             not run `kubectl config use-context`, which would repoint the
             cluster for every process on that host. */}
-        {probe?.ok && probe.contexts.length > 1 && (
+        {/* Shown on a FAILED read too, when kubectl got far enough to list
+            them. A kubeconfig with several contexts and only one reachable is
+            the ordinary state of a developer's machine; dropping the list
+            because the current context is down left nothing to click but a
+            refresh that fails the same way. */}
+        {contextChoices.length > 1 && (
           <select
             className="input"
             style={{ maxWidth: 200 }}
-            value={context || probe.currentContext || ''}
+            aria-label="Kubernetes context"
+            value={effectiveContext}
             onChange={(e) => {
               setContext(e.target.value)
               setOverview(null)
@@ -793,7 +844,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
               void load(e.target.value)
             }}
           >
-            {probe.contexts.map((c) => (
+            {contextChoices.map((c) => (
               <option key={c.name} value={c.name}>
                 {c.name}
                 {c.current ? ' (current)' : ''}
@@ -840,15 +891,26 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
             ))}
           </select>
         )}
-        <button className="btn" disabled={loading || !server} onClick={() => void load(context)}>
+        <button
+          className="btn"
+          disabled={loading || !hasTarget}
+          title={hasTarget ? `Read Kubernetes on ${targetName}` : 'Choose a host first'}
+          onClick={() => void load(effectiveContext)}
+        >
           <RefreshCw size={13} className={clsx(loading && 'spin')} />{' '}
           {probe ? 'Refresh' : 'Read cluster'}
         </button>
       </div>
 
-      {eligible.length === 0 && <div className="s-desc">No server in this workspace is online.</div>}
+      {/* Not a dead end: with nothing online the panel falls back to this
+          machine, so this names both facts rather than only the problem. */}
+      {eligible.length === 0 && (
+        <div className="s-desc">
+          No server in this workspace is online — reading the kubeconfig on this machine.
+        </div>
+      )}
 
-      {!probe && !loading && eligible.length > 0 && (
+      {!probe && !loading && hasTarget && (
         <div className="s-desc">
           Runs <span className="mono">kubectl</span> on the selected server, using whatever
           kubeconfig that server already has. Reading only, with one exception:{' '}
@@ -975,7 +1037,17 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                       The two beside it answer questions; this one runs code. */}
                   <button
                     className="icon-btn sm"
-                    title="Run one command inside this pod — arbitrary code, behind a typed confirmation"
+                    // Server-only, and it says so rather than doing nothing: the
+                    // approval is minted against a saved server's id and main
+                    // re-derives the command from it. Extending that consent
+                    // record to a target that is not a server is its own
+                    // decision, not a side effect of a dropdown option.
+                    disabled={localSelected}
+                    title={
+                      localSelected
+                        ? 'Running a command in a pod is available for a saved server, because the confirmation is recorded against one. Use a local terminal for this cluster.'
+                        : 'Run one command inside this pod — arbitrary code, behind a typed confirmation'
+                    }
                     onClick={() => {
                       setExecResult(null)
                       setExecCommand('')

@@ -107,15 +107,20 @@ export function useServerMetrics(server: Server, active: boolean): LiveMetrics {
           // what every honest reader of this hook uses.
           const cpu = d.cpu ?? s.cpu
           const ram = d.memPct ?? s.ram
+          // Held like cpu and ram: the gauge keeps the last figure it had
+          // rather than dropping to zero on one failed probe. What the
+          // reading actually was stays on `host`, and the alert path below
+          // uses that rather than this.
+          const disk = d.diskPct ?? s.disk
           ref.current = {
             cpu,
             ram,
-            disk: d.diskPct,
+            disk,
             rx,
             tx,
             cpuHistory: push(s.cpuHistory, cpu),
             ramHistory: push(s.ramHistory, ram),
-            diskHistory: push(s.diskHistory, d.diskPct),
+            diskHistory: push(s.diskHistory, disk),
             rxHistory: push(s.rxHistory, rx),
             txHistory: push(s.txHistory, tx),
             host: d,
@@ -133,7 +138,9 @@ export function useServerMetrics(server: Server, active: boolean): LiveMetrics {
             // resolve on a measurement that did not happen.
             cpu: d.cpu ?? null,
             ram: d.memPct ?? null,
-            disk: d.diskTotal > 0 ? d.diskPct : null,
+            // Was `diskTotal > 0 ? diskPct : null`, which asked the same
+            // question sideways. diskPct is null when it was not measured.
+            disk: d.diskPct,
             // Both already null when the host could not answer; passing them
             // through unchanged is the point. `?? null` covers a sample taken
             // by an older build of main, where the fields do not exist at all —
