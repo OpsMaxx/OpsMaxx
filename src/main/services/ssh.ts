@@ -1060,3 +1060,48 @@ function cleanup(sessionId: string): void {
   // The connection itself is shared, so hand it back rather than closing it.
   if (s.conn) release(s.conn)
 }
+
+/**
+ * Try a connection and throw it away.
+ *
+ * Add Server had no way to check a profile before saving it. The form has four
+ * to six chances to be wrong, and the only feedback loop was: save, open a
+ * session, and read a failure on a different screen — where, until recently,
+ * four different causes shared one sentence. Worse, saving PERSISTS the profile
+ * before it is known to work, so a first-run user ends up with a connection
+ * list containing entries that have never connected.
+ *
+ * Deliberately NOT pooled. `acquire` puts the connection in the pool for reuse,
+ * which is right for a session and wrong here: a test that left a live
+ * connection behind would mean pressing Test twice created two, and a test of a
+ * profile the user then edits would leave a pooled connection keyed to settings
+ * that no longer exist. `openChain` gives the same dial, the same jump-host
+ * chain and the same host-key verification with nothing retained.
+ *
+ * `allowPrompt` is NOT passed through: a first contact with an unknown host
+ * during a test would raise the trust dialog, and answering it would record a
+ * trust decision as a side effect of pressing a button labelled Test. The probe
+ * reports the refusal instead, and trust is granted by connecting.
+ */
+export async function sshTest(
+  cfg: SshHop & { hops?: SshHop[]; vpnProfileId?: string; serverName?: string; serverId?: string }
+): Promise<{ ok: boolean; error?: string }> {
+  let chain: { clients: Client[]; close?: () => void } | null = null
+  try {
+    chain = await openChain(cfg)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  } finally {
+    // Closed in a finally, and every client rather than the last: a chain that
+    // failed on hop three still opened hops one and two, and leaking those is
+    // how a form with a typo in it ends up holding connections open on a
+    // bastion.
+    try {
+      chain?.close?.()
+      for (const c of chain?.clients ?? []) c.end()
+    } catch {
+      /* already gone */
+    }
+  }
+}

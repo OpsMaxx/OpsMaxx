@@ -7,6 +7,7 @@ import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
 import { useVault } from '../../store/vault'
 import { VpnTransportSelect } from '../vpn/VpnTransportSelect'
+import { adviseOnError } from '../../lib/connectionError'
 import type { AuthMethod, Hop, UUID } from '../../types'
 
 // `unavailable` says why rather than hiding the option.
@@ -162,6 +163,55 @@ export function AddServerModal(): React.JSX.Element {
     })
   }
 
+  // Dial, then hang up. Nothing is saved and nothing is pooled — see sshTest.
+  //
+  // The form had no feedback loop at all: it has four to six chances to be
+  // wrong, and the only way to find out was to save it, open a session, and
+  // read a failure on a different screen. Saving PERSISTS the profile before it
+  // is known to work, so a first run ends with a connection list holding
+  // entries that have never connected.
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null)
+
+  const testConnection = async (): Promise<void> => {
+    if (!valid || testing) return
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const fn = window.shellpilot?.ssh?.test
+      if (!fn) {
+        // Said, rather than a button that quietly does nothing. The same rule
+        // the rest of the app applies to an unwired bridge.
+        setTestResult({ ok: false, text: 'This build cannot test a connection. Restart the app to rebuild it.' })
+        return
+      }
+      const r = await fn({
+        sessionId: `test-${Date.now()}`,
+        serverId: editId ?? undefined,
+        host: host.trim(),
+        port: Number(port) || 22,
+        username: username.trim() || 'root',
+        auth: auth === 'password' || auth === 'agent' ? auth : 'key',
+        password: auth === 'password' ? password || undefined : undefined,
+        keyPath: auth === 'key' ? keyPath || undefined : undefined,
+        passphrase: auth === 'key' ? passphrase || undefined : undefined,
+        hops,
+        vpnProfileId: vpnProfileId || undefined
+      } as never)
+      if (r?.ok) {
+        setTestResult({ ok: true, text: `Connected to ${host.trim()} as ${username.trim() || 'root'}.` })
+        return
+      }
+      // Through the same classifier the terminal's failure card uses, so a
+      // wrong username reads as a wrong username here rather than as the
+      // handshake timeout it arrives as.
+      const advice = adviseOnError(r?.error)
+      setTestResult({ ok: false, text: advice.hint ? `${advice.cause} ${advice.hint}` : advice.cause })
+    } finally {
+      setTesting(false)
+    }
+  }
+
   const save = async (): Promise<void> => {
     if (!valid) return
     const fields = {
@@ -229,6 +279,15 @@ export function AddServerModal(): React.JSX.Element {
               with an auth method it had no credential for — met much later as
               an undifferentiated "Connection failed" on a different screen. */}
           {missing && <span className="field-hint danger">{missing.why}</span>}
+          {!missing && testResult && (
+            <span className={clsx('field-hint', testResult.ok ? 'ok' : 'danger')}>{testResult.text}</span>
+          )}
+          {/* Beside the primary, where the fields are still editable. A failure
+              reported here can be corrected without saving a profile that does
+              not work and coming back to it. */}
+          <button className="btn" disabled={!valid || testing} onClick={() => void testConnection()}>
+            {testing ? 'Testing…' : 'Test connection'}
+          </button>
           <button className="btn primary" disabled={!valid} onClick={save}>
             {editId ? 'Save Changes' : 'Add Server'}
           </button>

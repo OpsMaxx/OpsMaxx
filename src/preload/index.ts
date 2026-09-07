@@ -258,6 +258,9 @@ const api = {
     resize: (id: string, cols: number, rows: number): void =>
       ipcRenderer.send('ssh:resize', id, cols, rows),
     close: (id: string): void => ipcRenderer.send('ssh:close', id),
+    /** Dial, then hang up. Nothing is pooled and nothing is saved. */
+    test: (cfg: SshConnectConfig & { serverId?: string }): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('ssh:test', cfg),
     onData: (id: string, cb: (data: string) => void): (() => void) => {
       const ch = `ssh:data:${id}`
       const h = (_e: IpcRendererEvent, d: string): void => cb(d)
