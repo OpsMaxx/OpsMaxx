@@ -9,17 +9,22 @@ import { MonitorSidebar } from '../monitor/MonitorSidebar'
 import { DatabaseSidebar } from '../databases/DatabaseSidebar'
 import { VaultSidebar } from '../vault/VaultSidebar'
 import { useVault } from '../../store/vault'
+import { useNav } from '../../store/nav'
 
 const titles: Record<string, string> = {
   connections: 'Connections',
   databases: 'Databases',
   tunnels: 'Tunnels & VPN',
+  // Overridden below when the Operations rail is showing: the two share one
+  // ActivityView, so this map alone titled the Operations sidebar "Fleet
+  // Monitor" while the page beside it said Operations.
   monitor: 'Fleet Monitor',
   vault: 'Vault'
 }
 
 export function Sidebar(): React.JSX.Element | null {
   const activity = useApp((s) => s.activity)
+  const fleetRail = useNav((s) => s.fleetRail)
   const collapsed = useApp((s) => s.sidebarCollapsed)
   const width = useApp((s) => s.sidebarWidth)
   const setWidth = useApp((s) => s.setSidebarWidth)
@@ -55,7 +60,9 @@ export function Sidebar(): React.JSX.Element | null {
   return (
     <aside className="sidebar" style={{ width }}>
       <div className="sidebar-header">
-        <span className="sidebar-title">{titles[activity] ?? ''}</span>
+        <span className="sidebar-title">
+          {activity === 'monitor' && fleetRail === 'operations' ? 'Operations' : (titles[activity] ?? '')}
+        </span>
         <div className="sidebar-actions">
           {activity === 'connections' && (
             <>

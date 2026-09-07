@@ -1331,9 +1331,32 @@ details[open] > .disclosure-head .chev {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  /* Both halves are identity strings and there was no gap between them, so a
+     server name longer than the card ran straight into its address and pushed
+     the address off the edge — "TestServerShellPilot169.58.227.8", with the
+     last octet gone. A clipped IP is not a shortened IP, it is a different one,
+     and nothing on screen said it had been cut. */
+  gap: var(--sp-3);
   color: var(--text-muted);
   font-size: var(--fs-sm);
   font-weight: 550;
+}
+/* The name is what gives way, because an ellipsis is a visible admission that
+   there is more. It needs min-width:0 to be allowed to: a flex item will not
+   shrink below its content without it, which is why the address moved instead
+   of the name yielding. */
+.metric-card .m-head > .row {
+  min-width: 0;
+}
+.metric-card .m-head > .row b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The address never shrinks and never wraps. It is the one string on this card
+   a person copies into another window. */
+.metric-card .m-head > .mono {
+  flex: none;
 }
 .metric-card .m-value {
   font-size: var(--fs-2xl);
