@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
-import { CronPanel } from '../src/renderer/src/components/monitor/CronPanel'
 import { CronEditPanel } from '../src/renderer/src/components/operations/CronEditPanel'
 import type { CronEntry, CronSourceReport } from '../src/shared/cron'
 import { buildCronWriteCommand } from '../src/shared/cron'
@@ -95,10 +94,6 @@ const bridge = (over: Record<string, unknown> = {}): Record<string, unknown> => 
   }
 })
 
-const readSchedules = async (): Promise<void> => {
-  await userEvent.click(screen.getByRole('button', { name: /read schedules/i }))
-  await screen.findByText(/db-01/)
-}
 
 // The edit half moved to its own panel on the Operations rail when the fleet
 // destination was split by surface — Monitoring's contract is that nothing in

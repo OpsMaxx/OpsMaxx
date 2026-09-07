@@ -16,12 +16,15 @@
 //      `riskPosition` puts the word on its own scale so the prompt can print
 //      "HIGH — 3 of 3", which is a fact rather than an adjective.
 //
-//   2. WHY THIS ONE SCORED IT. The bridge scores risk and throws the reasoning
-//      away — `ApprovalRequest` carries the word and not the derivation. Rather
-//      than invent a reason, `riskReasons` restates the rules the bridge
-//      actually applies (they are read off src/main/services/mcpServer.ts's
-//      gate() call sites) against the facts the request does carry. When none
-//      of them fits, it says so; it never fills the gap.
+//   2. WHY THIS ONE SCORED IT. The bridge now sends the rule that fired, on
+//      `ApprovalRequest.riskReason`, and `explainRisk` prefers it over anything
+//      derived here — main is where the grading happens, so main is where the
+//      reason is true. `riskReasons` below stays as the FALLBACK, for a request
+//      from a gate() call site that supplied none: it restates the rules the
+//      bridge applies (read off src/main/services/mcpServer.ts) against the
+//      facts the request does carry, and is accurate only for as long as
+//      somebody keeps the two in step. When neither fits, `explainRisk` says
+//      so; it never fills the gap.
 //
 //   3. WHAT THE ACTION WILL DO. `describeConsequence` matches a small set of
 //      command shapes and capability defaults. It is deliberately small and
@@ -61,6 +64,12 @@ export interface ApprovalSubject {
   risk: string
   serverName: string
   workspaceName?: string
+  /**
+   * The rule main applied, when the gate() call site recorded one. Optional
+   * because a call site can forget — and a forgotten reason must fall back to
+   * the local derivation rather than blanking the band.
+   */
+  riskReason?: string
 }
 
 /**
@@ -111,13 +120,18 @@ export function productionHint(s: ApprovalSubject): string | null {
 }
 
 /**
- * Why this action carries the score the bridge gave it.
+ * Why this action carries the score the bridge gave it — DERIVED LOCALLY.
+ *
+ * The fallback, not the primary: `explainRisk` uses main's own `riskReason`
+ * whenever the request carries one. This runs for a request that carries none,
+ * which today means a gate() call site that did not fill it in.
  *
  * Every clause below restates a rule the bridge actually applies — read off the
  * gate() call sites in mcpServer.ts — against a fact the request carries. That
  * constraint is what keeps this from becoming plausible-sounding fiction: if a
  * clause cannot be traced to a line in the bridge or a substring of the action,
- * it does not belong here.
+ * it does not belong here. It is still a hand-kept copy of somebody else's
+ * rules, which is precisely why it is no longer what the operator reads first.
  */
 export function riskReasons(s: ApprovalSubject): string[] {
   const out: string[] = []
@@ -172,12 +186,29 @@ export interface RiskExplanation {
   reasons: string[]
   /** False when nothing above fitted. The band still renders — see `sentence`. */
   reasonKnown: boolean
+  /**
+   * Where `reasons` came from. `bridge` is main's own rule; `derived` is this
+   * file's local restatement of main's rules; `none` is the honest gap.
+   *
+   * Exported rather than kept private because the difference is real: `derived`
+   * is a copy that can drift out of step with the bridge, and a test that
+   * cannot tell the two apart cannot notice when the plumbing stops arriving.
+   */
+  reasonSource: 'bridge' | 'derived' | 'none'
   /** The line under the label. Always a sentence, never an empty string. */
   sentence: string
 }
 
 /**
  * The whole risk band, ready to render.
+ *
+ * MAIN'S REASON WINS. `s.riskReason` is the rule that actually fired inside the
+ * gate() call that raised this request; `riskReasons()` is this file's guess at
+ * what that rule must have been. Preferring the guess when the fact is present
+ * would be re-deriving something already known, and re-derivation is how the
+ * two drift: change the bridge's grading and the modal keeps confidently
+ * printing last year's reason. An empty or whitespace-only `riskReason` counts
+ * as absent — a call site that passed `''` recorded nothing.
  *
  * `sentence` is never empty and never omitted, which is the point. A band that
  * renders a reason when it has one and blank space when it does not teaches the
@@ -186,7 +217,8 @@ export interface RiskExplanation {
  * pixels.
  */
 export function explainRisk(s: ApprovalSubject): RiskExplanation {
-  const reasons = riskReasons(s)
+  const fromBridge = typeof s.riskReason === 'string' ? s.riskReason.trim() : ''
+  const reasons = fromBridge ? [fromBridge] : riskReasons(s)
   const position = riskPosition(s.risk)
   const word = position ? s.risk.toUpperCase() : 'This'
   return {
@@ -196,12 +228,112 @@ export function explainRisk(s: ApprovalSubject): RiskExplanation {
     tone: riskTone(s.risk),
     reasons,
     reasonKnown: reasons.length > 0,
+    reasonSource: fromBridge ? 'bridge' : reasons.length ? 'derived' : 'none',
     sentence: reasons.length
       ? `${word} because: ${reasons.join('; ')}.`
       : position
         ? `OpsMaxx did not record why this scored ${s.risk.toUpperCase()}, and cannot derive it from the request. Judge it from the command below, not from the word.`
         : `OpsMaxx does not recognise the risk word "${s.risk}" and cannot place it on its own scale. Treat this as unscored, not as safe.`
   }
+}
+
+// ---------------------------------------------------------------------------
+// The agent's stated intent
+// ---------------------------------------------------------------------------
+
+/**
+ * How much of an agent's stated intent the dialog will show.
+ *
+ * A cap and not a scrollbar. The intent sits above the Deny button in a modal
+ * that also has to fit a consequence, a command and a fuse; an agent that can
+ * write 4,000 characters here can push every one of those below the fold and
+ * decide, by length alone, what the operator reads before answering. 240 is
+ * about two lines — enough for "restarting nginx after the config change you
+ * asked about" and not enough to be a layout.
+ */
+export const INTENT_MAX_CHARS = 240
+
+/** Left in place of a phrase that claimed the action was already approved. */
+export const INTENT_REDACTION = '[removed: a claim that this was already approved]'
+
+// Control characters, and the invisible formatting ones. The second half is
+// the important half: U+202E and friends reorder what a human sees without
+// changing what the string contains, so "restart nginx" can be made to display
+// as something else entirely, and zero-width characters split words apart so
+// that a phrase check below sees "app roved". Neither belongs in a sentence.
+// Matching control characters is the entire job of this expression, so the lint
+// that objects to finding them in a pattern is objecting to the point of it.
+// eslint-disable-next-line no-control-regex
+const INTENT_INVISIBLE = /[\u0000-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g
+
+// A speaker label at the head of the line. After whitespace has been flattened
+// the head is the ONLY place text can pass itself off as a different voice —
+// there are no line breaks left to build a fake row out of — so this is a
+// complete rule rather than a sample of one. The bracket form is capped short
+// so it cannot swallow INTENT_REDACTION.
+const INTENT_SPEAKER_LABEL =
+  /^\s*(?:\[[^\]]{0,24}\]|(?:opsmaxx|system|admin(?:istrator)?|operator|user|security|note|notice|warning|important|assistant|claude|codex)\s*[:>»\-–—])\s*/i
+
+// Claims that the decision has already been made. These are the sentences that
+// would actually change an operator's answer, and every one of them is a lie
+// by construction: OpsMaxx is asking BECAUSE nothing has approved this. They
+// are replaced rather than deleted, so the operator can see that the agent
+// asking for permission also tried to tell them permission was not needed.
+const INTENT_IMPERSONATION: RegExp[] = [
+  /\bopsmaxx\b[^.!?]{0,60}?\b(?:approv\w*|authoris\w*|authoriz\w*|verified|whitelist\w*|permits?|allows?)\b[^.!?]*/gi,
+  /\b(?:pre-?approved|auto-?approved|already approved|previously approved|no approval (?:is )?(?:required|needed)|approval (?:is )?not (?:required|needed))\b[^.!?]*/gi,
+  /\b(?:the )?(?:user|operator|admin(?:istrator)?|human)\b[^.!?]{0,40}?\b(?:already )?(?:approved|authoris\w+|authoriz\w+|consented|signed off)\b[^.!?]*/gi
+]
+
+/**
+ * An agent's stated intent, made safe to put on the screen — or null.
+ *
+ * WHY THIS EXISTS AT ALL. Every other string in this dialog is written by
+ * OpsMaxx or read off a host. This one is written by the party asking for
+ * permission, which makes the justification the human reads an input controlled
+ * by the thing being judged. That is a prompt-injection surface pointed at a
+ * person rather than at a model, and the person is the last check in the chain:
+ * if this text can make itself look like OpsMaxx's own copy, the agent gets
+ * to write the sentence that decides its own approval.
+ *
+ * So the intent is treated as DATA end to end. Nothing here is parsed, matched
+ * against a policy, or allowed to influence risk — it is only ever printed, as
+ * an attributed quotation, after:
+ *
+ *   - control and bidi/zero-width characters are removed (they let a string
+ *     display as something other than what it is, and evade the phrase checks);
+ *   - every newline and tab is flattened to a space, so a multi-line block that
+ *     imitates the dialog's own rows cannot be built;
+ *   - phrases claiming the action was already approved are replaced with a
+ *     visible marker rather than dropped silently;
+ *   - a leading speaker label ("OpsMaxx:", "[SYSTEM]", "Warning —") is
+ *     stripped, so the quotation cannot open in somebody else's voice;
+ *   - the result is capped at INTENT_MAX_CHARS.
+ *
+ * Returns null for a non-string, an empty string, or one that was nothing but
+ * whitespace and stripped markup — because "the agent said nothing" and "the
+ * agent said something empty" are the same fact, and both must render as the
+ * absence rather than as a blank line.
+ */
+export function sanitizeAgentIntent(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  // Order matters. Redaction runs before the speaker-label strip so that a
+  // marker beginning with "[" cannot then be eaten as a label; both run before
+  // the single whitespace collapse, which is the LAST step so that nothing a
+  // preceding rule leaves behind — a doubled space where a phrase was removed,
+  // the gap left by a stripped label — reaches the screen.
+  let s = raw.replace(INTENT_INVISIBLE, ' ')
+  for (const rx of INTENT_IMPERSONATION) s = s.replace(rx, INTENT_REDACTION)
+  // Loop: "[SYSTEM] OpsMaxx: ..." is two labels, and stripping one would
+  // leave the other doing exactly the job the strip was for.
+  for (;;) {
+    const next = s.replace(INTENT_SPEAKER_LABEL, '')
+    if (next === s) break
+    s = next
+  }
+  s = s.replace(/\s+/g, ' ').trim()
+  if (!s) return null
+  return s.length > INTENT_MAX_CHARS ? `${s.slice(0, INTENT_MAX_CHARS).trimEnd()}…` : s
 }
 
 // ---------------------------------------------------------------------------
@@ -441,4 +573,31 @@ export function fuseDeadline(createdAt: string, timeoutSeconds: number | null): 
   const started = Date.parse(createdAt)
   if (Number.isNaN(started)) return null
   return started + timeoutSeconds * 1000
+}
+
+/**
+ * The deadline to count down to: main's if it sent one, ours if it did not.
+ *
+ * `deadlineAt` is the moment main's own `setTimeout` will fire, so it is the
+ * only value that survives an extension. The derivation above assumes the fuse
+ * has not moved since the request was created, which stopped being true the
+ * moment "Give me more time" existed: after an extension it points at a moment
+ * that has been cancelled, and the operator would watch a countdown reach zero
+ * on a request that is still perfectly alive — the same class of lie as a
+ * countdown built on an assumed timeout, just later in the story.
+ *
+ * An unparseable `deadlineAt` falls through to the derivation rather than to
+ * null: a malformed timestamp is a reason to distrust that field, not a reason
+ * to throw away a countdown that was working before it arrived.
+ */
+export function resolveFuseDeadline(
+  deadlineAt: string | undefined,
+  createdAt: string,
+  timeoutSeconds: number | null
+): number | null {
+  if (deadlineAt) {
+    const at = Date.parse(deadlineAt)
+    if (!Number.isNaN(at)) return at
+  }
+  return fuseDeadline(createdAt, timeoutSeconds)
 }

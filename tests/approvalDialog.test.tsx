@@ -55,6 +55,7 @@ function session(over: Partial<McpAgentSession> = {}): McpAgentSession {
 interface Harness {
   respondApproval: ReturnType<typeof vi.fn>
   killAllSessions: ReturnType<typeof vi.fn>
+  extendApproval: ReturnType<typeof vi.fn>
   fire: (e: unknown) => void
 }
 
@@ -64,13 +65,17 @@ function harness(
     timeoutSeconds?: number | null
     sessions?: McpAgentSession[] | null
     audit?: { sessionId: string }[] | null
+    /** Omitted by default: the modal must cope with a preload that cannot extend. */
+    canExtend?: boolean
   } = {}
 ): Harness {
   let handler: ((e: unknown) => void) | null = null
   const respondApproval = vi.fn(async () => true)
   const killAllSessions = vi.fn(async () => ({ revoked: 2, denied: 1 }))
+  const extendApproval = vi.fn(async () => true)
   stubBridge({
     aiMcp: {
+      ...(opts.canExtend ? { extendApproval } : {}),
       listApprovals: async () => opts.approvals ?? [request()],
       getConfig: async () =>
         opts.timeoutSeconds === null ? {} : { approvalTimeoutSeconds: opts.timeoutSeconds ?? 120 },
@@ -86,7 +91,7 @@ function harness(
       }
     }
   })
-  return { respondApproval, killAllSessions, fire: (e) => handler?.(e) }
+  return { respondApproval, killAllSessions, extendApproval, fire: (e) => handler?.(e) }
 }
 
 beforeEach(() => {
@@ -192,11 +197,10 @@ describe('provenance the request itself does not carry', () => {
     expect(await screen.findByText(/no session record for sess-claude/)).toBeTruthy()
   })
 
-  it('states that no intent was recorded, because a blank line would blame the agent for OpsMaxx’s gap', async () => {
-    harness()
-    render(<ApprovalWatcher />)
-    expect(await screen.findByText(/does not ask an agent what it is trying to achieve/)).toBeTruthy()
-  })
+  // The bridge now DOES ask -- every gated tool takes an optional `intent` --
+  // so the absence moved from being OpsMaxx's gap to being the agent's
+  // silence, and the sentence had to move with it. See "what the agent itself
+  // claims it is doing" below for both halves.
 })
 
 describe('putting the decision away', () => {
@@ -233,5 +237,137 @@ describe('putting the decision away', () => {
     expect(useApprovalQueue.getState().pending).toHaveLength(1)
     h.fire({ type: 'resolved', request: request({ status: 'denied' }) })
     await waitFor(() => expect(useApprovalQueue.getState().pending).toHaveLength(0))
+  })
+})
+
+describe('the facts main sends rather than the renderer re-deriving them', () => {
+  it('prints main’s own reason for the grade instead of its local guess at it', async () => {
+    harness({
+      approvals: [
+        request({
+          riskReason: 'OpsMaxx could not classify this statement as a read, so it is treated as one that changes data'
+        })
+      ]
+    })
+    render(<ApprovalWatcher />)
+    expect(await screen.findByText(/HIGH because: OpsMaxx could not classify this statement as a read/)).toBeTruthy()
+    // The local derivation's sentence for this same request. Seeing it would
+    // mean the plumbing arrived and the modal ignored it.
+    expect(screen.queryByText(/because: the command runs as root/)).toBeNull()
+  })
+
+  it('names the tool the agent called, which no amount of reading the command could tell you', async () => {
+    harness({ approvals: [request({ toolName: 'execute_command' })] })
+    render(<ApprovalWatcher />)
+    expect(await screen.findByText(/called execute_command/)).toBeTruthy()
+  })
+
+  it('uses the exact action count from the request and drops the "at least" hedge', async () => {
+    harness({ approvals: [request({ actionsThisSession: 7 })], audit: null })
+    render(<ApprovalWatcher />)
+    expect(await screen.findByText('7 recorded before this one')).toBeTruthy()
+    expect(screen.queryByText(/at least/)).toBeNull()
+    expect(screen.queryByText(/could not read the audit log/)).toBeNull()
+  })
+
+  it('shows an exact zero from main, which is a measurement, unlike the zero of an unread log', async () => {
+    harness({ approvals: [request({ actionsThisSession: 0 })], audit: null })
+    render(<ApprovalWatcher />)
+    expect(await screen.findByText('0 recorded before this one')).toBeTruthy()
+  })
+
+  it('keeps the tail read’s "at least" for a request main could not count exactly', async () => {
+    harness({ audit: Array.from({ length: 500 }, () => ({ sessionId: 'sess-claude' })) })
+    render(<ApprovalWatcher />)
+    expect(await screen.findByText('at least 500 recorded before this one')).toBeTruthy()
+  })
+
+  it('still says the audit log was unreadable rather than reporting zero, when main sent no count', async () => {
+    harness({ audit: null })
+    render(<ApprovalWatcher />)
+    expect(await screen.findByText(/could not read the audit log/)).toBeTruthy()
+  })
+
+  it('takes the session’s age and group from the request without a second IPC round trip', async () => {
+    harness({
+      approvals: [
+        request({
+          sessionStartedAt: new Date(T0 - 12 * 60_000).toISOString(),
+          sessionGroupName: 'Full access',
+          actionsThisSession: 3
+        })
+      ],
+      // Both fallback reads fail. Nothing on the row may depend on them.
+      sessions: null,
+      audit: null
+    })
+    render(<ApprovalWatcher />)
+    expect(await screen.findByText(/connected 12m 0s ago/)).toBeTruthy()
+    expect(screen.getByText(/access group Full access/)).toBeTruthy()
+    expect(screen.queryByText(/no session record/)).toBeNull()
+  })
+})
+
+describe('what the agent itself claims it is doing', () => {
+  it('shows the agent’s stated intent, attributed to the agent and not to OpsMaxx', async () => {
+    harness({ approvals: [request({ intent: 'Restarting cron after the crontab edit you approved earlier' })] })
+    render(<ApprovalWatcher />)
+    expect(await screen.findByText(/Restarting cron after the crontab edit/)).toBeTruthy()
+    expect(screen.getByText(/Claude Code’s own words, not OpsMaxx’s/)).toBeTruthy()
+    expect(screen.getByText(/Nothing checked whether they are true/)).toBeTruthy()
+  })
+
+  it('renders the intent as text, never as markup, whatever the agent put in it', async () => {
+    harness({ approvals: [request({ intent: '<img src=x onerror="alert(1)"> deploy' })] })
+    render(<ApprovalWatcher />)
+    const el = await screen.findByText(/onerror/)
+    expect(el.querySelector('img')).toBeNull()
+    expect(document.querySelector('img')).toBeNull()
+  })
+
+  it('says the agent sent no reason, rather than leaving the row blank', async () => {
+    harness()
+    render(<ApprovalWatcher />)
+    expect(await screen.findByText(/Claude Code sent no reason/)).toBeTruthy()
+  })
+})
+
+describe('asking for more time', () => {
+  it('offers the button once the bridge can extend, and asks main rather than moving its own clock', async () => {
+    const h = harness({ canExtend: true })
+    render(<ApprovalWatcher />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Give me more time' }))
+    expect(h.extendApproval).toHaveBeenCalledWith('appr-1', 300)
+    // Nothing moved locally: the countdown is still main's, unchanged, until
+    // main says otherwise.
+    expect(screen.getByText('Auto-denies in 2:00')).toBeTruthy()
+    expect(screen.queryByText(/This build cannot extend the fuse/)).toBeNull()
+  })
+
+  it('counts down to main’s new deadline after an extension, not to the one it derived', async () => {
+    const h = harness({
+      canExtend: true,
+      approvals: [request({ deadlineAt: new Date(T0 + 120_000).toISOString() })]
+    })
+    render(<ApprovalWatcher />)
+    expect(await screen.findByText('Auto-denies in 2:00')).toBeTruthy()
+
+    h.fire({
+      type: 'extended',
+      request: request({ deadlineAt: new Date(T0 + 420_000).toISOString() })
+    })
+    await waitFor(() => expect(screen.getByText('Auto-denies in 7:00')).toBeTruthy())
+    // An extension is one field changing on a question already on screen, not
+    // a second question.
+    expect(useApprovalQueue.getState().pending).toHaveLength(1)
+  })
+
+  it('counts down against main’s deadline even when the configured timeout could not be read', async () => {
+    harness({
+      timeoutSeconds: null,
+      approvals: [request({ deadlineAt: new Date(T0 + 300_000).toISOString() })]
+    })
+    render(<ApprovalWatcher />)
+    expect(await screen.findByText('Auto-denies in 5:00')).toBeTruthy()
   })
 })
