@@ -123,7 +123,22 @@ export type K8sProbe =
        */
       allNamespaces: boolean
     }
-  | { ok: false; reason: K8sFailure; detail: string }
+  | {
+      ok: false
+      reason: K8sFailure
+      detail: string
+      /**
+       * The contexts kubectl listed before the failure, when it got that far.
+       *
+       * A kubeconfig with several contexts, only one of them reachable, is the
+       * normal state of a developer's machine — and the common state of a
+       * jump host. Dropping the list because the CURRENT context is down left
+       * the panel unable to offer the working context sitting beside it, with
+       * nothing to click but a refresh that fails identically.
+       */
+      contexts?: K8sContext[]
+      currentContext?: string | null
+    }
 
 /**
  * Why kubectl could not be read.
@@ -415,6 +430,23 @@ const section = (output: string, name: string): string => {
 // of which a single resource name can be.
 const looksLikeError = (text: string): boolean =>
   /^\s*(error[:\s]|Error from server|The connection to the server|Unable to connect)/i.test(text) ||
+  /**
+   * klog, which is what kubectl writes its own diagnostics with:
+   *
+   *   E0907 21:14:59.291121   83548 memcache.go:265] "Unhandled Error" err="…"
+   *
+   * The anchor above is on the START of the section, and a cluster that cannot
+   * be reached emits several of these BEFORE the `error:` summary line. So the
+   * section began with a klog line, did not match, and was taken for data —
+   * which is how five pods called `Error"` were once drawn for a cluster that
+   * was not answering at all.
+   *
+   * Matched by klog's own shape rather than per-line, because a per-line scan
+   * for /error/ would strike a pod legitimately named `error` in a columns
+   * listing. A severity letter, four digits and a timestamp cannot be a
+   * namespace or a pod name.
+   */
+  /^\s*[EF]\d{4}\s+\d{2}:\d{2}:\d{2}/.test(text) ||
   // Only with surrounding spaces: these are sentences kubectl writes, not
   // fragments of a name. `\bunauthorized\b` matched inside
   // `unauthorized-probe`, because a hyphen is a word boundary — so a perfectly
@@ -517,6 +549,10 @@ export function parseK8sOutput(output: string, exitCode: number | null): K8sProb
     }
   }
 
+  // Parsed before anything is decided about the cluster: kubectl lists these
+  // out of the kubeconfig without talking to an API server, so they survive a
+  // cluster that cannot be reached and are exactly what the user needs to pick
+  // a different one.
   const { contexts, current } = parseContexts(ctxText)
   // A namespace line is one token that is a valid Kubernetes name. Deciding by
   // SHAPE rather than by content is immune to what anyone calls a namespace —
@@ -530,6 +566,33 @@ export function parseK8sOutput(output: string, exitCode: number | null): K8sProb
   // --all-namespaces is the common RBAC denial. Falling back to the current
   // namespace is more useful than failing, and recording which one answered is
   // what lets an empty list be described honestly.
+  // kubectl ran and read the kubeconfig, but nothing came back from the API
+  // server. Reported as a failure rather than as an empty cluster — and with
+  // the contexts, because switching to one that answers is the whole fix.
+  const clusterSilent =
+    (nsText.trim() === '' || looksLikeError(nsText)) &&
+    (allText.trim() === '' || looksLikeError(allText)) &&
+    (nsPodText.trim() === '' || looksLikeError(nsPodText))
+  if (clusterSilent) {
+    // kubectl writes several klog lines and then one plain sentence saying what
+    // actually went wrong. The sentence is the useful half — "Unable to connect
+    // to the server: connection refused" tells an operator what to do, while
+    // `E0907 … memcache.go:265] "Unhandled Error"` tells them where in kubectl
+    // it was noticed. So the sentence is preferred, with the klog line as the
+    // fallback when there is nothing else.
+    const lines = [nsText, allText, nsPodText].flatMap((t) => t.split('\n'))
+    const isKlog = (l: string): boolean => /^\s*[EF]\d{4}\s+\d{2}:\d{2}:\d{2}/.test(l)
+    const firstError =
+      lines.find((l) => looksLikeError(l) && !isKlog(l)) ?? lines.find((l) => looksLikeError(l))
+    return {
+      ok: false,
+      reason: classifyK8sFailure(firstError ?? '', exitCode),
+      detail: (firstError ?? 'the cluster did not answer').trim(),
+      contexts,
+      currentContext: current
+    }
+  }
+
   const allOk = !looksLikeError(allText) && allText.trim() !== ''
   // The fallback needs the same check the first read got. Without it, a cluster
   // that refused BOTH reads had kubectl's own error lines fed to parsePods,

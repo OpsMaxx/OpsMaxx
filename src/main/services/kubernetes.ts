@@ -98,20 +98,26 @@ export class KubernetesReader {
       // 30s: four kubectl calls, each already bounded at 10s by
       // --request-timeout, plus the SSH round trip.
       const r = await this.deps.exec(cfg, buildK8sReadCommand(context, namespace), 30_000)
-      if (!r.ok) {
-        // A transport failure is not a cluster failure. Saying "kubectl is not
-        // installed" when the HOST was unreachable sends someone to fix the
-        // wrong machine entirely.
-        //
-        // This also swallows the case where kubectl RAN and printed its context
-        // list before failing on an unreachable current context — so the panel
-        // cannot offer the working context sitting beside the broken one. That
-        // is a real gap, and it is left here deliberately: reporting it needs
-        // K8sProbe to carry contexts on a failure, because parsing the output
-        // anyway turns kubectl's own error lines into rows that look like pods.
+      const output = `${r.stdout ?? ''}${r.stderr ?? ''}`
+      // A non-zero exit is not the same as a host that could not be reached.
+      // The command runs several kubectl calls in sequence and the last one
+      // decides the status, so an unreachable cluster on the current context
+      // makes the whole script exit non-zero even though kubectl ran, read the
+      // kubeconfig and printed every context in it.
+      //
+      // The marker is the honest test of "did kubectl run". If it is there,
+      // parse — parseK8sOutput reports a silent cluster as a failure that
+      // carries its contexts, so the panel can offer the one that answers
+      // instead of showing a refresh that fails identically.
+      //
+      // The original rule still holds where it applies: no marker means the
+      // script never got far enough to print one, and saying "kubectl is not
+      // installed" when the HOST was unreachable sends someone to fix the wrong
+      // machine entirely.
+      if (!r.ok && !output.includes('===SHELLPILOT-CTX===')) {
         return { ok: false, reason: 'unknown', detail: r.error ?? 'could not reach the server' }
       }
-      return parseK8sOutput(`${r.stdout ?? ''}${r.stderr ?? ''}`, r.code ?? null)
+      return parseK8sOutput(output, r.code ?? null)
     } catch (e) {
       return { ok: false, reason: 'unknown', detail: e instanceof Error ? e.message : String(e) }
     }
