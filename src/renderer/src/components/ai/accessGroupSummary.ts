@@ -41,6 +41,9 @@ const PHRASING: Record<AiCapability, Phrasing> = {
   sshTunnel: { verb: 'open SSH tunnels', gerund: 'opening SSH tunnels' },
   databaseAccess: { verb: 'query databases', gerund: 'querying databases' },
   sudo: { verb: 'use sudo', gerund: 'using sudo' },
+  containers: { verb: 'list containers and read their logs', gerund: 'reading containers' },
+  containerControl: { verb: 'start and stop containers', gerund: 'controlling containers' },
+  fleetRead: { verb: 'read across the fleet', gerund: 'reading across the fleet' },
   serverMetrics: { verb: 'read server metrics', gerund: 'reading server metrics' },
   hostFacts: {
     verb: 'read the server inventory and its pending security updates',

@@ -45,6 +45,8 @@ import { requestApproval } from './approvals'
 import { recordAudit, AUDIT_LOG_PATH } from './auditLog'
 import { redactOutput } from './secretRedaction'
 import { knownSecretValuesForServer, resolveChainSecrets, resolveDbSecrets } from './credentialResolver'
+import { DockerReader } from './docker'
+import type { DockerContainer } from '../../shared/docker'
 import { sshExec } from './ssh'
 import { dbQuery } from './db'
 import { tunnelStart, tunnelStop, tunnelList } from './tunnel'
@@ -2041,8 +2043,122 @@ function buildServer(): McpServer {
     }
   )
 
+  // ------------------------------------------------------------ containers
+  //
+  // An agent could always run `docker ps` through execute_command and parse
+  // the text. That is exactly what the app's own Docker reader exists to stop
+  // a person doing: it handles the runtime that needs sudo and the one that
+  // does not, the compose label template that some runtimes will not render,
+  // and the difference between "no compose project" and "this runtime could
+  // not tell us" — none of which survives a screen-scrape.
+  server.registerTool(
+    'list_containers',
+    {
+      title: 'List containers',
+      description:
+        'Containers on one server: name, image, state, the status line docker itself writes ' +
+        '("Up 3 hours", "Exited (0) 2 days ago"), published ports, and the compose project and ' +
+        'service where the runtime will say. ' +
+        'Prefer this over `docker ps` through execute_command: it needs no shell parsing, it ' +
+        'retries as root only when the unprivileged read is refused and TELLS you it did, and it ' +
+        'distinguishes "this container is not part of a compose project" from "this runtime could ' +
+        'not answer that question" — a distinction `docker ps` cannot express and which reads as ' +
+        '"standalone" when it is not.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: false }
+    },
+    async ({ serverName, intent }, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const resolved = resolveServerOrError(auth.session, serverName)
+      if ('error' in resolved) return resolved.error
+      const { server: s, workspace } = resolved.match
+      const check = effectiveCapability(auth.session, s.id, 'containers')
+      const ctx: AuditContext = {
+        session: auth.session,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        serverId: s.id,
+        serverName: s.name,
+        action: 'list_containers',
+        capability: 'containers'
+      }
+      // 'low': an inventory of what runs here. The logs tool is where the
+      // weight is, and it asks separately.
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'list_containers',
+          level: 'low',
+          because: 'it returns what is running on this server, with images and published ports',
+          intent
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      try {
+        const cfg = resolveChainSecrets(serverToSshConfig(s))
+        const probe = await dockerReader.list(cfg, { autoSudo: true })
+        if (!probe.ok) {
+          recordAudit({
+            ...auditBase(ctx),
+            approval: check.decision === 'ask' ? 'approved' : 'not-required',
+            result: 'error',
+            error: probe.reason ?? 'docker unavailable'
+          })
+          return errorText(
+            `Docker could not be read on ${s.name}: ${probe.reason ?? 'the runtime did not answer'}`
+          )
+        }
+        auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+        if (probe.containers.length === 0) {
+          return text(`No containers on ${s.name}${probe.usedSudo ? ' (read as root)' : ''}.`)
+        }
+        const rows = probe.containers.map((c: DockerContainer) => {
+          const project = c.composeProject ? ` [${c.composeProject}/${c.composeService ?? '?'}]` : ''
+          return `${c.state.padEnd(10)} ${c.name}${project}\n    ${c.image}\n    ${c.status}${c.ports ? `\n    ports: ${c.ports}` : ''}`
+        })
+        return text(
+          `${probe.containers.length} container(s) on ${s.name}` +
+            `${probe.usedSudo ? ' — read as root, because the unprivileged read was refused' : ''}:\n\n` +
+            rows.join('\n\n')
+        )
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        recordAudit({
+          ...auditBase(ctx),
+          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          result: 'error',
+          error: message
+        })
+        return errorText(`Could not list containers on ${s.name}: ${message}`)
+      }
+    }
+  )
+
   return server
 }
+
+/**
+ * The bridge's own Docker reader.
+ *
+ * Separate from the renderer's, and the difference is `allowPrompt`. The
+ * renderer passes it TRUE because a person just picked one server from a
+ * dropdown and pressed a button — that is the one moment a trust-on-first-use
+ * fingerprint dialog is answerable. An agent is not at that dropdown. A bridge
+ * read that could raise a host-key prompt would either block on a modal nobody
+ * is expecting or teach someone to approve fingerprints they did not go
+ * looking for, so an unknown host fails here instead.
+ */
+const dockerReader = new DockerReader({
+  exec: (cfg, command, timeoutMs) =>
+    sshExec(cfg as Parameters<typeof sshExec>[0], command, timeoutMs, false)
+})
 
 function auditBase(ctx: AuditContext): {
   agentName: string

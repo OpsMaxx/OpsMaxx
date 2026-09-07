@@ -70,7 +70,12 @@ const ALLOWED_TOOLS = [
   'set_tunnel',
   'list_vpns',
   'set_vpn',
-  'add_server'
+  'add_server',
+  // Reading the container list on one server. It opens no shell and runs no
+  // container action — `containerControl` exists for that and has no tool
+  // behind it. Gated on its own `containers` capability, denied on the Read
+  // Only tier because container logs are whatever the application printed.
+  'list_containers'
 ]
 
 // A hint, not the gate. Anything this regex matches is by construction absent
@@ -408,6 +413,15 @@ describe('the AI permission model has no word for a local shell', () => {
   // lives in is shared, not because an agent can reach it -- and it is the
   // shortest description of how to take the machine, so it stays that way.
   'sudoersRead',
+    // Reading containers, and reading across the fleet. `containers` has one
+    // tool behind it (list_containers) and gates the container logs an
+    // application wrote to stdout — which is why it is denied on Read Only.
+    // `containerControl` and `fleetRead` are declared here so the consent grid
+    // is honest about what is coming; neither has a tool behind it yet, and
+    // adding one means editing ALLOWED_TOOLS above in the same diff.
+    'containers',
+    'containerControl',
+    'fleetRead',
     'manageServers',
     'vpnControl'
   ]

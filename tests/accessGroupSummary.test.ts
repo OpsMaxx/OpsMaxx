@@ -18,6 +18,9 @@ function allowAll(overrides: Partial<AiCapabilityPolicy> = {}): AiCapabilityPoli
     terminal: 'allow',
     readFiles: 'allow',
     writeFiles: 'allow',
+    containers: 'allow',
+    containerControl: 'allow',
+    fleetRead: 'allow',
     sftpDownload: 'allow',
     sftpUpload: 'allow',
     sshTunnel: 'allow',
@@ -79,10 +82,11 @@ describe('summariseAccessGroup — built-in groups', () => {
       group(allowAll({ writeFiles: 'deny', sftpUpload: 'deny', sshTunnel: 'deny', sudo: 'deny' }))
     )
     expect(s.sentence).toBe(
-      'Can see server details, run commands, read files, download files, query databases, and read server metrics without asking. ' +
+      'Can see server details, run commands, read files, download files, query databases, read server metrics, ' +
+        'list containers and read their logs, start and stop containers, and read across the fleet without asking. ' +
         'Cannot use sudo, add servers to the workspace, start and stop VPNs, and list reverse proxies, write files, upload files, open SSH tunnels, read the server inventory and its pending security updates, collect this server’s firewall rule list, or collect this server’s sudoers rules.'
     )
-    expect(s.counts).toEqual({ allow: 6, ask: 0, deny: 9 })
+    expect(s.counts).toEqual({ allow: 9, ask: 0, deny: 9 })
     expect(s.elevated).toEqual([])
   })
 
@@ -100,7 +104,7 @@ describe('summariseAccessGroup — built-in groups', () => {
       )
     )
     expect(s.clauses[0]).toBe(
-      'Can see server details, run commands, read files, download files, query databases, and read server metrics without asking.'
+      'Can see server details, run commands, read files, download files, query databases, read server metrics, list containers and read their logs, start and stop containers, and read across the fleet without asking.'
     )
     expect(s.clauses[1]).toBe(
       'Asks you first before adding servers to the workspace, starting and stopping VPNs, and listing reverse proxies, writing files, uploading files, and opening SSH tunnels.'
@@ -134,7 +138,7 @@ describe('summariseAccessGroup — built-in groups', () => {
     )
     // Asking is not granting: nothing here happens without a human.
     expect(s.elevated).toEqual([])
-    expect(s.counts).toEqual({ allow: 6, ask: 6, deny: 3 })
+    expect(s.counts).toEqual({ allow: 9, ask: 6, deny: 3 })
   })
 
   it('Full Access still gates the three dangerous capabilities behind a prompt', () => {
@@ -142,7 +146,7 @@ describe('summariseAccessGroup — built-in groups', () => {
       group(allowAll({ sudo: 'ask', manageServers: 'ask', vpnControl: 'ask' }))
     )
     expect(s.clauses[0]).toBe(
-      'Can see server details, run commands, read files, write files, download files, upload files, open SSH tunnels, query databases, and read server metrics without asking.'
+      'Can see server details, run commands, read files, write files, download files, upload files, open SSH tunnels, query databases, read server metrics, list containers and read their logs, start and stop containers, and read across the fleet without asking.'
     )
     expect(s.clauses[1]).toBe(
       'Asks you first before using sudo, adding servers to the workspace, and starting and stopping VPNs, and listing reverse proxies.'
@@ -164,7 +168,8 @@ describe('summariseAccessGroup — built-in groups', () => {
       )
     )
     expect(s.clauses[0]).toBe(
-      'Can see server details, read files, download files, and read server metrics without asking.'
+      'Can see server details, read files, download files, read server metrics, ' +
+        'list containers and read their logs, start and stop containers, and read across the fleet without asking.'
     )
     expect(s.clauses[1]).toBe('Asks you first before running commands and querying databases.')
     expect(s.clauses[2]).toContain('Cannot use sudo, add servers to the workspace')
@@ -175,7 +180,7 @@ describe('summariseAccessGroup — edge cases', () => {
   it('says so plainly when everything is denied', () => {
     const s = summariseAccessGroup(group(everything('deny')))
     expect(s.sentence).toBe('Allows nothing — every AI request against the server is refused.')
-    expect(s.counts).toEqual({ allow: 0, ask: 0, deny: 15 })
+    expect(s.counts).toEqual({ allow: 0, ask: 0, deny: 18 })
     expect(s.elevated).toEqual([])
   })
 
@@ -389,13 +394,13 @@ describe('summariseAccessGroup — path rules outrank the capability', () => {
       )
     )
     expect(s.clauses).toEqual([
-      'Can see server details, run commands, download files, query databases, and read server metrics without asking.',
+      'Can see server details, run commands, download files, query databases, read server metrics, list containers and read their logs, start and stop containers, and read across the fleet without asking.',
       `Cannot use sudo, add servers to the workspace, start and stop VPNs, and list reverse proxies, upload files, open SSH tunnels, ${HF}, ${FW}, or ${SU}.`,
       'Can read files without asking — except 19 path rules that block it.',
       'Cannot write files — except 2 path rules that ask you first.'
     ])
     // The grid still shows what the grid shows; the rules qualify it.
-    expect(s.counts).toEqual({ allow: 6, ask: 0, deny: 9 })
+    expect(s.counts).toEqual({ allow: 9, ask: 0, deny: 9 })
     expect(s.overriddenByPath).toEqual(['readFiles', 'writeFiles'])
   })
 

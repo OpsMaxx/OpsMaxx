@@ -1311,10 +1311,24 @@ const read = (p: string): string => readFileSync(join(__dirname, '..', p), 'utf8
 
 describe('what must NOT be able to reach this', () => {
   it('is not exposed to the MCP bridge', () => {
-    // An agent gets execute_command gated per server against an access group.
-    // Restarting a container, or reading a host's disk usage, is a different
-    // risk with a different consent story; growing one because the UI did
-    // would be an accident rather than a decision.
+    // This list is shorter than it was, and the removal was deliberate.
+    //
+    // The rule it encodes has not changed: an agent gets execute_command gated
+    // per server, and restarting a container or reading a host's disk usage is
+    // a different risk with a different consent story — so growing the bridge
+    // because the UI grew would be an accident rather than a decision.
+    //
+    // `DockerReader` is now reachable because that decision was taken and the
+    // consent story was written: reading containers is its own `containers`
+    // capability with its own honest label, gated through `gate()`, audited
+    // like every other tool, and DENIED on the Read Only tier because
+    // container logs are whatever the application wrote to stdout.
+    //
+    // Everything below is still forbidden, and that is the point of keeping
+    // the list: the bridge reads containers, it does not act on them. A
+    // `containerControl` capability exists for that and deliberately has no
+    // tool behind it yet. Adding one means deleting a line here on purpose,
+    // which is the whole mechanism.
     const mcp = read('src/main/services/mcpServer.ts')
     for (const forbidden of [
       'buildDockerActionCommand',
@@ -1323,7 +1337,6 @@ describe('what must NOT be able to reach this', () => {
       'buildDockerInspectCommand',
       'buildDockerStatsCommand',
       'planDockerAction',
-      'DockerReader',
       'docker system df',
       'system df -v',
       'docker inspect',

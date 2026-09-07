@@ -28,6 +28,9 @@ function allowAll(overrides: Partial<AccessGroup['capabilities']> = {}): AccessG
     sftpDownload: 'allow',
     sftpUpload: 'allow',
     sshTunnel: 'allow',
+    containers: 'allow',
+    containerControl: 'allow',
+    fleetRead: 'allow',
     databaseAccess: 'allow',
     sudo: 'allow',
     serverMetrics: 'allow',
@@ -172,6 +175,15 @@ function defaultGroups(): AccessGroup[] {
         readFiles: 'allow',
         sftpDownload: 'allow',
         serverMetrics: 'allow',
+        // Denied, despite both being reads — this tier's promise is that it
+        // can be handed out and then not thought about. Container logs are
+        // whatever the application wrote to stdout, which routinely includes
+        // its own connection strings and tokens, and fleet reads span the
+        // whole workspace rather than the server this is set on. Same
+        // reasoning that already denies host facts and firewall rules here.
+        containers: 'deny',
+        containerControl: 'deny',
+        fleetRead: 'deny',
         terminal: 'deny',
         writeFiles: 'deny',
         sftpUpload: 'deny',

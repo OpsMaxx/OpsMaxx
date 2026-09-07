@@ -23,6 +23,9 @@ export type AiCapability =
   | 'sudoersRead'
   | 'manageServers'
   | 'vpnControl'
+  | 'containers'
+  | 'containerControl'
+  | 'fleetRead'
 
 // `detail` is the consent surface, and it is not decoration. A user reading this
 // grid is deciding what an agent may do, and the only thing they have to decide
@@ -159,6 +162,24 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
     detail:
       'Lists VPN profiles and reverse proxies, and starts or stops the VPNs. Reverse proxies ' +
       'are never started or stopped by an agent, at any setting.'
+  },
+  {
+    id: 'containers',
+    label: 'Containers: what is running, and their logs',
+    detail:
+      'Lists containers with their image, state, ports, uptime and compose project, and reads container logs. The logs are the part to weigh: an application writes its own connection strings, tokens and customer records to stdout, and this returns them as the container emitted them. It reads only — starting and stopping is a separate permission.'
+  },
+  {
+    id: 'containerControl',
+    label: 'Containers: start, stop and restart them',
+    detail:
+      'Restarts, stops and starts containers, and brings compose projects up and down. Stopping a container is an outage for whatever it serves, so this is separate from reading the list: an agent that may see what is running does not thereby get to stop it.'
+  },
+  {
+    id: 'fleetRead',
+    label: 'Fleet: read across many servers at once',
+    detail:
+      'Answers questions over everything already collected rather than one host at a time — the inventory, search across it, drift, alerts and the running process list. One call can return data from every server in the workspace, so the reach is the workspace and not the server this is set on.'
   }
 ]
 
