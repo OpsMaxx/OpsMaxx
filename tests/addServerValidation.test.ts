@@ -93,3 +93,61 @@ describe('the jump-host row is labelled', () => {
     expect(hops).not.toContain('placeholder="port"')
   })
 })
+
+describe('a profile can be checked before it is saved', () => {
+  const modal = read('src/renderer/src/components/connections/AddServerModal.tsx')
+  const ssh = read('src/main/services/ssh.ts')
+
+  // The form has four to six chances to be wrong and had no feedback loop: the
+  // only way to find out was to save it, open a session, and read a failure on
+  // a different screen. Saving PERSISTS the profile before it is known to work,
+  // so a first run ends with a connection list holding entries that have never
+  // connected.
+  it('offers Test connection beside the primary, where the fields are editable', () => {
+    expect(modal).toMatch(/Test connection/)
+    expect(modal).toMatch(/onClick=\{\(\) => void testConnection\(\)\}/)
+  })
+
+  // Through the same classifier the terminal's failure card uses, so a wrong
+  // username reads as a wrong username rather than as the handshake timeout it
+  // arrives as.
+  it('classifies the failure rather than pasting the driver string', () => {
+    expect(modal).toContain('adviseOnError(r?.error)')
+  })
+
+  // A button that quietly does nothing is worse than no button — the rule the
+  // rest of the app applies to an unwired bridge.
+  it('says so when the bridge has no test channel', () => {
+    expect(modal).toMatch(/This build cannot test a connection/)
+  })
+
+  // `acquire` pools for reuse, which is right for a session and wrong here: a
+  // pooled test connection would mean pressing Test twice created two, and a
+  // test of a profile the user then edits would leave one keyed to settings
+  // that no longer exist.
+  it('dials through openChain, never through the pool', () => {
+    const i = ssh.indexOf('export async function sshTest')
+    expect(i).toBeGreaterThan(-1)
+    const body = ssh.slice(i, i + 1600)
+    expect(body).toContain('openChain(cfg)')
+    expect(body).not.toContain('acquire(')
+  })
+
+  // A chain that failed on hop three still opened hops one and two, and leaking
+  // those is how a form with a typo in it holds connections open on a bastion.
+  it('closes every client it opened, in a finally', () => {
+    const i = ssh.indexOf('export async function sshTest')
+    const body = ssh.slice(i, i + 1600)
+    expect(body).toContain('} finally {')
+    expect(body).toMatch(/for \(const c of chain\?\.clients \?\? \[\]\) c\.end\(\)/)
+  })
+
+  // Answering a first-contact trust dialog would record a trust decision as a
+  // side effect of pressing a button labelled Test.
+  it('does not raise the host-key trust prompt', () => {
+    const i = ssh.indexOf('export async function sshTest')
+    const doc = ssh.slice(Math.max(0, i - 1500), i)
+    expect(doc).toMatch(/allowPrompt/)
+    expect(ssh.slice(i, i + 1600)).not.toMatch(/allowPrompt/)
+  })
+})

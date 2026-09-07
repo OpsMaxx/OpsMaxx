@@ -18,7 +18,8 @@ import {
   poolClose,
   sshExec,
   sshExecStream,
-  sshOpenFresh
+  sshOpenFresh,
+  sshTest
 } from './services/ssh'
 import type { KeyboardRequest } from './services/ssh'
 import {
@@ -707,6 +708,12 @@ setSshPrompter((req: KeyboardRequest) => {
 
 ipcMain.handle('ssh:connect', (e, cfg: SshConnectConfig & { serverId?: string }) =>
   sshConnect(e.sender, withVpnTransport(resolveChainSecrets(cfg)))
+)
+// Dials and hangs up. Goes through the same resolveChainSecrets/withVpnTransport
+// pipeline as a real connect, because a test that skipped either would pass on
+// a profile whose credential or transport is the thing that is wrong.
+ipcMain.handle('ssh:test', (_e, cfg: SshConnectConfig & { serverId?: string }) =>
+  sshTest(withVpnTransport(resolveChainSecrets(cfg)))
 )
 ipcMain.handle('ssh:pool-list', () => poolList())
 ipcMain.handle('ssh:pool-close', (_e, key: string) => poolClose(key))
