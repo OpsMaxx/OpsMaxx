@@ -46,7 +46,7 @@ import { recordAudit, AUDIT_LOG_PATH } from './auditLog'
 import { redactOutput } from './secretRedaction'
 import { knownSecretValuesForServer, resolveChainSecrets, resolveDbSecrets } from './credentialResolver'
 import { DockerReader } from './docker'
-import { buildDockerLogsCommand } from '../../shared/docker'
+import { buildDockerActionCommand, buildDockerLogsCommand } from '../../shared/docker'
 import type { DockerContainer } from '../../shared/docker'
 import { sshExec } from './ssh'
 import { dbQuery } from './db'
@@ -320,6 +320,24 @@ export interface FleetReader {
 let fleetReader: FleetReader | null = null
 export function setFleetReader(r: FleetReader): void {
   fleetReader = r
+}
+
+/**
+ * Backup destinations and their health, injected for the same reason.
+ *
+ * Read-only by construction: there is no run and no restore on this interface,
+ * so no later edit to the tool can reach one without adding a method here
+ * first — which is a diff someone sees.
+ */
+export interface BackupHealthReader {
+  (): {
+    destinations: { id: string; name: string; kind: string }[]
+    alarms: { destinationId: string; level: string; detail: string }[]
+  }
+}
+let backupReader: BackupHealthReader | null = null
+export function setBackupReader(r: BackupHealthReader): void {
+  backupReader = r
 }
 
 /**
@@ -2379,6 +2397,196 @@ function buildServer(): McpServer {
       auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
       return text(
         `${servers.length} server(s) across ${permitted.length} workspace(s):\n\n${rows.join('\n\n')}`
+      )
+    }
+  )
+
+  server.registerTool(
+    'container_action',
+    {
+      title: 'Start, stop or restart a container',
+      description:
+        'Starts, stops or restarts ONE container. ' +
+        'This is the only tool on the bridge that changes the state of a running service, and it is ' +
+        'behind its own permission for that reason: an agent allowed to see what is running does not ' +
+        'thereby get to stop it. ' +
+        'Stopping or restarting drops every connection the container is currently serving. Say what the ' +
+        'container is for in `intent`, because that sentence is what the person approving this sees. ' +
+        'One container per call, deliberately — there is no way to ask for several, so a mistake costs ' +
+        'one service rather than a host.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        container: z
+          .string()
+          .describe('Container name or id, exactly as list_containers reported it'),
+        action: z.enum(['start', 'stop', 'restart']).describe('What to do to it'),
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true, openWorldHint: false }
+    },
+    async ({ serverName, container, action, intent }, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const resolved = resolveServerOrError(auth.session, serverName)
+      if ('error' in resolved) return resolved.error
+      const { server: s, workspace } = resolved.match
+      const check = effectiveCapability(auth.session, s.id, 'containerControl')
+      const ctx: AuditContext = {
+        session: auth.session,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        serverId: s.id,
+        serverName: s.name,
+        action: `container_action ${action} ${container}`,
+        capability: 'containerControl'
+      }
+      // `high`, and starting is graded no lower than stopping. The panel grades
+      // a start as ordinary because the person doing it has the container in
+      // front of them and can see what they picked; an agent doing it is
+      // starting a service nobody asked for on a host nobody is looking at.
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'container_action',
+          level: 'high',
+          because:
+            action === 'start'
+              ? `it starts the container "${container}", which begins serving traffic again`
+              : `it ${action}s the container "${container}" and drops every connection it is serving`,
+          intent
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      const cfg = resolveChainSecrets(serverToSshConfig(s))
+      // One ref, always. The builder accepts a list and caps it; this passes a
+      // single-element one so there is no shape in which an agent acts on a
+      // host's worth of containers from one approval.
+      const run = async (sudo: boolean): Promise<{ ok: boolean; out: string; error?: string }> => {
+        const command = buildDockerActionCommand(action, [container], { sudo })
+        const r = await sshExec(cfg, command, 60_000, false)
+        return { ok: r.ok && (r.code ?? 0) === 0, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, error: r.error }
+      }
+      try {
+        let result = await run(false)
+        let usedSudo = false
+        if (!result.ok && /permission denied|cannot connect to the docker daemon/i.test(result.out)) {
+          const asRoot = await run(true)
+          if (asRoot.ok) {
+            result = asRoot
+            usedSudo = true
+          }
+        }
+        if (!result.ok) {
+          recordAudit({
+            ...auditBase(ctx),
+            approval: check.decision === 'ask' ? 'approved' : 'not-required',
+            result: 'error',
+            error: result.error ?? (result.out.trim() || 'the runtime refused')
+          })
+          return errorText(
+            `Could not ${action} ${container} on ${s.name}: ${result.error ?? (result.out.trim() || 'the runtime refused')}`
+          )
+        }
+        auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+        return text(
+          `${action === 'stop' ? 'Stopped' : action === 'start' ? 'Started' : 'Restarted'} ` +
+            `${container} on ${s.name}${usedSudo ? ' (as root)' : ''}.`
+        )
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        recordAudit({
+          ...auditBase(ctx),
+          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          result: 'error',
+          error: message
+        })
+        return errorText(`Could not ${action} ${container} on ${s.name}: ${message}`)
+      }
+    }
+  )
+
+  server.registerTool(
+    'backup_status',
+    {
+      title: 'Check whether backups are working',
+      description:
+        'Every backup destination configured on this machine, and how each is doing: what kind it is, ' +
+        'when it last succeeded, how late it is against its own schedule, and any alarm raised against ' +
+        'it. ' +
+        'Answers the question "are we actually backed up", which nothing else on this bridge can. ' +
+        'It names destinations, never their credentials — an SFTP destination reports its host and ' +
+        'path, and nothing that would let anyone reach it. ' +
+        'It cannot RUN a backup or restore one. A run outlives the approval that started it, which is ' +
+        'a capability the stop-all-AI-access switch could not revoke, and a restore overwrites data. ' +
+        'Neither is available at any permission level.',
+      inputSchema: { intent: INTENT_PARAM },
+      annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: false }
+    },
+    async ({ intent }, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const workspaces = auth.session.workspaces
+      if (workspaces.length === 0) return errorText('This session has no workspaces.')
+
+      // Backups are configured per machine rather than per workspace, so this
+      // is checked against the session's first workspace the way the fleet
+      // read is, and denied unless every workspace the session holds permits
+      // it — a machine-wide answer must not be reachable through the most
+      // permissive workspace in the set.
+      const decisions = workspaces.map((w) => effectiveWorkspaceCapability(auth.session, w.id, 'backupRead'))
+      if (decisions.some((d) => d.decision === 'deny')) {
+        return errorText(
+          'This session is not permitted to read backup health in every workspace it holds, and the answer is machine-wide.'
+        )
+      }
+      const check = decisions.reduce((strictest, d) => (d.decision === 'ask' ? d : strictest))
+      const ctx: AuditContext = {
+        session: auth.session,
+        workspaceId: workspaces[0].id,
+        workspaceName: workspaces[0].name,
+        serverId: null,
+        serverName: null,
+        action: 'backup_status',
+        capability: 'backupRead'
+      }
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'backup_status',
+          level: 'low',
+          because: 'it reports which backups are configured and whether they are running',
+          intent
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      if (!backupReader) {
+        return errorText('ShellPilot cannot read backup configuration on this machine.')
+      }
+      const { destinations, alarms } = backupReader()
+      if (destinations.length === 0) {
+        // Said plainly. "No destinations" reads as a clean bill of health if it
+        // is reported as an empty list of problems.
+        return text('NO BACKUP DESTINATIONS ARE CONFIGURED. Nothing on this machine is being backed up.')
+      }
+      const byId = new Map(alarms.map((a) => [a.destinationId, a]))
+      const rows = destinations.map((d) => {
+        const alarm = byId.get(d.id)
+        return (
+          `${d.name} (${d.kind})\n` +
+          `    ${alarm ? `${alarm.level.toUpperCase()}: ${alarm.detail}` : 'no alarm raised'}`
+        )
+      })
+      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      const worrying = alarms.filter((a) => a.level === 'alarm').length
+      return text(
+        `${destinations.length} backup destination(s)` +
+          `${worrying > 0 ? `, ${worrying} in alarm` : ''}:\n\n${rows.join('\n\n')}`
       )
     }
   )

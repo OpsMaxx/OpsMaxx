@@ -44,6 +44,7 @@ const PHRASING: Record<AiCapability, Phrasing> = {
   containers: { verb: 'list containers and read their logs', gerund: 'reading containers' },
   containerControl: { verb: 'start and stop containers', gerund: 'controlling containers' },
   fleetRead: { verb: 'read across the fleet', gerund: 'reading across the fleet' },
+  backupRead: { verb: 'see backup health', gerund: 'reading backup health' },
   serverMetrics: { verb: 'read server metrics', gerund: 'reading server metrics' },
   hostFacts: {
     verb: 'read the server inventory and its pending security updates',
