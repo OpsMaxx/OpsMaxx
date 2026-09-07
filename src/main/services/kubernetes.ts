@@ -102,6 +102,13 @@ export class KubernetesReader {
         // A transport failure is not a cluster failure. Saying "kubectl is not
         // installed" when the HOST was unreachable sends someone to fix the
         // wrong machine entirely.
+        //
+        // This also swallows the case where kubectl RAN and printed its context
+        // list before failing on an unreachable current context — so the panel
+        // cannot offer the working context sitting beside the broken one. That
+        // is a real gap, and it is left here deliberately: reporting it needs
+        // K8sProbe to carry contexts on a failure, because parsing the output
+        // anyway turns kubectl's own error lines into rows that look like pods.
         return { ok: false, reason: 'unknown', detail: r.error ?? 'could not reach the server' }
       }
       return parseK8sOutput(`${r.stdout ?? ''}${r.stderr ?? ''}`, r.code ?? null)

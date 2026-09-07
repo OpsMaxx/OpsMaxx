@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { timerHealth, type TimerHealth } from '../../../../shared/systemdTimers'
 import { CalendarClock, Pencil, Plus, RefreshCw, ShieldAlert } from 'lucide-react'
 import { sshHopsFor } from '../../lib/ssh'
+import { LOCAL_TARGET } from '../../../../shared/execTarget'
 import { clsx } from '../../lib/format'
 import {
   CRON_STATUS_HELP,
@@ -72,6 +73,24 @@ const cfgFor = (s: Server): CronEditTargetRef['cfg'] => ({
   auth: s.auth === 'password' || s.auth === 'agent' ? s.auth : 'key',
   hops: sshHopsFor(s)
 })
+
+/**
+ * This machine, collected alongside the servers.
+ *
+ * Not a row in `servers`, which is persisted and mirrored into the MCP data
+ * cache — see shared/execTarget.ts. The id is a sentinel no server can hold,
+ * which is also what makes the Edit control disappear on this row for free:
+ * every edit affordance below is already gated on `serverById.has(...)`, and
+ * cron editing routes through a server-shaped approval.
+ */
+const LOCAL_ID = 'local'
+const LOCAL_HOST = {
+  serverId: LOCAL_ID,
+  serverName: 'This machine',
+  // The marker, in the slot a connection config occupies for a server. Main
+  // reads it before it ever looks at the config's fields.
+  cfg: LOCAL_TARGET as unknown as CronEditTargetRef['cfg']
+}
 
 const KIND_LABEL: Record<CronEntry['kind'], string> = {
   'user-crontab': 'user crontab',
@@ -226,13 +245,16 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
   const collect = async (): Promise<void> => {
     setLoading(true)
     try {
-      const res = await window.opsmaxx?.cron?.collect(
-        eligible.map((s) => ({
+      const res = await window.opsmaxx?.cron?.collect([
+        ...eligible.map((s) => ({
           serverId: s.id,
           serverName: s.name,
           cfg: cfgFor(s)
-        }))
-      )
+        })),
+        // Last, so the estate reads first and this machine is the tail of the
+        // list rather than the headline.
+        LOCAL_HOST
+      ])
       setRows(res ?? [])
     } finally {
       // The handler catches per host today, so nothing here throws — but one
@@ -314,7 +336,7 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
   const readSchedules = (primary: boolean): React.JSX.Element => (
     <button
       className={primary ? 'btn primary sm' : 'btn ghost sm'}
-      disabled={loading || eligible.length === 0}
+      disabled={loading}
       onClick={() => void collect()}
     >
       <RefreshCw size={13} className={clsx(loading && 'spin')} /> {rows ? 'Refresh' : 'Read schedules'}

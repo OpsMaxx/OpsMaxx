@@ -1021,21 +1021,53 @@ function closeHistoryNow(): void {
 //
 // The renderer supplies targets because it owns the server list and the
 // workspace scoping; main owns the schedule and the credentials.
+/**
+ * Runs a command on whichever target the renderer named.
+ *
+ * Docker, Kubernetes, cron and host facts already take their runner by
+ * injection and pass the connection config through untouched, so "this
+ * machine" needs no branch inside any of them — only this one, here, at the
+ * point where main decides what the runner actually is.
+ *
+ * This lives in main's renderer-facing wiring and nowhere else on purpose. The
+ * MCP bridge and the CLI build their own readers bound straight to sshExec,
+ * from servers they resolved by name, so neither can express a local target —
+ * which is what keeps localExec out of their import closure and off the surface
+ * an agent can reach. See tests/localTerminalNotExposed.test.ts.
+ */
+const targetExec = (
+  cfg: unknown,
+  command: string,
+  timeoutMs: number
+): ReturnType<typeof sshExec> =>
+  isLocalTarget(cfg)
+    ? localExec(command, timeoutMs)
+    : sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs)
+
+/**
+ * The same dispatch for the readers that fan out.
+ *
+ * Two differences from targetExec, both deliberate and both pre-existing:
+ * allowPrompt is false, because N unknown hosts must not become N stacked
+ * trust dialogs; and the config is passed through unresolved, because these
+ * callers resolve their own secrets. A local target reaches neither question.
+ */
+const targetExecQuiet = (
+  cfg: unknown,
+  command: string,
+  timeoutMs: number
+): ReturnType<typeof sshExec> =>
+  isLocalTarget(cfg)
+    ? localExec(command, timeoutMs)
+    : sshExec(cfg as Parameters<typeof sshExec>[0], command, timeoutMs, false)
+
 // Host facts, on the sampler's slow clock. One reader for the whole process:
 // it holds no state of its own, only the exec function, and every probe is a
 // single round trip that releases its pooled connection when it finishes.
 //
 // It does NOT go through metrics.ts's exec, which discards the exit code —
 // three of the probes inside the collector use exit status as their API.
-const hostFactsReader = new HostFactsReader({
-  exec: (cfg, command, timeoutMs) =>
-    // Not targetExec: this one keeps allowPrompt false, because the sampler
-    // fans out and N unknown hosts must not become N stacked trust dialogs.
-    // A local target never reaches that question.
-    isLocalTarget(cfg)
-      ? localExec(command, timeoutMs)
-      : sshExec(cfg as Parameters<typeof sshExec>[0], command, timeoutMs, false)
-})
+const hostFactsReader = new HostFactsReader({ exec: targetExecQuiet })
 
 // Whether the key and access probe may run — roadmap item 23.
 //
@@ -1103,10 +1135,7 @@ const accessReader = new AccessReader({
 // Security posture, on the same slow clock — roadmap item 24. One reader for
 // the whole process, for the reason the other two are one: it holds no state
 // beyond the exec function, and every probe is a single round trip.
-const postureReader = new PostureReader({
-  exec: (cfg, command, timeoutMs) =>
-    sshExec(cfg as Parameters<typeof sshExec>[0], command, timeoutMs, false)
-})
+const postureReader = new PostureReader({ exec: targetExecQuiet })
 
 // Which access group governs a server, resolved exactly as the MCP bridge
 // resolves it: the assignment on the server, else the one on its workspace,
@@ -1135,8 +1164,7 @@ function groupForServer(serverId: string): AccessGroup | null {
 // a watched file and the panel, and adding a credential reach here to improve
 // them would put the vault inside a background sweep to make a display nicer.
 const driftReader = new DriftReader({
-  exec: (cfg, command, timeoutMs) =>
-    sshExec(cfg as Parameters<typeof sshExec>[0], command, timeoutMs, false),
+  exec: targetExecQuiet,
   // A FUNCTION, not the array. The list changes when the operator saves
   // settings, and a snapshot taken at construction would keep reading the
   // watches that existed at launch — including one the operator has since
@@ -2137,29 +2165,6 @@ ipcMain.handle('logtail:resume', (_e, tailId: string) => logTailer.resume(tailId
 // renderer is not a trust boundary, and anyone who can drive it already has a
 // terminal on these hosts — but it is not the same as the feature being absent,
 // and a reader of the paragraph above could reasonably assume otherwise.
-/**
- * Runs a command on whichever target the renderer named.
- *
- * Docker, Kubernetes, cron and host facts already take their runner by
- * injection and pass the connection config through untouched, so "this
- * machine" needs no branch inside any of them — only this one, here, at the
- * point where main decides what the runner actually is.
- *
- * This lives in main's renderer-facing wiring and nowhere else on purpose. The
- * MCP bridge and the CLI build their own readers bound straight to sshExec,
- * from servers they resolved by name, so neither can express a local target —
- * which is what keeps localExec out of their import closure and off the surface
- * an agent can reach. See tests/localTerminalNotExposed.test.ts.
- */
-const targetExec = (
-  cfg: unknown,
-  command: string,
-  timeoutMs: number
-): ReturnType<typeof sshExec> =>
-  isLocalTarget(cfg)
-    ? localExec(command, timeoutMs)
-    : sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs)
-
 const dockerReader = new DockerReader({
   // allowPrompt left TRUE here, unlike broadcast, log tailing and cron, and
   // the difference is deliberate. Those three fan out; this reads ONE target
@@ -2433,11 +2438,10 @@ ipcMain.handle(
 // process, not in a rejected promise, and cannot reach an error detail. See the
 // header of shared/compose.ts for why that is the whole shape of the feature.
 const composeReader = new ComposeReader({
-  exec: (cfg, command, timeoutMs) =>
-    // allowPrompt true, matching Docker above and for the same reason: this is
-    // one server the operator just chose, not a fan-out, which is the only
-    // moment a trust-on-first-use dialog is answerable.
-    sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs)
+  // allowPrompt true, matching Docker above and for the same reason: this is
+  // one host the operator just chose, not a fan-out, which is the only moment
+  // a trust-on-first-use dialog is answerable.
+  exec: targetExec
 })
 
 ipcMain.handle(
@@ -2642,13 +2646,11 @@ ipcMain.handle(
     }[] = []
     for (const t of targets) {
       try {
-        // Reads every online server in one press; same stacked-dialog problem.
-        const r = await sshExec(
-          resolveChainSecrets(t.cfg as SshConnectConfig),
-          CRON_COLLECT_COMMAND,
-          20_000,
-          false
-        )
+        // Reads every online host in one press; same stacked-dialog problem,
+        // which is why this is the quiet dispatch. It also carries the local
+        // target: this handler predates it and called sshExec directly, so
+        // "This machine" collected nothing while reporting no error at all.
+        const r = await targetExecQuiet(t.cfg, CRON_COLLECT_COMMAND, 20_000)
         if (!r.ok) {
           out.push({ serverId: t.serverId, serverName: t.serverName, entries: [], unparsed: 0, error: r.error })
           continue

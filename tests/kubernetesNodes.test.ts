@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
   buildK8sCordonCommand,
   parseK8sCordonResult,
+  parseK8sOutput,
   planK8sCordon,
   validateNodeName
 } from '../src/shared/kubernetes'
@@ -239,6 +240,45 @@ describe('the API server version', () => {
     const server = parseServerVersion(JSON.stringify({ clientVersion: { gitVersion: 'v1.31.0' } }))
     const verdicts = assessNodeSkew(server, [{ name: 'n1', kubeletVersion: 'v1.31.0' }])
     expect(verdicts[0].verdict).toBe('unknown')
+  })
+})
+
+
+// A cluster that refuses BOTH pod reads.
+//
+// Real shape, from a machine whose current context pointed at a stopped
+// cluster: kubectl printed its contexts happily, then wrote multi-line errors
+// into both pod sections. The fallback read had no error check of its own, so
+// those lines were handed to parsePods and each became a row — a panel showing
+// five pods called `Error"` for a cluster that was not answering at all.
+describe('pod sections that are both errors', () => {
+  const OUTPUT = [
+    '{"clientVersion":{"gitVersion":"v1.33.2"}}',
+    '===OPSMAXX-CTX===',
+    '      docker-desktop   docker-desktop   docker-desktop',
+    '*     minikube         minikube         minikube         default',
+    '===OPSMAXX-NS===',
+    'E0907 18:32:06.388539   73814 memcache.go:265] "Unhandled Error" err="couldn\'t get server API group list"',
+    '===OPSMAXX-PODS-ALL===',
+    'E0907 18:32:06.421955   73814 memcache.go:265] "Unhandled Error" err="couldn\'t get server API group list"',
+    'Unable to connect to the server: dial tcp 127.0.0.1:8443: connect: connection refused',
+    '===OPSMAXX-PODS-NS===',
+    'E0907 18:32:06.444120   73814 memcache.go:265] "Unhandled Error" err="couldn\'t get server API group list"',
+    'Unable to connect to the server: dial tcp 127.0.0.1:8443: connect: connection refused'
+  ].join('\n')
+
+  it('reports no pods rather than inventing them from the error text', () => {
+    const probe = parseK8sOutput(OUTPUT, 1)
+    if (!probe.ok) return // classified as a failure, which is also honest
+    expect(probe.pods).toEqual([])
+  })
+
+  it('never produces a pod whose name came from an error line', () => {
+    const probe = parseK8sOutput(OUTPUT, 1)
+    if (!probe.ok) return
+    for (const p of probe.pods) {
+      expect(p.name).not.toMatch(/^E\d{4}|Error|Unable to connect/)
+    }
   })
 })
 
