@@ -54,7 +54,7 @@ export function OnboardingTour(): React.JSX.Element | null {
   return (
     <div className="tour-card" role="dialog" aria-label="ShellPilot walkthrough">
       <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-        <Compass size={16} style={{ color: 'var(--accent)' }} />
+        <Compass size={16} style={{ color: 'var(--accent-ink)' }} />
         <b>{current.title}</b>
         <span className="spacer" />
         <span className="server-meta">

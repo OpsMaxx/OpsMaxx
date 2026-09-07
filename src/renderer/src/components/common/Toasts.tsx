@@ -19,7 +19,7 @@ export function Toasts(): React.JSX.Element {
         >
           {t.kind === 'ok' && <CheckCircle2 size={16} style={{ color: 'var(--ok)' }} />}
           {t.kind === 'error' && <AlertTriangle size={16} style={{ color: 'var(--danger)' }} />}
-          {t.kind === 'info' && <Info size={16} style={{ color: 'var(--accent)' }} />}
+          {t.kind === 'info' && <Info size={16} style={{ color: 'var(--accent-ink)' }} />}
           <span className="grow">{t.message}</span>
           {t.action && (
             <button

@@ -27,12 +27,15 @@ function dbTooltip(d: { username?: string; host: string; port: number }): string
   return d.username ? `${d.username}@${addr}` : addr
 }
 
+// Through tokens, not literals. DatabaseView renders the engine NAME in this
+// colour, so these are text colours and inherit the 4.5:1 obligation — which a
+// single hard-coded set could not meet in both themes. See tokens.css.
 export const KIND_COLOR: Record<DbKind, string> = {
-  postgres: '#58a6ff',
-  mysql: '#e3873c',
-  mssql: '#f85149',
-  mongodb: '#3fb950',
-  redis: '#db61a2'
+  postgres: 'var(--db-postgres)',
+  mysql: 'var(--db-mysql)',
+  mssql: 'var(--db-mssql)',
+  mongodb: 'var(--db-mongodb)',
+  redis: 'var(--db-redis)'
 }
 export const KIND_SHORT: Record<DbKind, string> = {
   postgres: 'PG',

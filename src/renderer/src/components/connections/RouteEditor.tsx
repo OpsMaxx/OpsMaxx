@@ -152,7 +152,7 @@ export function RouteEditor(): React.JSX.Element {
           <span className="line" />
         </div>
         <div className="route-node endpoint">
-          <span className="r-icon" style={{ color: 'var(--accent)' }}>
+          <span className="r-icon" style={{ color: 'var(--accent-ink)' }}>
             <ServerIcon size={16} />
           </span>
           <div className="r-body">

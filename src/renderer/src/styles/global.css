@@ -249,7 +249,7 @@ button {
   background: var(--bg-hover);
 }
 .activity-btn.active {
-  color: var(--accent);
+  color: var(--accent-ink);
   background: var(--accent-soft);
 }
 .activity-btn.active::before {
@@ -312,7 +312,7 @@ button {
   color: var(--text);
 }
 .icon-btn.active {
-  color: var(--accent);
+  color: var(--accent-ink);
   background: var(--accent-soft);
 }
 .icon-btn.sm {
@@ -457,7 +457,7 @@ button {
 }
 .spin {
   animation: spin 0.9s linear infinite;
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 @keyframes spin {
   to {
@@ -648,7 +648,7 @@ button {
   gap: 6px;
 }
 .statusbar .accent {
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 .statusbar .spacer {
   flex: 1;
@@ -806,7 +806,7 @@ button {
 .select:focus,
 .textarea:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--accent-ink);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .input::placeholder {
@@ -853,7 +853,7 @@ button {
   color: var(--text);
 }
 .radio-card.active {
-  border-color: var(--accent);
+  border-color: var(--accent-ink);
   background: var(--accent-soft);
   color: var(--text);
 }
@@ -1092,7 +1092,7 @@ details[open] > .disclosure-head .chev {
 }
 .palette-item.active .p-icon,
 .palette-item.active .p-title {
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 .palette-empty {
   padding: var(--sp-6);
@@ -1734,8 +1734,8 @@ details[open] > .disclosure-head .chev {
 }
 .sc-record.recording {
   border-style: solid;
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
   background: var(--accent-soft);
 }
 .sc-conflict {
@@ -1848,7 +1848,7 @@ details[open] > .disclosure-head .chev {
   gap: 6px;
 }
 .dbshell-prompt {
-  color: var(--accent);
+  color: var(--accent-ink);
   font-weight: 700;
   white-space: pre;
   flex-shrink: 0;
@@ -1937,7 +1937,7 @@ details[open] > .disclosure-head .chev {
   height: 52px;
   margin: 0 auto;
   border-radius: 50%;
-  color: var(--accent);
+  color: var(--accent-ink);
   background: var(--accent-soft);
 }
 .vault-error {
@@ -2572,7 +2572,7 @@ details[open] > .disclosure-head .chev {
   padding: 7px 10px;
   border-radius: 6px;
   font-size: 12px;
-  color: var(--accent);
+  color: var(--accent-ink);
   background: var(--bg-card);
 }
 .tour-dots {
@@ -2643,7 +2643,7 @@ details[open] > .disclosure-head .chev {
   border-radius: var(--r-pill);
   border: 1px solid var(--accent-border);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 9px;
   font-weight: 650;
   line-height: 13px;
@@ -2722,7 +2722,7 @@ details[open] > .disclosure-head .chev {
 .bc-panel .chip.on {
   background: var(--accent);
   color: #fff;
-  border-color: var(--accent);
+  border-color: var(--accent-ink);
 }
 .bc-confirm {
   margin-top: 10px;
@@ -2924,7 +2924,7 @@ details[open] > .disclosure-head .chev {
   cursor: pointer;
 }
 .inv-host:hover {
-  color: var(--accent);
+  color: var(--accent-ink);
   text-decoration: underline;
 }
 /* Absence, in words. Italic and dotted-underlined so it cannot be mistaken for
