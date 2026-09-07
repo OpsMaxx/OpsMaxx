@@ -99,7 +99,12 @@ const ALLOWED_TOOLS = [
   // told it may attempt, which is why it is the one tool that is not itself
   // gated. It also names what is absent by design, so an agent does not spend
   // turns discovering that the job runner is not there.
-  'describe_capabilities'
+  'describe_capabilities',
+  // Alerts that already fired, from history the app recorded on its own
+  // schedule, filtered to the servers the session can see. It says what
+  // HAPPENED; it does not rank hosts by how exposed they are, which is the
+  // line drift sits on the wrong side of.
+  'list_alerts'
 ]
 
 // A hint, not the gate. Anything this regex matches is by construction absent

@@ -402,7 +402,8 @@ import {
   explainSessionAccess,
   setCapacityReader,
   setFleetReader,
-  setBackupReader
+  setBackupReader,
+  setAlertReader
 } from './services/mcpServer'
 
 const isDev = !app.isPackaged
@@ -3404,6 +3405,29 @@ setCapacityReader(capacityReportFor)
 setFleetReader({ factsFor: (id) => fleetSampler.factsFor(id) })
 // Health only. There is no run and no restore on the interface this satisfies,
 // so a later edit cannot reach one without widening the interface first.
+// Alerts already recorded. A read of history, filtered by the caller to the
+// servers a session can see — the store itself is machine-wide.
+setAlertReader((limit) => {
+  if (!historyStore) return []
+  const from = Date.now() - ALERT_HYDRATION_WINDOW_MS
+  const rows = historyStore.readEvents({ kind: ALERT_HISTORY_KIND, limit, from })
+  return rows.flatMap((row) => {
+    const p = row.payload as
+      | { serverId?: string; serverName?: string; event?: string; kind?: string; subject?: string }
+      | undefined
+    if (!p?.serverId || !p.serverName || !p.event || !p.kind) return []
+    return [
+      {
+        at: row.ts,
+        serverId: p.serverId,
+        serverName: p.serverName,
+        kind: String(p.kind),
+        event: String(p.event),
+        detail: p.subject ? String(p.subject) : undefined
+      }
+    ]
+  })
+})
 setBackupReader(() => {
   try {
     const f = readTargets()
