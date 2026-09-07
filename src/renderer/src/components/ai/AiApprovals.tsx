@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Check, X } from 'lucide-react'
 import type { ApprovalRequest } from '../../../../shared/mcp'
+import { describeConsequence, formatRiskLabel, riskTone } from '../../../../shared/approvalRisk'
 import { bridgeOn } from '../../lib/bridge'
 
 export function AiApprovals(): React.JSX.Element {
@@ -35,12 +36,39 @@ export function AiApprovals(): React.JSX.Element {
 
       {approvals.length === 0 && <div className="s-desc">Nothing waiting on you right now.</div>}
 
-      {approvals.map((a) => (
+      {/* Same vocabulary as the modal, from the same module. This list used to
+          print a bare "risk: HIGH", which is a word with no scale next to it —
+          it cannot be read as the top of three rather than the middle of five,
+          and it says nothing about what the action does. Two surfaces showing
+          the same request must not disagree about how serious it is. */}
+      {approvals.map((a) => {
+        const subject = {
+          capability: a.capability,
+          action: a.action,
+          risk: a.risk,
+          serverName: a.serverName,
+          workspaceName: a.workspaceName
+        }
+        const tone = riskTone(a.risk)
+        const consequence = describeConsequence(subject)
+        return (
         <div className="list-row" key={a.id}>
           <div>
             <div className="r-title">{a.agentName}</div>
             <div className="r-sub">
-              {a.workspaceName} / {a.serverName} · risk: {a.risk.toUpperCase()}
+              {a.workspaceName} / {a.serverName} ·{' '}
+              <span
+                style={{
+                  color:
+                    tone === 'danger' ? 'var(--danger)' : tone === 'warn' ? 'var(--warn)' : 'var(--text-muted)',
+                  fontWeight: 600
+                }}
+              >
+                {formatRiskLabel(a.risk)}
+              </span>
+            </div>
+            <div className="r-sub" style={{ color: consequence.known ? 'var(--text-muted)' : 'var(--warn)' }}>
+              {consequence.text}
             </div>
             <div className="r-sub mono">{a.action}</div>
           </div>
@@ -52,7 +80,8 @@ export function AiApprovals(): React.JSX.Element {
             <Check size={13} /> Approve once
           </button>
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
