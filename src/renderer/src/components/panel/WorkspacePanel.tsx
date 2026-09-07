@@ -66,23 +66,36 @@ function TabPane({
     setVisited((v) => (v.has(tab.view) ? v : new Set(v).add(tab.view)))
   }, [tab.view])
 
-  // A local tab has no server and must never be handed one: Monitor, the
-  // docked strip and SFTP all take a non-optional `Server` and would need a
-  // synthesized row, which is exactly what the tab union exists to prevent.
-  // Only the terminal is meaningful here, so it is rendered on its own rather
-  // than inside the view-switching frame below.
-  if (tab.kind === 'local') return <Terminals tab={tab} tp={tp} />
-
-  if (!server) {
-    return <EmptyState icon={<TerminalIcon size={26} />} title="Session unavailable" message="This server no longer exists." />
-  }
-
   const paneStyle = (view: PanelView): React.CSSProperties => ({
     display: tab.view === view ? 'flex' : 'none',
     flexDirection: 'column',
     flex: 1,
     minHeight: 0
   })
+
+  // A local tab still has no server and must never be handed one — that is
+  // what the tab union exists to prevent. Monitor and the docked strip both
+  // take a non-optional `Server`, so they stay SSH-only; Files does not any
+  // more, because main serves this machine's half from node:fs behind the same
+  // channel, so SftpView takes `server?: Server` and absent means here.
+  if (tab.kind === 'local') {
+    return (
+      <>
+        <div style={paneStyle('terminal')}>
+          <Terminals tab={tab} tp={tp} />
+        </div>
+        {visited.has('files') && (
+          <div style={paneStyle('files')}>
+            <SftpView tabId={tab.id} />
+          </div>
+        )}
+      </>
+    )
+  }
+
+  if (!server) {
+    return <EmptyState icon={<TerminalIcon size={26} />} title="Session unavailable" message="This server no longer exists." />
+  }
 
   return (
     <>
@@ -361,19 +374,21 @@ export function WorkspacePanel(): React.JSX.Element {
           the case the old condition was actually covering. */}
       {active && (active.kind === 'local' || server) && (
         <div className="viewbar">
-          {active.kind === 'ssh' && (
-            <div className="segment">
-              {VIEWS.map((v) => (
-                <button
-                  key={v.id}
-                  className={clsx('seg-btn', active.view === v.id && 'active')}
-                  onClick={() => setTabView(active.id, v.id)}
-                >
-                  {v.icon} {v.label}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* A local tab gets Terminal and Files, not Monitor: the monitor
+              views take a non-optional Server, and the collector behind them
+              reads /proc and Linux `df` semantics — on a Mac or a Windows box
+              it would draw numbers that look right and are not. */}
+          <div className="segment">
+            {VIEWS.filter((v) => active.kind === 'ssh' || v.id !== 'monitor').map((v) => (
+              <button
+                key={v.id}
+                className={clsx('seg-btn', active.view === v.id && 'active')}
+                onClick={() => setTabView(active.id, v.id)}
+              >
+                {v.icon} {v.label}
+              </button>
+            ))}
+          </div>
           <span className="spacer" />
           <div className="server-meta mono">
             {server ? `${server.username}@${server.host}:${server.port}` : activeShellPath ?? ''}

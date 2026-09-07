@@ -1,5 +1,5 @@
 import type { DbConnectConfig } from '../../../shared/db'
-import type { SshConnectConfig } from '../../../shared/ssh'
+import type { SshHop } from '../../../shared/ssh'
 import { getCachedDatabase, getCachedServer } from '../mcpDataCache'
 import { vpnForDatabase, vpnForServer } from './dependencies'
 
@@ -17,7 +17,11 @@ import { vpnForDatabase, vpnForServer } from './dependencies'
 // `vpnForServer` already checks the profile still exists, because one deleted
 // profile must not make a fleet unreachable.
 
-export function withVpnTransport<T extends SshConnectConfig & { serverId?: string }>(
+// Constrained to SshHop rather than SshConnectConfig because only `serverId` is
+// read here. A caller that dials a server without opening a terminal — the HTTP
+// client sends a request down a direct-tcpip channel — has no session id, no
+// cols and no rows to invent, and must still ride the right VPN.
+export function withVpnTransport<T extends SshHop & { serverId?: string }>(
   cfg: T
 ): T & { vpnProfileId?: string; serverName?: string } {
   if (!cfg.serverId) return cfg

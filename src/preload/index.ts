@@ -3,6 +3,8 @@ import type { IpcRendererEvent } from 'electron'
 import type { AutoStartSettings, AutoStartState } from '../shared/autostart'
 import type { UnitDraft, UserUnitsReading } from '../shared/userUnits'
 import type { BackupAlarm } from '../shared/backup'
+import type { HttpRequestSpec, HttpResult } from '../shared/httpClient'
+import type { LocalTarget } from '../shared/execTarget'
 import type {
   SshConnectConfig,
   SshStatus,
@@ -342,9 +344,26 @@ const api = {
       return () => ipcRenderer.removeListener(ch, h)
     }
   },
+  http: {
+    /**
+     * Send one HTTP request from the main process. `spec.via` decides whether
+     * it leaves this machine directly or travels down a server's SSH
+     * connection; `spec.via.server` carries no credentials, because main
+     * merges those from the encrypted store by serverId.
+     */
+    request: (spec: HttpRequestSpec): Promise<HttpResult> => ipcRenderer.invoke('http:request', spec)
+  },
   sftp: {
-    connect: (key: string, cfg: SshConnectConfig & { serverId?: string }): Promise<SftpResult<{ home: string }>> =>
-      ipcRenderer.invoke('sftp:connect', key, cfg),
+    /**
+     * `cfg` is a connection config, or the local marker for this machine —
+     * main serves that half from node:fs behind the same channel. The key
+     * registered here decides which half answers every later call in the
+     * session, so a target cannot be varied call by call.
+     */
+    connect: (
+      key: string,
+      cfg: (SshConnectConfig & { serverId?: string }) | LocalTarget
+    ): Promise<SftpResult<{ home: string }>> => ipcRenderer.invoke('sftp:connect', key, cfg),
     list: (key: string, path: string): Promise<SftpResult<SftpEntry[]>> =>
       ipcRenderer.invoke('sftp:list', key, path),
     read: (key: string, path: string): Promise<SftpResult<string>> =>
@@ -898,6 +917,20 @@ const api = {
       serverId: string
     ): Promise<{ posture?: HostPosture; at?: number; error?: string; errorAt?: number; intervalMs: number }> =>
       ipcRenderer.invoke('fleet:posture', serverId),
+    /**
+     * The same reading for THIS machine, taken now.
+     *
+     * Takes no target on purpose: it cannot be pointed at a server, so it
+     * cannot become a second way to probe one outside the sampler's cadence.
+     * Nothing it returns is cached or persisted — see the handler.
+     */
+    postureLocal: (): Promise<
+      { ok: true; posture: HostPosture } | { ok: false; reason: string; detail: string }
+    > => ipcRenderer.invoke('fleet:posture-local'),
+    driftLocal: (
+      ctx?: { hostname?: string; serverName?: string }
+    ): Promise<{ ok: true; drift: HostDrift } | { ok: false; reason: string; detail: string }> =>
+      ipcRenderer.invoke('fleet:drift-local', ctx ?? {}),
     // A server's watched configuration files, as the sampler last collected
     // them — roadmap item 25. Read-only and never a trigger, exactly like
     // `facts`, `access` and `posture`, and with the same third state: `drift`

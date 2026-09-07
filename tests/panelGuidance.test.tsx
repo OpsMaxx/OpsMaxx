@@ -115,8 +115,28 @@ describe('the panel the complaint named: Docker with nothing read', () => {
     render(<DockerPanel servers={[]} />)
 
     // Previously one grey sentence stating the problem and nothing else.
+    //
+    // The panel now falls back to this machine when no server is online, so the
+    // sentence has to say that too: "no server is online" alone would be a
+    // half-truth in front of a panel that is about to read something. The step
+    // out — connect a server — is still named, because wanting a server is
+    // still why someone is standing here.
     expect(screen.getByText(/No server in this workspace is online/)).toBeTruthy()
+    expect(screen.getByText(/showing Docker on this machine/)).toBeTruthy()
     expect(screen.getByText(/Connect a server from the sidebar/)).toBeTruthy()
+  })
+
+  it('reads this machine when there is no server to read', async () => {
+    const { list } = stub()
+    render(<DockerPanel servers={[]} />)
+
+    const button = screen.getByRole('button', { name: /Read containers/ })
+    expect((button as HTMLButtonElement).disabled).toBe(false)
+    await userEvent.click(button)
+    await waitFor(() => expect(list).toHaveBeenCalled())
+    // The local marker, not a connection config — and emphatically not a
+    // synthesized server row. See shared/execTarget.ts.
+    expect(list.mock.calls[0][0]).toEqual({ local: true })
   })
 })
 

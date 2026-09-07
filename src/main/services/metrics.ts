@@ -116,8 +116,17 @@ const script = (withSleep: boolean): string => [
 const MAX_SERVICES = 80
 const MAX_LISTENERS = 120
 
-const CMD = script(false)
-const CMD_FIRST = script(true)
+/**
+ * The collector, exported so the local sampler runs the SAME script.
+ *
+ * A second script for this machine would be a second thing that can disagree
+ * with the parser, and the parser is where every "absent means null, not zero"
+ * rule lives.
+ */
+export const METRICS_CMD = script(false)
+export const METRICS_CMD_FIRST = script(true)
+const CMD = METRICS_CMD
+const CMD_FIRST = METRICS_CMD_FIRST
 
 function section(text: string, name: string): string[] {
   const parts = text.split('__' + name + '__')
@@ -217,7 +226,7 @@ export function parseListeners(lines: string[]): { listeners: PortListener[]; so
   return { listeners: out, source }
 }
 
-interface CpuSnap {
+export interface CpuSnap {
   total: number
   idle: number
 }
@@ -272,6 +281,13 @@ export function sumNetwork(
 
 // `prev` is the snapshot from this key's previous poll; the returned `snap` is
 // the one to diff the next poll against.
+export function parseMetrics(
+  text: string,
+  prev: CpuSnap | null
+): { data: HostMetrics; snap: CpuSnap | null } {
+  return parse(text, prev)
+}
+
 function parse(text: string, prev: CpuSnap | null): { data: HostMetrics; snap: CpuSnap | null } {
   const snaps = section(text, 'CPU').map(cpuTotals)
   const latest = snaps.length ? snaps[snaps.length - 1] : null
@@ -353,7 +369,7 @@ function parse(text: string, prev: CpuSnap | null): { data: HostMetrics; snap: C
     memPct: memTotal ? (memUsed / memTotal) * 100 : null,
     memUsed,
     memTotal,
-    diskPct: diskTotal ? (diskUsed / diskTotal) * 100 : 0,
+    diskPct: diskTotal ? (diskUsed / diskTotal) * 100 : null,
     diskUsed,
     diskTotal,
     inodePct,

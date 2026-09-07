@@ -228,6 +228,24 @@ import type { InspectStartOptions } from '../shared/inspect'
 import { storeFrpToken } from './services/vpn/frpSetup'
 import { toVpnResult } from './services/vpn/errors'
 import { withVpnTransport, withVpnTransportDb } from './services/vpn/transport'
+import { httpRequest } from './services/httpClient'
+import { localExec } from './services/localExec'
+import { localMetricsForget, localMetricsSample } from './services/localMetrics'
+import {
+  isLocalFileSession,
+  localFilesConnect,
+  localFilesDelete,
+  localFilesDisconnect,
+  localFilesDisposeAll,
+  localFilesList,
+  localFilesMkdir,
+  localFilesRead,
+  localFilesRename,
+  localFilesUpload,
+  localFilesWrite
+} from './services/localFiles'
+import { isLocalTarget, LOCAL_TARGET } from '../shared/execTarget'
+import type { HttpRequestSpec } from '../shared/httpClient'
 import type {
   FrpTokenResult,
   VpnKeygenResult,
@@ -811,32 +829,81 @@ ipcMain.on('local:close', (e, id: unknown) => {
   localClose(id, e.sender.id)
 })
 
+// ---- HTTP client ----
+//
+// Requests leave from main, not the renderer, so they can trust a private CA,
+// skip verification when the user explicitly asks, and — the part no
+// standalone API client can do — travel down a server's existing SSH
+// connection to reach a service bound to that host's loopback.
+//
+// The renderer names the server the same credential-free way the terminal
+// does; secrets are merged here, through the same pipeline as ssh:connect.
+ipcMain.handle('http:request', (_e, spec: HttpRequestSpec) =>
+  httpRequest(spec, { prepare: (target) => withVpnTransport(resolveChainSecrets(target)) })
+)
+
 // ---- SFTP ----
+//
+// The local half is a PARALLEL implementation, not a swapped transport: SFTP
+// is a protocol rather than a command, so there is no exec function to
+// substitute. It answers the same SftpResult and the same SftpEntry, so the
+// Files view needs no branch.
+//
+// Which half answers is decided by the key, registered at connect. That is
+// deliberate: every call after connect carries only a key and a path, so
+// sniffing a target on each one would mean trusting a value the renderer could
+// vary between calls in the same session.
 ipcMain.handle('sftp:connect', (_e, key: string, cfg: SshConnectConfig & { serverId?: string }) =>
-  sftpConnect(key, withVpnTransport(resolveChainSecrets(cfg)))
+  isLocalTarget(cfg)
+    ? localFilesConnect(key)
+    : sftpConnect(key, withVpnTransport(resolveChainSecrets(cfg)))
 )
-ipcMain.handle('sftp:list', (_e, key: string, path: string) => sftpList(key, path))
-ipcMain.handle('sftp:read', (_e, key: string, path: string) => sftpRead(key, path))
+ipcMain.handle('sftp:list', (_e, key: string, path: string) =>
+  isLocalFileSession(key) ? localFilesList(path) : sftpList(key, path)
+)
+ipcMain.handle('sftp:read', (_e, key: string, path: string) =>
+  isLocalFileSession(key) ? localFilesRead(path) : sftpRead(key, path)
+)
 ipcMain.handle('sftp:write', (_e, key: string, path: string, content: string) =>
-  sftpWrite(key, path, content)
+  isLocalFileSession(key) ? localFilesWrite(path, content) : sftpWrite(key, path, content)
 )
-ipcMain.handle('sftp:mkdir', (_e, key: string, path: string) => sftpMkdir(key, path))
-ipcMain.handle('sftp:rename', (_e, key: string, from: string, to: string) => sftpRename(key, from, to))
-ipcMain.handle('sftp:delete', (_e, key: string, path: string, dir: boolean) => sftpDelete(key, path, dir))
+ipcMain.handle('sftp:mkdir', (_e, key: string, path: string) =>
+  isLocalFileSession(key) ? localFilesMkdir(path) : sftpMkdir(key, path)
+)
+ipcMain.handle('sftp:rename', (_e, key: string, from: string, to: string) =>
+  isLocalFileSession(key) ? localFilesRename(from, to) : sftpRename(key, from, to)
+)
+ipcMain.handle('sftp:delete', (_e, key: string, path: string, dir: boolean) =>
+  isLocalFileSession(key) ? localFilesDelete(path, dir) : sftpDelete(key, path, dir)
+)
 ipcMain.handle('sftp:upload', (e, key: string, localPaths: string[], remoteDir: string) =>
-  sftpUpload(e.sender, key, localPaths, remoteDir)
+  isLocalFileSession(key)
+    ? localFilesUpload(e.sender, key, localPaths, remoteDir)
+    : sftpUpload(e.sender, key, localPaths, remoteDir)
 )
-ipcMain.handle('sftp:disconnect', (_e, key: string) => sftpDisconnect(key))
+ipcMain.handle('sftp:disconnect', (_e, key: string) => {
+  localFilesDisconnect(key)
+  sftpDisconnect(key)
+})
 ipcMain.handle('sftp:edit-external', (e, key: string, path: string, command: string) =>
   externalEditOpen(e.sender, key, path, command)
 )
 ipcMain.handle('sftp:edit-external-stop', (_e, path: string) => externalEditStop(path))
 
 // ---- Metrics ----
+// The local branch is HERE rather than inside metrics.ts, because
+// services/mcpServer.ts imports metricsSample — a branch in that module would
+// pull localExec into the agent-facing import closure. See
+// tests/localTerminalNotExposed.test.ts.
 ipcMain.handle('metrics:sample', (_e, key: string, cfg: SshConnectConfig & { serverId?: string }) =>
-  metricsSample(key, resolveChainSecrets(cfg))
+  isLocalTarget(cfg) ? localMetricsSample(key) : metricsSample(key, resolveChainSecrets(cfg))
 )
-ipcMain.handle('metrics:disconnect', (_e, key: string) => metricsDisconnect(key))
+ipcMain.handle('metrics:disconnect', (_e, key: string) => {
+  // There is no connection to hand back for this machine, only the CPU
+  // snapshot the next delta would have been measured against.
+  localMetricsForget(key)
+  metricsDisconnect(key)
+})
 
 // ---- The durable store ----
 //
@@ -1038,16 +1105,53 @@ function closeHistoryNow(): void {
 //
 // The renderer supplies targets because it owns the server list and the
 // workspace scoping; main owns the schedule and the credentials.
+/**
+ * Runs a command on whichever target the renderer named.
+ *
+ * Docker, Kubernetes, cron and host facts already take their runner by
+ * injection and pass the connection config through untouched, so "this
+ * machine" needs no branch inside any of them — only this one, here, at the
+ * point where main decides what the runner actually is.
+ *
+ * This lives in main's renderer-facing wiring and nowhere else on purpose. The
+ * MCP bridge and the CLI build their own readers bound straight to sshExec,
+ * from servers they resolved by name, so neither can express a local target —
+ * which is what keeps localExec out of their import closure and off the surface
+ * an agent can reach. See tests/localTerminalNotExposed.test.ts.
+ */
+const targetExec = (
+  cfg: unknown,
+  command: string,
+  timeoutMs: number
+): ReturnType<typeof sshExec> =>
+  isLocalTarget(cfg)
+    ? localExec(command, timeoutMs)
+    : sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs)
+
+/**
+ * The same dispatch for the readers that fan out.
+ *
+ * Two differences from targetExec, both deliberate and both pre-existing:
+ * allowPrompt is false, because N unknown hosts must not become N stacked
+ * trust dialogs; and the config is passed through unresolved, because these
+ * callers resolve their own secrets. A local target reaches neither question.
+ */
+const targetExecQuiet = (
+  cfg: unknown,
+  command: string,
+  timeoutMs: number
+): ReturnType<typeof sshExec> =>
+  isLocalTarget(cfg)
+    ? localExec(command, timeoutMs)
+    : sshExec(cfg as Parameters<typeof sshExec>[0], command, timeoutMs, false)
+
 // Host facts, on the sampler's slow clock. One reader for the whole process:
 // it holds no state of its own, only the exec function, and every probe is a
 // single round trip that releases its pooled connection when it finishes.
 //
 // It does NOT go through metrics.ts's exec, which discards the exit code —
 // three of the probes inside the collector use exit status as their API.
-const hostFactsReader = new HostFactsReader({
-  exec: (cfg, command, timeoutMs) =>
-    sshExec(cfg as Parameters<typeof sshExec>[0], command, timeoutMs, false)
-})
+const hostFactsReader = new HostFactsReader({ exec: targetExecQuiet })
 
 // Whether the key and access probe may run — roadmap item 23.
 //
@@ -1115,10 +1219,7 @@ const accessReader = new AccessReader({
 // Security posture, on the same slow clock — roadmap item 24. One reader for
 // the whole process, for the reason the other two are one: it holds no state
 // beyond the exec function, and every probe is a single round trip.
-const postureReader = new PostureReader({
-  exec: (cfg, command, timeoutMs) =>
-    sshExec(cfg as Parameters<typeof sshExec>[0], command, timeoutMs, false)
-})
+const postureReader = new PostureReader({ exec: targetExecQuiet })
 
 // Which access group governs a server, resolved exactly as the MCP bridge
 // resolves it: the assignment on the server, else the one on its workspace,
@@ -1147,8 +1248,7 @@ function groupForServer(serverId: string): AccessGroup | null {
 // a watched file and the panel, and adding a credential reach here to improve
 // them would put the vault inside a background sweep to make a display nicer.
 const driftReader = new DriftReader({
-  exec: (cfg, command, timeoutMs) =>
-    sshExec(cfg as Parameters<typeof sshExec>[0], command, timeoutMs, false),
+  exec: targetExecQuiet,
   // A FUNCTION, not the array. The list changes when the operator saves
   // settings, and a snapshot taken at construction would keep reading the
   // watches that existed at launch — including one the operator has since
@@ -1349,6 +1449,39 @@ ipcMain.handle('fleet:posture', (_e, serverId: string) => fleetSampler.postureFo
 // approval a job carries, and this panel could not decide which side is right
 // in any case.
 ipcMain.handle('fleet:drift', (_e, serverId: string) => fleetSampler.driftFor(serverId))
+
+// ---- Posture and drift for THIS machine ----
+//
+// Deliberately not the sampler, and deliberately not `cfg`-taking.
+//
+// Not the sampler, for three reasons. Posture and drift only run after a
+// successful metrics sample, which is an SSH probe, so a local target would
+// never reach them. The sweep persists what it finds — posture facts and drift
+// hashes go into the durable history store keyed by host — and this machine's
+// firewall state and config-file hashes do not belong in the same record as the
+// estate's. And an entry in the sampler's cache is one `fleetCached(id)` away
+// from the MCP bridge; not creating the entry is a stronger guarantee than an
+// id that happens not to resolve.
+//
+// Not cfg-taking, because these must not become a second way to probe a SERVER.
+// The comments above are emphatic that exactly one thing decides how often a
+// host is asked for its firewall ruleset, and it is the sampler. A handler that
+// accepted a connection config would quietly be a second one. Taking no target
+// at all makes that structural rather than a rule someone has to remember.
+//
+// The cadence question the sampler exists to answer does not arise here: this
+// is one host, read when a person is looking at the panel and presses refresh.
+ipcMain.handle('fleet:posture-local', () =>
+  postureReader.read(LOCAL_TARGET, {
+    // Fails closed, as it does for a server with no access group. The grant is
+    // an AI-access capability and this machine has no group to carry one, so
+    // the rules are not collected rather than collected by default.
+    firewallRules: false
+  })
+)
+ipcMain.handle('fleet:drift-local', (_e, ctx: unknown) =>
+  driftReader.read(LOCAL_TARGET, (ctx ?? {}) as Parameters<typeof driftReader.read>[1])
+)
 
 // ---- Changing who can get in — roadmap item 23, the write half ----
 //
@@ -2150,14 +2283,14 @@ ipcMain.handle('logtail:resume', (_e, tailId: string) => logTailer.resume(tailId
 // terminal on these hosts — but it is not the same as the feature being absent,
 // and a reader of the paragraph above could reasonably assume otherwise.
 const dockerReader = new DockerReader({
-  exec: (cfg, command, timeoutMs) =>
-    // allowPrompt left TRUE here, unlike broadcast, log tailing and cron, and
-    // the difference is deliberate. Those three fan out; this reads ONE server
-    // the user just chose from a dropdown and pressed a button for. That is
-    // precisely the moment a trust-on-first-use dialog is answerable — "I am
-    // connecting to this host right now, is that its fingerprint?" — rather than
-    // one of fifteen identical modals nobody can reason about.
-    sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs)
+  // allowPrompt left TRUE here, unlike broadcast, log tailing and cron, and
+  // the difference is deliberate. Those three fan out; this reads ONE target
+  // the user just chose from a dropdown and pressed a button for. That is
+  // precisely the moment a trust-on-first-use dialog is answerable — "I am
+  // connecting to this host right now, is that its fingerprint?" — rather than
+  // one of fifteen identical modals nobody can reason about. A local target
+  // never reaches that question at all.
+  exec: targetExec
 })
 
 // ---- Kubernetes ----
@@ -2169,10 +2302,7 @@ const dockerReader = new DockerReader({
 //
 // allowPrompt stays true for the same reason as Docker: one server the user
 // picked, not a fan-out.
-const k8sReader = new KubernetesReader({
-  exec: (cfg, command, timeoutMs) =>
-    sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs)
-})
+const k8sReader = new KubernetesReader({ exec: targetExec })
 
 ipcMain.handle('k8s:read', (_e, cfg: unknown, context?: string, namespace?: string) =>
   k8sReader.read(cfg, context, namespace)
@@ -2182,8 +2312,11 @@ ipcMain.handle(
   async (_e, cfg: unknown, namespace: string, pod: string, lines: unknown, context?: string) => {
     // buildK8sLogsCommand validates the names and clamps `lines` itself — the
     // argument that is not a string is the one nobody thinks to check.
-    const r = await sshExec(
-      resolveChainSecrets(cfg as SshConnectConfig),
+    // Through targetExec like the reader beside it: this handler predates the
+    // local target and bypassing it would let a local cluster list its pods and
+    // then fail to show their logs.
+    const r = await targetExec(
+      cfg,
       buildK8sLogsCommand(namespace, pod, lines as number, context),
       20_000
     )
@@ -2422,11 +2555,10 @@ ipcMain.handle(
 // process, not in a rejected promise, and cannot reach an error detail. See the
 // header of shared/compose.ts for why that is the whole shape of the feature.
 const composeReader = new ComposeReader({
-  exec: (cfg, command, timeoutMs) =>
-    // allowPrompt true, matching Docker above and for the same reason: this is
-    // one server the operator just chose, not a fan-out, which is the only
-    // moment a trust-on-first-use dialog is answerable.
-    sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs)
+  // allowPrompt true, matching Docker above and for the same reason: this is
+  // one host the operator just chose, not a fan-out, which is the only moment
+  // a trust-on-first-use dialog is answerable.
+  exec: targetExec
 })
 
 ipcMain.handle(
@@ -2631,13 +2763,11 @@ ipcMain.handle(
     }[] = []
     for (const t of targets) {
       try {
-        // Reads every online server in one press; same stacked-dialog problem.
-        const r = await sshExec(
-          resolveChainSecrets(t.cfg as SshConnectConfig),
-          CRON_COLLECT_COMMAND,
-          20_000,
-          false
-        )
+        // Reads every online host in one press; same stacked-dialog problem,
+        // which is why this is the quiet dispatch. It also carries the local
+        // target: this handler predates it and called sshExec directly, so
+        // "This machine" collected nothing while reporting no error at all.
+        const r = await targetExecQuiet(t.cfg, CRON_COLLECT_COMMAND, 20_000)
         if (!r.ok) {
           out.push({ serverId: t.serverId, serverName: t.serverName, entries: [], unparsed: 0, error: r.error })
           continue
@@ -2679,7 +2809,9 @@ ipcMain.handle(
 // tests run the real command string against a temp tree.
 const cronEditDeps = {
   exec: (cfg: unknown, command: string, timeoutMs: number) =>
-    sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs, false),
+    isLocalTarget(cfg)
+      ? localExec(command, timeoutMs)
+      : sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs, false),
   recordApproval: recordJobApproval
 }
 
@@ -3970,6 +4102,7 @@ app.on('before-quit', (e) => {
   sshDisposeAll()
   localDisposeAll()
   sftpDisposeAll()
+  localFilesDisposeAll()
   // After the sampler, which is the only writer: closing the database out from
   // under an in-flight sweep would be a caught-and-logged failure rather than a
   // crash, but it would also silently drop the sweep the user just paid for.

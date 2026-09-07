@@ -19,6 +19,23 @@ export function sshHopsFor(server: Server): (SshHop & { serverId?: string })[] {
   }))
 }
 
+/**
+ * A server as a connectable target, for callers that dial it without opening a
+ * terminal — the HTTP client sends a request down a direct-tcpip channel and
+ * has no session id, cols or rows to invent. Credentials are absent for the
+ * same reason they are absent from sshHopsFor: main merges them by serverId.
+ */
+export function sshTargetFor(server: Server): SshHop & { serverId: string; hops: SshHop[] } {
+  return {
+    serverId: server.id,
+    host: server.host,
+    port: server.port,
+    username: server.username,
+    auth: asAuth(server.auth),
+    hops: sshHopsFor(server)
+  }
+}
+
 export interface SshHopInfo {
   serverId: string
   host: string

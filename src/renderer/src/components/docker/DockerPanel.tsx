@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { useApp } from '../../store/app'
 import { sshHopsFor } from '../../lib/ssh'
+import { LOCAL_TARGET } from '../../../../shared/execTarget'
 import { clsx } from '../../lib/format'
 import {
   DOCKER_FAILURE_HELP,
@@ -154,6 +155,9 @@ function mergeNetworks(
   return { items: [...base.items, ...add.items], withheld: [...base.withheld, ...add.withheld] }
 }
 
+/** Not a server id: no server can have it, because ids are UUIDs. */
+const LOCAL_ID = 'local'
+
 export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Element {
   const [serverId, setServerId] = useState<string>('')
   // The package manager, from the facts the sampler already collects. Absent
@@ -216,7 +220,33 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
   const usedSudoNow = useSudo || (probe?.ok && probe.usedSudo === true)
 
   const eligible = useMemo(() => servers.filter((s) => s.status !== 'offline'), [servers])
-  const server = eligible.find((s) => s.id === serverId) ?? eligible[0]
+
+  /**
+   * "This machine" as a target.
+   *
+   * Deliberately a sentinel in this panel's own selection state rather than a
+   * row in `servers`: that list is persisted and mirrored into the MCP data
+   * cache, so a pseudo-server would become an agent-addressable target the
+   * moment it was written. See shared/execTarget.ts.
+   */
+  //
+  // Resolved rather than read straight off `serverId`, so the dropdown and the
+  // target can never disagree. They did: with no server online the browser
+  // rendered the only option as selected while the state was still '', which
+  // showed "This machine" above a Read button that refused to run.
+  //
+  // A saved server stays the default when there is one; this machine is the
+  // default only when there is nothing else, where the alternative is a dead
+  // panel.
+  const selectedId = serverId || eligible[0]?.id || LOCAL_ID
+  const localSelected = selectedId === LOCAL_ID
+  const server = localSelected ? undefined : eligible.find((s) => s.id === selectedId)
+  // Docker on this machine is worth offering whether or not any server is
+  // online — it is the daemon most developers actually use.
+  const hasTarget = localSelected || !!server
+  /** What main is told to run the command against. */
+  const targetCfg = (): unknown => (localSelected ? LOCAL_TARGET : cfgFor(server as Server))
+  const targetName = localSelected ? 'This machine' : server?.name
 
   const cfgFor = (s: Server): unknown => ({
     sessionId: `docker-${s.id}`,
@@ -288,19 +318,19 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
   }
 
   const load = async (sudoOverride?: boolean): Promise<void> => {
-    if (!server) return
+    if (!hasTarget) return
     setLoading(true)
     clearReads()
     const gen = generation.current
     try {
-      const r = await bridge()?.list?.(cfgFor(server), { sudo: sudoOverride ?? useSudo })
+      const r = await bridge()?.list?.(targetCfg(), { sudo: sudoOverride ?? useSudo })
       if (generation.current !== gen) return
       setProbe(r ?? null)
       // Only ask about sudo once something has actually been refused by it —
       // and only when the automatic retry did not already solve it, which it
       // usually does.
       if (r && !r.ok && r.reason === 'permission-denied') {
-        const can = await bridge()?.canSudo?.(cfgFor(server))
+        const can = await bridge()?.canSudo?.(targetCfg())
         if (generation.current !== gen) return
         setSudoAvailable(can ?? false)
       } else {
@@ -317,7 +347,7 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
   }
 
   const openLogs = async (c: DockerContainer): Promise<void> => {
-    if (!server) return
+    if (!hasTarget) return
     // `docker:logs` is one of the handlers that can reject: the builder refuses
     // a reference it cannot prove safe rather than escaping it. Asking first
     // turns an unhandled rejection and a pane stuck on "Loading…" into a
@@ -328,7 +358,7 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
     }
     setLogs({ name: c.name, output: 'Loading…' })
     try {
-      const r = await bridge()?.logs?.(cfgFor(server), refOf(c), logLines, {
+      const r = await bridge()?.logs?.(targetCfg(), refOf(c), logLines, {
         sudo: useSudo,
         timestamps: logTimestamps
       })
@@ -339,11 +369,11 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
   }
 
   const loadDisk = async (): Promise<void> => {
-    if (!server) return
+    if (!hasTarget) return
     setDiskLoading(true)
     const gen = generation.current
     try {
-      const r = await bridge()?.disk?.(cfgFor(server), { sudo: useSudo })
+      const r = await bridge()?.disk?.(targetCfg(), { sudo: useSudo })
       if (generation.current !== gen) return
       setDisk(r ?? { ok: false, reason: 'unknown', detail: 'Disk usage is not wired up in this build.' })
     } catch (e) {
@@ -355,13 +385,13 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
   }
 
   const loadDiskItems = async (): Promise<void> => {
-    if (!server) return
+    if (!hasTarget) return
     setDiskItemsLoading(true)
     const gen = generation.current
     try {
       const [r, n] = await Promise.all([
-        bridge()?.diskDetail?.(cfgFor(server), { sudo: useSudo }),
-        bridge()?.networks?.(cfgFor(server), { sudo: useSudo })
+        bridge()?.diskDetail?.(targetCfg(), { sudo: useSudo }),
+        bridge()?.networks?.(targetCfg(), { sudo: useSudo })
       ])
       if (generation.current !== gen) return
       // A fresh listing invalidates a selection made against the old one.
@@ -427,8 +457,8 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
     const gen = generation.current
     try {
       const [fresh, freshNets] = await Promise.all([
-        bridge()?.diskDetail?.(cfgFor(server), { sudo: useSudo }),
-        bridge()?.networks?.(cfgFor(server), { sudo: useSudo })
+        bridge()?.diskDetail?.(targetCfg(), { sudo: useSudo }),
+        bridge()?.networks?.(targetCfg(), { sudo: useSudo })
       ])
       if (generation.current !== gen) return
       setNetItems(
@@ -468,11 +498,11 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
       setReclaimPlan(null)
       setPicked(new Set())
       setReclaiming(true)
-      const r = await bridge()?.reclaim?.(cfgFor(server), reclaimPlan.items, { sudo: useSudo })
+      const r = await bridge()?.reclaim?.(targetCfg(), reclaimPlan.items, { sudo: useSudo })
       setReclaimResult(r ?? { ok: false, reason: 'unknown', detail: 'Reclaim is not wired up in this build.' })
       // The listing and the category totals are both stale now, whatever
       // happened — a partial removal leaves some of it changed.
-      const after = await bridge()?.diskDetail?.(cfgFor(server), { sudo: useSudo })
+      const after = await bridge()?.diskDetail?.(targetCfg(), { sudo: useSudo })
       if (generation.current !== gen) return
       if (after) setDiskItems(after)
       void loadDisk()
@@ -494,7 +524,7 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
     setStatsError(null)
     const gen = generation.current
     try {
-      const r = await bridge()?.stats?.(cfgFor(server), running.map(refOf), { sudo: useSudo })
+      const r = await bridge()?.stats?.(targetCfg(), running.map(refOf), { sudo: useSudo })
       if (generation.current !== gen) return
       if (!r) setStatsError('CPU and memory are not wired up in this build.')
       else if (!r.ok) setStatsError(`${DOCKER_FAILURE_HELP[r.reason]} ${r.detail}`)
@@ -518,11 +548,11 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
       setDetail(null)
       return
     }
-    if (!server) return
+    if (!hasTarget) return
     setDetail({ id: c.id, probe: null })
     const gen = generation.current
     try {
-      const r = await bridge()?.inspect?.(cfgFor(server), refOf(c), { sudo: useSudo })
+      const r = await bridge()?.inspect?.(targetCfg(), refOf(c), { sudo: useSudo })
       if (generation.current !== gen) return
       setDetail({
         id: c.id,
@@ -540,13 +570,13 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
   // ---- state changes ----
 
   const runAction = async (action: DockerAction, refs: string[]): Promise<void> => {
-    if (!server) return
+    if (!hasTarget) return
     setPending(null)
     setPhrase('')
     setActing(true)
     setActionResult(null)
     try {
-      const r = await bridge()?.act?.(cfgFor(server), action, refs, { sudo: useSudo })
+      const r = await bridge()?.act?.(targetCfg(), action, refs, { sudo: useSudo })
       setActionResult({
         action,
         result: r ?? { ok: false, reason: 'unknown', detail: 'Container actions are not wired up in this build.' }
@@ -601,6 +631,11 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
    * would be a second place for that to drift.
    */
   const launchEngineJob = async (spec: JobSpec): Promise<void> => {
+    // Server-only, and not an oversight: the job model mints an approval
+    // against a saved server's id and main re-derives the plan from it. Giving
+    // that record a target that is not a server is a change to the consent
+    // model, which deserves its own review rather than arriving as a side
+    // effect of a dropdown gaining an option.
     if (!server) return
     const targets = [{ serverId: server.id, serverName: server.name }]
     const planned = planJob(spec, targets)
@@ -660,20 +695,23 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
         </span>
         <h2 className="ui-section-title">Containers</h2>
         <p className="ui-note panel-head-purpose">
-          What is running under Docker on one server — state, ports, disk and live stats.
+          What is running under Docker on one host — state, ports, disk and live stats.
         </p>
         <div className="panel-head-actions">
           <select
             className="input"
             style={{ maxWidth: 200 }}
-            aria-label="Server"
-            value={server?.id ?? ''}
+            aria-label="Docker host"
+            value={selectedId}
             onChange={(e) => {
               setServerId(e.target.value)
               setProbe(null)
               clearReads()
             }}
           >
+            {/* First, and present even with no servers: the local daemon is the
+                one most developers actually have running. */}
+            <option value={LOCAL_ID}>This machine</option>
             {eligible.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
@@ -683,22 +721,34 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
           {/* The button this whole exercise started from. It is the one thing
               to do on an unread panel and it was styled as an ordinary
               secondary control, indistinguishable from the dropdown beside it. */}
-          <button className="btn primary" disabled={loading || !server} onClick={() => void load()}>
+          <button
+            className="btn primary"
+            disabled={loading || !hasTarget}
+            title={hasTarget ? `Read Docker on ${targetName}` : 'Choose a host first'}
+            onClick={() => void load()}
+          >
             <RefreshCw size={13} className={clsx(loading && 'spin')} /> {probe ? 'Refresh' : 'Read containers'}
           </button>
         </div>
       </div>
 
+      {/* Not a dead end any more: with no server online the panel falls back to
+          this machine and is fully usable, so this states both facts rather
+          than apologising. Saying only "no server is online" would now be
+          false — something IS readable, and it is already selected. */}
       {eligible.length === 0 && (
         <div className="panel-empty">
-          <p className="panel-empty-title">No server in this workspace is online.</p>
+          <p className="panel-empty-title">
+            No server in this workspace is online — showing Docker on this machine.
+          </p>
           <p className="panel-empty-body">
-            Connect a server from the sidebar, then come back and press <b>Read containers</b>.
+            Connect a server from the sidebar to read one, or press <b>Read containers</b> for the
+            daemon running here.
           </p>
         </div>
       )}
 
-      {!probe && !loading && eligible.length > 0 && (
+      {!probe && !loading && hasTarget && (
         <div className="panel-empty">
           <p className="panel-empty-title">Nothing has been read yet.</p>
           <p className="panel-empty-body">
@@ -810,7 +860,7 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
               button because it costs a bounded filesystem search. */}
           <ComposePanel
             server={server}
-            cfg={cfgFor(server)}
+            cfg={targetCfg()}
             containers={probe.containers}
             sudo={usedSudoNow === true}
           />
@@ -980,14 +1030,14 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
           {/* Item 42's engine upgrade. Beside the health log because both are
               questions about the DAEMON rather than about a container, and both
               are asked for rather than read on every refresh. */}
-          <EngineUpgradePanel
+          {server && <EngineUpgradePanel
             manager={allFacts[server.id]?.facts?.packageManager ?? null}
             read={() =>
               // No fallback to apt. A server whose facts have not been
               // collected gets the `unchecked` refusal above rather than a
               // read built on a guess about its distribution.
               bridge()?.enginePrecheck?.(
-                cfgFor(server),
+                targetCfg(),
                 allFacts[server.id]?.facts?.packageManager ?? 'apt'
               ) ??
               Promise.resolve({
@@ -999,12 +1049,12 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
             // way every other elevated job's is. An install with sudo is not
             // something to launch from a read panel on a click.
             onRun={(spec) => void launchEngineJob(spec)}
-          />
+          />}
 
           <HealthLogPanel
             refs={probe.containers.filter((c) => c.state === 'running').map((c) => refOf(c))}
             read={(refs) =>
-              bridge()?.healthLogs?.(cfgFor(server), refs, { sudo: useSudo }) ??
+              bridge()?.healthLogs?.(targetCfg(), refs, { sudo: useSudo }) ??
               Promise.resolve({
                 ok: false as const,
                 reason: 'unknown' as const,
@@ -1076,6 +1126,10 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
                           container and pressed a button labelled shell, which is the
                           approval. A modal here would be the nag that teaches
                           click-through on the ones that matter. */}
+                      {/* Server-only: a container shell is a PTY carried over that
+                          server's SSH connection, and the local terminal takes no
+                          initial command. On this machine the equivalent is
+                          `docker exec -it` in a local terminal tab. */}
                       {c.state === 'running' && validateContainerRef(c.name) && server && (
                         <button
                           className="icon-btn sm"
@@ -1084,7 +1138,7 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
                   // panel lists containers as root and then opens a shell as an
                   // account that cannot reach the socket — one feature behaving
                   // as two, which is exactly what an operator reported.
-                  onClick={() => openContainerShell(server.id, c.name, usedSudoNow)}
+                  onClick={() => server && openContainerShell(server.id, c.name, usedSudoNow)}
                         >
                           <SquareTerminal size={13} />
                         </button>
@@ -1096,7 +1150,7 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
                         probe={detail?.probe ?? null}
                         scan={
                           bridge()?.scanImage
-                            ? (ref) => bridge()!.scanImage!(cfgFor(server), ref)
+                            ? (ref) => bridge()!.scanImage!(targetCfg(), ref)
                             : null
                         }
                       />
