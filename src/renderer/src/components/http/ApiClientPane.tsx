@@ -108,7 +108,7 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
             customFetch: createHttpTransport(() => optionsRef.current, reportRef.current),
             // A description names its own servers, and they are usually
             // production. What the toolbar shows is what gets sent.
-            ...(baseUrl ? { baseServerURL: baseUrl } : {})
+            ...(baseUrl ? { baseServerURL: scratchOriginOf(baseUrl) } : {})
           }
         })
         app = client.app
@@ -125,7 +125,7 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
               }
             : // A scratch document has exactly one operation and we wrote it, so
               // name it outright.
-              { documentSlug: collection.id, path: SCRATCH_PATH, method: 'get' }
+              { documentSlug: collection.id, path: scratchPathOf(baseUrl), method: 'get' }
         )
         setLoading(false)
       } catch (err) {
@@ -201,15 +201,41 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
  * means the address bar is ready to type in rather than showing an empty state
  * inside an empty state.
  */
-const SCRATCH_PATH = '/'
+/**
+ * The path half of a collection's base URL.
+ *
+ * Someone adding a scratch collection pastes the URL they were going to curl,
+ * and that URL usually has a path on it. Splitting it means
+ * `http://host:9090/metrics` opens on /metrics — dropping the path and opening
+ * on `/` sends the first request somewhere the user never asked for, and the
+ * 404 that comes back looks like the service is broken.
+ */
+function scratchPathOf(baseUrl: string): string {
+  try {
+    const path = new URL(baseUrl).pathname
+    return path && path !== '/' ? path : '/'
+  } catch {
+    return '/'
+  }
+}
+
+/** The origin, since the path is carried by the operation instead. */
+function scratchOriginOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).origin
+  } catch {
+    return baseUrl
+  }
+}
 
 function scratchDocument(title: string, baseUrl: string): Record<string, unknown> {
+  const path = scratchPathOf(baseUrl)
   return {
     openapi: '3.1.0',
     info: { title, version: '1.0.0' },
-    ...(baseUrl ? { servers: [{ url: baseUrl }] } : {}),
+    ...(baseUrl ? { servers: [{ url: scratchOriginOf(baseUrl) }] } : {}),
     paths: {
-      [SCRATCH_PATH]: {
+      [path]: {
         get: {
           operationId: 'request',
           summary: 'New request',
