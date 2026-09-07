@@ -1,3 +1,12 @@
+// Minimum length of the vault master password.
+//
+// Lives here rather than in VaultView because the vault can now be created from
+// two places — the full gate, and the mid-flow prompt that fires when something
+// needs a credential and there is no vault yet. Two copies of this number would
+// eventually disagree, and the one that disagreed downward would be the one
+// creating an unrecoverable secret.
+export const VAULT_MIN_PASSWORD = 12
+
 // A free-form key/value pair on a vault entry. `secret` fields are masked in
 // the UI until revealed.
 export interface VaultField {

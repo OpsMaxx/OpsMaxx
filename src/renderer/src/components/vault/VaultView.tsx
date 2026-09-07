@@ -6,6 +6,7 @@ import { clsx } from '../../lib/format'
 import { useApp } from '../../store/app'
 import { bridgeOn } from '../../lib/bridge'
 import {
+  VAULT_MIN_PASSWORD,
   VAULT_KIND_LABEL,
   VAULT_KIND_FIELDS,
   VAULT_SECRET_LABEL,
@@ -74,7 +75,7 @@ const BIO_LABEL: Record<string, string> = {
 // stolen file the master password's length is worth more than anything the
 // unlock UI does. Only applies to passwords being chosen now — an existing
 // vault is not forced to change on upgrade.
-const MIN_PASSWORD = 12
+const MIN_PASSWORD = VAULT_MIN_PASSWORD
 
 function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
   const create = useVault((s) => s.create)
