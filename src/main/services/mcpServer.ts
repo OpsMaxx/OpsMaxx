@@ -46,6 +46,7 @@ import { recordAudit, AUDIT_LOG_PATH } from './auditLog'
 import { redactOutput } from './secretRedaction'
 import { knownSecretValuesForServer, resolveChainSecrets, resolveDbSecrets } from './credentialResolver'
 import { DockerReader } from './docker'
+import { buildDockerLogsCommand } from '../../shared/docker'
 import type { DockerContainer } from '../../shared/docker'
 import { sshExec } from './ssh'
 import { dbQuery } from './db'
@@ -2137,6 +2138,125 @@ function buildServer(): McpServer {
           error: message
         })
         return errorText(`Could not list containers on ${s.name}: ${message}`)
+      }
+    }
+  )
+
+  server.registerTool(
+    'container_logs',
+    {
+      title: 'Read a container\'s logs',
+      description:
+        'The last lines a container wrote to stdout and stderr. ' +
+        'Prefer this over `docker logs` through execute_command: the container reference and the line ' +
+        'count are validated rather than interpolated, the read falls back to root only when the ' +
+        'unprivileged one is refused, and the output goes through the same secret redaction as every ' +
+        'other command result. ' +
+        'It NEVER follows. A streaming log would outlive the approval that authorised it, and the ' +
+        'stop-all-AI-access switch works by resolving requests that are still pending — so a follow ' +
+        'would be a capability that switch could not revoke. Ask for a window with `since` instead.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        container: z
+          .string()
+          .describe('Container name or id, exactly as list_containers reported it'),
+        lines: z
+          .number()
+          .int()
+          .min(1)
+          .max(2000)
+          .optional()
+          .describe('How many trailing lines. Defaults to 200.'),
+        since: z
+          .string()
+          .optional()
+          .describe('A relative window such as 10m, 2h or 900s. Anything else is refused.'),
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: false }
+    },
+    async ({ serverName, container, lines, since, intent }, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const resolved = resolveServerOrError(auth.session, serverName)
+      if ('error' in resolved) return resolved.error
+      const { server: s, workspace } = resolved.match
+      const check = effectiveCapability(auth.session, s.id, 'containers')
+      const ctx: AuditContext = {
+        session: auth.session,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        serverId: s.id,
+        serverName: s.name,
+        action: `container_logs ${container}`,
+        capability: 'containers'
+      }
+      // 'medium', where the container LIST is low. A list says what runs; a log
+      // is whatever the application decided to print, which is routinely its
+      // own connection strings and its users' data. The approval dialog should
+      // weigh those differently.
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'container_logs',
+          level: 'medium',
+          because:
+            'it returns whatever this container printed, which routinely includes credentials and customer data',
+          intent
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      const tail = lines ?? 200
+      const secrets = knownSecretValuesForServer(s.id)
+      const cfg = resolveChainSecrets(serverToSshConfig(s))
+      // Two attempts at most, and only in this order: the builder throws on a
+      // reference or a window it does not recognise, which is what keeps an
+      // agent-supplied string out of the command line.
+      const readLogs = async (sudo: boolean): Promise<{ ok: boolean; out: string; error?: string }> => {
+        const command = buildDockerLogsCommand(container, tail, false, { since, sudo })
+        const r = await sshExec(cfg, command, 20_000, false)
+        return { ok: r.ok, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, error: r.error }
+      }
+      try {
+        let result = await readLogs(false)
+        let usedSudo = false
+        if (!result.ok || /permission denied|cannot connect to the docker daemon/i.test(result.out)) {
+          const asRoot = await readLogs(true)
+          if (asRoot.ok) {
+            result = asRoot
+            usedSudo = true
+          }
+        }
+        if (!result.ok) {
+          recordAudit({
+            ...auditBase(ctx),
+            approval: check.decision === 'ask' ? 'approved' : 'not-required',
+            result: 'error',
+            error: result.error ?? 'docker logs failed'
+          })
+          return errorText(
+            `Could not read logs for ${container} on ${s.name}: ${result.error ?? 'the runtime refused'}`
+          )
+        }
+        auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+        const body = redactOutput(result.out, secrets).trimEnd()
+        return text(
+          `Last ${tail} line(s) from ${container} on ${s.name}` +
+            `${since ? ` since ${since}` : ''}${usedSudo ? ' (read as root)' : ''}:\n\n` +
+            (body || '(the container has written nothing in this window)')
+        )
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        recordAudit({
+          ...auditBase(ctx),
+          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          result: 'error',
+          error: message
+        })
+        return errorText(`Could not read logs for ${container} on ${s.name}: ${message}`)
       }
     }
   )

@@ -75,7 +75,12 @@ const ALLOWED_TOOLS = [
   // container action — `containerControl` exists for that and has no tool
   // behind it. Gated on its own `containers` capability, denied on the Read
   // Only tier because container logs are whatever the application printed.
-  'list_containers'
+  'list_containers',
+  // The same `containers` capability as the list, weighed higher at the
+  // approval prompt because a log is whatever the application printed. Never
+  // follows: a stream would outlive the approval that authorised it, which is
+  // the durability argument this file already makes about jobs.
+  'container_logs'
 ]
 
 // A hint, not the gate. Anything this regex matches is by construction absent
