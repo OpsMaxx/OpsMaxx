@@ -11,6 +11,7 @@ import {
   ShieldAlert,
   Trash2
 } from 'lucide-react'
+import { EmptyState } from '../common/EmptyState'
 import { useApp } from '../../store/app'
 import { useVault } from '../../store/vault'
 import { toast } from '../../store/toast'
@@ -239,9 +240,16 @@ export function BackupDestinations(): React.JSX.Element {
       )}
 
       {file !== null && destinations.length === 0 && !editing && (
-        <p className="s-desc" style={{ marginBottom: 10 }}>
-          No destinations yet. Backups still work through the file you download above.
-        </p>
+        // The same three parts every other empty state in the app has, rather
+        // than a loose sentence with a row of "+ Local folder / + SFTP / + S3"
+        // underneath it standing in for a call to action. Those three buttons
+        // are still below — they are a choice of kind, and a choice of kind is
+        // not a title.
+        <EmptyState
+          compact
+          title="No destinations yet"
+          message="Backups still work through the file you download above; a destination is what makes them happen on a schedule and get checked afterwards."
+        />
       )}
 
       {destinations.map((dest) => {
@@ -298,7 +306,7 @@ export function BackupDestinations(): React.JSX.Element {
                   onChange={(e) => setRunPw((p) => ({ ...p, [dest.id]: e.target.value }))}
                 />
                 <button
-                  className="btn sm"
+                  className="btn primary size-28"
                   disabled={password.length < MIN_PASSPHRASE || busy !== null || problem !== null}
                   title={
                     problem ??
@@ -311,14 +319,14 @@ export function BackupDestinations(): React.JSX.Element {
                   {busy === dest.id ? <Loader2 size={13} className="spin" /> : <CloudUpload size={13} />}
                   Back up now
                 </button>
-                <button className="btn sm" disabled={busy !== null} onClick={() => void browse(dest)}>
+                <button className="btn secondary size-28" disabled={busy !== null} onClick={() => void browse(dest)}>
                   <RotateCcw size={13} /> Restore from here
                 </button>
-                <button className="btn sm" onClick={() => setEditing(dest)}>
+                <button className="btn secondary size-28" onClick={() => setEditing(dest)}>
                   Edit
                 </button>
                 <button
-                  className="btn sm danger"
+                  className="btn danger outline size-28"
                   title="Removes this destination from ShellPilot. The backups already at it are left alone."
                   onClick={() => void persist(destinations.filter((d) => d.id !== dest.id))}
                 >
@@ -342,7 +350,7 @@ export function BackupDestinations(): React.JSX.Element {
                       ))}
                     </select>
                     <button
-                      className="btn sm"
+                      className="btn secondary size-28"
                       disabled={!dumpChoice[dest.id] || busy !== null}
                       onClick={() => void dump(dest)}
                     >
@@ -378,7 +386,7 @@ export function BackupDestinations(): React.JSX.Element {
                         {g.name} · {new Date(g.modified).toLocaleString()} · {g.size} bytes
                       </span>
                       <button
-                        className="btn sm"
+                        className="btn secondary size-24"
                         disabled={!password || busy !== null}
                         title={
                           password
@@ -403,10 +411,18 @@ export function BackupDestinations(): React.JSX.Element {
                           {staged.summary.hasVault ? ' · vault included' : ''}
                         </div>
                       </div>
-                      <button className="btn sm" onClick={cancelStaged}>
+                      <button className="btn secondary size-28" onClick={cancelStaged}>
                         Cancel
                       </button>
-                      <button className="btn sm danger" disabled={busy !== null} onClick={() => void restore()}>
+                      {/* Filled rather than outlined: this replaces every
+                          workspace, server, credential and vault entry on the
+                          machine with what is in that file, and there is no way
+                          back from it. */}
+                      <button
+                        className="btn danger fill size-28"
+                        disabled={busy !== null}
+                        onClick={() => void restore()}
+                      >
                         Restore and restart
                       </button>
                     </div>
@@ -434,7 +450,7 @@ export function BackupDestinations(): React.JSX.Element {
       ) : (
         <div className="row" style={{ gap: 8 }}>
           {BACKUP_DESTINATION_KINDS.map((kind) => (
-            <button key={kind} className="btn sm" onClick={() => setEditing(blank(kind))}>
+            <button key={kind} className="btn secondary size-28" onClick={() => setEditing(blank(kind))}>
               <Plus size={13} /> {BACKUP_DESTINATION_LABEL[kind]}
             </button>
           ))}
@@ -490,7 +506,7 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
               onChange={(e) => patch({ directory: e.target.value })}
             />
             <button
-              className="btn sm"
+              className="btn secondary size-28"
               onClick={() => {
                 void window.shellpilot?.backup.chooseDirectory?.().then((dir) => {
                   if (dir) patch({ directory: dir })
@@ -655,18 +671,27 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
           </>
         )}
 
-        {problem && (
-          <div className="s-desc" style={{ color: 'var(--danger)', marginBottom: 6 }}>
-            {problem}
-          </div>
-        )}
+        {/* The footer, and it is INSIDE this column on purpose. Cancel and Save
+            used to be flex siblings of the column, in a banner with
+            `align-items: flex-start` — so they rendered at the top-right of the
+            panel, above every field they commit. On an S3 destination with a
+            schedule the form is tall enough to run past the bottom of the
+            window, which put the primary action off-screen behind the user as
+            they scrolled down to finish typing. */}
+        <div className="inline-panel-footer">
+          {problem && <span className="footer-note field-error">{problem}</span>}
+          <button className="btn secondary size-28" onClick={props.onCancel}>
+            Cancel
+          </button>
+          <button
+            className="btn primary size-28"
+            disabled={problem !== null}
+            onClick={() => props.onSave(dest)}
+          >
+            Save destination
+          </button>
+        </div>
       </div>
-      <button className="btn sm" onClick={props.onCancel}>
-        Cancel
-      </button>
-      <button className="btn sm primary" disabled={problem !== null} onClick={() => props.onSave(dest)}>
-        Save destination
-      </button>
     </div>
   )
 }

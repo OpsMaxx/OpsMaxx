@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Database } from 'lucide-react'
-import { Modal } from '../common/Modal'
+import { Field, Modal } from '../common/Modal'
 import { useApp, useWorkspaceServers } from '../../store/app'
 import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
@@ -74,6 +74,15 @@ export function AddDatabaseModal(): React.JSX.Element {
   // empty password field means "leave it alone" rather than "there isn't one".
   const valid = name.trim() && (useUri ? uri.trim() || !!editId : host.trim())
 
+  // Said under the field, once the user has been in it. Naming what is missing
+  // before anything is typed would be an accusation about an untouched form;
+  // saying nothing at all is what this dialog used to do, which left "Add
+  // Database" greyed out with no statement anywhere of what would ungrey it.
+  const [touched, setTouched] = useState<Record<string, boolean>>({})
+  const problem = (key: string, message: string | null): string | null =>
+    touched[key] ? message : null
+  const touch = (key: string) => (): void => setTouched((t) => ({ ...t, [key]: true }))
+
   // Retryable on purpose: an OS keychain that is unavailable is usually a
   // login keyring the user has not unlocked yet, and that is fixed outside
   // this app and then works.
@@ -131,17 +140,11 @@ export function AddDatabaseModal(): React.JSX.Element {
       title={editId ? 'Edit Database' : 'Add Database'}
       subtitle={editId ? `Change how ShellPilot reaches ${existing?.name ?? 'this database'}` : 'Create a database connection profile'}
       onClose={() => setModal(null)}
-      footer={
-        <>
-          <span className="spacer" />
-          <button className="btn" onClick={() => setModal(null)}>
-            Cancel
-          </button>
-          <button className="btn primary" disabled={!valid} onClick={save}>
-            {editId ? 'Save Changes' : 'Add Database'}
-          </button>
-        </>
-      }
+      confirm={{
+        label: editId ? 'Save changes' : 'Add database',
+        disabled: !valid,
+        onClick: () => void save()
+      }}
     >
       <div className="field">
         <label className="field-label">Engine</label>
@@ -160,9 +163,21 @@ export function AddDatabaseModal(): React.JSX.Element {
       </div>
 
       <div className="row" style={{ gap: 8 }}>
-        <div className="field grow">
-          <label className="field-label">Connection Name</label>
-          <input className="input" placeholder="Production DB" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        <div className="grow">
+          <Field
+            label="Connection name"
+            required
+            error={problem('name', name.trim() ? null : 'Give this connection a name.')}
+          >
+            <input
+              className="input"
+              placeholder="Production DB"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onBlur={touch('name')}
+              autoFocus
+            />
+          </Field>
         </div>
         <div className="field">
           <label className="field-label">Method</label>
@@ -179,16 +194,23 @@ export function AddDatabaseModal(): React.JSX.Element {
 
       {useUri ? (
         <>
-          <div className="field">
-            <label className="field-label">Connection string / URI</label>
+          <Field
+            label="Connection string / URI"
+            required={!editId}
+            error={problem(
+              'uri',
+              uri.trim() || editId ? null : 'Paste the connection string this database is reached by.'
+            )}
+          >
             <textarea
               className="textarea"
               style={{ minHeight: 60 }}
               placeholder={editId ? 'Leave blank to keep the saved connection string' : uriPlaceholder[kind]}
               value={uri}
               onChange={(e) => setUri(e.target.value)}
+              onBlur={touch('uri')}
             />
-          </div>
+          </Field>
           {kind === 'mongodb' && (
             <div className="field">
               <label className="field-label">Database (optional — overrides the URI default)</label>
@@ -199,14 +221,21 @@ export function AddDatabaseModal(): React.JSX.Element {
       ) : (
         <>
           <div className="field-row">
-            <div className="field" style={{ gridColumn: 'span 1' }}>
-              <label className="field-label">Server / IP</label>
-              <input className="input" value={host} onChange={(e) => setHost(e.target.value)} />
-            </div>
-            <div className="field">
-              <label className="field-label">Port</label>
+            <Field
+              label="Server / IP"
+              required
+              error={problem('host', host.trim() ? null : 'Name the host this database runs on.')}
+            >
+              <input
+                className="input"
+                value={host}
+                onChange={(e) => setHost(e.target.value)}
+                onBlur={touch('host')}
+              />
+            </Field>
+            <Field label="Port">
               <input className="input" value={port} onChange={(e) => setPort(e.target.value)} />
-            </div>
+            </Field>
           </div>
 
           <div className="field-row">

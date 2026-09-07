@@ -185,7 +185,7 @@ export function AiSecurity(): React.JSX.Element {
             )}
           </div>
         </div>
-        <button className="btn danger" onClick={killAll}>
+        <button className="btn danger outline" onClick={killAll}>
           <Octagon size={14} /> Stop all AI access
         </button>
       </div>

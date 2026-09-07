@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Network, Plus, Power, ArrowRight, Trash2, Loader2, Pencil } from 'lucide-react'
 import { useApp, useWorkspaceServers, useWorkspaceTunnels } from '../../store/app'
 import { EmptyState } from '../common/EmptyState'
-import { Modal } from '../common/Modal'
+import { Field, Modal } from '../common/Modal'
 import { clsx } from '../../lib/format'
 import { toast } from '../../store/toast'
 import type { ToastAction } from '../../store/toast'
@@ -14,6 +14,11 @@ import { classifyConnectionError, errorText } from '../../lib/connectionError'
 import { openSettings } from '../../store/nav'
 import type { Server, Tunnel, TunnelKind } from '../../types'
 import { bridgeHas } from '../../lib/bridge'
+
+/** Said the same way about both endpoints. `parseEndpoint` accepts a bare
+ *  port, a host:port and an interface:host:port, so naming only one of those
+ *  forms would be a lie about what the field takes. */
+const PORT_PROBLEM = 'Needs a port — "8080", or "127.0.0.1:8080".'
 
 const kindLabel: Record<TunnelKind, string> = {
   local: 'Local forward',
@@ -280,7 +285,7 @@ export function TunnelManager(): React.JSX.Element {
               )}
             </div>
             <button
-              className={clsx('btn sm', on ? 'danger' : 'primary')}
+              className={clsx('btn size-28', on ? 'danger outline' : 'primary')}
               disabled={busy[t.id]}
               onClick={() => void toggle(t)}
             >
@@ -331,6 +336,15 @@ function TunnelForm({ tunnel, onClose }: { tunnel?: Tunnel | null; onClose: () =
   const socks = kind === 'socks'
   const valid = name.trim() && serverId && parseEndpoint(listen).port > 0 && (socks || parseEndpoint(target).port > 0)
 
+  // Under the field, once the user has been in it — the frp dialog's placement,
+  // adopted here. This form previously had no observable validation at all:
+  // "+ Create" was simply grey, and nothing on screen said which of the four
+  // fields was the reason.
+  const [touched, setTouched] = useState<Record<string, boolean>>({})
+  const problem = (key: string, message: string | null): string | null =>
+    touched[key] ? message : null
+  const touch = (key: string) => (): void => setTouched((t) => ({ ...t, [key]: true }))
+
   const save = (): void => {
     if (!valid) return
     const fields = { name: name.trim(), kind, serverId, listen: listen.trim(), target: socks ? '' : target.trim() }
@@ -352,21 +366,34 @@ function TunnelForm({ tunnel, onClose }: { tunnel?: Tunnel | null; onClose: () =
       title={tunnel ? 'Edit tunnel' : 'Create tunnel'}
       subtitle="Forward a port over an SSH connection"
       onClose={onClose}
+      // Was an action row at the bottom of a bordered `.card` nested inside the
+      // body — a second container drawn inside a container, with the confirm
+      // sitting a third of the way up the dialog. The dialog next to this one
+      // in the same product put its confirm bottom-right.
+      confirm={{ label: tunnel ? 'Save changes' : 'Create tunnel', disabled: !valid, onClick: save }}
     >
-      <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <Field
+        label="Tunnel name"
+        required
+        error={problem('name', name.trim() ? null : 'Give the tunnel a name.')}
+      >
         <input
           className="input"
-          placeholder="Tunnel name"
+          placeholder="web-db"
           autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
+          onBlur={touch('name')}
         />
+      </Field>
 
+      <div className="field">
+        <span className="field-label">Kind</span>
         <div className="row" style={{ gap: 6 }}>
           {(['local', 'remote', 'socks'] as TunnelKind[]).map((k) => (
             <button
               key={k}
-              className={clsx('btn sm', kind === k && 'primary')}
+              className={clsx('btn size-28', kind === k ? 'primary' : 'secondary')}
               onClick={() => {
                 setKind(k)
                 // Both directions, not just into socks. See listenForKind: a
@@ -379,54 +406,66 @@ function TunnelForm({ tunnel, onClose }: { tunnel?: Tunnel | null; onClose: () =
             </button>
           ))}
         </div>
-
-        <label className="field">
-          <span className="field-label">SSH server</span>
-          <select className="input" value={serverId} onChange={(e) => setServerId(e.target.value)}>
-            {servers.length === 0 && <option value="">Add a server first — this workspace has none</option>}
-            {servers.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name} ({s.username}@{s.host})
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="field">
-          <span className="field-label">{kind === 'remote' ? 'Listen on server' : 'Listen locally'}</span>
-          <input
-            className="input"
-            value={listen}
-            onChange={(e) => setListen(e.target.value)}
-            placeholder={TUNNEL_DEFAULT_LISTEN[kind]}
-          />
-        </label>
-
-        {!socks && (
-          <label className="field">
-            <span className="field-label">
-              {kind === 'remote' ? 'Forward to (from this machine)' : 'Forward to (from the server)'}
-            </span>
-            <input className="input" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="localhost:80" />
-          </label>
-        )}
-
-        <div className="faint" style={{ fontSize: 11 }}>
+        <span className="field-hint">
           {kind === 'local' && 'Connections to the local port are carried over SSH and opened from the server.'}
           {kind === 'remote' && 'The server listens and forwards connections back to this machine.'}
           {kind === 'socks' && 'Point a browser or CLI at this port to route traffic through the server.'}
-        </div>
-
-        <div className="row" style={{ gap: 8 }}>
-          <span className="spacer" />
-          <button className="btn sm" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="btn primary sm" disabled={!valid} onClick={save}>
-            {tunnel ? <Pencil size={14} /> : <Plus size={14} />} {tunnel ? 'Save' : 'Create'}
-          </button>
-        </div>
+        </span>
       </div>
+
+      <Field
+        label="SSH server"
+        required
+        error={
+          servers.length === 0
+            ? 'This workspace has no servers — add one before creating a tunnel.'
+            : problem('serverId', serverId ? null : 'Choose the server to forward over.')
+        }
+      >
+        <select
+          className="input"
+          value={serverId}
+          onChange={(e) => setServerId(e.target.value)}
+          onBlur={touch('serverId')}
+        >
+          {servers.length === 0 && <option value="">No servers in this workspace</option>}
+          {servers.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name} ({s.username}@{s.host})
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      <Field
+        label={kind === 'remote' ? 'Listen on server' : 'Listen locally'}
+        required
+        error={problem('listen', parseEndpoint(listen).port > 0 ? null : PORT_PROBLEM)}
+      >
+        <input
+          className="input"
+          value={listen}
+          onChange={(e) => setListen(e.target.value)}
+          onBlur={touch('listen')}
+          placeholder={TUNNEL_DEFAULT_LISTEN[kind]}
+        />
+      </Field>
+
+      {!socks && (
+        <Field
+          label={kind === 'remote' ? 'Forward to (from this machine)' : 'Forward to (from the server)'}
+          required
+          error={problem('target', parseEndpoint(target).port > 0 ? null : PORT_PROBLEM)}
+        >
+          <input
+            className="input"
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            onBlur={touch('target')}
+            placeholder="localhost:80"
+          />
+        </Field>
+      )}
     </Modal>
   )
 }

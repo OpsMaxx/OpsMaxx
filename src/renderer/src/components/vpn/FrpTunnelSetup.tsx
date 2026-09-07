@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Modal } from '../common/Modal'
+import { Field, Modal } from '../common/Modal'
 import { useApp } from '../../store/app'
 import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
@@ -184,43 +184,40 @@ export function FrpTunnelSetup({
       subtitle="Once. After this, publishing a port is one step."
       size="lg"
       onClose={onClose}
-      footer={
-        <>
-          <span className="grow" />
-          <button className="btn" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="btn primary" disabled={!ready} onClick={() => void finish()}>
-            Finish setup
-          </button>
-        </>
-      }
+      confirm={{ label: 'Finish setup', disabled: !ready, onClick: () => void finish() }}
     >
       <div className="col" style={{ gap: 14 }}>
         {/* Said once, here, and nowhere else in this pane. */}
         <p className="muted" style={{ fontSize: 12, margin: 0, lineHeight: 1.5 }}>
-          ShellPilot does not server public addresses. frp publishes through an frp server you run,
+          ShellPilot does not serve public addresses. frp publishes through an frp server you run,
           under a domain you own — so those are the two things this asks for. It is the only time
           it will.
         </p>
 
-        <label className="field">
-          <span className="field-label">Name</span>
+        <Field label="Name">
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
-        </label>
+        </Field>
 
         <div className="field-row">
-          <label className="field">
-            <span className="field-label">frp server address</span>
+          <Field
+            label="frp server address"
+            required
+            error={
+              serverAddr.trim() === '' ? 'Name the frp server this client dials.' : null
+            }
+          >
             <input
               className="input"
               placeholder="frp.example.com"
               value={serverAddr}
               onChange={(e) => setServerAddr(e.target.value)}
             />
-          </label>
-          <label className="field">
-            <span className="field-label">Control port</span>
+          </Field>
+          <Field
+            label="Control port"
+            required
+            error={serverPort > 0 && serverPort < 65536 ? null : 'A port between 1 and 65535.'}
+          >
             <input
               className="input"
               type="number"
@@ -228,11 +225,17 @@ export function FrpTunnelSetup({
               value={serverPort || ''}
               onChange={(e) => setServerPort(Number(e.target.value))}
             />
-          </label>
+          </Field>
         </div>
 
-        <label className="field">
-          <span className="field-label">Server token</span>
+        <Field
+          label="Server token"
+          hint={
+            storeToken
+              ? 'Stored in the vault. Leave it empty if your frp server has no token.'
+              : 'This build of the preload bridge cannot store a token yet — add one to this profile’s vault entry instead.'
+          }
+        >
           <input
             className="input"
             type="password"
@@ -241,32 +244,30 @@ export function FrpTunnelSetup({
             onChange={(e) => setToken(e.target.value)}
             disabled={!storeToken}
           />
-          <span className="field-hint">
-            {storeToken
-              ? 'Stored in the vault. Leave it empty if your frp server has no token.'
-              : 'This build of the preload bridge cannot store a token yet — add one to this profile’s vault entry instead.'}
-          </span>
-        </label>
+        </Field>
 
         <div className="divider" />
 
         <div className="field-row">
-          <label className="field">
-            <span className="field-label">Your domain</span>
+          <Field
+            label="Your domain"
+            required
+            error={
+              baseDomain.trim() === ''
+                ? 'A domain you own, delegated to your frp server.'
+                : domainOk
+                  ? null
+                  : 'This is not a domain name.'
+            }
+          >
             <input
               className="input"
               placeholder="tunnel.example.com"
               value={baseDomain}
               onChange={(e) => setBaseDomain(e.target.value)}
             />
-            {baseDomain.trim() !== '' && !domainOk && (
-              <span className="field-hint" style={{ color: 'var(--danger)' }}>
-                This is not a domain name.
-              </span>
-            )}
-          </label>
-          <label className="field">
-            <span className="field-label">Served over</span>
+          </Field>
+          <Field label="Served over">
             <select
               className="input"
               value={scheme}
@@ -278,9 +279,8 @@ export function FrpTunnelSetup({
                 </option>
               ))}
             </select>
-          </label>
-          <label className="field">
-            <span className="field-label">Port in the URL</span>
+          </Field>
+          <Field label="Port in the URL">
             <input
               className="input"
               type="number"
@@ -288,7 +288,7 @@ export function FrpTunnelSetup({
               value={vhostPort}
               onChange={(e) => setVhostPort(e.target.value)}
             />
-          </label>
+          </Field>
         </div>
         {scheme === 'https' && (
           // frp does not terminate TLS for a plain local HTTP service. Someone

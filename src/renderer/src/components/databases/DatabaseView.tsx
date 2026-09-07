@@ -29,6 +29,7 @@ import { openDatabaseCreator, openDatabaseEditor } from '../../store/dbEditor'
 import { openSettings } from '../../store/nav'
 import { supportsDbOps, type DbVerdictLevel } from '../../../../shared/dbOps'
 import { formatDbAddress } from '../../../../shared/dbAddress'
+import { EmptyState } from '../common/EmptyState'
 import type { DatabaseConn, DbKind, Server } from '../../types'
 import type { DbConnectConfig, DbInfo, DbQueryResult, DbTestResult } from '../../../../shared/db'
 
@@ -503,7 +504,18 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
 
 function Results({ result }: { result: DbQueryResult | null }): React.JSX.Element {
   if (!result) {
-    return <div className="faint" style={{ padding: 20, fontSize: 13 }}>Run a query to see results.</div>
+    // The fourth empty-state grammar in the app, and the barest: a single grey
+    // sentence with no container, no title and no action, in the slot where a
+    // full results grid otherwise renders. `compact` exists for exactly this —
+    // in-panel, no glyph tile — so the shape matches every other empty state
+    // without the centred hero treatment that would be wrong here.
+    return (
+      <EmptyState
+        compact
+        title="No results yet"
+        message="Write a query above and press Run. Nothing is sent to the server until you do."
+      />
+    )
   }
   if (!result.ok) {
     return (

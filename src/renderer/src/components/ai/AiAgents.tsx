@@ -328,7 +328,7 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
             <div className="r-stat">{isLive(s) ? 'Active' : s.revoked ? 'Revoked' : 'Expired'}</div>
             {isLive(s) ? (
               <button
-                className="btn sm danger"
+                className="btn sm danger outline"
                 onClick={async () => {
                   await window.shellpilot?.aiMcp.revokeSession(s.id)
                   toast(`${s.agentName} can no longer reach ShellPilot.`, 'ok')
@@ -363,7 +363,7 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
       })}
 
       {sessions.some(isLive) && (
-        <button className="btn danger" style={{ marginTop: 18 }} onClick={killAll}>
+        <button className="btn danger outline" style={{ marginTop: 18 }} onClick={killAll}>
           <Octagon size={14} /> Stop all AI access
         </button>
       )}

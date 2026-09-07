@@ -18,10 +18,10 @@ export function VpnManager(): React.JSX.Element {
           <div className="sub">WireGuard and OpenVPN tunnels</div>
         </div>
         <div className="spacer" />
-        <button className="btn sm" onClick={() => importProfile('wireguard')}>
+        <button className="btn secondary size-28" onClick={() => importProfile('wireguard')}>
           <Plus size={14} /> Import WireGuard
         </button>
-        <button className="btn sm" onClick={() => importProfile('openvpn')}>
+        <button className="btn secondary size-28" onClick={() => importProfile('openvpn')}>
           <Plus size={14} /> Import OpenVPN
         </button>
       </div>
@@ -31,10 +31,20 @@ export function VpnManager(): React.JSX.Element {
           icon={<Globe size={26} />}
           title="No VPN profiles"
           message="Import a WireGuard .conf or an OpenVPN .ovpn to carry servers, databases and tunnels over a VPN."
+          // Both, because the header offers both and the sentence above names
+          // both. A single "Import WireGuard" button here was the only thing on
+          // an OpenVPN user's first screen that looked like the way in, and it
+          // was the wrong one — the header's second button is easy to miss when
+          // there is a filled button in the middle of the pane.
           action={
-            <button className="btn primary" onClick={() => importProfile('wireguard')}>
-              <Plus size={15} /> Import WireGuard
-            </button>
+            <div className="row" style={{ gap: 'var(--sp-2)' }}>
+              <button className="btn primary" onClick={() => importProfile('wireguard')}>
+                <Plus size={15} /> Import WireGuard
+              </button>
+              <button className="btn secondary size-32" onClick={() => importProfile('openvpn')}>
+                <Plus size={15} /> Import OpenVPN
+              </button>
+            </div>
           }
         />
       ) : (

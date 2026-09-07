@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, FileUp, ShieldAlert, Upload } from 'lucide-react'
-import { Modal } from '../common/Modal'
+import { Field, Modal } from '../common/Modal'
 import { VpnProfileForm } from './VpnProfileForm'
 import { useApp } from '../../store/app'
 import { toast } from '../../store/toast'
@@ -212,21 +212,10 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
       // `children` the whole row scrolls with the body, so on a config with a
       // long stripped-directive report both Import and the line explaining why
       // it is disabled start out below the fold.
-      footer={
-        <>
-          <span className="faint" style={{ flex: 1, fontSize: 11, textAlign: 'right' }}>
-            {status()}
-          </span>
-          <button className="btn" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="btn primary" disabled={!canSave} onClick={() => void save()}>
-            Import profile
-          </button>
-        </>
-      }
+      footerNote={status()}
+      confirm={{ label: 'Import profile', disabled: !canSave, onClick: () => void save() }}
     >
-      <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div className="col" style={{ gap: 10 }}>
         <div
           className="col"
           style={{
@@ -254,7 +243,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
               {HINT[kind]}
             </span>
             <span className="grow" />
-            <button className="btn sm" onClick={() => fileInput.current?.click()}>
+            <button className="btn secondary size-28" onClick={() => fileInput.current?.click()}>
               <Upload size={13} /> Choose file
             </button>
             <input
@@ -321,7 +310,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
             <span className="grow">{commitError.message}</span>
             {commitError.vaultLocked && (
               <button
-                className="btn sm primary"
+                className="btn primary size-28"
                 style={{ flexShrink: 0 }}
                 onClick={() => void save()}
               >
@@ -382,8 +371,11 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
           </div>
         )}
 
-        <label className="field">
-          <span className="field-label">Profile name</span>
+        <Field
+          label="Profile name"
+          required
+          error={nameTouched && name.trim() === '' ? 'Give the profile a name.' : null}
+        >
           <input
             className="input"
             value={name}
@@ -393,7 +385,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
               setName(e.target.value)
             }}
           />
-        </label>
+        </Field>
       </div>
     </Modal>
   )

@@ -150,7 +150,7 @@ describe('the buttons', () => {
     await userEvent.type(screen.getByPlaceholderText('/usr/local/bin/node'), '/usr/bin/node')
     await userEvent.type(screen.getByPlaceholderText('server.js --port 3000'), 'worker.js --queue mail')
     await userEvent.type(screen.getByPlaceholderText('/srv/api'), '/srv/worker')
-    await userEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Add process' }))
 
     await waitFor(() => expect(calls.created).toHaveLength(1))
     expect(calls.created[0]).toMatchObject({
@@ -176,7 +176,7 @@ describe('the buttons', () => {
     await userEvent.click(screen.getByRole('button', { name: /Add a variable/ }))
     await userEvent.type(screen.getByLabelText('Variable 1 name'), 'STRIPE_API_KEY')
     await userEvent.type(screen.getByLabelText('Variable 1 value'), 'sk_live_abcdef')
-    await userEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Add process' }))
 
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('STRIPE_API_KEY')
@@ -195,7 +195,7 @@ describe('the buttons', () => {
     await userEvent.type(screen.getByLabelText('Variable 1 name'), 'STRIPE_API_KEY')
     await userEvent.selectOptions(screen.getByLabelText('Variable 1 source'), 'vault')
     await userEvent.type(screen.getByLabelText('Variable 1 vault entry'), 'v-9')
-    await userEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Add process' }))
 
     await waitFor(() => expect(calls.created).toHaveLength(1))
     expect(calls.created[0]).toMatchObject({
@@ -209,7 +209,7 @@ describe('the buttons', () => {
     await userEvent.click(screen.getByRole('button', { name: /Add a process/ }))
     await userEvent.type(screen.getByPlaceholderText('API server'), 'Worker')
     // No command.
-    await userEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Add process' }))
 
     expect(await screen.findByRole('alert')).toHaveProperty(
       'textContent',

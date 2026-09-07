@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { Globe } from 'lucide-react'
-import { Modal } from '../common/Modal'
+import { Field, Modal } from '../common/Modal'
 import { useApp } from '../../store/app'
 import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
@@ -114,42 +113,31 @@ export function FrpPublishDialog({
       title="Publish a local port"
       subtitle={target.profile.name}
       onClose={onClose}
-      footer={
-        <>
-          <span className="grow" />
-          <button className="btn" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            className="btn primary"
-            disabled={!acknowledged || !nameOk || busy}
-            onClick={() => void publish()}
-          >
-            <Globe size={14} /> Publish
-          </button>
-        </>
-      }
+      confirm={{
+        label: 'Publish',
+        disabled: !acknowledged || !nameOk || busy,
+        onClick: () => void publish()
+      }}
     >
       <div className="col" style={{ gap: 14 }}>
-        <label className="field">
-          <span className="field-label">Name</span>
+        <Field
+          label="Name"
+          required
+          error={
+            collides
+              ? `“${clean}” is already published from this profile.`
+              : clean === ''
+                ? 'Give it a name — it becomes the first label of the address.'
+                : null
+          }
+        >
           <input
             className="input"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             aria-label="Name"
           />
-          {collides && (
-            <span className="field-hint" style={{ color: 'var(--danger)' }}>
-              “{clean}” is already published from this profile.
-            </span>
-          )}
-          {!collides && clean === '' && (
-            <span className="field-hint" style={{ color: 'var(--danger)' }}>
-              Give it a name — it becomes the first label of the address.
-            </span>
-          )}
-        </label>
+        </Field>
 
         {/* Both ends, spelled out, before anything happens. */}
         <div className="hop-card" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
