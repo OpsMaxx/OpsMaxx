@@ -94,7 +94,12 @@ const ALLOWED_TOOLS = [
   // Backup HEALTH, machine-wide: which destinations exist and whether they are
   // late. No run and no restore — the interface it reads through has neither,
   // so reaching one means widening that interface in a diff someone sees.
-  'backup_status'
+  'backup_status',
+  // Discloses nothing about any server — only what this session was already
+  // told it may attempt, which is why it is the one tool that is not itself
+  // gated. It also names what is absent by design, so an agent does not spend
+  // turns discovering that the job runner is not there.
+  'describe_capabilities'
 ]
 
 // A hint, not the gate. Anything this regex matches is by construction absent

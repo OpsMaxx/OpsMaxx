@@ -2591,6 +2591,81 @@ function buildServer(): McpServer {
     }
   )
 
+  server.registerTool(
+    'describe_capabilities',
+    {
+      title: 'Find out what you are allowed to do',
+      description:
+        'What this session may do on a given server, and what it may not, BEFORE trying it. ' +
+        'Call this first when planning anything beyond a single read. Every other tool answers a ' +
+        'permission question by being refused, which costs a round trip, produces an audit row for ' +
+        'work that was never going to happen, and — where the answer is "ask" — interrupts a person ' +
+        'to decline something you could have known was unavailable. ' +
+        'Each capability comes back as allow, ask or deny, with the sentence the user was shown when ' +
+        'they granted it. "ask" means a human is interrupted and may say no; treat it as a cost, not ' +
+        'as a yes. ' +
+        'What is absent is absent on purpose. There is no job runner, no rule engine, no local shell ' +
+        'and no vault access on this bridge at any permission level, and no setting turns them on.',
+      inputSchema: {
+        serverName: z
+          .string()
+          .optional()
+          .describe(
+            'The server to answer for, as returned by list_servers. Omit for the workspace-wide capabilities.'
+          )
+      },
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false }
+    },
+    async ({ serverName }, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+
+      // Deliberately NOT gated. It discloses nothing about the server — only
+      // what this session was already told it may attempt — and gating the
+      // question "what am I allowed to do" behind a permission is how an agent
+      // ends up discovering the boundary by tripping over it, which is the
+      // whole cost this tool exists to remove.
+      let rows: { id: string; label: string; detail: string; decision: string; reason: string }[]
+      let scope: string
+      if (serverName) {
+        const resolved = resolveServerOrError(auth.session, serverName)
+        if ('error' in resolved) return resolved.error
+        const { server: s } = resolved.match
+        scope = `on ${s.name}`
+        rows = AI_CAPABILITIES.map((c) => {
+          const d = effectiveCapability(auth.session, s.id, c.id)
+          return { id: c.id, label: c.label, detail: c.detail, decision: d.decision, reason: d.reason }
+        })
+      } else {
+        const ws = auth.session.workspaces[0]
+        if (!ws) return errorText('This session has no workspaces.')
+        scope = `in ${ws.name}`
+        rows = AI_CAPABILITIES.map((c) => {
+          const d = effectiveWorkspaceCapability(auth.session, ws.id, c.id)
+          return { id: c.id, label: c.label, detail: c.detail, decision: d.decision, reason: d.reason }
+        })
+      }
+
+      const order = { allow: 0, ask: 1, deny: 2 } as const
+      rows.sort(
+        (a, b) =>
+          (order[a.decision as keyof typeof order] ?? 3) - (order[b.decision as keyof typeof order] ?? 3)
+      )
+      const body = rows
+        .map(
+          (r) =>
+            `${r.decision.toUpperCase().padEnd(5)} ${r.id}\n    ${r.label}\n    ${r.detail}` +
+            `${r.decision !== 'allow' && r.reason ? `\n    why: ${r.reason}` : ''}`
+        )
+        .join('\n\n')
+      return text(
+        `What this session may do ${scope}:\n\n${body}\n\n` +
+          `Not present at any setting, by design: running jobs, defining rules, a shell on the ` +
+          `OpsMaxx machine itself, reading the vault, and restoring a backup.`
+      )
+    }
+  )
+
   return server
 }
 
