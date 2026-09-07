@@ -35,11 +35,22 @@ describe('the read/operate split', () => {
     expect(missing.map((m) => m.id)).toEqual([])
   })
 
-  it('puts exactly broadcast, patch and jobs on the operate surface', () => {
+  it('puts exactly broadcast, patch, jobs and keyRevoke on the operate surface', () => {
     // If this fails because you added a module, that is the test doing its job.
     // Decide which side of the line it is on, put it there, and update this
     // list — do not widen the assertion.
-    expect(modulesOnSurface('operate').map((m) => m.id).sort()).toEqual(['broadcast', 'jobs', 'patch'])
+    //
+    // `keyRevoke` is the fourth, and it arrived by SPLITTING rather than by
+    // being invented: revoking a key was already happening, on the read surface,
+    // inside the Access panel. Moving it here did not add a way to change a
+    // server; it stopped one being reachable from a destination that promises
+    // it cannot.
+    expect(modulesOnSurface('operate').map((m) => m.id).sort()).toEqual([
+      'broadcast',
+      'jobs',
+      'keyRevoke',
+      'patch'
+    ])
   })
 
   it('keeps the OperateModuleId union in step with the surface field', () => {
@@ -105,31 +116,41 @@ describe('isOperateModule', () => {
     const id: ModuleId = 'patch'
     if (isOperateModule(id)) {
       // Compiles only because the guard narrowed `id` to OperateModuleId.
-      const narrowed: 'broadcast' | 'patch' | 'jobs' = id
+      const narrowed: 'broadcast' | 'patch' | 'jobs' | 'keyRevoke' = id
       expect(narrowed).toBe('patch')
     }
   })
 })
 
 // ---------------------------------------------------------------------------
-// The contract's known exceptions, counted rather than waved away
+// The contract has no exceptions left, and this is what keeps it that way
 // ---------------------------------------------------------------------------
 //
 // `surface: 'read'` asserts that nothing on that surface writes to a server.
-// Three modules break it today — `access` can revoke an SSH key across servers,
-// `cron` can write a crontab, and `services` can install a systemd unit. They are named in READ_SURFACE_WRITE_EXCEPTIONS
-// instead of being reclassified, because both are large read-only views with
-// one mutating action attached, and moving the whole module would exile the
-// inventory into a destination built for change.
+// Three modules used to break it: `access` could revoke an SSH key across the
+// estate, `cron` could write a crontab, `services` could install a `systemd
+// --user` unit. Each was a large read-only view with one mutating control
+// bolted on, so none of them was reclassified — reclassifying would have exiled
+// the authorized_keys inventory, the crontab listing and the unit listing into a
+// destination built for change. They were SPLIT: the read stayed, the write
+// moved to Operations (`keyRevoke` as a module, the other two as sub-tabs of
+// `jobs`), and each read panel keeps a pointer at where its write went.
 //
-// This block exists so the exception list cannot grow quietly. A contract with
-// a silent exception is not a contract.
-describe('the read surface writes in exactly two known places', () => {
-  it('names them, so a third cannot be added without a deliberate edit', () => {
-    expect([...READ_SURFACE_WRITE_EXCEPTIONS].sort()).toEqual(['access', 'cron', 'services'])
+// The list is empty and the assertions stay, which is the point. A contract
+// whose exception list is checked is one where the fourth exception has to be
+// written down by somebody who can be asked why.
+describe('the read surface no longer writes anywhere', () => {
+  it('has an empty exception list, and fails loudly if one comes back', () => {
+    // If this fails, read what was added and why. The answer is almost never
+    // "add it to the list" — it is to split the panel, which has now been done
+    // three times and is a day's work, not a redesign.
+    expect(READ_SURFACE_WRITE_EXCEPTIONS).toEqual([])
   })
 
-  it('only exempts modules that are actually on the read surface', () => {
+  it('still only tolerates an exception for a module that is actually on the read surface', () => {
+    // Vacuous today, deliberately kept: it is the assertion that stops a future
+    // exception being parked on the list for a module that has since moved,
+    // where it would look handled and enforce nothing.
     for (const id of READ_SURFACE_WRITE_EXCEPTIONS) {
       const m = MODULES.find((x) => x.id === id)
       expect(m, `${id} is exempted but is not a module`).toBeDefined()
@@ -137,23 +158,33 @@ describe('the read surface writes in exactly two known places', () => {
     }
   })
 
-  // The copy was the worse half of the defect: both modules told the user
-  // "Read-only." in the sentence that decides whether they enable it. A false
-  // safety claim is worse than the write it was covering for, and the same
-  // mistake is visible elsewhere in the product ("Read-only — nothing is
-  // started, stopped or written here" sitting above four New service buttons).
   it('lets no module claim to be read-only while it is on this list', () => {
+    // The copy was the worse half of the original defect: all three modules told
+    // the user "Read-only." in the sentence that decides whether they enable it.
+    // A false safety claim is worse than the write it was covering for.
     for (const id of READ_SURFACE_WRITE_EXCEPTIONS) {
       const m = MODULES.find((x) => x.id === id)!
       expect(m.detail.toLowerCase(), `${id} still claims to be read-only`).not.toContain('read-only')
     }
   })
 
-  // The claim is fine, and true, on a module that does not write.
+  // The claim is fine, and true, on a module that does not write — which, now,
+  // is every module on this surface.
   it('leaves the honest read-only claims alone', () => {
     const clean = MODULES.filter(
       (m) => m.surface === 'read' && !READ_SURFACE_WRITE_EXCEPTIONS.includes(m.id)
     )
-    expect(clean.length).toBeGreaterThan(0)
+    expect(clean.length).toBe(modulesOnSurface('read').length)
+  })
+
+  it('keeps the three split modules on the read surface, where their reading belongs', () => {
+    // The other half of the fix, and the half a careless follow-up would undo:
+    // "make it operate" would have been one line and would have moved a large
+    // read into a destination whose banner says everything in it changes
+    // servers. If this ever fails, the question to ask is whether the READ moved
+    // — not whether the list should grow.
+    for (const id of ['access', 'cron', 'services'] as const) {
+      expect(MODULES.find((m) => m.id === id)!.surface, id).toBe('read')
+    }
   })
 })

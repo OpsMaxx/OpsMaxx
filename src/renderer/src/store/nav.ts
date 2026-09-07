@@ -113,6 +113,51 @@ export interface JobComposerJump {
   nonce: number
 }
 
+/**
+ * Arriving on the Operations rail with an intention, from the read panel the
+ * intention was formed in.
+ *
+ * Three writes used to live on Monitoring: revoking a key from the key table,
+ * editing a crontab from the schedule list, installing a unit from the service
+ * list. They have moved to Operations, and requirement four of that move is
+ * that the place they left is a POINTER rather than a hole — a control that
+ * simply vanished teaches a person the feature broke, and a pointer that opens
+ * the wrong page teaches them the button is broken, which is worse than no
+ * pointer at all.
+ *
+ * One union rather than a field per consumer, unlike `logTailJump` and
+ * `jobComposerJump` above. Those two are consumed by one panel each and were
+ * added years apart; these three arrive on the SAME rail, are cleared by the
+ * same rule, and two of them land on sub-tabs of one module — so a panel has to
+ * check the kind whichever way this is stored, and three near-identical fields
+ * would only spread that check out.
+ *
+ * DELIBERATELY NOT A JUMP THAT RUNS, for exactly the reason `JobComposerJump`
+ * states: `openLogTail` lands on lines because reading is safe, and every one
+ * of these lands on a FILLED FORM, before its plan, before its confirmation and
+ * before its approval record. The only thing a jump removes is the retyping.
+ */
+export type OperationsJump =
+  | { kind: 'revoke-key'; fingerprint: string; nonce: number }
+  | {
+      kind: 'cron-edit'
+      serverId: string
+      /** The line as read, when an existing job is being changed; absent when
+       *  adding. Carried verbatim because main identifies the job by its line
+       *  and never by its position in the list. */
+      line?: string
+      schedule: string
+      command: string
+      /** The text after an unescaped `%`, which cron pipes to the command on
+       *  stdin rather than running. Carried because it is NOT editable in the
+       *  form and a change that dropped it would quietly rewrite what the job
+       *  is fed — the one edit whose damage is invisible in the command line
+       *  the operator is looking at. */
+      input?: string
+      nonce: number
+    }
+  | { kind: 'unit-install'; serverId: string; nonce: number }
+
 interface NavState {
   aiSection: AiSection
   /** An access group the Access Groups page should open on, set by whoever
@@ -136,6 +181,9 @@ interface NavState {
   logTailJump: LogTailJumpRequest | null
   /** Consumed by JobsPanel; see JobComposerJump. */
   jobComposerJump: JobComposerJump | null
+  /** Consumed by whichever Operations panel the `kind` names; see
+   *  OperationsJump. */
+  operationsJump: OperationsJump | null
   setAiSection: (s: AiSection) => void
   setSettingsSection: (s: SettingsSection) => void
   setMonitorTab: (t: MonitorTab) => void
@@ -155,6 +203,7 @@ export const useNav = create<NavState>((set) => ({
   fleetRail: 'monitor',
   logTailJump: null,
   jobComposerJump: null,
+  operationsJump: null,
   setAiSection: (s) => set({ aiSection: s, aiGroupId: null }),
   setSettingsSection: (s) => set({ settingsSection: s }),
   setMonitorTab: (t) => set({ monitorTab: t }),
@@ -250,6 +299,57 @@ export function openMonitor(tab: MonitorTab): void {
 /** Open Operations on a particular panel. */
 export function openOperations(tab: OperationsTab): void {
   useNav.setState({ operationsTab: tab, fleetRail: 'operations' })
+  useApp.getState().setActivity('monitor')
+}
+
+/**
+ * Open the key-revocation panel on one fingerprint.
+ *
+ * Nothing is planned and nothing runs: the panel still reads the estate, still
+ * shows which accounts are left out and why, and still asks. The operator who
+ * pressed this was looking at the key in the Monitoring key table, which is the
+ * one fact this carries over.
+ */
+export function openKeyRevoke(fingerprint: string): void {
+  useNav.setState({
+    operationsTab: 'keyRevoke',
+    fleetRail: 'operations',
+    operationsJump: { kind: 'revoke-key', fingerprint, nonce: nextNonce() }
+  })
+  useApp.getState().setActivity('monitor')
+}
+
+/**
+ * Open the crontab editor with a job filled in, on one server.
+ *
+ * `jobs` rather than a tab of its own — the editor is a sub-tab there, for the
+ * reason written on the sub-tab strip in OperationsView. Routing to the parent
+ * module and letting the jump's `kind` pick the sub-tab keeps `OperationsTab` a
+ * union of module ids: a nav pointer that could name a sub-tab of a module that
+ * is switched off is a pointer at nothing.
+ */
+export function openCronEdit(draft: {
+  serverId: string
+  line?: string
+  schedule: string
+  command: string
+  input?: string
+}): void {
+  useNav.setState({
+    operationsTab: 'jobs',
+    fleetRail: 'operations',
+    operationsJump: { kind: 'cron-edit', ...draft, nonce: nextNonce() }
+  })
+  useApp.getState().setActivity('monitor')
+}
+
+/** Open the unit installer against one server. Same shape, same sub-tab rule. */
+export function openUnitInstall(serverId: string): void {
+  useNav.setState({
+    operationsTab: 'jobs',
+    fleetRail: 'operations',
+    operationsJump: { kind: 'unit-install', serverId, nonce: nextNonce() }
+  })
   useApp.getState().setActivity('monitor')
 }
 

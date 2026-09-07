@@ -4,6 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
 import { CronPanel } from '../src/renderer/src/components/monitor/CronPanel'
+import { CronEditPanel } from '../src/renderer/src/components/operations/CronEditPanel'
 import type { CronEntry, CronSourceReport } from '../src/shared/cron'
 import { buildCronWriteCommand } from '../src/shared/cron'
 import type { Server } from '../src/renderer/src/types'
@@ -99,22 +100,56 @@ const readSchedules = async (): Promise<void> => {
   await screen.findByText(/db-01/)
 }
 
-describe('the cron panel’s edit half', () => {
+// The edit half moved to its own panel on the Operations rail when the fleet
+// destination was split by surface — Monitoring's contract is that nothing in
+// it writes to a server. The behaviours below did not change, so they are
+// asserted against the panel that now owns them rather than deleted: the point
+// of the split was to move where the write lives, not to stop checking it.
+//
+// CronEditPanel reads ONE server, so it picks a server first where the read
+// panel read the estate.
+const readServer = async (): Promise<void> => {
+  await userEvent.selectOptions(screen.getByRole('combobox'), SERVER.id)
+  await userEvent.click(screen.getByRole('button', { name: /read this server/i }))
+  // Waits for the READ to land, not for the host name — that is also the text
+  // of the option just selected, so matching on it resolves before anything has
+  // been read. Either branch will do: a readable crontab says which sources it
+  // got, an unreadable one says why there is nothing to edit.
+  await waitFor(() =>
+    expect(
+      screen.queryByTestId('cron-unreadable') ?? screen.queryByText(/on this server/i)
+    ).toBeTruthy()
+  )
+}
+
+// Reads AND waits for an edit control. Separate from readServer because some of
+// these tests assert that no edit control appears — waiting for one there would
+// fail on the very thing being asserted.
+const openEditor = async (): Promise<void> => {
+  await readServer()
+  await screen.findByTitle('Change this job')
+}
+
+describe('the crontab editor, now on the Operations rail', () => {
   it('offers nothing to edit when this build’s main process has no edit channels', async () => {
     // The precedent is the `sources` field: a main process that has not been
     // taught something sends nothing, and a button that silently does nothing
     // is worse than no button.
+    // Said out loud rather than shown as an absence of buttons. A panel that
+    // silently offers nothing is indistinguishable from one that is still
+    // loading, which is the same rule the rest of the app applies to a read
+    // that did not happen.
     stubBridge({ cron: { collect: vi.fn(async () => rows()) } })
-    render(<CronPanel servers={[SERVER]} />)
-    await readSchedules()
+    render(<CronEditPanel servers={[SERVER]} />)
+    expect(screen.getByText(/no crontab edit channels/i)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /add job/i })).toBeNull()
     expect(screen.queryByTitle('Change this job')).toBeNull()
   })
 
   it('says why a /etc/cron.d job cannot be edited instead of leaving the row bare', async () => {
     stubBridge(bridge())
-    render(<CronPanel servers={[SERVER]} />)
-    await readSchedules()
+    render(<CronEditPanel servers={[SERVER]} />)
+    await openEditor()
     const label = screen.getByText('not editable')
     expect(label.getAttribute('title')).toContain('/etc/cron.d')
   })
@@ -135,9 +170,9 @@ describe('the cron panel’s edit half', () => {
         )
       })
     )
-    render(<CronPanel servers={[SERVER]} />)
-    await readSchedules()
-    expect(screen.getByText(/was not read in full, so nothing here can be edited/i)).toBeTruthy()
+    render(<CronEditPanel servers={[SERVER]} />)
+    await readServer()
+    expect(screen.getByText(/was not read in full, so nothing here can be written to it/i)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /add job/i })).toBeNull()
     expect(screen.queryByTitle('Change this job')).toBeNull()
   })
@@ -145,8 +180,8 @@ describe('the cron panel’s edit half', () => {
   it('refuses a schedule cron would not take, before anything reaches a server', async () => {
     const stub = bridge()
     stubBridge(stub)
-    render(<CronPanel servers={[SERVER]} />)
-    await readSchedules()
+    render(<CronEditPanel servers={[SERVER]} />)
+    await openEditor()
     await userEvent.click(screen.getByTitle('Change this job'))
     const schedule = screen.getByDisplayValue('0 3 * * *')
     await userEvent.clear(schedule)
@@ -158,8 +193,8 @@ describe('the cron panel’s edit half', () => {
 
   it('shows the same plain-English reading of a schedule the list shows', async () => {
     stubBridge(bridge())
-    render(<CronPanel servers={[SERVER]} />)
-    await readSchedules()
+    render(<CronEditPanel servers={[SERVER]} />)
+    await openEditor()
     await userEvent.click(screen.getByTitle('Change this job'))
     expect(screen.getAllByText('at 03:00 every day').length).toBeGreaterThan(1)
   })
@@ -167,8 +202,8 @@ describe('the cron panel’s edit half', () => {
   it('points at the job by its line, never by its position in the list', async () => {
     const stub = bridge()
     stubBridge(stub)
-    render(<CronPanel servers={[SERVER]} />)
-    await readSchedules()
+    render(<CronEditPanel servers={[SERVER]} />)
+    await openEditor()
     await userEvent.click(screen.getByTitle('Change this job'))
     const command = screen.getByDisplayValue('/usr/bin/backup --all')
     await userEvent.clear(command)
@@ -189,8 +224,8 @@ describe('the cron panel’s edit half', () => {
   it('shows main’s own summary of the change and will not apply it unconfirmed', async () => {
     const stub = bridge()
     stubBridge(stub)
-    render(<CronPanel servers={[SERVER]} />)
-    await readSchedules()
+    render(<CronEditPanel servers={[SERVER]} />)
+    await openEditor()
     await userEvent.click(screen.getByTitle('Change this job'))
     await userEvent.click(screen.getByRole('button', { name: /review change/i }))
     await screen.findByText(/change `0 3 \* \* \* \/usr\/bin\/backup --all`/)
@@ -204,8 +239,8 @@ describe('the cron panel’s edit half', () => {
   it('sends the bytes main worked out, with an approval that carries the typed word', async () => {
     const stub = bridge()
     stubBridge(stub)
-    render(<CronPanel servers={[SERVER]} />)
-    await readSchedules()
+    render(<CronEditPanel servers={[SERVER]} />)
+    await openEditor()
     await userEvent.click(screen.getByTitle('Change this job'))
     await userEvent.click(screen.getByRole('button', { name: /review change/i }))
     await userEvent.type(await screen.findByPlaceholderText('Type RUN'), 'RUN')
@@ -226,8 +261,8 @@ describe('the cron panel’s edit half', () => {
   it('tells the operator where the previous crontab is, and re-reads the server', async () => {
     const stub = bridge()
     stubBridge(stub)
-    render(<CronPanel servers={[SERVER]} />)
-    await readSchedules()
+    render(<CronEditPanel servers={[SERVER]} />)
+    await openEditor()
     await userEvent.click(screen.getByTitle('Change this job'))
     await userEvent.click(screen.getByRole('button', { name: /review change/i }))
     await userEvent.type(await screen.findByPlaceholderText('Type RUN'), 'RUN')
@@ -247,12 +282,16 @@ describe('the cron panel’s edit half', () => {
         }))
       })
     )
-    render(<CronPanel servers={[SERVER]} />)
-    await readSchedules()
+    render(<CronEditPanel servers={[SERVER]} />)
+    await openEditor()
     await userEvent.click(screen.getByTitle('Change this job'))
     await userEvent.click(screen.getByRole('button', { name: /review change/i }))
     await screen.findByText(/could not parse, starting with `wat`/)
-    expect(screen.queryByRole('button', { name: /apply to/i })).toBeNull()
+    // The guarantee is that a refusal cannot be applied. The editor keeps its
+    // action bar as fixed chrome rather than removing the button — which is the
+    // right call for a bar that also carries the target sentence — so the check
+    // is that it is dead, not that it is gone.
+    expect((screen.getByTestId('cron-apply') as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('warns when a missing final newline is about to be added for it', async () => {
@@ -269,8 +308,8 @@ describe('the cron panel’s edit half', () => {
         }))
       })
     )
-    render(<CronPanel servers={[SERVER]} />)
-    await readSchedules()
+    render(<CronEditPanel servers={[SERVER]} />)
+    await openEditor()
     await userEvent.click(screen.getByRole('button', { name: /add job/i }))
     await userEvent.type(screen.getByPlaceholderText('/usr/bin/backup --all'), '/b')
     await userEvent.click(screen.getByRole('button', { name: /review change/i }))
@@ -290,8 +329,8 @@ describe('the cron panel’s edit half', () => {
         }))
       })
     )
-    render(<CronPanel servers={[SERVER]} />)
-    await readSchedules()
+    render(<CronEditPanel servers={[SERVER]} />)
+    await openEditor()
     await userEvent.click(screen.getByTitle('Change this job'))
     await userEvent.click(screen.getByRole('button', { name: /review change/i }))
     await userEvent.type(await screen.findByPlaceholderText('Type RUN'), 'RUN')

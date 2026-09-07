@@ -138,9 +138,12 @@
   color: var(--text-muted);
 }
 
-/* Two tabs, so each one has room to say what it will do. Monitoring's strip
-   cannot afford that at thirteen; this one can at two, and a person who reads
-   only the tab still learns the consequence before arriving at the panel. */
+/* A handful of tabs, so each one has room to say what it will do. Monitoring's
+   strip cannot afford that at thirteen; this one can at four, and a person who
+   reads only the tab still learns the consequence before arriving at the panel.
+   The ceiling is the argument rather than the number: if this rail ever needs a
+   strip with an overflow, the thing to fix is how many ways the app can change
+   a server, not the strip. */
 .ops-rail {
   display: flex;
   gap: 8px;
@@ -173,6 +176,50 @@
   color: var(--text);
 }
 .ops-rail-consequence {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+/* Sub-tabs, inside one operate card.
+   Quieter than .ops-rail on purpose: it sits INSIDE a card that a tab has
+   already been chosen to reach, and two strips shouting equally would leave a
+   person unsure which one moved them. It still carries each sub-tab's own
+   consequence, because the parent tab's line is an umbrella over three
+   different writes and an umbrella is not a warning. */
+.ops-subrail {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.ops-subrail-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 6px 8px;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-muted);
+}
+.ops-subrail-btn:hover {
+  background: var(--bg-hover);
+}
+.ops-subrail-btn.active {
+  border-color: var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+.ops-subrail-label {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+.ops-subrail-consequence {
   font-size: var(--fs-xs);
   color: var(--text-muted);
 }

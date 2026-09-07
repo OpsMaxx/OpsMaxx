@@ -75,6 +75,24 @@
   --db-mongodb: #3fb950;
   --db-redis: #db61a2;
 
+  /* Host identity in the log stream.
+     Deliberately NOT drawn from the semantic ramp. The stream used to colour
+     one host with --accent and the next with a hardcoded #d98d4b, which is
+     amber — so an ordinary log line from the second host read as a warning,
+     and a colour-blind reader could not separate the two hosts at all. Amber
+     already means alert severity, a real security finding, an action owed and
+     an absent reading; it does not also get to mean "second host".
+     Six hues spaced round the wheel, avoiding the semantic teal, amber, red
+     and green, each tuned to clear 4.5:1 on every surface in its theme. The
+     hostname itself stays the primary carrier — colour is the shortcut, never
+     the only signal. */
+  --host-blue: #5c96d0;
+  --host-violet: #b877d8;
+  --host-pink: #d570a2;
+  --host-jade: #30a47d;
+  --host-rust: #cd7d54;
+  --host-olive: #96962b;
+
   /* Workspace accent colors */
   --ws-green: #3fb950;
   --ws-purple: #a371f7;
@@ -178,6 +196,14 @@
   --db-mssql: #d61208;
   --db-mongodb: #2a7a35;
   --db-redis: #c22c7c;
+
+  /* Same hues, darkened for a light ground. */
+  --host-blue: #2b6bab;
+  --host-violet: #9a36cd;
+  --host-pink: #bb2f75;
+  --host-jade: #1e7659;
+  --host-rust: #a35129;
+  --host-olive: #6b6b1b;
 
   --shadow-sm: 0 1px 2px rgba(30, 41, 59, 0.1);
   --shadow-md: 0 8px 24px rgba(30, 41, 59, 0.12);

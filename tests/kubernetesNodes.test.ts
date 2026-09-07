@@ -135,13 +135,28 @@ describe('what a real cluster said', () => {
 
 describe('how hard you have to press', () => {
   const target = (o: Partial<Parameters<typeof planK8sCordon>[0]> = {}) =>
-    planK8sCordon({ node: 'spk8s-worker', action: 'cordon', podCount: 6, context: null, ...o })
+    planK8sCordon({
+      node: 'spk8s-worker',
+      action: 'cordon',
+      podCount: 6,
+      // A cluster with somewhere else to run. The last-schedulable-node case is
+      // covered in tests/kubernetes.test.ts; here it would only obscure what
+      // each of these is actually asserting.
+      schedulableNodes: 3,
+      context: null,
+      ...o
+    })
 
-  it('is never a typed word, in either direction', () => {
+  it('is not a typed word for a routine cordon, in either direction', () => {
     // The reason this has its own plan function instead of reusing the
     // rollout's: nothing is evicted, and the undo is the other button on the
-    // same row. A typed word here is how the typed word stops meaning anything
-    // by the time a drain asks for one.
+    // same row. A typed word for the routine case is how the typed word stops
+    // meaning anything by the time a drain asks for one.
+    //
+    // The one exception is cordoning the LAST schedulable node, which takes the
+    // whole cluster out of service — that keys on blast radius rather than on
+    // the verb, and lives in tests/kubernetes.test.ts. Every case below has
+    // somewhere else to run.
     expect(target().confirmation).toEqual({ kind: 'confirm' })
     expect(target({ action: 'uncordon' }).confirmation).toEqual({ kind: 'confirm' })
     expect(target({ node: 'prod-worker-01' }).confirmation).toEqual({ kind: 'confirm' })
