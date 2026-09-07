@@ -138,13 +138,22 @@ describe('what the fan-out paths ask of an unknown server', () => {
     expect(main).toMatch(/CRON_COLLECT_COMMAND,\s*\n\s*20_000,\s*\n\s*false\s*\n?\s*\)/)
   })
 
-  it('still prompts for docker, which reads one server the user just picked', () => {
+  it('still prompts for docker, which reads one host the user just picked', () => {
     // The distinction is the point: one host, chosen deliberately, is when a
     // fingerprint question can actually be answered.
+    //
+    // Docker reaches sshExec through `targetExec` now, which is the same
+    // function the local-target dispatch uses — so the property is asserted
+    // where it actually lives. Two halves, both required: docker must use
+    // targetExec, and targetExec must not pass allowPrompt false.
     const main = read('src/main/index.ts')
     const dockerBlock = main.slice(main.indexOf('const dockerReader'), main.indexOf('ipcMain.handle(\'docker:list\''))
-    expect(dockerBlock).toMatch(/sshExec\(resolveChainSecrets\(cfg as SshConnectConfig\), command, timeoutMs\)/)
+    expect(dockerBlock).toMatch(/exec:\s*targetExec/)
     expect(dockerBlock).not.toMatch(/timeoutMs,\s*false/)
+
+    const targetExecBlock = main.slice(main.indexOf('const targetExec ='), main.indexOf('const dockerReader'))
+    expect(targetExecBlock).toMatch(/sshExec\(resolveChainSecrets\(cfg as SshConnectConfig\), command, timeoutMs\)/)
+    expect(targetExecBlock).not.toMatch(/timeoutMs,\s*false/)
   })
 
   it('brings connection setup inside the caller timeout', () => {
