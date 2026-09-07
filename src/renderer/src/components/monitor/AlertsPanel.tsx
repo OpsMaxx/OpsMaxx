@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, BookOpen, CheckCircle2, ChevronRight, RefreshCw, SlidersHorizontal } from 'lucide-react'
 import { useApp, useWorkspaceServers } from '../../store/app'
+import { disambiguateServerNames } from '../../../../shared/serverNames'
 import { useFleetStatus } from '../../store/fleetStatus'
 import {
   LABEL,
@@ -387,10 +388,19 @@ function RunbookRecallBody({ view }: { view: RunbookView }): React.JSX.Element {
 function OutstandingCard({
   a,
   now,
+  hostLabel,
   onRunbook
 }: {
   a: ActiveAlert
   now: number
+  /**
+   * The server's name, disambiguated against the rest of the workspace.
+   *
+   * This is the card you press Acknowledge on. Two servers sharing a name
+   * produced two byte-identical cards with identical timestamps and identical
+   * buttons, and nothing on screen said which host was being silenced.
+   */
+  hostLabel: string
   onRunbook: () => void
 }): React.JSX.Element {
   const snoozedUntil = a.snoozedUntil
@@ -404,7 +414,7 @@ function OutstandingCard({
     <li className={clsx('alert-card', snoozed && 'snoozed')} data-testid="outstanding-alert">
       <div className="alert-card-head">
         <span className="alert-kind">{LABEL[a.kind]}</span>
-        <span className="alert-host">{a.serverName}</span>
+        <span className="alert-host">{hostLabel}</span>
         {reading !== '' && <span className="alert-reading">{reading}</span>}
         <span className="alert-since">since {when(a.since, now)}</span>
       </div>
@@ -471,6 +481,9 @@ export function AlertsPanel(): React.JSX.Element {
   const globalThreshold = useApp((s) => s.settings.resourceAlertThreshold)
   const perHost = useApp((s) => s.settings.resourceAlertThresholds)
   const servers = useWorkspaceServers()
+  // Only where a name actually collides — an estate of unique names is left
+  // exactly as it was. See shared/serverNames.ts.
+  const serverLabels = useMemo(() => disambiguateServerNames(servers), [servers])
   const hydrated = useApp((st) => st.hydrated)
   // What is in each threshold box while it is being typed in, which is not the
   // same thing as what is stored. See commitThreshold.
@@ -722,6 +735,7 @@ export function AlertsPanel(): React.JSX.Element {
               key={`${a.serverId}:${a.kind}`}
               a={a}
               now={now}
+              hostLabel={serverLabels.get(a.serverId) ?? a.serverName}
               onRunbook={() => openRunbookFor(a.kind, a.serverId)}
             />
           ))}
@@ -825,7 +839,7 @@ export function AlertsPanel(): React.JSX.Element {
               <option value="">Every server</option>
               {servers.map((srv) => (
                 <option key={srv.id} value={srv.id}>
-                  {srv.name}
+                  {serverLabels.get(srv.id) ?? srv.name}
                 </option>
               ))}
             </select>
@@ -873,7 +887,7 @@ export function AlertsPanel(): React.JSX.Element {
                   const override = perHost[srv.id]
                   return (
                     <tr key={srv.id}>
-                      <td className="strong">{srv.name}</td>
+                      <td className="strong">{serverLabels.get(srv.id) ?? srv.name}</td>
                       <td>
                         <input
                           className="input"
