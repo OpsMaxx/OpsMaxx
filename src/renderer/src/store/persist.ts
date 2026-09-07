@@ -1,6 +1,7 @@
 import { useApp } from './app'
 import { backfillModules, type ModuleState } from '../../../shared/modules'
 import type { Server, MonitorGroup } from '../types'
+import { hasBackupContent } from '../../../shared/backupContent'
 
 // Bump when the seed/shape changes in a way that should discard older on-disk
 // data (e.g. removing the original sample/dummy dataset).
@@ -152,7 +153,13 @@ async function hydrate(): Promise<void> {
     // Any change to stored data invalidates the last backup. Guarded on the
     // current flag so this cannot loop: writing settings re-enters with
     // backupRelevantChanged false.
-    if (backupRelevantChanged && !state.settings.backupDirty) {
+    //
+    // And guarded on there being something a backup would CONTAIN. The app
+    // creates a default workspace for itself on first run, which changes
+    // `state.workspaces` and used to mark the backup stale before the user had
+    // created anything — so a brand new install opened with a red "Backup out
+    // of date" about data that did not exist. See shared/backupContent.ts.
+    if (backupRelevantChanged && !state.settings.backupDirty && hasBackupContent(state)) {
       useApp.getState().setSettings({ backupDirty: true })
     }
 
