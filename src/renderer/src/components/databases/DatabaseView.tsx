@@ -28,6 +28,7 @@ import { classifyConnectionError, errorText } from '../../lib/connectionError'
 import { openDatabaseCreator, openDatabaseEditor } from '../../store/dbEditor'
 import { openSettings } from '../../store/nav'
 import { supportsDbOps, type DbVerdictLevel } from '../../../../shared/dbOps'
+import { formatDbAddress } from '../../../../shared/dbAddress'
 import type { DatabaseConn, DbKind, Server } from '../../types'
 import type { DbConnectConfig, DbInfo, DbQueryResult, DbTestResult } from '../../../../shared/db'
 
@@ -64,13 +65,18 @@ function cfgOf(db: DatabaseConn, servers: Server[]): DbConnectConfig {
 // The driver's own words stay on screen underneath; this is the part that says
 // which setting to go and look at.
 function connSummary(db: DatabaseConn, jump: Server | undefined, error: string | undefined): string {
+  // Through formatDbAddress for the same reason as the chrome above: an error
+  // message is a display surface, and a record carrying a whole connection
+  // string in `host` would put the password in a toast.
+  const where = formatDbAddress(db.host, db.port)
+  const host = formatDbAddress(db.host, null)
   switch (classifyConnectionError(error)) {
     case 'refused':
-      return `Nothing is listening on ${db.host}:${db.port}.`
+      return `Nothing is listening on ${where}.`
     case 'unreachable':
-      return `${db.host} did not answer in time.`
+      return `${host} did not answer in time.`
     case 'auth':
-      return `${db.host} rejected the username or password.`
+      return `${host} rejected the username or password.`
     case 'host-key':
       return `${jump ? jump.name : 'The SSH server'} presented a different host key, so the tunnel was refused.`
     case 'key-missing':
@@ -262,9 +268,13 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
           {KIND_LABEL[db.kind]}
         </span>
         <b>{db.name}</b>
-        <span className="server-meta mono">
-          {db.host}
-          {db.port ? `:${db.port}` : ''}
+        {/* Never `{db.host}` directly. A record saved by a build before the
+            connection-string parser was fixed carries the entire string —
+            password included — in `host`, and this line is the chrome that
+            printed it permanently. formatDbAddress re-parses on read, so such
+            a record heals the first time it is shown. */}
+        <span className="server-meta mono" title={formatDbAddress(db.host, db.port)}>
+          {formatDbAddress(db.host, db.port)}
         </span>
         {db.kind === 'mongodb' ? (
           <div ref={pickerRef} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
