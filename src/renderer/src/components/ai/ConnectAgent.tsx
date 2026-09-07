@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Copy, TriangleAlert, Terminal, MonitorSmartphone, SquareTerminal } from 'lucide-react'
+import { Copy, Eye, EyeOff, TriangleAlert, Terminal, MonitorSmartphone, SquareTerminal } from 'lucide-react'
 import { toast } from '../../store/toast'
 import type { ToastAction } from '../../store/toast'
 import { useApp } from '../../store/app'
 import { openAi, openSettings } from '../../store/nav'
 import type { AccessGroup } from '../../../../shared/mcp'
+import { containsBearerToken, maskBearerTokens } from '../../../../shared/tokenDisplay'
 
 type Target = 'claude-code' | 'claude-desktop' | 'codex'
 
@@ -58,6 +59,9 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
   const [busy, setBusy] = useState<Target | null>(null)
   const [ready, setReady] = useState<Ready | null>(null)
   const [error, setError] = useState<{ text: string; action?: ToastAction } | null>(null)
+  // Hidden until asked for, and re-hidden whenever a new command is issued —
+  // revealing one token must not silently reveal the next one.
+  const [revealed, setRevealed] = useState(false)
 
   useEffect(() => {
     void window.opsmaxx?.aiPolicy.listGroups().then((g) => {
@@ -81,6 +85,7 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
     setBusy(target)
     setError(null)
     setReady(null)
+    setRevealed(false)
     try {
       const config = await api.aiMcp.getConfig()
       if (!config.enabled) {
@@ -237,16 +242,44 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
       {ready?.target === 'claude-code' && ready.command && (
         <div className="settings-section" style={{ marginTop: 12 }}>
           <h3>Claude Code</h3>
+          {/* The old copy read "the token is in that command and is shown only
+              once here" — beside a Copy again button, above the full 64-character
+              token in plain selectable text. The claim was defensible (only the
+              hash is stored, so this is the only time it CAN be shown) but it
+              reads as "already hidden", and it was not. A page users screenshot
+              for their team should not need the reader to know which half of
+              that sentence to believe, so the token is now actually hidden and
+              the sentence says what is true. */}
           <div className="s-desc">
             Copied to your clipboard. Paste it into a terminal — it registers OpsMaxx with Claude
-            Code for every project. The token is in that command and is shown only once here.
+            Code for every project. OpsMaxx keeps only a hash of the token, so this is the only
+            time it can show it to you; the copy on your clipboard is the whole command, token
+            included.
           </div>
           <div className="setting-row">
             <div className="s-info">
               <div className="s-title mono" style={{ wordBreak: 'break-all' }}>
-                {ready.command}
+                {revealed ? ready.command : maskBearerTokens(ready.command)}
               </div>
             </div>
+            {containsBearerToken(ready.command) && (
+              <button
+                className="btn sm"
+                aria-pressed={revealed}
+                onClick={() => setRevealed((r) => !r)}
+                title={
+                  revealed
+                    ? 'Hide the token again'
+                    : 'Show the token — anyone who can see this screen can then read it'
+                }
+              >
+                {revealed ? <EyeOff size={13} /> : <Eye size={13} />}
+                {revealed ? 'Hide' : 'Reveal'}
+              </button>
+            )}
+            {/* Copies the real command whatever the field is showing: the
+                clipboard is the intended way to move the token, and making the
+                user reveal it first would only put it on screen for no reason. */}
             <button
               className="btn sm"
               onClick={() => {
