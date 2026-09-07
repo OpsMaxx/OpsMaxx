@@ -97,3 +97,77 @@ export function describeMaintenanceWindow(w: MaintenanceWindow, serverNames: str
     'They keep being sampled and their chips stay up; what stops is the notifications. Webhook endpoints still receive everything.'
   )
 }
+
+// ---------------------------------------------------------------------------
+// WHETHER A WINDOW IS OPEN RIGHT NOW
+// ---------------------------------------------------------------------------
+//
+// Opening a window was well built — the confirmation names every server it will
+// silence and draws a precise line between what stops and what does not. What
+// happened next was that the panel went back to looking exactly as it had
+// before. Same composer, same "2 hours", same empty reason field, same "Open a
+// window" button. The header still read "3 outstanding", the tab badge still
+// read 3, and the status bar still read "3 alerts". The only trace anywhere was
+// one line inside each alert card saying it was snoozed.
+//
+// Fleet-wide alert suppression is the single easiest way to miss a production
+// outage, and the app forgot to mention it was on. A colleague arriving at the
+// console could not tell that alerting was muted.
+//
+// This derives the answer from what is actually true — which alerts are
+// currently snoozed — rather than from a stored "a window is open" flag. A flag
+// would be a second copy of the truth: it would survive the snoozes expiring,
+// it would survive somebody unsnoozing every alert by hand, and it would then
+// claim a window was open when nothing was silenced. There is nothing to keep
+// in step here because there is only one source.
+
+/** The minimum a caller must supply per alert. */
+export interface SnoozableAlert {
+  serverId: string
+  /** Epoch ms when this alert's snooze ends, or undefined when it is not snoozed. */
+  snoozedUntil?: number
+}
+
+export interface ActiveMaintenance {
+  /** Distinct servers with at least one silenced alert. */
+  serverCount: number
+  /** Alerts currently silenced. */
+  alertCount: number
+  /** When the LAST of them wakes up — the honest "until", since the window is
+   *  not over while anything is still quiet. */
+  until: number
+  /** True when nothing outstanding is announcing. The header says so. */
+  all: boolean
+}
+
+/**
+ * What is silenced right now, or null when nothing is.
+ *
+ * `now` is a parameter so the caller's clock is the one that decides, and so a
+ * test does not have to move the system clock to describe an expiry.
+ */
+export function activeMaintenance(
+  alerts: readonly SnoozableAlert[],
+  now = Date.now()
+): ActiveMaintenance | null {
+  const silenced = alerts.filter((a) => a.snoozedUntil !== undefined && a.snoozedUntil > now)
+  if (silenced.length === 0) return null
+  return {
+    serverCount: new Set(silenced.map((a) => a.serverId)).size,
+    alertCount: silenced.length,
+    until: Math.max(...silenced.map((a) => a.snoozedUntil as number)),
+    all: silenced.length === alerts.length
+  }
+}
+
+/** "1h 47m", "12m", "under a minute" — how long is left, for the banner. */
+export function remainingText(until: number, now = Date.now()): string {
+  const ms = until - now
+  if (ms <= 0) return 'ending now'
+  const mins = Math.floor(ms / 60_000)
+  if (mins < 1) return 'under a minute'
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  if (h === 0) return `${m}m`
+  return m === 0 ? `${h}h` : `${h}h ${m}m`
+}

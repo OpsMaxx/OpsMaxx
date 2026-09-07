@@ -22,8 +22,10 @@ import {
 } from '../../store/alerts'
 import { alertCoverage, alertCoverageLines, type AlertCoverage } from '../settings/alertCoverage'
 import {
+  activeMaintenance,
   checkMaintenanceWindow,
   describeMaintenanceWindow,
+  remainingText,
   type MaintenanceWindow
 } from '../../../../shared/maintenance'
 import { openSettings } from '../../store/nav'
@@ -587,6 +589,8 @@ export function AlertsPanel(): React.JSX.Element {
     () => Object.values(active).sort((a, b) => a.since - b.since),
     [active]
   )
+  // Derived, not stored. See activeMaintenance in shared/maintenance.ts.
+  const live = useMemo(() => activeMaintenance(outstanding, now), [outstanding, now])
   const coverage = alertCoverage(samplerStatus?.running, samplingEnabled)
   const chip = COVERAGE_CHIP[coverage]
   const openRunbookFor = (kind: StoreAlertKind, hostId: string): void => {
@@ -640,6 +644,39 @@ export function AlertsPanel(): React.JSX.Element {
       <div className="alerts-section-head">
         <span className="alerts-heading">Maintenance window</span>
       </div>
+      {/* An OPEN window replaces the composer. It used to render byte-identical
+          to no window at all — same dropdown, same empty reason field, same
+          "Open a window" button — so the one piece of state on this page that
+          can lose you a production outage was the one piece of state the page
+          did not show. Derived from which alerts are actually silenced rather
+          than from a stored flag, so it cannot claim a window is open after the
+          snoozes have expired. */}
+      {live !== null ? (
+        <div className="alerts-banner alerts-banner-live" style={{ flexWrap: 'wrap', gap: 6 }}>
+          <span className="grow">
+            <b>Maintenance window active.</b>{' '}
+            {live.alertCount} alert{live.alertCount === 1 ? '' : 's'} on {live.serverCount} server
+            {live.serverCount === 1 ? '' : 's'} {live.all ? '— everything outstanding — ' : ''}
+            silenced until {new Date(live.until).toLocaleTimeString()} ({remainingText(live.until, now)}{' '}
+            left). They are still being sampled, their chips stay up, and webhook endpoints still
+            receive everything.
+          </span>
+          <button
+            className="btn"
+            onClick={() => {
+              // Every silenced alert, not only the ones a window opened: the
+              // banner says "silenced", so ending it has to mean what it says.
+              for (const a of outstanding) {
+                if (a.snoozedUntil !== undefined && a.snoozedUntil > now) {
+                  unsnoozeAlert(a.serverId, a.kind)
+                }
+              }
+            }}
+          >
+            End window now
+          </button>
+        </div>
+      ) : (
       <div className="alerts-banner" style={{ flexWrap: 'wrap', gap: 6 }}>
         {windowPlan === null ? (
           <>
@@ -704,6 +741,7 @@ export function AlertsPanel(): React.JSX.Element {
           </>
         )}
       </div>
+      )}
       {windowError && <div className="alerts-quiet-line warn">{windowError}</div>}
 
       {/* ---------------------------------------------------------------
@@ -712,6 +750,11 @@ export function AlertsPanel(): React.JSX.Element {
       <div className="alerts-section-head">
         <span className="alerts-heading">Outstanding</span>
         {outstanding.length > 0 && <span className="chip warn">{outstanding.length}</span>}
+        {/* The count alone read the same whether the fleet was announcing or
+            silent. */}
+        {live !== null && (
+          <span className="chip">{live.all ? 'all silenced' : `${live.alertCount} silenced`}</span>
+        )}
       </div>
 
       {outstanding.length === 0 ? (

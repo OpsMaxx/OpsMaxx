@@ -3355,6 +3355,14 @@ details[open] > .disclosure-head .chev {
 }
 
 /* ============================= Alert inbox ============================= */
+/* An open maintenance window. Louder than the composer it replaces, because the
+   composer's job is to be available and this one's job is to be noticed: a
+   colleague arriving at the console has to be able to tell alerting is muted. */
+.alerts-banner.alerts-banner-live {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+
 /* The Alerts tab of the Fleet Monitor.
    
    Everything here is scoped under `.alerts` on purpose. The panel used
