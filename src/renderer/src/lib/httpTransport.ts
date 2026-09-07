@@ -14,7 +14,21 @@ export interface HttpTransportOptions {
   timeoutMs?: number
 }
 
-export function createHttpTransport(read: () => HttpTransportOptions): typeof fetch {
+/**
+ * Told about every transport failure, and about the first success after one.
+ *
+ * The API client logs a rejected fetch to the console and renders nothing, so
+ * a request that fails for a ShellPilot-shaped reason — an untrusted
+ * certificate, a service that is only reachable through a server — would look
+ * to the user like a button that does nothing. ShellPilot knows exactly why it
+ * failed, so it reports it in its own chrome instead.
+ */
+export type TransportReporter = (error: string | null) => void
+
+export function createHttpTransport(
+  read: () => HttpTransportOptions,
+  report?: TransportReporter
+): typeof fetch {
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = input instanceof Request ? input : new Request(input, init)
     const { via, insecureTls, timeoutMs } = read()
@@ -38,7 +52,14 @@ export function createHttpTransport(read: () => HttpTransportOptions): typeof fe
     // The client reports a rejected fetch as a failed request, which is what a
     // transport error is. Throwing a TypeError matches what the real fetch
     // does, so its error handling needs no special case for us.
-    if (!result.ok) throw new TypeError(result.error)
+    if (!result.ok) {
+      report?.(result.error)
+      throw new TypeError(result.error)
+    }
+    // A response of any status is a working transport — a 500 is the server
+    // answering, not a failure to reach it. Clearing here is what stops a
+    // stale certificate warning outliving the setting that fixed it.
+    report?.(null)
 
     const response = new Response(result.body, {
       status: result.status,

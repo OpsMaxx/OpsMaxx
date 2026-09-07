@@ -1,7 +1,6 @@
 import net from 'node:net'
 import tls from 'node:tls'
 import http from 'node:http'
-import https from 'node:https'
 import type { Duplex } from 'node:stream'
 import {
   MAX_RESPONSE_BYTES,
@@ -178,14 +177,22 @@ export async function httpRequest(
         finish({ ok: false, error: `Timed out after ${timeoutMs}ms`, code: 'ETIMEDOUT' })
       }, timeoutMs)
 
-      const agent = target.tls ? https : http
-      const request = agent.request(
+      // `createConnection` is an AGENT option, not a request option: with
+      // `agent: false` Node builds its own agent and ignores it, opening a
+      // fresh TCP connection instead — which would silently dial the target
+      // directly even when the user asked to go through a server, and would
+      // redo TLS with verification back on. Handing the socket over on a real
+      // agent is the only way it is actually used.
+      //
+      // `http` rather than `https` even for TLS targets, because the socket is
+      // already encrypted by startTls above. `https` would try to negotiate TLS
+      // a second time, inside the tunnel it just built.
+      const agent = new http.Agent({ keepAlive: false, maxSockets: 1 })
+      agent.createConnection = () => socket
+
+      const request = http.request(
         {
           method,
-          // The transport is already connected and already the right one, so
-          // Node must not open its own. Everything about where this request
-          // goes was decided above.
-          createConnection: () => socket,
           // Still needed: they build the request line and the Host header.
           host: target.hostname,
           port: target.port,
@@ -193,7 +200,7 @@ export async function httpRequest(
           headers,
           // One request per transport. Keeping it alive would strand an SSH
           // channel for every request the user ever sent.
-          agent: false
+          agent
         },
         (res) => {
           const chunks: Buffer[] = []
