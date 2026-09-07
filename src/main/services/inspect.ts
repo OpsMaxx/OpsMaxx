@@ -119,6 +119,29 @@ export function setInspectEmitter(fn: Emitter): void {
   emit = fn
 }
 
+/** Things that have to be told when capture stops.
+ *
+ *  The local terminal registers here because a shell it started during capture
+ *  still has the proxy in its environment afterwards, and only it can say so.
+ *  A registry rather than a direct call so the dependency stays one-way — this
+ *  module knows something wants telling, not what. */
+const stopListeners: (() => void)[] = []
+export function onInspectStopped(fn: () => void): void {
+  stopListeners.push(fn)
+}
+
+function announceStopped(): void {
+  for (const fn of stopListeners) {
+    // One listener throwing must not stop the others, and must never take the
+    // teardown down with it.
+    try {
+      fn()
+    } catch {
+      /* a listener that cannot report is not a reason to fail a stop */
+    }
+  }
+}
+
 let supervisor: Supervisor | null = null
 function sup(): Supervisor {
   // Its own run root, not the VPN's. The supervisor's reaper claims every
@@ -342,6 +365,7 @@ function onFlowEnd(d: Record<string, unknown>): void {
   flow.responseSpilled = d.resSpilled === true
   flow.requestTruncated = d.reqTruncated === true
   flow.responseTruncated = d.resTruncated === true
+  flow.upgraded = d.upgraded === true
   flow.error = d.error ? String(d.error) : undefined
   emit('inspect:flow', flow)
 }
@@ -531,6 +555,9 @@ export async function stopInspect(
   }
   await current.handle.kill().catch(() => undefined)
   await rm(current.spillDir, { recursive: true, force: true }).catch(() => undefined)
+  // After the proxy is actually down, so a shell told "capture stopped" cannot
+  // then find it still answering.
+  announceStopped()
 
   if (opts.reason) stoppedReason = opts.reason
   // A silent stop is the quit path and the failed-start path, and computing a

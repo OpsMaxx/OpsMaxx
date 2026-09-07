@@ -284,6 +284,15 @@ vulnerabilities — but do open a discussion if you disagree with the tradeoff.
   machine will not carry credentials — use an encrypted backup instead.
 - **Releases are not code-signed.** Verify checksums if you need assurance
   about a download.
+- **A WebSocket's frames are not recorded.** The upgrade handshake is
+  captured in full; what follows is another protocol on the same connection
+  and is relayed untouched.
+- **gRPC and other HTTP/2-only services cannot be intercepted.** The inspector
+  speaks HTTP/1.1 to the client, which every ordinary client falls back to and
+  gRPC does not.
+- **Recorded bodies are capped in total, not just per body.** Past 512 MiB the
+  oldest recorded bodies are deleted; their flows keep their headers, sizes and
+  inline preview.
 - **Certificate pinning defeats traffic inspection.** An application that
   checks for a specific certificate cannot be intercepted by OpsMaxx, Burp,
   Fiddler or anything else short of patching that application. OpsMaxx

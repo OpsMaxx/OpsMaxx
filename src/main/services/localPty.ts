@@ -1,4 +1,5 @@
 import { homedir } from 'node:os'
+import { webContents } from 'electron'
 import type { WebContents } from 'electron'
 import type {
   LocalCloseInfo,
@@ -9,7 +10,7 @@ import type {
 } from '../../shared/local'
 import { recordLocalSession } from './localSessionLog'
 import { findShell, sanitisedEnv } from './shellDiscovery'
-import { inspectEnv, inspectInjectsSessions } from './inspect'
+import { inspectEnv, inspectInjectsSessions, onInspectStopped } from './inspect'
 
 // node-pty is loaded lazily, on the first connect, and never at module scope.
 // A machine where the native binding will not load (an unsupported libc, a
@@ -224,6 +225,11 @@ interface Session {
   // a shell running as the user, so the check is worth its three lines now
   // rather than after a popped-out terminal window makes it exploitable.
   wcId: number
+  // This shell was started while traffic capture was on, so its environment
+  // points at the inspector. Recorded because that stops being true the moment
+  // capture stops, and a shell left pointing at a closed port fails every
+  // outbound request with nothing on screen to explain why.
+  inspected: boolean
 }
 const sessions = new Map<string, Session>()
 
@@ -255,7 +261,13 @@ export async function localConnect(wc: WebContents, cfg: LocalConnectConfig): Pr
   // Held by identity, not just by key: if a localClose() deletes this entry and
   // a fresh localConnect() claims the same id, the checks below must see that
   // this attempt was superseded rather than stomping the newer session.
-  const placeholder: Session = { pty: null, ack: () => {}, disposers: [], wcId: wc.id }
+  const placeholder: Session = {
+    pty: null,
+    ack: () => {},
+    disposers: [],
+    wcId: wc.id,
+    inspected: false
+  }
   sessions.set(sessionId, placeholder)
   // Held outside the try so the failure path can name the shell when discovery
   // did resolve one and the spawn is what went wrong.
@@ -266,6 +278,11 @@ export async function localConnect(wc: WebContents, cfg: LocalConnectConfig): Pr
     // reason to silently hand the user some other shell (finding #25).
     if (!shell) throw new Error(`No shell is configured under the id "${cfg.shellId}".`)
     shellForLog = shell
+    // Captured before the spawn rather than read twice: whether this shell is
+    // pointed at the inspector and whether it is RECORDED as pointed at it
+    // must be the same fact, or a capture that stops mid-spawn leaves a shell
+    // nothing will ever warn about.
+    const inspectVars = inspectSessionEnv()
     const pty = (await loadPty()).spawn(shell.path, shell.args, {
       name: 'xterm-256color',
       cols: cfg.cols,
@@ -276,7 +293,7 @@ export async function localConnect(wc: WebContents, cfg: LocalConnectConfig): Pr
       // still wins. This is rung one of traffic inspection: no privilege, no
       // system state, and a session started while capture is off is simply
       // not intercepted.
-      env: { ...sanitisedEnv(), ...inspectSessionEnv(), ...(shell.env ?? {}) },
+      env: { ...sanitisedEnv(), ...inspectVars, ...(shell.env ?? {}) },
       useConpty: true,
       // See Phase 0 Q3. The bundled redistributable ConPTY is deliberately not
       // shipped; the one in conhost.exe is used instead.
@@ -337,7 +354,8 @@ export async function localConnect(wc: WebContents, cfg: LocalConnectConfig): Pr
       pty,
       ack: out.onAck,
       disposers: [() => dataDisp.dispose(), () => exitDisp.dispose(), () => out.dispose()],
-      wcId: wc.id
+      wcId: wc.id,
+      inspected: Object.keys(inspectVars).length > 0
     })
     status(wc, sessionId, 'ready', { pid: pty.pid, shellLabel: shell.label })
     // One line per session start, to opsmaxx-local-sessions.jsonl — never the
@@ -431,11 +449,51 @@ export function localDisposeForWebContents(wcId: number): void {
 }
 
 
-/** The traffic inspector's environment, or nothing at all.
- *
- *  A separate function rather than an inline conditional because the same
- *  question is asked by the SSH path, and two copies of "is capture on and is
- *  it the kind that injects" is one copy too many. */
+/** The traffic inspector's environment, or nothing at all. */
 function inspectSessionEnv(): Record<string, string> {
   return inspectInjectsSessions() ? inspectEnv() : {}
 }
+
+/**
+ * Tell every shell that was pointed at the inspector that it no longer is.
+ *
+ * A shell inherits its environment once, at spawn. When capture stops, every
+ * terminal started during it still has `HTTPS_PROXY` aimed at a port that has
+ * closed — so the next `curl`, `git fetch` or `npm install` fails with a
+ * connection error and nothing on screen connects that to a proxy the user
+ * turned off ten minutes ago. This is the same failure the system-proxy
+ * restore exists to prevent, on the path that does not have an OS setting to
+ * put back.
+ *
+ * The notice is written to the terminal's OUTPUT, not its input: it appears
+ * like any other program's output and cannot corrupt a half-typed command. We
+ * do not try to unset the variables ourselves — writing to a shell's stdin
+ * would run whatever the user was in the middle of typing.
+ */
+export function localNotifyInspectStopped(): void {
+  for (const [, s] of sessions) {
+    if (!s.inspected || !s.pty) continue
+    s.inspected = false
+    const wc = webContents.fromId(s.wcId)
+    if (!wc || wc.isDestroyed()) continue
+    // Dim, on its own line, and ending with a fresh line so the prompt is not
+    // left dangling mid-sentence.
+    const notice =
+      '\r\n\x1b[2m[OpsMaxx] Traffic capture stopped. This shell still points at the ' +
+      'inspector; run `unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy` or open a new ' +
+      'terminal.\x1b[0m\r\n'
+    send(wc, `local:data:${sessionIdOf(s)}`, notice)
+  }
+}
+
+/** The map is keyed by id and the value does not carry it, so this is the
+ *  reverse lookup the notice above needs. Linear, over a handful of shells. */
+function sessionIdOf(target: Session): string {
+  for (const [id, s] of sessions) if (s === target) return id
+  return ''
+}
+
+// Registered at module load rather than called from inspect.ts, so the
+// dependency stays one-way: the terminal knows about the inspector, and the
+// inspector knows only that something wants telling.
+onInspectStopped(localNotifyInspectStopped)

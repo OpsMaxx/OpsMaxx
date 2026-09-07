@@ -1258,3 +1258,110 @@ func TestClosingCancelsAnArmedPinReport(t *testing.T) {
 		t.Fatal("an inspector that has stopped must not report anything afterwards")
 	}
 }
+
+// A WebSocket handshake must close its flow at the 101, not sit "in flight"
+// for as long as the socket is open — which, on a WebSocket, is exactly as
+// long as the user is looking at it.
+func TestWebSocketUpgradeEndsTheFlowAtTheHandshake(t *testing.T) {
+	origin := newOrigin(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The handshake alone. Hijacking and speaking frames is not needed to
+		// prove the point: what matters is that a 101 with no body does not
+		// strand the flow.
+		w.Header().Set("Upgrade", "websocket")
+		w.Header().Set("Connection", "Upgrade")
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}))
+
+	ins, sink, insPool := newTestInspector(t, trusting(origin))
+	client := clientThrough(t, ins, insPool)
+
+	req, err := http.NewRequest("GET", origin.url+"/socket", nil)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	resp, err := client.Do(req)
+	if err == nil {
+		resp.Body.Close()
+	}
+
+	waitFor(t, "the upgrade flow to end", func() bool {
+		return len(sink.events("inspect.flow.end")) == 1
+	})
+	e := sink.events("inspect.flow.end")[0]
+	if int(e["status"].(float64)) != http.StatusSwitchingProtocols {
+		t.Fatalf("status %v, want 101", e["status"])
+	}
+	if e["upgraded"] != true {
+		t.Fatal("a 101 must be reported as an upgrade so the UI can say the frames are not recorded")
+	}
+	if e["error"] != nil {
+		t.Fatalf("an upgrade is not a failure, got error %v", e["error"])
+	}
+}
+
+// The capture directory must not grow without limit. Before this, the only
+// thing that ever deleted a spill file was stopping the inspector.
+func TestSpillFilesAreEvictedOnceOverBudget(t *testing.T) {
+	ins, _, _ := newTestInspector(t, nil)
+
+	// Three files, the third of which pushes the total past a budget shrunk
+	// for the test by charging sizes directly.
+	dir := ins.spillDir
+	paths := make([]string, 3)
+	for i := range paths {
+		paths[i] = filepath.Join(dir, fmt.Sprintf("f%d.response", i))
+		if err := os.WriteFile(paths[i], []byte("body"), 0o600); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	// Charge each as if it were a third of the budget plus a byte, so the
+	// third arrival must evict the first.
+	share := int64(inspectSpillBudget/2) + 1
+	ins.noteSpill(paths[0], share)
+	ins.noteSpill(paths[1], share)
+
+	if _, err := os.Stat(paths[0]); err == nil {
+		t.Fatal("evicted too early: two files inside the budget must both survive")
+	} else if !os.IsNotExist(err) {
+		// The first should be gone: two shares already exceed the budget.
+		t.Fatalf("unexpected stat error: %v", err)
+	}
+	if _, err := os.Stat(paths[1]); err != nil {
+		t.Fatal("the newest file must always survive, however large it is")
+	}
+
+	ins.mu.RLock()
+	total, count := ins.spillBytes, len(ins.spilled)
+	ins.mu.RUnlock()
+	if count != 1 || total != share {
+		t.Fatalf("ledger says %d files / %d bytes, want 1 / %d", count, total, share)
+	}
+}
+
+// A real capture must charge the budget with the size it actually wrote.
+func TestRecordedBodyIsChargedToTheBudget(t *testing.T) {
+	payload := bytes.Repeat([]byte("x"), 40*1024)
+	origin := newOrigin(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(payload)
+	}))
+	ins, sink, insPool := newTestInspector(t, trusting(origin))
+	client := clientThrough(t, ins, insPool)
+
+	resp, err := client.Get(origin.url + "/charged")
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	_, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	waitFor(t, "the flow to end", func() bool { return len(sink.events("inspect.flow.end")) == 1 })
+
+	ins.mu.RLock()
+	total, count := ins.spillBytes, len(ins.spilled)
+	ins.mu.RUnlock()
+	if count == 0 || total < int64(len(payload)) {
+		t.Fatalf("budget ledger has %d files / %d bytes, want at least one file of %d",
+			count, total, len(payload))
+	}
+}

@@ -1,4 +1,4 @@
-opsmaxx-netd 0.5.1 (492921c)
+opsmaxx-netd 0.22.3 (92d41f1)
 
 Bundled Go dependencies, from sidecar/netd/go.mod:
 
@@ -9,6 +9,7 @@ Bundled Go dependencies, from sidecar/netd/go.mod:
   github.com/bazelbuild/rules_go v0.44.2
   github.com/cenkalti/backoff v2.2.1+incompatible
   github.com/cilium/ebpf v0.12.3
+  github.com/coder/websocket v1.8.14
   github.com/containerd/cgroups v1.0.4
   github.com/containerd/console v1.0.3
   github.com/containerd/containerd v1.6.36
@@ -23,6 +24,7 @@ Bundled Go dependencies, from sidecar/netd/go.mod:
   github.com/davecgh/go-spew v1.1.1
   github.com/docker/go-events v0.0.0-20190806004212-e31b211e4f1c
   github.com/docker/go-units v0.4.0
+  github.com/elazarl/goproxy v1.9.1
   github.com/go-logr/logr v1.3.0
   github.com/godbus/dbus/v5 v5.1.0
   github.com/gofrs/flock v0.8.0
@@ -58,21 +60,23 @@ Bundled Go dependencies, from sidecar/netd/go.mod:
   github.com/opencontainers/runtime-spec v1.1.0-rc.1
   github.com/opencontainers/selinux v1.10.1
   github.com/pkg/errors v0.9.1
+  github.com/pmezard/go-difflib v1.0.0
   github.com/sirupsen/logrus v1.9.3
+  github.com/stretchr/testify v1.11.1
   github.com/vishvananda/netlink v1.1.1-0.20211118161826-650dca95af54
   github.com/vishvananda/netns v0.0.0-20210104183010-2eb08e3e575f
   go.opencensus.io v0.24.0
-  golang.org/x/crypto v0.37.0
+  golang.org/x/crypto v0.48.0
   golang.org/x/exp v0.0.0-20230725093048-515e97ebf090
-  golang.org/x/mod v0.21.0
-  golang.org/x/net v0.39.0
+  golang.org/x/mod v0.32.0
+  golang.org/x/net v0.50.0
   golang.org/x/oauth2 v0.23.0
-  golang.org/x/sync v0.8.0
-  golang.org/x/sys v0.32.0
-  golang.org/x/term v0.31.0
-  golang.org/x/text v0.24.0
+  golang.org/x/sync v0.19.0
+  golang.org/x/sys v0.41.0
+  golang.org/x/term v0.40.0
+  golang.org/x/text v0.34.0
   golang.org/x/time v0.7.0
-  golang.org/x/tools v0.26.0
+  golang.org/x/tools v0.41.0
   golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2
   golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2
   golang.zx2c4.com/wireguard v0.0.0-20260522210424-ecfc5a8d5446

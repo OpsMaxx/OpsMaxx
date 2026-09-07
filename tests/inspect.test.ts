@@ -233,3 +233,35 @@ function hasGo(): boolean {
     return false;
   }
 }
+
+describe('body paging arithmetic', () => {
+  it('counts decoded bytes, not base64 characters', async () => {
+    // The next page's offset is a BYTE offset. Neither the base64 length nor
+    // the decoded JavaScript string length is that — base64 is 4 characters
+    // per 3 bytes minus padding, and a decoded string counts UTF-16 units. An
+    // over-count here silently skips bytes on every page after the first.
+    const { base64Bytes } = await import(
+      '../src/renderer/src/components/inspect/InspectFlowDetail'
+    )
+    for (const raw of ['', 'a', 'ab', 'abc', 'abcd', 'hello world', '£€ non-ascii ✓']) {
+      const bytes = Buffer.from(raw, 'utf8')
+      expect(base64Bytes(bytes.toString('base64')), raw).toBe(bytes.length)
+    }
+    // Binary, where the decoded-string-length shortcut is most wrong.
+    const binary = Buffer.from([0, 255, 128, 10, 0, 7])
+    expect(base64Bytes(binary.toString('base64'))).toBe(binary.length)
+  })
+
+  it('tolerates whitespace and returns 0 for nothing', () => {
+    expect(base64BytesSync('')).toBe(0)
+  })
+})
+
+// Imported lazily above because the component module pulls in React; this
+// small duplicate keeps the trivial case out of that import.
+function base64BytesSync(b64: string): number {
+  const clean = b64.replace(/[^A-Za-z0-9+/=]/g, '')
+  if (clean.length === 0) return 0
+  const padding = clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0
+  return (clean.length / 4) * 3 - padding
+}
