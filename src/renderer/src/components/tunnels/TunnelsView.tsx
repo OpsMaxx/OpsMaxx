@@ -1,10 +1,12 @@
-import { Globe, Network, Share2 } from 'lucide-react'
+import { Globe, Network, Radar, Share2 } from 'lucide-react'
 import { useApp, useWorkspaceTunnels, useWorkspaceVpns } from '../../store/app'
 import type { TunnelsTab } from '../../store/app'
 import { clsx } from '../../lib/format'
 import { TunnelManager } from './TunnelManager'
 import { VpnManager } from '../vpn/VpnManager'
 import { FrpManager } from '../vpn/FrpManager'
+import { InspectView } from '../inspect/InspectView'
+import { useInspect } from '../inspect/useInspect'
 
 /**
  * SSH tunnels, VPN and frp reverse proxies, behind one activity icon.
@@ -24,6 +26,7 @@ export function TunnelsView(): React.JSX.Element {
   const setTab = useApp((s) => s.setTunnelsTab)
   const tunnels = useWorkspaceTunnels()
   const vpns = useWorkspaceVpns()
+  const flowCount = useInspect((s) => s.flows.length)
 
   const tabs: { id: TunnelsTab; label: string; icon: React.ReactNode; count: number }[] = [
     { id: 'tunnels', label: 'Tunnels', icon: <Network size={14} />, count: tunnels.length },
@@ -38,7 +41,13 @@ export function TunnelsView(): React.JSX.Element {
       label: 'Reverse proxies',
       icon: <Share2 size={14} />,
       count: vpns.filter((p) => p.spec.kind === 'frp').length
-    }
+    },
+    // The odd one out, and deliberately here: every other tab makes a remote
+    // thing reachable, and this one shows what leaves. It belongs beside them
+    // because it is the same question — what is this machine talking to — and
+    // a fifth activity icon for one panel is how an icon bar stops being
+    // scannable. Its count is live flows, which is 0 until capture is on.
+    { id: 'inspect', label: 'Traffic', icon: <Radar size={14} />, count: flowCount }
   ]
 
   return (
@@ -60,6 +69,7 @@ export function TunnelsView(): React.JSX.Element {
       {tab === 'tunnels' && <TunnelManager />}
       {tab === 'vpn' && <VpnManager />}
       {tab === 'frp' && <FrpManager />}
+      {tab === 'inspect' && <InspectView />}
     </div>
   )
 }

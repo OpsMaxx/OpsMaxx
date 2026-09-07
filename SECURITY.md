@@ -208,6 +208,69 @@ binding being loaded at all. Neither is a security boundary against someone at
 your keyboard — they have a terminal either way — they are there so a machine can
 run OpsMaxx without the feature.
 
+## The traffic inspector's certificate authority
+
+Reading HTTPS means terminating it, and terminating it means holding a
+certificate authority this machine trusts. That authority is the most dangerous
+key OpsMaxx handles: whoever has it can impersonate any website to this
+computer. It is treated accordingly.
+
+**The private key never leaves the two places it has to be.** It is generated
+inside the `opsmaxx-netd` sidecar, sealed with the operating system's secure
+store through `safeStorage`, and handed back to a running sidecar on stdin —
+never on the command line, never in an environment variable, never to the
+renderer, and never to disk unsealed. If the OS keychain is unavailable the key
+is kept in memory for that session only and a new authority is minted next
+launch; OpsMaxx will not write it in plaintext as a fallback. Generation
+deliberately bypasses the process supervisor's log ring, for the same reason
+WireGuard key generation does: the answer to the request is a private key.
+
+**It is only trusted while you say so.** Nothing is installed at first run.
+Installing into the system trust store is one explicit action behind one
+administrator prompt, it installs nothing permanent that can later become root,
+and there is a matching removal for every store OpsMaxx can write to. The
+certificate's SHA-256 fingerprint is shown in the panel in the same colon-separated
+form Keychain Access and `certmgr.msc` use, so you can confirm the certificate
+your machine trusts is the one the running proxy signs with.
+
+**The authority is constrained.** It is a P-256 root with a one-year lifetime,
+`pathLenConstraint: 0` so it cannot issue intermediates, and the certificates it
+mints last thirty days and carry a single host name each.
+
+**Upstream verification stays on.** OpsMaxx validates the real server's
+certificate against the system trust store on the outbound half of every
+intercepted connection, so interception does not silently downgrade a
+connection that was previously authenticated. Extra roots can be added for
+internal services. Verification can be turned off, but only deliberately, and
+the panel and the log both say so for as long as it is off.
+
+**Some traffic is never intercepted.** Certificate revocation endpoints,
+platform update services and OpsMaxx's own update endpoints are excluded by
+default and tunnelled untouched. Standing in the middle of an OS update while
+holding a key that can forge its signature is not a debugging feature.
+
+**Captured traffic is not shown to AI agents.** The MCP bridge and the
+`opsmaxx` CLI have no access to flows. Request and response bodies routinely
+carry bearer tokens and session cookies, and the agent gateway's promise that it
+never sees key material is worth more than the convenience.
+
+**What a backup contains.** An encrypted backup includes the sealed CA key
+along with every other stored credential, re-encrypted under your backup
+passphrase. Restoring on another machine restores an authority that machine may
+still trust. Use `Forget certificate` in the traffic panel before exporting a
+backup you intend to share.
+
+## What the system proxy setting changes
+
+Capturing "this whole machine" changes your operating system's proxy settings
+and puts them back afterwards. The previous settings are written to disk
+**before** anything is changed, and the restore runs on stop, on quit, and again
+on the next launch if OpsMaxx died in between. If a restore fails the record
+is kept rather than discarded, so it is retried rather than forgotten. This
+ordering exists because the failure it prevents — a machine left pointing at a
+port nothing is listening on, with no working internet and no obvious cause —
+is the worst thing this feature could do to someone.
+
 ## Known limitations
 
 These are design decisions, not bugs. Please do not report them as
@@ -221,3 +284,12 @@ vulnerabilities — but do open a discussion if you disagree with the tradeoff.
   machine will not carry credentials — use an encrypted backup instead.
 - **Releases are not code-signed.** Verify checksums if you need assurance
   about a download.
+- **Certificate pinning defeats traffic inspection.** An application that
+  checks for a specific certificate cannot be intercepted by OpsMaxx, Burp,
+  Fiddler or anything else short of patching that application. OpsMaxx
+  detects it, names the host, and offers to stop intercepting it. It does not
+  ship a bypass.
+- **Per-process capture is not offered on any platform.** Choosing "intercept
+  only this application" needs a notarised system extension on macOS, an eBPF
+  redirector on Linux and a kernel driver on Windows. Capture is per-session or
+  machine-wide instead.

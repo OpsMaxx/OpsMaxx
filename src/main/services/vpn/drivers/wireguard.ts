@@ -1772,8 +1772,13 @@ const ONE_SHOT_ID = '1'
  * "the parent is gone", which is exactly right: it answers what is in flight
  * and exits on its own, so nothing is left behind even if the kill below never
  * lands.
+ *
+ * Exported because the traffic inspector mints its certificate authority the
+ * same way and for the same reason: the answer to `inspect.ca.generate` is a
+ * root CA private key, and the supervisor's log ring is the one place it must
+ * never go.
  */
-async function askNetdOnce<T>(method: string, params?: unknown): Promise<T> {
+export async function askNetdOnce<T>(method: string, params?: unknown): Promise<T> {
   const engine = await resolveNetd()
   if (engine.available === false) {
     throw new VpnError('binary-missing', engine.reason)

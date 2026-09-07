@@ -19,6 +19,14 @@ import type {
   AccessRunResult,
   HostAccess
 } from '../shared/access'
+import type {
+  InspectBodyPage,
+  InspectCaInfo,
+  InspectFlow,
+  InspectPinnedHost,
+  InspectStartOptions,
+  InspectStatus
+} from '../shared/inspect'
 import type { HostFacts } from '../shared/hostFacts'
 import type { HostPosture } from '../shared/posture'
 import type { FleetSampleEvent, FleetSamplerConfig, FleetSamplerStatus } from '../shared/fleet'
@@ -1123,6 +1131,66 @@ const api = {
     },
     replyPrompt: (id: string, value: string | null): void =>
       ipcRenderer.send('vpn:prompt-reply', id, value)
+  },
+  /**
+   * The HTTPS traffic inspector.
+   *
+   * Bodies are the one thing this bridge does NOT hand over wholesale: a flow
+   * carries a capped base64 preview and a byte count, and `body()` fetches a
+   * page of the rest on demand. A renderer that holds every response it has
+   * ever seen works for ten minutes and then takes the window with it.
+   */
+  inspect: {
+    status: (): Promise<InspectStatus> => ipcRenderer.invoke('inspect:status'),
+    start: (opts?: InspectStartOptions): Promise<InspectStatus> =>
+      ipcRenderer.invoke('inspect:start', opts),
+    stop: (): Promise<InspectStatus> => ipcRenderer.invoke('inspect:stop'),
+    flows: (limit?: number): Promise<InspectFlow[]> => ipcRenderer.invoke('inspect:flows', limit),
+    clear: (): Promise<void> => ipcRenderer.invoke('inspect:clear'),
+    body: (
+      flowId: string,
+      side: 'request' | 'response',
+      offset?: number,
+      limit?: number
+    ): Promise<InspectBodyPage> => ipcRenderer.invoke('inspect:body', flowId, side, offset, limit),
+    setPassthrough: (hosts: string[]): Promise<InspectStatus> =>
+      ipcRenderer.invoke('inspect:setPassthrough', hosts),
+    allowPinned: (host: string): Promise<InspectStatus> =>
+      ipcRenderer.invoke('inspect:allowPinned', host),
+    ca: (): Promise<InspectCaInfo> => ipcRenderer.invoke('inspect:ca'),
+    regenerateCa: (): Promise<InspectCaInfo> => ipcRenderer.invoke('inspect:regenerateCa'),
+    forgetCa: (): Promise<void> => ipcRenderer.invoke('inspect:forgetCa'),
+    installTrust: (
+      store: 'system' | 'nss'
+    ): Promise<{ ok: boolean; declined?: boolean; message?: string }> =>
+      ipcRenderer.invoke('inspect:installTrust', store),
+    removeTrust: (
+      store: 'system' | 'nss'
+    ): Promise<{ ok: boolean; declined?: boolean; message?: string }> =>
+      ipcRenderer.invoke('inspect:removeTrust', store),
+    /** The environment a shell needs to be intercepted, for the "copy for my
+     *  own terminal" button. Sessions OpsMaxx starts get it applied. */
+    env: (): Promise<Record<string, string>> => ipcRenderer.invoke('inspect:env'),
+    onFlow: (cb: (f: InspectFlow) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, f: InspectFlow): void => cb(f)
+      ipcRenderer.on('inspect:flow', h)
+      return () => ipcRenderer.removeListener('inspect:flow', h)
+    },
+    onStatus: (cb: (s: InspectStatus) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, s: InspectStatus): void => cb(s)
+      ipcRenderer.on('inspect:status', h)
+      return () => ipcRenderer.removeListener('inspect:status', h)
+    },
+    onPinned: (cb: (p: InspectPinnedHost) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, p: InspectPinnedHost): void => cb(p)
+      ipcRenderer.on('inspect:pinned', h)
+      return () => ipcRenderer.removeListener('inspect:pinned', h)
+    },
+    onCleared: (cb: () => void): (() => void) => {
+      const h = (): void => cb()
+      ipcRenderer.on('inspect:cleared', h)
+      return () => ipcRenderer.removeListener('inspect:cleared', h)
+    }
   },
   /**
    * The vault as NAMES, for a picker.

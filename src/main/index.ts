@@ -205,6 +205,26 @@ import {
 import { vpnCommitImport, vpnDeleteSecrets, vpnImport } from './services/vpn/import'
 import { wireguardDriver } from './services/vpn/drivers/wireguard'
 import { mintKeypair, storeKeypair } from './services/vpn/keys'
+import {
+  allowPinnedHost,
+  clearInspectFlows,
+  disposeInspect,
+  forgetInspectCa,
+  inspectBody,
+  inspectCa,
+  inspectEnv,
+  inspectFlows,
+  inspectRegenerateCa,
+  inspectStatus,
+  installInspectTrust,
+  recoverInspect,
+  removeInspectTrust,
+  setInspectEmitter,
+  setInspectPassthrough,
+  startInspect,
+  stopInspect
+} from './services/inspect'
+import type { InspectStartOptions } from '../shared/inspect'
 import { storeFrpToken } from './services/vpn/frpSetup'
 import { toVpnResult } from './services/vpn/errors'
 import { withVpnTransport, withVpnTransportDb } from './services/vpn/transport'
@@ -441,6 +461,14 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
+
+  // The inspector pushes flows as they happen rather than being polled: a
+  // traffic list that updates on a timer is a traffic list that is always
+  // slightly wrong. Guarded on `isDestroyed` because a flow can land between
+  // the window closing and the sidecar stopping.
+  setInspectEmitter((channel, payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
+  })
 
   // F5 would reload and destroy every open terminal. Ctrl+R is deliberately
   // NOT blocked here: preventDefault stops the key reaching the page at all,
@@ -3535,6 +3563,30 @@ ipcMain.handle('tunnel:stop', (_e, id: string) => tunnelStop(id))
 ipcMain.handle('tunnel:list', () => tunnelList())
 
 // ---- VPN ----
+// -------------------------------------------------------------- inspector
+//
+// The traffic inspector's bridge. `inspect:env` returns the environment for
+// the user's own shell; it is not secret — the proxy is on loopback and the
+// certificate is public — so it needs no gate beyond being in the app.
+ipcMain.handle('inspect:status', () => inspectStatus())
+ipcMain.handle('inspect:start', (_e, opts?: InspectStartOptions) => startInspect(opts))
+ipcMain.handle('inspect:stop', () => stopInspect())
+ipcMain.handle('inspect:flows', (_e, limit?: number) => inspectFlows(limit))
+ipcMain.handle('inspect:clear', () => clearInspectFlows())
+ipcMain.handle(
+  'inspect:body',
+  (_e, flowId: string, side: 'request' | 'response', offset?: number, limit?: number) =>
+    inspectBody(flowId, side, offset, limit)
+)
+ipcMain.handle('inspect:setPassthrough', (_e, hosts: string[]) => setInspectPassthrough(hosts))
+ipcMain.handle('inspect:allowPinned', (_e, host: string) => allowPinnedHost(host))
+ipcMain.handle('inspect:ca', () => inspectCa())
+ipcMain.handle('inspect:regenerateCa', () => inspectRegenerateCa())
+ipcMain.handle('inspect:forgetCa', () => forgetInspectCa())
+ipcMain.handle('inspect:installTrust', (_e, store: 'system' | 'nss') => installInspectTrust(store))
+ipcMain.handle('inspect:removeTrust', (_e, store: 'system' | 'nss') => removeInspectTrust(store))
+ipcMain.handle('inspect:env', () => inspectEnv())
+
 ipcMain.handle('vpn:list', () => vpnList())
 ipcMain.handle('vpn:profiles', () => vpnProfiles())
 ipcMain.handle('vpn:start', (e, id: string) => {
@@ -3946,6 +3998,11 @@ app.on('before-quit', (e) => {
   void Promise.race([
     Promise.all([
       vpnDisposeAll().catch(() => undefined),
+      // Same window, same reason: the inspector's sidecar goes down gracefully
+      // AND this machine's proxy settings go back to what they were. Quitting
+      // with the system pointed at a port that is about to stop answering is
+      // the one way this feature can leave someone with no internet.
+      disposeInspect().catch(() => undefined),
       // Supervised children are ours, so they go down with us rather than
       // being left for the next launch's reaper to find. Here rather than in
       // the synchronous block above, for the reason vpnDisposeAll is here: the
@@ -4069,6 +4126,12 @@ syncDriftWatches(loadData())
   // arbitrary local code execution that should not run before a human has
   // looked at the screen. See the auto-start refusal in shared/processes.ts.
   void processService.reapOrphans().catch((e) => console.error('[processes] reap failed:', e))
+
+  // If the previous run died between pointing this machine's proxy settings at
+  // the inspector and putting them back, the user is offline right now and
+  // does not know why. This is the launch half of that repair; the other two
+  // are on stop and on quit.
+  void recoverInspect().catch((e) => console.error('[inspect] recovery failed:', e))
 
   void vpnInit()
     .catch((e) => console.error('[vpn] init failed:', e))

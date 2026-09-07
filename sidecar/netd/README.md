@@ -220,6 +220,44 @@ keys in the UI from the model, never scraped from a log. Rejected key material
 is never quoted back in an error message either, which is why `json.Unmarshal`
 errors are replaced rather than passed through: they quote the offending value.
 
+## Traffic inspection (`inspect.*`)
+
+The HTTPS inspector — `inspect.go`. It is the one part of this binary that
+interprets the bytes it carries rather than only moving them, which is why it
+lives behind its own listener, its own lifecycle and its own caps, and never on
+the tunnel path.
+
+| Method | What it does |
+|---|---|
+| `inspect.ca.generate` | Mints a P-256 certificate authority and returns it. **The response carries a root CA private key**, so callers use the throwaway-sidecar path (`askNetdOnce`), never the supervised one — the supervisor captures child output into a log ring. |
+| `inspect.start` | Binds the proxy. Takes the CA pair on stdin, a passthrough list, a body cap and a capture directory. Optionally dials upstream through a live tunnel (`viaTunnelId`). |
+| `inspect.stop` / `inspect.status` | Idempotent teardown; current listener, flow counts and passthrough size. |
+| `inspect.passthrough` | Replaces the never-intercept list at runtime. Wholesale, not incremental: the parent holds the authoritative list. |
+| `inspect.body` | A bounded page out of one spilled body. The flow id is validated as a path segment, not merely trimmed. |
+
+Events: `inspect.flow.begin` and `inspect.flow.end` (exactly one end per
+begin, including on failure and on teardown), `inspect.pinned` (a host that
+rejected our certificate three times, said once per host per run) and
+`inspect.stopped`.
+
+Four things are deliberate and easy to undo by accident:
+
+1. **Flow payloads bypass `redact()`.** Every other outbound string goes
+   through it. A flow's headers and body are the product — redacting an
+   `Authorization` header is the opposite of what the user asked for, and
+   `redact()` matches on shape, so it would also mangle any 44-character base64
+   value in a body. Log lines and error strings from `inspect.go` still redact.
+2. **Bodies are bounded before anything else.** Capping the recording never
+   caps the transfer: bytes past the cap still reach the client, they are just
+   no longer recorded.
+3. **Upstream verification is on.** Terminating TLS makes this process the only
+   thing checking the far side is who it claims to be. `upstreamCAsPem` adds
+   roots; `insecureUpstream` removes the check and logs a warning every start.
+4. **`h2` is not advertised to the client.** goproxy reads HTTP/1.1 off the
+   hijacked connection; offering h2 would have the client speak a framing
+   nothing here parses. Clients downgrade on their own, which is what every
+   intercepting proxy does.
+
 ## System mode (`--privileged`)
 
 ```
@@ -478,6 +516,7 @@ repository.
 | `golang.org/x/{crypto,net,sys,time}` | BSD-3-Clause |
 | `github.com/google/btree` | Apache-2.0 |
 | `golang.zx2c4.com/wintun` | MIT |
+| `github.com/elazarl/goproxy` (traffic inspector) | BSD-3-Clause |
 
 All permissive; bundling the binary carries no obligation beyond preserving
 the copyright and permission notices. `scripts/build-sidecar.sh` writes the

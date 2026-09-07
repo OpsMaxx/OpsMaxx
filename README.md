@@ -98,6 +98,7 @@ sends you to a second application the moment you need to query a table or look u
 | **WireGuard** | Userspace WireGuard with **no administrator rights** — the tunnel appears as a local SOCKS5 proxy and forwards, and your routing table is never touched |
 | **OpenVPN** | Bundled on macOS and Linux, driven over its management interface, with one-time codes and split tunnelling |
 | **frp** | Publish a local port through an frp server, with a per-proxy confirmation naming exactly what becomes reachable |
+| **Traffic inspector** | Read the HTTP and HTTPS a machine is actually making — a Burp- or Fiddler-style proxy with one-click certificate install, terminals and SSH sessions routed automatically, and a host that pins its certificate named rather than silently missing |
 | **SSH & databases over VPN** | Point a server or a database at a VPN profile and it is brought up, waited for, and torn down with the session |
 | **Databases** | PostgreSQL, MySQL, SQL Server, MongoDB and Redis — with an interactive shell per engine |
 | **Databases over SSH** | Reach a database that is only routable from a bastion |
