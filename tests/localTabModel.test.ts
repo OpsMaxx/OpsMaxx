@@ -231,13 +231,34 @@ describe('deleteWorkspace', () => {
 describe('local tab views', () => {
   beforeEach(reset)
 
-  it('refuses to move a local tab off the terminal view', () => {
-    // Monitor and Files are SSH-only. Switching a local tab to 'files' used to
-    // be reachable from the open-files shortcut and blanked the pane with no
-    // way back.
+  /**
+   * Files is allowed now; it was not when this guard was written.
+   *
+   * The original reason was that switching a local tab to 'files' blanked the
+   * pane with no way back, because SftpView took a non-optional Server. It
+   * takes `server?: Server` now, and main serves this machine's half from
+   * node:fs behind the same channel — so the view renders, and the guard's
+   * premise is gone.
+   */
+  it('lets a local tab show its files', () => {
     useApp.getState().openLocal(zsh)
     const id = useApp.getState().tabs[0].id
     useApp.getState().setTabView(id, 'files')
+    expect(useApp.getState().tabs[0].view).toBe('files')
+  })
+
+  /**
+   * Monitor is still refused, and refused HERE rather than only hidden in the
+   * viewbar. LocalTab.view has no 'monitor' member, and MonitorView and
+   * MonitorStrip both take a non-optional Server — a write that got past the
+   * UI would put a tab in a shape nothing can render. The collector behind
+   * them reads /proc and Linux `df` semantics too, so off Linux it would draw
+   * numbers that look right and are not.
+   */
+  it('refuses to move a local tab to the monitor view', () => {
+    useApp.getState().openLocal(zsh)
+    const id = useApp.getState().tabs[0].id
+    useApp.getState().setTabView(id, 'monitor')
     expect(useApp.getState().tabs[0].view).toBe('terminal')
   })
 

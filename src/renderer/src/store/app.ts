@@ -1088,9 +1088,17 @@ export const useApp = create<AppState>((set, get) => ({
   // rather than a state the UI has no way to render. It used to be reachable
   // from the open-files shortcut, which would have blanked the pane with no
   // way back.
+  // A local tab switches between Terminal and Files. Monitor is refused HERE,
+  // not only hidden in the viewbar: LocalTab.view has no 'monitor' member, and
+  // the monitor views take a non-optional Server, so a state write that got
+  // past the UI would put a tab in a shape nothing can render.
   setTabView: (id, view) =>
     set((s) => ({
-      tabs: s.tabs.map((t) => (t.id === id && t.kind === 'ssh' ? { ...t, view } : t))
+      tabs: s.tabs.map((t) => {
+        if (t.id !== id) return t
+        if (t.kind === 'ssh') return { ...t, view }
+        return view === 'monitor' ? t : { ...t, view }
+      })
     })),
 
   setTabSession: (tabId, sessionId) =>
