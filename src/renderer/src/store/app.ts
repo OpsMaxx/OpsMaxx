@@ -19,6 +19,7 @@ import type {
   VpnSpec,
   VpnStatus,
   Tunnel,
+  ApiCollection,
   DatabaseConn
 } from '../types'
 import type { LocalShell } from '../../../shared/local'
@@ -293,6 +294,7 @@ interface AppState {
   vpnStatuses: Record<string, VpnStatus>
   tunnels: Tunnel[]
   databases: DatabaseConn[]
+  apiCollections: ApiCollection[]
 
   // navigation
   activeWorkspaceId: string
@@ -301,6 +303,8 @@ interface AppState {
   // `activity` itself and for the same reason: persist.ts saves the data a
   // backup needs, and where someone happened to be looking is not that.
   tunnelsTab: TunnelsTab
+  // Which API the HTTP client is showing. Session-only, like `activity`.
+  activeApiCollectionId: string | null
   sidebarWidth: number
   sidebarCollapsed: boolean
 
@@ -358,6 +362,7 @@ interface AppState {
   workspaceFolders: (kind?: FolderKind) => Folder[]
   workspaceVpns: () => VpnProfile[]
   workspaceTunnels: () => Tunnel[]
+  workspaceApiCollections: () => ApiCollection[]
   // Non-system groups in display order, then the Ungrouped bucket last.
   workspaceMonitorGroups: () => MonitorGroup[]
   activeTab: () => Tab | null
@@ -460,6 +465,10 @@ interface AppState {
   syncMonitorLayout: () => void
   addTunnel: (input: Omit<Tunnel, 'id' | 'workspaceId' | 'status'>) => string
   deleteTunnel: (id: string) => void
+  addApiCollection: (input: Omit<ApiCollection, 'id' | 'workspaceId'>) => string
+  updateApiCollection: (id: string, patch: Partial<Omit<ApiCollection, 'id' | 'workspaceId'>>) => void
+  deleteApiCollection: (id: string) => void
+  setActiveApiCollection: (id: string | null) => void
   setTunnelStatus: (id: string, status: Tunnel['status']) => void
   setVpnProfiles: (profiles: VpnProfile[]) => void
   upsertVpnProfile: (profile: VpnProfile) => void
@@ -475,6 +484,7 @@ interface AppState {
         | 'vpns'
         | 'tunnels'
         | 'databases'
+        | 'apiCollections'
         | 'settings'
         | 'activeWorkspaceId'
         | 'monitorGroups'
@@ -701,12 +711,14 @@ export const useApp = create<AppState>((set, get) => ({
   vpnStatuses: {},
   tunnels: [],
   databases: [],
+  apiCollections: [],
 
   activeDatabaseId: null,
   openDatabaseIds: [],
   activeWorkspaceId: DEFAULT_WORKSPACE.id,
   activity: 'connections',
   tunnelsTab: 'tunnels',
+  activeApiCollectionId: null,
   sidebarWidth: 280,
   sidebarCollapsed: false,
 
@@ -746,6 +758,8 @@ export const useApp = create<AppState>((set, get) => ({
     get().folders.filter((f) => f.workspaceId === get().activeId() && (f.kind ?? 'server') === kind),
   workspaceVpns: () => get().vpns.filter((v) => v.workspaceId === get().activeId()),
   workspaceTunnels: () => get().tunnels.filter((t) => t.workspaceId === get().activeId()),
+  workspaceApiCollections: () =>
+    get().apiCollections.filter((c) => c.workspaceId === get().activeId()),
   workspaceMonitorGroups: () => {
     const mine = get().monitorGroups.filter((g) => g.workspaceId === get().activeId())
     // Ungrouped is where unplaced cards land, so it belongs at the bottom of
@@ -1274,6 +1288,7 @@ export const useApp = create<AppState>((set, get) => ({
         databases: detachVpn(s.databases.filter((d) => d.workspaceId !== id), doomedVpns),
         vpns: s.vpns.filter((v) => v.workspaceId !== id),
         tunnels: s.tunnels.filter((t) => t.workspaceId !== id),
+        apiCollections: s.apiCollections.filter((c) => c.workspaceId !== id),
         tabs: keptTabs,
         // Asked of the surviving list rather than of the doomed one: the old
         // form only cleared the active tab when a *server* took it, so an
@@ -1429,6 +1444,30 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   deleteTunnel: (id) => set((s) => ({ tunnels: s.tunnels.filter((t) => t.id !== id) })),
+
+  addApiCollection: (input) => {
+    const id = uid('api')
+    set((s) => ({
+      apiCollections: [...s.apiCollections, { ...input, id, workspaceId: s.activeWorkspaceId }],
+      activeApiCollectionId: id
+    }))
+    return id
+  },
+
+  updateApiCollection: (id, patch) =>
+    set((s) => ({
+      apiCollections: s.apiCollections.map((c) => (c.id === id ? { ...c, ...patch } : c))
+    })),
+
+  // Clearing the selection when the open collection is the one deleted
+  // avoids the view holding an id nothing answers to.
+  deleteApiCollection: (id) =>
+    set((s) => ({
+      apiCollections: s.apiCollections.filter((c) => c.id !== id),
+      activeApiCollectionId: s.activeApiCollectionId === id ? null : s.activeApiCollectionId
+    })),
+
+  setActiveApiCollection: (id) => set({ activeApiCollectionId: id }),
 
   // A live tunnel re-emits its status on every connection open and close, so
   // this is called constantly with a status that has not moved. Writing it
@@ -1634,6 +1673,15 @@ export const useApp = create<AppState>((set, get) => ({
       servers: (data.servers ?? s.servers).map((sv) => ({
         ...sv,
         vpnProfileId: sv.vpnProfileId ?? null
+      })),
+      // Saves written before the HTTP client have no key at all; normalising
+      // here keeps "null means direct" and "false means verify" the only
+      // representations the view ever reads.
+      apiCollections: (data.apiCollections ?? s.apiCollections ?? []).map((c) => ({
+        ...c,
+        specUrl: c.specUrl ?? null,
+        viaServerId: c.viaServerId ?? null,
+        insecureTls: c.insecureTls === true
       })),
       databases: (data.databases ?? s.databases).map((d) => ({
         ...d,

@@ -19,6 +19,8 @@ interface Persisted {
   vpns: unknown
   tunnels: unknown
   databases: unknown
+  // Absent in saves written before the HTTP client existed.
+  apiCollections?: unknown
   settings: unknown
 }
 
@@ -131,7 +133,8 @@ async function hydrate(): Promise<void> {
       serversRefChanged ||
       state.vpns !== prev.vpns ||
       state.tunnels !== prev.tunnels ||
-      state.databases !== prev.databases
+      state.databases !== prev.databases ||
+      state.apiCollections !== prev.apiCollections
 
     const serversContentChanged =
       serversRefChanged &&
@@ -148,7 +151,8 @@ async function hydrate(): Promise<void> {
       serversContentChanged ||
       state.vpns !== prev.vpns ||
       state.tunnels !== prev.tunnels ||
-      state.databases !== prev.databases
+      state.databases !== prev.databases ||
+      state.apiCollections !== prev.apiCollections
 
     // Any change to stored data invalidates the last backup. Guarded on the
     // current flag so this cannot loop: writing settings re-enters with
@@ -188,6 +192,7 @@ function save(): Promise<void> {
       vpns: s.vpns,
       tunnels: s.tunnels,
       databases: s.databases,
+      apiCollections: s.apiCollections,
       settings: s.settings
     }) ?? Promise.resolve()
   )
