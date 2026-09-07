@@ -13,6 +13,7 @@ function copy(text: string): void {
 export function AiSecurity(): React.JSX.Element {
   const [config, setConfig] = useState<McpGlobalConfig | null>(null)
   const [status, setStatus] = useState<{ running: boolean; port: number | null }>({ running: false, port: null })
+  const [liveCount, setLiveCount] = useState<{ sessions: number; pending: number } | null>(null)
   // "Pick a different port" is the fix for almost every start failure, so the
   // message hands the user the field instead of naming it.
   const portRef = useRef<HTMLInputElement>(null)
@@ -20,6 +21,25 @@ export function AiSecurity(): React.JSX.Element {
   const load = (): void => {
     void window.shellpilot?.aiMcp.getConfig().then((c) => c && setConfig(c))
     void window.shellpilot?.aiMcp.status().then((s) => s && setStatus(s))
+    // Read, not assumed. `null` stays null when either call fails, and the
+    // confirmation then says it could not tell rather than printing a zero
+    // nobody measured — a "0 sessions" on an emergency stop is the one number
+    // that must never be a guess.
+    void Promise.all([
+      window.shellpilot?.aiMcp.listSessions(),
+      window.shellpilot?.aiMcp.listApprovals()
+    ])
+      .then(([sessions, approvals]) => {
+        if (!sessions || !approvals) {
+          setLiveCount(null)
+          return
+        }
+        setLiveCount({
+          sessions: sessions.filter((x) => !x.revoked).length,
+          pending: approvals.filter((a) => a.status === 'pending').length
+        })
+      })
+      .catch(() => setLiveCount(null))
   }
   useEffect(load, [])
 
@@ -44,6 +64,25 @@ export function AiSecurity(): React.JSX.Element {
   }
 
   const killAll = async (): Promise<void> => {
+    // Confirmed, and the confirmation NAMES what is about to be killed.
+    //
+    // This is an unconfirmed one-click revoke-everything sitting directly below
+    // the local-port field, so it was reachable by an accidental click while
+    // adjusting the setting above it. It is also the emergency stop, which
+    // means the confirmation has to stay cheap: a typed word here would be a
+    // toll on the one action somebody presses when something is going wrong.
+    //
+    // The count is what makes it honest rather than a speed bump. "Stop all AI
+    // access?" tells the reader nothing they did not already know; "revoke 1
+    // session and deny 0 pending requests" tells them whether they are stopping
+    // an incident or clicking a button that does nothing.
+    const live = liveCount
+    const ok = window.confirm(
+      live === null
+        ? 'Stop all AI access?\n\nShellPilot could not read how many sessions are active, so it cannot say what this will revoke. It will revoke every one of them.'
+        : `Stop all AI access?\n\nThis revokes ${live.sessions} active session(s) and denies ${live.pending} waiting request(s). Agents will have to be reconnected by hand.`
+    )
+    if (!ok) return
     const result = await window.shellpilot?.aiMcp.killAllSessions()
     load()
     if (!result) {
@@ -134,6 +173,16 @@ export function AiSecurity(): React.JSX.Element {
           <div className="s-title">🚨 Stop all AI access</div>
           <div className="s-desc">
             Immediately revokes every active session and denies every pending approval request.
+            {/* Says what it would actually do, before it is pressed. An
+                emergency stop that cannot tell you whether anything is running
+                is one you press to find out. */}
+            {liveCount !== null && (
+              <>
+                {' '}
+                Right now that is {liveCount.sessions} session(s) and {liveCount.pending} waiting
+                request(s).
+              </>
+            )}
           </div>
         </div>
         <button className="btn danger" onClick={killAll}>
