@@ -9,12 +9,78 @@ import { useVault } from '../../store/vault'
 import { VpnTransportSelect } from '../vpn/VpnTransportSelect'
 import type { AuthMethod, Hop, UUID } from '../../types'
 
-const AUTH: { id: AuthMethod; label: string; icon: React.ReactNode }[] = [
+// `unavailable` says why rather than hiding the option.
+//
+// Certificate was offered as an equal fourth choice and revealed no fields at
+// all when picked — no certificate file, no signed key, no CA hint. That was
+// the visible half. The real defect is in the transport: `asAuth` in
+// lib/transport.ts maps every value that is not password or agent to 'key', so
+// choosing Certificate did not merely do nothing, it silently connected as
+// PRIVATE KEY authentication using whatever key path happened to be set. A
+// profile saved that way cannot work and does not say why, and the user's
+// choice was reinterpreted without telling them.
+//
+// Disabled with a reason rather than deleted: the concept exists, OpsMaxx
+// reads certificate state elsewhere (shared/access.ts), and an option that
+// vanishes teaches a user the product cannot do something when the truth is
+// that this build cannot.
+const AUTH: {
+  id: AuthMethod
+  label: string
+  icon: React.ReactNode
+  unavailable?: string
+}[] = [
   { id: 'password', label: 'Password', icon: <Lock size={16} /> },
   { id: 'key', label: 'Private Key', icon: <KeyRound size={16} /> },
   { id: 'agent', label: 'SSH Agent', icon: <UserCheck size={16} /> },
-  { id: 'certificate', label: 'Certificate', icon: <FileBadge size={16} /> }
+  {
+    id: 'certificate',
+    label: 'Certificate',
+    icon: <FileBadge size={16} />,
+    unavailable:
+      'Certificate authentication is not implemented in this build. It is disabled rather than hidden because a connection saved with it would silently fall back to private-key authentication.'
+  }
 ]
+
+/**
+ * What is still missing before this profile could connect.
+ *
+ * Returns a field id and a sentence, or null when the form is complete. The
+ * button used to be gated on `name && host` alone, so a profile could be saved
+ * with an auth method it had no credential for — and the user met that as the
+ * undifferentiated "Connection failed" much later, on a different screen.
+ *
+ * Only ever reports the FIRST thing missing: a form that lights up six errors
+ * at once is a form nobody reads.
+ */
+function missingField(f: {
+  name: string
+  host: string
+  auth: AuthMethod
+  keyPath: string
+  password: string
+  usingVault: boolean
+  editing: boolean
+}): { field: string; why: string } | null {
+  if (!f.name.trim()) return { field: 'name', why: 'Give this connection a name.' }
+  if (!f.host.trim()) return { field: 'host', why: 'Enter the server address.' }
+  if (f.auth === 'certificate') {
+    return { field: 'auth', why: 'Pick an authentication method this build supports.' }
+  }
+  // The vault entry supplies the credential, so the field below is empty on
+  // purpose and must not be reported as missing.
+  if (f.usingVault) return null
+  // Editing keeps whatever was stored: a blank box means "unchanged", not
+  // "cleared", which is what its own placeholder says.
+  if (f.editing) return null
+  if (f.auth === 'key' && !f.keyPath.trim()) {
+    return { field: 'keyPath', why: 'Choose the private key to authenticate with.' }
+  }
+  if (f.auth === 'password' && !f.password) {
+    return { field: 'password', why: 'Enter the password, or switch to a key or the agent.' }
+  }
+  return null
+}
 
 export function AddServerModal(): React.JSX.Element {
   const setModal = useApp((s) => s.setModal)
@@ -60,7 +126,16 @@ export function AddServerModal(): React.JSX.Element {
   )
   const usingVault = vaultUnlocked && vaultEntryId !== ''
 
-  const valid = name.trim() && host.trim()
+  const missing = missingField({
+    name,
+    host,
+    auth,
+    keyPath,
+    password,
+    usingVault,
+    editing: !!editId
+  })
+  const valid = missing === null
 
   const pickKey = async (): Promise<void> => {
     const p = await window.opsmaxx?.dialog.openKey()
@@ -148,6 +223,12 @@ export function AddServerModal(): React.JSX.Element {
           <button className="btn" onClick={() => setModal(null)}>
             Cancel
           </button>
+          {/* Says what is missing rather than only going grey. A disabled
+              button with no explanation is a form the user has to guess at,
+              and the previous gate (`name && host`) let a profile be saved
+              with an auth method it had no credential for — met much later as
+              an undifferentiated "Connection failed" on a different screen. */}
+          {missing && <span className="field-hint danger">{missing.why}</span>}
           <button className="btn primary" disabled={!valid} onClick={save}>
             {editId ? 'Save Changes' : 'Add Server'}
           </button>
@@ -189,6 +270,8 @@ export function AddServerModal(): React.JSX.Element {
             <button
               key={a.id}
               className={clsx('radio-card', auth === a.id && 'active')}
+              disabled={a.unavailable !== undefined && auth !== a.id}
+              title={a.unavailable}
               onClick={() => setAuth(a.id)}
             >
               {a.icon}
@@ -196,6 +279,14 @@ export function AddServerModal(): React.JSX.Element {
             </button>
           ))}
         </div>
+        {/* Shown when the value is SELECTED, not only when hovered — an
+            existing profile saved with it opens here, and a tooltip is not a
+            way to tell somebody their connection cannot work. The card stays
+            enabled in that case so the state is visible rather than a mystery
+            selection nothing accounts for. */}
+        {AUTH.find((a) => a.id === auth)?.unavailable && (
+          <span className="field-hint danger">{AUTH.find((a) => a.id === auth)!.unavailable}</span>
+        )}
       </div>
 
       {auth !== 'agent' && vaultUnlocked && usableEntries.length > 0 && (

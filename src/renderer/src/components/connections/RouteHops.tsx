@@ -127,37 +127,50 @@ export function RouteHops({ hops, onChange, excludeServerId }: Props): React.JSX
               ))}
           </select>
 
-          <div className="input-group">
-            <input
-              className="input"
-              style={{ flex: '0 0 30%' }}
-              placeholder="label"
-              value={h.label}
-              onChange={(e) => patch(h.id, 'label', e.target.value)}
-            />
-            <input
-              className="input"
-              placeholder="host"
-              value={h.host}
-              disabled={!!h.serverId}
-              onChange={(e) => patch(h.id, 'host', e.target.value)}
-            />
-            <input
-              className="input"
-              style={{ flex: '0 0 76px' }}
-              placeholder="port"
-              value={h.port}
-              disabled={!!h.serverId}
-              onChange={(e) => patch(h.id, 'port', Number(e.target.value) || 22)}
-            />
-            <input
-              className="input"
-              style={{ flex: '0 0 24%' }}
-              placeholder="user"
-              value={h.username}
-              disabled={!!h.serverId}
-              onChange={(e) => patch(h.id, 'username', e.target.value)}
-            />
+          {/* Labelled, where this was four unlabelled boxes under a dropdown.
+              A placeholder is not a label: it disappears the moment the field
+              has a value, so the row a user comes back to is four anonymous
+              strings, and there is nothing for a screen reader to announce
+              either. The main host row a few lines up has always had real
+              labels — this row simply never got them. */}
+          <div className="input-group" style={{ alignItems: 'flex-end' }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: '0 0 30%' }}>
+              <span className="field-label">Label</span>
+              <input
+                className="input"
+                placeholder="bastion"
+                value={h.label}
+                onChange={(e) => patch(h.id, 'label', e.target.value)}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+              <span className="field-label">Server / IP</span>
+              <input
+                className="input"
+                placeholder="10.20.0.10"
+                value={h.host}
+                disabled={!!h.serverId}
+                onChange={(e) => patch(h.id, 'host', e.target.value)}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: '0 0 76px' }}>
+              <span className="field-label">Port</span>
+              <input
+                className="input"
+                value={h.port}
+                disabled={!!h.serverId}
+                onChange={(e) => patch(h.id, 'port', Number(e.target.value) || 22)}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: '0 0 24%' }}>
+              <span className="field-label">Username</span>
+              <input
+                className="input"
+                value={h.username}
+                disabled={!!h.serverId}
+                onChange={(e) => patch(h.id, 'username', e.target.value)}
+              />
+            </label>
           </div>
 
           <div className="input-group">
