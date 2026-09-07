@@ -3,6 +3,7 @@ import { Plus, Trash2, Save, SlidersHorizontal, FolderTree, ChevronRight, Triang
 import { toast } from '../../store/toast'
 import { useNav } from '../../store/nav'
 import { AI_CAPABILITIES } from '../../../../shared/mcp'
+import { clsx } from '../../lib/format'
 import { summariseAccessGroup, summariseFilePolicies } from './accessGroupSummary'
 import type { AccessGroupSummary } from './accessGroupSummary'
 import type { AccessGroup, AiCapability, FilePathRule, PermissionValue, PolicyAssignment } from '../../../../shared/mcp'
@@ -43,6 +44,80 @@ function PermSegment({
 // what a person meets first, and the sentence on it is generated from this
 // group's own capabilities — edit the grid and the card stops describing a
 // preset and starts describing what the group now actually does.
+// The question the page exists to answer, which the cards alone could not.
+//
+// Five cards of prose, each opening with a near-identical sentence, with the
+// differences buried mid-paragraph as single clauses — "asks you first before
+// writing files" against "can write files without asking". Answering "which of
+// these should I pick?" meant reading a few hundred words and diffing them
+// mentally, and the naming does not help: `Sudo Access` sounds like the most
+// dangerous option while `Full Access` sits above it and grants MORE while
+// asking for LESS.
+//
+// Derived from the live capabilities for the same reason the cards are: a user
+// who edits a group until it can write must see that here too. A hand-written
+// comparison would keep describing the presets after somebody changed them,
+// which is worse than having no comparison at all.
+//
+// Rendered as `allow` / `ask` / `deny` verbatim rather than as ticks and
+// crosses: `ask` is the value that matters most on this screen and it has no
+// natural glyph, and a two-symbol scheme would have to round it to one of the
+// other two.
+const PERM_TONE: Record<PermissionValue, string> = {
+  allow: 'danger',
+  ask: 'warn',
+  deny: ''
+}
+
+function TierMatrix({ groups }: { groups: AccessGroup[] }): React.JSX.Element | null {
+  // Two is the minimum at which a comparison says anything.
+  if (groups.length < 2) return null
+  return (
+    <details className="settings-section" style={{ marginTop: 12 }}>
+      <summary className="disclosure-head">
+        Compare all {groups.length} groups
+        <span className="s-desc" style={{ marginLeft: 8 }}>
+          What each one allows, asks about, or refuses — read from the groups themselves.
+        </span>
+      </summary>
+      <div className="inv-scroll">
+        <table className="table inv-table">
+          <thead>
+            <tr>
+              <th>Capability</th>
+              {groups.map((g) => (
+                <th key={g.id}>{g.name}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {AI_CAPABILITIES.map((c) => (
+              <tr key={c.id}>
+                {/* The detail, not just the label: "Server metrics" understated
+                    its grant once already, and a comparison that repeats the
+                    label teaches nothing the grid does not. */}
+                <td title={c.detail}>{c.label}</td>
+                {groups.map((g) => {
+                  // An absent capability evaluates as DENY everywhere else in
+                  // the app, so it is shown as deny here rather than blank —
+                  // an empty cell reads as "not applicable", which is a
+                  // different claim and not the one the policy makes.
+                  const v = g.capabilities[c.id] ?? 'deny'
+                  return (
+                    <td key={g.id}>
+                      <span className={clsx('chip', PERM_TONE[v])}>{v}</span>
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  )
+}
+
 function GroupCard({
   group,
   summary,
@@ -594,6 +669,8 @@ export function AiAccessGroups(): React.JSX.Element {
           />
         ))}
       </div>
+
+      <TierMatrix groups={groups} />
 
       {pendingId && draft && (
         // Switching used to reset the draft from `groups` with no check at all.
