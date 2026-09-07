@@ -23,6 +23,7 @@ import type {
   InspectBodyPage,
   InspectCaInfo,
   InspectFlow,
+  InspectOpaqueTunnel,
   InspectPinnedHost,
   InspectStartOptions,
   InspectStatus
@@ -1185,6 +1186,11 @@ const api = {
       const h = (_e: IpcRendererEvent, p: InspectPinnedHost): void => cb(p)
       ipcRenderer.on('inspect:pinned', h)
       return () => ipcRenderer.removeListener('inspect:pinned', h)
+    },
+    onOpaque: (cb: (o: InspectOpaqueTunnel) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, o: InspectOpaqueTunnel): void => cb(o)
+      ipcRenderer.on('inspect:opaque', h)
+      return () => ipcRenderer.removeListener('inspect:opaque', h)
     },
     onCleared: (cb: () => void): (() => void) => {
       const h = (): void => cb()

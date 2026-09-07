@@ -91,6 +91,17 @@ export interface InspectPinnedHost {
   at: number
 }
 
+/** A CONNECT tunnel that carried neither TLS nor HTTP — a mail client, an SSH
+ *  hop. Interception BREAKS these rather than merely failing to read them, so
+ *  it is reported with the same prominence as a pinning host and has the same
+ *  remedy: let it through untouched. */
+export interface InspectOpaqueTunnel {
+  /** host:port as the client asked for it. The port is the useful half — it is
+   *  what says this was IMAP rather than a website. */
+  host: string
+  at: number
+}
+
 export interface InspectCaInfo {
   /** PEM. Public by definition — this is the certificate the user installs. */
   certPem: string
@@ -142,6 +153,7 @@ export interface InspectStatus {
   /** Hosts excluded from interception, in the order they are applied. */
   passthrough: string[]
   pinned: InspectPinnedHost[]
+  opaque: InspectOpaqueTunnel[]
   flows: number
   captureBodies: boolean
   maxBodyBytes: number

@@ -237,8 +237,17 @@ the tunnel path.
 
 Events: `inspect.flow.begin` and `inspect.flow.end` (exactly one end per
 begin, including on failure and on teardown), `inspect.pinned` (a host that
-rejected our certificate three times, said once per host per run) and
-`inspect.stopped`.
+rejected our certificate, said once per host per run), `inspect.opaque` (a
+CONNECT that carried neither TLS nor HTTP) and `inspect.stopped`.
+
+**Where an interception attempt is counted matters.** goproxy peeks the first
+byte off a CONNECT tunnel: a TLS record type means it asks us for a
+certificate, anything else means it feeds the stream to an HTTP parser. So the
+strike that leads to `inspect.pinned` is counted in `tlsConfigFor`, which only
+runs on the TLS path — counting it at CONNECT time reported every mail client
+and SSH-over-CONNECT hop as a host that pins its certificate. The same peek is
+why those tunnels are *broken* by interception rather than merely unreadable,
+which is what `inspect.opaque` exists to say.
 
 Four things are deliberate and easy to undo by accident:
 

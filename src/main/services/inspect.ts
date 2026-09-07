@@ -6,6 +6,7 @@ import type {
   InspectCaInfo,
   InspectEnv,
   InspectFlow,
+  InspectOpaqueTunnel,
   InspectPinnedHost,
   InspectSourceKind,
   InspectStartOptions,
@@ -106,6 +107,7 @@ let run: Run | null = null
 let ca: InspectCaInfo | null = null
 let passthrough: string[] = [...INSPECT_DEFAULT_PASSTHROUGH]
 let pinned: InspectPinnedHost[] = []
+let opaque: InspectOpaqueTunnel[] = []
 let stoppedReason: string | undefined
 const flows: InspectFlow[] = []
 const flowIndex = new Map<string, InspectFlow>()
@@ -309,6 +311,9 @@ function onLine(text: string): void {
     case 'inspect.pinned':
       onPinned(msg.data ?? {})
       return
+    case 'inspect.opaque':
+      onOpaque(msg.data ?? {})
+      return
     case 'inspect.stopped':
       stoppedReason = String(msg.data?.reason ?? 'The traffic inspector stopped.')
       void stopInspect({ reason: stoppedReason })
@@ -380,6 +385,14 @@ function onPinned(d: Record<string, unknown>): void {
   }
   pinned.push(entry)
   emit('inspect:pinned', entry)
+}
+
+function onOpaque(d: Record<string, unknown>): void {
+  const host = String(d.host ?? '')
+  if (!host || opaque.some((o) => o.host === host)) return
+  const entry: InspectOpaqueTunnel = { host, at: Number(d.at ?? Date.now()) }
+  opaque.push(entry)
+  emit('inspect:opaque', entry)
 }
 
 // ------------------------------------------------------------------ lifecycle
@@ -579,6 +592,7 @@ async function bareStatus(): Promise<InspectStatus> {
     trust: [],
     passthrough: [...passthrough],
     pinned: [...pinned],
+    opaque: [...opaque],
     flows: flows.length,
     captureBodies: true,
     maxBodyBytes: 8 * 1024 * 1024,
@@ -622,6 +636,7 @@ export async function inspectStatus(extra: { restarting?: boolean } = {}): Promi
     trust,
     passthrough: [...passthrough],
     pinned: [...pinned],
+    opaque: [...opaque],
     flows: flows.length,
     captureBodies: current?.captureBodies ?? true,
     maxBodyBytes: current?.maxBodyBytes ?? 8 * 1024 * 1024,
@@ -657,6 +672,9 @@ export async function setInspectPassthrough(hosts: string[]): Promise<InspectSta
     // A host that is no longer intercepted is no longer failing to be
     // intercepted, so its pinning warning goes with it.
     pinned = pinned.filter((p) => !passthrough.includes(p.host))
+    // Same for an opaque tunnel: the host is now let through untouched, so
+    // the warning that it was being broken no longer describes anything.
+    opaque = opaque.filter((o) => !passthrough.includes(hostWithoutPort(o.host)))
   }
   const status = await inspectStatus()
   emit('inspect:status', status)
@@ -665,7 +683,26 @@ export async function setInspectPassthrough(hosts: string[]): Promise<InspectSta
 
 /** The remedy offered when a host is reported as pinning. */
 export async function allowPinnedHost(host: string): Promise<InspectStatus> {
-  return setInspectPassthrough([...passthrough, host])
+  // Accepts either form: a pinning host arrives bare, an opaque tunnel arrives
+  // as host:port, and a passthrough rule matches on the host alone.
+  return setInspectPassthrough([...passthrough, hostWithoutPort(host)])
+}
+
+/** `host:port` down to `host`, which is what a passthrough rule matches on.
+ *  IPv6 literals arrive bracketed, and splitting those on the last colon is
+ *  the one way to get this wrong. */
+export function hostWithoutPort(hostport: string): string {
+  const h = hostport.trim()
+  if (h.startsWith('[')) {
+    const close = h.indexOf(']')
+    return close > 0 ? h.slice(1, close) : h.slice(1)
+  }
+  // More than one colon and no brackets is a bare IPv6 address, which cannot
+  // carry a port. Splitting on the last colon there would return half an
+  // address, and a passthrough rule built from it would match nothing.
+  if (h.split(':').length > 2) return h
+  const colon = h.lastIndexOf(':')
+  return colon > 0 ? h.slice(0, colon) : h
 }
 
 function normaliseHosts(hosts: readonly string[]): string[] {
