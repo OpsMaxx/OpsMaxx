@@ -80,6 +80,40 @@ const withClock = async <T>(p: Promise<T>): Promise<T> => {
 // single jump bets that the unlink won that race; when it loses, the delay is
 // consumed against nothing and the relaunch never comes. Step and re-check
 // instead — the same fix tests/vpnSupervisor.test.ts documents.
+// Waits for a condition that may need EITHER a microtask hop or a fake timer.
+//
+// The two helpers above each cover one half and neither covers both, which is
+// what made this file flaky on CI while passing everywhere else:
+//
+//   `flush()` is a fixed 30 turns. Whether 30 is enough is a property of how
+//   many hops the transition happens to take, which nothing in the test bounds.
+//   That is a race by construction, not by bad luck — it simply had slack on a
+//   fast machine and none on a loaded 2-core runner.
+//
+//   `waitFor()` pumps microtasks and never advances the clock. If any step of
+//   the transition is behind a timer it cannot succeed at all; it can only burn
+//   its wall-clock budget and report "condition never became true", which is
+//   exactly what CI printed for the restart-in-flight test. Reaching `running`
+//   after a restart crosses the backoff timer AND the supervisor's readiness
+//   race, so it needs both kinds of pumping.
+//
+// Bounded by wall clock rather than by a step count, for the reason `waitFor`
+// already gives: `Date` is faked here, so a Date deadline would never advance
+// and a miss would hang instead of failing.
+const settleUntil = async (fn: () => boolean, budgetMs = 10_000): Promise<void> => {
+  const deadline = performance.now() + budgetMs
+  for (;;) {
+    if (fn()) return
+    if (performance.now() > deadline) break
+    // Microtasks first: if the transition needs no timer, this settles it
+    // without moving a clock the assertions may care about.
+    await new Promise((resolve) => setImmediate(resolve))
+    if (fn()) return
+    await vi.advanceTimersByTimeAsync(250)
+  }
+  throw new Error('condition never became true while settling')
+}
+
 const advanceUntil = async (fn: () => boolean, stepMs = 1_000, steps = 80): Promise<void> => {
   for (let i = 0; i < steps; i++) {
     if (fn()) return
@@ -296,7 +330,11 @@ describe('a crash loop trips the detector rather than restarting forever', () =>
       expect(spawns.length, `restart ${i + 1}`).toBe(n + 1)
     }
     spawns[6].child.exit(1)
-    await flush()
+    // Settled on the CONDITION rather than on a fixed turn count. The length
+    // assertion below still guards the other direction: if the detector had not
+    // fired, settling would let the backoff timer run and an eighth spawn would
+    // appear, which is the failure this test exists to catch.
+    await settleUntil(() => service.status()[0].state === 'crash-looped')
 
     // Seven attempts, and then it gave up — not an eighth.
     expect(spawns).toHaveLength(7)
@@ -320,8 +358,11 @@ describe('a crash loop trips the detector rather than restarting forever', () =>
     expect(service.status()[0].state).not.toBe('failed')
 
     await vi.advanceTimersByTimeAsync(1_000)
-    await waitFor(() => spawns.length === 2)
-    await waitFor(() => service.status()[0].state === 'running')
+    await settleUntil(() => spawns.length === 2)
+    // `waitFor` could never have reached this: getting to `running` after a
+    // restart goes through the supervisor's readiness race, and a
+    // microtask-only spin cannot advance a timer.
+    await settleUntil(() => service.status()[0].state === 'running')
   })
 
   it('keeps the log ring bounded while it loops', async () => {
