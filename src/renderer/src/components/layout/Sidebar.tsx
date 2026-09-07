@@ -91,7 +91,11 @@ export function Sidebar(): React.JSX.Element | null {
               <Network size={15} />
             </button>
           )}
-          {activity === 'monitor' && (
+          {/* Monitoring only. A monitor group is a Monitoring layout, and the
+              two rails share one ActivityView — so gating on `activity` alone
+              put "New monitor group" in the header of the Operations pane,
+              where it makes nothing a person on that rail could want. */}
+          {activity === 'monitor' && fleetRail === 'monitor' && (
             <button
               className="icon-btn"
               title="New monitor group"
