@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Plus, Copy, Ban, Octagon, Trash2, TriangleAlert } from 'lucide-react'
+import { Plus, Copy, Eye, EyeOff, Ban, Octagon, Trash2, TriangleAlert } from 'lucide-react'
 import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
 import { useApp } from '../../store/app'
 import { openAi } from '../../store/nav'
 import { SessionAccess } from './SessionAccess'
 import type { McpAgentSession, AccessGroup } from '../../../../shared/mcp'
+import { maskToken } from '../../../../shared/tokenDisplay'
 
 interface WorkspaceOpt {
   id: string
@@ -35,6 +36,9 @@ function CreateSessionForm({
   const [groupId, setGroupId] = useState(groups[0]?.id ?? '')
   const [ttl, setTtl] = useState(60)
   const [issued, setIssued] = useState<{ token: string; port: number | null } | null>(null)
+  // Re-hidden whenever a new session is issued, so revealing one token does not
+  // silently reveal the next.
+  const [revealed, setRevealed] = useState(false)
 
   // workspaces/groups arrive async (an IPC round-trip after this form has
   // already mounted with empty props), so the useState initializers above
@@ -79,6 +83,7 @@ function CreateSessionForm({
       })
       if (!result) throw new Error('ShellPilot returned no session')
       const status = await window.shellpilot?.aiMcp.status()
+      setRevealed(false)
       setIssued({ token: result.token, port: status?.running ? status.port : null })
       onCreated()
     } catch (err) {
@@ -119,8 +124,9 @@ function CreateSessionForm({
           </div>
         )}
         <div className="s-desc">
-          This token is shown only once. ShellPilot stores only its hash — if you lose it, revoke
-          the session and create a new one. Copy the block below into an MCP client that speaks
+          ShellPilot keeps only a hash of this token, so this is the only time it can show it to
+          you — if you lose it, revoke the session and create a new one. It is hidden below
+          until you ask for it. Copy the block below into an MCP client that speaks
           Streamable HTTP (e.g. Gemini CLI). <b>Claude Desktop cannot use it</b> — it ignores{' '}
           <code className="mono">url</code> and <code className="mono">headers</code> and only
           launches stdio servers; use <b>Overview → Connect Claude Desktop</b>, which writes the
@@ -145,11 +151,23 @@ function CreateSessionForm({
             </button>
           </div>
         )}
+        {/* Hidden by default. This page is one users screenshot to hand to a
+            colleague, and the token grants whatever its access group grants on
+            every server in the workspace. Copy does not need it visible. */}
         <div className="setting-row">
           <div className="s-info">
-            <div className="s-title mono">{issued.token}</div>
-            <div className="s-desc">Raw token, if you need it on its own.</div>
+            <div className="s-title mono" style={{ wordBreak: 'break-all' }}>
+              {revealed ? issued.token : maskToken(issued.token)}
+            </div>
+            <div className="s-desc">
+              Raw token, if you need it on its own. Reveal only puts it on this screen — anyone who
+              can see the screen can then read it.
+            </div>
           </div>
+          <button className="btn sm" aria-pressed={revealed} onClick={() => setRevealed((r) => !r)}>
+            {revealed ? <EyeOff size={13} /> : <Eye size={13} />}
+            {revealed ? 'Hide' : 'Reveal'}
+          </button>
           <button
             className="btn sm"
             onClick={() => {
