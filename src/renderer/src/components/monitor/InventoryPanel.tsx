@@ -16,6 +16,7 @@ import {
   type SortDirection
 } from '../../lib/inventory'
 import type { Server } from '../../types'
+import { NoteWhy, PanelShell } from './PanelShell'
 
 // The estate inventory — roadmap item C, renderer half.
 //
@@ -189,19 +190,34 @@ export function InventoryPanel({
     }
   }
 
+  const checkNow = (primary: boolean): React.JSX.Element => (
+    <button
+      className={primary ? 'btn primary sm' : 'btn ghost sm'}
+      disabled={busy || servers.length === 0}
+      onClick={() => void check()}
+      title="Sweeps the estate now and re-reads what has already been collected. Facts are re-collected at most once an hour per server, so a server checked recently keeps the figures it has."
+    >
+      <RefreshCw size={13} className={clsx(busy && 'spin')} /> Check now
+    </button>
+  )
+
   return (
-    <div className="bc-panel">
-      <div className="panel-head">
-        <span className="panel-head-icon">
-          <Boxes size={14} />
-        </span>
-        <h2 className="ui-section-title">Inventory</h2>
-        <p className="ui-note panel-head-purpose">
+    // A 30px solid-accent Check now was previously the loudest pixel on a
+    // screen whose entire content is findings, which put "read it again" above
+    // "read it". It is a 28px ghost now, and it goes solid only in the one
+    // state where refreshing IS the task — see below.
+    <PanelShell
+      icon={<Boxes size={14} />}
+      title="Inventory"
+      about={
+        <p>
           What each server is running and what it is owed — distribution, kernel, pending and
           security updates. Read from package caches as they are; nothing is installed or
           refreshed.
         </p>
-        <div className="panel-head-actions">
+      }
+      actions={
+        <>
           {summary.withFacts > 0 && (
             <button
               className="btn ghost sm"
@@ -211,17 +227,15 @@ export function InventoryPanel({
               {hardware ? 'Hide hardware' : 'Show hardware'}
             </button>
           )}
-          <button
-            className="btn primary"
-            disabled={busy || servers.length === 0}
-            onClick={() => void check()}
-            title="Sweeps the estate now and re-reads what has already been collected. Facts are re-collected at most once an hour per server, so a server checked recently keeps the figures it has."
-          >
-            <RefreshCw size={13} className={clsx(busy && 'spin')} /> Check now
-          </button>
-        </div>
-      </div>
-
+          {/* Primary ONLY while the table is empty — at that point Check now
+              is the panel's single action and the accent belongs to it. Once
+              there are rows, the rows are the point and refresh goes quiet.
+              One button, not two: an empty state that grew its own copy of the
+              header control put two identically-named buttons on the screen. */}
+          {checkNow(summary.withFacts === 0)}
+        </>
+      }
+    >
       {summary.withFacts === 0 ? (
         // The paragraph is unchanged. What changed is that it is now framed as
         // an empty state rather than set in the same size and colour as the
@@ -305,9 +319,15 @@ export function InventoryPanel({
               {summary.securityUnanswerable} server
               {summary.securityUnanswerable === 1 ? '' : 's'} can never report a security update
               count, so {summary.securityUnanswerable === 1 ? 'it is' : 'they are'} not in the{' '}
-              {summary.securityTotal} above. Arch and Alpine have no security channel at all, and
-              dnf cannot answer where the repositories publish no updateinfo. Treat those servers as
-              unknown, never as zero.
+              {summary.securityTotal} above. Treat{' '}
+              {summary.securityUnanswerable === 1 ? 'it' : 'them'} as unknown, never as zero.
+              {/* The sentence above is the finding and does not fold. What folds
+                  is which distributions and why — true, useful once, and 38px
+                  of a table's window every time it is not being read. */}
+              <NoteWhy summary="Why they cannot answer">
+                Arch and Alpine have no security channel at all, and dnf cannot answer where the
+                repositories publish no updateinfo.
+              </NoteWhy>
             </div>
           )}
 
@@ -324,10 +344,12 @@ export function InventoryPanel({
               <ShieldQuestion size={12} /> {summary.securityUnknown} server
               {summary.securityUnknown === 1 ? '' : 's'} did not answer the security question, so{' '}
               {summary.securityUnknown === 1 ? 'it is' : 'they are'} not in the{' '}
-              {summary.securityTotal} above. These are gaps that can close: a probe refused for want
-              of privilege answers for an account that has it, and a server whose facts have not been
-              collected yet answers on the next sweep. The Security column says which applies to
-              which server.
+              {summary.securityTotal} above.
+              <NoteWhy summary="These gaps can close">
+                A probe refused for want of privilege answers for an account that has it, and a
+                server whose facts have not been collected yet answers on the next sweep. The
+                Security column says which applies to which server.
+              </NoteWhy>
             </div>
           )}
 
@@ -366,10 +388,13 @@ export function InventoryPanel({
                           ) : (
                             <span>{r.serverName}</span>
                           )}
+                          {/* Was 10px mono. A hostname is the single string on
+                              this table most likely to be retyped into another
+                              window, and it was the smallest text on the
+                              screen. `.mono` now floors every machine-readable
+                              value at 12px. */}
                           {r.hostname && r.hostname !== r.serverName && (
-                            <div className="faint mono" style={{ fontSize: 10 }}>
-                              {r.hostname}
-                            </div>
+                            <div className="faint mono">{r.hostname}</div>
                           )}
                         </td>
                       ) : (
@@ -383,6 +408,6 @@ export function InventoryPanel({
           </div>
         </>
       )}
-    </div>
+    </PanelShell>
   )
 }

@@ -233,8 +233,16 @@ describe('the baseline', () => {
 
 describe('what the panel refuses', () => {
   it('states the refusal to push a file where somebody would look for the button', async () => {
+    // It moved behind the header's ⓘ, and the reason it was allowed to is the
+    // kind of sentence it is: a limit of what this app WRITES, not a limit of
+    // what it read. Nothing on the page becomes misleading in its absence, the
+    // way a missing "3 hosts could not answer" would. It is still on this
+    // panel, one click from the title, which is where somebody looking for the
+    // button that fixes three diverging hosts is looking.
     stub({ a: { drift: drift(reading()) } })
     render(<DriftPanel servers={[SERVERS[0]]} />)
+    expect(screen.queryByTestId('drift-no-push')).toBeNull()
+    await userEvent.click(await screen.findByRole('button', { name: /about configuration drift/i }))
     const refusal = await screen.findByTestId('drift-no-push')
     expect(refusal.textContent).toContain('never writes a file to a server')
     expect(refusal.textContent).toContain('that is a job')

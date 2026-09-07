@@ -475,20 +475,27 @@ describe('the alert is the page', () => {
     expect(cards[0].textContent).toContain('since 9 h ago')
   })
 
-  it('makes Acknowledge the one primary control and the snoozes secondary', async () => {
-    // The specific thing that was wrong: 1 hour / 8 hours / 24 hours /
+  it('ranks Acknowledge above the snoozes without spending the accent on it', async () => {
+    // The specific thing that was wrong first: 1 hour / 8 hours / 24 hours /
     // Acknowledge / Runbook were five `btn ghost sm` in one table cell, so the
     // action with a consequence looked exactly like the four that mostly do
-    // not have one.
+    // not have one. Acknowledge still has to outrank them, and does.
+    //
+    // What changed since: it is a secondary button rather than a solid-accent
+    // one. An inbox is N cards, so a solid accent on each card's Acknowledge
+    // made "make this go away" the loudest thing on a screen full of problems —
+    // the eye reached the dismissal before the alert. One rank is enough to
+    // separate it from four ghosts; a second rank was buying nothing and
+    // costing the scan order. Hence: above the ghosts, and not accent.
     outstanding()
     render(<AlertsPanel />)
     const ack = await screen.findByRole('button', { name: 'Acknowledge' })
-    expect(ack.classList.contains('primary')).toBe(true)
+    expect(ack.classList.contains('ghost'), 'Acknowledge has sunk to the snoozes').toBe(false)
+    expect(ack.classList.contains('primary'), 'dismissal is outranking the alert').toBe(false)
     for (const label of ['1 hour', '8 hours', '24 hours', 'Runbook']) {
-      expect(
-        screen.getByRole('button', { name: label }).classList.contains('primary'),
-        `${label} is competing with Acknowledge`
-      ).toBe(false)
+      const btn = screen.getByRole('button', { name: label })
+      expect(btn.classList.contains('primary'), `${label} is competing with Acknowledge`).toBe(false)
+      expect(btn.classList.contains('ghost'), `${label} has climbed to Acknowledge`).toBe(true)
     }
     // And the three durations are one grouped control rather than three peers
     // scattered along the row.

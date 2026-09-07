@@ -34,6 +34,7 @@ import { jobApprovalFor, planJob } from '../../../../shared/jobs'
 import { useFleet } from '../../store/fleet'
 import type { JobDetail, JobHostResult, JobProgress, JobRecord } from '../../../../shared/jobs'
 import type { Server } from '../../types'
+import { PanelShell } from './PanelShell'
 
 // Roadmap item 33. The job engine shipped in full -- waves, health gate,
 // reboot-and-verify, detached execution, approval record -- and NO RENDERER
@@ -369,31 +370,36 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
       phrase.trim() === pending.plan.confirmation.phrase)
 
   return (
-    <div className="panel-body">
-      <div className="panel-head">
-        <div>
-          <div className="panel-title">
-            <ListChecks size={14} /> Jobs
-          </div>
-          <div className="panel-subtitle">
-            A job is a list of commands, a list of servers, and the confirmation its own risk
-            demands — asked before anything runs and recorded with the answer.
-          </div>
-        </div>
-        <button className="btn" onClick={() => void refresh()}>
-          <RefreshCw size={13} /> {jobs ? 'Refresh' : 'Read jobs'}
-        </button>
-        <button
-          className="btn primary"
-          disabled={servers.length === 0}
-          onClick={() => {
-            setComposing((c) => !c)
-            setPending(null)
-          }}
-        >
-          <Plus size={13} /> New job
-        </button>
-      </div>
+    // `.panel-title` over `.panel-subtitle` again — see ServicesPanel for what
+    // that pair actually rendered. "New job" keeps the solid accent as this
+    // view's one primary action; refresh drops to a ghost beside it.
+    <PanelShell
+      icon={<ListChecks size={14} />}
+      title="Jobs"
+      about={
+        <p>
+          A job is a list of commands, a list of servers, and the confirmation its own risk
+          demands — asked before anything runs and recorded with the answer.
+        </p>
+      }
+      actions={
+        <>
+          <button className="btn ghost sm" onClick={() => void refresh()}>
+            <RefreshCw size={13} /> {jobs ? 'Refresh' : 'Read jobs'}
+          </button>
+          <button
+            className="btn primary sm"
+            disabled={servers.length === 0}
+            onClick={() => {
+              setComposing((c) => !c)
+              setPending(null)
+            }}
+          >
+            <Plus size={13} /> New job
+          </button>
+        </>
+      }
+    >
 
       {error && <div className="panel-note is-alarm">{error}</div>}
 
@@ -763,7 +769,7 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
           {pending.plan.reasons.length > 0 && (
             <div className="s-note warn">This job {pending.plan.reasons.join(', and ')}.</div>
           )}
-          <pre className="mono" style={{ fontSize: 11, whiteSpace: 'pre-wrap', margin: 0 }}>
+          <pre className="mono" style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
             {pending.spec.steps
               .map((s) => `${s.command}${s.reboot ? '   # declared: restarts the machine' : ''}`)
               .join('\n')}
@@ -771,7 +777,7 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
           {pending.spec.rollback && (
             <div className="s-note">
               Rollback, approved with this job and run only if you ask for it:
-              <pre className="mono" style={{ fontSize: 11, whiteSpace: 'pre-wrap', margin: 0 }}>
+              <pre className="mono" style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
                 {pending.spec.rollback.map((st) => st.command).join('\n')}
               </pre>
             </div>
@@ -823,7 +829,7 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
               </button>
               <span className={clsx('faint cron-desc', STATE_CLASS[j.state])}>{j.state}</span>
               <span className="grow" />
-              <span className="faint mono" style={{ fontSize: 11 }}>
+              <span className="faint mono">
                 {j.risk}
               </span>
               {(j.state === 'running' || j.state === 'queued') && (
@@ -851,7 +857,7 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
             </div>
             {detail?.id === j.id && (
               <div style={{ paddingLeft: 12 }}>
-                <pre className="mono" style={{ fontSize: 11, whiteSpace: 'pre-wrap', margin: '4px 0' }}>
+                <pre className="mono" style={{ whiteSpace: 'pre-wrap', margin: '4px 0' }}>
                   {j.spec.steps.map((s) => s.command).join('\n')}
                 </pre>
                 {detail.targets.map((t) => (
@@ -869,7 +875,7 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
                     {(output[t.serverId] || t.stdout || t.stderr) && (
                       <pre
                         className="mono"
-                        style={{ fontSize: 11, whiteSpace: 'pre-wrap', margin: 0, opacity: 0.85 }}
+                        style={{ whiteSpace: 'pre-wrap', margin: 0, opacity: 0.85 }}
                       >
                         {output[t.serverId] ?? `${t.stdout ?? ''}${t.stderr ?? ''}`}
                       </pre>
@@ -881,6 +887,6 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
           </div>
         ))
       )}
-    </div>
+    </PanelShell>
   )
 }

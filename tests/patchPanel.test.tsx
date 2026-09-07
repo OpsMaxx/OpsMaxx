@@ -347,7 +347,14 @@ describe('selecting the servers nobody can vouch for', () => {
 
 describe('what the screen refuses to offer', () => {
   it('says out loud that it will not patch on a schedule', async () => {
+    // Behind the header's ⓘ now — see the matching test in driftPanel for the
+    // line this is on the right side of. The caveats that qualify a NUMBER on
+    // this panel ("N servers can never report a security update count, so they
+    // are not in the N above") stay on the page unconditionally and are
+    // asserted elsewhere in this file.
     render(<PatchPanel servers={[server('a', 'one')]} />)
+    expect(screen.queryByTestId('patch-no-automation')).toBeNull()
+    await userEvent.click(await screen.findByRole('button', { name: /about patch and updates/i }))
     const note = await screen.findByTestId('patch-no-automation')
     expect(note.textContent).toContain('does not patch on a schedule')
     expect(note.textContent).toContain('unattended-upgrades')

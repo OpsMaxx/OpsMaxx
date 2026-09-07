@@ -14,6 +14,7 @@ import {
   type ChangeLogPage
 } from '../../../../shared/changelog'
 import type { Server } from '../../types'
+import { PanelShell } from './PanelShell'
 
 // "What did I change on Tuesday." — roadmap item 14, the view.
 //
@@ -126,25 +127,48 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
     void read()
   }, [read])
 
+  // Whether pressing Refresh is the task, or a way of disturbing an answer that
+  // is already on screen. It decides which of the two ranks the button wears.
+  const nothingToShow = page === null || page.entries.length === 0
+
   return (
-    <div className="bc-panel">
-      <div className="panel-head">
-        <span className="panel-head-icon">
-          <History size={14} />
-        </span>
-        <h2 className="ui-section-title">Change log</h2>
-        <p className="ui-note panel-head-purpose">
-          What ShellPilot itself changed on the estate, and when — with the coverage of each
-          source stated, so a quiet window is not read as a quiet week.
-        </p>
-        <div className="panel-head-actions">
-          {/* The panel's only action, and it was styled `ghost sm` — its least
-              prominent variant. It is the whole point of opening this tab. */}
-          <button className="btn primary" onClick={() => void read()} disabled={reading}>
-            <RefreshCw size={12} /> Refresh
-          </button>
-        </div>
-      </div>
+    // THREE PARAGRAPHS SAID ROUGHLY THE SAME THING before any entry: the
+    // purpose line, `CHANGELOG_SWITCH_ON`, and an empty state whose body
+    // repeated its own title word for word. Two of the three are here, read
+    // once each; the third is deduplicated below.
+    //
+    // What stays on the page is everything that qualifies the timeline: the
+    // per-source coverage rows, the unattributed-entries count, the "more than
+    // fit" note, and — the important one — CHANGELOG_SWITCH_OFF, which says
+    // nothing is being read at all. That is a limit of the reading and cannot
+    // live behind a click.
+    <PanelShell
+      icon={<History size={14} />}
+      title="Change log"
+      about={
+        <>
+          <p>
+            What ShellPilot itself changed on the estate, and when — with the coverage of each
+            source stated, so a quiet window is not read as a quiet week.
+          </p>
+          <p data-testid="changelog-on">{CHANGELOG_SWITCH_ON}</p>
+        </>
+      }
+      actions={
+        // Solid only while there is nothing to read past — with a timeline on
+        // screen, the timeline is the point and re-reading it is not, so the
+        // panel spends no accent at all. The same rule Inventory, Security
+        // posture, Server services and Scheduled jobs follow: at most one
+        // primary per view, and only where pressing it is the task.
+        <button
+          className={nothingToShow ? 'btn primary sm' : 'btn ghost sm'}
+          onClick={() => void read()}
+          disabled={reading}
+        >
+          <RefreshCw size={13} className={clsx(reading && 'spin')} /> Refresh
+        </button>
+      }
+    >
 
       {unavailable && (
         <div className="panel-note is-alarm" data-testid="changelog-unavailable">
@@ -164,11 +188,7 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
 
       {page?.enabled === true && (
         <>
-          <div className="panel-note" data-testid="changelog-on">
-            {CHANGELOG_SWITCH_ON}
-          </div>
-
-          <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
             <select
               className="input sm"
               aria-label="Time range"
@@ -264,9 +284,14 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
             // The sentence is kept word for word — a test guards it, and it
             // is the one claim this panel exists to make. What is added is the
             // next step, which it never had.
+            // One sentence, not three. The title said "Nothing matched this
+            // window." and the body underneath opened with the same five words
+            // — so the panel spent three lines making one claim, and the claim
+            // that actually matters (do not read this as quiet) arrived third.
+            // The clause a test guards, and the only one that qualifies the
+            // emptiness, is now in the first line a reader gets.
             <div className="panel-empty" data-testid="changelog-empty">
-              <p className="panel-empty-title">Nothing matched this window.</p>
-              <p className="panel-empty-body">
+              <p className="panel-empty-title">
                 Nothing matched this window — read the coverage above before reading that as a
                 quiet period.
               </p>
@@ -293,7 +318,7 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
                       )}
                     </div>
                     {e.detail.length > 0 && (
-                      <div className="mono faint" style={{ fontSize: 11 }}>
+                      <div className="mono faint">
                         {e.detail.join(' · ')}
                       </div>
                     )}
@@ -304,6 +329,6 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
           )}
         </>
       )}
-    </div>
+    </PanelShell>
   )
 }

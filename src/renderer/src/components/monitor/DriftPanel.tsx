@@ -13,6 +13,7 @@ import {
 } from '../../../../shared/driftWatch'
 import { clsx } from '../../lib/format'
 import type { Server } from '../../types'
+import { PanelShell } from './PanelShell'
 import {
   DRIFT_NO_PUSH,
   DRIFT_PREVIEW_CHARS,
@@ -245,17 +246,25 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   const collected = servers.filter((s) => entries[s.id]?.drift).length
 
   return (
-    <div className="bc-panel">
-      <div className="panel-head">
-        <span className="panel-head-icon">
-          <FileDiff size={14} />
-        </span>
-        <h2 className="ui-section-title">Configuration drift</h2>
-        <p className="ui-note panel-head-purpose">
-          Pick a watched file and see which servers still agree on it. Compared over hashes, and
-          read-only — ShellPilot never pushes a file back.
-        </p>
-        <div className="panel-head-actions">
+    <PanelShell
+      icon={<FileDiff size={14} />}
+      title="Configuration drift"
+      about={
+        <>
+          <p>
+            Pick a watched file and see which servers still agree on it. Compared over hashes, and
+            read-only — ShellPilot never pushes a file back.
+          </p>
+          {/* Behind the disclosure for the reason written out in PatchPanel:
+              this states a limit of what the app WRITES, not a limit of what it
+              read, so no number on the page becomes misleading without it. It
+              is still on this panel, where someone looking for the button that
+              fixes three diverging hosts will look. */}
+          <p data-testid="drift-no-push">{DRIFT_NO_PUSH}</p>
+        </>
+      }
+      actions={
+        <>
           <select
             className="input sm"
             aria-label="Watched file"
@@ -272,24 +281,16 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
             {adding ? 'Cancel' : 'Watch a file'}
           </button>
           <button
-            className="btn primary"
+            className="btn ghost sm"
             disabled={busy || servers.length === 0}
             onClick={() => void refresh()}
             title="Sweeps the estate now and re-reads what has already been collected. Watched files are re-read at most once an hour per server. Nothing is written to any server by this."
           >
             <RefreshCw size={13} className={clsx(busy && 'spin')} /> Check now
           </button>
-        </div>
-      </div>
-
-      {/* The refusal, on screen rather than only in the source — the same shape
-          docker.ts's refusal to ship `prune` takes. Someone looking at three
-          diverging hosts will look for the button that fixes them, and the
-          answer has to be here rather than in a code comment. */}
-      <div className="panel-note" data-testid="drift-no-push">
-        {DRIFT_NO_PUSH}
-      </div>
-
+        </>
+      }
+    >
       {adding && (
         <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
           <div className="r-title">Watch another file</div>
@@ -455,6 +456,6 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
           </div>
         </>
       )}
-    </div>
+    </PanelShell>
   )
 }

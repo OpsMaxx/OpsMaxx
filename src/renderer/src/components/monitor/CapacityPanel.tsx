@@ -26,10 +26,12 @@ import {
 } from '../../lib/capacity'
 import {
   buildFleetForecast,
+  type FleetForecastRow,
   type FleetForecast,
   type FleetForecastInput
 } from '../../../../shared/fleetForecast'
 import type { Server } from '../../types'
+import { PanelShell } from './PanelShell'
 
 // "This disk fills in eleven days." — roadmap item 26.
 //
@@ -87,7 +89,7 @@ function TrendRow({
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
         <b>{label}</b>
         {latest === null ? (
-          <span className="faint" style={{ fontSize: 11 }}>
+          <span className="faint">
             no samples
           </span>
         ) : (
@@ -159,7 +161,7 @@ function TrendRow({
         ))}
       </svg>
 
-      <div className="row faint" style={{ fontSize: 11, gap: 10, flexWrap: 'wrap' }}>
+      <div className="row faint" style={{ gap: 10, flexWrap: 'wrap' }}>
         {drawing.boundaryX !== null && (
           <span>
             Before {shortDate(trend.resolutionBoundary ?? report.from)}: {RES_LABEL.hourly}. After:{' '}
@@ -173,7 +175,7 @@ function TrendRow({
       </div>
 
       {gaps.map((s, i) => (
-        <div key={i} className="state-unknown" style={{ fontSize: 11 }}>
+        <div key={i} className="state-unknown">
           <AlertTriangle size={11} /> No samples for {span(s.gapBefore)}. The line is broken there
           rather than joined — nothing was measured across it.
         </div>
@@ -198,6 +200,87 @@ function TrendRow({
       )}
     </div>
   )
+}
+
+/**
+ * The estate forecast list, summary first and detail only where there is any.
+ *
+ * TWO THINGS ARE WRONG WITH PRINTING EVERY ROW, and they are different problems
+ * with the same symptom.
+ *
+ * The first is that a "no forecast" row carries no information the headline has
+ * not already given. `forecastHeadline` says "0 of 18 could be forecast", and
+ * then eighteen rows said "no forecast" one after another. That is not detail
+ * behind a summary, it is the summary retyped eighteen times, and it pushed the
+ * rows that DO say something — the crossings — off the bottom of the panel on
+ * the estates where there were any.
+ *
+ * The second is that each row printed the hostname twice: once in its own
+ * column and once at the head of `because`, which `fleetForecastRow` builds as
+ * `${hostName}: …` so the sentence stands alone wherever it is quoted. The
+ * column is the scannable copy and stays; the prefix is stripped HERE rather
+ * than removed there, because the sentence is also used in contexts with no
+ * column beside it.
+ *
+ * What does NOT collapse: a host that could not be forecast is still listed,
+ * with its reason, one click away and with the count on the button. "18 servers
+ * with no forecast" hidden entirely would be the reassuring fiction this whole
+ * feature is built against — the headline carries the denominator for exactly
+ * that reason and the disclosure carries it too.
+ */
+function ForecastRows({ rows }: { rows: FleetForecastRow[] }): React.JSX.Element {
+  const [showQuiet, setShowQuiet] = useState(false)
+  const said = rows.filter((r) => r.band !== 'refused')
+  const quiet = rows.filter((r) => r.band === 'refused')
+  const shown = showQuiet ? [...said, ...quiet] : said
+
+  return (
+    <>
+      {shown.length > 0 && (
+        <table className="mini-table">
+          <tbody>
+            {shown.map((r) => (
+              <tr key={`${r.hostId} ${r.metric}`} data-band={r.band}>
+                <td>
+                  <span
+                    className={clsx(
+                      'chip',
+                      r.band === 'over' ? 'danger' : r.band === 'crossing' ? 'warn' : 'state-unknown'
+                    )}
+                  >
+                    {r.band === 'refused' ? 'no forecast' : r.band}
+                  </span>
+                </td>
+                <td className="mono">{r.hostName}</td>
+                <td>{withoutHostPrefix(r.because, r.hostName)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {quiet.length > 0 && (
+        <button
+          className="btn ghost sm"
+          data-testid="forecast-show-quiet"
+          aria-expanded={showQuiet}
+          onClick={() => setShowQuiet((v) => !v)}
+          style={{ marginTop: 6 }}
+        >
+          {showQuiet
+            ? `Hide ${quiet.length} server${quiet.length === 1 ? '' : 's'} with no forecast`
+            : `Show ${quiet.length} server${quiet.length === 1 ? '' : 's'} with no forecast`}
+        </button>
+      )}
+    </>
+  )
+}
+
+/** Drops the `hostname: ` the sentence carries for standalone use. Exact match
+ *  only — a sentence that does not start with the host is left alone rather
+ *  than sliced at a guessed offset. */
+function withoutHostPrefix(sentence: string, hostName: string): string {
+  const prefix = `${hostName}: `
+  return sentence.startsWith(prefix) ? sentence.slice(prefix.length) : sentence
 }
 
 export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Element {
@@ -325,17 +408,17 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
   }
 
   return (
-    <div className="bc-panel">
-      <div className="panel-head">
-        <span className="panel-head-icon">
-          <TrendingUp size={14} />
-        </span>
-        <h2 className="ui-section-title">Capacity trends</h2>
-        <p className="ui-note panel-head-purpose">
+    <PanelShell
+      icon={<TrendingUp size={14} />}
+      title="Capacity trends"
+      about={
+        <p>
           How one server&rsquo;s CPU, memory and disk have moved over time, drawn from samples the
           fleet sampler already writes. Nothing extra is measured for this panel.
         </p>
-        <div className="panel-head-actions">
+      }
+      actions={
+        <>
         <select
           className="input"
           style={{ maxWidth: 200 }}
@@ -369,14 +452,15 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
           ))}
         </select>
         <button
-          className="btn primary"
+          className="btn ghost sm"
           disabled={loading || typeof trends !== 'function' || serverId === ''}
           onClick={refresh}
         >
           <RefreshCw size={13} className={clsx(loading && 'spin')} /> Refresh
         </button>
-        </div>
-      </div>
+        </>
+      }
+    >
 
       {/* Item 47's estate strip. Asked for, because it queries the store once
           per server and the answer only matters when somebody is asking the
@@ -395,26 +479,7 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
                   reassuring thing this app could print and one of the least
                   true. */}
               <div className="s-note">{fleet.headline}</div>
-              <table className="mini-table">
-                <tbody>
-                  {fleet.rows.map((r) => (
-                    <tr key={`${r.hostId} ${r.metric}`}>
-                      <td>
-                        <span
-                          className={clsx(
-                            'chip',
-                            r.band === 'over' ? 'danger' : r.band === 'crossing' ? 'warn' : 'state-unknown'
-                          )}
-                        >
-                          {r.band === 'refused' ? 'no forecast' : r.band}
-                        </span>
-                      </td>
-                      <td className="mono">{r.hostName}</td>
-                      <td>{r.because}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <ForecastRows rows={fleet.rows} />
             </>
           )}
         </div>
@@ -472,7 +537,7 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
           {report.trends.map((t) => (
             <TrendRow key={t.metric} trend={t} report={report} />
           ))}
-          <div className="faint" style={{ fontSize: 11, marginTop: 12 }}>
+          <div className="faint" style={{ marginTop: 12 }}>
             The store keeps {report.fullResolutionDays} days of {RES_LABEL.full} and{' '}
             {report.retainedDays} days of {RES_LABEL.hourly}. Older than that is gone, which is why
             a longer window is not always more line.
@@ -483,7 +548,7 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
               percentage — and on a host running containers most of what `df`
               lists is not a filesystem at all. */}
           <div className="row" style={{ gap: 8, marginTop: 14, alignItems: 'center' }}>
-            <span className="grow faint" style={{ fontSize: 11 }}>
+            <span className="grow faint">
               The trend above is the root filesystem. This host may have others.
             </span>
             <button
@@ -501,7 +566,7 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
           )}
           {storage !== null && !('error' in storage) && (
             <>
-              <div className="faint" style={{ fontSize: 11 }}>
+              <div className="faint">
                 {storageHeadline(storage)}
               </div>
               <table className="mini-table">
@@ -531,6 +596,6 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
           )}
         </>
       )}
-    </div>
+    </PanelShell>
   )
 }

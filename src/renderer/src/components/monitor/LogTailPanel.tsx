@@ -16,6 +16,7 @@ import {
   type UnitChoice
 } from '../../../../shared/logtail'
 import type { Server } from '../../types'
+import { PanelShell } from './PanelShell'
 
 // "A unit failed" is the question the monitor now answers. This is "why".
 //
@@ -403,13 +404,20 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
   const shown = useMemo(() => filterLogLines(lines, filter), [lines, filter])
 
   return (
-    <div className="bc-panel">
-      <div className="panel-head no-purpose">
-        <span className="panel-head-icon">
-          <ScrollText size={14} />
-        </span>
-        <h2 className="ui-section-title">Log tail</h2>
-        <div className="panel-head-actions" style={{ flexWrap: 'nowrap', minWidth: 0, flex: 1 }}>
+    <PanelShell
+      icon={<ScrollText size={14} />}
+      title="Log tail"
+      about={
+        <p>
+          Follows a systemd unit, a file or a container&rsquo;s output across the servers you pick,
+          interleaved into one stream. A server that refuses is named rather than left out.
+        </p>
+      }
+      actions={
+        // One flex row of its own inside the action cluster, so the segmented
+        // Unit/File/Container control and the target field stay on the line
+        // together instead of wrapping between themselves.
+        <div className="lt-controls">
         <div className="segment">
           <button className={clsx('seg-btn', kind === 'unit' && 'active')} disabled={running} onClick={() => setKind('unit')}>
             Unit
@@ -486,13 +494,8 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
           </button>
         )}
         </div>
-      </div>
-
-      <p className="ui-note">
-        Follows a systemd unit, a file or a container&rsquo;s output across the servers you pick,
-        interleaved into one stream. A server that refuses is named rather than left out.
-      </p>
-
+      }
+    >
       {/* -p and --since are the two flags people reach for during an incident,
           and they are journalctl's alone. */}
       {kind === 'unit' && (
@@ -546,7 +549,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
             ))
           )}
           {options.length > pickShown.length && (
-            <div className="faint" style={{ padding: '4px 10px', fontSize: 11 }}>
+            <div className="faint" style={{ padding: '4px 10px' }}>
               {pickShown.length} of {options.length} — keep typing to narrow.
             </div>
           )}
@@ -624,7 +627,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
               onChange={(e) => setFilter(e.target.value)}
             />
           </div>
-          <div className="row muted" style={{ fontSize: 11, justifyContent: 'space-between', marginTop: 8 }}>
+          <div className="row muted" style={{ justifyContent: 'space-between', marginTop: 8 }}>
             <span>
               {filter.trim() === '' ? (
                 <>
@@ -675,6 +678,6 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
           </p>
         </div>
       )}
-    </div>
+    </PanelShell>
   )
 }

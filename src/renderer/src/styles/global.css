@@ -354,7 +354,7 @@ button {
   align-items: center;
   gap: var(--sp-1);
   padding: var(--sp-1) var(--sp-2);
-  font-size: 10px;
+  font-size: var(--fs-caption);
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -704,8 +704,12 @@ button {
   background: var(--danger-soft);
   border-color: var(--danger);
 }
+/* 28px, up from 26. Two steps of button, not three: the secondary size is now
+   the one the demoted panel actions want (see `.panel-head-actions`), so a
+   refresh control does not have to choose between shouting at 32px and being a
+   26px afterthought. */
 .btn.sm {
-  height: 26px;
+  height: 28px;
   padding: 0 var(--sp-2);
   font-size: var(--fs-sm);
 }
@@ -725,7 +729,7 @@ button {
   height: 18px;
   padding: 0 5px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-identifier);
   color: var(--text-muted);
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -739,7 +743,7 @@ button {
   gap: 4px;
   height: 18px;
   padding: 0 7px;
-  font-size: 10px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   border-radius: var(--r-pill);
   background: var(--bg-elevated);
@@ -1059,7 +1063,7 @@ details[open] > .disclosure-head .chev {
 }
 .palette-group {
   padding: var(--sp-2) var(--sp-3) 4px;
-  font-size: 10px;
+  font-size: var(--fs-caption);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1146,7 +1150,7 @@ details[open] > .disclosure-head .chev {
 }
 .menu-label {
   padding: var(--sp-2) var(--sp-3) 4px;
-  font-size: 10px;
+  font-size: var(--fs-caption);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1250,7 +1254,7 @@ details[open] > .disclosure-head .chev {
   margin-bottom: var(--sp-2);
   border-radius: var(--r-sm);
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1277,7 +1281,9 @@ details[open] > .disclosure-head .chev {
   border-radius: 999px;
   background: var(--bg-elevated);
   color: var(--text-faint);
-  font-size: 10px;
+  /* A count, not a label — read as a number rather than recognised as a shape,
+     so it does not get the caps step. */
+  font-size: var(--fs-body);
 }
 .mg-rename {
   padding: 2px 6px;
@@ -1799,8 +1805,19 @@ details[open] > .disclosure-head .chev {
 .faint {
   color: var(--text-faint);
 }
+/* The 12px floor lives HERE, on the family, rather than at each of the ~180
+   call sites. Everything drawn in the mono face in this app is a
+   machine-readable value — a hostname, an address, a port, a fingerprint, a
+   command, a log line — which is exactly the set that gets floored, so the two
+   are one rule and only need saying once. Hostnames were rendering at 10.5px
+   and IPs at 11px: the strings a person most often retypes into a terminal
+   were the smallest text on the screen.
+   `max()` rather than a fixed size, so a caller that has deliberately gone
+   LARGER — a headline figure, terminal output — keeps its size. What it cannot
+   do is go under 12, which is where `rn` starts reading as `m`. */
 .mono {
   font-family: var(--font-mono);
+  font-size: max(var(--fs-identifier), 1em);
 }
 .selectable {
   user-select: text;
@@ -1829,7 +1846,7 @@ details[open] > .disclosure-head .chev {
   overflow-y: auto;
   padding: var(--sp-3);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-identifier);
   line-height: 1.55;
   /* body sets user-select:none app-wide; shell output must be selectable. */
   user-select: text;
@@ -1872,7 +1889,7 @@ details[open] > .disclosure-head .chev {
   padding: 0;
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-identifier);
   line-height: 1.55;
   user-select: text;
 }
@@ -1884,7 +1901,7 @@ details[open] > .disclosure-head .chev {
 }
 .dbshell-note {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: var(--fs-body);
   padding-top: 2px;
 }
 .dbshell-error {
@@ -1899,7 +1916,7 @@ details[open] > .disclosure-head .chev {
   border-top: 1px solid var(--border-subtle);
   padding: 6px var(--sp-3);
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: var(--fs-body);
 }
 .dbshell-hint b {
   color: var(--text-muted);
@@ -1923,10 +1940,10 @@ details[open] > .disclosure-head .chev {
 }
 .vault-gate-card h2 {
   margin: 10px 0 6px;
-  font-size: 17px;
+  font-size: var(--fs-title);
 }
 .vault-gate-card p {
-  font-size: 12px;
+  font-size: var(--fs-body);
   line-height: 1.5;
   margin-bottom: 14px;
 }
@@ -1945,7 +1962,7 @@ details[open] > .disclosure-head .chev {
   background: var(--danger-soft);
   border-radius: var(--r-sm);
   padding: 6px 10px;
-  font-size: 12px;
+  font-size: var(--fs-body);
   margin-top: 8px;
 }
 .vault-panel {
@@ -1965,7 +1982,7 @@ details[open] > .disclosure-head .chev {
 .vault-label {
   width: 82px;
   flex: none;
-  font-size: 11px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -1976,7 +1993,7 @@ details[open] > .disclosure-head .chev {
   align-items: center;
   gap: 8px;
   margin-top: 10px;
-  font-size: 11px;
+  font-size: var(--fs-caption);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2010,7 +2027,7 @@ details[open] > .disclosure-head .chev {
   color: var(--text-muted);
 }
 .backup-h {
-  font-size: 13px;
+  font-size: var(--fs-subtitle);
   font-weight: 650;
   margin: var(--sp-4) 0 var(--sp-1);
 }
@@ -2054,7 +2071,7 @@ details[open] > .disclosure-head .chev {
   background: var(--danger-soft);
   color: var(--danger);
   border-bottom: 1px solid var(--danger);
-  font-size: 12px;
+  font-size: var(--fs-body);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -2087,7 +2104,7 @@ details[open] > .disclosure-head .chev {
   padding: 0 4px;
   text-align: center;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-identifier);
   color: var(--text-muted);
 }
 .term-search-count.none {
@@ -2107,7 +2124,7 @@ details[open] > .disclosure-head .chev {
   width: 100%;
   padding: 4px var(--sp-3);
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -2121,7 +2138,7 @@ details[open] > .disclosure-head .chev {
   align-items: center;
   gap: var(--sp-2);
   padding: 4px var(--sp-3);
-  font-size: 11px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -2155,13 +2172,13 @@ details[open] > .disclosure-head .chev {
   margin-bottom: 4px;
 }
 .ms-label {
-  font-size: 11px;
+  font-size: var(--fs-body);
   color: var(--text-muted);
 }
 .ms-value {
   margin-left: auto;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-identifier);
   font-weight: 700;
 }
 .ms-bar {
@@ -2179,7 +2196,7 @@ details[open] > .disclosure-head .chev {
 .ms-net {
   display: flex;
   gap: var(--sp-3);
-  font-size: 11px;
+  font-size: var(--fs-body);
   color: var(--text-muted);
   margin-bottom: 4px;
 }
@@ -2205,14 +2222,25 @@ details[open] > .disclosure-head .chev {
   gap: var(--sp-2);
   min-width: 0;
 }
+/* The same job as `.metric-card .m-value` — one number, read at a glance — and
+   it was drawn 6px smaller for no reason anybody could state. Same role now, so
+   a reader glancing between the fleet strip and a server card is not told by
+   the type that one of the two numbers matters less. */
 .ft-value {
   font-family: var(--font-mono);
-  font-size: 16px;
-  font-weight: 700;
+  font-size: var(--fs-display);
+  font-weight: var(--fw-display);
   line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
 }
+/* 11px, which the scale permits only for a tracked all-caps label — so this is
+   one, rather than being 11px running text. */
 .ft-label {
-  font-size: 11px;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-caption);
+  letter-spacing: var(--tracking-caption);
+  text-transform: uppercase;
   color: var(--text-muted);
 }
 
@@ -2296,11 +2324,11 @@ details[open] > .disclosure-head .chev {
 .term-dead .td-sub {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-identifier);
 }
 .term-dead .td-hint {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: var(--fs-body);
   line-height: 1.5;
 }
 /* The driver's own words, kept below our sentence rather than dropped: they are
@@ -2308,7 +2336,7 @@ details[open] > .disclosure-head .chev {
    unrecognised failure they are the only real information on the card. */
 .term-dead .td-raw {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--fs-body);
   line-height: 1.5;
   max-width: 52ch;
   word-break: break-word;
@@ -2341,11 +2369,11 @@ details[open] > .disclosure-head .chev {
   padding: 28px;
 }
 .crash-card h2 {
-  font-size: 17px;
+  font-size: var(--fs-title);
   margin: 12px 0 8px;
 }
 .crash-card p {
-  font-size: 12px;
+  font-size: var(--fs-body);
   line-height: 1.55;
 }
 .crash-icon {
@@ -2365,7 +2393,7 @@ details[open] > .disclosure-head .chev {
   overflow: auto;
   text-align: left;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-identifier);
   color: var(--danger);
   background: var(--bg-terminal);
   border-radius: var(--r-sm);
@@ -2379,7 +2407,7 @@ details[open] > .disclosure-head .chev {
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-sm);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-identifier);
   white-space: pre;
 }
 
@@ -2388,7 +2416,7 @@ details[open] > .disclosure-head .chev {
    the one bolded cell — the layer that actually decided — harder to spot. */
 .mini-table {
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--fs-body);
 }
 .mini-table th,
 .mini-table td {
@@ -2400,7 +2428,7 @@ details[open] > .disclosure-head .chev {
 }
 .mini-table th {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--fs-caption);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -2611,7 +2639,7 @@ details[open] > .disclosure-head .chev {
   margin-top: 10px;
   padding: 7px 10px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: var(--fs-body);
   color: var(--accent-ink);
   background: var(--bg-card);
 }
@@ -2684,7 +2712,7 @@ details[open] > .disclosure-head .chev {
   border: 1px solid var(--accent-border);
   background: var(--accent-soft);
   color: var(--accent-ink);
-  font-size: 9px;
+  font-size: var(--fs-caption);
   font-weight: 650;
   line-height: 13px;
   letter-spacing: 0.04em;
@@ -2810,7 +2838,7 @@ details[open] > .disclosure-head .chev {
   overflow: auto;
   background: var(--bg-code, var(--bg-hover));
   border-radius: 5px;
-  font-size: 12px;
+  font-size: var(--fs-identifier);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -2843,7 +2871,7 @@ details[open] > .disclosure-head .chev {
   align-items: baseline;
   gap: 10px;
   padding: 3px 0;
-  font-size: 12px;
+  font-size: var(--fs-body);
   border-bottom: 1px solid var(--border-subtle);
 }
 .cron-when {
@@ -2896,7 +2924,7 @@ details[open] > .disclosure-head .chev {
   background: none;
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-body);
   cursor: pointer;
 }
 .lt-pick:hover {
@@ -3041,24 +3069,34 @@ details[open] > .disclosure-head .chev {
    ========================================================================== */
 
 /* ---- Type scale -----------------------------------------------------------
-   Four sizes, five roles. The label role separates itself by weight, tracking
-   and caps rather than by a fifth size — a scale with a step every 1px is not
-   a scale, and the panels already had 10/11/12/13 doing exactly that.
+   Five roles, and they are the SAME five roles tokens.css names. This block
+   used to hold its own numbers — 18/15/13/12/12 — which is how the product
+   ended up with two type scales that agreed about nothing: same-rank headings
+   drew at 20px here and 16px there, and the same big-metric number was 22px on
+   one screen and 17px on another.
 
-   The rule that matters: `--type-note`, the explanatory role, is BOTH a step
-   down in size and a step down in colour. Prose a user is meant to skim past
-   must lose to the row they are meant to act on. */
+   Every value below is now a role token. The names stay because ~30 rules and
+   a dozen components spell them, but they are aliases now, and there is one
+   place left to change a size.
+
+   The note role changed shape rather than size. It used to be a step down in
+   size AND in colour, with the old comment arguing that one step was not
+   enough to stop the eye. The measurement disagreed: the step was 13→12, which
+   at that size is not a step anybody sees. So the size step is gone and the
+   colour step does the whole job — which it was already doing. */
 :root {
-  --type-page-size: 18px;
-  --type-page-weight: 650;
-  --type-section-size: 15px;
-  --type-section-weight: 600;
-  --type-body-size: 13px;
-  --type-body-weight: 400;
-  --type-note-size: 12px;
-  --type-label-size: 12px;
-  --type-label-weight: 600;
-  --type-label-tracking: 0.06em;
+  --type-page-size: var(--fs-display);
+  --type-page-weight: var(--fw-display);
+  --type-section-size: var(--fs-title);
+  --type-section-weight: var(--fw-title);
+  --type-subtitle-size: var(--fs-subtitle);
+  --type-subtitle-weight: var(--fw-subtitle);
+  --type-body-size: var(--fs-body);
+  --type-body-weight: var(--fw-body);
+  --type-note-size: var(--fs-body);
+  --type-label-size: var(--fs-caption);
+  --type-label-weight: var(--fw-caption);
+  --type-label-tracking: var(--tracking-caption);
   /* The measure an explanatory line wraps at. Prose that runs the full width of
      a 1600px window is prose nobody finishes. */
   --type-note-measure: 78ch;
@@ -3076,13 +3114,22 @@ details[open] > .disclosure-head .chev {
   letter-spacing: -0.005em;
   color: var(--text);
 }
+/* The rank between a panel heading and a row. It exists because the product
+   already had this rank — group headers, card titles, the name of the thing a
+   list item is about — and was drawing it at whatever the nearest available
+   size happened to be. */
+.ui-subtitle {
+  font-size: var(--type-subtitle-size);
+  font-weight: var(--type-subtitle-weight);
+  color: var(--text);
+}
 .ui-body {
   font-size: var(--type-body-size);
   font-weight: var(--type-body-weight);
   color: var(--text);
 }
-/* The quiet role. Two steps down from body — smaller AND muted — because one
-   step is not enough to stop the eye. */
+/* The quiet role. Body size, muted colour, and a measure. Colour is the whole
+   demotion now — see the block header. */
 .ui-note {
   font-size: var(--type-note-size);
   line-height: 1.5;
@@ -3096,6 +3143,7 @@ details[open] > .disclosure-head .chev {
   text-transform: uppercase;
   color: var(--text-faint);
 }
+
 
 /* ---- Colour roles ---------------------------------------------------------
    Action roles first. `--accent` in this app already carries five jobs — fill,
@@ -3196,18 +3244,39 @@ details[open] > .disclosure-head .chev {
   color: var(--state-unknown);
 }
 
+/* ---- Page template --------------------------------------------------------
+   ONE shape for every monitoring tab: header on the page background, content in
+   a card. It was measurably not one shape before — Inventory, Security posture,
+   Configuration drift and Docker put the icon, title, description and actions
+   INSIDE the bordered card; Rules, Jobs and Server services put the same four
+   outside it; Fleet-wide search had no title, no description and no icon at all.
+   At fifteen tabs that costs a re-fixation on every switch, because the eye has
+   to find the header before it can read it.
+
+   Header outside is the version that is true: it names the page, not the card,
+   and a page with two cards would otherwise have to pick one to live in. */
+.panel-page {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 /* ---- Panel header ---------------------------------------------------------
-   Title, one line of purpose, primary action right-aligned. A grid rather than
-   a flex row so the purpose line sits UNDER the title and does not push the
-   actions around when it wraps — the previous `.row` header put the title and
-   every control on one line and had nowhere for a sentence to go, which is why
-   the sentence ended up as a full-width paragraph below instead. */
+   Title, an ⓘ, actions. A grid rather than a flex row so that a panel which
+   still carries a visible purpose line has somewhere to put it without pushing
+   the actions around when it wraps.
+
+   The purpose line is now the exception rather than the rule — see
+   `.panel-head-info`. Measured on Inventory at 900px tall, the title block, the
+   heading, a two-line description, the count strip and a four-line caveat ran
+   to 392px before the table header at 397px: 44% of the window spent before the
+   first row of data, on a panel whose entire job is the rows. */
 .panel-head {
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: start;
   gap: 2px var(--sp-2);
-  margin-bottom: var(--sp-3);
+  margin-bottom: var(--sp-2);
 }
 .panel-head-icon {
   grid-column: 1;
@@ -3253,6 +3322,87 @@ details[open] > .disclosure-head .chev {
   align-self: center;
 }
 
+/* ---- The ⓘ, and what is behind it -----------------------------------------
+   What moved behind this button and what did NOT is the whole design, so it is
+   written down rather than left to whoever edits a panel next.
+
+   BEHIND IT: what the panel is for, where its numbers come from, and what it
+   does not touch. Good copy, worth keeping, read once. Nobody reads it on the
+   four-hundredth visit and it costs two lines of the window on every one.
+
+   NOT BEHIND IT: anything that states a LIMIT of the reading. "3 servers could
+   not answer", "a check that could not run is not a check that passed",
+   "treat those as unknown, never as zero". A caveat you have to click to find
+   is a caveat that did not happen, and this product's governing rule is that a
+   value nobody measured must never render as though it were measured. The
+   compromise the panels use is a one-line finding that stays on screen with the
+   paragraph explaining the mechanism folded underneath it — see `.note-why`.
+
+   A popover rather than a `title` tooltip because it holds paragraphs, has to
+   be reachable from the keyboard, and has to survive being read slowly. */
+.panel-head-info {
+  position: relative;
+  display: inline-flex;
+}
+.panel-info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: none;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.panel-info-btn:hover,
+.panel-info-btn[aria-expanded='true'] {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.panel-info-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  width: min(46ch, 70vw);
+  padding: var(--sp-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-md);
+  font-size: var(--type-note-size);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.panel-info-pop > * + * {
+  margin-top: var(--sp-2);
+}
+.panel-info-pop p {
+  margin: 0;
+  /* The popover is already narrow; the 78ch prose measure would do nothing here
+     except fight the width above. */
+  max-width: none;
+}
+
+/* The Log tail composer, which lives in the header's action slot rather than
+   below it: choosing a unit IS the panel until something is streaming, and a
+   composer under a header the reader has already passed is a composer nobody
+   finds. `flex: 1` so the target field takes the width the buttons do not. */
+.lt-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--sp-2);
+  min-width: 0;
+  flex: 1;
+}
+.lt-controls .input.grow {
+  min-width: 0;
+}
+
 /* ---- Panel notes ----------------------------------------------------------
    The replacement for the panels' `.s-desc`, which — see the block at the top —
    is inert outside a settings row. `.setting-row .s-desc` is left exactly as it
@@ -3272,8 +3422,11 @@ details[open] > .disclosure-head .chev {
 .panel-note:first-child {
   margin-top: 0;
 }
+/* Optically matched to the surrounding UI face, but never below the floor: a
+   note is where a hostname most often appears mid-sentence, and 0.95em of a
+   size that later shrinks would take it under. */
 .panel-note .mono {
-  font-size: 0.95em;
+  font-size: max(var(--fs-identifier), 0.95em);
 }
 .panel-note.is-ok {
   color: var(--state-ok);
@@ -3296,6 +3449,50 @@ details[open] > .disclosure-head .chev {
 .panel-note.is-unknown {
   padding-left: var(--sp-2);
   border-left: 2px solid currentColor;
+}
+
+/* ---- "Why", folded under a finding ----------------------------------------
+   The four-line caveats were right and they were also 76px each, stacked two
+   and three deep above a table. Splitting them is not the same as hiding them:
+   the FINDING — "3 servers could not answer, so they are not in the 4 above" —
+   stays on screen unconditionally, and only the paragraph explaining the
+   mechanism folds. A reader who wants to know why dnf cannot answer opens it;
+   a reader who does not still cannot miss that the number is short.
+
+   `<details>` rather than a bespoke toggle: it is keyboard-reachable, it is
+   announced as a disclosure, and the browser's find-in-page opens it. */
+.note-why {
+  display: block;
+  margin-top: var(--sp-1);
+}
+.note-why > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  width: fit-content;
+  list-style: none;
+  cursor: pointer;
+  font-size: var(--type-note-size);
+  /* Inherits the note's status colour, so the disclosure reads as part of the
+     finding rather than as an unrelated link. */
+  color: inherit;
+  opacity: 0.85;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.note-why > summary::-webkit-details-marker {
+  display: none;
+}
+.note-why > summary:hover {
+  opacity: 1;
+}
+.note-why[open] > summary {
+  margin-bottom: var(--sp-1);
+}
+.note-why-body {
+  color: var(--text-muted);
+  font-size: var(--type-note-size);
+  line-height: 1.5;
 }
 
 /* ---- Panel empty state ----------------------------------------------------
@@ -3638,14 +3835,36 @@ details[open] > .disclosure-head .chev {
 /* ---- Sub-group heading -----------------------------------------------------
    The name of a group WITHIN a panel — one host's block of cron jobs, one
    account's keys. Not `.ui-section-title`: the panel already used that once and
-   a second 15px heading inside it would compete with the panel's own name. Body
-   size, heavier, which is the whole step. It replaces `.s-title` at these call
-   sites, which — like `.s-desc` — is only ever defined as `.setting-row
-   .s-title` and therefore did nothing here. */
+   a second heading at the same size inside it would compete with the panel's
+   own name. It replaces `.s-title` at these call sites, which — like `.s-desc`
+   — is only ever defined as `.setting-row .s-title` and therefore did nothing
+   here.
+
+   This is the subtitle role, so it is now one step below the panel heading in
+   SIZE as well as in weight. It used to be body size at weight 600, which put
+   it a hair away from `.panel-empty-title` and from any bolded run of prose.
+
+   A defect this exposed, worth naming because it will otherwise be
+   reintroduced: six panels used `.panel-subtitle` for the DESCRIPTION under
+   their title, next to a `.panel-title` that this stylesheet has never defined
+   at all. So on those panels the heading rendered as ordinary body text while
+   the sentence underneath it rendered bold and full-strength — hierarchy
+   exactly inverted. Those call sites now use `.panel-head` with `.ui-note`.
+   `.panel-title` is defined below so that a survivor renders as a heading
+   rather than as nothing. */
 .panel-subtitle {
-  font-size: var(--type-body-size);
-  font-weight: 600;
+  font-size: var(--type-subtitle-size);
+  font-weight: var(--type-subtitle-weight);
   color: var(--text);
+}
+.panel-title {
+  font-size: var(--type-section-size);
+  font-weight: var(--type-section-weight);
+  letter-spacing: -0.005em;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
 }
 
 /* ---- Bare status classes ---------------------------------------------------

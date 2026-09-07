@@ -314,10 +314,19 @@ describe('forecasting the whole estate', () => {
   it('keeps a host that could not be forecast in the list', async () => {
     // Dropping it would make "nothing is filling up" and "one host could not be
     // forecast" render identically.
+    //
+    // The rows that say "no forecast" now fold behind a disclosure, because on
+    // a real estate there are eighteen of them and they repeat what the
+    // headline already said. What must NOT fold is that they exist: the COUNT
+    // is on the button, unclicked, so this asserts it there first and then
+    // opens it to check the host and its reason are both still reachable.
     await openStrip((id) =>
       Promise.resolve(report(id === 'srv-alpha' ? FILLING : FLAT, 7, id))
     )
-    await waitFor(() => expect(screen.getByText(/bravo: no disk forecast/)).toBeTruthy())
+    const toggle = await screen.findByTestId('forecast-show-quiet')
+    expect(toggle.textContent).toMatch(/Show \d+ servers? with no forecast/)
+    await userEvent.click(toggle)
+    await waitFor(() => expect(screen.getAllByText('bravo').length).toBeGreaterThan(0))
     expect(screen.getByText(/not moving enough to call a trend/)).toBeTruthy()
   })
 
@@ -338,9 +347,13 @@ describe('forecasting the whole estate', () => {
     // fixture, so they refuse for the same reason and would match too. That
     // they appear at all is the point -- every metric with a threshold gets a
     // row, and none of them is silently dropped.
+    // The hostname is the row's own column and is no longer repeated at the
+    // head of the sentence beside it, so the two halves are asserted apart.
+    await userEvent.click(await screen.findByTestId('forecast-show-quiet'))
     await waitFor(() =>
-      expect(screen.getByText('bravo: no disk forecast — nothing was sampled in this window.')).toBeTruthy()
+      expect(screen.getByText('no disk forecast — nothing was sampled in this window.')).toBeTruthy()
     )
+    expect(screen.getAllByText('bravo').length).toBeGreaterThan(0)
   })
 
   it('is not run until it is asked for', async () => {
