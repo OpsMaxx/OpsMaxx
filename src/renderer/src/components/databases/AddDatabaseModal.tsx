@@ -10,13 +10,34 @@ import { saveDatabaseEdit, useDbEditor } from '../../store/dbEditor'
 import { displayHostFromUri } from '../../../../shared/dbAddress'
 import type { DbKind, UUID } from '../../types'
 
-const KINDS: { id: DbKind; label: string; port: number }[] = [
-  { id: 'postgres', label: 'PostgreSQL', port: 5432 },
-  { id: 'mysql', label: 'MySQL', port: 3306 },
-  { id: 'mssql', label: 'SQL Server', port: 1433 },
-  { id: 'mongodb', label: 'MongoDB', port: 27017 },
-  { id: 'redis', label: 'Redis', port: 6379 }
+// Per-engine, and `dbLabel`/`dbPlaceholder` are REQUIRED fields rather than a
+// ternary at the input, because a ternary is how two of the five came to be
+// wrong: `kind === 'mongodb' ? 'admin' : kind === 'redis' ? '0' : 'postgres'`
+// quietly told a MySQL user that a Postgres system database was the example,
+// and told a SQL Server user the same. The mapping existed; it just had a
+// default that was only correct for the engine it was written for.
+//
+// A record keyed on DbKind cannot be added to without answering for every
+// column, so the next engine cannot inherit somebody else's system database.
+const KINDS: {
+  id: DbKind
+  label: string
+  port: number
+  /** What this engine calls the thing, in its own words. */
+  dbLabel: string
+  /** A real database name on a stock install of THIS engine. */
+  dbPlaceholder: string
+}[] = [
+  { id: 'postgres', label: 'PostgreSQL', port: 5432, dbLabel: 'Database', dbPlaceholder: 'postgres' },
+  { id: 'mysql', label: 'MySQL', port: 3306, dbLabel: 'Database', dbPlaceholder: 'mysql' },
+  { id: 'mssql', label: 'SQL Server', port: 1433, dbLabel: 'Database', dbPlaceholder: 'master' },
+  { id: 'mongodb', label: 'MongoDB', port: 27017, dbLabel: 'Database', dbPlaceholder: 'admin' },
+  // Redis numbers its databases rather than naming them, so the label changes
+  // too — "Database: mydb" is not a thing a Redis user can type.
+  { id: 'redis', label: 'Redis', port: 6379, dbLabel: 'Database (index)', dbPlaceholder: '0' }
 ]
+
+const kindOf = (k: DbKind): (typeof KINDS)[number] => KINDS.find((x) => x.id === k)!
 
 export function AddDatabaseModal(): React.JSX.Element {
   const setModal = useApp((s) => s.setModal)
@@ -207,10 +228,10 @@ export function AddDatabaseModal(): React.JSX.Element {
 
           <div className="field-row">
             <div className="field">
-              <label className="field-label">{kind === 'redis' ? 'Database (index)' : 'Database'}</label>
+              <label className="field-label">{kindOf(kind).dbLabel}</label>
               <input
                 className="input"
-                placeholder={kind === 'mongodb' ? 'admin' : kind === 'redis' ? '0' : 'postgres'}
+                placeholder={kindOf(kind).dbPlaceholder}
                 value={database}
                 onChange={(e) => setDatabase(e.target.value)}
               />
