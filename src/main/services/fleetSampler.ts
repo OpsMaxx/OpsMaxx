@@ -160,7 +160,10 @@ export function metricsToSamples(host: HostMetrics): Record<string, number> {
     // with dashes, and a zero would draw those hosts as having none left.
     ...(host.inodePct === null ? {} : { inodePct: host.inodePct }),
     memUsed: host.memUsed,
-    diskPct: host.diskPct,
+    // Same guard as cpu and inodePct, and it matters as much: a stored 0
+    // becomes a point on the capacity trend, and a forecast drawn through
+    // failed probes slopes towards an emptying disk.
+    ...(host.diskPct === null ? {} : { diskPct: host.diskPct }),
     diskUsed: host.diskUsed,
     netRx: host.netRx,
     netTx: host.netTx,

@@ -1371,7 +1371,7 @@ function buildServer(): McpServer {
           // answer is that this sweep could not read /proc/stat.
           `CPU: ${m.cpu === null ? 'not measured' : `${m.cpu.toFixed(1)}%`}`,
           `Memory: ${m.memPct === null ? 'not measured' : `${m.memPct.toFixed(1)}%`} (${m.memUsed}/${m.memTotal} bytes)`,
-          `Disk: ${m.diskPct.toFixed(1)}% (${m.diskUsed}/${m.diskTotal} bytes)`,
+          `Disk: ${m.diskPct === null ? 'not measured' : `${m.diskPct.toFixed(1)}%`} (${m.diskUsed}/${m.diskTotal} bytes)`,
           `Uptime: ${Math.round(m.uptime / 3600)}h`,
           provenance,
           '',

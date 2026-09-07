@@ -90,23 +90,29 @@ describe('the parser, on output the collector actually produces', () => {
     expect(parseMetrics(LINUX, null).data.load1).toBe(0.33)
   })
 
-  // The rule the whole module is built around, and the reason the platform
-  // gate exists rather than a best-effort read.
-  //
-  // NOTE: diskPct is deliberately not asserted here, because it is the one
-  // figure that does NOT follow the rule — `HostMetrics.diskPct` is typed
-  // `number` where cpu, memPct, inodePct and load1 are all `number | null`,
-  // and an unreadable `df` parses to 0 rather than null. That is a pre-existing
-  // false all-clear on the alert path and it is not this change's to fix:
-  // making it nullable touches alerting, capacity trends and every stored
-  // sample. Asserting the current value here would entrench it, so it is named
-  // instead.
+  /**
+   * The rule the whole module is built around, and the reason the platform
+   * gate exists rather than a best-effort read.
+   *
+   * diskPct is in this list now. It used to parse to 0 with `diskTotal: 0` as
+   * the "was this measured" signal, read through a `diskTotal > 0` guard. That
+   * worked where it was applied — the two alert paths checked it — but the
+   * fleet sampler stored the 0 as a capacity-trend point, the MCP bridge
+   * reported "Disk: 0.0%" to an agent, and two panels printed it. 0% is the
+   * most reassuring number this field can hold, so it is the worst default.
+   */
   it('emits null, not zero, for a section that is not there', () => {
     const { data } = parseMetrics('__CPU__\n__MEM__\n__DISK__\n', null)
     expect(data.cpu).toBeNull()
     expect(data.memPct).toBeNull()
+    expect(data.diskPct).toBeNull()
     expect(data.inodePct).toBeNull()
     expect(data.load1).toBeNull()
+  })
+
+  it('still reports a real disk reading as a number', () => {
+    const { data } = parseMetrics(LINUX, null)
+    expect(typeof data.diskPct).toBe('number')
   })
 })
 

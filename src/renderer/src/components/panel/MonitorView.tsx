@@ -43,7 +43,10 @@ export function MonitorView({
           'Used memory',
           `${bytes(m.host.memUsed)}${m.host.memPct === null ? '' : ` (${m.host.memPct.toFixed(0)}%)`}`
         ],
-        ['Used disk', `${bytes(m.host.diskUsed)} (${m.host.diskPct.toFixed(0)}%)`],
+        [
+          'Used disk',
+          `${bytes(m.host.diskUsed)}${m.host.diskPct === null ? '' : ` (${m.host.diskPct.toFixed(0)}%)`}`
+        ],
         ['Server / IP', server.host]
       ]
     : [
