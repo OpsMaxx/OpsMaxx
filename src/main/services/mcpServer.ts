@@ -341,6 +341,22 @@ export function setBackupReader(r: BackupHealthReader): void {
 }
 
 /**
+ * Alerts that have already fired, injected like the rest.
+ *
+ * A read of history the app recorded on its own schedule: it opens no
+ * connection, and it says what happened rather than ranking hosts by how
+ * exposed they are. That distinction is why this is here and configuration
+ * drift is not.
+ */
+export interface AlertReader {
+  (limit: number): { at: number; serverId: string; serverName: string; kind: string; event: string; detail?: string }[]
+}
+let alertReader: AlertReader | null = null
+export function setAlertReader(r: AlertReader): void {
+  alertReader = r
+}
+
+/**
  * What the approval dialog needs that the audit context does not carry.
  *
  * `because` is the reason this grade was chosen, written where the choice is
@@ -2662,6 +2678,87 @@ function buildServer(): McpServer {
         `What this session may do ${scope}:\n\n${body}\n\n` +
           `Not present at any setting, by design: running jobs, defining rules, a shell on the ` +
           `OpsMaxx machine itself, reading the vault, and restoring a backup.`
+      )
+    }
+  )
+
+  server.registerTool(
+    'list_alerts',
+    {
+      title: 'List alerts that have fired',
+      description:
+        'Alerts OpsMaxx has already raised across this workspace — a server that ran hot, a unit ' +
+        'that failed, a threshold that was crossed — newest first, each with the server it is about ' +
+        'and when it fired. ' +
+        'Prefer this over sampling metrics per server to look for trouble: these are the moments ' +
+        'something already went wrong, recorded when it happened rather than reconstructed now. ' +
+        'It reports what HAPPENED. It does not rank servers by how exposed they are, and there is no ' +
+        'tool here that does.',
+      inputSchema: {
+        limit: z.number().int().min(1).max(200).optional().describe('How many, newest first. Defaults to 50.'),
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: false }
+    },
+    async ({ limit, intent }, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const workspaces = auth.session.workspaces
+      if (workspaces.length === 0) return errorText('This session has no workspaces.')
+
+      const permitted = workspaces.filter(
+        (w) => effectiveWorkspaceCapability(auth.session, w.id, 'fleetRead').decision !== 'deny'
+      )
+      if (permitted.length === 0) {
+        return errorText('This session is not permitted to read the fleet in any of its workspaces.')
+      }
+      const check = permitted
+        .map((w) => effectiveWorkspaceCapability(auth.session, w.id, 'fleetRead'))
+        .reduce((strictest, d) => (d.decision === 'ask' ? d : strictest))
+      const ctx: AuditContext = {
+        session: auth.session,
+        workspaceId: permitted[0].id,
+        workspaceName: permitted[0].name,
+        serverId: null,
+        serverName: null,
+        action: 'list_alerts',
+        capability: 'fleetRead'
+      }
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'list_alerts',
+          level: 'low',
+          because: 'it returns alerts already recorded for servers in this workspace',
+          intent
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      if (!alertReader) {
+        return errorText(
+          'OpsMaxx is not recording history on this machine, so there are no alerts to read. ' +
+            'This does not mean nothing has gone wrong.'
+        )
+      }
+      // Filtered to the servers this session can actually see. The store is
+      // machine-wide and a session is not.
+      const visible = new Set(listCachedServers(permitted.map((w) => w.id)).map((srv) => srv.id))
+      const rows = alertReader(Math.min(200, (limit ?? 50) * 4)).filter((r) => visible.has(r.serverId))
+      if (rows.length === 0) return text('No alerts have fired for the servers in this workspace.')
+      const shown = rows.slice(0, limit ?? 50)
+      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      return text(
+        `${shown.length} alert(s), newest first:\n\n` +
+          shown
+            .map(
+              (r) =>
+                `${r.serverName} — ${r.event}${r.detail ? ` (${r.detail})` : ''}\n` +
+                `    ${r.kind}, ${agePhrase(Date.now() - r.at)}`
+            )
+            .join('\n\n')
       )
     }
   )
