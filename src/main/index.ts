@@ -400,7 +400,8 @@ import {
   stopMcpServer,
   mcpServerStatus,
   explainSessionAccess,
-  setCapacityReader
+  setCapacityReader,
+  setFleetReader
 } from './services/mcpServer'
 
 const isDev = !app.isPackaged
@@ -3396,6 +3397,10 @@ ipcMain.handle(
 // for the first second of every launch and forever on a machine with history
 // switched off.
 setCapacityReader(capacityReportFor)
+// Read-only view of what the sampler has already collected. The sampler's own
+// on-demand sweep is deliberately not passed: an agent that could trigger one
+// would be starting work on every server in the workspace from a single call.
+setFleetReader({ factsFor: (id) => fleetSampler.factsFor(id) })
 
 // ---- The change log — roadmap item 14 ----
 //
