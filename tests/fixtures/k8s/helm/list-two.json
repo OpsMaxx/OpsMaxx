@@ -1,0 +1,1 @@
+[{"name":"cache","namespace":"kube-system","revision":"1","updated":"2026-09-05 17:32:20.786000301 +0000 UTC","status":"deployed","chart":"demo-0.1.0","app_version":"1.16.0"},{"name":"web","namespace":"default","revision":"1","updated":"2026-09-05 17:32:10.613536421 +0000 UTC","status":"deployed","chart":"demo-0.1.0","app_version":"1.16.0"}]

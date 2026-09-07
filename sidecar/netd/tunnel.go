@@ -167,9 +167,28 @@ func buildUAPI(p *UpParams) (string, error) {
 
 // ----------------------------------------------------------- ipcGet parse
 
+// One peer's own numbers. The aggregate fields above answer "is this tunnel
+// alive"; these answer "which peer", which is a different question and the one
+// somebody asks when a site-to-site link is half up.
+//
+// PublicKey is the only stable identity a peer has -- WireGuard has no names --
+// so it is reported here and the PARENT is responsible for keeping it out of
+// anything an agent can read. See the note on StatsResult.PeerRows.
+type ipcPeer struct {
+	PublicKey        string
+	Endpoint         string
+	RxBytes          int64
+	TxBytes          int64
+	LastHandshakeSec int64
+}
+
 type ipcSnapshot struct {
-	ListenPort        int
-	Peers             int
+	ListenPort int
+	Peers      int
+	// One row per peer, in the order the device listed them. `Peers` above is
+	// its length and is kept rather than derived: every existing caller reads
+	// the count and removing it would be a protocol change for no gain.
+	PeerRows          []ipcPeer
 	RxBytes           int64
 	TxBytes           int64
 	LastHandshakeSec  int64
@@ -191,9 +210,12 @@ func parseIPCGet(s string) (*ipcSnapshot, error) {
 	snap := &ipcSnapshot{}
 	var (
 		inPeer       bool
+		peerKey      string
 		peerEndpoint string
 		peerSec      int64
 		peerNsec     int64
+		peerRx       int64
+		peerTx       int64
 		bestSec      int64 = -1
 		fallbackEP   string
 	)
@@ -202,6 +224,13 @@ func parseIPCGet(s string) (*ipcSnapshot, error) {
 			return
 		}
 		snap.Peers++
+		snap.PeerRows = append(snap.PeerRows, ipcPeer{
+			PublicKey:        peerKey,
+			Endpoint:         peerEndpoint,
+			RxBytes:          peerRx,
+			TxBytes:          peerTx,
+			LastHandshakeSec: peerSec,
+		})
 		if peerSec > bestSec {
 			bestSec = peerSec
 			snap.LastHandshakeSec = peerSec
@@ -213,7 +242,8 @@ func parseIPCGet(s string) (*ipcSnapshot, error) {
 		if fallbackEP == "" && peerEndpoint != "" {
 			fallbackEP = peerEndpoint
 		}
-		peerEndpoint, peerSec, peerNsec = "", 0, 0
+		peerKey, peerEndpoint, peerSec, peerNsec = "", "", 0, 0
+		peerRx, peerTx = 0, 0
 	}
 
 	for _, line := range strings.Split(s, "\n") {
@@ -240,6 +270,7 @@ func parseIPCGet(s string) (*ipcSnapshot, error) {
 			// Starts a new peer block; everything after belongs to it.
 			flushPeer()
 			inPeer = true
+			peerKey = v
 		case "endpoint":
 			if inPeer {
 				peerEndpoint = v
@@ -256,11 +287,13 @@ func parseIPCGet(s string) (*ipcSnapshot, error) {
 			if inPeer {
 				n, _ := strconv.ParseInt(v, 10, 64)
 				snap.RxBytes += n
+				peerRx = n
 			}
 		case "tx_bytes":
 			if inPeer {
 				n, _ := strconv.ParseInt(v, 10, 64)
 				snap.TxBytes += n
+				peerTx = n
 			}
 		}
 	}
@@ -269,10 +302,17 @@ func parseIPCGet(s string) (*ipcSnapshot, error) {
 		snap.Endpoint = fallbackEP
 	}
 	// A negative handshake would mean a corrupt device response; clamp rather
-	// than hand the parent something it has to defend against (E63).
+	// than hand the parent something it has to defend against (E63). Per peer
+	// as well as in aggregate: a caller reading a row must not have to make the
+	// same defence the aggregate already has.
 	if snap.LastHandshakeSec < 0 {
 		snap.LastHandshakeSec = 0
 		snap.LastHandshakeNsec = 0
+	}
+	for i := range snap.PeerRows {
+		if snap.PeerRows[i].LastHandshakeSec < 0 {
+			snap.PeerRows[i].LastHandshakeSec = 0
+		}
 	}
 	return snap, nil
 }
@@ -803,6 +843,26 @@ func (t *Tunnel) listenerList() []ListenerOut {
 }
 
 // stats samples the device.
+// peerStats copies the parser's rows onto the wire type. A copy rather than a
+// shared slice: the snapshot is scratch and the result is handed to a writer
+// that may outlive this call.
+func peerStats(rows []ipcPeer) []PeerStats {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]PeerStats, 0, len(rows))
+	for _, p := range rows {
+		out = append(out, PeerStats{
+			PublicKey:            p.PublicKey,
+			Endpoint:             p.Endpoint,
+			RxBytes:              p.RxBytes,
+			TxBytes:              p.TxBytes,
+			LastHandshakeUnixSec: p.LastHandshakeSec,
+		})
+	}
+	return out
+}
+
 func (t *Tunnel) stats() (*StatsResult, error) {
 	t.mu.Lock()
 	closed := t.closed
@@ -826,6 +886,7 @@ func (t *Tunnel) stats() (*StatsResult, error) {
 		RemoteEndpoint:       snap.Endpoint,
 		AssignedIP:           t.assignedIP,
 		Peers:                snap.Peers,
+		PeerRows:             peerStats(snap.PeerRows),
 		SampledAt:            time.Now().UnixMilli(),
 	}, nil
 }

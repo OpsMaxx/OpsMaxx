@@ -1,0 +1,16 @@
+===SP-TIMER-UNIT===
+NextElapseUSecRealtime=
+LastTriggerUSec=
+Result=success
+Id=certbot.timer
+LoadState=not-found
+ActiveState=inactive
+SubState=dead
+===SP-TIMER-SERVICE===
+Result=success
+ExecMainExitTimestamp=
+ExecMainStatus=0
+Id=certbot.service
+LoadState=not-found
+ActiveState=inactive
+SubState=dead

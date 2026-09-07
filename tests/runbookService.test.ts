@@ -20,7 +20,8 @@ import { ALERT_HISTORY_KIND, type StoredAlertEvent } from '../src/shared/webhook
 import {
   RUNBOOK_LOOKBACK_DAYS,
   RUNBOOK_NEVER_FIRED,
-  RUNBOOK_NOTE_MAX
+  RUNBOOK_NOTE_MAX,
+  type RunbookOutcome
 } from '../src/shared/runbooks'
 
 // Item 28's main-process half: where a note lives, and what the job history can
@@ -135,7 +136,7 @@ describe('a note', () => {
     expect(mode).toBe(0o600)
   })
 
-  it('keeps the fleet-wide note and the per-host note apart', () => {
+  it('keeps the fleet-wide note and the per-server note apart', () => {
     const d = deps()
     saveRunbookNote(d, 'disk', null, 'Fleet: check journald first.')
     saveRunbookNote(d, 'disk', 'web-1', 'web-1 keeps its backups on /.')
@@ -215,7 +216,7 @@ describe('what was run the last three times it fired', () => {
     expect(r.status === 'ok' && r.occurrences[0].jobs[0].commands[0].outcome).toBe('succeeded')
   })
 
-  it('does not attribute a job that ran on a different host', async () => {
+  it('does not attribute a job that ran on a different server', async () => {
     const s = await store()
     raise(s, 'raised', T0)
     job(s, 'j1', T0 + 5 * MIN, ['fix-db'], { hosts: ['db-1'] })
@@ -227,7 +228,7 @@ describe('what was run the last three times it fired', () => {
     expect(other.status).toBe('never-fired')
   })
 
-  it('does not attribute a job belonging to a different alert kind on the same host', async () => {
+  it('does not attribute a job belonging to a different alert kind on the same server', async () => {
     const s = await store()
     // A CPU alert on the same host, in the same minutes. The disk runbook must
     // not claim its incident.
@@ -275,7 +276,7 @@ describe('what was run the last three times it fired', () => {
     expect(r).toEqual({ status: 'unavailable', reason: 'store-unreadable' })
   })
 
-  it('will not answer a per-host question without a host', async () => {
+  it('will not answer a per-server question without a server', async () => {
     const s = await store()
     raise(s, 'raised', T0)
     job(s, 'j1', T0 + 5 * MIN, ['whatever'])
@@ -295,13 +296,11 @@ describe('what was run the last three times it fired', () => {
     expect(text).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz012345')
   })
 
-  it('carries what the host said as host-reported, separate from what we ran', async () => {
+  it('carries what the server said as host-reported, separate from what we ran', async () => {
     const s = await store()
     raise(s, 'raised', T0)
-    // `nonzero`, which is what `classifyBroadcastResult` ACTUALLY stores for a
-    // command that ran and exited non-zero. The seed said `failed`, which is
-    // not a member of `JobHostOutcome` and which nothing in production can
-    // write — see the note on the outcome assertion below.
+    // `nonzero` is what `classifyBroadcastResult` stores for a command that ran
+    // and exited non-zero.
     job(s, 'j1', T0 + 5 * MIN, ['fstrim -av'], {
       outcome: 'nonzero',
       exitCode: 1,
@@ -310,32 +309,49 @@ describe('what was run the last three times it fired', () => {
     const r = readRunbookRecall(deps({ history: () => s }), 'disk', 'web-1')
     const cmd = r.status === 'ok' ? r.occurrences[0].jobs[0].commands[0] : null
     expect(cmd?.text).toBe('fstrim -av')
-    // ------------------------------------------------------------------
-    // WHY THIS LINE HAS A NOTE ON IT.
-    //
-    // `outcomeOf` used to read
-    //   `if (outcome === 'failed' || outcome === 'timeout' || outcome === 'unhealthy')`
-    // and `JobHostOutcome` has never had a `failed`. The real vocabulary is ok,
-    // nonzero, missing-command, permission-denied, timeout, unreachable,
-    // cancelled, abandoned, orphaned, unhealthy — so every failure except
-    // `timeout` and `unhealthy` fell through to `unknown`, and the runbook told
-    // an operator "we do not know how that went" about a command that plainly
-    // failed. A non-zero exit is the commonest failure there is.
-    //
-    // It was invisible because this seed wrote `failed` too: the fixture
-    // matched the branch rather than the store, so the test and the code were
-    // wrong in the same direction and the test passed. Nothing but the type
-    // checker was ever going to say so — which is the whole argument for
-    // type-checking the suite.
-    //
-    // `outcomeOf` now maps the union exhaustively BY TYPE, so a new outcome
-    // added to the job engine fails to compile there rather than quietly
-    // joining `unknown`. `abandoned` and `cancelled` still mean `unknown`, on
-    // purpose: one stopped because ShellPilot did, the other never ran, and
-    // neither says the command failed.
-    // ------------------------------------------------------------------
+    // A non-zero exit is the commonest failure there is. The whole map is
+    // pinned in 'reads every outcome the job engine can store' below.
     expect(cmd?.outcome).toBe('failed')
     expect(cmd?.hostReported).toBe('fstrim: /: the discard operation is not supported')
+  })
+
+  // Every outcome the job engine can store, and what the runbook says about it.
+  //
+  // Typed as a total Record so the compiler makes this list follow the union:
+  // add an outcome to `JobHostOutcome` and this fails to compile until someone
+  // decides what it means, which is the same guard `outcomeOf` itself has. A
+  // hand-written array would have silently kept passing while covering nine of
+  // ten.
+  const MEANS: Record<JobHostOutcome, RunbookOutcome> = {
+    ok: 'succeeded',
+    nonzero: 'failed',
+    'missing-command': 'failed',
+    'permission-denied': 'failed',
+    timeout: 'failed',
+    unreachable: 'failed',
+    unhealthy: 'failed',
+    // Not failures. Each is a case where nobody watched the command end:
+    // `abandoned` is ShellPilot stopping, `cancelled` never started, and
+    // `orphaned` lost the wrapper's pid before an `rc` was written — which
+    // `src/shared/jobs.ts` says may be a command that finished a microsecond
+    // before it could record so, or one that died mid-upgrade.
+    abandoned: 'unknown',
+    cancelled: 'unknown',
+    orphaned: 'unknown'
+  }
+
+  it('reads every outcome the job engine can store', async () => {
+    for (const [stored, expected] of Object.entries(MEANS) as [
+      JobHostOutcome,
+      RunbookOutcome
+    ][]) {
+      const s = await store()
+      raise(s, 'raised', T0)
+      job(s, 'j1', T0 + 5 * MIN, ['do-a-thing'], { outcome: stored })
+      const r = readRunbookRecall(deps({ history: () => s }), 'disk', 'web-1')
+      const got = r.status === 'ok' ? r.occurrences[0].jobs[0].commands[0].outcome : null
+      expect(`${stored} -> ${got}`).toBe(`${stored} -> ${expected}`)
+    }
   })
 
   it('calls an outcome nobody observed unknown, rather than calling it a failure', async () => {
@@ -390,7 +406,7 @@ describe('what was run the last three times it fired', () => {
     ])
   })
 
-  it('finds that job on a host that has run hundreds since', async () => {
+  it('finds that job on a server that has run hundreds since', async () => {
     // The read is capped, and a cap over a 400-day window is a different cap
     // from one over ninety days: the newest two hundred jobs on a busy host
     // are all from the last fortnight, and the one that answered the spring

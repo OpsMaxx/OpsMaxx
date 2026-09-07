@@ -86,6 +86,11 @@ const ALLOWED_TOOLS = [
   'write_file',
   'list_files',
   'get_server_metrics',
+  // Item 47. A READ of history ShellPilot already stores: it opens no
+  // connection, reaches no shell, and answers about a server that is offline.
+  // Gated on `serverMetrics`, the same capability as the tool whose numbers
+  // these are over time.
+  'get_capacity_trends',
   'get_host_facts',
   'list_databases',
   'query_database',
@@ -551,7 +556,7 @@ describe('nothing an agent can reach imports the job engine', () => {
       `A module reachable from the MCP bridge or the ShellPilot CLI now imports the job engine.\n\n` +
         `${offenders.join('\n')}\n\n` +
         `DURABILITY DEFEATS REVOCATION. denyAllPending() — the stop-all-AI-access switch — works ` +
-        `by resolving requests that are PENDING. A job already running on fifteen hosts has ` +
+        `by resolving requests that are PENDING. A job already running on fifteen servers has ` +
         `nothing pending: no request to deny, no approval to withdraw, and no session revocation ` +
         `that reaches the channels already open. The switch would return cleanly, report a ` +
         `number, and the estate upgrade would keep going. That is not a weaker guarantee than ` +
@@ -597,6 +602,11 @@ describe('the AI permission model has no word for a job', () => {
     // accepts traffic on — for a person to look at. The bridge cannot reach
     // them at any setting; section 4 below holds that by name.
     'firewallRules',
+  // Item 36b. A HUMAN-ONLY consent line, like firewallRules above it: no MCP
+  // tool exposes sudoers whatever it is set to. It is here because the grid it
+  // lives in is shared, not because an agent can reach it -- and it is the
+  // shortest description of how to take the machine, so it stays that way.
+  'sudoersRead',
     'manageServers',
     'vpnControl'
   ]

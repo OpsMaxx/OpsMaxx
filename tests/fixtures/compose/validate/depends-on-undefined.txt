@@ -1,0 +1,2 @@
+service "web" depends on undefined service "nope": invalid compose project
+exit=1

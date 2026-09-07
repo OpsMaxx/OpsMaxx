@@ -85,7 +85,7 @@ export type DockerFailure =
 
 export const DOCKER_FAILURE_HELP: Record<DockerFailure, string> = {
   'not-installed':
-    'No docker on this host. Looked on PATH and in /usr/bin, /usr/local/bin, /snap/bin, /opt/homebrew/bin and /usr/sbin. If it lives somewhere else, a symlink into /usr/local/bin is the usual fix.',
+    'No docker on this server. Looked on PATH and in /usr/bin, /usr/local/bin, /snap/bin, /opt/homebrew/bin and /usr/sbin. If it lives somewhere else, a symlink into /usr/local/bin is the usual fix.',
   'daemon-unreachable':
     'Docker is installed but its daemon is not answering. It may not be running, or it may be listening on a socket this user cannot see.',
   'permission-denied':
@@ -199,16 +199,34 @@ export const DOCKER_SUB_SEP = '\u0003'
  * so the caller can run `"$SP_BIN" ...` and get the same answer a login shell
  * would.
  */
-export function resolveBinary(name: string, extraPaths: string[] = []): string {
-  const candidates = [
-    name,
-    `/usr/bin/${name}`,
-    `/usr/local/bin/${name}`,
-    `/snap/bin/${name}`,
-    `/opt/homebrew/bin/${name}`,
-    `/usr/sbin/${name}`,
-    ...extraPaths
+export function resolveBinary(
+  name: string,
+  extraPaths: string[] = [],
+  /**
+   * Other binaries that answer the same questions, tried in order after the
+   * first. `docker` then `podman`, so a machine with both keeps using docker
+   * and a machine with only podman stops reporting "not installed".
+   *
+   * Verified against a real podman 5.8.4: a stock install has NO `docker`
+   * binary at all -- `command -v docker` finds nothing -- so every call site
+   * that resolved only `docker` reported the runtime absent on a server that
+   * was running containers. The `podman-docker` shim package exists and plenty
+   * of hosts have it, which is exactly why this went unnoticed.
+   */
+  alsoTry: string[] = []
+): string {
+  const pathsFor = (n: string): string[] => [
+    n,
+    `/usr/bin/${n}`,
+    `/usr/local/bin/${n}`,
+    `/snap/bin/${n}`,
+    `/opt/homebrew/bin/${n}`,
+    `/usr/sbin/${n}`
   ]
+  // Every path for the FIRST name before any path for the second: a host with
+  // docker in /usr/local/bin and podman in /usr/bin must still choose docker,
+  // which interleaving by directory would get wrong.
+  const candidates = [...pathsFor(name), ...alsoTry.flatMap(pathsFor), ...extraPaths]
   // `command -v` rather than `which`: built in, and it is the POSIX spelling.
   return (
     `SP_BIN=""; for c in ${candidates.join(' ')}; do ` +
@@ -238,7 +256,7 @@ export const SUDO_PROBE = 'sudo -n true >/dev/null 2>&1 && echo SP_SUDO_OK || tr
 export function buildDockerListCommand(opts: { sudo?: boolean } = {}): string {
   const run = opts.sudo ? 'sudo -n "$SP_BIN"' : '"$SP_BIN"'
   return [
-    resolveBinary('docker'),
+    resolveBinary('docker', [], ['podman']),
     `${run} version --format "{{.Server.Version}}" 2>/dev/null || ${run} --version 2>&1`,
     // Compose labels, asked for SEPARATELY and allowed to fail.
     //
@@ -313,11 +331,20 @@ export function extractDockerVersion(text: string): string | null {
 
 /** `<no value>` is what a Go template prints for a field the binary does not
  *  have - docker before 20.10 has no `.State`. A chip reading `<no value>` is
- *  worse than one derived from the status line everybody already reads. */
+ *  worse than one derived from the status line everybody already reads.
+ *
+ *  THE STATUS WORD IS NOT THE SAME ON BOTH ENGINES. Docker's `system df -v`
+ *  writes `Up 2 hours` and `Exited (0) 3 minutes ago`; PODMAN's writes the bare
+ *  state -- `running`, `exited`, `created` -- measured on podman 5.8.4. Two of
+ *  those matched the existing branches by luck, because `exited` and `created`
+ *  are the same word either way. `running` matched nothing and every running
+ *  container on a podman host was reported `unknown`. `podman ps` is not
+ *  affected: it emits `Up …` like docker, and a real `.State` besides. */
 function stateFrom(state: string, status: string): string {
   const s = state.trim()
   if (s !== '' && s !== '<no value>') return s
   if (/^up\b/i.test(status)) return 'running'
+  if (/^running\b/i.test(status)) return 'running'
   if (/^exited\b/i.test(status)) return 'exited'
   if (/^created\b/i.test(status)) return 'created'
   if (/^restarting\b/i.test(status)) return 'restarting'
@@ -512,12 +539,15 @@ export function buildDockerLogsCommand(
   ]
     .filter((f) => f !== '')
     .join(' ')
-  if (opts.sudo !== true) {
-    // The unchanged shape. Anything else here would make the common path
-    // depend on a shell fragment it does not need.
-    return `docker logs ${flags} ${ref} 2>&1`
-  }
-  return [resolveBinary('docker'), `sudo -n "$SP_BIN" logs ${flags} ${ref} 2>&1`].join('; ')
+  // BOTH branches resolve the binary, and the comment that used to sit here
+  // said the common path "does not need the fragment". That was true while
+  // docker was the only runtime it could be. It is not true now: on a podman
+  // host with no docker shim this returned a literal `docker logs`, so logs
+  // were the one thing that failed WITHOUT sudo and worked with it -- which
+  // reads as a permissions problem and is not one.
+  const probe = resolveBinary('docker', [], ['podman'])
+  const run = opts.sudo === true ? 'sudo -n "$SP_BIN"' : '"$SP_BIN"'
+  return [probe, `${run} logs ${flags} ${ref} 2>&1`].join('; ')
 }
 
 /**
@@ -534,7 +564,7 @@ export function buildDockerShellCommand(ref: string, opts: { sudo?: boolean } = 
   // then opens a shell as nobody is not one feature, it is two that disagree.
   const run = opts.sudo ? 'sudo -n "$SP_BIN"' : '"$SP_BIN"'
   return [
-    resolveBinary('docker'),
+    resolveBinary('docker', [], ['podman']),
     `${run} exec -it ${ref} /bin/bash 2>/dev/null || ${run} exec -it ${ref} /bin/sh`
   ].join('; ')
 }
@@ -618,6 +648,9 @@ export const DOCKER_MARKERS = {
   health: '===SHELLPILOT-HEALTH===',
   stats: '===SHELLPILOT-STATS===',
   act: '===SHELLPILOT-ACT===',
+  networks: '===SHELLPILOT-NETWORKS===',
+  netAttach: '===SHELLPILOT-NETATTACH===',
+  healthLog: '===SHELLPILOT-HEALTHLOG===',
   /**
    * One marker per removal kind, because the four commands are four different
    * programs and their output must never be pooled.
@@ -799,7 +832,7 @@ export type DockerDiskProbe =
 export function buildDockerDiskCommand(opts: { sudo?: boolean } = {}): string {
   const run = runner(opts.sudo)
   return [
-    resolveBinary('docker'),
+    resolveBinary('docker', [], ['podman']),
     `echo "${DOCKER_MARKERS.df}"`,
     `${run} system df 2>&1`
   ].join('; ')
@@ -1033,7 +1066,7 @@ export type DockerDiskDetailProbe =
 export function buildDockerDiskDetailCommand(opts: { sudo?: boolean } = {}): string {
   const run = runner(opts.sudo)
   return [
-    resolveBinary('docker'),
+    resolveBinary('docker', [], ['podman']),
     `echo "${DOCKER_MARKERS.engine}"`,
     `${run} version --format "{{.Server.BuildTime}}" 2>/dev/null || true`,
     `echo "${DOCKER_MARKERS.dfDetail}"`,
@@ -1457,7 +1490,7 @@ export function buildDockerInspectCommand(ref: string, opts: { sudo?: boolean } 
   if (!validateContainerRef(ref)) throw new Error('refusing to build a command from an invalid container reference')
   const run = runner(opts.sudo)
   return [
-    resolveBinary('docker'),
+    resolveBinary('docker', [], ['podman']),
     `echo "${DOCKER_MARKERS.health}"`,
     `${run} inspect --format '{{.State.Health.Status}}' ${ref} 2>/dev/null || true`,
     `echo "${DOCKER_MARKERS.inspect}"`,
@@ -1547,6 +1580,193 @@ export function parseDockerInspectOutput(output: string, exitCode: number | null
   }
 }
 
+// ----------------------------------------------------------- health log
+//
+// `Health.Status` has been read since the inspect probe was written. This is
+// the LOG under it, and reading a real one changed what the panel can claim.
+//
+//  1. `.State.Health` IS NULL FOR A CONTAINER WITH NO HEALTHCHECK. Not
+//     "healthy", not "unknown" -- absent. Three different sentences, and the
+//     one this build must never print for a container nobody wrote a check for
+//     is "healthy".
+//
+//  2. DOCKER KEEPS ONLY THE LAST FIVE ENTRIES. Measured against a container
+//     whose `FailingStreak` was 24 and whose log held 5. The log is a SAMPLE
+//     and the streak is the count, so a panel showing five failures as "the
+//     history" understates a container that has been down for hours.
+//
+//  3. `starting` CAN MEAN "FAILING EVERY CHECK". A container inside its
+//     `start_period` reported `Status: starting` and `FailingStreak: 0` with a
+//     logged check that exited 1. With a 300-second start period, trusting the
+//     status alone shows a hopeful word for five minutes about a container that
+//     has never once passed. The log's exit codes are the only thing that says
+//     otherwise, which is why they are read.
+//
+//  4. THE OUTPUT IS THE HEALTHCHECK'S OWN STDOUT AND CARRIES WHATEVER IT
+//     PRINTS. A measured one contained
+//     `https://user:...@api.example.com/health?token=...` and an
+//     `Authorization: Bearer` header, verbatim. The parse below keeps it as
+//     given -- redaction happens in main, before this crosses IPC, where the
+//     redactor and the known secrets are. A shared parser promising redaction
+//     it cannot enforce would be worse than not promising it.
+
+/** How many entries docker keeps. Measured, not documented from memory. */
+export const DOCKER_HEALTH_LOG_KEPT = 5
+
+export interface DockerHealthEntry {
+  start: string
+  end: string
+  /** null only when docker printed something this could not read. */
+  exitCode: number | null
+  /** RAW. See point 4 above -- redacted in main, never here. */
+  output: string
+}
+
+export interface DockerHealthLog {
+  container: string
+  /** `healthy`, `unhealthy`, `starting` -- or null for NO HEALTHCHECK AT ALL. */
+  status: string | null
+  failingStreak: number | null
+  entries: DockerHealthEntry[]
+  /** The streak is longer than the entries kept, so the log is a sample of it. */
+  sampled: boolean
+}
+
+export function buildDockerHealthLogCommand(refs: string[], opts: { sudo?: boolean } = {}): string {
+  if (!Array.isArray(refs) || refs.length === 0) {
+    throw new Error('refusing to build a health command with no container references')
+  }
+  if (refs.length > DOCKER_ACTION_MAX_REFS) {
+    throw new Error(`refusing to read health for more than ${DOCKER_ACTION_MAX_REFS} containers at once`)
+  }
+  for (const ref of refs) {
+    if (!validateContainerRef(ref)) {
+      throw new Error('refusing to build a command from an invalid container reference')
+    }
+  }
+  const run = runner(opts.sudo)
+  // `{{if .State.Health}}...{{else}}null{{end}}`: without the guard, a
+  // container with no healthcheck makes the template fail for the WHOLE
+  // invocation, so one plain container would cost the health of every other.
+  const tmpl = '{{.Name}}|{{if .State.Health}}{{json .State.Health}}{{else}}null{{end}}'
+  return [
+    resolveBinary('docker', [], ['podman']),
+    `echo "${DOCKER_MARKERS.healthLog}"`,
+    `${run} inspect --format '${tmpl}' ${refs.join(' ')} 2>&1 || true`,
+    `echo "${DOCKER_MARKERS.end}"`
+  ].join('; ')
+}
+
+export type DockerHealthLogProbe =
+  | { ok: true; logs: DockerHealthLog[]; usedSudo?: boolean }
+  | { ok: false; reason: DockerFailure; detail: string }
+
+/** The probe shape its siblings use, so it goes through the same failover. */
+export function parseDockerHealthLogOutput(
+  output: string,
+  exitCode: number | null
+): DockerHealthLogProbe {
+  const body = section(output, DOCKER_MARKERS.healthLog)
+  if (body === undefined) {
+    const detail = nonEmptyLines(output)[0] ?? 'docker did not run'
+    return { ok: false, reason: classifyDockerFailure(output, exitCode), detail }
+  }
+  return { ok: true, logs: parseDockerHealthLogs(body) }
+}
+
+export function parseDockerHealthLogs(text: string): DockerHealthLog[] {
+  const out: DockerHealthLog[] = []
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (line === '') continue
+    const at = line.indexOf('|')
+    // `error: no such object: ...` has no separator. Skipped rather than
+    // guessed at: docker names the ref it could not find and there is nothing
+    // to report about a container that is not there.
+    if (at <= 0) continue
+    const container = line.slice(0, at).replace(/^\//, '')
+    const body = line.slice(at + 1).trim()
+    if (body === 'null') {
+      out.push({ container, status: null, failingStreak: null, entries: [], sampled: false })
+      continue
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(body)
+    } catch {
+      continue
+    }
+    const h = parsed as {
+      Status?: unknown
+      FailingStreak?: unknown
+      Log?: { Start?: unknown; End?: unknown; ExitCode?: unknown; Output?: unknown }[]
+    }
+    const streak = typeof h.FailingStreak === 'number' ? h.FailingStreak : null
+    const entries: DockerHealthEntry[] = (Array.isArray(h.Log) ? h.Log : []).map((e) => ({
+      start: typeof e.Start === 'string' ? e.Start : '',
+      end: typeof e.End === 'string' ? e.End : '',
+      exitCode: typeof e.ExitCode === 'number' ? e.ExitCode : null,
+      output: typeof e.Output === 'string' ? e.Output : ''
+    }))
+    out.push({
+      container,
+      status: typeof h.Status === 'string' ? h.Status : null,
+      failingStreak: streak,
+      entries,
+      sampled: streak !== null && streak > entries.length
+    })
+  }
+  return out
+}
+
+/**
+ * Worst first, and `starting` is not one bucket.
+ *
+ * A container inside its start period whose every logged check exited non-zero
+ * sorts directly behind the unhealthy ones, because it is failing and the word
+ * on the status does not say so. A container that is genuinely still starting
+ * sorts below both.
+ */
+export function healthRank(log: DockerHealthLog): number {
+  if (log.status === 'unhealthy') return 0
+  if (log.status === 'starting') {
+    const failing = log.entries.length > 0 && log.entries.every((e) => e.exitCode !== 0)
+    return failing ? 1 : 2
+  }
+  if (log.status === 'healthy') return 3
+  // No healthcheck is not a problem and is not an all-clear either, so it sits
+  // below healthy rather than being dropped.
+  if (log.status === null) return 4
+  return 5
+}
+
+export function sortUnhealthyFirst(logs: DockerHealthLog[]): DockerHealthLog[] {
+  return [...logs].sort((a, b) => healthRank(a) - healthRank(b) || a.container.localeCompare(b.container))
+}
+
+/** One line per container, saying the thing the status alone does not. */
+export function healthHeadline(log: DockerHealthLog): string {
+  if (log.status === null) return `${log.container} has no healthcheck, so nothing is checking it.`
+  if (log.status === 'unhealthy') {
+    const streak =
+      log.failingStreak === null
+        ? 'it has been failing'
+        : `it has failed ${log.failingStreak} check${log.failingStreak === 1 ? '' : 's'} in a row`
+    const sample = log.sampled
+      ? `, and docker keeps only the last ${log.entries.length} of them`
+      : ''
+    return `${log.container} is unhealthy: ${streak}${sample}.`
+  }
+  if (log.status === 'starting') {
+    const failing = log.entries.length > 0 && log.entries.every((e) => e.exitCode !== 0)
+    return failing
+      ? `${log.container} still reports "starting" and every check it has run has failed. Its start period is hiding that.`
+      : `${log.container} is inside its start period; docker is not calling it unhealthy yet.`
+  }
+  if (log.status === 'healthy') return `${log.container} is passing its healthcheck.`
+  return `${log.container} reported a health status this build does not know: ${log.status}.`
+}
+
 // ---------------------------------------------------------------- stats
 
 export interface DockerStat {
@@ -1598,7 +1818,7 @@ export function buildDockerStatsCommand(refs: string[], opts: { sudo?: boolean }
     '{{.BlockIO}}'
   ].join(DOCKER_SEP)
   return [
-    resolveBinary('docker'),
+    resolveBinary('docker', [], ['podman']),
     `echo "${DOCKER_MARKERS.stats}"`,
     `${run} stats --no-stream --format "${fmt}" ${refs.join(' ')} 2>&1`
   ].join('; ')
@@ -1774,7 +1994,7 @@ export function buildDockerActionCommand(
     flags = ` -t ${validTimeoutSeconds(opts.timeoutSec)}`
   }
   return [
-    resolveBinary('docker'),
+    resolveBinary('docker', [], ['podman']),
     `echo "${DOCKER_MARKERS.act}"`,
     `${run} ${action}${flags} ${refs.join(' ')} 2>&1`
   ].join('; ')
@@ -2088,6 +2308,251 @@ export function buildDockerReclaimPreview(disk: DockerDiskDetail): DockerReclaim
   return { items, withheld }
 }
 
+import type { EnginePrecheckProbe } from './enginePrecheck'
+import type { PackageManager } from './hostFacts'
+import type { ImageScanProbe } from './imageScan'
+
+// ------------------------------------------------------------ pull / build
+//
+// Item 42's row. Two verbs that look alike on a panel and are not alike at all.
+//
+// `pull` fetches bytes and runs none of them. It is graded ordinary in
+// `shared/commandRisk.ts` deliberately -- putting a confirmation on the safest
+// thing here teaches people to click through the ones that matter.
+//
+// `build` RUNS A DOCKERFILE, which is a program: `RUN curl ... | sh` is an
+// ordinary line in one. It is graded elevated for that reason, and it takes no
+// build args, because a build arg is free text that reaches a `RUN` line and
+// nothing here can show an operator what it will do.
+
+/** A build context, made safe to interpolate and to reason about.
+ *
+ *  Absolute, or a plain relative path with no traversal. Not a URL: `docker
+ *  build https://github.com/x/y.git` is a real form and it fetches and builds
+ *  code from the internet, which is not a thing to accept from a text box. */
+export function validateBuildContext(path: unknown): boolean {
+  if (typeof path !== 'string' || path === '' || path.length > 4096) return false
+  if (/[^A-Za-z0-9._/-]/.test(path)) return false
+  if (path.includes('..')) return false
+  return true
+}
+
+/**
+ * An image reference, validated before it is written into someone's file.
+ *
+ * Deliberately strict about the tag and permissive about the registry: a
+ * registry host can carry a port and a path, a tag cannot carry a slash, and a
+ * digest is hex of a stated length. The thing being prevented is not a shell
+ * injection — this value is written into a file, not a command — it is a file
+ * edit that leaves the project unparseable, which is a worse outcome than a
+ * refused edit because it is discovered at the next deploy.
+ */
+const IMAGE_RE =
+  /^(?:[a-zA-Z0-9._-]+(?::\d+)?\/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*(?::[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127})?(?:@sha256:[a-f0-9]{64})?$/
+
+export function validateImageRef(ref: unknown): boolean {
+  if (typeof ref !== 'string' || ref.length === 0 || ref.length > 512) return false
+  // Checked BEFORE the pattern, because the pattern alone accepted
+  // `../etc/passwd`: a registry component is `[a-zA-Z0-9._-]+`, which `..`
+  // satisfies, so a path traversal read as `registry `..`, image `etc/passwd``
+  // and was written straight into someone's compose file. Found by the test
+  // below rather than by review, which is why it is spelled out here.
+  if (ref.startsWith('.') || ref.startsWith('/') || ref.includes('..')) return false
+  return IMAGE_RE.test(ref)
+}
+
+export function buildDockerPullCommand(ref: string, opts: { sudo?: boolean } = {}): string {
+  if (!validateImageRef(ref)) {
+    throw new Error('refusing to build a pull command from an invalid image reference')
+  }
+  return [resolveBinary('docker', [], ['podman']), `${runner(opts.sudo)} pull ${ref}`].join('; ')
+}
+
+export function buildDockerBuildCommand(
+  spec: { context: string; tag: string },
+  opts: { sudo?: boolean } = {}
+): string {
+  if (!validateBuildContext(spec.context)) {
+    throw new Error('refusing to build a build command from an invalid context path')
+  }
+  if (!validateImageRef(spec.tag)) {
+    throw new Error('refusing to build a build command with an invalid tag')
+  }
+  // `--pull`, always. A build that reuses a cached base image is a build that
+  // does not contain the security update somebody just asked for.
+  return [
+    resolveBinary('docker', [], ['podman']),
+    `${runner(opts.sudo)} build --pull -t ${spec.tag} ${spec.context}`
+  ].join('; ')
+}
+
+// ---------------------------------------------------------------------------
+// Networks
+// ---------------------------------------------------------------------------
+//
+// `docker system df -v` does not list networks at all, which is why the reclaim
+// preview has never emitted one despite `network rm` being built and parsed.
+// This is that read, and the obvious version of it is WRONG.
+//
+// `docker network inspect` reports the containers ATTACHED RIGHT NOW. Measured:
+// a compose project with one service stopped left its network reporting
+// `len .Containers` == 0 while `docker ps -a` still showed the stopped
+// container on it. Removing that network on the strength of the zero is not
+// recoverable by recreating a network of the same name -- the container is
+// pinned to the network's ID. Measured, end to end: after `docker network rm
+// spnet_back`, `docker compose start b` failed with "network
+// c1fd84b264c9... not found", and only recreating the container fixes it.
+//
+// So attachment is read from `docker ps -a`, whose `{{.Networks}}` column names
+// the networks of STOPPED containers too, and `network inspect` is not used.
+
+export interface DockerNetwork {
+  id: string
+  name: string
+  driver: string
+  scope: string
+}
+
+export interface DockerNetworkUse {
+  containerId: string
+  name: string
+  /** `running`, `exited`, `created`, `paused`... as docker's own State column. */
+  state: string
+  /** Comma-joined by docker, split here. */
+  networks: string[]
+}
+
+/**
+ * Docker's three built-in networks.
+ *
+ * `docker network rm` refuses all three, so offering one is offering a button
+ * that cannot work. They are withheld with that reason rather than filtered,
+ * because a network the operator can see in `docker network ls` and not in this
+ * list is a list that looks broken.
+ */
+export const DOCKER_DEFAULT_NETWORKS: ReadonlySet<string> = new Set(['bridge', 'host', 'none'])
+
+export function buildDockerNetworkCommand(opts: { sudo?: boolean } = {}): string {
+  const run = runner(opts.sudo)
+  return [
+    resolveBinary('docker', [], ['podman']),
+    `echo "${DOCKER_MARKERS.networks}"`,
+    `${run} network ls --format '{{.ID}}|{{.Name}}|{{.Driver}}|{{.Scope}}' 2>&1 || true`,
+    `echo "${DOCKER_MARKERS.netAttach}"`,
+    // `ps -a`, not `ps`: a stopped container still holds its networks, and it is
+    // the only place that shows.
+    `${run} ps -a --format '{{.ID}}|{{.Names}}|{{.State}}|{{.Networks}}' 2>&1`,
+    `SP_RC=$?; echo "${DOCKER_MARKERS.end}"; exit $SP_RC`
+  ].join('; ')
+}
+
+export function parseDockerNetworks(text: string): DockerNetwork[] {
+  const out: DockerNetwork[] = []
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (line === '') continue
+    const f = line.split('|')
+    if (f.length < 4) continue
+    out.push({ id: f[0].trim(), name: f[1].trim(), driver: f[2].trim(), scope: f[3].trim() })
+  }
+  return out
+}
+
+export function parseDockerNetworkUse(text: string): DockerNetworkUse[] {
+  const out: DockerNetworkUse[] = []
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (line === '') continue
+    const f = line.split('|')
+    if (f.length < 4) continue
+    out.push({
+      containerId: f[0].trim(),
+      name: f[1].trim(),
+      state: f[2].trim(),
+      networks: f[3]
+        .split(',')
+        .map((n) => n.trim())
+        .filter((n) => n !== '')
+    })
+  }
+  return out
+}
+
+export type DockerNetworkProbe =
+  | { ok: true; networks: DockerNetwork[]; use: DockerNetworkUse[]; usedSudo?: boolean }
+  | { ok: false; reason: DockerFailure; detail: string }
+
+export function parseDockerNetworkOutput(
+  output: string,
+  exitCode: number | null
+): DockerNetworkProbe {
+  const nets = section(output, DOCKER_MARKERS.networks)
+  const attach = section(output, DOCKER_MARKERS.netAttach)
+  // BOTH sections or neither. A network listing without the attachment read is
+  // a list of networks with nothing known about what holds them, and the whole
+  // module exists to not offer one of those.
+  if (nets === undefined || attach === undefined) {
+    const detail = nonEmptyLines(output)[0] ?? 'docker did not run'
+    return { ok: false, reason: classifyDockerFailure(output, exitCode), detail }
+  }
+  return { ok: true, networks: parseDockerNetworks(nets), use: parseDockerNetworkUse(attach) }
+}
+
+/**
+ * Which networks may be offered, and why the rest may not.
+ *
+ * The only network offered is one that no container names at all -- not one
+ * whose containers merely are not running. See the header: that difference was
+ * measured, and getting it wrong breaks a `compose start` in a way recreating
+ * the network does not fix.
+ */
+export function buildDockerNetworkPreview(
+  networks: DockerNetwork[],
+  use: DockerNetworkUse[]
+): DockerReclaimPreview {
+  const items: DockerReclaimItem[] = []
+  const withheld: DockerReclaimWithheld[] = []
+
+  const holders = new Map<string, DockerNetworkUse[]>()
+  for (const u of use) {
+    for (const n of u.networks) {
+      const list = holders.get(n)
+      if (list === undefined) holders.set(n, [u])
+      else list.push(u)
+    }
+  }
+
+  for (const net of networks) {
+    if (DOCKER_DEFAULT_NETWORKS.has(net.name)) {
+      withheld.push({
+        kind: 'network',
+        id: net.id,
+        label: net.name,
+        reason: 'docker creates this one and refuses to remove it'
+      })
+      continue
+    }
+    const on = holders.get(net.name) ?? []
+    if (on.length > 0) {
+      const running = on.filter((u) => u.state === 'running').length
+      withheld.push({
+        kind: 'network',
+        id: net.id,
+        label: net.name,
+        reason:
+          running === on.length
+            ? `${on.length} container${on.length === 1 ? '' : 's'} on it`
+            : `${on.length} container${on.length === 1 ? '' : 's'} on it, ${on.length - running} of them stopped and still attached`
+      })
+      continue
+    }
+    items.push({ kind: 'network', id: net.id, label: net.name, size: '', sizeBytes: null })
+  }
+
+  return { items, withheld }
+}
+
+
 export type DockerReclaimRisk = 'elevated' | 'destructive'
 
 export interface DockerReclaimPlan {
@@ -2391,7 +2856,7 @@ export function buildDockerReclaimCommand(
     blocks.push(`${run} ${RECLAIM_VERB[kind]} ${refs.join(' ')} 2>&1`)
   }
   return [
-    resolveBinary('docker'),
+    resolveBinary('docker', [], ['podman']),
     ...blocks,
     // The last block's own status, held over the echo and handed back — the
     // same shape `buildDockerDiskDetailCommand` uses, and for the same reason.
@@ -2541,6 +3006,21 @@ export interface DockerBridge {
   diskDetail(cfg: unknown, opts?: { sudo?: boolean; autoSudo?: boolean }): Promise<DockerDiskDetailProbe>
   inspect(cfg: unknown, ref: string, opts?: { sudo?: boolean; autoSudo?: boolean }): Promise<DockerInspectProbe>
   stats(cfg: unknown, refs: string[], opts?: { sudo?: boolean; autoSudo?: boolean }): Promise<DockerStatsProbe>
+  /** Healthcheck logs. Whatever the check printed, REDACTED IN MAIN before it
+   *  reaches this boundary -- see the reader. */
+  healthLogs(
+    cfg: unknown,
+    refs: string[],
+    opts?: { sudo?: boolean; autoSudo?: boolean }
+  ): Promise<DockerHealthLogProbe>
+  /** One image's vulnerabilities, if the host already has a scanner. Never
+   *  installs one -- see `DockerReader.scanImage`. */
+  scanImage(cfg: unknown, ref: string): Promise<ImageScanProbe>
+  /** The engine-upgrade precheck. Read-only and unelevated; its package block
+   *  is shown rather than parsed -- see `shared/engineUpgrade.ts`. */
+  enginePrecheck(cfg: unknown, manager: PackageManager): Promise<EnginePrecheckProbe>
+  /** Networks, with what is attached to each -- INCLUDING stopped containers. */
+  networks(cfg: unknown, opts?: { sudo?: boolean; autoSudo?: boolean }): Promise<DockerNetworkProbe>
   act(
     cfg: unknown,
     action: DockerAction,

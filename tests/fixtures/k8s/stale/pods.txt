@@ -1,0 +1,4 @@
+default       bad-job-n8n86                             Failed      <none>   2026-09-05T19:23:19Z   Job
+default       ok-job-jmjvl                              Succeeded   <none>   2026-09-05T19:23:19Z   Job
+kube-system   coredns-ccb96694c-vnn97                   Running     <none>   2026-09-05T19:23:19Z   ReplicaSet
+kube-system   local-path-provisioner-5cf85fd84d-n9s6p   Running     <none>   2026-09-05T19:23:19Z   ReplicaSet

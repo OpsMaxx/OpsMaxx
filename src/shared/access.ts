@@ -1,3 +1,4 @@
+import type { SudoersFileReading } from './sudoers'
 // Who can get into a host, and with which key — roadmap item 23, the read half.
 //
 // One `authorized_keys` file per user per host is the whole dataset, and no GUI
@@ -123,12 +124,12 @@ export const ACCESS_STATUS_HELP: Record<AccessStatus, string> = {
   ok: 'Read successfully. An empty list here means empty, not "we could not look".',
   partial:
     'Some of it was read and some was not. The values shown are real; they are not the whole picture, and the accounts that could not be read are counted separately rather than being left out.',
-  absent: 'This host does not have the file that answers this, and that was checked rather than assumed.',
+  absent: 'This server does not have the file that answers this, and that was checked rather than assumed.',
   denied:
     'It exists and this account was not allowed to read it. A different account, or passwordless sudo, would see more. This is NOT the same as there being nothing there.',
-  'no-tool': 'The program that answers this is not installed on this host.',
+  'no-tool': 'The program that answers this is not installed on this server.',
   unsupported:
-    'This host cannot answer this question at all — not a permission problem and not a missing tool. Treat it as UNKNOWN, never as "none".',
+    'This server cannot answer this question at all — not a permission problem and not a missing tool. Treat it as UNKNOWN, never as "none".',
   unknown: 'The probe ran and its answer could not be read, or the collector never reported on it.'
 }
 
@@ -250,7 +251,7 @@ export const KEY_PROBLEM_HELP: Record<KeyProblem, string> = {
   truncated:
     'This line was longer than the collector transmits and arrived cut short, so its fingerprint would be wrong. The line is reported and deliberately not fingerprinted.',
   certificate:
-    'This line trusts a certificate, and the public key inside the certificate could not be read out of it. The certificate itself is deliberately not fingerprinted: that value is different for every certificate issued to the same key, so it would match nothing on any other host while looking like an answer.'
+    'This line trusts a certificate, and the public key inside the certificate could not be read out of it. The certificate itself is deliberately not fingerprinted: that value is different for every certificate issued to the same key, so it would match nothing on any other server while looking like an answer.'
 }
 
 /**
@@ -479,6 +480,17 @@ export function shellIsNoLogin(shell: string | null): boolean {
 export interface HostAccess {
   accounts: AccessAccount[]
   /**
+   * What sudo actually grants, from /etc/sudoers and /etc/sudoers.d — item 36b.
+   *
+   * `undefined` when nobody consented: `sudoersRead` is its own capability,
+   * denied on every seeded group, so this is absent on almost every host and
+   * that absence means "not asked for". `null` means it was asked for and the
+   * read failed. Neither is a host with no sudo rules, and the panel has to
+   * tell all three apart -- which is why this is not an array that can be
+   * empty for three different reasons.
+   */
+  sudoers?: SudoersFileReading[] | null
+  /**
    * The `AuthorizedKeysFile` directives found in sshd's config, verbatim.
    *
    * More than one means the config disagrees with itself across
@@ -587,6 +599,14 @@ export const ACCESS_INTERVAL_MS = 60 * 60 * 1000
 // ---- Building the command -------------------------------------------------
 
 export interface AccessCollectOptions {
+  /**
+   * Also read /etc/sudoers and /etc/sudoers.d — item 36b.
+   *
+   * Set by main from the `sudoersRead` capability on the group that governs
+   * the server, which is that item's own consent line. Absent means the read
+   * does not happen at all: it is not a default anybody can drift into.
+   */
+  sudoers?: boolean
   /**
    * Retry a refused read as root, with `sudo -n` only.
    *
@@ -772,7 +792,7 @@ export function buildAccessCommand(opts: AccessCollectOptions = {}): string {
     'SP_SSHD_W="-"',
     'SP_SSHD_D="-"',
     'if [ ! -d /etc/ssh ]; then',
-    'SP_SSHD_ST=absent; SP_SSHD_D="this host has no /etc/ssh directory"',
+    'SP_SSHD_ST=absent; SP_SSHD_D="this server has no /etc/ssh directory"',
     'elif [ ! -x /etc/ssh ]; then',
     'SP_SSHD_ST=denied; SP_SSHD_MISS=1',
     'SP_SSHD_D="/etc/ssh exists and this account cannot enter it, so nothing about where sshd looks for keys was read"',
@@ -799,7 +819,7 @@ export function buildAccessCommand(opts: AccessCollectOptions = {}): string {
     'SP_SSHD_ST=denied; SP_SSHD_MISS=1',
     'SP_SSHD_D="sshd_config exists and this account cannot read it"',
     'else',
-    'SP_SSHD_ST=absent; SP_SSHD_D="this host has no /etc/ssh/sshd_config"',
+    'SP_SSHD_ST=absent; SP_SSHD_D="this server has no /etc/ssh/sshd_config"',
     'fi',
     ...ifSudo(
       // `sshd -T` prints the EFFECTIVE configuration, every Include resolved
@@ -833,7 +853,7 @@ export function buildAccessCommand(opts: AccessCollectOptions = {}): string {
     ...findBin('passwd', 'SP_PASSWD'),
     'SP_PWS=""',
     'if [ -z "$SP_PASSWD" ]; then',
-    'sp_note account-status no-tool - "this host has no passwd command"',
+    'sp_note account-status no-tool - "this server has no passwd command"',
     'else',
     'SP_ERR=$("$SP_PASSWD" -S -a 2>&1 >/dev/null || true)',
     'if SP_PWS=$("$SP_PASSWD" -S -a 2>/dev/null) && [ -n "$SP_PWS" ]; then',
@@ -849,8 +869,8 @@ export function buildAccessCommand(opts: AccessCollectOptions = {}): string {
     // exit status is the same either way.
     'case "$SP_ERR" in',
     '*nrecognized*|*nvalid\\ option*|*llegal\\ option*|*"BusyBox"*|*"Usage:"*)',
-    'sp_note account-status unsupported - "the passwd on this host has no -S, so no lock state exists to read" ;;',
-    '*) sp_note account-status denied - "passwd -S -a needs root on this host" ;;',
+    'sp_note account-status unsupported - "the passwd on this server has no -S, so no lock state exists to read" ;;',
+    '*) sp_note account-status denied - "passwd -S -a needs root on this server" ;;',
     'esac',
     'fi',
     'fi',
@@ -898,7 +918,7 @@ export function buildAccessCommand(opts: AccessCollectOptions = {}): string {
     'elif [ -e /etc/passwd ]; then',
     'sp_note accounts denied - "/etc/passwd exists and this account cannot read it"',
     'else',
-    'sp_note accounts absent - "this host has no /etc/passwd"',
+    'sp_note accounts absent - "this server has no /etc/passwd"',
     'fi',
     ...findBin('chage', 'SP_CHAGE'),
     'if [ "$SP_PWOK" = 1 ]; then',
@@ -1047,7 +1067,7 @@ export function buildAccessCommand(opts: AccessCollectOptions = {}): string {
     // with — cron.ts spells the same idea `root` for the same reason.
     'sp_note sudoers ok - "group membership is a proxy for administrative rights, not a reading of the sudoers file"',
     'else',
-    'sp_note sudoers no-tool - "this host has no id command"',
+    'sp_note sudoers no-tool - "this server has no id command"',
     'fi',
 
     // Printed once, at the end, out of a variable that nothing read from a file
@@ -1932,7 +1952,7 @@ export function parseAccessCollection(output: string, deps: ParseAccessDeps): Ho
       keysSource = {
         ...keysSource,
         status: 'absent',
-        detail: 'this host has no accounts that could hold an authorized_keys file'
+        detail: 'this server has no accounts that could hold an authorized_keys file'
       }
     } else if (denied === 0) {
       keysSource = { ...keysSource, status: 'ok', detail: `read all ${accounts.length} accounts` }
@@ -2087,7 +2107,7 @@ export function summariseAccess(access: HostAccess): AccessSummary {
   // key sshd does not look at.
   if (access.readsTheFileWeRead === false) {
     uncertainty.push(
-      'sshd does not read .ssh/authorized_keys on this host, which is the file this collection read, so the keys listed here are not the keys it accepts'
+      'sshd does not read .ssh/authorized_keys on this server, which is the file this collection read, so the keys listed here are not the keys it accepts'
     )
   }
   const legacy = access.accounts.filter((a) => a.hasLegacyKeyFile === true).map((a) => a.user)
@@ -2108,7 +2128,7 @@ export function summariseAccess(access: HostAccess): AccessSummary {
   }
   if (unfingerprinted > 0) {
     uncertainty.push(
-      `${unfingerprinted} line${unfingerprinted === 1 ? '' : 's'} in a file that was read could not be fingerprinted, so ${unfingerprinted === 1 ? 'it' : 'they'} cannot be matched against other hosts`
+      `${unfingerprinted} line${unfingerprinted === 1 ? '' : 's'} in a file that was read could not be fingerprinted, so ${unfingerprinted === 1 ? 'it' : 'they'} cannot be matched against other servers`
     )
   }
   // The one uncertainty that no amount of reading can remove. A cert-authority
@@ -2116,7 +2136,7 @@ export function summariseAccess(access: HostAccess): AccessSummary {
   // not written down on this host — or on any other.
   if (certificateAuthorities > 0) {
     uncertainty.push(
-      `${certificateAuthorities} line${certificateAuthorities === 1 ? '' : 's'} trust${certificateAuthorities === 1 ? 's' : ''} a certificate authority, so this host also accepts every key that authority signs — including keys that do not exist yet and are in no file anywhere`
+      `${certificateAuthorities} line${certificateAuthorities === 1 ? '' : 's'} trust${certificateAuthorities === 1 ? 's' : ''} a certificate authority, so this server also accepts every key that authority signs — including keys that do not exist yet and are in no file anywhere`
     )
   }
 
@@ -2349,17 +2369,81 @@ export function accessToFacts(access: HostAccess): Record<string, string> {
 // where the button would have been, because a control that quietly vanished
 // reads as a feature that has not arrived rather than one that was withdrawn.
 // tests/accessWrite.test.ts fails if either half of that stops being true.
+/**
+ * The build-time ceiling, kept as the DEFAULT rather than as the whole gate.
+ *
+ * WHAT CHANGED SINCE THE ARGUMENT ABOVE WAS WRITTEN, because most of it is now
+ * out of date and a stale safety comment is worse than none — the next person
+ * reads it and believes it.
+ *
+ * The blocker the paragraph above calls out by name — "ANYTHING THAT ISSUES THE
+ * DISARM. accessDisarmCommand() exists and nothing in this repository calls it"
+ * — was BUILT. `sshOpenFresh` opens a connection outside the pool, presents a
+ * key to sshd again and reports when that handshake completed and what the pool
+ * was holding at the time; `judgeAccessVerification` refuses unless the session
+ * authenticated AFTER the write, was not a pooled connection, and found the
+ * change where it landed; and `AccessCommitter` is the one caller of the
+ * disarm, behind that judgement. The watchdog's survival ladder was built too:
+ * `systemd-run --user --scope` first, probed on the server rather than assumed,
+ * because that is what escapes the logind scope KillUserProcesses kills.
+ *
+ * WHAT WAS UNPROVEN HAS NOW BEEN WATCHED, and it did not pass first time.
+ *
+ * Run on RHEL 9.8 with systemd 252 and logind KillUserProcesses=yes, over a
+ * real sshd session that was then closed: the staged write revoked the key, the
+ * session ended, the watchdog was killed with it, and the file was NEVER PUT
+ * BACK. The account was locked out of its own server — the exact outcome this
+ * design exists to prevent, produced by the design.
+ *
+ * The mechanism was right and the precondition was missing. Measured with
+ * marker files, because pgrep lies here: `pgrep -f "sleep 300"` matches its own
+ * command line and reported every rung as surviving when none had.
+ *
+ *             no linger        lingering
+ *   scope     never fired      FIRED
+ *   setsid    never fired      never fired
+ *   nohup     never fired      never fired
+ *
+ * The scope is the only rung that survives this configuration at all, and only
+ * when the account lingers — without it logind stops `user@UID.service` when
+ * the last session ends and takes every transient scope with it. The old probe,
+ * `systemd-run --user --scope --quiet --collect true`, SUCCEEDS on a
+ * non-lingering account: a fair test of "can I make a scope" and none of "will
+ * it outlive me".
+ *
+ * So the write now asks logind whether it kills user processes and asks
+ * loginctl whether this account lingers, and REFUSES to stage when both are
+ * true, naming `loginctl enable-linger` in the refusal. Verified afterwards on
+ * the same server: refused without linger, and with linger enabled it staged,
+ * survived the session closing, restored the file at the deadline and removed
+ * its own markers.
+ *
+ * So this is off by default and now OPT-IN rather than unreachable, because a
+ * gate nobody can open is also a gate nobody can test, and the observation that
+ * would finish this item cannot be made while the code cannot run at all. The
+ * operator turning it on is told exactly which sentence is unverified.
+ */
 export const ACCESS_WRITE_ENABLED = false
+
+/** What the panel says beside the switch. It names the ONE unproven thing
+ *  rather than gesturing at risk in general, because "this may be unsafe" is
+ *  advice nobody can act on and "nobody has watched this work on RHEL 9" is. */
+export const ACCESS_WRITE_OPT_IN_NOTE =
+  'Adding and revoking keys is off by default. Every refusal and both rollbacks are built and ' +
+  'tested, and the change is staged behind a dead-man\u2019s switch on the server itself \u2014 but ' +
+  'nobody has yet watched that switch fire on a real RHEL 9 server with KillUserProcesses=yes, ' +
+  'which is the case it exists for. Turn this on only if you can afford to be locked out of the ' +
+  'server you point it at, and keep a second session open while you try it.'
 
 /**
  * What the panel says where the button would be. One source of words, so the
  * renderer and anything else that has to explain this cannot drift apart.
  */
 export const ACCESS_WRITE_DISABLED_REASON =
-  'Changing authorized keys is not enabled in this build. The safety net behind it — the host ' +
+  'Changing authorized keys is not enabled in this build. The safety net behind it — the server ' +
   'restoring its own previous file if nothing confirms the change — is not yet dependable, and a ' +
   'rollback that cannot be relied on is worse than no rollback at all, because it tells you that ' +
-  'you are safe. Reading is unaffected: nothing on this screen writes to any host.'
+  'you are safe. Reading is unaffected: nothing on this screen writes to any server.'
 
 /**
  * What the write half will and will not be able to do when it is switched back
@@ -2375,8 +2459,8 @@ export const ACCESS_WRITE_DISABLED_REASON =
  */
 export const ACCESS_WRITE_SCOPE =
   'Even once it is enabled it will only ever edit ~/.ssh/authorized_keys for the account ' +
-  'ShellPilot connects as on each host — not another account\u2019s file, and not any path sshd was ' +
-  'configured to read instead. On the account it connects as it also needs the host to report ' +
+  'ShellPilot connects as on each server — not another account\u2019s file, and not any path sshd was ' +
+  'configured to read instead. On the account it connects as it also needs the server to report ' +
   'which key this session authenticated with (sshd\u2019s ExposeAuthInfo, off by default); without ' +
   'that it refuses, because nothing can prove the key being removed is not the one holding the ' +
   'connection open.'
@@ -2606,7 +2690,7 @@ export function planAccessChange(req: AccessChangeRequest): AccessChangePlan {
       if (protect.has(key)) {
         block(
           'is-session-key',
-          `that key is the one this session is authenticated with on ${t.serverName}. Removing it would end ShellPilot's own way back into the host, so it is refused here rather than confirmed anywhere.`
+          `that key is the one this session is authenticated with on ${t.serverName}. Removing it would end ShellPilot's own way back into the server, so it is refused here rather than confirmed anywhere.`
         )
         continue
       }
@@ -2625,7 +2709,7 @@ export function planAccessChange(req: AccessChangeRequest): AccessChangePlan {
       if (matches.length === 0) {
         block(
           'not-present',
-          `that key is not on ${t.user}@${t.serverName}. It is left out rather than counted as removed — a revocation report that includes hosts nothing happened on is not a revocation report.`
+          `that key is not on ${t.user}@${t.serverName}. It is left out rather than counted as removed — a revocation report that includes servers nothing happened on is not a revocation report.`
         )
         continue
       }
@@ -2785,7 +2869,7 @@ export function buildRevokeKeyCommand(o: {
     expect: [
       `SP_HIT=$(grep -c -F -- '${o.blob}' "$SP_F" 2>/dev/null || true)`,
       `case "$SP_HIT" in ''|*[!0-9]*) SP_HIT=0 ;; esac`,
-      '[ "$SP_HIT" -gt 0 ] || { rm -f "$SP_B"; echo "that key is not in this account\u2019s authorized_keys on this host; nothing was changed" >&2; exit 4; }',
+      '[ "$SP_HIT" -gt 0 ] || { rm -f "$SP_B"; echo "that key is not in this account\u2019s authorized_keys on this server; nothing was changed" >&2; exit 4; }',
       'SP_WANT=$((SP_BEFORE-SP_HIT))'
     ].join('\n')
   })
@@ -2883,7 +2967,7 @@ function buildStagedWrite(o: {
     // as one: the lock already being there is another change in flight, and
     // anything else is a `~/.ssh` this account cannot write — which is a
     // different problem with a different fix.
-    'mkdir "$SP_LOCK" 2>/dev/null || { [ -d "$SP_LOCK" ] && { echo "another key change is starting on this host right now; nothing was changed" >&2; exit 6; }; echo "a lock could not be created in ~/.ssh, so nothing was changed" >&2; exit 3; }',
+    'mkdir "$SP_LOCK" 2>/dev/null || { [ -d "$SP_LOCK" ] && { echo "another key change is starting on this server right now; nothing was changed" >&2; exit 6; }; echo "a lock could not be created in ~/.ssh, so nothing was changed" >&2; exit 3; }',
     'trap \'rmdir "$SP_LOCK" 2>/dev/null\' EXIT INT TERM HUP',
     // THE MESSAGE NAMES THE FILE AND THE REMEDY, because there is one case
     // where this does not clear itself: a host whose watchdog was killed after
@@ -2892,7 +2976,7 @@ function buildStagedWrite(o: {
     // backup stays. Refusing further automated changes on that host is the
     // right answer and a person should look at it, so the sentence says which
     // file and what checking it means.
-    'for SP_OLD in "$HOME"/.ssh/*.shellpilot-*.bak; do [ -e "$SP_OLD" ] || continue; echo "a key change staged earlier is still waiting for its rollback window to close ($SP_OLD); nothing was changed. If that window has already passed, its rollback did not run on this host: compare that file against the live authorized_keys and remove it by hand once you are satisfied." >&2; exit 6; done',
+    'for SP_OLD in "$HOME"/.ssh/*.shellpilot-*.bak; do [ -e "$SP_OLD" ] || continue; echo "a key change staged earlier is still waiting for its rollback window to close ($SP_OLD); nothing was changed. If that window has already passed, its rollback did not run on this server: compare that file against the live authorized_keys and remove it by hand once you are satisfied." >&2; exit 6; done',
 
     // Refuse before touching anything. A file this account cannot write is a
     // file the change cannot make, and finding that out after the backup is
@@ -2902,7 +2986,7 @@ function buildStagedWrite(o: {
     // the `mv` at the end replaces the LINK with a regular file — permanently
     // destroying the indirection while the real file keeps the key. There is no
     // safe way to edit through it from here, so it is a refusal.
-    '[ -h "$SP_F" ] && { echo "authorized_keys is a symbolic link on this host; replacing it would destroy the link and leave the real file untouched, so nothing was changed" >&2; exit 3; }',
+    '[ -h "$SP_F" ] && { echo "authorized_keys is a symbolic link on this server; replacing it would destroy the link and leave the real file untouched, so nothing was changed" >&2; exit 3; }',
     '[ -f "$SP_F" ] || { echo "no authorized_keys to change" >&2; exit 3; }',
     '[ -w "$SP_F" ] || { echo "authorized_keys is not writable by this account" >&2; exit 3; }',
     // RULE 3. Before anything else, and the run stops if it did not land.
@@ -2919,7 +3003,7 @@ function buildStagedWrite(o: {
     // AND AN EMPTY authorized_keys IS A REAL FILE. A freshly provisioned
     // account has one, and adding the first key to it is the first thing
     // anybody will try; `[ -s ]` refused that with the wrong reason entirely.
-    'command -v cmp >/dev/null 2>&1 || { rm -f "$SP_B"; echo "this host has no cmp, so the backup could not be checked against the file it came from; nothing was changed" >&2; exit 3; }',
+    'command -v cmp >/dev/null 2>&1 || { rm -f "$SP_B"; echo "this server has no cmp, so the backup could not be checked against the file it came from; nothing was changed" >&2; exit 3; }',
     'cmp -s "$SP_F" "$SP_B" || { rm -f "$SP_B"; echo "the backup is not a faithful copy of authorized_keys; nothing was changed" >&2; exit 3; }',
     // `|| echo 0` would be a bug here, and it is worth naming because it is
     // the obvious way to write it: `grep -c` PRINTS its count and then exits 1
@@ -2997,8 +3081,58 @@ function buildStagedWrite(o: {
     'SP_L=',
     // `--quiet` so the scope name does not land in the job output; `--collect`
     // so a scope whose process died is not left behind as a failed unit.
+    // THE PRECONDITION THE PROBE USED TO MISS, found by running this on a real
+    // RHEL 9.8 with KillUserProcesses=yes and watching all three rungs die.
+    //
+    // `systemd-run --user --scope --quiet --collect true` SUCCEEDS on an
+    // account that is not lingering. It is a fair test of "can I make a
+    // scope" and no test at all of "will that scope outlive my session",
+    // because without linger logind stops `user@UID.service` when the last
+    // session ends and takes every transient scope in it along. Measured, with
+    // marker files rather than pgrep:
+    //
+    //             no linger        lingering
+    //   scope     never fired      FIRED
+    //   setsid    never fired      never fired
+    //   nohup     never fired      never fired
+    //
+    // So the scope is the only rung that ever survives this configuration, and
+    // it survives only when the account lingers. Probing the scope alone armed
+    // a rollback that was already dead, which is the precise thing the gate
+    // comment calls worse than no rollback: the operator is told they are safe.
+    'SP_LINGER=no',
+    'command -v loginctl >/dev/null 2>&1 && loginctl show-user "$(id -un)" -p Linger 2>/dev/null | grep -q "^Linger=yes$" && SP_LINGER=yes',
+    // KillUserProcesses is asked of logind itself rather than read out of a
+    // config file, because the file is one of four that can set it and the bus
+    // knows the answer.
+    // THREE-VALUED, and the reason is that `no` was doing double duty. It
+    // meant BOTH "logind answered false" and "we could not ask", and those are
+    // opposite facts: the first says nothing will kill the watchdog, the
+    // second says we do not know. A host with logind and without `busctl` --
+    // a minimal image, a container base -- read as the safe answer and armed a
+    // rollback that logind may have been about to kill. That is the same
+    // mistake this file spends its length refusing elsewhere: a property
+    // nobody could measure is not the reassuring value.
+    //
+    //   absent   no logind on this host at all, so nothing kills the slice
+    //            when the session ends and even `nohup` is a real promise
+    //   no       logind said KillUserProcesses=false
+    //   yes      logind said true
+    //   unknown  logind is here and would not answer -- treated as `yes`
+    'SP_KILL=unknown',
+    'command -v loginctl >/dev/null 2>&1 || SP_KILL=absent',
+    'if [ "$SP_KILL" = unknown ] && command -v busctl >/dev/null 2>&1; then SP_KILLV=$(busctl get-property org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager KillUserProcesses 2>/dev/null || true); case "$SP_KILLV" in *true*) SP_KILL=yes ;; *false*) SP_KILL=no ;; esac; fi',
     'if command -v systemd-run >/dev/null 2>&1 && systemd-run --user --scope --quiet --collect true >/dev/null 2>&1; then SP_L="systemd-run --user --scope --quiet --collect"; elif command -v setsid >/dev/null 2>&1; then SP_L=setsid; elif command -v nohup >/dev/null 2>&1; then SP_L=nohup; fi',
-    '[ -n "$SP_L" ] || { rm -f "$SP_T" "$SP_B"; echo "this host has no way to leave a process running after the session ends, so the rollback could not be armed and nothing was changed" >&2; exit 5; }',
+    '[ -n "$SP_L" ] || { rm -f "$SP_T" "$SP_B"; echo "this server has no way to leave a process running after the session ends, so the rollback could not be armed and nothing was changed" >&2; exit 5; }',
+    // Refuse rather than arm something that cannot fire. A staged write whose
+    // rollback is already dead is the one shape this feature must not take.
+    // `!= no` and `!= absent`, so UNKNOWN refuses with `yes`. This is also the
+    // answer to the question item 36a left open -- whether a host that fell
+    // through to `nohup` may be written to at all. It may, and only when the
+    // host has positively said it will not kill the process: with logind
+    // absent, or with logind answering false. Where the answer could not be
+    // had, the weakest launcher is not given the benefit of the doubt.
+    '[ "$SP_KILL" != no ] && [ "$SP_KILL" != absent ] && [ "$SP_LINGER" = no ] && { rm -f "$SP_T" "$SP_B"; echo "this server either kills a user\'s processes when their last session ends (logind KillUserProcesses=yes) or would not say whether it does, and this account is not lingering, so the rollback could be killed before it restored anything; nothing was changed. Run: loginctl enable-linger $(id -un)" >&2; exit 6; }',
     // Unquoted on purpose: `$SP_L` is one of three literals this file wrote,
     // and the systemd one is four words.
     `$SP_L sh -c ': > "$3"; sleep ${wait}; [ -f "$0" ] || cp -p "$1" "$2"; rm -f "$0" "$1" "$3"' "$SP_M" "$SP_B" "$SP_F" "$SP_ARM" </dev/null >/dev/null 2>&1 &`,
@@ -3014,7 +3148,7 @@ function buildStagedWrite(o: {
     // outlive it. Either way the file was never replaced, so the worst a
     // survivor can do at its deadline is copy the backup over an identical
     // file and tidy up after itself.
-    '[ -f "$SP_ARM" ] || { kill "$SP_WPID" 2>/dev/null; rm -f "$SP_T" "$SP_B" "$SP_ARM"; echo "the rollback did not start on this host, so nothing was changed" >&2; exit 5; }',
+    '[ -f "$SP_ARM" ] || { kill "$SP_WPID" 2>/dev/null; rm -f "$SP_T" "$SP_B" "$SP_ARM"; echo "the rollback did not start on this server, so nothing was changed" >&2; exit 5; }',
 
     'mv "$SP_T" "$SP_F" || { echo "the file could not be replaced" >&2; exit 3; }',
     // Said out loud, in the job output, so the operator reading the pane knows
@@ -3212,7 +3346,7 @@ export function judgeAccessVerification(o: {
     return {
       commit: false,
       outcome: 'reverted-unconfirmed',
-      reason: `the ${o.rollbackSeconds}-second window closed before this could be confirmed, so the host has already put the previous file back.`
+      reason: `the ${o.rollbackSeconds}-second window closed before this could be confirmed, so the server has already put the previous file back.`
     }
   }
 
@@ -3223,7 +3357,7 @@ export function judgeAccessVerification(o: {
       // Deliberately not diagnosed further. A refused key and an unreachable
       // host look the same from here, and both mean the same thing about what
       // may be done next: nothing.
-      reason: `a second, independent session could not be opened after the change (${o.evidence.openError ?? 'no reason given'}). A rejected key and an unreachable host are indistinguishable from here, and both mean the change must not be made permanent.`
+      reason: `a second, independent session could not be opened after the change (${o.evidence.openError ?? 'no reason given'}). A rejected key and an unreachable server are indistinguishable from here, and both mean the change must not be made permanent.`
     }
   }
 
@@ -3235,7 +3369,7 @@ export function judgeAccessVerification(o: {
     return {
       commit: false,
       outcome: 'reverted-verification-failed',
-      reason: `the session that ran the check authenticated before the change was written, so it says nothing about the file that is on the host now.`
+      reason: `the session that ran the check authenticated before the change was written, so it says nothing about the file that is on the server now.`
     }
   }
 
@@ -3258,15 +3392,15 @@ export function judgeAccessVerification(o: {
       commit: false,
       outcome: 'reverted-verification-failed',
       reason: said
-        ? `the new session reached the host and the check failed there: ${said}`
-        : `the new session reached the host and the check did not complete (${v?.error ?? `exit ${String(v?.code)}`}).`
+        ? `the new session reached the server and the check failed there: ${said}`
+        : `the new session reached the server and the check did not complete (${v?.error ?? `exit ${String(v?.code)}`}).`
     }
   }
   if (!v.stdout.includes(`${ACCESS_VERIFIED_PREFIX}${o.token}`)) {
     return {
       commit: false,
       outcome: 'reverted-verification-failed',
-      reason: `the new session did not find this change staged where it landed, so it is not the host and account the change was made on.`
+      reason: `the new session did not find this change staged where it landed, so it is not the server and account the change was made on.`
     }
   }
 
@@ -3298,16 +3432,16 @@ export function describeAccessOutcome(o: {
       // one-staged-change-at-a-time rule. An operator who wants that file wants
       // it now, and telling them it will be there indefinitely is how they find
       // out otherwise at the worst moment.
-      return `Committed on ${o.serverName}. A second session authenticated after the change and called off the host's rollback, so ${o.user}'s authorized_keys is now permanent. The previous file is at ${o.backupPath} until the ${o.rollbackSeconds}-second window closes, after which the host removes it.`
+      return `Committed on ${o.serverName}. A second session authenticated after the change and called off the server's rollback, so ${o.user}'s authorized_keys is now permanent. The previous file is at ${o.backupPath} until the ${o.rollbackSeconds}-second window closes, after which the server removes it.`
     case 'reverted-verification-failed':
       // NOT "the previous file is back", which is a claim about something this
       // process cannot see. The staged write proves the watchdog armed before
       // it replaces anything, so what can honestly be said is that it was
       // running and holding the deadline — and then where to look, because the
       // operator reading this may be the one who has just been locked out.
-      return `Reverted on ${o.serverName}: the check failed. ${o.reason} The host's rollback was armed and confirmed running before anything was replaced, and was left armed, so ${o.user}'s previous authorized_keys should be back within ${o.rollbackSeconds}s of the change. It is restored from ${o.backupPath}; if you can still reach the host, that is where to look.`
+      return `Reverted on ${o.serverName}: the check failed. ${o.reason} The server's rollback was armed and confirmed running before anything was replaced, and was left armed, so ${o.user}'s previous authorized_keys should be back within ${o.rollbackSeconds}s of the change. It is restored from ${o.backupPath}; if you can still reach the server, that is where to look.`
     case 'reverted-unconfirmed':
-      return `Reverted on ${o.serverName}: nothing confirmed it in time. ${o.reason} That is the dead-man's switch doing its job rather than the change failing — ${o.user}'s previous authorized_keys is back, the host is exactly as it was, and it can be staged again.`
+      return `Reverted on ${o.serverName}: nothing confirmed it in time. ${o.reason} That is the dead-man's switch doing its job rather than the change failing — ${o.user}'s previous authorized_keys is back, the server is exactly as it was, and it can be staged again.`
   }
 }
 

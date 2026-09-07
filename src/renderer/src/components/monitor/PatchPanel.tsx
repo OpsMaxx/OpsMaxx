@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
+import { sortBySeverity, type SecurityListProbe } from '../../../../shared/securityUpdates'
+import { kernelReport, type KernelReport, type KernelStatus } from '../../../../shared/kernelStatus'
 import { AlertTriangle, Ban, RefreshCw, ShieldQuestion, Wrench } from 'lucide-react'
 import { useFleet } from '../../store/fleet'
 import { useApp } from '../../store/app'
 import { bridgeHas } from '../../lib/bridge'
+import { openSettings } from '../../store/nav'
 import { clsx } from '../../lib/format'
 import { sshHopsFor } from '../../lib/ssh'
 import {
@@ -73,9 +76,17 @@ function Count({ count }: { count: PatchCount }): React.JSX.Element {
   }
   // Never a dash, never a zero, never blank. On an Arch or Alpine host the true
   // security count is "cannot be answered" and the two must not be confusable.
+  //
+  // Which is why this is `state-unknown` and not `warn`. Amber says "look at
+  // this", and a distribution that does not publish a security channel is not
+  // asking to be looked at -- nothing is wrong, the question simply has no
+  // answer there. Painting it the same colour as a real degradation is the
+  // confusion the comment above is about, made in the stylesheet instead of in
+  // the number. `state-unknown` is deliberately the only achromatic one, so it
+  // reads as absent rather than as a third severity.
   return (
     <span
-      className={clsx('faint', count.gap === 'unsupported' && 'warn')}
+      className={clsx('faint', count.gap === 'unsupported' && 'state-unknown')}
       title={count.help}
     >
       {PATCH_GAP_LABEL[count.gap]}
@@ -92,6 +103,17 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   const samplingEnabled = useApp((s) => s.settings.fleetSamplingEnabled)
 
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  // The security-update LIST for one host — item 46. One at a time and asked
+  // for: it is a fresh SSH read per host, and the counts beside it come from
+  // the hourly sample.
+  const [secList, setSecList] = useState<{ serverName: string; probe: SecurityListProbe } | null>(null)
+  const [kernel, setKernel] = useState<{
+    serverName: string
+    report?: KernelReport
+    error?: string
+  } | null>(null)
+  const [kernelLoading, setKernelLoading] = useState<string | null>(null)
+  const [secLoading, setSecLoading] = useState<string | null>(null)
   // `all`, not `security`, and it is a deliberate choice rather than a default
   // nobody thought about. apt has NO security-only command — every recipe that
   // claims to have one installs dependencies the operator did not ask for — so
@@ -110,6 +132,72 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   const [healthGate, setHealthGate] = useState(true)
   const [phrase, setPhrase] = useState('')
   const [confirming, setConfirming] = useState(false)
+
+  /**
+   * Which kernel is running here, and is a newer one installed?
+   *
+   * On demand, per row, exactly like the security list beside it: the sweep
+   * already carries the restart flag, and this is the explanation behind it
+   * rather than a second thing to collect hourly.
+   */
+  const loadKernel = async (serverId: string, rebootRequired: boolean | null): Promise<void> => {
+    const server = servers.find((sv) => sv.id === serverId)
+    if (!server) return
+    setKernelLoading(serverId)
+    setKernel(null)
+    try {
+      const call = (
+        window.shellpilot as
+          | { fleet?: { kernel?: (cfg: unknown) => Promise<KernelStatus | { error: string }> } }
+          | undefined
+      )?.fleet?.kernel
+      if (typeof call !== 'function') {
+        setKernel({
+          serverName: server.name,
+          error: 'This build cannot read kernels. Restart the app to rebuild it.'
+        })
+        return
+      }
+      const res = await call(server)
+      if ('error' in res) {
+        setKernel({ serverName: server.name, error: res.error })
+        return
+      }
+      setKernel({ serverName: server.name, report: kernelReport(res, rebootRequired) })
+    } catch (e) {
+      setKernel({ serverName: server.name, error: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setKernelLoading(null)
+    }
+  }
+
+  const loadSecurityList = async (serverId: string): Promise<void> => {
+    const server = servers.find((sv) => sv.id === serverId)
+    if (!server) return
+    setSecLoading(serverId)
+    setSecList(null)
+    try {
+      const call = (
+        window.shellpilot as
+          | { fleet?: { securityList?: (cfg: unknown) => Promise<SecurityListProbe> } }
+          | undefined
+      )?.fleet?.securityList
+      setSecList({
+        serverName: server.name,
+        probe:
+          typeof call === 'function'
+            ? await call(server)
+            : { ok: false, detail: 'This build cannot list security updates. Restart the app to rebuild it.' }
+      })
+    } catch (e) {
+      setSecList({
+        serverName: server.name,
+        probe: { ok: false, detail: e instanceof Error ? e.message : String(e) }
+      })
+    } finally {
+      setSecLoading(null)
+    }
+  }
   const [busy, setBusy] = useState(false)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -324,15 +412,22 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
 
   return (
     <div className="bc-panel">
-      <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-        <Wrench size={14} className="faint" />
-        <b className="grow">Patch and updates</b>
+      <div className="panel-head">
+        <span className="panel-head-icon">
+          <Wrench size={14} />
+        </span>
+        <h2 className="ui-section-title">Patch and updates</h2>
+        <p className="ui-note panel-head-purpose">
+          Choose the servers to update, review the plan, then run it in waves. Nothing installs
+          until you confirm, and there is no unattended mode.
+        </p>
+        <div className="panel-head-actions">
         <button
           className="btn ghost sm"
           disabled={running || needy.length === 0}
           data-testid="patch-select-needy"
           onClick={() => setSelected(new Set(needy.map((r) => r.serverId)))}
-          title="Selects the hosts that report something to install or a reboot they are owed. A host whose counts could not be read is NOT selected here: it is unknown, not known to need something, and picking it would be this screen deciding something for you. The button beside this one offers those hosts separately."
+          title="Selects the servers that report something to install or a reboot they are owed. A server whose counts could not be read is NOT selected here: it is unknown, not known to need something, and picking it would be this screen deciding something for you. The button beside this one offers those servers separately."
         >
           Select what needs something
         </button>
@@ -350,38 +445,50 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
             onClick={() =>
               setSelected((prev) => new Set([...prev, ...unanswerable.map((r) => r.serverId)]))
             }
-            title="Adds the hosts where at least one question had no answer — a count that could not be read, a security channel that does not exist, a reboot flag nothing could check. They are unknown, not known to be clean, and nothing here can tell you which. Adding them to the selection is a decision for you to make deliberately."
+            title="Adds the servers where at least one question had no answer — a count that could not be read, a security channel that does not exist, a reboot flag nothing could check. They are unknown, not known to be clean, and nothing here can tell you which. Adding them to the selection is a decision for you to make deliberately."
           >
             <ShieldQuestion size={13} /> Add {unanswerable.length} that could not answer
           </button>
         )}
         <button
-          className="btn"
+          className="btn primary"
           disabled={busy || servers.length === 0}
           onClick={() => void check()}
           title="Sweeps the estate now and re-reads what has already been collected. Nothing is installed and no package cache is refreshed by this."
         >
           <RefreshCw size={13} className={clsx(busy && 'spin')} /> Check now
         </button>
+        </div>
       </div>
 
       {/* The refusal, on the screen and not only in the source. An operator who
           is looking for "patch everything nightly" deserves to be told it is not
           here and why, in the place they went looking for it. */}
-      <div className="s-desc" data-testid="patch-no-automation">
+      <div className="panel-note" data-testid="patch-no-automation">
         {PATCH_NO_AUTOMATION_NOTE}
       </div>
 
       {summary.withFacts === 0 ? (
-        <div className="s-desc">
-          <b>No host facts have been collected yet.</b> Update counts come from the same hourly
-          sweep the inventory reads. Press <b>Check now</b>, and make sure background checking is
-          on in Settings.
+        <div className="panel-empty">
+          <p className="panel-empty-title">No server facts have been collected yet.</p>
+          <p className="panel-empty-body">
+            Update counts come from the same hourly sweep the inventory reads. Press{' '}
+            <b>Check now</b>, and make sure background checking is on in Settings.
+          </p>
+          <div className="panel-empty-actions">
+            <button className="btn ghost sm" onClick={() => openSettings('monitoring')}>
+              Open Monitoring settings
+            </button>
+          </div>
         </div>
       ) : (
         <>
           <div
-            className={clsx('s-desc', !summary.allClear && 'warn')}
+            // `allClear` false covers both "something needs installing" and
+            // "a host could not answer", so the generic attention role rather
+            // than the unknown one — the unanswerable count gets its own
+            // `is-unknown` note directly below, where it can be precise.
+            className={clsx('panel-note', summary.allClear ? 'is-ok' : 'is-watch')}
             data-testid="patch-summary"
           >
             {/* `allClear` is FALSE whenever a single host could not answer, and
@@ -393,12 +500,12 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
           </div>
 
           {summary.securityUnanswerable > 0 && (
-            <div className="s-desc warn" data-testid="patch-unanswerable">
-              <ShieldQuestion size={12} /> {summary.securityUnanswerable} host
+            <div className="panel-note is-unknown" data-testid="patch-unanswerable">
+              <ShieldQuestion size={12} /> {summary.securityUnanswerable} server
               {summary.securityUnanswerable === 1 ? '' : 's'} can never report a security update
               count, so {summary.securityUnanswerable === 1 ? 'it is' : 'they are'} not in the{' '}
               {summary.securityTotal} above. Arch and Alpine have no security channel at all, and
-              dnf cannot answer where the repositories publish no updateinfo. Treat those hosts as
+              dnf cannot answer where the repositories publish no updateinfo. Treat those servers as
               unknown, never as zero.
             </div>
           )}
@@ -412,6 +519,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                   <th>Packages</th>
                   <th className="num">Updates</th>
                   <th className="num">Security</th>
+                  <th>Kernel</th>
                   <th>Reboot</th>
                 </tr>
               </thead>
@@ -438,12 +546,40 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                     </td>
                     <td data-col="security" className="num">
                       <Count count={r.security} />
+                      {/* The list behind the number — item 46. Asked for per
+                          host rather than sampled: it is tens of rows nobody
+                          reads most of the time, and paying for it hourly on
+                          every host is the wrong trade. */}
+                      {/* Only where there is a number and it is above zero. A
+                          `null` count is "we could not tell", and offering a
+                          list for that would imply there is one to fetch. */}
+                      {r.security.value !== null && r.security.value > 0 && (
+                        <button
+                          className="btn ghost sm"
+                          aria-label={`Which packages on ${r.serverName}`}
+                          disabled={secLoading === r.serverId}
+                          onClick={() => void loadSecurityList(r.serverId)}
+                        >
+                          which
+                        </button>
+                      )}
+                    </td>
+                    <td data-col="kernel">
+                      {/* Asked for rather than sampled. A row shows nothing
+                          until somebody wants the explanation. */}
+                      <button
+                        className="btn-ghost sm"
+                        disabled={kernelLoading === r.serverId}
+                        onClick={() => void loadKernel(r.serverId, r.rebootRequired ?? null)}
+                      >
+                        {kernelLoading === r.serverId ? 'reading' : 'kernel'}
+                      </button>
                     </td>
                     <td data-col="reboot">
                       {r.rebootGap !== null ? (
                         <span className="faint">{PATCH_GAP_LABEL[r.rebootGap]}</span>
                       ) : r.rebootRequired ? (
-                        <span className="warn" title={r.rebootReason ?? undefined}>
+                        <span className="state-watch" title={r.rebootReason ?? undefined}>
                           owed
                         </span>
                       ) : (
@@ -454,6 +590,50 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 ))}
               </tbody>
             </table>
+            {kernel !== null && (
+              <div className="bc-controls" style={{ marginTop: 8 }}>
+                <div className="s-title">Kernel on {kernel.serverName}</div>
+                {kernel.error !== undefined ? (
+                  // NOT "up to date". A read that could not happen and a host
+                  // whose kernel is current are different answers.
+                  <div className="s-note is-alarm">{kernel.error}</div>
+                ) : (
+                  <div
+                    className={
+                      kernel.report!.verdict === 'current' ? 's-note' : 's-note is-alarm'
+                    }
+                  >
+                    {kernel.report!.detail}
+                  </div>
+                )}
+              </div>
+            )}
+            {secList !== null && (
+              <div className="bc-controls" style={{ marginTop: 8 }}>
+                <div className="s-title">Security updates on {secList.serverName}</div>
+                {!secList.probe.ok ? (
+                  // NOT an empty list. A read that could not happen and a host
+                  // with nothing pending are different answers.
+                  <div className="s-note is-alarm">{secList.probe.detail}</div>
+                ) : (
+                  <>
+                    <div className="s-note">{secList.probe.listing.note}</div>
+                    <table className="mini-table">
+                      <tbody>
+                        {sortBySeverity(secList.probe.listing.updates).map((u) => (
+                          <tr key={u.name}>
+                            <td>{u.severity === '' ? <span className="faint">—</span> : u.severity}</td>
+                            <td className="mono">{u.name}</td>
+                            <td className="mono faint">{u.candidate}</td>
+                            <td className="faint">{u.advisories.join(', ')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </>
       )}
@@ -477,7 +657,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
               in waves of{' '}
               <input
                 type="number"
-                aria-label="Hosts per wave"
+                aria-label="Servers per wave"
                 min={1}
                 max={Math.max(1, chosen.length)}
                 value={waveSize}
@@ -502,7 +682,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 onChange={(e) => setReboot(e.target.checked)}
                 disabled={running}
               />{' '}
-              restart the hosts that say they need it
+              restart the servers that say they need it
             </label>
           </div>
 
@@ -510,14 +690,14 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
               run halted. A disabled control with no explanation is indistinguishable
               from a broken one. */}
           {!gateUsable && (
-            <div className="s-desc warn" data-testid="patch-gate-unavailable">
+            <div className="panel-note is-unknown" data-testid="patch-gate-unavailable">
               <AlertTriangle size={12} /> The wave gate is unavailable. {GATE_SAMPLER_NOTE} Until it
               is on, the waves below roll on one after another with nothing checking the estate in
               between — run them in small waves and watch, or turn the sampler on first.
             </div>
           )}
 
-          <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+          <div className="panel-stats">
             {waves.length} wave{waves.length === 1 ? '' : 's'}:{' '}
             {waves.map((w) => `${w.name} (${w.hosts.map((h) => h.serverName).join(', ')})`).join(' → ')}
           </div>
@@ -527,13 +707,13 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
               servers can share a bastion the checks below cannot see. Printed
               next to the refusals, where it qualifies them. */}
           {plan.unmatchedNote !== null && (
-            <div className="s-desc warn" data-testid="patch-unmatched-hops">
+            <div className="panel-note is-unknown" data-testid="patch-unmatched-hops">
               <AlertTriangle size={12} /> {plan.unmatchedNote}
             </div>
           )}
 
           {plan.excluded.map((x) => (
-            <div key={x.serverId} className="s-desc" data-testid="patch-excluded">
+            <div key={x.serverId} className="panel-note" data-testid="patch-excluded">
               <b>{x.serverName}</b> is not in this run: {x.reason}
             </div>
           ))}
@@ -542,13 +722,13 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
               ticked past. The run button is disabled while any of these stands,
               and main refuses the same run independently. */}
           {plan.blocks.map((b) => (
-            <div key={`${b.kind}:${b.serverId}`} className="s-desc danger" data-testid="patch-block">
+            <div key={`${b.kind}:${b.serverId}`} className="panel-note is-alarm" data-testid="patch-block">
               <Ban size={12} /> {b.reason}
             </div>
           ))}
 
           {jobPlans.map((j) => (
-            <div key={j.packageManager} className="s-desc" data-testid="patch-command">
+            <div key={j.packageManager} className="panel-note" data-testid="patch-command">
               <b>{j.packageManager}</b> · {j.detail}
               <div className="mono" style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>
                 {j.spec.steps.map((st) => st.command).join('\n')}
@@ -557,7 +737,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
           ))}
 
           {error !== null && (
-            <div className="s-desc danger" data-testid="patch-error">
+            <div className="panel-note is-alarm" data-testid="patch-error">
               {error}
             </div>
           )}
@@ -580,7 +760,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
               onClick={() => (strongest === 'none' ? void start() : setConfirming(true))}
             >
               {scope === 'security' ? 'Install security updates' : 'Install updates'} on{' '}
-              {plan.hosts.filter((h) => h.excluded === null).length} host
+              {plan.hosts.filter((h) => h.excluded === null).length} server
               {plan.hosts.filter((h) => h.excluded === null).length === 1 ? '' : 's'}
             </button>
           </div>
@@ -591,7 +771,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 This will run on{' '}
                 {plan.hosts.filter((h) => h.excluded === null).map((h) => h.serverName).join(', ')} in{' '}
                 {waves.length} wave{waves.length === 1 ? '' : 's'}
-                {reboot ? ', restarting the hosts that say they need it' : ''}.
+                {reboot ? ', restarting the servers that say they need it' : ''}.
               </div>
               {strongest === 'type-to-confirm' && (
                 <input

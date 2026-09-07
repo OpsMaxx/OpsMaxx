@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { RefreshCw, ShieldAlert, ShieldQuestion } from 'lucide-react'
+import { openSettings } from '../../store/nav'
 import { bridgeHas } from '../../lib/bridge'
 import { clsx, duration } from '../../lib/format'
 import {
@@ -83,7 +84,7 @@ const loudGap = (gap: Cell['gap']): boolean => gap === 'denied' || gap === 'unkn
 const gapWords: Record<PostureStatus, string> = {
   ok: 'read',
   partial: 'partly read',
-  absent: 'not on this host',
+  absent: 'not on this server',
   denied: 'not permitted',
   'no-tool': 'no tool for it',
   unsupported: 'cannot be answered',
@@ -101,7 +102,7 @@ function gapCell(status: PostureStatus, detail?: string): Cell {
 const NEVER: Cell = {
   text: 'not collected',
   gap: 'never',
-  help: 'The background sweep has not read this host yet. That is not a finding about the host — it is the absence of one. Press Check now, and make sure background checking is on in Settings.'
+  help: 'The background sweep has not read this server yet. That is not a finding about the server — it is the absence of one. Press Check now, and make sure background checking is on in Settings.'
 }
 
 function firewallCell(posture: HostPosture): Cell {
@@ -120,7 +121,7 @@ function firewallCell(posture: HostPosture): Cell {
       text: `${tool} inactive, no kernel rules`,
       gap: null,
       bad: true,
-      help: `${tool} is switched off and the kernel filter tables were read and are empty. Both halves were checked; this host is not filtering.`
+      help: `${tool} is switched off and the kernel filter tables were read and are empty. Both halves were checked; this server is not filtering.`
     }
   }
   if (rules === null) {
@@ -149,7 +150,7 @@ function macCell(posture: HostPosture): Cell {
     return {
       text: 'none installed',
       gap: null,
-      help: 'Neither SELinux nor AppArmor is on this host, and that was checked rather than assumed. Plenty of estates run this way deliberately.'
+      help: 'Neither SELinux nor AppArmor is on this server, and that was checked rather than assumed. Plenty of estates run this way deliberately.'
     }
   }
   if (mac === null || s.status === 'denied' || s.status === 'unknown') return gapCell(s.status, s.detail)
@@ -167,7 +168,7 @@ function macCell(posture: HostPosture): Cell {
       help:
         drift === ''
           ? `SELinux is ${mac.mode}.`
-          : `SELinux is ${mac.mode} right now, and /etc/selinux/config says ${mac.bootMode}. The running mode and the boot-time setting disagree, so this host changes behaviour at its next reboot.`
+          : `SELinux is ${mac.mode} right now, and /etc/selinux/config says ${mac.bootMode}. The running mode and the boot-time setting disagree, so this server changes behaviour at its next reboot.`
     }
   }
   // AppArmor has no global mode. "Enforcing" here means enabled with nothing in
@@ -285,7 +286,7 @@ function certCell(posture: HostPosture): Cell {
       return {
         text: `${inv.unreadableRoots} director${inv.unreadableRoots === 1 ? 'y' : 'ies'} refused`,
         gap: s.status === 'ok' ? 'denied' : s.status,
-        help: `A certificate directory that could not be entered is NOT a directory with no certificates. /etc/letsencrypt is 0700 root on most hosts, so this usually closes with passwordless sudo. ${bound}`
+        help: `A certificate directory that could not be entered is NOT a directory with no certificates. /etc/letsencrypt is 0700 root on most servers, so this usually closes with passwordless sudo. ${bound}`
       }
     }
     if (unread > 0) {
@@ -300,8 +301,8 @@ function certCell(posture: HostPosture): Cell {
       gap: null,
       help:
         s.status === 'absent'
-          ? `None of the directories ShellPilot looks in exists on this host, and that was checked rather than assumed. ${bound}`
-          : `Every directory was read and holds no certificate. This is a reading, not a gap — and it is not the same as "this host is fine", because nothing here has an expiry to be near. ${bound}`
+          ? `None of the directories ShellPilot looks in exists on this server, and that was checked rather than assumed. ${bound}`
+          : `Every directory was read and holds no certificate. This is a reading, not a gap — and it is not the same as "this server is fine", because nothing here has an expiry to be near. ${bound}`
     }
   }
 
@@ -316,10 +317,10 @@ function certCell(posture: HostPosture): Cell {
     bad: isCertificateExpiringSoon(days),
     help:
       (days < 0
-        ? `The soonest certificate on this host expired ${-days} days ago. This is an outage in progress, not a warning.`
-        : `The soonest certificate on this host has ${days} days left${isCertificateExpiringSoon(days) ? `, which is inside the ${CERT_EXPIRY_DAYS}-day line certbot itself renews at — the renewal that should have run has not` : ''}.`) +
+        ? `The soonest certificate on this server expired ${-days} days ago. This is an outage in progress, not a warning.`
+        : `The soonest certificate on this server has ${days} days left${isCertificateExpiringSoon(days) ? `, which is inside the ${CERT_EXPIRY_DAYS}-day line certbot itself renews at — the renewal that should have run has not` : ''}.`) +
       (missing > 0
-        ? ` ${missing} other thing${missing === 1 ? '' : 's'} could not be read, so this number may not be the worst one on the host.`
+        ? ` ${missing} other thing${missing === 1 ? '' : 's'} could not be read, so this number may not be the worst one on the server.`
         : '') +
       ` ${bound}`
   }
@@ -345,7 +346,7 @@ function updatesCell(facts: HostFacts | null): Cell {
     help:
       r.count === 0
         ? 'The package manager was asked and reports no pending security updates. Collected by the Inventory probe, not recomputed here.'
-        : `${r.count} pending security updates, as this host's own package manager counts them. Collected by the Inventory probe.`
+        : `${r.count} pending security updates, as this server's own package manager counts them. Collected by the Inventory probe.`
   }
 }
 
@@ -416,16 +417,16 @@ function FirewallRules({ posture }: { posture: HostPosture }): React.JSX.Element
   if (fw === null) {
     return (
       <div className="inv-na loud" title={POSTURE_STATUS_HELP[s.status]}>
-        Nothing was read about this host&rsquo;s firewall at all{s.detail ? ` — ${s.detail}` : ''}.
+        Nothing was read about this server&rsquo;s firewall at all{s.detail ? ` — ${s.detail}` : ''}.
       </div>
     )
   }
   if (!fw.rulesRequested) {
     return (
       <div className="inv-na">
-        The rule lines were not collected for this host, and this space is therefore not a
+        The rule lines were not collected for this server, and this space is therefore not a
         statement about what it lets in. The capability <b>Firewall rules: the addresses and
-        ports this host accepts</b> is not granted to the access group that governs this server,
+        ports this server accepts</b> is not granted to the access group that governs this server,
         so ShellPilot never asked for them. Grant it in AI access if you want them; the counts
         above are unaffected either way.
       </div>
@@ -436,7 +437,7 @@ function FirewallRules({ posture }: { posture: HostPosture }): React.JSX.Element
     // one thing this must never look like is a short list.
     return (
       <div className="inv-na loud">
-        The rule lines could not be read on this host, which is not a report of an empty ruleset.
+        The rule lines could not be read on this server, which is not a report of an empty ruleset.
         {s.detail ? ` Collector said: ${s.detail}.` : ''} Most of these close with passwordless
         sudo for the account ShellPilot connects as.
       </div>
@@ -456,17 +457,17 @@ function FirewallRules({ posture }: { posture: HostPosture }): React.JSX.Element
               // STATED, never silent. A prefix drawn as if it were the whole
               // list is the same failure as a refused read drawn as an empty
               // one, one step quieter.
-              <span className="warn">
+              <span className="state-unknown">
                 {' '}
                 · showing {listing.lines.length} of {listing.matched}, cut at{' '}
-                {listing.bound.maxLines} lines on the host
+                {listing.bound.maxLines} lines on the server
               </span>
             )}
           </div>
           {listing.lines.length === 0 ? (
             <div>
               This was read and lists nothing. That is a reading, not a gap — and on its own it is
-              not &ldquo;this host is closed&rdquo;: the other reading, and anything in front of
+              not &ldquo;this server is closed&rdquo;: the other reading, and anything in front of
               the NIC, are separate questions.
             </div>
           ) : (
@@ -484,12 +485,12 @@ function FirewallRules({ posture }: { posture: HostPosture }): React.JSX.Element
 
 const COLUMNS: { id: string; label: string; help: string }[] = [
   { id: 'firewall', label: 'Firewall', help: 'Which firewall is active and how many rules it lists. Both the front end and the kernel tables underneath are read, because "ufw is inactive" is not "nothing is filtering".' },
-  { id: 'mac', label: 'SELinux / AppArmor', help: 'Whether mandatory access control is enforcing. A host with neither is a finding, not a gap — and it is shown differently from a host that could not be asked.' },
+  { id: 'mac', label: 'SELinux / AppArmor', help: 'Whether mandatory access control is enforcing. A server with neither is a finding, not a gap — and it is shown differently from a server that could not be asked.' },
   { id: 'sshd', label: 'sshd', help: 'Seven directives against a hardening baseline. A directive that could not be read is never counted as passing.' },
-  { id: 'failed', label: 'Failed logins', help: 'How many failed attempts the host recorded and how many distinct account names they tried. Counts only: every field on a failed-login record is text an attacker chose.' },
-  { id: 'updates', label: 'Security updates', help: 'Pending security updates as the host’s own package manager counts them. Collected by the Inventory probe and shown here unchanged — ShellPilot computes nothing from a CVE feed.' },
+  { id: 'failed', label: 'Failed logins', help: 'How many failed attempts the server recorded and how many distinct account names they tried. Counts only: every field on a failed-login record is text an attacker chose.' },
+  { id: 'updates', label: 'Security updates', help: 'Pending security updates as the server’s own package manager counts them. Collected by the Inventory probe and shown here unchanged — ShellPilot computes nothing from a CVE feed.' },
   { id: 'oom', label: 'OOM kills', help: 'Processes the kernel reaped for memory in the last 24 hours. Only the journal can be asked for a window — a count read from dmesg or kern.log is real, and a ZERO read from either is not a statement about a day and is not drawn as one.' },
-  { id: 'certs', label: 'Certificates', help: 'Days left on the soonest certificate in a bounded set of named directories on this host. Not a TLS scanner: nothing is fetched over the network, the distribution trust store is deliberately not searched, and a directory that could not be entered is never rendered as a host with no certificates.' }
+  { id: 'certs', label: 'Certificates', help: 'Days left on the soonest certificate in a bounded set of named directories on this server. Not a TLS scanner: nothing is fetched over the network, the distribution trust store is deliberately not searched, and a directory that could not be entered is never rendered as a server with no certificates.' }
 ]
 
 export function PosturePanel({
@@ -591,54 +592,70 @@ export function PosturePanel({
 
   return (
     <div className="bc-panel">
-      <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-        <ShieldAlert size={14} className="faint" />
-        <b className="grow">Security posture</b>
-        <button
-          className="btn"
-          disabled={busy || servers.length === 0}
-          onClick={() => void refresh()}
-          title="Sweeps the estate now and re-reads what has already been collected. Posture is re-collected at most once an hour per host. Nothing is changed by this: no firewall is enabled, no SELinux mode is set and no configuration is written."
-        >
-          <RefreshCw size={13} className={clsx(busy && 'spin')} /> Check now
-        </button>
+      <div className="panel-head">
+        <span className="panel-head-icon">
+          <ShieldAlert size={14} />
+        </span>
+        <h2 className="ui-section-title">Security posture</h2>
+        <p className="ui-note panel-head-purpose">
+          Firewalls, SELinux and AppArmor, sshd settings, OOM kills and certificate expiry, per
+          server. Everything is read; no firewall is enabled and no configuration is written.
+        </p>
+        <div className="panel-head-actions">
+          <button
+            className="btn primary"
+            disabled={busy || servers.length === 0}
+            onClick={() => void refresh()}
+            title="Sweeps the estate now and re-reads what has already been collected. Posture is re-collected at most once an hour per server. Nothing is changed by this: no firewall is enabled, no SELinux mode is set and no configuration is written."
+          >
+            <RefreshCw size={13} className={clsx(busy && 'spin')} /> Check now
+          </button>
+        </div>
       </div>
 
       {summary.collected === 0 ? (
-        <div className="s-desc">
-          <b>No security posture has been collected yet.</b> ShellPilot reads it about once an hour,
-          on the same background sweep as the inventory — so a server added in the last hour, or an
-          estate where this has just been switched on, will not have any yet. Press{' '}
-          <b>Check now</b> to sweep immediately, and make sure background checking is on in
-          Settings. Nothing is changed by the probe: firewalls are read, never enabled; SELinux
-          modes are read, never set; and no configuration file is written.
+        <div className="panel-empty">
+          <p className="panel-empty-title">No security posture has been collected yet.</p>
+          <p className="panel-empty-body">
+            ShellPilot reads it about once an hour, on the same background sweep as the inventory —
+            so a server added in the last hour, or an estate where this has just been switched on,
+            will not have any yet. Press <b>Check now</b> to sweep immediately, and make sure
+            background checking is on in Settings. Nothing is changed by the probe: firewalls are
+            read, never enabled; SELinux modes are read, never set; and no configuration file is
+            written.
+          </p>
+          <div className="panel-empty-actions">
+            <button className="btn ghost sm" onClick={() => openSettings('monitoring')}>
+              Open Monitoring settings
+            </button>
+          </div>
         </div>
       ) : (
         <>
-          <div className="row wrap muted" style={{ fontSize: 11, marginTop: 8, gap: 12 }}>
+          <div className="panel-stats">
             <span>
-              {summary.hosts} host{summary.hosts === 1 ? '' : 's'} · posture for {summary.collected}
+              {summary.hosts} server{summary.hosts === 1 ? '' : 's'} · posture for {summary.collected}
             </span>
             {/* Every count here has its gap beside it. A security roll-up drawn
                 over only the hosts that answered is the exact shape of
                 reassuring fiction this panel exists to avoid. */}
             <span>
               {summary.firewallActive} filtering
-              {summary.firewallInactive > 0 && <span className="warn"> · {summary.firewallInactive} not</span>}
+              {summary.firewallInactive > 0 && <span className="state-watch"> · {summary.firewallInactive} not</span>}
               {summary.firewallUnknown > 0 && (
-                <span className="warn"> · {summary.firewallUnknown} could not be read</span>
+                <span className="state-unknown"> · {summary.firewallUnknown} could not be read</span>
               )}
             </span>
             <span>
               {summary.macEnforcing} enforcing
               {summary.macAbsent > 0 && <span> · {summary.macAbsent} with none installed</span>}
-              {summary.macUnknown > 0 && <span className="warn"> · {summary.macUnknown} unknown</span>}
+              {summary.macUnknown > 0 && <span className="state-unknown"> · {summary.macUnknown} unknown</span>}
             </span>
             <span>
-              {summary.sshdWeak > 0 && <span className="warn">{summary.sshdWeak} with a weak sshd setting</span>}
+              {summary.sshdWeak > 0 && <span className="state-watch">{summary.sshdWeak} with a weak sshd setting</span>}
               {summary.sshdWeak === 0 && <span>no weak sshd settings found</span>}
               {summary.sshdUnknown > 0 && (
-                <span className="warn"> · {summary.sshdUnknown} sshd config could not be read</span>
+                <span className="state-unknown"> · {summary.sshdUnknown} sshd config could not be read</span>
               )}
             </span>
             {/* Both of these carry their gap, for the reason every count above
@@ -648,38 +665,38 @@ export function PosturePanel({
                 host that refused, because neither can support a "none". */}
             <span>
               {summary.oomKilling > 0 ? (
-                <span className="warn">{summary.oomKilling} killing processes for memory</span>
+                <span className="state-watch">{summary.oomKilling} killing processes for memory</span>
               ) : (
                 <span>no OOM kills seen</span>
               )}
               {summary.oomUnknown > 0 && (
-                <span className="warn"> · {summary.oomUnknown} kernel log could not be read over a stated window</span>
+                <span className="state-unknown"> · {summary.oomUnknown} kernel log could not be read over a stated window</span>
               )}
             </span>
             <span>
               {summary.certExpired > 0 && (
-                <span className="warn">{summary.certExpired} with an EXPIRED certificate</span>
+                <span className="state-watch">{summary.certExpired} with an EXPIRED certificate</span>
               )}
               {summary.certExpired === 0 && summary.certExpiringSoon === 0 && (
                 <span>no certificate inside {CERT_EXPIRY_DAYS} days</span>
               )}
               {summary.certExpiringSoon > 0 && (
-                <span className="warn">
+                <span className="state-watch">
                   {summary.certExpired > 0 ? ' · ' : ''}
                   {summary.certExpiringSoon} expiring within {CERT_EXPIRY_DAYS} days
                 </span>
               )}
               {summary.certUnknown > 0 && (
-                <span className="warn"> · {summary.certUnknown} could not be fully read</span>
+                <span className="state-unknown"> · {summary.certUnknown} could not be fully read</span>
               )}
             </span>
           </div>
 
           {(summary.firewallUnknown > 0 || summary.sshdUnknown > 0) && (
-            <div className="s-desc warn">
+            <div className="panel-note is-unknown">
               <ShieldQuestion size={12} /> {summary.firewallUnknown + summary.sshdUnknown} check
               {summary.firewallUnknown + summary.sshdUnknown === 1 ? '' : 's'} across this estate could
-              not run, and a check that could not run is not a check that passed. Those hosts are not
+              not run, and a check that could not run is not a check that passed. Those servers are not
               in the counts above and they are not clear — most of these close with passwordless
               sudo for the account ShellPilot connects as, which lets the probe read a ruleset and
               ask sshd for its effective configuration. Nothing about that grants any write.
@@ -687,7 +704,7 @@ export function PosturePanel({
           )}
 
           {failed.map((f) => (
-            <div key={f.serverId} className="s-desc danger">
+            <div key={f.serverId} className="panel-note is-alarm">
               {f.serverName}: the posture probe failed — {f.error}
             </div>
           ))}
@@ -738,7 +755,7 @@ export function PosturePanel({
                             onClick={() =>
                               setOpenRules((o) => (o === r.serverId ? null : r.serverId))
                             }
-                            title="The rule lines this host’s firewall lists, as it printed them — or the reason there are none to show. Collected only where the Firewall rules capability is granted."
+                            title="The rule lines this server’s firewall lists, as it printed them — or the reason there are none to show. Collected only where the Firewall rules capability is granted."
                           >
                             {openRules === r.serverId ? 'Hide rules' : 'rules'}
                           </button>
@@ -756,7 +773,7 @@ export function PosturePanel({
                     {openRules === r.serverId && r.posture && (
                       <tr>
                         <td colSpan={COLUMNS.length + 1}>
-                          <div className="s-desc" data-rules-detail={r.serverName}>
+                          <div className="panel-note" data-rules-detail={r.serverName}>
                             <FirewallRules posture={r.posture} />
                           </div>
                         </td>
@@ -765,7 +782,7 @@ export function PosturePanel({
                     {open === r.serverId && r.posture?.sshd && (
                       <tr>
                         <td colSpan={COLUMNS.length + 1}>
-                          <div className="s-desc" data-sshd-detail={r.serverName}>
+                          <div className="panel-note" data-sshd-detail={r.serverName}>
                             {r.posture.sshd.effective ? (
                               <b>Read from sshd&rsquo;s own effective configuration.</b>
                             ) : (
@@ -776,7 +793,7 @@ export function PosturePanel({
                               </b>
                             )}
                             {r.posture.sshd.matchBlocks !== null && r.posture.sshd.matchBlocks > 0 && (
-                              <div className="warn" style={{ marginTop: 4 }}>
+                              <div className="state-watch" style={{ marginTop: 4 }}>
                                 This configuration has {r.posture.sshd.matchBlocks} conditional{' '}
                                 <span className="mono">Match</span> block
                                 {r.posture.sshd.matchBlocks === 1 ? '' : 's'}. The values below are

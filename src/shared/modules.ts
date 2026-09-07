@@ -18,6 +18,8 @@
 // `backfillModules`, which mirrors `backfillCapabilities`.
 
 export type ModuleId =
+  | 'jobs'
+  | 'services'
   | 'docker'
   | 'kubernetes'
   | 'cron'
@@ -80,7 +82,7 @@ export type ModuleSurface = 'read' | 'operate'
  * strings claimed "Read-only." while doing this — that copy has been corrected,
  * because a false safety claim is worse than the write it was covering for.
  */
-export const READ_SURFACE_WRITE_EXCEPTIONS: ModuleId[] = ['access', 'cron']
+export const READ_SURFACE_WRITE_EXCEPTIONS: ModuleId[] = ['access', 'cron', 'services']
 
 export interface ModuleDef {
   id: ModuleId
@@ -110,7 +112,7 @@ export const MODULES: ModuleDef[] = [
     surface: 'read',
     label: 'Fleet-wide search',
     detail:
-      'Search systemd units, listening ports and hosts across the workspace, from data the monitor already collects.',
+      'Search systemd units, listening ports and servers across the workspace, from data the monitor already collects.',
     defaultEnabled: true
   },
   {
@@ -118,7 +120,7 @@ export const MODULES: ModuleDef[] = [
     surface: 'read',
     label: 'Inventory',
     detail:
-      'What every host is — distribution, architecture, CPU, virtualisation — and what it needs: pending updates, security updates where the distribution publishes them, and whether a reboot is owed. Read-only, and nothing is refreshed: package caches are read, never updated, and their age is reported alongside the counts.',
+      'What every server is — distribution, architecture, CPU, virtualisation — and what it needs: pending updates, security updates where the distribution publishes them, and whether a reboot is owed. Read-only, and nothing is refreshed: package caches are read, never updated, and their age is reported alongside the counts.',
     // OFF for a fresh install too, not merely for upgrades.
     //
     // Enabling it means running the host's package manager on every host once
@@ -135,7 +137,7 @@ export const MODULES: ModuleDef[] = [
     surface: 'operate',
     label: 'Patch and update management',
     detail:
-      'What every host needs — pending updates, security updates where the distribution publishes them, and whether a reboot is owed — and applying them in waves, with a health check between waves and a hard refusal to restart a host other servers connect through. It never patches on a schedule and never decides for you.',
+      'What every server needs — pending updates, security updates where the distribution publishes them, and whether a reboot is owed — and applying them in waves, with a health check between waves and a hard refusal to restart a server other servers connect through. It never patches on a schedule and never decides for you.',
     // OFF by default, and not merely for upgrades.
     //
     // This is the only module that can INSTALL SOFTWARE ON YOUR SERVERS. The
@@ -151,7 +153,7 @@ export const MODULES: ModuleDef[] = [
     surface: 'read',
     label: 'Fleet keys and access',
     detail:
-      'Which key opens which host and whose it is: every authorized_keys file across the estate, fingerprinted, with locked and expired accounts and administrative group membership alongside. A host whose files could not be read is shown as unreadable and excluded from every count — never as a host with no keys. Reading is the whole of it apart from revoking a key, which is planned against the host and confirmed before anything changes.',
+      'Which key opens which server and whose it is: every authorized_keys file across the estate, fingerprinted, with locked and expired accounts and administrative group membership alongside. A server whose files could not be read is shown as unreadable and excluded from every count — never as a server with no keys. Reading is the whole of it apart from revoking a key, which is planned against the server and confirmed before anything changes.',
     // OFF by default, and this one's toggle gates the COLLECTION rather than
     // just the panel — see FleetSamplerDeps.accessEnabled.
     //
@@ -172,7 +174,7 @@ export const MODULES: ModuleDef[] = [
     surface: 'read',
     label: 'Capacity trends',
     detail:
-      'How full a host is getting and when it runs out — "this disk fills in eleven days" — drawn from the samples the monitor already writes. It stores nothing of its own, schedules nothing and evaluates nothing in the background: every line is derived on demand from history that exists whether or not this is on. A forecast is never stated without the window it was drawn from, and a gap where a host was unreachable is left as a hole in the line rather than drawn across.',
+      'How full a server is getting and when it runs out — "this disk fills in eleven days" — drawn from the samples the monitor already writes. It stores nothing of its own, schedules nothing and evaluates nothing in the background: every line is derived on demand from history that exists whether or not this is on. A forecast is never stated without the window it was drawn from, and a gap where a server was unreachable is left as a hole in the line rather than drawn across.',
     // OFF for a fresh install too, and this one is the cheapest module in the
     // list — it reads the local history store and opens no connection at all.
     //
@@ -206,7 +208,7 @@ export const MODULES: ModuleDef[] = [
     surface: 'read',
     label: 'Rules',
     detail:
-      'When an alert fires, run a job or post to the webhook \u2014 with a ceiling on how often it may act. A rule runs the job it was confirmed with, on the hosts it was confirmed for, and refuses if either has changed. It is not a workflow language: one trigger, one filter, one action, one rate limit.',
+      'When an alert fires, run a job or post to the webhook \u2014 with a ceiling on how often it may act. A rule runs the job it was confirmed with, on the servers it was confirmed for, and refuses if either has changed. It is not a workflow language: one trigger, one filter, one action, one rate limit.',
     // OFF by default, and this is the module the default matters most for.
     //
     // Every other module here is something a person presses. This one acts on
@@ -226,7 +228,7 @@ export const MODULES: ModuleDef[] = [
     surface: 'read',
     label: 'Configuration drift',
     detail:
-      'Compare a watched configuration file across the estate and say where it diverges \u2014 "all twelve web servers have this nginx.conf, three do not". Every file is compared under normalisation rules that are named on screen, so two files that differ and are called the same say which rule ate the difference. A host that could not be read is never reported as a host that matches. Read-only: it never writes a file back to bring a host into line.',
+      'Compare a watched configuration file across the estate and say where it diverges \u2014 "all twelve web servers have this nginx.conf, three do not". Every file is compared under normalisation rules that are named on screen, so two files that differ and are called the same say which rule ate the difference. A server that could not be read is never reported as a server that matches. Read-only: it never writes a file back to bring a server into line.',
     // OFF by default, and this one's toggle gates the COLLECTION rather than
     // just the panel \u2014 see FleetSamplerDeps.driftEnabled.
     //
@@ -247,7 +249,7 @@ export const MODULES: ModuleDef[] = [
     surface: 'read',
     label: 'Security posture',
     detail:
-      'What every host already knows about its own exposure: which firewall is active and the shape of its rules, whether SELinux or AppArmor is enforcing, how sshd compares with a hardening baseline, and how many logins have failed. Read-only, and emphatically not a vulnerability scanner — the pending security update count comes from the Inventory probe, which asks the host\'s own package manager, rather than from a CVE feed. A check that could not run is shown as unread, never as passed.',
+      'What every server already knows about its own exposure: which firewall is active and the shape of its rules, whether SELinux or AppArmor is enforcing, how sshd compares with a hardening baseline, and how many logins have failed. Read-only, and emphatically not a vulnerability scanner — the pending security update count comes from the Inventory probe, which asks the server\'s own package manager, rather than from a CVE feed. A check that could not run is shown as unread, never as passed.',
     // OFF by default, and this one's toggle gates the COLLECTION rather than
     // just the panel — see FleetSamplerDeps.postureEnabled.
     //
@@ -268,14 +270,14 @@ export const MODULES: ModuleDef[] = [
     surface: 'operate',
     label: 'Run a command on many servers',
     detail:
-      'Run one command across selected servers, with confirmation that scales to how many hosts and how dangerous the command is.',
+      'Run one command across selected servers, with confirmation that scales to how many servers and how dangerous the command is.',
     defaultEnabled: false
   },
   {
     id: 'logTail',
     surface: 'read',
     label: 'Live log tailing',
-    detail: 'Follow a systemd unit or a log file on several hosts at once, interleaved by host.',
+    detail: 'Follow a systemd unit or a log file on several servers at once, interleaved by server.',
     defaultEnabled: true
   },
   {
@@ -283,15 +285,42 @@ export const MODULES: ModuleDef[] = [
     surface: 'read',
     label: 'Scheduled jobs',
     detail:
-      'Read crontabs, /etc/cron.d and systemd timers across the estate. Editing a schedule is planned against the host and confirmed before it is written; nothing else here changes anything.',
+      'Read crontabs, /etc/cron.d and systemd timers across the estate. Editing a schedule is planned against the server and confirmed before it is written; nothing else here changes anything.',
     defaultEnabled: true
+  },
+  {
+    id: 'jobs',
+    // The clearest `operate` module in the registry: it composes multi-step
+    // work, picks the servers and runs it in waves.
+    surface: 'operate',
+    label: 'Jobs',
+    detail:
+      'Compose a multi-step job, pick the servers, run it in waves and watch it. Every job asks for the confirmation its own risk demands, and the answer is recorded before anything runs.',
+    // OFF by default, and more deliberately than the read-only modules above:
+    // this one WRITES. It is the surface the job engine shipped without, and a
+    // module that switches itself on is a module that decided for the operator.
+    defaultEnabled: false
+  },
+  {
+    id: 'services',
+    // Mostly a read, with one install action bolted on — the same shape as
+    // `access` and `cron`, and handled the same way. See
+    // READ_SURFACE_WRITE_EXCEPTIONS.
+    surface: 'read',
+    label: 'Server services',
+    detail:
+      'Read what each server supervises for your account with `systemd --user` — what is running, what has failed, and whether it survives you logging out. Nothing is started or stopped here; the one thing it writes is a new unit file, and that asks first.',
+    // OFF by default like the rest. It reads only, but it reads something most
+    // operators have never looked at, and a module that switches itself on is a
+    // module that decides for them.
+    defaultEnabled: false
   },
   {
     id: 'processes',
     surface: 'read',
     label: 'Local processes',
     detail:
-      'Run, watch, restart and read the logs of a long-lived process on THIS machine \u2014 a dev server, a worker, a script that should outlive its terminal. Restart policies, exponential backoff, crash-loop detection and a bounded log ring, from the supervisor that already keeps VPN engines alive. Nothing runs on a remote host, nothing starts by itself, and a value that looks like a secret has to come from the vault rather than the process list.',
+      'Run, watch, restart and read the logs of a long-lived process on THIS machine \u2014 a dev server, a worker, a script that should outlive its terminal. Restart policies, exponential backoff, crash-loop detection and a bounded log ring, from the supervisor that already keeps VPN engines alive. Nothing runs on a remote server, nothing starts by itself, and a value that looks like a secret has to come from the vault rather than the process list.',
     // OFF by default, and this is the module whose default matters most in the
     // whole registry.
     //
@@ -314,7 +343,7 @@ export const MODULES: ModuleDef[] = [
     surface: 'read',
     label: 'Docker',
     detail:
-      'List containers on a server, read their logs, and open a shell inside a running one. Uses the docker binary already on the host — a container shell is arbitrary code execution there.',
+      'List containers on a server, read their logs, and open a shell inside a running one. Uses the docker binary already on the server — a container shell is arbitrary code execution there.',
     defaultEnabled: false
   },
   {
@@ -322,7 +351,7 @@ export const MODULES: ModuleDef[] = [
     surface: 'read',
     label: 'Kubernetes',
     detail:
-      'List contexts, namespaces and pods and read pod logs, using the kubectl already on the host. Reading only: it never switches your context, never execs into a pod, and never applies or deletes anything.',
+      'List contexts, namespaces and pods and read pod logs, using the kubectl already on the server. Reading only: it never switches your context, never execs into a pod, and never applies or deletes anything.',
     defaultEnabled: false
   }
 ]
@@ -341,9 +370,9 @@ export const MODULES: ModuleDef[] = [
  * two agree. Adding an `operate` module then fails a test rather than quietly
  * producing a tab that exists in one half of the app and not the other.
  */
-export type OperateModuleId = Extract<ModuleId, 'broadcast' | 'patch'>
+export type OperateModuleId = Extract<ModuleId, 'broadcast' | 'patch' | 'jobs'>
 
-export const OPERATE_MODULE_IDS: readonly OperateModuleId[] = ['broadcast', 'patch']
+export const OPERATE_MODULE_IDS: readonly OperateModuleId[] = ['broadcast', 'patch', 'jobs']
 
 /** Whether this module's destination is Operations rather than Monitoring. */
 export function isOperateModule(id: ModuleId): id is OperateModuleId {

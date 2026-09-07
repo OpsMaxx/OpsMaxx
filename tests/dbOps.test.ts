@@ -10,6 +10,7 @@ import {
   DB_VERDICT_RANK,
   MYSQL_QUERIES,
   MYSQL_QUESTIONS,
+  MSSQL_QUESTIONS,
   PG_QUERIES,
   PG_QUESTIONS,
   PG_REDACTED_QUERY,
@@ -895,10 +896,16 @@ describe('the two statements that cannot bind a parameter', () => {
 // ===========================================================================
 
 describe('the report', () => {
-  it('covers eight questions per SQL engine', () => {
+  it('covers the questions each SQL engine can answer', () => {
     expect(PG_QUESTIONS).toHaveLength(8)
-    expect(MYSQL_QUESTIONS).toHaveLength(8)
-    for (const id of [...PG_QUESTIONS, ...MYSQL_QUESTIONS]) expect(DB_QUESTION_LABEL[id]).toBeTruthy()
+    // Nine for MySQL since item 37 added `digests`: which statements read a
+    // table without an index, which the slow log cannot see because a scan of
+    // a small table is fast.
+    expect(MYSQL_QUESTIONS).toHaveLength(9)
+    expect(MSSQL_QUESTIONS).toHaveLength(8)
+    for (const id of [...PG_QUESTIONS, ...MYSQL_QUESTIONS, ...MSSQL_QUESTIONS]) {
+      expect(DB_QUESTION_LABEL[id], id).toBeTruthy()
+    }
   })
 
   it('covers only the engines it can actually answer for', () => {
@@ -909,9 +916,13 @@ describe('the report', () => {
     // than a thin imitation of the SQL page — see tests/dbOpsMongoRedis.test.ts.
     expect(supportsDbOps('mongodb')).toBe(true)
     expect(supportsDbOps('redis')).toBe(true)
-    // Still out, and the note says why rather than leaving it to be discovered.
-    expect(supportsDbOps('mssql')).toBe(false)
-    expect(DB_OPS_UNSUPPORTED_NOTE).toMatch(/SQL Server is not covered/)
+    // In now. Every query behind it was run against a real SQL Server 2022
+    // before it was written down, which is the bar the other four engines set
+    // and the reason this stayed false until it could be met — see
+    // tests/dbOpsMssql.test.ts and the live suite beside it.
+    expect(supportsDbOps('mssql')).toBe(true)
+    expect(DB_OPS_UNSUPPORTED_NOTE).toMatch(/SQL Server/)
+    expect(DB_OPS_UNSUPPORTED_NOTE).not.toMatch(/not covered/)
   })
 
   it('knows which questions each engine answers', () => {
@@ -960,5 +971,52 @@ describe('the report', () => {
     expect(my?.maxConnections).toBe(151)
     const maria = parseMysqlOverview(row(MARIA.overview), 600)
     expect(maria?.flavour).toBe('mariadb')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Item 37: the session holding the lock
+// ---------------------------------------------------------------------------
+//
+// `PG_QUERIES.locks` filtered on `cardinality(pg_blocking_pids(a.pid)) > 0`,
+// which is "sessions that are blocked" -- and the session HOLDING the lock is
+// not itself blocked. Measured against PostgreSQL 16.15 with a three-deep
+// chain: the query returned two rows and the blocker was not among them. The
+// screen showed two stuck queries and nothing to act on.
+//
+// Fixing the query alone would have been a bug: `judgePgLocks` counted every
+// returned row as a blocked session, so the blocker would have inflated the
+// count it reports and the `blockedSessions` metric it stores.
+
+describe('the blocking chain includes the session at the head of it', () => {
+  it('asks for the blockers as well as the blocked', () => {
+    expect(PG_QUERIES.locks).toContain('pg_blocking_pids(a.pid)) > 0')
+    // The half that was missing: sessions that block somebody.
+    expect(PG_QUERIES.locks).toContain('a.pid = ANY(pg_blocking_pids(b.pid))')
+  })
+
+  // Row shapes as PostgreSQL 16.15 actually returned them: the blocker has an
+  // empty blocked_by, the waiter names it.
+  const root = { pid: 124, username: 'postgres', state: 'active', waitingSeconds: 30, blockedBy: [], waitEventType: 'Timeout', waitEvent: 'PgSleep', query: 'update t set v=$1', redacted: false }
+  const waiter = { pid: 131, username: 'postgres', state: 'active', waitingSeconds: 28, blockedBy: [124], waitEventType: 'Lock', waitEvent: 'transactionid', query: 'update t set v=$2', redacted: false }
+
+  it('counts the blocked sessions, not the rows', () => {
+    // Two rows, one blocked session. Counting rows would say two.
+    const v = judgePgLocks([root, waiter] as never)
+    expect(v.headline).toContain('1 session')
+    expect(v.headline).not.toContain('2 session')
+  })
+
+  it('names what the blocker is doing, which is the point of returning it', () => {
+    // "waiting on pid 124" is not actionable; "waiting on pid 124, which is
+    // running this" is.
+    const v = judgePgLocks([root, waiter] as never)
+    expect(v.because).toContain('124')
+    expect(v.because).toContain('update t set v=$1')
+  })
+
+  it('still says nothing is waiting when only a blocker-shaped row appears', () => {
+    // A session that blocks nobody and waits for nothing is not a finding.
+    expect(judgePgLocks([root] as never).level).toBe('ok')
   })
 })

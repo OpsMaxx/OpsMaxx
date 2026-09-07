@@ -1,0 +1,5 @@
+default       nolimits                 1     <none>   <none>   <none>   <none>
+default       web                      2     100m     64Mi     200m     128Mi
+kube-system   coredns                  1     100m     70Mi     <none>   170Mi
+kube-system   local-path-provisioner   1     <none>   <none>   <none>   <none>
+kube-system   metrics-server           1     100m     70Mi     <none>   <none>

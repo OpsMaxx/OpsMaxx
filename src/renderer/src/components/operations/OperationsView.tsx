@@ -9,8 +9,10 @@ import {
   type OperateModuleId
 } from '../../../../shared/modules'
 import { openSettings, useNav } from '../../store/nav'
+import type { JobComposerJump } from '../../store/nav'
 import { BroadcastPanel } from '../monitor/BroadcastPanel'
 import { PatchPanel } from '../monitor/PatchPanel'
+import { JobsPanel } from '../monitor/JobsPanel'
 import type { Server } from '../../types'
 
 // Operations — the half of the fleet destination that CHANGES servers.
@@ -31,9 +33,9 @@ import type { Server } from '../../types'
 //  1. A standing banner rather than a title. Monitoring's `.content-header` is
 //     an `h1` and a stat line. This is a statement about what the whole rail
 //     does, and it does not scroll away.
-//  2. Tabs that carry their consequence. There are two of them, so there is
+//  2. Tabs that carry their consequence. There are three of them, so there is
 //     room to say what each one will do to a host. Monitoring's strip cannot
-//     afford that at thirteen tabs; this one can afford it at two, and the
+//     afford that at fourteen tabs; this one can afford it at three, and the
 //     asymmetry is the point rather than an inconsistency.
 //  3. Execute controls at the FOOT of the card (`.op-actionbar`), never
 //     top-right. See the comments at those two sites in BroadcastPanel and
@@ -46,16 +48,20 @@ import type { Server } from '../../types'
 /** What each operate tab will do, said in the tab itself. */
 const CONSEQUENCE: Record<OperateModuleId, string> = {
   broadcast: 'Runs a shell command on every server you select.',
-  patch: 'Installs packages in waves, and restarts hosts that ask for it.'
+  patch: 'Installs packages in waves, and restarts hosts that ask for it.',
+  jobs: 'Runs a multi-step job across servers in waves, with a rollback you press yourself.'
 }
 
 export function OperationsView({
   servers,
   modules,
-  hidden
+  hidden,
+  jobJump
 }: {
   servers: Server[]
   modules: ModuleState | undefined
+  /** A prefilled service step, set by openServiceJob and consumed by JobsPanel. */
+  jobJump?: JobComposerJump
   /**
    * Hidden rather than unmounted, and this prop is the whole reason the rail
    * lives inside FleetMonitor. BroadcastPanel holds a live run in component
@@ -147,6 +153,15 @@ export function OperationsView({
       {moduleEnabled(modules, 'patch') && (
         <div className="ops-card" style={show('patch')}>
           <PatchPanel servers={servers} />
+        </div>
+      )}
+      {/* Jobs composes multi-step work and runs it across servers in waves, so
+          it belongs on this side of the line rather than in a destination whose
+          contract is that nothing in it writes. `openServiceJob` routes here
+          directly for the same reason. */}
+      {moduleEnabled(modules, 'jobs') && (
+        <div className="ops-card" style={show('jobs')}>
+          <JobsPanel servers={servers} jump={jobJump} />
         </div>
       )}
 

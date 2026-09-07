@@ -4,13 +4,22 @@ import { useFleet } from '../../store/fleet'
 import { useFleetStatus } from '../../store/fleetStatus'
 import {
   checkCertificateAlert,
+  checkErrorRateAlert,
   checkResourceAlerts,
   checkStateAlert,
   checkUnitAlerts,
+  checkVpnCertificateAlert,
   hydrateAlerts,
   noteAlertEvent
 } from '../../store/alerts'
 import { postureAlertReadings } from '../../../../shared/posture'
+import { VPN_ALERT_READINGS } from '../../../../shared/vpn'
+import {
+  crashloopReading,
+  crashloopSubject,
+  type CrashPodMinimal,
+  type CrashReadState
+} from '../../../../shared/k8sCrashloop'
 import { bridgeHas, bridgeOn } from '../../lib/bridge'
 import { sshHopsFor } from '../../lib/ssh'
 import type { FleetTarget } from '../../../../shared/fleet'
@@ -52,6 +61,9 @@ function toTarget(s: Server): FleetTarget {
 }
 
 export function FleetWatcher(): null {
+  // Destinations that were alarming last time, so one that recovers can be
+  // cleared. Nothing else knows which ids to clear.
+  const knownBackupIds = useRef<Set<string>>(new Set())
   const servers = useWorkspaceServers()
   // Read through a ref inside the subscription. The handler is registered once
   // on purpose -- resubscribing on every server edit would drop events during
@@ -207,6 +219,36 @@ export function FleetWatcher(): null {
     }
   }, [targets, reportFacts, reportFactsError])
 
+  // Backups, on the same app-root cadence as everything else here.
+  //
+  // A missing backup is not an event anybody receives — a schedule that stopped
+  // produces silence, which is exactly what a healthy one produces — so it has
+  // to be ASKED FOR on a timer rather than waited for. Hourly is enough: the
+  // shortest thing this can catch is a schedule measured in hours, and nothing
+  // here gets better for being asked more often.
+  useEffect(() => {
+    const ask = (): void => {
+      const alarms = window.shellpilot?.backup?.alarms
+      if (typeof alarms !== 'function') return
+      void alarms().then((list) => {
+        for (const a of list ?? []) {
+          checkStateAlert(`backup:${a.destinationId}`, a.destinationName, 'backup-failed', true, a.detail)
+        }
+        // Anything not in the list has a recent, successful, verified backup.
+        // Cleared by name so a destination that recovered stops alarming
+        // without waiting for anybody to open a panel.
+        const bad = new Set((list ?? []).map((a) => `backup:${a.destinationId}`))
+        for (const d of knownBackupIds.current) {
+          if (!bad.has(d)) checkStateAlert(d, d, 'backup-failed', false)
+        }
+        knownBackupIds.current = new Set([...(list ?? []).map((a) => `backup:${a.destinationId}`)])
+      })
+    }
+    ask()
+    const t = setInterval(ask, 3600_000)
+    return () => clearInterval(t)
+  }, [])
+
   // Reconfigure whenever what should be watched changes. Main treats this as
   // the complete desired state, so removing a server here stops sampling it.
   useEffect(() => {
@@ -290,6 +332,122 @@ export function FleetWatcher(): null {
   }, [])
 
 
+  // A VPN in error, and a VPN that is up and silent.
+  //
+  // Polled over `vpn.list()` on the tunnel poll's cadence and for the tunnel
+  // poll's reason: `vpn.onStatus` is per profile id, so a subscription set here
+  // would have to be added and dropped as profiles come and go, and a
+  // subscription set that can be wrong is worse than a read ten seconds late
+  // for a condition measured in minutes.
+  //
+  // THE STATE MAP IS THE WHOLE FEATURE, and it lives in VPN_ALERT_READINGS so
+  // it can be tested exhaustively without a timer. Read it before changing
+  // anything here.
+  useEffect(() => {
+    if (!bridgeHas(window.shellpilot?.vpn as Record<string, unknown> | undefined, 'list')) return
+    let live = true
+    const read = (): void => {
+      void window.shellpilot?.vpn?.list().then((list) => {
+        if (!live || !Array.isArray(list)) return
+        for (const v of list) {
+          // The friendly name, from the profile list, for the reason the tunnel
+          // poll above does the same: VpnStatus carries an id and no name, and
+          // a uuid in an alert is a row nobody can place.
+          const name = useApp.getState().vpns.find((p) => p.id === v.id)?.name ?? v.id
+          const { down, silent } = VPN_ALERT_READINGS[v.state]
+          if (down !== null) checkStateAlert(v.id, name, 'vpn-down', down)
+          if (silent !== null) checkStateAlert(v.id, name, 'vpn-degraded', silent)
+          // Item 48's second row. The date was read once at import and lives on
+          // the spec beside `remotes`, so this costs no vault unlock and no
+          // parse -- and it warns BEFORE the connect fails, which was the whole
+          // complaint: openvpn's own "certificate has expired" arrives after.
+          const profile = useApp.getState().vpns.find((p) => p.id === v.id)
+          const spec = profile?.spec
+          if (spec?.kind === 'openvpn') {
+            checkVpnCertificateAlert(v.id, name, spec.clientCertNotAfter)
+          }
+        }
+      })
+    }
+    void hydrateAlerts().then(() => {
+      if (live) read()
+    })
+    const timer = setInterval(read, 10_000)
+    return () => {
+      live = false
+      clearInterval(timer)
+    }
+  }, [])
+
+  // Item 40: pods restarting.
+  //
+  // Polled from the renderer, not the fleet sampler, and that is the item's own
+  // constraint rather than convenience: the sampler is inside the
+  // agent-reachable import closure, and `shared/kubernetes` may not enter it.
+  // The probe module this uses imports nothing at all for the same reason.
+  //
+  // KEYED ON THE CLUSTER CONTEXT. A cluster is visible from every server
+  // holding a kubeconfig, so a serverId key would raise one crashloop once per
+  // such server.
+  //
+  // The previous sample is held in a ref because the reading is a DELTA: a
+  // restart count is not a restart rate, and the first sweep after launch has
+  // nothing to compare against and says so.
+  const lastPods = useRef<Map<string, CrashPodMinimal[]>>(new Map())
+  useEffect(() => {
+    if (!bridgeHas(window.shellpilot?.k8s as Record<string, unknown> | undefined, 'read')) return
+    let live = true
+    const read = (): void => {
+      // Only what the operator asked for. Nothing is polled until they name a
+      // server and a context, because nothing else can know which server holds
+      // a kubeconfig.
+      const watches = useApp.getState().settings.k8sWatch ?? []
+      const servers = useApp.getState().servers
+      for (const w of watches) {
+        const s = servers.find((x) => x.id === w.serverId)
+        if (!s) continue
+        void window.shellpilot?.k8s
+          ?.read(s, w.context || undefined)
+          .then((probe) => {
+            if (!live || !probe) return
+            const context = w.context || (probe.ok ? probe.currentContext : null) || ''
+            const subject = crashloopSubject(context)
+            const state: CrashReadState = !probe.ok
+              ? probe.reason === 'forbidden'
+                ? 'forbidden'
+                : probe.reason === 'unauthorized'
+                  ? 'unauthorized'
+                  : 'no-cluster'
+              : probe.allNamespaces
+                ? 'ok'
+                : // RBAC limited the list to one namespace, so "nothing is
+                  // crashlooping" would be a claim about a fraction of the
+                  // cluster stated as a claim about all of it.
+                  'one-namespace'
+            const pods = probe.ok ? probe.pods : []
+            const r = crashloopReading(state, pods, lastPods.current.get(subject) ?? null)
+            if (probe.ok) lastPods.current.set(subject, pods)
+            if (r.bad !== null) {
+              checkStateAlert(subject, context || 'the current context', 'pod-crashloop', r.bad, r.detail)
+            }
+          })
+          .catch(() => {
+            // A throw is not an observation that nothing is crashlooping.
+          })
+      }
+    }
+    void hydrateAlerts().then(() => {
+      if (live) read()
+    })
+    // Slower than the tunnel and VPN polls: this one shells out to kubectl on
+    // a remote server, and a crashloop is measured in minutes.
+    const timer = setInterval(read, 120_000)
+    return () => {
+      live = false
+      clearInterval(timer)
+    }
+  }, [])
+
   // Item 19b's two deferred kinds: OOM kills and certificate expiry.
   //
   // Read from the posture the background sweep ALREADY HOLDS, exactly as the
@@ -321,7 +479,7 @@ export function FleetWatcher(): null {
           if (!live || !r) return
           const name = serversRef.current.find((s) => s.id === t.serverId)?.name ?? t.serverId
           // `r.posture` absent is "never collected", and postureAlertReadings
-          // turns that into two nulls rather than into two clean bills of
+          // turns that into nulls rather than into clean bills of
           // health. Every other honesty rule in this pair — a ring-buffer zero,
           // a refused /etc/letsencrypt, a certificate that would not parse —
           // is decided in shared/posture.ts for the same reason isDiskCritical
@@ -330,6 +488,11 @@ export function FleetWatcher(): null {
           const reading = postureAlertReadings(r.posture ?? null)
           checkStateAlert(t.serverId, name, 'oom-kill', reading.oomKills, reading.oomDetail)
           checkCertificateAlert(t.serverId, name, reading.certDays)
+          // Rides this same sweep because it is READ on this same sweep: the
+          // hourly posture collection counts the journal in the same pass it
+          // counts OOM kills, which is why the coverage row can honestly say
+          // sixty minutes of counting once an hour leaves no gap.
+          checkErrorRateAlert(t.serverId, name, reading.errorPerMinute)
         })
       }
     }

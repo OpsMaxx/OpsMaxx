@@ -1,3 +1,4 @@
+import type { DiskMount } from './mounts'
 // Shared SSH types used by main, preload and renderer.
 
 export type SshAuth = 'password' | 'key' | 'agent'
@@ -115,6 +116,19 @@ export interface HostMetrics {
    * there would read as an empty filesystem and post an all-clear.
    */
   inodePct?: number | null
+  /**
+   * Every real filesystem on the server — item 47.
+   *
+   * BESIDE `diskPct`, not instead of it. `diskPct` is the ROOT filesystem and
+   * has meant that in every sample stored since the history store was written,
+   * so it goes on meaning it; this is the rest of them, which is where a full
+   * /var or /data actually lives.
+   *
+   * Optional, because a sample read back from an older store has none — and
+   * absent is not `[]`. `[]` means `df` answered and no real filesystem came
+   * back; absent means nobody asked.
+   */
+  mounts?: DiskMount[]
   /**
    * One-minute load average, or null when /proc/loadavg could not be read.
    *

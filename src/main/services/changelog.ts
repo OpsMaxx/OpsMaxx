@@ -38,7 +38,10 @@ import type { ApprovalSurface } from '../../shared/broadcast'
 const SURFACE_LABEL: Record<ApprovalSurface, string> = {
   broadcast: 'Broadcast',
   job: 'Job',
-  'k8s-exec': 'Kubernetes exec'
+  'k8s-exec': 'Kubernetes exec',
+  access: 'Key and access',
+  k8s: 'Kubernetes',
+  'db-statement': 'Database statement'
 }
 
 

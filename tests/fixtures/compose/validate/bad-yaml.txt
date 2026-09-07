@@ -1,0 +1,2 @@
+yaml: while scanning a quoted scalar at line 5, column 9: line 6: found unexpected end of stream
+exit=1

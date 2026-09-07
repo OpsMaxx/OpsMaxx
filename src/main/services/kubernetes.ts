@@ -1,4 +1,5 @@
 import type {
+  K8sAllocatableProbe,
   K8sCordonResult,
   K8sCordonTarget,
   K8sDrainAssessment,
@@ -19,6 +20,13 @@ import type {
   K8sWorkloadKind
 } from '../../shared/kubernetes'
 import {
+  buildK8sReviewCommand,
+  splitReview,
+  type K8sReviewProbe
+} from '../../shared/k8sReview'
+import {
+  buildK8sAllocatableCommand,
+  parseK8sAllocatable,
   buildK8sCordonCommand,
   buildK8sDiagnoseCommand,
   buildK8sDrainCommand,
@@ -94,7 +102,7 @@ export class KubernetesReader {
         // A transport failure is not a cluster failure. Saying "kubectl is not
         // installed" when the HOST was unreachable sends someone to fix the
         // wrong machine entirely.
-        return { ok: false, reason: 'unknown', detail: r.error ?? 'could not reach the host' }
+        return { ok: false, reason: 'unknown', detail: r.error ?? 'could not reach the server' }
       }
       return parseK8sOutput(`${r.stdout ?? ''}${r.stderr ?? ''}`, r.code ?? null)
     } catch (e) {
@@ -131,7 +139,7 @@ export class KubernetesReader {
       // rejected invoke with no explanation.
       const cmd = buildK8sDiagnoseCommand(namespace, pod, context, previousLines)
       const r = await this.deps.exec(cfg, cmd, 30_000)
-      if (!r.ok) return fail(r.error ?? 'could not reach the host')
+      if (!r.ok) return fail(r.error ?? 'could not reach the server')
       return parseK8sDiagnosis(namespace, pod, merge(r), r.code ?? null)
     } catch (e) {
       return fail(e instanceof Error ? e.message : String(e))
@@ -142,7 +150,10 @@ export class KubernetesReader {
   async overview(cfg: unknown, context?: string, namespace?: string): Promise<K8sOverview> {
     const fail = (detail: string): K8sOverview => {
       const f = { ok: false, reason: 'unknown', detail } as const
-      return { deployments: f, statefulSets: f, daemonSets: f, nodes: f, events: f }
+      // `serverVersion: null` is the honest value for a failed read: it means
+      // the skew report says "unknown" rather than comparing nodes against a
+      // version nobody got.
+      return { deployments: f, statefulSets: f, daemonSets: f, nodes: f, serverVersion: null, pdbs: f, events: f }
     }
     try {
       // 45s rather than the read's 30s: five kubectl calls at up to 10s each,
@@ -150,10 +161,27 @@ export class KubernetesReader {
       // would mean the transport gives up first and the user sees a timeout
       // instead of the four blocks that did answer.
       const r = await this.deps.exec(cfg, buildK8sOverviewCommand(context, namespace), 45_000)
-      if (!r.ok) return fail(r.error ?? 'could not reach the host')
+      if (!r.ok) return fail(r.error ?? 'could not reach the server')
       return parseK8sOverview(merge(r), r.code ?? null)
     } catch (e) {
       return fail(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  /**
+   * What each node can hold against what is booked on it.
+   *
+   * Its own call rather than a block in `overview`: it reads EVERY namespace
+   * whatever the operator has selected, and folding a read with different scope
+   * into the overview would make the overview's namespace mean two things.
+   */
+  async allocatable(cfg: unknown, context?: string): Promise<K8sAllocatableProbe> {
+    try {
+      const r = await this.deps.exec(cfg, buildK8sAllocatableCommand(context), 30_000)
+      if (!r.ok) return { ok: false, detail: r.error ?? 'could not reach the server' }
+      return parseK8sAllocatable(merge(r), r.code ?? null)
+    } catch (e) {
+      return { ok: false, detail: e instanceof Error ? e.message : String(e) }
     }
   }
 
@@ -165,7 +193,7 @@ export class KubernetesReader {
     }
     try {
       const r = await this.deps.exec(cfg, buildK8sTopCommand(context, namespace), 25_000)
-      if (!r.ok) return fail(r.error ?? 'could not reach the host')
+      if (!r.ok) return fail(r.error ?? 'could not reach the server')
       return parseK8sUsage(merge(r), r.code ?? null)
     } catch (e) {
       return fail(e instanceof Error ? e.message : String(e))
@@ -224,7 +252,7 @@ export class KubernetesReader {
           // than a failed one: the command may well have reached the host and
           // run. Saying "it did not restart" would be a guess, and the wrong
           // guess makes someone click again.
-          detail: `${r.error ?? 'could not reach the host'} — the restart may or may not have been sent; re-read the workload before retrying`
+          detail: `${r.error ?? 'could not reach the server'} — the restart may or may not have been sent; re-read the workload before retrying`
         }
       }
       return parseK8sRolloutResult(merge(r), r.code ?? null)
@@ -280,7 +308,7 @@ export class KubernetesReader {
       const r = await this.deps.exec(cfg, cmd, 20_000)
       if (!r.ok) {
         return fail(
-          `${r.error ?? 'could not reach the host'} — the ${action} may or may not have been applied; re-read the node before retrying`
+          `${r.error ?? 'could not reach the server'} — the ${action} may or may not have been applied; re-read the node before retrying`
         )
       }
       return parseK8sCordonResult(action, target.node, merge(r), r.code ?? null)
@@ -313,7 +341,7 @@ export class KubernetesReader {
       // exec's own timeout means the transport gives up first and the user sees
       // a timeout instead of the three blocks that did answer.
       const r = await this.deps.exec(cfg, cmd, 45_000)
-      if (!r.ok) return fail(r.error ?? 'could not reach the host')
+      if (!r.ok) return fail(r.error ?? 'could not reach the server')
       return parseK8sDrainPreflight(node, merge(r), r.code ?? null)
     } catch (e) {
       return fail(e instanceof Error ? e.message : String(e))
@@ -374,7 +402,7 @@ export class KubernetesReader {
       const r = await this.deps.exec(cfg, buildK8sDrainCommand(node, context), 150_000)
       if (!r.ok) {
         return fail(
-          `${r.error ?? 'could not reach the host'} — the drain was sent and its outcome is unknown; the node has been cordoned and some pods may already have moved. Re-read the node before retrying.`,
+          `${r.error ?? 'could not reach the server'} — the drain was sent and its outcome is unknown; the node has been cordoned and some pods may already have moved. Re-read the node before retrying.`,
           plan
         )
       }
@@ -438,7 +466,7 @@ export class KubernetesReader {
           // leaves the exec in an UNKNOWN state: it may well have reached the
           // host and run, and telling somebody it did not is how a command that
           // is not idempotent gets run twice.
-          detail: `${r.error ?? 'could not reach the host'} — the command may or may not have run inside the container`
+          detail: `${r.error ?? 'could not reach the server'} — the command may or may not have run inside the container`
         }
       }
       return parseK8sExecResult(merge(r), r.code ?? null)
@@ -463,10 +491,27 @@ export class KubernetesReader {
       // 45s: five kubectl calls at up to 10s each, the same arithmetic as the
       // overview.
       const r = await this.deps.exec(cfg, buildK8sResourcesCommand(context, namespace), 45_000)
-      if (!r.ok) return fail(r.error ?? 'could not reach the host')
+      if (!r.ok) return fail(r.error ?? 'could not reach the server')
       return parseK8sResources(merge(r), r.code ?? null)
     } catch (e) {
       return fail(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  /**
+   * The whole-cluster review: thirteen reads, one round trip.
+   *
+   * 60s, because it is thirteen kubectl calls rather than five. A transport
+   * failure returns the sections as MISSING with the reason on each -- not an
+   * empty review, which is the shape that reads as a clean cluster.
+   */
+  async review(cfg: unknown, context?: string): Promise<K8sReviewProbe> {
+    try {
+      const r = await this.deps.exec(cfg, buildK8sReviewCommand('kubectl', context), 60_000)
+      if (!r.ok) return { ok: false, detail: r.error ?? 'could not reach the server' }
+      return { ok: true, blocks: splitReview(merge(r)) }
+    } catch (e) {
+      return { ok: false, detail: e instanceof Error ? e.message : String(e) }
     }
   }
 
@@ -482,7 +527,7 @@ export class KubernetesReader {
   async apiScan(cfg: unknown, context?: string): Promise<K8sApiScan> {
     try {
       const r = await this.deps.exec(cfg, buildK8sApiScanCommand(context), 25_000)
-      if (!r.ok) return this.unscanned(r.error ?? 'could not reach the host')
+      if (!r.ok) return this.unscanned(r.error ?? 'could not reach the server')
       return parseK8sApiScan(merge(r), r.code ?? null)
     } catch (e) {
       return this.unscanned(e instanceof Error ? e.message : String(e))
@@ -512,7 +557,7 @@ export class KubernetesReader {
         // NOT `not-installed`. A host we could not reach has told us nothing
         // about whether helm is on it, and the two have completely different
         // fixes.
-        return { ok: false, reason: 'failed', detail: r.error ?? 'could not reach the host' }
+        return { ok: false, reason: 'failed', detail: r.error ?? 'could not reach the server' }
       }
       return parseK8sHelmList(merge(r), r.code ?? null)
     } catch (e) {

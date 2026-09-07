@@ -1,0 +1,63 @@
+===SHELLPILOT-NODES===
+f392be70efdb   False   False   False   True   12    24571576Ki   110   <none>
+===SHELLPILOT-WORKLOADRES===
+default       bounded                  2     50m      32Mi     200m     64Mi
+default       unbounded                1     <none>   <none>   <none>   <none>
+kube-system   coredns                  1     100m     70Mi     <none>   170Mi
+kube-system   local-path-provisioner   1     <none>   <none>   <none>   <none>
+===SHELLPILOT-WORKLOADLABELS===
+default|bounded|2|app=bounded;
+default|unbounded|1|app=unbounded;
+kube-system|coredns|1|k8s-app=kube-dns;
+kube-system|local-path-provisioner|1|app=local-path-provisioner;
+===SHELLPILOT-HPA===
+default   bounded-hpa   bounded   2     10    2     0     80    <none>
+===SHELLPILOT-PDB===
+default|bounded-pdb|0|2|2|2|{"app":"bounded"}|
+default|orphan-pdb|0|0|1|0|{"app":"nothing-has-this"}|
+===SHELLPILOT-STALEPODS===
+default       bounded-66f885c57b-mhxkw                  Running     <none>   2026-09-05T20:33:09Z   ReplicaSet
+default       bounded-66f885c57b-rvkvv                  Running     <none>   2026-09-05T20:33:09Z   ReplicaSet
+default       broken-addon-7rjbr                        Running     <none>   2026-09-05T20:33:09Z   DaemonSet
+default       done-job-6qgzj                            Succeeded   <none>   2026-09-05T20:33:09Z   Job
+default       failed-job-dsqxn                          Failed      <none>   2026-09-05T20:33:26Z   Job
+default       failed-job-n9zft                          Failed      <none>   2026-09-05T20:33:09Z   Job
+default       unbounded-8588964f4d-h6mf4                Running     <none>   2026-09-05T20:33:09Z   ReplicaSet
+kube-system   coredns-ccb96694c-bfrpb                   Running     <none>   2026-09-05T20:32:40Z   ReplicaSet
+kube-system   local-path-provisioner-5cf85fd84d-rrtpk   Running     <none>   2026-09-05T20:32:40Z   ReplicaSet
+===SHELLPILOT-STALEJOBS===
+default   done-job     1        <none>   2026-09-05T20:33:09Z   2026-09-05T20:33:18Z
+default   failed-job   <none>   2        2026-09-05T20:33:09Z   <none>
+===SHELLPILOT-PV===
+manual-retain   1Gi   Retain   Available   <none>   <none>   manual   <none>
+===SHELLPILOT-DS===
+default   broken-addon   1     1     0     1     <none>   1     0     1     1
+===SHELLPILOT-WARN===
+default   FailedGetResourceMetric        HorizontalPodAutoscaler   bounded-hpa          13    2026-09-05T20:36:24Z   failed to get cpu utilization: unable to get metrics for resource cpu: unable to fetch metrics from resource metrics API: the server could not find the requested resource (get pods.metrics.k8s.io)
+default   FailedComputeMetricsReplicas   HorizontalPodAutoscaler   bounded-hpa          12    2026-09-05T20:36:09Z   invalid metrics (1 invalid out of 1), first error is: failed to get cpu resource metric value: failed to get cpu utilization: unable to get metrics for resource cpu: unable to fetch metrics from resource metrics API: the server could not find the requested resource (get pods.metrics.k8s.io)
+default   BackOff                        Pod                       broken-addon-7rjbr   9     2026-09-05T20:34:46Z   Back-off restarting failed container c in pod broken-addon-7rjbr_default(6d55ae2d-bdcb-45b9-bd6d-bcde68de3422)
+default   InvalidDiskCapacity            Node                      f392be70efdb         1     2026-09-05T20:32:34Z   invalid capacity 0 on image filesystem
+default   BackoffLimitExceeded           Job                       failed-job           1     2026-09-05T20:33:28Z   Job has reached the specified backoff limit
+===SHELLPILOT-CM===
+default           kube-root-ca.crt                                       2026-09-05T20:32:40Z
+default           nobody-uses-me                                         2026-09-05T20:33:09Z
+kube-node-lease   kube-root-ca.crt                                       2026-09-05T20:32:40Z
+kube-public       kube-root-ca.crt                                       2026-09-05T20:32:40Z
+kube-system       cluster-dns                                            2026-09-05T20:32:35Z
+kube-system       coredns                                                2026-09-05T20:32:37Z
+kube-system       extension-apiserver-authentication                     2026-09-05T20:32:33Z
+kube-system       kube-apiserver-legacy-service-account-token-tracking   2026-09-05T20:32:33Z
+kube-system       kube-root-ca.crt                                       2026-09-05T20:32:40Z
+kube-system       local-path-config                                      2026-09-05T20:32:38Z
+===SHELLPILOT-PVCX===
+default   orphan-claim   Pending   2026-09-05T20:33:09Z
+===SHELLPILOT-REFS===
+default|bounded-66f885c57b-mhxkw|cm:;;kube-root-ca.crt;;|env:|pvc:;
+default|bounded-66f885c57b-rvkvv|cm:;;kube-root-ca.crt;;|env:|pvc:;
+default|broken-addon-7rjbr|cm:;;kube-root-ca.crt;;|env:|pvc:;
+default|done-job-6qgzj|cm:;;kube-root-ca.crt;;|env:|pvc:;
+default|failed-job-dsqxn|cm:;;kube-root-ca.crt;;|env:|pvc:;
+default|failed-job-n9zft|cm:;;kube-root-ca.crt;;|env:|pvc:;
+default|unbounded-8588964f4d-h6mf4|cm:;;kube-root-ca.crt;;|env:|pvc:;
+kube-system|coredns-ccb96694c-bfrpb|cm:coredns;coredns-custom;;;kube-root-ca.crt;;|env:|pvc:;;;
+kube-system|local-path-provisioner-5cf85fd84d-rrtpk|cm:local-path-config;;;kube-root-ca.crt;;|env:;|pvc:;;

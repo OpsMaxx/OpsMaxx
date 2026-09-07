@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import type { AutoStartSettings, AutoStartState } from '../../../../shared/autostart'
+import { ACCESS_WRITE_OPT_IN_NOTE } from '../../../../shared/access'
 import {
   Sliders,
   Palette,
@@ -96,6 +98,65 @@ function SettingSwitch({
   )
 }
 
+/**
+ * Starting with the machine.
+ *
+ * This pairs with background checking rather than being a cosmetic preference:
+ * the fleet poll runs from the app root, so a ShellPilot that starts at login
+ * is a fleet watched from login. Without it, "background checking" only means
+ * background of whenever somebody last opened the app.
+ *
+ * Reads its own state from the OS rather than from our settings file, because
+ * the login item is the OS's record and a user can remove it from System
+ * Settings without telling us. A stored boolean would then be a claim that
+ * disagreed with the machine.
+ */
+function AutoStartSetting(): React.JSX.Element | null {
+  const [state, setState] = useState<AutoStartState | null>(null)
+
+  useEffect(() => {
+    void window.shellpilot!.autoStart.get().then(setState)
+  }, [])
+
+  if (!state) return null
+
+  if (!state.supported) {
+    return (
+      <div className="setting-row">
+        <div className="s-info">
+          <div className="s-title">Start when I log in</div>
+          <div className="s-desc">{state.reason}</div>
+        </div>
+      </div>
+    )
+  }
+
+  const set = (next: Partial<AutoStartSettings>): void => {
+    void window.shellpilot!.autoStart
+      .set({ openAtLogin: state.openAtLogin, openAsHidden: state.openAsHidden, ...next })
+      .then(setState)
+  }
+
+  return (
+    <>
+      <SettingSwitch
+        label="Start when I log in"
+        desc="Launch ShellPilot with your machine, so background checking and alerts run from login rather than from whenever you next open the app."
+        checked={state.openAtLogin}
+        onChange={(v) => set({ openAtLogin: v })}
+      />
+      {state.openAtLogin && state.hiddenSupported && (
+        <SettingSwitch
+          label="Start in the background"
+          desc="Launch without opening a window. Checks still run and alerts still fire — ShellPilot is waiting in the Dock rather than in front of you."
+          checked={state.openAsHidden}
+          onChange={(v) => set({ openAsHidden: v })}
+        />
+      )}
+    </>
+  )
+}
+
 // What the background sampler is actually doing.
 //
 // The switch above reports intent, and intent is not the interesting part: a
@@ -176,8 +237,8 @@ function KnownHosts(): React.JSX.Element {
           <div className="s-title">Trusted SSH host keys</div>
           <div className="s-desc">
             {hosts.length
-              ? 'Connections are refused if a host presents a different key than the one saved here.'
-              : 'No hosts trusted yet — the first connection to a server will ask.'}
+              ? 'Connections are refused if a server presents a different key than the one saved here.'
+              : 'No servers trusted yet — the first connection to a server will ask.'}
           </div>
         </div>
         <button className="btn sm" onClick={load}>
@@ -239,17 +300,25 @@ function VaultState(): React.JSX.Element {
       <div className="s-info">
         <div className="s-title">
           {unlocked ? <LockOpen size={13} /> : <Lock size={13} />}{' '}
-          {!exists ? 'No vault on this computer yet' : unlocked ? 'Vault unlocked' : 'Vault locked'}
+          {exists === null
+            ? 'Checking for a vault…'
+            : !exists
+              ? 'No vault on this computer yet'
+              : unlocked
+                ? 'Vault unlocked'
+                : 'Vault locked'}
         </div>
         <div className="s-desc">
-          {!exists
+          {exists === null
+            ? 'Reading this machine\u2019s keychain. Nothing is decided until it answers.'
+            : !exists
             ? 'A vault holds one copy of each credential and travels inside an encrypted backup. Without one, every server keeps its own.'
             : unlocked
               ? 'Anything that needs a saved credential can use it until the timer below runs out.'
               : 'Anything that needs a saved credential will ask you to unlock first.'}
         </div>
       </div>
-      {!exists ? (
+      {exists === null ? null : !exists ? (
         <button className="btn sm" onClick={() => setActivity('vault')}>
           Set up a vault
         </button>
@@ -357,6 +426,19 @@ export function Settings(): React.JSX.Element {
                   ))}
                 </div>
               </div>
+              <AutoStartSetting />
+              <SettingSwitch
+                label="Allow adding and revoking keys on servers"
+                desc={ACCESS_WRITE_OPT_IN_NOTE}
+                checked={settings.accessWriteEnabled}
+                onChange={(v) => setSettings({ accessWriteEnabled: v })}
+              />
+              <SettingSwitch
+                label="Ask for Touch ID when the vault is locked"
+                desc="When you open the Vault and it is locked, raise the fingerprint prompt without waiting for a click. Cancel it and the master password field is right there. Does nothing unless you have already set up biometric unlock."
+                checked={settings.vaultAutoBiometricPrompt}
+                onChange={(v) => setSettings({ vaultAutoBiometricPrompt: v })}
+              />
               <SettingSwitch
                 label="Compact density"
                 desc="Tighter rows and padding across trees, lists and the docked monitor. Font sizes are unchanged."
@@ -503,7 +585,7 @@ export function Settings(): React.JSX.Element {
                   webhook is posted from inside one of the two. */}
               <SettingSwitch
                 label="Alerts"
-                desc="The master switch. Covers CPU and memory at or above the threshold, a root filesystem more than 85% full by blocks OR by inodes, a load average at or above 2 per core, and systemd units that have failed — and, since every webhook is sent from an alert, webhook delivery too. CPU, memory and load repeat once a minute while the condition lasts; a full disk or inode table repeats every six hours, or sooner if it gets 5 points worse. They clear themselves on recovery: a filesystem as soon as it is back to 85% or below, CPU and memory once they are 5 points under the threshold, so a host sitting exactly on the line does not flicker on and off. A host that crosses the same line five times in six hours is announced once more and then held quiet until it has gone six hours without crossing again. Anything the host could not measure — no inode accounting, no /proc/loadavg, no df — raises nothing and clears nothing, because a reading nobody could take is not a reading of zero. Switching this off also takes down any alerts already showing."
+                desc="The master switch. Covers CPU and memory at or above the threshold, a root filesystem more than 85% full by blocks OR by inodes, a load average at or above 2 per core, and systemd units that have failed — and, since every webhook is sent from an alert, webhook delivery too. CPU, memory and load repeat once a minute while the condition lasts; a full disk or inode table repeats every six hours, or sooner if it gets 5 points worse. They clear themselves on recovery: a filesystem as soon as it is back to 85% or below, CPU and memory once they are 5 points under the threshold, so a server sitting exactly on the line does not flicker on and off. A server that crosses the same line five times in six hours is announced once more and then held quiet until it has gone six hours without crossing again. Anything the server could not measure — no inode accounting, no /proc/loadavg, no df — raises nothing and clears nothing, because a reading nobody could take is not a reading of zero. Switching this off also takes down any alerts already showing."
                 checked={settings.resourceAlertsEnabled}
                 onChange={(v) => setSettings({ resourceAlertsEnabled: v })}
               />
@@ -513,10 +595,10 @@ export function Settings(): React.JSX.Element {
                   <div className="s-desc">
                     The same figure applies to CPU and to memory. Disk has its own, fixed at{' '}
                     <strong>85%</strong>: a root filesystem past that alerts, which is the same
-                    85% at which the Fleet Monitor lists the host as needing attention and turns
+                    85% at which the Fleet Monitor lists the server as needing attention and turns
                     its disk bar red. Inodes use the same 85% and load its own fixed{' '}
                     <strong>2 per core</strong>. Only the root filesystem is measured, for blocks
-                    and for inodes alike — a host that has filled /var and has room on / raises
+                    and for inodes alike — a server that has filled /var and has room on / raises
                     nothing here.{' '}
                     {alertCoverageText(fleetStatus?.running, settings.fleetSamplingEnabled)}
                   </div>

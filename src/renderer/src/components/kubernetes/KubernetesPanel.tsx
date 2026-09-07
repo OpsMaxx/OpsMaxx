@@ -50,8 +50,20 @@ import {
   type K8sSchedulingAction,
   type K8sTextRead,
   type K8sUsage,
-  type K8sWorkload
+  type K8sWorkload,
+  type K8sAllocatableProbe
 } from '../../../../shared/kubernetes'
+import { useApp } from '../../store/app'
+import {
+  assessNodeSkew,
+  pdbHeadroom,
+  summariseUpgradeReadiness
+} from '../../../../shared/k8sSkew'
+import {
+  reviewFindings,
+  type K8sReviewProbe,
+  type ReviewFinding
+} from '../../../../shared/k8sReview'
 import { approvalFor, type CommandApproval } from '../../../../shared/broadcast'
 import type { Server } from '../../types'
 
@@ -94,6 +106,7 @@ import type { Server } from '../../types'
  * has no diagnose channel" is a sentence, not a mystery.
  */
 interface K8sBridge {
+  allocatable?: (cfg: unknown, context?: string) => Promise<K8sAllocatableProbe>
   read?: (cfg: unknown, context?: string, namespace?: string) => Promise<K8sProbe>
   logs?: (
     cfg: unknown,
@@ -132,6 +145,7 @@ interface K8sBridge {
   exec?: (cfg: unknown, target: K8sExecTarget, approval: unknown) => Promise<K8sExecResult>
   resources?: (cfg: unknown, context?: string, namespace?: string) => Promise<K8sResources>
   apiScan?: (cfg: unknown, context?: string) => Promise<K8sApiScan>
+  review?: (cfg: unknown, context?: string) => Promise<K8sReviewProbe>
   helm?: (cfg: unknown, context?: string) => Promise<K8sHelmList>
 }
 
@@ -206,11 +220,25 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   const [logs, setLogs] = useState<{ pod: string; output: string } | null>(null)
   const [filter, setFilter] = useState('')
 
+  // Item 40's watch list. Keyed on the CONTEXT rather than the server, because
+  // a cluster reachable from three admin boxes is one thing to watch.
+  const k8sWatch = useApp((st) => st.settings.k8sWatch) ?? []
+  const watchContext = context || (probe?.ok ? probe.currentContext : null) || ''
+  const watched = k8sWatch.some((w) => w.context === watchContext)
+  const setWatch = (on: boolean): void => {
+    const rest = k8sWatch.filter((w) => w.context !== watchContext)
+    useApp
+      .getState()
+      .setSettings({ k8sWatch: on ? [...rest, { serverId, context: watchContext }] : rest })
+  }
+
   const [view, setView] = useState<'pods' | 'cluster' | 'usage' | 'resources'>('pods')
   const [overview, setOverview] = useState<K8sOverview | null>(null)
   const [overviewLoading, setOverviewLoading] = useState(false)
   const [usage, setUsage] = useState<K8sUsage | null>(null)
   const [usageLoading, setUsageLoading] = useState(false)
+  const [alloc, setAlloc] = useState<K8sAllocatableProbe | null>(null)
+  const [allocLoading, setAllocLoading] = useState(false)
   const [diag, setDiag] = useState<{ pod: string; result: K8sDiagnosis | null; error?: string } | null>(
     null
   )
@@ -218,6 +246,28 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   // The state change, and everything it needs to be deliberate.
   const [resources, setResources] = useState<K8sResources | null>(null)
   const [apiScan, setApiScan] = useState<K8sApiScan | null>(null)
+  // The whole-cluster review. Its OWN button, not part of the refresh: it is
+  // thirteen kubectl calls and the answer only matters when somebody is asking
+  // the question it answers.
+  const [review, setReview] = useState<K8sReviewProbe | null>(null)
+  const [reviewLoading, setReviewLoading] = useState(false)
+
+  const runReview = async (): Promise<void> => {
+    if (!server) return
+    setReviewLoading(true)
+    try {
+      const b = bridge()
+      setReview(
+        b.review
+          ? await b.review(cfgFor(server), context || undefined)
+          : { ok: false, detail: NOT_WIRED }
+      )
+    } catch (e) {
+      setReview({ ok: false, detail: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setReviewLoading(false)
+    }
+  }
   const [helm, setHelm] = useState<K8sHelmList | null>(null)
   const [resourcesLoading, setResourcesLoading] = useState(false)
 
@@ -298,7 +348,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
       const fn = bridge().overview
       if (!fn) {
         const f = { ok: false, reason: 'unknown', detail: NOT_WIRED } as const
-        setOverview({ deployments: f, statefulSets: f, daemonSets: f, nodes: f, events: f })
+        setOverview({ deployments: f, statefulSets: f, daemonSets: f, nodes: f, serverVersion: null, pdbs: f, events: f })
         return
       }
       setOverview(await fn(cfgFor(server), context || undefined, (ns ?? namespace) || undefined))
@@ -308,9 +358,27 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         reason: 'unknown',
         detail: e instanceof Error ? e.message : String(e)
       } as const
-      setOverview({ deployments: f, statefulSets: f, daemonSets: f, nodes: f, events: f })
+      setOverview({ deployments: f, statefulSets: f, daemonSets: f, nodes: f, serverVersion: null, pdbs: f, events: f })
     } finally {
       setOverviewLoading(false)
+    }
+  }
+
+  /** Booked capacity. Takes no namespace: a node holds every pod on it. */
+  const loadAllocatable = async (): Promise<void> => {
+    if (!server) return
+    setAllocLoading(true)
+    try {
+      const fn = bridge().allocatable
+      if (!fn) {
+        setAlloc({ ok: false, detail: NOT_WIRED })
+        return
+      }
+      setAlloc(await fn(cfgFor(server), context || undefined))
+    } catch (e) {
+      setAlloc({ ok: false, detail: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setAllocLoading(false)
     }
   }
 
@@ -767,7 +835,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
       {!probe && !loading && eligible.length > 0 && (
         <div className="s-desc">
           Runs <span className="mono">kubectl</span> on the selected server, using whatever
-          kubeconfig that host already has. Reading only, with one exception:{' '}
+          kubeconfig that server already has. Reading only, with one exception:{' '}
           <span className="mono">rollout restart</span>, which asks first. It never switches your
           context, never execs into a pod, and never deletes anything.
         </div>
@@ -947,6 +1015,70 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                     </>
                   )}
 
+                  {/* Item 40. A watch is what makes the pod-crashloop alert
+                      fire at all: nothing can guess which server holds a
+                      kubeconfig, so until an operator says "ask THIS server
+                      about THIS cluster", the poll has nothing to do. */}
+                  {serverId !== '' && (
+                    <div className="s-note" style={{ marginTop: 10 }}>
+                      {watched ? (
+                        <>
+                          <b>Watching this cluster for restarting pods.</b> Checked every two
+                          minutes from {servers.find((x) => x.id === serverId)?.name}. An alert is
+                          raised when a pod&rsquo;s restart count goes up between checks — a count
+                          on its own cannot tell a pod that is restarting now from one that
+                          restarted last week.
+                          <button className="btn ghost sm" onClick={() => setWatch(false)}>
+                            Stop watching
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          Not watching this cluster. Nothing is polled until you say which server
+                          to ask, because nothing else can know which of them holds a kubeconfig.
+                          <button className="btn ghost sm" onClick={() => setWatch(true)}>
+                            Watch for restarting pods
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Item 41's readiness report. The item itself -- cordon,
+                      patch, reboot, uncordon as one job -- argues against being
+                      built; what it asks for instead is the read that says
+                      whether an upgrade is safe to start, and this is where it
+                      belongs. */}
+                  {overview.nodes.ok && overview.nodes.items.length > 0 && (
+                    <div className="s-note" style={{ marginTop: 10 }}>
+                      <b>
+                        {
+                          summariseUpgradeReadiness(
+                            assessNodeSkew(
+                              overview.serverVersion,
+                              overview.nodes.items.map((n) => ({ name: n.name, kubeletVersion: n.version }))
+                            ),
+                            // `null`, not `[]`. An empty list would say the
+                            // cluster has no budgets and so nothing that could
+                            // block a drain, which is a measurement nobody
+                            // took.
+                            overview.pdbs.ok ? pdbHeadroom(overview.pdbs.items) : null
+                          ).headline
+                        }
+                      </b>
+                      {assessNodeSkew(
+                        overview.serverVersion,
+                        overview.nodes.items.map((n) => ({ name: n.name, kubeletVersion: n.version }))
+                      )
+                        .filter((k) => k.verdict !== 'ok')
+                        .map((k) => (
+                          <div key={k.node} className="r-sub faint">
+                            {k.because}
+                          </div>
+                        ))}
+                    </div>
+                  )}
+
                   <div className="s-title" style={{ marginTop: 10 }}>
                     <ServerIcon size={12} /> Nodes
                   </div>
@@ -1023,6 +1155,71 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                 </button>
               </div>
               {!usage && usageLoading && <div className="faint" style={{ fontSize: 12 }}>Reading…</div>}
+
+              {/* USAGE AND BOOKED CAPACITY ARE DIFFERENT QUESTIONS, and putting
+                  them under one heading is how they get confused. `kubectl top`
+                  says what the pods are consuming right now; this says what the
+                  scheduler has promised them. A node at 5% usage can be fully
+                  booked and refuse the next pod, and only the second number
+                  explains why. */}
+              <div className="row muted" style={{ fontSize: 11, marginTop: 12 }}>
+                <span className="grow">
+                  Requested against allocatable — what the scheduler has promised, not what is
+                  being used. Every namespace, whichever one is selected above.
+                </span>
+                <button
+                  className="btn ghost sm"
+                  disabled={allocLoading}
+                  onClick={() => void loadAllocatable()}
+                >
+                  <RefreshCw size={12} className={clsx(allocLoading && 'spin')} /> Read
+                </button>
+              </div>
+              {!alloc && allocLoading && (
+                <div className="faint" style={{ fontSize: 12 }}>Reading…</div>
+              )}
+              {alloc && !alloc.ok && (
+                <div className="faint" style={{ fontSize: 12 }}>
+                  Requested-against-allocatable could not be read: {alloc.detail}
+                </div>
+              )}
+              {alloc?.ok && alloc.report && (
+                <>
+                  {/* The headline carries the unsized count beside the
+                      percentage, because a cluster at 8% whose pods are unsized
+                      has headroom nobody can compute. */}
+                  <div className="faint" style={{ fontSize: 11, marginBottom: 4 }}>
+                    {alloc.headline}
+                  </div>
+                  {alloc.report.nodes.map((n) => (
+                    <div key={n.node} className="cron-row">
+                      <span className="chip">
+                        {n.cpuPct === null ? 'cpu ?' : `${Math.round(n.cpuPct)}% cpu`}
+                      </span>
+                      <span className="chip">
+                        {n.memPct === null ? 'mem ?' : `${Math.round(n.memPct)}% mem`}
+                      </span>
+                      <span className="mono grow cron-cmd">{n.node}</span>
+                      <span className="faint" style={{ fontSize: 11 }}>
+                        {n.podCount} pod(s)
+                        {/* Never folded into the percentage: these contribute
+                            nothing to it and can grow into whatever is left. */}
+                        {n.cpuUnsetPods > 0 ? `, ${n.cpuUnsetPods} request no cpu` : ''}
+                        {n.partialPods > 0 ? `, ${n.partialPods} sized in part` : ''}
+                        {n.cordoned ? ' — cordoned, so this is not headroom' : ''}
+                      </span>
+                    </div>
+                  ))}
+                  {alloc.report.unplaced.length > 0 && (
+                    <div className="faint" style={{ fontSize: 11, marginTop: 4 }}>
+                      Not scheduled anywhere:{' '}
+                      {alloc.report.unplaced
+                        .map((u) => `${u.namespace}/${u.name} (${u.phase})`)
+                        .join(', ')}
+                    </div>
+                  )}
+                </>
+              )}
               {usage && (
                 <>
                   {!usage.nodes.ok ? (
@@ -1170,6 +1367,61 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                       </div>
                     ))
                   )}
+
+                  <div className="s-title" style={{ marginTop: 10 }}>
+                    <TriangleAlert size={12} /> Cluster review
+                  </div>
+                  {/* Its own button. Thirteen kubectl calls, and the answer only
+                      matters when somebody is asking the question it answers —
+                      folding it into the refresh would make every refresh wait
+                      on it. */}
+                  <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                    <button
+                      className="btn ghost sm"
+                      disabled={reviewLoading}
+                      onClick={() => void runReview()}
+                    >
+                      {review === null ? 'Review this cluster' : 'Review again'}
+                    </button>
+                    {reviewLoading && <span className="faint" style={{ fontSize: 11 }}>reading…</span>}
+                  </div>
+                  {review !== null && !review.ok && (
+                    <div className="s-note is-alarm">
+                      Nothing was read: {review.detail}
+                    </div>
+                  )}
+                  {review?.ok === true &&
+                    (() => {
+                      const r = reviewFindings(review.blocks, Date.now())
+                      const tone = (f: ReviewFinding): string =>
+                        f.level === 'alarm' ? 'danger' : f.level === 'watch' ? 'warn' : ''
+                      return (
+                        <>
+                          {/* WHAT WAS NOT LOOKED AT, first and always. A short
+                              list of findings reads as a clean cluster, and a
+                              denied read is the difference. */}
+                          {r.blind.map((b2) => (
+                            <div key={`${b2.section} ${b2.detail}`} className="s-note is-alarm">
+                              <b>{b2.section}</b> was not read, so nothing here says anything about it:{' '}
+                              <span className="mono">{b2.detail}</span>
+                            </div>
+                          ))}
+                          {r.findings.map((f) => (
+                            <div key={`${f.section} ${f.subject} ${f.because}`} className="cron-row">
+                              <span className={clsx('chip', tone(f))}>{f.level}</span>
+                              <span className="faint cron-desc">{f.section}</span>
+                              <span className="mono cron-when">{f.subject}</span>
+                              <span className="grow cron-cmd">{f.because}</span>
+                            </div>
+                          ))}
+                          {r.notes.map((n) => (
+                            <div key={n} className="faint" style={{ fontSize: 11 }}>
+                              {n}
+                            </div>
+                          ))}
+                        </>
+                      )
+                    })()}
 
                   <div className="s-title" style={{ marginTop: 10 }}>
                     <TriangleAlert size={12} /> Deprecated APIs

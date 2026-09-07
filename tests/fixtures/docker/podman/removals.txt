@@ -1,0 +1,11 @@
+podman version 5.8.4
+---
+Untagged: docker.io/library/alpine:3.19
+Deleted: 83b2b6703a620bf2e001ab57f7adc414d891787b3c59859b1b62909e48dd2242
+rmi exit=0
+---
+spdead
+rm exit=0
+---
+Error: volume spvol is being used by the following container(s): 237796ed539efef4e74316ff8c7ed3fdee98afe52df301f56231189d9d2254e1: volume is being used
+volrm exit=2

@@ -59,6 +59,9 @@ export interface LogTailJump {
   target: string
   serverId: string
   nonce: number
+  /** journald filters carried through the jump. Unit jumps only. */
+  priority?: LogPriority
+  since?: string
 }
 
 export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogTailJump }): React.JSX.Element {
@@ -323,7 +326,20 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
     setKind(jump.kind)
     setTarget(jump.target)
     setSelected(new Set([jump.serverId]))
-    void begin({ kind: jump.kind, target: jump.target }, [jump.serverId])
+    // A jump may carry journald filters — an alert lands on the window that
+    // explains it rather than on the unit's whole history. Absent means absent:
+    // the form is left as the operator had it rather than cleared.
+    if (jump.priority !== undefined) setPriority(jump.priority)
+    if (jump.since !== undefined) setSince(jump.since)
+    void begin(
+      {
+        kind: jump.kind,
+        target: jump.target,
+        ...(jump.priority !== undefined ? { priority: jump.priority } : {}),
+        ...(jump.since !== undefined ? { since: jump.since } : {})
+      },
+      [jump.serverId]
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jump])
 
@@ -370,8 +386,12 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
 
   return (
     <div className="bc-panel">
-      <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-        <ScrollText size={14} className="faint" />
+      <div className="panel-head no-purpose">
+        <span className="panel-head-icon">
+          <ScrollText size={14} />
+        </span>
+        <h2 className="ui-section-title">Log tail</h2>
+        <div className="panel-head-actions" style={{ flexWrap: 'nowrap', minWidth: 0, flex: 1 }}>
         <div className="segment">
           <button className={clsx('seg-btn', kind === 'unit' && 'active')} disabled={running} onClick={() => setKind('unit')}>
             Unit
@@ -400,11 +420,11 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
           placeholder={
             kind === 'container'
               ? containers.length
-                ? `${containers[0]} — ${containers.length} on this host`
+                ? `${containers[0]} — ${containers.length} on this server`
                 : 'new_system-redis-1'
               : kind === 'unit'
               ? units.length
-                ? `nginx.service — ${units.length} on this host`
+                ? `nginx.service — ${units.length} on this server`
                 : 'nginx.service'
               : '/var/log/syslog'
           }
@@ -425,7 +445,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
           className="btn ghost sm"
           title={
             options.length
-              ? `Pick from ${options.length} on this host`
+              ? `Pick from ${options.length} on this server`
               : 'Select a server to load the list'
           }
           disabled={running || options.length === 0}
@@ -447,7 +467,13 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
             <Play size={13} /> Tail
           </button>
         )}
+        </div>
       </div>
+
+      <p className="ui-note">
+        Follows a systemd unit, a file or a container&rsquo;s output across the servers you pick,
+        interleaved into one stream. A server that refuses is named rather than left out.
+      </p>
 
       {/* -p and --since are the two flags people reach for during an incident,
           and they are journalctl's alone. */}
@@ -523,11 +549,11 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
         ))}
       </div>
 
-      {error && <div className="s-desc danger">{error}</div>}
+      {error && <div className="panel-note is-alarm">{error}</div>}
       {/* A host that refused is named rather than silently missing from the
           stream — otherwise its absence reads as "that host is quiet". */}
       {failed.map((f) => (
-        <div key={f.serverId} className="s-desc danger">
+        <div key={f.serverId} className="panel-note is-alarm">
           {f.serverName}: {f.error ?? 'could not tail'}
         </div>
       ))}
@@ -543,7 +569,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
                 able to see at any moment that these lines came from a
                 privileged read, not only in the second after they started it. */}
             {d.usedSudo && (
-              <span className="chip warn" title="This host refused the unprivileged read, so it was retried with sudo -n">
+              <span className="chip warn" title="This server refused the unprivileged read, so it was retried with sudo -n">
                 <ShieldAlert size={11} /> reading as root
               </span>
             )}
@@ -552,7 +578,12 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
                 from "this is wrong", so an empty pane with a good reason is
                 not dressed as a failure. */}
             {d.issue !== 'ok' && (
-              <span className={clsx('s-desc', !d.waiting && 'danger')}>{LOG_ISSUE_HELP[d.issue]}</span>
+              // `waiting` is genuinely "nothing yet, which may be fine" —
+              // an unknown, not a fault. It used to be the same undefined
+              // `.s-desc` as the fault case, so neither was coloured at all.
+              <span className={clsx('panel-note', d.waiting ? 'is-unknown' : 'is-alarm')}>
+                {LOG_ISSUE_HELP[d.issue]}
+              </span>
             )}
             {/* Only when it would help and cannot prompt. */}
             {!d.usedSudo && d.sudoAvailable && (d.issue === 'journal-unreadable' || d.issue === 'file-denied') && (
@@ -587,7 +618,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
                 // quiet host unless it says what it is 12 of.
                 `${shown.length} of ${lines.length} lines match`
               )}
-              {paused && ' — paused, the host is still being followed'}
+              {paused && ' — paused, the server is still being followed'}
             </span>
             <label className="row" style={{ gap: 6 }}>
               <span
@@ -609,6 +640,22 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
             ))}
           </div>
         </>
+      )}
+
+      {/* Not running, nothing streamed, nothing wrong — the state the panel
+          opens in. It used to render the composer and then stop. */}
+      {!running && lines.length === 0 && error === null && failed.length === 0 && (
+        <div className="panel-empty">
+          <p className="panel-empty-title">No stream open.</p>
+          <p className="panel-empty-body">
+            {selected.size === 0
+              ? 'Pick one or more servers above, name a unit, file or container, then press Tail.'
+              : `Name a ${kind === 'unit' ? 'unit' : kind === 'file' ? 'file path' : 'container'} above, then press Tail.`}{' '}
+            Lines from every selected server arrive in one stream, colour-coded by server, and the
+            filter accepts text, <span className="mono">/regex/</span> or{' '}
+            <span className="mono">!exclude</span>.
+          </p>
+        </div>
       )}
     </div>
   )

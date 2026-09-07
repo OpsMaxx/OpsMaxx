@@ -32,6 +32,8 @@ function allowAll(overrides: Partial<AiCapabilityPolicy> = {}): AiCapabilityPoli
     // further along: it is the list of addresses and ports the host accepts
     // traffic on. Roadmap item 31.
     firewallRules: 'deny',
+    // Item 36b. Seeded denied on every group, exactly like firewallRules.
+    sudoersRead: 'deny',
     manageServers: 'deny',
     vpnControl: 'deny',
     ...overrides
@@ -78,9 +80,9 @@ describe('summariseAccessGroup — built-in groups', () => {
     )
     expect(s.sentence).toBe(
       'Can see server details, run commands, read files, download files, query databases, and read server metrics without asking. ' +
-        'Cannot use sudo, add servers to the workspace, start and stop VPNs, and list reverse proxies, write files, upload files, open SSH tunnels, read the host inventory and its pending security updates, or collect this host’s firewall rule list.'
+        'Cannot use sudo, add servers to the workspace, start and stop VPNs, and list reverse proxies, write files, upload files, open SSH tunnels, read the server inventory and its pending security updates, collect this server’s firewall rule list, or collect this server’s sudoers rules.'
     )
-    expect(s.counts).toEqual({ allow: 6, ask: 0, deny: 8 })
+    expect(s.counts).toEqual({ allow: 6, ask: 0, deny: 9 })
     expect(s.elevated).toEqual([])
   })
 
@@ -104,12 +106,12 @@ describe('summariseAccessGroup — built-in groups', () => {
       'Asks you first before adding servers to the workspace, starting and stopping VPNs, and listing reverse proxies, writing files, uploading files, and opening SSH tunnels.'
     )
     expect(s.clauses[2]).toBe(
-      'Cannot use sudo, read the host inventory and its pending security updates, or collect this host’s firewall rule list.'
+      'Cannot use sudo, read the server inventory and its pending security updates, collect this server’s firewall rule list, or collect this server’s sudoers rules.'
     )
     expect(s.elevated).toEqual([])
   })
 
-  it('Sudo Access asks before sudo, and denies only host facts', () => {
+  it('Sudo Access asks before sudo, and denies only server facts', () => {
     const s = summariseAccessGroup(
       group(
         allowAll({
@@ -128,11 +130,11 @@ describe('summariseAccessGroup — built-in groups', () => {
     // including this one, because a count of unpatched security updates is a
     // vulnerability report rather than a health check — see AI_CAPABILITIES.
     expect(s.clauses[2]).toBe(
-      'Cannot read the host inventory and its pending security updates or collect this host’s firewall rule list.'
+      'Cannot read the server inventory and its pending security updates, collect this server’s firewall rule list, or collect this server’s sudoers rules.'
     )
     // Asking is not granting: nothing here happens without a human.
     expect(s.elevated).toEqual([])
-    expect(s.counts).toEqual({ allow: 6, ask: 6, deny: 2 })
+    expect(s.counts).toEqual({ allow: 6, ask: 6, deny: 3 })
   })
 
   it('Full Access still gates the three dangerous capabilities behind a prompt', () => {
@@ -173,7 +175,7 @@ describe('summariseAccessGroup — edge cases', () => {
   it('says so plainly when everything is denied', () => {
     const s = summariseAccessGroup(group(everything('deny')))
     expect(s.sentence).toBe('Allows nothing — every AI request against the server is refused.')
-    expect(s.counts).toEqual({ allow: 0, ask: 0, deny: 14 })
+    expect(s.counts).toEqual({ allow: 0, ask: 0, deny: 15 })
     expect(s.elevated).toEqual([])
   })
 
@@ -301,10 +303,14 @@ function seededFilePolicies(): AccessGroup['filePolicies'] {
 // mode and RETURNS IT — the `blanket.decision === 'deny'` check below it is
 // only reached when nothing matched. So a path rule outranks the capability in
 // both directions, and these are the cases where a flat clause would lie.
-const HF = 'read the host inventory and its pending security updates'
+const HF = 'read the server inventory and its pending security updates'
 // Denied on every seeded group too, and last in declaration order among the
 // denials, so it is the tail of every flat "Cannot" clause below.
-const FW = 'collect this host’s firewall rule list'
+const FW = 'collect this server’s firewall rule list'
+// Item 36b, declared after firewallRules and therefore the new tail of every
+// flat "Cannot" clause. Sudoers says who can become root; the firewall rules
+// say what the server is exposed on.
+const SU = 'collect this server’s sudoers rules'
 
 describe('summariseAccessGroup — path rules outrank the capability', () => {
   it('does not claim a group cannot read files when a rule allows a path', () => {
@@ -317,7 +323,7 @@ describe('summariseAccessGroup — path rules outrank the capability', () => {
     expect(s.overriddenByPath).toEqual(['readFiles'])
     // and it is not left sitting in the flat "Cannot" list as an absolute
     expect(s.clauses).toContain(
-      `Cannot add servers to the workspace, start and stop VPNs, and list reverse proxies, ${HF}, or ${FW}.`
+      `Cannot add servers to the workspace, start and stop VPNs, and list reverse proxies, ${HF}, ${FW}, or ${SU}.`
     )
   })
 
@@ -361,7 +367,7 @@ describe('summariseAccessGroup — path rules outrank the capability', () => {
     // no longer last in that clause — hostFacts and firewallRules are denied on
     // every seeded group and sort after it — so the assertion names the item
     // rather than the sentence ending.
-    expect(s.sentence).toContain('read files, ' + HF + ', or ' + FW + '.')
+    expect(s.sentence).toContain('read files, ' + HF + ', ' + FW + ', or ' + SU + '.')
   })
 
   it('treats an explicit null on a rule the way evaluateFilePath does', () => {
@@ -384,12 +390,12 @@ describe('summariseAccessGroup — path rules outrank the capability', () => {
     )
     expect(s.clauses).toEqual([
       'Can see server details, run commands, download files, query databases, and read server metrics without asking.',
-      `Cannot use sudo, add servers to the workspace, start and stop VPNs, and list reverse proxies, upload files, open SSH tunnels, ${HF}, or ${FW}.`,
+      `Cannot use sudo, add servers to the workspace, start and stop VPNs, and list reverse proxies, upload files, open SSH tunnels, ${HF}, ${FW}, or ${SU}.`,
       'Can read files without asking — except 19 path rules that block it.',
       'Cannot write files — except 2 path rules that ask you first.'
     ])
     // The grid still shows what the grid shows; the rules qualify it.
-    expect(s.counts).toEqual({ allow: 6, ask: 0, deny: 8 })
+    expect(s.counts).toEqual({ allow: 6, ask: 0, deny: 9 })
     expect(s.overriddenByPath).toEqual(['readFiles', 'writeFiles'])
   })
 

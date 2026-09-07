@@ -1,0 +1,3 @@
+default|consumer|cm:used-as-volume;;;;kube-root-ca.crt;;|env:used-as-envfrom;used-as-keyref;|pvc:;mounted-claim;;
+kube-system|coredns-ccb96694c-7htcn|cm:coredns;coredns-custom;;;kube-root-ca.crt;;|env:|pvc:;;;
+kube-system|local-path-provisioner-5cf85fd84d-wjtsb|cm:local-path-config;;;kube-root-ca.crt;;|env:;|pvc:;;

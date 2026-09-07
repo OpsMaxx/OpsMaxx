@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { bytesHeadline, type BytesReading } from '../../../../shared/bytesForecast'
+import type { CapacityBridge } from '../../../../shared/capacity'
 import { AlertTriangle, CheckCircle2, HelpCircle, Loader2, Lock, RefreshCw, ShieldAlert } from 'lucide-react'
 import {
   DB_ANSWER_HELP,
@@ -590,8 +592,41 @@ export function DbOpsPanel({ cfg, kind, onVerdict }: Props): React.JSX.Element {
   // another engine's columns while a stale report is still on screen.
   const engine = report?.engine ?? null
 
+  // Item 47's growth series, read back after the read that wrote to it. Not on
+  // mount: before the first `db:ops` there is nothing to read, and a panel that
+  // asked anyway would print "nothing has been recorded" at somebody who had
+  // not asked a question yet.
+  const [growth, setGrowth] = useState<BytesReading | null>(null)
+  useEffect(() => {
+    setGrowth(null)
+  }, [cfg.id])
+  useEffect(() => {
+    if (report === null) return
+    const mine = generation.current
+    void (async () => {
+      const call = (
+        window.shellpilot as { capacity?: { dbGrowth?: CapacityBridge['dbGrowth'] } } | undefined
+      )?.capacity?.dbGrowth
+      if (typeof call !== 'function') return
+      const r = await call(cfg.id, 90).catch(() => null)
+      if (mine === generation.current) setGrowth(r)
+    })()
+  }, [report, cfg.id])
+
   return (
     <div style={{ padding: 12, overflowY: 'auto', flex: 1, minHeight: 0 }}>
+      {/* The growth line, above the answers. It is the one thing here that is
+          about a trend rather than a moment, and it is the sentence somebody
+          takes to a capacity meeting.
+
+          `bytesHeadline` leads with the RATE and adds the crossing only when
+          there is a ceiling to cross, because a rate is true whether or not
+          anybody set one. */}
+      {growth !== null && (
+        <div className="s-note" style={{ marginBottom: 10 }}>
+          {bytesHeadline(cfg.database?.trim() || cfg.name || 'This database', growth)}
+        </div>
+      )}
       <div className="row" style={{ marginBottom: 10 }}>
         <button className="btn primary sm" disabled={loading} onClick={() => void read()}>
           {loading ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />} Read server state

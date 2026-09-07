@@ -10,8 +10,9 @@ import {
 } from '../src/main/services/history'
 import { JobRunner, type JobExecResult } from '../src/main/services/jobRunner'
 import type { JobProgress, JobRunRequest, JobSpec, JobTargetRef } from '../src/shared/jobs'
-import { JOB_TERMINAL_STATES, jobApprovalFor, jobCohorts, planJob } from '../src/shared/jobs'
+import { JOB_TERMINAL_STATES, jobApprovalFor, jobCohorts, planJob, verifyJobApproval } from '../src/shared/jobs'
 import { GATE_POLL_MS, GATE_WAIT_MS, type GateHost } from '../src/shared/patch'
+import type { GateNode } from '../src/shared/nodeGate'
 
 // B4's staging and its health gate, and item 17's hard refusal — the three
 // things that decide whether an estate upgrade keeps rolling.
@@ -100,6 +101,7 @@ function harness(
     guard?: (req: JobRunRequest) => string | null
     health?: (ids: string[]) => GateHost[]
     withoutHealth?: boolean
+    nodes?: (ids: string[]) => Promise<Map<string, GateNode>>
   } = {}
 ) {
   const progress: JobProgress[] = []
@@ -131,6 +133,7 @@ function harness(
                 failedUnits: []
               }
           ))),
+    nodes: over.nodes,
     sleep: (ms) =>
       new Promise<void>((resolve) => {
         gateWaited.push(ms)
@@ -224,8 +227,106 @@ describe('waves', () => {
 // The health gate
 // =========================================================================
 
+describe('the gate can see a Kubernetes node, not just a machine', () => {
+  const asNode = (verdict: 'not-ready' | 'ok'): ((ids: string[]) => Promise<Map<string, GateNode>>) =>
+    async (ids) =>
+      new Map(
+        ids.map((id) => [
+          id,
+          verdict === 'ok'
+            ? ({ role: 'node', nodeName: `node-${id}`, finding: null } as GateNode)
+            : ({
+                role: 'node',
+                nodeName: `node-${id}`,
+                finding: {
+                  node: `node-${id}`,
+                  verdict: 'not-ready',
+                  because: `node-${id} is reporting NotReady.`
+                }
+              } as GateNode)
+        ])
+      )
+
+  // THE BUG. Nothing wrong with the machine — it answers SSH and runs no failed
+  // units — and everything wrong with the node. Before this, wave 2 opened.
+  it('stops the run when a rebooted node came back NotReady on a healthy machine', async () => {
+    const store = await openStore()
+    const h = harness(store, { nodes: asNode('not-ready') })
+    const req = approved({ jobId: 'jn', spec: spec(), targets: waved(['a', 'b', 'c']) })
+    const run = h.runner.run(req)
+    await h.settle()
+    h.tick(1)
+    h.observe('a')
+    await h.finish('a')
+
+    expect(h.isOpening('b')).toBe(false)
+    await run
+    const job = store.readJob('jn')!
+    expect(job.state).toBe('halted')
+    const rows = Object.fromEntries(job.targets.map((t) => [t.serverId, t]))
+    expect(rows.b.error).toContain('NotReady')
+  })
+
+  it('rolls on when the node came back Ready', async () => {
+    const store = await openStore()
+    const h = harness(store, { nodes: asNode('ok') })
+    const req = approved({ jobId: 'jo', spec: spec(), targets: waved(['a', 'b']) })
+    const run = h.runner.run(req)
+    await h.settle()
+    h.tick(1)
+    h.observe('a')
+    await h.finish('a')
+    expect(h.isOpening('b')).toBe(true)
+    await h.finish('b')
+    h.observe('b')
+    await run
+  })
+
+  // The cost decision. The node read is an SSH round trip per host inside a
+  // loop that polls every five seconds; asking the control plane about a host
+  // that is not answering SSH buys nothing, because the gate is already saying
+  // no.
+  it('does not ask the cluster about a wave whose machines already failed', async () => {
+    const store = await openStore()
+    let asked = 0
+    const h = harness(store, {
+      nodes: async (ids) => {
+        asked += 1
+        return new Map(ids.map((id) => [id, { role: 'unknown' } as GateNode]))
+      }
+    })
+    const req = approved({ jobId: 'jp', spec: spec(), targets: waved(['a', 'b']) })
+    const run = h.runner.run(req)
+    await h.settle()
+    h.tick(1)
+    h.observe('a', { failedUnits: ['nginx.service'] })
+    await h.finish('a')
+    await run
+    expect(asked).toBe(0)
+  })
+
+  // A probe that throws is not an answer, and must be neither the thing that
+  // halts an estate nor the thing that waves it through.
+  it('rolls on as before when the node read itself fails', async () => {
+    const store = await openStore()
+    const h = harness(store, {
+      nodes: () => Promise.reject(new Error('ssh blew up'))
+    })
+    const req = approved({ jobId: 'jq', spec: spec(), targets: waved(['a', 'b']) })
+    const run = h.runner.run(req)
+    await h.settle()
+    h.tick(1)
+    h.observe('a')
+    await h.finish('a')
+    expect(h.isOpening('b')).toBe(true)
+    await h.finish('b')
+    h.observe('b')
+    await run
+  })
+})
+
 describe('the health gate between waves', () => {
-  it('stops the run when the finished wave left a host with a failed unit', async () => {
+  it('stops the run when the finished wave left a server with a failed unit', async () => {
     const store = await openStore()
     const h = harness(store)
     const req = approved({ jobId: 'j2', spec: spec(), targets: waved(['a', 'b', 'c']) })
@@ -255,7 +356,7 @@ describe('the health gate between waves', () => {
     expect(rows.b.state).toBe('skipped')
     expect(rows.c.state).toBe('skipped')
     // And the row answers the only question anyone asks afterwards.
-    expect(rows.b.error).toContain('Nothing was installed on this host')
+    expect(rows.b.error).toContain('Nothing was installed on this server')
     expect(rows.b.error).toContain('nginx.service')
 
     // `halted` is TERMINAL. If it were not, the job would be adopted at the
@@ -265,7 +366,7 @@ describe('the health gate between waves', () => {
     expect(store.unfinishedJobs().map((j) => j.id)).not.toContain('j2')
   })
 
-  it('stops when the finished wave left a host unreachable', async () => {
+  it('stops when the finished wave left a server unreachable', async () => {
     const store = await openStore()
     const h = harness(store)
     const req = approved({ jobId: 'j3', spec: spec(), targets: waved(['a', 'b']) })
@@ -373,7 +474,7 @@ describe('the health gate between waves', () => {
     expect(store.readJob('j8')!.state).toBe('done')
   })
 
-  it('reports a host that cannot answer for its units without blocking on it', async () => {
+  it('reports a server that cannot answer for its units without blocking on it', async () => {
     const store = await openStore()
     const h = harness(store)
     const req = approved({ jobId: 'j9', spec: spec(), targets: waved(['a', 'b']) })
@@ -479,7 +580,7 @@ describe('a patch run and its approval record', () => {
     expect(h.isOpening('a')).toBe(false)
   })
 
-  it('refuses a host moved into a different wave', async () => {
+  it('refuses a server moved into a different wave', async () => {
     // Moving a host between waves changes how many run at once, which is what
     // the confirmation was sized against.
     const store = await openStore()
@@ -499,7 +600,7 @@ describe('a patch run and its approval record', () => {
       },
       { targets: confirmed }
     )
-    await expect(h.runner.run(req)).rejects.toThrow(/Moving a host between waves/)
+    await expect(h.runner.run(req)).rejects.toThrow(/Moving a server between waves/)
     expect(store.readJob('jb')).toBeNull()
   })
 
@@ -512,6 +613,68 @@ describe('a patch run and its approval record', () => {
     )
     await expect(h.runner.run(req)).rejects.toThrow(/edited command needs a fresh confirmation/)
     expect(store.readJob('jc')).toBeNull()
+  })
+
+  // THE GATE WAS NOT CHECKED, and the file said it was. `JobSpec.gate`'s own
+  // comment has always claimed a job confirmed with a gate cannot be resumed
+  // without one, "because the two are different blast radii" — and nothing
+  // enforced it: verifyApproval compares commands, targets and the re-derived
+  // plan, and the gate is in none of the three. A spec approved with
+  // `gate: 'health'` verified CLEAN with the gate deleted, which turns a staged
+  // run that checks between every wave into one that rolls through all of them
+  // unchecked, on a confirmation given for the careful version.
+  it('refuses a run whose stage gate was removed after it was approved', async () => {
+    const store = await openStore()
+    const h = harness(store)
+    const req = approved(
+      { jobId: 'jg', spec: { ...spec(), gate: 'none' }, targets: waved(['a', 'b']) },
+      { spec: spec() }
+    )
+    await expect(h.runner.run(req)).rejects.toThrow(/different blast radii/)
+    expect(store.readJob('jg')).toBeNull()
+  })
+
+  // Deleting the field outright is the likelier edit than setting it to
+  // 'none', and an earlier version of this check let exactly that through.
+  it('refuses a run whose gate field was deleted, not merely set to none', async () => {
+    const store = await openStore()
+    const h = harness(store)
+    const bare = { ...spec() }
+    delete (bare as { gate?: unknown }).gate
+    const req = approved(
+      { jobId: 'jj', spec: bare, targets: waved(['a', 'b']) },
+      { spec: spec() }
+    )
+    await expect(h.runner.run(req)).rejects.toThrow(/different blast radii/)
+  })
+
+  // A record carrying something this build cannot interpret refuses. Treating
+  // it as "cannot tell, carry on" would make a corrupt approval the way past
+  // the check.
+  it('refuses an approval whose recorded gate is not a gate at all', () => {
+    const targets = waved(['a', 'b'])
+    const approval = jobApprovalFor(spec(), targets, { confirmedAt: 1 })
+    const tampered = { ...approval, gate: 7 } as unknown
+    expect(verifyJobApproval(tampered, spec(), targets).ok).toBe(false)
+  })
+
+  it('refuses a gate added after the approval as firmly as one removed', async () => {
+    const store = await openStore()
+    const h = harness(store)
+    const req = approved(
+      { jobId: 'jh', spec: spec(), targets: waved(['a', 'b']) },
+      { spec: { ...spec(), gate: 'none' } }
+    )
+    await expect(h.runner.run(req)).rejects.toThrow(/different blast radii/)
+  })
+
+  // The positive control, asserted on the verifier rather than on a run: a
+  // matching gate must not be the thing that refuses. Without this the two
+  // cases above would pass just as well against a check that refuses always.
+  it('passes verification when the gate is the one that was approved', () => {
+    const targets = waved(['a', 'b'])
+    const approval = jobApprovalFor(spec(), targets, { confirmedAt: 1 })
+    expect(verifyJobApproval(approval, spec(), targets)).toEqual({ ok: true })
   })
 
   it('refuses a reboot step that was not in what was approved', async () => {

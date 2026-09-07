@@ -1,0 +1,3 @@
+Waiting for daemon set "broken-addon" rollout to finish: 0 of 1 updated pods are available...
+error: timed out waiting for the condition
+exit=1

@@ -1,4 +1,4 @@
-import { describe, it, expect, afterAll } from 'vitest'
+import { describe, it, expect, afterAll, afterEach, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
@@ -20,6 +20,7 @@ import { join, resolve } from 'node:path'
 import {
   ACCESS_ROLLBACK_SECONDS,
   ACCESS_WRITE_DISABLED_REASON,
+  ACCESS_WRITE_OPT_IN_NOTE,
   ACCESS_WRITE_ENABLED,
   ACCESS_STATUS_MARKER,
   accessCommitMarker,
@@ -46,14 +47,14 @@ describe('the gate that keeps the write half out of this build', () => {
   // are being fixed next, and these tests are the record of what is wrong with
   // them. Deleting them along with the button would delete the evidence.
 
-  it('is off, and turning it on is a decision somebody makes here', () => {
+  it('ships off, so nothing turns it on by upgrading', () => {
     expect(
       ACCESS_WRITE_ENABLED,
-      'ACCESS_WRITE_ENABLED is true. Flipping it re-exposes access:plan and ' +
-        'access:run to the UI. The five blockers adversarial review found in ' +
-        'the plan path have to be fixed and this test deliberately rewritten ' +
-        'first — the point of the constant is that the change cannot happen ' +
-        'as a side effect of something else.'
+      'ACCESS_WRITE_ENABLED is true, which would expose adding and revoking ' +
+        'keys to every install on upgrade rather than to the operator who ' +
+        'chose it. It is the DEFAULT now, not the whole gate — the opt-in is ' +
+        'settings.accessWriteEnabled and main enforces that, so this staying ' +
+        'false is what keeps the decision an operator’s rather than a release’s.'
     ).toBe(false)
     // A reason an operator can read, not a boolean on its own. "The buttons
     // vanished" is not an explanation, and an operator who is told nothing
@@ -76,7 +77,10 @@ describe('the gate that keeps the write half out of this build', () => {
       expect(at, channel).toBeGreaterThan(-1)
       // Within the first few lines of the handler, before any plan is derived.
       const head = main.slice(at, at + 900)
-      expect(head, channel).toContain('ACCESS_WRITE_ENABLED')
+      // The symbol changed from the build constant to the main-side gate that
+      // also reads the operator's setting. What is asserted is unchanged: the
+      // check is IN main, in both handlers, before anything is derived.
+      expect(head, channel).toContain('isAccessWriteEnabled()')
       const body = main.slice(at)
       const gate = body.indexOf('ACCESS_WRITE_ENABLED')
       const derive = body.indexOf('deriveAccessPlan')
@@ -192,13 +196,13 @@ const revoke = (o: Partial<Parameters<typeof planAccessChange>[0]> = {}): Return
 // ---------------------------------------------------------------------------
 
 describe('rule 1 — never remove the key this session is on', () => {
-  it('refuses when the host says that key is the one we authenticated with', async () => {
+  it('refuses when the server says that key is the one we authenticated with', async () => {
     // sshd's own answer, via SSH_AUTH_INFO_0. The only authoritative source, and
     // where it exists the check is exact rather than a guess.
     const plan = revoke({ targets: [target(host({ authinfo: [`publickey ssh-ed25519 ${A}`] }))] })
     expect(plan.write).toBeNull()
     expect(plan.blocks.map((b) => b.kind)).toEqual(['is-session-key'])
-    expect(plan.blocks[0].reason).toContain('own way back into the host')
+    expect(plan.blocks[0].reason).toContain('own way back into the server')
   })
 
   it('refuses a fingerprint the caller named as protected', async () => {
@@ -217,7 +221,7 @@ describe('rule 1 — never remove the key this session is on', () => {
     expect(plan.disarm).toEqual([])
   })
 
-  it('refuses to touch the connecting account at all when the host will not say', async () => {
+  it('refuses to touch the connecting account at all when the server will not say', async () => {
     // ExposeAuthInfo is off by default, so this is what most hosts look like.
     // Without that fact nothing can prove the key being removed is not the one
     // holding the connection open — so the account ShellPilot connects as is
@@ -242,7 +246,7 @@ describe('rule 1 — never remove the key this session is on', () => {
     expect(plan.targets.map((t) => t.serverId)).toEqual(['a'])
   })
 
-  it('refuses when the session key is the SECOND factor the host named', async () => {
+  it('refuses when the session key is the SECOND factor the server named', async () => {
     // `AuthenticationMethods publickey,publickey`. sshd reports one factor per
     // line of SSH_AUTH_INFO_0, and only the first was ever looked at — so on a
     // two-factor host the second key was unprotected and revocable.
@@ -256,7 +260,7 @@ describe('rule 1 — never remove the key this session is on', () => {
     expect(plan.write).toBeNull()
   })
 
-  it('refuses conservatively when the key the host named was cut, rather than trusting the stump', async () => {
+  it('refuses conservatively when the key the server named was cut, rather than trusting the stump', async () => {
     // THE BYPASS, at the level it mattered. A blob cut by the collector still
     // decodes — to a different key — so `is-session-key` did not fire, and the
     // list was non-empty so the conservative branch did not fire either. Both
@@ -274,7 +278,7 @@ describe('rule 1 — never remove the key this session is on', () => {
     expect(plan.write).toBeNull()
   })
 
-  it('still refuses that other account when the host names the key and it matches', async () => {
+  it('still refuses that other account when the server names the key and it matches', async () => {
     // The authoritative check is not scoped to the connecting account: a key
     // shared between accounts is still the key this session is on.
     const plan = revoke({
@@ -403,7 +407,7 @@ describe('rule 2 — nothing is committed without a second, independent session'
     expect(command).toContain(`${ACCESS_ROLLBACK_SECONDS}s`)
   })
 
-  it('runs one host at a time', async () => {
+  it('runs one server at a time', async () => {
     // A key change rolled across a selection in parallel is the case where a
     // mistake reaches every machine before the first failure is visible;
     // serialised, the second host is still reachable while the first is being
@@ -442,7 +446,7 @@ describe('rule 2 — nothing is committed without a second, independent session'
 // Rule 3
 // ---------------------------------------------------------------------------
 
-describe('rule 3 — always leave a timestamped backup on the host', () => {
+describe('rule 3 — always leave a timestamped backup on the server', () => {
   it('copies the file before anything else touches it', async () => {
     const command = revoke({ targets: [target(host({ self: 'root' }))], fingerprint: B_FP }).write!.command
     const backup = command.indexOf('cp -p "$SP_F" "$SP_B"')
@@ -485,7 +489,7 @@ describe('what a change refuses to be', () => {
     expect(plan.blocks.map((b) => b.kind)).toEqual(['not-the-file-sshd-reads'])
   })
 
-  it('refuses a host whose sshd reads only authorized_keys2', async () => {
+  it('refuses a server whose sshd reads only authorized_keys2', async () => {
     // BLOCKER 4. Setting AuthorizedKeysFile REPLACES OpenSSH's default list
     // rather than adding to it. Every path this host names is a member of that
     // list, so the subset check said "the default is in force" and the gate
@@ -500,7 +504,7 @@ describe('what a change refuses to be', () => {
     expect(plan.write).toBeNull()
   })
 
-  it('refuses a host whose sshd config could only be read in part', async () => {
+  it('refuses a server whose sshd config could only be read in part', async () => {
     // BLOCKER 5's write half. The read half already downgrades this source to
     // `partial` and takes `keyFileIsDefault` to null; what matters here is that
     // the GATE consumes it rather than merely putting a banner on a screen.
@@ -537,7 +541,7 @@ describe('what a change refuses to be', () => {
     expect(plan.blocks[0].reason).toContain('could not be checked')
   })
 
-  it('does not block a legacy file on a host whose sshd does not read one', async () => {
+  it('does not block a legacy file on a server whose sshd does not read one', async () => {
     // The over-block this would otherwise be. `AuthorizedKeysFile
     // .ssh/authorized_keys` alone means keys2 is not read, so its presence
     // changes nothing about who can log in.
@@ -549,7 +553,7 @@ describe('what a change refuses to be', () => {
     expect(plan.write).not.toBeNull()
   })
 
-  it('leaves out a host the key is not on rather than counting it as revoked', async () => {
+  it('leaves out a server the key is not on rather than counting it as revoked', async () => {
     const plan = revoke({
       fingerprint: 'SHA256:notonanyhostanywhere',
       targets: [target(host({ self: 'root' }))]
@@ -824,7 +828,7 @@ describe.skipIf(process.platform === 'win32')('the staged write, run for real', 
     expect(lines[1]).toContain(B)
   })
 
-  it('removes every line carrying the key, however many this host has', async () => {
+  it('removes every line carrying the key, however many this server has', async () => {
     // The expected count is computed ON THE HOST now. It used to be taken from
     // the FIRST target in the selection and baked into the one command every
     // host runs, so the order the operator happened to select hosts in decided
@@ -837,7 +841,7 @@ describe.skipIf(process.platform === 'win32')('the staged write, run for real', 
     expect(h.read()).toContain(B)
   })
 
-  it('refuses when the key is not in the file this host actually has', async () => {
+  it('refuses when the key is not in the file this server actually has', async () => {
     // A collection that has gone stale, where the key is already gone. That
     // used to surface as "the new file has 2 lines and 1 was expected", which
     // is the truth about the wrong thing.
@@ -929,7 +933,7 @@ describe.skipIf(process.platform === 'win32')('the staged write, run for real', 
     expect(r.out).not.toContain('STAGED:')
   })
 
-  it('changes nothing on a host with no way to detach a process at all', async () => {
+  it('changes nothing on a server with no way to detach a process at all', async () => {
     const h = fakeHome([`ssh-ed25519 ${A} alice@laptop`, `ssh-ed25519 ${B} bob@desktop`, ''])
     const before = h.read()
     const r = h.run(
@@ -1136,5 +1140,201 @@ describe.skipIf(process.platform === 'win32')('the staged write, run for real', 
     h.run(buildRevokeKeyCommand({ path: h.file, blob: A, token: 't8', rollbackSeconds: 60 }))
     const mode = execFileSync('/bin/sh', ['-c', `ls -l "${h.file}" | cut -c1-10`], { encoding: 'utf8' }).trim()
     expect(mode).toBe('-rw-------')
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+import {
+  isAccessWriteEnabled,
+  setAccessWriteEnabledForTests,
+  syncAccessWriteEnabled
+} from '../src/main/services/accessWriteGate'
+
+describe('the operator opt-in, which main enforces rather than the renderer', () => {
+  afterEach(() => setAccessWriteEnabledForTests(false))
+
+  it('is off when nobody has said anything', () => {
+    syncAccessWriteEnabled(null)
+    expect(isAccessWriteEnabled()).toBe(false)
+  })
+
+  it('is off on a FRESH import, before any settings have arrived', async () => {
+    // The window between the process starting and the first data:save. Every
+    // other test in this block calls sync() first, which overwrites whatever
+    // the module started as -- so none of them can see the initial value, and a
+    // mutation setting it to `true` passed all of them. Loaded fresh here so
+    // the pristine default is actually observed.
+    vi.resetModules()
+    const fresh = await import('../src/main/services/accessWriteGate')
+    expect(fresh.isAccessWriteEnabled()).toBe(false)
+  })
+
+  it('is off for a settings blob written before this key existed', () => {
+    // The upgrade path, and the one that must not open the gate. Every install
+    // that has ever run this app has a data file with no such key in it.
+    syncAccessWriteEnabled({ settings: {} })
+    expect(isAccessWriteEnabled()).toBe(false)
+    syncAccessWriteEnabled({ settings: { localTerminalEnabled: true } })
+    expect(isAccessWriteEnabled()).toBe(false)
+  })
+
+  it('needs the exact boolean, not merely something truthy', () => {
+    // `=== true`, not `!== false`. This is the INVERSE of localTerminalEnabled
+    // next door, and the inversion is the point: that one is a convenience
+    // whose safe state is available, this is a gate whose safe state is shut.
+    // A corrupt blob must not be able to open it.
+    for (const v of ['true', 1, {}, [], 'yes']) {
+      syncAccessWriteEnabled({ settings: { accessWriteEnabled: v } })
+      expect(isAccessWriteEnabled(), String(v)).toBe(false)
+    }
+  })
+
+  it('turns on only for a real, explicit true', () => {
+    syncAccessWriteEnabled({ settings: { accessWriteEnabled: true } })
+    expect(isAccessWriteEnabled()).toBe(true)
+  })
+
+  it('goes off again when the operator turns it off', () => {
+    syncAccessWriteEnabled({ settings: { accessWriteEnabled: true } })
+    syncAccessWriteEnabled({ settings: { accessWriteEnabled: false } })
+    expect(isAccessWriteEnabled()).toBe(false)
+  })
+
+  it('names the one thing that is unproven, rather than warning in general', () => {
+    // "This may be unsafe" is advice nobody can act on. The operator is told
+    // which sentence has never been observed, so they can decide whether they
+    // are the person who can observe it.
+    expect(ACCESS_WRITE_OPT_IN_NOTE).toMatch(/KillUserProcesses/)
+    expect(ACCESS_WRITE_OPT_IN_NOTE).toMatch(/second session/i)
+  })
+})
+
+describe('the precondition the probe used to miss, measured on a real RHEL 9', () => {
+  // Run against RHEL 9.8, systemd 252, logind KillUserProcesses=yes, over a
+  // real sshd session that was then closed. Survival was checked with marker
+  // FILES, not pgrep -- `pgrep -f "sleep 300"` matches its own command line and
+  // reported every rung as surviving when none of them had.
+  //
+  //             no linger        lingering
+  //   scope     never fired      FIRED
+  //   setsid    never fired      never fired
+  //   nohup     never fired      never fired
+  //
+  // The old probe -- `systemd-run --user --scope --quiet --collect true` --
+  // returns success on a non-lingering account. It is a fair test of "can I
+  // make a scope" and no test of "will that scope outlive my session", because
+  // logind stops user@UID.service when the last session ends and takes every
+  // transient scope with it. So the write armed a rollback that was already
+  // dead, and told the operator they were covered.
+
+  const cmd = (): string =>
+    buildRevokeKeyCommand({ path: '/home/u/.ssh/authorized_keys', blob: A, token: 't', rollbackSeconds: 60 })
+
+  it('asks whether the account lingers, not just whether a scope can be made', () => {
+    expect(cmd()).toContain('loginctl show-user')
+    expect(cmd()).toContain('Linger=yes')
+  })
+
+  it('asks logind itself whether it kills user processes', () => {
+    // The bus, not a config file: KillUserProcesses can be set in any of four
+    // places and logind is the one that knows the answer.
+    expect(cmd()).toContain('KillUserProcesses')
+    expect(cmd()).toContain('busctl')
+  })
+
+  it('refuses to stage when those two are true together', () => {
+    // Both conditions, not either: KillUserProcesses with linger is fine, and
+    // no linger without KillUserProcesses leaves setsid a chance.
+    //
+    // `!= no` and `!= absent` rather than `= yes`, so a logind that would not
+    // answer refuses alongside one that answered yes. See the behavioural
+    // tests at the end of this file.
+    expect(cmd()).toContain('[ "$SP_KILL" != no ] && [ "$SP_KILL" != absent ] && [ "$SP_LINGER" = no ]')
+    expect(cmd()).toMatch(/nothing was changed/)
+  })
+
+  it('tells the operator the command that fixes it', () => {
+    // "Not lingering" is a true sentence nobody can act on. The fix is one
+    // command and it is in the refusal.
+    expect(cmd()).toContain('loginctl enable-linger')
+  })
+
+  it('still refuses when the server has no way to detach at all', () => {
+    // The older guard, unchanged: no systemd-run, no setsid, no nohup.
+    expect(cmd()).toContain('no way to leave a process running after the session ends')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// "Could not ask" is not "answered no"
+// ---------------------------------------------------------------------------
+//
+// SP_KILL used to be two-valued, and `no` meant BOTH "logind answered false"
+// and "we could not ask it". Those are opposite facts. A host with logind and
+// without `busctl` -- a minimal image, a container base -- took the reassuring
+// branch and armed a rollback that logind may have been about to kill.
+//
+// This is also where item 36a's open question is answered: whether a host that
+// fell through to `nohup` may be written to at all. It may, and only where the
+// host positively said it will not kill the process.
+describe('what the staged write does when logind will not answer', () => {
+  const LINGER_OFF = 'echo "Linger=no"'
+
+  it('refuses when logind is present and cannot be asked, rather than assuming the safe answer', () => {
+    const h = fakeHome([`ssh-ed25519 ${A} alice@laptop`, `ssh-ed25519 ${B} bob@desktop`, ''])
+    const before = h.read()
+    // loginctl exists, so this host runs logind, and busctl EXISTS AND FAILS --
+    // which is the `SP_KILL=unknown` case: the script's `|| true` swallows the
+    // error and the `case` matches neither true nor false.
+    //
+    // The shim is the fix for a real CI failure. This used to rely on the test
+    // platform having no `busctl` at all, which is true on macOS and FALSE on
+    // an Ubuntu runner -- where a real busctl answered and the host was read as
+    // `no` rather than `unknown`, so the refusal never came. A test whose case
+    // is produced by the absence of a binary is a test about the machine it
+    // runs on.
+    const r = h.run(
+      buildRevokeKeyCommand({ path: h.file, blob: A, token: 'kunknown', rollbackSeconds: 60 }),
+      { shim: { loginctl: LINGER_OFF, busctl: 'exit 1' } }
+    )
+    expect(r.code).not.toBe(0)
+    expect(r.out).toContain('would not say whether it does')
+    expect(h.read()).toBe(before)
+    expect(r.out).not.toContain('STAGED:')
+  })
+
+  it('still refuses when logind answers yes', () => {
+    const h = fakeHome([`ssh-ed25519 ${A} alice@laptop`, `ssh-ed25519 ${B} bob@desktop`, ''])
+    const before = h.read()
+    const r = h.run(
+      buildRevokeKeyCommand({ path: h.file, blob: A, token: 'kyes', rollbackSeconds: 60 }),
+      { shim: { loginctl: LINGER_OFF, busctl: 'echo "b true"' } }
+    )
+    expect(r.code).not.toBe(0)
+    expect(h.read()).toBe(before)
+    expect(r.out).not.toContain('STAGED:')
+  })
+
+  it('proceeds when logind answers no, which is the fact the old code was guessing', () => {
+    const h = fakeHome([`ssh-ed25519 ${A} alice@laptop`, `ssh-ed25519 ${B} bob@desktop`, ''])
+    const r = h.run(
+      buildRevokeKeyCommand({ path: h.file, blob: A, token: 'kno', rollbackSeconds: 60 }),
+      { shim: { loginctl: LINGER_OFF, busctl: 'echo "b false"' } }
+    )
+    expect(r.out).toContain('STAGED:')
+    expect(h.read()).not.toContain(A)
+  })
+
+  it('proceeds on a host with no logind at all, where nohup is a real promise', () => {
+    // Nothing kills the slice when the session ends, so the weakest launcher
+    // is still a launcher. This is the case that must NOT be refused, or the
+    // feature would be unavailable on every non-systemd host.
+    const h = fakeHome([`ssh-ed25519 ${A} alice@laptop`, `ssh-ed25519 ${B} bob@desktop`, ''])
+    const r = h.run(
+      buildRevokeKeyCommand({ path: h.file, blob: A, token: 'kabsent', rollbackSeconds: 60 })
+    )
+    expect(r.out).toContain('STAGED:')
+    expect(h.read()).not.toContain(A)
   })
 })

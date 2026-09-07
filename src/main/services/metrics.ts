@@ -1,5 +1,6 @@
 import type { Client } from 'ssh2'
 import { acquire, release, type PooledConnection } from './ssh'
+import { parseMounts } from '../../shared/mounts'
 import type { HostMetrics, MetricsResult, PortListener, ServiceUnit, SshConnectConfig } from '../../shared/ssh'
 
 interface Conn {
@@ -56,6 +57,18 @@ const script = (withSleep: boolean): string => [
   // rather than to a comfortable zero.
   'echo __INODE__',
   'df -iP / 2>/dev/null | tail -1',
+  // Item 47. EVERY filesystem, beside the two reads above rather than instead
+  // of them: `diskPct` is the root filesystem and has meant that in every
+  // stored sample since the store was written, so it keeps meaning it.
+  //
+  // `-T` for the type column, because that is the only reliable way to drop
+  // the pseudo-filesystems -- `-l` means "local", and tmpfs and overlay are
+  // local. Guarded like `df -i`: a userland without `-T` leaves the section
+  // empty, which parses to no mounts rather than to a server with no disks.
+  'echo __MOUNTS__',
+  'df -kPT 2>/dev/null',
+  'echo __MOUNTINODES__',
+  'df -iPT 2>/dev/null',
   'echo __LOAD__',
   'cat /proc/loadavg 2>/dev/null',
   'echo __NET__',
@@ -301,6 +314,16 @@ function parse(text: string, prev: CpuSnap | null): { data: HostMetrics; snap: C
       ? (inodeUsed / inodeTotal) * 100
       : null
 
+  // Item 47: every filesystem, deduped and with the pseudo ones dropped. An
+  // empty list is `[]` and not null -- the section either answered or did not,
+  // and `df -kPT` failing entirely leaves no rows, which parseMounts reports
+  // as no mounts. What must never happen is a mount list standing in for the
+  // root reading above, so the two are kept apart.
+  const mounts = parseMounts(
+    section(text, 'MOUNTS').join('\n'),
+    section(text, 'MOUNTINODES').join('\n')
+  )
+
   // /proc/loadavg: "0.15 0.10 0.09 1/234 5678". A container without /proc
   // mounted, or a kernel without it, emits nothing — which is not a load of
   // zero, which is a perfectly idle machine.
@@ -334,6 +357,7 @@ function parse(text: string, prev: CpuSnap | null): { data: HostMetrics; snap: C
     diskUsed,
     diskTotal,
     inodePct,
+    mounts,
     load1,
     netRx,
     netTx,

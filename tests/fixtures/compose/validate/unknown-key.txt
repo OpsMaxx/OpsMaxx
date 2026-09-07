@@ -1,0 +1,2 @@
+validating /tmp/cval/c.yaml: services.web additional properties 'imagz' not allowed
+exit=1

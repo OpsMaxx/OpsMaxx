@@ -55,6 +55,11 @@ const ALLOWED_TOOLS = [
   'write_file',
   'list_files',
   'get_server_metrics',
+  // Item 47. A READ of history ShellPilot already stores: it opens no
+  // connection, reaches no shell, and answers about a server that is offline.
+  // Gated on `serverMetrics`, the same capability as the tool whose numbers
+  // these are over time.
+  'get_capacity_trends',
   // Roadmap item C. Reads over SSH on a configured server, like every other
   // tool here, and reaches no shell on this machine. Gated on its own
   // `hostFacts` capability rather than serverMetrics.
@@ -386,6 +391,11 @@ describe('the AI permission model has no word for a local shell', () => {
     // addresses and ports a host accepts traffic on belongs, not because a
     // bridge tool answers with it.
     'firewallRules',
+  // Item 36b. A HUMAN-ONLY consent line, like firewallRules above it: no MCP
+  // tool exposes sudoers whatever it is set to. It is here because the grid it
+  // lives in is shared, not because an agent can reach it -- and it is the
+  // shortest description of how to take the machine, so it stays that way.
+  'sudoersRead',
     'manageServers',
     'vpnControl'
   ]

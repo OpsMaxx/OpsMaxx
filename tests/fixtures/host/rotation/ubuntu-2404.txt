@@ -1,0 +1,32 @@
+===SP-ROT-LOGROTATE===
+yes
+active
+===SP-ROT-STATE===
+logrotate state -- version 2
+"/var/log/syslog" 2026-9-6-0:0:2
+"/var/log/dpkg.log" 2026-9-1-0:0:3
+"/var/log/unattended-upgrades/unattended-upgrades.log" 2026-9-1-0:0:3
+"/var/log/unattended-upgrades/unattended-upgrades-shutdown.log" 2026-8-25-0:0:0
+"/var/log/auth.log" 2026-9-6-0:0:2
+"/var/log/cloud-init.log" 2026-8-25-0:0:0
+"/var/log/apt/term.log" 2026-9-1-0:0:3
+"/var/log/apport.log" 2026-8-25-0:0:0
+"/var/log/ubuntu-advantage*.log" 2026-8-25-0:0:0
+"/var/log/cloud-init-output.log" 2026-8-25-0:0:0
+"/var/log/apt/history.log" 2026-9-1-0:0:3
+"/var/log/boot.log" 2026-8-25-0:0:0
+"/var/log/alternatives.log" 2026-9-1-0:0:3
+"/var/log/mail.log" 2026-8-25-0:0:0
+"/var/log/kern.log" 2026-9-6-0:0:2
+"/var/log/ufw.log" 2026-8-25-0:0:0
+"/var/log/wtmp" 2026-8-25-0:0:0
+"/var/log/btmp" 2026-9-1-0:0:3
+"/var/log/unattended-upgrades/unattended-upgrades-dpkg.log" 2026-9-1-0:0:3
+"/var/log/user.log" 2026-8-25-0:0:0
+"/var/log/cron.log" 2026-8-25-0:0:0
+===SP-ROT-USAGE===
+Archived and active journals take up 198.3M in the file system.
+===SP-ROT-CAP===
+Aug 28 06:59:14 host-1 systemd-journald[960169]: System Journal (/var/log/journal/00000000000000000000000000000000) is 58.9M, max 4.0G, 3.9G free.
+Sep 01 06:14:44 host-1 systemd-journald[1934339]: System Journal (/var/log/journal/00000000000000000000000000000000) is 105.0M, max 4.0G, 3.8G free.
+Sep 03 06:56:43 host-1 systemd-journald[2668147]: System Journal (/var/log/journal/00000000000000000000000000000000) is 161.0M, max 4.0G, 3.8G free.

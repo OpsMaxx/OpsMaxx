@@ -7,6 +7,12 @@ import type {
   HostAccess,
   Sha256
 } from '../../shared/access'
+import type { AccessGroup } from '../../shared/mcp'
+import {
+  buildSudoersCommand,
+  parseSudoersOutput,
+  type SudoersFileReading
+} from '../../shared/sudoers'
 import {
   ACCESS_COMMITTED_PREFIX,
   ACCESS_ROLLBACK_SECONDS,
@@ -107,7 +113,7 @@ export class AccessReader {
         // most important line in the file. Reporting "this host trusts no keys"
         // when the connection never opened would put a fabricated all-clear in
         // front of somebody running an access review.
-        return { ok: false, reason: 'unreachable', detail: r.error ?? 'could not reach the host' }
+        return { ok: false, reason: 'unreachable', detail: r.error ?? 'could not reach the server' }
       }
       // stderr is NOT merged into stdout, unlike the Docker reader. Every probe
       // in the collector redirects its own stderr to /dev/null, so anything on
@@ -120,13 +126,27 @@ export class AccessReader {
         // No status block means no collection. Reported as its own failure
         // rather than as a host with six unknowns and no accounts, which would
         // look like a real reading of a very empty machine.
-        const detail = (r.stderr ?? '').trim().slice(0, 200) || 'the host returned no collector output'
+        const detail = (r.stderr ?? '').trim().slice(0, 200) || 'the server returned no collector output'
         return { ok: false, reason: 'no-output', detail }
       }
       const access = parseAccessCollection(stdout, {
         sha256: this.deps.sha256 ?? nodeSha256,
         now: (this.deps.now ?? Date.now)()
       })
+      // Item 36b, and only where somebody consented. A second exec rather than
+      // part of the command above: a server whose group has not granted this
+      // is one the sudoers read never touches, which is easier to be sure of
+      // than a command whose shape depends on a capability.
+      if (opts.sudoers === true) {
+        access.sudoers = await readSudoers(
+          async (c, command, timeoutMs) => {
+            const r = await this.deps.exec(c, command, timeoutMs)
+            return { ok: r.ok === true, output: r.stdout ?? '' }
+          },
+          cfg,
+          { sudo: opts.sudo }
+        )
+      }
       return { ok: true, access }
     } catch (e) {
       return { ok: false, reason: 'unknown', detail: e instanceof Error ? e.message : String(e) }
@@ -289,7 +309,7 @@ export class AccessCommitter {
           // to undo it and there is nothing to investigate.
           outcome = 'reverted-unconfirmed'
           const said = (disarm.stderr ?? '').trim().split('\n')[0].slice(0, 160)
-          reason = `the host let a new session in, but the confirmation could not be written to it (${said || disarm.error || `exit ${String(disarm.code)}`}).`
+          reason = `the server let a new session in, but the confirmation could not be written to it (${said || disarm.error || `exit ${String(disarm.code)}`}).`
         }
       }
 
@@ -338,4 +358,38 @@ export class AccessCommitter {
       return { ok: false, code: null, stdout: '', stderr: '', error: e instanceof Error ? e.message : String(e) }
     }
   }
+}
+
+/**
+ * Whether this server's group consented to the sudoers read — item 36b.
+ *
+ * Reads the capability and NOTHING else, exactly as `firewallRulesGranted`
+ * does and for the same reason: it has its own line in the grid because no
+ * other grant should widen it. Being allowed to RUN sudo is not being allowed
+ * to read who else can.
+ */
+export function sudoersReadGranted(group: AccessGroup | null): boolean {
+  return group?.capabilities?.sudoersRead === 'allow'
+}
+
+/**
+ * The sudoers read, as its own exec.
+ *
+ * SEPARATE from the access collection rather than folded into it. That command
+ * is already long and runs on every server every hour; this one runs only
+ * where somebody consented, and a server whose group has not is a server this
+ * never touches at all. Folding them together would make one command whose
+ * shape depends on a capability, which is harder to read and harder to be
+ * sure of.
+ */
+export async function readSudoers(
+  exec: (cfg: unknown, command: string, timeoutMs: number) => Promise<{ ok: boolean; output: string }>,
+  cfg: unknown,
+  opts: { sudo?: boolean; timeoutMs?: number } = {}
+): Promise<SudoersFileReading[] | null> {
+  const r = await exec(cfg, buildSudoersCommand(opts), opts.timeoutMs ?? 20_000)
+  // `null`, not `[]`. A read that did not happen is not a host with no sudoers
+  // rules, and the two must never render the same.
+  if (!r.ok) return null
+  return parseSudoersOutput(r.output)
 }

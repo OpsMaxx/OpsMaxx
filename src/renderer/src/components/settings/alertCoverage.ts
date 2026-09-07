@@ -34,9 +34,9 @@ const COPY: Record<AlertCoverage, string> = {
   running: 'Background checks are running, so alerts fire wherever you are in the app.',
   'requested-not-running':
     'Background checks are switched on but not running right now — see the reason below. ' +
-    'Until they are, a host is only sampled while its monitor is on screen.',
+    'Until they are, a server is only sampled while its monitor is on screen.',
   'foreground-only':
-    'Without background checks below, a host is only sampled while its monitor is on screen — ' +
+    'Without background checks below, a server is only sampled while its monitor is on screen — ' +
     'so an alert can only fire while you are already looking at it.'
 }
 
@@ -70,9 +70,11 @@ export function alertCoverageText(running: boolean | undefined, enabled: boolean
 //                   reads it. Nothing produces them in the background at all.
 //                   This is the one that must never be described as "alerts
 //                   fire wherever you are in the app".
-//   posture-sweep   oom-kill and cert-expiry. Item 19b's two deferred kinds
-//                   come off the hourly security posture probe, which is a
-//                   FOURTH answer and not a variant of the three above.
+//   posture-sweep   oom-kill, cert-expiry and error-rate. Item 19b's two
+//                   deferred kinds, and item 5's journal error rate, which is
+//                   counted in the same hourly pass that counts OOM kills.
+//                   They come off the hourly security posture probe, which is
+//                   a FOURTH answer and not a variant of the three above.
 //
 // Why posture-sweep is its own row rather than being filed under one of the
 // existing three, given that this file exists to stop coverage rows claiming
@@ -108,12 +110,35 @@ export const COVERAGE_SOURCE: Record<StoreAlertKind, AlertCoverageSource> = {
   inode: 'sampler',
   load: 'sampler',
   'host-unreachable': 'sampler',
+  // The VPN poll runs in FleetWatcher, which is mounted at the app root, so it
+  // is watched whenever the app is open and not only on the monitor page --
+  // the same claim `tunnel-down` makes and for the same reason.
+  'vpn-down': 'app-root',
+  // Polled where the VPNs are, and for the same reason: it is a read of a
+  // cluster rather than of a server, and the fleet sampler is inside the
+  // agent-reachable closure this probe must stay out of.
+  'pod-crashloop': 'app-root',
+  'vpn-degraded': 'app-root',
   'job-failed': 'app-root',
   'tunnel-down': 'app-root',
   'db-alarm': 'read-on-demand',
   'db-watch': 'read-on-demand',
   'oom-kill': 'posture-sweep',
-  'cert-expiry': 'posture-sweep'
+  'cert-expiry': 'posture-sweep',
+  // NOT the posture sweep, which is the whole reason this is its own kind: a
+  // VPN profile is not a server and is never swept. It is read at import and
+  // checked by the same app-root poll that watches the VPNs themselves.
+  'vpn-cert-expiry': 'app-root',
+  // Raised from the app root beside the backup tick, so it fires whether or not
+  // anybody has the Backup panel open — a backup that stopped is exactly the
+  // thing nobody is looking at.
+  'backup-failed': 'app-root',
+  // The posture sweep, beside the OOM read, because that is literally where
+  // the journal is counted -- one hourly collection asks for both. Filing it
+  // under `sampler` would promise a two-minute readout that does not exist, and
+  // the window is sized to this sweep precisely so the claim stays true: sixty
+  // minutes counted once an hour leaves no unobserved time.
+  'error-rate': 'posture-sweep'
 }
 
 const KINDS_BY_SOURCE = (src: AlertCoverageSource): StoreAlertKind[] =>

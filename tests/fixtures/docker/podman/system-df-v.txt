@@ -1,0 +1,21 @@
+===SHELLPILOT-ENGINE===
+===SHELLPILOT-DFV===
+Images space usage:
+
+REPOSITORY                 TAG         IMAGE ID      CREATED     SIZE        SHARED SIZE  UNIQUE SIZE  CONTAINERS
+docker.io/library/busybox  1.36        b116e1550744  3 years     4.66MB      0B           4.66MB       4
+docker.io/library/alpine   3.19        83b2b6703a62  11 months   7.699MB     0B           7.699MB      0
+
+Containers space usage:
+
+CONTAINER ID  IMAGE         COMMAND     LOCAL VOLUMES  SIZE        CREATED     STATUS      NAMES
+237796ed539e  b116e1550744  sleep 3000  1              11.08kB     2 minutes   running     spkeep
+26503a8473c9  b116e1550744  true        0              10.93kB     2 minutes   exited      spdead
+10b6b93794a3  b116e1550744  sleep 100   0              0B          33 seconds  created     spcreated
+451b3763f927  b116e1550744  sleep 3000  0              10.94kB     33 seconds  running     sppaused
+
+Local Volumes space usage:
+
+VOLUME NAME  LINKS       SIZE
+spvol        1           0B
+===SHELLPILOT-END===

@@ -1,0 +1,29 @@
+===SP-STORE-DF===
+===SP-STORE-DFBSD===
+Filesystem      Type   1024-blocks      Used Available Capacity iused      ifree %iused  Mounted on
+/dev/disk3s3s1  apfs     482797652  18017788  11531876    61%  426704  115318760    0%   /
+devfs           devfs          382       382         0   100%    1324          0  100%   /dev
+/dev/disk3s6    apfs     482797652  12596664  11531876    53%      12  115318760    0%   /System/Volumes/VM
+/dev/disk3s4    apfs     482797652  15749064  11531876    58%    1995  115318760    0%   /System/Volumes/Preboot
+/dev/disk3s2    apfs     482797652    807876  11531876     7%     348  115318760    0%   /System/Volumes/Update
+/dev/disk1s2    apfs        512000      6164    492104     2%       1    4921040    0%   /System/Volumes/xarts
+/dev/disk1s1    apfs        512000      5748    492104     2%      39    4921040    0%   /System/Volumes/iSCPreboot
+/dev/disk1s3    apfs        512000      3124    492104     1%      88    4921040    0%   /System/Volumes/Hardware
+/dev/disk3s1    apfs     482797652 421646608  11531876    98% 6922119  115318760    6%   /System/Volumes/Data
+map auto_home   autofs           0         0         0   100%       0          0     -   /System/Volumes/Data/home
+/dev/disk5s1    apfs       8916992   8631196    257900    98%      13    2579000    0%   /Library/Developer/CoreSimulator/Cryptex/Images/bundle/SimRuntimeBundle-D91DC696-6D75-475E-89C3-7E43728BD252
+/dev/disk7s1    apfs      20254720  19697484    506584    98%  559323    5065840   10%   /Library/Developer/CoreSimulator/Volumes/iOS_22G86
+/dev/disk9s1    apfs      17231872  16741356    446332    98%  607237    4463320   12%   /Library/Developer/CoreSimulator/Volumes/iOS_23C54
+/dev/disk2s1    apfs       5242836   2247796   2972996    44%      67   29729960    0%   /System/Volumes/Update/SFR/mnt1
+/dev/disk3s3    apfs     482797652  18017788  11531876    61%  458732  115318760    0%   /System/Volumes/Update/mnt1
+/dev/disk10s1   hfs         406196    403316      2880   100%     805 4294966474    0%   /Volumes/ShellPilot 0.14.0-arm64
+/dev/disk11s1   hfs         406200    403320      2880   100%     805 4294966474    0%   /Volumes/ShellPilot 0.14.2-arm64
+/dev/disk12s1   hfs         406200    403320      2880   100%     805 4294966474    0%   /Volumes/ShellPilot 0.15.0-arm64
+/dev/disk13s1   hfs         406200    403320      2880   100%     805 4294966474    0%   /Volumes/ShellPilot 0.15.2-arm64
+===SP-STORE-LSBLK===
+===SP-STORE-FINDMNT===
+===SP-STORE-VGS===
+NOTOOL
+===SP-STORE-LVS===
+NOTOOL
+===SP-STORE-MDSTAT===

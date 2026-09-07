@@ -1,11 +1,17 @@
 import { create } from 'zustand'
 import { useApp } from './app'
+import {
+  checkMaintenanceWindow,
+  maintenanceSnoozes,
+  type MaintenanceWindow
+} from '../../../shared/maintenance'
 import { onServerForgotten } from './serverCleanup'
 import { DISK_DANGER, isDiskCritical } from '../components/monitor/hostHealth'
 // The certificate line and its comparison, taken from the module that owns the
 // reading rather than restated here — the discipline `isDiskCritical` set. An
 // alert firing at a different number from the panel it sends you to is worse
 // than no alert.
+import { ERROR_RATE_DEFAULT_THRESHOLD } from '../../../shared/errorRate'
 import { CERT_EXPIRY_DAYS, isCertificateExpiringSoon } from '../../../shared/posture'
 import { EVENT_ALERT_KINDS } from '../../../shared/webhook'
 import type { RunbookNote, RunbookView, RunbooksBridge } from '../../../shared/runbooks'
@@ -113,7 +119,14 @@ const REPEAT: Record<NumericAlertKind, number> = {
   // about one certificate nobody can renew faster by being told again. Daily
   // is "you will hear about this every morning until it is fixed", and
   // escalation covers the fortnight where a day is too long to wait.
-  'cert-expiry': 24 * 60 * 60 * 1000
+  'cert-expiry': 24 * 60 * 60 * 1000,
+  // Same daily cadence: a certificate's remaining days change once a day, and
+  // a profile's certificate is no different from a server's.
+  'vpn-cert-expiry': 24 * 60 * 60 * 1000,
+  // The WINDOW, not a cadence chosen for itself. The number is counted over
+  // sixty minutes on an hourly sweep, so it cannot change faster than that:
+  // anything quicker would re-announce the same measurement in different words.
+  'error-rate': 60 * 60 * 1000
 }
 
 // How far below the threshold a value must fall before a later crossing counts
@@ -143,7 +156,14 @@ const RECOVER_MARGIN: Record<NumericAlertKind, number> = {
   // this can never be the thing that decides anything; it exists so a
   // certificate cannot sit exactly on thirty and earn a fresh raise every
   // sweep, which is the only way this kind could oscillate at all.
-  'cert-expiry': 5
+  'cert-expiry': 5,
+  'vpn-cert-expiry': 5,
+  // ONE a minute, for the reason load is 0.5 rather than 5: five is five
+  // PERCENT for the things measured in percent, and here it is five errors a
+  // minute — which against the default threshold of five puts the recovery line
+  // at zero, so a host would have to fall completely silent to ever clear. That
+  // is the load bug exactly, and it makes an alert that raises once and stays.
+  'error-rate': 1
 }
 
 // A rise of this much since the last thing we said re-opens the repeat window.
@@ -159,7 +179,12 @@ const ESCALATE_BY: Record<NumericAlertKind, number> = {
   // A WEEK closer than the figure last announced. 30 → 21 → 14 → 7 → 0 is
   // monotone movement towards an outage, and it is the one shape a flap never
   // has, so each of those steps speaks even under a damp or a snooze.
-  'cert-expiry': 7
+  'cert-expiry': 7,
+  'vpn-cert-expiry': 7,
+  // Five more a minute than the figure last announced, which over the hour the
+  // number is counted across is three hundred additional lines — a change big
+  // enough to be a different event rather than the same one drifting.
+  'error-rate': 5
 }
 
 // The floor under every reason to speak, per kind. Nothing may notify faster
@@ -187,7 +212,23 @@ const MIN_GAP: Record<NumericAlertKind, number> = {
   // escalation bypasses ARE the feature for a condition that does not fix
   // itself, and a certificate cannot flap in a sample — the probe behind it
   // runs hourly and the number moves by one a day.
-  'cert-expiry': 0
+  'cert-expiry': 0,
+  'vpn-cert-expiry': 0,
+  // A FULL WINDOW, and this one is not zero. Disk and certificates sit at zero
+  // because their bypasses are the feature for conditions that cannot flap; an
+  // error rate flaps by nature — a burst then quiet is the normal shape of a
+  // deploy. Nothing may speak twice about one hour's counting.
+  //
+  // IT EQUALS THIS KIND'S REPEAT WINDOW, and that makes both bypasses above
+  // INERT for it: escalation and the re-raise exist to speak SOONER than the
+  // repeat, and there is no sooner here. That is a property of the source
+  // rather than a setting — the number is produced by the hourly posture
+  // sweep, so a second, worse reading does not exist inside the hour to
+  // escalate on. `ESCALATE_BY` and `LOWER_IS_WORSE` are still filled in
+  // correctly, because a Record must be total and because the day this rides a
+  // faster probe they become live; they simply cannot fire today, and a test
+  // pins that so the inertness is a stated fact rather than a silent one.
+  'error-rate': 60 * 60 * 1000
 }
 
 // ---------------------------------------------------------------------------
@@ -211,7 +252,12 @@ const LOWER_IS_WORSE: Record<NumericAlertKind, boolean> = {
   disk: false,
   inode: false,
   load: false,
-  'cert-expiry': true
+  'cert-expiry': true,
+  // Inverted, like its sibling: the number is days REMAINING, so smaller is
+  // worse and the arithmetic runs the other way.
+  'vpn-cert-expiry': true,
+  // The right way up: more errors is worse.
+  'error-rate': false
 }
 
 /**
@@ -755,6 +801,9 @@ export function hydrateAlerts(): Promise<void> {
 
 /** Short, for the status-bar chip and the notification title. */
 export const LABEL: Record<AlertKind, string> = {
+  'vpn-down': 'VPN down',
+  'pod-crashloop': 'Pods restarting',
+  'vpn-degraded': 'VPN silent',
   cpu: 'CPU',
   ram: 'Memory',
   disk: 'Disk',
@@ -763,10 +812,13 @@ export const LABEL: Record<AlertKind, string> = {
   'host-unreachable': 'Unreachable',
   'job-failed': 'Job failed',
   'tunnel-down': 'Tunnel down',
+  'backup-failed': 'Backup',
   'db-alarm': 'Database alarm',
   'db-watch': 'Database watch',
   'oom-kill': 'OOM kill',
-  'cert-expiry': 'Certificate'
+  'cert-expiry': 'Certificate',
+  'vpn-cert-expiry': 'VPN certificate',
+  'error-rate': 'Error rate'
 }
 
 // What the number is measuring, for the sentences a person reads. Disk says
@@ -784,7 +836,12 @@ const SUBJECT: Record<NumericAlertKind, string> = {
   // "on this host" and it means it: the probe reads a bounded set of named
   // directories, so a certificate somewhere else on the box raises nothing
   // here — the same caveat disk states about `df -kP /`.
-  'cert-expiry': 'The soonest certificate on this host'
+  'cert-expiry': 'The soonest certificate on this server',
+  'vpn-cert-expiry': 'This VPN profile’s own client certificate',
+  // Says WHICH lines, because "errors" alone would be a claim about the
+  // application. This counts journald priority err and worse, and an
+  // application that logs its errors at `info` contributes none of them.
+  'error-rate': 'Journal lines at error or worse'
 }
 
 // How each kind's line reads in a sentence, because the kinds do not compare
@@ -799,7 +856,10 @@ const OVER_WORD: Record<NumericAlertKind, string> = {
   load: 'at or above',
   // At or below, matching isCertificateExpiringSoon: a certificate ON thirty
   // days is inside the window certbot would already have renewed in.
-  'cert-expiry': 'at or below'
+  'cert-expiry': 'at or below',
+  'vpn-cert-expiry': 'at or below',
+  // Strictly above, matching errorRateReport's `perMinute > threshold`.
+  'error-rate': 'above'
 }
 const backBelow: Record<NumericAlertKind, (threshold: number) => string> = {
   cpu: (t) => `back below ${t}%`,
@@ -809,7 +869,9 @@ const backBelow: Record<NumericAlertKind, (threshold: number) => string> = {
   load: (t) => `back below ${t} per core`,
   // Which is what a renewal looks like from here, and the only thing that
   // produces it: nothing else moves this number upwards.
-  'cert-expiry': (t) => `renewed and back above ${t} days`
+  'cert-expiry': (t) => `renewed and back above ${t} days`,
+  'vpn-cert-expiry': (t) => `renewed and back above ${t} days`,
+  'error-rate': (t) => `back to ${t} a minute or below`
 }
 
 // The unit each kind's number is in. Not everything alerting measures is a
@@ -821,7 +883,9 @@ export const UNIT: Record<NumericAlertKind, string> = {
   disk: '%',
   inode: '%',
   load: ' per core',
-  'cert-expiry': ' days'
+  'cert-expiry': ' days',
+  'vpn-cert-expiry': ' days',
+  'error-rate': ' a minute'
 }
 
 // One decimal at most, trailing zero dropped. Rounding to whole points made a
@@ -856,7 +920,9 @@ const VALUE_CHIP: Record<NumericAlertKind, (v: number) => string> = {
   disk: (v) => `${fmt(v)}%`,
   inode: (v) => `${fmt(v)}%`,
   load: (v) => `${fmt(v)} per core`,
-  'cert-expiry': (v) => (v < 0 ? `${fmt(-v)}d overdue` : `${fmt(v)}d left`)
+  'cert-expiry': (v) => (v < 0 ? `${fmt(-v)}d overdue` : `${fmt(v)}d left`),
+  'vpn-cert-expiry': (v) => (v < 0 ? `${fmt(-v)}d overdue` : `${fmt(v)}d left`),
+  'error-rate': (v) => `${fmt(v)}/min`
 }
 
 /** The value in a sentence, preposition and all. The five percentages and the
@@ -868,12 +934,29 @@ const VALUE_PHRASE: Record<NumericAlertKind, (v: number) => string> = {
   inode: (v) => `at ${fmt(v)}%`,
   load: (v) => `at ${fmt(v)} per core`,
   'cert-expiry': (v) =>
-    v < 0 ? `${fmt(-v)} days PAST expiry` : v === 0 ? 'expiring today' : `${fmt(v)} days from expiry`
+    v < 0 ? `${fmt(-v)} days PAST expiry` : v === 0 ? 'expiring today' : `${fmt(v)} days from expiry`,
+  // Says what stops working, not just that a date passed. An expired client
+  // certificate does not degrade the VPN -- the connect fails outright, and
+  // openvpn's own log only says so afterwards, which is the gap this closes.
+  'vpn-cert-expiry': (v) =>
+    v < 0
+      ? `${fmt(-v)} days PAST expiry — this profile can no longer connect`
+      : v === 0
+        ? 'expiring today'
+        : `${fmt(v)} days from expiry`,
+  // The count as well as the rate, because "at 6 a minute" hides how much
+  // there is to read and the hour is what somebody will actually go and look
+  // at. The window is fixed at sixty minutes by the sweep it rides.
+  'error-rate': (v) => `at ${fmt(v)} a minute — about ${Math.round(v * 60)} in the last hour`
 }
 
 // The wire name for each kind. A Record rather than a ternary, so adding a kind
 // is a type error here instead of a metric quietly posting as 'memory'.
 const WEBHOOK_KIND: Record<StoreAlertKind, WebhookAlertKind> = {
+  'vpn-down': 'vpn-down',
+  'pod-crashloop': 'pod-crashloop',
+  'vpn-degraded': 'vpn-degraded',
+  'backup-failed': 'backup-failed',
   cpu: 'cpu',
   ram: 'memory',
   disk: 'disk',
@@ -885,7 +968,9 @@ const WEBHOOK_KIND: Record<StoreAlertKind, WebhookAlertKind> = {
   'db-alarm': 'db-alarm',
   'db-watch': 'db-watch',
   'oom-kill': 'oom-kill',
-  'cert-expiry': 'cert-expiry'
+  'cert-expiry': 'cert-expiry',
+  'vpn-cert-expiry': 'vpn-cert-expiry',
+  'error-rate': 'error-rate'
 }
 
 function evaluate(
@@ -1137,6 +1222,13 @@ const STATE_WORDS: Record<
     raised: (name) => `${name} did not answer the last check`,
     resolved: (name) => `${name} is answering again`
   },
+  'backup-failed': {
+    // Named for what is missing rather than for what errored: a schedule that
+    // stopped and a run that failed both end here, and in both the operator
+    // does not have the backup they think they have.
+    raised: (_name, detail) => detail || 'A backup is missing or failed',
+    resolved: () => 'A backup has succeeded again'
+  },
   'job-failed': {
     raised: (name, detail) => `${name} failed a job step${detail ? ` (${detail})` : ''}`,
     resolved: (name) => `${name} has completed a job step since`
@@ -1144,6 +1236,24 @@ const STATE_WORDS: Record<
   'tunnel-down': {
     raised: (name) => `Tunnel ${name} is in error`,
     resolved: (name) => `Tunnel ${name} is carrying traffic again`
+  },
+  'vpn-down': {
+    raised: (name) => `VPN ${name} is in error`,
+    resolved: (name) => `VPN ${name} is connected again`
+  },
+  // The name here is a cluster context, not a server -- see the note on the
+  // kind. The detail carries which pod, already scrubbed.
+  'pod-crashloop': {
+    raised: (name, detail) => `${name}: ${detail || 'a pod is restarting repeatedly'}`,
+    resolved: (name) => `${name}: no pod restarted since the last check`
+  },
+  // Says what is wrong rather than that something is, because the fix is a
+  // different one: a tunnel that is up and silent is not reconnected, it is
+  // investigated. Never an endpoint in the words -- see the note above this
+  // table about what reaches an outbound field.
+  'vpn-degraded': {
+    raised: (name) => `VPN ${name} is up but not passing traffic`,
+    resolved: (name) => `VPN ${name} is passing traffic again`
   },
   // The resolve is a REAL observation and not an assumption, which is what
   // earns this a place among the states rather than among the events: the
@@ -1418,6 +1528,30 @@ export function snoozeAlert(serverId: string, kind: AlertKind, ms: number): void
   })
 }
 
+/**
+ * Open a maintenance window — item 44.
+ *
+ * Written as ordinary snooze rows, one per server per kind, because those are
+ * already durable, already carry an absolute end, and are already replayed at
+ * launch. A window with its own storage would be a second way to silence an
+ * estate, and only one of the two would have been thought about.
+ *
+ * Deliberately NOT: pausing the sampler (a gap reads as "could not tell" and
+ * the patch gate needs fresh samples), touching `webhookNotify` (that is the
+ * silent discard the webhook module refuses by name), or clearing the chips
+ * (the condition is still true; what stops is the announcing).
+ *
+ * Returns how many rows it wrote, so the caller can say so rather than assert
+ * it worked.
+ */
+export function openMaintenanceWindow(w: MaintenanceWindow, now = Date.now()): number {
+  const check = checkMaintenanceWindow(w, now)
+  if (!check.ok) return 0
+  const planned = maintenanceSnoozes(w, now)
+  for (const p of planned) snoozeAlert(p.serverId, p.kind, p.ms)
+  return planned.length
+}
+
 /** End a snooze early. Written to the log as a zero-length snooze rather than
  *  as a new event name: "quiet until then" with a `then` in the past is exactly
  *  what this means, and it replays correctly without teaching the reader a
@@ -1474,6 +1608,22 @@ export function acknowledgeAlert(serverId: string, kind: AlertKind): void {
 // empties, which is the "it is fixed" message that makes the first one worth
 // reading.
 const failedUnits = new Map<string, Set<string>>()
+
+/**
+ * Which units are currently failed on one host.
+ *
+ * Exists so the alert inbox can offer the failed unit's own log. The ACTIVE
+ * alert deliberately carries no unit name -- it is one chip for the condition,
+ * however many units are in it -- and parsing the names back out of its summary
+ * would be reading a sentence written for a person. This returns the set the
+ * diff above already keeps.
+ *
+ * A COPY, and in insertion order. The caller renders from it and must not be
+ * able to mutate the set the next sweep diffs against.
+ */
+export function failedUnitsFor(serverId: string): string[] {
+  return [...(failedUnits.get(serverId) ?? [])]
+}
 
 export function checkUnitAlerts(serverId: string, serverName: string, units: string[] | null): void {
   // null is "we could not see systemd", not "nothing is failing" — the same
@@ -1793,6 +1943,69 @@ export function checkResourceAlerts(serverId: string, serverName: string, s: Res
  * so the panel and the alert can never disagree about which certificate is the
  * worst one or about whether a refused directory counts.
  */
+/**
+ * A VPN profile's own client certificate, against the same threshold.
+ *
+ * Its own kind rather than `cert-expiry`, and the reason is the coverage page:
+ * `cert-expiry` is answered by the posture sweep, and a VPN profile is not a
+ * server and is never swept. Same threshold and same comparison as its
+ * sibling, from the same module, because an alert that fires at a different
+ * number from the panel it points at is worse than no alert.
+ *
+ * `null` returns without a word. A profile whose certificate could not be read
+ * -- a pkcs12 bundle, an unparseable block -- has not told us it is fine.
+ */
+export function checkVpnCertificateAlert(
+  profileId: string,
+  profileName: string,
+  notAfter: number | null | undefined,
+  now = Date.now()
+): void {
+  if (!useApp.getState().settings.resourceAlertsEnabled) return
+  if (notAfter === null || notAfter === undefined) return
+  // Floored, so "12 days" means at least twelve whole days and an expiry three
+  // days ago is -3 rather than -2.something rounded towards zero -- the same
+  // arithmetic readCertificate does, for the same reason.
+  const days = Math.floor((notAfter - now) / 86_400_000)
+  evaluate(
+    profileId,
+    profileName,
+    'vpn-cert-expiry',
+    days,
+    CERT_EXPIRY_DAYS,
+    now,
+    isCertificateExpiringSoon(days)
+  )
+}
+
+/**
+ * How much a host is complaining, per minute.
+ *
+ * NULL RETURNS WITHOUT A WORD, and this kind is the one most able to get that
+ * wrong. An unreadable journal produces no lines, and "no lines" and "no
+ * errors" are the same empty output — so a host whose journal this account may
+ * not read would otherwise report the quietest error rate in the estate.
+ * shared/posture.ts decides which of those two happened and hands a null for
+ * the one that is not a reading.
+ *
+ * The threshold is a stated default rather than a measured constant: what
+ * counts as a lot of errors is per-estate, and a busy application server
+ * writes more in an idle hour than a database does in a bad week.
+ */
+export function checkErrorRateAlert(
+  serverId: string,
+  serverName: string,
+  perMinute: number | null,
+  threshold = ERROR_RATE_DEFAULT_THRESHOLD
+): void {
+  if (!useApp.getState().settings.resourceAlertsEnabled) return
+  if (perMinute === null) return
+  // Strictly above, which is what OVER_WORD says out loud and what
+  // errorRateReport compares — the disk kind's lesson, where "at or above 85%"
+  // was a claim the code did not implement.
+  evaluate(serverId, serverName, 'error-rate', perMinute, threshold, Date.now(), perMinute > threshold)
+}
+
 export function checkCertificateAlert(
   serverId: string,
   serverName: string,

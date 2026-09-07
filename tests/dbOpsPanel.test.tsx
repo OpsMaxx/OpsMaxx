@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
@@ -480,5 +480,94 @@ describe('DbOpsPanel — the engine the tables are drawn for', () => {
     render(<DbOpsPanel cfg={{ ...CFG, kind: 'redis' }} kind="redis" />)
     expect(screen.getByText(/9 questions will be asked/)).toBeTruthy()
     expect(screen.getByText(/memory and eviction/)).toBeTruthy()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Item 47's growth line, read back after the read that wrote to it.
+// ---------------------------------------------------------------------------
+
+describe('DbOpsPanel — database growth', () => {
+  const reading = (over: Record<string, unknown> = {}): unknown => ({
+    perDay: 400 * 1024 ** 2,
+    crossesAt: null,
+    days: null,
+    refusal: 'no-ceiling',
+    r2: 0.95,
+    confidence: 'high',
+    from: Date.now() - 7 * 86_400_000,
+    to: Date.now(),
+    points: 40,
+    latest: 8 * 1024 ** 3,
+    ...over
+  })
+
+  const withGrowth = (r: unknown): ReturnType<typeof vi.fn> => {
+    const call = vi.fn(async () => r)
+    stubBridge({
+      db: { ops: (cfg: DbConnectConfig) => opsImpl(cfg) },
+      capacity: { dbGrowth: call }
+    })
+    return call
+  }
+
+  // Before the first read there is nothing in the series, and a panel that
+  // asked anyway would print "nothing has been recorded" at somebody who has
+  // not asked a question yet.
+  it('asks for nothing until a read has happened', async () => {
+    const call = withGrowth(reading())
+    render(<DbOpsPanel cfg={CFG} kind="postgres" />)
+    await waitFor(() => expect(readButton()).toBeTruthy())
+    expect(call).not.toHaveBeenCalled()
+  })
+
+  it('shows the rate after a read, leading with it', async () => {
+    const user = userEvent.setup()
+    withGrowth(reading())
+    render(<DbOpsPanel cfg={CFG} kind="postgres" />)
+    await user.click(readButton())
+    await waitFor(() => expect(screen.getByText(/is growing 400 MiB a day/)).toBeTruthy())
+  })
+
+  // The rate is true whether or not anybody set a ceiling, so it is shown with
+  // the reason there is no date rather than withheld.
+  it('says why there is no crossing date, without hiding the rate', async () => {
+    const user = userEvent.setup()
+    withGrowth(reading())
+    render(<DbOpsPanel cfg={CFG} kind="postgres" />)
+    await user.click(readButton())
+    await waitFor(() =>
+      expect(screen.getByText(/nothing has said how big is too big/)).toBeTruthy()
+    )
+  })
+
+  it('shows nothing at all when the build has no such channel', async () => {
+    const user = userEvent.setup()
+    stubBridge({ db: { ops: (cfg: DbConnectConfig) => opsImpl(cfg) } })
+    render(<DbOpsPanel cfg={CFG} kind="postgres" />)
+    await user.click(readButton())
+    await waitFor(() => expect(screen.queryByText(/is growing/)).toBeNull())
+  })
+
+  // The same hazard the answers already have a guard for: one connection's
+  // growth sentence under another connection's heading, with nothing on screen
+  // that would give it away.
+  it('drops the previous connection’s growth line when the connection changes', async () => {
+    const user = userEvent.setup()
+    withGrowth(reading())
+    const { rerender } = render(<DbOpsPanel cfg={CFG} kind="postgres" />)
+    await user.click(readButton())
+    await waitFor(() => expect(screen.getByText(/is growing/)).toBeTruthy())
+    rerender(<DbOpsPanel cfg={{ ...CFG, id: 'db-2' }} kind="postgres" />)
+    await waitFor(() => expect(screen.queryByText(/is growing/)).toBeNull())
+  })
+
+  it('asks about the connection it is showing', async () => {
+    const user = userEvent.setup()
+    const call = withGrowth(reading())
+    render(<DbOpsPanel cfg={CFG} kind="postgres" />)
+    await user.click(readButton())
+    await waitFor(() => expect(call).toHaveBeenCalled())
+    expect(call.mock.calls[0][0]).toBe('db-1')
   })
 })

@@ -428,12 +428,28 @@ export interface RemoteListResult {
 // Database dumps as a source
 // ---------------------------------------------------------------------------
 
-export const DUMP_ENGINES = ['postgres', 'mysql'] as const
+export const DUMP_ENGINES = ['postgres', 'mysql', 'mongo'] as const
 export type DumpEngine = (typeof DUMP_ENGINES)[number]
 
 export const DUMP_BINARY: Record<DumpEngine, string> = {
   postgres: 'pg_dump',
-  mysql: 'mysqldump'
+  mysql: 'mysqldump',
+  mongo: 'mongodump'
+}
+
+/**
+ * What a dump of each engine actually is on disk.
+ *
+ * `.sql` for the two that emit SQL text, and `.archive` for mongo -- which is
+ * BSON, not SQL, and naming it `.sql` would be a lie an operator only finds out
+ * about when they try to read it. The retention regex below accepts both,
+ * because a dump whose name it does not recognise is a dump retention never
+ * counts and never removes.
+ */
+export const DUMP_EXTENSION: Record<DumpEngine, string> = {
+  postgres: 'sql',
+  mysql: 'sql',
+  mongo: 'archive'
 }
 
 export interface DumpTarget {
@@ -450,6 +466,21 @@ export interface DumpCommand {
   /** Passed through the environment, never on the command line: an argv is
    *  world-readable in /proc and lands in shell history. */
   env: Record<string, string>
+  /**
+   * A configuration file the runner must write, pass by path, and delete.
+   *
+   * Only mongodump needs one, and only because it HAS NO PASSWORD ENVIRONMENT
+   * VARIABLE -- `PGPASSWORD` and `MYSQL_PWD` have no counterpart, and its
+   * `--password` flag is the argv exposure this whole interface exists to
+   * avoid. `--config` was measured to work: the same dump succeeded with the
+   * real password in the file and failed with `AuthenticationFailed` when the
+   * file held a wrong one, so the file is genuinely what is read.
+   *
+   * The trade is stated rather than hidden: an argv is readable by every user
+   * on the machine, and this is a 0600 file readable by this user and root that
+   * exists for the length of one dump. Better, not free.
+   */
+  configFile?: { contents: string }
 }
 
 /**
@@ -460,6 +491,28 @@ export interface DumpCommand {
  * listing on the machine, and pg_dump has no password flag at all.
  */
 export function dumpCommand(target: DumpTarget, password: string): DumpCommand {
+  if (target.engine === 'mongo') {
+    return {
+      binary: 'mongodump',
+      args: [
+        '--host', target.host,
+        '--port', String(target.port),
+        '--username', target.username,
+        // The authentication database, not the one being dumped. Getting this
+        // wrong is the commonest mongodump failure and it reports as an auth
+        // error rather than as a missing database.
+        '--authenticationDatabase', 'admin',
+        '--db', target.database,
+        // Measured: writes the archive to STDOUT, which is what the existing
+        // pipeline reads. Without it mongodump writes a DIRECTORY of BSON
+        // files and this would capture nothing at all.
+        '--archive'
+      ],
+      env: {},
+      // See DumpCommand.configFile. mongodump has no password env var.
+      ...(password ? { configFile: { contents: `password: ${password}\n` } } : {})
+    }
+  }
   if (target.engine === 'postgres') {
     return {
       binary: 'pg_dump',
@@ -512,6 +565,200 @@ export interface DumpRunReport {
  *  as a generation of one. */
 export function dumpObjectName(target: DumpTarget, when: Date): string {
   const iso = when.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
-  const safe = target.database.replace(/[^A-Za-z0-9_.-]/g, '_')
-  return `${BACKUP_OBJECT_PREFIX}dump-${safe}-${iso}.sql`
+  const safe = safeDumpDatabase(target.database)
+  return `${BACKUP_OBJECT_PREFIX}dump-${safe}-${iso}.${DUMP_EXTENSION[target.engine]}`
+}
+
+/**
+ * The safe form of a database name, as it appears inside a dump object.
+ *
+ * Exported because it is LOSSY and callers have to be able to see that: `my-db`
+ * and `my_db` both become `my_db`, and two such databases dumping to one
+ * destination share a retention group. See collidingDumpDatabases().
+ */
+export function safeDumpDatabase(database: string): string {
+  return database.replace(/[^A-Za-z0-9_.-]/g, '_')
+}
+
+/** `shellpilot-dump-<db>-<ISO>.sql`, parsed from the RIGHT: the database name
+ *  may contain `-` and `.`, so only the timestamp's fixed shape makes the
+ *  boundary unambiguous. */
+const DUMP_NAME_RE = new RegExp(
+  `^${BACKUP_OBJECT_PREFIX}dump-(.+)-(\\d{8}T\\d{6}Z)\\.(?:sql|archive)$`
+)
+
+export function isDumpObjectName(name: string): boolean {
+  return DUMP_NAME_RE.test(name)
+}
+
+/** The safe database name inside a dump object, or null when the object is not
+ *  one of ours. Never the raw name -- that is not recoverable. */
+export function dumpDatabaseOf(name: string): string | null {
+  const m = DUMP_NAME_RE.exec(name)
+  return m === null ? null : m[1]
+}
+
+/**
+ * Databases whose names collide once sanitised.
+ *
+ * A caller that dumps two of these to one destination is a caller whose
+ * retention will count them together and delete one database's dumps because
+ * the other's are newer. Surfaced rather than worked around: renaming a
+ * database is the operator's decision, and silently keeping more than asked
+ * would be a retention setting that does not mean what it says.
+ */
+export function collidingDumpDatabases(databases: string[]): string[][] {
+  const by = new Map<string, string[]>()
+  for (const d of databases) {
+    const k = safeDumpDatabase(d)
+    by.set(k, [...(by.get(k) ?? []), d])
+  }
+  return [...by.values()].filter((g) => g.length > 1)
+}
+
+/**
+ * Retention for dumps -- item 38's first gap.
+ *
+ * Dumps had none at all: `backupTick` iterates bundle destinations only, and
+ * `isBackupObjectName` deliberately does not match a `.sql`, so a destination
+ * accumulated one dump per run for ever.
+ *
+ * PER DATABASE, which is the difference from the bundle's. Bundles are one
+ * series; a destination holds dumps of several databases interleaved, and a
+ * global "keep 7" would keep seven objects rather than seven of each -- so a
+ * busy database would evict a quiet one entirely.
+ *
+ * The same three refusals as planRetention, because they are the same three
+ * mistakes.
+ */
+export function planDumpRetention(
+  generations: BackupGeneration[],
+  keep: number,
+  database: string
+): RetentionPlan {
+  const safe = safeDumpDatabase(database)
+  const ours = generations.filter((g) => dumpDatabaseOf(g.name) === safe)
+  const sorted = [...ours].sort((a, b) => b.modified - a.modified || b.name.localeCompare(a.name))
+  if (!Number.isFinite(keep) || keep <= 0) {
+    return { keep: sorted, remove: [], refused: 'No limit is set, so no dump is deleted.' }
+  }
+  if (sorted.length <= 1) {
+    return {
+      keep: sorted,
+      remove: [],
+      refused: 'Only one dump of this database is here, and the last one is never deleted.'
+    }
+  }
+  const kept = sorted.slice(0, Math.max(1, keep))
+  return { keep: kept, remove: sorted.slice(kept.length) }
+}
+
+// ---------------------------------------------------------------------------
+// Is there actually a backup?
+// ---------------------------------------------------------------------------
+//
+// The roadmap parked this behind item 5 — "there is no backup that could fail"
+// — and item 5 shipped, so here it is.
+//
+// THE TRAP IS `lastRunAt`, and it is documented thirty lines above: it records
+// an ATTEMPT, not a success, deliberately, so a broken SFTP server is not
+// retried every minute. Which means an "is it overdue" check written against
+// it reports a healthy schedule while every single run fails. The question an
+// operator is actually asking is "do I have a backup", and the only field that
+// answers it is the last SUCCESSFUL report.
+//
+// The second trap is quieter: a run can succeed and not be verified. `verified`
+// is true only when the bytes were read back off the destination and matched,
+// and a write nobody read back is a backup nobody has evidence of. That is not
+// an alarm — the file is probably there — but it is not silence either.
+
+export type BackupAlarmReason = 'failed' | 'never' | 'overdue' | 'unverified'
+
+export interface BackupAlarm {
+  destinationId: string
+  destinationName: string
+  reason: BackupAlarmReason
+  level: 'watch' | 'alarm'
+  /** What to say, in the words the panel and the webhook both use. */
+  detail: string
+}
+
+/**
+ * How late a backup may be before it is worth interrupting somebody.
+ *
+ * TWO periods, not one. ShellPilot only backs up while it is running, so a
+ * daily schedule on a laptop that was shut overnight is routinely a few hours
+ * late and that is not a fault. Two missed periods is not lateness, it is a
+ * schedule that has stopped.
+ */
+export const BACKUP_OVERDUE_PERIODS = 2
+
+export function assessBackups(
+  destinations: BackupDestination[],
+  lastReport: Record<string, BackupRunReport>,
+  now: number
+): BackupAlarm[] {
+  const out: BackupAlarm[] = []
+  for (const d of destinations) {
+    // Not scheduled is not overdue. A destination somebody backs up to by hand
+    // is a choice, and alarming about it would train people to ignore this.
+    if (!Number.isFinite(d.everyHours) || d.everyHours <= 0) continue
+
+    const r = lastReport[d.id]
+    if (r === undefined) {
+      out.push({
+        destinationId: d.id,
+        destinationName: d.name,
+        reason: 'never',
+        level: 'alarm',
+        detail: `${d.name} is scheduled every ${d.everyHours}h and has never produced a backup.`
+      })
+      continue
+    }
+    if (!r.ok) {
+      out.push({
+        destinationId: d.id,
+        destinationName: d.name,
+        reason: 'failed',
+        level: 'alarm',
+        detail: `The last backup to ${d.name} failed: ${r.error ?? 'no reason given'}`
+      })
+      continue
+    }
+
+    const at = Date.parse(r.finishedAt)
+    if (!Number.isFinite(at)) {
+      // A report we cannot date is not a recent one. Reading it as fresh would
+      // be the reassuring half of the guess.
+      out.push({
+        destinationId: d.id,
+        destinationName: d.name,
+        reason: 'overdue',
+        level: 'alarm',
+        detail: `${d.name} has a backup report with an unreadable date, so how old it is cannot be told.`
+      })
+      continue
+    }
+    const lateBy = now - at
+    if (lateBy > d.everyHours * 3600_000 * BACKUP_OVERDUE_PERIODS) {
+      out.push({
+        destinationId: d.id,
+        destinationName: d.name,
+        reason: 'overdue',
+        level: 'alarm',
+        detail: `${d.name} last backed up ${Math.floor(lateBy / 3600_000)}h ago on a ${d.everyHours}h schedule.`
+      })
+      continue
+    }
+    if (!r.verified) {
+      out.push({
+        destinationId: d.id,
+        destinationName: d.name,
+        reason: 'unverified',
+        level: 'watch',
+        detail: `${d.name} was written but not read back, so there is no evidence the backup is intact.`
+      })
+    }
+  }
+  return out
 }

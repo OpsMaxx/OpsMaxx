@@ -8,9 +8,16 @@ import type {
   VpnStats,
   VpnStatus,
   VpnValidation,
-  VpnValidationIssue
+  VpnValidationIssue,
+  VpnDiagnoseResult
 } from '../../../../shared/vpn'
+import {
+  probableRemotes,
+  serverReachCheck,
+  type RemoteReach
+} from '../../../../shared/vpnChecks'
 import { resolveEngineBinary } from '../binaries'
+import { reachRemote } from '../openvpnReach'
 import type { VpnDriver, VpnDriverContext } from '../driver'
 import type { ElevationProbe, Elevator } from '../elevation'
 import { elevationErrorCode, elevatorForPlatform } from '../elevation'
@@ -372,7 +379,7 @@ export function createOpenVpnDriver(opts: OpenVpnDriverOptions = {}): OpenVpnDri
       }
       if (spec.httpProxy) {
         if (!spec.httpProxy.host.trim()) {
-          error('httpProxy.host', 'bad-host', 'The proxy needs a host name.')
+          error('httpProxy.host', 'bad-host', 'The proxy needs a server name.')
         }
         if (!isPort(spec.httpProxy.port)) {
           error('httpProxy.port', 'bad-port', 'The proxy port must be between 1 and 65535.')
@@ -380,7 +387,7 @@ export function createOpenVpnDriver(opts: OpenVpnDriverOptions = {}): OpenVpnDri
       }
       for (const [i, remote] of (spec.remotes ?? []).entries()) {
         if (!remote.host.trim()) {
-          error(`remotes[${i}].host`, 'bad-host', 'The server needs a host name.')
+          error(`remotes[${i}].host`, 'bad-host', 'The server needs a server name.')
         }
         if (!isPort(remote.port)) {
           error(`remotes[${i}].port`, 'bad-port', 'The server port must be between 1 and 65535.')
@@ -602,6 +609,36 @@ export function createOpenVpnDriver(opts: OpenVpnDriverOptions = {}): OpenVpnDri
       // `>BYTECOUNT:` for the counters and the CONNECTED state line for the
       // assigned address. Both are pushed, so this asks openvpn nothing.
       return sessions.get(id)?.management.stats() ?? null
+    },
+
+    /**
+     * There is no netstack here: openvpn owns a real device in another process,
+     * and there is nothing in THIS process to dial through. What can be
+     * answered is the question somebody actually has when a profile will not
+     * come up -- can this machine reach the server at all -- and the answer
+     * separates a firewall or DNS problem from a certificate one.
+     *
+     * The `target` is deliberately unused. The only addresses this may try are
+     * the profile's own `remotes`; accepting a typed host would make this a
+     * port scanner wearing a diagnose label.
+     */
+    async diagnose(profile: VpnProfile & { spec: OpenVpnSpec }): Promise<VpnDiagnoseResult> {
+      const remotes = profile.spec.remotes ?? []
+      const { probe, skippedUdp } = probableRemotes(remotes)
+      const results: RemoteReach[] = []
+      for (const r of probe) {
+        // Sequential and short-circuiting: one reachable remote answers the
+        // question, and trying the rest would open connections to somebody's
+        // servers for no further information.
+        const one = await reachRemote(r)
+        results.push(one)
+        if (one.reached) break
+      }
+      return {
+        id: profile.id,
+        checks: [serverReachCheck(results, skippedUdp, remotes.length)],
+        sampledAt: Date.now()
+      }
     },
 
     softRestart(id: string): boolean {

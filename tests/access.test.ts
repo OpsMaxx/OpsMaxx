@@ -157,7 +157,7 @@ describe('the command the collector sends', () => {
     expect(ACCESS_COMMAND).not.toMatch(/set -e/)
   })
 
-  it('pins the locale, so a date is parseable on a host that is not in English', () => {
+  it('pins the locale, so a date is parseable on a server that is not in English', () => {
     // `lastlog` and `chage` print through the locale. Without this a host in
     // de_DE emits `Di 2 Sep` and every last-login on it silently loses its
     // timestamp.
@@ -418,7 +418,7 @@ describe('an authorized_keys line, adversarially', () => {
 // Dates
 // ---------------------------------------------------------------------------
 
-describe('reading the host’s own dates', () => {
+describe('reading the server’s own dates', () => {
   it('does not mistake a UTC offset for a year', () => {
     // `lastlog` prints `Tue Sep  2 06:00:01 +0000 2026`. A lazy hop to "the
     // next four digits" finds `0000`, which is rejected as a year — and every
@@ -428,7 +428,7 @@ describe('reading the host’s own dates', () => {
     expect(at).toBe(Date.UTC(2026, 8, 2, 6, 0, 1))
   })
 
-  it('prefers an offset printed on the row over the host’s current one', () => {
+  it('prefers an offset printed on the row over the server’s current one', () => {
     // They agree almost always. Where they do not — a login recorded before a
     // DST change — the row is the one that was written at the time.
     expect(parseLoginInstant('ops pts/0 h Mon Jan 5 09:30:00 +0100 2026', 600)).toBe(
@@ -779,7 +779,7 @@ describe('what may and may not be concluded', () => {
     expect(s.certain).toBe(false)
   })
 
-  it('lists the hosts a key could not be looked for on, beside the ones it is on', () => {
+  it('lists the servers a key could not be looked for on, beside the ones it is on', () => {
     // A fingerprint on four hosts that could not be looked for on three more
     // has NOT been shown to be absent from those three. The second list is the
     // set of machines somebody still has to check by hand.
@@ -858,7 +858,7 @@ describe('the reader’s failure classification', () => {
     })
   })
 
-  it('calls a missing status block no-output rather than an empty host', () => {
+  it('calls a missing status block no-output rather than an empty server', () => {
     const r = new AccessReader({ exec: async () => ({ ok: true, stdout: 'V now 1\n', stderr: 'csh: syntax' }) })
     return r.read({}).then((p) => {
       expect(p.ok).toBe(false)
@@ -950,6 +950,24 @@ function fakeHost(): FakeHost {
   )
   script('chage', 'printf "Last password change : Sep 13, 2024\\nAccount expires : never\\n"')
 
+  // `id`, STUBBED, and this is the point of the whole helper.
+  //
+  // The collector calls `id -nG "$SP_U"` as a bare word, so without a stub here
+  // PATH finds the machine's own `id` and the answer becomes a reading of
+  // WHOEVER IS RUNNING THE TESTS. Three assertions below then depended on this
+  // laptop not having accounts called `ops`, `deploy` or `nohome` -- true here,
+  // not true of a build server, and nothing in the file said so out loud.
+  //
+  // Answers for `root` and `ops`, refuses `deploy` and `nohome`. That is what
+  // makes the sudoers status `partial` rather than the machine's user database
+  // making it, and it is stated rather than discovered.
+  script(
+    'id',
+    '[ "$1" = "-un" ] && { echo sp-collector; exit 0; }\n' +
+      '[ "$1" = "-nG" ] && { case "$2" in root) echo "root wheel";; ops) echo "ops";; *) exit 1;; esac; exit 0; }\n' +
+      'exit 1'
+  )
+
   return {
     root,
     bin,
@@ -965,6 +983,13 @@ function fakeHost(): FakeHost {
         cmd = cmd
           .replace(new RegExp(`for c in ${name}[^;]*;`), `for c in sp-absent-${name};`)
           .replace(new RegExp(`SP_BIN=${name}(?=[\\s;]|$)`), `SP_BIN=sp-absent-${name}`)
+        // Rewriting the `command -v` probe hides the tool from the STATUS, but
+        // the collector also calls `id` by bare name, and that call would sail
+        // straight past the rewrite to the machine's own binary. So the stub is
+        // replaced by one that refuses, which is what a host without the tool
+        // actually does to that line.
+        writeFileSync(join(bin, name), '#!/bin/sh\nexit 1\n')
+        chmodSync(join(bin, name), 0o755)
       }
       return execFileSync('/bin/sh', ['-c', cmd], {
         encoding: 'utf8',
@@ -1022,16 +1047,22 @@ describe.skipIf(process.platform === 'win32')('the collector, run against a host
       'authorized-keys=ok',
       'sshd-config=ok',
       'account-status=ok',
-      // `partial`, and correctly so: the tree names accounts the machine
-      // running this test does not have, so `id -nG` answers for some and not
-      // for others. That is exactly the shape of a real host where one account
-      // comes from a directory service that is down, and reporting it as `ok`
-      // would claim group membership had been read for everybody.
+      // `partial`, decided by the stubbed `id` in fakeHost: it answers for
+      // `root` and `ops` and refuses `deploy` and `nohome`. That is the shape
+      // of a real host where some accounts come from a directory service that
+      // is down, and reporting it as `ok` would claim group membership had been
+      // read for everybody.
       'sudoers=partial',
       'last-login=ok'
     ])
     const a = parse(host().collect())
-    expect(a.accounts.filter((x) => x.adminGroups === null).length).toBeGreaterThan(0)
+    // Exactly the two the stub refuses. `toBeGreaterThan(0)` passed here for
+    // years while the number was decided by the machine's user database.
+    expect(a.accounts.filter((x) => x.adminGroups === null).map((x) => x.user).sort()).toEqual([
+      'deploy',
+      'nohome'
+    ])
+    expect(acct(a, 'root').adminGroups).toEqual(['root', 'wheel'])
   })
 
   it('includes a nologin account that has keys and skips one that does not', () => {
@@ -1121,7 +1152,7 @@ describe.skipIf(process.platform === 'win32')('the collector, run against a host
     ])
   })
 
-  it('truncates an 8 KB comment on the host and says the line was cut', () => {
+  it('truncates an 8 KB comment on the server and says the line was cut', () => {
     const h = host()
     h.file('home/ops/.ssh/authorized_keys', `ssh-ed25519 ${ED25519} ${'A'.repeat(8192)}\n`)
     const out = h.collect()
@@ -1232,11 +1263,11 @@ describe.skipIf(process.platform === 'win32')('the collector, run against a host
     expect(a.readsTheFileWeRead).toBe(false)
     expect(a.readsLegacyKeyFile).toBe(true)
     expect(summariseAccess(a).uncertainty.join(' ')).toContain(
-      'sshd does not read .ssh/authorized_keys on this host'
+      'sshd does not read .ssh/authorized_keys on this server'
     )
   })
 
-  it('says yes to a host that reads both files', () => {
+  it('says yes to a server that reads both files', () => {
     const h = host()
     h.file('etc/ssh/sshd_config', 'Port 22\nAuthorizedKeysFile .ssh/authorized_keys .ssh/authorized_keys2\n')
     const a = parse(h.collect())
@@ -1327,7 +1358,7 @@ describe.skipIf(process.platform === 'win32')('the collector, run against a host
     expect(acct(a, 'root').neverLoggedIn).toBe(false)
   })
 
-  it('says never-logged-in only when the host said so', () => {
+  it('says never-logged-in only when the server said so', () => {
     const a = parse(host().collect())
     expect(acct(a, 'ops').neverLoggedIn).toBe(true)
     expect(acct(a, 'root').neverLoggedIn).toBe(false)
@@ -1356,7 +1387,7 @@ describe.skipIf(process.platform === 'win32')('the collector, run against a host
     )
   })
 
-  it('exits cleanly and still reports when nothing on the host answers', () => {
+  it('exits cleanly and still reports when nothing on the server answers', () => {
     // No sshd_config, no tools, no key files. The `|| true` placement and the
     // absence of `set -e` are what make this a collection rather than a crash,
     // and neither can be tested any other way than by running it.
@@ -1420,13 +1451,13 @@ describe.skipIf(process.platform === 'win32')('the collector, run against a host
     expect(a.sessionKeysCertain).toBe(true)
   })
 
-  it('is not sure when the host says nothing at all', () => {
+  it('is not sure when the server says nothing at all', () => {
     const a = parse(host().collect())
     expect(a.sessionKeyFingerprints).toEqual([])
     expect(a.sessionKeysCertain).toBe(false)
   })
 
-  it('is not sure when the host names a key this cannot fingerprint', () => {
+  it('is not sure when the server names a key this cannot fingerprint', () => {
     const a = parse(host().collect({ env: { SSH_AUTH_INFO_0: 'publickey ssh-ed25519 not-base64!!' } }))
     expect(a.sessionKeyFingerprints).toEqual([])
     expect(a.sessionKeysCertain).toBe(false)
@@ -1441,9 +1472,13 @@ describe.skipIf(process.platform === 'win32')('the collector, run against a host
     expect(a.sessionKeysCertain).toBe(false)
   })
 
-  it('reports the account it ran as, and the host’s own clock', () => {
+  it('reports the account it ran as, and the server’s own clock', () => {
     const a = parse(host().collect())
-    expect(a.collectedAs).toBe(execFileSync('id', ['-un'], { encoding: 'utf8' }).trim())
+    // The stub's name, not this machine's. Asserting against a live
+    // `execFileSync('id')` compared the collector to whoever ran the suite --
+    // and resolved `id` through the TEST process's PATH, which other suites in
+    // this repo legitimately overwrite while they run.
+    expect(a.collectedAs).toBe('sp-collector')
     expect(a.hostNow).toBeGreaterThan(1_700_000_000_000)
   })
 

@@ -1,0 +1,5 @@
+Updates Information Summary: available
+    133 Security notice(s)
+         43 Important Security notice(s)
+         80 Moderate Security notice(s)
+         10 Low Security notice(s)

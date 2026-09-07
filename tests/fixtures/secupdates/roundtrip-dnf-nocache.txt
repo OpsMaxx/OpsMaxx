@@ -1,0 +1,8 @@
+===SHELLPILOT-SECPM===
+dnf
+===SHELLPILOT-SECCHECK===
+Error: Cache-only enabled but no cache for 'appstream'
+===SHELLPILOT-SECLIST===
+Error: Cache-only enabled but no cache for 'appstream'
+===SHELLPILOT-SECSUM===
+Error: Cache-only enabled but no cache for 'appstream'

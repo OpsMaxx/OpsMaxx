@@ -95,27 +95,20 @@ describe('the pane says what the token grants, where the token is', () => {
     expect(screen.getByText(/Treat it like the API key it stands in for/)).toBeTruthy()
   })
 
-  it('shows the token only when asked, and then shows the whole of it', async () => {
+  it('will not create a token without a name', async () => {
+    // A list of tokens nobody can account for is a list nobody revokes from,
+    // so the name is required rather than defaulted to "token 3".
     mount()
-    const user = userEvent.setup()
-    expect(screen.queryByDisplayValue(TOKEN)).toBeNull()
-
-    await user.click(await screen.findByRole('button', { name: 'Show token' }))
-
-    expect(await screen.findByDisplayValue(TOKEN)).toBeTruthy()
+    expect(
+      ((await screen.findByRole('button', { name: 'Create token' })) as HTMLButtonElement).disabled
+    ).toBe(true)
   })
 
-  it('warns that rotating breaks whatever is still using the old one', async () => {
+  it('says every request is refused when there are no tokens', async () => {
+    // The safe state, said plainly, so an operator who has revoked everything
+    // knows why their script stopped.
     mount()
-    const user = userEvent.setup()
-
-    await user.click(await screen.findByRole('button', { name: 'Rotate' }))
-
-    expect(
-      await screen.findByText(
-        'New token. Anything still using the old one will now be refused — update your scripts.'
-      )
-    ).toBeTruthy()
+    expect(await screen.findByText(/every request is refused/)).toBeTruthy()
   })
 
   it('says plainly that being on loopback is not a permission', async () => {
@@ -182,14 +175,14 @@ describe('a rule reads as a sentence about where a credential goes', () => {
   it('surfaces the exact refusal when a rule will not save', async () => {
     mount({
       rules: [],
-      saveRule: async () => ({ ok: false, error: '"Host" cannot carry a credential.' })
+      saveRule: async () => ({ ok: false, error: '"Server" cannot carry a credential.' })
     })
     const user = userEvent.setup()
 
     await user.click(await screen.findByRole('button', { name: 'Add rule' }))
     await user.click(screen.getByRole('button', { name: 'Save rule' }))
 
-    expect(await screen.findByText('"Host" cannot carry a credential.')).toBeTruthy()
+    expect(await screen.findByText('"Server" cannot carry a credential.')).toBeTruthy()
   })
 
   it('sends the draft as a rule, with the injection the form chose', async () => {

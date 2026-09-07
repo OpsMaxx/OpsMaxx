@@ -61,17 +61,26 @@ export function VaultUnlockModal(): React.JSX.Element | null {
   const [confirm, setConfirm] = useState('')
   const [show, setShow] = useState(false)
 
-  // Creating, not unlocking. Everything below branches on this rather than on
-  // `exists` directly, so the distinction is stated once.
-  const creating = !exists
-  const canUseBio = bioAvailable && bioEnabled && !creating
+  // THREE states, not two. `exists` is `boolean | null` and the null means the
+  // probe has not answered yet — so `!exists` would read "still checking" as
+  // "there is no vault" and put the user in front of a create-vault form, with
+  // a master-password field, for a vault that may well already exist. Writing
+  // it as `exists === false` keeps the unknown its own case, which is the same
+  // rule the fleet reads follow: a value nobody has measured is not a zero.
+  const checking = exists === null
+  const creating = exists === false
+  const canUseBio = bioAvailable && bioEnabled && !creating && !checking
 
   // Only meaningful while creating, and only once the user has typed something
   // into the second field — showing "does not match" against an empty box is a
   // complaint about work not yet done.
   const mismatch = creating && confirm.length > 0 && password !== confirm
+  // Nothing is submittable while the probe is outstanding: `submit` branches on
+  // `creating` to choose between create() and unlock(), and choosing either one
+  // on a guess is how a vault gets created over one that already exists.
   const ready =
     !busy &&
+    !checking &&
     (creating ? password.length >= VAULT_MIN_PASSWORD && confirm === password : password.length > 0)
 
   useEffect(() => {
@@ -98,7 +107,7 @@ export function VaultUnlockModal(): React.JSX.Element | null {
 
   return (
     <Modal
-      title={creating ? 'Create your vault' : 'Vault locked'}
+      title={checking ? 'Vault' : creating ? 'Create your vault' : 'Vault locked'}
       subtitle={reason}
       onClose={() => close(false)}
     >
@@ -109,9 +118,11 @@ export function VaultUnlockModal(): React.JSX.Element | null {
           <Lock size={18} style={{ color: 'var(--accent-ink)', marginTop: 2 }} />
         )}
         <div className="s-desc">
-          {creating
-            ? `There is no vault on this machine yet, so there is nowhere to keep this secret. The vault keeps passwords, SSH keys and other secrets encrypted here, so ShellPilot can use them without you retyping them. Pick a master password to protect it — it is never stored anywhere, so if you lose it the contents cannot be recovered.`
-            : 'This credential is stored in your vault. Unlock it to continue — it stays unlocked for the rest of this session.'}
+          {checking
+            ? 'Checking this machine for a vault…'
+            : creating
+              ? `There is no vault on this machine yet, so there is nowhere to keep this secret. The vault keeps passwords, SSH keys and other secrets encrypted here, so ShellPilot can use them without you retyping them. Pick a master password to protect it — it is never stored anywhere, so if you lose it the contents cannot be recovered.`
+              : 'This credential is stored in your vault. Unlock it to continue — it stays unlocked for the rest of this session.'}
         </div>
       </div>
 
@@ -194,7 +205,7 @@ export function VaultUnlockModal(): React.JSX.Element | null {
           Cancel
         </button>
         <button className="btn sm primary" disabled={!ready} onClick={() => void submit()}>
-          {creating ? 'Create vault and continue' : 'Unlock and continue'}
+          {checking ? 'Checking…' : creating ? 'Create vault and continue' : 'Unlock and continue'}
         </button>
       </div>
     </Modal>

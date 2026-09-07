@@ -35,8 +35,11 @@ function points(
 }
 
 describe('the metrics a capacity question is asked about', () => {
-  it('names three of item A metrics and nothing invented', () => {
-    expect(CAPACITY_METRICS).toEqual(['cpu', 'memPct', 'diskPct'])
+  it('names the item A metrics and nothing invented', () => {
+    // `inodePct` joined them in item 47: it was measured every sweep and never
+    // stored, so a host running out of inodes had a number on screen, no series
+    // behind it and no forecast in front of it.
+    expect(CAPACITY_METRICS).toEqual(['cpu', 'memPct', 'diskPct', 'inodePct'])
     // Every one of them is a real series the sampler writes. A name that
     // drifted from METRICS would read as an empty chart forever, with nothing
     // on screen to say the metric does not exist.
@@ -45,7 +48,7 @@ describe('the metrics a capacity question is asked about', () => {
     // main hands the store real SeriesPoints to this module's TrendPoint, and
     // asks the store for these names as Metrics.
     const asMetrics: readonly Metric[] = CAPACITY_METRICS
-    expect(asMetrics.length).toBe(3)
+    expect(asMetrics.length).toBe(4)
     const fromStore: SeriesPoint = { ts: 1, v: 2, res: 'hourly', min: 1, max: 3, n: 4 }
     const asTrendPoint: TrendPoint = fromStore
     expect(asTrendPoint.n).toBe(4)
@@ -86,7 +89,7 @@ describe('a step change is not a trend', () => {
 })
 
 describe('a gap is not a flat line', () => {
-  it('splits the series where the host stopped answering', () => {
+  it('splits the series where the server stopped answering', () => {
     const before = points(T0 - 2 * DAY - 12 * HOUR, 73, HOUR, 'hourly', (i) => 40 + i * 0.4)
     const after = points(T0, 13, HOUR, 'hourly', () => 80)
     const both = [...before, ...after]
@@ -154,7 +157,7 @@ describe('a series too young to have a rate', () => {
     expect(f.points).toBe(6)
   })
 
-  it('refuses a series that stopped reporting, rather than extrapolating a dead host', () => {
+  it('refuses a series that stopped reporting, rather than extrapolating a dead server', () => {
     const stopped = points(T0 - 2 * DAY, 145, HOUR, 'hourly', (i) => 60 + i * 0.1)
     const f = forecast(stopped, 90, T0)
     expect(f.ok === false && f.reason).toBe('stale')
@@ -344,7 +347,7 @@ describe('the report main hands the panel', () => {
 
   it('answers with a conclusion per metric, not with the samples', () => {
     expect(report.hostId).toBe('srv-alpha')
-    expect(report.trends.map((t) => t.metric)).toEqual(['cpu', 'memPct', 'diskPct'])
+    expect(report.trends.map((t) => t.metric)).toEqual(['cpu', 'memPct', 'diskPct', 'inodePct'])
     const disk = report.trends[2]
     expect(disk.read).toBe(145)
     if (!disk.forecast?.ok) throw new Error('expected a disk forecast')
@@ -391,7 +394,7 @@ describe('the report main hands the panel', () => {
     expect(r.trends[2].low).toBe(20)
   })
 
-  it('reports nothing at all for a host with no history, without throwing', () => {
+  it('reports nothing at all for a server with no history, without throwing', () => {
     const r = buildCapacityReport('srv-new', {}, {
       now: T0,
       from: T0 - DAY,
@@ -400,7 +403,7 @@ describe('the report main hands the panel', () => {
       fullResolutionDays: 7,
       retainedDays: 90
     })
-    expect(r.trends.map((t) => t.read)).toEqual([0, 0, 0])
+    expect(r.trends.map((t) => t.read)).toEqual([0, 0, 0, 0])
     expect(r.trends[2].latest).toBeNull()
     expect(r.trends[2].forecast).toEqual({ ok: false, reason: 'no-data', from: 0, to: 0, points: 0 })
   })

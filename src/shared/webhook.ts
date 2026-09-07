@@ -34,7 +34,25 @@ export const ALERT_KINDS = [
   'db-alarm',
   'db-watch',
   'oom-kill',
-  'cert-expiry'
+  'cert-expiry',
+  // Parked behind item 5 until there was a backup that could fail. The kind
+  // covers three states an operator cannot tell apart from silence: a run that
+  // failed, a schedule that has stopped, and a destination that has never
+  // produced anything at all. See assessBackups() in ./backup.
+  'backup-failed',
+  // Two, for the reason STATE_ALERT_KINDS gives: up-but-silent and down are
+  // different conditions with different fixes. `stopped` is neither -- a
+  // person pressing Stop is not an outage -- and no endpoint ever reaches
+  // these payloads.
+  'vpn-down',
+  'vpn-degraded',
+  'vpn-cert-expiry',
+  'pod-crashloop',
+  // Item 5. How many error-priority journal lines a host is writing per
+  // minute. The logging feature could tail and search; neither NOTICES, and a
+  // host that starts writing errors at three in the morning is one nobody is
+  // watching the journal for.
+  'error-rate'
 ] as const
 export type AlertKind = (typeof ALERT_KINDS)[number]
 
@@ -170,7 +188,29 @@ export function validateWebhookUrl(raw: string): { ok: true; url: string } | { o
  * direction per kind so the arithmetic is inverted in one place instead of the
  * comparison being written down twice.
  */
-export const NUMERIC_ALERT_KINDS = ['cpu', 'ram', 'disk', 'inode', 'load', 'cert-expiry'] as const
+export const NUMERIC_ALERT_KINDS = [
+  'cpu',
+  'ram',
+  'disk',
+  'inode',
+  'load',
+  'cert-expiry',
+  // A SIBLING of cert-expiry rather than the same kind, and the reason is the
+  // coverage page rather than the arithmetic. `cert-expiry` is answered by the
+  // posture sweep, and a VPN profile has no posture -- it is not a server and
+  // is never swept. Raising both under one name would have the coverage page
+  // tell an operator this alert comes from a sweep that never looks at it.
+  //
+  // Numeric, and inverted like its sibling: days remaining, smaller is worse.
+  'vpn-cert-expiry',
+  // Numeric, and the RIGHT way up: errors per minute, bigger is worse. It is
+  // numeric rather than a state because the whole numeric apparatus is real for
+  // it -- a host settling from forty a minute back to two is a recovery a
+  // margin exists to debounce, and 5 -> 20 -> 80 is the monotone movement
+  // escalation exists for. A state kind would throw all of that away and answer
+  // only "errors: yes".
+  'error-rate'
+] as const
 export type NumericAlertKind = (typeof NUMERIC_ALERT_KINDS)[number]
 
 /**
@@ -201,7 +241,31 @@ export const STATE_ALERT_KINDS = [
   'host-unreachable',
   'job-failed',
   'tunnel-down',
-  'oom-kill'
+  'oom-kill',
+  // A state, not an occurrence: "there is no recent backup" stays true until a
+  // backup succeeds, so it clears itself the way unreachable does rather than
+  // firing again every tick.
+  'backup-failed',
+  // TWO KINDS, not one with a detail. `degraded` is up-but-not-passing-traffic
+  // -- a WireGuard handshake older than 180s -- and `error` is down. vpn.ts
+  // calls that distinction "the single most useful thing this UI shows", and
+  // the two call for different reactions: one is reconnect, the other is find
+  // out why a tunnel that thinks it is up carries nothing. Folding them into
+  // one kind would tell the operator to do the wrong one half the time.
+  //
+  // `stopped` is neither, and is deliberately not an alert at all: a person
+  // pressing Stop is not an outage.
+  'vpn-down',
+  'vpn-degraded',
+  // Item 40. A STATE, like oom-kill: the condition can be observed to become
+  // false -- a sweep in which no pod's restart count moved is a real
+  // observation that nothing is restarting, not an assumption.
+  //
+  // KEYED ON THE CLUSTER, not on a server. A cluster is visible from every
+  // host holding a kubeconfig, so a serverId key would raise the same
+  // crashloop once per such host. The `StoredDbAlertRow` precedent already
+  // covers a subject that is not a fleet host.
+  'pod-crashloop'
 ] as const
 export type StateAlertKind = (typeof STATE_ALERT_KINDS)[number]
 

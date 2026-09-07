@@ -1,0 +1,331 @@
+===SP-STORE-DF===
+Filesystem             Type      1K-blocks      Used    Avail Use% IUse% Mounted on
+overlay                overlay    61202244   5274376 52786544  10%    2% /
+tmpfs                  tmpfs         65536         0    65536   0%    1% /dev
+shm                    tmpfs         65536         0    65536   0%    1% /dev/shm
+/run/host_mark/private fakeowner 482797652 446354404 36443248  93%    2% /mnt/a
+/dev/vda1              ext4       61202244   5274376 52786544  10%    2% /etc/hosts
+tmpfs                  tmpfs             4         0        4   0%  100% /proc/scsi
+===SP-STORE-LSBLK===
+{
+   "blockdevices": [
+      {
+         "name": "nbd0",
+         "kname": "nbd0",
+         "type": "disk",
+         "size": "0B",
+         "fstype": null,
+         "mountpoint": null,
+         "rota": false,
+         "pkname": null
+      },{
+         "name": "nbd1",
+         "kname": "nbd1",
+         "type": "disk",
+         "size": "0B",
+         "fstype": null,
+         "mountpoint": null,
+         "rota": false,
+         "pkname": null
+      },{
+         "name": "nbd2",
+         "kname": "nbd2",
+         "type": "disk",
+         "size": "0B",
+         "fstype": null,
+         "mountpoint": null,
+         "rota": false,
+         "pkname": null
+      },{
+         "name": "nbd3",
+         "kname": "nbd3",
+         "type": "disk",
+         "size": "0B",
+         "fstype": null,
+         "mountpoint": null,
+         "rota": false,
+         "pkname": null
+      },{
+         "name": "nbd4",
+         "kname": "nbd4",
+         "type": "disk",
+         "size": "0B",
+         "fstype": null,
+         "mountpoint": null,
+         "rota": false,
+         "pkname": null
+      },{
+         "name": "nbd5",
+         "kname": "nbd5",
+         "type": "disk",
+         "size": "0B",
+         "fstype": null,
+         "mountpoint": null,
+         "rota": false,
+         "pkname": null
+      },{
+         "name": "nbd6",
+         "kname": "nbd6",
+         "type": "disk",
+         "size": "0B",
+         "fstype": null,
+         "mountpoint": null,
+         "rota": false,
+         "pkname": null
+      },{
+         "name": "nbd7",
+         "kname": "nbd7",
+         "type": "disk",
+         "size": "0B",
+         "fstype": null,
+         "mountpoint": null,
+         "rota": false,
+         "pkname": null
+      },{
+         "name": "vda",
+         "kname": "vda",
+         "type": "disk",
+         "size": "59.6G",
+         "fstype": null,
+         "mountpoint": null,
+         "rota": true,
+         "pkname": null,
+         "children": [
+            {
+               "name": "vda1",
+               "kname": "vda1",
+               "type": "part",
+               "size": "59.6G",
+               "fstype": null,
+               "mountpoint": "/etc/hosts",
+               "rota": true,
+               "pkname": "vda"
+            }
+         ]
+      },{
+         "name": "vdb",
+         "kname": "vdb",
+         "type": "disk",
+         "size": "625.3M",
+         "fstype": null,
+         "mountpoint": null,
+         "rota": true,
+         "pkname": null
+      },{
+         "name": "nbd8",
+         "kname": "nbd8",
+         "type": "disk",
+         "size": "0B",
+         "fstype": null,
+         "mountpoint": null,
+         "rota": false,
+         "pkname": null
+      },{
+         "name": "nbd9",
+         "kname": "nbd9",
+         "type": "disk",
+         "size": "0B",
+         "fstype": null,
+         "mountpoint": null,
+         "rota": false,
+         "pkname": null
+      },{
+         "name": "nbd10",
+         "kname": "nbd10",
+         "type": "disk",
+         "size": "0B",
+         "fstype": null,
+         "mountpoint": null,
+         "rota": false,
+         "pkname": null
+      },{
+         "name": "nbd11",
+         "kname": "nbd11",
+         "type": "disk",
+         "size": "0B",
+         "fstype": null,
+         "mountpoint": null,
+         "rota": false,
+         "pkname": null
+      },{
+         "name": "nbd12",
+         "kname": "nbd12",
+         "type": "disk",
+         "size": "0B",
+         "fstype": null,
+         "mountpoint": null,
+         "rota": false,
+         "pkname": null
+      },{
+         "name": "nbd13",
+         "kname": "nbd13",
+         "type": "disk",
+         "size": "0B",
+         "fstype": null,
+         "mountpoint": null,
+         "rota": false,
+         "pkname": null
+      },{
+         "name": "nbd14",
+         "kname": "nbd14",
+         "type": "disk",
+         "size": "0B",
+         "fstype": null,
+         "mountpoint": null,
+         "rota": false,
+         "pkname": null
+      },{
+         "name": "nbd15",
+         "kname": "nbd15",
+         "type": "disk",
+         "size": "0B",
+         "fstype": null,
+         "mountpoint": null,
+         "rota": false,
+         "pkname": null
+      }
+   ]
+}
+===SP-STORE-FINDMNT===
+{
+   "filesystems": [
+      {
+         "target": "/",
+         "source": "overlay",
+         "fstype": "overlay",
+         "options": "rw,relatime,lowerdir=/var/lib/docker/overlay2/l/QXLWP733ZI7UX4M2EVSSOPIO5U:/var/lib/docker/overlay2/l/5NWUMAXJXONN3BGYPJ5MZEJ5CN,upperdir=/var/lib/docker/overlay2/01242c4acd11ae2b6f92e7f99cf633199c41b03952034e31f3afa7dba4fc6c65/diff,workdir=/var/lib/docker/overlay2/01242c4acd11ae2b6f92e7f99cf633199c41b03952034e31f3afa7dba4fc6c65/work",
+         "children": [
+            {
+               "target": "/proc",
+               "source": "proc",
+               "fstype": "proc",
+               "options": "rw,nosuid,nodev,noexec,relatime",
+               "children": [
+                  {
+                     "target": "/proc/bus",
+                     "source": "proc[/bus]",
+                     "fstype": "proc",
+                     "options": "ro,nosuid,nodev,noexec,relatime"
+                  },{
+                     "target": "/proc/fs",
+                     "source": "proc[/fs]",
+                     "fstype": "proc",
+                     "options": "ro,nosuid,nodev,noexec,relatime"
+                  },{
+                     "target": "/proc/irq",
+                     "source": "proc[/irq]",
+                     "fstype": "proc",
+                     "options": "ro,nosuid,nodev,noexec,relatime"
+                  },{
+                     "target": "/proc/sys",
+                     "source": "proc[/sys]",
+                     "fstype": "proc",
+                     "options": "ro,nosuid,nodev,noexec,relatime"
+                  },{
+                     "target": "/proc/sysrq-trigger",
+                     "source": "proc[/sysrq-trigger]",
+                     "fstype": "proc",
+                     "options": "ro,nosuid,nodev,noexec,relatime"
+                  },{
+                     "target": "/proc/interrupts",
+                     "source": "tmpfs[/null]",
+                     "fstype": "tmpfs",
+                     "options": "rw,nosuid,size=65536k,mode=755"
+                  },{
+                     "target": "/proc/kcore",
+                     "source": "tmpfs[/null]",
+                     "fstype": "tmpfs",
+                     "options": "rw,nosuid,size=65536k,mode=755"
+                  },{
+                     "target": "/proc/keys",
+                     "source": "tmpfs[/null]",
+                     "fstype": "tmpfs",
+                     "options": "rw,nosuid,size=65536k,mode=755"
+                  },{
+                     "target": "/proc/scsi",
+                     "source": "tmpfs",
+                     "fstype": "tmpfs",
+                     "options": "ro,relatime,size=4k,nr_inodes=1"
+                  },{
+                     "target": "/proc/timer_list",
+                     "source": "tmpfs[/null]",
+                     "fstype": "tmpfs",
+                     "options": "rw,nosuid,size=65536k,mode=755"
+                  }
+               ]
+            },{
+               "target": "/dev",
+               "source": "tmpfs",
+               "fstype": "tmpfs",
+               "options": "rw,nosuid,size=65536k,mode=755",
+               "children": [
+                  {
+                     "target": "/dev/pts",
+                     "source": "devpts",
+                     "fstype": "devpts",
+                     "options": "rw,nosuid,noexec,relatime,gid=5,mode=620,ptmxmode=666"
+                  },{
+                     "target": "/dev/mqueue",
+                     "source": "mqueue",
+                     "fstype": "mqueue",
+                     "options": "rw,nosuid,nodev,noexec,relatime"
+                  },{
+                     "target": "/dev/shm",
+                     "source": "shm",
+                     "fstype": "tmpfs",
+                     "options": "rw,nosuid,nodev,noexec,relatime,size=65536k"
+                  }
+               ]
+            },{
+               "target": "/sys",
+               "source": "sysfs",
+               "fstype": "sysfs",
+               "options": "ro,nosuid,nodev,noexec,relatime",
+               "children": [
+                  {
+                     "target": "/sys/firmware",
+                     "source": "tmpfs",
+                     "fstype": "tmpfs",
+                     "options": "ro,relatime,size=4k,nr_inodes=1"
+                  },{
+                     "target": "/sys/fs/cgroup",
+                     "source": "cgroup",
+                     "fstype": "cgroup2",
+                     "options": "ro,nosuid,nodev,noexec,relatime"
+                  }
+               ]
+            },{
+               "target": "/mnt/a",
+               "source": "/run/host_mark/private[/tmp]",
+               "fstype": "fakeowner",
+               "options": "rw,nosuid,nodev,relatime,fakeowner"
+            },{
+               "target": "/mnt/b",
+               "source": "/run/host_mark/private[/tmp]",
+               "fstype": "fakeowner",
+               "options": "rw,nosuid,nodev,relatime,fakeowner"
+            },{
+               "target": "/etc/resolv.conf",
+               "source": "/dev/vda1[/docker/containers/01efa3c1636f62facc7b752324cd1e77ed2ac4f4bea66e90d82e44b4b213cca6/resolv.conf]",
+               "fstype": "ext4",
+               "options": "rw,relatime,discard"
+            },{
+               "target": "/etc/hostname",
+               "source": "/dev/vda1[/docker/containers/01efa3c1636f62facc7b752324cd1e77ed2ac4f4bea66e90d82e44b4b213cca6/hostname]",
+               "fstype": "ext4",
+               "options": "rw,relatime,discard"
+            },{
+               "target": "/etc/hosts",
+               "source": "/dev/vda1[/docker/containers/01efa3c1636f62facc7b752324cd1e77ed2ac4f4bea66e90d82e44b4b213cca6/hosts]",
+               "fstype": "ext4",
+               "options": "rw,relatime,discard"
+            }
+         ]
+      }
+   ]
+}
+===SP-STORE-VGS===
+NOTOOL
+===SP-STORE-LVS===
+NOTOOL
+===SP-STORE-MDSTAT===

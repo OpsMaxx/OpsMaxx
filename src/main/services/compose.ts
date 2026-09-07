@@ -3,13 +3,18 @@ import type {
   ComposeEnvProbe,
   ComposeFailure,
   ComposeImageEditPlan,
+  ComposeRevertPlan,
   ComposeImageWriteRequest,
   ComposeImageWriteResult,
   ComposeListProbe,
-  ComposeProjectRef
+  ComposeProjectRef,
+  ComposeEnvWriteResult
 } from '../../shared/compose'
 import {
   applyComposeImageEdit,
+  buildComposeBackupReadCommand,
+  parseComposeBackupRead,
+  planComposeRevert,
   buildComposeConfigCommand,
   buildComposeEnvNamesCommand,
   buildComposeListCommand,
@@ -21,6 +26,11 @@ import {
   planComposeImageEdit,
   validateComposePath
 } from '../../shared/compose'
+import {
+  ENV_MAX_FILE_BYTES,
+  applyEnvWrite,
+  planEnvWrite
+} from '../../shared/envWrite'
 import { SUDO_PROBE } from '../../shared/docker'
 
 // The compose round trips.
@@ -98,7 +108,7 @@ export class ComposeReader {
     // A transport failure is not a compose failure. Saying "compose is not
     // installed" for a host that was simply unreachable sends someone to fix
     // the wrong machine.
-    if (!r.ok) return onTransportFailure(r.error ?? 'could not reach the host')
+    if (!r.ok) return onTransportFailure(r.error ?? 'could not reach the server')
     const stdout = r.stdout ?? ''
     const stderr = r.stderr ?? ''
     // Joined on a newline rather than glued: the collectors redirect the
@@ -236,7 +246,7 @@ export class ComposeReader {
     const command = buildComposeReadCommand(path, opts)
     try {
       const r = await this.deps.exec(cfg, command, READ_TIMEOUT_MS)
-      if (!r.ok) return { ok: false, error: r.error ?? 'could not reach the host' }
+      if (!r.ok) return { ok: false, error: r.error ?? 'could not reach the server' }
       const text = r.stdout ?? ''
       const stderr = (r.stderr ?? '').trim()
       // `head` writes its refusal to stderr and nothing to stdout. A file that
@@ -245,6 +255,82 @@ export class ComposeReader {
       return { ok: true, text }
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  /**
+   * Write ONE variable into a `.env`, with a value this class is HANDED.
+   *
+   * It does not reach the vault. The caller resolves the value and passes it,
+   * exactly as `dbSampler` is handed resolved configs and `driftReader` is
+   * denied the resolver entirely: the vault-shaped decisions stay in one place,
+   * and a reader that could open the vault to fill in a write is a reader with
+   * a reason to be given the vault.
+   *
+   * NOTHING ABOUT THE VALUE COMES BACK. The result says which line changed and
+   * whether it was replaced or appended. There is no field on it that could
+   * hold a value, and no error path returns file text -- an error message
+   * carrying the line it failed on would be the leak this whole module is
+   * arranged to prevent.
+   *
+   * No sudo failover, for the reason the header gives: a write is not a read.
+   */
+  async writeEnvValue(
+    cfg: unknown,
+    req: { path: string; name: string },
+    value: string,
+    opts: { sudo?: boolean } = {}
+  ): Promise<ComposeEnvWriteResult> {
+    if (!validateComposePath(req?.path)) return { ok: false, reason: 'not a valid file path' }
+    // No name check here: `planEnvWrite` validates it and returns the refusal
+    // with the name in it. A second check would read as though it were the one
+    // keeping the invariant, and it silently absorbed the mutation that
+    // deleted it.
+    if (typeof value !== 'string' || value === '') {
+      // An empty value would write `NAME=""`, which is a real and different
+      // thing from the variable the operator meant to set. It is refused rather
+      // than written, because the likeliest cause is a vault field that is
+      // empty or a slot that does not exist on that entry.
+      return { ok: false, reason: 'that vault entry has nothing in the field you picked' }
+    }
+    const read = await this.readFile(cfg, req.path, opts)
+    if (!read.ok || read.text === undefined) {
+      return { ok: false, reason: read.error ?? 'could not read the file' }
+    }
+    if (read.text.length > ENV_MAX_FILE_BYTES) {
+      return { ok: false, reason: 'that file is too large to be a .env' }
+    }
+
+    // Planned and applied in ONE main-process operation. There is no
+    // renderer round trip in between, so unlike the image edit there is no
+    // stale-plan case to catch -- it cannot arise.
+    const plan = planEnvWrite(read.text, req.name)
+    if (!plan.ok) return { ok: false, reason: plan.reason }
+
+    // ONE try, and it never returns an exception's message.
+    //
+    // Everything from here holds either the file body or the built command,
+    // and both contain the value. `applyEnvWrite` throws with the plan in
+    // hand, `buildComposeWriteCommand` throws with the content in hand, and a
+    // transport error can carry whatever it was given. A per-call catch that
+    // returned `e.message` anywhere in this block would be the leak the rest of
+    // the module is arranged to prevent, so no catch here does -- the remote's
+    // own `r.error` and `r.stdout` are returned fields rather than thrown
+    // messages, and are about `cp`/`tee`/`mv` rather than about the body.
+    try {
+      const updated = applyEnvWrite(read.text, plan, value)
+      const command = buildComposeWriteCommand(req.path, updated, opts)
+      const r = await this.deps.exec(cfg, command, WRITE_TIMEOUT_MS)
+      if (!r.ok) return { ok: false, reason: r.error ?? 'could not reach the server' }
+      const merged = `${r.stdout ?? ''}${r.stderr ?? ''}`
+      if ((r.code ?? 0) !== 0 || !merged.includes('===SHELLPILOT-END===')) {
+        // The remote's own words, and they are about `cp`/`tee`/`mv` rather
+        // than about the content -- the heredoc body is never echoed back.
+        return { ok: false, reason: merged.trim() || 'the file was not written' }
+      }
+      return { ok: true, name: plan.name, line: plan.line, action: plan.action, backup: `${req.path}.shellpilot-bak` }
+    } catch {
+      return { ok: false, reason: 'the file could not be written' }
     }
   }
 
@@ -261,6 +347,82 @@ export class ComposeReader {
    *
    * No sudo failover. See the header: a write is not a read.
    */
+  /**
+   * Plan putting one service back to the tag it had before ShellPilot's last
+   * edit to this file.
+   *
+   * BOTH FILES ARE RE-READ HERE, at the moment the revert is planned, for the
+   * same reason `writeImageTag` re-derives its plan: the renderer is not a
+   * trust boundary, and a revert computed against a file somebody has changed
+   * since is a write aimed at a line that has moved.
+   *
+   * It returns a PLAN and writes nothing. Applying it goes back through
+   * `writeImageTag` — same approval, same confirmation, same `expect` check —
+   * because a revert is an ordinary image edit and must not become a second
+   * write path with its own weaker rules.
+   */
+  async planRevert(
+    cfg: unknown,
+    req: { path: string; service: string },
+    opts: { sudo?: boolean } = {}
+  ): Promise<ComposeRevertPlan> {
+    if (!validateComposePath(req?.path)) {
+      return { ok: false, refusal: 'unreadable', reason: 'not a valid compose file path' }
+    }
+    let backupText: string | null
+    try {
+      const r = await this.deps.exec(
+        cfg,
+        buildComposeBackupReadCommand(req.path, opts),
+        READ_TIMEOUT_MS
+      )
+      // A host that did not answer says so. This is the branch the whole
+      // three-way read exists for: reporting it as "no backup" would tell an
+      // operator there is nothing to roll back on the strength of a question
+      // nobody got an answer to.
+      if (!r.ok) {
+        return {
+          ok: false,
+          refusal: 'unreachable',
+          reason: r.error ?? 'could not reach the server, so whether there is a backup is unknown'
+        }
+      }
+      const read = parseComposeBackupRead(`${r.stdout ?? ''}${r.stderr ?? ''}`)
+      if (read === null) {
+        return {
+          ok: false,
+          refusal: 'unreadable',
+          reason: 'the server did not say whether a backup is there, so nothing was assumed about it'
+        }
+      }
+      if (read.state === 'denied') {
+        return {
+          ok: false,
+          refusal: 'backup-denied',
+          reason:
+            'a ShellPilot backup is beside this compose file and this account may not read it. There may well be a tag to go back to — this is not a report that there is none.'
+        }
+      }
+      backupText = read.state === 'present' ? read.text : null
+    } catch (e) {
+      return {
+        ok: false,
+        refusal: 'unreachable',
+        reason: e instanceof Error ? e.message : String(e)
+      }
+    }
+
+    const current = await this.readFile(cfg, req.path, opts)
+    if (!current.ok || current.text === undefined) {
+      return {
+        ok: false,
+        refusal: 'unreachable',
+        reason: current.error ?? 'could not read the compose file'
+      }
+    }
+    return planComposeRevert(current.text, backupText, req.service)
+  }
+
   async writeImageTag(
     cfg: unknown,
     req: ComposeImageWriteRequest,
@@ -281,7 +443,7 @@ export class ComposeReader {
       return {
         ok: false,
         reason:
-          'the compose file on the host is not the one this edit was planned against — it has changed since it was read. Nothing was written.'
+          'the compose file on the server is not the one this edit was planned against — it has changed since it was read. Nothing was written.'
       }
     }
 
@@ -295,7 +457,7 @@ export class ComposeReader {
     const command = buildComposeWriteCommand(req.path, updated, opts)
     try {
       const r = await this.deps.exec(cfg, command, WRITE_TIMEOUT_MS)
-      if (!r.ok) return { ok: false, reason: r.error ?? 'could not reach the host' }
+      if (!r.ok) return { ok: false, reason: r.error ?? 'could not reach the server' }
       const merged = `${r.stdout ?? ''}${r.stderr ?? ''}`
       // The write chain is `cp && tee && mv && echo <end marker>`. The marker
       // is the only proof the `mv` ran: a non-zero exit is conclusive, but a

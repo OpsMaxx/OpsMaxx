@@ -130,6 +130,7 @@
 // guessing, which is exactly what a certificate body coming off a host needs,
 // and it is in a shared file with no `node:` imports so the renderer can bundle
 // it. See the note there on why this codebase decodes rather than shelling out.
+import { ERROR_RATE_WINDOW_MINUTES, errorRatePerMinute } from './errorRate'
 import { decodeBase64 } from './access'
 import { SUDO_PROBE, resolveBinary } from './docker'
 import type { FactStatus, HostFacts } from './hostFacts'
@@ -185,22 +186,27 @@ export const POSTURE_STATUS_HELP: Record<PostureStatus, string> = {
   ok: 'Read successfully. A zero here means the probe looked and found none, not "we could not look".',
   partial:
     'Some of it was read and some was not. What is shown is real; it is not the whole picture, and the part that was refused is named rather than left out.',
-  absent: 'This host does not have the thing that answers this, and that was checked rather than assumed.',
+  absent: 'This server does not have the thing that answers this, and that was checked rather than assumed.',
   denied:
     'It exists and this account was not allowed to read it. A different account, or passwordless sudo, would see more. This is NOT the same as there being no rules, no policy or no failures.',
-  'no-tool': 'The program that answers this is not installed on this host.',
+  'no-tool': 'The program that answers this is not installed on this server.',
   unsupported:
-    'This host cannot answer this question at all. For the firewall that means no firewall tooling is installed — which is not the same as no filtering: the kernel can enforce a ruleset loaded at boot with nothing left on disk to ask. Treat it as UNKNOWN, never as "open".',
+    'This server cannot answer this question at all. For the firewall that means no firewall tooling is installed — which is not the same as no filtering: the kernel can enforce a ruleset loaded at boot with nothing left on disk to ask. Treat it as UNKNOWN, never as "open".',
   unknown: 'The probe ran and its answer could not be read, or the collector never reported on it.'
 }
 
-/** The six things the collector reports on, each read independently. */
+/** The seven things the collector reports on, each read independently. */
 export type PostureSourceId =
   | 'firewall'
   | 'mandatory-access'
   | 'sshd-hardening'
   | 'failed-logins'
   | 'oom-kills'
+  // Between the OOM read and the certificates, matching the order the
+  // collector emits its notes in -- the `sources` array is built in that order,
+  // and a second ordering here would put the same seven rows on screen
+  // differently depending on which list a panel happened to iterate.
+  | 'error-rate'
   | 'certificates'
 
 export const POSTURE_SOURCE_IDS: PostureSourceId[] = [
@@ -209,6 +215,7 @@ export const POSTURE_SOURCE_IDS: PostureSourceId[] = [
   'sshd-hardening',
   'failed-logins',
   'oom-kills',
+  'error-rate',
   'certificates'
 ]
 
@@ -218,6 +225,7 @@ export const POSTURE_SOURCE_LABEL: Record<PostureSourceId, string> = {
   'sshd-hardening': 'sshd configuration',
   'failed-logins': 'Failed logins',
   'oom-kills': 'OOM kills',
+  'error-rate': 'Journal error rate',
   certificates: 'Certificate expiry'
 }
 
@@ -400,7 +408,7 @@ export interface FirewallRuleListing {
  * configured the host — which on a compromised host is not the operator.
  */
 export const FIREWALL_RULES_HOST_REPORTED_NOTE =
-  'Reported by the host. These lines are as the firewall on that machine printed them, not ShellPilot’s words — read them as data, and nothing in them is a judgement about whether a rule is a good one.'
+  'Reported by the server. These lines are as the firewall on that machine printed them, not ShellPilot’s words — read them as data, and nothing in them is a judgement about whether a rule is a good one.'
 
 /** ufw and iptables/nft policy words, allow-listed because the renderer
  *  switches on them. Anything else becomes null rather than being displayed. */
@@ -563,7 +571,7 @@ const SSHD_BASELINE: Record<
     values: ['yes', 'no'],
     hardened: ['no'],
     weak: ['yes'],
-    why: 'passwords are accepted, so this host can be brute-forced from the internet'
+    why: 'passwords are accepted, so this server can be brute-forced from the internet'
   },
   PubkeyAuthentication: {
     values: ['yes', 'no'],
@@ -829,15 +837,49 @@ export const CERT_SEARCH_ROOTS = [
   '/etc/pki/tls/certs',
   '/etc/nginx',
   '/etc/apache2',
-  '/etc/httpd'
+  '/etc/httpd',
+  // Item 39. Kubernetes control-plane certificates, and the reason this is the
+  // best-value line in that table: kubeadm issues them for ONE YEAR and renews
+  // them on upgrade. A cluster that is not upgraded for a year stops -- every
+  // component at once, with `x509: certificate has expired` in every log -- and
+  // there is no warning anywhere before it happens. It is the single most
+  // common way a self-managed cluster dies.
+  //
+  // No new alert kind: these are certificates on a server, so the `cert-expiry`
+  // kind that already exists fires for them. That is the whole point of putting
+  // them here rather than building a Kubernetes-specific probe.
+  //
+  // Ordered AFTER the web roots deliberately. `find` walks its arguments in
+  // order and the cap below is a `head`, so on a host that is somehow both a
+  // busy web server and a control plane, the certificates somebody is more
+  // likely to be renewing by hand survive the truncation -- and `truncated`
+  // says the list is a prefix either way.
+  '/etc/kubernetes/pki',
+  '/var/lib/kubelet/pki',
+  // k3s and rke2 keep their own, in the same shape, under rancher's tree.
+  '/var/lib/rancher/k3s/server/tls',
+  '/var/lib/rancher/rke2/server/tls'
 ] as const
 
 /** Deep enough for `/etc/letsencrypt/live/<domain>/fullchain.pem` and for the
  *  `ssl/<site>/` layout people give nginx, and no deeper. */
 export const CERT_SEARCH_MAX_DEPTH = 3
 
-/** The cap on files read. `truncated` says when it was reached. */
-export const CERT_SEARCH_MAX_FILES = 16
+/**
+ * The cap on files read. `truncated` says when it was reached.
+ *
+ * Raised from 16 with the Kubernetes roots, because a kubeadm control plane
+ * holds about thirteen certificates in `/etc/kubernetes/pki` alone once
+ * `etcd/` is counted, plus the kubelet's own -- so at 16 a control-plane node
+ * would have reported a truncated list of its own certificates and nothing
+ * else, which is the shape of answer this probe exists to avoid.
+ *
+ * The wire cost is the number that matters and it is stated rather than
+ * guessed: 32 x CERT_B64_CAP is 64 KB of base64 per host in the worst case,
+ * on the posture sweep's cadence and not the sampler's. Still a cap, and still
+ * low enough that a pathological tree cannot hold an SSH channel open.
+ */
+export const CERT_SEARCH_MAX_FILES = 32
 
 /** The most base64 transmitted per certificate. A leaf certificate is 1.1 to
  *  2.2 KB of base64, so this holds a whole normal one; a certificate longer
@@ -955,6 +997,22 @@ export interface CertificateInventory {
 
 // ---- The posture itself ---------------------------------------------------
 
+/**
+ * How much this host is complaining, and over what.
+ *
+ * The WINDOW travels with the count for the same reason it does on
+ * OomKillSummary: a number of lines means nothing without the period it was
+ * counted over, and the two must not be able to drift apart. `count` is null
+ * for a journal that answered nothing readable -- never zero, which is a
+ * reading.
+ */
+export interface ErrorRateSummary {
+  /** Lines at err or worse in the window, or null when none was counted. */
+  count: number | null
+  /** The collector's own words for the period. Null when it said nothing. */
+  window: string | null
+}
+
 export interface HostPosture {
   firewall: FirewallState | null
   mandatoryAccess: MandatoryAccess | null
@@ -962,6 +1020,7 @@ export interface HostPosture {
   failedLogins: FailedLoginSummary | null
   oomKills: OomKillSummary | null
   certificates: CertificateInventory | null
+  errorRate: ErrorRateSummary | null
   /** Epoch milliseconds this collection ran, by OUR clock. */
   collectedAt: number
   sources: PostureSourceReport[]
@@ -1224,10 +1283,10 @@ export function buildPostureCommand(opts: PostureCollectOptions = {}): string {
     `sp_val fw-active "$(grep -i '^ENABLED=' /etc/ufw/ufw.conf 2>/dev/null | head -1 | sed 's/^[^=]*=//')"`,
     'SP_FW_READ=1',
     'SP_FW_MISS=1',
-    'SP_FW_D="ufw status needs root on this host, so only /etc/ufw/ufw.conf was read: it says whether ufw is switched on and nothing about the rules"',
+    'SP_FW_D="ufw status needs root on this server, so only /etc/ufw/ufw.conf was read: it says whether ufw is switched on and nothing about the rules"',
     'else',
     'SP_FW_MISS=1',
-    'SP_FW_D="ufw is installed and reading its status needs root on this host"',
+    'SP_FW_D="ufw is installed and reading its status needs root on this server"',
     'fi',
 
     // ---- firewalld -------------------------------------------------------
@@ -1278,7 +1337,7 @@ export function buildPostureCommand(opts: PostureCollectOptions = {}): string {
     ),
     'else',
     'SP_FW_MISS=1',
-    'SP_FW_D="firewalld is running and listing its rules needs root on this host"',
+    'SP_FW_D="firewalld is running and listing its rules needs root on this server"',
     'fi',
     'elif [ -d /etc/firewalld ] && [ ! -x /etc/firewalld ]; then',
     // Traversal before existence again. A firewalld config directory this
@@ -1357,7 +1416,7 @@ export function buildPostureCommand(opts: PostureCollectOptions = {}): string {
     // hypervisor security group in front of the NIC. "There is nothing here to
     // ask" is true; "there is no firewall" is not, and this build cannot tell
     // them apart.
-    'sp_note firewall unsupported - "this host has none of ufw, firewalld, nft or iptables installed, so nothing here can be asked what the kernel is filtering — which is NOT the same as nothing being filtered"',
+    'sp_note firewall unsupported - "this server has none of ufw, firewalld, nft or iptables installed, so nothing here can be asked what the kernel is filtering — which is NOT the same as nothing being filtered"',
     'elif [ "$SP_FW_READ" = 1 ] && [ "$SP_FW_MISS" = 0 ]; then',
     'sp_note firewall ok "$SP_FW_W" "$SP_FW_D"',
     'elif [ "$SP_FW_READ" = 1 ]; then',
@@ -1436,12 +1495,12 @@ export function buildPostureCommand(opts: PostureCollectOptions = {}): string {
     `sp_val mac-complain "$(printf '%s\\n' "$SP_PROF" | grep -c '(complain)' || true)"`,
     'elif [ "$SP_MAC_ST" = ok ]; then',
     'SP_MAC_ST=partial',
-    'SP_MAC_D="apparmor is enabled and its profile list needs root on this host, so how many profiles are loaded was not read"',
+    'SP_MAC_D="apparmor is enabled and its profile list needs root on this server, so how many profiles are loaded was not read"',
     'fi',
     'else',
     // CHECKED absent, not assumed. Both interfaces were looked for and neither
     // is there — a real finding on a stock Debian without apparmor installed.
-    'sp_note mandatory-access absent - "this host has neither SELinux nor AppArmor: no selinuxfs, no apparmor module and neither getenforce nor aa-status is installed"',
+    'sp_note mandatory-access absent - "this server has neither SELinux nor AppArmor: no selinuxfs, no apparmor module and neither getenforce nor aa-status is installed"',
     'SP_MAC_ST=""',
     'fi',
     '[ -n "$SP_MAC_ST" ] && sp_note mandatory-access "$SP_MAC_ST" "$SP_MAC_W" "$SP_MAC_D"',
@@ -1494,7 +1553,7 @@ export function buildPostureCommand(opts: PostureCollectOptions = {}): string {
     // failure, more hardened than average rather than less.
     'if [ ! -d /etc/ssh ]; then',
     'SP_SSHD_ST=absent',
-    'SP_SSHD_D="this host has no /etc/ssh directory"',
+    'SP_SSHD_D="this server has no /etc/ssh directory"',
     'elif [ ! -x /etc/ssh ]; then',
     'SP_SSHD_ST=denied',
     'SP_SSHD_D="/etc/ssh exists and this account cannot enter it, so nothing about how sshd is configured was read"',
@@ -1620,10 +1679,10 @@ export function buildPostureCommand(opts: PostureCollectOptions = {}): string {
     'case "$SP_ERR" in',
     '*"No such file"*|*"no such file"*|*"cannot open"*)',
     'SP_FL_ST=absent',
-    'SP_FL_D="this host has no /var/log/btmp, so failed logins are not being recorded there at all" ;;',
+    'SP_FL_D="this server has no /var/log/btmp, so failed logins are not being recorded there at all" ;;',
     '*)',
     'SP_FL_ST=denied',
-    'SP_FL_D="/var/log/btmp exists and reading it needs root on this host" ;;',
+    'SP_FL_D="/var/log/btmp exists and reading it needs root on this server" ;;',
     'esac',
     'fi',
     'fi',
@@ -1678,7 +1737,7 @@ export function buildPostureCommand(opts: PostureCollectOptions = {}): string {
     ...findBin('dmesg', 'SP_DMESG'),
     'SP_OOM_ST=no-tool',
     'SP_OOM_W="-"',
-    'SP_OOM_D="this host has no readable kernel journal, no readable dmesg and no /var/log/kern.log, so whether the OOM killer has run cannot be established"',
+    'SP_OOM_D="this server has no readable kernel journal, no readable dmesg and no /var/log/kern.log, so whether the OOM killer has run cannot be established"',
     // Set the moment something that COULD have answered refuses. Without it a
     // host whose journal exists and is root-only, with no dmesg and no
     // kern.log, would fall through to `no-tool` — which reads as "there is
@@ -1770,7 +1829,7 @@ export function buildPostureCommand(opts: PostureCollectOptions = {}): string {
     'if [ -d /var/log ] && [ ! -x /var/log ]; then',
     'SP_OOM_ST=denied',
     'SP_OOM_REF=1',
-    'SP_OOM_D="/var/log exists on this host and this account may not enter it, so the kernel log inside it was never opened"',
+    'SP_OOM_D="/var/log exists on this server and this account may not enter it, so the kernel log inside it was never opened"',
     'elif [ -f /var/log/kern.log ]; then',
     // The error text with the count thrown away, so a permission problem is
     // told apart from a file that genuinely holds no kills.
@@ -1800,7 +1859,7 @@ export function buildPostureCommand(opts: PostureCollectOptions = {}): string {
     'else',
     'SP_OOM_ST=denied',
     'SP_OOM_REF=1',
-    'SP_OOM_D="/var/log/kern.log exists and reading it needs root on this host"',
+    'SP_OOM_D="/var/log/kern.log exists and reading it needs root on this server"',
     'fi',
     'fi',
     'fi',
@@ -1810,9 +1869,69 @@ export function buildPostureCommand(opts: PostureCollectOptions = {}): string {
     // person can close. The whole point of SP_OOM_REF.
     'if [ "$SP_OOM_ST" = no-tool ] && [ "$SP_OOM_REF" = 1 ]; then',
     'SP_OOM_ST=denied',
-    'SP_OOM_D="a kernel log is present on this host and this account may not read it. This is NOT a report of no OOM kills."',
+    'SP_OOM_D="a kernel log is present on this server and this account may not read it. This is NOT a report of no OOM kills."',
     'fi',
     'sp_note oom-kills "$SP_OOM_ST" "$SP_OOM_W" "$SP_OOM_D"',
+
+    // =====================================================================
+    // JOURNAL ERROR RATE
+    // =====================================================================
+    //
+    // How many lines at err-or-worse this host wrote in the last hour. The one
+    // logging fact worth alerting on: the tailer and the search both require
+    // somebody to already be looking.
+    //
+    // THE WINDOW MATCHES THE SWEEP, and that is the whole reason it is sixty
+    // minutes rather than a livelier ten. A window shorter than the interval
+    // between collections leaves time nobody looked at, and the answer would
+    // still be presented as this host's error rate. Hourly sweep, hourly
+    // window, no gap. Measured cost of the read on a real host: 0.213s.
+    //
+    // ITS OWN READABILITY PROBE, not SP_JRUN and not SP_OOMRUN. SP_JRUN is
+    // resolved only on the branch where lastb failed, so it is frequently
+    // unset; SP_OOMRUN answers for `-k`, which is a DIFFERENT permission --
+    // an account in `adm` may read one and not the other. Reusing either would
+    // report a refusal as a zero.
+    //
+    // `-q` AND `2>/dev/null` AND `grep -c .`, all three, because journald
+    // writes `-- No entries --` TO STDERR: a count taken with the streams
+    // merged is 1 for a host with no errors at all, which is a permanent
+    // low-grade false alert on every quiet machine in the estate. Measured
+    // both ways on systemd 255.
+    'SP_ERR_ST=no-tool',
+    'SP_ERR_W="-"',
+    'SP_ERR_D="this server has no journalctl, so how many errors it is writing could not be established"',
+    'SP_ERRUN=""',
+    'if [ -n "$SP_JCTL" ]; then',
+    // `-n 0` opens the journal, prints nothing and exits non-zero when this
+    // account may not read it -- the same cheap probe the other two use, and
+    // for the same reason: without it the count below reports 0 for a refusal.
+    '"$SP_JCTL" --no-pager -q -n 0 >/dev/null 2>&1 && SP_ERRUN="$SP_JCTL"',
+    ...ifSudo(
+      'if [ -z "$SP_ERRUN" ] && [ "$SP_SUDO" = 1 ]; then',
+      'sudo -n "$SP_JCTL" --no-pager -q -n 0 >/dev/null 2>&1 && { SP_ERRUN="sudo -n $SP_JCTL"; SP_ERR_W=root; }',
+      'fi'
+    ),
+    'fi',
+    'if [ -n "$SP_ERRUN" ]; then',
+    'sp_val err-tool journal',
+    `SP_ERRA="--no-pager -q -p err --since -${ERROR_RATE_WINDOW_MINUTES}min"`,
+    // Taken from the substitution's OUTPUT rather than its exit status, as
+    // every other count here is: `grep -c` exits 1 when it counts none and
+    // still PRINTS 0, so a probe reading the status would turn a quiet host
+    // into one that could not be asked.
+    `sp_val err-count "$($SP_ERRUN $SP_ERRA 2>/dev/null | grep -c . || true)"`,
+    `sp_val err-window "the last ${ERROR_RATE_WINDOW_MINUTES} minutes of the journal"`,
+    'SP_ERR_ST=ok',
+    `SP_ERR_D="journalctl -p err over the last ${ERROR_RATE_WINDOW_MINUTES} minutes"`,
+    'elif [ -n "$SP_JCTL" ]; then',
+    // The same distinction SP_OOM_REF exists for: "there is nothing here to
+    // ask" and "there is, and you may not" have different fixes, and only one
+    // is a gap a person can close.
+    'SP_ERR_ST=denied',
+    'SP_ERR_D="the journal is present on this server and this account may not read it. This is NOT a report of no errors."',
+    'fi',
+    'sp_note error-rate "$SP_ERR_ST" "$SP_ERR_W" "$SP_ERR_D"',
 
     // =====================================================================
     // CERTIFICATES
@@ -1838,7 +1957,7 @@ export function buildPostureCommand(opts: PostureCollectOptions = {}): string {
     // CERTIFICATES is the half-probe this item was deferred rather than ship.
     'SP_CERT_ST=absent',
     'SP_CERT_W="-"',
-    'SP_CERT_D="none of the certificate directories ShellPilot looks in is present on this host"',
+    'SP_CERT_D="none of the certificate directories ShellPilot looks in is present on this server"',
     'SP_CERT_ROOTS=""',
     // The escalation prefix, empty unless a root needed root. /etc/letsencrypt
     // is 0700 root on Debian, which makes this the COMMON case rather than an
@@ -1914,13 +2033,13 @@ export function buildPostureCommand(opts: PostureCollectOptions = {}): string {
     'SP_CERT_ST=absent',
     'elif [ -z "$SP_CERT_ROOTS" ]; then',
     'SP_CERT_ST=denied',
-    'SP_CERT_D="every certificate directory present on this host refused to be entered. This is NOT a report of no certificates."',
+    'SP_CERT_D="every certificate directory present on this server refused to be entered. This is NOT a report of no certificates."',
     'elif [ "$SP_CERT_MISS" -gt 0 ]; then',
     'SP_CERT_ST=partial',
     'SP_CERT_D="some certificate directories were read and some refused to be entered. A directory that could not be read is not a directory with no certificates."',
     'else',
     'SP_CERT_ST=ok',
-    'SP_CERT_D="read every certificate directory that is present on this host"',
+    'SP_CERT_D="read every certificate directory that is present on this server"',
     'fi',
     'sp_val cert-refused "$SP_CERT_MISS"',
     // Emitted on every run including the empty one, so the parser can tell "the
@@ -1977,6 +2096,9 @@ const VALUE_KEYS = [
   'oom-window',
   'cert-refused',
   'cert-searched',
+  'err-tool',
+  'err-count',
+  'err-window',
 ] as const
 type ValueKey = (typeof VALUE_KEYS)[number]
 
@@ -2288,7 +2410,7 @@ export function judgeSshd(
   }
   if (raw === null) {
     if (opts.sourceStatus === 'denied' || opts.sourceStatus === 'absent') {
-      return unknown('sshd’s configuration could not be read on this host, so this is unchecked — not passing.')
+      return unknown('sshd’s configuration could not be read on this server, so this is unchecked — not passing.')
     }
     if (opts.effective) {
       return unknown('sshd reported its effective configuration and this directive was not in it, which this build cannot explain.')
@@ -2299,12 +2421,12 @@ export function judgeSshd(
   }
 
   const value = freeText(raw)
-  if (value === null) return unknown('the host reported an empty value for this directive.')
+  if (value === null) return unknown('the server reported an empty value for this directive.')
 
   // Numeric directive.
   if (directive === 'MaxAuthTries') {
     const n = parseCount(value)
-    if (n === null) return unknown('the host reported a value for MaxAuthTries that is not a number.')
+    if (n === null) return unknown('the server reported a value for MaxAuthTries that is not a number.')
     return {
       directive,
       value: String(n),
@@ -2335,7 +2457,7 @@ export function judgeSshd(
     // yes===SHELLPILOT-POSTURE===` — or anything else outside sshd's own
     // vocabulary — gets `unknown`, not a value the panel would render.
     return unknown(
-      `the host reported a value for ${directive} that is not one sshd accepts, so nothing is concluded from it.`
+      `the server reported a value for ${directive} that is not one sshd accepts, so nothing is concluded from it.`
     )
   }
   if (base.hardened.includes(lower)) {
@@ -2604,6 +2726,20 @@ export function parsePosture(output: string, now = Date.now()): HostPosture {
           window: freeText(values.get('oom-window'))
         }
 
+  // ---- journal error rate -------------------------------------------------
+  //
+  // Null when the journal answered nothing, exactly as oomKills and
+  // failedLogins are null: a summary carrying a null count would render as a
+  // real reading of a very quiet host, and the reason belongs on the source
+  // report where a person can see it.
+  const errorRate: ErrorRateSummary | null =
+    values.get('err-tool') === undefined
+      ? null
+      : {
+          count: parseCount(values.get('err-count')),
+          window: freeText(values.get('err-window'))
+        }
+
   // ---- certificates ------------------------------------------------------
   //
   // Null ONLY when the block never ran. `cert-searched` is emitted on every
@@ -2636,7 +2772,7 @@ export function parsePosture(output: string, now = Date.now()): HostPosture {
     confirm(
       'firewall',
       firewall !== null && (firewall.tool !== null || firewall.backend.tool !== null),
-      'the firewall probe reported success and named no tool, so nothing about what this host filters was established'
+      'the firewall probe reported success and named no tool, so nothing about what this server filters was established'
     ),
     confirm(
       'mandatory-access',
@@ -2656,12 +2792,17 @@ export function parsePosture(output: string, now = Date.now()): HostPosture {
     confirm(
       'oom-kills',
       oomKills !== null && oomKills.count !== null,
-      'the OOM probe reported success and returned no count, so whether this host has killed anything for memory was not established'
+      'the OOM probe reported success and returned no count, so whether this server has killed anything for memory was not established'
+    ),
+    confirm(
+      'error-rate',
+      errorRate !== null && errorRate.count !== null,
+      'the error-rate probe reported success and returned no count, so how much this server is complaining was not established'
     ),
     confirm(
       'certificates',
       certificates !== null,
-      'the certificate probe reported success and returned no search at all, so nothing about what expires on this host was established'
+      'the certificate probe reported success and returned no search at all, so nothing about what expires on this server was established'
     )
   ]
 
@@ -2672,6 +2813,7 @@ export function parsePosture(output: string, now = Date.now()): HostPosture {
     failedLogins,
     oomKills,
     certificates,
+    errorRate,
     collectedAt: now,
     sources
   }
@@ -2703,7 +2845,7 @@ export function securityUpdateReading(facts: HostFacts | null): {
       count: null,
       status: 'unknown',
       detail:
-        'no host facts have been collected for this server yet, so its security update count is unknown. Switch on the Inventory collection, or wait for the next hourly sweep.'
+        'no server facts have been collected for this server yet, so its security update count is unknown. Switch on the Inventory collection, or wait for the next hourly sweep.'
     }
   }
   const s = factSource(facts, 'security-updates')
@@ -2756,10 +2898,32 @@ export interface PostureAlertReadings {
    * different sentence rather than as a small number.
    */
   certDays: number | null
+  /**
+   * Journal lines at error or worse, PER MINUTE, or null.
+   *
+   * Null for every host that was not actually counted -- no journalctl, a
+   * journal this account may not read, a probe that did not report ok. A zero
+   * would be the most reassuring possible way to say nobody looked, and this is
+   * the alert most able to make that mistake: an unreadable journal produces no
+   * lines, and "no lines" and "no errors" are the same empty output.
+   */
+  errorPerMinute: number | null
+  /** The window those lines were counted over, for the sentence. */
+  errorWindowMinutes: number
+  /** Our words for why there is no number, when there is none. */
+  errorDetail: string
 }
 
 export function postureAlertReadings(posture: HostPosture | null): PostureAlertReadings {
-  if (posture === null) return { oomKills: null, oomDetail: '', certDays: null }
+  if (posture === null)
+    return {
+      oomKills: null,
+      oomDetail: '',
+      certDays: null,
+      errorPerMinute: null,
+      errorWindowMinutes: ERROR_RATE_WINDOW_MINUTES,
+      errorDetail: 'this server has not been collected yet'
+    }
 
   const oom = posture.oomKills
   const oomStatus = postureSource(posture, 'oom-kills').status
@@ -2784,7 +2948,35 @@ export function postureAlertReadings(posture: HostPosture | null): PostureAlertR
   // contributes nothing rather than contributing reassurance: it is counted as
   // a gap by the panel and by the roll-up, and the alert simply has one fewer
   // number to be worst.
-  return { oomKills, oomDetail, certDays: soonestCertificateExpiry(posture.certificates) }
+  // The error rate, and ONLY from a probe that said ok. `partial` has no
+  // meaning here and is never emitted for this source -- there is one way to
+  // count the journal and either it was readable or it was not -- but the
+  // status is checked rather than assumed, so a future source that can only
+  // half-answer cannot arrive as a clean reading without someone deciding what
+  // it means.
+  const errStatus = postureSource(posture, 'error-rate').status
+  const err = posture.errorRate
+  const errorPerMinute =
+    errStatus === 'ok' && err !== null
+      ? errorRatePerMinute(err.count, ERROR_RATE_WINDOW_MINUTES)
+      : null
+  const errorDetail =
+    errorPerMinute !== null
+      ? ''
+      : errStatus === 'denied'
+        ? 'this account may not read the journal on this server'
+        : errStatus === 'no-tool'
+          ? 'this server has no journalctl'
+          : 'the journal was not counted on this collection'
+
+  return {
+    oomKills,
+    oomDetail,
+    certDays: soonestCertificateExpiry(posture.certificates),
+    errorPerMinute,
+    errorWindowMinutes: ERROR_RATE_WINDOW_MINUTES,
+    errorDetail
+  }
 }
 
 /**

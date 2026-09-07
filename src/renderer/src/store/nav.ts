@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { useApp } from './app'
 import { isOperateModule, type ModuleId, type OperateModuleId } from '../../../shared/modules'
+import type { LogPriority } from '../../../shared/logtail'
 
 // Which page of AI & MCP, and which page of Settings, is open. Both used to be
 // local `useState` inside their panel, which meant nothing outside the panel
@@ -54,6 +55,63 @@ export type OperationsTab = OperateModuleId
  * hides a subtree; it never tears one down.
  */
 export type FleetRail = 'monitor' | 'operations'
+/**
+ * A jump into the log tail asked for from elsewhere in the monitor -- item 43.
+ *
+ * `LogTailPanel` has taken a `jump` prop since it shipped, and its own comment
+ * names the caller this is for: "the failed-unit list is the one that matters".
+ * Nothing ever passed it. This is the other half.
+ *
+ * Held in nav rather than lifted into FleetMonitor's state for the reason
+ * `monitorTab` is: the failed-unit list is several components down, and
+ * threading a setter through them to reach a sibling is how that prop came to
+ * be unused in the first place.
+ *
+ * `nonce` rather than a value comparison, because tailing the same unit on the
+ * same server twice in a row is a thing people do -- LogTailJump's own note.
+ */
+export interface LogTailJumpRequest {
+  kind: 'unit' | 'file' | 'container'
+  target: string
+  serverId: string
+  nonce: number
+  /** journald filters, carried through a jump so an alert can land on the
+   *  window that explains it rather than on the whole unit's history. Unit
+   *  jumps only; the panel ignores them for files and containers, which is the
+   *  same rule `validateLogSource` enforces. */
+  priority?: LogPriority
+  since?: string
+}
+
+/**
+ * A prefilled job step, from wherever the operator noticed they needed one.
+ *
+ * DELIBERATELY NOT A JUMP THAT RUNS. `openLogTail` lands on lines because
+ * reading is safe; this lands on a FILLED FORM because a service action is a
+ * write on somebody's server, and the confirmation it goes through is the point
+ * of the composer rather than a step to be skipped by arriving with an
+ * intention.
+ */
+/**
+ * A strictly increasing jump id.
+ *
+ * NOT `Date.now()`, which is what this used to be on both jump kinds. Both
+ * panels ignore a jump whose nonce equals the last one they honoured -- so that
+ * asking twice for the same unit re-fills rather than being swallowed -- and
+ * two clicks inside one millisecond produce the SAME `Date.now()`. The second
+ * one then did nothing, which is exactly the case the nonce exists to handle.
+ * A counter cannot collide.
+ */
+let jumpSeq = 0
+const nextNonce = (): number => (jumpSeq += 1)
+
+export interface JobComposerJump {
+  serverId: string
+  mode: 'service'
+  action: 'start' | 'stop' | 'restart' | 'reload' | 'enable' | 'disable'
+  unit: string
+  nonce: number
+}
 
 interface NavState {
   aiSection: AiSection
@@ -74,6 +132,10 @@ interface NavState {
   operationsTab: OperationsTab
   /** Which of the two fleet destinations is showing. See FleetRail. */
   fleetRail: FleetRail
+  /** Consumed by LogTailPanel's `jump` prop; see LogTailJumpRequest. */
+  logTailJump: LogTailJumpRequest | null
+  /** Consumed by JobsPanel; see JobComposerJump. */
+  jobComposerJump: JobComposerJump | null
   setAiSection: (s: AiSection) => void
   setSettingsSection: (s: SettingsSection) => void
   setMonitorTab: (t: MonitorTab) => void
@@ -91,6 +153,8 @@ export const useNav = create<NavState>((set) => ({
   // planner starts computing a plan against the estate the moment it is shown.
   operationsTab: 'broadcast',
   fleetRail: 'monitor',
+  logTailJump: null,
+  jobComposerJump: null,
   setAiSection: (s) => set({ aiSection: s, aiGroupId: null }),
   setSettingsSection: (s) => set({ settingsSection: s }),
   setMonitorTab: (t) => set({ monitorTab: t }),
@@ -105,12 +169,66 @@ export function openAi(section: AiSection, groupId?: string | null): void {
 }
 
 /**
+ * Open the log tail on one unit on one server, and start it.
+ *
+ * It lands on LINES rather than on a filled-in form, which is LogTailPanel's
+ * own decision about what a jump means: somebody who clicked a failed unit
+ * asked to see its log, not to be shown a form about it.
+ */
+export function openLogTail(
+  serverId: string,
+  target: string,
+  kind: LogTailJumpRequest['kind'] = 'unit',
+  filters: { priority?: LogPriority; since?: string } = {}
+): void {
+  useNav.setState({
+    monitorTab: 'logTail',
+    logTailJump: {
+      kind,
+      target,
+      serverId,
+      nonce: nextNonce(),
+      // Spread rather than assigned: an absent filter must stay absent, or a
+      // jump with no window would clear one the operator had set by hand.
+      ...(kind === 'unit' && filters.priority !== undefined ? { priority: filters.priority } : {}),
+      ...(kind === 'unit' && filters.since !== undefined ? { since: filters.since } : {})
+    }
+  })
+  useApp.getState().setActivity('monitor')
+}
+
+/**
+ * Open the job composer with a service step filled in, on one server.
+ *
+ * Nothing runs. The operator still picks the wave, reads the plan and confirms,
+ * which is exactly what they would have done had they typed it — the only thing
+ * removed is the retyping of a unit name they are looking at.
+ */
+export function openServiceJob(
+  serverId: string,
+  action: JobComposerJump['action'],
+  unit: string
+): void {
+  // `jobs` is an OPERATIONS tab, not a monitor one — it composes work that runs
+  // on servers. Setting `monitorTab` here would leave the jump filled in on a
+  // panel the Monitoring rail no longer renders, so the operator would land on
+  // Overview with a prefilled composer they cannot see. Same routing the
+  // openMonitor guard does, applied at the source rather than after the fact.
+  useNav.setState({
+    operationsTab: 'jobs',
+    fleetRail: 'operations',
+    jobComposerJump: { serverId, mode: 'service', action, unit, nonce: nextNonce() }
+  })
+  useApp.getState().setActivity('monitor')
+}
+
+/**
  * Open the Fleet Monitor on a particular panel.
  *
  * An `operate` module is ROUTED to Operations rather than refused, and that
  * matters more than it looks. Every pointer into this destination — the
  * status-bar chips, an alert's "show me", a round trip through
- * `openSettings('modules')` — was written when Monitoring held all fifteen
+ * `openSettings('modules')` — was written when Monitoring held all seventeen
  * modules. Splitting the destination underneath them would have turned each of
  * those into a click that opens Monitoring and shows Overview, which is the
  * failure this whole file was written against: a pointer that opens the wrong

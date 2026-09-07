@@ -1,0 +1,29 @@
+### podman compose config, plain (THE LEAK)
+[4m>>>> Executing external compose provider "/usr/bin/podman-compose". Please see podman-compose(1) for how to disable this message. <<<<
+
+[0mservices:
+  web:
+    environment:
+      SECRET: hunter2
+    image: busybox
+
+EXIT=0
+### podman compose config with the safe flags
+[4m>>>> Executing external compose provider "/usr/bin/podman-compose". Please see podman-compose(1) for how to disable this message. <<<<
+
+[0musage: podman-compose [-h] [-v] [--in-pod in_pod] [--pod-args pod_args]
+                      [--env-file env_file] [-f file] [--profile profile]
+                      [-p PROJECT_NAME] [--podman-path PODMAN_PATH]
+                      [--podman-args args] [--podman-pull-args args]
+EXIT=2
+### no provider at all
+Error: looking up compose provider failed
+7 errors occurred:
+	* exec: "/root/.docker/cli-plugins/docker-compose": stat /root/.docker/cli-plugins/docker-compose: no such file or directory
+	* exec: "/usr/local/lib/docker/cli-plugins/docker-compose": stat /usr/local/lib/docker/cli-plugins/docker-compose: no such file or directory
+	* exec: "/usr/local/libexec/docker/cli-plugins/docker-compose": stat /usr/local/libexec/docker/cli-plugins/docker-compose: no such file or directory
+	* exec: "/usr/lib/docker/cli-plugins/docker-compose": stat /usr/lib/docker/cli-plugins/docker-compose: no such file or directory
+	* exec: "/usr/libexec/docker/cli-plugins/docker-compose": stat /usr/libexec/docker/cli-plugins/docker-compose: no such file or directory
+	* exec: "docker-compose": executable file not found in $PATH
+	* exec: "podman-compose": executable file not found in $PATH
+EXIT=125

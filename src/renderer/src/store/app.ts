@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
 import { FLEET_INTERVAL_DEFAULT_MS } from '../../../shared/fleet'
 import { defaultModuleState, type ModuleState } from '../../../shared/modules'
+import type { DriftWatchProposal } from '../../../shared/driftWatch'
 import { forgetServer } from './serverCleanup'
 import type {
   ActivityView,
@@ -104,6 +105,20 @@ export interface AppSettings {
   resourceAlertsEnabled: boolean
   resourceAlertThreshold: number
   /**
+   * Clusters to watch for restarting pods — item 40's "from which host".
+   *
+   * EMPTY BY DEFAULT, and the emptiness is the point. A background poll cannot
+   * guess which servers hold a kubeconfig, and trying every server would run
+   * `kubectl` across the estate every couple of minutes to find out. So the
+   * operator names the one server to ask, per context, and nothing is polled
+   * until they do.
+   *
+   * One entry per CLUSTER, not per server: a cluster reachable from three
+   * admin boxes is one thing to watch, and the alert is keyed on the context
+   * for the same reason.
+   */
+  k8sWatch?: { serverId: string; context: string }[]
+  /**
    * Per-host overrides of the CPU/memory threshold, by server id.
    *
    * An estate is not uniform: a build box at 95% is working and a database at
@@ -136,6 +151,44 @@ export interface AppSettings {
   // credential and does not belong in a settings file or a backup.
   webhookAlertsEnabled: boolean
   webhookNotifyOnResolved: boolean
+  /**
+   * Ask for Touch ID by itself when the vault screen opens locked.
+   *
+   * Only ever does anything when biometric unlock is already set up, so this
+   * turns no key on and reduces nothing: the prompt is the same one the button
+   * shows, raised without the click. Cancelling it falls straight through to
+   * the password field, which is why it can default on.
+   *
+   * Defaults to `true` and absence must read as ENABLED, for the reason
+   * `localTerminalEnabled` documents below: settings persist wholesale and are
+   * merged saved-over-default, so a `false` shipped as a default would be
+   * written into every install and outrank a later change.
+   */
+  /**
+   * Whether the access WRITE half — adding and revoking keys on servers — is
+   * offered at all.
+   *
+   * Defaults to false and ABSENCE READS AS FALSE, which is the opposite of
+   * `localTerminalEnabled` below and deliberately so: that one is a convenience
+   * whose safe state is available, this is a gate whose safe state is shut.
+   * Main keeps its own copy (services/accessWriteGate.ts) and every access
+   * write handler consults that, because a renderer-side flag only constrains
+   * an honest renderer.
+   */
+  accessWriteEnabled: boolean
+  /**
+   * Configuration files the operator added to the drift read, beyond the fixed
+   * catalogue -- item 46.
+   *
+   * Stored as the PROPOSAL, not as a `DriftWatch`: the id, the label fallback
+   * and the rule ordering are derived by `checkDriftWatch`, and a settings blob
+   * that could assert them would be asserting things main is about to
+   * recompute. Main re-validates every entry before the collector sees it --
+   * services/driftWatchStore.ts -- because the path ends up inside a shell
+   * script and a renderer-side check constrains only an honest renderer.
+   */
+  driftWatches: DriftWatchProposal[]
+  vaultAutoBiometricPrompt: boolean
   // Tightens row heights and paddings across the app.
   compactDensity: boolean
   // Command used to open remote files. Empty means the OS default handler.
@@ -185,6 +238,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   modules: defaultModuleState(),
   webhookAlertsEnabled: false,
   webhookNotifyOnResolved: true,
+  accessWriteEnabled: false,
+  driftWatches: [],
+  vaultAutoBiometricPrompt: true,
   compactDensity: false,
   externalEditorCommand: 'code',
   openFilesExternally: false,
@@ -212,6 +268,21 @@ interface AppState {
   // data
   workspaces: Workspace[]
   folders: Folder[]
+  /**
+   * Whether the saved data has been read back yet.
+   *
+   * NOT derivable from `servers.length`, and that is the whole point. Servers
+   * arrive from `await bridge.data.load()`, so for the first moments of every
+   * launch the list is empty because nobody has looked -- not because there are
+   * none. Panels that say "no servers" out loud were saying it about a fleet
+   * they had not been shown, which is the same mistake as a zero for an
+   * unmeasured reading.
+   *
+   * Set once, on every terminal path including the failures: a build with no
+   * data bridge and a load that throws are both DEFINITE answers, and leaving
+   * this false there would trade a wrong claim for a spinner that never stops.
+   */
+  hydrated: boolean
   servers: Server[]
   vpns: VpnProfile[]
   // Live status per profile id, straight off `vpn:status:<id>`. Kept beside the
@@ -624,6 +695,7 @@ export const useApp = create<AppState>((set, get) => ({
   workspaces: [DEFAULT_WORKSPACE],
   folders: [],
   monitorGroups: [],
+  hydrated: false,
   servers: [],
   vpns: [],
   vpnStatuses: {},

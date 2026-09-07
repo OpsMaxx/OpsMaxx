@@ -235,7 +235,7 @@ describe('PostgreSQL', () => {
 })
 
 describe('MySQL and MariaDB', () => {
-  it('answers all eight from the captured source', async () => {
+  it('answers all nine from the captured source', async () => {
     serve('mysql', capture('mysql', 'source'))
     const { answers } = await dbOps(MY_CFG)
     expect(answers.map((a) => a.id)).toEqual([
@@ -243,6 +243,9 @@ describe('MySQL and MariaDB', () => {
       'replication',
       'binlogs',
       'slowlog',
+      // Item 37. In the order the collector asks, which is the order the page
+      // reads: the slow log's count, then which statements are scanning.
+      'digests',
       'connections',
       'processlist',
       'bufferpool',

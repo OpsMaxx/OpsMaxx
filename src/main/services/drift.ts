@@ -75,9 +75,17 @@ export interface DriftDeps {
   exec: DriftExec
   /** Injectable so a test can pin the clock a collection is stamped with. */
   now?: () => number
-  /** Overridable so a test does not have to build a tree at seven absolute
-   *  paths. Production always uses the catalogue. */
-  watches?: DriftWatch[]
+  /**
+   * The watches to read.
+   *
+   * A FUNCTION or an array. Production passes a function, because the list is
+   * the catalogue plus whatever the operator has added and that changes when
+   * settings are saved -- a snapshot taken at construction would go on reading
+   * a watch the operator removed, which is the version of this that matters.
+   * Tests pass an array so they do not have to build a tree at seven absolute
+   * paths.
+   */
+  watches?: DriftWatch[] | (() => DriftWatch[])
 }
 
 export type DriftFailure =
@@ -186,7 +194,8 @@ export class DriftReader {
   constructor(private readonly deps: DriftDeps) {}
 
   async read(cfg: unknown, ctx: DriftNormaliseContext = {}): Promise<DriftProbe> {
-    const watches = this.deps.watches ?? DRIFT_WATCHES
+    const w = this.deps.watches
+    const watches = typeof w === 'function' ? w() : (w ?? DRIFT_WATCHES)
     const command = buildDriftCommand({ watches })
     try {
       const r = await this.deps.exec(cfg, command, DRIFT_TIMEOUT_MS)
@@ -196,7 +205,7 @@ export class DriftReader {
         // which the comparison would render as "not collected" at best and
         // could render as "matches" if anything downstream ever got sloppy — is
         // the failure mode this whole item is shaped around refusing.
-        return { ok: false, reason: 'unreachable', detail: r.error ?? 'could not reach the host' }
+        return { ok: false, reason: 'unreachable', detail: r.error ?? 'could not reach the server' }
       }
       // stderr is NOT merged into stdout. Every read in the collector redirects
       // its own stderr, so anything on stderr came from the shell or the
@@ -204,7 +213,7 @@ export class DriftReader {
       // region where a line beginning `D ` would be read as file content.
       const stdout = r.stdout ?? ''
       if (!stdout.includes(DRIFT_MARKER)) {
-        const detail = (r.stderr ?? '').trim().slice(0, 200) || 'the host returned no collector output'
+        const detail = (r.stderr ?? '').trim().slice(0, 200) || 'the server returned no collector output'
         return { ok: false, reason: 'no-output', detail }
       }
       const parsed = parseDriftCollection(stdout, watches)

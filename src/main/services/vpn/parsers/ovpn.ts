@@ -6,6 +6,8 @@ import type {
   StrippedDirective,
   VpnImportResultInternal
 } from '../../../../shared/vpn'
+import { decodeBase64 } from '../../../../shared/access'
+import { certificateNotAfter } from '../../../../shared/posture'
 import { VpnError } from '../errors'
 import { hostHasIpv6, PENDING_VAULT_ENTRY } from './wgConf'
 
@@ -248,7 +250,15 @@ const PROXY_AUTH_METHODS = new Set(['basic', 'ntlm', 'ntlm2', 'none'])
 
 /** The only blocks allowed inline, and the only directives allowed to name a
  *  file. Everything here ends up inside the re-emitted config as a block. */
-const INLINE_TAGS = ['ca', 'cert', 'key', 'tls-auth', 'tls-crypt', 'tls-crypt-v2', 'dh', 'pkcs12'] as const
+// `crl-verify` is here for item 48: it was falling through the switch's default
+// branch into "not a setting ShellPilot carries over", which silently turned a
+// profile that CHECKS REVOCATION into one that does not. That is the one
+// direction a dropped directive must never go -- every other drop makes the
+// profile refuse to do something, and this one made it accept a certificate the
+// issuer had withdrawn.
+const INLINE_TAGS = [
+  'ca', 'cert', 'key', 'tls-auth', 'tls-crypt', 'tls-crypt-v2', 'dh', 'pkcs12', 'crl-verify'
+] as const
 const INLINE_TAG_SET: ReadonlySet<string> = new Set<string>(INLINE_TAGS)
 
 // Dropped with a report rather than rejected: nothing an attacker reaches
@@ -601,7 +611,7 @@ function directive(ctx: Ctx, tokens: string[], lineNo: number, raw: string): voi
 
     case 'remote': {
       const host = args[0] ?? ''
-      if (!HOSTISH.test(host)) return drop(ctx, name, `"${host}" is not a host name or address.`)
+      if (!HOSTISH.test(host)) return drop(ctx, name, `"${host}" is not a server name or address.`)
       const port = args.length > 1 ? intIn(args[1], 1, 65535) : 1194
       if (port === null) return drop(ctx, name, `"${args[1]}" is not a port.`)
       let proto = ctx.globalProto ?? 'udp'
@@ -759,7 +769,7 @@ function directive(ctx: Ctx, tokens: string[], lineNo: number, raw: string): voi
     case 'socks-proxy': {
       const host = args[0] ?? ''
       const port = intIn(args[1] ?? '', 1, 65535)
-      if (!HOSTISH.test(host) || port === null) return drop(ctx, name, 'Expected a proxy host and port.')
+      if (!HOSTISH.test(host) || port === null) return drop(ctx, name, 'Expected a proxy server and port.')
       const extra: string[] = []
       if (args.length > 2) {
         const third = args[2].toLowerCase()
@@ -812,9 +822,22 @@ function directive(ctx: Ctx, tokens: string[], lineNo: number, raw: string): voi
     case 'tls-crypt':
     case 'tls-crypt-v2':
     case 'dh':
+    case 'crl-verify':
     case 'pkcs12': {
       const p = args[0] ?? ''
       if (!p) return drop(ctx, name, 'Expected a file name.')
+      // `crl-verify DIR dir` names a DIRECTORY of hash-named CRLs, which has no
+      // inline form at all. Dropped with its own reason rather than read as a
+      // file: openvpn would reject the re-emitted config, and a profile that
+      // fails to start is a worse answer than one that says what it could not
+      // carry.
+      if (name === 'crl-verify' && args[1] === 'dir') {
+        return drop(
+          ctx,
+          name,
+          'This profile checks revocation against a DIRECTORY of CRLs, which cannot be carried inline. Revocation will not be checked.'
+        )
+      }
       // Some exporters write both `ca [inline]` and a <ca> block.
       if (p === '[inline]') return
       const bytes = readContained(ctx, p, lineNo, raw, name)
@@ -834,6 +857,40 @@ function directive(ctx: Ctx, tokens: string[], lineNo: number, raw: string): voi
     default:
       return drop(ctx, name, 'Not a setting ShellPilot carries over.')
   }
+}
+
+/**
+ * When the profile's own client certificate stops being accepted.
+ *
+ * Plan E31 promised this date and it was never built, so the only signal a
+ * profile had was openvpn's "certificate has expired" in the log -- AFTER the
+ * connect had already failed, on a certificate that had been dead for however
+ * long nobody looked.
+ *
+ * Computed HERE, at import, from material the parser already holds in memory.
+ * The alternative is re-reading the config out of the vault to answer a
+ * question about a date, which would mean unlocking the vault to draw a UI.
+ *
+ * `null` for every kind of "we could not tell", and the kinds are not
+ * distinguished on purpose: a caller can do nothing different for a truncated
+ * certificate than for an absent one, and the honest thing to render for both
+ * is that the date is not known rather than a guess.
+ *
+ * PKCS#12 is refused rather than attempted. It is a password-wrapped container,
+ * not a certificate, and its bytes are stored base64 as a blob -- walking it as
+ * DER would produce `unparseable` at best and a wrong date at worst.
+ */
+export function clientCertNotAfter(pem: string | undefined): number | null {
+  if (!pem) return null
+  const b64 = pem
+    .replace(/-----BEGIN [A-Z0-9 ]+-----/g, '')
+    .replace(/-----END [A-Z0-9 ]+-----/g, '')
+    .replace(/\s+/g, '')
+  if (b64 === '') return null
+  const der = decodeBase64(b64)
+  if (der === null || der.length === 0) return null
+  const r = certificateNotAfter(der)
+  return r.ok ? r.notAfter : null
 }
 
 function finish(ctx: Ctx, opts: OvpnParseOptions): VpnImportResultInternal {
@@ -895,6 +952,11 @@ function finish(ctx: Ctx, opts: OvpnParseOptions): VpnImportResultInternal {
     ctx.warnings.push('The private key in this profile is encrypted, so you will need its passphrase to connect.')
   }
 
+  // Beside `remotes`, and for the same reason: a summary the UI can show
+  // without unlocking the vault. Never for a pkcs12 profile -- see the note on
+  // clientCertNotAfter.
+  const certNotAfter = ctx.inline.has('pkcs12') ? null : clientCertNotAfter(ctx.inline.get('cert'))
+
   const spec: OpenVpnSpec = {
     kind: 'openvpn',
     configRef: { vaultEntryId: PENDING_VAULT_ENTRY, field: 'configBody' },
@@ -905,6 +967,7 @@ function finish(ctx: Ctx, opts: OvpnParseOptions): VpnImportResultInternal {
     strippedDirectives: ctx.stripped,
     remotes: ctx.remotes
   }
+  if (certNotAfter !== null) spec.clientCertNotAfter = certNotAfter
   if (ctx.staticChallenge) spec.staticChallenge = ctx.staticChallenge
 
   return {

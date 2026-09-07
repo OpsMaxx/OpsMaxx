@@ -1,3 +1,5 @@
+import type { GateNode } from './nodeGate'
+import { summariseNodeGate } from './nodeGate'
 import {
   FACT_STATUS_HELP,
   factSource,
@@ -62,9 +64,9 @@ import {
 // target list at a specific moment — applies. It never decides.
 export const PATCH_NO_AUTOMATION_NOTE =
   'ShellPilot does not patch on a schedule and will not add one. It is a desktop app that gets ' +
-  'closed, it cannot answer a dpkg conffile prompt, and it does not know what your hosts do. ' +
+  'closed, it cannot answer a dpkg conffile prompt, and it does not know what your servers do. ' +
   'Reporting what is pending and letting you choose is the honest version of this; for genuinely ' +
-  'unattended patching use unattended-upgrades or dnf-automatic on the host itself.'
+  'unattended patching use unattended-upgrades or dnf-automatic on the server itself.'
 
 // ===========================================================================
 // THE HONESTY REQUIREMENT THIS INHERITS FROM ITEM C
@@ -81,9 +83,9 @@ export const PATCH_NO_AUTOMATION_NOTE =
 // vocabulary is `lib/inventory.ts`'s, deliberately: `unsupported` renders as
 // "cannot be answered", never as a dash and never as a number.
 export const PATCH_SECURITY_SCOPE_NOTE =
-  'Security counts cover the hosts whose distribution publishes them. Arch and Alpine have no ' +
+  'Security counts cover the servers whose distribution publishes them. Arch and Alpine have no ' +
   'security channel at all, and dnf cannot answer where the repositories omit updateinfo — those ' +
-  'hosts are excluded from the totals below rather than counted as zero.'
+  'servers are excluded from the totals below rather than counted as zero.'
 
 // ---------------------------------------------------------------------------
 // Package managers
@@ -155,7 +157,7 @@ export function patchCommandFor(
             'apt has no single command that installs only security updates. Every recipe that ' +
             'claims to filters a package list and then installs its dependencies too, which is ' +
             'a wider change than the one you asked for. Run the full upgrade, or use ' +
-            'unattended-upgrades on the host, which is built for exactly this.'
+            'unattended-upgrades on the server, which is built for exactly this.'
         }
       }
       return {
@@ -176,8 +178,8 @@ export function patchCommandFor(
           ok: true,
           command: `${sudo}${bin} -y --security upgrade`,
           detail:
-            `${bin} --security upgrade. On a host whose repositories publish no updateinfo this ` +
-            'installs nothing and says so — which is why the count for such a host reads "cannot ' +
+            `${bin} --security upgrade. On a server whose repositories publish no updateinfo this ` +
+            'installs nothing and says so — which is why the count for such a server reads "cannot ' +
             'be answered" rather than 0.'
         }
       }
@@ -208,7 +210,7 @@ export function patchCommandFor(
           ok: false,
           reason:
             'Arch has no security channel, so there is no security-only upgrade to run. This is ' +
-            'the same fact the inventory reports as "cannot be answered" for this host: it is ' +
+            'the same fact the inventory reports as "cannot be answered" for this server: it is ' +
             'not a permission problem and not a missing tool.'
         }
       }
@@ -225,14 +227,14 @@ export function patchCommandFor(
           ok: false,
           reason:
             'Alpine tracks security fixes per package rather than as a channel, so apk has no ' +
-            'security-only upgrade. The inventory reports this host as "cannot be answered" for ' +
+            'security-only upgrade. The inventory reports this server as "cannot be answered" for ' +
             'the same reason.'
         }
       }
       return {
         ok: true,
         command: `${sudo}apk upgrade`,
-        detail: 'apk upgrade against the repositories already configured on the host.'
+        detail: 'apk upgrade against the repositories already configured on the server.'
       }
   }
 }
@@ -384,7 +386,7 @@ export function verifyReboot(
     return {
       kind: 'unverifiable',
       ok: false,
-      reason: 'The host answered again but the post-reboot check produced nothing this build understands.'
+      reason: 'The server answered again but the post-reboot check produced nothing this build understands.'
     }
   }
   if (before === null || before === 'unknown' || after.bootId === null) {
@@ -393,7 +395,7 @@ export function verifyReboot(
       kind: 'unverifiable',
       ok: false,
       reason:
-        'The host is answering again, but it does not expose a boot id, so ShellPilot cannot ' +
+        'The server is answering again, but it does not expose a boot id, so ShellPilot cannot ' +
         'prove it actually restarted rather than merely dropping the connection' +
         (up === null ? '.' : ` — its uptime is ${up}s, which is the only evidence available.`)
     }
@@ -403,7 +405,7 @@ export function verifyReboot(
       kind: 'not-rebooted',
       ok: false,
       reason:
-        'The host is answering and its boot id has not changed, so it never restarted. The ' +
+        'The server is answering and its boot id has not changed, so it never restarted. The ' +
         'reboot command was issued and something refused or swallowed it.'
     }
   }
@@ -412,7 +414,7 @@ export function verifyReboot(
       kind: 'degraded',
       ok: false,
       reason:
-        `The host restarted and came back with ${after.failed.length} failed ` +
+        `The server restarted and came back with ${after.failed.length} failed ` +
         `${after.failed.length === 1 ? 'unit' : 'units'}: ${after.failed.join(', ')}.`
     }
   }
@@ -420,7 +422,7 @@ export function verifyReboot(
     return {
       kind: 'degraded',
       ok: false,
-      reason: `The host restarted and systemd reports the system as "${after.unitState}".`
+      reason: `The server restarted and systemd reports the system as "${after.unitState}".`
     }
   }
   return {
@@ -428,15 +430,15 @@ export function verifyReboot(
     ok: true,
     reason:
       after.unitState === null
-        ? 'The host restarted (its boot id changed). It has no systemd, so nothing here can say ' +
+        ? 'The server restarted (its boot id changed). It has no systemd, so nothing here can say ' +
           'whether its services came back.'
-        : 'The host restarted and came back with no failed units.'
+        : 'The server restarted and came back with no failed units.'
   }
 }
 
 /** What a host's row says when its reboot step is still waiting for it. */
 export const JOB_REBOOTING_NOTE =
-  'The reboot has been issued and the host has stopped answering, which is what was expected. ' +
+  'The reboot has been issued and the server has stopped answering, which is what was expected. ' +
   'ShellPilot is polling until it comes back and will then check that it really restarted and ' +
   'that nothing failed on the way up. This is not "unreachable": nothing is wrong yet.'
 
@@ -456,7 +458,7 @@ export const JOB_REBOOTING_NOTE =
 export type PatchGap = Exclude<FactStatus, 'ok'> | 'not-collected' | 'probe-failed'
 
 export const PATCH_GAP_LABEL: Record<PatchGap, string> = {
-  absent: 'not on this host',
+  absent: 'not on this server',
   denied: 'not permitted',
   'no-tool': 'no tool for it',
   'stale-metadata': 'from a stale cache',
@@ -524,7 +526,7 @@ function gapHelp(gap: PatchGap, detail?: string): string {
     gap === 'not-collected'
       ? 'Host facts have not been collected for this server yet. They are collected about once an hour.'
       : gap === 'probe-failed'
-        ? 'The facts probe ran on this host and did not complete.'
+        ? 'The facts probe ran on this server and did not complete.'
         : FACT_STATUS_HELP[gap]
   return detail ? `${detail}. ${base}` : base
 }
@@ -652,14 +654,14 @@ export function summarisePatch(rows: PatchHostRow[]): PatchSummary {
   s.allClear = rows.length > 0 && nothingPending && unanswered === 0
 
   if (rows.length === 0) {
-    s.allClearNote = 'No hosts in this workspace.'
+    s.allClearNote = 'No servers in this workspace.'
   } else if (s.allClear) {
-    s.allClearNote = 'Every host answered, and every host is up to date.'
+    s.allClearNote = 'Every server answered, and every server is up to date.'
   } else if (nothingPending) {
     const parts: string[] = []
     if (s.securityUnanswerable > 0) {
       parts.push(
-        `${s.securityUnanswerable} ${s.securityUnanswerable === 1 ? 'host cannot' : 'hosts cannot'} ` +
+        `${s.securityUnanswerable} ${s.securityUnanswerable === 1 ? 'server cannot' : 'servers cannot'} ` +
           'report a security count at all'
       )
     }
@@ -670,8 +672,8 @@ export function summarisePatch(rows: PatchHostRow[]): PatchSummary {
     // not are not zero — they are absent, and an estate is not clear because
     // the hosts that could answer had nothing to say.
     s.allClearNote =
-      `Nothing is pending on the hosts that answered, but ${parts.join(', ')}. That is not an ` +
-      'all-clear: those hosts are unknown, not clean.'
+      `Nothing is pending on the servers that answered, but ${parts.join(', ')}. That is not an ` +
+      'all-clear: those servers are unknown, not clean.'
   } else {
     const bits: string[] = []
     if (s.securityTotal > 0) bits.push(`${s.securityTotal} security`)
@@ -833,7 +835,7 @@ export function planPatch(req: PatchPlanRequest): PatchPlan {
     }
     if (h.packageManager === null) {
       const reason =
-        'ShellPilot has not identified a package manager on this host, so it cannot know what ' +
+        'ShellPilot has not identified a package manager on this server, so it cannot know what ' +
         'command would update it. Nothing is guessed.'
       excluded.push({ serverId: h.serverId, serverName: h.serverName, reason })
       hosts.push({
@@ -973,6 +975,20 @@ export interface GateHost {
    * hostHealth.ts's rule, and it decides a different outcome here.
    */
   failedUnits: string[] | null
+  /**
+   * What the CONTROL PLANE says about this host, when it is a node.
+   *
+   * OPTIONAL, and absent means "nobody asked" rather than "it is fine" — see
+   * `summariseNodeGate`. Every caller written before this existed supplies
+   * nothing and keeps exactly the behaviour it had.
+   *
+   * It exists because systemd and Kubernetes disagree precisely when it
+   * matters: a node that reboots into a broken kubelet answers SSH, runs no
+   * failed units, and is NotReady. The gate passed it, started the next wave,
+   * and took a cluster out one wave at a time using the mechanism meant to
+   * prevent that.
+   */
+  node?: GateNode
 }
 
 export type GateVerdict =
@@ -1051,15 +1067,47 @@ export function evaluateGate(
       reason: `${parts.join('; ')}. The remaining waves were not started.`
     }
   }
+  // ---- and then, for the hosts that are nodes ---------------------------
+  //
+  // AFTER the systemd checks, not instead of them: a node is still a server,
+  // and a machine with failed units is a problem whatever the control plane
+  // thinks of it. This only ever adds reasons to stop.
+  const nodes = summariseNodeGate(hosts)
+  if (nodes.blocking.length > 0) {
+    return {
+      ok: false,
+      kind: 'unhealthy',
+      hosts: nodes.blocking.map((b) => b.serverName),
+      reason: `${nodes.blocking.map((b) => b.because).join('; ')}. The remaining waves were not started.`
+    }
+  }
+  // A node we could not read is a WAIT, not a failure, and for the same reason
+  // a stale sample is: "we still cannot tell" is not permission to continue.
+  // The runner polls, and halts at the timeout if it is still unread.
+  if (nodes.unread.length > 0) {
+    return {
+      ok: false,
+      kind: 'stale',
+      hosts: nodes.unread.map((u) => u.serverName),
+      reason:
+        `${nodes.unread.map((u) => `${u.serverName} is the node ${u.nodeName} and its state could not be read (${u.why})`).join('; ')}. ` +
+        'A node this run just rebooted is not assumed Ready because the cluster did not answer, so the gate is waiting.'
+    }
+  }
+
   const unverified = hosts.filter((h) => h.failedUnits === null).map((h) => h.serverName)
+  const nodeNote =
+    nodes.pressure.length > 0
+      ? ` ${nodes.pressure.join('; ')} — reported rather than blocked, because pressure is usually a condition the node already had.`
+      : ''
   return {
     ok: true,
     unverified,
     note:
-      unverified.length === 0
+      (unverified.length === 0
         ? `All ${hosts.length} ${hosts.length === 1 ? 'host' : 'hosts'} in this wave answered with no failed units.`
-        : `${hosts.length - unverified.length} of ${hosts.length} hosts answered with no failed units; ` +
-          `${unverified.join(', ')} cannot report unit state at all, so nothing here vouches for ${unverified.length === 1 ? 'it' : 'them'}.`
+        : `${hosts.length - unverified.length} of ${hosts.length} servers answered with no failed units; ` +
+          `${unverified.join(', ')} cannot report unit state at all, so nothing here vouches for ${unverified.length === 1 ? 'it' : 'them'}.`) + nodeNote
   }
 }
 

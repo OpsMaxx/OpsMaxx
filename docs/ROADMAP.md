@@ -1,7 +1,13 @@
 # ShellPilot roadmap
 
-Sixteen things we intended to build, what each one actually rests on in the code today, and what is
-genuinely hard about it. Written after 0.8.0, and maintained since: 0.9.0 through 0.9.3 shipped
+What we intended to build, what each one actually rests on in the code today, and what is genuinely
+hard about it. It began as sixteen items and grew to thirty-two as the work found things the plan
+had not; the next section says where all of them now stand, and the rest of this document is kept
+because the reasoning behind an ordering outlives the ordering. **Items 33–48 were added on 5 Sep
+from a gap audit** — thirty operational areas checked task by task against the code at 0.15.2 —
+and they are the section to read if the question is "what do we build next".
+
+Written after 0.8.0, and maintained since: 0.9.0 through 0.9.3 shipped
 nine of the sixteen, and 0.9.4 through 0.9.7 were stability releases, and this document keeps their write-ups rather than deleting them, because the
 reasoning outlives the ticket.
 
@@ -28,6 +34,78 @@ This is a statement of direction, not a schedule. Sizes are rough and relative �
 focused person, not a calendar quarter. Where something is a real unknown it says so rather than
 guessing, because the cost of a wrong estimate here is a commitment nobody can keep.
 
+## Where this stands, as of 0.16.x
+
+**The three items that were "part done" are closed.**
+
+*Item 18* now covers SQL Server, the fifth and last engine, verified against a
+real server rather than from the documentation — which changed three readings:
+`user connections = 0` means unlimited, an empty availability-replica list means
+"no AG configured" rather than "no replicas healthy", and a NULL in the backup
+history means never rather than long ago.
+
+*Item 23*'s write half is opt-in rather than unreachable. Every blocker the
+adversarial review raised has been built — the independent re-authentication,
+the judgement that refuses a pooled or too-early session, the `systemd-run
+--user --scope` watchdog ladder — and the gate comment that still said otherwise
+was three of those behind. What remains unobserved is one thing, named where the
+operator turns it on: nobody has watched the rollback fire on a real RHEL 9
+server with `KillUserProcesses=yes`. A gate nobody can open is a gate nobody can
+test, which is why it is now a switch.
+
+*Item 1*'s remote half is a refusal with an argument, not a gap: supervising
+over a held-open SSH channel is a reliability promise the transport does not
+make. **Its named successor now ships in part** — the `systemctl --user` READER,
+as the `services` module. Built and verified against a real RHEL 9.8 running
+systemd 252, which is where the fact worth having came from: a `--user` service
+stops when the account's last session ends unless that account is lingering, so
+units that read `active running` over SSH can be units that are about to stop.
+The panel says that before it shows the list. The unit-file EDITOR is the
+remaining half and SHIPPED in 0.19.1 — write, enable, back up any unit of that
+name first, with the exact bytes previewed before they are sent.
+
+*Item 21b*'s port mappings are STILL unverified, and the blocker is the harness
+rather than the code: podman nested in Docker on Apple Silicon cannot keep a
+container running (`exec container process /bin/sleep: Invalid argument`), so
+there is nothing to publish a port from. Everything else about podman has been
+run against a real podman 5.8.4, and the caveat was
+pointing at the wrong thing. Every template renders identically and `system df`
+matches, so no parsing changed — but `resolveBinary('docker')` was hard-coded at
+nine call sites and a stock podman install has no `docker` binary at all, so the
+panel reported the runtime absent on a server full of containers. Writing the
+test found a second bug: `logs` was the one command that did not resolve its
+binary, making it the only thing that failed without sudo and worked with it.
+Port mappings remain unverified — podman nested in Docker cannot publish a port
+— and nothing was changed on the strength of that reading.
+
+## Where this stood, as of 0.13.1
+
+**Every item in the matrix below is shipped, cut, or gated on something only a real host can
+answer.** Four releases did it: 0.10.0, 0.11.0, 0.12.0 and 0.13.0, with 0.13.1 as a fix.
+
+| | |
+|---|---|
+| **Shipped** | 24 of the 26 matrix rows, plus items 29–32 which were raised by the work rather than planned |
+| **Cut, deliberately** | Ghostty (8), Tauri (10), n8n (9) and DNS/TLS — see the cut list |
+| **Built but switched off** | Item 23's write half: key revoke. `ACCESS_WRITE_ENABLED` is `false` |
+| **Not built, and correctly so** | Item 15(b), a third-party extension API. 15(a) — optional first-party modules — shipped |
+| **Tests** | 2,215 → 4,648 |
+| **Runtime dependencies added** | None. Every item above is built on `node:sqlite`, `ssh2` and what was already here |
+| **Gap audit, 5 Sep** | Nineteen areas partial, five near-full, six refused by decision. Items 33–48 in "The gap audit" below say exactly what is missing in each and in what order to close it |
+
+**The one thing waiting on the physical world.** Item 23 can stage a key revoke, and the code is
+written and tested. It is off because a claim in its design has never been checked against a host
+that behaves the way the claim assumes: a RHEL 9 machine with `KillUserProcesses=yes`, where ending
+the session kills the user's processes. Stage a revoke there, end the session, and see whether the
+authorized_keys file comes back. Until someone does that, shipping the write would be shipping a
+rollback nobody has watched roll back. The read half is shipped and useful on its own.
+
+**What has never met a real estate.** Patch management, detached execution, Kubernetes drain and the
+access collector are tested against real servers, real Postgres and MySQL, a real MinIO and a real
+`kind` cluster — each of which found bugs no double did — but not against a production fleet under
+load. That is the next thing that will teach us something, and it is not a thing more tests can
+substitute for.
+
 ## Built since this was written
 
 Shipped in 0.9.0 through 0.9.3, and hardened across 0.9.4 to 0.9.7. Kept here rather than deleted, because the write-ups say why each
@@ -44,7 +122,7 @@ was built and that reasoning outlives the ticket.
 | **6. Cron, read-only** | **Built.** Crontabs, /etc/cron.d and systemd timers across the estate. Read-only until the parser is proven — the user-field trap is a silent misread, not an error. |
 | **15a. Optional first-party modules** | **Built.** Six modules behind the registry. Borrows the AI_CAPABILITIES shape: absent reads as OFF, and an upgrade never switches a new module on for an existing install. Enforced twice — `MODULE_FORBIDDEN_IMPORTS` by walking the real import closure, and `MODULE_FORBIDDEN_BRIDGE` for the `window.shellpilot` namespaces a closure walk cannot see. Part (b) is not started and `tests/moduleBoundaries.test.ts` guards against drifting into it. |
 | **4a. Docker** | **Built** as the first module behind that gate, off by default. Shells out to the host's own binary. The work was in telling the three failures apart: missing binary, stopped daemon, and permission denied have three different fixes. Now beyond listing: start/stop/restart with graded confirmation, `docker exec` as a third `TerminalTransport`, container logs followed live, and `docker system df` parsed down to reclaimable bytes per type. |
-| **4b. Kubernetes** | **Built, read-only plus one write.** Pods, nodes, deployments/statefulsets/daemonsets with ready-versus-desired, namespace events, `kubectl top` where a Metrics API answers, and a diagnosis view. The single mutation is `kubectl rollout restart`. It deliberately does not switch contexts, exec into a pod, or delete anything, and `src/shared/kubernetes.ts` states why in the file rather than in a commit message. This document previously said Kubernetes should stay "separate and later"; it arrived earlier because the Docker module's failure classification and sudo discipline transferred wholesale. |
+| **4b. Kubernetes** | **Built, read-only plus one write.** Pods, nodes, deployments/statefulsets/daemonsets with ready-versus-desired, namespace events, `kubectl top` where a Metrics API answers, and a diagnosis view. The first mutation was `kubectl rollout restart`; cordon, uncordon, drain and a one-command exec followed under item 22. It deliberately does not switch contexts, apply, scale, or delete anything, and `src/shared/kubernetes.ts` states why in the file rather than in a commit message. This document previously said Kubernetes should stay "separate and later"; it arrived earlier because the Docker module's failure classification and sudo discipline transferred wholesale. |
 
 Two things those unlocked, now unblocked rather than done: **fleet-wide search** (item 13) can now
 index a complete estate rather than whatever was last looked at, and any future scheduled work has
@@ -110,526 +188,790 @@ against a live local endpoint, but nobody has yet turned background checking on 
 behind bastions and watched what happens to connection count, bastion load or battery. That is the
 decision item 16 flagged and it needs a real fleet to answer.
 
-## The through-line
+## The gap audit — 5 Sep, against 0.15.2
 
-ShellPilot is becoming the place a small team operates its infrastructure from: shells, files,
-databases, tunnels and secrets in one window, with AI agents able to act through it without ever
-holding a credential. Almost everything below is that same sentence extended to another kind of
-target — a container, a scheduled job, a process, a workflow — or to another kind of consumer.
+Every write-up above says what an item was meant to do. This section says what each operational
+area can and cannot do **today**, read from the code rather than from the write-ups, so that the
+next round of building starts from the gap and not from the intention.
 
-Two properties are not negotiable as this grows, because they are what the app is:
+**How it was done.** Thirty operational areas — the ordinary week of the ten-to-fifty-host operator
+from "Who this is for" — were broken into their typical tasks and each task was checked against
+the working tree at `bb4620b`, in eight independent read-only audits. Every task was classified
+one of four ways, and the fourth is the one that matters most:
 
-- **Credentials do not leave the app.** Every feature that touches a remote thing resolves its
-  secret inside `credentialResolver.ts` and hands the caller a connection, never a password.
-- **Anything an agent can drive is gated and audited.** A new capability means a new entry in
-  `AI_CAPABILITIES`, a policy decision, and an audit row — or an explicit, tested decision that the
-  surface is human-only, the way the local terminal is.
+| | |
+|---|---|
+| **DONE** | Achievable in the app, end to end, with tests |
+| **PARTIAL** | A real piece exists; the task as an operator would phrase it is not covered |
+| **MISSING** | Nothing usable exists |
+| **REFUSED BY DESIGN** | The code or this document states a deliberate non-goal, with a reason. **Not a gap.** Listed so nobody rebuilds the argument from scratch |
 
-A third property became visible only after 0.9.7, and is the reason for the operator-console
-section further down: **almost everything the app does today is a read.** Watching, searching,
-tailing, asking an agent — those are one verb, and the other half of an operator's job is the
-other one. Extending the sentence above to another kind of target is no longer the only axis;
-extending it to another kind of *action*, safely, is now the larger one.
+Five areas came out near-complete (monitoring, alerting, Compose, frp, inventory). Six are
+refused or absent by decision (Kubernetes backup, DNS/TLS, documentation, vulnerability
+scanning, a configuration DSL, unattended patching). The nineteen in between are what this
+section is about, and they are numbered from 33 onward so they can be argued with the way
+items 1–32 were.
 
----
+### Three findings that reorder the work
 
-## Who this is for — and who it is not
+**1. Almost every write the operator asks for lands on one missing surface.** The job engine
+shipped in full — waves, health gate, reboot-and-verify, detached execution, approval record —
+and **no renderer composes a job.** `jobs.run` is called from exactly one place,
+`PatchPanel.tsx:294`, and `jobs.list`/`jobs.get` are called from nowhere; job history is visible
+only through the change log. So "restart nginx on twelve hosts", "install a package everywhere",
+"push this config", "run VACUUM in a window I chose" are all the same missing thing wearing
+different clothes: a job composer plus a handful of *typed* step kinds whose text is built in
+main rather than typed by hand. Item 33 is that composer and item 34 the step kinds. Half the
+partial areas below close on those two.
 
-Every ordering below is a consequence of this section. Change the customer and the ranking changes,
-which is why it is written down before the numbers rather than left implicit inside them.
+**2. Five refusals share one precondition, and it is a lab host.** Firewall edit
+(`posture.ts:118-125`), host quarantine (`posture.ts:100-105`), per-account key revoke
+(`index.ts:1257-1272`), sudoers edit and SSH key rotation all say, in their own words, "not until
+there is a staged write with an independent re-authentication and an automatic revert." That
+protocol exists — `access.ts:2814-3140`, 56 tests against a real shell — and is switched off at
+`ACCESS_WRITE_ENABLED = false` pending the RHEL 9 `KillUserProcesses=yes` check named at the top
+of this document. Nothing else on this page unblocks as much per day of work as that check.
+Item 36.
 
-**The target operator.** One person, or a team of two or three without a dedicated platform
-engineer, running **ten to fifty mixed Linux hosts** — some bare metal, some VPS, some small cloud —
-behind one or two jump boxes, across a production tier, a staging tier and a database tier. Mostly
-systemd. Docker or Compose on several of them. Maybe one small Kubernetes cluster, maybe none. They
-own the estate end to end: they patch it, back it up, hold its credentials, and get paged for it.
+**3. Three defects were found that are not features.** `policyEngine.ts:425` classifies a
+statement by its leading verb, so `SELECT pg_terminate_backend(123)` and `ANALYZE` are `read`
+and run through `query_database` with **no approval** under the default group. `ComposePanel.tsx:162-181`
+mints a job approval without a dialog, which is correct for a one-host `pull` and wrong the
+moment `sudo` makes the plan ask for `confirm`. And `assessCommand`'s docker/podman destructive
+rule (`broadcast.ts:223-230`) is not applied to `execute_command`, so an agent's `docker volume rm`
+is graded `high` only if it says `sudo`. Item 35, and it goes first.
 
-**What they do not have**, and this is the part that matters more than what they do:
+### Corrections to this document
 
-- **No Ansible, Puppet, Salt or Chef.** They looked, decided the setup cost exceeded the payoff at
-  their size, and run commands by hand. This is the single most important fact about them.
-- **No Prometheus, Grafana or Datadog.** Or a Prometheus somebody set up once that nobody maintains.
-- **No PagerDuty, no on-call rotation.** Alerts go to a phone, or nowhere.
-- **No compliance regime** forcing an audit trail — yet. Some of them acquire one, and that is when
-  item 14 stops being a convenience.
-- **No budget approval process.** They install what they want.
+Found while auditing, fixed in the sections above where they were one-line; listed here where
+they were not.
 
-**Why this customer and not a larger one.** An enterprise SRE team has already solved every problem
-on this page — with Ansible, Prometheus, Vault and a pipeline — and solved it better than a desktop
-app ever will. Selling to them means competing with their existing stack on its own terms and losing.
-The ten-to-fifty-host operator has the same problems and *none* of that machinery, because every
-piece of it costs more to run than their estate justifies. They are doing this work in fifteen
-terminal tabs right now. That gap is the entire opportunity, and nobody is serving it: MobaXterm and
-Termius are better terminals, and the config-management tools start above where this user stops.
+- **Item 32 is shipped**, not open: `EVENT_RETENTION_TIERS` at `history.ts:440-458` keeps alerts
+  400 days and `RUNBOOK_LOOKBACK_DAYS` mirrors it. Two comments still say JSONL logs have no
+  retention (`shared/changelog.ts:154-158`, `services/changelog.ts:57-63`); they do, since
+  `jsonlPrune` was wired at `index.ts:884-892`.
+- **B4 is in code**, not remaining: stages, gate, reboot-and-wait and jump-host exclusion are all
+  in `jobRunner.ts:962-1214` and tested. The matrix row and the split table were wrong.
+- **Kubernetes execs into pods.** `modules.ts:259` and the 4b row above still said it never
+  would. Exec shipped behind `approvalFor`/`verifyApproval` (`kubernetes.ts:74-79`).
+- `jobs.ts:316-329` describes an `access` job kind that `JOB_KINDS` does not contain and
+  `access.ts:2462` says was removed. `access.ts:385` mentions a `sudoIsProxy` field that does not
+  exist on `AccessAccount`. Both are stale comments, not code.
+- The first of item 23's two follow-ons ("the panel must state the scope before selecting a
+  target") is done — `ACCESS_WRITE_SCOPE` renders at `AccessPanel.tsx:421`. The second, the
+  missing approval-log row, is not, and is folded into item 35.
 
-**The anti-personas, stated so a feature request can be measured against them.**
+### Where every partial area stands
 
-- **The enterprise platform team.** Has a stack. Not a customer. Do not build for their reviewers.
-- **The Kubernetes-native shop.** Their estate is a control plane, not hosts. `kubectl`, k9s and
-  Lens serve them, and matching those is a product we are not building. This is why item 22 ranks
-  where it does, and why applying manifests stays refused.
-- **The single-server hobbyist.** One box, one tab. Everything in this document is overhead for
-  them. They are welcome, they are not who the ordering serves, and no feature earns its place by
-  helping them.
-- **The person who wants a prettier PuTTY.** Already served, by the terminal that shipped in 0.8.0.
-  Nothing below is for them either.
+One row per area. "Done" is the part an operator can lean on today; "gap" is the exact thing
+missing, with the item that closes it. Sizes are for one focused person.
 
-**The one-sentence test for anything proposed after this.** *Does it remove a task the
-ten-to-fifty-host operator currently does by hand, in tabs, on a schedule they resent?* If not, it
-needs a different justification than "a sysadmin might want it" — because a sysadmin might want
-everything.
+| Area | Done today | Exact gap | Item |
+|---|---|---|---|
+| **Linux fleet** | Patch apt/dnf/yum/zypper/pacman/apk; security counts where the distro publishes them; reboot waves with boot-id proof, health gate, jump-host and same-wave-DB refusals; failed units read | No package install/remove/hold; no `systemctl` verb; no fsck/LVM/mount; no "kernel installed vs running" fact. OS release jumps refused on the patch path (`patch.ts:133-136`) and should stay so | 34, 46 |
+| **Fleet automation** | Broadcast with blast-radius confirm; detached durable jobs; nine fact sources hourly; event rules with pinned approval | **No job composer or job list in the renderer.** No fleet file push. No user primitives. Rules have no time trigger (refused: `rules.ts:6-16`). No tag-seeded target pick, no stop-on-first-failure | 33, 34 |
+| **Access & SSH** | Every `authorized_keys` fingerprinted and attributed; locked/expired accounts; admin groups; last login; jump chains | Key add/revoke built, **switched off**, connecting account only. Sudo is group membership, not `sudoers`. No export. No service-account classification | 36, 46 |
+| **Security** | Firewall in both layers with rule lines behind their own consent; sshd vs baseline; SELinux/AppArmor mode; failed logins; OOM kills; cert inventory with 30-day alert; drift over seven watches; app-side audit | No firewall/sshd/MAC writes (refused until 36); no secrets rotation; no auditd posture; per-package security list absent; drift watches fixed | 36, 43, 46 |
+| **Docker** | Start/stop/restart graded; exec; logs one-shot and followed; stats; `system df -v` per item; reclaim by id with re-preview; health status parsed | No `pull`/`build` as a job (comment-only today); networks reclaimable but never listed; no targeted engine upgrade; no scanner consumer; podman unproven | 42 |
+| **Compose** | Discover, parse, declared-vs-running, edit image tag with stale-check, `pull` and `up -d` as jobs, `.env` names only | Per-service scope built but not wired; no compose `restart`; validation errors surface as "nothing this parser could read"; `depends_on`/volumes/`restart:` parsed and not rendered; no `.env` write; approval minted without a dialog | 35, 42 |
+| **Kubernetes** | Pods with reason-over-phase, workloads ready/desired, events, describe, previous logs, `top`, PVCs, ingress, RBAC bindings, secret names, deprecated APIs, helm list; rollout restart, cordon/uncordon, drain with seven refusals, exec | No node conditions/allocatable/taints; no requests/limits; no HPA; PDBs only inside the drain; no Role rules; no PV/StorageClass; no cert expiry of any kind; helm list parse unproven | 39 |
+| **K8s lifecycle** | Chain as one job (`shared/nodeMaintenance.ts`); node-aware wave gate, wired and live (`shared/nodeGate.ts`), fed by asking the wave's own hosts; API scan with stated blind spots | A chain is ONE node — staged multi-node needs per-target step templating. A wave that cannot reach any API server stays `unknown`, so a plain kubeadm worker gets no node check. Upgrades, helm upgrade/rollback, `rollout undo` contradict the module's own reasoning | 40, 41 |
+| **PostgreSQL** | Dump to local/SFTP/S3 with read-back; replication, archiver, vacuum age, connections, locks, sizes, `pg_stat_statements` — nine judged questions | Dumps are manual, plaintext, 512 MB in memory, no restore. No slots/`pg_wal` size. Slow queries have no alarm level. Locks show the blocked, not the blocker. No write of any kind (routed to jobs by `dbOps.ts:33-35`) | 37, 38 |
+| **MySQL/MariaDB** | As Postgres, plus binlog inventory and buffer pool | No top-N slow statements (only whether the log is on); binlog purge is REFUSED BY DESIGN, not missing — `dbOps.ts`'s own header says deleting binlogs is deleting the only thing standing between a replica that fell behind and a rebuild; no `KILL`/`OPTIMIZE`; no binlog position in dumps | 37, 38 |
+| **MongoDB** | Replica set, oplog window, index usage, connections, current ops, sizes, asserts | `mongodump` SHIPPED — measured against a real authenticated MongoDB 7, and both halves of the old refusal turned out to name the actual problems. `--archive` is required or mongodump writes a DIRECTORY of BSON files and this pipeline, which reads stdout, captures nothing; and mongodump HAS NO PASSWORD ENVIRONMENT VARIABLE — `PGPASSWORD` and `MYSQL_PWD` have no counterpart and `--password` is the argv exposure the interface exists to avoid — so the credential goes in a 0600 `--config` file, proven to be read by dumping with the right password and failing `AuthenticationFailed` with a wrong one. The archive is named `.archive` rather than `.sql`, and the retention regex accepts both, because a dump retention does not recognise is one it never removes. Redis stays refused for a stated reason rather than an omission: pg_dump, mysqldump and mongodump are CLIENTS that ask a server for its contents, and Redis's persistence is a snapshot the server writes to its own disk. No index build monitor; `mongos` out of scope; index sizes never populated (`dbOps.ts:700-720` does not pass `sizes`) | 37, 38 |
+| **Redis** | Memory, eviction, persistence, replication, slowlog, keyspace, cluster, clients | No backup path at all; AOF, Sentinel and Cluster judged but never exercised; no trend | 37, 38 |
+| **Backup/DR** | Encrypted app bundle to three destination kinds, retention with three refusals, read-back + decrypt verify; PG/MySQL dumps | The bundle is app state, never host data; dumps have no schedule, encryption, retention or restore test; no volume backup; see 38 | 38 |
+| **Logging** | journald/file/container tail across hosts with preflight, pause buffer, priority/since, client filter; K8s pod logs one-shot | Search across hosts and history SHIPPED (`shared/logSearch.ts`) — and it found that `journalctl -g` is SMART-CASE: measured on one day of a real journal, `-g session` matched 1135 lines and `-g SESSION` matched 1, so an operator searching for `ERROR` is told there is one on a host with over a thousand. `--case-sensitive` is therefore always sent explicitly and defaults to insensitive, because "I searched for ERROR and it said none" is the failure nobody catches. The pattern is a REGEX and cannot be allow-listed the way `--since` is, so what makes it safe is placement: inside single quotes a shell expands nothing, the single quote is the only character that can end the word, and it is the only one refused. No error-rate kind; rotation read SHIPPED (`shared/logRotation.ts`); auditd/sudo logs tailed as files only | 43 |
+| **Incident response** | Inbox, ack, snooze, dedupe, flap damping, hysteresis, 400-day history; runbook per kind; rules alert → job | Failed unit → its log SHIPPED and FILTERED (`shared/alertLogs.ts`), and → a prefilled restart job (`openServiceJob`); no rollback of anything; no DB restore; quarantine refused until 36; no incident span | 43, 44 |
+| **Change management** | Waves with gate; drift; change log over four records | Maintenance window SHIPPED (`shared/maintenance.ts`, item 44 — snooze rows rather than a second suppression mechanism); no rollback plan on the approval; no per-package version inventory | 44, 46 |
+| **Housekeeping** | Docker reclaim by id | Nothing reads logs, tmp, journald usage, autoremove candidates, LVM snapshots, stale K8s objects; dead users/keys have no verdict | 45 |
+| **Storage** | Root-filesystem disk and inode %, alerted at 85; PVC request and capacity; Docker disk per item | Per-mount capacity now READ on demand (`storageLayout.ts`); the trend and the alert are still `/` only. Inode IS stored and trended -- `inodePct` is in `CAPACITY_METRICS` and in the history metric list, and the fleet sampler writes it. No LVM, mdstat, SMART, zfs, NFS read of any kind | 47 |
+| **Capacity** | cpu/memPct/diskPct trends over 7 d full + 90 d hourly, forecast with eight refusals and a 90-day horizon | No K8s allocatable-vs-requested — blocked on a k3s fixture this machine cannot capture. The fleet-level forecast SHIPPED (`shared/fleetForecast.ts`, three bands, headline always carrying the denominator) and so did `get_capacity_trends` over MCP, gated on `serverMetrics` | 47 |
+| **OpenVPN / WireGuard** | Client side is complete: sanitised import, OTP, split/full tunnel, management-interface health; WireGuard userspace *and* system mode (Linux/Windows), peers, allowed IPs, handshake age, bytes, keygen with derived public key | Nothing touches a VPN **server**: no `wg set`, no easy-rsa, no CRL. No `vpn-down` alert kind. Client cert `notAfter` never read (`<cert>` is opaque). `latencyMs` exists in the type and no driver fills it. Sidecar reports one handshake and a peer *count*, not per-peer rows | 48 |
 
----
+### What is refused and stays refused
 
-## Near term — mostly assembly, not invention
+The audits found these written down, each with a reason that still holds. They are collected here
+so a future request can be answered by citation rather than re-argued.
 
-These three are largely UI and glue over machinery that already exists and is already tested. They
-were first because the ratio of value to new risk looked best on this list.
-
-**Superseded, and kept for the reason it was wrong.** "Cheap and low-risk" was measured against the
-code and not against the operator. Item 3 was built and mattered; items 1 and 2 rank in the Defer
-quadrant of the leverage table below, because pm2-style supervision serves about a quarter of the
-target operators and the frp UX about a fifth. Assembly cost is a poor proxy for value, and this
-section is the evidence.
-
-### 1. pm2-style process monitoring, local and remote
-
-Run, watch, restart and read the logs of long-lived user processes — a dev server, a worker, a
-one-off script — on this machine or on any server already configured.
-
-**What exists.** Nearly all of it, in a place nobody would look for it. `vpn/supervisor.ts` was
-built to keep VPN engines alive and already implements the entire pm2 core: exponential backoff with
-jitter, crash-loop detection over a rolling window, restart policies (`never` / `on-failure` /
-`always`), readiness probes, optional periodic health checks, a bounded in-memory log ring, PID
-records that survive an app restart, and orphan reaping on launch. `SupervisedSpec` is a general
-process description that happens to be used for VPN.
-
-**What is actually new.** Lifting `Supervisor` out of `vpn/` and generalising the naming; a
-persistent process list; a UI; and the remote half — the supervisor spawns locally, so remote
-processes need either an agent-side runner over SSH or a `systemd --user` / launchd translation. The
-remote design is the real decision, and it is worth taking slowly: shipping "we run your process
-over an SSH channel we hold open" is a promise about reliability the current transport does not make.
-
-**Size.** Local: weeks. Remote: materially more, and gated on the design question above.
-
-### 2. ngrok-style tunnel UX over frp
-
-"Give me a public URL for localhost:3000" as one action, rather than a form with a bind address, a
-remote port and a server to run it on.
-
-**What exists.** All of the transport. frp shipped in 0.8.0 with its own manager, profile form,
-proxy editor and supervised lifecycle. This item adds no networking.
-
-**What is actually new.** The UX, and the honesty around it. ngrok's magic is that it owns the
-public endpoint; frp does not, so somebody has to point a domain at a server they control. The
-feature is only pleasant if we make that setup a guided one-time thing and then never mention it
-again. There is also a real safety question — publishing a local port to the internet from one
-click deserves the same treatment `vpnControl` already gets, which is why frp is refused to agents
-entirely today.
-
-**Size.** Weeks, almost all of it design.
-
-### 3. Alert channels — Slack, WhatsApp, Twilio, webhooks
-
-Send what the Fleet Monitor already knows somewhere a person will see it when the app is closed.
-
-**What exists.** The signal. `hostHealth.ts` already decides what needs attention — failed units,
-disk pressure — and `get_server_metrics` reports the same. Desktop notifications exist, but only for
-MCP approval requests (`main/index.ts:586`).
-
-**What is actually new.** Outbound delivery, and everything that comes with it: per-channel
-credentials in the vault, retry and rate limiting, deduplication so one flapping unit does not send
-two hundred messages, and an explicit decision about what a message may contain. That last one is
-load-bearing — an alert naming a host and a unit is useful; an alert carrying a log line can carry a
-secret out of the app to a third-party API, and `secretRedaction.ts` exists precisely because that
-is easy to get wrong.
-
-**Size.** Weeks for one channel, then days each. Start with a generic webhook: it is the one that
-cannot be wrong about anyone's API, and Slack is a webhook.
+| Refused | Where the reason is | Note |
+|---|---|---|
+| OS release jump inside a patch run | `patch.ts:133-136`, `:203` | A separate opt-in "release jump" job is not formally refused; every argument in `patch.ts:30-62` weighs against it |
+| App-side schedules and time-triggered rules | `patch.ts:37-67`, `rules.ts:6-16` | Host-side cron edit (6e) is the sanctioned route. A window *filter* on rules does not contradict this |
+| `prune` in any spelling, `-a`, `--force`, build-cache removal | `docker.ts:568-600`, `:1972-1974` | Blast radius must be a literal list of ids |
+| `compose down`, `down -v`, `rm`, `kill`; `.env` values on screen | `compose.ts:1070-1085`, `:28-67` | Shipped stricter than the write-up asked |
+| Kubernetes context switch, apply, scale, edit, single-pod delete, agent reach | `kubernetes.ts:34-65`, `tests/jobsNotExposed.test.ts:865-941` | `rollout undo` and `helm upgrade`/`rollback` fall under *edit* by the file's own taxonomy — see item 44 |
+| Any write from the database operations panel | `dbOps.ts:16-83` | "If a session must die, that is a job" — item 37 is that job |
+| sshd_config write, `systemctl restart sshd`, `setenforce`, fail2ban ban/unban | `posture.ts:127-139` | Sawing the branch off |
+| Drift push-to-fix | `drift.ts:1040-1063` | A canary upgraded first looks exactly like a host that drifted |
+| Firewall edit, host quarantine — **conditionally** | `posture.ts:100-125` | Precondition is item 36's protocol, proven on a real host |
+| `sudo` in the access write | `access.ts:2307-2313` | The decision per-account revoke and sudoers edit must overturn first |
+| SQL Server operations | `dbOps.ts:4354-4359` | Never run against one |
+| `KEYS`/`SCAN` on Redis | `dbOps.ts:78-83` | Big-key analysis needs an argued exception |
+| Full tunnel in WireGuard system mode; macOS system mode; a kill switch; any script directive in a VPN config; agents starting frp or seeing an endpoint or key; an elevated run restarting itself | `drivers/wireguard.ts:1445-1464`, `docs/VPN.md:50-62, 289-294`, `parsers/ovpn.ts:49-175`, `policyEngine.ts:520-524`, `managerApi.ts:34-38` | Unchanged |
+| Vulnerability scanner, config DSL, metrics warehouse, ticketing, DNS/TLS management, Kubernetes manifests, unattended patching | The table above this section | Unchanged |
 
 ---
 
-## The prerequisite the roadmap was ranking around without seeing — now built
-
-### 16. Background metrics sampling — BUILT
-
-Sample the estate on a schedule from the main process, independently of what the renderer is
-rendering.
-
-**This was not a feature. It was why two features above could not be built at all**, which the
-first version of this document ranked without noticing. Built; the write-up below is kept as the
-reasoning, in the past tense where it describes what was wrong.
-
-**The problem.** `App.tsx` renders the Fleet Monitor as `{activity === 'monitor' && <FleetMonitor />}`.
-Leave that tab and every `ServerMonitorCard` unmounts, `useServerMetrics` stops, and sampling ends.
-The `useFleet` store says so in its own comment: *"Every value here came from a sample some other
-component already paid for."* Fleet data exists only while someone is looking at it.
-
-So **alerts are not unbuilt, they are impossible**: you cannot notify a person about a failure you
-only detect while they are staring at the screen that would have shown it. `checkResourceAlerts`
-already exists in `store/alerts.ts` and is called from that same renderer loop — the alerting logic
-is written and just as trapped as the sampling. And **fleet-wide search** would index whatever
-happened to be sampled recently rather than the estate.
-
-**What exists.** More than half of it, in the right place. `metricsSample()` lives in main, is
-already called from the MCP path under its own `mcp:${id}` key, dedupes in-flight calls, caches
-briefly, and returns a full `HostMetrics`. The connection pool is already shared with SSH sessions.
-The renderer's chained-not-interval polling — wait for one sample to land before scheduling the
-next, so a slow link cannot queue polls faster than they finish — is the right design and should
-move rather than be rewritten.
-
-**What is actually new.** A scheduler in main, a per-server opt-in, and pushing results to the
-renderer instead of the renderer pulling them.
-
-**The decision this forces, and it should be made deliberately.** Sampling fifteen servers on a
-timer means the app maintains connections to the whole estate whether or not anyone is looking.
-That changes battery use, bastion load and audit noise, and it needs the vault unlocked to resolve
-credentials at all — so a locked vault has to degrade to "not sampling" rather than to an error
-loop. Background cadence should be far slower than the 2s a focused view uses; the interesting
-number is minutes, not seconds.
-
-**Size.** 1–2 weeks. Unblocks items 3 and 13, and gives items 6 and 12 a scheduler to live in.
-
----
-
-## The fleet gap — what fifteen servers need that three do not
-
-These were not on the original list and belong near the top of it. They share a shape: each is
-about the *estate*, and each is invisible until the server count passes roughly ten. The reference
-user runs ~15 hosts behind two jump boxes, across prod, staging and database tiers.
-
-### 11. Run one command across many servers
-
-Select a group — a tag, a workspace, a hand-picked set — and run one command against all of it, with
-the results readable side by side.
-
-**Why it is the largest gap on this page.** It is the defining problem of managing fifteen servers
-instead of three, and nothing else here touches it. "Check disk on every prod box", "restart nginx
-on the three web servers", "which of these has the old package" is fifteen tabs and fifteen pastes
-today. MobaXterm has multi-exec and Termius has it; a tool positioned against both cannot not have
-it.
-
-**What exists.** More than it looks. `execute_command`, the policy engine, approvals and the audit
-log are all per-server already, and the supervisor gives a model for running many things at once
-and collecting their output. Fan-out is orchestration over machinery that exists.
-
-**What is actually new, and it is not the execution.** It is the results view — fifteen outputs that
-have to be scannable, with "same on all twelve, different on these three" as the primary reading
-rather than a wall of text. And it is the safety model, which deserves more thought than the
-feature: one approval for fifteen hosts is a categorically different decision from fifteen
-approvals, and a command aimed at a tag that silently acquired a production box is exactly how
-outages happen. Dry-run, an explicit resolved target list shown before execution, and a hard stop on
-first failure as the default all matter more than throughput does.
-
-**Size.** Weeks for a solid version. The policy question is worth settling before any of it.
-
-### 12. Live log tailing across hosts
-
-Follow a file, a unit or a container across several servers at once, merged and filtered.
-
-**Why.** The Fleet Monitor now says `uwsgi` failed. It cannot say why, and "why" is the next thing
-anyone asks. `tail -f` on one box is easy; merged, filtered, colour-coded tailing across three web
-servers is the daily reality of running a tier, and no GUI client does it well.
-
-**What exists.** The streaming half. The SSH data plane already handles continuous output with
-coalescing and backpressure, and `TerminalTransport` is the right abstraction to hang this on.
-
-**What is actually new.** Merging streams with per-host attribution, filtering that does not lose
-the stream while you type, and bounded buffers so a chatty host cannot exhaust memory. Also a
-decision about `journalctl` versus files versus `docker logs`, which is really the same target
-model that items 4 and 6 need.
-
-**Size.** Weeks.
-
-### 13. Fleet-wide search
-
-"Which host has port 5432 open?" "Where is this unit running?" "Which boxes have this process?"
-
-**Why this one is nearly free, and worth more than it sounds.** The Fleet Monitor *already collects*
-every listening socket with its owning process and every systemd unit on every reporting host, on
-every sample. That is a searchable index of the estate that exists in memory and is thrown away
-after being rendered as a table. Exposing it is a small feature that makes the data already being
-gathered worth gathering — and it is the kind of thing nobody else has, because nobody else is
-already holding the data.
-
-**What is actually new.** An index and a query surface. Note the honest limits up front: it reflects
-the last sample, not the present, and a host that could not report is a gap in the answer rather
-than an absence of the thing — the same `null`-is-not-empty distinction the monitor already respects
-must survive into search results, or the feature will confidently tell someone a port is closed.
-
-**Size.** Days to weeks. The best value-to-effort ratio on this page.
-
-### 14. Human session audit
-
-A record of what *you* did — commands run, files changed, on which host, when.
-
-**Why.** There is a meticulous audit log for what agents did and nothing for what the operator did.
-"What did I change on Tuesday" is a real question during an incident, and for anyone in a regulated
-environment it stops being a convenience and becomes a procurement requirement.
-
-**What exists.** `auditLog.ts`, the redaction pipeline, and — from 0.8.0 — the precedent of a
-*separate* log file for a different question, since local terminal sessions already write to
-`shellpilot-local-sessions.jsonl` rather than polluting the AI log.
-
-**What is actually new.** Deciding what is recorded, and being conservative. Commands and targets,
-yes. Full terminal output, no: it is enormous, it is full of secrets that redaction will not
-reliably catch, and a log of everything a person's shell printed is a more attractive target than
-most of what it was meant to protect. This should follow the local-session log's shape — metadata,
-never content — and it should be off by default with a clear switch, because recording a person's
-work is a different consent question from recording an agent's.
-
-**Size.** Weeks, most of it deciding what not to store.
-
----
-
-## Natural extensions of what 0.8.0 shipped
-
-### 4. Docker and Kubernetes
-
-List containers and pods, exec into them, read logs, see state — against a local daemon or any
-configured server.
-
-**What exists, and it is the important part.** `TerminalTransport` (`renderer/src/lib/transport.ts`)
-was introduced in 0.8.0 to make the terminal indifferent to what is on the other end. It has two
-implementations today, SSH and local. `docker exec -it` and `kubectl exec -it` are both "a PTY over
-a channel", which is the same shape. A container shell should be a third implementation and a new
-`PaneTarget` variant, not a new terminal.
-
-**What is actually new.** Discovery and state — container and pod listing, contexts and namespaces,
-image and restart metadata — plus deciding whether we shell out to the `docker` and `kubectl`
-binaries or speak the APIs. Shelling out is far less work and inherits the user's existing auth,
-including cloud provider plugins we would otherwise have to reimplement; it costs us structured
-errors and a dependency on binaries being present. The policy surface is not free either: a
-capability that lets an agent exec into a container is a capability to run code on a host.
-
-**Size.** Docker: weeks. Kubernetes meaningfully more — contexts, namespaces and RBAC are a product
-in themselves, and doing it badly is worse than not doing it.
-
-### 5. Backups to and from multiple targets
-
-Encrypted backups to somewhere other than a local file, and restore from any of them.
-
-**What exists.** The hard half. `backup.ts` already does password-derived encryption, export,
-inspect-before-import and import, over the whole persisted store. The format and the crypto do not
-change.
-
-**What is actually new.** Destinations — SFTP to a configured server, S3-compatible object storage,
-a local directory, a network share — plus scheduling, retention, and restore-from-remote. Two things
-deserve care: a backup contains the vault, so where it lands is a security decision the UI must make
-obvious rather than bury; and an automatic backup is a scheduled job, which is item 6, so these two
-should be built in that order or they will grow two schedulers.
-
-**Size.** Weeks. Less if it lands after cron.
-
-### 6. Cron and scheduled jobs, local and remote, across OSes
-
-See, create and edit scheduled work on any target, without remembering which of four mechanisms that
-box uses.
-
-**What exists.** The execution path — `execute_command` over SSH, policy, approvals and audit — and
-now local shells too.
-
-**What is actually new.** Four different systems behind one model: crontab on Linux and macOS,
-systemd timers where they are preferred, launchd on macOS for anything user-scoped, and Task
-Scheduler on Windows, which is XML over `schtasks` and shares nothing with the others. Reading is
-already awkward; *editing* is where this gets dangerous, because a bad write to a crontab is a
-silent outage and a bad `schtasks` invocation is worse. Round-tripping a file we did not write,
-preserving comments and unfamiliar syntax, matters more here than the UI does.
-
-**Size.** Read-only across all four: weeks. Safe editing: significantly more, and the honest
-sequencing is to ship read-only first and let it prove the parsing before anything writes.
-
----
-
-## New subsystems
-
-### 7. API credential proxy
-
-Let a process — a script, a dev server, an AI agent — make authenticated calls to a third-party API
-without ever holding the key. ShellPilot injects the credential at the boundary and logs the call.
-
-**Why this one matters more than its position suggests.** It is the same idea the app is already
-built on, pointed at a new class of secret. `docs/AI-SECURITY.md` says an agent never receives an
-SSH password or a database credential because ShellPilot resolves it server-side; this extends that
-sentence to API keys, which is where most of the leakage risk in an AI-assisted workflow actually
-lives. It also composes with everything above — the alert channels in item 3 need credentials, and
-this is where they should live.
-
-**What exists.** The vault, `credentialResolver.ts` with its vault/keychain/inline sources, the
-policy engine, the audit log, and `knownSecretValuesForServer` for redaction. The storage and the
-gating are done.
-
-**What is actually new.** A local HTTP proxy that rewrites outbound requests, per-destination rules
-about which credential applies, and TLS interception or an explicit base-URL rewrite. That choice is
-the whole design: interception is transparent and requires trusting a local CA; rewriting is honest
-and requires the caller to opt in by pointing at us. **Recommend the rewrite.** A tool whose pitch
-is "your secrets never leave" should not ship a CA into the user's trust store.
-
-**Size.** Weeks for the rewrite model. The interception model is a different and larger product.
-
-### 8. Ghostty for local shells
-
-**Read this one carefully, because the obvious version of it is not the useful one.** A feasibility
-study before 0.8.0 established, by inspection of the shipped artifacts:
-
-- **libghostty-vt contains no PTY.** Zero pty/spawn/exec symbols across its 30 public headers, zero
-  PTY functions among the 189 exports of its WASM build. It is a VT parser and terminal state
-  machine. It does not replace `node-pty` and cannot; cmux pairs it with `portable-pty` for exactly
-  this reason.
-- **The full libghostty renderer cannot be embedded in Electron.** Its platform enum admits macOS
-  and iOS only, and its surface type is an `NSView`.
-
-So "local shell support with ghostty" cannot mean swapping out how we spawn shells. What it can
-mean, and where there is real value:
-
-**A WASM libghostty-vt in the main process for terminal state, behind a flag.** It is a 262 KB
-gzipped, zero-import module — no native code, no signing, no per-platform binary — and it ships
-`snapshot.h`: CRC-protected binary encode and restore of complete terminal state, scrollback and
-unfinished parser input included. That is precisely the primitive session restore and
-detach/reattach need, and xterm.js has no equivalent; the alternative is replaying raw bytes.
-
-**What is actually new.** Hand-written FFI against an API whose authors say it will change without
-warning, and a decision about what owns terminal state. Keep xterm.js rendering in the renderer
-regardless — it works, and replacing it buys nothing this list needs.
-
-**Size.** A scoped experiment first. Do not start it as "adopt ghostty"; start it as "can we
-serialise and restore a session", which is a question with an answer.
-
-### 9. n8n embedded for workflow management
-
-Visual workflow automation inside the app: on this alert, run that command, then call that API.
-
-**Be clear-eyed about what embedding means.** n8n is a full Node application with its own database,
-its own auth, its own editor UI and a large dependency tree. "Embedded" realistically means running
-it as a supervised sidecar process and framing its web UI, not linking a library. That is
-achievable — the supervisor from item 1 is exactly the right tool for keeping it alive — but the
-result is two applications sharing a window, with two update cadences, two security models and two
-sets of stored credentials.
-
-**The question to answer before any code.** Is the value in n8n specifically, or in "if this, then
-that" over ShellPilot's own primitives? Because items 1, 3 and 6 together already give alerts,
-scheduling and execution, and a small purpose-built rule engine over those would integrate with the
-policy layer, the audit log and the vault — none of which an embedded n8n will do without
-significant bridging. Licensing needs checking too: n8n is fair-code under the Sustainable Use
-License, not open source, and bundling it in a distributed app is a question for a lawyer rather
-than for us.
-
-**Size.** Large, and the largest part is not engineering.
-
----
-
-### 15. A plugin system — so nobody ships or runs what they do not use
-
-Not every user needs Kubernetes, or n8n, or five database drivers. The app should not carry them for
-everyone.
-
-**Separate the two things this phrase usually means, because only one of them is cheap.**
-
-**(a) Optional first-party modules.** Features that ship with the app but are off until enabled, and
-whose weight is not paid until they are. This is what "we don't want to ship bloatware" actually
-asks for, and it introduces no new trust boundary — the code is still ours, still reviewed, still in
-the repo. It is achievable now.
-
-**(b) A third-party extension API.** Code we did not write, running inside the app. This is what
-"plugin system" usually means and it is a fundamentally different proposition here, for a reason
-specific to this product: ShellPilot's entire thesis is that credentials never leave it. A plugin
-that can call `credentialResolver` is a vault with no lock, and an ecosystem where the answer to
-"can I trust this extension" is "read its source" is not a security model. Not impossible — it needs
-a real sandbox and a capability-scoped API — but it is a product in itself, not a refactor.
-
-**Do (a) first, and do not let it drift into (b) by accident.** The two share a registry and almost
-nothing else.
-
-**What (a) actually costs.** Less than it looks, because the pieces exist:
-
-- **Gating is already a solved pattern here.** `AI_CAPABILITIES` plus the policy engine is a working
-  model of "this surface is available, this one is not", including the important default: an absent
-  capability reads as denied rather than as permitted. A module registry can borrow that shape
-  directly, including `backfillCapabilities`'s rule that a new thing does not silently switch itself
-  on for existing installs.
-- **The UI already hides what does not apply.** The activity bar, the tab kinds and the viewbar all
-  branch on what a tab or workspace supports. A disabled module is one more branch, not a new
-  mechanism.
-- **Lazy loading is already how the risky thing loads.** `localPty.ts` imports `@lydell/node-pty`
-  inside `loadPty()`, on first use, so a machine where it cannot load still gets a working app. That
-  is exactly the pattern a module needs.
-
-**What is actually new, and it is the interesting half: weight that is not paid.** Toggling a
-feature off in the UI does not shrink the installer. Today's ~120 MB is mostly Electron, but the
-five database drivers — `pg`, `mysql2`, `mssql`, `mongodb`, `ioredis` — are bundled for everyone,
-and something like n8n or a Kubernetes client would dwarf all of them. Real modularity means heavy
-dependencies are **fetched on enable rather than bundled**, and that is a supply-chain decision, not
-a packaging one: a download at runtime needs a pinned version, a checksum and a signature, or it is
-a remote-code-execution feature with a friendly button. The good news is that the pattern already
-exists — `resources/bin/manifest.json` plus `resolveBundled()` verifies a SHA-256 before executing
-any engine binary, on every run. Extend that, do not invent something new beside it.
-
-**The rule that must hold whatever gets built.** A module may not read the vault, resolve
-credentials, register an MCP tool without a policy entry, or reach the local terminal. Those are the
-four things the security model is made of, and `tests/localTerminalNotExposed.test.ts` already shows
-how to enforce a boundary like that by walking the real import closure rather than trusting a
-convention.
-
-**Interaction with Tauri.** Doing (a) well *helps* item 10 — clean module boundaries with no
-Electron API bleeding into feature logic is exactly the precondition a port needs. Doing (b) first
-would harm it badly: a third-party extension API is a compatibility promise, and rewriting the host
-underneath one is how migrations die.
-
-**Size.** (a) is weeks for the registry and the UI, plus real time per module to actually separate
-it. (b) is quarters and should not be scheduled until (a) has shipped and someone has asked for it
-with a concrete use case.
-
----
-
-## The one that changes every estimate above
-
-### 10. Migration to Tauri
-
-Replace Electron with Tauri: a Rust backend and the OS webview instead of a bundled Chromium.
-
-**The case for it is real.** Installers drop from ~120 MB to a fraction of that. Memory footprint
-falls. A Rust core is a better place for the privileged work this app does — the supervisor, the
-PTY layer, the VPN engines — than a Node main process. Several of the sharper problems in 0.8.0 —
-native modules under a hardened runtime, `spawn-helper` and asar unpacking, per-architecture
-prebuilds — simply do not exist in that world.
-
-**The cost is the whole main process.** `src/main` is not a thin shell: SSH and SFTP over `ssh2`,
-five database drivers, the MCP server, the vault and OS keychain integration, the VPN subsystem with
-its privileged helpers and elevation paths per platform, the supervisor, metrics parsing, the policy
-engine, the updater. That is the majority of roughly 48,000 lines of TypeScript, and almost none of
-it ports — it is rewritten in Rust against different libraries with different behaviours. The
-renderer largely survives; everything under it does not.
-
-**And the webview is not Chromium.** WebKit on macOS, WebView2 on Windows, WebKitGTK on Linux — with
-per-platform rendering differences the terminal, which is performance-sensitive and pixel-sensitive,
-will find first.
-
-**How to hold this.** Not as a scheduled item, and not as something to start "when there is time",
-because started halfway it doubles the maintenance surface indefinitely. Treat it as a standing
-direction with two gates: (a) new privileged subsystems get designed so their logic could move —
-clear boundaries, no Electron API bleed into business logic; and (b) it becomes a real project only
-when someone has ported one hard subsystem end to end — the VPN engine supervisor is the right
-candidate — and measured what it actually cost. Anything before that measurement is a guess about a
-year of work.
-
-**Size.** Quarters, and it invalidates the estimate on everything else while it is in flight.
-
----
-
-## The operator console — what running an estate needs that everything above does not give it
-
-Everything shipped so far answers one shape of question: **what is happening?** Watch the fleet,
-search it, tail it, ask an agent about it, and react by hand. That is an observation deck, and it is
-a good one.
-
-A sysadmin's actual week is a different shape: **patch these forty packages, coordinate the reboots,
-back that up, restore it somewhere to prove the backup works, drain that node, rotate that key, and
-show me on Friday what changed.** Almost none of that is a thing to look at. It is a thing to run —
-usually for longer than a minute, usually on a schedule, and always with a record afterwards.
-
-Measured against that week honestly, the gap is not twenty missing panels. It is three missing
-pieces of plumbing that nearly every one of those tasks needs, and which nothing in the app has:
-
+### 33. A job composer, and a job list — **SHIPPED**
+
+A `jobs` module (OFF by default, and more deliberately than the read-only ones:
+this one writes), `shared/jobCompose.ts` for the vocabulary, and a `JobsPanel`
+with list, detail, live output, cancel and a composer. The confirmation is the
+one `planJob` demands — the panel does not decide for itself that a verb is
+safe, which is the mistake item 35 had to fix in ComposePanel. Waves are
+`cohort` labels, so twelve servers three at a time is a blast radius of three
+and asks for less than twelve at once. Still open from this item: seeding a
+selection from a folder or tag, halt-remaining-across-hosts, and saved
+templates.
+
+**The finding above, made concrete.** `src/preload/index.ts:168-199` exposes
+`list/get/run/cancel/setDetached/capabilities/onProgress/onOutput`; IPC is wired at
+`index.ts:1812-1830`; `planJob` (`jobs.ts:442`) sizes the confirmation on the largest cohort;
+`jobApprovalFor` (`:506`) mints the record; `planWaves` (`patch.ts:711-728`) splits targets; the
+gate and halt are tested (`tests/jobStages.test.ts:190-396`). `PatchPanel.tsx:286-312` is the only
+caller and is a copy-able template. `RulesPanel.tsx:245-255` already composes a multi-step
+`command` spec from a textarea.
+
+**What is new.** A `JobsPanel` — list, detail, live output, cancel — and a "New job" composer:
+steps textarea, hand-picked targets, wave size, gate toggle, an optional `reboot` flag on a step,
+and the confirmation dialog `planJob` asks for. "Re-run as new job" is allowed only if it
+re-mints the approval; a saved *template* may hold steps and never targets (`broadcast.ts:13-15`).
+Two small broadcast follow-ons ride along: seeding a selection from a folder or tag — a seed,
+never a persisted set — and "halt remaining hosts on first failure", which the engine already
+does per host (`tests/jobRunner.test.ts:328`) and not across hosts.
+
+**What it must not do.** Reach the bridge (`tests/jobsNotExposed.test.ts`), skip the dialog the
+way the rules surface refuses a "run now" button (`rules.ts:613-619`), or run a gate without the
+sampler on (`GATE_SAMPLER_NOTE`, `patch.ts:1090-1093`).
+
+**Size.** 1–1.5 weeks. Everything in item 34 is a step kind inside it.
+
+### 34. Typed step kinds: service, package, file, user
+
+This document's non-goal table says the useful subset of configuration management is "about eight
+idempotent operations — package, service, user, file, key, line-in-file — and everything past
+that is a language." Item 33 gives those operations somewhere to run; this item is four of them,
+each a builder in main so the approval record holds structured intent rather than free text, and
+each an OFF-by-default module (`modules.ts:82-95`).
+
+| | Exists | New | Refused neighbour | Size |
+|---|---|---|---|---|
+| **34a service** — **SHIPPED** | — | `start\|stop\|restart\|reload\|enable\|disable` in `shared/serviceStep.ts`, wired as the composer's second mode. Unit names are an enumerated character set, not an escape function, because the value is interpolated into a command that runs as root. sshd is refused outright for every interrupting action — no phrase makes it a good idea, and offering one would imply there is. The name is checked against the units the PICKED servers reported, and `null` services is never read as "runs no units". Every action gets a verify step, because `systemctl start` exits 0 having asked. `stop` on a database unit needs no special rule: `assessCommand` already grades it destructive, so it demands a typed phrase. | | done |
+| **34b package** — **SHIPPED** | — | `install\|remove\|hold\|unhold` per manager in `shared/packageStep.ts`, wired as the composer's third mode. The MANAGER IS CHOSEN ONCE for the job, not per server: a job is one step list for every server in it and `verifyApproval` compares that text literally, so a command substituted per server could not be checked against its own approval. Stricter than `patch.ts`, which plans per server, and deliberately so — a patch run is "bring everything up to date", this is "install exactly this". apt removes rather than purges. apk and pacman refuse `hold` OUT LOUD rather than producing a command that does nothing, because "the job succeeded" on a server where the pin was never applied leaves the operator believing a version is held. Every action verifies, since `apt-get install` exits 0 having installed nothing when the name matched a virtual package. No `'package'` JobKind: the engine runs commands, and a second kind would be a second execution path for no gain. | done |
+| **34c file push** — **SHIPPED for a NEW file** | — | `shared/fileStep.ts`, the composer's fifth mode. The content goes into the command as base64 and its sha256 beside it, so `verifyApproval`'s literal comparison covers the BYTES — a job whose content was swapped between the dialog and the run does not verify. The host checks the arriving bytes against that hash and refuses if they differ, which is the only step that would notice a truncated transfer. Written to a temporary file and renamed over, because a rename is atomic and a truncate-then-write is not — a process reading a config file mid-write sees half of it. authorized_keys, shadow, passwd, sudoers and any private key are refused, pointing at the screen that stages and rolls back. Base64 rather than a heredoc, which `userUnits.ts` learned the expensive way. REPLACING an existing file is still open: it needs the current checksum read from each server first, and a job is one command for every server, so "what is there" is not one answer. | new file done |
+| **34d user** — **SHIPPED** | — | `create\|lock\|unlock\|add-group\|set-expiry\|delete` in `shared/userStep.ts`, wired as the composer's fourth mode. THE PASSWORD RULE IS STRUCTURAL, not a redaction: there is no action that sets one, and the panel says where the field would have been. A step's text is stored, hashed, compared and rendered — redaction happens at the writer, one of those four places — so a password in a step is a password in a record that outlives the job. `create` makes a locked account with no password and access arrives as a key through item 36's gate. `lock` expires the account as well as locking the password, because `usermod -L` alone leaves key logins working and an operator who locks an account believes it is shut. `delete` asks about the home directory separately, and root and the system accounts are refused at any strength. | done |
+
+**Order.** 34a first: it is the smallest, it is the one the inbox needs (item 43), and it proves
+the typed-step shape before 34c spends three weeks on it.
+
+### 35. Defects first: the classifier, the silent approval, and the missing rows — **SHIPPED**
+
+**All four, and one of them was bigger than written.** Defect 3 asked for
+`execute_command` to grade `docker volume rm` as `high`. It does now, and that
+changed nothing on its own: `risk` is read only inside the `decision === 'ask'`
+branch, `terminal` is `allow` in all four built-in groups, and an allowed
+command never opens a card for a grade to appear on. So the DECISION moved too
+— a destructive or elevated command can no longer resolve better than ASK,
+which is the rule this file already stated about `DROP TABLE`. Sudo is exempt,
+because a group that set it to `allow` had that decided by a human.
+
+Defect 1 turned out to be four traps rather than one: the SELECT wrapper, EXPLAIN
+ANALYZE (which executes), SELECT ... INTO, and ANALYZE itself. The existing test
+asserted `pg_terminate_backend(1)` bare — the form nobody types.
+
+The classifier moved to `shared/commandRisk.ts`; `jobsNotExposed.test.ts` caught
+the import dragging the job engine into the agent-reachable closure.
+
+Not a feature. Four things the audit found that should land before anything above is built on
+top of them, because each is a hole in a safety property this document claims.
+
+1. **`policyEngine.ts:425`.** The `READ` regex keys on the leading verb, so `SELECT
+   pg_terminate_backend(…)`, `SELECT pg_switch_wal()`, `SELECT pg_stat_statements_reset()` and
+   `ANALYZE` are `read` → `low` risk → no prompt with `databaseAccess = allow`, which every
+   built-in group grants (`:410-411`). Treat `pg_terminate_backend`, `pg_cancel_backend`,
+   `pg_switch_wal`, `*_reset` as mutating and move `analyze` out of `READ`. A day.
+2. **`ComposePanel.tsx:162-181`** auto-fills the phrase and calls `jobs.run` with no dialog.
+   Correct while `confirmationFor(ordinary, 1)` is `none`; wrong once `sudo` makes the step
+   `elevated`. Reuse the job confirm dialog whenever `jobPlan.confirmation.kind !== 'none'`. Half
+   a day, and every new compose verb inherits it.
+3. **`execute_command` risk.** `mcpServer.ts:833` grades `high` only on `sudo`. Apply
+   `assessCommand`'s docker/podman rule (`broadcast.ts:223-230`) so `docker volume rm` from an
+   agent is `high`. A day.
+4. **Approval-log vocabulary.** `JobApprovalEntry.surface` is `'broadcast' | 'job'`
+   (`jobs.ts:557`) and `ApprovalSurface` is `'broadcast' | 'job' | 'k8s-exec'`
+   (`broadcast.ts:603-605`). Key add/revoke (`index.ts:1309-1400`), `kubectl exec`, cordon, drain
+   and every item-37 statement need a row in `shellpilot-job-approvals.jsonl`. Widen both unions
+   once — `'access'`, `'k8s'`, `'db-statement'` — so item 36's first real revoke is recorded.
+   Half a day.
+
+**Size.** A week, all four. Nothing else on this page should merge first.
+
+### 36. The access write gate, and the five things behind it
+
+**36a. Flip `ACCESS_WRITE_ENABLED`.** The code is complete: plan and blocks
+(`access.ts:2528-2751`), both builders (`:2753-2812`), staged write with backup, count check,
+`chmod 600`, watchdog and arming proof (`:2860-2930`), verify and disarm (`:3057-3140`),
+`AccessCommitter` over a fresh unpooled session (`services/access.ts:218-341`), main-side
+re-derivation (`index.ts:1309-1334`), and the scope statement on screen. What flips it is not
+code: stage a revoke on a RHEL 9 host with `KillUserProcesses=yes` and no lingering, end the
+session, and watch whether `authorized_keys` comes back. The residual the design admits is at
+`docs/plans/roadmap-execution.md:603-608` — the arming proof catches a watchdog that never
+started and cannot catch one killed afterwards — and the five things to try are at `:614-625`.
+**36a is ANSWERED.** The RHEL 9.8 check was run (systemd 252, logind
+`KillUserProcesses=yes`, real PAM sessions), and it produced the measured table
+now in `access.ts`: only a `systemd-run --user --scope` on a LINGERING account
+ever survived; `setsid` and `nohup` never fired in either column. So the write
+refuses to stage when logind kills user processes and the account does not
+linger, and `ACCESS_WRITE_ENABLED = false` became the DEFAULT rather than the
+whole gate — `settings.accessWriteEnabled` is the operator's opt-in and main
+enforces it in both handlers.
+
+The `nohup` question is answered too, and the answer is not about the launcher.
+`SP_KILL` was two-valued, and `no` meant both "logind answered false" and "we
+could not ask" — opposite facts, one of which armed a rollback that logind may
+have been about to kill. It is three-valued now (`absent`/`no`/`yes`/`unknown`)
+and `unknown` refuses alongside `yes`. So a host that fell through to `nohup`
+may be written to only where it positively said it will not kill the process:
+logind absent, or logind answering false. Four behavioural tests, each driving
+a shimmed `loginctl`/`busctl` rather than asserting on the command text.
+
+**36b. Sudoers read — PARSER SHIPPED.** `shared/sudoers.ts` parses `Defaults`, aliases, specs,
+tags and include directives, and answers "what does sudo grant this account" by NAME, by GROUP
+and through a `User_Alias` — replacing the ADMIN_GROUPS guess, which is wrong in both directions.
+Verified against the real `/etc/sudoers` from `debian:12` and `almalinux:9`, captured as
+fixtures.
+
+Three things the item did not say and each changed the shape:
+
+`NOPASSWD` is not a boolean. Tags apply to the commands that FOLLOW them, so
+`NOPASSWD: /bin/ls, PASSWD: /bin/rm` is one spec where one command needs a password and one does
+not — and a boolean answers it wrongly whichever way it is set, the wrong direction reporting
+passwordless ROOT for an account with passwordless `ls`. It is `'all' | 'some' | 'none'`.
+
+`#includedir` is a DIRECTIVE that begins with the comment character. Both fixtures use it and
+both keep their real rules in `/etc/sudoers.d`, so a parser that treats it as a comment concludes
+the host has almost no sudo configuration.
+
+A line that could not be parsed is CARRIED OUT, never dropped, and makes the per-account sentence
+say the reading is incomplete. A sudoers parser that silently ignores what it cannot read will
+one day ignore the line granting root.
+
+**The consent line is SHIPPED**: `sudoersRead`, a new `AiCapability`, denied on every seeded
+group and opted into by none — so an upgraded install backfills it to deny rather than inheriting
+an `ask` nobody can answer during an unattended sweep, which is exactly the argument
+`firewallRules` makes one line above it. Being allowed to RUN sudo and being allowed to READ who
+else can are different grants, and the Sudo Access group has the first and not the second. No MCP
+tool exposes it whatever it is set to.
+
+**The probe is SHIPPED** and verified against `debian:12` with four drop-in files planted in
+`/etc/sudoers.d`. It reads each file SEPARATELY — "which file grants this" is the first question
+anybody asks and the last a concatenation can answer — in `sort` order, because the shell's glob
+order is locale-dependent and sudo's is not, and it skips the names sudo itself skips (a `.`
+anywhere, or a trailing `~`). Reading those would report rules that are NOT in effect, which is
+worse than missing ones: an operator would go and remove a grant that was never granted. Bounded
+on the HOST, not here: a 2 GB `/etc/sudoers` must not reach the SSH channel. An unreadable file
+makes the answer incomplete rather than absent, and the sentence says the usual cause is a sweep
+that was not root.
+
+**The gate is wired**: `sudoersReadGranted` reads the capability and nothing else, exactly as
+`firewallRulesGranted` does — `ask` collects nothing, because the sweep is unattended and there
+is nobody to answer a prompt — and `readSudoers` is its own exec rather than being folded into
+the hourly access command, so a server whose group has not consented is one this never touches.
+A failed read returns `null`, never `[]`: a read that did not happen is not a host with no
+sudoers rules. The sampler passes the capability per server, exactly as it does for the firewall rules, and the
+access panel renders the findings. THREE STATES are kept apart there and the type exists to force
+that: `undefined` is nobody consented, `null` is the read was asked for and failed, and an array
+is an answer. A server whose read failed says so rather than appearing as a server with no sudo
+rules. **Item 36b is complete.**
+
+**36c. Per-account revoke.** Blocked in main, not the planner (`index.ts:1257-1272`). Needs a
+per-host command (the connecting-account write resolves `$HOME` on the host, `:2860`, so one
+text covers a selection; a per-account write cannot), which turns the confirmed-command equality
+into per-host equality — the shape `AccessChangePlan.disarm` already has (`:2503-2505`) — and
+needs `sudo` in the write, which `:2307-2313` refuses on the ground that an escalated write is
+indistinguishable in the sudo log from an attacker. That refusal must be overturned in writing
+before a button. **1–2 weeks after 36a.**
+
+**36d. Firewall edit.** Refused at `posture.ts:118-125` until "a staged write, an independent
+re-authentication and an automatic revert" exist — 36a's protocol, pointed at `ufw`/`nft`.
+`firewalld --timeout` is native and is the safe first slice; `nft list ruleset` → `nft -f` is
+the snapshot/restore for the rest. Verify with a fresh session, which proves only that SSH still
+passes — the one thing the app *can* prove. Post-change re-read of the rule listing closes the
+"reported done, changed nothing" class. **2–3 weeks after 36a; firewalld alone, one.**
+
+**36e. Host quarantine.** 36d with a fixed ruleset (operator's source only). **2 weeks after 36d.**
+
+**Also behind the gate.** SSH key rotation = add → verify → revoke with the old key under
+`protect` (`access.ts:2415-2417`) until the fresh session succeeds (2 weeks after 36a).
+Sudoers *edit* needs everything 36c needs and would be the first root-escalated write in the app;
+recommend not before 36c lands. Local secret-age tracking on vault entries (`vault.ts:47-48`)
+needs none of this and is days.
+
+### 37. A database statement job
+
+**Why one item and not twelve.** `dbOps.ts:16-83` refuses every write from the operations panel —
+terminate, `VACUUM`, `PURGE BINARY LOGS`, `OPTIMIZE`, `createIndex`, `killOp`, `BGSAVE`,
+`CONFIG SET` — and at `:33-35` names where they belong: "that is a job: it goes through the job
+engine's approval model." The job engine has no database target. `JobStep.command` is a shell
+string (`jobs.ts:346-347`), `JobTargetRef` is a server (`:405-409`), and `ApprovalSurface` has no
+database value. Every one of the twelve is one to three days *after* this surface exists and
+weeks *without* it.
+
+**The shape.** Mint `approvalFor({surface:'db-statement', commands:[<the literal statement>],
+targets:[{serverId: db.id, serverName: db.name}]})` when the human types the phrase, verify with
+`verifyApproval` immediately before executing — the pattern `kubernetes.ts:404-422` reuses
+unmodified for `kubectl exec`. Run on `openTransient()` (`db.ts:276`), never the shared client;
+bind the value where the engine allows and where it cannot (`PURGE … TO '<file>'`) use a
+throwing builder enumerated in a `DB_WRITE_STATEMENT_BUILDERS` list so
+`tests/dbOpsRegressions.test.ts:78-127` can see it. Its own risk plan — `destructive`,
+type-to-confirm with the pid or file name as the phrase. Output to history, redacted. Never in
+the bridge's import closure, and close item 35.1 in the same change.
+
+**Then, per engine, in the order an operator would ask:** PG terminate backend and kill blocker;
+MySQL `KILL`; MySQL `PURGE BINARY LOGS TO` with a preflight that reads every replica's current
+file *from the replicas* (cross-connection, new); PG `VACUUM`/`ANALYZE` and MySQL
+`ANALYZE`/`OPTIMIZE` with the lock-time warning the refusal already wrote; Mongo
+`createIndexes`/`dropIndexes` plus the in-progress build monitor that `serverStatus` zeroes
+today (`dbOps.ts:2612`); Mongo `killOp` fetching `command` for the one opid named; Redis
+`BGSAVE` with a poll on `rdb_bgsave_in_progress`; Redis `CONFIG SET` for `maxmemory-policy`.
+
+**Reads that ride along and need no surface** (each 1–3 days, fixtures required). **PG
+`pg_replication_slots` and the blocking TREE are SHIPPED** in `shared/pgBlocking.ts`, both
+against fixtures from a real PostgreSQL 16.15 in Docker.
+
+**The live query is FIXED**, which is the part that matters more than the tree module:
+`PG_QUERIES.locks` filtered on `cardinality(pg_blocking_pids(a.pid)) > 0` — sessions that are
+BLOCKED — and the session holding the lock is not itself blocked. Proven against PostgreSQL
+16.15: the old query returned two pids, the fixed one returns three, and the extra one is the
+only session an operator can act on. Fixing the query alone would have been a bug — `judgePgLocks`
+counted every returned row as a blocked session and `blockedSessions` stored that as a metric, so
+both now count blocked rows only, and the verdict names what the blocker is running.
+
+The blocking tree measured out worse than the item describes: with a three-deep chain made from
+three concurrent transactions on one row, the session actually HOLDING the lock is not itself
+blocked — so the existing read, which returns rows that are blocked, omits the only session an
+operator could act on. The tree reports the root first, counts waiters transitively (a count of
+direct waiters says one where two are stuck), and carries a seen-set on every walk because a
+snapshot taken across a deadlock's resolution can contain a cycle.
+
+Slots repeat `mssqlAlwaysOnStatus`'s trap and it was confirmed on the live server: zero rows is
+what a server with no replication returns AND what one whose slots were dropped returns, so an
+empty list is `unknown`, never `ok`. An INACTIVE slot is the alarm — the server keeps every WAL
+segment it might need, for ever, and the first symptom is a full disk.
+
+**MySQL top-N, Mongo index sizes and Redis persistence are SHIPPED** too
+(`shared/dbSlowReads.ts`), against fixtures from MySQL 8.4.11, MongoDB 7 and Redis 7.4.11. Two of
+the three thresholds changed because of what those servers returned: a Mongo collection of two
+documents holds 58 bytes of data and 24,576 bytes of index — a ratio over 400, because an index
+has a minimum size — so a size FLOOR comes before the ratio or every small collection in an
+estate is on screen; and three of MySQL's four real digests returned no rows at all, so
+`examinedPerRow` is null rather than Infinity, which would sort every INSERT above the statement
+actually scanning. `no_index_used` is MySQL's own count and is the signal used, because it is
+true on a table too small for a ratio to mean anything.
+
+**The MySQL half is WIRED** as a ninth question, `digests`, with a capture recorded from MySQL
+8.4. It is not the slow log: that counts statements crossing a time threshold, and a scan of a
+small table is fast. `performance_schema` being off or unreadable is `absent` — a first-class
+answer — never "no statement is scanning".
+
+**The Redis verdict was DELETED rather than shipped.** `judgeRedisPersistence` already answers
+"what would a restart cost" and answers it better, from runtime state — last BGSAVE status, last
+AOF write status, save age, changes since. Mine read only configuration, and a server whose last
+BGSAVE failed is healthy by the config and broken in fact. Two judgements of one question is two
+things to keep in step and the weaker would have been on screen half the time. What survives is
+the parse, because item 38 needs `dir` and `dbfilename` to know where the RDB file is.
+
+Still open: the PG slow-statement threshold in `DB_THRESHOLDS`; MySQL top-N from
+`performance_schema.events_statements_summary_by_digest`; Mongo index sizes (the collector never
+passes `sizes`, `services/dbOps.ts:700-720`); Redis `CONFIG GET dir dbfilename`. Fixtures for
+Redis AOF, Sentinel and Cluster and a Mongo sharded cluster remain captured-or-nothing
+(`tests/fixtures/dbops/README.md:8-14`).
+
+**Size.** 2–3 weeks for the surface; then 1–3 days per action.
+
+### 38. Backups, the second half
+
+Item 5 shipped the bundle: encrypted, three destinations, retention with three refusals, read
+back and decrypted after every write. The audit found the *database* half is thinner than the
+README row implies, and the bundle never contains host data.
+
+**What a dump proves today** (`services/backup.ts:828-923`): the binary exited 0, stdout was
+non-empty, the bytes landed and read back with a matching sha256. It does not prove the SQL is
+loadable. `DumpRunReport` "has no retention and no restore test, because it is not an encrypted
+bundle and nothing here can open it to check" (`shared/backup.ts:490-493`). Dumps are manual —
+`backupTick` (`:975-996`) iterates bundle destinations only — plaintext, 512 MB in memory
+(`MAX_DUMP_BYTES`), and refused for any database behind a bastion, a VPN or a URI
+(`backupTargets.ts:716-727`).
+
+**In order:**
+
+1. **Schedule, stream, encrypt, retain** — the four things the bundle has and the dump does not.
+   **RETAIN is SHIPPED**: `planDumpRetention` with `planRetention`'s three refusals, counted PER
+   DATABASE — a destination holds dumps of several databases interleaved, so a global "keep 7"
+   would keep seven objects rather than seven of each, and a database dumped hourly would evict
+   one dumped weekly entirely. The two retentions cannot see each other's objects, which is
+   pinned in both directions. `collidingDumpDatabases` surfaces the one real ambiguity: a name
+   with a character outside `[A-Za-z0-9_.-]` sanitises into the object name and can collide with
+   one already spelled with an underscore, so those two share a group. Schedule, streaming and
+   encryption still open.
+2. **Dump on the remote host over SSH** as a job, which is what makes bastion/VPN databases
+   dumpable and is the only way a large dump ever finishes. Needs the detached path. 1–2 weeks.
+3. **`mongodump --archive --gzip`** and a Redis path. Mongo is a stated absence, not a refusal
+   (`backupTargets.ts:702-703`), and `--uri` is the *correct* form for it — which inverts the
+   URI refusal above and needs a decision on how the credential reaches `mongodump` without
+   touching the command line (`shared/backup.ts:449-452`). Redis has no stdout dumper: either
+   `BGSAVE` (item 37) then copy `dir/dbfilename` off a host that is a configured server over
+   SFTP, or `redis-cli --rdb`. 1 week each.
+4. **Restore into a scratch database** — the only restore test that means anything for a dump.
+   Needs a target, a scratch-DB policy (DDL, `destructive`), streaming and a job; sits on item
+   37. 1–2 weeks per SQL engine.
+5. **Restore the bundle's siblings.** `psql < dump` / `mysql < dump` as a job with a typed
+   phrase. Host *file* restore is out of scope: the bundle is app state and the README should
+   say so where it says "everything".
+6. **Binlog position** in MySQL dumps (`--source-data=2`) and `pg_dumpall --globals-only`. Days.
+
+**And the one that is not a database.** A failed scheduled backup reaches a desktop
+`Notification` (`index.ts:3517-3531`) and nothing else — no webhook, no inbox row, no history.
+`job-failed` is *not* emitted for backups; it comes only from the renderer's job watcher
+(`FleetWatcher.tsx:243-250`). A `backup-failed` STATE kind: add to `ALERT_KINDS` and
+`STATE_ALERT_KINDS`, a coverage source, a destination-not-host subject (the `hostId: null`
+precedent at `index.ts:2809-2811`), raise from `onNewFailure`, resolve on the next `report.ok`,
+and surface `skipped` — a vault-locked destination that never runs is the silent failure the file
+already warns about (`backup.ts:930-936`). The `Record<Kind,…>` tables fail to type-check until
+filled, which is the guard. **2–3 days, and it should go before anything else in this item.**
+
+### 39. Kubernetes reads that are cheap and missing
+
+**All rows below are reachable.** `shared/k8sReview.ts` runs the thirteen reads in one round trip and `KubernetesPanel`'s **Cluster review** button renders them worst-first, with what was NOT read printed above the findings — a short list of findings otherwise reads as a clean cluster. Building it found a real defect: reading PodDisruptionBudgets in the wrong shape made `parseDrainPdbs` return nothing and every workload was then reported as having no budget, so text that yields no objects is now a blind spot rather than an empty cluster.
+
+
+All reads, all per-`--context`, all with their own `K8sRead` verdict, none agent-reachable. Each
+is a few days and none needs a new principle.
+
+| Read | New | Size |
+|---|---|---|
+| **Node conditions, allocatable, taints** — **SHIPPED** | — | `shared/k8sNodes.ts`, against fixtures from a real k3s v1.31.5 node before and after `kubectl cordon`. The measurement that shaped it: `False` is GOOD for the three pressures and BAD for Ready, so reading them as one boolean inverts three of the four. And a node condition has THREE values — `Unknown` is what the control plane writes when the kubelet has stopped reporting, which is the state an operator most needs and the one a boolean cannot hold. Such a node's other conditions are the last ones it sent and the verdict says so. A cordoned node gets its own verdict and does not count against readiness: it is not broken, and calling it unhealthy sends somebody to investigate their own change. Allocatable quantities are kept as Kubernetes wrote them (`24571576Ki`), because converting them would put a unit decision in a parser. |
+| **Requests/limits, node allocatable vs requested** — **SHIPPED** | — | `shared/k8sResources.ts`, with the quantity parser the row asks for: a bare CPU number is CORES and `100m` is millicores, and reading that backwards understates a node a thousandfold and reports every cluster as wildly overcommitted. `Ki` is 1024 and `K` is 1000 and both appear — a node says `24571576Ki`, a manifest says `64Mi`. "No requests set" is an answer: on a stock k3s TWO OF FIVE deployments set none, and a container with no request is not one that needs nothing — it is one the scheduler places blind and the kubelet evicts first, so they are counted and listed rather than added as zero. No allocatable read gives `null`, not a percentage against zero capacity. |
+| **HPA** — **SHIPPED** | — | `shared/k8sHpa.ts`, against two fixtures that are THE SAME HPA a minute apart: before the metrics API served and after. The row asked that `<unknown>` render as unmeasured and never 0%; measuring it showed the trap is sharper. An HPA with no metrics reports `desiredReplicas: 0` — a real 0 in the API, not `<none>` — while its minimum is 2, so read as a number it says the autoscaler wants to scale a production deployment to nothing, and on a cluster whose metrics API never serves it says that for ever. `currentUtilization` is the field that separates the two, so `desiredReplicas` is null whenever it is absent. Also names an autoscaler at its ceiling AND over target (it has nothing left to do), and one pinned with min === max (it can never scale). |
+| **PDBs as a view** — **SHIPPED** | — | `shared/k8sPdbView.ts`: per-workload "covered by N budgets, allowing M", with the SMALLEST allowance across them, since that is the one a drain actually meets. `matchExpressions` stays `cannot-evaluate` and never `uncovered` — the drain preflight already refuses to guess at one ("an unknown budget is not a permission"), and a view that skipped it would report a workload as unprotected when it may be the best protected thing on the cluster. The measurement that changed the design: an ORPHANED budget — selector pointing at a label nothing carries — reports `disruptionsAllowed: 0`, byte-for-byte what a budget protecting real replicas at its limit reports. They are told apart by `expectedPods`, which is the count the controller itself arrived at and is therefore right for matchExpressions too; re-deriving it from matchLabels would be a second implementation of the controller's matching. |
+| **Certificates, three ways** | (1) **SHIPPED** — `/etc/kubernetes/pki`, `/var/lib/kubelet/pki` and the k3s/rke2 `server/tls` trees are cert roots, so the existing `cert-expiry` kind fires for control planes with no new kind. Two things the line did not mention and both mattered: a kubeadm control plane holds TWELVE certificates once `etcd/` and the kubelet are counted, so the 16-file cap had to go to 32 or such a node would report a truncated list of its own and nothing else; and the new roots go AFTER the web roots, because `find` walks its arguments in order and the cap is a `head`. Verified by building a kubeadm layout on disk and searching it with the probe's own depth and name list, not by asserting on the command text; (2) kubeconfig client cert or token `NotAfter` decoded on the host, never echoed; (3) cert-manager `Certificate` Ready/`notAfter`/`renewalTime`, CRD absent being a normal answer | 1 d / 2–3 d / 2 d |
+| **RBAC rules and `can-i --list`** — **SHIPPED** | — | `shared/k8sRbac.ts`, against real output for an admin kubeconfig and for a service account bound to a pods-only Role. Three things the output does that a naive parse gets wrong: `system:basic-user` grants the three `selfsubject*` rules to EVERY authenticated identity, so counting them reports five permissions for an account with two and buries the two; a non-resource rule prints with an EMPTY first column, so splitting on whitespace reads `[/api/*]` as the resource name and shifts every column after it (the columns are found by header position instead); and a failed read is `unknown`, never an empty permission set — reporting that as "can do nothing" would describe a cluster-admin token as harmless. |
+| **PVs, StorageClasses** — **PVCs and PVs SHIPPED** | — | The fixture's Pending PVC IS `WaitForFirstConsumer`, as the row predicted, and that turned out to be the whole finding: it is k3s's default and EKS's and GKE's, so every claim sits Pending until a pod that mounts it is scheduled. Reporting Pending as a fault would fire on every such cluster for every claim. Pending on an `Immediate` class is the opposite — the provisioner should have bound it and did not — and a class that was not among those read gives `unknown` rather than a guess. `Lost` says the data is gone. PVs and reclaim policy per volume are `shared/k8sPv.ts`, and measuring that changed what the row prints. A RECLAIM POLICY IS NOT A PROPERTY OF THE VOLUME: it is what happens the moment somebody deletes the claim. Measured — a static hostPath PV with `Delete`, bound, had its claim deleted and VANISHED from the API within seconds; no event, no Released state to notice it in. The same test with `Retain` left the volume at `Released` still carrying the deleted claim's `claimRef.uid`, which is why it never rebinds on its own. So a bound volume prints what deleting its claim would do rather than its status, which is `Bound` and unhelpful; `Bound`+`Delete` stays graded `ok` because it is the default on k3s, EKS and GKE and grading it would fire on every volume of every such cluster. Released volumes are counted as held capacity separately, because no claim reports them. StorageClass expansion is still open. |
+| **`rollout history`** — **SHIPPED** | — | `shared/k8sRollout.ts`. Measured, and it is not a plain read after all: `kubernetes.io/change-cause` is an ANNOTATION on the deployment that is copied onto every new ReplicaSet until somebody changes it, so it describes whichever rollout last set it and gets carried onto later ones. On the fixture, revisions 2 and 3 both say "bump to 1.37" and revision 3 is `busybox:1.36.1` — a different image wearing revision 2's label. Showing that uncaveated would have an operator roll back to "the one before the 1.37 bump" and land somewhere else. So the IMAGE leads (read from the ReplicaSet, which is a per-revision fact) and a repeated label is marked as probably left over. `rollout status` on demand shipped with the add-on view in `shared/k8sAddon.ts`, where the reason it needs a deadline was measured. |
+| **Helm** — **parse PROVEN** | — | Fixtures recorded from helm v3.16.2 against k3s v1.31.5 with two releases in two namespaces, plus a real empty list. The parse is correct. The field worth taking a fixture for was `revision`: helm sends it as a STRING, and the parser's `str()` returns `''` for anything else, so a numeric revision would have vanished silently — a release showing a blank revision with nothing to say why. `app_version` → `appVersion` is the one renamed field and is now pinned. `history`, `status` and the `get values` decision are still open. | parse done |
+| **Stale objects** — **SHIPPED** | — | `shared/k8sStale.ts`, report only; deletion stays refused. Two measurements shaped it. `kubectl get pods` prints **Completed** and **Error** in its STATUS column while `.status.phase` says **Succeeded** and **Failed** — two vocabularies for one pod, and a parser keying on one with a comment describing the other is how somebody later "fixes" it to match the docs and breaks it. And **a failed Job records no `completionTime` at all**, so age from that field is null for exactly the jobs most worth noticing; it comes from `startTime` and the sentence says so. A Job's pods are not listed beside the Job — deleting the Job removes them, so the Job is the actionable row. An evicted pod is `Failed` too, and the reason is the only thing separating "the node pushed it off" from "the process exited non-zero". PVCs and ConfigMaps are `shared/k8sUnused.ts`, and the measurement cut both ways. "No pod references this" IS NOT "this is unused": a Deployment scaled to zero mounting a ConfigMap leaves it referenced by nothing that exists, and scaling back up breaks at once — so the result is a candidate list carrying a caveat that names what was not looked at, never a recommendation. And the obvious scan is wrong the other way: `kube-root-ca.crt` is in EVERY namespace and referenced by every pod only from inside a `projected` volume's `sources[]`, in a volume the API server injects and nobody's manifest contains. A scan walking `.spec.volumes[*].configMap.name` — the path anyone writes first — misses it and proposes deleting the service-account CA on every cluster; in the fixture it also sits in `kube-public` and `kube-node-lease`, which hold no pods at all, so there it is unreferenced by construction and forever. The projected path is walked, cluster-owned names and system namespaces are never proposed, and kept rows are still listed rather than hidden. |
+| **Add-on verification view** — **SHIPPED** | — | `shared/k8sAddon.ts`, measured on k3s v1.31.5 with two DaemonSets side by side: one healthy, one whose container exits at once. THE BROKEN ONE IS FULLY ROLLED OUT — UP-TO-DATE equals DESIRED, the column every "did the rollout finish" check reads — and it has never started. So availability is asked before up-to-dateness, and "the rollout is complete and the add-on is not running" is a sentence this view can print. Three more measured traps: `numberAvailable` and `numberUnavailable` are both `omitempty`, so each is ABSENT when zero (they are absent on different rows of the one fixture) while `numberReady` is never omitted — absent means zero for those two fields specifically; a DaemonSet with DESIRED 0 satisfies every ratio and means the add-on is installed nowhere; and `rollout status --watch=false` printed "Waiting for … 0 of 1 updated pods are available" and EXITED 0, so `done` requires the exit code and the wording to agree, and the command builder cannot emit a rollout status without a deadline. Warnings are grouped per object and reason because the fixture's eight rows describe two problems, and `InvalidDiskCapacity` — permanent kubelet noise on this shape of cluster — is dropped. |
+| | Exists | New | Size |
+|---|---|---|---|
+| **Compose dialog** (item 35.2) — **SHIPPED** | — | Done as item 35's second defect: the panel asks whenever `planJob` says to, rather than filling in its own phrase. | done |
+| **Per-service pull/up** — **SHIPPED** | — | A checkbox per service in the open project; the picks are cleared with the project, because a selection carried across would name another project's services. Empty still means every service, which is what compose means by no argument. Another builder that had validated a `services` list since it was written and never received one. | done |
+| **Compose `restart` one service** — **SHIPPED** | — | Routed to the container `act` path, as the row suggested, and measuring said why that is the right end rather than merely the cheaper one. `docker compose restart` was run against a real project first. It DOES NOT APPLY AN EDITED COMPOSE FILE: with the file changed from `V: one` to `V: two`, `compose restart` brought the container back still carrying `V=one` and `up -d` recreated it as `V=two` — so the dialog always carries that sentence and points at `up`. And it touches EVERY replica: a `replicas: 2` service restarted both. Going through `planDockerAction` means the containers are NAMED, the fan-out is visible before it happens, a restart is graded elevated, and two replicas escalate to a typed `RESTART` — which is what two containers going down at once deserves. A service with no container gets a refusal pointing at `up`, because `restart` does not create one. `planComposeServiceRestart` in `shared/compose.ts`, wired into `ComposePanel`. |
+| **Validation wording and lint** — **SHIPPED** | — | Measured against compose v5.1.4 refusing six real files, and the row's diagnosis was exactly right: NONE of `service "web" depends on undefined service "nope"`, `yaml: while scanning a quoted scalar…`, `validating …: additional properties 'imagz' not allowed`, `has neither an image nor a build context`, `dependency cycle detected` or `env file … not found` matched `BLOCK_FAILURE`, so all six printed "returned nothing this parser could read" — a sentence about this program instead of the sentence compose wrote about the operator's file. They are now `invalid-project`, whose help line says compose read the file and refused it and whose detail is compose's own line verbatim. The lint (`lintComposeConfig`) covers what compose ACCEPTS and still surprises: a floating or absent tag (with the registry-port colon handled — `registry:5000/app` is untagged, not tagged `5000`), a missing restart policy, and `network_mode: host` alongside a `ports:` block, which compose accepts at exit 0 while the mappings do nothing. A NAMES-ONLY model is refused by the linter itself: every field on it is empty because nothing was read, and linting it would claim every service has no tag and no restart policy. |
+| **Render what is parsed** — **chips SHIPPED** | — | A chip row per declared service: `restart:`, `depends_on`, ports, profiles. A service with NO `restart:` is chipped `no (default)` and warned rather than left blank — compose defaults to `no`, so it does not come back after a reboot and nothing else on the screen said so. A profiled service is chipped "not started by a plain up", which is the commonest reason a declared service looks missing. Declared-vs-running restart policy (needs a per-container inspect) and the volume join are still open. | chips done |
+| **`docker pull` / `build` as jobs** — **SHIPPED** | — | The row asked whether `build` needs an `ELEVATED` rule. It does, and the reason is the one the row gave: a Dockerfile is a program and `RUN curl … | sh` is an ordinary line in one, so `docker build` and `docker compose build` are graded elevated with "runs a Dockerfile, which can execute anything its author wrote". `pull` deliberately is NOT — it fetches bytes and runs none of them, and a confirmation on the safest thing on the panel teaches people to click through the ones that matter. `compose build --pull` always carries `--pull` (a build reusing a cached base is a build without the security update somebody just asked for) and takes NO build args, because a build arg is free text reaching a `RUN` line and nothing here can show what it will do. `up` still omits `--build`: building and starting are separate decisions, and folding one in runs a Dockerfile behind a button labelled start. The build button only appears where the file declares something built from source. Standalone `buildDockerPullCommand` / `buildDockerBuildCommand` validate the reference, the tag and the context — the context refuses a URL, since `docker build https://…git` fetches and builds code off the internet. `validateImageRef` moved to `shared/docker.ts` and is re-exported from `compose.ts`: compose imports docker, so leaving it would have made the import circular. |
+| **Networks** — **SHIPPED** | — | `buildDockerNetworkCommand` / `buildDockerNetworkPreview` in `shared/docker.ts`. The row said "emit only zero-attached" and measuring showed that rule is wrong: `docker network inspect` counts the containers attached RIGHT NOW, so a compose network whose one service is stopped reports zero while `docker ps -a` still shows the container on it. Removing it on that basis is not recoverable by recreating a network of the same name — the container is pinned to the network's ID. Measured end to end: after `docker network rm spnet_back`, `docker compose start b` failed with "network c1fd84b264c9… not found", and only recreating the container fixes it. So attachment comes from `docker ps -a`, whose `{{.Networks}}` column names a stopped container's networks, and `network inspect` is not used at all. `bridge`, `host` and `none` are withheld with the reason rather than filtered, and a network is offered with no size rather than `0 B`, which would read as a measurement. Wired end to end: `DockerReader.networks`, its own IPC channel, and `mergeNetworks` in the panel — networks are a SECOND read, so the confirm-time re-check re-reads both and the preview stays a pure function of the two, which is the only thing that makes that check mean anything. A network read that FAILED goes in as a withheld row saying so, because a silently network-free preview is indistinguishable from a host with no removable networks and only one of those is true. |
+| **Targeted engine/compose upgrade** — **SHIPPED, with one part deliberately left to the operator** | — | `shared/engineUpgrade.ts`. The precheck reads `docker info --format '{{json .LiveRestoreEnabled}}'` — measured on a real daemon, which answered `false` — and that flag is READ rather than the behaviour being watched, which is a weaker claim and is worded as one wherever it appears. Anything that is not exactly `true` or `false` is `null`, never `false`: a daemon that could not be asked has not said containers will stop. THE INSTALLED SET IS NOT PARSED, and writing the fixture is what settled that: the first version searched the package block for the package names, and dpkg's own error is `dpkg-query: no packages found matching docker-ce`, which CONTAINS the name — so a host that has never had Docker's packages read as having them. A correct `dpkg-query`/`rpm -q` parser could be written but not verified here, and an unverified parser standing between an operator and a SECOND container engine is worse than no parser, so the block is shown and the operator confirms they read it. All four packages move together (`docker-ce`, `docker-ce-cli`, `containerd.io`, `docker-compose-plugin`), because upgrading only the daemon leaves last release's CLI and runtime beside it, and the job is built by the existing `packageJobSpec` rather than a second builder — it validates every name, quotes them and ends with the manager saying what is installed now. `apk`, `pacman` and `zypper` are refused: Docker publishes no repository for them. WIRED into the Docker panel, where the package block is shown verbatim and a checkbox carries the confirmation the parser cannot; the package manager comes from host facts and a server whose facts are not collected is refused rather than guessed at as apt. The precheck types live in a separate `shared/enginePrecheck.ts` because `shared/docker.ts` needs the probe type and IS agent-reachable — importing the plan half there would drag the job vocabulary into the MCP import closure, which the boundary test caught. |
+| **Health log, unhealthy-first** — **SHIPPED** | — | `buildDockerHealthLogCommand` / `parseDockerHealthLogs` / `sortUnhealthyFirst` in `shared/docker.ts`, measured against four real containers in one inspect. Four findings. `.State.Health` IS NULL for a container with no healthcheck — not healthy, not unknown, and "healthy" is the word this must never print for it. Docker keeps only the LAST FIVE entries: measured against a container whose `FailingStreak` was 24 and whose log held 5, so the log is a sample and the streak is the count. `starting` can mean "failing every check": inside a 300-second `start_period` a check exiting 1 reported `Status: starting`, `FailingStreak: 0`, so the log's exit codes are the only thing that says otherwise and a failing starter sorts directly behind the unhealthy. And the output is the check's own stdout verbatim — a measured one carried `https://user:…@host/health?token=…` and an `Authorization: Bearer` header — so the shared parser keeps it RAW and redaction stays in main, where `redactOutput` and the known secrets are; a shared parser promising redaction it cannot enforce would be worse than not promising it. Wired end to end: `DockerReader.healthLogs` is the one read in that file rewritten before it returns — every `Output` goes through `redactOutput` there, so the renderer and anything that later logs what the panel showed never hold the original. `HealthLogPanel` renders it, asked for rather than read on every refresh, and for RUNNING containers only: a stopped one's health is whatever it was when it stopped, and shown beside live answers it reads as current. |
+| **`.env` write via the vault** — **SHIPPED** | — | `shared/envWrite.ts`, `EnvValueWrite.tsx`, and the design WAS the work as the row predicted. The image-tag edit's plan-then-confirm shape could not be reused, because for a `.env` THE LINE IS THE SECRET: a plan carrying `before` would carry the thing this module exists never to read. So there is no round trip — the renderer sends a path, a name and a vault REFERENCE, main resolves, reads, plans, applies and writes, and what comes back is a line number. The plan never leaves the process, so the staleness `writeImageTag`'s `before` check exists to catch cannot arise rather than being caught. THE QUOTING WAS MEASURED end to end — `.env` bytes, through interpolation, into a running container's real environment, read back with `env -0 | base64` — and two earlier harnesses were wrong in ways that looked like the escaper was wrong (`printf "$V"` let the container's shell expand `$b` and turn `$$` into PID 1; `config --format json` re-escapes `$` on output), which is precisely why it was measured. What it found: an inline `#` starts a comment so an unquoted value is truncated; trailing whitespace is stripped; `export FOO=v` IS honoured; a repeated name takes the LAST one, so a duplicate is refused rather than half-written; double quotes interpolate `$` and process backslash escapes; and single quotes process nothing but have NO escape for a single quote at all — the shell's own trick is a compose parse error. Apostrophes are common in passwords, so the writer emits double quotes escaping `\` then `"` then `$`, in that order, because escaping `\` last re-escapes the backslashes just added. THE BOUNDARY IS IN THE TYPES: `writeEnvValue(cfg, req, value)` is deliberately NOT on `ComposeBridge`, because that is the interface the preload implements and a value-taking member there would require the renderer to hold one. AND THE MODULE GUARD CAUGHT A REAL LEAK — the first version imported `store/vault` for the entry picker, which would have put every vault password, in plaintext, inside the docker module's renderer half; `shared/vaultIndex.ts` is the names-only answer, a SEPARATE namespace rather than a filtered call, because the namespace is the unit the guard works in. Its projection is a function with an explicit return type, since the inline literal it replaced type-checked cleanly with `password` added to it. |
+| **Scanner consumer** — **SHIPPED for trivy** | — | `shared/imageScan.ts`, measured against three real trivy runs, and two of the three findings change what the panel is allowed to say. `alpine:3.18` REPORTS ZERO VULNERABILITIES AND IS PAST END OF SUPPORT — trivy warns "security updates are not provided" — so zero there means nobody is issuing advisories any more, and an EOSL image never renders as clean. `debian:12` reports 221 findings of which FIVE have a fix, and all five are `UNKNOWN`: every one of its 4 CRITICAL and 52 HIGH has no fixed version, so a count without the fixable split invites an `apt upgrade` that clears nothing. `UNKNOWN` is its own bucket (six of them) rather than folded into low. The read is `--format template`, not `--format json` — one Debian image's JSON is 589 KB — and it keeps stderr because the template receives `types.Results` and cannot reach `Metadata.OS.EOSL` at all, so the end-of-support warning is only on stderr. "No scanner" is its own class and grades `unknown`, never `ok`, and nothing installs one. **grype and `docker scout cves` are deliberately NOT parsed**: neither was measured, and a parser written from documentation reports whatever it guessed. The scan does not escalate to sudo either — every other read here does, but escalating means running a third-party binary as root to satisfy a panel. |
+| **Podman** — **PROVED, and it found a bug** | — | Measured on podman 5.8.4 in a container on the test host, through the commands `shared/docker.ts` already builds. That module was written anticipating podman — no `--format`, because the engines disagree about field names, and it resolves the `podman` binary as a fallback — and the anticipation held for almost everything: both `system df` forms parse on every column, and the missing `Build Cache` row is simply three rows rather than four because the parser reads a LIST and not a fixed set. WHAT DID NOT HOLD: docker's `system df -v` STATUS column writes `Up 2 hours`, podman's writes the bare state, so `exited` and `created` matched the existing branches by luck of the same word while `running` matched nothing — EVERY RUNNING CONTAINER ON A PODMAN HOST read as `unknown`. WHAT THAT WAS NOT is an unsafe action: the reclaim preview withheld them anyway as "its state could not be read", so the refuse-what-you-cannot-read default held and this was a wrong label rather than a container offered for deletion. That is now pinned separately so the safety never depends on the parse, and mutation established that TWO independent guards keep a running container out of the offered list — removing either alone changes nothing, removing both offers one. `podman volume rm` on an in-use volume differs too (exit 2 and different wording against docker's exit 1) and CANNOT BE REACHED, because rule 1 never offers a volume with `LINKS > 0` and podman reports `LINKS` in the same column; the fixture records it so nobody rediscovers it. **AND `podman compose` TURNED OUT TO BE A CREDENTIAL PROBLEM, not a compatibility one.** It is not an implementation: it looks up an EXTERNAL PROVIDER and runs that, printing `>>>> Executing external compose provider "/usr/bin/podman-compose" <<<<` before every command — successful ones included — in ANSI escapes that `--no-ansi` does not remove. `shared/compose.ts` exists because `docker compose config` resolves `${SECRET}` out of `.env` and prints it, and the whole module rests on `--no-interpolate --no-env-resolution` making that impossible; **podman-compose REJECTS BOTH FLAGS** (exit 2, usage error) and plain `podman compose config` printed the project's `.env` password in plaintext. So such a host is REFUSED, like docker-compose v1 and for a stronger reason — reading it would mean choosing between an unverified command line and a credential dump — and the refusal fires on the BANNER rather than on a failure, because a leaking `config` exits 0 and would otherwise read as a project this build can show. No provider at all is a different fact (exit 125) and keeps its own sentence. ROOTLESS PODMAN IS CLOSED TOO: `Host.Security.Rootless` is true and storage moves to `$HOME`, but the `system df` table is unchanged, which is the only thing this build reads. |
+
+### 43. Logs, and getting from an alert to one
+
+**Failed unit → tail deep-link — SHIPPED.** Not from `AlertsPanel`, which this item assumed:
+`unit-failed` is deliberately not a store kind (`webhook.ts:154` — failed units are a SET of
+names, not a threshold crossing), so no row exists there to click. The failed units render in
+`FleetHealth.tsx`, and that is where the link went.
+
+It was not a missing feature so much as a missing WIRE. `LogTailPanel` has taken a `jump` prop
+since it shipped and its own comment names the caller it was written for — "the failed-unit list
+is the one that matters" — and nothing ever passed it. The same shape as item 33's job engine.
+The request is held in `nav` beside `monitorTab`, for the same reason: the list that sets it is
+several components from the panel that reads it. A test asserts FleetMonitor actually hands the
+prop over, because asserting the store alone would have passed on the broken code.
+
+**Search across hosts.** A one-shot query mode — `journalctl -u U -g PATTERN --since … -n N`,
+`grep -F -m N`, `docker logs --since … | grep -F` — fanned out with the non-streaming exec the
+pickers use (`logTail.ts:392-426`), pattern validated to a fixed-string class and never
+interpolated, results capped per host, and a "hosts that could not answer" list. Rotated files
+need the picker to stop excluding `.gz` (`logtail.ts:680`). Storage of lines stays refused;
+a live grep is not storage. 1–1.5 weeks, +3 days for `zgrep`.
+
+**An error-rate kind — SHIPPED.** `error-rate`, and three of the four guesses above were wrong
+once the thing was measured.
+
+NOT `wc -l`. `journalctl` writes `-- No entries --` TO STDERR, so a count taken with the streams
+merged is **1 for a host with no errors at all** — measured both ways on systemd 255 against an
+empty window and against one holding three real errors, where every form answered 3. That is a
+permanent low-grade false alert on every quiet machine in the estate, which is precisely how
+people learn to ignore an alert. The read discards stderr, passes `-q`, and counts with
+`grep -c .`.
+
+NOT a STATE kind. NUMERIC, and the first one added after `cert-expiry` that runs the normal way
+up. The whole numeric apparatus is real for it: a host settling from forty a minute back to two
+is a recovery a margin exists to debounce. A state kind would answer only "errors: yes".
+
+NOT per unit, and NOT on the facts cadence. It rides the **hourly posture sweep**, beside the OOM
+and failed-login probes — which is what makes the coverage row honest, and it is where the hard
+half of asking a journal anything (which `journalctl`, and may this account read it, with `sudo -n`
+as a stated fallback) was already solved. A second command builder would have been a second place
+that decision is made.
+
+The window is **60 minutes because the sweep is hourly**: a window shorter than the interval
+between reads leaves time nobody looked at and still presents its answer as this host's error
+rate. A test asserts `window >= POSTURE_INTERVAL_MS` so the two cannot drift apart. Measured cost
+of the read: 0.213s.
+
+"Could not read the journal" is not zero, and this is the kind most able to get that wrong — an
+unreadable journal produces no lines, and "no lines" and "no errors" are the same empty output.
+`denied`, `no-tool` and a downgraded `ok` all yield a null rate that neither raises nor resolves
+nor clears a standing chip. The status is checked rather than the count trusted on the strength
+of its own presence, because the collector's output is host-controlled text.
+
+Escalation and the re-raise bypass are **inert** for this kind and say so in the source: the
+reading only changes once per sweep, so there is no sooner-than-repeat to escalate to. The
+`ESCALATE_BY` and `LOWER_IS_WORSE` entries are filled in correctly and cannot fire today.
+
+`src/shared/errorRate.ts` (interpretation only — it reads nothing), the collector block in
+`posture.ts`, `checkErrorRateAlert` in the alert store. 14 mutations, 13 killed; the survivor is
+the inert direction flag above, left documented rather than covered by a test that would only
+appear to cover it. Verified end to end against a real Ubuntu 24.04 host.
+
+**Host rotation and audit posture.** `journalctl --disk-usage`, `SystemMaxUse`,
+`logrotate.timer`, top-N under `/var/log` (3–5 days); `auditd` installed/active/enabled,
+`auditctl -s` and rule count, journald persistent vs volatile, rsyslog forwarding, and counts —
+never names — of `sudo` and `USER_AUTH` events in 24 h, the same vocabulary as failed logins
+(1 week). Both read-only, both `sudo -n`, both on `get_host_facts` only with a new capability
+line.
+
+### 44. Change management: windows, rollback, incidents
+
+**Maintenance window — SHIPPED.** A window is not a new suppression mechanism: it is "snooze
+every kind on these servers until T", written as the snooze rows the alert store already has,
+which are durable, carry an absolute `until` and are replayed at launch. A second way to silence
+an estate would be a second thing to reason about, and only one of them would have been.
+
+All three refusals kept, and said on screen rather than only in a comment: the sampler is not
+paused, `webhookNotify` is untouched, and the chips stay up — what stops is the announcing. Two
+limits the roadmap did not ask for and both earned their place: a window may not run longer than
+24 hours (a silence nobody has to renew is one nobody remembers setting), and it may not open
+without a note, because somebody reading the alert log in three weeks will want to know why it
+went quiet. Human-only, per the revocation argument. Disabling named rules and the patch-plan
+reboot refusal are still open.
+
+**Rollback on the approval — SHIPPED.** `rollback?: JobStep[]` on `JobSpec`, written in the
+composer beside the steps because that is the only moment anybody knows how to undo the thing.
+Inside the approval hash via `approvalCommands()` — ONE derivation called by the mint and the
+verify, since they are two halves of a literal comparison — and prefixed `rollback: ` so a
+one-step job with an undo cannot produce the same approved list as a two-step job. Editing or
+removing the rollback after the approval is minted fails verification, which is the property the
+"covered by the same hash" line was asking for. Running it composes an ordinary job from those
+steps and goes through the same dialog, so `planJob` grades it on its OWN commands: undoing a
+`start` with a `stop` is still a stop. Offered only once the job has stopped, and a test asserts
+`jobRunner.ts` contains no reference to the field at all.
+
+**Deployment rollback — SHIPPED for compose.** The premise above was wrong, and finding that out
+was most of the work. The app does not need to remember the previous tag: `buildComposeWriteCommand`
+has always run `cp -p <file> <file>.shellpilot-bak` BEFORE writing, so the previous version of the
+file is already on the host. That record beats anything the app could keep — it survives the app
+being closed, reinstalled or run from a colleague's laptop, and it cannot drift from the file it
+describes because it IS the file. No new store.
+
+A revert is an image edit, NOT a file restore: copying the backup over the file would also undo
+every unrelated change made since — a port, an env var, a service somebody added this morning. The
+backup is read for ONE value, and the revert is then an ordinary edit of the current file back to
+it: same planner, same approval, same `expect` check, same write. The panel button opens the
+existing edit form pre-filled, so there is no second write path in the UI either, and
+`composePanel`'s "exactly these verbs" guard is where a roll-back that wrote on click would show up.
+
+`planComposeRevert` + `composeServiceImage` in `shared/compose.ts`, sharing ONE `locateComposeImage`
+with the editor — they were the same twenty lines twice for an hour, which is long enough for the
+two to disagree about which `image:` belongs to a service. Refusals are separate answers, not one:
+`no-backup`, `not-in-backup`, `not-in-file`, `same-image`, `backup-denied`, `unreachable`. The
+three-way backup read exists because the ordinary compose read ends in `2>&1`, so a missing file
+comes back as a successful read whose "content" is `head: cannot open` — three facts collapsed into
+one wrong sentence. **A host that did not answer is never reported as "nothing to roll back."**
+
+It says what it is and promises nothing: one level deep, "the file as it was immediately before
+ShellPilot last wrote to it" — not the last known good version and not what is running. 11
+mutations, 11 killed, including one that revealed a real bug: an empty `.shellpilot-bak` was being
+called a missing one. All three read states verified against a real host.
+
+Kubernetes: `rollout undo` **contradicts the header** — it rewrites `.spec.template`,
+diverges from git, and "leaves the cluster somewhere the user has to remember to undo", which is
+the file's own definition of `edit` (`kubernetes.ts:52-58`, `:1167-1172`). If wanted it is a
+recorded reversal in the header, graded like drain, with a caveat that live now differs from
+source; `rollout history` as a read is safe now (item 39). Package downgrade should be refused
+in-file for the reason `dist-upgrade` is.
+
+**Node lifecycle chaining — SHIPPED.** Three named gaps,
+and they did not turn out to be one piece of work.
+
+*The chain* (`shared/nodeMaintenance.ts`, shipped). `planNodeMaintenance` emits cordon → patch →
+reboot → uncordon as one `JobSpec`, with the uncordon ALSO as the job's `rollback` — never run
+automatically, per item 44. A run that fails partway leaves the node cordoned, which is correct
+rather than a gap: a node whose patch did not finish should not be taking work. It **refuses** a
+node that cannot run `kubectl` against its own cluster, and says why that is normal — the steps run
+ON the node, which a k3s or control-plane node can do and a typical kubeadm worker cannot. An
+unknown refuses as firmly as a no: cordoning on a maybe is how a node ends up out of service by a
+chain that then cannot uncordon it. It does NOT drain, and says so: a cordon evicts nothing, the
+running pods are killed by the reboot, and folding the module's most destructive verb into a button
+labelled "patch" is not on. 12 mutations, 12 killed.
+
+*The gate* (`shared/nodeGate.ts`, built and tested). The gate read systemd and nothing else, and
+**systemd and Kubernetes disagree exactly when it matters**: a node that reboots into a broken
+kubelet answers SSH, runs no failed units, and is NotReady. The gate passed it and started the next
+wave — a three-node cluster taken out one wave at a time by the mechanism meant to prevent that.
+`evaluateGate` now also halts on `not-ready`, `unreported` and a node still cordoned after its own
+wave; `pressure` is reported and does not block, because it is usually a condition the run did not
+cause. A node whose state could not be read is a WAIT, not a pass. Matching a server to a node is
+EXACT on the host's own reported hostname, because the failure mode is not "no match" — it is
+gating the WRONG machine. The systemd checks still run first, so a host that is switched off reads
+as "not answering" rather than "NotReady". 12 mutations, 12 killed, including one that caught a real
+inversion: `judgeNodes` reports only PROBLEMS, so a healthy node has no finding, and reading that as
+"could not be read" made every healthy node a gate that waits until it times out.
+
+*A hole found on the way, and closed.* `JobSpec.gate`'s own comment has always said a job
+confirmed with a gate cannot be resumed without one, "because the two are different blast radii".
+**Nothing enforced it.** `verifyApproval` compares commands, targets and the re-derived plan, and
+the gate is in none of the three — measured, not inferred: a spec approved with `gate: 'health'`
+verified `{ok:true}` with the gate deleted. That turns a staged run which checks between every wave
+into one that rolls through all of them unchecked, on a confirmation somebody gave for the careful
+version. The gate now rides on the approval RECORD (not in `approvalCommands`, which was the first
+attempt and made a one-step job report itself as "2 step(s)" in the refusal an operator reads), and
+`verifyJobApproval` compares it. A record with no gate field predates the check and is allowed, so
+runs launched by the previous build stay resumable; that trade is written down where it is made. 7
+mutations, 7 killed — two of which found real defects in the first version: a deleted `gate` field
+(likelier than `'none'`) slipped through, and a `typeof` guard turned a corrupt recorded value into
+"cannot tell, carry on" instead of a refusal.
+
+*A second limit, found by trying to wire the two together.* A chain is a job for **one node**:
+`kubectl cordon <node>` names its node, and a `JobSpec` carries one list of steps for every target.
+So patching three nodes is three jobs, and nothing sequences them or holds the second until the
+first is Ready again — which is exactly what waves are for. Staged multi-node maintenance therefore
+needs per-target step templating in the job engine, a spec whose commands differ per host, which
+changes what an approval record covers. It is stated in the module rather than left to be
+discovered as a cordon naming the wrong machine. It also means the chain and the node-aware gate
+serve different shapes of run and cannot be wired to each other.
+
+*The producer — SHIPPED, by asking the wave's own hosts.* The nomination design was rejected: it
+needed a new spec field inside the approval record and a composer screen. Instead the gate asks each
+host in the finished wave what it is CALLED and whether it can see a cluster, in one command. The
+hostname comes from the machine itself, which removes the matching problem rather than solving it —
+there is no cached "hostname this host reported", the friendly name is a label somebody typed, and
+the SSH host is often an IP. Any single host with a kubeconfig answers for the whole wave, since
+they are all in one run against one cluster.
+
+TWO PASSES, and the order is a cost decision: the node read is an SSH round trip per host inside a
+loop that polls every five seconds for up to five minutes, so the machines are judged first from the
+cached snapshot and the cluster is asked only once they are clean — one read on a healthy wave, none
+on a broken one. `health` stays a snapshot and is still not a second opinion on host health; this
+asks a different question nothing samples, through `judgeNodes`, the app's single derivation of it.
+
+A probe that throws changes nothing: a read that did not happen must be neither the thing that halts
+an estate nor the thing that waves it through. 9 mutations, 9 killed; three found real gaps,
+including the subtlest one here — with kubectl's stderr merged, `error: You must be logged in to the
+server (Unauthorized)` is ten whitespace-separated fields and parses as a NODE. It matches no
+hostname so nothing halts, but the wave now HAS a node list and every genuine node in it is demoted
+from `unknown` to `not-a-node`: the check silently does nothing while reporting that it looked.
+
+**The stated limit.** A plain kubeadm worker has a kubelet and no kubeconfig, so unless something
+else in its wave can reach the API server, nothing here can tell whether it came back Ready — those
+hosts stay `unknown`, which does not block and is exactly the behaviour of every previous build.
+Verified end to end against a live single-node k3s: the machine's own hostname and the node name
+matched exactly, and the row parsed to a Ready, unpressured, uncordoned node.
+
+**Incident record.** A named span — start at raise, end at resolve — with a note and the alert
+rows and jobs inside it, joined by `runbookJobWindow` (`runbooks.ts:333-340`); its own JSON file
+for the reason runbooks are not in the history store. Ticketing stays webhook-out; an internal
+span that posts the fixed payload shape stays inside that line. 1–2 weeks.
+
+### 45. Housekeeping as a read, then delete-by-id
+
+The Docker reclaim shape — preview a literal list, re-preview on confirm, refuse `prune` — is
+the only housekeeping the app does, and it is the right shape for the rest.
+
+**The read** (1–2 weeks): a `housekeeping` posture-like source per host — journald disk usage,
+`/var/log` top-N, `/tmp` size and oldest file, `apt-get autoremove --dry-run` / `dnf autoremove
+--assumeno` candidate counts, `lvs -o lv_name,origin,snap_percent` for snapshots. Single-line,
+capped, no mutation, "could not read `/tmp`" is not empty. **Delete-by-id** (+1 week): a list of
+paths or packages, typed confirm, never a blanket verb. Cloud snapshots are a provider-API
+product and refused by the DNS/TLS precedent.
+
+**Dead users and keys — SHIPPED.** `staleAccounts(hosts, days)` in `shared/staleAccounts.ts`,
+rendered in the access panel with a 30/90/180/365 window. Four verdicts, and the fourth is the
+point: a server without `lastlog` answers "no login recorded" about EVERY account including the
+one somebody used a minute ago, so that case is `unknown` and the panel says why in those words.
+`expired: null` does not exclude an account — a date nobody could parse is not a date in the past
+— and an unreadable key file is a finding rather than a skip. The unknowns are counted in the
+headline, because a number that shrinks as the estate gets harder to read is the wrong direction
+for one somebody uses to decide they are done. Revoke stays behind item 36, and the panel says so
+rather than offering a button that would act through a path with no rollback. **Stale Kubernetes objects**:
+item 39's last row.
+
+### 46. Facts the fleet is still missing
+
+Read-only additions to `hostFacts`, each a new `FACT_SOURCE_IDS` entry, each updating the
+`hostFacts` capability grid text because packages-and-versions is attacker-useful in the same way
+security counts are.
+
+| Fact | Why | Size |
+|---|---|---|
+| **Installed packages and versions** — **SHIPPED** | — | `shared/installedPackages.ts`, written to the EXISTING `facts` table as `pkg:<name>` with `retireFacts`. THE SIZE QUESTION WAS NOT A DECISION, it was arithmetic nobody had run: against the real package count of a real host (1,241 on Ubuntu 24.04), 50 hosts is **62,050 rows = 4.6 MB** at 78 bytes/row, "which hosts have package X" answers in **3 ms** and "which hosts have version 1.2.5\*" in **7 ms**. 200 hosts is about 18 MB. So no cap, no second table, no new schema. FOUR MANAGERS MEASURED, each through the builder — apt on a real server, rpm in almalinux:9, apk in alpine:3.19, pacman in archlinux — all normalised to `name<TAB>version` in the shell so there is one parser rather than four. THREE TRAPS. `dpkg-query -W` LISTS PACKAGES THAT ARE NOT INSTALLED: the measured host had two in `deinstall ok config-files`, removed with their configuration left behind and carrying a version like any other row, so without the status filter this answers "which boxes still have the old openssl" with hosts that removed it — the same trap `kernelStatus` documents, one query over, and it was caught by mutation before shipping. `rpm -qa` REPORTS GPG KEYS AS PACKAGES, and a host trusting several vendor keys has several rows all named `gpg-pubkey`, which would collide on one fact key. `apk info -v` IS NOT PARSEABLE — it prints `alpine-baselayout-3.4.3-r2`, name and version joined by a dash, and names contain dashes (`libcrypto3`), so the installed database's `P:`/`V:` lines are read instead. AND AN EMPTY READ IS NEVER AN EMPTY HOST: the result is a discriminated union, the sampler sets `write.packages` only on `ok`, and retirement runs only then — otherwise a busy dpkg would delete a thousand facts and record a fact-removed event for each. |
+| **Per-package security list** — **SHIPPED** | — | `shared/securityUpdates.ts`, on demand per host rather than sampled, and measuring it found that ONE HOST GIVES THREE DIFFERENT ANSWERS. On almalinux:9.3: `updateinfo summary` says **133** security notices, `updateinfo list security` prints **203** rows, and `--security check-update` names **55** packages. 55 is what `dnf upgrade --security` will touch; 133 is the one that sounds biggest; 203 is the advisory×package pairing (one advisory names several packages — `expat` is covered by six). So `check-update` is the spine, the advisories only decorate it, and the note says the two counts are not the same measurement. Worse: `dnf -C --security check-update` on a host with NO CACHE prints `Error: Cache-only enabled but no cache` on stderr and EXITS 0 — dnf's code for "nothing pending" — so every block keeps stderr and that line is a refusal, not an empty list. apt has no such marker (a host with no lists prints exactly what a patched host prints), so its note says the answer is only as good as the cache rather than claiming a detection that does not exist. Severity is the distribution's own word; apt names none and gets an empty string rather than an invented one. |
+| **Kernel installed vs running** — **READ SHIPPED**; the install scope still open | — | `shared/kernelStatus.ts`, a Kernel column on the patch table, read per row rather than added to the hourly sweep. Measured on a real Ubuntu 24.04.4 host that WAS ITSELF PENDING A REBOOT — running `6.8.0-136-generic` with `-138` installed — and the recorded output carries TWO TRAPS AT ONCE. `dpkg-query -W 'linux-image-*'` lists `linux-image-unsigned-6.8.0-136-generic  unknown ok not-installed`: a version-bearing name on a package the host does not have, so counting names reports four kernels where there are two. And `linux-image-virtual 6.8.0-138.138 install ok installed` IS installed and is NOT a kernel — a meta package whose version tracks what it wants rather than what is on disk. A third from the same host: `linux-image-generic` was "no packages found" there, so no meta package name may be assumed. THE COMPARISON IS NOT THE PRIMARY SIGNAL and this file does not read the restart marker at all: `hostFacts` already reads it on BOTH families (the flag file on Debian, `needs-restarting -r` on RHEL), two readers of one fact is one of them drifting, and the marker outranks any version inference because it catches what a kernel comparison never would — the measured host's `.pkgs` named `libc6` and `linux-base` beside the kernel, so "restart required" there is not a kernel claim. `compareKernelVersions` is pinned against `dpkg --compare-versions` run on that host, which is how `6.8.0-99 < 6.8.0-100` got fixed: a string comparison has it backwards, and the same host confirmed `sort` puts `-99` AFTER `-136`, so `ls -1 /boot` order is wrong too. A debian:12 container gave the other measured case — dpkg present, ZERO kernel packages, empty `/boot`, and `uname -r` reporting the Docker VM's kernel — which is why `dpkg` is a field: an empty installed list is otherwise indistinguishable from an RPM host nobody asked in its own language. **RPM IS NOW MEASURED TOO**, in almalinux:9 containers with TWO kernels installed — a real configuration, since rpm treats the kernel as installonly. `rpm -qa 'kernel*'` IS THE WRONG QUERY: two kernels give EIGHT rows because `kernel-core`, `kernel-modules` and `kernel-modules-core` match, and prefix-matching does not save you since `kernel-core-5.14.0-…` carries the `kernel-` prefix; `rpm -q kernel` queries the name exactly. That glob output is kept as a fixture because it is also REVERSE SORTED, so it is the ordering case as well. `needs-restarting -r` was measured both ways (exit 1 required, exit 0 not) and is deliberately NOT run here — `hostFacts` already runs it on this family, and the test forbidding a second read of the reboot marker, written for Debian, fired on the RPM side. rpm's own `labelCompare` gives the same four answers dpkg did, so one comparator serves both. What is still NOT verified is the join between `uname -r` and an rpm version on a running RHEL host, so a running kernel that is not among the installed ones is reported as exactly that rather than guessed at. **Still open:** the kernel-only install scope, which is the write half and still sits uneasily with `patch.ts`. |
+
+> **Not built, and why — 6 Sep.** Attempted and stopped at the measurement, not at the code. Every host available here is a CONTAINER, and a container reports a kernel it does not own: measured on almalinux:9.3, `uname -r` says `6.12.76-linuxkit` (the Docker VM's kernel), `rpm -q kernel` says "package kernel is not installed", and `/boot` is empty. So the comparison this row is about — newest installed against running — has nothing to compare, and "nothing installed, something running" must not render as an urgent finding. That container detection (`/.dockerenv`, `/proc/1/cgroup`) is the one part that was measured and is worth keeping for the next attempt. Installing a kernel package into a container to manufacture the normal case was tried and broke the image's coreutils, and the machine then hit 100% disk. The row needs one real Linux host with kernel packages, the same way the podman row needs a podman host; writing the `rpm -q kernel` / `dpkg -l linux-image-*` multi-kernel parser from documentation instead would be a parser that reports whatever it guessed.
+
+| **Storage layout** — **READ SHIPPED**; the write half still open | — | `shared/storageLayout.ts`, rendered in the capacity panel beside the trend it completes — that trend is the ROOT filesystem only, which is exactly the gap the row names. THE FINDING: on the measured Ubuntu 24.04.4 host, which runs Docker AND k3s, `df` lists TWENTY-ONE filesystems and only THREE are somewhere bytes can go. Eight are container overlays, and each reports the same size, the same used figure and the same 14% as `/`, because that is the filesystem beneath them — so rendering `df` renders one filesystem at 14% as nine, and any threshold fires nine times for one problem. THE FILTERING IS IN THE PARSER, NOT THE SHELL: `df -x overlay` was one flag and would have made the exclusion invisible, leaving three rows and no way to know eighteen were dropped, so the command reads everything and the headline always carries the count and the reasons. "NO LVM" IS A MEASUREMENT — `vgs --reportformat json` ran, exited 0 and returned an empty report, which is a different fact from a host with no LVM tooling, so `command -v` runs first and only the empty-report case licenses the sentence. `/boot` is PROMOTED above `/` at equal pressure: it is 913 MB against 200 GB, it is the one filesystem an unattended upgrade fills on its own, and a full `/boot` half-installs a kernel, which is the failure the kernel row next door describes. RECORDING THE FIXTURE CAUGHT A BUG IN THE BUILDER: `df -P --output=…` is refused outright ("mutually exclusive") and prints nothing, so the first recording had an empty section — the argument for recording through the builder rather than by hand. **AND IT WAS BROKEN ON EVERY BSD TARGET**, which `freebsd`, `netbsd` and `openbsd` all are in this build's distro allow-list: BSD `df` rejects `--output` exactly as it rejected `-P` beside it, so the section came back empty and the read reported NO FILESYSTEMS on all of them. Measured on a BSD userland and fixed with `df -Y -k`, the form that carries a Type column; both are always sent, since each engine rejects the other's flag with "invalid option" and writes nothing. That one listing also contained BOTH parsing failures at once — `map auto_home` has a SOURCE containing a space, which shifts every field counted from the left, and a mounted disk image has a TARGET containing spaces, which shifts them counted from the right — so fields are now located by anchoring on the first run of digits, which is the only thing both agree on. `devfs` reports 382 blocks at 100%, permanently full and unfixable, so the BSD pseudo names are excluded beside the Linux ones. And SIX APFS VOLUMES REPORT THE SAME TOTAL AND THE SAME AVAILABLE with different used figures, because they are volumes in one container: they are real filesystems and are not dropped, but six rows each saying "11 GB free" reads as 66 GB when filling any one fills all six, so `sharedPools` names the group — grouped on total AND available together, since size alone would call two ordinary same-model disks a pool. **THE WRITE HALF IS NOW SHIPPED AS A GROW-ONLY PLANNER** (`shared/lvGrow.ts`), measured on an LVM stack built on loopback files for the purpose — two PVs, one VG, an ext4 volume and an xfs volume, both mounted, torn down afterwards. The generated command was not merely built but RUN: `sudo -n lvextend -r -L +268435456b '/dev/spvg/lvext'` took the volume from 872415232B to 1140850688B, online, while mounted. IT ONLY GROWS, and that is measurement rather than caution: `lvreduce -r` on the xfs volume answered `fsadm: Xfs filesystem shrinking is unsupported` (exit 5), and on the mounted ext4 volume it asked **interactively** `Do you want to unmount "/mnt/spext" ? [Y|n]` — a question a job runner would be answering unattended, where `-y` means "yes, unmount the live filesystem". So there is no shrink path, no `--yes` and no `-f`. THREE FAILURES SHARE EXIT 5 — xfs shrink, ext4 shrink while mounted, and `Insufficient free space: N extents needed, but only M available` — so the code cannot say which happened and everything is decided from a preflight and refused BEFORE anything runs. What did not need a rule was checked too: being unmounted does not block a grow, because fsadm mounts the volume briefly (`xfs_growfs` alone on an unmounted volume is exit 1, which is why this drives `lvextend -r` rather than the per-filesystem tools). **Still open:** thin pools, RAID and cached LVs, none of which were built; ext2/ext3 are listed as growable on the strength of sharing `resize2fs` with ext4 but only ext4 was grown. |
+| **Service-account classification** — **SHIPPED** | `classifyAccount` (root / system / person / unknown, from the UID and never the NAME — `postgres` at uid 1200 is a person's account somebody called postgres) plus `serviceAccountsWithKeys`, rendered as its own list in the access panel. Ordered by whether the account's own shell would let anyone in, and `nologin` ones are still listed because sshd's ForceCommand can turn the second into the first. root is excluded: a key there is how this app connects. A null shell reads as `null`, never `false`, which would claim a login is possible. Owner/purpose tags not built. | mostly done |
+| **Access-review export** — **SHIPPED** | — | `shared/accessExport.ts`, CSV and JSON, downloaded from the access panel. A projection of facts the collector already holds, and the three rules it adds are all about the difference between a fact and a gap. A HOST THAT REFUSED IS A ROW — an export is read as a complete list of who can get in, and a host dropping out of it turns "we could not look at that machine" into "nobody can reach it"; a host that answered and listed nothing gets a different sentence again. A `since` FILTER NEVER SILENTLY DROPS AN UNKNOWN: `lastLoginAt` is null both for an undated login and for an account that never logged in, which the collector already separates, and filtering either out would remove exactly the accounts an auditor is looking for — so they are kept and marked `undated`/`never`. NO KEY MATERIAL, asserted by a test rather than left to review. The coverage section is written into the SAME file as the rows (a caveat in a second download is a caveat nobody has when they read the first) and names every unread host, every sshd reading keys from a path this never opened, every `AuthorizedKeysCommand` that generates keys at login time, and every account whose file refused. A CSV cell beginning `=`, `+`, `-` or `@` is prefixed with a quote: a key comment is attacker-controlled text off a host, so that is an injection into the auditor's spreadsheet rather than a formatting nicety. |
+| **Bastion as an access object** — **SHIPPED** | — | `shared/bastion.ts`, the topology graph asked the access question instead of the reboot one. THE TRANSITIVE STEP IS THE FEATURE: `dependentsOf` is one hop deep, so a bastion in front of a bastion looks like it guards two machines when it guards five, and an operator revoking a key there is told about the two. A key on the bastion produces one finding per KEY naming every server it reaches, not one row per key-and-host. Revoking is a CONFIRMATION and not a hard refusal like `rebootBlockFor`, and the difference is deliberate: rebooting a bastion mid-run is a thing a staged run must not contain, whereas revoking a key on one is frequently exactly right — somebody left — and refusing it outright sends people to edit `authorized_keys` by hand where nothing checks anything. An ADDRESS match stays the weaker claim all the way out, and a chain's strength is its FIRST link's, because a path is only as good as its claim about the bastion itself. "Nothing behind it" never renders as silence: `noBastionNote` says what the routes say and appends `unmatchedHopNote` when the graph has holes. The walk is bounded twice on purpose — `seen` makes it correct, a depth ceiling makes a bug in `seen` produce a wrong answer rather than a process that never returns, because a hang reads as broken infrastructure rather than as a defect. |
+| **Certbot timer read** — **SHIPPED, generalised to systemd timers** | — | `shared/systemdTimers.ts`, with a "did it run?" control per timer in the cron panel, which already listed `systemd-timers` as a source and could say WHEN but never whether it WORKED. Generalised because that is what could be measured — the test host runs no certbot but runs eleven timers, three that have never fired, and two genuinely failed services. FIVE FINDINGS, four of them traps that produce a confident wrong answer rather than an error. (1) A UNIT THAT DOES NOT EXIST REPORTS SUCCESS: `systemctl show certbot.service` on a host with no certbot answers `Result=success`, `ExecMainStatus=0`, `SubState=dead` and exits 0 — every field says fine, and only `LoadState=not-found` disagrees, so it is checked FIRST and nothing else is believed until it passes. That recording is `detail-absent.txt` and it is the fixture the whole design rests on. (2) `left` IN THE JSON IS NOT A DURATION — it is the same absolute microsecond stamp as `next`, so rendering it as a remaining time gives about fifty-six thousand years. (3) `passed` IS A MONOTONIC STAMP: uptime was 1132793 s and logrotate reported 1088423 s, so it is time since boot and subtracting it from now dates every timer to the 1970s; the age comes from `last`, which is realtime. (4) `last: 0` MEANS NEVER, and fed to a date renders as "56 years ago". (5) A TIMER AND ITS SERVICE HAVE DIFFERENT NORMAL STATES — `inactive` on a timer means it will never fire, on a service it means a oneshot finished — which is also why the SERVICE is read at all: a timer can fire perfectly every day into a service that fails every time, and this host had two services in exactly that state. **Not measured:** certbot's own unit names, so `renewalTimers` is a filter over units the host listed rather than a parser — an unrecognised name is a MISS, never a wrong answer about a different unit — and a timer with an explicit `Unit=` whose service is not the timer's stem, where the verdict names the unit it actually read so the mismatch is visible. |
+| **Drift, operator-chosen watches** — **VALIDATION AND APPROVAL SHIPPED** | — | `shared/driftWatch.ts`, the answer to the three things `drift.ts` says a typed path would need first. FOUR GATES, in this order. (1) THE PATH IS INTERPOLATED INTO A SHELL SCRIPT — `buildDriftCommand` embeds each path inside single quotes, which is safe for a fixed catalogue and is a command injection the moment somebody can type one, so the character set is an ALLOWLIST rather than an escape, and it is enforced here rather than at the point of use because a builder that trusts its caller will one day be called by something else. (2) Under `/etc` and nowhere else, with `..` refused as TRAVERSAL rather than accepted for starting with the right four characters. (3) A credential denylist whose bias is the OPPOSITE of `mounts.ts`: there an unknown filesystem is included because a missed one is a disk filling up nobody sees, here a name containing `key`, `secret`, `password`, `token` or a `.pem`/`.env` shape is refused whether or not it holds one, because a wrongly refused config file is a sentence and a wrongly accepted one is a private key in an hourly diff on every host. (4) A one-time typed approval whose phrase CONTAINS THE PATH, so an approval for `/etc/nginx/nginx.conf` cannot be replayed for `/etc/ssl/private/site.key` — the same reason `verifyApproval` compares command text literally. The character check runs before the credential check so a shell-breaking path is named as that rather than as a suspected secret. WIRED: the panel adds and removes watches, the proposal is persisted in settings, and MAIN re-validates every stored entry before the collector sees it (`services/driftWatchStore.ts`) — the same reasoning as `accessWriteGate.ts`, and the sharpest instance of it, because the path is interpolated into the collector script and a renderer-side check constrains only an honest renderer. A stored watch that fails is DROPPED rather than repaired: there is no safe repair for a path that could break out of a shell literal, and quietly fixing one would mean the file being read is not the file that was approved. The catalogue is always first, so a blob cannot shadow one of its paths, and `DriftDeps.watches` takes a FUNCTION so a watch the operator removed is not still read until the next restart. |
+| | New | Size |
+|---|---|---|
+| **DB growth series** — **STORE AND FORECAST SHIPPED**; a `dbSampler` still open | — | `dbBytes` appended to `METRICS` (id 10) and `db:<connectionId>` interns as a subject with no schema change, because `host_key` is opaque TEXT. The budget arithmetic moved to a new `SWEEP_METRICS`: a series written when somebody opens a panel is not 30 rows an hour per host, and counting it in the sweep budget would overstate the cost of adding one by four orders of magnitude — which would make that budget useless for the decision it exists to force. Both counts are pinned, so appending a SWEEP metric still fails a test. The forecast is a SECOND forecaster (`shared/bytesForecast.ts`) rather than a tenth metric passed to `capacity.ts`, for the reason that file states about itself: its whole refusal policy rests on one flat-rise number working for cpu, memory and disk because all three are 0–100, and in bytes that number means nothing — half a gigabyte a week is noise on a 400 GB database and a crisis on a 2 GB one. So the flat rule is RELATIVE (2% of the run's starting size, measured from the start because the latest reading moves with every vacuum). And there is no 90% for bytes: a ceiling is optional, its absence is its own refusal, and **the rate is kept when the date is refused** — "this database has grown 380 MB a day for six days" is what somebody acts on, and withholding it because nobody set a limit would be withholding the useful half. `shared/dbSizeSample.ts` decides which number out of a sizes read may be plotted, and only ONE engine's can be: `pg_database_size` is a true per-database total, while MySQL's `totalBytes` is a sum over the rows its sizes query returned AND THAT QUERY HAS A LIMIT — on a server with more tables than the limit it is the biggest twenty rather than the schema, so a read that came back at the limit is refused rather than recorded. The named database is matched exactly or nothing is recorded: a Postgres sizes read lists every database on the cluster, and falling back to a sum would give a series that silently switches between "this database" and "this whole server", with every rate across the switch fiction. WIRED at the `db:ops` handler rather than inside `dbOps`, so that function stays a pure read with no store dependency; a failed write is swallowed, because an operational read that answered every question must not report itself as failed because a by-product series could not be appended to. The forecast is READ BACK on its own channel (`capacity:db-growth`) and shown as one line above the answers — a separate channel from `capacity:trends` and not a tenth metric on it, because that report carries percentage thresholds and a percentage forecaster and neither means anything in bytes; the ceiling comes from the caller because nothing here knows one, and inventing one would put a crossing date on screen nobody chose. The `dbSampler` — **SHIPPED** (`services/dbSampler.ts`), modelled on `fleetSampler` and deliberately smaller, because what it costs is different in kind: a metrics sweep is an SSH exec channel and this takes a CONNECTION on somebody's database server. So it is OFF by default with its own toggle ("we now connect to your production database every hour" is a thing a person switches on, not one they discover in a connection log), its cadence floor is an HOUR and a settings blob's shorter one is clamped rather than trusted, it never resolves a credential, a locked vault STOPS it rather than making it fail every interval forever, and the lock is re-checked when the timer fires rather than only when it was set. Its probe reuses `dbOps` and `reportSizeSample`, because a second path to a size number would be a second place for MySQL's capped total to be recorded by mistake. |
+| **K8s allocatable vs requested** — **SHIPPED** | — | `shared/k8sAllocatable.ts`, rendered in the Kubernetes panel's usage view. Measured on a three-node `kind` cluster built for it, AND CHECKED AGAINST THE SCHEDULER'S OWN ARITHMETIC: `kubectl describe node` prints an `Allocated resources` block, which is what was actually booked, so the tests compute each node's requests from the pod list and compare. On `sp-alloc-worker2` both come to 940m and 514Mi. That check is what caught the finding: KUBERNETES SCHEDULES ON `max(sum(containers), max(initContainers))`, and summing only the app containers gave 440m against the scheduler's 940m — the missing 500m being one init container. THREE MORE FINDINGS. `<none>` is not zero, which the row already said, and the unsized count is reported beside the percentage rather than folded into it, because a cluster at 8% whose pods are unsized has headroom nobody can compute. THE COLUMN CANNOT SAY A POD IS FULLY SIZED: a pod with two containers, one sized and one not, prints ONE value with no placeholder, so the container NAMES are read purely to compare counts — and `kube-proxy` ships with no CPU request, so the unsized count is never zero on a real cluster and is a number to read rather than an alert. A Pending pod is booked nowhere and is named rather than dropped; a `Succeeded`/`Failed` pod keeps its `nodeName` and must not be counted. A CORDONED NODE'S FREE SPACE IS NOT HEADROOM — it is excluded from the total with the exclusion said out loud — and a node whose allocatable could not be read is null rather than zero, because zero renders it as full. The read is ALL NAMESPACES whatever the panel has selected, since a node holds every pod on it, and an empty node list is a blind spot rather than an empty cluster — the rule the PDB read had to learn. **CROSS-VALIDATED against a second, independent cluster:** the shipped read was re-run against a live single-node k3s on a different host and distribution, and agreed to the byte (200m, 140Mi) including the node's OWN printed percentages, 3% and 1%, computed from `6` cores and `12247552Ki` — units the kind fixture never exercises. k3s also ships an unsized system pod of its own (`local-path-provisioner` where kind has `kube-proxy`), so two unrelated distributions both confirm that the unsized count is never zero on a real cluster. |
+| **Fleet expansion forecast** — **SHIPPED** | — | `shared/fleetForecast.ts`, rendered as a strip in the capacity panel. The row said refusal-first is the feature and that decided the shape: on a real estate most hosts produce NO forecast, so a ranking needs somewhere to put them, and both obvious answers are wrong. Dropping them makes "nothing is filling up" and "eleven hosts could not be forecast" render identically; sorting them last by a sentinel date puts a host that is ALREADY OVER below one that fills in eighty days, because `already-past` yields no crossing time at all. So there are three bands and the band beats the date — `over` first, then real crossings soonest, then every refusal WITH its reason in the operator's words, because a `stale` host needs somebody to look at it, a `too-few-points` host needs only time, and a `step-change` host needs somebody to find out what was untarred. The headline always carries the denominator ("1 of 3 could be forecast"), an estate with no samples says so rather than reading as an all-clear, and a server whose read FAILED goes in as a refusal rather than being absent. No new IPC: it reuses the per-host `trends` channel across the visible servers, which reads the local history store rather than a host, so a second channel would only be a second place for the forecast policy to drift. |
+| **`get_capacity_trends` over MCP** — **SHIPPED** | Registered read-only, gated on `serverMetrics` — the same capability as the tool whose numbers these are over time, rather than a second switch to grant for data the first already gives. The report is computed by ONE function main also uses for `capacity:trends`, wired in the way the fleet sampler is, so an agent cannot end up disagreeing with the panel the operator is looking at. "History is off" is a sentence, not an empty answer: an agent told nothing fills the gap itself. | done |
+
+**Backup, the parts that are not databases.** The bundle is the app's own store and nothing
+streams (`backupTargets.ts:22-26`, "kilobytes"). A **remote file backup** — `tar -C / -czf -
+<paths>` over an exec channel on the *same* pooled connection `openSftpIo` acquires — needs a
+streaming `put`/`get`, a name that is not `.spbackup` so `planRetention` never counts it as a
+generation, its own retention, a path allow-list, a sudo decision for `/etc/shadow`, and an
+exposure text like `BACKUP_DESTINATION_EXPOSURE` because host files hold secrets too. Built as a
+job kind, not a second scheduler, which is item 5's own instruction. **2–3 weeks.** A **Docker
+volume backup** is the same source through `docker run --rm -v <vol>:/v … tar`, with quiescing
+graded like any container action. **+1–2 weeks.** A **restore drill** of the oldest kept
+generation is 2–4 days; a true scratch import 1–2 weeks. None of it is refused; none of it is
+agent-reachable, and the vault inside the bundle is why.
+
+### 48. VPN: the alert, the certificate date, and the server nobody manages
+
+**One correction to the README first.** WireGuard is not userspace-only. `VpnMode` is
+`'userspace' | 'system'` (`vpn.ts:16`); system mode creates a real TUN and applies routes and
+DNS behind a per-launch elevation, refused on macOS and for full-tunnel profiles. "Your routing
+table is never touched" is true of the default mode, and the README row should say so.
+
+**Cheap and missing.**
+
+| | Exists | New | Size |
+|---|---|---|---|
+| **`vpn-down` alert kind** — **SHIPPED** | — | TWO kinds, not one with a `detail`: `vpn-down` and `vpn-degraded`. Up-but-silent and down have different fixes, and one kind carrying both would tell the operator to reconnect when it is not that. `stopped` is null in BOTH columns rather than false — a person pressing Stop is not an outage, and it is not evidence of health either, so `false` would have the app resolve its own alert. The map is `VPN_ALERT_READINGS`, an exhaustive Record in `shared/vpn.ts`, tested without a timer; the poll around it is ten lines. | done |
+| **OpenVPN client cert expiry** — **SHIPPED** | — | `clientCertNotAfter` computed at IMPORT from material the parser already holds, so nothing unlocks the vault to draw a date, and stored on the spec beside `remotes` as a non-secret summary. pkcs12 is refused rather than attempted — a password-wrapped container is not a certificate. The alert is `vpn-cert-expiry`, a SIBLING of `cert-expiry` rather than the same kind: the coverage page says where an alert comes from, `cert-expiry` says the posture sweep, and a VPN profile is not a server and is never swept. Tested against a certificate generated with openssl, not bytes written to satisfy the walker. | done |
+| **`crl-verify` carry-over** — **SHIPPED** | — | Carried as inline-capable material like `ca`. The direction mattered: every other dropped directive makes the imported profile REFUSE something, and this one made it accept a certificate the issuer had withdrawn. The `crl-verify DIR dir` form has no inline equivalent, so it is dropped with its own sentence rather than read as a file — a profile that reports the gap beats one that fails to start. | done |
+| **WireGuard per-peer stats, latency** — **SHIPPED** | — | The aggregate was a SUM, and that was the bug: a site-to-site link with one dead peer and one busy one showed the busy peer's traffic and the busy peer's handshake, and looked healthy. The UAPI already answers per peer — `wg` prints those rows — and the sidecar was discarding the block between `public_key=` lines; `parseIPCGet` now resets the counters at a peer boundary along with everything else, because a peer block that omits `rx_bytes` must not inherit the previous peer's number, which is the one mutation of six the first tests did not catch. `peers` is absent rather than empty when no rows came back: a sidecar from a build that reports none and a tunnel whose peers were removed are different answers. `latencyMs` is populated by the probe below and is a TCP CONNECT TIME, named for what was measured — it includes the peer's forwarding and the far service's accept, so calling it a round trip would be a stronger claim than the number supports. THE KEYS STAY OFF THE AGENT'S SIDE: `list_vpns` promises endpoints and keys are never included, a peer row is a public key beside an endpoint, and `tests/vpnPeerStats.test.ts` reads `mcpServer.ts` and fails if `peers` or `publicKey` appears in it. |
+| **Diagnose** — **SHIPPED**, three checks of the five | — | `sidecar/netd/diagnose.go`, rendered by `VpnDiagnose.tsx` on the card. EVERY CHECK RUNS INSIDE THE NETSTACK, through the same two calls a SOCKS5 client uses: a lookup on the host resolver would travel in the clear and leak the very name the tunnel exists to hide, and a host `ping` would measure the path to the peer's public endpoint rather than the path through the tunnel — a number that looks like an answer and is about a different route. THE CALLER NAMES THE TARGET and there is no default, because a default would be this app deciding to open a connection to a third party through somebody's VPN. A SKIPPED CHECK IS NOT A PASSING CHECK: three words and no fourth, a skip always carries its reason, and the guard that stops a failed lookup producing a second redundant TCP timeout is the ONLY one — a duplicate in `connectCheck` silently absorbed the mutation that deleted it, so it was removed rather than tested. Never and long-ago are two sentences, not one: a key that was never right and a peer that has gone away have different fixes. NOT AGENT-REACHABLE — the target is an arbitrary host and port, and an agent able to call this repeatedly would have a port scanner pointed through the operator's VPN; `tests/vpnDiagnose.test.ts` fails if `vpn:diagnose` or `vpnDiagnose` ever appears in `mcpServer.ts`. **The IPv6 leak check is wired**, and it needed no new detector: `detectIpv6Leak` already existed and ran on all three platforms at apply time, and the only thing missing was a row on the card. It is decided in the parent rather than the sidecar because netd sees its own netstack and the UDP socket under it, and nothing of the host's routing table. Userspace mode SKIPS it with the reason — an application reaches that tunnel by connecting to a listener on purpose, so nothing is captured and nothing can bypass it — and a routing table that could not be READ skips too, because a read that did not happen is not a read that found nothing. OpenVPN skips it on a third ground: its routes are pushed by the server at connect time and are not in the stored profile, so `false` would raise a leak warning on every working IPv6 OpenVPN profile and `true` would hide a real one. The wording is `detectIpv6Leak`'s own, so an operator warned at connect and an operator reading this checklist are told the same thing about the same fact.
+
+**TLS reach for OpenVPN is wired too**, and the correction that made it possible is that it needs no netstack at all: the addresses are the profile's own `remotes`, and the useful question is whether THIS machine can reach the server — which is what somebody wants to know when the profile will not come up, so the button is offered whether or not it is connected. It takes NO typed target, because accepting one would make it a port scanner wearing a diagnose label, and the card hides the fields rather than showing inputs the probe ignores. A UDP remote is not tried: sending an OpenVPN control packet is speaking the protocol at somebody's server, which is a different act from seeing whether a port answers. THE FINDING, and it came from working out what a failed handshake means: a server with `tls-auth` or `tls-crypt` — most of them, and all the well-configured ones — silently DROPS an unkeyed ClientHello, so a handshake that does not complete is the expected behaviour of a correct server and reporting it as a failure would send somebody to debug the one thing that was right. TCP reach is therefore the pass condition and the handshake is reported as extra, with the certificate explicitly NOT validated: a private CA is the normal case, so this measures reach and says so rather than letting a green tick imply trust. Measured against real sockets on loopback — a plain listener, a TLS listener with an openssl-generated self-signed certificate, and a closed port.
+
+**DECIDED AGAINST: an MTU probe.** The failure it would catch is real and is not caught by anything above — a tunnel that handshakes, passes small packets and stalls on anything larger, which is what a too-large MTU looks like — but there is no honest way to measure it against an arbitrary target. Writing bytes to somebody's production port to see whether they come back is not something a diagnose button may do, and the alternative, reporting the CONFIGURED MTU as a check, is a number nobody probed dressed as a reading. The netstack's negotiated MSS is derived from that same configured value and adds nothing. So it is refused by name rather than approximated. |
+| **OpenVPN edit without re-import** — **SHIPPED**; DNS verification still open | — | `services/vpn/ovpnEdit.ts`. THE OBVIOUS VERSION OF THIS SHIPS A PRIVATE KEY TO THE RENDERER: a stored `configBody` is a vault secret precisely because it carries `<key>` and `<tls-crypt>`, and "let them edit the text" means handing that to a window, a clipboard, a screenshot. So every inline block is replaced by an unmistakable placeholder on the way out and restored in main on the way back, and the operator edits the directives anybody actually edits — `remote`, `cipher`, `verb` — without ever seeing the key. Four placeholder cases are handled rather than assumed: DELETED means remove that block (honoured and reported, since removing `<cert>` silently is the difference between a profile that connects and one that does not), INVENTED is refused because there is nothing to restore, DUPLICATED is refused because it would write the same key twice, and a real `<key>` block PASTED BACK is refused with the sentence that it is an import rather than an edit — accepting it would make the redaction theatre. No sanitising rules live here: the restored body goes to `parseOvpn`, because a rule kept in two places is a rule that drifts.
+
+**WIRED** (`services/vpn/edit.ts`), and the caution in the earlier note was misplaced: the orphan risk it named is one `vpnCommitImport` has always had, not one an edit introduces. An edit is a SESSION — `vpn:editRead` hands out the redacted text and keeps the blocks in main, `vpn:editCommit` puts them back, sanitises through `parseOvpn` and stages a NEW vault entry exactly as an import does, `vpn:editCancel` drops them without waiting for the thirty-minute TTL, and a vault lock forgets every session because key material must not outlive the unlock that made it readable. The old entry is HANDED BACK for the caller to delete after it has saved, never deleted here: save-then-delete leaves a recoverable orphan, delete-then-save leaves a profile pointing at a vault entry that is gone, which is a VPN that cannot connect and a config body nobody has. |
 | Missing | What the code says today | What it blocks |
 |---|---|---|
 | **Somewhere to keep history** | `store.ts` is a single JSON blob, rewritten whole on every save. `fleetSampler` holds a `Map` in memory and `delete`s a host's entry the moment it goes unreachable. There is no database dependency in `package.json` and no time series anywhere in the renderer. | Capacity forecasting, alert hysteresis, job history, drift detection, "what changed on Tuesday" |
@@ -989,14 +1331,15 @@ count as "ours" for expiry. A half-probe that reports "no OOM kills" when it cou
 journal is precisely the alert this item spends its length refusing to ship, because a metric that
 could not be measured is not zero. They are a separate item, not a loose end in this one.
 
-"Backup failed" is not built either, for a shorter reason: item 5 has not been built, so there is
-no backup that could fail. "Replication lag from item 18" IS built, as `db-alarm` and `db-watch` —
+"Backup failed" IS built, since item 5 shipped and gave it something that could fail. It keys on
+the last SUCCESSFUL report rather than `lastRunAt`, which records attempts, and separates four
+reasons: never, failed, overdue, unverified. "Replication lag from item 18" IS built, as `db-alarm` and `db-watch` —
 item 18 already decides the level and writes it to the durable store with the numbers attached, and
 alerting reads that verdict rather than reaching one of its own.
 
 The write-up below is kept as the reasoning, in the past tense where it describes what was wrong.
 
-Three kinds fire today: `cpu`, `memory`, `unit-failed`.
+Four kinds fire today: `cpu`, `memory`, `unit-failed`, `backup-failed`.
 
 **The surprising gap is disk, and it is subtler than "missing".** `hostHealth.ts` treats disk as a
 first-class signal already — `DISK_DANGER = 85`, `diskCritical` per host, `diskHosts` in the fleet
@@ -1346,15 +1689,15 @@ a cheap item, and treating it as one is how a quarter disappears.
 |---|---|---|---|---|---|---|---|---|---|
 | 19a | ~~**Disk alert**~~ | 100% | continuous | 4 | none | **8** | **SHIPPED** | — | Done |
 | 21a | ~~**Docker itemised disk view**~~ | 60% | monthly | 3 | some | **5** | **SHIPPED** | — | Done |
-| 21b | ~~**Docker reclaim by id**~~ | 60% | monthly | 3 | some | **5** | **SHIPPED** | podman untested | Done |
+| 21b | ~~**Docker reclaim by id**~~ | 60% | monthly | 3 | some | **5** | **SHIPPED** | podman tested, ports unverified | Done |
 | C | ~~**Host facts**~~ | 100% | continuous | 4 | strong | **3 / 21** | **SHIPPED** | — | Done |
 | A | ~~**Durable store**~~ | — | — | — | — | **0 / 30** | **SHIPPED** | — | Done |
-| B | ~~**Job engine B1+B2+B3**~~ | — | — | — | — | **0 / 38** | **SHIPPED** | B4 remains | Part done |
-| 18 | ~~**Database operations**~~ | 70% | weekly | 4 | strong | **8** | **SHIPPED** | mssql not covered, stated | Done |
+| B | ~~**Job engine B1–B4**~~ | — | — | — | — | **0 / 38** | **SHIPPED** | — | Done |
+| 18 | ~~**Database operations**~~ | 70% | weekly | 4 | strong | **8** | **SHIPPED** | all five engines | Done |
 | 17 | ~~**Patch management**~~ | 100% | weekly | 5 | strong | **10** | **SHIPPED** | — | Done |
 | 5 | ~~**Backups to real targets**~~ | 90% | weekly | 5 | strong | **8** | **SHIPPED** | — | Done |
 | 19b | ~~**Alerting, the rest**~~ | 100% | continuous | 4 | none | **8** | **SHIPPED** | — | Done |
-| 23 | ~~**Fleet key management**~~ | 100% | quarterly | 5 | very strong | **7** | **READ SHIPPED** | write gated, needs a real host | Part done |
+| 23 | ~~**Fleet key management**~~ | 100% | quarterly | 5 | very strong | **7** | **SHIPPED** | write opt-in, rollback verified on RHEL 9 | Done |
 | 20 | ~~**Compose**~~ | 60% | daily | 3 | some | **6** | **SHIPPED** | — | Done |
 | 6e | ~~**Cron editing**~~ | 80% | monthly | 3 | some | **5** | **SHIPPED** | — | Done |
 | 24 | ~~**Security posture**~~ | 60% | monthly | 3 | some | **5** | **SHIPPED** | — | Done |
@@ -1365,7 +1708,7 @@ a cheap item, and treating it as one is how a quarter disappears.
 | 25 | ~~**Configuration drift**~~ | 50% | rare | 4 | strong | **4** | **SHIPPED** | — | Done |
 | 28 | ~~**Runbooks on alerts**~~ | 40% | per-incident | 3 | some | **4** | **SHIPPED** | — | Done |
 | 14 | ~~**Change log**~~ | 30% solo | per-incident | 3 | strong | **4** / **8** team | **SHIPPED** | — | Done |
-| 1 | ~~**pm2 supervision**~~ | 25% | daily | 3 | some | **4** | **SHIPPED** (local) | remote refused | Done |
+| 1 | ~~**pm2 supervision**~~ | 25% | daily | 3 | some | **4** | **SHIPPED** | successor shipped: read + write user units | Done |
 | 2 | ~~**frp ngrok UX**~~ | 20% | rare | 2 | some | **3** | **SHIPPED** | — | Done |
 | 8 | ~~**Ghostty snapshot**~~ | — | — | — | — | — | **CUT** | — | Not building |
 | 10 | ~~**Tauri**~~ | — | — | — | — | — | **CUT** | — | Not building |
@@ -1436,7 +1779,16 @@ after those ship is how the gap becomes permanent.
 **Size.** A day for jsdom, testing-library and the first real component test. Then it is
 per-feature cost like any other test, rather than a project.
 
-### 30. Two gaps in the gates themselves
+### 30. Two gaps in the gates themselves — SHIPPED
+
+**Both closed since this was written, verified 6 Sep.** `tsconfig.tests.json` exists, covers
+`tests/**` plus `src/renderer/src/env.d.ts` for the `window.shellpilot` augmentation, and
+`typecheck:tests` is in the `npm run typecheck` chain — so the test tree is type-checked on
+every run, which is how the `.env` picker's `VaultState` mistake and the missing
+`ComposeEnvWriteResult` import were caught rather than shipped. `npm audit` reports **0
+vulnerabilities** and CI runs it with the registry's own flakiness separated from a finding,
+so the gate is green before anyone touches it and can therefore report a change that makes
+things worse. The write-up below is kept as the reasoning.
 
 Both found while building item 29, both predating it, and both the same species: a check that
 exists and does not check.
@@ -1486,7 +1838,12 @@ line in the capability grid, not added because it is obviously useful.
 
 ---
 
-### 32. A retention horizon per event kind
+### 32. A retention horizon per event kind — SHIPPED
+
+**Shipped since this was written:** `EVENT_RETENTION_TIERS` in `history.ts` keeps the `alert` kind
+400 days and `job-` events 365, with 90 as the default, and `RUNBOOK_LOOKBACK_DAYS` mirrors the
+alert tier so the runbook join is no longer bounded by the shorter number. The write-up below is
+kept as the reasoning.
 
 **Raised by item 28, and it is a defect at a boundary rather than a missing feature.**
 

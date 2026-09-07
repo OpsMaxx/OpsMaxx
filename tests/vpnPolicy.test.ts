@@ -149,7 +149,12 @@ describe('frp is refused in code, not by policy', () => {
 // that lives only in a pure function nobody calls would pass every test in this
 // file and still open a port.
 describe('set_vpn against a live bridge', () => {
-  const PORT = 58741
+  // Unique across the suite, and `tests/testPorts.test.ts` fails if it stops
+  // being: this file and capacityTool both used 58741, and when the scheduler
+  // happened to run them together the second server's client authenticated
+  // against the FIRST one's session store and every assertion here failed with
+  // "this token is not recognized" -- a message about the wrong thing entirely.
+  const PORT = 58743
   let client: Client
   const started: string[] = []
   const stopped: string[] = []
