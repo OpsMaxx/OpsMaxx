@@ -180,7 +180,44 @@ describe('MCP server (integration)', () => {
 // reverse by accident later: that reading containers is its own capability
 // rather than folded into an existing one, and that the tier meant to be handed
 // out without thinking does not grant it.
-    describe('container tools', () => {
+    describe('describe_capabilities', () => {
+    it('answers without being gated, because the boundary should not be found by tripping over it', async () => {
+      const client = await connectedClient(token)
+      const res = (await client.callTool({
+        name: 'describe_capabilities',
+        arguments: { serverName: 'Nginx Server Prod' }
+      })) as { content: { text?: string }[] }
+      const said = res.content.map((c) => c.text ?? '').join(' ')
+      // Not refused, and it names decisions rather than describing the server.
+      expect(said).not.toMatch(/not permitted|denied by/i)
+      expect(said).toMatch(/ALLOW|ASK|DENY/)
+      await client.close()
+    })
+
+    it('names what is absent by design, so an agent does not go looking', async () => {
+      // The three exclusions this repository argues for at length. If one of
+      // them ever becomes reachable, this sentence becomes a lie — which is a
+      // better failure than the tool quietly still claiming it.
+      const client = await connectedClient(token)
+      const res = (await client.callTool({
+        name: 'describe_capabilities',
+        arguments: {}
+      })) as { content: { text?: string }[] }
+      const said = res.content.map((c) => c.text ?? '').join(' ')
+      expect(said).toMatch(/running jobs/i)
+      expect(said).toMatch(/defining rules/i)
+      expect(said).toMatch(/vault/i)
+      const names = (await client.listTools()).tools.map((t) => t.name)
+      for (const forbidden of ['run_job', 'broadcast_command', 'local_exec', 'read_vault']) {
+        expect(names, `${forbidden} must not exist while the tool says it does not`).not.toContain(
+          forbidden
+        )
+      }
+      await client.close()
+    })
+  })
+
+  describe('container tools', () => {
     it('offers both container tools to an agent', async () => {
       const client = await connectedClient(token)
       const names = (await client.listTools()).tools.map((t) => t.name)
