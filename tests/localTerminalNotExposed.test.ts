@@ -85,7 +85,16 @@ const ALLOWED_TOOLS = [
   // connection and starts no sweep — the sampler's on-demand sweep is
   // deliberately not reachable, because one call that begins work on every
   // server is a fan-out with a different consent story.
-  'fleet_inventory'
+  'fleet_inventory',
+  // The one tool on the bridge that changes a running service, behind its own
+  // `containerControl` capability and denied on every read-only tier. One
+  // container per call: there is no shape in which a single approval acts on a
+  // host's worth of them.
+  'container_action',
+  // Backup HEALTH, machine-wide: which destinations exist and whether they are
+  // late. No run and no restore — the interface it reads through has neither,
+  // so reaching one means widening that interface in a diff someone sees.
+  'backup_status'
 ]
 
 // A hint, not the gate. Anything this regex matches is by construction absent
@@ -432,6 +441,7 @@ describe('the AI permission model has no word for a local shell', () => {
     'containers',
     'containerControl',
     'fleetRead',
+    'backupRead',
     'manageServers',
     'vpnControl'
   ]

@@ -401,7 +401,8 @@ import {
   mcpServerStatus,
   explainSessionAccess,
   setCapacityReader,
-  setFleetReader
+  setFleetReader,
+  setBackupReader
 } from './services/mcpServer'
 
 const isDev = !app.isPackaged
@@ -3401,6 +3402,23 @@ setCapacityReader(capacityReportFor)
 // on-demand sweep is deliberately not passed: an agent that could trigger one
 // would be starting work on every server in the workspace from a single call.
 setFleetReader({ factsFor: (id) => fleetSampler.factsFor(id) })
+// Health only. There is no run and no restore on the interface this satisfies,
+// so a later edit cannot reach one without widening the interface first.
+setBackupReader(() => {
+  try {
+    const f = readTargets()
+    return {
+      destinations: f.destinations.map((d) => ({ id: d.id, name: d.name, kind: d.kind })),
+      alarms: assessBackups(f.destinations, f.lastReport ?? {}, Date.now()).map((a) => ({
+        destinationId: a.destinationId,
+        level: a.level,
+        detail: a.detail
+      }))
+    }
+  } catch {
+    return { destinations: [], alarms: [] }
+  }
+})
 
 // ---- The change log — roadmap item 14 ----
 //

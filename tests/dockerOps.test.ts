@@ -1324,14 +1324,19 @@ describe('what must NOT be able to reach this', () => {
     // like every other tool, and DENIED on the Read Only tier because
     // container logs are whatever the application wrote to stdout.
     //
+    // `buildDockerActionCommand` went the same way, in its own commit and with
+    // its own consent story: `container_action` is behind the separate
+    // `containerControl` capability, denied on every read-only tier, graded
+    // `high` at the approval prompt, and takes ONE container per call — the
+    // builder accepts a list and the tool refuses to pass one, so no single
+    // approval can act on a host's worth of containers.
+    //
     // Everything below is still forbidden, and that is the point of keeping
-    // the list: the bridge reads containers, it does not act on them. A
-    // `containerControl` capability exists for that and deliberately has no
-    // tool behind it yet. Adding one means deleting a line here on purpose,
-    // which is the whole mechanism.
+    // the list. Disk usage and `docker inspect` are inventory of a different
+    // kind, and `planDockerAction` is the panel's confirmation grading, which
+    // an agent must not be able to consult in order to route around.
     const mcp = read('src/main/services/mcpServer.ts')
     for (const forbidden of [
-      'buildDockerActionCommand',
       'buildDockerDiskCommand',
       'buildDockerDiskDetailCommand',
       'buildDockerInspectCommand',

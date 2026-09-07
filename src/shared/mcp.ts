@@ -26,6 +26,7 @@ export type AiCapability =
   | 'containers'
   | 'containerControl'
   | 'fleetRead'
+  | 'backupRead'
 
 // `detail` is the consent surface, and it is not decoration. A user reading this
 // grid is deciding what an agent may do, and the only thing they have to decide
@@ -174,6 +175,12 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
     label: 'Containers: start, stop and restart them',
     detail:
       'Restarts, stops and starts containers, and brings compose projects up and down. Stopping a container is an outage for whatever it serves, so this is separate from reading the list: an agent that may see what is running does not thereby get to stop it.'
+  },
+  {
+    id: 'backupRead',
+    label: 'Backups: whether they are running and when they last succeeded',
+    detail:
+      'Reads the backup destinations and how each is doing — the last successful run, how late it is, and any alarm raised against it. It names destinations and their kind, never their credentials. Running a backup and restoring one are not here at any setting: a run outlives the approval that started it, and a restore overwrites data.'
   },
   {
     id: 'fleetRead',

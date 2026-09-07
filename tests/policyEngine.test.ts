@@ -23,6 +23,7 @@ function group(overrides: Partial<AccessGroup['capabilities']> = {}, filePolicie
       containers: 'allow',
       containerControl: 'allow',
       fleetRead: 'allow',
+      backupRead: 'allow',
       sftpDownload: 'allow',
       sftpUpload: 'deny',
       sshTunnel: 'deny',
