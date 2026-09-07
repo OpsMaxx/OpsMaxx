@@ -1700,3 +1700,52 @@ func TestClientOfferingH2NeverPanicsTheSidecar(t *testing.T) {
 		client.CloseIdleConnections()
 	}
 }
+
+// Three unrelated hosts refusing the certificate is not three pinning
+// applications, it is one untrusted authority. Reporting it per-host sends
+// someone to fix three things that are not broken while the panel shows an
+// empty list and claims the certificate is fine — which is exactly what a
+// real machine did with the certificate installed but never trusted.
+func TestManyRefusalsAreReportedAsAnUntrustedAuthority(t *testing.T) {
+	ins, sink, _ := newTestInspector(t, nil)
+
+	for i := 0; i < inspectUntrustedHosts; i++ {
+		host := fmt.Sprintf("host%d.example", i)
+		for j := 0; j < inspectPinThreshold; j++ {
+			ins.noteAttempt(host)
+		}
+	}
+	waitFor(t, "the untrusted-authority report", func() bool {
+		return len(sink.events("inspect.untrusted")) == 1
+	})
+
+	e := sink.events("inspect.untrusted")[0]
+	hosts, _ := e["hosts"].([]any)
+	if len(hosts) < inspectUntrustedHosts {
+		t.Fatalf("the report must name the hosts so the claim can be checked, got %v", e["hosts"])
+	}
+	if e["fingerprint"] != ins.caFingerprint {
+		t.Fatalf("the report must name the authority it is about, got %v", e["fingerprint"])
+	}
+
+	// More refusals must not repeat it.
+	for j := 0; j < inspectPinThreshold; j++ {
+		ins.noteAttempt("another.example")
+	}
+	time.Sleep(inspectPinGrace + 200*time.Millisecond)
+	if n := len(sink.events("inspect.untrusted")); n != 1 {
+		t.Fatalf("said %d times; once per run is the whole point", n)
+	}
+}
+
+// One host refusing is that host's policy, not a verdict on the authority.
+func TestOneRefusalIsNotBlamedOnTheAuthority(t *testing.T) {
+	ins, sink, _ := newTestInspector(t, nil)
+	for j := 0; j < inspectPinThreshold; j++ {
+		ins.noteAttempt("solo.example")
+	}
+	waitFor(t, "the pinned report", func() bool { return len(sink.events("inspect.pinned")) == 1 })
+	if n := len(sink.events("inspect.untrusted")); n != 0 {
+		t.Fatalf("a single pinning host must not be reported as an untrusted authority (%d)", n)
+	}
+}

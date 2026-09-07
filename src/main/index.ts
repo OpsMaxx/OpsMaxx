@@ -541,9 +541,25 @@ function createWindow(): void {
     // as a live target in the meantime.
     vpnSetCadence('idle')
   })
-  const wcId = mainWindow.webContents.id
+  // Both captured BEFORE the window is destroyed, and for the same reason.
+  //
+  // Reading `mainWindow.webContents` inside the handler below throws "Object
+  // has been destroyed" — Electron rejects property access on a destroyed
+  // BrowserWindow, so the `if (mainWindow)` guard that used to be there
+  // checked the wrong thing: the reference is still non-null, it is the object
+  // behind it that has gone. The throw took out the rest of the handler, so
+  // every disposal after it — the shells, the log tails, the broadcasts, the
+  // jobs, the rule engine — was skipped on every window close, which is
+  // exactly the leak this handler exists to prevent. It surfaced only as one
+  // line from the uncaughtException net at the bottom of this file.
+  //
+  // Holding the WebContents itself is safe where holding the window is not:
+  // `vpnDetachRenderer` removes it from a Set by identity and never touches
+  // the object.
+  const wc = mainWindow.webContents
+  const wcId = wc.id
   mainWindow.webContents.on('destroyed', () => {
-    if (mainWindow) vpnDetachRenderer(mainWindow.webContents)
+    vpnDetachRenderer(wc)
     // Reap this window's shells. Without it they keep running until quit,
     // holding a WebContents that send() refuses to write to — live processes
     // with nowhere left to report. The id is captured above because the

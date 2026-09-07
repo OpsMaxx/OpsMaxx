@@ -129,6 +129,16 @@ const (
 	// HTTP parser that rejects them. We cannot avoid that without owning the
 	// connect path, but we can stop pretending it did not happen.
 	inspectOpaqueGrace = 5 * time.Second
+	// How many DIFFERENT hosts have to reject our certificate before the
+	// conclusion changes from "these hosts pin" to "nothing trusts us".
+	//
+	// One host refusing a certificate is that host's policy. Three unrelated
+	// hosts refusing it in the same session is not a coincidence about them,
+	// it is a fact about this machine: the authority is not in a trust store
+	// the clients consult. Reporting that as three pinning applications sends
+	// the user to fix three things that are not broken, while the panel shows
+	// nothing and claims the certificate is fine.
+	inspectUntrustedHosts = 3
 	// Total bytes the capture directory may hold. Past this, the oldest
 	// recorded bodies are deleted, oldest first.
 	//
@@ -324,6 +334,15 @@ type OpaqueTunnel struct {
 	At   int64  `json:"at"`
 }
 
+// UntrustedCA says the certificate authority itself is the problem: enough
+// unrelated hosts have refused it that they cannot all be pinning.
+type UntrustedCA struct {
+	// The hosts that refused, so the claim can be checked rather than taken.
+	Hosts       []string `json:"hosts"`
+	Fingerprint string   `json:"fingerprint"`
+	At          int64    `json:"at"`
+}
+
 // PinnedHost says a host refused the certificate we minted for it, repeatedly.
 // The parent turns this into an offer to stop intercepting that host, which is
 // the only remedy that exists short of patching the client binary.
@@ -382,7 +401,10 @@ type Inspector struct {
 	// host:port values already reported as carrying something that is not
 	// HTTP or TLS, so a client that retries does not repeat the notice.
 	reportedOpaque map[string]bool
-	certs          map[string]*tls.Certificate
+	// Said once per run, when enough distinct hosts have refused the
+	// certificate that the certificate is the only thing left in common.
+	reportedUntrusted bool
+	certs             map[string]*tls.Certificate
 	// Most-recently-used last. A slice rather than a linked list because the
 	// cap is 512 and a linear move-to-back on a hit costs less than the
 	// allocations a list would at that size.
@@ -1198,6 +1220,33 @@ func (ins *Inspector) firePin(host string, attempts int) {
 	// storm.
 	ins.out.Emit("inspect.pinned", &PinnedHost{
 		Host: host, Attempts: attempts, At: time.Now().UnixMilli(),
+	})
+	ins.reportIfUntrusted()
+}
+
+// reportIfUntrusted draws the conclusion that a per-host view cannot.
+//
+// The pinning signal is indistinguishable, one host at a time, from "this
+// machine does not trust our certificate authority" — and the second is far
+// more likely and entirely fixable. Once enough unrelated hosts have refused
+// us, say so, once, instead of leaving a list of blameless hosts on screen.
+func (ins *Inspector) reportIfUntrusted() {
+	ins.mu.Lock()
+	if ins.reportedUntrusted || len(ins.pinned) < inspectUntrustedHosts {
+		ins.mu.Unlock()
+		return
+	}
+	ins.reportedUntrusted = true
+	hosts := make([]string, 0, len(ins.pinned))
+	for h := range ins.pinned {
+		hosts = append(hosts, h)
+	}
+	ins.mu.Unlock()
+	sort.Strings(hosts)
+	ins.out.Emit("inspect.untrusted", &UntrustedCA{
+		Hosts:       hosts,
+		Fingerprint: ins.caFingerprint,
+		At:          time.Now().UnixMilli(),
 	})
 }
 
