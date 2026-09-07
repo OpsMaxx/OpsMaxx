@@ -117,6 +117,16 @@ const (
 	// most ordinary page load on the internet would be reported as certificate
 	// pinning. One request from that host inside the window cancels the report.
 	inspectPinGrace = 2 * time.Second
+	// How long a MITM'd CONNECT is given to prove it is carrying TLS — or at
+	// least HTTP — before it is reported as something we cannot inspect.
+	//
+	// goproxy peeks the first byte of the tunnel: a TLS record type means it
+	// hands us the certificate, anything else means it tries to parse HTTP
+	// off the raw stream. A CONNECT carrying IMAP, SMTP or SSH is therefore
+	// not merely unreadable, it is BROKEN by interception — the bytes go to an
+	// HTTP parser that rejects them. We cannot avoid that without owning the
+	// connect path, but we can stop pretending it did not happen.
+	inspectOpaqueGrace = 5 * time.Second
 	// Total bytes the capture directory may hold. Past this, the oldest
 	// recorded bodies are deleted, oldest first.
 	//
@@ -293,6 +303,16 @@ type Header struct {
 	Value string `json:"value"`
 }
 
+// OpaqueTunnel is a CONNECT that carried neither TLS nor HTTP — a mail or SSH
+// connection tunnelled through the proxy. Interception breaks these, so the
+// remedy is the same as for a pinning host: let it through untouched.
+type OpaqueTunnel struct {
+	// host:port exactly as the client asked for it. The port is the useful
+	// half here — it is what tells someone this was IMAP rather than a website.
+	Host string `json:"host"`
+	At   int64  `json:"at"`
+}
+
 // PinnedHost says a host refused the certificate we minted for it, repeatedly.
 // The parent turns this into an offer to stop intercepting that host, which is
 // the only remedy that exists short of patching the client binary.
@@ -345,9 +365,12 @@ type Inspector struct {
 	// Hosts at the threshold, waiting out inspectPinGrace. Cancelled by a
 	// request arriving from that host.
 	pinTimers map[string]*time.Timer
-	certs     map[string]*tls.Certificate
-	certLRU   []string
-	live      map[string]*flowRec
+	// host:port values already reported as carrying something that is not
+	// HTTP or TLS, so a client that retries does not repeat the notice.
+	reportedOpaque map[string]bool
+	certs          map[string]*tls.Certificate
+	certLRU        []string
+	live           map[string]*flowRec
 	// Recorded bodies on disk, oldest first, and what they add up to. The
 	// budget is enforced here rather than by the parent because this is the
 	// only side that knows when a file finished being written.
@@ -585,6 +608,7 @@ func newInspector(parent context.Context, out *Writer, p *InspectStartParams, vi
 		pinned:           map[string]bool{},
 		certs:            map[string]*tls.Certificate{},
 		pinTimers:        map[string]*time.Timer{},
+		reportedOpaque:   map[string]bool{},
 		live:             map[string]*flowRec{},
 	}
 	if via != nil {
@@ -738,6 +762,20 @@ func (ins *Inspector) dialAddr(ctx context.Context, addr string) (net.Conn, erro
 	return ins.dial(ctx, host, port)
 }
 
+// connectMark follows one CONNECT tunnel through the three places that can
+// say what it turned out to be.
+//
+// goproxy creates a fresh ProxyCtx for each request inside a tunnel but
+// carries `UserData` across from the CONNECT, which is the only thread tying
+// an inner request back to the tunnel it arrived on.
+type connectMark struct {
+	host string
+	// A TLS handshake record was seen: goproxy asked us for a certificate.
+	tls atomic.Bool
+	// An HTTP request was parsed off the tunnel, TLS or not.
+	used atomic.Bool
+}
+
 // onConnect decides, per host, whether this connection is intercepted or
 // tunnelled untouched.
 func (ins *Inspector) onConnect(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
@@ -745,15 +783,54 @@ func (ins *Inspector) onConnect(host string, ctx *goproxy.ProxyCtx) (*goproxy.Co
 	if ins.isPassthrough(name) {
 		return goproxy.OkConnect, host
 	}
-	ins.noteAttempt(name)
+	// Deliberately NOT counted as a pinning attempt here. A CONNECT is just a
+	// request for a tunnel; whether the client then speaks TLS to us is not
+	// known until goproxy has peeked its first byte, and counting at this
+	// point reported every non-HTTPS tunnel — a mail client, an SSH-over-
+	// CONNECT hop — as a host that pins its certificate.
+	mark := &connectMark{host: host}
+	ctx.UserData = mark
+	// Self-expiring: the closure is the only reference, so there is nothing to
+	// clean up and nothing to leak if the tunnel outlives the window.
+	time.AfterFunc(inspectOpaqueGrace, func() { ins.reportIfOpaque(mark) })
 	return &goproxy.ConnectAction{
 		Action:    goproxy.ConnectMitm,
 		TLSConfig: ins.tlsConfigFor,
 	}, host
 }
 
-func (ins *Inspector) tlsConfigFor(host string, _ *goproxy.ProxyCtx) (*tls.Config, error) {
+// reportIfOpaque names a tunnel that carried neither TLS nor HTTP.
+//
+// Interception breaks these rather than merely failing to read them, so
+// silence is the one thing that must not happen: the user sees an application
+// stop working and has nothing connecting it to OpsMaxx.
+func (ins *Inspector) reportIfOpaque(m *connectMark) {
+	if m.tls.Load() || m.used.Load() || ins.ctx.Err() != nil {
+		return
+	}
+	ins.mu.Lock()
+	if ins.reportedOpaque[m.host] {
+		ins.mu.Unlock()
+		return
+	}
+	ins.reportedOpaque[m.host] = true
+	ins.mu.Unlock()
+	ins.out.Emit("inspect.opaque", &OpaqueTunnel{Host: m.host, At: time.Now().UnixMilli()})
+}
+
+// tlsConfigFor is called by goproxy ONLY after it has peeked a TLS handshake
+// record off the tunnel, which makes it the honest place to count an
+// interception attempt: reaching here means the client really is speaking TLS
+// to us, so a client that then produces no request really did reject our
+// certificate.
+func (ins *Inspector) tlsConfigFor(host string, ctx *goproxy.ProxyCtx) (*tls.Config, error) {
 	name := hostOnly(host)
+	if ctx != nil {
+		if m, ok := ctx.UserData.(*connectMark); ok {
+			m.tls.Store(true)
+		}
+	}
+	ins.noteAttempt(name)
 	cert, err := ins.leafFor(name)
 	if err != nil {
 		return nil, err
@@ -783,6 +860,14 @@ func (ins *Inspector) onRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http
 	// A request arriving on this host is proof the client accepted our
 	// certificate, so its strike count goes back to zero.
 	ins.clearAttempt(host)
+	// And proof the tunnel it arrived on was carrying HTTP, so it is not the
+	// opaque protocol reportIfOpaque exists to name. Read before UserData is
+	// replaced with this flow's record below.
+	if ctx != nil {
+		if m, ok := ctx.UserData.(*connectMark); ok {
+			m.used.Store(true)
+		}
+	}
 
 	id := "f" + strconv.FormatUint(ins.flowN.Add(1), 10)
 	rec := &flowRec{id: id}

@@ -86,11 +86,17 @@ export const useInspect = create<InspectState>((set, get) => ({
         status: s.status ? { ...s.status, pinned: [...s.status.pinned, p] } : s.status
       }))
     )
+    const offOpaque = api.onOpaque((o) =>
+      set((s) => ({
+        status: s.status ? { ...s.status, opaque: [...s.status.opaque, o] } : s.status
+      }))
+    )
     const offCleared = api.onCleared(() => set({ flows: [], selectedId: null }))
     return () => {
       offFlow()
       offStatus()
       offPinned()
+      offOpaque()
       offCleared()
       set({ wired: false })
     }

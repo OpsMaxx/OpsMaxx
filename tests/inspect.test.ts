@@ -265,3 +265,25 @@ function base64BytesSync(b64: string): number {
   const padding = clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0
   return (clean.length / 4) * 3 - padding
 }
+
+describe('host:port splitting for passthrough rules', () => {
+  it('keeps IPv6 addresses whole', async () => {
+    // A passthrough rule matches on the host alone, so an opaque tunnel
+    // reported as `host:port` has to be reduced to a host. Splitting an IPv6
+    // literal on its last colon returns half an address and a rule that
+    // matches nothing — the failure is silent, which is why it is pinned here.
+    const { hostWithoutPort } = await import('../src/main/services/inspect')
+    const cases: Record<string, string> = {
+      'mail.example.test:993': 'mail.example.test',
+      'example.com': 'example.com',
+      '127.0.0.1:8443': '127.0.0.1',
+      '[2001:db8::1]:993': '2001:db8::1',
+      '[::1]:8080': '::1',
+      '[::1]': '::1',
+      '2001:db8::1': '2001:db8::1'
+    }
+    for (const [input, want] of Object.entries(cases)) {
+      expect(hostWithoutPort(input), input).toBe(want)
+    }
+  })
+})

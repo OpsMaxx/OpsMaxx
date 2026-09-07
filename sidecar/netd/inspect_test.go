@@ -1365,3 +1365,114 @@ func TestRecordedBodyIsChargedToTheBudget(t *testing.T) {
 			count, total, len(payload))
 	}
 }
+
+// A CONNECT carrying something that is not TLS — a mail client, an SSH hop —
+// must not be reported as a host that pins its certificate. Before the strike
+// moved to the TLS path, every one of them was.
+func TestNonTLSTunnelIsNotReportedAsPinning(t *testing.T) {
+	// An origin that speaks a line protocol, not TLS and not HTTP.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_, _ = c.Write([]byte("220 mail.example.test ESMTP\r\n"))
+			_ = c.Close()
+		}
+	}()
+
+	ins, sink, _ := newTestInspector(t, nil)
+
+	// Several CONNECTs to it, more than the pinning threshold, each speaking a
+	// protocol that is not TLS.
+	for i := 0; i < inspectPinThreshold+2; i++ {
+		c, err := net.Dial("tcp", fmt.Sprintf("%s:%d", ins.bindHost, ins.bindPort))
+		if err != nil {
+			t.Fatalf("dial proxy: %v", err)
+		}
+		target := ln.Addr().String()
+		fmt.Fprintf(c, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", target, target)
+		// Read the proxy's 200, then send a line that is emphatically not a
+		// TLS ClientHello.
+		buf := make([]byte, 64)
+		_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
+		_, _ = c.Read(buf)
+		_, _ = c.Write([]byte("EHLO example.test\r\n"))
+		time.Sleep(20 * time.Millisecond)
+		_ = c.Close()
+	}
+
+	// Well past the pin grace: nothing here is a certificate rejection.
+	time.Sleep(inspectPinGrace + 300*time.Millisecond)
+	if n := len(sink.events("inspect.pinned")); n != 0 {
+		t.Fatalf("a non-TLS tunnel was reported as certificate pinning %d time(s)", n)
+	}
+	ins.mu.RLock()
+	strikes := len(ins.attempts)
+	ins.mu.RUnlock()
+	if strikes != 0 {
+		t.Fatalf("a non-TLS tunnel recorded %d pinning strike(s)", strikes)
+	}
+}
+
+// The other half: it must be REPORTED, because interception breaks it rather
+// than merely failing to read it.
+func TestOpaqueTunnelIsReportedOnce(t *testing.T) {
+	ins, sink, _ := newTestInspector(t, nil)
+	// Driven directly rather than over a socket: the grace window is five
+	// seconds and the behaviour under test is the decision, not the plumbing.
+	m := &connectMark{host: "mail.example.test:993"}
+	ins.reportIfOpaque(m)
+	ins.reportIfOpaque(m)
+
+	events := sink.events("inspect.opaque")
+	if len(events) != 1 {
+		t.Fatalf("want exactly one report, got %d", len(events))
+	}
+	if events[0]["host"] != "mail.example.test:993" {
+		t.Fatalf("report named %v; the port is the half that says which protocol it was",
+			events[0]["host"])
+	}
+}
+
+func TestTunnelThatCarriedTLSOrHTTPIsNotReportedOpaque(t *testing.T) {
+	ins, sink, _ := newTestInspector(t, nil)
+
+	tlsSeen := &connectMark{host: "site.example:443"}
+	tlsSeen.tls.Store(true)
+	ins.reportIfOpaque(tlsSeen)
+
+	httpSeen := &connectMark{host: "plain.example:80"}
+	httpSeen.used.Store(true)
+	ins.reportIfOpaque(httpSeen)
+
+	if n := len(sink.events("inspect.opaque")); n != 0 {
+		t.Fatalf("a tunnel that carried TLS or HTTP was reported as opaque %d time(s)", n)
+	}
+}
+
+// A real HTTPS client must still be counted, or the pinning detection that
+// moved here stops working at all.
+func TestTLSHandshakeStillCountsAsAnAttempt(t *testing.T) {
+	origin := newOrigin(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("never reached"))
+	}))
+	ins, sink, _ := newTestInspector(t, nil)
+	// Trusts only the origin's CA, so it rejects our certificate — genuine
+	// pinning behaviour, over genuine TLS.
+	client := clientThrough(t, ins, origin.pool)
+	for i := 0; i < inspectPinThreshold+1; i++ {
+		if resp, err := client.Get(origin.url + "/pinned"); err == nil {
+			resp.Body.Close()
+			t.Fatal("the client should have refused our certificate")
+		}
+		client.CloseIdleConnections()
+	}
+	waitFor(t, "the pinned report", func() bool { return len(sink.events("inspect.pinned")) == 1 })
+}

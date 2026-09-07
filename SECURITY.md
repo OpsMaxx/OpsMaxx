@@ -284,6 +284,11 @@ vulnerabilities — but do open a discussion if you disagree with the tradeoff.
   machine will not carry credentials — use an encrypted backup instead.
 - **Releases are not code-signed.** Verify checksums if you need assurance
   about a download.
+- **Tunnels carrying something other than HTTP are broken, not just
+  unreadable.** A CONNECT to an IMAP, SMTP or SSH port is handed to an HTTP
+  parser and dropped. OpsMaxx detects this, names the host and port, and
+  offers to let it through untouched — but the first connection is already
+  lost. Add such hosts to the passthrough list before capturing machine-wide.
 - **A WebSocket's frames are not recorded.** The upgrade handshake is
   captured in full; what follows is another protocol on the same connection
   and is relayed untouched.

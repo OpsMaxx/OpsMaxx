@@ -162,6 +162,23 @@ export function InspectView(): React.JSX.Element {
         </div>
       ))}
 
+      {/* A tunnel carrying something that is not HTTP at all. Interception
+          breaks these, so this is a report of damage already done, not a
+          missing capability — and it gets the same prominence as pinning. */}
+      {status?.opaque.map((o) => (
+        <div className="banner warn" key={o.host}>
+          <AlertTriangle size={14} />
+          <span>
+            <strong>{o.host}</strong> is not HTTP or HTTPS. OpsMaxx cannot inspect it, and
+            intercepting it stops it working.
+          </span>
+          <div className="spacer" />
+          <button className="btn secondary size-24" onClick={() => void allowPinned(o.host)}>
+            Let it through untouched
+          </button>
+        </div>
+      ))}
+
       {status?.ca && <CaCard />}
 
       <div className="row" style={{ gap: 'var(--sp-2)', padding: '8px 0' }}>
