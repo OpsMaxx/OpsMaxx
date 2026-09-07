@@ -22,22 +22,33 @@ export function AddApiModal(): React.JSX.Element {
   const [name, setName] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [specUrl, setSpecUrl] = useState('')
+  // A description chosen from disk: its path is what the collection keeps, and
+  // the name is only what the picker is showing back to the user.
+  const [specPath, setSpecPath] = useState<string | null>(null)
+  const [fileError, setFileError] = useState<string | null>(null)
   const [viaServerId, setViaServerId] = useState('')
 
   const urlField = source === 'spec' ? specUrl : baseUrl
-  const parsed = urlField.trim() ? parseTarget(urlField.trim()) : null
+  // A file-backed description has no URL to parse, and demanding one would be
+  // asking for the thing the file replaces.
+  const usingFile = source === 'spec' && specPath !== null
+  const parsed = !usingFile && urlField.trim() ? parseTarget(urlField.trim()) : null
   const urlError = parsed && 'error' in parsed ? parsed.error : null
-  const valid = name.trim().length > 0 && urlField.trim().length > 0 && !urlError
+  const valid =
+    name.trim().length > 0 && (usingFile || (urlField.trim().length > 0 && !urlError))
 
   const create = (): void => {
     if (!valid) return
     addApiCollection({
       name: name.trim(),
-      specUrl: source === 'spec' ? specUrl.trim() : null,
+      specUrl: source === 'spec' && !usingFile ? specUrl.trim() : null,
+      specPath: usingFile ? specPath : null,
       // A description names its own servers, but the user still has to be able
       // to say "not that one" — so a spec-backed collection keeps a base URL
       // too, defaulted from the spec's origin.
-      baseUrl: source === 'spec' ? originOf(specUrl.trim()) : baseUrl.trim(),
+      // A file names no origin, so the base URL stays empty until the
+      // description's own servers supply one.
+      baseUrl: usingFile ? '' : source === 'spec' ? originOf(specUrl.trim()) : baseUrl.trim(),
       viaServerId: viaServerId || null,
       insecureTls: false
     })
@@ -78,17 +89,58 @@ export function AddApiModal(): React.JSX.Element {
 
       {source === 'spec' ? (
         <Field
-          label="OpenAPI document URL"
+          label="OpenAPI document"
           required
-          error={urlError ?? undefined}
-          hint="The description is fetched the same way requests are sent, so a spec served by the target host is reachable too."
+          error={fileError ?? urlError ?? undefined}
+          hint="A URL is fetched the same way requests are sent, so a description served by the target host is reachable too. A file is re-read each time, so editing it and reopening shows the change."
         >
-          <input
-            className="input"
-            value={specUrl}
-            placeholder="https://api.example.com/openapi.json"
-            onChange={(e) => setSpecUrl(e.target.value)}
-          />
+          {specPath ? (
+            <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+              <span className="mono ellipsis" title={specPath} style={{ flex: 1, minWidth: 0 }}>
+                {specPath}
+              </span>
+              <button
+                className="btn secondary size-28"
+                onClick={() => {
+                  setSpecPath(null)
+                  setFileError(null)
+                }}
+              >
+                Use a URL instead
+              </button>
+            </div>
+          ) : (
+            <div className="row" style={{ gap: 'var(--sp-2)' }}>
+              <input
+                className="input"
+                value={specUrl}
+                placeholder="https://api.example.com/openapi.json"
+                onChange={(e) => setSpecUrl(e.target.value)}
+              />
+              <button
+                className="btn secondary size-28"
+                onClick={() => {
+                  setFileError(null)
+                  void window.opsmaxx?.http
+                    .chooseSpecFile()
+                    .then((chosen) => {
+                      if (!chosen) return
+                      setSpecPath(chosen.path)
+                      // Name the collection after the file, but never over
+                      // something the user has already typed.
+                      if (!name.trim()) {
+                        setName(chosen.path.split('/').pop()?.replace(/\.[^.]+$/, '') ?? 'API')
+                      }
+                    })
+                    .catch((e: unknown) =>
+                      setFileError(e instanceof Error ? e.message : String(e))
+                    )
+                }}
+              >
+                Choose a file…
+              </button>
+            </div>
+          )}
         </Field>
       ) : (
         <Field

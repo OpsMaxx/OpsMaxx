@@ -171,6 +171,14 @@ export interface ApiCollection {
   name: string
   // OpenAPI/Swagger document URL, or null for a scratch collection.
   specUrl: string | null
+  /**
+   * A description on this machine instead of at a URL.
+   *
+   * The path rather than the text: a description is a file someone edits, and
+   * storing a copy would show them yesterday's version of their own API with
+   * no way to tell. It is re-read every time the collection is opened.
+   */
+  specPath?: string | null
   // Where requests are sent. Overrides the servers the document declares,
   // because the document usually names production and the user rarely means it.
   baseUrl: string

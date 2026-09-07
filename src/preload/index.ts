@@ -351,7 +351,15 @@ const api = {
      * connection; `spec.via.server` carries no credentials, because main
      * merges those from the encrypted store by serverId.
      */
-    request: (spec: HttpRequestSpec): Promise<HttpResult> => ipcRenderer.invoke('http:request', spec)
+    request: (spec: HttpRequestSpec): Promise<HttpResult> =>
+      ipcRenderer.invoke('http:request', spec),
+    /** Pick an OpenAPI description from disk. Returns its path and its
+     *  contents, or null if the picker was dismissed. Both halves, because the
+     *  collection stores the path and the client is handed the text. */
+    chooseSpecFile: (): Promise<{ path: string; text: string } | null> =>
+      ipcRenderer.invoke('http:chooseSpecFile'),
+    /** Re-read a description a collection already points at. */
+    readSpecFile: (path: string): Promise<string> => ipcRenderer.invoke('http:readSpecFile', path)
   },
   sftp: {
     /**
