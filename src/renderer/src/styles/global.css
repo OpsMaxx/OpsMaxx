@@ -2303,6 +2303,26 @@ details[open] > .disclosure-head .chev {
   font-size: 11px;
   line-height: 1.5;
 }
+/* The driver's own words, kept below our sentence rather than dropped: they are
+   what a person pastes into a search when our sentence is not enough, and for an
+   unrecognised failure they are the only real information on the card. */
+.term-dead .td-raw {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  max-width: 52ch;
+  word-break: break-word;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+}
+.term-dead .td-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  justify-content: center;
+}
 
 /* ============================ Crash / paste guard ========================= */
 .crash {

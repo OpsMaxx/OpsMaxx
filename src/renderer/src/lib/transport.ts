@@ -23,6 +23,13 @@ export interface TerminalTransport {
   // `subtitle`: the SSH greeting has always read "Connecting to box
   // (10.0.0.4:22)…" without the username, and this phase is a pure refactor.
   endpoint: string
+  // Which saved connection this pane is for, when there is one.
+  //
+  // Optional because a local shell genuinely has no server behind it, and the
+  // failure card uses this to decide whether to offer "Edit connection" — an
+  // offer that would be meaningless for a local shell. Absent means "there is
+  // nothing to edit", not "we did not look".
+  serverId?: string
   connect(sessionId: string, cols: number, rows: number): Promise<void>
   write(sessionId: string, data: string): void
   resize(sessionId: string, cols: number, rows: number): void
@@ -86,6 +93,7 @@ export function sshTransport(
     title: server.name,
     subtitle: `${server.username}@${server.host}:${server.port}`,
     endpoint: `${server.host}:${server.port}`,
+    serverId: server.id,
     connect: (sessionId, cols, rows) =>
       // A credential kept in the vault is unreadable while the vault is
       // locked. Rather than failing with instructions to go and unlock it and
@@ -212,6 +220,7 @@ export function containerTransport(
     title: containerRef,
     subtitle: `container on ${server.name}`,
     endpoint: `${containerRef} · ${server.host}`,
+    serverId: server.id,
     // The close reason is the container's, not the host's. See
     // containerCloseReason: "shell exited with 127" is true and tells nobody
     // that the image simply has no shell.

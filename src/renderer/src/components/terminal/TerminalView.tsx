@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { RotateCw, Terminal as TerminalIcon } from 'lucide-react'
+import { Pencil, RotateCw, Terminal as TerminalIcon } from 'lucide-react'
 import { TerminalSearch } from './TerminalSearch'
 import { PasteConfirm } from './PasteConfirm'
 import { EmptyState } from '../common/EmptyState'
@@ -10,6 +10,8 @@ import {
   setupTerminalUX,
   useTerminalSession
 } from '../../hooks/useTerminalSession'
+import { adviseOnError } from '../../lib/connectionError'
+import { clsx } from '../../lib/format'
 import type { TerminalTransport } from '../../lib/transport'
 import type { Server } from '../../types'
 
@@ -99,6 +101,82 @@ function DemoTerminal({ server }: { server: Server }): React.JSX.Element {
   )
 }
 
+// The failure card.
+//
+// It used to print the raw driver string as its title and offer Reconnect and
+// nothing else, so an unreachable host, a wrong port, a wrong username and a
+// rejected key were one sentence with one button — and the button was the one
+// action that cannot fix three of the four. The hint underneath then reassured
+// the reader that reconnecting "usually skips authentication", which is
+// precisely the wrong thing to say when authentication is the suspect.
+//
+// The classifier in lib/connectionError.ts already knew the difference. This is
+// the surface finally asking it.
+function DeadSession({
+  dead,
+  transport,
+  onReconnect
+}: {
+  dead: string
+  transport: TerminalTransport
+  onReconnect: () => void
+}): React.JSX.Element {
+  const openServerEditor = useApp((s) => s.openServerEditor)
+  const advice = adviseOnError(dead)
+  const serverId = transport.serverId
+
+  return (
+    <div className="term-dead">
+      <div className="td-box">
+        {/* The cause leads. The driver's own words are kept below rather than
+            dropped: they are what a person pastes into a search when our
+            sentence is not enough, and for `unknown` they are the only real
+            information on the card. */}
+        <div className="td-title">{advice.cause}</div>
+        <div className="td-sub">{transport.subtitle}</div>
+        <div className="td-raw mono">{dead}</div>
+        {advice.hint && <div className="td-hint">{advice.hint}</div>}
+
+        <div className="td-actions">
+          {/* Offered only when it can work. A Reconnect on a rejected
+              credential re-runs the same rejected credential, forever. */}
+          {advice.retry && (
+            <button className="btn primary" autoFocus onClick={onReconnect}>
+              <RotateCw size={14} /> Reconnect
+            </button>
+          )}
+          {advice.edit && serverId && (
+            <button
+              className={clsx('btn', !advice.retry && 'primary')}
+              autoFocus={!advice.retry}
+              onClick={() => openServerEditor(serverId)}
+            >
+              <Pencil size={14} /> Edit connection
+            </button>
+          )}
+          {/* Neither applies — a changed host key, or an OS refusal. Retrying
+              is still allowed, it is just not the thing being recommended. */}
+          {!advice.retry && !(advice.edit && serverId) && (
+            <button className="btn" onClick={onReconnect}>
+              <RotateCw size={14} /> Try again
+            </button>
+          )}
+        </div>
+
+        {/* Only where it is true. Reconnecting reuses a pooled connection, which
+            is worth knowing when the failure was transport-level and actively
+            misleading when it was not. */}
+        {advice.retry && (
+          <div className="td-hint">
+            The scrollback above is kept. Reconnecting reuses the pooled connection when one is
+            still open.
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ---- Real session ----------------------------------------------------------
 function RealTerminal({
   transport,
@@ -129,22 +207,7 @@ function RealTerminal({
       }}
     >
       <div className="xterm-host" ref={hostRef} />
-      {dead && (
-        <div className="term-dead">
-          <div className="td-box">
-            <div className="td-title">{dead}</div>
-            <div className="td-sub">{transport.subtitle}</div>
-            <button className="btn primary" autoFocus onClick={reconnect}>
-              <RotateCw size={14} /> Reconnect
-            </button>
-            <div className="td-hint">
-              The scrollback above is kept. Reconnecting reuses the pooled
-              connection when one is still open, so it usually skips
-              authentication.
-            </div>
-          </div>
-        </div>
-      )}
+      {dead && <DeadSession dead={dead} transport={transport} onReconnect={reconnect} />}
       {pending && (
         <PasteConfirm
           text={pending.text}

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { classifyConnectionError, errorText } from '../src/renderer/src/lib/connectionError'
+import {
+  adviseOnError,
+  classifyConnectionError,
+  errorText,
+  faultAdvice
+} from '../src/renderer/src/lib/connectionError'
+import type { ConnectionFault } from '../src/renderer/src/lib/connectionError'
 
 // Which button an error gets is decided entirely by this classifier, so the
 // strings it is fed are the ones the app actually produces — ssh2's phrasing,
@@ -60,5 +66,96 @@ describe('errorText', () => {
   it('handles anything that was thrown, not just Errors', () => {
     expect(errorText('plain string')).toBe('plain string')
     expect(errorText(new Error('Error: doubled up'))).toBe('doubled up')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// What each fault offers, which is the half the terminal never asked for
+// ---------------------------------------------------------------------------
+//
+// The classifier above has been right for a while and the database surface used
+// it. The terminal did not: an unreachable host, a wrong port, a wrong username
+// and a rejected key all arrived as one string — "Connection failed: Timed out
+// while waiting for handshake" — over a card whose only button was Reconnect.
+//
+// Reconnect cannot fix three of those four. On a rejected credential it re-runs
+// the same rejected credential and fails identically, forever, and the card then
+// reassured the reader that reconnecting "usually skips authentication" at the
+// exact moment authentication was the suspect.
+
+describe('a failure offers the action that can actually help', () => {
+  // THE assertion. Offering retry on an auth failure is offering a button that
+  // is known not to work, which is worse than offering nothing.
+  it('does not offer a retry for a credential the server already rejected', () => {
+    const a = adviseOnError('All configured authentication methods failed')
+    expect(a.retry).toBe(false)
+    expect(a.edit).toBe(true)
+    expect(a.cause).toMatch(/username|credential/i)
+  })
+
+  it.each([
+    ['Permission denied (publickey)', false],
+    ['ENOENT: no such file, open /home/u/.ssh/id_rsa', false],
+    ['Encrypted private key detected, no passphrase given', false],
+    ['connect ECONNREFUSED 127.0.0.1:22', true],
+    ['ETIMEDOUT', true]
+  ])('%s → retry=%s', (text, retry) => {
+    expect(adviseOnError(text).retry).toBe(retry)
+  })
+
+  // A changed host key is a decision — rebuilt server, or interception — and it
+  // is not made by pressing a button on a failure card.
+  it('offers neither retry nor edit for a host-key mismatch', () => {
+    const a = adviseOnError('Host key verification failed')
+    expect(a.retry).toBe(false)
+    expect(a.edit).toBe(false)
+    expect(a.hint).toMatch(/certain the server changed/i)
+  })
+
+  // Everything the fix could be is behind Edit connection, so a fault whose fix
+  // is a field must say so or the user has nowhere to go.
+  it('points at the connection settings whenever the fix is a field on it', () => {
+    for (const t of ['ECONNREFUSED', 'ETIMEDOUT', 'authentication failed', 'no such file id_ed25519']) {
+      expect(adviseOnError(t).edit, t).toBe(true)
+    }
+  })
+})
+
+describe('an unrecognised failure is not given an invented explanation', () => {
+  // Inventing a cause for text we did not recognise is how four different
+  // problems came to share one wrong sentence in the first place.
+  it('says it could not tell, rather than naming a cause', () => {
+    const a = adviseOnError('kex_exchange_identification: banner line contains invalid characters')
+    expect(a.cause).toMatch(/could not tell/i)
+    expect(a.cause).not.toMatch(/username|port|listening|firewall/i)
+  })
+
+  it('still lets the user try again and look at the settings', () => {
+    const a = adviseOnError(null)
+    expect(a.retry).toBe(true)
+    expect(a.edit).toBe(true)
+  })
+})
+
+describe('every fault is answered', () => {
+  // A fault added to the union with no advice would fall through to undefined
+  // and render an empty card.
+  it('gives every classification a cause sentence', () => {
+    const faults: ConnectionFault[] = [
+      'host-key',
+      'port-in-use',
+      'passphrase',
+      'key-missing',
+      'auth',
+      'refused',
+      'unreachable',
+      'permission',
+      'unknown'
+    ]
+    for (const f of faults) {
+      const a = faultAdvice(f)
+      expect(a, f).toBeDefined()
+      expect(a.cause.length, f).toBeGreaterThan(10)
+    }
   })
 })
