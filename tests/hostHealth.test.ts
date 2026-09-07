@@ -127,10 +127,25 @@ describe('summariseFleetHealth', () => {
   })
 
   it('does not alarm on a server that reported no filesystem at all', () => {
+    // "Nothing was measured" is `diskPct: null` now. It used to be spelled
+    // `diskPct: 100, diskTotal: 0` and read through a `diskTotal > 0` guard —
+    // a combination the parser can no longer produce, because it emits null
+    // for the percentage the moment there is no total to divide by.
     const h = summariseFleetHealth([server('a')], {
-      a: host({ diskPct: 100, diskTotal: 0, diskUsed: 0 })
+      a: host({ diskPct: null, diskTotal: 0, diskUsed: 0 })
     })
     expect(h.attention).toHaveLength(0)
+    expect(h.diskHosts).toBe(0)
+  })
+
+  // The direction to be wrong in, stated as its own case: an unmeasured disk
+  // must never be treated as a disk with room.
+  it('does not treat an unmeasured disk as a healthy one', () => {
+    const h = summariseFleetHealth([server('a')], { a: host({ diskPct: null }) })
+    expect(h.attention).toHaveLength(0)
+    expect(h.rest.map((r) => r.id)).toEqual(['a'])
+    expect(h.rest[0].diskPct).toBeNull()
+    expect(h.rest[0].diskCritical).toBe(false)
   })
 
   it('leaves CPU and memory pressure out of the attention list', () => {

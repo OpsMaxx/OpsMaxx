@@ -369,7 +369,7 @@ function parse(text: string, prev: CpuSnap | null): { data: HostMetrics; snap: C
     memPct: memTotal ? (memUsed / memTotal) * 100 : null,
     memUsed,
     memTotal,
-    diskPct: diskTotal ? (diskUsed / diskTotal) * 100 : 0,
+    diskPct: diskTotal ? (diskUsed / diskTotal) * 100 : null,
     diskUsed,
     diskTotal,
     inodePct,
