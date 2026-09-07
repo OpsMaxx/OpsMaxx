@@ -3991,7 +3991,9 @@ details[open] > .disclosure-head .chev {
 }
 .http-via-hint code {
   font-family: var(--font-mono);
-  font-size: 0.95em;
+  /* Floored so a monospace run inside already-small hint text cannot shrink
+     below the identifier step. See tests/typeScale.test.ts. */
+  font-size: max(var(--fs-identifier), 0.95em);
 }
 .http-warning {
   display: flex;
