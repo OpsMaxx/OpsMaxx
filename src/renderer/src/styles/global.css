@@ -2919,11 +2919,42 @@ details[open] > .disclosure-head .chev {
    as zero is the failure this whole feature exists to prevent — so they get the
    warning colour a count never gets. A number and a reason must not be able to
    look like each other. */
+/* Horizontally scrolling table wrapper.
+   The scroll already worked; nothing said it was there. A column cut by the
+   panel edge looked like the end of the row, and in the light theme a security
+   count was cut MID-NUMBER — "38626" truncated and presented as though it were
+   the whole figure. That is a correctness bug wearing a layout bug's clothes,
+   and a hairline scrollbar under the last row is not an answer to it.
+
+   The two gradients below are the standard self-detecting overflow shadow:
+   the pair with `background-attachment: local` sit on the CONTENT and slide
+   away as it scrolls, the pair attached to the container stay put. Where the
+   content covers the container the local layer hides the shadow, so the fade
+   appears only on the side that actually has more to show — no measurement, no
+   resize observer, nothing to keep in step. */
 .inv-scroll {
   margin-top: 8px;
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
+  background:
+    linear-gradient(to right, var(--bg-panel) 30%, transparent) left / 24px 100% no-repeat local,
+    linear-gradient(to left, var(--bg-panel) 30%, transparent) right / 24px 100% no-repeat local,
+    linear-gradient(to right, rgba(0, 0, 0, 0.28), transparent) left / 14px 100% no-repeat scroll,
+    linear-gradient(to left, rgba(0, 0, 0, 0.28), transparent) right / 14px 100% no-repeat scroll;
+}
+/* The host is what identifies a row, so it must survive being scrolled past —
+   otherwise a wide table shows eight columns of numbers belonging to a server
+   whose name is off-screen to the left. */
+.inv-table th:first-child,
+.inv-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg-panel);
+}
+.inv-table tr:hover td:first-child {
+  background: var(--bg-hover);
 }
 .inv-table {
   /* Wider than the pane once hardware columns are open; the wrapper scrolls
