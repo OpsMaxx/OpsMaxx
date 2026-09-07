@@ -305,6 +305,24 @@ export function setCapacityReader(
 }
 
 /**
+ * The fleet sampler's stored answers, injected for the same reason the capacity
+ * store is: main owns the sampler, it starts after this module is constructed,
+ * and it is switched off entirely on some machines.
+ *
+ * Deliberately only the READ side. The sampler also samples on demand, and an
+ * agent that could trigger a sweep would be starting work across every server
+ * in the workspace from one call — a fan-out with a different consent story,
+ * and one that outlives the request that asked for it.
+ */
+export interface FleetReader {
+  factsFor(serverId: string): { facts?: unknown; at?: number; error?: string }
+}
+let fleetReader: FleetReader | null = null
+export function setFleetReader(r: FleetReader): void {
+  fleetReader = r
+}
+
+/**
  * What the approval dialog needs that the audit context does not carry.
  *
  * `because` is the reason this grade was chosen, written where the choice is
@@ -2258,6 +2276,110 @@ function buildServer(): McpServer {
         })
         return errorText(`Could not read logs for ${container} on ${s.name}: ${message}`)
       }
+    }
+  )
+
+  server.registerTool(
+    'fleet_inventory',
+    {
+      title: 'Read the fleet inventory',
+      description:
+        'One answer for every server in the workspace, from what OpsMaxx has ALREADY collected on ' +
+        'its own schedule: distribution and version, pending updates and how many are security updates, ' +
+        'whether a reboot is waiting, and whether the host has drifted since it was last looked at. ' +
+        'Prefer this over calling get_host_facts once per server: it opens no connection at all, it ' +
+        'answers for hosts that are currently offline, and it costs one call instead of one per host. ' +
+        'It reports CONFIGURATION DRIFT for no server, deliberately. Which hosts have fallen behind the ' +
+        'rest is a ranked list of the weakest machines in the estate, kept fresh, and it is not ' +
+        'available here at any permission level. ' +
+        'Every row carries WHEN it was collected. A stale row is not a current reading and this does ' +
+        'not pretend otherwise — a host that has not been sampled says so rather than reporting zero.',
+      inputSchema: { intent: INTENT_PARAM },
+      annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: false }
+    },
+    async ({ intent }, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const workspaces = auth.session.workspaces
+      if (workspaces.length === 0) return errorText('This session has no workspaces.')
+
+      // Checked per workspace, not once for the session. A session can hold
+      // several, they can be assigned different access groups, and answering
+      // for all of them because one permits it would be the widest possible
+      // reading of a grant the user made narrowly. Workspaces that do not
+      // permit it are left out of the answer rather than failing the call.
+      const permitted = workspaces.filter(
+        (w) => effectiveWorkspaceCapability(auth.session, w.id, 'fleetRead').decision !== 'deny'
+      )
+      if (permitted.length === 0) {
+        return errorText('This session is not permitted to read the fleet in any of its workspaces.')
+      }
+      // The strictest surviving decision governs the prompt: if any permitted
+      // workspace says ask, the human is asked once for the whole call.
+      const check = permitted
+        .map((w) => effectiveWorkspaceCapability(auth.session, w.id, 'fleetRead'))
+        .reduce((strictest, d) => (d.decision === 'ask' ? d : strictest))
+      const ctx: AuditContext = {
+        session: auth.session,
+        workspaceId: permitted[0].id,
+        workspaceName: permitted[0].name,
+        serverId: null,
+        serverName: null,
+        action: 'fleet_inventory',
+        capability: 'fleetRead'
+      }
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'fleet_inventory',
+          level: 'medium',
+          because:
+            'it returns every server in the workspace at once, with what each is unpatched against',
+          intent
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      if (!fleetReader) {
+        return errorText(
+          'OpsMaxx is not sampling this fleet, so there is nothing collected to report. ' +
+            'This does not mean the servers are healthy.'
+        )
+      }
+      const servers = listCachedServers(permitted.map((w) => w.id))
+      if (servers.length === 0) return text('No servers in this workspace.')
+
+      const rows = servers.map((srv) => {
+        const facts = fleetReader!.factsFor(srv.id)
+        if (!facts.facts) {
+          // Never a zero. "Not sampled" and "nothing pending" are different
+          // sentences and only one of them is good news.
+          return `${srv.name}\n    not sampled${facts.error ? ` — ${facts.error}` : ''}`
+        }
+        const f = facts.facts as {
+          osName?: string
+          osVersion?: string
+          updates?: { count?: number; security?: number | null }
+          rebootRequired?: boolean
+        }
+        const sec =
+          f.updates?.security === null || f.updates?.security === undefined
+            ? 'security updates NOT AVAILABLE'
+            : `${f.updates.security} security`
+        return (
+          `${srv.name}\n` +
+          `    ${f.osName ?? 'unknown OS'} ${f.osVersion ?? ''}`.trimEnd() +
+          `\n    ${f.updates?.count ?? 0} updates pending, ${sec}` +
+          `${f.rebootRequired ? '\n    REBOOT REQUIRED' : ''}` +
+          `\n    collected ${facts.at ? agePhrase(Date.now() - facts.at) : 'never'}`
+        )
+      })
+      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      return text(
+        `${servers.length} server(s) across ${permitted.length} workspace(s):\n\n${rows.join('\n\n')}`
+      )
     }
   )
 

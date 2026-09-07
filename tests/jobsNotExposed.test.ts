@@ -108,7 +108,12 @@ const ALLOWED_TOOLS = [
   // approval prompt because a log is whatever the application printed. Never
   // follows: a stream would outlive the approval that authorised it, which is
   // the durability argument this file already makes about jobs.
-  'container_logs'
+  'container_logs',
+  // A READ of what the sampler already collected, workspace-wide. It opens no
+  // connection and starts no sweep — the sampler's on-demand sweep is
+  // deliberately not reachable, because one call that begins work on every
+  // server is a fan-out with a different consent story.
+  'fleet_inventory'
 ]
 
 // A hint, not the gate — the whitelist above has already failed by the time
