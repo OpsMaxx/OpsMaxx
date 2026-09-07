@@ -43,28 +43,78 @@ export interface LocalExecResult {
 const OUTPUT_CAP = 200_000
 
 /**
- * A login shell, because these commands are the ones a user would type.
+ * The user's login PATH, resolved once.
  *
  * `docker`, `kubectl` and `crontab` routinely live somewhere only a login
  * shell's PATH knows about — Homebrew on Apple silicon, asdf, nix, Docker
  * Desktop's own bin. Electron's own PATH is whatever launchd or the desktop
- * session handed it, which on macOS is frequently just /usr/bin:/bin. Without
- * `-l` the local target would report "docker is not installed" on a machine
- * where the user's terminal runs it fine.
+ * session handed it, which on macOS is frequently just /usr/bin:/bin, so
+ * without this the local target reports "docker is not installed" on a machine
+ * whose terminal runs it fine.
+ *
+ * Resolved through the login shell but NOT used to run the commands — see
+ * runShell for why that distinction is load-bearing.
  */
-function shellFor(command: string): { file: string; args: string[] } {
+let loginPath: string | null = null
+
+async function resolveLoginPath(): Promise<string> {
+  if (loginPath !== null) return loginPath
+  const shell = process.env.SHELL
+  if (!shell || platform === 'win32') {
+    loginPath = process.env.PATH ?? ''
+    return loginPath
+  }
+  loginPath = await new Promise<string>((resolve) => {
+    let out = ''
+    const child = spawn(shell, ['-l', '-c', 'printf %s "$PATH"'], { windowsHide: true })
+    const done = (value: string): void => {
+      clearTimeout(timer)
+      resolve(value.trim() || process.env.PATH || '')
+    }
+    // A login shell that hangs on a slow profile must not wedge every read.
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL')
+      done('')
+    }, 5000)
+    child.stdout?.on('data', (c: Buffer) => (out += c.toString('utf8')))
+    child.on('error', () => done(''))
+    child.on('close', () => done(out))
+  })
+  return loginPath
+}
+
+/**
+ * `sh`, deliberately, with the login shell's PATH handed to it.
+ *
+ * The commands come from the shared builders in src/shared, which are written
+ * for the POSIX shell that `ssh host 'command'` lands in. Running them under
+ * the user's own interactive shell is not equivalent, and the difference is not
+ * cosmetic: zsh sets `nomatch` by default, so an unquoted glob that sh passes
+ * through as a literal makes zsh abort the command instead. The Kubernetes
+ * reader's `custom-columns=…containerStatuses[*].ready…` is exactly that shape,
+ * and under zsh it failed with "no matches found" while the same string works
+ * on every server in the estate.
+ *
+ * So: the login shell answers "what is on PATH", and sh runs the command.
+ */
+function runShell(command: string, path: string): { file: string; args: string[]; env: NodeJS.ProcessEnv } {
   if (platform === 'win32') {
     // PowerShell is present on every supported Windows build, and unlike cmd
     // it does not need its own quoting rules for the command strings the
     // shared builders produce.
-    return { file: 'powershell.exe', args: ['-NoProfile', '-NonInteractive', '-Command', command] }
+    return {
+      file: 'powershell.exe',
+      args: ['-NoProfile', '-NonInteractive', '-Command', command],
+      env: process.env
+    }
   }
-  return { file: process.env.SHELL || '/bin/sh', args: ['-l', '-c', command] }
+  return { file: '/bin/sh', args: ['-c', command], env: { ...process.env, PATH: path } }
 }
 
-export function localExec(command: string, timeoutMs = 30_000): Promise<LocalExecResult> {
+export async function localExec(command: string, timeoutMs = 30_000): Promise<LocalExecResult> {
+  const path = await resolveLoginPath()
   return new Promise((resolve) => {
-    const { file, args } = shellFor(command)
+    const { file, args, env } = runShell(command, path)
 
     let stdout = ''
     let stderr = ''
@@ -94,7 +144,7 @@ export function localExec(command: string, timeoutMs = 30_000): Promise<LocalExe
         // rounds of quoting for one command string.
         shell: false,
         windowsHide: true,
-        env: process.env
+        env
       })
     } catch (err) {
       return finish({ ok: false, error: err instanceof Error ? err.message : String(err) })

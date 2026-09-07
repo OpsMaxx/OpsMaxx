@@ -58,12 +58,30 @@ describe.runIf(posix)('localExec', () => {
     expect(r.stdout).toBe('ab')
   })
 
-  // A login shell is what puts Homebrew, asdf and Docker Desktop on PATH.
+  // The login shell is what puts Homebrew, asdf and Docker Desktop on PATH.
   // Electron's own PATH frequently has none of them.
-  it('uses a login shell, so the user PATH applies', async () => {
+  it('applies the login shell PATH', async () => {
     const r = await localExec('echo $PATH')
     expect(r.ok).toBe(true)
     expect(r.stdout.trim().length).toBeGreaterThan(0)
+  })
+
+  /**
+   * The commands come from the shared builders, which target the POSIX shell
+   * `ssh host 'command'` lands in. Running them under the user's own shell is
+   * not equivalent: zsh sets `nomatch`, so an unquoted glob that sh passes
+   * through as a literal makes zsh abort the whole command.
+   *
+   * This is not hypothetical. The Kubernetes reader asks for
+   * `custom-columns=…containerStatuses[*].ready…`; under zsh that failed with
+   * "no matches found" while the identical string works on every server in the
+   * estate — a local target that looked like an unreachable cluster.
+   */
+  it('passes an unmatched glob through, as a POSIX shell does', async () => {
+    const r = await localExec('echo custom-columns=READY:.status.containerStatuses[*].ready')
+    expect(r.ok).toBe(true)
+    expect(r.stdout.trim()).toBe('custom-columns=READY:.status.containerStatuses[*].ready')
+    expect(r.stderr).not.toMatch(/no matches found/i)
   })
 })
 

@@ -531,7 +531,13 @@ export function parseK8sOutput(output: string, exitCode: number | null): K8sProb
   // namespace is more useful than failing, and recording which one answered is
   // what lets an empty list be described honestly.
   const allOk = !looksLikeError(allText) && allText.trim() !== ''
-  const pods = allOk ? parsePods(allText) : parsePods(nsPodText)
+  // The fallback needs the same check the first read got. Without it, a cluster
+  // that refused BOTH reads had kubectl's own error lines fed to parsePods,
+  // which turned each one into a row — "Error\" 0/1 E0907 18:32:06" rendered as
+  // a pod. Inventing workloads out of an error message is the exact failure
+  // this module exists to prevent, and it is worse than reporting nothing.
+  const nsOk = !looksLikeError(nsPodText) && nsPodText.trim() !== ''
+  const pods = allOk ? parsePods(allText) : nsOk ? parsePods(nsPodText) : []
 
   const versionMatch = versionText.match(/"gitVersion"\s*:\s*"([^"]+)"/)
   return {
