@@ -208,6 +208,8 @@ import { mintKeypair, storeKeypair } from './services/vpn/keys'
 import { storeFrpToken } from './services/vpn/frpSetup'
 import { toVpnResult } from './services/vpn/errors'
 import { withVpnTransport, withVpnTransportDb } from './services/vpn/transport'
+import { httpRequest } from './services/httpClient'
+import type { HttpRequestSpec } from '../shared/httpClient'
 import type {
   FrpTokenResult,
   VpnKeygenResult,
@@ -776,6 +778,19 @@ ipcMain.on('local:close', (e, id: unknown) => {
   if (!isValidSessionId(id)) return
   localClose(id, e.sender.id)
 })
+
+// ---- HTTP client ----
+//
+// Requests leave from main, not the renderer, so they can trust a private CA,
+// skip verification when the user explicitly asks, and — the part no
+// standalone API client can do — travel down a server's existing SSH
+// connection to reach a service bound to that host's loopback.
+//
+// The renderer names the server the same credential-free way the terminal
+// does; secrets are merged here, through the same pipeline as ssh:connect.
+ipcMain.handle('http:request', (_e, spec: HttpRequestSpec) =>
+  httpRequest(spec, { prepare: (target) => withVpnTransport(resolveChainSecrets(target)) })
+)
 
 // ---- SFTP ----
 ipcMain.handle('sftp:connect', (_e, key: string, cfg: SshConnectConfig & { serverId?: string }) =>

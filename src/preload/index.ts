@@ -3,6 +3,7 @@ import type { IpcRendererEvent } from 'electron'
 import type { AutoStartSettings, AutoStartState } from '../shared/autostart'
 import type { UnitDraft, UserUnitsReading } from '../shared/userUnits'
 import type { BackupAlarm } from '../shared/backup'
+import type { HttpRequestSpec, HttpResult } from '../shared/httpClient'
 import type {
   SshConnectConfig,
   SshStatus,
@@ -332,6 +333,15 @@ const api = {
       ipcRenderer.on(ch, h)
       return () => ipcRenderer.removeListener(ch, h)
     }
+  },
+  http: {
+    /**
+     * Send one HTTP request from the main process. `spec.via` decides whether
+     * it leaves this machine directly or travels down a server's SSH
+     * connection; `spec.via.server` carries no credentials, because main
+     * merges those from the encrypted store by serverId.
+     */
+    request: (spec: HttpRequestSpec): Promise<HttpResult> => ipcRenderer.invoke('http:request', spec)
   },
   sftp: {
     connect: (key: string, cfg: SshConnectConfig & { serverId?: string }): Promise<SftpResult<{ home: string }>> =>
