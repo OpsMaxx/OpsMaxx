@@ -69,11 +69,18 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
 
     void (async () => {
       try {
-        const [{ createApiClientModal }, { createWorkspaceStore }, { createWorkspaceEventBus }] =
-          await Promise.all([
-            import('@scalar/api-client/modal'),
+        const [
+          { Operation },
+          { createWorkspaceStore },
+          { createWorkspaceEventBus },
+          { getActiveEnvironment },
+          { createApp, h }
+        ] = await Promise.all([
+            import('@scalar/api-client/v2/features/operation'),
             import('@scalar/workspace-store/client'),
             import('@scalar/workspace-store/events'),
+            import('@scalar/workspace-store/request-example'),
+            import('vue'),
             // The stylesheet rides the same dynamic import as the code, so it
             // is not in the main CSS bundle either.
             import('@scalar/api-client/style.css')
@@ -111,33 +118,58 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
         }
         if (disposed) return
 
-        const client = createApiClientModal({
-          el,
-          eventBus,
-          workspaceStore,
-          options: {
-            customFetch: createHttpTransport(() => optionsRef.current, reportRef.current),
-            // A description names its own servers, and they are usually
-            // production. What the toolbar shows is what gets sent.
-            ...(baseUrl ? { baseServerURL: scratchOriginOf(baseUrl) } : {})
-          }
-        })
-        app = client.app
-        client.open(
-          specUrl || specPath
-            ? // 'default' is the library's own placeholder for "the caller does
-              // not know a path or method"; it resolves to the first operation,
-              // which is the only sensible landing point in a spec that may
-              // describe hundreds.
-              {
-                documentSlug: collection.id,
-                path: 'default',
-                method: 'default' as NonNullable<Parameters<typeof client.open>[0]>['method']
+        // Where to land. A description may hold hundreds of operations, so the
+        // first one is the only sensible answer; a scratch document has one we
+        // wrote ourselves and can name outright.
+        const first = firstOperationOf(workspaceStore, collection.id)
+        const landingPath = specUrl || specPath ? (first?.path ?? '/') : scratchPathOf(baseUrl)
+        const landingMethod = specUrl || specPath ? (first?.method ?? 'get') : 'get'
+
+        // Mounted as the client's OWN operation view rather than through
+        // `createApiClientModal`.
+        //
+        // That helper is Scalar's minimal embed — "jump to one operation from a
+        // reference page" — and it hardcodes `layout: 'modal'` as a literal in
+        // its render function. Nine components downstream read that value and
+        // take features away: the method beside the address bar is rendered
+        // with `isEditable: layout !== 'modal'`, so it was a label rather than
+        // a control; `{{variable}}` completion in every input is gated the same
+        // way; and the request block hides two whole sections. None of that was
+        // our document or a broken dropdown — it was the wrapper.
+        //
+        // `Operation` is exported, takes `layout` as an ordinary prop, and
+        // derives everything else from the workspace store, which is why this
+        // is twelve props rather than the thirty its inner block wants.
+        // Narrowed rather than cast: the workspace can hold an AsyncAPI
+        // document, and the operation view is OpenAPI-only. A description that
+        // is not OpenAPI renders the client's own empty state instead of being
+        // forced through a type it does not satisfy.
+        const active = workspaceStore.workspace.documents[collection.id]
+        const openApiDocument = active && 'openapi' in active ? active : null
+        const documentRef = { value: openApiDocument }
+        const vueApp = createApp({
+          render: () =>
+            h(Operation, {
+              documentSlug: collection.id,
+              document: documentRef.value,
+              eventBus,
+              // The whole point of the change.
+              layout: 'web',
+              path: landingPath,
+              method: landingMethod,
+              environment: getActiveEnvironment(workspaceStore, documentRef.value).environment,
+              workspaceStore,
+              plugins: [],
+              options: {
+                customFetch: createHttpTransport(() => optionsRef.current, reportRef.current),
+                // A description names its own servers, and they are usually
+                // production. What the toolbar shows is what gets sent.
+                ...(baseUrl ? { baseServerURL: scratchOriginOf(baseUrl) } : {})
               }
-            : // A scratch document has exactly one operation and we wrote it, so
-              // name it outright.
-              { documentSlug: collection.id, path: scratchPathOf(baseUrl), method: 'get' }
-        )
+            })
+        })
+        vueApp.mount(el)
+        app = vueApp
         setLoading(false)
       } catch (err) {
         if (!disposed) {
@@ -283,6 +315,35 @@ async function parseSpec(text: string, path: string): Promise<Record<string, unk
   } catch (e) {
     throw new Error(`${path} could not be read as YAML: ${e instanceof Error ? e.message : String(e)}`)
   }
+}
+
+/**
+ * The first operation in a description, as a path and a method.
+ *
+ * A description may hold hundreds; landing on the first is the only answer
+ * that does not require guessing which one the user meant. Returns null for a
+ * document with no paths at all, which is a valid if useless description and
+ * must not throw here.
+ */
+const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'] as const
+type HttpMethodName = (typeof HTTP_METHODS)[number]
+
+function firstOperationOf(
+  store: { workspace: { documents: Record<string, unknown> } },
+  slug: string
+): { path: string; method: HttpMethodName } | null {
+  const doc = store.workspace.documents[slug] as
+    | { paths?: Record<string, Record<string, unknown>> }
+    | undefined
+  const paths = doc?.paths
+  if (!paths) return null
+  const methods = HTTP_METHODS
+  for (const [path, item] of Object.entries(paths)) {
+    for (const method of methods) {
+      if (item && typeof item === 'object' && method in item) return { path, method }
+    }
+  }
+  return null
 }
 
 function scratchDocument(title: string, baseUrl: string): Record<string, unknown> {
