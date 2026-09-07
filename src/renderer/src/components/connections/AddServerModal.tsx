@@ -428,7 +428,12 @@ export function AddServerModal(): React.JSX.Element {
           <input
             className="input"
             type="password"
-            placeholder="••••••••••"
+            // See AddDatabaseModal: dots are the mask, so a dot placeholder
+            // cannot be told apart from a saved password. This one showed them
+            // unconditionally, so an edit gave the reader no way to know
+            // whether a credential was stored — and leaving it blank on an
+            // edit is exactly what keeps it.
+            placeholder={editId ? 'Unchanged — leave blank to keep the saved password' : ''}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />

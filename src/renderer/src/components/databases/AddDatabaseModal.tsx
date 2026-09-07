@@ -248,7 +248,14 @@ export function AddDatabaseModal(): React.JSX.Element {
               <input
                 className="input"
                 type="password"
-                placeholder={editId ? 'Unchanged' : '••••••••'}
+                // Never the mask character. In a type=password field the dots
+                // ARE what content looks like, so a dot placeholder is
+                // indistinguishable from a stored credential — on a NEW
+                // connection it showed eight dots in an empty box, and on an
+                // edit the reader could not tell whether anything was saved.
+                // Words, or nothing. Blank on an edit genuinely keeps the
+                // stored secret, so "Unchanged" is the truth.
+                placeholder={editId ? 'Unchanged' : ''}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
