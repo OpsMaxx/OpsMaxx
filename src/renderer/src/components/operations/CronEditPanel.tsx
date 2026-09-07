@@ -19,6 +19,7 @@ import type {
 } from '../../../../shared/cron'
 import { approvalFor, planBroadcast } from '../../../../shared/broadcast'
 import type { Server } from '../../types'
+import { PanelShell } from '../monitor/PanelShell'
 
 // Writing a crontab — the write half of what used to be one Monitoring tab.
 //
@@ -141,7 +142,7 @@ function JobForm({
           onChange={(e) => onChange({ ...draft, command: e.target.value })}
         />
       </div>
-      <div className="row" style={{ gap: 8, alignItems: 'center', fontSize: 11 }}>
+      <div className="row" style={{ gap: 8, alignItems: 'center' }}>
         <span className={clsx(scheduleOk ? 'faint' : 'warn')}>
           {scheduleOk
             ? (described ?? 'a schedule cron accepts — no plain-English reading of it is offered')
@@ -331,7 +332,7 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
     const refusal = cronEditRefusal(entry.kind)
     if (refusal !== null) {
       return (
-        <span className="faint" style={{ fontSize: 11 }} title={refusal}>
+        <span className="faint" title={refusal}>
           not editable
         </span>
       )
@@ -340,7 +341,7 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
     // happen for a crontab; if it ever does, saying so beats a button that
     // resolves to whatever line happens to match.
     if (entry.line === undefined || !ownCrontabReadable(host)) {
-      return <span className="faint" style={{ fontSize: 11 }} />
+      return <span className="faint" />
     }
     return (
       <span className="row" style={{ gap: 4 }}>
@@ -384,19 +385,18 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
     plan && plan.confirmation.kind === 'type-to-confirm' ? plan.confirmation.phrase : null
 
   return (
-    <div className="panel-body">
-      <div className="panel-head">
-        <div>
-          <div className="panel-title">
-            <CalendarClock size={14} /> Change what a server runs on a schedule
-          </div>
-          <div className="panel-subtitle">
-            Adds, changes or removes one job in the connected account&rsquo;s own crontab, on one
-            server. The whole file is replaced — that is the only way to write one — after a
-            timestamped copy is kept on the server itself.
-          </div>
-        </div>
-        <div className="row" style={{ gap: 6 }}>
+    <PanelShell
+      icon={<CalendarClock size={14} />}
+      title="Change what a server runs on a schedule"
+      about={
+        <p>
+          Adds, changes or removes one job in the connected account&rsquo;s own crontab, on one
+          server. The whole file is replaced — that is the only way to write one — after a
+          timestamped copy is kept on the server itself.
+        </p>
+      }
+      actions={
+        <>
           <select
             className="input"
             aria-label="Server"
@@ -423,9 +423,9 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
           >
             <RefreshCw size={13} className={clsx(loading && 'spin')} /> Read this server
           </button>
-        </div>
-      </div>
-
+        </>
+      }
+    >
       {!bridge && (
         <div className="panel-note is-alarm">
           This build&rsquo;s main process has no crontab edit channels, so nothing here can write.
@@ -467,7 +467,7 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
             </div>
           ) : (
             <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 6 }}>
-              <span className="faint" style={{ fontSize: 11 }}>
+              <span className="faint">
                 {summariseCronSources(host.sources ?? []).incomplete.length > 0
                   ? 'Some other sources on this server were not readable; the list below is what was.'
                   : 'Every source on this server was read.'}
@@ -503,7 +503,7 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
           )}
 
           {host.entries.length === 0 && (
-            <div className="faint" style={{ fontSize: 12, marginTop: 8 }}>
+            <div className="faint" style={{ marginTop: 8 }}>
               {/* Only claimed when every source actually answered. On a host
                   where /etc/cron.d was refused, "Nothing scheduled" is a
                   sentence about our permissions wearing a sentence about the
@@ -563,17 +563,17 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
               from the change. */}
           {pending?.reply.command && (
             <div className="panel-note" style={{ display: 'grid', gap: 6, marginTop: 10 }}>
-              <div className="mono" style={{ fontSize: 12 }}>
+              <div className="mono">
                 {pending.reply.summary}
               </div>
-              <div className="faint" style={{ fontSize: 11 }}>
+              <div className="faint">
                 The whole crontab is replaced — that is the only way to write one — after a
                 timestamped copy of it is kept on {pending.target.serverName}. It is written back
                 only if the file is still the one this was planned against, and it is read back
                 afterwards and compared; if it does not match, the copy goes straight back.
               </div>
               {pending.reply.addedFinalNewline && (
-                <div className="state-watch" style={{ fontSize: 11 }}>
+                <div className="state-watch">
                   <ShieldAlert size={11} /> This crontab has no newline at the end of its last line,
                   so one is being added. Without it the new job would be glued onto the end of the
                   previous one.
@@ -622,6 +622,6 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
           </div>
         </>
       )}
-    </div>
+    </PanelShell>
   )
 }

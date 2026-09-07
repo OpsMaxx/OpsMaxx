@@ -18,6 +18,7 @@ import {
 import { jobApprovalFor } from '../../../../shared/jobs'
 import type { JobSpec, JobTargetRef } from '../../../../shared/jobs'
 import type { Server } from '../../types'
+import { PanelShell } from './PanelShell'
 
 // Rules — roadmap item 27.
 //
@@ -112,7 +113,7 @@ function RuleCard({
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
         <b>{rule.name || 'Untitled rule'}</b>
         <div className="row" style={{ gap: 8 }}>
-          <label className="row" style={{ gap: 4, fontSize: 12 }}>
+          <label className="row" style={{ gap: 4 }}>
             <input
               type="checkbox"
               checked={rule.enabled}
@@ -127,18 +128,18 @@ function RuleCard({
         </div>
       </div>
 
-      <div style={{ fontSize: 12 }}>
+      <div>
         <span className="faint">When </span>
         {when(rule)}
       </div>
 
       {job === null ? (
-        <div style={{ fontSize: 12 }}>
+        <div>
           <span className="faint">Then </span>
           post to the configured webhook
         </div>
       ) : (
-        <div className="col" style={{ gap: 4, fontSize: 12 }}>
+        <div className="col" style={{ gap: 4 }}>
           <div>
             <span className="faint">Then run </span>
             {job.spec.title}
@@ -148,14 +149,14 @@ function RuleCard({
           {/* The step text itself, never a job id. What a rule runs is the
               thing a person has to be able to check a year later. */}
           {job.spec.steps.map((s, i) => (
-            <code key={i} style={{ fontSize: 11, wordBreak: 'break-all' }}>
+            <code key={i} style={{ wordBreak: 'break-all' }}>
               {s.command}
             </code>
           ))}
         </div>
       )}
 
-      <div className="faint" style={{ fontSize: 11 }}>
+      <div className="faint">
         {limitText(rule.limit.maxFirings, rule.limit.windowMs)}
         {rule.status.lastFiredAt !== undefined
           ? ` · last acted ${new Date(rule.status.lastFiredAt).toLocaleString()}`
@@ -169,7 +170,7 @@ function RuleCard({
       {!rule.verdict.ok && (
         <div
           className="row state-alarm"
-          style={{ gap: 6, fontSize: 12, alignItems: 'flex-start' }}
+          style={{ gap: 6, alignItems: 'flex-start' }}
         >
           <AlertTriangle size={14} />
           <span>This rule will not run: {rule.verdict.reason}</span>
@@ -178,7 +179,7 @@ function RuleCard({
       {rule.verdict.ok && rule.status.refusal !== undefined && (
         <div
           className="row state-watch"
-          style={{ gap: 6, fontSize: 12, alignItems: 'flex-start' }}
+          style={{ gap: 6, alignItems: 'flex-start' }}
         >
           <AlertTriangle size={14} />
           <span>Last time it fired it was refused: {rule.status.refusal}</span>
@@ -351,25 +352,29 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   }
 
   return (
-    <div className="col" style={{ gap: 12 }}>
-      <div className="panel-head">
-        <span className="panel-head-icon">
-          <Zap size={14} />
-        </span>
-        <h2 className="ui-section-title">Rules</h2>
-        <p className="ui-note panel-head-purpose">
+    // Header outside the card, content in it — the same shape Inventory and
+    // Security posture now wear. This panel used to put the header outside and
+    // have no card at all, which is the other half of the same inconsistency.
+    // "New rule" keeps the solid accent: it is the one action here that changes
+    // anything, which is exactly what the accent is reserved for.
+    <PanelShell
+      icon={<Zap size={14} />}
+      title="Rules"
+      about={
+        <p>
           When an alert fires, run a job or post to the webhook. A rule runs the job it was
           confirmed with, on the servers it was confirmed for, and refuses if either has changed.
         </p>
-        <div className="panel-head-actions">
-          <button className="btn primary" onClick={() => setOpen((v) => !v)}>
-            <Plus size={14} /> New rule
-          </button>
-        </div>
-      </div>
+      }
+      actions={
+        <button className="btn primary sm" onClick={() => setOpen((v) => !v)}>
+          <Plus size={14} /> New rule
+        </button>
+      }
+    >
 
       {error !== null && (
-        <div className="row state-alarm" style={{ gap: 6, fontSize: 12 }}>
+        <div className="row state-alarm" style={{ gap: 6 }}>
           <AlertTriangle size={14} />
           {error}
         </div>
@@ -377,13 +382,13 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
 
       {open && (
         <div className="card col" style={{ gap: 10, padding: 12 }}>
-          <label className="col" style={{ gap: 4, fontSize: 12 }}>
+          <label className="col" style={{ gap: 4 }}>
             Name
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Vacuum the journal" />
           </label>
 
           <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-            <label className="col" style={{ gap: 4, fontSize: 12 }}>
+            <label className="col" style={{ gap: 4 }}>
               When
               <select value={kind} onChange={(e) => setKind(e.target.value as RuleAlertKind)}>
                 {RULE_ALERT_KINDS.map((k) => (
@@ -393,14 +398,14 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 ))}
               </select>
             </label>
-            <label className="col" style={{ gap: 4, fontSize: 12 }}>
+            <label className="col" style={{ gap: 4 }}>
               is
               <select value={event} onChange={(e) => setEvent(e.target.value as RuleTriggerEvent)}>
                 <option value="raised">raised</option>
                 <option value="resolved">resolved</option>
               </select>
             </label>
-            <label className="col" style={{ gap: 4, fontSize: 12 }}>
+            <label className="col" style={{ gap: 4 }}>
               on
               <select value={hostFilter} onChange={(e) => setHostFilter(e.target.value)}>
                 <option value="">any server</option>
@@ -411,7 +416,7 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 ))}
               </select>
             </label>
-            <label className="col" style={{ gap: 4, fontSize: 12 }}>
+            <label className="col" style={{ gap: 4 }}>
               at or above
               <input
                 value={minValue}
@@ -424,7 +429,7 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
           </div>
 
           <div className="row" style={{ gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <label className="col" style={{ gap: 4, fontSize: 12 }}>
+            <label className="col" style={{ gap: 4 }}>
               At most
               <input
                 type="number"
@@ -436,7 +441,7 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 style={{ width: 70 }}
               />
             </label>
-            <label className="col" style={{ gap: 4, fontSize: 12 }}>
+            <label className="col" style={{ gap: 4 }}>
               time(s) in
               <select value={windowMs} onChange={(e) => setWindowMs(Number(e.target.value))}>
                 {WINDOWS.map((w) => (
@@ -446,12 +451,12 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 ))}
               </select>
             </label>
-            <span className="faint" style={{ fontSize: 11, paddingBottom: 6 }}>
+            <span className="faint" style={{ paddingBottom: 6 }}>
               A rule with no ceiling turns a flapping condition into an outage.
             </span>
           </div>
 
-          <div className="row" style={{ gap: 12, fontSize: 12 }}>
+          <div className="row" style={{ gap: 12 }}>
             <label className="row" style={{ gap: 4 }}>
               <input
                 type="radio"
@@ -474,11 +479,11 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
 
           {actionType === 'job' && (
             <div className="col" style={{ gap: 8 }}>
-              <label className="col" style={{ gap: 4, fontSize: 12 }}>
+              <label className="col" style={{ gap: 4 }}>
                 Job title
                 <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Clear the journal" />
               </label>
-              <label className="col" style={{ gap: 4, fontSize: 12 }}>
+              <label className="col" style={{ gap: 4 }}>
                 Commands, one per line
                 <textarea
                   rows={3}
@@ -487,7 +492,7 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                   placeholder="journalctl --vacuum-size=200M"
                 />
               </label>
-              <div className="col" style={{ gap: 4, fontSize: 12 }}>
+              <div className="col" style={{ gap: 4 }}>
                 Servers
                 <div className="col" style={{ gap: 2, maxHeight: 160, overflowY: 'auto' }}>
                   {servers.map((s) => (
@@ -508,7 +513,7 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
               </div>
 
               {plan !== null && (
-                <div className="col" style={{ gap: 2, fontSize: 12 }}>
+                <div className="col" style={{ gap: 2 }}>
                   <div>
                     <span className="faint">This runs on </span>
                     {plan.blastRadius} server(s) at once
@@ -524,7 +529,7 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 </div>
               )}
 
-              <label className="col" style={{ gap: 4, fontSize: 12 }}>
+              <label className="col" style={{ gap: 4 }}>
                 {/* Always typed, for a job rule. `planJob` would ask for a click
                     here; a standing authorisation is a different thing being
                     agreed to, and the word says which one. */}
@@ -581,6 +586,6 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
           />
         ))
       )}
-    </div>
+    </PanelShell>
   )
 }

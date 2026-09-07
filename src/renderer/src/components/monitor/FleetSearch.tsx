@@ -5,6 +5,7 @@ import { openSettings } from '../../store/nav'
 import { searchFleet, coverageSentence, matchKey, type FleetMatch } from '../../lib/fleetSearch'
 import { duration } from '../../lib/format'
 import type { Server } from '../../types'
+import { PanelShell } from './PanelShell'
 
 // Fleet-wide search over what the sampler already knows.
 //
@@ -17,6 +18,17 @@ const ICON = {
   unit: Boxes,
   port: Network
 } as const
+
+// Hoisted out of the render so the element identity is stable across renders —
+// a popover whose children are a new tree every keystroke would remount while
+// somebody is reading it, and this panel re-renders on every character typed.
+const ABOUT = (
+  <p>
+    Searches what the fleet sampler already knows — unit names, listening ports, distributions
+    and server names — across every server in this workspace. Nothing is asked of a host: the
+    coverage line above the results says which servers the answer could be drawn from.
+  </p>
+)
 
 function Row({ m, onOpen }: { m: FleetMatch; onOpen: (serverId: string) => void }): React.JSX.Element {
   const Icon = ICON[m.kind]
@@ -33,7 +45,7 @@ function Row({ m, onOpen }: { m: FleetMatch; onOpen: (serverId: string) => void 
       {/* The age is not a detail. A search that answers from a sweep four
           minutes old and does not say so is indistinguishable from one that
           just asked the host. */}
-      <span className="faint mono" style={{ fontSize: 11 }}>
+      <span className="faint mono">
         {m.stale ? 'last seen ' : ''}
         {duration(m.at)} ago
       </span>
@@ -73,7 +85,12 @@ export function FleetSearch({
     result.coverage.searched.length === 0 && result.coverage.noProbes.length === 0
 
   return (
-    <div className="fleet-search">
+    // The one tab that had NO header at all — no title, no icon, no
+    // description — so switching to it left nothing on screen saying which of
+    // the fifteen tabs you had landed in except the strip above. It gets the
+    // same header as every other tab; the search field is the card's first
+    // element, the way Run a command's composer is.
+    <PanelShell icon={<Search size={14} />} title="Fleet-wide search" about={ABOUT} className="fleet-search">
       <div className="input-group">
         <Search size={14} className="faint" />
         <input
@@ -91,7 +108,7 @@ export function FleetSearch({
 
       {active && (
         <div className="fleet-results">
-          <div className="row muted" style={{ fontSize: 11, justifyContent: 'space-between' }}>
+          <div className="row muted" style={{ justifyContent: 'space-between' }}>
             <span>
               {result.matches.length} match{result.matches.length === 1 ? '' : 'es'}
               {result.truncated > 0 && ` · ${result.truncated} more not shown`}
@@ -143,6 +160,6 @@ export function FleetSearch({
           ))}
         </div>
       )}
-    </div>
+    </PanelShell>
   )
 }

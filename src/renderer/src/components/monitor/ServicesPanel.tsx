@@ -4,6 +4,7 @@ import { clsx } from '../../lib/format'
 import { openSettings, openUnitInstall } from '../../store/nav'
 import { summariseUserUnits, type UserUnitsReading } from '../../../../shared/userUnits'
 import type { Server } from '../../types'
+import { PanelShell } from './PanelShell'
 
 // What each server supervises for this account, read from its own systemd.
 //
@@ -57,24 +58,36 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
     }
   }, [servers])
 
+  const readNow = (primary: boolean): React.JSX.Element => (
+    <button
+      className={primary ? 'btn primary sm' : 'btn ghost sm'}
+      disabled={loading || servers.length === 0}
+      onClick={() => void read()}
+    >
+      <RefreshCw size={13} className={clsx(loading && 'spin')} /> {rows ? 'Refresh' : 'Read services'}
+    </button>
+  )
+
   return (
-    <div className="panel-body">
-      <div className="panel-head">
-        <div>
-          <div className="panel-title">
-            <ServerCog size={14} /> Server services
-          </div>
-          <div className="panel-subtitle">
-            What each server&rsquo;s own systemd supervises for your account. Read-only — nothing is
-            started, stopped or written here, because the server&rsquo;s supervisor is the one that
-            is still there when OpsMaxx is not. Installing a unit writes a file onto a host, so
-            it lives on the Operations rail.
-          </div>
-        </div>
-        <button className="btn primary" disabled={loading || servers.length === 0} onClick={() => void read()}>
-          <RefreshCw size={13} className={clsx(loading && 'spin')} /> {rows ? 'Refresh' : 'Read services'}
-        </button>
-      </div>
+    // This panel had the root cause of M11 in its markup twice over: the header
+    // sat on `.panel-body`, a LAYOUT class with no card, and it was built from
+    // `.panel-title` — which this stylesheet has never defined — over
+    // `.panel-subtitle`, which is defined bold and full-strength. So the
+    // heading drew as ordinary body text and the four-line description under it
+    // drew heavier than the heading. Hierarchy exactly inverted, by absence.
+    <PanelShell
+      icon={<ServerCog size={14} />}
+      title="Server services"
+      about={
+        <p>
+          What each server&rsquo;s own systemd supervises for your account. Read-only — nothing is
+          started, stopped or written here, because the server&rsquo;s supervisor is the one that
+          is still there when OpsMaxx is not. Installing a unit writes a file onto a host, so
+          it lives on the Operations rail.
+        </p>
+      }
+      actions={readNow(rows === null)}
+    >
 
       {error && <div className="panel-note is-alarm">{error}</div>}
 
@@ -142,6 +155,6 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
           )
         })
       )}
-    </div>
+    </PanelShell>
   )
 }

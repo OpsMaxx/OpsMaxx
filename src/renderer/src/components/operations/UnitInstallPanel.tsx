@@ -9,6 +9,7 @@ import {
   type UnitRestart
 } from '../../../../shared/userUnits'
 import type { Server } from '../../types'
+import { PanelShell } from '../monitor/PanelShell'
 
 // Installing a `systemd --user` unit — the write half of what used to be one
 // Monitoring tab.
@@ -93,18 +94,21 @@ export function UnitInstallPanel({ servers }: { servers: Server[] }): React.JSX.
   }
 
   return (
-    <div className="panel-body">
-      <div className="panel-head">
-        <div>
-          <div className="panel-title">
-            <ServerCog size={14} /> Install a service on a server
-          </div>
-          <div className="panel-subtitle">
-            Writes a unit to <code>~/.config/systemd/user/</code> on one server and enables it. It
-            is not started: the server&rsquo;s own systemd owns it from then on, which is the point
-            — it is there when OpsMaxx is not.
-          </div>
-        </div>
+    // Was `.panel-title` over `.panel-subtitle` on a bare `.panel-body`: an
+    // undefined class for the heading and a bold one for the description, so
+    // the sentence outranked the title it explained. Same template as every
+    // other tab now.
+    <PanelShell
+      icon={<ServerCog size={14} />}
+      title="Install a service on a server"
+      about={
+        <p>
+          Writes a unit to <code>~/.config/systemd/user/</code> on one server and enables it. It
+          is not started: the server&rsquo;s own systemd owns it from then on, which is the point
+          — it is there when OpsMaxx is not.
+        </p>
+      }
+      actions={
         <select
           className="input"
           aria-label="Server"
@@ -121,8 +125,8 @@ export function UnitInstallPanel({ servers }: { servers: Server[] }): React.JSX.
             </option>
           ))}
         </select>
-      </div>
-
+      }
+    >
       <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
         <input
           className="input"
@@ -159,7 +163,7 @@ export function UnitInstallPanel({ servers }: { servers: Server[] }): React.JSX.
         {/* The exact bytes, before they are written. A file is about to appear
             on a machine nobody is looking at, and "trust me" is not a preview. */}
         {check.ok ? (
-          <pre className="mono" style={{ fontSize: 11, whiteSpace: 'pre-wrap', margin: 0 }}>
+          <pre className="mono" style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
             {renderUnitFile(draft)}
           </pre>
         ) : (
@@ -202,6 +206,6 @@ export function UnitInstallPanel({ servers }: { servers: Server[] }): React.JSX.
           Install
         </button>
       </div>
-    </div>
+    </PanelShell>
   )
 }

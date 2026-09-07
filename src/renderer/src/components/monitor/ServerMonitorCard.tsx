@@ -24,7 +24,7 @@ export function ServerMonitorCard({
           <span className={clsx('status-dot', server.status)} />
           <b style={{ color: 'var(--text)' }}>{server.name}</b>
         </div>
-        <span className="mono faint" style={{ fontSize: 11 }}>
+        <span className="mono faint">
           {server.host}
         </span>
       </div>
@@ -37,7 +37,7 @@ export function ServerMonitorCard({
         <>
           <div className="row" style={{ gap: 16 }}>
             <div className="grow col" style={{ gap: 4 }}>
-              <div className="row muted" style={{ fontSize: 11, justifyContent: 'space-between' }}>
+              <div className="row muted" style={{ justifyContent: 'space-between' }}>
                 <span>
                   <Cpu size={11} /> CPU
                 </span>
@@ -51,7 +51,7 @@ export function ServerMonitorCard({
               </div>
             </div>
             <div className="grow col" style={{ gap: 4 }}>
-              <div className="row muted" style={{ fontSize: 11, justifyContent: 'space-between' }}>
+              <div className="row muted" style={{ justifyContent: 'space-between' }}>
                 <span>
                   <MemoryStick size={11} /> RAM
                 </span>
@@ -68,7 +68,7 @@ export function ServerMonitorCard({
           <Sparkline data={m.cpuHistory} max={100} height={36} />
 
           {m.host && (
-            <div className="row muted" style={{ fontSize: 11, justifyContent: 'space-between' }}>
+            <div className="row muted" style={{ justifyContent: 'space-between' }}>
               <span>
                 <HardDrive size={11} /> Disk
               </span>
@@ -79,7 +79,7 @@ export function ServerMonitorCard({
             </div>
           )}
 
-          <div className="row muted" style={{ fontSize: 11, justifyContent: 'space-between' }}>
+          <div className="row muted" style={{ justifyContent: 'space-between' }}>
             <span>
               <ArrowDown size={11} /> {rate(m.rx)}
             </span>

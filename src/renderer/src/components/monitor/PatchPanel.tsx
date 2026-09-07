@@ -29,6 +29,7 @@ import {
   type JobProgress
 } from '../../../../shared/jobs'
 import type { Server } from '../../types'
+import { NoteWhy, PanelShell } from './PanelShell'
 
 // Patch and update management — roadmap item 17, renderer half.
 //
@@ -411,17 +412,30 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   const resultRows = Object.values(results)
 
   return (
-    <div className="bc-panel">
-      <div className="panel-head">
-        <span className="panel-head-icon">
-          <Wrench size={14} />
-        </span>
-        <h2 className="ui-section-title">Patch and updates</h2>
-        <p className="ui-note panel-head-purpose">
-          Choose the servers to update, review the plan, then run it in waves. Nothing installs
-          until you confirm, and there is no unattended mode.
-        </p>
-        <div className="panel-head-actions">
+    <PanelShell
+      icon={<Wrench size={14} />}
+      title="Patch and updates"
+      about={
+        <>
+          <p>
+            Choose the servers to update, review the plan, then run it in waves. Nothing installs
+            until you confirm, and there is no unattended mode.
+          </p>
+          {/* The refusal, still on the screen and still reachable in the place
+              somebody goes looking for "patch everything nightly" — which is
+              this panel — but no longer a second grey paragraph standing
+              between the header and the table on every visit.
+              It is behind the disclosure and not on the page because of what
+              kind of sentence it is: it states a limit of what this app WRITES,
+              not a limit of what it READ. Nothing on this screen is rendered
+              misleading by its absence. The caveats that qualify a NUMBER —
+              "these servers are not in the count above" — stay on the page
+              unconditionally, below. */}
+          <p data-testid="patch-no-automation">{PATCH_NO_AUTOMATION_NOTE}</p>
+        </>
+      }
+      actions={
+        <>
         <button
           className="btn ghost sm"
           disabled={running || needy.length === 0}
@@ -450,24 +464,21 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
             <ShieldQuestion size={13} /> Add {unanswerable.length} that could not answer
           </button>
         )}
+        {/* Ghost, not solid. The solid accent on this panel belongs to the one
+            button that changes a server — "Review the plan" further down — and
+            spending it on "read it again" put refresh above the findings in the
+            scan order. */}
         <button
-          className="btn primary"
+          className="btn ghost sm"
           disabled={busy || servers.length === 0}
           onClick={() => void check()}
           title="Sweeps the estate now and re-reads what has already been collected. Nothing is installed and no package cache is refreshed by this."
         >
           <RefreshCw size={13} className={clsx(busy && 'spin')} /> Check now
         </button>
-        </div>
-      </div>
-
-      {/* The refusal, on the screen and not only in the source. An operator who
-          is looking for "patch everything nightly" deserves to be told it is not
-          here and why, in the place they went looking for it. */}
-      <div className="panel-note" data-testid="patch-no-automation">
-        {PATCH_NO_AUTOMATION_NOTE}
-      </div>
-
+        </>
+      }
+    >
       {summary.withFacts === 0 ? (
         <div className="panel-empty">
           <p className="panel-empty-title">No server facts have been collected yet.</p>
@@ -504,9 +515,12 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
               <ShieldQuestion size={12} /> {summary.securityUnanswerable} server
               {summary.securityUnanswerable === 1 ? '' : 's'} can never report a security update
               count, so {summary.securityUnanswerable === 1 ? 'it is' : 'they are'} not in the{' '}
-              {summary.securityTotal} above. Arch and Alpine have no security channel at all, and
-              dnf cannot answer where the repositories publish no updateinfo. Treat those servers as
-              unknown, never as zero.
+              {summary.securityTotal} above. Treat{' '}
+              {summary.securityUnanswerable === 1 ? 'it' : 'them'} as unknown, never as zero.
+              <NoteWhy summary="Why they cannot answer">
+                Arch and Alpine have no security channel at all, and dnf cannot answer where the
+                repositories publish no updateinfo.
+              </NoteWhy>
             </div>
           )}
 
@@ -814,6 +828,6 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
           </tbody>
         </table>
       )}
-    </div>
+    </PanelShell>
   )
 }

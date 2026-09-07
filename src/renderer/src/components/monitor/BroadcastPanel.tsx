@@ -15,6 +15,7 @@ import {
   type BroadcastProgress
 } from '../../../../shared/broadcast'
 import type { Server } from '../../types'
+import { PanelShell } from './PanelShell'
 
 // Run one command across many servers.
 //
@@ -248,30 +249,28 @@ export function BroadcastPanel({ servers }: { servers: Server[] }): React.JSX.El
   const refused = rows.filter((r) => outcomeOf(r) === 'permission-denied')
 
   return (
-    <div className="bc-panel">
-      <div className="panel-head no-purpose">
-        <span className="panel-head-icon">
-          <Terminal size={14} />
-        </span>
-        <h2 className="ui-section-title">Run a command</h2>
-        <div className="panel-head-actions" style={{ flexWrap: 'nowrap', minWidth: 0, flex: 1 }}>
-        <input
-          className="input grow mono"
-          placeholder="Command to run on the selected servers…"
-          value={command}
-          onChange={(e) => setCommand(e.target.value)}
-          disabled={running}
-        />
-        </div>
-      </div>
-
-      {/* The purpose line, under the composer rather than above it: the field
-          is what the eye should reach first here, unlike every read-only panel
-          where the title is. */}
-      <p className="ui-note">
-        Runs one command on every server you pick, one connection each. Nothing runs until you
-        confirm, and a command that changes or destroys state says so before the dialog opens.
-      </p>
+    <PanelShell
+      icon={<Terminal size={14} />}
+      title="Run a command"
+      about={
+        <p>
+          Runs one command on every server you pick, one connection each. Nothing runs until you
+          confirm, and a command that changes or destroys state says so before the dialog opens.
+        </p>
+      }
+    >
+      {/* The composer is the first thing in the card, which is the one place
+          this panel departs from the read-only tabs and does so deliberately:
+          there the eye should reach the findings first, here it should reach
+          the field. */}
+      <input
+        className="input grow mono"
+        style={{ width: '100%' }}
+        placeholder="Command to run on the selected servers…"
+        value={command}
+        onChange={(e) => setCommand(e.target.value)}
+        disabled={running}
+      />
 
       <div className="row wrap" style={{ gap: 6, marginTop: 8 }}>
         {eligible.length === 0 && (
@@ -378,7 +377,7 @@ export function BroadcastPanel({ servers }: { servers: Server[] }): React.JSX.El
 
       {rows.length > 0 && (
         <div className="bc-results">
-          <div className="row muted" style={{ fontSize: 11, justifyContent: 'space-between' }}>
+          <div className="row muted" style={{ justifyContent: 'space-between' }}>
             <span className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
               <span>
                 {finished} of {rows.length} finished
@@ -438,6 +437,6 @@ export function BroadcastPanel({ servers }: { servers: Server[] }): React.JSX.El
           </p>
         </div>
       )}
-    </div>
+    </PanelShell>
   )
 }

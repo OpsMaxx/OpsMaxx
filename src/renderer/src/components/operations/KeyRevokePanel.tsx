@@ -15,6 +15,7 @@ import {
   type HostAccess
 } from '../../../../shared/access'
 import type { Server } from '../../types'
+import { PanelShell } from '../monitor/PanelShell'
 
 // Revoking an SSH key across the estate — the write half of what used to be one
 // Monitoring tab.
@@ -256,19 +257,17 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
   }
 
   return (
-    <div className="panel-body">
-      <div className="panel-head">
-        <div>
-          <div className="panel-title">
-            <KeyRound size={14} /> Revoke a key
-          </div>
-          <div className="panel-subtitle">
-            Removes one key from every account across the estate that trusts it. The inventory below
-            is the reading the Monitoring sweep already took; nothing here re-reads a server until a
-            change has been made to it.
-          </div>
-        </div>
-      </div>
+    <PanelShell
+      icon={<KeyRound size={14} />}
+      title="Revoke a key"
+      about={
+        <p>
+          Removes one key from every account across the estate that trusts it. The inventory below
+          is the reading the Monitoring sweep already took; nothing here re-reads a server until a
+          change has been made to it.
+        </p>
+      }
+    >
 
       {/* Said once, before a target is chosen — because the point of saying it
           is that nobody plans around a capability this does not have. Both
@@ -330,7 +329,7 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
                     data-fingerprint={k.fingerprint}
                     className={clsx(selected === k.fingerprint && 'is-selected')}
                   >
-                    <td className="mono" style={{ fontSize: 10 }}>
+                    <td className="mono">
                       <button
                         className="inv-host"
                         data-testid={`pick-${k.fingerprint}`}
@@ -358,7 +357,7 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
                       )}
                     </td>
                     <td className="num mono">{k.targets.length}</td>
-                    <td className="faint" style={{ fontSize: 11 }}>
+                    <td className="faint">
                       {[...new Set(k.targets.map((t) => t.serverName))].join(', ')}
                     </td>
                   </tr>
@@ -385,7 +384,7 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
               {pending.preview.rollbackSeconds} seconds. Nothing becomes permanent until a second
               connection has authenticated against the changed file.
               {pending.preview.hosts.length > 0 && (
-                <div className="mono" style={{ fontSize: 10, marginTop: 6 }}>
+                <div className="mono" style={{ marginTop: 6 }}>
                   {pending.preview.hosts.map((h) => (
                     <div key={`${h.serverId}:${h.user}`}>
                       {h.serverName} · {h.user}
@@ -421,12 +420,12 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
               )}
               <div style={{ marginTop: 6 }}>
                 <details>
-                  <summary className="muted" style={{ fontSize: 11 }}>
+                  <summary className="muted">
                     What will run on each server
                   </summary>
                   {/* Shown, and sent back with the run: main derives it again
                       and refuses to touch a host if the two differ. */}
-                  <pre className="mono" style={{ fontSize: 10, whiteSpace: 'pre-wrap' }}>
+                  <pre className="mono" style={{ whiteSpace: 'pre-wrap' }}>
                     {pending.preview.command || 'nothing — every server was left out'}
                   </pre>
                 </details>
@@ -504,6 +503,6 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
           </div>
         </>
       )}
-    </div>
+    </PanelShell>
   )
 }

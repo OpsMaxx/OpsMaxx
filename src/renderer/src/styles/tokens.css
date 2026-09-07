@@ -105,12 +105,53 @@
   /* Typography */
   --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', 'Menlo', Consolas, monospace;
+  /* Five sizes, five roles, and no step you cannot name.
+     A count of what shipped before this: 22, 20, 18, 17, 16, 15, 14, 13, 12.5,
+     12, 11, 10.5. Twelve steps, and the two doing most of the work — 13 and 12
+     — are one pixel apart, which at 13px is a 7% difference nobody resolves in
+     a glance. A step the eye cannot see is not hierarchy, it is noise with a
+     maintenance cost: every author picking between 12 and 13 was making a
+     decision that could not be read back off the screen.
+     So the 12px step is merged into 13 and the 21/22px step into 20. Where two
+     sizes have to be distinguished and are not, the answer is weight, colour
+     or caps — all three of which survive a 90% zoom and a bad monitor.
+     The six --fs-* names are kept and re-pointed rather than deleted: they are
+     spelled ~70 times across this stylesheet, and a rename would be a churn
+     diff hiding a real change. --fs-sm now resolves to the same 13px as
+     --fs-md, deliberately: that IS the merge, and it lands everywhere at once
+     instead of one component at a time. */
   --fs-xs: 11px;
-  --fs-sm: 12px;
+  --fs-sm: 13px;
   --fs-md: 13px;
-  --fs-lg: 15px;
-  --fs-xl: 18px;
-  --fs-2xl: 22px;
+  --fs-lg: 14px;
+  --fs-xl: 16px;
+  --fs-2xl: 20px;
+
+  /* The roles, named by the job. A rule that wants "the size a panel heading
+     is" should say so, so that moving panel headings later does not require
+     knowing which numeric step they happened to land on. */
+  --fs-display: var(--fs-2xl);
+  --fw-display: 600;
+  --fs-title: var(--fs-xl);
+  --fw-title: 600;
+  --fs-subtitle: var(--fs-lg);
+  --fw-subtitle: 500;
+  --fs-body: var(--fs-md);
+  --fw-body: 400;
+  --fs-caption: var(--fs-xs);
+  --fw-caption: 500;
+  --tracking-caption: 0.06em;
+
+  /* The floor for a string a person retypes into another window.
+     Hostnames rendered at 10.5px mono and IPs at 11px — the two strings on the
+     entire screen most likely to be transcribed by hand into a terminal, set
+     smaller than the prose around them. Mono at 10.5px on a dark ground in a
+     30px row is where `rn` becomes `m` and `1` becomes `l`, and the cost of
+     getting it wrong is a command run against the wrong machine.
+     11px survives only for tracked all-caps labels, which are recognised by
+     shape rather than read letter by letter. Anything a person copies —
+     hostname, address, port, id, fingerprint, digest — floors here. */
+  --fs-identifier: 12px;
 
   /* Spacing scale (4px base) */
   --sp-1: 4px;

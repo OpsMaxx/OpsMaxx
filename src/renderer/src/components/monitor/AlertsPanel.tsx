@@ -333,7 +333,7 @@ function RunbookRecallBody({ view }: { view: RunbookView }): React.JSX.Element {
                   <tbody>
                     {j.commands.map((c, i) => (
                       <tr key={`${j.id}:${i}`}>
-                        <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{c.text}</td>
+                        <td style={{ fontFamily: 'monospace' }}>{c.text}</td>
                         <td className={c.outcome === 'failed' ? 'warn' : 'faint'}>{c.outcome}</td>
                         <td className="faint">
                           {/* The one string on this screen a host wrote. Marked
@@ -432,8 +432,14 @@ function OutstandingCard({
       )}
 
       <div className="alert-actions">
+        {/* Secondary, not solid. One alert card carrying a solid accent button
+            is fine; twelve of them stacked make the loudest thing on an inbox
+            of problems the button that makes each problem go away, so the eye
+            lands on "dismiss" before it lands on what is wrong. Acknowledge is
+            still first in the row and still the obvious next step — it just
+            does not outrank the alert it belongs to. */}
         <button
-          className="btn primary sm"
+          className="btn sm"
           title="You have seen it and are dealing with it. The chip goes and nothing more is said until the condition itself clears — however long that takes."
           onClick={() => acknowledgeAlert(a.serverId, a.kind)}
         >

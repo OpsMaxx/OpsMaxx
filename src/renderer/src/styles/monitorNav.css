@@ -176,7 +176,12 @@
   color: var(--text);
 }
 .ops-rail-consequence {
-  font-size: var(--fs-xs);
+  /* Body size, not the caption step. This is the sentence that says what
+     pressing the tab will DO to a server, and 11px is reserved for tracked
+     all-caps labels that are recognised by shape rather than read. A
+     consequence has to be read. It is still demoted — by colour and weight,
+     against a label at 600 in full-strength text. */
+  font-size: var(--fs-body);
   color: var(--text-muted);
 }
 
@@ -220,7 +225,7 @@
   color: var(--text);
 }
 .ops-subrail-consequence {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-body);
   color: var(--text-muted);
 }
 
@@ -230,11 +235,20 @@
   border: 1px solid var(--border);
   border-radius: var(--r-md);
 }
+/* NOT a card any more, despite the name — kept because it is the slot each
+   operate module is mounted into and renaming it would touch every mount point
+   for no gain.
+
+   It drew a border and a background around the panel INCLUDING the panel's
+   header, which is the same divergence M11 names on the monitoring side: four
+   tabs put the title inside the bordered box and three put it outside. The
+   template is header on the page, content in a card, and the panel now supplies
+   its own card (`PanelShell`). Leaving the chrome here would nest one inside
+   the other. */
 .ops-card {
-  padding: 14px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 /* The execute slot.

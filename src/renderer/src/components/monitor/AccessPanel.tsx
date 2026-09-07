@@ -30,6 +30,7 @@ import {
   type HostAccess
 } from '../../../../shared/access'
 import type { Server } from '../../types'
+import { PanelShell } from './PanelShell'
 
 // Fleet keys and access — roadmap item 23, renderer half.
 //
@@ -356,17 +357,17 @@ export function AccessPanel({
     bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'accessPlan')
 
   return (
-    <div className="bc-panel">
-      <div className="panel-head">
-        <span className="panel-head-icon">
-          <KeyRound size={14} />
-        </span>
-        <h2 className="ui-section-title">Keys and access</h2>
-        <p className="ui-note panel-head-purpose">
+    <PanelShell
+      icon={<KeyRound size={14} />}
+      title="Keys and access"
+      about={
+        <p>
           Which SSH keys can reach which servers, and which accounts they land on. Files are read,
           never edited, and no private key is touched.
         </p>
-        <div className="panel-head-actions">
+      }
+      actions={
+        <>
           {collected.length > 0 && (
             <button className="btn ghost sm" onClick={() => setView(view === 'keys' ? 'hosts' : 'keys')}>
               {view === 'keys' ? 'By server' : 'By key'}
@@ -391,17 +392,20 @@ export function AccessPanel({
           >
             Export JSON
           </button>
+          {/* Ghost while there are keys on screen, solid while there are not —
+              the same rule Inventory and Security posture follow. At most one
+              accent control per view, and only where pressing it is the task. */}
           <button
-            className="btn primary"
+            className={collected.length === 0 ? 'btn primary sm' : 'btn ghost sm'}
             disabled={busy || servers.length === 0}
             onClick={() => void refresh()}
             title="Sweeps the estate now and re-reads what has already been collected. Keys are re-read at most once an hour per server."
           >
             <RefreshCw size={13} className={clsx(busy && 'spin')} /> Check now
           </button>
-        </div>
-      </div>
-
+        </>
+      }
+    >
       {collected.length > 0 && (
         <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
           <div className="cron-row">
@@ -641,7 +645,7 @@ export function AccessPanel({
                 <tbody>
                   {keyRows.map((k) => (
                     <tr key={k.fingerprint} data-fingerprint={k.fingerprint}>
-                      <td className="mono" style={{ fontSize: 10 }}>
+                      <td className="mono">
                         {k.fingerprint}
                       </td>
                       <td>
@@ -662,7 +666,7 @@ export function AccessPanel({
                           k.labels.join(' · ')
                         )}
                       </td>
-                      <td className="mono" style={{ fontSize: 10 }}>
+                      <td className="mono">
                         {k.type}
                         {k.bits !== null && ` ${k.bits}`}
                         {k.restrictedEverywhere && (
@@ -712,7 +716,7 @@ export function AccessPanel({
                             ) : (
                               <span>{o.server}</span>
                             )}
-                            <span className="faint mono" style={{ fontSize: 10 }}>
+                            <span className="faint mono">
                               {' '}
                               {o.users.join(', ')}
                             </span>
@@ -760,7 +764,7 @@ export function AccessPanel({
                     h.entry!.access!.accounts.map((a) => (
                       <tr key={`${h.server.id}:${a.user}`} data-host={h.server.name} data-user={a.user}>
                         <td>{h.server.name}</td>
-                        <td className="mono" style={{ fontSize: 11 }}>
+                        <td className="mono">
                           {a.user}
                           {a.hasLegacyKeyFile === true && (
                             <span
@@ -822,14 +826,13 @@ export function AccessPanel({
                           ) : (
                             <span
                               className="mono"
-                              style={{ fontSize: 10 }}
                               title="Membership of an administrative group, which is a proxy for sudo rights rather than a reading of sudoers."
                             >
                               {a.adminGroups.join(', ')}
                             </span>
                           )}
                         </td>
-                        <td className="faint" style={{ fontSize: 10 }}>
+                        <td className="faint">
                           {a.neverLoggedIn ? (
                             'never'
                           ) : a.lastLoginAt !== null ? (
@@ -903,6 +906,6 @@ export function AccessPanel({
           {KEY_PROBLEM_HELP['unknown-type']}
         </div>
       )}
-    </div>
+    </PanelShell>
   )
 }

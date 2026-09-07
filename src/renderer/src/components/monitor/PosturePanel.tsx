@@ -22,6 +22,7 @@ import {
 } from '../../../../shared/posture'
 import { FACT_STATUS_HELP, type HostFacts } from '../../../../shared/hostFacts'
 import type { Server } from '../../types'
+import { NoteWhy, PanelShell } from './PanelShell'
 
 // Security posture — roadmap item 24, renderer half.
 //
@@ -382,7 +383,7 @@ function DirectiveRow({ r }: { r: SshdReading }): React.JSX.Element {
           {r.value}
         </span>
       )}
-      <span className="faint" style={{ fontSize: 11 }}>
+      <span className="faint">
         {r.detail}
       </span>
     </div>
@@ -448,7 +449,7 @@ function FirewallRules({ posture }: { posture: HostPosture }): React.JSX.Element
       <b>{FIREWALL_RULES_HOST_REPORTED_NOTE}</b>
       {fw.ruleLines.map((listing) => (
         <div key={listing.from} data-rule-listing={listing.from} style={{ marginTop: 6 }}>
-          <div className="faint" style={{ fontSize: 11 }}>
+          <div className="faint">
             {listing.from === 'front'
               ? 'What the firewall front end lists'
               : 'What the kernel tables underneath hold'}{' '}
@@ -472,7 +473,9 @@ function FirewallRules({ posture }: { posture: HostPosture }): React.JSX.Element
             </div>
           ) : (
             listing.lines.map((line, i) => (
-              <div key={`${listing.from}:${i}`} className="mono" style={{ fontSize: 11 }}>
+              // A firewall rule line is copied into a terminal verbatim. 11px
+              // mono was the smallest text in the panel and the most literal.
+              <div key={`${listing.from}:${i}`} className="mono">
                 {line}
               </div>
             ))
@@ -590,29 +593,29 @@ export function PosturePanel({
   const summary = useMemo(() => summarisePosture(rows.map((r) => ({ posture: r.posture }))), [rows])
   const failed = rows.filter((r): r is typeof r & { error: string } => typeof r.error === 'string')
 
+  const checkNow = (primary: boolean): React.JSX.Element => (
+    <button
+      className={primary ? 'btn primary sm' : 'btn ghost sm'}
+      disabled={busy || servers.length === 0}
+      onClick={() => void refresh()}
+      title="Sweeps the estate now and re-reads what has already been collected. Posture is re-collected at most once an hour per server. Nothing is changed by this: no firewall is enabled, no SELinux mode is set and no configuration is written."
+    >
+      <RefreshCw size={13} className={clsx(busy && 'spin')} /> Check now
+    </button>
+  )
+
   return (
-    <div className="bc-panel">
-      <div className="panel-head">
-        <span className="panel-head-icon">
-          <ShieldAlert size={14} />
-        </span>
-        <h2 className="ui-section-title">Security posture</h2>
-        <p className="ui-note panel-head-purpose">
+    <PanelShell
+      icon={<ShieldAlert size={14} />}
+      title="Security posture"
+      about={
+        <p>
           Firewalls, SELinux and AppArmor, sshd settings, OOM kills and certificate expiry, per
           server. Everything is read; no firewall is enabled and no configuration is written.
         </p>
-        <div className="panel-head-actions">
-          <button
-            className="btn primary"
-            disabled={busy || servers.length === 0}
-            onClick={() => void refresh()}
-            title="Sweeps the estate now and re-reads what has already been collected. Posture is re-collected at most once an hour per server. Nothing is changed by this: no firewall is enabled, no SELinux mode is set and no configuration is written."
-          >
-            <RefreshCw size={13} className={clsx(busy && 'spin')} /> Check now
-          </button>
-        </div>
-      </div>
-
+      }
+      actions={checkNow(summary.collected === 0)}
+    >
       {summary.collected === 0 ? (
         <div className="panel-empty">
           <p className="panel-empty-title">No security posture has been collected yet.</p>
@@ -694,12 +697,18 @@ export function PosturePanel({
 
           {(summary.firewallUnknown > 0 || summary.sshdUnknown > 0) && (
             <div className="panel-note is-unknown">
+              {/* The first sentence is the reason this panel exists and does
+                  not fold under anything. What folds is the remedy — true,
+                  useful, and read once per estate rather than per visit. */}
               <ShieldQuestion size={12} /> {summary.firewallUnknown + summary.sshdUnknown} check
               {summary.firewallUnknown + summary.sshdUnknown === 1 ? '' : 's'} across this estate could
               not run, and a check that could not run is not a check that passed. Those servers are not
-              in the counts above and they are not clear — most of these close with passwordless
-              sudo for the account OpsMaxx connects as, which lets the probe read a ruleset and
-              ask sshd for its effective configuration. Nothing about that grants any write.
+              in the counts above and they are not clear.
+              <NoteWhy summary="How to close them">
+                Most of these close with passwordless sudo for the account OpsMaxx connects as,
+                which lets the probe read a ruleset and ask sshd for its effective configuration.
+                Nothing about that grants any write.
+              </NoteWhy>
             </div>
           )}
 
@@ -827,13 +836,13 @@ export function PosturePanel({
                 .map((id) => ({ row: r, s: postureSource(r.posture as HostPosture, id) }))
                 .filter(({ s }) => s.status === 'denied' && s.detail)
                 .map(({ row, s }) => (
-                  <div key={`${row.serverId}-${s.id}`} className="faint" style={{ fontSize: 11, marginTop: 4 }}>
+                  <div key={`${row.serverId}-${s.id}`} className="faint" style={{ marginTop: 4 }}>
                     {row.serverName} · {s.label}: {s.detail}
                   </div>
                 ))
             )}
         </>
       )}
-    </div>
+    </PanelShell>
   )
 }

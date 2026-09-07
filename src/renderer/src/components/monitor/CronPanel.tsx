@@ -15,6 +15,7 @@ import type {
 } from '../../../../shared/cron'
 import { openCronEdit } from '../../store/nav'
 import type { Server } from '../../types'
+import { PanelShell } from './PanelShell'
 
 // What is scheduled across the estate — currently unanswerable without visiting
 // every box.
@@ -89,10 +90,31 @@ const KIND_LABEL: Record<CronEntry['kind'], string> = {
  * operator has no way to tell those apart from the outside, so the panel has to
  * say which it is.
  */
+/**
+ * How many of a host's jobs cannot be edited, and why, grouped by the reason.
+ *
+ * A Map rather than a count, because the reasons are genuinely different — a
+ * job in /etc/cron.d is refused for one cause and another account's crontab for
+ * another — and collapsing them into "12 not editable" would hide the fact that
+ * one of the two is fixable by connecting as a different account.
+ *
+ * Insertion order is entry order, so the reason attached to the first job on
+ * screen is the first sentence under the heading.
+ */
+function notEditableByReason(host: HostCron): [string, number][] {
+  const byReason = new Map<string, number>()
+  for (const e of host.entries) {
+    const refusal = cronEditRefusal(e.kind)
+    if (refusal === null) continue
+    byReason.set(refusal, (byReason.get(refusal) ?? 0) + 1)
+  }
+  return [...byReason]
+}
+
 function SourceStatus({ sources }: { sources?: CronSourceReport[] }): React.JSX.Element {
   if (!sources || sources.length === 0) {
     return (
-      <div className="faint" style={{ fontSize: 11 }}>
+      <div className="faint">
         This server did not report which sources it managed to read, so this list may be incomplete.
       </div>
     )
@@ -100,7 +122,7 @@ function SourceStatus({ sources }: { sources?: CronSourceReport[] }): React.JSX.
   const { answered, total, incomplete, usedSudo } = summariseCronSources(sources)
   const complete = incomplete.length === 0
   return (
-    <div style={{ fontSize: 11 }}>
+    <div>
       <span className={clsx(complete ? 'faint' : 'warn')}>
         {complete ? `read all ${total} sources` : `read ${answered} of ${total} sources`}
       </span>
@@ -235,14 +257,12 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
   // stopped being true, and the next person to put a control back in this cell
   // would rediscover it the hard way.
   const rowControls = (host: HostCron, entry: CronEntry): React.JSX.Element => {
-    const refusal = cronEditRefusal(entry.kind)
-    if (refusal !== null) {
-      return (
-        <span className="faint" style={{ fontSize: 11 }} title={refusal}>
-          not editable
-        </span>
-      )
-    }
+    // The refusal is NOT printed here any more. It is a property of the source
+    // kind, not of the row, so on a host whose jobs all come out of /etc/cron.d
+    // the identical three words appeared on all twenty-six of them — the widest
+    // column on the row carrying the least information on it. One roll-up per
+    // host says the same thing once; see `notEditable` below.
+    if (cronEditRefusal(entry.kind) !== null) return <span />
     // A job with no line behind it is one we cannot point at. It should not
     // happen for a crontab; if it ever does, saying so beats a button that
     // resolves to whatever line happens to match.
@@ -254,9 +274,9 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
     // this codebase names — worse than no pointer, because the user learns the
     // button is broken.
     if (entry.line === undefined || !ownCrontabReadable(host)) {
-      return <span className="faint" style={{ fontSize: 11 }} />
+      return <span className="faint" />
     }
-    if (!serverById.has(host.serverId)) return <span className="faint" style={{ fontSize: 11 }} />
+    if (!serverById.has(host.serverId)) return <span className="faint" />
     return (
       <button
         className="btn"
@@ -291,18 +311,28 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
     (h) => !h.error && (h.sources?.length ?? 0) > 0 && summariseCronSources(h.sources ?? []).incomplete.length > 0
   ).length
 
+  const readSchedules = (primary: boolean): React.JSX.Element => (
+    <button
+      className={primary ? 'btn primary sm' : 'btn ghost sm'}
+      disabled={loading || eligible.length === 0}
+      onClick={() => void collect()}
+    >
+      <RefreshCw size={13} className={clsx(loading && 'spin')} /> {rows ? 'Refresh' : 'Read schedules'}
+    </button>
+  )
+
   return (
-    <div className="bc-panel">
-      <div className="panel-head">
-        <span className="panel-head-icon">
-          <CalendarClock size={14} />
-        </span>
-        <h2 className="ui-section-title">Scheduled jobs</h2>
-        <p className="ui-note panel-head-purpose">
+    <PanelShell
+      icon={<CalendarClock size={14} />}
+      title="Scheduled jobs"
+      about={
+        <p>
           Every crontab and systemd timer across the estate, and which of them this account was
           actually allowed to read.
         </p>
-        <div className="panel-head-actions">
+      }
+      actions={
+        <>
           {rows && (
             <input
               className="input"
@@ -312,15 +342,10 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
               onChange={(e) => setFilter(e.target.value)}
             />
           )}
-          <button
-            className="btn primary"
-            disabled={loading || eligible.length === 0}
-            onClick={() => void collect()}
-          >
-            <RefreshCw size={13} className={clsx(loading && 'spin')} /> {rows ? 'Refresh' : 'Read schedules'}
-          </button>
-        </div>
-      </div>
+          {readSchedules(!rows)}
+        </>
+      }
+    >
 
       {!rows && !loading && (
         // Before anything has been read this IS the panel, so it is framed as
@@ -389,18 +414,31 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
                   )}
                 </div>
                 <SourceStatus sources={h.sources} />
+                {/* Once per host and per reason, not once per row. Still said
+                    out loud: a row with no button beside it and no sentence
+                    anywhere is indistinguishable from one that is still
+                    loading, which is the failure this panel is built against. */}
+                {notEditableByReason(h).map(([reason, n]) => (
+                  <div
+                    key={reason}
+                    className="ui-note"
+                    data-testid={`cron-not-editable-${h.serverId}`}
+                  >
+                    {n} of these cannot be edited from OpsMaxx: {reason}
+                  </div>
+                ))}
                 {/* Why the pointer is not there, rather than simply not putting
                     it there. An operator looking at a host whose crontab we only
                     half read deserves the reason — and it is a real one: a write
                     replaces the whole file, so the part that could not be read is
                     the part it would delete. */}
                 {!ownCrontabReadable(h) && (
-                  <div className="faint" style={{ fontSize: 11 }}>
+                  <div className="faint">
                     This account’s crontab was not read in full, so nothing here can be edited.
                   </div>
                 )}
                 {h.entries.length === 0 && (
-                  <div className="faint" style={{ fontSize: 12 }}>
+                  <div className="faint">
                     {q !== ''
                       ? 'Nothing matching.'
                       : // Only claimed when every source actually answered. On a
@@ -459,7 +497,6 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
                           ? 'panel-note is-alarm'
                           : 'panel-note'
                       }
-                      style={{ fontSize: 11 }}
                     >
                       {/* A failed READ is not a verdict, and must not render
                           like one. */}
@@ -472,6 +509,6 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
             ))}
         </>
       )}
-    </div>
+    </PanelShell>
   )
 }
