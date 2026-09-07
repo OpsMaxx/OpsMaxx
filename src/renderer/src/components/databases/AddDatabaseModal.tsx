@@ -7,6 +7,7 @@ import { clsx } from '../../lib/format'
 import { KIND_COLOR } from './DatabaseSidebar'
 import { VpnTransportSelect } from '../vpn/VpnTransportSelect'
 import { saveDatabaseEdit, useDbEditor } from '../../store/dbEditor'
+import { displayHostFromUri } from '../../../../shared/dbAddress'
 import type { DbKind, UUID } from '../../types'
 
 const KINDS: { id: DbKind; label: string; port: number }[] = [
@@ -70,7 +71,12 @@ export function AddDatabaseModal(): React.JSX.Element {
 
   const save = async (): Promise<void> => {
     if (!valid) return
-    const displayHost = useUri ? uri.match(/@([^/:?,]+)/)?.[1] ?? uri.replace(/^\w+(\+\w+)?:\/\//, '').split(/[/:?]/)[0] : host.trim()
+    // A parse that did not succeed must never render as though it did. The
+    // old derivation here fell back to splitting the string on `/ : ?`, which
+    // for an ADO.NET string (no scheme, no `@`, none of those three) returned
+    // the WHOLE string — password included — and persisted it as the host.
+    // `displayHostFromUri` returns '' instead. See shared/dbAddress.ts.
+    const displayHost = useUri ? displayHostFromUri(uri) : host.trim()
     const fields = {
       name: name.trim(),
       kind,

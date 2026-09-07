@@ -11,10 +11,21 @@ import {
 } from 'lucide-react'
 import { useApp, useWorkspaceDatabases, useWorkspaceFolders } from '../../store/app'
 import { clsx } from '../../lib/format'
+import { formatDbAddress } from '../../../../shared/dbAddress'
 import { toast } from '../../store/toast'
 import { ContextMenu, MenuEntry } from '../connections/ContextMenu'
 import { openDatabaseEditor } from '../../store/dbEditor'
 import type { DatabaseConn, DbKind, Folder } from '../../types'
+
+// A tooltip is a display surface like any other. `d.host` may be a whole
+// connection string on a record saved before the parser was fixed, so it goes
+// through formatDbAddress rather than being interpolated raw — see
+// shared/dbAddress.ts. Username is empty in connection-string mode, so it is
+// only prefixed when there actually is one.
+function dbTooltip(d: { username?: string; host: string; port: number }): string {
+  const addr = formatDbAddress(d.host, d.port)
+  return d.username ? `${d.username}@${addr}` : addr
+}
 
 export const KIND_COLOR: Record<DbKind, string> = {
   postgres: '#58a6ff',
@@ -91,7 +102,7 @@ export function DatabaseSidebar(): React.JSX.Element {
         e.preventDefault()
         setCtx({ x: e.clientX, y: e.clientY, id: d.id, name: d.name })
       }}
-      title={`${d.username}@${d.host}:${d.port}`}
+      title={dbTooltip(d)}
     >
       <span
         className="mono"
