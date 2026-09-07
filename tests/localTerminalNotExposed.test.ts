@@ -104,7 +104,11 @@ const ALLOWED_TOOLS = [
   // schedule, filtered to the servers the session can see. It says what
   // HAPPENED; it does not rank hosts by how exposed they are, which is the
   // line drift sits on the wrong side of.
-  'list_alerts'
+  'list_alerts',
+  // The same container read as list_containers, grouped. No second command and
+  // therefore no second thing that can be true of the host at a different
+  // moment; on the `containers` capability for the same reason.
+  'compose_status'
 ]
 
 // A hint, not the gate. Anything this regex matches is by construction absent

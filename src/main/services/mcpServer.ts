@@ -2763,6 +2763,122 @@ function buildServer(): McpServer {
     }
   )
 
+  server.registerTool(
+    'compose_status',
+    {
+      title: 'Show compose projects and their services',
+      description:
+        'The containers on a server grouped by their compose project and service, with how many of ' +
+        "each project's containers are actually running. " +
+        'Answers "is this stack up" without reading a compose file or shelling out to ' +
+        '`docker compose ps`, which needs the project directory to be found first and answers for one ' +
+        'project at a time. ' +
+        'A container the runtime could not report a project for is listed as ungrouped rather than ' +
+        'guessed at, and a runtime that cannot answer the grouping question at all says so — that is ' +
+        'not the same as "these containers belong to no project", and treating it as such would ' +
+        'describe a fully grouped host as a pile of loose containers.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: false }
+    },
+    async ({ serverName, intent }, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const resolved = resolveServerOrError(auth.session, serverName)
+      if ('error' in resolved) return resolved.error
+      const { server: s, workspace } = resolved.match
+      const check = effectiveCapability(auth.session, s.id, 'containers')
+      const ctx: AuditContext = {
+        session: auth.session,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        serverId: s.id,
+        serverName: s.name,
+        action: 'compose_status',
+        capability: 'containers'
+      }
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'compose_status',
+          level: 'low',
+          because: 'it returns which compose projects are on this server and whether they are running',
+          intent
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      try {
+        const cfg = resolveChainSecrets(serverToSshConfig(s))
+        // Same read as the container list — no second command, and therefore no
+        // second thing that can be true of the host at a different moment.
+        const probe = await dockerReader.list(cfg, { autoSudo: true })
+        if (!probe.ok) {
+          recordAudit({
+            ...auditBase(ctx),
+            approval: check.decision === 'ask' ? 'approved' : 'not-required',
+            result: 'error',
+            error: probe.reason ?? 'docker unavailable'
+          })
+          return errorText(
+            `Docker could not be read on ${s.name}: ${probe.reason ?? 'the runtime did not answer'}`
+          )
+        }
+        auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+
+        const projects = new Map<string, DockerContainer[]>()
+        const ungrouped: DockerContainer[] = []
+        for (const c of probe.containers as DockerContainer[]) {
+          if (c.composeProject) {
+            const list = projects.get(c.composeProject) ?? []
+            list.push(c)
+            projects.set(c.composeProject, list)
+          } else ungrouped.push(c)
+        }
+        // "The runtime could not render the label template" and "nothing here
+        // is a compose project" are different facts, and only one of them is
+        // about the host. Saying the first as if it were the second describes a
+        // fully grouped machine as a pile of loose containers.
+        const groupingUnavailable = probe.composeLabels === 'unavailable'
+        if (projects.size === 0 && groupingUnavailable) {
+          return text(
+            `This runtime on ${s.name} cannot report compose labels, so its ${probe.containers.length} ` +
+              `container(s) cannot be grouped. This does NOT mean they belong to no project.`
+          )
+        }
+        if (projects.size === 0) {
+          return text(`No compose projects on ${s.name}. ${ungrouped.length} standalone container(s).`)
+        }
+        const blocks = [...projects.entries()].map(([name, cs]) => {
+          const running = cs.filter((c) => c.state === 'running').length
+          const services = cs
+            .map((c) => `      ${c.state.padEnd(10)} ${c.composeService ?? c.name}`)
+            .join('\n')
+          return `${name} — ${running}/${cs.length} running\n${services}`
+        })
+        return text(
+          `${projects.size} compose project(s) on ${s.name}` +
+            `${ungrouped.length > 0 ? `, plus ${ungrouped.length} ungrouped container(s)` : ''}` +
+            `${groupingUnavailable ? ' (grouping was only partly readable)' : ''}:\n\n` +
+            blocks.join('\n\n')
+        )
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        recordAudit({
+          ...auditBase(ctx),
+          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          result: 'error',
+          error: message
+        })
+        return errorText(`Could not read compose projects on ${s.name}: ${message}`)
+      }
+    }
+  )
+
   return server
 }
 
