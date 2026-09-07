@@ -210,6 +210,20 @@ import { toVpnResult } from './services/vpn/errors'
 import { withVpnTransport, withVpnTransportDb } from './services/vpn/transport'
 import { httpRequest } from './services/httpClient'
 import { localExec } from './services/localExec'
+import { localMetricsForget, localMetricsSample } from './services/localMetrics'
+import {
+  isLocalFileSession,
+  localFilesConnect,
+  localFilesDelete,
+  localFilesDisconnect,
+  localFilesDisposeAll,
+  localFilesList,
+  localFilesMkdir,
+  localFilesRead,
+  localFilesRename,
+  localFilesUpload,
+  localFilesWrite
+} from './services/localFiles'
 import { isLocalTarget, LOCAL_TARGET } from '../shared/execTarget'
 import type { HttpRequestSpec } from '../shared/httpClient'
 import type {
@@ -795,31 +809,67 @@ ipcMain.handle('http:request', (_e, spec: HttpRequestSpec) =>
 )
 
 // ---- SFTP ----
+//
+// The local half is a PARALLEL implementation, not a swapped transport: SFTP
+// is a protocol rather than a command, so there is no exec function to
+// substitute. It answers the same SftpResult and the same SftpEntry, so the
+// Files view needs no branch.
+//
+// Which half answers is decided by the key, registered at connect. That is
+// deliberate: every call after connect carries only a key and a path, so
+// sniffing a target on each one would mean trusting a value the renderer could
+// vary between calls in the same session.
 ipcMain.handle('sftp:connect', (_e, key: string, cfg: SshConnectConfig & { serverId?: string }) =>
-  sftpConnect(key, withVpnTransport(resolveChainSecrets(cfg)))
+  isLocalTarget(cfg)
+    ? localFilesConnect(key)
+    : sftpConnect(key, withVpnTransport(resolveChainSecrets(cfg)))
 )
-ipcMain.handle('sftp:list', (_e, key: string, path: string) => sftpList(key, path))
-ipcMain.handle('sftp:read', (_e, key: string, path: string) => sftpRead(key, path))
+ipcMain.handle('sftp:list', (_e, key: string, path: string) =>
+  isLocalFileSession(key) ? localFilesList(path) : sftpList(key, path)
+)
+ipcMain.handle('sftp:read', (_e, key: string, path: string) =>
+  isLocalFileSession(key) ? localFilesRead(path) : sftpRead(key, path)
+)
 ipcMain.handle('sftp:write', (_e, key: string, path: string, content: string) =>
-  sftpWrite(key, path, content)
+  isLocalFileSession(key) ? localFilesWrite(path, content) : sftpWrite(key, path, content)
 )
-ipcMain.handle('sftp:mkdir', (_e, key: string, path: string) => sftpMkdir(key, path))
-ipcMain.handle('sftp:rename', (_e, key: string, from: string, to: string) => sftpRename(key, from, to))
-ipcMain.handle('sftp:delete', (_e, key: string, path: string, dir: boolean) => sftpDelete(key, path, dir))
+ipcMain.handle('sftp:mkdir', (_e, key: string, path: string) =>
+  isLocalFileSession(key) ? localFilesMkdir(path) : sftpMkdir(key, path)
+)
+ipcMain.handle('sftp:rename', (_e, key: string, from: string, to: string) =>
+  isLocalFileSession(key) ? localFilesRename(from, to) : sftpRename(key, from, to)
+)
+ipcMain.handle('sftp:delete', (_e, key: string, path: string, dir: boolean) =>
+  isLocalFileSession(key) ? localFilesDelete(path, dir) : sftpDelete(key, path, dir)
+)
 ipcMain.handle('sftp:upload', (e, key: string, localPaths: string[], remoteDir: string) =>
-  sftpUpload(e.sender, key, localPaths, remoteDir)
+  isLocalFileSession(key)
+    ? localFilesUpload(e.sender, key, localPaths, remoteDir)
+    : sftpUpload(e.sender, key, localPaths, remoteDir)
 )
-ipcMain.handle('sftp:disconnect', (_e, key: string) => sftpDisconnect(key))
+ipcMain.handle('sftp:disconnect', (_e, key: string) => {
+  localFilesDisconnect(key)
+  sftpDisconnect(key)
+})
 ipcMain.handle('sftp:edit-external', (e, key: string, path: string, command: string) =>
   externalEditOpen(e.sender, key, path, command)
 )
 ipcMain.handle('sftp:edit-external-stop', (_e, path: string) => externalEditStop(path))
 
 // ---- Metrics ----
+// The local branch is HERE rather than inside metrics.ts, because
+// services/mcpServer.ts imports metricsSample — a branch in that module would
+// pull localExec into the agent-facing import closure. See
+// tests/localTerminalNotExposed.test.ts.
 ipcMain.handle('metrics:sample', (_e, key: string, cfg: SshConnectConfig & { serverId?: string }) =>
-  metricsSample(key, resolveChainSecrets(cfg))
+  isLocalTarget(cfg) ? localMetricsSample(key) : metricsSample(key, resolveChainSecrets(cfg))
 )
-ipcMain.handle('metrics:disconnect', (_e, key: string) => metricsDisconnect(key))
+ipcMain.handle('metrics:disconnect', (_e, key: string) => {
+  // There is no connection to hand back for this machine, only the CPU
+  // snapshot the next delta would have been measured against.
+  localMetricsForget(key)
+  metricsDisconnect(key)
+})
 
 // ---- The durable store ----
 //
@@ -3994,6 +4044,7 @@ app.on('before-quit', (e) => {
   sshDisposeAll()
   localDisposeAll()
   sftpDisposeAll()
+  localFilesDisposeAll()
   // After the sampler, which is the only writer: closing the database out from
   // under an in-flight sweep would be a caught-and-logged failure rather than a
   // crash, but it would also silently drop the sweep the user just paid for.

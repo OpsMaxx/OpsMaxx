@@ -22,6 +22,7 @@ import { toast } from '../../store/toast'
 import { useApp } from '../../store/app'
 import { bytes, clsx } from '../../lib/format'
 import { sshHopsFor } from '../../lib/ssh'
+import { LOCAL_TARGET } from '../../../../shared/execTarget'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import { classifyConnectionError, errorText } from '../../lib/connectionError'
 import { openSettings } from '../../store/nav'
@@ -109,8 +110,12 @@ function connectFailure(
 }
 
 // ---- Real SFTP -------------------------------------------------------------
-function RealSftp({ server, tabId }: { server: Server; tabId?: string }): React.JSX.Element {
-  const key = server.id
+function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React.JSX.Element {
+  // Absent server means this machine.
+  const local = server === undefined
+  // One session per server, as before; one for this machine, shared the same
+  // way across every tab showing it.
+  const key = server?.id ?? 'local'
   const [path, setPath] = useState('/')
   const [entries, setEntries] = useState<SftpEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -158,24 +163,32 @@ function RealSftp({ server, tabId }: { server: Server; tabId?: string }): React.
   const paneId = useApp((s) => {
     const tp = tabId ? s.panes[tabId] : undefined
     const pane = tp?.panes.find((p) => p.id === tp.activePaneId)
-    return pane?.target.kind === 'ssh' && pane.target.serverId === server.id ? pane.id : undefined
+    if (!pane) return undefined
+    // A local Files view follows a LOCAL pane, and a server's follows a pane on
+    // that server. Crossing them would send the browser off to list a path
+    // from the wrong machine and push a `cd` down the wrong session.
+    if (local) return pane.target.kind === 'local' ? pane.id : undefined
+    return pane.target.kind === 'ssh' && pane.target.serverId === server?.id ? pane.id : undefined
   })
   const session = useApp((s) => (paneId ? s.tabSession[paneId] : undefined))
   const termCwd = useApp((s) => (paneId ? s.tabCwd[paneId] : undefined))
   const setTabCwd = useApp((s) => s.setTabCwd)
 
   const cfg = useCallback(
-    () => ({
-      sessionId: `sftp-${server.id}`,
-      serverId: server.id,
-      host: server.host,
-      port: server.port,
-      username: server.username,
-      auth: asAuth(server.auth),
-      cols: 80,
-      rows: 24,
-      hops: sshHopsFor(server)
-    }),
+    () =>
+      server === undefined
+        ? LOCAL_TARGET
+        : {
+            sessionId: `sftp-${server.id}`,
+            serverId: server.id,
+            host: server.host,
+            port: server.port,
+            username: server.username,
+            auth: asAuth(server.auth),
+            cols: 80,
+            rows: 24,
+            hops: sshHopsFor(server)
+          },
     [server]
   )
 
@@ -184,8 +197,13 @@ function RealSftp({ server, tabId }: { server: Server; tabId?: string }): React.
   // through withVaultUnlock turns that into an unlock dialog and a call that
   // finishes, instead of a promise nobody catches and a spinner that never stops.
   const unlocked = useCallback(
-    <T,>(run: () => Promise<T>): Promise<T> => withVaultUnlock(`Opening files on ${server.name}`, run),
-    [server.name]
+    <T,>(run: () => Promise<T>): Promise<T> =>
+      // Nothing on this machine needs a credential the vault holds, so a local
+      // browse must not raise an unlock dialog.
+      server === undefined
+        ? run()
+        : withVaultUnlock(`Opening files on ${server.name}`, run),
+    [server]
   )
 
   const list = useCallback(
@@ -262,10 +280,19 @@ function RealSftp({ server, tabId }: { server: Server; tabId?: string }): React.
         return
       }
       setError(
-        connectFailure(server, res?.error, openServerEditor, {
-          label: 'Try again',
-          run: () => void connect(() => true)
-        })
+        // connectFailure names SSH failure modes — a changed host key, a
+        // missing private key, a refused credential. None of them can happen
+        // opening a folder on this machine, so a local failure is reported as
+        // itself rather than dressed as a connection problem.
+        server === undefined
+          ? {
+              message: res?.error ?? 'Could not open files on this machine.',
+              retry: { label: 'Try again', run: () => void connect(() => true) }
+            }
+          : connectFailure(server, res?.error, openServerEditor, {
+              label: 'Try again',
+              run: () => void connect(() => true)
+            })
       )
       setLoading(false)
     },
@@ -860,6 +887,15 @@ function DemoSftp(): React.JSX.Element {
   )
 }
 
-export function SftpView({ server, tabId }: { server: Server; tabId?: string }): React.JSX.Element {
+/**
+ * The Files view.
+ *
+ * `server` is optional: absent means this machine, which main serves from
+ * node:fs behind the same channel and the same result shape. Deliberately not
+ * a synthesized Server — see shared/execTarget.ts for why that row must not
+ * exist.
+ */
+export function SftpView({ server, tabId }: { server?: Server; tabId?: string }): React.JSX.Element {
+  if (!server) return <RealSftp server={undefined} tabId={tabId} />
   return server.demo === false ? <RealSftp server={server} tabId={tabId} /> : <DemoSftp />
 }

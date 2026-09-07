@@ -257,8 +257,20 @@ export interface LocalTab extends TabBase {
   shellId: string
   // Where the shell was started, when the user asked for somewhere specific.
   cwd?: string
-  // Only 'terminal' is meaningful; Monitor and Files are SSH-only views.
-  view: 'terminal'
+  /**
+   * Terminal and Files. Monitor stays SSH-only.
+   *
+   * Files earned its place because main serves this machine's half from
+   * node:fs behind the same channel and the same result shape, so the view
+   * needs no server — it takes `server?: Server` and absent means here.
+   *
+   * Monitor does not, and the reason is not that it is harder: MonitorStrip
+   * and MonitorView both take a non-optional Server, and the collector behind
+   * them reads /proc and Linux `df` semantics, so on anything but a Linux
+   * workstation it would draw numbers that look right and are not. See
+   * services/localMetrics.ts.
+   */
+  view: 'terminal' | 'files'
 }
 
 export type Tab = SshTab | LocalTab

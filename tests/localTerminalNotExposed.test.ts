@@ -194,10 +194,14 @@ const SEED_FILES = [
 // store and the audit log, which is the entire reason localPty is on this list.
 // The dispatch between it and sshExec lives in main's renderer-facing IPC
 // handlers precisely so it never enters this closure.
+//
+// localFiles joined it with the Files view's local half, and it is the
+// starkest of the four: it reads and writes arbitrary paths directly. It needs
+// no shell at all to hand over the vault.
 function isForbiddenSpecifier(spec: string): boolean {
   if (/node-pty/i.test(spec)) return true
   const base = spec.replace(/\.[cm]?[jt]sx?$/i, '').split(/[/\\]/).pop() ?? ''
-  return /^(localPty|shellDiscovery|localExec)$/i.test(base)
+  return /^(localPty|shellDiscovery|localExec|localFiles)$/i.test(base)
 }
 
 function tsFilesIn(dir: string): string[] {

@@ -4,6 +4,7 @@ import type { AutoStartSettings, AutoStartState } from '../shared/autostart'
 import type { UnitDraft, UserUnitsReading } from '../shared/userUnits'
 import type { BackupAlarm } from '../shared/backup'
 import type { HttpRequestSpec, HttpResult } from '../shared/httpClient'
+import type { LocalTarget } from '../shared/execTarget'
 import type {
   SshConnectConfig,
   SshStatus,
@@ -344,8 +345,16 @@ const api = {
     request: (spec: HttpRequestSpec): Promise<HttpResult> => ipcRenderer.invoke('http:request', spec)
   },
   sftp: {
-    connect: (key: string, cfg: SshConnectConfig & { serverId?: string }): Promise<SftpResult<{ home: string }>> =>
-      ipcRenderer.invoke('sftp:connect', key, cfg),
+    /**
+     * `cfg` is a connection config, or the local marker for this machine —
+     * main serves that half from node:fs behind the same channel. The key
+     * registered here decides which half answers every later call in the
+     * session, so a target cannot be varied call by call.
+     */
+    connect: (
+      key: string,
+      cfg: (SshConnectConfig & { serverId?: string }) | LocalTarget
+    ): Promise<SftpResult<{ home: string }>> => ipcRenderer.invoke('sftp:connect', key, cfg),
     list: (key: string, path: string): Promise<SftpResult<SftpEntry[]>> =>
       ipcRenderer.invoke('sftp:list', key, path),
     read: (key: string, path: string): Promise<SftpResult<string>> =>
