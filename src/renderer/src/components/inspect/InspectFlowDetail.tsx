@@ -140,18 +140,37 @@ function BodyView({
   const size = (side === 'request' ? flow.requestBytes : flow.responseBytes) ?? 0
   const truncated = side === 'request' ? flow.requestTruncated : flow.responseTruncated
 
-  const [full, setFull] = useState<string | null>(null)
+  // Pages accumulate rather than replace. The previous version fetched one
+  // 64 KiB page from offset 0 and then hid the button, so a 5 MB body was
+  // permanently unreadable past its first page — the paging API was there and
+  // the UI never used it.
+  const [pages, setPages] = useState<string[]>([])
+  const [offset, setOffset] = useState(0)
+  const [total, setTotal] = useState<number | null>(null)
+  const [eof, setEof] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setFull(null)
+    setPages([])
+    setOffset(0)
+    setTotal(null)
+    setEof(false)
     setError(null)
   }, [flow.id, side])
 
+  const full = pages.length > 0 ? pages.join('') : null
   const text = full ?? (preview ? decode(preview) : '')
   const binary = looksBinary(text)
 
+  if (flow.upgraded) {
+    return (
+      <div className="sub">
+        This connection was upgraded to another protocol after the handshake — a WebSocket, almost
+        always. The handshake above is recorded; the frames that follow are not.
+      </div>
+    )
+  }
   if (!preview && size === 0) {
     return <div className="sub">No body.</div>
   }
@@ -187,7 +206,7 @@ function BodyView({
 
       {error && <div className="sub danger">{error}</div>}
 
-      {spilled && !full && !binary && (
+      {spilled && !eof && !binary && (
         <button
           className="btn secondary size-24"
           disabled={loading}
@@ -195,14 +214,29 @@ function BodyView({
             setLoading(true)
             setError(null)
             void window.shellpilot?.inspect
-              .body(flow.id, side, 0, PAGE)
-              .then((page) => setFull(decode(page.base64)))
+              .body(flow.id, side, offset, PAGE)
+              .then((page) => {
+                setPages((p) => [...p, decode(page.base64)])
+                setOffset(page.offset + base64Bytes(page.base64))
+                setTotal(page.total)
+                setEof(page.eof)
+              })
               .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
               .finally(() => setLoading(false))
           }}
         >
-          {loading ? 'Loading…' : `Load more (${formatBytes(size)} total)`}
+          {loading
+            ? 'Loading…'
+            : full
+              ? `Load more (${formatBytes(offset)} of ${formatBytes(total ?? size)})`
+              : `Load recorded body (${formatBytes(size)})`}
         </button>
+      )}
+
+      {eof && full && (
+        <div className="sub">
+          Showing the whole recorded body, {formatBytes(total ?? offset)}.
+        </div>
       )}
 
       {truncated && (
@@ -213,6 +247,17 @@ function BodyView({
       )}
     </div>
   )
+}
+
+/** How many BYTES a base64 string decodes to. Needed because the next page's
+ *  offset is a byte offset, and neither the base64 length nor the decoded
+ *  JavaScript string length is that: base64 is 4 characters per 3 bytes minus
+ *  padding, and a decoded string counts UTF-16 units, not bytes. */
+export function base64Bytes(b64: string): number {
+  const clean = b64.replace(/[^A-Za-z0-9+/=]/g, '')
+  if (clean.length === 0) return 0
+  const padding = clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0
+  return (clean.length / 4) * 3 - padding
 }
 
 function decode(base64: string): string {

@@ -75,6 +75,10 @@ export interface InspectFlow {
   responseSpilled?: boolean
   requestTruncated?: boolean
   responseTruncated?: boolean
+  /** The connection was handed to another protocol after the handshake — a
+   *  WebSocket, almost always. The status and headers are real; there is no
+   *  body, and the frames that follow are not recorded. */
+  upgraded?: boolean
   /** Present when the exchange did not complete. Already redacted. */
   error?: string
 }

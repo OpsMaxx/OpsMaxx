@@ -117,6 +117,15 @@ const (
 	// most ordinary page load on the internet would be reported as certificate
 	// pinning. One request from that host inside the window cancels the report.
 	inspectPinGrace = 2 * time.Second
+	// Total bytes the capture directory may hold. Past this, the oldest
+	// recorded bodies are deleted, oldest first.
+	//
+	// Without a budget the only thing that ever removed a spill file was
+	// stopping the inspector: an afternoon of capture behind a package
+	// manager writes every artefact it downloads to disk and never takes any
+	// of it back. 512 MiB is far more than a debugging session needs and is
+	// still a number rather than "whatever is left on the volume".
+	inspectSpillBudget = 512 << 20
 	// Upper bound on the in-flight flow table. A flow is removed when it ends;
 	// this only bites if a client opens tens of thousands of requests that
 	// never complete, and dropping the recording is better than growing without
@@ -270,6 +279,10 @@ type FlowEnd struct {
 	ResSpilled       bool   `json:"resSpilled,omitempty"`
 	ReqTruncated     bool   `json:"reqTruncated,omitempty"`
 	ResTruncated     bool   `json:"resTruncated,omitempty"`
+	// The connection was handed over to another protocol after the handshake —
+	// a WebSocket. The status and headers are real; there is no body, and the
+	// frames that follow are not recorded.
+	Upgraded bool `json:"upgraded,omitempty"`
 	// Set when the exchange did not complete. Redacted, unlike the payload
 	// fields above: this one is a diagnostic, not the user's own traffic.
 	Error string `json:"error,omitempty"`
@@ -335,9 +348,20 @@ type Inspector struct {
 	certs     map[string]*tls.Certificate
 	certLRU   []string
 	live      map[string]*flowRec
+	// Recorded bodies on disk, oldest first, and what they add up to. The
+	// budget is enforced here rather than by the parent because this is the
+	// only side that knows when a file finished being written.
+	spilled    []spillFile
+	spillBytes int64
 
 	flowN atomic.Uint64
 	flows atomic.Int64
+}
+
+// spillFile is one recorded body on disk.
+type spillFile struct {
+	path  string
+	bytes int64
 }
 
 // flowRec is the mutable half of one exchange, alive between begin and end.
@@ -349,6 +373,10 @@ type flowRec struct {
 	// to finish the same flow, and two FlowEnds for one FlowBegin is worse
 	// than none.
 	once sync.Once
+	// The exchange became something other than HTTP — a WebSocket. Reported
+	// so the parent can say "frames are not recorded" rather than showing an
+	// empty body and letting the user conclude the request failed.
+	upgraded bool
 }
 
 func (s *Server) inspectStart(req *Request) (interface{}, error) {
@@ -620,6 +648,10 @@ func (ins *Inspector) close() {
 	}
 	ins.certs = map[string]*tls.Certificate{}
 	ins.certLRU = nil
+	// The parent deletes the directory itself; this only drops our accounting
+	// of it, so a restart does not begin already over budget.
+	ins.spilled = nil
+	ins.spillBytes = 0
 	live := ins.live
 	ins.live = map[string]*flowRec{}
 	ins.mu.Unlock()
@@ -831,6 +863,18 @@ func (ins *Inspector) onResponse(resp *http.Response, ctx *goproxy.ProxyCtx) *ht
 	status, statusText := resp.StatusCode, resp.Status
 	ctype := resp.Header.Get("Content-Type")
 
+	// A protocol upgrade — a WebSocket, almost always. There is no response
+	// body to read: what follows on that connection is frames in another
+	// protocol entirely, and the bytes goproxy relays afterwards are not ours
+	// to interpret. Ending the flow here is the only honest option; waiting
+	// for a body close that will never come would leave the row saying "in
+	// flight" for as long as the socket is open, which on a WebSocket is
+	// exactly as long as the user is looking at it.
+	if status == http.StatusSwitchingProtocols {
+		ins.finishUpgrade(rec, status, statusText, headers, ctype)
+		return resp
+	}
+
 	if resp.Body == nil || ins.maxBody < 0 {
 		ins.finish(rec, status, statusText, headers, ctype, nil)
 		return resp
@@ -845,6 +889,13 @@ func (ins *Inspector) onResponse(resp *http.Response, ctx *goproxy.ProxyCtx) *ht
 	}
 	resp.Body = rec.res.wrap(resp.Body)
 	return resp
+}
+
+// finishUpgrade closes out an exchange that stopped being HTTP. The headers
+// are the whole record: the handshake is visible, the frames after it are not.
+func (ins *Inspector) finishUpgrade(rec *flowRec, status int, statusText string, headers []Header, ctype string) {
+	rec.upgraded = true
+	ins.finish(rec, status, statusText, headers, ctype, nil)
 }
 
 // finish emits exactly one FlowEnd and releases everything the flow held.
@@ -865,6 +916,7 @@ func (ins *Inspector) finish(rec *flowRec, status int, statusText string, header
 			// have to scan a header array to find it.
 			ContentType: ctype,
 		}
+		end.Upgraded = rec.upgraded
 		if cause != nil {
 			end.Error = redact(cause.Error())
 		}
@@ -1287,11 +1339,17 @@ func (r *bodyRecorder) finishRecording() {
 // the body's own Close and the flow's teardown reach it.
 func (r *bodyRecorder) close() {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.file != nil {
-		_ = r.file.Close()
-		r.file = nil
+	if r.file == nil {
+		r.mu.Unlock()
+		return
 	}
+	_ = r.file.Close()
+	r.file = nil
+	path, kept := r.path, r.kept
+	r.mu.Unlock()
+	// Only now is the file finished and its size final, which is why the
+	// budget is charged here rather than on every write.
+	r.ins.noteSpill(path, kept)
 }
 
 func (r *bodyRecorder) previewBase64() string {
@@ -1301,6 +1359,39 @@ func (r *bodyRecorder) previewBase64() string {
 		return ""
 	}
 	return base64.StdEncoding.EncodeToString(r.preview.Bytes())
+}
+
+// noteSpill records a finished capture file and evicts the oldest ones until
+// the directory is back inside its budget.
+//
+// Eviction is oldest-first and unconditional: a flow whose body has been
+// deleted still shows its headers, its byte counts and its inline preview, so
+// what is lost is the tail of an old body rather than the record that it
+// happened. The alternative — refusing to record once full — would silently
+// make the newest traffic, which is what someone is actually looking at, the
+// traffic with no body.
+func (ins *Inspector) noteSpill(path string, bytes int64) {
+	if path == "" || bytes <= 0 {
+		return
+	}
+	ins.mu.Lock()
+	ins.spilled = append(ins.spilled, spillFile{path: path, bytes: bytes})
+	ins.spillBytes += bytes
+	var evict []string
+	// Never the file just written, however large it is: a single body over
+	// the whole budget should still be readable once.
+	for ins.spillBytes > inspectSpillBudget && len(ins.spilled) > 1 {
+		oldest := ins.spilled[0]
+		ins.spilled = ins.spilled[1:]
+		ins.spillBytes -= oldest.bytes
+		evict = append(evict, oldest.path)
+	}
+	ins.mu.Unlock()
+	// Outside the lock: deleting is a syscall per file and nothing else needs
+	// to wait on it.
+	for _, p := range evict {
+		_ = os.Remove(p)
+	}
 }
 
 // readBody serves `inspect.body` out of the spill directory.
