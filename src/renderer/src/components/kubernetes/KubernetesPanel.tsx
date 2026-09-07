@@ -20,6 +20,7 @@ import {
   K8S_FAILURE_HELP,
   k8sRelativeTime,
   nodeIsUnhealthy,
+  countSchedulableNodes,
   planK8sCordon,
   planK8sDrain,
   planK8sRollout,
@@ -28,6 +29,7 @@ import {
   workloadIsDegraded,
   type K8sApiScan,
   type K8sCordonPlan,
+  type K8sCordonTarget,
   type K8sCordonResult,
   type K8sDiagnosis,
   type K8sDrainAssessment,
@@ -131,7 +133,7 @@ interface K8sBridge {
   ) => Promise<K8sRolloutResult>
   cordon?: (
     cfg: unknown,
-    target: { node: string; action: K8sSchedulingAction; podCount: number | null; context?: string | null },
+    target: K8sCordonTarget,
     confirmed: boolean
   ) => Promise<K8sCordonResult>
   drainPreflight?: (cfg: unknown, node: string, context?: string) => Promise<K8sDrainAssessment>
@@ -275,6 +277,13 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   // at once and the row that is working is the one that says so.
   const [nodeBusy, setNodeBusy] = useState('')
   const [nodePending, setNodePending] = useState<{ plan: K8sCordonPlan } | null>(null)
+  const [nodePhrase, setNodePhrase] = useState('')
+  // Trimmed, and compared exactly. A plan that does not ask for a word is
+  // confirmed by opening the dialog at all.
+  const nodeConfirmed =
+    nodePending === null ||
+    nodePending.plan.confirmation.kind !== 'type-to-confirm' ||
+    nodePhrase.trim() === nodePending.plan.confirmation.phrase
   const [nodeResult, setNodeResult] = useState<K8sCordonResult | null>(null)
   // The preflight lives beside the drain dialog rather than inside it: it is a
   // READ, it takes a round trip, and the verdict is the thing the operator is
@@ -443,6 +452,9 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
 
   const askToCordon = (n: K8sNode, action: K8sSchedulingAction): void => {
     setNodeResult(null)
+    // Never carried across dialogs: a word typed for one node must not confirm
+    // the next one.
+    setNodePhrase('')
     setDrainCheck(null)
     // Computed here so the dialog can explain itself, and computed AGAIN in the
     // main process before anything runs — the same rule the restart follows.
@@ -454,6 +466,10 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         // namespace rather than all of them this is an undercount, which is why
         // the plan's sentence is about eviction rather than about the number.
         podCount: probe?.ok && probe.allNamespaces ? podsOn(n.name) : null,
+        // Null when the node list has not been read, rather than 0 or 1 — the
+        // plan treats an absent count as unanswered and says so, instead of
+        // deciding this is or is not the last node on a guess.
+        schedulableNodes: overview?.nodes.ok ? countSchedulableNodes(overview.nodes.items) : null,
         context: context || (probe?.ok ? probe.currentContext : null)
       })
     })
@@ -1567,10 +1583,25 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
               {c}
             </div>
           ))}
+          {/* The plan can now escalate to a typed word — cordoning the last
+              schedulable node takes the whole cluster out of service. Without
+              this input the escalation would be computed and then silently
+              ignored, and the action would still run on one click, which is
+              worse than never having escalated at all. */}
+          {nodePending.plan.confirmation.kind === 'type-to-confirm' && (
+            <input
+              className="input"
+              style={{ marginTop: 8 }}
+              autoFocus
+              placeholder={`Type ${nodePending.plan.confirmation.phrase} to ${nodePending.plan.target.action}`}
+              value={nodePhrase}
+              onChange={(e) => setNodePhrase(e.target.value)}
+            />
+          )}
           <div className="row" style={{ gap: 8, marginTop: 8 }}>
             <button
               className="btn primary"
-              disabled={nodeBusy !== ''}
+              disabled={nodeBusy !== '' || !nodeConfirmed}
               onClick={() => void runCordon()}
             >
               {nodePending.plan.target.action === 'cordon' ? 'Cordon' : 'Uncordon'}
