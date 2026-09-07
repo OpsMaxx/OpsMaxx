@@ -67,3 +67,49 @@ describe('the wrapper says which side has more', () => {
     expect(block).toMatch(/background:\s*var\(--bg-/)
   })
 })
+
+// ---------------------------------------------------------------------------
+// The server card's two identity strings
+// ---------------------------------------------------------------------------
+//
+// Found in the shipped 0.22.0 build: a server card headed
+// "TestServerOpsMaxx169.58.227.8" — the name running straight into the
+// address with no gap, and the address clipped by the card edge with its last
+// octet missing.
+//
+// Same class as the table clipping this file already covers. A clipped IP is
+// not a shortened IP, it is a different one, and nothing on screen said it had
+// been cut. The name is what gives way instead, because an ellipsis is a
+// visible admission that there is more; the address either fits or the card
+// scrolls, but it is never silently wrong.
+describe('a long server name does not push its address off the card', () => {
+  const head = (): string => {
+    const i = CSS.indexOf('.metric-card .m-head {')
+    expect(i).toBeGreaterThan(-1)
+    return CSS.slice(i, i + 1200)
+  }
+
+  it('puts a gap between the two, so they cannot run together', () => {
+    expect(head()).toMatch(/gap:\s*var\(--sp-/)
+  })
+
+  // A flex item will not shrink below its content without this, which is why
+  // the address moved instead of the name yielding.
+  it('lets the name shrink, which needs min-width:0', () => {
+    expect(CSS).toMatch(/\.metric-card \.m-head > \.row \{[^}]*min-width:\s*0/)
+  })
+
+  it('truncates the name visibly rather than overflowing it', () => {
+    const i = CSS.indexOf('.metric-card .m-head > .row b')
+    expect(i).toBeGreaterThan(-1)
+    const block = CSS.slice(i, CSS.indexOf('}', i))
+    expect(block).toContain('text-overflow: ellipsis')
+    expect(block).toContain('white-space: nowrap')
+  })
+
+  it('never lets the address shrink', () => {
+    const i = CSS.indexOf('.metric-card .m-head > .mono')
+    expect(i).toBeGreaterThan(-1)
+    expect(CSS.slice(i, CSS.indexOf('}', i))).toMatch(/flex:\s*none/)
+  })
+})

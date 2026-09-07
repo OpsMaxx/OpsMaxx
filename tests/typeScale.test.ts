@@ -118,7 +118,11 @@ describe('machine-readable values have a floor', () => {
     // sysadmin most often retypes into another window were the smallest text on
     // the screen. The rule lives on `.mono` because everything drawn in the mono
     // face here IS a machine-readable value, so the two sets are the same set.
-    const mono = /\.mono\s*\{[^}]*\}/.exec(OWNED['global.css'])
+    // Anchored to the start of a line: `.mono` is a substring of every
+    // descendant selector that ends in it (`.metric-card .m-head > .mono`),
+    // and an unanchored match found one of those instead of the rule that
+    // actually carries the floor — reporting a defect that was not there.
+    const mono = /^\.mono\s*\{[^}]*\}/m.exec(OWNED['global.css'])
     expect(mono, '.mono must be defined in global.css').not.toBeNull()
     expect(mono![0]).toMatch(/font-size:\s*max\(\s*var\(--fs-identifier\)\s*,\s*1em\s*\)/)
   })

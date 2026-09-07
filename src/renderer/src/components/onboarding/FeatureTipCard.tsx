@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Compass, X } from 'lucide-react'
 import { useOnboarding } from '../../store/onboarding'
+import { useNav } from '../../store/nav'
 import { useApp } from '../../store/app'
 import { FEATURE_TIPS } from './tourSteps'
 
@@ -25,6 +26,13 @@ import { FEATURE_TIPS } from './tourSteps'
 // and it is permanent.
 export function FeatureTipCard(): React.JSX.Element | null {
   const activity = useApp((s) => s.activity)
+  // Monitoring and Operations are two rail destinations sharing ONE
+  // ActivityView — deliberately, because they are one mounted tree and a split
+  // that unmounted either would kill a running log tail or strand a live
+  // fan-out. The cost is that `activity` alone cannot tell them apart, and a
+  // tip keyed on it fired the monitoring card while the user was standing in
+  // Operations, explaining a screen they were not looking at.
+  const fleetRail = useNav((s) => s.fleetRail)
   const tourOpen = useOnboarding((s) => s.open)
   const seenTips = useOnboarding((s) => s.seenTips)
   const markTipSeen = useOnboarding((s) => s.markTipSeen)
@@ -41,10 +49,20 @@ export function FeatureTipCard(): React.JSX.Element | null {
       setShownId(null)
       return
     }
+    // The monitor tip belongs to the Monitoring rail only. Written as "the
+    // view matches AND, where the view is shared, the rail matches too" rather
+    // than as a special case for one id, so a second tip on either rail cannot
+    // reintroduce this.
+    const onSharedView = activity === 'monitor'
     const seen = new Set(seenTips)
-    const tip = FEATURE_TIPS.find((t) => t.view === activity && !seen.has(t.id))
+    const tip = FEATURE_TIPS.find(
+      (t) =>
+        t.view === activity &&
+        !seen.has(t.id) &&
+        (!onSharedView || fleetRail === 'monitor')
+    )
     setShownId(tip?.id ?? null)
-  }, [activity, seenTips, tourOpen])
+  }, [activity, fleetRail, seenTips, tourOpen])
 
   if (!shownId) return null
   const tip = FEATURE_TIPS.find((t) => t.id === shownId)
