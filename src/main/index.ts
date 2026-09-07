@@ -210,7 +210,7 @@ import { toVpnResult } from './services/vpn/errors'
 import { withVpnTransport, withVpnTransportDb } from './services/vpn/transport'
 import { httpRequest } from './services/httpClient'
 import { localExec } from './services/localExec'
-import { isLocalTarget } from '../shared/execTarget'
+import { isLocalTarget, LOCAL_TARGET } from '../shared/execTarget'
 import type { HttpRequestSpec } from '../shared/httpClient'
 import type {
   FrpTokenResult,
@@ -1365,6 +1365,39 @@ ipcMain.handle('fleet:posture', (_e, serverId: string) => fleetSampler.postureFo
 // approval a job carries, and this panel could not decide which side is right
 // in any case.
 ipcMain.handle('fleet:drift', (_e, serverId: string) => fleetSampler.driftFor(serverId))
+
+// ---- Posture and drift for THIS machine ----
+//
+// Deliberately not the sampler, and deliberately not `cfg`-taking.
+//
+// Not the sampler, for three reasons. Posture and drift only run after a
+// successful metrics sample, which is an SSH probe, so a local target would
+// never reach them. The sweep persists what it finds — posture facts and drift
+// hashes go into the durable history store keyed by host — and this machine's
+// firewall state and config-file hashes do not belong in the same record as the
+// estate's. And an entry in the sampler's cache is one `fleetCached(id)` away
+// from the MCP bridge; not creating the entry is a stronger guarantee than an
+// id that happens not to resolve.
+//
+// Not cfg-taking, because these must not become a second way to probe a SERVER.
+// The comments above are emphatic that exactly one thing decides how often a
+// host is asked for its firewall ruleset, and it is the sampler. A handler that
+// accepted a connection config would quietly be a second one. Taking no target
+// at all makes that structural rather than a rule someone has to remember.
+//
+// The cadence question the sampler exists to answer does not arise here: this
+// is one host, read when a person is looking at the panel and presses refresh.
+ipcMain.handle('fleet:posture-local', () =>
+  postureReader.read(LOCAL_TARGET, {
+    // Fails closed, as it does for a server with no access group. The grant is
+    // an AI-access capability and this machine has no group to carry one, so
+    // the rules are not collected rather than collected by default.
+    firewallRules: false
+  })
+)
+ipcMain.handle('fleet:drift-local', (_e, ctx: unknown) =>
+  driftReader.read(LOCAL_TARGET, (ctx ?? {}) as Parameters<typeof driftReader.read>[1])
+)
 
 // ---- Changing who can get in — roadmap item 23, the write half ----
 //

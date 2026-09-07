@@ -899,6 +899,20 @@ const api = {
       serverId: string
     ): Promise<{ posture?: HostPosture; at?: number; error?: string; errorAt?: number; intervalMs: number }> =>
       ipcRenderer.invoke('fleet:posture', serverId),
+    /**
+     * The same reading for THIS machine, taken now.
+     *
+     * Takes no target on purpose: it cannot be pointed at a server, so it
+     * cannot become a second way to probe one outside the sampler's cadence.
+     * Nothing it returns is cached or persisted — see the handler.
+     */
+    postureLocal: (): Promise<
+      { ok: true; posture: HostPosture } | { ok: false; reason: string; detail: string }
+    > => ipcRenderer.invoke('fleet:posture-local'),
+    driftLocal: (
+      ctx?: { hostname?: string; serverName?: string }
+    ): Promise<{ ok: true; drift: HostDrift } | { ok: false; reason: string; detail: string }> =>
+      ipcRenderer.invoke('fleet:drift-local', ctx ?? {}),
     // A server's watched configuration files, as the sampler last collected
     // them — roadmap item 25. Read-only and never a trigger, exactly like
     // `facts`, `access` and `posture`, and with the same third state: `drift`
