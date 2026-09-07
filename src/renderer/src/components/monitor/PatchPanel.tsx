@@ -562,7 +562,16 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
             </div>
           )}
 
-          <div className="row" style={{ gap: 8, marginTop: 8 }}>
+          {/* The same bottom action bar BroadcastPanel uses, and for the same
+              reason: on the Operations rail the thing that changes servers sits
+              at the foot of the plan it is going to execute, never in the
+              top-right slot the read-only panels use for "Check now". */}
+          <div className="op-actionbar">
+            <span className="op-actionbar-what">
+              {waves.length} wave{waves.length === 1 ? '' : 's'}
+              {reboot ? ', restarting the hosts that say they need it' : ', no restarts'}
+            </span>
+            <span className="grow" />
             <button
               className="btn primary"
               data-testid="patch-run"

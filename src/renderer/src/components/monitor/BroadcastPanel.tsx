@@ -253,19 +253,6 @@ export function BroadcastPanel({ servers }: { servers: Server[] }): React.JSX.El
           onChange={(e) => setCommand(e.target.value)}
           disabled={running}
         />
-        {running ? (
-          <button
-            className="btn danger"
-            onClick={() => void window.shellpilot?.broadcast?.cancel(runId.current)}
-            title="Hosts that have not started will not start. A host already running is left to finish — killing it mid-write is how a change ends up half applied."
-          >
-            <Square size={13} /> Stop
-          </button>
-        ) : (
-          <button className="btn primary" disabled={targets.length === 0 || command.trim() === ''} onClick={attempt}>
-            <Play size={13} /> Run
-          </button>
-        )}
       </div>
 
       <div className="row wrap" style={{ gap: 6, marginTop: 8 }}>
@@ -304,6 +291,41 @@ export function BroadcastPanel({ servers }: { servers: Server[] }): React.JSX.El
           {plan.reasons.join('; ')}.
         </div>
       )}
+
+      {/* The execute control, at the foot of the composer rather than top-right
+          beside the command box where it used to sit.
+          Top-right is the slot every read-only Monitoring panel puts "Check
+          now" and "Refresh" in, and this button runs an arbitrary shell command
+          on every selected host. Sharing that slot meant the most dangerous
+          control in the product was the one a person had the most practice
+          clicking without reading. Down here it is the last thing under the
+          command, the targets and the risk line, in that order — so the reasons
+          are passed on the way to the button rather than sitting beneath it. */}
+      <div className="op-actionbar">
+        <span className="op-actionbar-what">
+          {command.trim() === ''
+            ? 'Type a command to run.'
+            : targets.length === 0
+              ? 'Select at least one server.'
+              : `Runs on ${targets.length} server${targets.length === 1 ? '' : 's'}: ${targets
+                  .map((t) => t.serverName)
+                  .join(', ')}`}
+        </span>
+        <span className="grow" />
+        {running ? (
+          <button
+            className="btn danger"
+            onClick={() => void window.shellpilot?.broadcast?.cancel(runId.current)}
+            title="Hosts that have not started will not start. A host already running is left to finish — killing it mid-write is how a change ends up half applied."
+          >
+            <Square size={13} /> Stop
+          </button>
+        ) : (
+          <button className="btn primary" disabled={targets.length === 0 || command.trim() === ''} onClick={attempt}>
+            <Play size={13} /> Run
+          </button>
+        )}
+      </div>
 
       {confirming && (
         <div className="bc-confirm">

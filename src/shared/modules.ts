@@ -34,11 +34,61 @@ export type ModuleId =
   | 'drift'
   | 'processes'
 
+/**
+ * Which of the two destinations a module belongs to.
+ *
+ * THE CONTRACT, and the only reason this field exists: **nothing on a `read`
+ * surface may write to a server.** A `read` panel may open connections, run
+ * probes, and hold as much state as it likes; what it may not do is leave an
+ * estate different from how it found it. `operate` is the other half — the
+ * modules whose entire purpose is to change hosts.
+ *
+ * This is not taxonomy for its own sake. Before the split, Monitoring put a
+ * teal primary button in the same slot on every tab, and on eleven of them it
+ * meant "read that again" while on two of them it meant "install 70 packages
+ * and reboot" or "run this shell command on the fleet". Muscle memory built on
+ * the eleven landed on the two. No amount of recolouring fixes that, because
+ * the colour was never the thing being learned — the SLOT was. Splitting the
+ * destination is what makes the slot mean one thing again.
+ *
+ * The split is therefore load-bearing rather than cosmetic, which is why
+ * `surface` is required rather than optional and why
+ * tests/monitorSurfaces.test.ts pins the `operate` set to an exact list: a
+ * module added later cannot default onto the harmless side by being forgotten.
+ */
+export type ModuleSurface = 'read' | 'operate'
+
+/**
+ * Modules on the `read` surface that can still write to a server.
+ *
+ * The contract is "nothing on a read surface writes", and these two break it
+ * TODAY. They are listed rather than quietly reclassified because both are
+ * mostly-read panels with one mutating action bolted on, and moving the whole
+ * module to `operate` would exile a large read-only view — the authorized_keys
+ * inventory, the crontab listing — into a destination built for things that
+ * change servers. That is the wrong shape and it would make Operations a
+ * dumping ground.
+ *
+ * Naming them here rather than softening the contract's wording is deliberate.
+ * A contract with a silent exception is not a contract; a contract with a
+ * two-item list that a test pins is one whose violations are countable, and a
+ * third cannot be added without someone editing this array and being asked why.
+ *
+ * The real fix in both cases is the same and is a separate piece of work: split
+ * the panel so the read view stays on Monitoring and the mutating action moves
+ * to Operations as its own entry. Until then, note that both modules' `detail`
+ * strings claimed "Read-only." while doing this — that copy has been corrected,
+ * because a false safety claim is worse than the write it was covering for.
+ */
+export const READ_SURFACE_WRITE_EXCEPTIONS: ModuleId[] = ['access', 'cron']
+
 export interface ModuleDef {
   id: ModuleId
   label: string
   /** What enabling it actually gives you. Shown in Settings. */
   detail: string
+  /** See ModuleSurface. `read` may not write to a server; `operate` exists to. */
+  surface: ModuleSurface
   /**
    * On for a brand new install. Existing installs are never switched on by an
    * upgrade regardless — see backfillModules.
@@ -57,6 +107,7 @@ export interface ModuleDef {
 export const MODULES: ModuleDef[] = [
   {
     id: 'fleetSearch',
+    surface: 'read',
     label: 'Fleet-wide search',
     detail:
       'Search systemd units, listening ports and hosts across the workspace, from data the monitor already collects.',
@@ -64,6 +115,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: 'inventory',
+    surface: 'read',
     label: 'Inventory',
     detail:
       'What every host is — distribution, architecture, CPU, virtualisation — and what it needs: pending updates, security updates where the distribution publishes them, and whether a reboot is owed. Read-only, and nothing is refreshed: package caches are read, never updated, and their age is reported alongside the counts.',
@@ -80,6 +132,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: 'patch',
+    surface: 'operate',
     label: 'Patch and update management',
     detail:
       'What every host needs — pending updates, security updates where the distribution publishes them, and whether a reboot is owed — and applying them in waves, with a health check between waves and a hard refusal to restart a host other servers connect through. It never patches on a schedule and never decides for you.',
@@ -95,9 +148,10 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: 'access',
+    surface: 'read',
     label: 'Fleet keys and access',
     detail:
-      'Which key opens which host and whose it is: every authorized_keys file across the estate, fingerprinted, with locked and expired accounts and administrative group membership alongside. A host whose files could not be read is shown as unreadable and excluded from every count — never as a host with no keys. Read-only.',
+      'Which key opens which host and whose it is: every authorized_keys file across the estate, fingerprinted, with locked and expired accounts and administrative group membership alongside. A host whose files could not be read is shown as unreadable and excluded from every count — never as a host with no keys. Reading is the whole of it apart from revoking a key, which is planned against the host and confirmed before anything changes.',
     // OFF by default, and this one's toggle gates the COLLECTION rather than
     // just the panel — see FleetSamplerDeps.accessEnabled.
     //
@@ -115,6 +169,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: 'capacity',
+    surface: 'read',
     label: 'Capacity trends',
     detail:
       'How full a host is getting and when it runs out — "this disk fills in eleven days" — drawn from the samples the monitor already writes. It stores nothing of its own, schedules nothing and evaluates nothing in the background: every line is derived on demand from history that exists whether or not this is on. A forecast is never stated without the window it was drawn from, and a gap where a host was unreachable is left as a hole in the line rather than drawn across.',
@@ -129,6 +184,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: 'changeLog',
+    surface: 'read',
     label: 'Change log',
     detail:
       '"What did I change on Tuesday" — one timeline over four records that already exist: shells run on this machine, what you confirmed before a job or a broadcast ran, what an agent did through the MCP bridge, and the alerts, jobs and store events the durable history keeps. Metadata only: commands and targets, never output. It reads; it stores nothing of its own and writes nothing.',
@@ -147,6 +203,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: 'rules',
+    surface: 'read',
     label: 'Rules',
     detail:
       'When an alert fires, run a job or post to the webhook \u2014 with a ceiling on how often it may act. A rule runs the job it was confirmed with, on the hosts it was confirmed for, and refuses if either has changed. It is not a workflow language: one trigger, one filter, one action, one rate limit.',
@@ -166,6 +223,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: 'drift',
+    surface: 'read',
     label: 'Configuration drift',
     detail:
       'Compare a watched configuration file across the estate and say where it diverges \u2014 "all twelve web servers have this nginx.conf, three do not". Every file is compared under normalisation rules that are named on screen, so two files that differ and are called the same say which rule ate the difference. A host that could not be read is never reported as a host that matches. Read-only: it never writes a file back to bring a host into line.',
@@ -186,6 +244,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: 'posture',
+    surface: 'read',
     label: 'Security posture',
     detail:
       'What every host already knows about its own exposure: which firewall is active and the shape of its rules, whether SELinux or AppArmor is enforcing, how sshd compares with a hardening baseline, and how many logins have failed. Read-only, and emphatically not a vulnerability scanner — the pending security update count comes from the Inventory probe, which asks the host\'s own package manager, rather than from a CVE feed. A check that could not run is shown as unread, never as passed.',
@@ -206,6 +265,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: 'broadcast',
+    surface: 'operate',
     label: 'Run a command on many servers',
     detail:
       'Run one command across selected servers, with confirmation that scales to how many hosts and how dangerous the command is.',
@@ -213,18 +273,22 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: 'logTail',
+    surface: 'read',
     label: 'Live log tailing',
     detail: 'Follow a systemd unit or a log file on several hosts at once, interleaved by host.',
     defaultEnabled: true
   },
   {
     id: 'cron',
+    surface: 'read',
     label: 'Scheduled jobs',
-    detail: 'Read crontabs, /etc/cron.d and systemd timers across the estate. Read-only.',
+    detail:
+      'Read crontabs, /etc/cron.d and systemd timers across the estate. Editing a schedule is planned against the host and confirmed before it is written; nothing else here changes anything.',
     defaultEnabled: true
   },
   {
     id: 'processes',
+    surface: 'read',
     label: 'Local processes',
     detail:
       'Run, watch, restart and read the logs of a long-lived process on THIS machine \u2014 a dev server, a worker, a script that should outlive its terminal. Restart policies, exponential backoff, crash-loop detection and a bounded log ring, from the supervisor that already keeps VPN engines alive. Nothing runs on a remote host, nothing starts by itself, and a value that looks like a secret has to come from the vault rather than the process list.',
@@ -247,6 +311,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: 'docker',
+    surface: 'read',
     label: 'Docker',
     detail:
       'List containers on a server, read their logs, and open a shell inside a running one. Uses the docker binary already on the host — a container shell is arbitrary code execution there.',
@@ -254,12 +319,41 @@ export const MODULES: ModuleDef[] = [
   },
   {
     id: 'kubernetes',
+    surface: 'read',
     label: 'Kubernetes',
     detail:
       'List contexts, namespaces and pods and read pod logs, using the kubectl already on the host. Reading only: it never switches your context, never execs into a pod, and never applies or deletes anything.',
     defaultEnabled: false
   }
 ]
+
+/**
+ * The `operate` half, as a type rather than as a runtime filter.
+ *
+ * Yes, this repeats what `surface` already says, and the repetition is the
+ * point. `OperationsTab` in store/nav.ts has to be a narrow union — a nav
+ * pointer that can name a tab the destination does not have is exactly the
+ * "pointer that opens the wrong destination" this codebase refuses elsewhere —
+ * and a union cannot be derived from a runtime `.filter()` without an `as`
+ * cast, which would silently accept whatever the array happened to contain.
+ *
+ * So the list is written twice and tests/monitorSurfaces.test.ts asserts the
+ * two agree. Adding an `operate` module then fails a test rather than quietly
+ * producing a tab that exists in one half of the app and not the other.
+ */
+export type OperateModuleId = Extract<ModuleId, 'broadcast' | 'patch'>
+
+export const OPERATE_MODULE_IDS: readonly OperateModuleId[] = ['broadcast', 'patch']
+
+/** Whether this module's destination is Operations rather than Monitoring. */
+export function isOperateModule(id: ModuleId): id is OperateModuleId {
+  return (OPERATE_MODULE_IDS as readonly ModuleId[]).includes(id)
+}
+
+/** The modules belonging to one destination, in registry order. */
+export function modulesOnSurface(surface: ModuleSurface): ModuleDef[] {
+  return MODULES.filter((m) => m.surface === surface)
+}
 
 export type ModuleState = Partial<Record<ModuleId, boolean>>
 

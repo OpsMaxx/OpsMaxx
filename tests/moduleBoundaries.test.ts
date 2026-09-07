@@ -409,16 +409,26 @@ describe('what a module may not reach', () => {
     // whole app store, and a test that mounted it to discover a missing tab
     // would be testing zustand. What decides whether a tab exists is the
     // `moduleEnabled(modules, 'x')` guard around it, and that is a literal.
-    const src = readFileSync(join(ROOT, 'src/renderer/src/components/monitor/FleetMonitor.tsx'), 'utf8')
+    //
+    // TWO mount points since the destination was split by surface: `read`
+    // modules hang off FleetMonitor and `operate` modules off OperationsView.
+    // Scanning only the first would report every operate module as unreachable,
+    // and — worse in the other direction — a future operate module could be
+    // mounted nowhere and this guard would still be looking at the wrong file.
+    const MOUNT_POINTS = [
+      'src/renderer/src/components/monitor/FleetMonitor.tsx',
+      'src/renderer/src/components/operations/OperationsView.tsx'
+    ]
+    const src = MOUNT_POINTS.map((f) => readFileSync(join(ROOT, f), 'utf8')).join('\n')
     const mounted = new Set([...src.matchAll(/moduleEnabled\(modules,\s*'([^']+)'\)/g)].map((m) => m[1]))
     // Anti-vacuity: a regex that stopped matching would make this pass for
     // every module at once.
-    expect(mounted.size, 'no module guards found in FleetMonitor — this regex is broken').toBeGreaterThan(0)
+    expect(mounted.size, 'no module guards found at either mount point — this regex is broken').toBeGreaterThan(0)
     const unreachable = MODULES.map((m) => m.id).filter((id) => !mounted.has(id))
     expect(
       unreachable,
-      `These modules are in the registry and have no tab in FleetMonitor, so enabling them does ` +
-        `nothing a user can see: ${unreachable.join(', ')}`
+      `These modules are in the registry and have no tab at either mount point, so enabling them ` +
+        `does nothing a user can see: ${unreachable.join(', ')}`
     ).toEqual([])
   })
 })
