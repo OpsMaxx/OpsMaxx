@@ -209,6 +209,8 @@ import { storeFrpToken } from './services/vpn/frpSetup'
 import { toVpnResult } from './services/vpn/errors'
 import { withVpnTransport, withVpnTransportDb } from './services/vpn/transport'
 import { httpRequest } from './services/httpClient'
+import { localExec } from './services/localExec'
+import { isLocalTarget } from '../shared/execTarget'
 import type { HttpRequestSpec } from '../shared/httpClient'
 import type {
   FrpTokenResult,
@@ -1027,7 +1029,12 @@ function closeHistoryNow(): void {
 // three of the probes inside the collector use exit status as their API.
 const hostFactsReader = new HostFactsReader({
   exec: (cfg, command, timeoutMs) =>
-    sshExec(cfg as Parameters<typeof sshExec>[0], command, timeoutMs, false)
+    // Not targetExec: this one keeps allowPrompt false, because the sampler
+    // fans out and N unknown hosts must not become N stacked trust dialogs.
+    // A local target never reaches that question.
+    isLocalTarget(cfg)
+      ? localExec(command, timeoutMs)
+      : sshExec(cfg as Parameters<typeof sshExec>[0], command, timeoutMs, false)
 })
 
 // Whether the key and access probe may run — roadmap item 23.
@@ -2130,15 +2137,38 @@ ipcMain.handle('logtail:resume', (_e, tailId: string) => logTailer.resume(tailId
 // renderer is not a trust boundary, and anyone who can drive it already has a
 // terminal on these hosts — but it is not the same as the feature being absent,
 // and a reader of the paragraph above could reasonably assume otherwise.
+/**
+ * Runs a command on whichever target the renderer named.
+ *
+ * Docker, Kubernetes, cron and host facts already take their runner by
+ * injection and pass the connection config through untouched, so "this
+ * machine" needs no branch inside any of them — only this one, here, at the
+ * point where main decides what the runner actually is.
+ *
+ * This lives in main's renderer-facing wiring and nowhere else on purpose. The
+ * MCP bridge and the CLI build their own readers bound straight to sshExec,
+ * from servers they resolved by name, so neither can express a local target —
+ * which is what keeps localExec out of their import closure and off the surface
+ * an agent can reach. See tests/localTerminalNotExposed.test.ts.
+ */
+const targetExec = (
+  cfg: unknown,
+  command: string,
+  timeoutMs: number
+): ReturnType<typeof sshExec> =>
+  isLocalTarget(cfg)
+    ? localExec(command, timeoutMs)
+    : sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs)
+
 const dockerReader = new DockerReader({
-  exec: (cfg, command, timeoutMs) =>
-    // allowPrompt left TRUE here, unlike broadcast, log tailing and cron, and
-    // the difference is deliberate. Those three fan out; this reads ONE server
-    // the user just chose from a dropdown and pressed a button for. That is
-    // precisely the moment a trust-on-first-use dialog is answerable — "I am
-    // connecting to this host right now, is that its fingerprint?" — rather than
-    // one of fifteen identical modals nobody can reason about.
-    sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs)
+  // allowPrompt left TRUE here, unlike broadcast, log tailing and cron, and
+  // the difference is deliberate. Those three fan out; this reads ONE target
+  // the user just chose from a dropdown and pressed a button for. That is
+  // precisely the moment a trust-on-first-use dialog is answerable — "I am
+  // connecting to this host right now, is that its fingerprint?" — rather than
+  // one of fifteen identical modals nobody can reason about. A local target
+  // never reaches that question at all.
+  exec: targetExec
 })
 
 // ---- Kubernetes ----
@@ -2150,10 +2180,7 @@ const dockerReader = new DockerReader({
 //
 // allowPrompt stays true for the same reason as Docker: one server the user
 // picked, not a fan-out.
-const k8sReader = new KubernetesReader({
-  exec: (cfg, command, timeoutMs) =>
-    sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs)
-})
+const k8sReader = new KubernetesReader({ exec: targetExec })
 
 ipcMain.handle('k8s:read', (_e, cfg: unknown, context?: string, namespace?: string) =>
   k8sReader.read(cfg, context, namespace)
@@ -2163,8 +2190,11 @@ ipcMain.handle(
   async (_e, cfg: unknown, namespace: string, pod: string, lines: unknown, context?: string) => {
     // buildK8sLogsCommand validates the names and clamps `lines` itself — the
     // argument that is not a string is the one nobody thinks to check.
-    const r = await sshExec(
-      resolveChainSecrets(cfg as SshConnectConfig),
+    // Through targetExec like the reader beside it: this handler predates the
+    // local target and bypassing it would let a local cluster list its pods and
+    // then fail to show their logs.
+    const r = await targetExec(
+      cfg,
       buildK8sLogsCommand(namespace, pod, lines as number, context),
       20_000
     )
@@ -2660,7 +2690,9 @@ ipcMain.handle(
 // tests run the real command string against a temp tree.
 const cronEditDeps = {
   exec: (cfg: unknown, command: string, timeoutMs: number) =>
-    sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs, false),
+    isLocalTarget(cfg)
+      ? localExec(command, timeoutMs)
+      : sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs, false),
   recordApproval: recordJobApproval
 }
 
