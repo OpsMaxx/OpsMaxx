@@ -1059,6 +1059,13 @@ details[open] > .disclosure-head .chev {
 }
 .palette-list {
   overflow-y: auto;
+  /* Same rule `.modal-body` a few hundred lines down already states: a flex
+     child will not shrink below its content without this. `.palette` is a flex
+     column capped at 60vh with `overflow: hidden`, so without it a long result
+     list grew past the cap and was clipped rather than scrolled — and the
+     palette is Cmd+K, which is how this app expects you to reach anything. It
+     fits on a small estate and silently loses results on a real one. */
+  min-height: 0;
   padding: var(--sp-2);
 }
 .palette-group {
@@ -1605,12 +1612,29 @@ details[open] > .disclosure-head .chev {
 .settings {
   display: grid;
   grid-template-columns: 200px 1fr;
+  /* `minmax(0, 1fr)` rather than a bare implicit row, and min-height:0 on both
+     children below.
+
+     A grid item's default `min-height: auto` means it will NOT shrink below its
+     own content. So `.settings-content` grew past the 100% row instead of
+     scrolling inside it, its `overflow-y: auto` never engaged, and everything
+     past the fold was simply unreachable — no scrollbar, no wheel response,
+     nothing on screen saying there was more. Both Settings and AI & MCP use
+     this layout, so it was every page of both that ran long: the Monitoring
+     settings below "Also send when it recovers", and the access-group editor
+     with its twenty-one path rules.
+
+     The `100%` height was doing its job; what was missing is permission for the
+     children to be smaller than what is in them. */
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
 }
 .settings-nav {
   border-right: 1px solid var(--border-subtle);
   padding: var(--sp-3);
   overflow-y: auto;
+  /* See .settings — without this the item cannot shrink and never scrolls. */
+  min-height: 0;
   background: var(--bg-sidebar);
 }
 .settings-nav .nav-item {
@@ -1634,6 +1658,8 @@ details[open] > .disclosure-head .chev {
 }
 .settings-content {
   overflow-y: auto;
+  /* See .settings. This is the one that stranded content. */
+  min-height: 0;
   padding: var(--sp-6);
 }
 .settings-section h2 {
