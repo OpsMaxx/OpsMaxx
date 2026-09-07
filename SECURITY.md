@@ -237,6 +237,13 @@ your machine trusts is the one the running proxy signs with.
 `pathLenConstraint: 0` so it cannot issue intermediates, and the certificates it
 mints last thirty days and carry a single host name each.
 
+**A proxy off loopback needs a password.** A listener on 127.0.0.1 is reachable
+only by processes already running as you, who can read the traffic anyway. A
+listener on any other address is an open proxy for the network that also
+decrypts TLS — so OpsMaxx refuses to start one without credentials rather
+than warning about it, generates them itself, and puts them in the environment
+it hands out.
+
 **Upstream verification stays on.** OpsMaxx validates the real server's
 certificate against the system trust store on the outbound half of every
 intercepted connection, so interception does not silently downgrade a
@@ -292,9 +299,6 @@ vulnerabilities — but do open a discussion if you disagree with the tradeoff.
 - **A WebSocket's frames are not recorded.** The upgrade handshake is
   captured in full; what follows is another protocol on the same connection
   and is relayed untouched.
-- **gRPC and other HTTP/2-only services cannot be intercepted.** The inspector
-  speaks HTTP/1.1 to the client, which every ordinary client falls back to and
-  gRPC does not.
 - **Recorded bodies are capped in total, not just per body.** Past 512 MiB the
   oldest recorded bodies are deleted; their flows keep their headers, sizes and
   inline preview.

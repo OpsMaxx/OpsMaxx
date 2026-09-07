@@ -28,6 +28,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -129,7 +130,18 @@ type originServer struct {
 	listen net.Listener
 }
 
+// newOriginH2 is newOrigin with h2 offered in ALPN, for the HTTP/2 path.
+func newOriginH2(t *testing.T, handler http.Handler) *originServer {
+	t.Helper()
+	return newOriginWith(t, handler, []string{"h2", "http/1.1"})
+}
+
 func newOrigin(t *testing.T, handler http.Handler) *originServer {
+	t.Helper()
+	return newOriginWith(t, handler, []string{"http/1.1"})
+}
+
+func newOriginWith(t *testing.T, handler http.Handler, alpn []string) *originServer {
 	t.Helper()
 	caCertPem, caKeyPem, caCert := newCA(t)
 	caPair, err := tls.X509KeyPair([]byte(caCertPem), []byte(caKeyPem))
@@ -169,6 +181,7 @@ func newOrigin(t *testing.T, handler http.Handler) *originServer {
 		TLSConfig: &tls.Config{
 			Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}},
 			MinVersion:   tls.VersionTLS12,
+			NextProtos:   alpn,
 		},
 	}
 	go func() { _ = srv.ServeTLS(ln, "", "") }()
@@ -1392,7 +1405,7 @@ func TestNonTLSTunnelIsNotReportedAsPinning(t *testing.T) {
 	// Several CONNECTs to it, more than the pinning threshold, each speaking a
 	// protocol that is not TLS.
 	for i := 0; i < inspectPinThreshold+2; i++ {
-		c, err := net.Dial("tcp", fmt.Sprintf("%s:%d", ins.bindHost, ins.bindPort))
+		c, err := net.Dial("tcp", net.JoinHostPort(ins.bindHost, strconv.Itoa(ins.bindPort)))
 		if err != nil {
 			t.Fatalf("dial proxy: %v", err)
 		}
@@ -1475,4 +1488,215 @@ func TestTLSHandshakeStillCountsAsAnAttempt(t *testing.T) {
 		client.CloseIdleConnections()
 	}
 	waitFor(t, "the pinned report", func() bool { return len(sink.events("inspect.pinned")) == 1 })
+}
+
+// ------------------------------------------------------------------ h2
+
+// gRPC and other HTTP/2-only services were unreachable while the inspector
+// spoke 1.1 only. goproxy's h2 path runs the same request and response
+// filters, so flows must be recorded there exactly as on the 1.1 path.
+func TestHTTP2IsInterceptedAndRecorded(t *testing.T) {
+	origin := newOriginH2(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor != 2 {
+			t.Errorf("origin was reached over %s, want HTTP/2", r.Proto)
+		}
+		w.Header().Set("Content-Type", "application/grpc+proto")
+		_, _ = w.Write([]byte("h2 body"))
+	}))
+
+	ins, sink, insPool := newTestInspector(t, trusting(origin))
+	client := clientThrough(t, ins, insPool)
+	// Ask for h2 end to end.
+	tr := client.Transport.(*http.Transport)
+	tr.ForceAttemptHTTP2 = true
+	tr.TLSClientConfig.NextProtos = []string{"h2", "http/1.1"}
+
+	resp, err := client.Get(origin.url + "/h2")
+	if err != nil {
+		t.Fatalf("h2 request through the inspector: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if string(body) != "h2 body" {
+		t.Fatalf("body %q", body)
+	}
+
+	waitFor(t, "the h2 flow to end", func() bool { return len(sink.events("inspect.flow.end")) == 1 })
+	b := sink.events("inspect.flow.begin")[0]
+	if b["path"] != "/h2" {
+		t.Fatalf("begin event path %v", b["path"])
+	}
+	e := sink.events("inspect.flow.end")[0]
+	if int(e["status"].(float64)) != 200 {
+		t.Fatalf("status %v", e["status"])
+	}
+	if got := decodePreview(t, e, "resPreviewBase64"); got != "h2 body" {
+		t.Fatalf("an h2 response body must be recorded like any other, got %q", got)
+	}
+}
+
+// ------------------------------------------------------------------ auth
+
+// A listener anywhere but loopback is reachable by the whole network, and it
+// decrypts TLS. Refusing to start one without credentials is the only
+// defensible default.
+func TestNonLoopbackBindRequiresCredentials(t *testing.T) {
+	certPem, keyPem, _ := newCA(t)
+	_, err := newInspector(context.Background(), NewWriter(&eventSink{}), &InspectStartParams{
+		BindHost:  "0.0.0.0",
+		CACertPem: certPem,
+		CAKeyPem:  keyPem,
+		SpillDir:  t.TempDir(),
+	}, nil)
+	if err == nil {
+		t.Fatal("an open proxy on 0.0.0.0 was allowed with no credentials")
+	}
+	if !strings.Contains(err.Error(), "open proxy") {
+		t.Fatalf("the refusal should say why, got %v", err)
+	}
+
+	// With credentials it is allowed.
+	ins, err := newInspector(context.Background(), NewWriter(&eventSink{}), &InspectStartParams{
+		BindHost:  "127.0.0.1", // bound to loopback for the test's own safety
+		Username:  "u",
+		Password:  "p",
+		CACertPem: certPem,
+		CAKeyPem:  keyPem,
+		SpillDir:  t.TempDir(),
+	}, nil)
+	if err != nil {
+		t.Fatalf("credentials should have been accepted: %v", err)
+	}
+	ins.close()
+}
+
+func TestLoopbackNeedsNoCredentials(t *testing.T) {
+	for _, host := range []string{"127.0.0.1", "::1", "localhost", ""} {
+		if !isLoopbackHost(host) && host != "" {
+			t.Errorf("%q should count as loopback", host)
+		}
+	}
+	for _, host := range []string{"0.0.0.0", "192.168.1.10", "example.com", "::"} {
+		if isLoopbackHost(host) {
+			t.Errorf("%q must NOT count as loopback", host)
+		}
+	}
+}
+
+func TestCredentialsAreEnforcedOnEveryPath(t *testing.T) {
+	origin := newOrigin(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("secret"))
+	}))
+	ins, sink, insPool := newTestInspector(t, func(p *InspectStartParams) {
+		trusting(origin)(p)
+		p.Username = "user"
+		p.Password = "pass"
+	})
+
+	// No credentials: the CONNECT is rejected and nothing is recorded.
+	if _, err := clientThrough(t, ins, insPool).Get(origin.url + "/denied"); err == nil {
+		t.Fatal("an unauthenticated client reached the origin")
+	}
+	if n := len(sink.events("inspect.flow.begin")); n != 0 {
+		t.Fatalf("an unauthenticated request produced %d flow events", n)
+	}
+
+	// With them, it works.
+	proxyURL, _ := url.Parse(fmt.Sprintf("http://user:pass@%s:%d", ins.bindHost, ins.bindPort))
+	ok := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: insPool, MinVersion: tls.VersionTLS12},
+		},
+	}
+	resp, err := ok.Get(origin.url + "/allowed")
+	if err != nil {
+		t.Fatalf("an authenticated request was refused: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if string(body) != "secret" {
+		t.Fatalf("body %q", body)
+	}
+	waitFor(t, "the authenticated flow", func() bool {
+		return len(sink.events("inspect.flow.end")) == 1
+	})
+}
+
+// ------------------------------------------------------------------ cert LRU
+
+// The cache must evict the least recently USED host, not the oldest minted.
+// Under the previous insertion-order eviction a host touched on every page
+// load was thrown out ahead of one seen once, which is backwards.
+func TestCertCacheEvictsLeastRecentlyUsed(t *testing.T) {
+	ins, _, _ := newTestInspector(t, nil)
+
+	// Fill the cache exactly.
+	for i := 0; i < inspectCertCacheMax; i++ {
+		if _, err := ins.leafFor(fmt.Sprintf("h%d.example", i)); err != nil {
+			t.Fatalf("leafFor: %v", err)
+		}
+	}
+	// Touch the oldest so it is now the most recently used.
+	if _, err := ins.leafFor("h0.example"); err != nil {
+		t.Fatalf("leafFor: %v", err)
+	}
+	// One more host forces exactly one eviction.
+	if _, err := ins.leafFor("new.example"); err != nil {
+		t.Fatalf("leafFor: %v", err)
+	}
+
+	ins.mu.RLock()
+	_, keptTouched := ins.certs["h0.example"]
+	_, evictedNext := ins.certs["h1.example"]
+	size := len(ins.certs)
+	ins.mu.RUnlock()
+
+	if !keptTouched {
+		t.Fatal("the host used most recently was evicted — that is FIFO, not LRU")
+	}
+	if evictedNext {
+		t.Fatal("the least recently used host survived; something else was evicted")
+	}
+	if size > inspectCertCacheMax {
+		t.Fatalf("cache grew to %d past its %d cap", size, inspectCertCacheMax)
+	}
+}
+
+// A client that offers h2 must never be able to crash the sidecar.
+//
+// Advertising "h2" in the client ALPN list without goproxy's AllowHTTP2 drops
+// the connection into the HTTP/1 parser, which reads a frame, fails, and
+// dereferences a nil request URL — in a goroutine goproxy started, so no
+// recover in this process catches it and the whole sidecar dies. This test
+// exists because that is exactly what an earlier version of the two settings
+// above did to each other.
+func TestClientOfferingH2NeverPanicsTheSidecar(t *testing.T) {
+	origin := newOriginH2(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("alive"))
+	}))
+	ins, _, insPool := newTestInspector(t, trusting(origin))
+
+	for _, alpn := range [][]string{
+		{"h2"},
+		{"h2", "http/1.1"},
+		{"http/1.1", "h2"},
+		{"http/1.1"},
+	} {
+		client := clientThrough(t, ins, insPool)
+		tr := client.Transport.(*http.Transport)
+		tr.ForceAttemptHTTP2 = true
+		tr.TLSClientConfig.NextProtos = alpn
+		resp, err := client.Get(origin.url + "/alpn")
+		if err != nil {
+			t.Fatalf("ALPN %v: %v", alpn, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if string(body) != "alive" {
+			t.Fatalf("ALPN %v produced %q", alpn, body)
+		}
+		client.CloseIdleConnections()
+	}
 }

@@ -5,7 +5,7 @@ import { clsx } from '../../lib/format'
 import { useInspect } from './useInspect'
 import { InspectFlowDetail } from './InspectFlowDetail'
 import type { InspectFlow, InspectSourceKind } from '../../../../shared/inspect'
-import { isSensitiveHeader } from '../../../../shared/inspect'
+import { INSPECT_CA_EXPIRY_WARN_SEC, isSensitiveHeader } from '../../../../shared/inspect'
 
 /**
  * The HTTPS traffic inspector.
@@ -27,6 +27,7 @@ export function InspectView(): React.JSX.Element {
   const select = useInspect((s) => s.select)
   const allowPinned = useInspect((s) => s.allowPinned)
   const installTrust = useInspect((s) => s.installTrust)
+  const regenerate = useInspect((s) => s.regenerateCa)
 
   const [filter, setFilter] = useState('')
   const [source, setSource] = useState<InspectSourceKind>('sessions')
@@ -178,6 +179,47 @@ export function InspectView(): React.JSX.Element {
           </button>
         </div>
       ))}
+
+      {/* An expired authority makes every request fail with a certificate
+          error that says nothing about OpsMaxx. Said before it happens,
+          and unmissably once it has. */}
+      {status?.ca && status.ca.expiresInSec <= 0 && (
+        <div className="banner danger">
+          <AlertTriangle size={14} />
+          <span>
+            OpsMaxx’s certificate expired. Nothing can be inspected until you create a new one
+            and install it.
+          </span>
+          <div className="spacer" />
+          <button className="btn primary size-24" onClick={() => void regenerate()} disabled={busy}>
+            Create a new certificate
+          </button>
+        </div>
+      )}
+      {status?.ca &&
+        status.ca.expiresInSec > 0 &&
+        status.ca.expiresInSec < INSPECT_CA_EXPIRY_WARN_SEC && (
+          <div className="banner warn">
+            <AlertTriangle size={14} />
+            <span>
+              OpsMaxx’s certificate expires in {Math.ceil(status.ca.expiresInSec / 86400)} days.
+              After that nothing can be inspected until you create and install a new one.
+            </span>
+          </div>
+        )}
+
+      {/* The listener needs a password, so the environment the panel hands out
+          carries one. Said plainly, because a proxy that silently rejects
+          everything looks broken. */}
+      {running && status?.requiresCredentials && (
+        <div className="banner">
+          <ShieldCheck size={14} />
+          <span>
+            This proxy is off loopback, so it requires a username and password. “Copy shell setup”
+            includes them.
+          </span>
+        </div>
+      )}
 
       {status?.ca && <CaCard />}
 

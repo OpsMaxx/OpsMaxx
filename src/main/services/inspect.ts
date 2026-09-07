@@ -14,6 +14,7 @@ import type {
   InspectTrustStore
 } from '../../shared/inspect'
 import { INSPECT_DEFAULT_PASSTHROUGH, formatFingerprint } from '../../shared/inspect'
+import { randomBytes } from 'node:crypto'
 import { askNetdOnce } from './vpn/drivers/wireguard'
 import { resolveBundled } from './vpn/binaries'
 import { Supervisor } from './vpn/supervisor'
@@ -99,6 +100,8 @@ interface Run {
   maxBodyBytes: number
   insecureUpstream: boolean
   spillDir: string
+  /** Present only while the listener is off loopback. */
+  credentials: { username: string; password: string } | null
   systemProxyEngaged: boolean
   stopping: boolean
 }
@@ -240,6 +243,11 @@ async function describeCa(certPem: string, keyPersisted: boolean): Promise<Inspe
     fingerprintDisplay: formatFingerprint(fingerprint),
     notBefore: Math.floor(new Date(cert.validFrom).getTime() / 1000),
     notAfter: Math.floor(new Date(cert.validTo).getTime() / 1000),
+    // Computed on every read rather than at mint time. The authority is
+    // checked once when it is loaded, and an app left running for a year would
+    // otherwise pass that check and then start failing every request with a
+    // certificate error nothing on screen explained.
+    expiresInSec: Math.floor((new Date(cert.validTo).getTime() - Date.now()) / 1000),
     commonName: cert.subject.split('\n').find((l) => l.startsWith('CN='))?.slice(3) ?? 'OpsMaxx Traffic Inspector',
     certPath,
     keyPersisted
@@ -433,6 +441,17 @@ async function doStart(opts: InspectStartOptions): Promise<InspectStatus> {
   await mkdir(spillDir, { recursive: true, mode: 0o700 })
 
   const bindHost = opts.bindHost?.trim() || '127.0.0.1'
+  // A listener anywhere but loopback is an open proxy for the network, and it
+  // decrypts TLS. The sidecar refuses one without credentials; generating them
+  // here means the user is never asked to invent a password for a thing they
+  // did not know needed one.
+  const needsCredentials = !isLoopbackBind(bindHost)
+  const credentials = needsCredentials
+    ? {
+        username: opts.username?.trim() || 'opsmaxx',
+        password: opts.password?.trim() || randomBytes(18).toString('base64url')
+      }
+    : null
   const captureBodies = opts.captureBodies !== false
   const maxBodyBytes = opts.maxBodyBytes ?? 8 * 1024 * 1024
   passthrough = normaliseHosts(opts.passthrough ?? passthrough)
@@ -485,6 +504,7 @@ async function doStart(opts: InspectStartOptions): Promise<InspectStatus> {
     maxBodyBytes,
     insecureUpstream: opts.insecureUpstream === true,
     spillDir,
+    credentials,
     systemProxyEngaged: false,
     stopping: false
   }
@@ -504,7 +524,9 @@ async function doStart(opts: InspectStartOptions): Promise<InspectStatus> {
     maxBodyBytes: captureBodies ? maxBodyBytes : -1,
     spillDir,
     upstreamCAsPem: opts.upstreamCAsPem,
-    insecureUpstream: opts.insecureUpstream === true
+    insecureUpstream: opts.insecureUpstream === true,
+    username: credentials?.username,
+    password: credentials?.password
   }).catch(async (e: unknown) => {
     // A sidecar that started but refused the configuration must not be left
     // running: it holds a port and does nothing.
@@ -641,6 +663,7 @@ export async function inspectStatus(extra: { restarting?: boolean } = {}): Promi
     captureBodies: current?.captureBodies ?? true,
     maxBodyBytes: current?.maxBodyBytes ?? 8 * 1024 * 1024,
     insecureUpstream: current?.insecureUpstream ? true : undefined,
+    requiresCredentials: current?.credentials ? true : undefined,
     stoppedReason
   }
 }
@@ -703,6 +726,20 @@ export function hostWithoutPort(hostport: string): string {
   if (h.split(':').length > 2) return h
   const colon = h.lastIndexOf(':')
   return colon > 0 ? h.slice(0, colon) : h
+}
+
+/** Whether a bind address is reachable only from this machine.
+ *
+ *  A hostname that is not an IP literal counts as remote: resolving it to
+ *  decide a security question would mean trusting DNS for it. The same rule
+ *  the sidecar applies, restated so the two cannot disagree about which
+ *  listeners need a password. */
+export function isLoopbackBind(host: string): boolean {
+  const h = host.trim().toLowerCase().replace(/^\[|\]$/g, '')
+  if (h === 'localhost' || h === '') return true
+  if (h === '::1') return true
+  if (h === '0.0.0.0' || h === '::') return false
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)
 }
 
 function normaliseHosts(hosts: readonly string[]): string[] {
@@ -775,7 +812,13 @@ export function inspectEnv(): InspectEnv {
   // loopback, and handing a process the literal 0.0.0.0 as a proxy address is
   // how a working proxy looks broken.
   const host = current.bindHost === '0.0.0.0' ? '127.0.0.1' : current.bindHost
-  const url = `http://${host}:${current.bindPort}`
+  // Credentials go in the URL because that is the only place an environment
+  // variable can carry them, and every client that reads HTTPS_PROXY
+  // understands the form.
+  const auth = current.credentials
+    ? `${encodeURIComponent(current.credentials.username)}:${encodeURIComponent(current.credentials.password)}@`
+    : ''
+  const url = `http://${auth}${host}:${current.bindPort}`
   const certPath = ca.certPath
   return {
     HTTP_PROXY: url,

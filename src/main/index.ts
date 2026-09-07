@@ -467,7 +467,13 @@ function createWindow(): void {
   // slightly wrong. Guarded on `isDestroyed` because a flow can land between
   // the window closing and the sidecar stopping.
   setInspectEmitter((channel, payload) => {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
+    // Every window, not just this one. A flow belongs to the machine rather
+    // than to whichever window happened to start capture, and a popped-out
+    // second window showing an empty list while the first fills up is a bug
+    // nobody would think to report as one.
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send(channel, payload)
+    }
   })
 
   // F5 would reload and destroy every open terminal. Ctrl+R is deliberately
