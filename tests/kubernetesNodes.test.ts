@@ -251,6 +251,140 @@ describe('the API server version', () => {
 // into both pod sections. The fallback read had no error check of its own, so
 // those lines were handed to parsePods and each became a row — a panel showing
 // five pods called `Error"` for a cluster that was not answering at all.
+/**
+ * A kubeconfig that reads fine and a cluster that does not answer.
+ *
+ * The ordinary state of a developer's machine, and common on a jump host:
+ * several contexts, one of them reachable. kubectl lists contexts out of the
+ * file without talking to an API server, so they survive the failure — and
+ * switching to one that answers is the only useful thing to do about it.
+ */
+/**
+ * kubectl's own diagnostics, which are klog lines and not sentences.
+ *
+ * The error check anchors on the START of a section, and an unreachable
+ * cluster writes several klog lines before the `error:` summary — so the
+ * section began with one, failed the check, and was taken for data.
+ */
+describe('klog output is recognised as failure, not as data', () => {
+  const KLOG =
+    'E0907 21:14:59.291121   83548 memcache.go:265] "Unhandled Error" err="couldn\'t get server API group list"\n' +
+    'error: invalid character \'<\' looking for beginning of value'
+
+  const withPods = (podSection: string): string =>
+    [
+      '{"clientVersion":{"gitVersion":"v1.33.2"}}',
+      '===OPSMAXX-CTX===',
+      '*     docker-desktop   docker-desktop   docker-desktop   default',
+      '===OPSMAXX-NS===',
+      KLOG,
+      '===OPSMAXX-PODS-ALL===',
+      KLOG,
+      '===OPSMAXX-PODS-NS===',
+      podSection
+    ].join('\n')
+
+  it('does not turn klog lines into pods', () => {
+    const probe = parseK8sOutput(withPods(KLOG), 1)
+    expect(probe.ok).toBe(false)
+  })
+
+  // The shape of the bug, stated directly: a name that came out of a
+  // timestamped diagnostic line.
+  it('never yields a pod named from a diagnostic line', () => {
+    const probe = parseK8sOutput(withPods(KLOG), 1)
+    if (probe.ok) {
+      for (const p of probe.pods) expect(p.name).not.toMatch(/^E\d{4}|Error|Unhandled/)
+    }
+  })
+
+  // The other direction: a severity letter and four digits is klog's shape,
+  // and a real workload must not be mistaken for one.
+  it('still reads a real listing that happens to mention error', () => {
+    // The ten custom-columns fields the read command asks for.
+    const real = [
+      'default',
+      'error-handler',
+      'true',
+      'Running',
+      'app',
+      '<none>',
+      '<none>',
+      '0',
+      'node-1',
+      '2026-09-01T10:00:00Z'
+    ].join('   ')
+    const probe = parseK8sOutput(withPods(real), 0)
+    expect(probe.ok).toBe(true)
+    if (!probe.ok) return
+    expect(probe.pods.map((p) => p.name)).toContain('error-handler')
+  })
+})
+
+describe('a cluster that went quiet behind a readable kubeconfig', () => {
+  const OUTPUT = [
+    '{"clientVersion":{"gitVersion":"v1.33.2"}}',
+    '===OPSMAXX-CTX===',
+    '      docker-desktop   docker-desktop   docker-desktop',
+    '*     minikube         minikube         minikube         default',
+    '===OPSMAXX-NS===',
+    'Unable to connect to the server: dial tcp 127.0.0.1:8443: connect: connection refused',
+    '===OPSMAXX-PODS-ALL===',
+    'Unable to connect to the server: dial tcp 127.0.0.1:8443: connect: connection refused',
+    '===OPSMAXX-PODS-NS===',
+    'Unable to connect to the server: dial tcp 127.0.0.1:8443: connect: connection refused'
+  ].join('\n')
+
+  it('is a failure, not an empty cluster', () => {
+    const probe = parseK8sOutput(OUTPUT, 1)
+    expect(probe.ok).toBe(false)
+  })
+
+  it('keeps the contexts kubectl already listed', () => {
+    const probe = parseK8sOutput(OUTPUT, 1)
+    if (probe.ok) throw new Error('expected a failure')
+    expect((probe.contexts ?? []).map((c) => c.name)).toEqual(['docker-desktop', 'minikube'])
+    expect(probe.currentContext).toBe('minikube')
+  })
+
+  it('says what the cluster said rather than inventing a reason', () => {
+    const probe = parseK8sOutput(OUTPUT, 1)
+    if (probe.ok) throw new Error('expected a failure')
+    expect(probe.detail).toMatch(/connection refused/)
+  })
+
+  /**
+   * kubectl writes klog diagnostics and then a plain sentence. The sentence
+   * says what to do about it; the klog line says where inside kubectl the
+   * problem was noticed. The operator gets the sentence.
+   */
+  it('prefers kubectl\'s sentence over its klog line', () => {
+    const noisy = [
+      '{"clientVersion":{"gitVersion":"v1.33.2"}}',
+      '===OPSMAXX-CTX===',
+      '*     docker-desktop   docker-desktop   docker-desktop   default',
+      '===OPSMAXX-NS===',
+      'E0907 21:14:59.291121   83548 memcache.go:265] "Unhandled Error" err="x"',
+      'Unable to connect to the server: connection refused',
+      '===OPSMAXX-PODS-ALL===',
+      'E0907 21:15:00.150896   83933 memcache.go:265] "Unhandled Error" err="x"',
+      '===OPSMAXX-PODS-NS===',
+      'E0907 21:15:00.317007   84050 memcache.go:265] "Unhandled Error" err="x"'
+    ].join('\n')
+    const probe = parseK8sOutput(noisy, 1)
+    if (probe.ok) throw new Error('expected a failure')
+    expect(probe.detail).toBe('Unable to connect to the server: connection refused')
+    expect(probe.detail).not.toMatch(/memcache\.go/)
+  })
+
+  // The failure this replaced: reporting zero pods for a cluster that was not
+  // answering at all.
+  it('never reports pods for a cluster that said nothing', () => {
+    const probe = parseK8sOutput(OUTPUT, 1)
+    expect(probe.ok).toBe(false)
+  })
+})
+
 describe('pod sections that are both errors', () => {
   const OUTPUT = [
     '{"clientVersion":{"gitVersion":"v1.33.2"}}',

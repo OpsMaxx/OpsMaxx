@@ -574,7 +574,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
       setDrainCheck(null)
       setPhrase('')
       void loadOverview()
-      void load(context)
+      void load(effectiveContext)
     } finally {
       setNodeBusy('')
     }
@@ -724,6 +724,22 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   }
 
   const q = filter.trim().toLowerCase()
+  // Contexts come off either branch: a failed read carries them when kubectl
+  // read the kubeconfig before the cluster went quiet.
+  const contextChoices = probe ? (probe.ok ? probe.contexts : (probe.contexts ?? [])) : []
+  const currentContext = probe ? (probe.ok ? probe.currentContext : (probe.currentContext ?? null)) : null
+  /**
+   * The context a read will actually use.
+   *
+   * Falls through to the first listed one, because a kubeconfig need not mark
+   * any context as current — and when none is marked, the picker rendered the
+   * first entry as selected while the state behind it was still empty. Pressing
+   * Refresh then re-read with no context at all and failed identically, which
+   * looks like a control that does nothing. Display and behaviour read the same
+   * value here.
+   */
+  const effectiveContext = context || currentContext || contextChoices[0]?.name || ''
+
   const allPods = probe?.ok ? probe.pods : []
   const pods =
     q === ''
@@ -810,11 +826,17 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         {/* Choosing a context here passes --context for THIS read only. It does
             not run `kubectl config use-context`, which would repoint the
             cluster for every process on that host. */}
-        {probe?.ok && probe.contexts.length > 1 && (
+        {/* Shown on a FAILED read too, when kubectl got far enough to list
+            them. A kubeconfig with several contexts and only one reachable is
+            the ordinary state of a developer's machine; dropping the list
+            because the current context is down left nothing to click but a
+            refresh that fails the same way. */}
+        {contextChoices.length > 1 && (
           <select
             className="input"
             style={{ maxWidth: 200 }}
-            value={context || probe.currentContext || ''}
+            aria-label="Kubernetes context"
+            value={effectiveContext}
             onChange={(e) => {
               setContext(e.target.value)
               setOverview(null)
@@ -822,7 +844,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
               void load(e.target.value)
             }}
           >
-            {probe.contexts.map((c) => (
+            {contextChoices.map((c) => (
               <option key={c.name} value={c.name}>
                 {c.name}
                 {c.current ? ' (current)' : ''}
@@ -873,7 +895,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
           className="btn"
           disabled={loading || !hasTarget}
           title={hasTarget ? `Read Kubernetes on ${targetName}` : 'Choose a host first'}
-          onClick={() => void load(context)}
+          onClick={() => void load(effectiveContext)}
         >
           <RefreshCw size={13} className={clsx(loading && 'spin')} />{' '}
           {probe ? 'Refresh' : 'Read cluster'}
