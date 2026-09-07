@@ -16,6 +16,7 @@ import {
   Plug
 } from 'lucide-react'
 import { useApp, useWorkspaceFolders, useWorkspaceServers } from '../../store/app'
+import { disambiguateServerNames } from '../../../../shared/serverNames'
 import { clsx } from '../../lib/format'
 import { toast } from '../../store/toast'
 import { ContextMenu, MenuEntry } from './ContextMenu'
@@ -30,6 +31,10 @@ interface Ctx {
 export function ConnectionTree(): React.JSX.Element {
   const folders = useWorkspaceFolders()
   const servers = useWorkspaceServers()
+  // Two servers with the same name render identically here and everywhere the
+  // sidebar sends you. The suffix is added ONLY where a name actually collides,
+  // so an estate of unique names is untouched — see shared/serverNames.ts.
+  const labels = useMemo(() => disambiguateServerNames(servers), [servers])
   const openServer = useApp((s) => s.openServer)
   const newSession = useApp((s) => s.newSession)
   const toggleFavorite = useApp((s) => s.toggleFavorite)
@@ -163,7 +168,7 @@ export function ConnectionTree(): React.JSX.Element {
       title={`${s.username}@${s.host}:${s.port} — double-click for a new session`}
     >
       <span className={clsx('status-dot', s.status)} />
-      <span className="label">{s.name}</span>
+      <span className="label">{labels.get(s.id) ?? s.name}</span>
       {s.route.length > 0 && <Route size={12} className="faint" />}
       <span className="spacer" />
       {s.favorite && <Star size={12} className="fav" fill="currentColor" />}
@@ -333,7 +338,7 @@ export function ConnectionTree(): React.JSX.Element {
         {recent.map((s) => (
           <div key={s.id} className="tree-row" onClick={() => openServer(s.id)}>
             <span className={clsx('status-dot', s.status)} />
-            <span className="label">{s.name}</span>
+            <span className="label">{labels.get(s.id) ?? s.name}</span>
           </div>
         ))}
       </div>
