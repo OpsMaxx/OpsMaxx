@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { TOUR_STEPS } from '../src/renderer/src/components/onboarding/tourSteps'
+import { FULL_WALKTHROUGH } from '../src/renderer/src/components/onboarding/tourSteps'
 
 // What is workspace-scoped and what is not, pinned so the claim and the code
 // cannot drift apart again. The onboarding text said every vault entry belonged
@@ -28,17 +28,23 @@ describe('what a workspace actually isolates', () => {
 })
 
 describe('the walkthrough does not overclaim isolation', () => {
+  // Checked across the WHOLE walkthrough, first-run steps and deferred tips
+  // alike. The workspaces panel moved out of the first two steps and into a tip
+  // that fires on first visit; the claim it makes about isolation is the same
+  // claim wherever it is shown, so the guard has to cover both or a future edit
+  // could overclaim in the half it stopped reading.
   it('explains that an entry can be shared rather than implying total isolation', () => {
     // The vault is filtered by workspace, not cryptographically separated, and
-    // the tour must not imply otherwise.
-    const text = TOUR_STEPS.map((s) => s.body).join(' ')
+    // nothing the user is shown may imply otherwise.
+    const text = FULL_WALKTHROUGH.map((s) => s.body).join(' ')
     expect(text).toMatch(/marked shared/i)
   })
 
   it('still tells people workspaces can be password-protected', () => {
-    // The real isolation is worth keeping in the tour; only the vault claim was
-    // wrong.
-    expect(TOUR_STEPS.find((s) => s.id === 'workspaces')!.body).toMatch(/password-protect/i)
+    // The real isolation is worth keeping; only the vault claim was wrong.
+    const step = FULL_WALKTHROUGH.find((s) => /workspace/i.test(s.title))
+    expect(step, 'the walkthrough no longer explains workspaces at all').toBeDefined()
+    expect(step!.body).toMatch(/password-protect/i)
   })
 })
 

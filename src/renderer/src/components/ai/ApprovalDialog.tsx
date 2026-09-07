@@ -38,64 +38,92 @@ import {
 const AUDIT_WINDOW = 500
 
 interface Provenance {
-  /** null once the read has finished and found no session with this id. */
-  session: McpAgentSession | null
+  /** When the session connected, or null when nothing could say. */
+  startedAt: string | null
+  /** The access group named on the session, or null. */
+  groupName: string | null
+  /** False only while the fallback read is still in flight. */
   sessionRead: boolean
   /** Recorded actions this session has already taken, or null if unreadable. */
   actions: number | null
-  /** True when the audit read filled its window, so `actions` is a floor. */
+  /** True when the count came from a filled tail read, so it is a floor. */
   capped: boolean
 }
 
 /**
  * Who is asking, and how much they have already done.
  *
- * Both halves are read from surfaces that already exist — the session list and
- * the audit log — rather than being taken on trust from the request, which
- * carries neither. Both can fail, and when they do this returns null rather
- * than 0: "this session has taken no actions" and "ShellPilot could not find
- * out" are opposite pieces of news, and rendering the second as the first is
- * exactly the failure this product's rules forbid.
+ * MAIN'S ANSWER FIRST. The request now carries the session's start, its access
+ * group and an exact action count, because main holds the session record and
+ * can read the whole audit log rather than a tail of it. When they are there,
+ * both IPC round-trips below are skipped: they were two reads per modal for
+ * facts the process raising the request already knew.
+ *
+ * THE READS STAY, as the fallback for a request that arrives without them —
+ * and they stay honest. Both can fail, and when they do this reports null
+ * rather than 0: "this session has taken no actions" and "ShellPilot could not
+ * find out" are opposite pieces of news, and rendering the second as the first
+ * is exactly the failure this product's rules forbid. The tail read also
+ * reports `capped`, so a number derived from a truncated window can never be
+ * printed with the flat confidence of main's exact one.
  */
 function useProvenance(request: ApprovalRequest): Provenance {
-  const [p, setP] = useState<Provenance>({ session: null, sessionRead: false, actions: null, capped: false })
+  const knownStart = request.sessionStartedAt ?? null
+  const knownActions = request.actionsThisSession
+
+  const initial = (): Provenance => ({
+    startedAt: knownStart,
+    groupName: request.sessionGroupName ?? null,
+    sessionRead: knownStart !== null,
+    actions: typeof knownActions === 'number' ? knownActions : null,
+    capped: false
+  })
+
+  const [p, setP] = useState<Provenance>(initial)
 
   useEffect(() => {
     let live = true
-    setP({ session: null, sessionRead: false, actions: null, capped: false })
+    setP(initial())
 
-    void window.shellpilot?.aiMcp
-      ?.listSessions?.()
-      .then((all: McpAgentSession[] | undefined) => {
-        if (!live) return
-        setP((prev) => ({
-          ...prev,
-          session: all?.find((s) => s.id === request.sessionId) ?? null,
-          sessionRead: true
-        }))
-      })
-      .catch(() => live && setP((prev) => ({ ...prev, sessionRead: true })))
+    if (knownStart === null) {
+      void window.shellpilot?.aiMcp
+        ?.listSessions?.()
+        .then((all: McpAgentSession[] | undefined) => {
+          if (!live) return
+          const found = all?.find((s) => s.id === request.sessionId) ?? null
+          setP((prev) => ({
+            ...prev,
+            startedAt: found?.createdAt ?? null,
+            groupName: found?.groupName ?? null,
+            sessionRead: true
+          }))
+        })
+        .catch(() => live && setP((prev) => ({ ...prev, sessionRead: true })))
+    }
 
-    void window.shellpilot?.aiMcp
-      ?.listAudit?.(AUDIT_WINDOW)
-      .then((entries: AuditEntry[] | undefined) => {
-        if (!live || !entries) return
-        setP((prev) => ({
-          ...prev,
-          actions: entries.filter((e) => e.sessionId === request.sessionId).length,
-          // listAudit returns the tail of the file. A full window means older
-          // entries exist that were not read, so the count is a floor and the
-          // sentence has to say "at least" — a count presented as exact when it
-          // is a tail read is a measured-looking number nobody measured.
-          capped: entries.length >= AUDIT_WINDOW
-        }))
-      })
-      .catch(() => {})
+    if (typeof knownActions !== 'number') {
+      void window.shellpilot?.aiMcp
+        ?.listAudit?.(AUDIT_WINDOW)
+        .then((entries: AuditEntry[] | undefined) => {
+          if (!live || !entries) return
+          setP((prev) => ({
+            ...prev,
+            actions: entries.filter((e) => e.sessionId === request.sessionId).length,
+            // listAudit returns the tail of the file. A full window means older
+            // entries exist that were not read, so the count is a floor and the
+            // sentence has to say "at least" — a count presented as exact when it
+            // is a tail read is a measured-looking number nobody measured.
+            capped: entries.length >= AUDIT_WINDOW
+          }))
+        })
+        .catch(() => {})
+    }
 
     return () => {
       live = false
     }
-  }, [request.id, request.sessionId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request.id, request.sessionId, knownStart, knownActions, request.sessionGroupName])
 
   return p
 }
@@ -121,7 +149,11 @@ export function ApprovalDialog({
     action: request.action,
     risk: request.risk,
     serverName: request.serverName,
-    workspaceName: request.workspaceName
+    workspaceName: request.workspaceName,
+    // Main's own rule, when the gate() call site recorded one. explainRisk
+    // prefers it over the derivation in approvalRisk.ts, which exists now only
+    // for a call site that supplied none.
+    riskReason: request.riskReason
   }
   const risk = explainRisk(subject)
   const consequence = describeConsequence(subject)
@@ -254,7 +286,12 @@ export function ApprovalDialog({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <Row label="Agent">
               {request.agentName}
-              {prov.session ? ` · access group ${prov.session.groupName}` : ''}
+              {prov.groupName ? ` · access group ${prov.groupName}` : ''}
+              {request.toolName ? (
+                <span className="mono" style={{ color: 'var(--text-faint)' }}> · called {request.toolName}</span>
+              ) : (
+                ''
+              )}
             </Row>
             <Row label="Where">
               {request.workspaceName} / {request.serverName}
@@ -262,9 +299,9 @@ export function ApprovalDialog({
             <Row label="Session">
               {!prov.sessionRead ? (
                 'reading…'
-              ) : prov.session ? (
+              ) : prov.startedAt ? (
                 <>
-                  connected {duration(Date.parse(prov.session.createdAt))} ago
+                  connected {duration(Date.parse(prov.startedAt))} ago
                   <span className="mono" style={{ color: 'var(--text-faint)' }}>
                     {' '}
                     ({request.sessionId})
@@ -284,18 +321,39 @@ export function ApprovalDialog({
                   action or its fortieth.
                 </span>
               ) : (
+                // "at least" only for the renderer's own tail read. Main counts
+                // the whole log or sends nothing, so a number that came from the
+                // request is exact and says so by not hedging — and a hedged
+                // number can never be mistaken for one.
                 `${prov.capped ? 'at least ' : ''}${prov.actions} recorded before this one`
               )}
             </Row>
             <Row label="What led to this">
-              {/* The bridge does not carry an intent, and this line says so
-                  rather than leaving a gap. A blank here would read as "the
-                  agent gave no reason", which is a claim about the agent;
-                  the truth is a claim about ShellPilot. */}
-              <span style={{ color: 'var(--warn)' }}>
-                Not recorded. ShellPilot’s bridge does not ask an agent what it is trying to achieve, so nothing here
-                knows what task this action belongs to.
-              </span>
+              {/* THE ONE FIELD ON THIS SCREEN THE AGENT WROTE.
+                  Rendered as an attributed quotation, in the agent's name, and
+                  never as ShellPilot's own voice — the party asking for
+                  permission also writes this sentence, so it is evidence about
+                  the agent and never evidence about the action. It arrives
+                  already flattened, stripped and capped (sanitizeAgentIntent);
+                  React escapes what is left; nothing here parses it.
+
+                  Absent is still its own state, and the sentence still names
+                  whose gap it is: the bridge offers every gated tool an
+                  optional `intent`, so nothing arriving means the agent chose
+                  not to say, which is a fact about the agent worth reading. */}
+              {request.intent ? (
+                <>
+                  <span style={{ color: 'var(--text)' }}>“{request.intent}”</span>
+                  <div style={{ color: 'var(--text-faint)', fontSize: 11, marginTop: 3 }}>
+                    {request.agentName}’s own words, not ShellPilot’s. Nothing checked whether they are true.
+                  </div>
+                </>
+              ) : (
+                <span style={{ color: 'var(--warn)' }}>
+                  {request.agentName} sent no reason. ShellPilot asks for one on every gated call and does not
+                  require it, so nothing here knows what task this action belongs to.
+                </span>
+              )}
             </Row>
             <Row label="If you deny">{describeDenial(subject)}</Row>
           </div>

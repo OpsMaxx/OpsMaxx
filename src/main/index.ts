@@ -332,7 +332,13 @@ import {
   setSessionGroup,
   type CreateSessionInput
 } from './services/mcpAuth'
-import { listPendingApprovals, respondToApproval, onApprovalEvent, denyAllPending } from './services/approvals'
+import {
+  listPendingApprovals,
+  respondToApproval,
+  extendApproval,
+  onApprovalEvent,
+  denyAllPending
+} from './services/approvals'
 import { onCliPairingEvent, cancelCliPairing } from './services/cliPairing'
 import { claudeCodeCommand, writeClaudeDesktopConfig, writeCodexConfig } from './services/clientConfig'
 import { setAgentServerCreator, type AgentServerRequest, type AgentServerResult } from './services/agentServerCreate'
@@ -3801,6 +3807,13 @@ ipcMain.handle('aiMcp:listApprovals', () => listPendingApprovals())
 ipcMain.handle('aiMcp:respondApproval', (_e, id: string, decision: 'approved' | 'denied') =>
   respondToApproval(id, decision)
 )
+// "Give me more time". Reaches the ONE timer, in approvals.ts, rather than
+// letting the renderer keep a clock of its own: a countdown the renderer could
+// reset locally would go on ticking against a deadline main had never heard of.
+// False here means the fuse did not move -- already answered, already timed
+// out, or the extension ceiling is spent -- and the renderer must not pretend
+// otherwise; the new deadline arrives as an `extended` event, not as a guess.
+ipcMain.handle('aiMcp:extendApproval', (_e, id: string, seconds: number) => extendApproval(id, seconds))
 onApprovalEvent((e) => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('ai:approval-event', e)
   if (e.type === 'created') notifyApprovalPending(e.request)

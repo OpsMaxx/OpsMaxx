@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { useEffect, useState } from 'react'
 import type { ApprovalRequest } from '../../../shared/mcp'
-import { fuseDeadline, formatFuse } from '../../../shared/approvalRisk'
+import { resolveFuseDeadline, formatFuse } from '../../../shared/approvalRisk'
 import { bridgeOn, bridgeHas } from '../lib/bridge'
 import { toast } from './toast'
 import { openAi } from './nav'
@@ -101,6 +101,18 @@ export function startApprovalQueue(): () => void {
       useApprovalQueue.setState((s) => ({ pending: [...s.pending, e.request] }))
       return
     }
+    if (e.type === 'extended') {
+      // REPLACE, never append, and never announce. An extension is one field
+      // changing on a request the operator is already looking at; treating it
+      // like a `created` would put a second copy of the same question in the
+      // queue, and toasting it would interrupt the person who just asked for
+      // quiet time to think. The only visible effect is the countdown, which
+      // now reads main's new deadline instead of the old derived one.
+      useApprovalQueue.setState((s) => ({
+        pending: s.pending.map((r) => (r.id === e.request.id ? e.request : r))
+      }))
+      return
+    }
     useApprovalQueue.setState((s) => ({
       pending: s.pending.filter((r) => r.id !== e.request.id),
       deferred: s.deferred.filter((id) => id !== e.request.id)
@@ -172,7 +184,14 @@ export async function denyAndStopAllAi(): Promise<void> {
   )
 }
 
-/** Whether this build's preload can extend a running fuse. See useApprovalFuse. */
+/**
+ * Whether this build's preload can extend a running fuse.
+ *
+ * Probed rather than assumed. The IPC exists in this build, but the modal is
+ * also rendered by tests and by any harness that stubs the bridge, and a button
+ * that calls a method which is not there would look like it worked and would
+ * not. See useApprovalFuse.
+ */
 export function canExtendFuse(): boolean {
   return bridgeHas(window.shellpilot?.aiMcp as Record<string, unknown> | undefined, 'extendApproval')
 }
@@ -184,6 +203,13 @@ export function canExtendFuse(): boolean {
  * `pending` map (src/main/services/approvals.ts) and nothing in the renderer
  * can reach it, so when the method is absent the modal says so instead of
  * offering a button that would appear to work and would not.
+ *
+ * Nothing is updated here on the way back, on purpose. Main may grant less than
+ * was asked for (the ceiling in approvals.ts) or nothing at all (the request
+ * was answered a moment ago), and the only honest countdown is the one built
+ * from the deadline main broadcasts on its `extended` event. Writing a locally
+ * computed deadline here would be the renderer telling itself a time that main
+ * never agreed to.
  */
 export async function extendApprovalFuse(id: string, seconds: number): Promise<void> {
   const fn = (window.shellpilot?.aiMcp as unknown as Record<string, unknown> | undefined)?.extendApproval
@@ -206,10 +232,15 @@ export interface Fuse {
  * Ticks only while there is something to count. The interval is torn down when
  * the request goes away or the timeout is unknown, so an app sitting idle with
  * no pending approval is not waking up every second to recompute nothing.
+ *
+ * The deadline is main's own whenever the request carries one, and the
+ * created-at-plus-configured-timeout derivation only when it does not — see
+ * resolveFuseDeadline. That also means an extension re-arms this effect for
+ * free: `deadline` is the dependency, and the `extended` event changes it.
  */
 export function useApprovalFuse(request: ApprovalRequest | undefined): Fuse {
   const timeoutSeconds = useApprovalQueue((s) => s.timeoutSeconds)
-  const deadline = request ? fuseDeadline(request.createdAt, timeoutSeconds) : null
+  const deadline = request ? resolveFuseDeadline(request.deadlineAt, request.createdAt, timeoutSeconds) : null
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {

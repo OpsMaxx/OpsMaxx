@@ -1230,11 +1230,21 @@ const api = {
     listApprovals: (): Promise<ApprovalRequest[]> => ipcRenderer.invoke('aiMcp:listApprovals'),
     respondApproval: (id: string, decision: 'approved' | 'denied'): Promise<boolean> =>
       ipcRenderer.invoke('aiMcp:respondApproval', id, decision),
+    // Resolves false when the fuse did NOT move: the request was already
+    // answered, the clock already denied it, or the extension ceiling in
+    // approvals.ts is spent. The renderer must not treat the call itself as the
+    // extension -- the new deadline comes back on the `extended` event below,
+    // which is main's timer rather than the renderer's arithmetic.
+    extendApproval: (id: string, seconds: number): Promise<boolean> =>
+      ipcRenderer.invoke('aiMcp:extendApproval', id, seconds),
     listAudit: (limit?: number): Promise<AuditEntry[]> => ipcRenderer.invoke('aiMcp:listAudit', limit),
     onApprovalEvent: (
-      cb: (e: { type: 'created' | 'resolved'; request: ApprovalRequest }) => void
+      cb: (e: { type: 'created' | 'resolved' | 'extended'; request: ApprovalRequest }) => void
     ): (() => void) => {
-      const h = (_e: IpcRendererEvent, ev: { type: 'created' | 'resolved'; request: ApprovalRequest }): void => cb(ev)
+      const h = (
+        _e: IpcRendererEvent,
+        ev: { type: 'created' | 'resolved' | 'extended'; request: ApprovalRequest }
+      ): void => cb(ev)
       ipcRenderer.on('ai:approval-event', h)
       return () => ipcRenderer.removeListener('ai:approval-event', h)
     },

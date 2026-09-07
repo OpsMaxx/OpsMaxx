@@ -240,6 +240,13 @@ export interface McpAgentSession {
   revoked: boolean
 }
 
+// Everything below `status` is optional, and the optionality is not laziness —
+// it is what lets the approval dialog keep its honest-absence paths alive. A
+// required field would compile everywhere and then arrive as `undefined` from
+// one gate() call site somebody forgot, which the renderer would have no way to
+// tell apart from a measured value. Optional says "this may genuinely not have
+// been recorded", and every consumer is forced to decide what to print when it
+// was not. See src/renderer/src/components/ai/ApprovalDialog.tsx.
 export interface ApprovalRequest {
   id: string
   sessionId: string
@@ -254,6 +261,55 @@ export interface ApprovalRequest {
   createdAt: string
   status: 'pending' | 'approved' | 'denied' | 'timeout'
   resolvedAt?: string
+
+  /**
+   * When this request auto-denies, as main's timer actually has it.
+   *
+   * The renderer used to derive the deadline from `createdAt` plus the
+   * configured timeout, which was right only for as long as nothing could move
+   * the fuse. extendApproval() moves it, so a derived deadline would go on
+   * counting down to a moment that no longer exists and the operator would
+   * watch it hit zero while the request was still very much alive. This is the
+   * timer, not a reconstruction of it; the derivation stays as the fallback.
+   */
+  deadlineAt?: string
+
+  /** The MCP tool the agent called, e.g. `execute_command`. */
+  toolName?: string
+
+  /**
+   * The agent's own stated reason for the call, ALREADY SANITISED.
+   *
+   * Written by the party asking for permission, so it is evidence about the
+   * agent and never evidence about the action. sanitizeAgentIntent() in
+   * shared/approvalRisk.ts is the only thing that may put a value here, and the
+   * dialog renders it as an attributed quotation. Absent means the agent sent
+   * none — the bridge offers the field on every gated tool and does not require
+   * it.
+   */
+  intent?: string
+
+  /**
+   * The rule that produced `risk`, in the operator's language, from the gate()
+   * call site that fired it. The renderer can re-derive something similar from
+   * capability and action, but that derivation is a copy of main's rules kept
+   * in step by hand; this is the rule itself.
+   */
+  riskReason?: string
+
+  /** When the agent's session connected. Exact — main holds the session. */
+  sessionStartedAt?: string
+  /** The access group named on the session. */
+  sessionGroupName?: string
+  /**
+   * Audited actions this session took before this one — EXACT, or absent.
+   *
+   * Absent whenever main could not count them exactly (unreadable log, a
+   * corrupt line, a log too large to read in a modal's lifetime). It is never a
+   * partial count: the renderer's own tail read is the approximate answer and
+   * it labels itself "at least N", so a number here is always the real one.
+   */
+  actionsThisSession?: number
 }
 
 export type AuditApproval = 'not-required' | 'approved' | 'denied' | 'timeout'

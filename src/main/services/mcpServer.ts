@@ -1,5 +1,6 @@
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { z } from 'zod'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -41,7 +42,7 @@ import { getGroup, listAssignments } from './policyStore'
 import { fleetCached } from './fleetSampler'
 import type { CapacityReport } from '../../shared/capacity'
 import { requestApproval } from './approvals'
-import { recordAudit } from './auditLog'
+import { recordAudit, AUDIT_LOG_PATH } from './auditLog'
 import { redactOutput } from './secretRedaction'
 import { knownSecretValuesForServer, resolveChainSecrets, resolveDbSecrets } from './credentialResolver'
 import { sshExec } from './ssh'
@@ -300,10 +301,74 @@ export function setCapacityReader(
   capacityReader = fn
 }
 
+/**
+ * What the approval dialog needs that the audit context does not carry.
+ *
+ * `because` is the reason this grade was chosen, written where the choice is
+ * made. It is not optional, and that is the design: the renderer used to derive
+ * an equivalent sentence from the capability and the command, which was correct
+ * only for as long as somebody remembered to update a copy of these rules
+ * living in another process. A required field means a new gated tool cannot be
+ * added without a human writing down why it grades what it grades — at the one
+ * place that knows.
+ *
+ * `intent` is whatever the agent put in the tool call's optional `intent`
+ * argument. It is attacker-controlled text and is passed through untouched to
+ * exactly one place — requestApproval, which sanitises it. Nothing in this
+ * module reads it, tests it, or lets it influence a decision.
+ */
+interface GateSubject {
+  toolName: string
+  level: 'low' | 'medium' | 'high'
+  because: string
+  intent?: string
+}
+
+/**
+ * How many audited actions a session has taken — EXACT, or null.
+ *
+ * The approval dialog can already answer this from a 500-row tail of the audit
+ * log, and does when this returns null; but a tail read makes the number a
+ * floor ("at least 40"), and a floor is a worse thing to hand somebody deciding
+ * whether an agent is behaving oddly than the real count. This reads the whole
+ * file, which is what makes it exact.
+ *
+ * Null — not zero, and not a partial count — for every case where exactness is
+ * not available: the file cannot be read, a line does not parse (skipping it
+ * would silently make the total a floor again, wearing an exact number's
+ * clothes), or the file is large enough that reading it would stall the tool
+ * call that a human is already waiting on. Null hands the question back to the
+ * renderer's tail read, which knows how to label itself as approximate.
+ */
+function countSessionActions(sessionId: string): number | null {
+  // ~8MB is roughly 20k audit lines: far more than retention normally leaves,
+  // and the point at which a synchronous read stops being free. Past it the
+  // approximate answer is the better trade.
+  const MAX_BYTES = 8 * 1024 * 1024
+  try {
+    if (!existsSync(AUDIT_LOG_PATH)) return 0
+    if (statSync(AUDIT_LOG_PATH).size > MAX_BYTES) return null
+    let n = 0
+    for (const line of readFileSync(AUDIT_LOG_PATH, 'utf8').split('\n')) {
+      if (!line) continue
+      let entry: { sessionId?: string }
+      try {
+        entry = JSON.parse(line) as { sessionId?: string }
+      } catch {
+        return null
+      }
+      if (entry.sessionId === sessionId) n++
+    }
+    return n
+  } catch {
+    return null
+  }
+}
+
 async function gate(
   ctx: AuditContext,
   check: { decision: 'allow' | 'ask' | 'deny'; reason: string },
-  risk: 'low' | 'medium' | 'high',
+  subject: GateSubject,
   extra?: ExtraLike
 ): Promise<{ ok: true } | { ok: false; result: CallToolResult }> {
   if (check.decision === 'deny') {
@@ -337,7 +402,18 @@ async function gate(
       serverName: ctx.serverName,
       capability: ctx.capability,
       action: ctx.action,
-      risk
+      risk: subject.level,
+      riskReason: subject.because,
+      toolName: subject.toolName,
+      intent: subject.intent,
+      // Both read here rather than by the renderer over IPC. Main holds the
+      // session record, so its start and its group are facts rather than the
+      // result of a lookup that can come back empty; the action count is exact
+      // or absent, and `?? undefined` is what keeps a failed count out of the
+      // request entirely instead of turning it into a zero.
+      sessionStartedAt: ctx.session.createdAt,
+      sessionGroupName: ctx.session.groupName,
+      actionsThisSession: countSessionActions(ctx.session.id) ?? undefined
     })
     if (decision !== 'approved') {
       recordAudit({
@@ -381,6 +457,32 @@ function auditSuccess(ctx: AuditContext, approval: 'not-required' | 'approved', 
     exitCode: extra.exitCode
   })
 }
+
+/**
+ * The one parameter on every gated tool that exists for the human, not the tool.
+ *
+ * MCP's tools/call carries a name, arguments and `_meta` — there is no field in
+ * the protocol where an agent states what it is trying to achieve, so if
+ * ShellPilot wants that sentence it has to ask for it, and this is the asking.
+ * Optional, because an agent that does not answer must not be blocked, and
+ * because a required field would mostly be filled with the tool's own name.
+ *
+ * It is never used for anything except display. It does not widen a permission,
+ * it does not change a grade, and it is not matched against a policy: an agent
+ * that could improve its own odds by writing the right words here would be
+ * grading its own request. The description says so out loud, because an agent
+ * that believes this text is persuasion will write persuasion, and the operator
+ * is better served by a plain answer.
+ */
+const INTENT_PARAM = z
+  .string()
+  .optional()
+  .describe(
+    'Optional. One short sentence saying what you are trying to achieve with this call. If the call ' +
+      'needs a human to approve it, this is shown to them word for word, attributed to you, and capped ' +
+      'in length. It is never treated as permission and never changes what you are allowed to do — say ' +
+      'what the task is, not why it should be allowed.'
+  )
 
 // Sent to the client on initialize and, in most clients, placed in the model's
 // system prompt. Without it an agent has to infer the addressing scheme from
@@ -825,11 +927,12 @@ function buildServer(): McpServer {
         serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
         command: z
           .string()
-          .describe('A single non-interactive shell command. Not a script, not an interactive program.')
+          .describe('A single non-interactive shell command. Not a script, not an interactive program.'),
+        intent: INTENT_PARAM
       },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true }
     },
-    async ({ serverName, command }, extra) => {
+    async ({ serverName, command, intent }, extra) => {
       const auth = authenticateExtra(extra)
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
       const resolved = resolveServerOrError(auth.session, serverName)
@@ -855,11 +958,25 @@ function buildServer(): McpServer {
       // rule, but swapping one rule for another would quietly lower some
       // command somewhere and this is not the change to discover that in.
       const assessed = assessCommand(command)
-      const risk =
-        check.decision === 'deny' || assessed.risk !== 'ordinary' || /sudo\b/.test(command)
-          ? 'high'
-          : 'medium'
-      const gated = await gate(ctx, check, risk, extra)
+      const runsAsRoot = /sudo\b/.test(command)
+      const elevated = check.decision === 'deny' || assessed.risk !== 'ordinary' || runsAsRoot
+      // The reason names the rule that fired, in that order, because that is
+      // the order the OR above evaluates -- and assessCommand already returns
+      // the sentence for its own rule, so this quotes it rather than writing a
+      // second description of the same regex that could drift from it.
+      const because = !elevated
+        ? 'it runs a shell command of the agent\u2019s own composition on the host'
+        : runsAsRoot
+          ? 'the command runs as root, through sudo'
+          : assessed.reasons[0]
+            ? `ShellPilot\u2019s command classifier graded it ${assessed.risk}: ${assessed.reasons[0]}`
+            : `ShellPilot\u2019s command classifier graded it ${assessed.risk}`
+      const gated = await gate(
+        ctx,
+        check,
+        { toolName: 'execute_command', level: elevated ? 'high' : 'medium', because, intent },
+        extra
+      )
       if (!gated.ok) return gated.result
 
       const secrets = knownSecretValuesForServer(s.id)
@@ -899,11 +1016,12 @@ function buildServer(): McpServer {
         'command line. Text only — this is not a way to fetch binaries.',
       inputSchema: {
         serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
-        path: z.string().describe('Absolute remote path, e.g. /var/log/nginx/error.log')
+        path: z.string().describe('Absolute remote path, e.g. /var/log/nginx/error.log'),
+        intent: INTENT_PARAM
       },
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false }
     },
-    async ({ serverName, path }, extra) => {
+    async ({ serverName, path, intent }, extra) => {
       const auth = authenticateExtra(extra)
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
       const resolved = resolveServerOrError(auth.session, serverName)
@@ -919,7 +1037,17 @@ function buildServer(): McpServer {
         action: `read ${path}`,
         capability: 'readFiles'
       }
-      const gated = await gate(ctx, check, 'low', extra)
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'read_file',
+          level: 'low',
+          because: 'it reads a file from the host and hands the contents to the agent',
+          intent
+        },
+        extra
+      )
       if (!gated.ok) return gated.result
 
       const secrets = knownSecretValuesForServer(s.id)
@@ -949,11 +1077,12 @@ function buildServer(): McpServer {
       inputSchema: {
         serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
         path: z.string().describe('Absolute remote path, e.g. /etc/nginx/conf.d/site.conf'),
-        content: z.string().describe('The complete new contents of the file. Replaces whatever is there.')
+        content: z.string().describe('The complete new contents of the file. Replaces whatever is there.'),
+        intent: INTENT_PARAM
       },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false }
     },
-    async ({ serverName, path, content }, extra) => {
+    async ({ serverName, path, content, intent }, extra) => {
       const auth = authenticateExtra(extra)
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
       const resolved = resolveServerOrError(auth.session, serverName)
@@ -969,7 +1098,17 @@ function buildServer(): McpServer {
         action: `write ${path} (${content.length} bytes)`,
         capability: 'writeFiles'
       }
-      const gated = await gate(ctx, check, 'medium', extra)
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'write_file',
+          level: 'medium',
+          because: 'it overwrites a file on the host, and ShellPilot keeps no copy of the previous contents',
+          intent
+        },
+        extra
+      )
       if (!gated.ok) return gated.result
 
       const cfg = resolveChainSecrets(serverToSshConfig(s))
@@ -996,11 +1135,12 @@ function buildServer(): McpServer {
         'through execute_command — it returns structured output and is checked against the per-path rules directly.',
       inputSchema: {
         serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
-        path: z.string().describe('Absolute remote directory path, e.g. /var/www')
+        path: z.string().describe('Absolute remote directory path, e.g. /var/www'),
+        intent: INTENT_PARAM
       },
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false }
     },
-    async ({ serverName, path }, extra) => {
+    async ({ serverName, path, intent }, extra) => {
       const auth = authenticateExtra(extra)
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
       const resolved = resolveServerOrError(auth.session, serverName)
@@ -1016,7 +1156,17 @@ function buildServer(): McpServer {
         action: `list ${path}`,
         capability: 'readFiles'
       }
-      const gated = await gate(ctx, check, 'low', extra)
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'list_files',
+          level: 'low',
+          because: 'it lists a directory on the host, so the agent learns the filenames in it',
+          intent
+        },
+        extra
+      )
       if (!gated.ok) return gated.result
 
       const cfg = resolveChainSecrets(serverToSshConfig(s))
@@ -1057,11 +1207,12 @@ function buildServer(): McpServer {
           .min(1)
           .max(90)
           .optional()
-          .describe('How many days of history to read. Defaults to 7, clamped to what is retained.')
+          .describe('How many days of history to read. Defaults to 7, clamped to what is retained.'),
+        intent: INTENT_PARAM
       },
       annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: false }
     },
-    async ({ serverName, windowDays }, extra) => {
+    async ({ serverName, windowDays, intent }, extra) => {
       const auth = authenticateExtra(extra)
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
       const resolved = resolveServerOrError(auth.session, serverName)
@@ -1080,7 +1231,17 @@ function buildServer(): McpServer {
         action: 'get_capacity_trends',
         capability: 'serverMetrics'
       }
-      const gated = await gate(ctx, check, 'low', extra)
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'get_capacity_trends',
+          level: 'low',
+          because: 'it returns CPU, memory and disk history ShellPilot has already recorded, and touches the host not at all',
+          intent
+        },
+        extra
+      )
       if (!gated.ok) return gated.result
 
       // "History is off" and "this server has no history" are different
@@ -1123,10 +1284,13 @@ function buildServer(): McpServer {
         'or `uptime` through execute_command: it needs no shell access, returns parsed values rather than ' +
         'text to scrape, and distinguishes "nothing is failing" from "systemd is not installed here" — ' +
         'which a scraped command cannot.',
-      inputSchema: { serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers') },
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        intent: INTENT_PARAM
+      },
       annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: false }
     },
-    async ({ serverName }, extra) => {
+    async ({ serverName, intent }, extra) => {
       const auth = authenticateExtra(extra)
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
       const resolved = resolveServerOrError(auth.session, serverName)
@@ -1142,7 +1306,17 @@ function buildServer(): McpServer {
         action: 'get_server_metrics',
         capability: 'serverMetrics'
       }
-      const gated = await gate(ctx, check, 'low', extra)
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'get_server_metrics',
+          level: 'low',
+          because: 'it returns the host\u2019s listening ports and failed services, not only its CPU and memory',
+          intent
+        },
+        extra
+      )
       if (!gated.ok) return gated.result
 
       // Answer from the Fleet Monitor's own sample when it has a current one.
@@ -1231,10 +1405,13 @@ function buildServer(): McpServer {
         'A number reported as NOT AVAILABLE is NOT zero. Read the status next to it before concluding ' +
         'anything about how patched a server is. ' +
         'This is a separate permission from server metrics because it is a patch-status report.',
-      inputSchema: { serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers') },
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        intent: INTENT_PARAM
+      },
       annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: false }
     },
-    async ({ serverName }, extra) => {
+    async ({ serverName, intent }, extra) => {
       const auth = authenticateExtra(extra)
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
       const resolved = resolveServerOrError(auth.session, serverName)
@@ -1254,7 +1431,18 @@ function buildServer(): McpServer {
       // 'medium', not 'low'. The metrics tool is a health check; this one
       // enumerates which hosts are unpatched and against what, and the approval
       // dialog should say so at a weight that matches.
-      const gated = await gate(ctx, check, 'medium', extra)
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'get_host_facts',
+          level: 'medium',
+          because:
+            'it returns which security updates the host is missing, which is what the host is unpatched against',
+          intent
+        },
+        extra
+      )
       if (!gated.ok) return gated.result
 
       // Answered from the sampler's hourly collection when it has one, for the
@@ -1349,11 +1537,12 @@ function buildServer(): McpServer {
         databaseName: z.string().describe('Friendly name exactly as returned by list_databases'),
         statement: z
           .string()
-          .describe('A single statement. SQL for relational engines, shell syntax for MongoDB and Redis.')
+          .describe('A single statement. SQL for relational engines, shell syntax for MongoDB and Redis.'),
+        intent: INTENT_PARAM
       },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true }
     },
-    async ({ databaseName, statement }, extra) => {
+    async ({ databaseName, statement, intent }, extra) => {
       const auth = authenticateExtra(extra)
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
       const { session } = auth
@@ -1389,7 +1578,20 @@ function buildServer(): McpServer {
         capability: 'databaseAccess'
       }
 
-      const gated = await gate(ctx, check, classifyStatement(statement) === 'read' ? 'low' : 'high', extra)
+      const reads = classifyStatement(statement) === 'read'
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'query_database',
+          level: reads ? 'low' : 'high',
+          because: reads
+            ? 'ShellPilot classified this statement as a read'
+            : 'ShellPilot could not classify this statement as a read, so it is treated as one that changes data',
+          intent
+        },
+        extra
+      )
       if (!gated.ok) return gated.result
 
       const approval = check.decision === 'ask' ? 'approved' : 'not-required'
@@ -1447,11 +1649,12 @@ function buildServer(): McpServer {
         'change where one points — only run one the user has already defined.',
       inputSchema: {
         tunnelName: z.string().describe('Friendly name exactly as returned by list_tunnels'),
-        running: z.boolean().describe('true to start the tunnel, false to stop it')
+        running: z.boolean().describe('true to start the tunnel, false to stop it'),
+        intent: INTENT_PARAM
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
     },
-    async ({ tunnelName, running }, extra) => {
+    async ({ tunnelName, running, intent }, extra) => {
       const auth = authenticateExtra(extra)
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
       const { session } = auth
@@ -1494,7 +1697,19 @@ function buildServer(): McpServer {
         capability: 'sshTunnel'
       }
 
-      const gated = await gate(ctx, check, running ? 'high' : 'low', extra)
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'set_tunnel',
+          level: running ? 'high' : 'low',
+          because: running
+            ? 'it opens a network path between this machine and a port on the server'
+            : 'it closes a tunnel that other things may still be using',
+          intent
+        },
+        extra
+      )
       if (!gated.ok) return gated.result
       const approval = check.decision === 'ask' ? 'approved' : 'not-required'
 
@@ -1579,11 +1794,12 @@ function buildServer(): McpServer {
         'create a VPN profile or change where one points — only run one the user has already defined.',
       inputSchema: {
         vpnName: z.string().describe('Friendly name exactly as returned by list_vpns'),
-        running: z.boolean().describe('true to start the VPN, false to stop it')
+        running: z.boolean().describe('true to start the VPN, false to stop it'),
+        intent: INTENT_PARAM
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
     },
-    async ({ vpnName, running }, extra) => {
+    async ({ vpnName, running, intent }, extra) => {
       const auth = authenticateExtra(extra)
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
       const { session } = auth
@@ -1642,7 +1858,21 @@ function buildServer(): McpServer {
         capability: 'vpnControl'
       }
 
-      const gated = await gate(ctx, check, running || liveDependents > 0 ? 'high' : 'low', extra)
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'set_vpn',
+          level: running || liveDependents > 0 ? 'high' : 'low',
+          because: running
+            ? 'it changes which network your later SSH and database sessions travel over'
+            : liveDependents > 0
+              ? `it stops a VPN that ${liveDependents} live session(s) reach their host through`
+              : 'it stops a VPN that other sessions may depend on',
+          intent
+        },
+        extra
+      )
       if (!gated.ok) return gated.result
       const approval = check.decision === 'ask' ? 'approved' : 'not-required'
 
@@ -1712,7 +1942,8 @@ function buildServer(): McpServer {
         password: z.string().optional().describe('Password, when auth is "password"'),
         keyPath: z.string().optional().describe('Absolute path to a private key file, when auth is "key"'),
         passphrase: z.string().optional().describe('Passphrase for the private key, if it has one'),
-        os: z.string().optional().describe('Operating system label, default "Linux"')
+        os: z.string().optional().describe('Operating system label, default "Linux"'),
+        intent: INTENT_PARAM
       }
     },
     async (args, extra) => {
@@ -1767,7 +1998,17 @@ function buildServer(): McpServer {
       }
 
       const check = effectiveWorkspaceCapability(session, workspace.id, 'manageServers')
-      const gated = await gate(ctx, check, 'high', extra)
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'add_server',
+          level: 'high',
+          because: 'it writes to ShellPilot\u2019s own connection list and stores a credential there',
+          intent: args.intent
+        },
+        extra
+      )
       if (!gated.ok) return gated.result
 
       const result = await createServerForAgent({
