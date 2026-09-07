@@ -9,6 +9,7 @@ import type {
 } from '../../shared/local'
 import { recordLocalSession } from './localSessionLog'
 import { findShell, sanitisedEnv } from './shellDiscovery'
+import { inspectEnv, inspectInjectsSessions } from './inspect'
 
 // node-pty is loaded lazily, on the first connect, and never at module scope.
 // A machine where the native binding will not load (an unsupported libc, a
@@ -270,7 +271,12 @@ export async function localConnect(wc: WebContents, cfg: LocalConnectConfig): Pr
       cols: cfg.cols,
       rows: cfg.rows,
       cwd: cfg.cwd ?? homedir(),
-      env: { ...sanitisedEnv(), ...(shell.env ?? {}) },
+      // The inspector's variables sit between the sanitised base and the
+      // shell's own, so a shell profile that deliberately sets HTTPS_PROXY
+      // still wins. This is rung one of traffic inspection: no privilege, no
+      // system state, and a session started while capture is off is simply
+      // not intercepted.
+      env: { ...sanitisedEnv(), ...inspectSessionEnv(), ...(shell.env ?? {}) },
       useConpty: true,
       // See Phase 0 Q3. The bundled redistributable ConPTY is deliberately not
       // shipped; the one in conhost.exe is used instead.
@@ -422,4 +428,14 @@ export function localDisposeForWebContents(wcId: number): void {
   for (const [id, s] of [...sessions.entries()]) {
     if (s.wcId === wcId) localClose(id)
   }
+}
+
+
+/** The traffic inspector's environment, or nothing at all.
+ *
+ *  A separate function rather than an inline conditional because the same
+ *  question is asked by the SSH path, and two copies of "is capture on and is
+ *  it the kind that injects" is one copy too many. */
+function inspectSessionEnv(): Record<string, string> {
+  return inspectInjectsSessions() ? inspectEnv() : {}
 }

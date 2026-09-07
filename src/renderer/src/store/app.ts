@@ -251,7 +251,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 export type ModalKind = 'add-server' | 'workspaces' | 'route-editor' | 'add-database' | 'import-ssh' | null
 
 /** Which of the three destinations the Tunnels & VPN view is showing. */
-export type TunnelsTab = 'tunnels' | 'vpn' | 'frp'
+export type TunnelsTab = 'tunnels' | 'vpn' | 'frp' | 'inspect'
 
 // What openTab takes: a Tab minus the fields the store mints, with the
 // workspace optional.

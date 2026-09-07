@@ -84,6 +84,15 @@ type Server struct {
 	// tunnel into a server that has already torn everything down.
 	stopping bool
 
+	// The traffic inspector, when one is running. There is at most one: it
+	// owns a listener the user pointed their system, terminal or device at,
+	// and a second one would mean a second CA and a second port with no way
+	// for anyone to tell which was which. `inspectorStarting` reserves the
+	// slot across the slow part of inspect.start, the same way `starting`
+	// reserves a tunnelId across wg.up.
+	inspector         *Inspector
+	inspectorStarting bool
+
 	ctx      context.Context
 	cancel   context.CancelFunc
 	forwardN atomic.Uint64
@@ -335,6 +344,18 @@ func (s *Server) dispatch(req *Request) {
 		s.handle(req, s.forwardClose)
 	case "wg.keygen":
 		s.handle(req, s.wgKeygen)
+	case "inspect.start":
+		s.handle(req, s.inspectStart)
+	case "inspect.stop":
+		s.handle(req, s.inspectStop)
+	case "inspect.status":
+		s.handle(req, s.inspectStatus)
+	case "inspect.passthrough":
+		s.handle(req, s.inspectPassthrough)
+	case "inspect.body":
+		s.handle(req, s.inspectBody)
+	case "inspect.ca.generate":
+		s.handle(req, s.inspectCAGenerate)
 	case "auth":
 		// Only ever valid as the very first message on a --privileged
 		// connection, where privileged.go consumes it before this dispatcher
@@ -481,6 +502,11 @@ func (s *Server) wgDown(req *Request) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	// An inspector riding this tunnel loses its road the moment the device
+	// goes. Leaving it listening would answer every request with a 502 from a
+	// proxy the user still believes is working; stopping it and saying why is
+	// the only version of this that a person can act on.
+	s.stopInspectorOn(p.TunnelID, "the tunnel it was inspecting through was stopped")
 	// Blocks until every listener is closed, every relay has ended and the
 	// device is down. The caller is entitled to assume the ports are free
 	// when this returns.
@@ -619,6 +645,8 @@ func (s *Server) stop() {
 	s.stopOnce.Do(func() {
 		s.mu.Lock()
 		s.stopping = true
+		ins := s.inspector
+		s.inspector = nil
 		all := make([]*Tunnel, 0, len(s.tunnels))
 		for id, t := range s.tunnels {
 			all = append(all, t)
@@ -626,6 +654,13 @@ func (s *Server) stop() {
 		}
 		s.forwards = map[string]string{}
 		s.mu.Unlock()
+
+		// Before the tunnels: the inspector may be dialling through one of
+		// them, and tearing the road up under a live request produces a
+		// confusing error instead of a clean stop.
+		if ins != nil {
+			ins.close()
+		}
 
 		var wg sync.WaitGroup
 		for _, t := range all {
