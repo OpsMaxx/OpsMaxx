@@ -480,6 +480,33 @@ function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
 
+  // A right-click menu, because Electron ships none.
+  //
+  // The Edit menu's roles give Cmd+C and Cmd+V, so the keyboard has always
+  // worked — but right-clicking a field did nothing at all, in every input in
+  // the app. In an embedded editor that owns its own keybindings, or for
+  // anyone who reaches for the mouse, that reads as "this app cannot copy and
+  // paste". The roles below are the same ones the Edit menu uses, so there is
+  // one implementation of each and no second behaviour to keep in step.
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const items: Electron.MenuItemConstructorOptions[] = []
+    if (params.isEditable || params.selectionText) {
+      if (params.isEditable) items.push({ role: 'undo' }, { role: 'redo' }, { type: 'separator' })
+      items.push(
+        // Cut and Delete only where there is something to cut from; Copy
+        // wherever there is a selection, editable or not, because reading a
+        // value out of a read-only pane is the common case.
+        ...(params.isEditable ? [{ role: 'cut' as const }] : []),
+        { role: 'copy' as const },
+        ...(params.isEditable ? [{ role: 'paste' as const }] : []),
+        { type: 'separator' as const },
+        { role: 'selectAll' as const }
+      )
+    }
+    if (items.length === 0) return
+    Menu.buildFromTemplate(items).popup({ window: mainWindow ?? undefined })
+  })
+
   // The inspector pushes flows as they happen rather than being polled: a
   // traffic list that updates on a timer is a traffic list that is always
   // slightly wrong. Guarded on `isDestroyed` because a flow can land between
@@ -3683,6 +3710,49 @@ ipcMain.handle('backup:dumpDatabase', async (_e, destinationId: string, database
   if ('error' in resolved) return refuse(resolved.error)
   return dumpToDestination(dest, resolved.target, resolved.password)
 })
+/**
+ * Pick an OpenAPI document from disk and return its path and contents.
+ *
+ * Both, because the two callers want different halves: the collection stores
+ * the path so it can be re-read after a restart and so the user can see which
+ * file they chose, and the client is handed the text so it never has to reach
+ * the filesystem itself.
+ *
+ * The read is capped. A description is a document, and a multi-hundred-megabyte
+ * file chosen here — by accident or otherwise — must not be pulled into the
+ * renderer's heap before anything looks at it.
+ */
+const OPENAPI_MAX_BYTES = 32 * 1024 * 1024
+ipcMain.handle('http:chooseSpecFile', async () => {
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  const chosen = await dialog.showOpenDialog(win, {
+    title: 'Choose an OpenAPI description',
+    properties: ['openFile'],
+    filters: [
+      { name: 'OpenAPI', extensions: ['json', 'yaml', 'yml'] },
+      { name: 'All files', extensions: ['*'] }
+    ]
+  })
+  const path = chosen.canceled ? null : (chosen.filePaths[0] ?? null)
+  if (!path) return null
+  const { stat, readFile } = await import('node:fs/promises')
+  const info = await stat(path)
+  if (info.size > OPENAPI_MAX_BYTES) {
+    throw new Error(
+      `That file is ${Math.round(info.size / (1024 * 1024))} MB. An OpenAPI description this large is almost certainly not one.`
+    )
+  }
+  return { path, text: await readFile(path, 'utf8') }
+})
+
+/** Re-read a description the collection already points at. */
+ipcMain.handle('http:readSpecFile', async (_e, path: string) => {
+  const { stat, readFile } = await import('node:fs/promises')
+  const info = await stat(path)
+  if (info.size > OPENAPI_MAX_BYTES) throw new Error('That description is too large to open.')
+  return readFile(path, 'utf8')
+})
+
 ipcMain.handle('backup:chooseDirectory', async () => {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   const chosen = await dialog.showOpenDialog(win, {

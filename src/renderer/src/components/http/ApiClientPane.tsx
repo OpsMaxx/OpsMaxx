@@ -60,6 +60,7 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
   // Rebuilt only when the identity or the document changes — not when `via` or
   // the certificate toggle does, which the ref above carries instead.
   const specUrl = collection.specUrl
+  const specPath = collection.specPath ?? null
   const baseUrl = collection.baseUrl
 
   useEffect(() => {
@@ -83,7 +84,17 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
         const workspaceStore = createWorkspaceStore()
         const eventBus = createWorkspaceEventBus()
 
-        if (specUrl) {
+        if (specPath) {
+          // Re-read on every open rather than cached at import: a description
+          // on disk is a file someone edits, and showing them yesterday's copy
+          // of their own API with no way to tell is worse than not offering
+          // files at all.
+          const text = await window.shellpilot!.http.readSpecFile(specPath)
+          await workspaceStore.addDocument({
+            name: collection.id,
+            document: await parseSpec(text, specPath)
+          })
+        } else if (specUrl) {
           // The document is fetched through the same transport as the requests.
           // A spec served by the very host the requests go to would otherwise
           // be unreachable for exactly the reasons the transport exists.
@@ -113,7 +124,7 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
         })
         app = client.app
         client.open(
-          specUrl
+          specUrl || specPath
             ? // 'default' is the library's own placeholder for "the caller does
               // not know a path or method"; it resolves to the first operation,
               // which is the only sensible landing point in a spec that may
@@ -140,7 +151,7 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
       disposed = true
       app?.unmount()
     }
-  }, [collection.id, collection.name, specUrl, baseUrl])
+  }, [collection.id, collection.name, specUrl, specPath, baseUrl])
 
   if (error) {
     return (
@@ -228,21 +239,77 @@ function scratchOriginOf(baseUrl: string): string {
   }
 }
 
+/**
+ * The methods a scratch request offers.
+ *
+ * The client takes its method from the OPERATION, not from a control of its
+ * own: a path that describes only `get` has no other method to switch to, and
+ * the method beside the address bar is then a label rather than a choice. This
+ * document used to define exactly one operation, which is why a scratch
+ * request was stuck on GET — not a dropdown that failed to work, a document
+ * with nothing else in it.
+ *
+ * Describing the whole set costs nothing — they are four lines of JSON each —
+ * and turns the same control into a real choice.
+ */
+const SCRATCH_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'] as const
+
+/**
+ * An OpenAPI description read from disk, as an object.
+ *
+ * JSON first, because it is the cheap case and most `.json` descriptions are
+ * exactly that. YAML costs a dynamic import, so only someone who actually has
+ * a YAML description pays for the parser.
+ *
+ * A file that is neither is reported by its own parse error rather than as a
+ * generic failure: "unexpected end of the stream within a flow collection at
+ * line 40" tells someone where to look, and "the API client could not start"
+ * does not.
+ */
+async function parseSpec(text: string, path: string): Promise<Record<string, unknown>> {
+  const trimmed = text.trimStart()
+  if (trimmed.startsWith('{')) {
+    try {
+      return JSON.parse(text) as Record<string, unknown>
+    } catch (e) {
+      throw new Error(`${path} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+  const { parse } = await import('yaml')
+  try {
+    const doc = parse(text) as unknown
+    if (!doc || typeof doc !== 'object') throw new Error('it does not describe an object')
+    return doc as Record<string, unknown>
+  } catch (e) {
+    throw new Error(`${path} could not be read as YAML: ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
 function scratchDocument(title: string, baseUrl: string): Record<string, unknown> {
   const path = scratchPathOf(baseUrl)
+  const operations: Record<string, unknown> = {}
+  for (const method of SCRATCH_METHODS) {
+    operations[method] = {
+      operationId: `request-${method}`,
+      summary: `${method.toUpperCase()} ${path}`,
+      // A body only where one is meaningful. Offering it on GET is how a
+      // client ends up sending one, which some servers reject outright.
+      ...(method === 'post' || method === 'put' || method === 'patch'
+        ? {
+            requestBody: {
+              required: false,
+              content: { 'application/json': { schema: { type: 'object' } } }
+            }
+          }
+        : {}),
+      responses: { '200': { description: 'OK' } }
+    }
+  }
   return {
     openapi: '3.1.0',
     info: { title, version: '1.0.0' },
     ...(baseUrl ? { servers: [{ url: scratchOriginOf(baseUrl) }] } : {}),
-    paths: {
-      [path]: {
-        get: {
-          operationId: 'request',
-          summary: 'New request',
-          responses: { '200': { description: 'OK' } }
-        }
-      }
-    }
+    paths: { [path]: operations }
   }
 }
 
