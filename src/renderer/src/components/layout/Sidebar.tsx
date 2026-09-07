@@ -7,6 +7,7 @@ import { TunnelSidebar } from '../tunnels/TunnelSidebar'
 import { VpnSidebar } from '../vpn/VpnSidebar'
 import { MonitorSidebar } from '../monitor/MonitorSidebar'
 import { DatabaseSidebar } from '../databases/DatabaseSidebar'
+import { ApiSidebar } from '../http/ApiSidebar'
 import { VaultSidebar } from '../vault/VaultSidebar'
 import { useVault } from '../../store/vault'
 import { useNav } from '../../store/nav'
@@ -15,6 +16,7 @@ const titles: Record<string, string> = {
   connections: 'Connections',
   databases: 'Databases',
   tunnels: 'Tunnels & VPN',
+  http: 'HTTP Client',
   // Overridden below when the Operations rail is showing: the two share one
   // ActivityView, so this map alone titled the Operations sidebar "Fleet
   // Monitor" while the page beside it said Operations.
@@ -91,6 +93,11 @@ export function Sidebar(): React.JSX.Element | null {
               <Network size={15} />
             </button>
           )}
+          {activity === 'http' && (
+            <button className="icon-btn" title="Add an API" onClick={() => setModal('add-api')}>
+              <Plus size={16} />
+            </button>
+          )}
           {/* Monitoring only. A monitor group is a Monitoring layout, and the
               two rails share one ActivityView — so gating on `activity` alone
               put "New monitor group" in the header of the Operations pane,
@@ -115,6 +122,7 @@ export function Sidebar(): React.JSX.Element | null {
       <div className="sidebar-scroll">
         {activity === 'connections' && <ConnectionTree />}
         {activity === 'databases' && <DatabaseSidebar />}
+        {activity === 'http' && <ApiSidebar />}
         {activity === 'tunnels' && (
           <>
             <TunnelSidebar />

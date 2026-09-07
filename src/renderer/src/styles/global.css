@@ -3948,3 +3948,173 @@ details[open] > .disclosure-head .chev {
 .danger {
   color: var(--state-alarm);
 }
+
+/* ============================= HTTP client ============================= */
+/*
+   The API client is a third-party Vue app mounted into `.http-client-host`.
+   Everything here is either the chrome around it, or the two rules that make
+   it sit in a pane instead of over the window.
+*/
+
+.http-toolbar {
+  gap: var(--sp-3);
+}
+.http-via {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+}
+.http-via-label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+.http-via-select {
+  height: 26px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-sm);
+  width: auto;
+  min-width: 150px;
+}
+/* Truncates rather than pushing the certificate control off the bar on a
+   narrow window; the same sentence is in the Add dialog's hint. */
+.http-via-hint {
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.http-via-hint code {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+}
+.http-warning {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+/* Verification off is a standing condition, not a moment — so it is coloured
+   for as long as it lasts rather than announced once and forgotten. */
+.http-tls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  white-space: nowrap;
+}
+.http-tls-off {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.http-tls-off:hover {
+  background: var(--warn-soft);
+}
+
+/*
+   Two rules, both load-bearing:
+
+   `transform` makes this element the containing block for its `position: fixed`
+   descendants, which is what keeps the client's panel inside this pane instead
+   of filling the window. `overflow: hidden` then clips its rounded corners to
+   the pane. Removing either puts the client back over the whole app.
+*/
+.http-client-host {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  transform: translateZ(0);
+  overflow: hidden;
+}
+
+/* The client ships a close button and a click-outside backdrop for the modal it
+   normally is. Here it is a pane: there is nothing to close, and a backdrop
+   over the whole app would swallow clicks meant for the rest of OpsMaxx. */
+.http-client-host .app-exit-button,
+.http-client-host .scalar-app-exit {
+  display: none !important;
+}
+
+/* Same reason: the client floats itself as a rounded card inset 60px from the
+   top and bottom of the window. A pane fills its pane — the inset would read
+   as a dialog sitting on the view rather than as the view. */
+.http-client-host .scalar-app-layout {
+  margin: 0 !important;
+  border-radius: 0 !important;
+  border: 0 !important;
+  height: 100% !important;
+  max-height: none !important;
+}
+
+.sidebar-empty {
+  padding: var(--sp-3);
+  font-size: var(--fs-sm);
+}
+.tree-icon {
+  display: flex;
+  align-items: center;
+  color: var(--text-faint);
+}
+.tree-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+.tree-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--fs-sm);
+  flex-shrink: 0;
+}
+/* Revealed on hover so a list of APIs is a list, not a row of delete buttons. */
+.tree-action {
+  opacity: 0;
+}
+.tree-row:hover .tree-action,
+.tree-action:focus-visible {
+  opacity: 1;
+}
+
+.modal-segment {
+  margin-bottom: var(--sp-3);
+}
+
+/* A transport failure, reported by OpsMaxx because the API client renders
+   nothing for one. Sits between the toolbar and the client, so it is attached
+   to the request that failed rather than floating as a toast. */
+.http-error {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--danger-soft);
+  color: var(--text);
+  font-size: var(--fs-md);
+}
+.http-error-icon {
+  color: var(--danger);
+  flex-shrink: 0;
+}
+.http-error-text {
+  flex: 1;
+  min-width: 0;
+}
+.http-error .btn {
+  flex-shrink: 0;
+}

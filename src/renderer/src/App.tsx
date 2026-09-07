@@ -10,8 +10,10 @@ import { StatusBar } from './components/layout/StatusBar'
 import { WorkspacePanel } from './components/panel/WorkspacePanel'
 import { FleetMonitor } from './components/monitor/FleetMonitor'
 import { TunnelsView } from './components/tunnels/TunnelsView'
+import { HttpView } from './components/http/HttpView'
 import { DatabaseWorkspace } from './components/databases/DatabaseView'
 import { AddDatabaseModal } from './components/databases/AddDatabaseModal'
+import { AddApiModal } from './components/http/AddApiModal'
 import { Settings } from './components/settings/Settings'
 import { VaultView } from './components/vault/VaultView'
 import { AiPanel } from './components/ai/AiPanel'
@@ -52,6 +54,7 @@ function MainArea(): React.JSX.Element {
           holds the thing they set up yesterday — so TunnelsView keeps them
           behind a single icon and switches between them in place. */}
       {activity === 'tunnels' && <TunnelsView />}
+      {activity === 'http' && <HttpView />}
       {activity === 'vault' && <VaultView />}
       {activity === 'ai' && <AiPanel />}
       {activity === 'settings' && <Settings />}
@@ -102,6 +105,7 @@ export default function App(): React.JSX.Element {
       {modal === 'route-editor' && <RouteEditor />}
       {modal === 'workspaces' && <WorkspaceManager />}
       {modal === 'add-database' && <AddDatabaseModal />}
+      {modal === 'add-api' && <AddApiModal />}
       {modal === 'import-ssh' && <SshConfigImport />}
       {/* Not a `modal` kind: the unlock prompt can appear over any view. */}
       <WorkspaceUnlock />

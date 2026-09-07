@@ -249,7 +249,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
   jobsDetached: true,
   shortcuts: {}
 }
-export type ModalKind = 'add-server' | 'workspaces' | 'route-editor' | 'add-database' | 'import-ssh' | null
+export type ModalKind =
+  | 'add-server'
+  | 'workspaces'
+  | 'route-editor'
+  | 'add-database'
+  | 'add-api'
+  | 'import-ssh'
+  | null
 
 /** Which of the three destinations the Tunnels & VPN view is showing. */
 export type TunnelsTab = 'tunnels' | 'vpn' | 'frp'
@@ -1715,6 +1722,8 @@ export const useWorkspaceFolders = (kind: FolderKind = 'server') =>
 export const useWorkspaceVpns = () => useApp(useShallow((s) => s.workspaceVpns()))
 export const useWorkspaceTunnels = () => useApp(useShallow((s) => s.workspaceTunnels()))
 export const useWorkspaceDatabases = () => useApp(useShallow((s) => s.workspaceDatabases()))
+export const useWorkspaceApiCollections = () =>
+  useApp(useShallow((s) => s.workspaceApiCollections()))
 export const useWorkspaceTabs = () => useApp(useShallow((s) => s.workspaceTabs()))
 export const useWorkspaceMonitorGroups = () =>
   useApp(useShallow((s) => s.workspaceMonitorGroups()))
