@@ -117,7 +117,16 @@ function which(cmd: string): boolean {
 async function systemTrustState(ctx: TrustContext): Promise<InspectTrustStore> {
   const base = { id: 'system' as const, label: 'System trust store', installable: true }
   if (ctx.platform === 'darwin') {
-    const { stdout } = await tryRun('security', [
+    // Presence and trust are different facts, and only the second one matters.
+    //
+    // This used to answer with `find-certificate`, which reports a certificate
+    // sitting in the keychain with no trust setting attached as "trusted". On
+    // a real machine the install added the certificate and the trust setting
+    // did not take: the panel then said the certificate was fine, hid the
+    // install button, and every single host came back as though it pinned —
+    // because every client on the machine was, correctly, refusing a root it
+    // does not trust. `verify-cert` is the question actually being asked.
+    const present = await tryRun('security', [
       'find-certificate',
       '-a',
       '-Z',
@@ -125,23 +134,32 @@ async function systemTrustState(ctx: TrustContext): Promise<InspectTrustStore> {
       ctx.commonName,
       '/Library/Keychains/System.keychain'
     ])
-    const want = sha256Hex(ctx.certPem).toUpperCase()
-    const trusted = stdout.toUpperCase().includes(want)
+    const installed = present.stdout.toUpperCase().includes(sha256Hex(ctx.certPem).toUpperCase())
+    const verified = await tryRun('security', ['verify-cert', '-c', ctx.certPath, '-p', 'ssl'])
+    if (verified.ok) return { ...base, state: 'trusted' }
     return {
       ...base,
-      state: trusted ? 'trusted' : 'untrusted',
-      hint: trusted ? undefined : 'Install the certificate to intercept HTTPS in Safari, Chrome and native apps.'
+      state: 'untrusted',
+      hint: installed
+        ? 'The certificate is in your keychain but is not trusted, so every HTTPS request still fails. Install it again to add the trust setting.'
+        : 'Install the certificate to intercept HTTPS in Safari, Chrome and native apps.'
     }
   }
   invalidateTrustCache()
   if (ctx.platform === 'win32') {
+    // A certificate in the Root store IS trusted on Windows — the store is the
+    // trust setting, unlike macOS where the two are separate. `-verifystore`
+    // is still the stronger question: it fails for a certificate that is
+    // present but expired or otherwise unusable.
     const thumb = sha1Hex(ctx.certPem).toUpperCase()
-    const { stdout } = await tryRun('certutil', ['-user', '-store', 'Root', thumb])
-    const trusted = stdout.toUpperCase().includes(thumb)
+    const verified = await tryRun('certutil', ['-user', '-verifystore', 'Root', thumb])
+    if (verified.ok && verified.stdout.toUpperCase().includes(thumb)) {
+      return { ...base, state: 'trusted' }
+    }
     return {
       ...base,
-      state: trusted ? 'trusted' : 'untrusted',
-      hint: trusted ? undefined : 'Install the certificate to intercept HTTPS in Edge, Chrome and .NET applications.'
+      state: 'untrusted',
+      hint: 'Install the certificate to intercept HTTPS in Edge, Chrome and .NET applications.'
     }
   }
   if (ctx.platform === 'linux') {
@@ -314,6 +332,22 @@ export async function installSystemTrust(ctx: TrustContext): Promise<TrustChange
   if (exit.declined) return { ok: false, declined: true, message: 'The administrator prompt was declined.' }
   if (exit.code !== 0) {
     return { ok: false, message: `The trust store rejected the certificate (exit ${exit.code ?? 'unknown'}).` }
+  }
+
+  // Verified rather than assumed. `security add-trusted-cert` can exit 0 having
+  // added the certificate to the keychain without attaching the trust setting
+  // — a managed Mac can drop it, and so can a policy this process cannot see.
+  // The result is a certificate that looks installed and is refused by every
+  // client, which is far worse than an install that admits it failed.
+  invalidateTrustCache()
+  const after = await systemTrustState(ctx)
+  if (after.state !== 'trusted') {
+    return {
+      ok: false,
+      message:
+        after.hint ??
+        'The certificate was added but is still not trusted. A device management profile may be preventing it.'
+    }
   }
   return { ok: true }
 }

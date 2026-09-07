@@ -320,3 +320,41 @@ describe('vitest sanity', () => {
     spy.mockRestore()
   })
 })
+
+// A window's WebContents is removed from the bus inside its own `destroyed`
+// handler, by which point Electron throws on any property access to it. The
+// removal is therefore only safe while it is a Set delete by identity —
+// nothing may read from the object.
+//
+// This is pinned rather than left to review because the failure is silent and
+// remote: a later `removeTarget` that reads, say, `wc.id` would throw inside
+// that handler in the packaged app, and the throw would skip every disposal
+// after it — the window's shells, log tails, broadcasts and jobs would all
+// leak on every window close, surfacing only as one line from the
+// uncaughtException net.
+describe('removing a destroyed target', () => {
+  it('never touches the WebContents it is given', () => {
+    const bus = new VpnStatusBus()
+    const live = fakeWc()
+    bus.addTarget(live)
+
+    // Stands in for a destroyed WebContents: Electron's own destroyed objects
+    // throw on property access, and so does this.
+    const destroyed = new Proxy(
+      {},
+      {
+        get(_t, prop) {
+          throw new Error(`Object has been destroyed (read of ${String(prop)})`)
+        },
+        has(_t, prop) {
+          throw new Error(`Object has been destroyed (has of ${String(prop)})`)
+        }
+      }
+    ) as unknown as WebContents
+
+    bus.addTarget(destroyed)
+    expect(() => bus.removeTarget(destroyed)).not.toThrow()
+    // And the one still alive is untouched by that removal.
+    expect(() => bus.removeTarget(live)).not.toThrow()
+  })
+})
