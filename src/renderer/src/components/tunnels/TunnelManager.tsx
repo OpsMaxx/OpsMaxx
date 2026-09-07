@@ -6,7 +6,7 @@ import { Modal } from '../common/Modal'
 import { clsx } from '../../lib/format'
 import { toast } from '../../store/toast'
 import type { ToastAction } from '../../store/toast'
-import { parseEndpoint } from '../../../../shared/tunnel'
+import { TUNNEL_DEFAULT_LISTEN, listenForKind, parseEndpoint } from '../../../../shared/tunnel'
 import type { TunnelStatus } from '../../../../shared/tunnel'
 import { sshHopFor } from '../../lib/ssh'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
@@ -325,7 +325,7 @@ function TunnelForm({ tunnel, onClose }: { tunnel?: Tunnel | null; onClose: () =
   const [name, setName] = useState(tunnel?.name ?? '')
   const [kind, setKind] = useState<TunnelKind>(tunnel?.kind ?? 'local')
   const [serverId, setServerId] = useState(tunnel?.serverId ?? servers[0]?.id ?? '')
-  const [listen, setListen] = useState(tunnel?.listen ?? '127.0.0.1:8080')
+  const [listen, setListen] = useState(tunnel?.listen ?? TUNNEL_DEFAULT_LISTEN.local)
   const [target, setTarget] = useState(tunnel?.target || 'localhost:80')
 
   const socks = kind === 'socks'
@@ -369,7 +369,10 @@ function TunnelForm({ tunnel, onClose }: { tunnel?: Tunnel | null; onClose: () =
               className={clsx('btn sm', kind === k && 'primary')}
               onClick={() => {
                 setKind(k)
-                if (k === 'socks') setListen('127.0.0.1:1080')
+                // Both directions, not just into socks. See listenForKind: a
+                // field the user has typed into is left alone, an untouched
+                // default is swapped for the new kind's.
+                setListen((cur) => listenForKind(cur, k))
               }}
             >
               {kindLabel[k]}
@@ -391,7 +394,12 @@ function TunnelForm({ tunnel, onClose }: { tunnel?: Tunnel | null; onClose: () =
 
         <label className="field">
           <span className="field-label">{kind === 'remote' ? 'Listen on server' : 'Listen locally'}</span>
-          <input className="input" value={listen} onChange={(e) => setListen(e.target.value)} placeholder="127.0.0.1:8080" />
+          <input
+            className="input"
+            value={listen}
+            onChange={(e) => setListen(e.target.value)}
+            placeholder={TUNNEL_DEFAULT_LISTEN[kind]}
+          />
         </label>
 
         {!socks && (
