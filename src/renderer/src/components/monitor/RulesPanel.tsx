@@ -47,6 +47,9 @@ function bridge(): Partial<RulesBridge> | undefined {
 }
 
 const KIND_LABEL: Record<RuleAlertKind, string> = {
+  'vpn-down': 'VPN down',
+  'pod-crashloop': 'Pods restarting',
+  'vpn-degraded': 'VPN up but silent',
   cpu: 'CPU',
   disk: 'Disk',
   inode: 'Inodes',
@@ -54,10 +57,13 @@ const KIND_LABEL: Record<RuleAlertKind, string> = {
   'host-unreachable': 'Host unreachable',
   'job-failed': 'Job failed',
   'tunnel-down': 'Tunnel down',
+  'backup-failed': 'Backup failed',
   'db-alarm': 'Database alarm',
   'db-watch': 'Database watch',
   'oom-kill': 'OOM kill',
-  'cert-expiry': 'Certificate expiry'
+  'cert-expiry': 'Certificate expiry',
+  'vpn-cert-expiry': 'VPN certificate expiry',
+  'error-rate': 'Journal error rate'
 }
 
 const WINDOWS: { ms: number; label: string }[] = [
@@ -82,7 +88,7 @@ function limitText(maxFirings: number, windowMs: number): string {
 function when(rule: RuleView): string {
   const kind = KIND_LABEL[rule.trigger.kind as RuleAlertKind] ?? rule.trigger.kind
   const parts = [`${kind} ${rule.trigger.event}`]
-  if (rule.filter.serverId !== undefined) parts.push('on one host')
+  if (rule.filter.serverId !== undefined) parts.push('on one server')
   if (rule.filter.minValue !== undefined) parts.push(`at or above ${rule.filter.minValue}`)
   return parts.join(', ')
 }
@@ -161,13 +167,19 @@ function RuleCard({
 
       {/* A rule that cannot run says so here rather than at 3am. */}
       {!rule.verdict.ok && (
-        <div className="row danger" style={{ gap: 6, fontSize: 12, alignItems: 'flex-start' }}>
+        <div
+          className="row state-alarm"
+          style={{ gap: 6, fontSize: 12, alignItems: 'flex-start' }}
+        >
           <AlertTriangle size={14} />
           <span>This rule will not run: {rule.verdict.reason}</span>
         </div>
       )}
       {rule.verdict.ok && rule.status.refusal !== undefined && (
-        <div className="row warn" style={{ gap: 6, fontSize: 12, alignItems: 'flex-start' }}>
+        <div
+          className="row state-watch"
+          style={{ gap: 6, fontSize: 12, alignItems: 'flex-start' }}
+        >
           <AlertTriangle size={14} />
           <span>Last time it fired it was refused: {rule.status.refusal}</span>
         </div>
@@ -177,8 +189,17 @@ function RuleCard({
 }
 
 export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Element {
-  const [rules, setRules] = useState<RuleView[]>([])
+  // `null` until the read comes back, NOT `[]`.
+  //
+  // An empty array means "there are no rules", and this screen says that out
+  // loud -- "No rules. Nothing runs on its own." That is a confident claim
+  // about whether anything is going to fire, and before the read returned it
+  // was being made about rules that had not been looked at yet. On a screen
+  // whose entire subject is what runs without you, asserting that nothing does
+  // is the one thing it must not get wrong.
+  const [rules, setRules] = useState<RuleView[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [noBridge, setNoBridge] = useState(false)
   const [open, setOpen] = useState(false)
 
   const [name, setName] = useState('')
@@ -196,7 +217,16 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
 
   const refresh = useCallback(async (): Promise<void> => {
     const list = bridge()?.list
-    if (typeof list !== 'function') return
+    if (typeof list !== 'function') {
+      // A definite answer, and not the same one as "still reading". The
+      // capability is missing from this build's preload, so nothing will ever
+      // arrive -- leaving the panel on "Reading the rules…" would be a spinner
+      // that never resolves, which is the failure the tri-state was added to
+      // avoid, just pointed the other way.
+      setNoBridge(true)
+      return
+    }
+    setNoBridge(false)
     try {
       setRules(await list())
     } catch (e) {
@@ -322,21 +352,24 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
 
   return (
     <div className="col" style={{ gap: 12 }}>
-      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <div className="col" style={{ gap: 2 }}>
-          <b>Rules</b>
-          <span className="faint" style={{ fontSize: 11 }}>
-            When an alert fires, run a job or post to the webhook. A rule runs the job it was
-            confirmed with, on the hosts it was confirmed for, and refuses if either has changed.
-          </span>
+      <div className="panel-head">
+        <span className="panel-head-icon">
+          <Zap size={14} />
+        </span>
+        <h2 className="ui-section-title">Rules</h2>
+        <p className="ui-note panel-head-purpose">
+          When an alert fires, run a job or post to the webhook. A rule runs the job it was
+          confirmed with, on the servers it was confirmed for, and refuses if either has changed.
+        </p>
+        <div className="panel-head-actions">
+          <button className="btn primary" onClick={() => setOpen((v) => !v)}>
+            <Plus size={14} /> New rule
+          </button>
         </div>
-        <button className="btn" onClick={() => setOpen((v) => !v)}>
-          <Plus size={14} /> New rule
-        </button>
       </div>
 
       {error !== null && (
-        <div className="row danger" style={{ gap: 6, fontSize: 12 }}>
+        <div className="row state-alarm" style={{ gap: 6, fontSize: 12 }}>
           <AlertTriangle size={14} />
           {error}
         </div>
@@ -370,7 +403,7 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
             <label className="col" style={{ gap: 4, fontSize: 12 }}>
               on
               <select value={hostFilter} onChange={(e) => setHostFilter(e.target.value)}>
-                <option value="">any host</option>
+                <option value="">any server</option>
                 {servers.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
@@ -455,7 +488,7 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 />
               </label>
               <div className="col" style={{ gap: 4, fontSize: 12 }}>
-                Hosts
+                Servers
                 <div className="col" style={{ gap: 2, maxHeight: 160, overflowY: 'auto' }}>
                   {servers.map((s) => (
                     <label key={s.id} className="row" style={{ gap: 6 }}>
@@ -478,7 +511,7 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 <div className="col" style={{ gap: 2, fontSize: 12 }}>
                   <div>
                     <span className="faint">This runs on </span>
-                    {plan.blastRadius} host(s) at once
+                    {plan.blastRadius} server(s) at once
                     <span className="faint"> and reads as </span>
                     {plan.risk}
                     <span className="faint">, every time it fires.</span>
@@ -495,7 +528,7 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 {/* Always typed, for a job rule. `planJob` would ask for a click
                     here; a standing authorisation is a different thing being
                     agreed to, and the word says which one. */}
-                This rule runs commands on those hosts unattended, whenever it fires. Type{' '}
+                This rule runs commands on those servers unattended, whenever it fires. Type{' '}
                 <b>{RULE_UNATTENDED_PHRASE}</b> to confirm.
                 <input
                   value={phrase}
@@ -517,9 +550,25 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
         </div>
       )}
 
-      {rules.length === 0 ? (
-        <div className="faint" style={{ fontSize: 12 }}>
-          No rules. Nothing runs on its own.
+      {noBridge ? (
+        <div className="panel-note is-alarm">
+          This build’s preload does not expose the rule engine yet. Restart the app to rebuild it.
+        </div>
+      ) : rules === null ? (
+        <div className="panel-empty">
+          <p className="panel-empty-title">Reading the rules…</p>
+        </div>
+      ) : rules.length === 0 ? (
+        // Was one grey sentence with no next step. The sentence is kept —
+        // "nothing runs on its own" is the reassurance a rules screen owes the
+        // reader — and now it says what to do about it.
+        <div className="panel-empty">
+          <p className="panel-empty-title">No rules. Nothing runs on its own.</p>
+          <p className="panel-empty-body">
+            Press <b>New rule</b> to connect an alert to a job or to the webhook. Every rule is
+            confirmed once, against a specific job and specific servers, and refuses to run if either
+            of those changes afterwards.
+          </p>
         </div>
       ) : (
         rules.map((r) => (

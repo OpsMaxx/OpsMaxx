@@ -1,5 +1,8 @@
 import { contextBridge, ipcRenderer, clipboard, webUtils } from 'electron'
 import type { IpcRendererEvent } from 'electron'
+import type { AutoStartSettings, AutoStartState } from '../shared/autostart'
+import type { UnitDraft, UserUnitsReading } from '../shared/userUnits'
+import type { BackupAlarm } from '../shared/backup'
 import type {
   SshConnectConfig,
   SshStatus,
@@ -44,12 +47,20 @@ import type {
 import type { ChangeLogBridge, ChangeLogFilter, ChangeLogPage } from '../shared/changelog'
 import type { RunbookNote, RunbookView, RunbooksBridge } from '../shared/runbooks'
 import type { StoreAlertKind } from '../shared/webhook'
+import type { BytesReading } from '../shared/bytesForecast'
+import type { EnginePrecheckProbe } from '../shared/enginePrecheck'
+import type { PackageManager } from '../shared/hostFacts'
+import type { ImageScanProbe } from '../shared/imageScan'
+import type { SecurityListProbe } from '../shared/securityUpdates'
+import type { K8sReviewProbe } from '../shared/k8sReview'
 import type {
   DockerAction,
   DockerActionResult,
   DockerBridge,
   DockerDiskDetailProbe,
   DockerDiskProbe,
+  DockerHealthLogProbe,
+  DockerNetworkProbe,
   DockerInspectProbe,
   DockerLogsOptions,
   DockerProbe,
@@ -58,11 +69,13 @@ import type {
   DockerStatsProbe
 } from '../shared/docker'
 import type {
-  ComposeBridge,
   ComposeConfigProbe,
   ComposeEnvProbe,
+  ComposeEnvWriteResult,
+  ComposePreloadBridge,
   ComposeImageWriteRequest,
   ComposeImageWriteResult,
+  ComposeRevertPlan,
   ComposeListProbe,
   ComposeProjectRef
 } from '../shared/compose'
@@ -79,6 +92,7 @@ import type {
   K8sHelmList,
   K8sResources,
   K8sDiagnosis,
+  K8sAllocatableProbe,
   K8sOverview,
   K8sProbe,
   K8sRolloutResult,
@@ -94,7 +108,7 @@ import type {
   WebhookDeliveryStatus,
   WebhookTestResult
 } from '../shared/webhook'
-import type { CredProxyCall, CredProxyRule, CredProxyStatus } from '../shared/credproxy'
+import type { CredProxyCall, CredProxyRule, CredProxyStatus , CredProxyToken } from '../shared/credproxy'
 import type {
   LocalCloseInfo,
   LocalConnectConfig,
@@ -115,6 +129,8 @@ import type { DbConnectConfig, DbInfo, DbQueryResult, DbTestResult } from '../sh
 import type { DbShellResult } from '../shared/dbshell'
 import type { DbOpsReport } from '../shared/dbOps'
 import type { VaultEntry, VaultListResult, VaultResult, VaultStatus } from '../shared/vault'
+import type { KernelStatus } from '../shared/kernelStatus'
+import type { StorageLayout } from '../shared/storageLayout'
 import type { TunnelConfig, TunnelResult, TunnelSshConfig, TunnelStatus } from '../shared/tunnel'
 import type {
   FrpTokenResult,
@@ -132,8 +148,12 @@ import type {
   VpnSpec,
   VpnStartResult,
   VpnStatus,
-  VpnValidation
+  VpnValidation,
+  VpnDiagnoseRefusal,
+  VpnDiagnoseResult,
+  VpnDiagnoseTarget
 } from '../shared/vpn'
+import type { VaultIndexResult } from '../shared/vaultIndex'
 import type { KnownHost } from '../main/services/knownhosts'
 import type { SshConfigHost } from '../shared/sshconfig'
 import type {
@@ -202,6 +222,11 @@ const jobsBridge: JobsBridge = {
 const api = {
   platform: (): Promise<NodeJS.Platform> => ipcRenderer.invoke('app:platform'),
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
+  autoStart: {
+    get: (): Promise<AutoStartState> => ipcRenderer.invoke('app:autoStart'),
+    set: (next: AutoStartSettings): Promise<AutoStartState> =>
+      ipcRenderer.invoke('app:setAutoStart', next)
+  },
   window: {
     control: (action: WindowAction): Promise<void> =>
       ipcRenderer.invoke('window:control', action),
@@ -391,6 +416,16 @@ const api = {
     start: (port?: number): Promise<{ ok: boolean; error?: string; status: CredProxyStatus }> =>
       ipcRenderer.invoke('credproxy:start', port),
     stop: (): Promise<CredProxyStatus> => ipcRenderer.invoke('credproxy:stop'),
+    tokens: (): Promise<CredProxyToken[]> => ipcRenderer.invoke('credproxy:tokens'),
+    createToken: (
+      name: string,
+      expiresAt: string | null
+    ): Promise<{ ok: boolean; id?: string; token?: string; error?: string }> =>
+      ipcRenderer.invoke('credproxy:create-token', name, expiresAt),
+    revokeToken: (id: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('credproxy:revoke-token', id),
+    tokenValue: (id: string): Promise<string | null> =>
+      ipcRenderer.invoke('credproxy:token-value', id),
     token: (): Promise<{ ok: boolean; token?: string; error?: string }> =>
       ipcRenderer.invoke('credproxy:token'),
     rotateToken: (): Promise<{ ok: boolean; token?: string; error?: string }> =>
@@ -422,7 +457,13 @@ const api = {
   // panel calls at runtime and finds undefined.
   capacity: {
     trends: (hostId: string, windowDays: number): Promise<CapacityReport | null> =>
-      ipcRenderer.invoke('capacity:trends', hostId, windowDays)
+      ipcRenderer.invoke('capacity:trends', hostId, windowDays),
+    dbGrowth: (
+      connectionId: string,
+      windowDays: number,
+      ceilingBytes?: number
+    ): Promise<BytesReading | null> =>
+      ipcRenderer.invoke('capacity:db-growth', connectionId, windowDays, ceilingBytes)
   } satisfies CapacityBridge,
   // Roadmap item 27. Four channels and deliberately no fifth: there is no
   // `run` and no `test`, because a button that fired a rule on demand would be
@@ -537,6 +578,10 @@ const api = {
       ipcRenderer.invoke('k8s:overview', cfg, context, namespace),
     usage: (cfg: unknown, context?: string, namespace?: string): Promise<K8sUsage> =>
       ipcRenderer.invoke('k8s:usage', cfg, context, namespace),
+    /** Takes NO namespace: a node's load is every pod on it, whatever namespace
+     *  the operator is looking at. See the command builder. */
+    allocatable: (cfg: unknown, context?: string): Promise<K8sAllocatableProbe> =>
+      ipcRenderer.invoke('k8s:allocatable', cfg, context),
     rolloutRestart: (
       cfg: unknown,
       target: K8sRolloutTarget,
@@ -568,6 +613,8 @@ const api = {
       ipcRenderer.invoke('k8s:resources', cfg, context, namespace),
     apiScan: (cfg: unknown, context?: string): Promise<K8sApiScan> =>
       ipcRenderer.invoke('k8s:api-scan', cfg, context),
+    review: (cfg: unknown, context?: string): Promise<K8sReviewProbe> =>
+      ipcRenderer.invoke('k8s:review', cfg, context),
     helm: (cfg: unknown, context?: string): Promise<K8sHelmList> =>
       ipcRenderer.invoke('k8s:helm', cfg, context),
     execPlan: (target: K8sExecTarget): Promise<{ plan: K8sExecPlan; command: string }> =>
@@ -600,6 +647,19 @@ const api = {
       ref: string,
       opts?: { sudo?: boolean; autoSudo?: boolean }
     ): Promise<DockerInspectProbe> => ipcRenderer.invoke('docker:inspect', cfg, ref, opts),
+    scanImage: (cfg: unknown, ref: string): Promise<ImageScanProbe> =>
+      ipcRenderer.invoke('docker:scan-image', cfg, ref),
+    enginePrecheck: (cfg: unknown, manager: PackageManager): Promise<EnginePrecheckProbe> =>
+      ipcRenderer.invoke('docker:engine-precheck', cfg, manager),
+    networks: (
+      cfg: unknown,
+      opts?: { sudo?: boolean; autoSudo?: boolean }
+    ): Promise<DockerNetworkProbe> => ipcRenderer.invoke('docker:networks', cfg, opts),
+    healthLogs: (
+      cfg: unknown,
+      refs: string[],
+      opts?: { sudo?: boolean; autoSudo?: boolean }
+    ): Promise<DockerHealthLogProbe> => ipcRenderer.invoke('docker:health-logs', cfg, refs, opts),
     stats: (
       cfg: unknown,
       refs: string[],
@@ -621,7 +681,7 @@ const api = {
       opts?: { sudo?: boolean }
     ): Promise<DockerReclaimResult> => ipcRenderer.invoke('docker:reclaim', cfg, items, opts)
   } satisfies DockerBridge,
-  // The file half. `satisfies ComposeBridge` for the same reason as above: a
+  // The file half. `satisfies ComposePreloadBridge` for the same reason as above: a
   // channel added to the contract and forgotten here becomes a compile error
   // rather than a method the panel calls and finds undefined.
   //
@@ -650,13 +710,49 @@ const api = {
       opts?: { sudo?: boolean }
     ): Promise<{ ok: boolean; text?: string; error?: string }> =>
       ipcRenderer.invoke('compose:read-file', cfg, path, opts),
+    /**
+     * Write one `.env` variable from the vault.
+     *
+     * TAKES A REFERENCE, NOT A VALUE, and that asymmetry is the point: this
+     * function has no parameter that could carry a secret, so the renderer
+     * cannot send one even by mistake. Main resolves the entry, writes it, and
+     * answers with a line number.
+     */
+    writeEnvValue: (
+      cfg: unknown,
+      req: { path: string; name: string; serverId: string },
+      ref: {
+        vaultEntryId: string
+        slot: 'password' | 'privateKey' | 'username' | 'field'
+        fieldKey?: string
+      },
+      opts?: { sudo?: boolean }
+    ): Promise<ComposeEnvWriteResult> =>
+      ipcRenderer.invoke('compose:write-env-value', cfg, req, ref, opts),
+    /** Reads the backup beside the file and returns a plan. Writes nothing. */
+    planRevert: (
+      cfg: unknown,
+      req: { path: string; service: string },
+      opts?: { sudo?: boolean }
+    ): Promise<ComposeRevertPlan> => ipcRenderer.invoke('compose:plan-revert', cfg, req, opts),
     writeImageTag: (
       cfg: unknown,
       req: ComposeImageWriteRequest,
       opts?: { sudo?: boolean }
     ): Promise<ComposeImageWriteResult> =>
       ipcRenderer.invoke('compose:write-image-tag', cfg, req, opts)
-  } satisfies ComposeBridge,
+  } satisfies ComposePreloadBridge,
+  services: {
+    collect: (
+      targets: { serverId: string; serverName: string; cfg: unknown }[]
+    ): Promise<{ serverId: string; serverName: string; reading: UserUnitsReading }[]> =>
+      ipcRenderer.invoke('services:collect', targets),
+    write: (
+      target: { cfg: unknown },
+      draft: UnitDraft
+    ): Promise<{ ok: boolean; output?: string; error?: string }> =>
+      ipcRenderer.invoke('services:write', target, draft)
+  },
   cron: {
     collect: (
       targets: { serverId: string; serverName: string; cfg: unknown }[]
@@ -746,6 +842,24 @@ const api = {
       serverId: string
     ): Promise<{ facts?: HostFacts; at?: number; error?: string; errorAt?: number; intervalMs: number }> =>
       ipcRenderer.invoke('fleet:facts', serverId),
+    // The security-update LIST, asked for rather than sampled: the counts come
+    // with `facts` every hour, and this is the tens of rows behind them.
+    securityList: (cfg: unknown): Promise<SecurityListProbe> =>
+      ipcRenderer.invoke('fleet:security-list', cfg),
+    /** Running vs installed kernels. Asked for, not sampled. */
+    kernel: (cfg: unknown): Promise<KernelStatus | { error: string }> =>
+      ipcRenderer.invoke('fleet:kernel', cfg),
+    /** Disks, filesystems, LVM, software RAID. Asked for, not sampled. */
+    storage: (cfg: unknown): Promise<StorageLayout | { error: string }> =>
+      ipcRenderer.invoke('fleet:storage', cfg),
+    /** One timer and the service it activates. Both, because a timer that fires
+     *  into a failing service looks healthy from the timer alone. */
+    timer: (
+      cfg: unknown,
+      timerUnit: string,
+      serviceUnit: string
+    ): Promise<{ timer: Record<string, string>; service: Record<string, string> } | { error: string }> =>
+      ipcRenderer.invoke('fleet:timer', cfg, timerUnit, serviceUnit),
     // Who can get into a server, as the sampler last collected it — roadmap
     // item 23. Read-only and never a trigger, exactly like `facts`.
     //
@@ -846,6 +960,7 @@ const api = {
     // entry, and main resolves both — so the renderer can configure where the
     // vault gets uploaded without ever holding the key to the place it lands.
     destinations: (): Promise<BackupTargetsFile> => ipcRenderer.invoke('backup:destinations'),
+    alarms: (): Promise<BackupAlarm[]> => ipcRenderer.invoke('backup:alarms'),
     saveDestinations: (destinations: BackupDestination[]): Promise<BackupTargetsFile> =>
       ipcRenderer.invoke('backup:saveDestinations', destinations),
     runDestination: (id: string, password: string): Promise<BackupRunReport> =>
@@ -923,6 +1038,14 @@ const api = {
       ipcRenderer.invoke('vpn:commitImport', profileName, workspaceId, kind, text, baseDir),
     logs: (id: string, limit?: number): Promise<VpnLogLine[]> =>
       ipcRenderer.invoke('vpn:logs', id, limit),
+    /** Probe a running tunnel from the inside. The host and port are the
+     *  operator's; there is no default, and a probe with neither still reports
+     *  the handshake. */
+    diagnose: (
+      id: string,
+      target: VpnDiagnoseTarget
+    ): Promise<VpnDiagnoseResult | VpnDiagnoseRefusal> =>
+      ipcRenderer.invoke('vpn:diagnose', id, target),
     dependents: (id: string): Promise<VpnDependent[]> => ipcRenderer.invoke('vpn:dependents', id),
     // A WireGuard keypair, stored the same way an imported one is: the main
     // handler puts the private key in the vault and hands back a ref. The key
@@ -997,6 +1120,17 @@ const api = {
     },
     replyPrompt: (id: string, value: string | null): void =>
       ipcRenderer.send('vpn:prompt-reply', id, value)
+  },
+  /**
+   * The vault as NAMES, for a picker.
+   *
+   * A separate namespace from `vault` on purpose: `vault.list()` returns
+   * passwords, `vault` is forbidden to modules, and a names-only method sitting
+   * inside it would make the whole namespace legal for them again. See
+   * `shared/vaultIndex.ts`.
+   */
+  vaultIndex: {
+    list: (): Promise<VaultIndexResult> => ipcRenderer.invoke('vault-index:list')
   },
   vault: {
     status: (): Promise<VaultStatus> => ipcRenderer.invoke('vault:status'),

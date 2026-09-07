@@ -1,0 +1,3 @@
+122|Timeout||begin; update sp_t set v='A' where id=1; select pg_sleep(25)|active|postgres|19
+129|Lock|122|begin; update sp_t set v='B' where id=1; commit;|active|postgres|17
+136|Lock|129|begin; update sp_t set v='C' where id=1; commit;|active|postgres|15

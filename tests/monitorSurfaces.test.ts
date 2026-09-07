@@ -35,11 +35,11 @@ describe('the read/operate split', () => {
     expect(missing.map((m) => m.id)).toEqual([])
   })
 
-  it('puts exactly broadcast and patch on the operate surface', () => {
+  it('puts exactly broadcast, patch and jobs on the operate surface', () => {
     // If this fails because you added a module, that is the test doing its job.
     // Decide which side of the line it is on, put it there, and update this
     // list — do not widen the assertion.
-    expect(modulesOnSurface('operate').map((m) => m.id)).toEqual(['patch', 'broadcast'])
+    expect(modulesOnSurface('operate').map((m) => m.id).sort()).toEqual(['broadcast', 'jobs', 'patch'])
   })
 
   it('keeps the OperateModuleId union in step with the surface field', () => {
@@ -53,21 +53,24 @@ describe('the read/operate split', () => {
   })
 
   it('leaves every remaining module on the read surface', () => {
-    expect(modulesOnSurface('read').map((m) => m.id)).toEqual([
-      'fleetSearch',
-      'inventory',
-      'access',
-      'capacity',
-      'changeLog',
-      'rules',
-      'drift',
-      'posture',
-      'logTail',
-      'cron',
-      'processes',
-      'docker',
-      'kubernetes'
-    ])
+    expect(modulesOnSurface('read').map((m) => m.id).sort()).toEqual(
+      [
+        'fleetSearch',
+        'inventory',
+        'access',
+        'capacity',
+        'changeLog',
+        'rules',
+        'drift',
+        'posture',
+        'logTail',
+        'cron',
+        'services',
+        'processes',
+        'docker',
+        'kubernetes'
+      ].sort()
+    )
   })
 
   it('accounts for every module exactly once across the two surfaces', () => {
@@ -102,7 +105,7 @@ describe('isOperateModule', () => {
     const id: ModuleId = 'patch'
     if (isOperateModule(id)) {
       // Compiles only because the guard narrowed `id` to OperateModuleId.
-      const narrowed: 'broadcast' | 'patch' = id
+      const narrowed: 'broadcast' | 'patch' | 'jobs' = id
       expect(narrowed).toBe('patch')
     }
   })
@@ -113,8 +116,8 @@ describe('isOperateModule', () => {
 // ---------------------------------------------------------------------------
 //
 // `surface: 'read'` asserts that nothing on that surface writes to a server.
-// Two modules break it today — `access` can revoke an SSH key across hosts, and
-// `cron` can write a crontab. They are named in READ_SURFACE_WRITE_EXCEPTIONS
+// Three modules break it today — `access` can revoke an SSH key across servers,
+// `cron` can write a crontab, and `services` can install a systemd unit. They are named in READ_SURFACE_WRITE_EXCEPTIONS
 // instead of being reclassified, because both are large read-only views with
 // one mutating action attached, and moving the whole module would exile the
 // inventory into a destination built for change.
@@ -123,7 +126,7 @@ describe('isOperateModule', () => {
 // a silent exception is not a contract.
 describe('the read surface writes in exactly two known places', () => {
   it('names them, so a third cannot be added without a deliberate edit', () => {
-    expect([...READ_SURFACE_WRITE_EXCEPTIONS].sort()).toEqual(['access', 'cron'])
+    expect([...READ_SURFACE_WRITE_EXCEPTIONS].sort()).toEqual(['access', 'cron', 'services'])
   })
 
   it('only exempts modules that are actually on the read surface', () => {

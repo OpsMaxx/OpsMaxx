@@ -26,6 +26,27 @@ const ROOT = resolve(__dirname, '..')
 // The files each module owns. Adding a module means adding its entry points
 // here, deliberately, in a diff a reviewer sees.
 const MODULE_FILES: Record<string, string[]> = {
+  // Item 1's successor: reads what a server's own systemd supervises for this
+  // account. It must not reach the vault or the local terminal — it is a
+  // read-only view of somebody else's supervisor, and the boundary is the
+  // point of building it this way rather than as a remote supervisor.
+  services: [
+    'src/shared/userUnits.ts',
+    'src/renderer/src/components/monitor/ServicesPanel.tsx'
+  ],
+  // Item 33's composer. The job ENGINE is not listed, for the reason the
+  // `patch` entry below gives at length: it exists on every install and adopts
+  // its own rows at launch whether or not this module is on. What the module
+  // owns is the vocabulary that turns what somebody typed into a spec, and the
+  // panel that asks for the confirmation `planJob` demands.
+  jobs: [
+    'src/shared/jobCompose.ts',
+    'src/shared/serviceStep.ts',
+    'src/shared/packageStep.ts',
+    'src/shared/userStep.ts',
+    'src/shared/fileStep.ts',
+    'src/renderer/src/components/monitor/JobsPanel.tsx'
+  ],
   fleetSearch: ['src/renderer/src/lib/fleetSearch.ts', 'src/renderer/src/components/monitor/FleetSearch.tsx'],
   // The main-process half (src/shared/hostFacts.ts, src/main/services/hostFacts.ts)
   // is not listed: it is collected by the fleet sampler on every install
@@ -42,6 +63,10 @@ const MODULE_FILES: Record<string, string[]> = {
   // panel that drives it.
   patch: [
     'src/shared/patch.ts',
+    'src/shared/securityUpdates.ts',
+    'src/shared/engineUpgrade.ts',
+    'src/shared/enginePrecheck.ts',
+    'src/renderer/src/components/docker/EngineUpgrade.tsx',
     'src/shared/topology.ts',
     'src/renderer/src/components/monitor/PatchPanel.tsx'
   ],
@@ -52,7 +77,16 @@ const MODULE_FILES: Record<string, string[]> = {
   // gates the COLLECTION and not merely the panel — the probe reads other
   // accounts' authorized_keys with `sudo -n`, which is not a thing to discover
   // in a sudo log. See FleetSamplerDeps.accessEnabled.
-  access: ['src/renderer/src/components/monitor/AccessPanel.tsx'],
+  // `staleAccounts.ts` is the module's, unlike the collector below it: it is a
+  // pure verdict over what the collector already produced, and it exists only
+  // for this panel.
+  access: [
+    'src/shared/staleAccounts.ts',
+    'src/shared/accessExport.ts',
+    'src/shared/bastion.ts',
+    'src/shared/sudoers.ts',
+    'src/renderer/src/components/monitor/AccessPanel.tsx'
+  ],
   // The collector (src/shared/posture.ts, src/main/services/posture.ts) is not
   // listed, for the reason hostFacts is not listed under `inventory` and the
   // access collector is not listed above: it lives in the sampler, not in the
@@ -79,6 +113,8 @@ const MODULE_FILES: Record<string, string[]> = {
   // vault inside a background sweep, which is the trade this list exists to
   // make visible.
   drift: [
+    'src/shared/driftWatch.ts',
+    'src/main/services/driftWatchStore.ts',
     'src/shared/drift.ts',
     'src/main/services/drift.ts',
     'src/renderer/src/components/monitor/DriftPanel.tsx'
@@ -90,6 +126,10 @@ const MODULE_FILES: Record<string, string[]> = {
   // preload bridge rather than imported, which is what the second assertion
   // below covers.
   capacity: [
+    'src/shared/fleetForecast.ts',
+    'src/shared/bytesForecast.ts',
+    'src/shared/dbSizeSample.ts',
+    'src/main/services/dbSampler.ts',
     'src/shared/capacity.ts',
     'src/renderer/src/lib/capacity.ts',
     'src/renderer/src/components/monitor/CapacityPanel.tsx'
@@ -150,9 +190,22 @@ const MODULE_FILES: Record<string, string[]> = {
     'src/main/services/processes.ts',
     'src/renderer/src/components/processes/ProcessesPanel.tsx'
   ],
-  docker: ['src/shared/docker.ts', 'src/main/services/docker.ts', 'src/renderer/src/components/docker/DockerPanel.tsx'],
+  docker: ['src/shared/imageScan.ts', 'src/shared/docker.ts', 'src/main/services/docker.ts', 'src/renderer/src/components/docker/DockerPanel.tsx'],
   kubernetes: [
     'src/shared/kubernetes.ts',
+    'src/shared/k8sSkew.ts',
+    'src/shared/k8sNodes.ts',
+    'src/shared/k8sResources.ts',
+    'src/shared/k8sHpa.ts',
+    'src/shared/k8sPdbView.ts',
+    'src/shared/k8sRbac.ts',
+    'src/shared/k8sStale.ts',
+    'src/shared/k8sRollout.ts',
+    'src/shared/k8sPv.ts',
+    'src/shared/k8sAddon.ts',
+    'src/shared/k8sUnused.ts',
+    'src/shared/k8sCrashloop.ts',
+    'src/shared/k8sReview.ts',
     'src/main/services/kubernetes.ts',
     'src/renderer/src/components/kubernetes/KubernetesPanel.tsx'
   ]

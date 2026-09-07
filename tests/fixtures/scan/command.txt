@@ -1,0 +1,1 @@
+trivy image --scanners vuln --format template --template '{{- range . }}{{- range .Vulnerabilities }}{{ .Severity }}|{{ if .FixedVersion }}fix{{ else }}nofix{{ end }}|{{ .VulnerabilityID }}|{{ .PkgName }}{{ println }}{{- end }}{{- end }}' <ref> 2>&1

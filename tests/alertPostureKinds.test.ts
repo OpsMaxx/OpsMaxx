@@ -121,7 +121,7 @@ describe('a certificate running out', () => {
     cert(-3)
     expect(shown[0].title).toBe('web-1: Certificate 3 days PAST expiry')
     expect(raises()[0].summary).toBe(
-      'web-1: The soonest certificate on this host 3 days PAST expiry (threshold 30 days)'
+      'web-1: The soonest certificate on this server 3 days PAST expiry (threshold 30 days)'
     )
   })
 
@@ -197,7 +197,7 @@ describe('a certificate running out', () => {
     cert(89)
     expect(resolves()).toHaveLength(1)
     expect(resolves()[0].summary).toBe(
-      'web-1: The soonest certificate on this host renewed and back above 30 days'
+      'web-1: The soonest certificate on this server renewed and back above 30 days'
     )
     expect(chips()).toEqual([])
   })
@@ -261,7 +261,7 @@ describe('a certificate running out', () => {
 // oom-kill: a state with an observable resolve
 // ---------------------------------------------------------------------------
 
-describe('a host killing processes for memory', () => {
+describe('a server killing processes for memory', () => {
   it('speaks once on the crossing and says what was killed', () => {
     oom(true, '3 killed across 2 processes')
     expect(raises()).toHaveLength(1)
@@ -333,16 +333,19 @@ describe('a host killing processes for memory', () => {
 // What the coverage row is allowed to claim about them
 // ---------------------------------------------------------------------------
 
-describe('coverage stays honest about where these two come from', () => {
+describe('coverage stays honest about where these come from', () => {
   it('does not file them under the sampler, the app root or read-on-demand', () => {
     expect(COVERAGE_SOURCE['oom-kill']).toBe('posture-sweep')
     expect(COVERAGE_SOURCE['cert-expiry']).toBe('posture-sweep')
+    // Item 5's error rate is counted in the same hourly pass, so it makes the
+    // same claim and inherits the same second switch.
+    expect(COVERAGE_SOURCE['error-rate']).toBe('posture-sweep')
   })
 
   it('names the SECOND switch the other three sources do not have', () => {
     const row = alertCoverageLines(true, true).find((l) => l.source === 'posture-sweep')
     expect(row, 'no posture-sweep row — this assertion checked nothing').toBeDefined()
-    expect(row?.kinds.sort()).toEqual(['cert-expiry', 'oom-kill'])
+    expect(row?.kinds.sort()).toEqual(['cert-expiry', 'error-rate', 'oom-kill'])
     expect(row?.text).toContain('Security posture module')
     // And it must not borrow the sampler's promise, which is the sentence this
     // whole file exists to keep honest.
@@ -353,5 +356,145 @@ describe('coverage stays honest about where these two come from', () => {
     const sampler = alertCoverageLines(true, true).find((l) => l.source === 'sampler')
     expect(sampler?.kinds).not.toContain('oom-kill')
     expect(sampler?.kinds).not.toContain('cert-expiry')
+    expect(sampler?.kinds).not.toContain('error-rate')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Item 48: the VPN profile's own client certificate
+// ---------------------------------------------------------------------------
+//
+// A sibling of cert-expiry rather than the same kind, and the reason is the
+// coverage page rather than the arithmetic: `cert-expiry` is answered by the
+// posture sweep, and a VPN profile is not a server and is never swept.
+//
+// Before this, the only signal a profile had was openvpn's own "certificate
+// has expired" in the log -- after the connect had already failed.
+
+/** A profile whose certificate expires `days` from now. */
+const vpnCert = (days: number | null | undefined): void =>
+  alerts.checkVpnCertificateAlert(
+    'vpn-1',
+    'Office VPN',
+    days === null || days === undefined ? days : T0 + days * 86_400_000,
+    T0
+  )
+
+describe('a VPN client certificate on its way out', () => {
+  it('warns before the connect fails, rather than after it has', () => {
+    vpnCert(3)
+    expect(recorded.map((r) => r.event.kind)).toContain('vpn-cert-expiry')
+    const raised = recorded.find((r) => r.event.kind === 'vpn-cert-expiry')!
+    expect(raised.event.event).toBe('raised')
+    expect(raised.event.serverName).toBe('Office VPN')
+  })
+
+  it('says nothing about a certificate with months left', () => {
+    vpnCert(200)
+    expect(recorded.filter((r) => r.event.kind === 'vpn-cert-expiry')).toEqual([])
+  })
+
+  it('says nothing at all when the date could not be read, because that is not "fine"', () => {
+    // A pkcs12 bundle, or a block that would not parse. Absent is not healthy.
+    vpnCert(null)
+    vpnCert(undefined)
+    expect(recorded.filter((r) => r.event.kind === 'vpn-cert-expiry')).toEqual([])
+  })
+
+  it('counts an already-expired certificate as negative days, floored not truncated', () => {
+    // A HALF day past, deliberately: floor and trunc agree on every whole
+    // number, so a test using one asserts nothing about which was written.
+    // Expired five and a half days ago is -6 days remaining, the same way
+    // readCertificate floors, and -5 would round towards zero and flatter it.
+    alerts.checkVpnCertificateAlert('vpn-1', 'Office VPN', T0 - 5.5 * 86_400_000, T0)
+    const raised = recorded.find((r) => r.event.kind === 'vpn-cert-expiry')!
+    expect(raised.event.value).toBe(-6)
+  })
+
+  it('resolves when the certificate is renewed', () => {
+    vpnCert(3)
+    recorded.length = 0
+    vpnCert(365)
+    const resolved = recorded.find((r) => r.event.kind === 'vpn-cert-expiry')
+    expect(resolved?.event.event).toBe('resolved')
+  })
+
+  it('does not post under the server certificate kind', () => {
+    vpnCert(3)
+    expect(posted.some((p) => p.kind === 'vpn-cert-expiry')).toBe(true)
+    expect(posted.some((p) => p.kind === 'cert-expiry')).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Item 5: the journal error rate, which rides the same hourly sweep
+// ---------------------------------------------------------------------------
+//
+// NUMERIC and the RIGHT way up, which is the thing these cases pin. It is the
+// first numeric kind added after cert-expiry taught the store that a number can
+// run downwards, so the risk is not that the direction is unknown but that it
+// is inherited: a kind filed beside two inverted ones and left pointing their
+// way would treat a host screaming into its journal as the healthiest in the
+// fleet, and say nothing at all.
+
+const rate = (perMinute: number | null): void =>
+  alerts.checkErrorRateAlert('s1', 'web-1', perMinute, 5)
+
+describe('the journal error rate is numeric and not inverted', () => {
+  it('raises when the rate climbs above the line', () => {
+    rate(40)
+    expect(raises().map((p) => p.kind)).toEqual(['error-rate'])
+    expect(chips()).toContain('error-rate')
+  })
+
+  // The mutation this exists to kill: with the direction inverted, forty errors
+  // a minute is "well above the line" read as "well clear of it" and nothing is
+  // ever said.
+  it('says nothing when the rate is comfortably below it', () => {
+    rate(0)
+    rate(1)
+    expect(raises()).toEqual([])
+    expect(chips()).not.toContain('error-rate')
+  })
+
+  it('clears when the host goes quiet again', () => {
+    rate(40)
+    vi.setSystemTime(T0 + 2 * 60 * 60 * 1000)
+    rate(0)
+    expect(resolves().map((p) => p.kind)).toEqual(['error-rate'])
+    expect(chips()).not.toContain('error-rate')
+  })
+
+  // The floor, and the reason escalation is inert for this kind. The number is
+  // produced by the hourly posture sweep, so a worse reading does not exist
+  // inside the window to escalate on — and even a synthetic one must not beat
+  // the floor, or a host mid-incident earns a notification per sample.
+  it('says nothing more inside the window, however much worse it gets', () => {
+    rate(40)
+    expect(raises()).toHaveLength(1)
+    posted.length = 0
+    vi.setSystemTime(T0 + 59 * 60_000)
+    rate(400)
+    expect(posted).toEqual([])
+  })
+
+  it('repeats once the window has passed and the host is still noisy', () => {
+    rate(40)
+    posted.length = 0
+    vi.setSystemTime(T0 + 61 * 60_000)
+    rate(40)
+    expect(raises().map((p) => p.kind)).toEqual(['error-rate'])
+  })
+
+  // A rate nobody measured is not a quiet host. This kind is the one most able
+  // to get that wrong: an unreadable journal produces no lines, and "no lines"
+  // and "no errors" are the same empty output.
+  it('neither raises nor resolves on a null', () => {
+    rate(40)
+    posted.length = 0
+    rate(null)
+    expect(posted).toEqual([])
+    // And the chip STAYS. A read that did not happen is not an all-clear.
+    expect(chips()).toContain('error-rate')
   })
 })

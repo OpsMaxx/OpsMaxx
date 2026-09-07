@@ -1,8 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  accessCoverageCsv,
+  accessExportCoverage,
+  accessExportCsv,
+  accessExportJson,
+  buildAccessExport
+} from '../../../../shared/accessExport'
 import { KeyRound, RefreshCw, ShieldAlert } from 'lucide-react'
+import { openSettings } from '../../store/nav'
+import { useApp } from '../../store/app'
 import { bridgeHas } from '../../lib/bridge'
 import { clsx, duration } from '../../lib/format'
 import { sshHopsFor } from '../../lib/ssh'
+import {
+  serviceAccountsWithKeys,
+  staleAccounts,
+  summariseStaleAccounts
+} from '../../../../shared/staleAccounts'
+import { sudoAcrossFiles } from '../../../../shared/sudoers'
 import {
   ACCESS_STATUS_HELP,
   ACCESS_WRITE_DISABLED_REASON,
@@ -85,7 +100,7 @@ function statusChip(status: AccessStatus): React.JSX.Element | null {
       {status === 'denied'
         ? 'not permitted'
         : status === 'absent'
-          ? 'not on this host'
+          ? 'not on this server'
           : status === 'no-tool'
             ? 'no tool for it'
             : status === 'unsupported'
@@ -121,7 +136,7 @@ function KeyCount({ account }: { account: AccessAccount }): React.JSX.Element {
       {unreadable > 0 && (
         <span
           className="chip warn"
-          title={`${unreadable} line${unreadable === 1 ? '' : 's'} in this file could not be fingerprinted, so ${unreadable === 1 ? 'it is' : 'they are'} not in the count beside it and cannot be matched against other hosts.`}
+          title={`${unreadable} line${unreadable === 1 ? '' : 's'} in this file could not be fingerprinted, so ${unreadable === 1 ? 'it is' : 'they are'} not in the count beside it and cannot be matched against other servers.`}
         >
           +{unreadable} unreadable
         </span>
@@ -148,7 +163,7 @@ function KeyCount({ account }: { account: AccessAccount }): React.JSX.Element {
  */
 const OUTCOME_LABEL: Record<AccessCommitOutcome, string> = {
   committed: 'Committed',
-  'reverted-verification-failed': 'Reverted — the host would not let a new session in',
+  'reverted-verification-failed': 'Reverted — the server would not let a new session in',
   'reverted-unconfirmed': 'Reverted — nothing confirmed it in time'
 }
 
@@ -173,6 +188,41 @@ export function AccessPanel({
   const [result, setResult] = useState<AccessRunResult | null>(null)
   const [running, setRunning] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
+
+  /**
+   * The review, as a file.
+   *
+   * EVERY server goes in, not just the ones that answered. A host missing from
+   * an access review reads as a host nobody can reach, and `buildAccessExport`
+   * gives an unread one a row saying otherwise.
+   *
+   * The coverage section is written into the SAME file rather than offered
+   * separately: it is the part that says whether the rows are the whole story,
+   * and a caveat in a second download is a caveat nobody has when they read the
+   * first.
+   */
+  const exportReview = (format: 'csv' | 'json'): void => {
+    const inputs = servers.map((s) => ({
+      serverId: s.id,
+      serverName: s.name,
+      access: entries[s.id]?.access ?? null,
+      error: entries[s.id]?.error ?? null
+    }))
+    const rows = buildAccessExport(inputs)
+    const coverage = accessExportCoverage(inputs)
+    const at = Date.now()
+    const body =
+      format === 'json'
+        ? accessExportJson(rows, coverage, { generatedAt: at, since: null })
+        : `${accessExportCsv(rows)}\n\n# coverage\n${accessCoverageCsv(coverage)}`
+    const blob = new Blob([body], { type: format === 'json' ? 'application/json' : 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `access-review-${new Date(at).toISOString().slice(0, 10)}.${format}`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   const load = useCallback(async (): Promise<void> => {
     if (!bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'access')) return
@@ -298,6 +348,11 @@ export function AccessPanel({
   // a subset of `failed`: a host can answer perfectly and still have two home
   // directories this account cannot traverse, and that host's counts are a
   // lower bound exactly as a failed host's are.
+  // 90 days by default. Short enough that a forgotten contractor's key shows
+  // up inside a quarter, long enough that somebody who was on parental leave
+  // does not.
+  const [idleDays, setIdleDays] = useState(90)
+
   const hosts = useMemo(
     () =>
       servers.map((s) => {
@@ -329,6 +384,41 @@ export function AccessPanel({
   // under `unchecked`, and counting it twice would put two numbers in the
   // banner for one machine.
   const incomplete = current.filter((h) => h.summary && !h.summary.certain)
+
+  // Item 45. Which accounts still hold a working key that nobody has used.
+  //
+  // Over `collected` rather than `current`: a host whose last collection is
+  // three weeks old still tells you something true about who had a key then,
+  // and the banner above already says which hosts are stale. Dropping them here
+  // would make this list quietly shrink as the estate got harder to read.
+  const idleFindings = useMemo(
+    () =>
+      staleAccounts(
+        collected.map((h) => ({
+          serverId: h.server.id,
+          serverName: h.server.name,
+          accounts: h.entry!.access!.accounts
+        })),
+        idleDays
+      ),
+    [collected, idleDays]
+  )
+  const idleSummary = summariseStaleAccounts(idleFindings)
+
+  // Item 46. A different question from the one above -- not "has anyone used
+  // this key" but "should this account have one at all" -- so it is its own
+  // list rather than a column on that one.
+  const serviceKeys = useMemo(
+    () =>
+      serviceAccountsWithKeys(
+        collected.map((h) => ({
+          serverId: h.server.id,
+          serverName: h.server.name,
+          accounts: h.entry!.access!.accounts
+        }))
+      ),
+    [collected]
+  )
 
   /**
    * The by-key view. One row per distinct fingerprint across everything that
@@ -378,56 +468,230 @@ export function AccessPanel({
   // The button is not merely hidden. Main refuses `access:plan` and
   // `access:run` outright, and the notice below says the buttons were withdrawn
   // rather than leaving an operator to conclude they have not arrived.
+  // Three things, and they fail for different reasons. The BUILD ceiling is a
+  // decision about this release; the SETTING is the operator's, off unless they
+  // turned it on; the bridge is a fact about this install. Main enforces the
+  // setting again in both handlers, so this is the honest UI and not the
+  // boundary.
+  const writeOptIn = useApp((st) => st.settings.accessWriteEnabled)
   const canWrite =
-    ACCESS_WRITE_ENABLED &&
+    (ACCESS_WRITE_ENABLED || writeOptIn) &&
     bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'accessPlan')
 
   return (
     <div className="bc-panel">
-      <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-        <KeyRound size={14} className="faint" />
-        <b className="grow">Keys and access</b>
-        {collected.length > 0 && (
-          <button className="btn ghost sm" onClick={() => setView(view === 'keys' ? 'hosts' : 'keys')}>
-            {view === 'keys' ? 'By host' : 'By key'}
+      <div className="panel-head">
+        <span className="panel-head-icon">
+          <KeyRound size={14} />
+        </span>
+        <h2 className="ui-section-title">Keys and access</h2>
+        <p className="ui-note panel-head-purpose">
+          Which SSH keys can reach which servers, and which accounts they land on. Files are read,
+          never edited, and no private key is touched.
+        </p>
+        <div className="panel-head-actions">
+          {collected.length > 0 && (
+            <button className="btn ghost sm" onClick={() => setView(view === 'keys' ? 'hosts' : 'keys')}>
+              {view === 'keys' ? 'By server' : 'By key'}
+            </button>
+          )}
+          {/* Item 46's access review. Downloaded rather than shown: the thing
+              somebody wants is a file to hand over, and rendering four thousand
+              rows in a panel is not that. */}
+          <button
+            className="btn ghost sm"
+            disabled={servers.length === 0}
+            title="Every account and key across this estate as a CSV, with a coverage section naming every host that could not be read and every sshd that reads keys from somewhere this did not look."
+            onClick={() => exportReview('csv')}
+          >
+            Export CSV
           </button>
-        )}
-        <button
-          className="btn"
-          disabled={busy || servers.length === 0}
-          onClick={() => void refresh()}
-          title="Sweeps the estate now and re-reads what has already been collected. Keys are re-read at most once an hour per host."
-        >
-          <RefreshCw size={13} className={clsx(busy && 'spin')} /> Check now
-        </button>
+          <button
+            className="btn ghost sm"
+            disabled={servers.length === 0}
+            title="The same review as JSON, coverage first."
+            onClick={() => exportReview('json')}
+          >
+            Export JSON
+          </button>
+          <button
+            className="btn primary"
+            disabled={busy || servers.length === 0}
+            onClick={() => void refresh()}
+            title="Sweeps the estate now and re-reads what has already been collected. Keys are re-read at most once an hour per server."
+          >
+            <RefreshCw size={13} className={clsx(busy && 'spin')} /> Check now
+          </button>
+        </div>
       </div>
+
+      {collected.length > 0 && (
+        <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+          <div className="cron-row">
+            <span className="r-title">Keys nobody is using</span>
+            <span className="grow" />
+            <label className="r-sub faint">
+              idle for{' '}
+              <select
+                className="input sm"
+                aria-label="Idle threshold in days"
+                value={idleDays}
+                onChange={(e) => setIdleDays(Number(e.target.value))}
+              >
+                <option value={30}>30 days</option>
+                <option value={90}>90 days</option>
+                <option value={180}>180 days</option>
+                <option value={365}>a year</option>
+              </select>
+            </label>
+          </div>
+          {/* The unknowns are IN the headline, not filtered out of it. A count
+              that shrinks as the estate gets harder to read is the wrong
+              direction for a number somebody uses to decide they are done. */}
+          <div className="r-sub">{idleSummary.headline}</div>
+          {idleFindings.filter((f) => f.verdict !== 'active').length > 0 && (
+            <table className="mini-table">
+              <tbody>
+                {idleFindings
+                  .filter((f) => f.verdict !== 'active')
+                  .map((f) => (
+                    <tr key={`${f.serverId}:${f.user}`}>
+                      <td className="mono">{f.user}</td>
+                      <td className="faint">{f.serverName}</td>
+                      <td className={clsx(f.verdict === 'unknown' ? 'state-unknown' : 'warn')}>
+                        {f.verdict === 'never-used'
+                          ? 'never used'
+                          : f.verdict === 'stale'
+                            ? `${f.daysSinceLogin}d idle`
+                            : 'could not tell'}
+                      </td>
+                      <td className="faint">{f.because}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          )}
+          {/* Revoking is item 36's, behind its own gate and its own rollback.
+              A button here would act through a path that has neither. */}
+          <div className="r-sub faint">
+            Read-only. Removing a key is done from the key rows above, where the change is staged
+            with a rollback.
+          </div>
+        </div>
+      )}
+
+      {/* Item 36b. THREE states, and the type exists to keep them apart:
+          `undefined` is nobody consented, `null` is the read failed, and an
+          array is an answer. Rendering all three the same would be the whole
+          point of the feature lost. */}
+      {collected.some((h) => h.entry!.access!.sudoers !== undefined) && (
+        <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+          <div className="r-title">What sudo actually grants</div>
+          <div className="r-sub faint">
+            Read from <code>/etc/sudoers</code> and <code>/etc/sudoers.d</code>, which replaces
+            the guess this app makes otherwise — that anyone in <code>wheel</code> or{' '}
+            <code>sudo</code> has root. That guess is wrong in both directions.
+          </div>
+          <table className="mini-table">
+            <tbody>
+              {collected
+                .filter((h) => h.entry!.access!.sudoers !== undefined)
+                .flatMap((h) => {
+                  const files = h.entry!.access!.sudoers
+                  if (files === null) {
+                    return [
+                      <tr key={`${h.server.id}:failed`}>
+                        <td className="mono">{h.server.name}</td>
+                        <td className="state-unknown">could not be read</td>
+                        <td className="faint">
+                          The read was asked for and did not answer. This is not a server with no
+                          sudo rules.
+                        </td>
+                      </tr>
+                    ]
+                  }
+                  return h.entry!.access!.accounts.map((a) => {
+                    const r = sudoAcrossFiles(a.user, a.adminGroups ?? [], files ?? [])
+                    if (r.findings.length === 0 && r.unreadable.length === 0) return null
+                    return (
+                      <tr key={`${h.server.id}:${a.user}`}>
+                        <td className="mono">{a.user}</td>
+                        <td className="faint">{h.server.name}</td>
+                        <td className={clsx(r.findings.some((f) => f.grantsAll && f.noPassword === 'all') && 'warn')}>
+                          {r.sentence}
+                        </td>
+                      </tr>
+                    )
+                  }).filter(Boolean)
+                })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {serviceKeys.length > 0 && (
+        <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+          <div className="r-title">Service accounts with keys</div>
+          <div className="r-sub faint">
+            Accounts below uid 1000 — software, not people — that hold a key. Ordered by whether
+            the account&rsquo;s own shell would let somebody in. root is not listed: a key there is
+            how OpsMaxx usually connects.
+          </div>
+          <table className="mini-table">
+            <tbody>
+              {serviceKeys.map((f) => (
+                <tr key={`${f.serverId}:${f.user}`}>
+                  <td className="mono">{f.user}</td>
+                  <td className="faint">{f.serverName}</td>
+                  <td className={clsx(f.loginDisabled === false ? 'warn' : 'faint')}>
+                    {f.loginDisabled === false
+                      ? 'can log in'
+                      : f.loginDisabled === true
+                        ? 'shell refuses login'
+                        : 'shell unknown'}
+                  </td>
+                  <td className="faint">{f.because}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Said once, at the top, before a target is chosen — because the point
           of saying it is that nobody plans around a capability this does not
           have. Both halves matter: that the write half is off, and what it will
           and will not be able to do when it is back. */}
-      {!ACCESS_WRITE_ENABLED && (
-        <div className="s-desc" data-testid="write-gated">
+      {!canWrite && (
+        <div className="panel-note is-unknown" data-testid="write-gated">
           <ShieldAlert size={12} /> <b>{ACCESS_WRITE_DISABLED_REASON}</b>{' '}
           <span className="muted">{ACCESS_WRITE_SCOPE}</span>
         </div>
       )}
 
       {collected.length === 0 ? (
-        <div className="s-desc">
-          <b>No authorized_keys have been collected yet.</b> OpsMaxx reads them about once an
-          hour, on the same background sweep as host facts — so a server added in the last hour, or
+        <div className="panel-empty">
+          <p className="panel-empty-title">No authorized_keys have been collected yet.</p>
+          <p className="panel-empty-body">
+            OpsMaxx reads them about once an
+          hour, on the same background sweep as server facts — so a server added in the last hour, or
           an estate where this module has just been switched on, will not have any yet. Press{' '}
           <b>Check now</b> to sweep immediately, and make sure background checking is on in
-          Settings. Nothing is written to any host by this: the files are read, never edited, and no
+          Settings. Nothing is written to any server by this: the files are read, never edited, and no
           private key is touched.
           {failed.length > 0 && (
             <>
               {' '}
-              <b>{failed.length}</b> host{failed.length === 1 ? '' : 's'} refused the probe — see
+              <b>{failed.length}</b> server{failed.length === 1 ? '' : 's'} refused the probe — see
               below.
             </>
           )}
+          </p>
+          <div className="panel-empty-actions">
+            <button className="btn ghost sm" onClick={() => openSettings('monitoring')}>
+              Open Monitoring settings
+            </button>
+          </div>
         </div>
       ) : (
         <>
@@ -435,20 +699,20 @@ export function AccessPanel({
               never optional. "37 keys across 12 hosts" on an estate where 3
               hosts could not be read is a count over 9 hosts wearing the label
               of a count over 12. */}
-          <div className="row wrap muted" style={{ fontSize: 11, marginTop: 8, gap: 12 }}>
+          <div className="panel-stats">
             <span>
               {keyRows.length} distinct key{keyRows.length === 1 ? '' : 's'} across{' '}
-              {collected.length} host{collected.length === 1 ? '' : 's'}
+              {collected.length} server{collected.length === 1 ? '' : 's'}
             </span>
             {unchecked > 0 && (
-              <span className="warn" data-testid="unchecked-hosts">
-                {unchecked} host{unchecked === 1 ? '' : 's'} could not be checked and{' '}
+              <span className="state-unknown" data-testid="unchecked-hosts">
+                {unchecked} server{unchecked === 1 ? '' : 's'} could not be checked and{' '}
                 {unchecked === 1 ? 'is' : 'are'} not in that count
               </span>
             )}
             {incomplete.length > 0 && (
-              <span className="warn" data-testid="incomplete-hosts">
-                {incomplete.length} host{incomplete.length === 1 ? '' : 's'} answered only partly
+              <span className="state-unknown" data-testid="incomplete-hosts">
+                {incomplete.length} server{incomplete.length === 1 ? '' : 's'} answered only partly
               </span>
             )}
           </div>
@@ -458,12 +722,12 @@ export function AccessPanel({
               explicitly what may NOT be concluded — not merely that some data
               is missing. */}
           {(unchecked > 0 || incomplete.length > 0) && (
-            <div className="s-desc warn" data-testid="not-an-answer">
+            <div className="panel-note is-unknown" data-testid="not-an-answer">
               <ShieldAlert size={12} /> This is not a complete picture of the estate, so “this key
               is not on my fleet” cannot be concluded from it.{' '}
               {unchecked > 0 && (
                 <>
-                  {unchecked} host{unchecked === 1 ? '' : 's'} could not be read this time
+                  {unchecked} server{unchecked === 1 ? '' : 's'} could not be read this time
                   {stale.length > 0 && (
                     <>
                       {' '}
@@ -476,7 +740,7 @@ export function AccessPanel({
               )}
               {incomplete.length > 0 && (
                 <>
-                  {incomplete.length} host{incomplete.length === 1 ? '' : 's'} answered for some
+                  {incomplete.length} server{incomplete.length === 1 ? '' : 's'} answered for some
                   accounts and not others.{' '}
                 </>
               )}
@@ -496,9 +760,9 @@ export function AccessPanel({
                 Revoke {pending.fingerprint} from {pending.preview.hosts.length} account
                 {pending.preview.hosts.length === 1 ? '' : 's'}?
               </b>{' '}
-              This is staged, not applied. Each host takes a timestamped backup, replaces the file,
+              This is staged, not applied. Each server takes a timestamped backup, replaces the file,
               and arms its OWN rollback before OpsMaxx lets go — so if this app dies in the next
-              instant, the host puts the previous file back by itself after{' '}
+              instant, the server puts the previous file back by itself after{' '}
               {pending.preview.rollbackSeconds} seconds. Nothing becomes permanent until a second
               connection has authenticated against the changed file.
               {pending.preview.hosts.length > 0 && (
@@ -539,12 +803,12 @@ export function AccessPanel({
               <div style={{ marginTop: 6 }}>
                 <details>
                   <summary className="muted" style={{ fontSize: 11 }}>
-                    What will run on each host
+                    What will run on each server
                   </summary>
                   {/* Shown, and sent back with the run: main derives it again
                       and refuses to touch a host if the two differ. */}
                   <pre className="mono" style={{ fontSize: 10, whiteSpace: 'pre-wrap' }}>
-                    {pending.preview.command || 'nothing — every host was left out'}
+                    {pending.preview.command || 'nothing — every server was left out'}
                   </pre>
                 </details>
               </div>
@@ -586,7 +850,7 @@ export function AccessPanel({
                 </div>
               ))}
               {result.reports.length === 0 && result.notStaged.length === 0 && (
-                <span>Nothing ran: every host was left out.</span>
+                <span>Nothing ran: every server was left out.</span>
               )}
             </div>
           )}
@@ -634,7 +898,7 @@ export function AccessPanel({
                         {k.restrictedEverywhere && (
                           <span
                             className="chip"
-                            title="Every line carrying this key restricts it — a command=, from= or restrict option. It is not a general-purpose login on any host where it was found."
+                            title="Every line carrying this key restricts it — a command=, from= or restrict option. It is not a general-purpose login on any server where it was found."
                           >
                             restricted
                           </span>
@@ -642,7 +906,7 @@ export function AccessPanel({
                         {k.viaCertificate && (
                           <span
                             className="chip"
-                            title="At least one host trusts this key through a certificate rather than as a bare key. The fingerprint is the key inside the certificate, which is what ssh-keygen -l prints — so it is the same key either way."
+                            title="At least one server trusts this key through a certificate rather than as a bare key. The fingerprint is the key inside the certificate, which is what ssh-keygen -l prints — so it is the same key either way."
                           >
                             certificate
                           </span>
@@ -655,7 +919,7 @@ export function AccessPanel({
                           <span
                             className="chip warn"
                             data-testid={`ca-${k.fingerprint}`}
-                            title="This is a cert-authority line: the host trusts this key as a signer, so it also accepts every key this authority signs — including keys that do not exist yet and are in no file anywhere. Revoking one signed key does not change that."
+                            title="This is a cert-authority line: the server trusts this key as a signer, so it also accepts every key this authority signs — including keys that do not exist yet and are in no file anywhere. Revoking one signed key does not change that."
                           >
                             certificate authority
                           </span>
@@ -692,7 +956,7 @@ export function AccessPanel({
                             data-testid={`revoke-${k.fingerprint}`}
                             disabled={running || pending !== null}
                             onClick={() => void planRevoke(k.fingerprint)}
-                            title="Shows exactly what would run on which hosts. Nothing is written until you confirm it, and nothing becomes permanent until a second, independent session has proved the host still lets OpsMaxx in."
+                            title="Shows exactly what would run on which servers. Nothing is written until you confirm it, and nothing becomes permanent until a second, independent session has proved the server still lets OpsMaxx in."
                           >
                             Revoke…
                           </button>
@@ -801,7 +1065,7 @@ export function AccessPanel({
                             // of this" is not "we do not know when they logged
                             // in", and showing the phrase is the better of the
                             // two answers.
-                            <span title="The host reported this and OpsMaxx could not read a date out of it.">
+                            <span title="The server reported this and OpsMaxx could not read a date out of it.">
                               {a.lastLoginText}
                             </span>
                           ) : (
@@ -820,7 +1084,7 @@ export function AccessPanel({
               below the tables rather than in a tooltip: it is the list of
               machines somebody has to go and check by hand. */}
           {incomplete.map((h) => (
-            <div key={h.server.id} className="s-desc warn" data-testid={`incomplete-${h.server.name}`}>
+            <div key={h.server.id} className="panel-note is-unknown" data-testid={`incomplete-${h.server.name}`}>
               <b>{h.server.name}</b>: {h.summary!.uncertainty.join('; ')}.
             </div>
           ))}
@@ -832,23 +1096,23 @@ export function AccessPanel({
           The age is the age of the READING — that is the number that decides
           whether to act on what is on the screen. */}
       {stale.map((h) => (
-        <div key={h.server.id} className="s-desc warn" data-testid={`stale-${h.server.name}`}>
+        <div key={h.server.id} className="panel-note is-unknown" data-testid={`stale-${h.server.name}`}>
           <ShieldAlert size={12} /> <b>{h.server.name}</b>: the keys shown above were read{' '}
           <b>{duration(h.entry!.at ?? null)} ago</b> and the probe has been failing since —{' '}
-          {h.entry!.error}. They are what OpsMaxx last saw, not what the host trusts now, and
-          this host is counted as unchecked.
+          {h.entry!.error}. They are what OpsMaxx last saw, not what the server trusts now, and
+          this server is counted as unchecked.
         </div>
       ))}
 
       {failed.map((h) => (
-        <div key={h.server.id} className="s-desc danger" data-testid={`failed-${h.server.name}`}>
-          {h.server.name}: the access probe failed — {h.entry!.error}. This host is excluded from
-          every count above; it is not a host with no keys.
+        <div key={h.server.id} className="panel-note is-alarm" data-testid={`failed-${h.server.name}`}>
+          {h.server.name}: the access probe failed — {h.entry!.error}. This server is excluded from
+          every count above; it is not a server with no keys.
         </div>
       ))}
       {collected.length > 0 && never.length > 0 && (
-        <div className="s-desc" data-testid="never-collected">
-          {never.length} host{never.length === 1 ? '' : 's'} ({never.map((h) => h.server.name).join(', ')}
+        <div className="panel-note is-unknown" data-testid="never-collected">
+          {never.length} server{never.length === 1 ? '' : 's'} ({never.map((h) => h.server.name).join(', ')}
           ) {never.length === 1 ? 'has' : 'have'} not been read yet. They are excluded from every
           count above.
         </div>
@@ -859,7 +1123,7 @@ export function AccessPanel({
       {collected.some((h) =>
         h.entry!.access!.accounts.some((a) => a.keys?.some((k) => k.problem !== null))
       ) && (
-        <div className="s-desc" data-testid="problem-help">
+        <div className="panel-note" data-testid="problem-help">
           Some lines in files that WERE read could not be fingerprinted.{' '}
           {KEY_PROBLEM_HELP['unknown-type']}
         </div>

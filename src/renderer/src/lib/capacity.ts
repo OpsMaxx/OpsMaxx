@@ -29,7 +29,10 @@ const DAY_MS = 86_400_000
 export const METRIC_LABEL: Record<CapacityMetric, string> = {
   cpu: 'CPU',
   memPct: 'Memory',
-  diskPct: 'Disk'
+  diskPct: 'Disk',
+  // Not "Inodes": the word means nothing to most people and the panel is read
+  // in a hurry. What runs out is the ability to create files.
+  inodePct: 'Files (inodes)'
 }
 
 /**
@@ -79,7 +82,7 @@ export function refusalText(
     case 'no-data':
       return 'No samples in this window yet.'
     case 'stale':
-      return `No samples for ${span(Date.now() - f.to)}. Nothing to forecast from until this host reports again.`
+      return `No samples for ${span(Date.now() - f.to)}. Nothing to forecast from until this server reports again.`
     case 'too-few-points':
       return `Only ${f.points} sample${f.points === 1 ? '' : 's'} since the last break in the data; ${FORECAST_MIN_POINTS} are needed.`
     case 'window-too-short':

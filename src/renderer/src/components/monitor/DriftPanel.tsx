@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FileDiff, Info, Pin, RefreshCw } from 'lucide-react'
 import { bridgeHas } from '../../lib/bridge'
+import { openSettings } from '../../store/nav'
+import { useApp } from '../../store/app'
+import {
+  checkDriftWatch,
+  driftWatchApprovalSentence,
+  driftWatchId,
+  driftWatchPhrase,
+  verifyDriftWatchApproval,
+  type DriftWatchProposal
+} from '../../../../shared/driftWatch'
 import { clsx } from '../../lib/format'
 import type { Server } from '../../types'
 import {
@@ -14,6 +24,7 @@ import {
   driftRule,
   type DriftHostResult,
   type DriftVerdict,
+  type DriftWatch,
   type HostDrift
 } from '../../../../shared/drift'
 
@@ -36,7 +47,7 @@ const VERDICT_LABEL: Record<DriftVerdict, string> = {
   identical: 'identical',
   'ignored-difference': 'differs in ignored ways',
   differs: 'differs',
-  absent: 'not on this host',
+  absent: 'not on this server',
   unread: 'could not be read'
 }
 
@@ -65,7 +76,7 @@ function Rules({ watchId }: { watchId: string }): React.JSX.Element | null {
   // code does not use is worse than showing none.
   const rules = DRIFT_RULE_ORDER.filter((id) => watch.rules.includes(id)).map(driftRule)
   return (
-    <div className="s-desc" data-testid="drift-rules">
+    <div className="panel-note" data-testid="drift-rules">
       <b>{watch.path}</b> is compared after these rules are applied, in this order. Two files that
       differ only in what these remove are reported as differing in ignored ways — never as
       identical.
@@ -100,7 +111,7 @@ function Row({
       <td>
         <button
           className={clsx('btn ghost sm', pinned && 'active')}
-          title="Compare every other host against this one"
+          title="Compare every other server against this one"
           onClick={onPin}
         >
           <Pin size={11} />
@@ -134,6 +145,52 @@ function Row({
 export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Element {
   const [entries, setEntries] = useState<Record<string, Entry>>({})
   const [watchId, setWatchId] = useState<string>(DRIFT_WATCHES[0].id)
+  // Item 46's operator-chosen watches, beside the catalogue rather than instead
+  // of it. Re-validated here so a settings blob edited by hand cannot put a
+  // path in the picker -- and AGAIN in main, which is the check that counts:
+  // see services/driftWatchStore.ts.
+  const stored = useApp((st) => st.settings.driftWatches)
+  const setSettings = useApp((st) => st.setSettings)
+  const custom = useMemo(() => {
+    const out: DriftWatch[] = []
+    for (const p of stored) {
+      const c = checkDriftWatch(p, [...DRIFT_WATCHES, ...out])
+      if (c.ok) out.push(c.watch)
+    }
+    return out
+  }, [stored])
+  const allWatches = useMemo(() => [...DRIFT_WATCHES, ...custom], [custom])
+  const [adding, setAdding] = useState(false)
+  const [draft, setDraft] = useState<DriftWatchProposal>({
+    path: '',
+    label: '',
+    comment: '#',
+    rules: [...DRIFT_RULE_ORDER]
+  })
+  const [phrase, setPhrase] = useState('')
+  const check = checkDriftWatch(draft, allWatches)
+
+  const addWatch = (): void => {
+    // Both guards are the function's own preconditions and BOTH are currently
+    // redundant with the disabled button below -- a mutation removing the
+    // approval check survives the tests for exactly that reason, and it is
+    // recorded here rather than defended with a test that would only be
+    // testing the mutation. They stay because a disabled button is a UI state
+    // and this is a function: the next caller may not be a button. What is NOT
+    // redundant is main's own re-validation, which is the check that counts —
+    // see services/driftWatchStore.ts.
+    if (!check.ok) return
+    if (!verifyDriftWatchApproval(draft.path.trim(), phrase)) return
+    setSettings({ driftWatches: [...stored, { ...draft, path: draft.path.trim() }] })
+    setAdding(false)
+    setPhrase('')
+    setDraft({ path: '', label: '', comment: '#', rules: [...DRIFT_RULE_ORDER] })
+  }
+
+  const removeWatch = (path: string): void => {
+    setSettings({ driftWatches: stored.filter((p) => p.path.trim() !== path) })
+    if (watchId === driftWatchId(path)) setWatchId(DRIFT_WATCHES[0].id)
+  }
   const [pinned, setPinned] = useState<string | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [showRules, setShowRules] = useState(false)
@@ -167,7 +224,7 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
     }
   }
 
-  const watch = DRIFT_WATCHES.find((x) => x.id === watchId) ?? DRIFT_WATCHES[0]
+  const watch = allWatches.find((x) => x.id === watchId) ?? allWatches[0]
 
   const comparison = useMemo(
     () =>
@@ -189,59 +246,150 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
 
   return (
     <div className="bc-panel">
-      <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-        <FileDiff size={14} className="faint" />
-        <b className="grow">Configuration drift</b>
-        <select
-          className="input sm"
-          aria-label="Watched file"
-          value={watchId}
-          onChange={(e) => setWatchId(e.target.value)}
-        >
-          {DRIFT_WATCHES.map((x) => (
-            <option key={x.id} value={x.id}>
-              {x.label}
-            </option>
-          ))}
-        </select>
-        <button
-          className="btn"
-          disabled={busy || servers.length === 0}
-          onClick={() => void refresh()}
-          title="Sweeps the estate now and re-reads what has already been collected. Watched files are re-read at most once an hour per host. Nothing is written to any host by this."
-        >
-          <RefreshCw size={13} className={clsx(busy && 'spin')} /> Check now
-        </button>
+      <div className="panel-head">
+        <span className="panel-head-icon">
+          <FileDiff size={14} />
+        </span>
+        <h2 className="ui-section-title">Configuration drift</h2>
+        <p className="ui-note panel-head-purpose">
+          Pick a watched file and see which servers still agree on it. Compared over hashes, and
+          read-only — OpsMaxx never pushes a file back.
+        </p>
+        <div className="panel-head-actions">
+          <select
+            className="input sm"
+            aria-label="Watched file"
+            value={watchId}
+            onChange={(e) => setWatchId(e.target.value)}
+          >
+            {allWatches.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.label}
+              </option>
+            ))}
+          </select>
+          <button className="btn ghost sm" onClick={() => setAdding((a) => !a)}>
+            {adding ? 'Cancel' : 'Watch a file'}
+          </button>
+          <button
+            className="btn primary"
+            disabled={busy || servers.length === 0}
+            onClick={() => void refresh()}
+            title="Sweeps the estate now and re-reads what has already been collected. Watched files are re-read at most once an hour per server. Nothing is written to any server by this."
+          >
+            <RefreshCw size={13} className={clsx(busy && 'spin')} /> Check now
+          </button>
+        </div>
       </div>
 
       {/* The refusal, on screen rather than only in the source — the same shape
           docker.ts's refusal to ship `prune` takes. Someone looking at three
           diverging hosts will look for the button that fixes them, and the
           answer has to be here rather than in a code comment. */}
-      <div className="s-desc" data-testid="drift-no-push">
+      <div className="panel-note" data-testid="drift-no-push">
         {DRIFT_NO_PUSH}
       </div>
 
+      {adding && (
+        <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+          <div className="r-title">Watch another file</div>
+          <input
+            className="input mono"
+            aria-label="Path"
+            placeholder="/etc/logrotate.conf"
+            value={draft.path}
+            onChange={(e) => setDraft({ ...draft, path: e.target.value })}
+          />
+          <input
+            className="input"
+            aria-label="Label"
+            placeholder="What it is, in one line"
+            value={draft.label}
+            onChange={(e) => setDraft({ ...draft, label: e.target.value })}
+          />
+          {/* The refusal, with its own sentence. Every one of these is a
+              different thing to do about it, and "invalid path" would be none
+              of them. */}
+          {!check.ok ? (
+            draft.path.trim() === '' ? (
+              <div className="s-note faint">A path under /etc.</div>
+            ) : (
+              <div className="s-note is-alarm">{check.detail}</div>
+            )
+          ) : (
+            <>
+              {/* What is being asserted, said before it is typed. */}
+              <div className="s-note warn">{driftWatchApprovalSentence(check.watch.path)}</div>
+              <input
+                className="input mono"
+                aria-label={`Type ${driftWatchPhrase(check.watch.path)} to confirm`}
+                placeholder={driftWatchPhrase(check.watch.path)}
+                value={phrase}
+                onChange={(e) => setPhrase(e.target.value)}
+              />
+            </>
+          )}
+          <div className="row-actions">
+            <button
+              className="btn primary"
+              disabled={!check.ok || !verifyDriftWatchApproval(draft.path.trim(), phrase)}
+              onClick={addWatch}
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      )}
+
+      {custom.length > 0 && (
+        <table className="mini-table">
+          <tbody>
+            {custom.map((w) => (
+              <tr key={w.id}>
+                <td className="mono">{w.path}</td>
+                <td className="faint">{w.label}</td>
+                <td>
+                  <button
+                    className="btn ghost sm"
+                    aria-label={`Stop watching ${w.path}`}
+                    onClick={() => removeWatch(w.path)}
+                  >
+                    Stop watching
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
       {collected === 0 ? (
-        <div className="s-desc">
-          <b>No configuration files have been read yet.</b> OpsMaxx reads them about once an
-          hour, on the same background sweep as the inventory — so a server added in the last hour,
-          or an estate where this has just been switched on, will not have any yet. Press{' '}
-          <b>Check now</b> to sweep immediately, and make sure background checking is on in
-          Settings.
+        <div className="panel-empty">
+          <p className="panel-empty-title">No configuration files have been read yet.</p>
+          <p className="panel-empty-body">
+            OpsMaxx reads them about once an hour, on the same background sweep as the inventory
+            — so a server added in the last hour, or an estate where this has just been switched
+            on, will not have any yet. Press <b>Check now</b> to sweep immediately, and make sure
+            background checking is on in Settings.
+          </p>
+          <div className="panel-empty-actions">
+            <button className="btn ghost sm" onClick={() => openSettings('monitoring')}>
+              Open Monitoring settings
+            </button>
+          </div>
         </div>
       ) : (
         <>
-          <div className="row wrap muted" style={{ fontSize: 11, marginTop: 8, gap: 12 }}>
+          <div className="panel-stats">
             {/* Each count is one text node rather than a number beside a word.
                 A React fragment splits `{n} match{...}` into three nodes, which
                 reads identically and is not the same string — and a headline
                 nobody can find is a headline nobody reads. */}
             <span>
               <span>{`${comparison.matching} ${comparison.matching === 1 ? 'match' : 'matches'}`}</span>
-              {comparison.diverging > 0 && <span className="warn">{` · ${comparison.diverging} differ`}</span>}
+              {comparison.diverging > 0 && <span className="state-watch">{` · ${comparison.diverging} differ`}</span>}
               {comparison.coverage.absent.length > 0 && (
-                <span className="warn">
+                <span className="state-unknown">
                   {` · ${comparison.coverage.absent.length} do not have the file`}
                 </span>
               )}
@@ -254,24 +402,24 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
           {showRules && <Rules watchId={watch.id} />}
 
           {comparison.baselineServerId === null ? (
-            <div className="s-desc warn" data-testid="drift-no-baseline">
+            <div className="panel-note is-unknown" data-testid="drift-no-baseline">
               Nothing to compare against. {pinned
-                ? 'The host you pinned could not be read, and another has NOT been substituted for it — a column of verdicts against a reference you did not choose would say less than nothing.'
-                : 'No host answered with a readable copy of this file.'}
+                ? 'The server you pinned could not be read, and another has NOT been substituted for it — a column of verdicts against a reference you did not choose would say less than nothing.'
+                : 'No server answered with a readable copy of this file.'}
             </div>
           ) : (
             comparison.baselineChosen && (
-              <div className="s-desc" data-testid="drift-chosen-baseline">
-                Nobody pinned a baseline, so the largest group of matching hosts was used and the
+              <div className="panel-note" data-testid="drift-chosen-baseline">
+                Nobody pinned a baseline, so the largest group of matching servers was used and the
                 others are compared against it. That is a statement about the majority, not about
-                which side is correct: a host that was fixed first looks exactly like a host that
+                which side is correct: a server that was fixed first looks exactly like a server that
                 drifted. Pin one to compare against it instead.
               </div>
             )
           )}
 
           {sentence && (
-            <div className="s-desc warn" data-testid="drift-coverage">
+            <div className="panel-note is-unknown" data-testid="drift-coverage">
               {sentence}
             </div>
           )}
@@ -298,8 +446,8 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
             </table>
           </div>
 
-          <div className="s-desc faint">
-            Comparison is over hashes. OpsMaxx keeps two hashes and a status per file per host —
+          <div className="panel-note faint">
+            Comparison is over hashes. OpsMaxx keeps two hashes and a status per file per server —
             never the file — so a divergence survives a restart while the configuration itself is
             not copied into its store. The first {DRIFT_PREVIEW_CHARS} characters of each file are
             held in memory for this session only, after every redaction rule has run over the whole

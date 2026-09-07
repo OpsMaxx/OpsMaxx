@@ -6,11 +6,15 @@ import {
   CircleCheck,
   Clock,
   HardDrive,
+  RotateCw,
+  ScrollText,
   Unplug
 } from 'lucide-react'
 import { useApp } from '../../store/app'
 import { useFleet } from '../../store/fleet'
-import { openSettings } from '../../store/nav'
+import { openLogTail, openServiceJob, openSettings } from '../../store/nav'
+import { alertLogTarget } from '../../../../shared/alertLogs'
+import { checkServiceStep } from '../../../../shared/serviceStep'
 import { bytes, clsx, duration } from '../../lib/format'
 import type { PortListener } from '../../../../shared/ssh'
 // Aliased: the summary type and the component below share a name, and the
@@ -172,7 +176,52 @@ function HostRowView({
           {failed.map((u) => (
             <li key={u.name}>
               <b>{u.name}</b>
-              {u.description ? ` — ${u.description}` : ''}
+              {u.description ? ` — ${u.description}` : ''}{' '}
+              {/* Item 43. LogTailPanel has taken a `jump` prop since it
+                  shipped and its own comment names this list as the caller it
+                  was for -- "the failed-unit list is the one that matters".
+                  Nothing ever passed it, so the shortest path from "nginx
+                  failed" to "why" was to read the unit name, change tab, pick
+                  the server again and type the name back in. */}
+              <button
+                className="btn ghost sm"
+                title={`Tail ${u.name} on ${row.name}`}
+                onClick={() => {
+                  // Item 43 landed the jump; this gives it a filter. It used to
+                  // tail the unit's WHOLE history at every priority, which for
+                  // a busy unit is the reason nobody reads it. `alertLogTarget`
+                  // is the one place that decides what a failed unit's log
+                  // should be -- err and worse -- and it omits a time window
+                  // here on purpose, because `systemctl list-units` reports no
+                  // failure time and "the last fifteen minutes" would hide the
+                  // reason for anything that failed this morning.
+                  const t = alertLogTarget({ kind: 'unit-failed', since: null, units: [u.name] })
+                  if (!t.ok) return
+                  openLogTail(row.id, t.source.target, 'unit', {
+                    priority: t.source.priority,
+                    since: t.source.since
+                  })
+                }}
+              >
+                <ScrollText size={11} /> Logs
+              </button>
+              {/* The other half of the same moment. `serviceStep` already had
+                  restart, checked and with its protected units; it was reachable
+                  only by going to Jobs and retyping the unit name you are
+                  looking at.
+
+                  The button is ABSENT, not disabled, where the check refuses:
+                  sshd is refused at any strength of confirmation, and a button
+                  that always says no teaches people that refusals are noise. */}
+              {checkServiceStep('restart', u.name).ok && (
+                <button
+                  className="btn ghost sm"
+                  title={`Fill a restart job for ${u.name} on ${row.name}. Nothing runs until you confirm it.`}
+                  onClick={() => openServiceJob(row.id, 'restart', u.name)}
+                >
+                  <RotateCw size={11} /> Restart
+                </button>
+              )}
             </li>
           ))}
         </ul>
@@ -256,7 +305,7 @@ function NotYetChecked({
   return (
     <section className="fleet-health">
       <div className="fh-head">
-        <b>Fleet health</b>
+        <h2 className="ui-section-title">Fleet health</h2>
         <span className="chip">
           <Clock size={11} /> Not checked yet
         </span>
@@ -267,19 +316,21 @@ function NotYetChecked({
         <span className="fh-meta">{coverageLine(health)}</span>
       </div>
       {sampling ? (
-        <div className="fh-note">
-          No host has reported yet. Background checking is on, so this fills in as hosts answer —
+        <div className="fh-note ui-note">
+          No server has reported yet. Background checking is on, so this fills in as servers answer —
           failed services and disks close to full will be listed here.
         </div>
       ) : (
         <>
-          <div className="fh-note">
-            No host has reported yet. Background checking is off, so a host is only looked at while
+          <div className="fh-note ui-note">
+            No server has reported yet. Background checking is off, so a server is only looked at while
             its card is on screen — nothing is watching for failed services or full disks in between.
             Turning it on in Settings → Monitoring sweeps the whole estate on a schedule and fills
             this panel in.
           </div>
-          <button className="btn sm ghost" onClick={() => openSettings('monitoring')}>
+          {/* The only thing to do on this screen, and it was the quietest
+              control on it. */}
+          <button className="btn sm primary" onClick={() => openSettings('monitoring')}>
             Open Monitoring settings
           </button>
         </>
@@ -322,7 +373,7 @@ export function FleetHealth({ servers }: { servers: Server[] }): React.JSX.Eleme
   return (
     <section className="fleet-health">
       <div className="fh-head">
-        <b>Fleet health</b>
+        <h2 className="ui-section-title">Fleet health</h2>
         {failures && (
           <span className="chip danger">
             <CircleAlert size={11} /> {failures}
@@ -375,7 +426,7 @@ export function FleetHealth({ servers }: { servers: Server[] }): React.JSX.Eleme
         <>
           <button className="btn sm ghost fh-rest-toggle" onClick={() => setShowRest(!showRest)}>
             {showRest ? <ChevronDown size={13} /> : <ChevronRight size={13} />} {health.rest.length}{' '}
-            {health.rest.length === 1 ? 'other host' : 'other hosts'}
+            {health.rest.length === 1 ? 'other server' : 'other servers'}
           </button>
           {showRest && (
             <div className="fh-list">

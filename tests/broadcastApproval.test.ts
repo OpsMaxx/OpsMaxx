@@ -90,30 +90,30 @@ describe('how dangerous a command reads', () => {
 })
 
 describe('what the user has to do before it runs', () => {
-  it('just runs an ordinary command on a single host', () => {
+  it('just runs an ordinary command on a single server', () => {
     // Nagging on the safe case is exactly how people learn to click through
     // the dangerous one.
     expect(confirmationFor('ordinary', 1)).toEqual({ kind: 'none' })
   })
 
-  it('asks to confirm as soon as it is more than one host', () => {
+  it('asks to confirm as soon as it is more than one server', () => {
     expect(confirmationFor('ordinary', 2).kind).toBe('confirm')
   })
 
-  it('requires typing once the host count is large', () => {
+  it('requires typing once the server count is large', () => {
     expect(confirmationFor('ordinary', TYPE_ABOVE_HOSTS + 1).kind).toBe('type-to-confirm')
   })
 
-  it('requires typing for a destructive command even on one host', () => {
+  it('requires typing for a destructive command even on one server', () => {
     // The command is the danger here, not the count.
     expect(confirmationFor('destructive', 1)).toEqual({ kind: 'type-to-confirm', phrase: 'RUN' })
   })
 
-  it('asks to confirm an elevated command on a couple of hosts', () => {
+  it('asks to confirm an elevated command on a couple of servers', () => {
     expect(confirmationFor('elevated', 2).kind).toBe('confirm')
   })
 
-  it('never returns "none" for anything but an ordinary single host', () => {
+  it('never returns "none" for anything but an ordinary single server', () => {
     // The rule that matters most: nothing is safe by omission.
     for (const risk of ['ordinary', 'elevated', 'destructive'] as const) {
       for (const n of [0, 1, 2, 5, 6, 20]) {
@@ -441,7 +441,7 @@ describe('summarising a partial failure', () => {
     expect(finished + s.running).toBe(s.total)
   })
 
-  it('does not count a host that has not finished as an answer', () => {
+  it('does not count a server that has not finished as an answer', () => {
     // A category for "we do not know yet" would be counted in the summary as
     // though it were a result.
     expect(classifyBroadcastResult(host({ state: 'pending' }))).toBeNull()
@@ -519,7 +519,7 @@ describe('the approval record, shared with the job engine', () => {
     expect(v.ok === false && v.reason).toMatch(/approved as `uptime` and is now `rm -rf \/var\/log`/)
   })
 
-  it('refuses a host added after the record was minted', () => {
+  it('refuses a server added after the record was minted', () => {
     const v = check(mint('uptime', targets(2)), 'uptime', targets(3))
     expect(v.ok).toBe(false)
     expect(v.ok === false && v.reason).toMatch(/host-2 was not in the target list that was confirmed/)
@@ -608,8 +608,15 @@ describe('where the broadcast approval is enforced', () => {
     expect(shared.match(/export function verifyApproval/g)).toHaveLength(1)
     expect(main).not.toMatch(/function verifyApproval/)
     const jobs = readFileSync(resolve(__dirname, '../src/shared/jobs.ts'), 'utf8')
-    // jobs.ts adapts it, it does not restate it.
-    expect(jobs).toContain('return verifyApproval(')
+    // jobs.ts ADAPTS it and does not restate it. Adapting includes adding a
+    // check the shared verifier cannot make — it compares commands, targets and
+    // the plan, and knows nothing about a stage gate — so `verifyJobApproval`
+    // calls it, keeps its verdict, and adds the gate comparison on top. What
+    // this forbids is a second implementation of the comparison itself.
+    expect(jobs).toMatch(/verifyApproval\(\n?\s*approval,/)
     expect(jobs).not.toMatch(/export function verifyApproval\s*\(/)
+    // The shared verdict is never discarded: a job-specific check may only add
+    // a refusal, never overturn one.
+    expect(jobs).toContain('if (!verdict.ok) return verdict')
   })
 })

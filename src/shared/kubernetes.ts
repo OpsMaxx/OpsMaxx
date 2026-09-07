@@ -176,11 +176,11 @@ export const K8S_FAILURE_HELP: Record<K8sFailure, string> = {
   // PATH an SSH session gets" — described a limitation that resolveBinary
   // removed, so it sent people to check a PATH that had already been searched.
   'not-installed':
-    'No kubectl on this host. Looked on PATH and in /usr/bin, /usr/local/bin, /snap/bin, /opt/homebrew/bin, /usr/sbin, plus the k3s, rke2 and microk8s wrappers. If it lives somewhere else, a symlink into /usr/local/bin is the usual fix.',
+    'No kubectl on this server. Looked on PATH and in /usr/bin, /usr/local/bin, /snap/bin, /opt/homebrew/bin, /usr/sbin, plus the k3s, rke2 and microk8s wrappers. If it lives somewhere else, a symlink into /usr/local/bin is the usual fix.',
   'no-kubeconfig':
     'kubectl is installed but found no kubeconfig. It looks in $KUBECONFIG then ~/.kube/config, and an SSH session may not have the same environment as a login shell.',
   'no-cluster':
-    'kubectl has a config but the cluster is not answering — the API server may be down, or the context may point somewhere unreachable from this host.',
+    'kubectl has a config but the cluster is not answering — the API server may be down, or the context may point somewhere unreachable from this server.',
   forbidden:
     'This account is authenticated but its RBAC does not allow listing these resources. That is a different problem from there being none, and the roles it needs are named in the raw error below.',
   unauthorized:
@@ -697,6 +697,14 @@ export interface K8sOverview {
   statefulSets: K8sRead<K8sWorkload>
   daemonSets: K8sRead<K8sWorkload>
   nodes: K8sRead<K8sNode>
+  /** The API SERVER's version, for the skew report. Null when it could not be
+   *  read -- which includes a kubectl that could not reach the cluster and
+   *  printed its own version instead. */
+  serverVersion: string | null
+  /** Every budget in the cluster, for the readiness report. The drain
+   *  preflight reads the same objects with the same parser; this one is not
+   *  scoped to a node. */
+  pdbs: K8sRead<K8sPdb>
   events: K8sRead<K8sEvent>
 }
 
@@ -812,6 +820,18 @@ export function buildK8sOverviewCommand(context?: string, namespace?: string): s
     // be a lie about what is being read. A namespace-scoped token is denied
     // here, which is a normal answer and is reported as one.
     call('NODES', `get nodes --no-headers${ctx}`),
+    // Item 41's readiness report needs the API SERVER's version, and the probe
+    // reads only the client's (`version --client`, deliberately, so it works
+    // with no cluster at all). `-o json` without `--client` contacts the API
+    // server, so it belongs here with the other cluster reads rather than in
+    // the probe -- and it fails like they do, which the parser reads as
+    // "unknown" rather than as a version.
+    call('SRVVER', `version -o json${ctx}`),
+    // The SAME read and the SAME parser the drain preflight uses, rather than a
+    // thinner second one. Two shapes for one object is two answers to the
+    // question "how much headroom is there", and only one of them would get
+    // fixed when the field moves.
+    call('PDBS', `get poddisruptionbudgets --all-namespaces -o ${DRAIN_PDB_JSONPATH}${ctx}`),
     `${call('EVENTS', `get events${ns} --no-headers -o ${EVENT_COLS}${ctx}`)} | head -c ${EVENT_BYTE_CAP}`
   ].join('; ')
 }
@@ -824,6 +844,56 @@ export function buildK8sOverviewCommand(context?: string, namespace?: string): s
  * a majority of clusters, and would tempt the parser into showing an empty
  * usage table — which reads as "idle" rather than "not measured".
  */
+/**
+ * Allocatable against requested, one round trip.
+ *
+ * ALWAYS ALL NAMESPACES, whatever namespace the operator has selected. What a
+ * node is holding is the sum of every pod on it, and a namespace-scoped read
+ * would produce a number that is confidently wrong -- it would report a node as
+ * empty because the things filling it are in `kube-system`. The scope helper is
+ * therefore not used here, and that is the one place in this file that ignores
+ * the selected namespace on purpose.
+ */
+export function buildK8sAllocatableCommand(context?: string): string {
+  const ctx = context && validateContext(context) ? ` --context=${context}` : ''
+  return [
+    k8sResolve(),
+    call('ALLOCNODES', `get nodes -o custom-columns='${ALLOC_NODE_COLS}'${ctx}`),
+    call('ALLOCPODS', `get pods --all-namespaces -o custom-columns='${ALLOC_POD_COLS}'${ctx}`)
+  ].join('; ')
+}
+
+export interface K8sAllocatableProbe {
+  ok: boolean
+  report?: AllocationReport
+  headline?: string
+  detail?: string
+}
+
+/**
+ * A read that produced no rows is a BLIND SPOT, not an empty cluster.
+ *
+ * The rule the PDB read had to learn: text kubectl wrote that yields no objects
+ * means the read did not work, and reporting it as "nothing is scheduled" turns
+ * a failure into an all-clear. A cluster with no nodes cannot exist while
+ * kubectl is answering.
+ */
+export function parseK8sAllocatable(output: string, code: number | null): K8sAllocatableProbe {
+  const nodeText = section(output, 'ALLOCNODES')
+  const podText = section(output, 'ALLOCPODS')
+  const nodes = parseNodeAllocatable(nodeText)
+  const pods = parsePodRequests(podText)
+  if (nodes.length === 0) {
+    const line = nodeText.trim().split('\n').find((l) => l.trim() !== '')
+    return {
+      ok: false,
+      detail: line ? line.trim() : `the node list came back empty (exit ${code ?? 'unknown'})`
+    }
+  }
+  const report = allocationReport(nodes, pods)
+  return { ok: true, report, headline: allocationHeadline(report) }
+}
+
 export function buildK8sTopCommand(context?: string, namespace?: string): string {
   const { ctx, ns } = scope(context, namespace)
   return [
@@ -1097,12 +1167,34 @@ export function parseK8sDiagnosis(
   }
 }
 
+/**
+ * The API server's version out of `kubectl version -o json`.
+ *
+ * Null on anything unexpected, which includes the common case: a kubectl that
+ * could not reach the cluster prints the CLIENT version and an error, and
+ * reading that as the server's would report a cluster in perfect skew because
+ * the operator's laptop agrees with itself.
+ */
+export function parseServerVersion(text: string): string | null {
+  const t = text.trim()
+  if (t === '') return null
+  try {
+    const j = JSON.parse(t) as { serverVersion?: { gitVersion?: unknown } }
+    const v = j.serverVersion?.gitVersion
+    return typeof v === 'string' && v !== '' ? v : null
+  } catch {
+    return null
+  }
+}
+
 export function parseK8sOverview(output: string, exitCode: number | null): K8sOverview {
   return {
     deployments: readBlock(section(output, 'DEPLOY'), (t) => parseWorkloads(t, 'deployment'), exitCode),
     statefulSets: readBlock(section(output, 'STS'), (t) => parseWorkloads(t, 'statefulset'), exitCode),
     daemonSets: readBlock(section(output, 'DS'), (t) => parseWorkloads(t, 'daemonset'), exitCode),
     nodes: readBlock(section(output, 'NODES'), parseNodes, exitCode),
+    serverVersion: parseServerVersion(section(output, 'SRVVER')),
+    pdbs: readBlock(section(output, 'PDBS'), parseDrainPdbs, exitCode),
     events: readBlock(section(output, 'EVENTS'), parseEvents, exitCode)
   }
 }
@@ -1171,6 +1263,15 @@ export function parseK8sRolloutResult(output: string, exitCode: number | null): 
 // times a day. Making them type a word for that is how the word stops meaning
 // anything by the time a StatefulSet is selected.
 
+import {
+  ALLOC_NODE_COLS,
+  ALLOC_POD_COLS,
+  allocationHeadline,
+  allocationReport,
+  parseNodeAllocatable,
+  parsePodRequests,
+  type AllocationReport
+} from './k8sAllocatable'
 import type { BroadcastConfirmation, BroadcastRisk } from './broadcast'
 
 export interface K8sRolloutTarget {
@@ -1251,7 +1352,7 @@ export function planK8sRollout(target: K8sRolloutTarget): K8sRolloutPlan {
     // ReadWriteOnce volume, a host port or a full node all make it not.
     type = true
     reasons.push(
-      'one replica — the replacement is started first, but if it cannot be scheduled (a ReadWriteOnce volume, a host port, a full node) this workload stays down until it can'
+      'one replica — the replacement is started first, but if it cannot be scheduled (a ReadWriteOnce volume, a server port, a full node) this workload stays down until it can'
     )
   }
   if ((target.desired ?? 0) >= K8S_TYPE_ABOVE_REPLICAS) {
@@ -1846,7 +1947,9 @@ function parseDrainPods(text: string): K8sDrainPod[] {
 
 const DRAIN_PDB_FIELDS = 8
 
-function parseDrainPdbs(text: string): K8sPdb[] {
+/** Exported for the cluster review, which reads the same rows for a different
+ *  question. One parser, because two would drift. */
+export function parseDrainPdbs(text: string): K8sPdb[] {
   const out: K8sPdb[] = []
   for (const raw of text.split('\n')) {
     const line = raw.trim()
@@ -2683,7 +2786,7 @@ const INGRESS_JSONPATH =
   `'jsonpath={range .items[*]}{.metadata.namespace}{"|"}{.metadata.name}{"|"}` +
   `{.spec.ingressClassName}{"|"}{range .status.loadBalancer.ingress[*]}{.ip}{.hostname}{";"}{end}{"|"}` +
   `{range .spec.tls[*]}{.secretName}{";"}{end}{"|"}` +
-  `{range .spec.rules[*]}{.host}{range .http.paths[*]}{" "}{.path}{"->"}` +
+  `{range .spec.rules[*]}{.server}{range .http.paths[*]}{" "}{.path}{"->"}` +
   `{.backend.service.name}{":"}{.backend.service.port.number}{end}{";"}{end}{"\\n"}{end}'`
 
 const RBAC_JSONPATH =
@@ -3050,7 +3153,7 @@ export function parseK8sHelmList(output: string, exitCode: number | null): K8sHe
       ok: false,
       reason: 'not-installed',
       detail:
-        'No helm on this host. That is not a statement about the cluster — releases installed from somewhere else are still there, this host just cannot list them.'
+        'No helm on this server. That is not a statement about the cluster — releases installed from somewhere else are still there, this server just cannot list them.'
     }
   }
   try {

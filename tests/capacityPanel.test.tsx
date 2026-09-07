@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
+import { useApp } from '../src/renderer/src/store/app'
 import { CapacityPanel } from '../src/renderer/src/components/monitor/CapacityPanel'
 import {
   CAPACITY_THRESHOLDS,
@@ -136,7 +137,7 @@ describe('a forecast the data cannot support', () => {
   })
 })
 
-describe('a host that was unreachable', () => {
+describe('a server that was unreachable', () => {
   const before = points(T0 - 2 * DAY - 12 * HOUR, 73, HOUR, 'hourly', (i) => 40 + i * 0.4)
   const after = points(T0, 13, HOUR, 'hourly', () => 80)
 
@@ -200,7 +201,7 @@ describe('the boundary between the two stored resolutions', () => {
   })
 })
 
-describe('reading for the wrong host', () => {
+describe('reading for the wrong server', () => {
   it('does not land one server trends under another server heading', async () => {
     // The DockerPanel defect, in a place where it would be worse: a disk
     // forecast is a number an operator acts on, and there is nothing on screen
@@ -254,5 +255,107 @@ describe('when there is nothing to show', () => {
     stubBridge({ capacity: { trends: () => Promise.reject(new Error('nope')) } })
     render(<CapacityPanel servers={[ALPHA]} />)
     await waitFor(() => expect(screen.getByText(/Could not read the history store/)).toBeTruthy())
+  })
+})
+
+describe('before the saved servers have been read back', () => {
+  it('does not tell someone with servers that they have none', () => {
+    // Servers arrive from `await bridge.data.load()`, so the list is empty for
+    // the first moments of every launch. This panel rendered that emptiness as
+    // "No servers to chart." -- a confident answer to a question nobody had
+    // asked yet. The store now says whether it has looked.
+    stubBridge({ capacity: { trends: () => Promise.resolve(report(FILLING)) } })
+    useApp.setState({ hydrated: false })
+    render(<CapacityPanel servers={[]} />)
+
+    expect(screen.getByText(/Reading your servers/)).toBeTruthy()
+    expect(screen.queryByText('No servers to chart.')).toBeNull()
+  })
+
+  it('says so once the read has happened and there really are none', () => {
+    // The waiting state must not become a place to hide: an empty workspace is
+    // a real answer and has to be given.
+    stubBridge({ capacity: { trends: () => Promise.resolve(report(FILLING)) } })
+    useApp.setState({ hydrated: true })
+    render(<CapacityPanel servers={[]} />)
+
+    expect(screen.getByText('No servers to chart.')).toBeTruthy()
+    expect(screen.queryByText(/Reading your servers/)).toBeNull()
+  })
+
+  it('charts what it was given without waiting for the signal', () => {
+    // A list with something in it is its own proof. Gating the whole panel on
+    // hydration would put a spinner in front of an answer already on screen.
+    stubBridge({ capacity: { trends: () => Promise.resolve(report(FILLING)) } })
+    useApp.setState({ hydrated: false })
+    render(<CapacityPanel servers={[ALPHA]} />)
+
+    expect(screen.queryByText(/Reading your servers/)).toBeNull()
+    expect(screen.queryByText('No servers to chart.')).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The estate strip. Item 47's fleet expansion forecast.
+// ---------------------------------------------------------------------------
+
+/** Flat: no rate, so `capacity.ts` refuses. The majority case on a real estate. */
+const FLAT = points(T0, 145, HOUR, 'hourly', () => 40)
+
+describe('forecasting the whole estate', () => {
+  const openStrip = async (
+    trends: (id: string, days: number) => Promise<unknown>
+  ): Promise<void> => {
+    stubBridge({ capacity: { trends } })
+    render(<CapacityPanel servers={[ALPHA, BRAVO]} />)
+    await userEvent.click(await screen.findByText('Forecast the whole estate'))
+  }
+
+  it('keeps a host that could not be forecast in the list', async () => {
+    // Dropping it would make "nothing is filling up" and "one host could not be
+    // forecast" render identically.
+    await openStrip((id) =>
+      Promise.resolve(report(id === 'srv-alpha' ? FILLING : FLAT, 7, id))
+    )
+    await waitFor(() => expect(screen.getByText(/bravo: no disk forecast/)).toBeTruthy())
+    expect(screen.getByText(/not moving enough to call a trend/)).toBeTruthy()
+  })
+
+  it('puts the denominator in the headline', async () => {
+    await openStrip((id) =>
+      Promise.resolve(report(id === 'srv-alpha' ? FILLING : FLAT, 7, id))
+    )
+    await waitFor(() => expect(document.body.textContent).toContain('could be forecast'))
+    expect(document.body.textContent).toContain('alpha in 11 day(s)')
+  })
+
+  it('puts a read that failed in as a refusal rather than leaving it out', async () => {
+    // A server whose read threw is not silently absent from an estate forecast.
+    await openStrip((id) =>
+      id === 'srv-alpha' ? Promise.resolve(report(FILLING, 7, id)) : Promise.reject(new Error('nope'))
+    )
+    // Scoped to bravo: alpha's own memory and inode series are empty in this
+    // fixture, so they refuse for the same reason and would match too. That
+    // they appear at all is the point -- every metric with a threshold gets a
+    // row, and none of them is silently dropped.
+    await waitFor(() =>
+      expect(screen.getByText('bravo: no disk forecast — nothing was sampled in this window.')).toBeTruthy()
+    )
+  })
+
+  it('is not run until it is asked for', async () => {
+    let calls = 0
+    stubBridge({
+      capacity: {
+        trends: (id: string) => {
+          calls += 1
+          return Promise.resolve(report(FILLING, 7, id))
+        }
+      }
+    })
+    render(<CapacityPanel servers={[ALPHA, BRAVO]} />)
+    await waitFor(() => expect(screen.getByText('Forecast the whole estate')).toBeTruthy())
+    // One read for the selected host's own chart, and none for the estate.
+    expect(calls).toBe(1)
   })
 })

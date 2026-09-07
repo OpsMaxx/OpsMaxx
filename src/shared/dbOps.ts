@@ -220,6 +220,11 @@ export const MYSQL_QUESTIONS = [
   'replication',
   'binlogs',
   'slowlog',
+  // Item 37. NOT the slow log: that says how many statements crossed a time
+  // threshold, and this says WHICH statements read the table without an index.
+  // A query can be fast on today's data and still be the one that stops
+  // working when the table grows, which the slow log cannot see.
+  'digests',
   'connections',
   'processlist',
   'bufferpool',
@@ -259,6 +264,38 @@ export const MONGO_QUESTIONS = [
  * before Redis 6, and without knowing that, "no ceiling reported" is
  * indistinguishable from "no ceiling".
  */
+/**
+ * SQL Server. Eight, by the same rule, and two of them exist because a real
+ * server answered a question in a way that would have been read wrong.
+ *
+ * `alwayson` rather than reusing `replication`, because the shape of the wrong
+ * answer is different. `sys.dm_hadr_availability_replica_states` returns ZERO
+ * ROWS on a server with no availability group -- it does not error. Zero
+ * healthy replicas and no replication configured are the same query result and
+ * the opposite operational fact, and `SERVERPROPERTY('IsHadrEnabled')` is the
+ * only thing that separates them.
+ *
+ * `backups` has no equivalent on the other engines and is arguably the single
+ * most useful question here: a database in FULL recovery whose log has never
+ * been backed up grows that log until the disk fills, and SQL Server will not
+ * warn anybody. `msdb.dbo.backupset` reports NULL for never-backed-up, which is
+ * not "backed up a long time ago".
+ *
+ * `logspace` for the same failure one step later. Cut, by the rule the other
+ * lists use: wait statistics (tuning, not an alarm), index fragmentation (a
+ * maintenance report), plan cache internals (unactionable without the workload).
+ */
+export const MSSQL_QUESTIONS = [
+  'overview',
+  'alwayson',
+  'backups',
+  'logspace',
+  'connections',
+  'blocking',
+  'slowlog',
+  'sizes'
+] as const
+
 export const REDIS_QUESTIONS = [
   'overview',
   'memory',
@@ -275,9 +312,20 @@ export type PgQuestionId = (typeof PG_QUESTIONS)[number]
 export type MysqlQuestionId = (typeof MYSQL_QUESTIONS)[number]
 export type MongoQuestionId = (typeof MONGO_QUESTIONS)[number]
 export type RedisQuestionId = (typeof REDIS_QUESTIONS)[number]
-export type DbQuestionId = PgQuestionId | MysqlQuestionId | MongoQuestionId | RedisQuestionId
+export type MssqlQuestionId = (typeof MSSQL_QUESTIONS)[number]
+export type DbQuestionId =
+  | PgQuestionId
+  | MysqlQuestionId
+  | MongoQuestionId
+  | RedisQuestionId
+  | MssqlQuestionId
 
 export const DB_QUESTION_LABEL: Record<DbQuestionId, string> = {
+  digests: 'Statements that scan',
+  alwayson: 'Availability groups',
+  backups: 'Backups',
+  logspace: 'Transaction log space',
+  blocking: 'Blocking',
   overview: 'Server',
   replication: 'Replication',
   archiver: 'WAL archiving',
@@ -305,6 +353,16 @@ export const DB_QUESTION_LABEL: Record<DbQuestionId, string> = {
 /** Why this one is on the page. Shown in the UI, so the editorial choice is
  *  visible to the operator rather than only to whoever wrote it. */
 export const DB_QUESTION_WHY: Record<DbQuestionId, string> = {
+  digests:
+    'Which statements read a table without using an index. Not the slow log: that counts statements which crossed a time threshold, and a statement can be fast on today’s data and still be the one that stops working when the table grows. MySQL counts the index-less executions itself, so this is its number rather than a ratio inferred from row counts — a query examining four rows to return two is scanning, and no threshold on time or rows would notice.',
+  alwayson:
+    'Whether every replica is joined, synchronising and caught up. Zero replicas is not zero problems — a server with no availability group returns the same empty list as one whose replicas have all gone, so this reports whether AlwaysOn is configured at all before it reports health.',
+  backups:
+    'When each database was last backed up, full and log, and whether a database in FULL recovery has ever had its log backed up. That last one is the quiet killer: the log grows until the disk fills and SQL Server does not warn anybody. Never backed up reads as never, not as long ago.',
+  logspace:
+    'How full each transaction log is. The same failure one step later — a log nobody truncates does not slow down, it stops the database.',
+  blocking:
+    'Sessions waiting on another session, and the one at the head of the chain. A blocked session is not slow, it is stopped, and the answer is always the head blocker rather than the queue behind it.',
   overview: 'Which server this is, what role it is playing, and how long it has been up.',
   replication:
     'A replica that has stopped is a backup that is not being taken and a read pool serving stale rows. It fails silently.',
@@ -920,7 +978,7 @@ export const PG_QUERIES = Object.freeze({
        current_user AS username,
        EXTRACT(EPOCH FROM (now() - pg_postmaster_start_time()))::bigint AS uptime_seconds`,
 
-  replication: `SELECT application_name, host(client_addr) AS client_addr, state, sync_state,
+  replication: `SELECT application_name, server(client_addr) AS client_addr, state, sync_state,
        EXTRACT(EPOCH FROM write_lag) AS write_lag_seconds,
        EXTRACT(EPOCH FROM flush_lag) AS flush_lag_seconds,
        EXTRACT(EPOCH FROM replay_lag) AS replay_lag_seconds,
@@ -997,12 +1055,24 @@ export const PG_QUERIES = Object.freeze({
        MAX(EXTRACT(EPOCH FROM (now() - state_change)))::bigint AS oldest_seconds
   FROM pg_stat_activity WHERE backend_type = 'client backend' GROUP BY 1 ORDER BY 2 DESC`,
 
+  // THE SESSION HOLDING THE LOCK IS NOT ITSELF BLOCKED, so a filter of
+  // "blocked sessions" omits the only one an operator can act on. Measured on
+  // PostgreSQL 16.15 with a three-deep chain: this query returned two rows and
+  // the blocker was not among them. The screen showed two stuck queries and
+  // nothing to do about either.
+  //
+  // The EXISTS clause adds the sessions that block somebody. It is a
+  // correlated subquery over pg_stat_activity, which is a handful of rows on
+  // any real server -- pg_stat_activity is a view over shared memory, not a
+  // table -- so the cost is the same order as the original.
   locks: `SELECT a.pid, a.usename AS username, a.state,
        EXTRACT(EPOCH FROM (now() - a.query_start))::bigint AS waiting_seconds,
        pg_blocking_pids(a.pid) AS blocked_by, a.wait_event_type, a.wait_event,
        left(a.query, 200) AS query
   FROM pg_stat_activity a
-  WHERE cardinality(pg_blocking_pids(a.pid)) > 0 ORDER BY 4 DESC NULLS LAST LIMIT $1`,
+  WHERE cardinality(pg_blocking_pids(a.pid)) > 0
+     OR EXISTS (SELECT 1 FROM pg_stat_activity b WHERE a.pid = ANY(pg_blocking_pids(b.pid)))
+  ORDER BY 4 DESC NULLS LAST LIMIT $1`,
 
   databases: `SELECT datname AS name, pg_database_size(oid)::bigint AS bytes
   FROM pg_database WHERE datallowconn ORDER BY 2 DESC`,
@@ -1562,33 +1632,45 @@ export function judgePgConnections(v: PgConnectionsValue): DbVerdict {
 
 export function judgePgLocks(locks: PgLock[]): DbVerdict {
   if (locks.length === 0) return { level: 'ok', headline: 'Nothing is waiting on a lock.' }
+  // BLOCKED sessions only, for the counting. The query now also returns the
+  // sessions that are BLOCKING -- the ones an operator can actually act on,
+  // which it used to omit -- and those are not themselves waiting. Counting
+  // every returned row would report three sessions blocked where two are, and
+  // the third is the one holding the lock.
+  const blocked = locks.filter((l) => l.blockedBy.length > 0)
+  const roots = locks.filter((l) => l.blockedBy.length === 0)
+  if (blocked.length === 0) return { level: 'ok', headline: 'Nothing is waiting on a lock.' }
   // `?? 0` here was the bug: a role without pg_read_all_stats gets NULL for
   // query_start on a backend it does not own, so a session blocked for two
   // hours rendered as "briefly blocked (0s)" — a watch instead of an alarm.
   // A wait nobody could time is not a wait of zero.
-  const timed = locks.filter((l) => l.waitingSeconds !== null)
-  const hidden = locks.length - timed.length
+  const timed = blocked.filter((l) => l.waitingSeconds !== null)
+  const hidden = blocked.length - timed.length
   const worst = timed.length > 0 ? timed.reduce((a, b) => ((b.waitingSeconds ?? 0) > (a.waitingSeconds ?? 0) ? b : a)) : null
   const s = worst?.waitingSeconds ?? null
-  const blockers = [...new Set(locks.flatMap((l) => l.blockedBy))]
-  const target = worst ?? locks[0]
+  const blockers = [...new Set(blocked.flatMap((l) => l.blockedBy))]
+  const target = worst ?? blocked[0]
+  // The root's own query, when the query returned it. This is the whole point
+  // of including blockers: "waiting on pid 124" is not actionable and
+  // "waiting on pid 124, which is running <this>" is.
+  const root = roots.find((r) => target.blockedBy.includes(r.pid))
   const because = `pid ${target.pid} is waiting on ${target.blockedBy.join(', ') || 'another session'}${
-    blockers.length > 1 ? `; ${blockers.length} sessions are blocking in total` : ''
-  }.`
+    root ? ` (${root.state}${root.query ? `: ${root.query}` : ''})` : ''
+  }${blockers.length > 1 ? `; ${blockers.length} sessions are blocking in total` : ''}.`
   if (s !== null && s >= T.lockWaitAlarmSeconds) {
-    return { level: 'alarm', headline: `${locks.length} session${locks.length === 1 ? ' has' : 's have'} been blocked for up to ${formatSeconds(s)}.`, because }
+    return { level: 'alarm', headline: `${blocked.length} session${blocked.length === 1 ? ' has' : 's have'} been blocked for up to ${formatSeconds(s)}.`, because }
   }
   if (hidden > 0) {
     return {
       level: 'unknown',
-      headline: `${locks.length} session${locks.length === 1 ? ' is' : 's are'} blocked, and this account cannot see for how long.`,
+      headline: `${blocked.length} session${blocked.length === 1 ? ' is' : 's are'} blocked, and this account cannot see for how long.`,
       because: `query_start came back NULL for ${hidden} of them, which is what Postgres returns instead of an error when the role lacks pg_read_all_stats. The wait could be two seconds or two hours. ${because}`
     }
   }
   if (s !== null && s >= T.lockWaitWatchSeconds) {
-    return { level: 'watch', headline: `${locks.length} session${locks.length === 1 ? ' is' : 's are'} blocked, the longest for ${formatSeconds(s)}.`, because }
+    return { level: 'watch', headline: `${blocked.length} session${blocked.length === 1 ? ' is' : 's are'} blocked, the longest for ${formatSeconds(s)}.`, because }
   }
-  return { level: 'watch', headline: `${locks.length} session${locks.length === 1 ? ' is' : 's are'} briefly blocked (${formatSeconds(s ?? 0)}).`, because }
+  return { level: 'watch', headline: `${blocked.length} session${blocked.length === 1 ? ' is' : 's are'} briefly blocked (${formatSeconds(s ?? 0)}).`, because }
 }
 
 export function judgePgSizes(v: PgSizesValue): DbVerdict {
@@ -1782,6 +1864,21 @@ export const MYSQL_QUERIES = Object.freeze({
   binlogExpireDays: 'SELECT @@expire_logs_days AS expire_days',
   binaryLogs: 'SHOW BINARY LOGS',
 
+  // Item 37. `sum_no_index_used` is MySQL's OWN count of executions that read
+  // the table without an index -- not a ratio inferred from rows, which on a
+  // small table says nothing: the scanning statement measured on MySQL 8.4.11
+  // examined four rows to return two.
+  //
+  // `digest_text` is normalised by the server before it is read, so a user's
+  // literal cannot arrive here. Table and column names still can, and it is
+  // treated as remote text on that basis.
+  digests: `SELECT COALESCE(schema_name,'') AS schema_name, COALESCE(LEFT(digest_text,120),'') AS digest_text,
+       count_star, ROUND(sum_timer_wait/1000000000,1) AS total_ms,
+       ROUND(max_timer_wait/1000000000,1) AS max_ms,
+       sum_rows_examined, sum_rows_sent, sum_no_index_used
+  FROM performance_schema.events_statements_summary_by_digest
+  WHERE digest_text IS NOT NULL
+  ORDER BY sum_timer_wait DESC LIMIT ?`,
   slowSettings: `SELECT @@slow_query_log AS slow_query_log, @@long_query_time AS long_query_time,
        @@slow_query_log_file AS slow_query_log_file, @@log_output AS log_output`,
 
@@ -1796,7 +1893,7 @@ export const MYSQL_QUERIES = Object.freeze({
 
   bufferPool: `SELECT @@innodb_buffer_pool_size AS bytes, @@innodb_buffer_pool_instances AS instances`,
 
-  processlist: `SELECT ID AS id, USER AS user, HOST AS host, DB AS db, COMMAND AS command,
+  processlist: `SELECT ID AS id, USER AS user, HOST AS server, DB AS db, COMMAND AS command,
        TIME AS seconds, STATE AS state, LEFT(INFO, 200) AS info
   FROM information_schema.PROCESSLIST WHERE COMMAND <> 'Sleep' ORDER BY TIME DESC LIMIT ?`,
 
@@ -4340,7 +4437,7 @@ export interface DbOpsReport {
   answers: DbAnswer<unknown>[]
 }
 
-export type DbOpsEngine = 'postgres' | 'mysql' | 'mongodb' | 'redis'
+export type DbOpsEngine = 'postgres' | 'mysql' | 'mongodb' | 'redis' | 'mssql'
 
 /**
  * Which engines this feature covers.
@@ -4352,18 +4449,27 @@ export type DbOpsEngine = 'postgres' | 'mysql' | 'mongodb' | 'redis'
  * persistence and the link to a master. SQL Server is still out.
  */
 export function supportsDbOps(kind: string): kind is DbOpsEngine {
-  return kind === 'postgres' || kind === 'mysql' || kind === 'mongodb' || kind === 'redis'
+  return (
+    kind === 'postgres' ||
+    kind === 'mysql' ||
+    kind === 'mongodb' ||
+    kind === 'redis' ||
+    kind === 'mssql'
+  )
 }
 
 export const DB_OPS_UNSUPPORTED_NOTE =
-  'Operational reads are available for PostgreSQL, MySQL/MariaDB, MongoDB and Redis. SQL Server is not covered: nothing here has been run against one, and a page of questions written from documentation would agree with whatever its author assumed rather than with the server.'
+  'Operational reads are available for PostgreSQL, MySQL/MariaDB, MongoDB, Redis and SQL Server. ' +
+  'Every engine this app can connect to is now covered, so this note is kept for the next engine ' +
+  'rather than for a gap that exists today.'
 
 /** The questions asked of each engine, in the order they should be read. */
 export const DB_QUESTIONS_BY_ENGINE: Record<DbOpsEngine, readonly DbQuestionId[]> = {
   postgres: PG_QUESTIONS,
   mysql: MYSQL_QUESTIONS,
   mongodb: MONGO_QUESTIONS,
-  redis: REDIS_QUESTIONS
+  redis: REDIS_QUESTIONS,
+  mssql: MSSQL_QUESTIONS
 }
 
 /** The worst verdict on the page, which is the one the tab badge shows. */
@@ -4518,8 +4624,12 @@ export function dbEventMetrics(a: DbAnswer<unknown>): Record<string, number> {
     }
     case 'locks': {
       const locks = (Array.isArray(v) ? v : []) as PgLock[]
-      put('blockedSessions', locks.length)
-      const waits = locks.map((l) => l.waitingSeconds).filter((n): n is number => n !== null)
+      // BLOCKED rows only. The query also returns the sessions doing the
+      // blocking, which are not themselves waiting -- counting them would
+      // inflate this metric by one per chain, silently, in a stored series.
+      const blocked = locks.filter((l) => l.blockedBy.length > 0)
+      put('blockedSessions', blocked.length)
+      const waits = blocked.map((l) => l.waitingSeconds).filter((n): n is number => n !== null)
       if (waits.length > 0) put('longestWaitSeconds', Math.max(...waits))
       put('redactedSessions', locks.filter((l) => l.redacted).length)
       break

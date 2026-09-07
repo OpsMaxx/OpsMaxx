@@ -96,6 +96,16 @@ export interface OpenVpnSpec {
   // Summary fields kept out of the encrypted config body so the UI can show
   // something useful without unlocking the vault.
   remotes?: { host: string; port: number; proto: string }[]
+  /**
+   * Epoch ms at which this profile's own client certificate stops being
+   * accepted, or absent when it could not be read -- and absent is not
+   * "fine", it is not known.
+   *
+   * Computed once at import from material the parser already had, so nothing
+   * unlocks the vault to draw a date. Never set for a pkcs12 profile: that is
+   * a password-wrapped container, not a certificate.
+   */
+  clientCertNotAfter?: number
 }
 
 export type FrpProxyType = 'tcp' | 'udp' | 'http' | 'https' | 'stcp' | 'sudp' | 'xtcp' | 'tcpmux'
@@ -244,6 +254,39 @@ export type VpnState =
   | 'degraded'
   | 'error'
 
+/**
+ * What a VPN's state says about the two conditions worth alerting on.
+ *
+ * A pure map, exported and exhaustive, because the map IS the feature -- the
+ * poll around it is ten lines of timer. Written as a Record so a state added to
+ * VpnState is a type error here rather than a silent `null` that makes a new
+ * failure mode invisible.
+ *
+ * `null` is "this state is not an observation of that condition", and it is not
+ * `false`. The two that matter:
+ *
+ *   stopped   NOT an outage. A person pressed Stop. It is also not evidence
+ *             the VPN is healthy, so it is null in both columns rather than
+ *             false -- resolving a down alert because somebody stopped the
+ *             profile would be the app marking its own alert as fixed.
+ *   degraded  Up and not passing traffic. `down: false` because it IS up, and
+ *             `silent: true`, which is a different alert with a different fix.
+ *             vpn.ts calls that distinction the single most useful thing this
+ *             UI shows.
+ */
+export const VPN_ALERT_READINGS: Record<VpnState, { down: boolean | null; silent: boolean | null }> = {
+  error: { down: true, silent: null },
+  connected: { down: false, silent: false },
+  degraded: { down: false, silent: true },
+  // Coming up, or going round again. Neither condition is observable yet, and
+  // announcing a failure every time somebody starts a VPN is how an alert
+  // becomes one people turn off.
+  starting: { down: null, silent: null },
+  authenticating: { down: null, silent: null },
+  reconnecting: { down: null, silent: null },
+  stopped: { down: null, silent: null }
+}
+
 export interface FrpProxyStatus {
   name: string
   type: string
@@ -251,6 +294,29 @@ export interface FrpProxyStatus {
   err?: string
   localAddr?: string
   remoteAddr?: string
+}
+
+/**
+ * One WireGuard peer's own numbers.
+ *
+ * THE AGGREGATE ABOVE ANSWERS "IS THIS TUNNEL ALIVE"; this answers "which
+ * peer", which is a different question and the one somebody asks when a
+ * site-to-site link is half up and the totals still look fine.
+ *
+ * `publicKey` is an identity rather than a secret -- a WireGuard public key is
+ * meant to be shared -- but it is still what names a person's device, and
+ * `list_vpns` promises an agent is never shown keys of any kind. Nothing that
+ * builds an agent-facing answer may read this field, and a test asserts it.
+ */
+export interface VpnPeerStat {
+  publicKey: string
+  endpoint?: string
+  rxBytes: number
+  txBytes: number
+  /** AGE in seconds, converted from the sidecar's absolute stamp the same way
+   *  the aggregate is. Absent means this peer has never completed a handshake,
+   *  which is not the same as a long time ago. */
+  lastHandshakeSec?: number
 }
 
 export interface VpnStats {
@@ -261,6 +327,10 @@ export interface VpnStats {
   assignedIp?: string
   remoteEndpoint?: string
   latencyMs?: number
+  // WireGuard only, and absent rather than empty when the sidecar reported no
+  // rows: a tunnel whose peers were removed and one from a build that does not
+  // report rows are different, and only the first is a fact about the tunnel.
+  peers?: VpnPeerStat[]
   // frp only; frp exposes no client-side byte counters, so the proxy table is
   // the telemetry rather than faked rx/tx numbers.
   proxies?: FrpProxyStatus[]
@@ -300,6 +370,61 @@ export interface VpnBoundListener {
   bindPort: number
   targetHost?: string
   targetPort?: number
+}
+
+// ------------------------------------------------------- diagnose
+
+/**
+ * One line of the connectivity checklist.
+ *
+ * THREE WORDS AND NO FOURTH. `skipped` is not a soft `ok`: it means the check
+ * did not run, it always carries the reason in `detail`, and rendering it as a
+ * pass would put a green tick over a question nobody asked. That is the whole
+ * reason this is a vocabulary rather than a boolean.
+ */
+export type VpnCheckStatus = 'ok' | 'failed' | 'skipped'
+
+/**
+ * `handshake`, `dns` and `tcp` come from the sidecar and are about the far
+ * side. `ipv6` is decided HERE and is about this machine: whether traffic the
+ * tunnel was supposed to carry is going somewhere else instead, which netd
+ * cannot see because it has no view of the host's routing table.
+ */
+export type VpnCheckName = 'handshake' | 'dns' | 'tcp' | 'ipv6' | 'server'
+
+export interface VpnDiagnoseCheck {
+  name: VpnCheckName
+  status: VpnCheckStatus
+  /** Present on every row, including the passing ones. */
+  detail: string
+  /** Milliseconds for a probe, SECONDS for the handshake's age. Absent when
+   *  nothing was timed, which is not the same as zero. */
+  elapsed?: number
+}
+
+/** What the operator asks the probe to reach. There is no default: see
+ *  `sidecar/netd/diagnose.go`. A probe that picked an address would be this app
+ *  opening a connection to a third party through somebody's VPN. */
+export interface VpnDiagnoseTarget {
+  host?: string
+  port?: number
+}
+
+export interface VpnDiagnoseResult {
+  id: string
+  checks: VpnDiagnoseCheck[]
+  /** TCP connect time through the tunnel, present only when that check passed.
+   *  NOT a ping: it includes the peer's forwarding and the far service's
+   *  accept, and the field is named for what was measured. */
+  latencyMs?: number
+  sampledAt: number
+}
+
+/** A driver with no probe says so in words. An empty checklist would render
+ *  exactly like a tunnel where everything passed. */
+export interface VpnDiagnoseRefusal {
+  id: string
+  unsupported: string
 }
 
 export interface VpnStatus {

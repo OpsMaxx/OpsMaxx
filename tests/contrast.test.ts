@@ -123,7 +123,11 @@ describe('the two accent roles are genuinely separate', () => {
       join(__dirname, '../src/renderer/src/styles/global.css'),
       'utf8'
     ).replace(/\/\*[\s\S]*?\*\//g, '')
-    expect(css).not.toMatch(/color:\s*var\(--accent\)\s*;/)
+    // Anchored, because `color:` is a substring of `border-color:` and a
+    // BORDER may legitimately take the fill token — only text may not. An
+    // unanchored match here reported main's `border-color: var(--accent)` as a
+    // violation, which is the same over-broad-assertion mistake in miniature.
+    expect(css).not.toMatch(/(?:^|[\s;{])color:\s*var\(--accent\)\s*;/m)
   })
 })
 

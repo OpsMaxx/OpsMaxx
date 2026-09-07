@@ -57,6 +57,27 @@ export function VaultView(): React.JSX.Element {
     []
   )
 
+  // `null` is "main has not answered yet", and it must not fall through to the
+  // create screen. status() reaches safeStorage, which on macOS blocks on a
+  // keychain prompt for as long as the user takes to answer it -- and for that
+  // whole time a user with a full vault was being shown "Create vault" and two
+  // empty password fields.
+  if (exists === null) {
+    return (
+      <div className="main vault-gate">
+        <div className="vault-gate-card">
+          <div className="vault-gate-icon">
+            <Lock size={26} />
+          </div>
+          <h2>Opening the vault</h2>
+          <p className="faint">
+            Checking this machine for a vault. If your keychain asks for permission, that is
+            OpsMaxx reading the key it stored there.
+          </p>
+        </div>
+      </div>
+    )
+  }
   if (!exists) return <VaultGate mode="create" />
   if (!unlocked) return <VaultGate mode="unlock" />
   return <VaultBrowser />
@@ -99,11 +120,29 @@ function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
     void refreshBiometrics()
   }, [refreshBiometrics])
 
-  // Deliberately NOT fired automatically. The prompt is a gate, not a
-  // cryptographic step, and a prompt that appears unbidden every time the app
-  // opens trains people to touch the sensor without reading it — which is
-  // exactly the habit that makes a prompt worth phishing. The button is one
-  // click and says what it does.
+  // Fired automatically, but only here and only once, and the earlier refusal
+  // to do it at all is worth keeping in view rather than deleting.
+  //
+  // The argument against was: a prompt that appears unbidden every time the app
+  // opens trains people to touch the sensor without reading it, which is the
+  // habit that makes a prompt worth phishing. That objection is about an
+  // UNBIDDEN prompt. This one is not — it fires because the user navigated to
+  // the Vault screen and found it locked, which is them asking to open the
+  // vault. It never fires from the credential modal, never on app start, and
+  // never anywhere else.
+  //
+  // Once per mount, guarded by a ref: cancelling must leave the password field
+  // sitting there, not raise the sheet again. `promptTouchID` rejects on
+  // cancel, `unlockWithBiometrics` swallows that into a failed result, and the
+  // guard means neither can loop.
+  const autoPrompted = useRef(false)
+  const autoPrompt = useApp((s) => s.settings.vaultAutoBiometricPrompt)
+
+  useEffect(() => {
+    if (!canUseBio || !autoPrompt || autoPrompted.current || busy) return
+    autoPrompted.current = true
+    void unlockWithBiometrics()
+  }, [canUseBio, autoPrompt, busy, unlockWithBiometrics])
 
   const creating = mode === 'create'
   const mismatch = creating && confirm.length > 0 && password !== confirm
@@ -252,20 +291,36 @@ function BiometricOffer(): React.JSX.Element | null {
       <div style={{ flex: 1 }}>
         <div className="s-title">Unlock with {label} next time?</div>
         <div className="s-desc">
-          {label} reopens the vault while OpsMaxx is running. <b>Nothing extra is written to
-          disk</b> — you enter your master password once each time you start the app, and after
-          that {label} unlocks it.
+          Your master password is never stored either way, and you can change this at any time.
+          Once it is on, opening a locked Vault asks for {label} on its own; cancel and the
+          password field is still there. Settings turns that off.
           <br />
-          Your master password is never stored, and you can turn this off at any time.
+          <br />
+          <b>While the app is running</b> — nothing extra is written to disk. You type the master
+          password once per launch, and {label} reopens the vault after that.
+          <br />
+          <b>Across restarts</b> — the vault&rsquo;s key is saved to this Mac&rsquo;s keychain, so
+          you stop typing the password altogether. It is the more convenient choice and the weaker
+          one: anything that can read that keychain entry as your account can then open the vault.
         </div>
       </div>
       <button
         className="btn sm primary"
         onClick={() =>
+          void setBiometrics(true, 'persistent').then(
+            (ok) => ok && toast(`${label} unlock enabled, and remembered across restarts`, 'ok')
+          )
+        }
+      >
+        Across restarts
+      </button>
+      <button
+        className="btn sm"
+        onClick={() =>
           void setBiometrics(true, 'session').then((ok) => ok && toast(`${label} unlock enabled`, 'ok'))
         }
       >
-        Enable
+        While it&rsquo;s running
       </button>
       <button className="btn sm" onClick={decline}>
         Not now
@@ -314,6 +369,25 @@ function VaultBrowser(): React.JSX.Element {
           >
             <Fingerprint size={13} /> {BIO_LABEL[bioKind] ?? 'Biometrics'}:{' '}
             {bioEnabled ? (bioScope === 'persistent' ? 'on, saved' : 'on, this session') : 'off'}
+          </button>
+        )}
+        {/* The upgrade had no control at all: `persistent` was implemented,
+            tested and reachable only by calling the store by hand, so a user who
+            turned this on and then found the password prompt waiting after a
+            restart had no way to say "no, keep it". */}
+        {bioAvailable && bioEnabled && bioScope === 'session' && (
+          <button
+            className="btn sm"
+            title={`Save this vault's key to the keychain so ${
+              BIO_LABEL[bioKind] ?? 'biometrics'
+            } opens it after a restart too. Anything that can read that entry as your account can then open the vault.`}
+            onClick={() =>
+              void setBiometrics(true, 'persistent').then(
+                (ok) => ok && toast('Key saved — this vault opens after a restart now', 'ok')
+              )
+            }
+          >
+            Keep after restart
           </button>
         )}
         <button className="btn sm" onClick={() => setChanging((v) => !v)}>
@@ -465,6 +539,15 @@ function EntryEditor({ entry }: { entry: VaultEntry }): React.JSX.Element {
           className="btn sm danger"
           title="Delete this entry"
           onClick={() => {
+            // Same question the sidebar asks. Two delete paths that disagree
+            // about whether this is confirmable is worse than either.
+            if (
+              !window.confirm(
+                `Delete “${entry.name}” from the vault?\n\nThis cannot be undone, and anything using this entry will stop being able to authenticate.`
+              )
+            ) {
+              return
+            }
             remove(entry.id)
             toast(`${entry.name} deleted`)
           }}
@@ -494,7 +577,7 @@ function EntryEditor({ entry }: { entry: VaultEntry }): React.JSX.Element {
             label="Public key"
             value={entry.publicKey ?? ''}
             onChange={(v) => set({ publicKey: v })}
-            placeholder="ssh-ed25519 AAAA… user@host"
+            placeholder="ssh-ed25519 AAAA… user@server"
           />
         </>
       )}

@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, RefreshCw, TrendingUp } from 'lucide-react'
-import { clsx } from '../../lib/format'
+import { openSettings } from '../../store/nav'
+import { useApp } from '../../store/app'
+import {
+  storageHeadline,
+  type StorageLayout
+} from '../../../../shared/storageLayout'
+import { bytes, clsx } from '../../lib/format'
 import {
   CAPACITY_THRESHOLDS,
   CAPACITY_WINDOWS,
@@ -18,6 +24,11 @@ import {
   shortDate,
   span
 } from '../../lib/capacity'
+import {
+  buildFleetForecast,
+  type FleetForecast,
+  type FleetForecastInput
+} from '../../../../shared/fleetForecast'
 import type { Server } from '../../types'
 
 // "This disk fills in eleven days." — roadmap item 26.
@@ -162,7 +173,7 @@ function TrendRow({
       </div>
 
       {gaps.map((s, i) => (
-        <div key={i} className="warn" style={{ fontSize: 11 }}>
+        <div key={i} className="state-unknown" style={{ fontSize: 11 }}>
           <AlertTriangle size={11} /> No samples for {span(s.gapBefore)}. The line is broken there
           rather than joined — nothing was measured across it.
         </div>
@@ -170,7 +181,7 @@ function TrendRow({
 
       {trend.forecast !== null && threshold !== null && (
         <div
-          className={clsx('s-desc', trend.forecast.ok ? '' : 'faint')}
+          className={clsx('panel-note', trend.forecast.ok ? '' : 'faint')}
           style={{ marginTop: 2 }}
         >
           {forecastText(trend.forecast, trend.metric, threshold)}
@@ -193,6 +204,7 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
   const [serverId, setServerId] = useState<string>(servers[0]?.id ?? '')
   const [days, setDays] = useState<number>(7)
   const [report, setReport] = useState<CapacityReport | null>(null)
+  const hydrated = useApp((st) => st.hydrated)
   const [loading, setLoading] = useState(false)
   const [failed, setFailed] = useState(false)
   /** Bumped by Refresh. A re-read of the SAME server and window has to be a
@@ -204,6 +216,39 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
    *  one host's disk presented as another's, and there is nothing on screen
    *  that would give it away. */
   const generation = useRef(0)
+  /**
+   * The filesystems this host actually has.
+   *
+   * READ ON DEMAND, not with the trends. The trends come from stored samples
+   * and touch no host; this opens an SSH channel, and a panel that did it on
+   * every server change would probe a machine because somebody used a
+   * dropdown.
+   */
+  const [storage, setStorage] = useState<StorageLayout | { error: string } | null>(null)
+  const [storageLoading, setStorageLoading] = useState(false)
+
+  const loadStorage = async (): Promise<void> => {
+    const server = servers.find((sv) => sv.id === serverId)
+    if (!server) return
+    setStorageLoading(true)
+    setStorage(null)
+    try {
+      const call = (
+        window.opsmaxx as
+          | { fleet?: { storage?: (cfg: unknown) => Promise<StorageLayout | { error: string }> } }
+          | undefined
+      )?.fleet?.storage
+      setStorage(
+        typeof call === 'function'
+          ? await call(server)
+          : { error: 'This build cannot read filesystems. Restart the app to rebuild it.' }
+      )
+    } catch (e) {
+      setStorage({ error: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setStorageLoading(false)
+    }
+  }
 
   const selected = servers.find((s) => s.id === serverId) ?? null
   const trends = bridge()?.trends
@@ -231,17 +276,78 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
 
   const refresh = (): void => setNonce((n) => n + 1)
 
+  /**
+   * The estate strip -- item 47's fleet expansion forecast.
+   *
+   * Reuses the per-host `trends` channel across every server rather than adding
+   * an IPC of its own: that channel reads the LOCAL history store, not a host,
+   * so N calls are N queries against a database this process already has open.
+   * A second channel would be a second place for the forecast policy to drift.
+   *
+   * `over` and `refused` rows are the point. On a real estate most hosts
+   * produce no forecast, and a strip that showed only crossings would read as
+   * an all-clear on an estate nobody has measured.
+   */
+  const [fleet, setFleet] = useState<FleetForecast | null>(null)
+  const [fleetLoading, setFleetLoading] = useState(false)
+  const fleetGen = useRef(0)
+
+  const loadFleet = async (): Promise<void> => {
+    if (typeof trends !== 'function') return
+    const mine = ++fleetGen.current
+    setFleetLoading(true)
+    try {
+      const inputs: FleetForecastInput[] = []
+      for (const s of servers) {
+        const r = await trends(s.id, days).catch(() => null)
+        if (fleetGen.current !== mine) return
+        // A server whose read FAILED is not silently absent: it goes in as a
+        // refusal with no data, which is exactly what it is.
+        if (r === null) {
+          inputs.push({
+            hostId: s.id,
+            hostName: s.name,
+            metric: 'diskPct',
+            forecast: { ok: false, reason: 'no-data', from: 0, to: 0, points: 0 }
+          })
+          continue
+        }
+        for (const t of r.trends) {
+          if (t.forecast === null) continue
+          inputs.push({ hostId: s.id, hostName: s.name, metric: t.metric, forecast: t.forecast })
+        }
+      }
+      if (fleetGen.current !== mine) return
+      setFleet(buildFleetForecast(inputs))
+    } finally {
+      if (fleetGen.current === mine) setFleetLoading(false)
+    }
+  }
+
   return (
     <div className="bc-panel">
-      <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-        <TrendingUp size={14} className="faint" />
-        <b className="grow">Capacity trends</b>
+      <div className="panel-head">
+        <span className="panel-head-icon">
+          <TrendingUp size={14} />
+        </span>
+        <h2 className="ui-section-title">Capacity trends</h2>
+        <p className="ui-note panel-head-purpose">
+          How one server&rsquo;s CPU, memory and disk have moved over time, drawn from samples the
+          fleet sampler already writes. Nothing extra is measured for this panel.
+        </p>
+        <div className="panel-head-actions">
         <select
           className="input"
           style={{ maxWidth: 200 }}
           aria-label="Server"
           value={serverId}
-          onChange={(e) => setServerId(e.target.value)}
+          onChange={(e) => {
+              setServerId(e.target.value)
+              // Cleared with the server, for the reason `generation` exists
+              // above: one host's filesystems left on screen under another
+              // host's name is a wrong answer nothing on screen gives away.
+              setStorage(null)
+            }}
         >
           {servers.map((s) => (
             <option key={s.id} value={s.id}>
@@ -263,31 +369,103 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
           ))}
         </select>
         <button
-          className="btn"
+          className="btn primary"
           disabled={loading || typeof trends !== 'function' || serverId === ''}
           onClick={refresh}
         >
           <RefreshCw size={13} className={clsx(loading && 'spin')} /> Refresh
         </button>
+        </div>
       </div>
 
+      {/* Item 47's estate strip. Asked for, because it queries the store once
+          per server and the answer only matters when somebody is asking the
+          estate question rather than the one-host one. */}
+      {typeof trends === 'function' && servers.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <button className="btn ghost sm" disabled={fleetLoading} onClick={() => void loadFleet()}>
+            {fleet === null ? 'Forecast the whole estate' : 'Forecast again'}
+            {fleetLoading && <span className="faint"> reading…</span>}
+          </button>
+          {fleet !== null && (
+            <>
+              {/* The denominator is in the headline, not behind a hover: a
+                  status line reading "nothing fills within 90 days" on an
+                  estate where most hosts could not be forecast is the most
+                  reassuring thing this app could print and one of the least
+                  true. */}
+              <div className="s-note">{fleet.headline}</div>
+              <table className="mini-table">
+                <tbody>
+                  {fleet.rows.map((r) => (
+                    <tr key={`${r.hostId} ${r.metric}`}>
+                      <td>
+                        <span
+                          className={clsx(
+                            'chip',
+                            r.band === 'over' ? 'danger' : r.band === 'crossing' ? 'warn' : 'state-unknown'
+                          )}
+                        >
+                          {r.band === 'refused' ? 'no forecast' : r.band}
+                        </span>
+                      </td>
+                      <td className="mono">{r.hostName}</td>
+                      <td>{r.because}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
+      )}
+
       {typeof trends !== 'function' ? (
-        <div className="s-desc">
+        <div className="panel-note is-alarm">
           This build’s preload does not expose capacity trends yet. Restart the app to rebuild it.
         </div>
-      ) : servers.length === 0 ? (
-        <div className="s-desc">No servers to chart.</div>
-      ) : failed ? (
-        <div className="s-desc danger">Could not read the history store.</div>
-      ) : report === null ? (
-        <div className="s-desc">
-          {loading
-            ? 'Reading…'
-            : 'No stored history. Trends come from the fleet sampler’s own samples, so this fills in once sampling has been running.'}
+      ) : servers.length === 0 && !hydrated ? (
+        // Saved servers arrive from an await, so the list is empty for the
+        // first moments of every launch -- and this panel used that emptiness
+        // to tell people they had no servers. It is not a claim worth making
+        // before the answer is in.
+        //
+        // Only the EMPTY branch waits. A list with something in it is its own
+        // proof that servers exist, whatever the flag says, and holding a chart
+        // back for a signal that would only confirm what is already on screen
+        // would be a spinner in front of an answer.
+        <div className="panel-empty">
+          <p className="panel-empty-title">Reading your servers…</p>
         </div>
+      ) : servers.length === 0 ? (
+        <div className="panel-empty">
+          <p className="panel-empty-title">No servers to chart.</p>
+          <p className="panel-empty-body">
+            Add a server to this workspace and its samples start accumulating here.
+          </p>
+        </div>
+      ) : failed ? (
+        <div className="panel-note is-alarm">Could not read the history store.</div>
+      ) : report === null ? (
+        loading ? (
+          <div className="panel-note">Reading…</div>
+        ) : (
+          <div className="panel-empty">
+            <p className="panel-empty-title">No stored history.</p>
+            <p className="panel-empty-body">
+              Trends come from the fleet sampler’s own samples, so this fills in once sampling has
+              been running. Turn background checking on and leave it for an hour.
+            </p>
+            <div className="panel-empty-actions">
+              <button className="btn ghost sm" onClick={() => openSettings('monitoring')}>
+                Open Monitoring settings
+              </button>
+            </div>
+          </div>
+        )
       ) : (
         <>
-          <div className="s-desc">
+          <div className="panel-note">
             {selected?.name ?? serverId} over the last {span(report.to - report.from)}, from the
             samples the fleet sampler already writes. Nothing is measured for this panel.
           </div>
@@ -299,6 +477,58 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
             {report.retainedDays} days of {RES_LABEL.hourly}. Older than that is gone, which is why
             a longer window is not always more line.
           </div>
+
+          {/* THE TREND ABOVE IS `/` ONLY. This says which other filesystems
+              exist, because a full /var or /data is invisible to a single disk
+              percentage — and on a host running containers most of what `df`
+              lists is not a filesystem at all. */}
+          <div className="row" style={{ gap: 8, marginTop: 14, alignItems: 'center' }}>
+            <span className="grow faint" style={{ fontSize: 11 }}>
+              The trend above is the root filesystem. This host may have others.
+            </span>
+            <button
+              className="btn ghost sm"
+              disabled={storageLoading}
+              onClick={() => void loadStorage()}
+            >
+              {storageLoading ? 'Reading…' : 'Read filesystems'}
+            </button>
+          </div>
+          {storage !== null && 'error' in storage && (
+            // NOT an empty list: a read that could not happen and a host with
+            // one filesystem are different answers.
+            <div className="panel-note is-alarm">The filesystems could not be read: {storage.error}</div>
+          )}
+          {storage !== null && !('error' in storage) && (
+            <>
+              <div className="faint" style={{ fontSize: 11 }}>
+                {storageHeadline(storage)}
+              </div>
+              <table className="mini-table">
+                <thead>
+                  <tr>
+                    <th>Mounted on</th>
+                    <th>Type</th>
+                    <th className="num">Size</th>
+                    <th className="num">Used</th>
+                    <th className="num">Inodes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {storage.df.mounts.map((m) => (
+                    <tr key={m.target}>
+                      <td className="mono">{m.target}</td>
+                      <td>{m.fstype}</td>
+                      <td className="num">{m.sizeKb === null ? '?' : bytes(m.sizeKb * 1024)}</td>
+                      <td className="num">{m.usePct === null ? '?' : `${m.usePct}%`}</td>
+                      {/* `-` from vfat is unknown, not zero. */}
+                      <td className="num">{m.inodePct === null ? '—' : `${m.inodePct}%`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
         </>
       )}
     </div>

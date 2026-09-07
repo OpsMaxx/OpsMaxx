@@ -1,5 +1,6 @@
 import type { AccessGroup, AiCapability, PermissionValue, PolicyAssignment } from '../../shared/mcp'
 import type { VpnKind } from '../../shared/vpn'
+import { assessCommand, SUDO_REASON } from '../../shared/commandRisk'
 
 export interface Decision {
   decision: PermissionValue
@@ -343,6 +344,29 @@ export function evaluateCommand(group: AccessGroup | null, command: string): Dec
         : { decision: 'allow', reason: 'Allowed by access group.' }
   }
 
+  // THE DANGEROUS FORM IS NEVER GRANTED SILENTLY, WHATEVER THE GROUP SAYS.
+  //
+  // That sentence is thirty lines further down this file, about DROP TABLE,
+  // and the terminal path did not have it. `terminal` is `allow` in all four
+  // built-in groups, so `docker volume rm data`, `rm -rf /var/lib` and
+  // `systemctl stop postgresql` reached an agent with no approval card at all.
+  // Grading them `high` in mcpServer.ts does not fix that on its own: a
+  // decision of `allow` never opens a card for a grade to appear on.
+  //
+  // SUDO IS DELIBERATELY EXEMPT. A group that has explicitly set sudo to
+  // `allow` has had that decision made by a human, and re-asking would
+  // overrule them -- so a command whose ONLY finding is "runs as root" is left
+  // to the sudo branch above. `sudo rm -rf /` still lands here, because its
+  // finding is the rm, not the sudo.
+  const assessed = assessCommand(command)
+  const beyondSudo = assessed.reasons.filter((r) => r !== SUDO_REASON)
+  if (base.decision === 'allow' && assessed.risk !== 'ordinary' && beyondSudo.length > 0) {
+    base = {
+      decision: 'ask',
+      reason: `Requires approval: this command ${beyondSudo.join(', and ')}.`
+    }
+  }
+
   // A path rule can only narrow the command decision, never widen it.
   return extractPathAccesses(command).reduce<Decision>(
     (acc, { path, mode }) => mostRestrictive(acc, evaluateFilePath(group, path, mode)),
@@ -421,8 +445,55 @@ export type StatementKind = 'read' | 'mutating' | 'destructive'
 
 const DESTRUCTIVE = /^(drop|truncate|alter|create|rename|grant|revoke|flushall|flushdb|shutdown)\b/
 const MUTATING =
-  /^(insert|update|delete|replace|merge|upsert|copy|load|call|do|set|del|unlink|expire|rpush|lpush|sadd|hset|incr|decr|append|getset|move|migrate|restore|persist)\b/
-const READ = /^(select|show|explain|describe|desc|with|values|table|analyze|get|mget|keys|scan|type|ttl|exists|llen|lrange|smembers|hget|hgetall|zrange|info|dbsize|find|aggregate|count|distinct|list)\b/
+  /^(insert|update|delete|replace|merge|upsert|copy|load|call|do|set|del|unlink|expire|rpush|lpush|sadd|hset|incr|decr|append|getset|move|migrate|restore|persist|analyze|analyse|vacuum|reindex|cluster)\b/
+const READ = /^(select|show|explain|describe|desc|with|values|table|get|mget|keys|scan|type|ttl|exists|llen|lrange|smembers|hget|hgetall|zrange|info|dbsize|find|aggregate|count|distinct|list)\b/
+
+// THE LEADING VERB IS NOT THE STATEMENT. Three ways that breaks, all of them
+// found by the audit rather than by these tests, and all of them ending with a
+// `read` grade -- which is `low` risk, which is no prompt, on a group whose
+// databaseAccess is `allow`. That is every built-in group.
+//
+// A DENYLIST, and not a proof. A side-effecting function not named here still
+// reads as `read`. The allowlist shape would be safer and is not available:
+// every honest read calls count(), now() or coalesce(), so "unknown function
+// means mutating" would prompt on every query an operator ever runs. What is
+// defensible is that the functions somebody reaches for DURING AN INCIDENT --
+// when they are in a hurry and an agent is helping -- are the ones here.
+const SIDE_EFFECT_FN =
+  /\b(pg_terminate_backend|pg_cancel_backend|pg_switch_wal|pg_switch_xlog|pg_promote|pg_reload_conf|pg_rotate_logfile|pg_drop_replication_slot|pg_create_restore_point|\w*_reset)\s*\(/
+
+// `SELECT * INTO newtable FROM t` CREATES A RELATION -- Postgres and MSSQL
+// both. The verb is still `select`.
+const SELECT_INTO = /^select\b[\s\S]*\binto\s+\S/
+
+// EXPLAIN plans. EXPLAIN ANALYZE **runs the statement**, so
+// `explain analyze delete from users` deletes the rows, and every word in
+// front of `delete` says this is a read.
+const EXPLAIN_OPTS = new Set([
+  'analyze', 'analyse', 'verbose', 'costs', 'settings', 'buffers', 'wal',
+  'timing', 'summary', 'generic_plan', 'memory', 'serialize', 'format',
+  'text', 'json', 'xml', 'yaml', 'on', 'off', 'true', 'false'
+])
+
+function stripExplain(s: string): { rest: string; executes: boolean } | null {
+  if (!/^explain\b/.test(s)) return null
+  let rest = s.slice('explain'.length).trim()
+  let executes = false
+  const paren = /^\(([^)]*)\)/.exec(rest)
+  if (paren) {
+    // EXPLAIN (ANALYZE FALSE) does not execute, and saying so costs one test.
+    executes = /\banaly[sz]e\b(?!\s*(false|off))/.test(paren[1])
+    rest = rest.slice(paren[0].length).trim()
+  } else {
+    for (;;) {
+      const m = /^([a-z_]+)\b/.exec(rest)
+      if (!m || !EXPLAIN_OPTS.has(m[1])) break
+      if (m[1] === 'analyze' || m[1] === 'analyse') executes = true
+      rest = rest.slice(m[0].length).trim()
+    }
+  }
+  return { rest, executes }
+}
 
 // Strips leading comments and parenthesised prefixes so the verb is the first
 // thing tested, and splits on ; so a read cannot smuggle a write behind one.
@@ -464,8 +535,20 @@ export function classifyStatement(sql: string): StatementKind {
     }
     if (mongo === 'read') continue
 
+    // Graded by what it RUNS, not by the word in front of it.
+    const ex = stripExplain(s)
+    if (ex) {
+      if (!ex.executes) continue
+      if (ex.rest) {
+        const inner = classifyStatement(ex.rest)
+        if (inner === 'destructive') return 'destructive'
+        if (inner === 'mutating') worst = 'mutating'
+        continue
+      }
+    }
+
     if (DESTRUCTIVE.test(s)) return 'destructive'
-    if (MUTATING.test(s)) worst = 'mutating'
+    if (MUTATING.test(s) || SIDE_EFFECT_FN.test(s) || SELECT_INTO.test(s)) worst = 'mutating'
     // An unrecognised verb is treated as mutating rather than read. There are
     // far too many dialects to enumerate, and guessing "harmless" is the
     // expensive direction to be wrong in.

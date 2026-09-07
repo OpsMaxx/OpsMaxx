@@ -1,0 +1,4 @@
+dir|/data
+dbfilename|dump.rdb
+appendonly|no
+save|3600 1 300 100 60 10000

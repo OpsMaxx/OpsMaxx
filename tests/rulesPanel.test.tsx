@@ -83,7 +83,7 @@ function mount(rules: RuleView[], over: Record<string, unknown> = {}) {
 }
 
 describe('reading a rule back', () => {
-  it('shows the command and the hosts, not a job id', async () => {
+  it('shows the command and the servers, not a job id', async () => {
     // A standing authorisation nobody can read back is not consent, it is a
     // setting. The step TEXT is what somebody has to be able to check a year
     // later, and a job id is not it.
@@ -134,17 +134,32 @@ describe('reading a rule back', () => {
           ruleId: 'r1',
           fired: [T0],
           suppressed: 0,
-          refusal: 'rebooting gateway would cut three hosts.',
+          refusal: 'rebooting gateway would cut three servers.',
           refusedAt: T0
         }
       })
     ])
-    expect(await screen.findByText(/would cut three hosts/)).toBeTruthy()
+    expect(await screen.findByText(/would cut three servers/)).toBeTruthy()
   })
 
   it('says nothing runs on its own when there are none', async () => {
     mount([])
     expect(await screen.findByText('No rules. Nothing runs on its own.')).toBeTruthy()
+  })
+
+  it('does not say it before it has read them', async () => {
+    // "Nothing runs on its own" is a claim about whether anything is going to
+    // fire, and it was being made about rules nobody had looked at yet: `rules`
+    // began as `[]`, which this screen renders as a confident nothing. On the
+    // one screen whose subject is what happens without you, that is the single
+    // sentence it must not get wrong.
+    //
+    // The neighbouring test cannot catch this -- `findByText` WAITS, so it
+    // passes whether or not the claim was also on screen a moment earlier. This
+    // one holds the read open and looks while it is still pending.
+    mount([], { list: () => new Promise(() => {}) })
+    expect(await screen.findByText(/Reading the rules/)).toBeTruthy()
+    expect(screen.queryByText('No rules. Nothing runs on its own.')).toBeNull()
   })
 })
 
@@ -219,7 +234,7 @@ describe('writing a job rule', () => {
     await user.click(screen.getByLabelText('alpha'))
     await user.click(screen.getByLabelText('bravo'))
 
-    expect(await screen.findByText(/2 host\(s\) at once/)).toBeTruthy()
+    expect(await screen.findByText(/2 server\(s\) at once/)).toBeTruthy()
     expect(screen.getByText(/destructive/)).toBeTruthy()
     expect(screen.getByText(/every time it fires/)).toBeTruthy()
   })
@@ -252,10 +267,24 @@ describe('writing a job rule', () => {
       'inode',
       'load',
       'cert-expiry',
+      // A sibling of cert-expiry, not the same kind: a VPN profile is not a
+      // server and the posture sweep never looks at one.
+      'vpn-cert-expiry',
+      'error-rate',
       'host-unreachable',
       'job-failed',
       'tunnel-down',
       'oom-kill',
+      // Parked behind item 5 until there was a backup that could fail. A STATE,
+      // so it sits with the others: "there is no recent backup" stays true until
+      // one succeeds.
+      'backup-failed',
+      // Two, not one: up-but-silent and down have different fixes.
+      'vpn-down',
+      'vpn-degraded',
+      // Keyed on the cluster context rather than a server: a cluster is
+      // visible from every host holding a kubeconfig.
+      'pod-crashloop',
       'db-alarm',
       'db-watch'
     ])
@@ -293,6 +322,10 @@ describe('a bridge that is not there', () => {
     // renderer is newer than the preload, so every method is undefined.
     stubBridge({})
     render(<RulesPanel servers={SERVERS} />)
-    expect(await screen.findByText('No rules. Nothing runs on its own.')).toBeTruthy()
+    // Was asserting 'No rules. Nothing runs on its own.' -- which, with no
+    // bridge at all, is a claim about what will fire made by a panel that
+    // cannot read anything. It says what is actually wrong now.
+    expect(await screen.findByText(/preload does not expose the rule engine/)).toBeTruthy()
+    expect(screen.queryByText('No rules. Nothing runs on its own.')).toBeNull()
   })
 })

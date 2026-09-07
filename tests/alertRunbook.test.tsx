@@ -170,7 +170,7 @@ describe('a store that could not be read', () => {
 // =========================================================================
 
 describe('the commands that were run last time', () => {
-  it('shows them, with the outcome this host reached', async () => {
+  it('shows them, with the outcome this server reached', async () => {
     views = [
       view({
         recall: {
@@ -205,7 +205,7 @@ describe('the commands that were run last time', () => {
     expect(body).toContain('succeeded')
   })
 
-  it('marks what the host said as the host having said it', async () => {
+  it('marks what the server said as the server having said it', async () => {
     views = [
       view({
         recall: {
@@ -319,7 +319,7 @@ describe('the note', () => {
       view({ hostNote: { kind: 'disk', hostId: null, text: 'Check /var/log first.', updatedAt: T0 } })
     ]
     render(<AlertsPanel />)
-    const box = await screen.findByLabelText('Runbook note for Disk on every host')
+    const box = await screen.findByLabelText('Runbook note for Disk on every server')
     await user.type(box, 'Check /var/log first.')
     await user.tab()
     await waitFor(() => expect(saved.length).toBe(1))
@@ -331,7 +331,7 @@ describe('the note', () => {
     saveOk = false
     views = [view()]
     render(<AlertsPanel />)
-    const box = await screen.findByLabelText('Runbook note for Disk on every host')
+    const box = await screen.findByLabelText('Runbook note for Disk on every server')
     await user.type(box, 'this will not land')
     await user.tab()
     await waitFor(() => expect(screen.getByTestId('runbook-save-failed')).toBeTruthy())
@@ -340,7 +340,7 @@ describe('the note', () => {
     expect((box as HTMLTextAreaElement).value).toBe('this will not land')
   })
 
-  it('shows the fleet-wide note beside a host note rather than merged into it', async () => {
+  it('shows the fleet-wide note beside a server note rather than merged into it', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     useApp.setState({ servers: [SERVER] })
     views = [
@@ -352,8 +352,8 @@ describe('the note', () => {
       })
     ]
     render(<AlertsPanel />)
-    await screen.findByLabelText('Runbook note for Disk on every host')
-    await user.selectOptions(screen.getByLabelText('Runbook host'), 's1')
+    await screen.findByLabelText('Runbook note for Disk on every server')
+    await user.selectOptions(screen.getByLabelText('Runbook server'), 's1')
     const box = await screen.findByLabelText('Runbook note for Disk on web-1')
     expect((box as HTMLTextAreaElement).value).toBe('web-1 keeps backups on /.')
     expect(screen.getByTestId('runbook-kind-note').textContent).toContain('Fleet: check journald.')
@@ -428,13 +428,12 @@ describe('the refusal', () => {
     })
     views = [view(), view({ hostId: 's1', recall: { status: 'never-fired' } })]
     render(<AlertsPanel />)
-    // 'Disk' also names an <option> in the kind picker below, so the row is
-    // found by being a row rather than by being the only match.
+    // 'Disk' also names an <option> in the kind picker below, so the card is
+    // found by being an outstanding card rather than by being the only match.
+    // (It was located with `closest('tr')` while Outstanding was a table; the
+    // assertions below are unchanged.)
     await waitFor(() => expect(screen.getAllByText('Disk').length).toBeGreaterThan(1))
-    const row = screen
-      .getAllByText('Disk')
-      .map((el) => el.closest('tr'))
-      .find((tr): tr is HTMLTableRowElement => tr !== null) as HTMLElement
+    const row = screen.getByTestId('outstanding-alert')
     await user.click(within(row).getByText('Runbook'))
     await waitFor(() =>
       expect(screen.getByLabelText('Runbook note for Disk on web-1')).toBeTruthy()

@@ -39,6 +39,7 @@ function group(overrides: Partial<AccessGroup['capabilities']> = {}, filePolicie
       // What it gates is whether OpsMaxx's own posture probe may collect a
       // host's firewall rule lines.
       firewallRules: 'deny',
+      sudoersRead: 'deny',
       manageServers: 'deny',
       vpnControl: 'deny',
       ...overrides

@@ -18,6 +18,7 @@ import { sshHopsFor } from '../../lib/ssh'
 import { clsx } from '../../lib/format'
 import {
   DOCKER_FAILURE_HELP,
+  buildDockerNetworkPreview,
   buildDockerReclaimPreview,
   diffDockerReclaim,
   dockerReclaimBlocked,
@@ -37,6 +38,7 @@ import {
   type DockerInspectProbe,
   type DockerProbe,
   type DockerReclaimDiff,
+  type DockerNetworkProbe,
   type DockerReclaimItem,
   type DockerReclaimPlan,
   type DockerReclaimPreview,
@@ -45,6 +47,12 @@ import {
 } from '../../../../shared/docker'
 import type { Server } from '../../types'
 import { ComposePanel } from './ComposePanel'
+import { HealthLogPanel } from './HealthLog'
+import { useFleet } from '../../store/fleet'
+import { EngineUpgradePanel } from './EngineUpgrade'
+import { jobApprovalFor, planJob, type JobSpec } from '../../../../shared/jobs'
+import { ImageScanPanel } from './ImageScan'
+import type { ImageScanProbe } from '../../../../shared/imageScan'
 import { ReclaimDialog, ReclaimOutcome } from './Reclaim'
 
 // Containers on a server, and what an operator does with them.
@@ -107,8 +115,51 @@ function humanBytes(bytes: number): string {
   return `${n < 10 && i > 0 ? n.toFixed(2) : Math.round(n)}${units[i]}`
 }
 
+/**
+ * Fold the network read into the disk-derived preview.
+ *
+ * Networks are a SECOND read -- `system df -v` lists none -- and this is where
+ * the two meet. Two things it must not do.
+ *
+ * It must not silently omit networks when the read failed: the preview would
+ * then look complete while offering nothing from a whole category, and nobody
+ * on screen could tell that from a host with no removable networks. The failure
+ * goes in as a withheld row, where it is visible.
+ *
+ * And it must be a pure function of the two reads, for the reason the disk
+ * preview is: the confirm-time re-check compares a fresh preview against the
+ * planned items, and that comparison only means something if the same reads
+ * always produce the same offer set.
+ */
+function mergeNetworks(
+  base: DockerReclaimPreview,
+  nets: DockerNetworkProbe | null
+): DockerReclaimPreview {
+  if (nets === null) return base
+  if (!nets.ok) {
+    return {
+      items: base.items,
+      withheld: [
+        ...base.withheld,
+        {
+          kind: 'network',
+          id: '',
+          label: 'networks',
+          reason: `they could not be read, so none is offered: ${nets.detail}`
+        }
+      ]
+    }
+  }
+  const add = buildDockerNetworkPreview(nets.networks, nets.use)
+  return { items: [...base.items, ...add.items], withheld: [...base.withheld, ...add.withheld] }
+}
+
 export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Element {
   const [serverId, setServerId] = useState<string>('')
+  // The package manager, from the facts the sampler already collects. Absent
+  // means the facts have not been collected -- which the engine-upgrade panel
+  // refuses on rather than guessing a distribution from.
+  const allFacts = useFleet((st) => st.facts)
   const [probe, setProbe] = useState<DockerProbe | null>(null)
   const [loading, setLoading] = useState(false)
   const [logs, setLogs] = useState<{ name: string; output: string } | null>(null)
@@ -127,6 +178,11 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
   // image and volume on the host, so an operator who only wanted the four
   // category totals should not pay for it.
   const [diskItems, setDiskItems] = useState<DockerDiskDetailProbe | null>(null)
+  // Networks come from their OWN read: `system df -v` lists none. Held beside
+  // the disk listing and re-read with it, so the preview stays a pure function
+  // of the reads on screen -- which is what makes the confirm-time re-check
+  // mean anything.
+  const [netItems, setNetItems] = useState<DockerNetworkProbe | null>(null)
   const [diskItemsLoading, setDiskItemsLoading] = useState(false)
   // Reclaim. NOTHING is pre-selected and there is no select-all: the lifecycle
   // model's rule is that targets are explicit, and a select-all checkbox is
@@ -303,12 +359,18 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
     setDiskItemsLoading(true)
     const gen = generation.current
     try {
-      const r = await bridge()?.diskDetail?.(cfgFor(server), { sudo: useSudo })
+      const [r, n] = await Promise.all([
+        bridge()?.diskDetail?.(cfgFor(server), { sudo: useSudo }),
+        bridge()?.networks?.(cfgFor(server), { sudo: useSudo })
+      ])
       if (generation.current !== gen) return
       // A fresh listing invalidates a selection made against the old one.
       clearReclaim()
       setDiskItems(
         r ?? { ok: false, reason: 'unknown', detail: 'The itemised disk view is not wired up in this build.' }
+      )
+      setNetItems(
+        n ?? { ok: false, reason: 'unknown', detail: 'The network read is not wired up in this build.' }
       )
     } catch (e) {
       if (generation.current !== gen) return
@@ -328,8 +390,8 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
    * two of them is a difference on the host rather than in this function.
    */
   const preview: DockerReclaimPreview | null = useMemo(
-    () => (diskItems?.ok === true ? buildDockerReclaimPreview(diskItems.disk) : null),
-    [diskItems]
+    () => (diskItems?.ok === true ? mergeNetworks(buildDockerReclaimPreview(diskItems.disk), netItems) : null),
+    [diskItems, netItems]
   )
   const pickedItems: DockerReclaimItem[] = useMemo(
     () => (preview === null ? [] : preview.items.filter((i) => picked.has(dockerReclaimKey(i)))),
@@ -364,8 +426,14 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
     setReclaimChecking(true)
     const gen = generation.current
     try {
-      const fresh = await bridge()?.diskDetail?.(cfgFor(server), { sudo: useSudo })
+      const [fresh, freshNets] = await Promise.all([
+        bridge()?.diskDetail?.(cfgFor(server), { sudo: useSudo }),
+        bridge()?.networks?.(cfgFor(server), { sudo: useSudo })
+      ])
       if (generation.current !== gen) return
+      setNetItems(
+        freshNets ?? { ok: false, reason: 'unknown', detail: 'The network read is not wired up in this build.' }
+      )
       if (!fresh || !fresh.ok) {
         setDiskItems(
           fresh ?? { ok: false, reason: 'unknown', detail: 'The itemised disk view is not wired up in this build.' }
@@ -381,7 +449,13 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
         })
         return
       }
-      const again = buildDockerReclaimPreview(fresh.disk)
+      // `?? null` is not a shrug: an unwired bridge is exactly the case the
+      // withheld row above is for, and the ?? keeps it on that path rather
+      // than letting `undefined` mean "no networks".
+      const again = mergeNetworks(
+        buildDockerReclaimPreview(fresh.disk),
+        freshNets ?? { ok: false, reason: 'unknown', detail: 'The network read is not wired up in this build.' }
+      )
       const diff = diffDockerReclaim(reclaimPlan.items, again)
       // The listing is replaced either way, so whatever happens next is chosen
       // against what the host actually holds now.
@@ -518,6 +592,31 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
       ? disk.rows.reduce((sum, r) => sum + (r.reclaimableBytes ?? 0), 0)
       : null
 
+  /**
+   * The engine upgrade, as a job.
+   *
+   * The approval is minted from the SAME spec and target list the engine will
+   * re-derive its plan from, which is what makes the record checkable. The
+   * typed phrase is the one `planJob` asks for; a panel that invented its own
+   * would be a second place for that to drift.
+   */
+  const launchEngineJob = async (spec: JobSpec): Promise<void> => {
+    if (!server) return
+    const targets = [{ serverId: server.id, serverName: server.name }]
+    const planned = planJob(spec, targets)
+    const phrase =
+      planned.confirmation.kind === 'type-to-confirm' ? planned.confirmation.phrase : null
+    if (phrase !== null && window.prompt(`Type ${phrase} to upgrade the engine on ${server.name}.`) !== phrase) {
+      return
+    }
+    await window.opsmaxx?.jobs?.run?.({
+      jobId: crypto.randomUUID(),
+      spec,
+      approval: jobApprovalFor(spec, targets, { phrase, confirmedAt: Date.now() }),
+      targets: [{ serverId: server.id, serverName: server.name, cfg: cfgFor(server) }]
+    })
+  }
+
   const actionButtons = (c: DockerContainer): React.JSX.Element => (
     <>
       {c.state !== 'running' && (
@@ -555,37 +654,58 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
 
   return (
     <div className="bc-panel">
-      <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-        <Container size={14} className="faint" />
-        <b className="grow">Containers</b>
-        <select
-          className="input"
-          style={{ maxWidth: 200 }}
-          value={server?.id ?? ''}
-          onChange={(e) => {
-            setServerId(e.target.value)
-            setProbe(null)
-            clearReads()
-          }}
-        >
-          {eligible.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-        <button className="btn" disabled={loading || !server} onClick={() => void load()}>
-          <RefreshCw size={13} className={clsx(loading && 'spin')} /> {probe ? 'Refresh' : 'Read containers'}
-        </button>
+      <div className="panel-head">
+        <span className="panel-head-icon">
+          <Container size={14} />
+        </span>
+        <h2 className="ui-section-title">Containers</h2>
+        <p className="ui-note panel-head-purpose">
+          What is running under Docker on one server — state, ports, disk and live stats.
+        </p>
+        <div className="panel-head-actions">
+          <select
+            className="input"
+            style={{ maxWidth: 200 }}
+            aria-label="Server"
+            value={server?.id ?? ''}
+            onChange={(e) => {
+              setServerId(e.target.value)
+              setProbe(null)
+              clearReads()
+            }}
+          >
+            {eligible.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          {/* The button this whole exercise started from. It is the one thing
+              to do on an unread panel and it was styled as an ordinary
+              secondary control, indistinguishable from the dropdown beside it. */}
+          <button className="btn primary" disabled={loading || !server} onClick={() => void load()}>
+            <RefreshCw size={13} className={clsx(loading && 'spin')} /> {probe ? 'Refresh' : 'Read containers'}
+          </button>
+        </div>
       </div>
 
-      {eligible.length === 0 && <div className="s-desc">No server in this workspace is online.</div>}
+      {eligible.length === 0 && (
+        <div className="panel-empty">
+          <p className="panel-empty-title">No server in this workspace is online.</p>
+          <p className="panel-empty-body">
+            Connect a server from the sidebar, then come back and press <b>Read containers</b>.
+          </p>
+        </div>
+      )}
 
       {!probe && !loading && eligible.length > 0 && (
-        <div className="s-desc">
-          Runs <span className="mono">docker ps</span> on the selected server using the docker binary
-          already installed there. Reading only — nothing is started, stopped or removed until you ask
-          for it.
+        <div className="panel-empty">
+          <p className="panel-empty-title">Nothing has been read yet.</p>
+          <p className="panel-empty-body">
+            Press <b>Read containers</b> to run <span className="mono">docker ps</span> on the
+            selected server, using the docker binary already installed there. Reading only —
+            nothing is started, stopped or removed until you ask for it.
+          </p>
         </div>
       )}
 
@@ -613,14 +733,14 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
                 Retry with sudo
               </button>
               <span className="faint">
-                This account has passwordless sudo on that host, so containers can be read as root.
+                This account has passwordless sudo on that server, so containers can be read as root.
               </span>
             </div>
           )}
           {probe.reason === 'permission-denied' && sudoAvailable === false && (
             <div className="faint" style={{ marginTop: 6 }}>
               sudo would need a password here, and there is no terminal to type it into. Add this
-              user to the docker group on the host, or configure passwordless sudo for it.
+              user to the docker group on the server, or configure passwordless sudo for it.
             </div>
           )}
         </div>
@@ -851,6 +971,48 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
             </div>
           )}
 
+          {/* Healthchecks, worst first. Asked for rather than read on every
+              refresh: it is one `docker inspect` per open panel and the answer
+              only matters when somebody is looking. It covers RUNNING
+              containers -- a stopped one's health is whatever it was when it
+              stopped, and presenting that beside live answers reads as
+              current. */}
+          {/* Item 42's engine upgrade. Beside the health log because both are
+              questions about the DAEMON rather than about a container, and both
+              are asked for rather than read on every refresh. */}
+          <EngineUpgradePanel
+            manager={allFacts[server.id]?.facts?.packageManager ?? null}
+            read={() =>
+              // No fallback to apt. A server whose facts have not been
+              // collected gets the `unchecked` refusal above rather than a
+              // read built on a guess about its distribution.
+              bridge()?.enginePrecheck?.(
+                cfgFor(server),
+                allFacts[server.id]?.facts?.packageManager ?? 'apt'
+              ) ??
+              Promise.resolve({
+                ok: false as const,
+                detail: 'The engine precheck is not wired up in this build.'
+              })
+            }
+            // The plan goes to the JOBS surface with its approval minted the
+            // way every other elevated job's is. An install with sudo is not
+            // something to launch from a read panel on a click.
+            onRun={(spec) => void launchEngineJob(spec)}
+          />
+
+          <HealthLogPanel
+            refs={probe.containers.filter((c) => c.state === 'running').map((c) => refOf(c))}
+            read={(refs) =>
+              bridge()?.healthLogs?.(cfgFor(server), refs, { sudo: useSudo }) ??
+              Promise.resolve({
+                ok: false as const,
+                reason: 'unknown' as const,
+                detail: 'Healthcheck logs are not wired up in this build.'
+              })
+            }
+          />
+
           {groups.map((g) => (
             <div key={g.project ?? ' ungrouped'}>
               {/* Only worth a header when there is more than one bucket —
@@ -929,7 +1091,16 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
                       )}
                     </div>
 
-                    {open && <InspectDetail probe={detail?.probe ?? null} />}
+                    {open && (
+                      <InspectDetail
+                        probe={detail?.probe ?? null}
+                        scan={
+                          bridge()?.scanImage
+                            ? (ref) => bridge()!.scanImage!(cfgFor(server), ref)
+                            : null
+                        }
+                      />
+                    )}
                   </div>
                 )
               })}
@@ -1072,7 +1243,13 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
  * credentials do not leak. A "show env" button would be a one-line change and
  * that is exactly why the reason for its absence is written down here.
  */
-function InspectDetail({ probe }: { probe: DockerInspectProbe | null }): React.JSX.Element {
+function InspectDetail({
+  probe,
+  scan
+}: {
+  probe: DockerInspectProbe | null
+  scan: ((ref: string) => Promise<ImageScanProbe>) | null
+}): React.JSX.Element {
   if (probe === null) {
     return (
       <div className="faint" style={{ fontSize: 11, padding: '4px 0 8px 12px' }}>
@@ -1108,6 +1285,11 @@ function InspectDetail({ probe }: { probe: DockerInspectProbe | null }): React.J
         <span className="chip">logs: {i.logDriver === '' ? 'unknown' : i.logDriver}</span>
       </div>
       <div className="mono">image {i.image}</div>
+      {/* The scan lives beside the image reference because that is what it is
+          about -- a container's vulnerabilities are its image's. Asked for, not
+          run on open: it is a scanner invocation that may download a 111 MB
+          database. */}
+      {scan !== null && <ImageScanPanel image={i.image} scan={scan} />}
       {/* The reference and the digest disagree constantly, and that
           disagreement — "latest" is not the latest here — is frequently the
           bug being hunted. */}
@@ -1188,6 +1370,13 @@ function DiskItems({
   const d = probe.disk
   const offered = new Map(preview.items.map((i) => [dockerReclaimKey(i), i]))
   const refused = new Map(preview.withheld.map((w) => [dockerReclaimKey(w), w]))
+  // Offered first, then the refused ones with their reason. Both, always: a
+  // network the operator can see in `docker network ls` and not here is a list
+  // that looks broken.
+  const networks = [
+    ...preview.items.filter((i) => i.kind === 'network'),
+    ...preview.withheld.filter((w) => w.kind === 'network')
+  ]
 
   /**
    * The checkbox, or the reason there isn't one.
@@ -1371,13 +1560,34 @@ function DiskItems({
         </div>
       ))}
 
+      {/* Networks come from their own read -- `system df -v` lists none -- so
+          they are rendered from the preview rather than from a table of `d`.
+          Both halves: the offered ones and the ones this will not offer, with
+          the reason. A network attached only to a STOPPED container reports
+          zero attachments to `docker network inspect`, and removing it on that
+          basis breaks a `compose start` in a way recreating the network does
+          not fix, so the withheld reason is the point of the row. */}
+      {networks.length > 0 && heading('Networks', networks.length)}
+      {networks.map((n) => (
+        <div key={n.id === '' ? n.label : n.id} className="cron-row">
+          {pick('network', n.id)}
+          <span className="mono cron-when" style={nameCell} title={n.id}>
+            {n.label}
+          </span>
+          <span className="faint cron-desc">{'reason' in n ? n.reason : 'nothing is attached to it'}</span>
+          <span className="grow" />
+          {/* No size. Docker says nothing about a network's footprint and
+              `0 B` would read as a measurement of it. */}
+        </div>
+      ))}
+
       {/* An answer, and one worth printing: four headings with nothing under
-          any of them renders as silence otherwise, which reads like a view
+          any of them renders as silence otherwise, which reads like a host
           that failed to load rather than a host holding nothing. */}
       {empty && (
         <div className="faint" style={{ fontSize: 11 }}>
           Docker answered, and every table it printed was empty: there is nothing stored on this
-          host. That is the reading, not a read that failed.
+          server. That is the reading, not a read that failed.
         </div>
       )}
 

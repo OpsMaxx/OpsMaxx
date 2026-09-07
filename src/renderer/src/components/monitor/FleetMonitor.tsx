@@ -30,6 +30,7 @@ import { DriftPanel } from './DriftPanel'
 import { CapacityPanel } from './CapacityPanel'
 import { LogTailPanel } from './LogTailPanel'
 import { CronPanel } from './CronPanel'
+import { ServicesPanel } from './ServicesPanel'
 import { RulesPanel } from './RulesPanel'
 import { ChangeLogPanel } from './ChangeLogPanel'
 import {
@@ -277,10 +278,16 @@ export function FleetMonitor(): React.JSX.Element {
   const rail = useNav((s) => s.fleetRail)
   const [moreOpen, setMoreOpen] = useState(false)
   const [offOpen, setOffOpen] = useState(false)
+  // Item 43. Held in nav for the same reason the tab is: the failed-unit list
+  // that sets it is several components away from the panel that consumes it.
+  const logTailJump = useNav((s) => s.logTailJump)
+  // Item 43's sibling: a prefilled service step, set from the same failed-unit
+  // list and consumed several components away.
+  const jobComposerJump = useNav((s) => s.jobComposerJump)
 
-  // Only the READ half. The two modules that change servers moved to
-  // Operations — see ModuleSurface in src/shared/modules.ts for why, and
-  // OperationsView for what they moved into.
+  // Only the READ half. The modules that change servers moved to Operations —
+  // see ModuleSurface in src/shared/modules.ts for why, and OperationsView for
+  // what they moved into.
   const tabs = useMemo<ModuleDef[]>(
     () => modulesOnSurface('read').filter((m) => moduleEnabled(modules, m.id)),
     [modules]
@@ -401,8 +408,10 @@ export function FleetMonitor(): React.JSX.Element {
       <div className="monitor-sticky">
         <div className="content-header">
           <div>
-            <h1>Monitoring</h1>
-            <div className="sub">
+            <h1 className="ui-page-title">Monitoring</h1>
+            {/* "reading only" rather than "live metrics": it is the contract of
+                the destination now, not a description of the overview tab. */}
+            <div className="sub ui-note">
               {online} of {servers.length} servers online · reading only
             </div>
           </div>
@@ -568,12 +577,17 @@ export function FleetMonitor(): React.JSX.Element {
           back here to read a log. */}
       {moduleEnabled(modules, 'logTail') && (
         <div style={show('logTail')}>
-          <LogTailPanel servers={servers} />
+          <LogTailPanel servers={servers} jump={logTailJump ?? undefined} />
         </div>
       )}
       {moduleEnabled(modules, 'cron') && (
         <div style={show('cron')}>
           <CronPanel servers={servers} />
+        </div>
+      )}
+      {moduleEnabled(modules, 'services') && (
+        <div style={show('services')}>
+          <ServicesPanel servers={servers} />
         </div>
       )}
       {moduleEnabled(modules, 'rules') && (
@@ -687,7 +701,12 @@ export function FleetMonitor(): React.JSX.Element {
         unmounted would mean crossing rails killed a tail or stranded a run.
         Hidden, never unmounted, is the same property the tab strip above has
         always had \u2014 the split just widened what it covers. */}
-    <OperationsView servers={servers} modules={modules} hidden={rail !== 'operations'} />
+    <OperationsView
+      servers={servers}
+      modules={modules}
+      hidden={rail !== 'operations'}
+      jobJump={jobComposerJump ?? undefined}
+    />
     </>
   )
 }

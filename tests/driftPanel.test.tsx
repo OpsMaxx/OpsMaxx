@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
+import { useApp } from '../src/renderer/src/store/app'
 import { DriftPanel } from '../src/renderer/src/components/monitor/DriftPanel'
 import type { DriftReading, HostDrift } from '../src/shared/drift'
 import type { Server } from '../src/renderer/src/types'
@@ -64,7 +65,7 @@ async function verdictFor(name: string): Promise<string> {
   return (row.cells[1].textContent ?? '').trim()
 }
 
-describe('a host that could not be read', () => {
+describe('a server that could not be read', () => {
   it('is never shown as matching', async () => {
     // The failure this codebase has been bitten by repeatedly. A denied read is
     // its own word, in its own colour, with the status's own explanation beside
@@ -157,7 +158,7 @@ describe('a difference a rule ate', () => {
   })
 })
 
-describe('a host that does not have the file', () => {
+describe('a server that does not have the file', () => {
   it('gets its own answer rather than being called divergent or unread', async () => {
     // "All twelve web servers have this nginx.conf. Three do not."
     stub({
@@ -166,7 +167,7 @@ describe('a host that does not have the file', () => {
       c: { drift: drift(reading({ status: 'absent', hash: undefined, normalisedHash: undefined })) }
     })
     render(<DriftPanel servers={SERVERS} />)
-    expect(await verdictFor('web-03')).toBe('not on this host')
+    expect(await verdictFor('web-03')).toBe('not on this server')
     expect(await screen.findByText(/1 do not have the file/)).toBeTruthy()
   })
 })
@@ -213,11 +214,11 @@ describe('the baseline', () => {
     })
     render(<DriftPanel servers={SERVERS} />)
     const note = await screen.findByTestId('drift-chosen-baseline')
-    expect(note.textContent).toContain('a host that was fixed first looks exactly like a host that drifted')
+    expect(note.textContent).toContain('a server that was fixed first looks exactly like a server that drifted')
     expect(await verdictFor('web-03')).toBe('differs')
   })
 
-  it('stops saying so once a host is pinned', async () => {
+  it('stops saying so once a server is pinned', async () => {
     stub({
       a: { drift: drift(reading()) },
       b: { drift: drift(reading({ hash: 'h-x', normalisedHash: 'n-x' })) }
@@ -235,11 +236,11 @@ describe('what the panel refuses', () => {
     stub({ a: { drift: drift(reading()) } })
     render(<DriftPanel servers={[SERVERS[0]]} />)
     const refusal = await screen.findByTestId('drift-no-push')
-    expect(refusal.textContent).toContain('never writes a file to a host')
+    expect(refusal.textContent).toContain('never writes a file to a server')
     expect(refusal.textContent).toContain('that is a job')
   })
 
-  it('offers no control that could change a host', async () => {
+  it('offers no control that could change a server', async () => {
     stub({
       a: { drift: drift(reading()) },
       b: { drift: drift(reading({ hash: 'h-x', normalisedHash: 'n-x' })) }
@@ -261,5 +262,70 @@ describe('before anything has been collected', () => {
     render(<DriftPanel servers={SERVERS} />)
     expect(await screen.findByText(/No configuration files have been read yet/)).toBeTruthy()
     expect(screen.queryByText('identical')).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Watching a file the operator chose. Item 46.
+// ---------------------------------------------------------------------------
+
+describe('adding a watch', () => {
+  const open = async (): Promise<ReturnType<typeof userEvent.setup>> => {
+    useApp.setState((s) => ({ settings: { ...s.settings, driftWatches: [] } }))
+    stubBridge({ fleet: { drift: async () => ({ intervalMs: 3_600_000 }), sampleNow: async () => undefined } })
+    const user = userEvent.setup()
+    render(<DriftPanel servers={SERVERS} />)
+    await user.click(screen.getByText('Watch a file'))
+    return user
+  }
+
+  it('refuses a path that could break out of the collector script, and says so', async () => {
+    const user = await open()
+    await user.type(screen.getByLabelText('Path'), "/etc/x'; id; '")
+    await waitFor(() => expect(screen.getByText(/could change what that script runs/)).toBeTruthy())
+    // No approval box while the path is refused: there is nothing to approve.
+    expect(screen.queryByLabelText(/to confirm/)).toBeNull()
+  })
+
+  it('refuses a credential store with its own sentence', async () => {
+    const user = await open()
+    await user.type(screen.getByLabelText('Path'), '/etc/ssl/private/site.pem')
+    await waitFor(() =>
+      expect(screen.getByText(/no redaction pattern catches every secret format/)).toBeTruthy()
+    )
+  })
+
+  it('says what is being asserted before the phrase is typed', async () => {
+    const user = await open()
+    await user.type(screen.getByLabelText('Path'), '/etc/logrotate.conf')
+    await waitFor(() =>
+      expect(screen.getByText(/Confirm it is configuration and not a credential store/)).toBeTruthy()
+    )
+    expect(screen.getByLabelText('Type WATCH /etc/logrotate.conf to confirm')).toBeTruthy()
+  })
+
+  it('will not add until the phrase naming that path is typed', async () => {
+    const user = await open()
+    await user.type(screen.getByLabelText('Path'), '/etc/logrotate.conf')
+    const add = await screen.findByText('Add')
+    expect((add as HTMLButtonElement).disabled).toBe(true)
+    // The phrase for a DIFFERENT path is not enough.
+    await user.type(screen.getByLabelText(/to confirm/), 'WATCH /etc/fstab')
+    expect((screen.getByText('Add') as HTMLButtonElement).disabled).toBe(true)
+    await user.clear(screen.getByLabelText(/to confirm/))
+    await user.type(screen.getByLabelText(/to confirm/), 'WATCH /etc/logrotate.conf')
+    await waitFor(() => expect((screen.getByText('Add') as HTMLButtonElement).disabled).toBe(false))
+  })
+
+  it('stores the proposal and lists it, and can stop watching it', async () => {
+    const user = await open()
+    await user.type(screen.getByLabelText('Path'), '/etc/logrotate.conf')
+    await user.type(await screen.findByLabelText(/to confirm/), 'WATCH /etc/logrotate.conf')
+    await user.click(screen.getByText('Add'))
+    await waitFor(() =>
+      expect(useApp.getState().settings.driftWatches.map((w) => w.path)).toEqual(['/etc/logrotate.conf'])
+    )
+    await user.click(screen.getByLabelText('Stop watching /etc/logrotate.conf'))
+    await waitFor(() => expect(useApp.getState().settings.driftWatches).toEqual([]))
   })
 })

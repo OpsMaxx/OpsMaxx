@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { timerHealth, type TimerHealth } from '../../../../shared/systemdTimers'
 import { CalendarClock, Pencil, Plus, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react'
 import { sshHopsFor } from '../../lib/ssh'
 import { clsx } from '../../lib/format'
@@ -102,7 +103,7 @@ function SourceStatus({ sources }: { sources?: CronSourceReport[] }): React.JSX.
   if (!sources || sources.length === 0) {
     return (
       <div className="faint" style={{ fontSize: 11 }}>
-        This host did not report which sources it managed to read, so this list may be incomplete.
+        This server did not report which sources it managed to read, so this list may be incomplete.
       </div>
     )
   }
@@ -124,7 +125,7 @@ function SourceStatus({ sources }: { sources?: CronSourceReport[] }): React.JSX.
         </span>
       )}
       {incomplete.map((s) => (
-        <div key={s.id} className="warn" style={{ marginTop: 2 }}>
+        <div key={s.id} className="state-unknown" style={{ marginTop: 2 }}>
           <ShieldAlert size={11} /> {s.label}: {CRON_STATUS_HELP[s.status]}
           {s.detail ? ` (${s.detail})` : ''}
         </div>
@@ -170,7 +171,7 @@ function JobForm({
   // when a job runs is worse than none.
   const described = scheduleOk ? describeSchedule(draft.schedule) : null
   return (
-    <div className="s-desc" style={{ display: 'grid', gap: 6, marginTop: 6 }}>
+    <div className="panel-note" style={{ display: 'grid', gap: 6, marginTop: 6 }}>
       <div className="row" style={{ gap: 6, alignItems: 'center' }}>
         <input
           className="input mono"
@@ -220,6 +221,63 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
 
   const bridge = editBridge()
   const eligible = useMemo(() => servers.filter((s) => s.status !== 'offline'), [servers])
+  /**
+   * "Did it actually work?" for one systemd timer.
+   *
+   * On demand, per timer, and it reads the SERVICE too: a timer can fire
+   * perfectly every day into a service that fails every time, which is the case
+   * this answers and which the schedule above cannot see.
+   */
+  const [timerHealthState, setTimerHealthState] = useState<{
+    key: string
+    health?: TimerHealth
+    error?: string
+  } | null>(null)
+  const [timerLoading, setTimerLoading] = useState<string | null>(null)
+
+  const loadTimerHealth = async (serverId: string, unit: string): Promise<void> => {
+    const server = servers.find((sv) => sv.id === serverId)
+    // A timer unit activates the service of the same stem. systemd allows an
+    // explicit `Unit=`, and when it differs this reads the wrong service --
+    // which is why the verdict names the unit it actually read.
+    const service = unit.replace(/\.timer$/, '.service')
+    const key = `${serverId}:${unit}`
+    if (!server) return
+    setTimerLoading(key)
+    setTimerHealthState(null)
+    try {
+      const call = (
+        window.opsmaxx as
+          | {
+              fleet?: {
+                timer?: (
+                  cfg: unknown,
+                  t: string,
+                  s: string
+                ) => Promise<
+                  { timer: Record<string, string>; service: Record<string, string> } | { error: string }
+                >
+              }
+            }
+          | undefined
+      )?.fleet?.timer
+      if (typeof call !== 'function') {
+        setTimerHealthState({ key, error: 'This build cannot read timers. Restart the app to rebuild it.' })
+        return
+      }
+      const res = await call(server, unit, service)
+      if ('error' in res) {
+        setTimerHealthState({ key, error: res.error })
+        return
+      }
+      setTimerHealthState({ key, health: timerHealth({ ...res, nowMs: Date.now() }) })
+    } catch (e) {
+      setTimerHealthState({ key, error: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setTimerLoading(null)
+    }
+  }
+
   const serverById = useMemo(() => new Map(servers.map((s) => [s.id, s])), [servers])
 
   /**
@@ -295,7 +353,7 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
         serverId: target.serverId,
         ok: res.ok,
         text: res.ok
-          ? `Changed. The crontab as it was is on the host at ${res.backupPath ?? 'the backup path it reported'}.`
+          ? `Changed. The crontab as it was is on the server at ${res.backupPath ?? 'the backup path it reported'}.`
           : res.detail
       })
       setPending(null)
@@ -405,7 +463,7 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
     const plan = planBroadcast(pending.reply.command, [ref])
     const needed = plan.confirmation.kind === 'type-to-confirm' ? plan.confirmation.phrase : null
     return (
-      <div className="s-desc" style={{ display: 'grid', gap: 6, marginTop: 6 }}>
+      <div className="panel-note" style={{ display: 'grid', gap: 6, marginTop: 6 }}>
         <div className="mono" style={{ fontSize: 12 }}>
           {pending.reply.summary}
         </div>
@@ -416,7 +474,7 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
           does not match, the copy goes straight back.
         </div>
         {pending.reply.addedFinalNewline && (
-          <div className="warn" style={{ fontSize: 11 }}>
+          <div className="state-watch" style={{ fontSize: 11 }}>
             <ShieldAlert size={11} /> This crontab has no newline at the end of its last line, so one
             is being added. Without it the new job would be glued onto the end of the previous one.
           </div>
@@ -461,56 +519,76 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
 
   return (
     <div className="bc-panel">
-      <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-        <CalendarClock size={14} className="faint" />
-        <b className="grow">Scheduled jobs</b>
-        {rows && (
-          <input
-            className="input"
-            style={{ maxWidth: 220 }}
-            placeholder="Filter by command or file…"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
-        )}
-        <button className="btn" disabled={loading || eligible.length === 0} onClick={() => void collect()}>
-          <RefreshCw size={13} className={clsx(loading && 'spin')} /> {rows ? 'Refresh' : 'Read schedules'}
-        </button>
+      <div className="panel-head">
+        <span className="panel-head-icon">
+          <CalendarClock size={14} />
+        </span>
+        <h2 className="ui-section-title">Scheduled jobs</h2>
+        <p className="ui-note panel-head-purpose">
+          Every crontab and systemd timer across the estate, and which of them this account was
+          actually allowed to read.
+        </p>
+        <div className="panel-head-actions">
+          {rows && (
+            <input
+              className="input"
+              style={{ maxWidth: 220 }}
+              placeholder="Filter by command or file…"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+          )}
+          <button
+            className="btn primary"
+            disabled={loading || eligible.length === 0}
+            onClick={() => void collect()}
+          >
+            <RefreshCw size={13} className={clsx(loading && 'spin')} /> {rows ? 'Refresh' : 'Read schedules'}
+          </button>
+        </div>
       </div>
 
       {!rows && !loading && (
-        <div className="s-desc">
-          Reads crontabs, /etc/crontab, /etc/cron.d, other accounts’ crontabs and systemd timers
-          from every online server, and says which of those it was actually allowed to read.
-          Sources that are root-only are retried with <span className="mono">sudo -n</span>, which
-          never prompts for a password. Nothing is written or changed — this only looks.
+        // Before anything has been read this IS the panel, so it is framed as
+        // an empty state rather than set at body weight beside the button.
+        <div className="panel-empty">
+          <p className="panel-empty-title">Nothing has been read yet.</p>
+          <p className="panel-empty-body">
+            Reads crontabs, /etc/crontab, /etc/cron.d, other accounts’ crontabs and systemd timers
+            from every online server, and says which of those it was actually allowed to read.
+            Sources that are root-only are retried with <span className="mono">sudo -n</span>, which
+            never prompts for a password. Nothing is written or changed — this only looks.
+          </p>
+          <p className="panel-empty-body">
+            Press <b>Read schedules</b> above to start.
+          </p>
         </div>
       )}
 
       {rows && (
         <>
-          <div className="row muted" style={{ fontSize: 11, marginTop: 8, gap: 12 }}>
+          <div className="panel-stats">
             <span>
-              {total} job{total === 1 ? '' : 's'} across {visible.length - failed.length} host
+              {total} job{total === 1 ? '' : 's'} across {visible.length - failed.length} server
               {visible.length - failed.length === 1 ? '' : 's'}
             </span>
             {/* Lines that looked like jobs but did not parse are counted, not
                 hidden. A schedule silently missing from this view is a command
                 running on a box that nobody knows about. */}
-            {unparsed > 0 && <span className="warn">{unparsed} line{unparsed === 1 ? '' : 's'} not understood</span>}
+            {unparsed > 0 && <span className="state-unknown">{unparsed} line{unparsed === 1 ? '' : 's'} not understood</span>}
             {/* Counted across the estate as well as per host: with a dozen
                 servers, a single host whose cron.d was refused is easy to
                 scroll past, and it is exactly the host you would want to look
                 at. */}
             {partial > 0 && (
-              <span className="warn">
-                {partial} host{partial === 1 ? '' : 's'} only partly readable
+              <span className="state-unknown">
+                {partial} server{partial === 1 ? '' : 's'} only partly readable
               </span>
             )}
           </div>
 
           {failed.map((h) => (
-            <div key={h.serverId} className="s-desc danger">
+            <div key={h.serverId} className="panel-note is-alarm">
               {h.serverName}: {h.error}
             </div>
           ))}
@@ -519,7 +597,7 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
             .filter((h) => !h.error)
             .map((h) => (
               <div key={h.serverId} style={{ marginTop: 10 }}>
-                <div className="row s-title" style={{ gap: 8, alignItems: 'center' }}>
+                <div className="row panel-subtitle" style={{ gap: 8, alignItems: 'center' }}>
                   <span className="grow">
                     {h.serverName} <span className="faint">· {h.entries.length}</span>
                   </span>
@@ -545,7 +623,7 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
                   </div>
                 )}
                 {note?.serverId === h.serverId && (
-                  <div className={clsx('s-desc', note.ok ? '' : 'danger')}>{note.text}</div>
+                  <div className={clsx('panel-note', note.ok ? '' : 'is-alarm')}>{note.text}</div>
                 )}
                 {draft?.serverId === h.serverId && draft.line === undefined && (
                   <JobForm
@@ -589,6 +667,18 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
                     <span className="mono cron-when">
                       {e.kind === 'systemd-timer' ? (e.nextRun ? `next ${e.nextRun}` : 'no next run') : e.schedule}
                     </span>
+                    {/* The schedule above says WHEN. This says whether the last
+                        run worked, which is a different question and the only
+                        one that catches a timer firing into a failing service. */}
+                    {e.kind === 'systemd-timer' && (
+                      <button
+                        className="btn-ghost sm"
+                        disabled={timerLoading === `${h.serverId}:${e.origin}`}
+                        onClick={() => void loadTimerHealth(h.serverId, e.origin)}
+                      >
+                        {timerLoading === `${h.serverId}:${e.origin}` ? 'reading' : 'did it run?'}
+                      </button>
+                    )}
                     {/* Null means "a valid schedule I decline to describe".
                         A wrong sentence about when a job runs is worse than
                         none. */}
@@ -607,6 +697,22 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
                     {e.user && <span className="faint">{e.user}</span>}
                     {bridge && rowControls(h, e)}
                   </div>
+                  {timerHealthState?.key === `${h.serverId}:${e.origin}` && (
+                    <div
+                      className={
+                        timerHealthState.error !== undefined ||
+                        (timerHealthState.health !== undefined &&
+                          timerHealthState.health.verdict !== 'ok')
+                          ? 'panel-note is-alarm'
+                          : 'panel-note'
+                      }
+                      style={{ fontSize: 11 }}
+                    >
+                      {/* A failed READ is not a verdict, and must not render
+                          like one. */}
+                      {timerHealthState.error ?? timerHealthState.health?.detail}
+                    </div>
+                  )}
                   {draft?.serverId === h.serverId && draft.line !== undefined && draft.line === e.line && (
                     <JobForm
                       draft={draft}

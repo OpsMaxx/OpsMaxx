@@ -222,6 +222,23 @@ type AuthResult struct {
 // negative — age. Zero/absent means there has never been a handshake (E22,
 // E27), which the parent turns into `handshake-timeout` once its own 30 s
 // grace window expires.
+// One peer's own numbers.
+//
+// PUBLICKEY IS AN IDENTITY, NOT A SECRET -- a WireGuard public key is meant to
+// be shared -- but it is still the thing that names a person's device, and
+// `list_vpns` promises an agent never sees key material of any kind. The parent
+// is what keeps that promise; this reports the key because a peer has no other
+// stable name and a row nobody can identify is not worth a round trip.
+type PeerStats struct {
+	PublicKey string `json:"publicKey"`
+	Endpoint  string `json:"endpoint,omitempty"`
+	RxBytes   int64  `json:"rxBytes"`
+	TxBytes   int64  `json:"txBytes"`
+	// Absolute unix seconds, like the aggregate above. Zero means this peer has
+	// never completed a handshake, which is NOT the same as a long time ago.
+	LastHandshakeUnixSec int64 `json:"lastHandshakeUnixSec,omitempty"`
+}
+
 type StatsResult struct {
 	TunnelID             string `json:"tunnelId"`
 	RxBytes              int64  `json:"rxBytes"`
@@ -230,7 +247,45 @@ type StatsResult struct {
 	RemoteEndpoint       string `json:"remoteEndpoint,omitempty"`
 	AssignedIP           string `json:"assignedIp,omitempty"`
 	Peers                int    `json:"peers"`
+	// One row per peer, in the order the device listed them. `Peers` stays: it
+	// is what every existing caller reads, and removing it would be a protocol
+	// change for no gain.
+	PeerRows []PeerStats `json:"peerRows,omitempty"`
 	// Unix millis at which netd sampled. Lets the parent age the sample.
+	SampledAt int64 `json:"sampledAt"`
+}
+
+// DiagnoseParams asks for the checklist in `diagnose.go`.
+//
+// Host and Port are OPTIONAL and there is no default: see that file's header.
+// Without them the handshake is still checked and the other two say, in words,
+// that nothing was asked of them.
+type DiagnoseParams struct {
+	TunnelID string `json:"tunnelId"`
+	Host     string `json:"host,omitempty"`
+	Port     int    `json:"port,omitempty"`
+}
+
+// One line of the checklist.
+type DiagnoseCheck struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	// Always present, including on `ok`. A checklist whose passing rows say
+	// nothing teaches people that the words only matter when something breaks.
+	Detail string `json:"detail"`
+	// Milliseconds for a probe that ran, SECONDS for the handshake's age --
+	// the two things this field carries are the two things those checks
+	// measured, and neither has a second meaning. Absent when nothing was
+	// timed, which is not the same as zero.
+	Elapsed int64 `json:"elapsed,omitempty"`
+}
+
+type DiagnoseResult struct {
+	TunnelID string          `json:"tunnelId"`
+	Checks   []DiagnoseCheck `json:"checks"`
+	// TCP connect time through the tunnel, present only when that check
+	// succeeded. Never a ping: see `connectCheck`.
+	LatencyMs int64 `json:"latencyMs,omitempty"`
 	SampledAt int64 `json:"sampledAt"`
 }
 

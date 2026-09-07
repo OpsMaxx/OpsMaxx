@@ -1,0 +1,16 @@
+===SP-TIMER-UNIT===
+NextElapseUSecRealtime=Mon 2026-09-07 00:00:00 CEST
+LastTriggerUSec=Sun 2026-09-06 00:00:01 CEST
+Result=success
+Id=logrotate.timer
+LoadState=loaded
+ActiveState=active
+SubState=waiting
+===SP-TIMER-SERVICE===
+Result=exit-code
+ExecMainExitTimestamp=Mon 2026-08-24 09:39:50 CEST
+ExecMainStatus=1
+Id=cloud-init.service
+LoadState=loaded
+ActiveState=failed
+SubState=failed

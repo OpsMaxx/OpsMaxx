@@ -1,0 +1,2 @@
+service "web" has neither an image nor a build context specified: invalid compose project
+exit=1

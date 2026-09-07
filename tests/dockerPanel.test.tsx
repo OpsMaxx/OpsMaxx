@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
+import { useFleet } from '../src/renderer/src/store/fleet'
 import { DockerPanel } from '../src/renderer/src/components/docker/DockerPanel'
 import type {
   DockerDiskDetailProbe,
@@ -417,7 +418,7 @@ describe('DockerPanel — reclaim by id', () => {
     await user.type(screen.getByPlaceholderText(/Type REMOVE to continue/), 'REMOVE')
     await user.click(btn(/^Remove$/))
 
-    await screen.findByText(/This host is not what the list said it was/)
+    await screen.findByText(/This server is not what the list said it was/)
     expect(document.body.textContent).toContain('1 container linked to it')
     expect(reclaimCalls).toBe(0)
   })
@@ -507,5 +508,428 @@ describe('DockerPanel — reclaim by id', () => {
     for (const invented of ['3.61GB', '3.6GB', '3.61', '3610000000']) {
       expect(document.body.textContent).not.toContain(invented)
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Healthchecks, worst first. Item 42's row, rendered.
+// ---------------------------------------------------------------------------
+
+const HEALTH_LOGS = {
+  ok: true as const,
+  logs: [
+    {
+      container: 'alpha-good',
+      status: 'healthy',
+      failingStreak: 0,
+      entries: [{ start: '2026-09-05T20:14:09Z', end: '2026-09-05T20:14:09Z', exitCode: 0, output: 'ok\n' }],
+      sampled: false
+    },
+    {
+      // Measured shape: inside a start period, every check failing, status
+      // still the hopeful word and the streak still zero.
+      container: 'alpha-slowstart',
+      status: 'starting',
+      failingStreak: 0,
+      entries: [{ start: '2026-09-05T20:14:11Z', end: '2026-09-05T20:14:11Z', exitCode: 1, output: '' }],
+      sampled: false
+    },
+    {
+      container: 'alpha-plain',
+      status: null,
+      failingStreak: null,
+      entries: [],
+      sampled: false
+    },
+    {
+      container: 'alpha-sick',
+      status: 'unhealthy',
+      failingStreak: 24,
+      entries: [
+        {
+          start: '2026-09-05T20:14:03Z',
+          end: '2026-09-05T20:14:03Z',
+          exitCode: 1,
+          output: 'probing https://user:[REDACTED]@api.example.com/health?token=[REDACTED]\n'
+        }
+      ],
+      sampled: true
+    }
+  ]
+}
+
+describe('DockerPanel — healthchecks', () => {
+  const openHealth = async (
+    user: ReturnType<typeof userEvent.setup>,
+    probe: unknown = HEALTH_LOGS
+  ): Promise<{ calls: unknown[][] }> => {
+    const calls: unknown[][] = []
+    stubBridge({
+      docker: {
+        list: (cfg: Cfg) => {
+          // A STOPPED container alongside the running one. Without it the
+          // running-only filter is unfalsifiable, and a stopped container's
+          // health is whatever it was when it stopped.
+          const base = listing(cfg.serverId.replace('srv-', ''))
+          if (!base.ok) return Promise.resolve(base)
+          return Promise.resolve({
+            ...base,
+            containers: [
+              ...base.containers,
+              { ...base.containers[0], id: 'stopped01234', shortId: 'stopped0', name: 'alpha-old', state: 'exited', status: 'Exited (0) 2 days ago' }
+            ]
+          })
+        },
+        disk: () => Promise.resolve(DISK),
+        diskDetail: (cfg: Cfg) => diskDetailImpl(cfg),
+        healthLogs: (...args: unknown[]) => {
+          calls.push(args)
+          return Promise.resolve(probe)
+        }
+      }
+    })
+    render(<DockerPanel servers={[ALPHA, BRAVO]} />)
+    await user.click(btn(/Read containers/))
+    await screen.findByText(/Read healthchecks/)
+    await user.click(btn(/Read healthchecks/))
+    return { calls }
+  }
+
+  it('reads healthchecks only when asked, and only for running containers', async () => {
+    const user = userEvent.setup()
+    const { calls } = await openHealth(user)
+    await waitFor(() => expect(calls.length).toBe(1))
+    // A stopped container's health is whatever it was when it stopped; shown
+    // beside live answers it reads as current.
+    expect(calls[0][1]).toEqual(['alpha0123456789ab'])
+  })
+
+  it('puts the unhealthy first and the failing starter above the healthy one', async () => {
+    const user = userEvent.setup()
+    await openHealth(user)
+    await screen.findByText(/is unhealthy/)
+    const order = ['alpha-sick', 'alpha-slowstart', 'alpha-good', 'alpha-plain']
+    const positions = order.map((n) => document.body.textContent!.indexOf(n))
+    expect(positions).toEqual([...positions].sort((a, b) => a - b))
+    expect(positions.every((p) => p >= 0)).toBe(true)
+  })
+
+  it('says the start period is hiding a container that has never passed', async () => {
+    const user = userEvent.setup()
+    await openHealth(user)
+    await screen.findByText(/start period is hiding that/)
+  })
+
+  it('says how long the streak is and that the log is only part of it', async () => {
+    const user = userEvent.setup()
+    await openHealth(user)
+    await screen.findByText(/failed 24 checks in a row/)
+    expect(screen.getByText(/keeps only the last 1/)).toBeTruthy()
+  })
+
+  it('does not call a container with no healthcheck healthy', async () => {
+    const user = userEvent.setup()
+    await openHealth(user)
+    await screen.findByText(/no healthcheck, so nothing is checking it/)
+    expect(screen.getByText('no healthcheck')).toBeTruthy()
+  })
+
+  it('says a silent check printed nothing rather than showing an empty cell', async () => {
+    const user = userEvent.setup()
+    await openHealth(user)
+    await screen.findByText('printed nothing')
+  })
+
+  it('shows what main redacted, and never a secret', async () => {
+    const user = userEvent.setup()
+    await openHealth(user)
+    await screen.findByText(/is unhealthy/)
+    expect(document.body.textContent).toContain('[REDACTED]')
+    expect(document.body.textContent).not.toContain('s3cr3t')
+  })
+
+  it('reports a failed read instead of an empty list', async () => {
+    const user = userEvent.setup()
+    await openHealth(user, { ok: false, reason: 'no-docker', detail: 'docker: command not found' })
+    await screen.findByText(/docker: command not found/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Networks in the reclaim preview. `system df -v` lists none, so they come from
+// their own read and meet the disk listing in `mergeNetworks`.
+// ---------------------------------------------------------------------------
+
+const NETWORKS = {
+  ok: true as const,
+  networks: [
+    { id: 'e742a9db8c51', name: 'bridge', driver: 'bridge', scope: 'local' },
+    { id: '1a48ad199a4f', name: 'sp-orphan', driver: 'bridge', scope: 'local' },
+    { id: '9330583d766b', name: 'sp-free', driver: 'bridge', scope: 'local' }
+  ],
+  use: [
+    // Stopped, and still holding sp-orphan. This is the case the whole module
+    // exists for: `docker network inspect` would report zero here.
+    { containerId: '2eaf0cebaa73', name: 'alpha-old', state: 'exited', networks: ['sp-orphan'] }
+  ]
+}
+
+describe('DockerPanel — networks in the preview', () => {
+  const itemiseWith = async (
+    user: ReturnType<typeof userEvent.setup>,
+    nets: unknown = NETWORKS
+  ): Promise<void> => {
+    stubBridge({
+      docker: {
+        list: (cfg: Cfg) => Promise.resolve(listing(cfg.serverId.replace('srv-', ''))),
+        disk: () => Promise.resolve(DISK),
+        diskDetail: (cfg: Cfg) => diskDetailImpl(cfg),
+        networks: () => Promise.resolve(nets)
+      }
+    })
+    render(<DockerPanel servers={[ALPHA, BRAVO]} />)
+    await openDiskCard(user)
+    await user.click(btn(/Itemise/))
+  }
+
+  it('offers the network nothing is attached to', async () => {
+    const user = userEvent.setup()
+    await itemiseWith(user)
+    await waitFor(() => expect(document.body.textContent).toContain('sp-free'))
+  })
+
+  it('does not offer one a STOPPED container is still on', async () => {
+    const user = userEvent.setup()
+    await itemiseWith(user)
+    await waitFor(() => expect(screen.getByText('sp-free')).toBeTruthy())
+    // Listed, with the reason -- what it must never be is offered.
+    expect(document.body.textContent).toContain('sp-orphan')
+    expect(document.body.textContent).toContain('stopped and still attached')
+    expect(screen.queryByLabelText(/sp-orphan/)).toBeNull()
+    // ...while the free one IS selectable.
+    expect(screen.getByLabelText(/sp-free/)).toBeTruthy()
+  })
+
+  it('says networks were not read rather than showing a complete-looking list', async () => {
+    const user = userEvent.setup()
+    await itemiseWith(user, { ok: false, reason: 'no-docker', detail: 'network ls exploded' })
+    // A silently network-free preview is indistinguishable from a host with no
+    // removable networks, and only one of those is true.
+    await waitFor(() => expect(document.body.textContent).toContain('network ls exploded'))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The image scan, on screen. Item 42's scanner row.
+// ---------------------------------------------------------------------------
+
+const INSPECT = {
+  ok: true as const,
+  inspect: {
+    id: 'a'.repeat(64),
+    name: 'alpha-api',
+    image: 'alpine:3.18',
+    imageId: 'sha256:' + 'b'.repeat(64),
+    status: 'running',
+    exitCode: null,
+    startedAt: 'now',
+    createdAt: 'now',
+    restartPolicy: 'always',
+    restartMaxRetries: null,
+    restartCount: 0,
+    health: null,
+    envCount: 3,
+    ports: [],
+    mounts: [],
+    networks: [],
+    logDriver: 'json-file'
+  }
+}
+
+const EOSL_SCAN = {
+  ok: true as const,
+  scannerPresent: true,
+  reading: {
+    rows: [],
+    endOfSupport: true,
+    warnings: ['The vulnerability detection may be insufficient because security updates are not provided'],
+    failure: null
+  }
+}
+
+async function openScan(
+  user: ReturnType<typeof userEvent.setup>,
+  scanImage: unknown
+): Promise<void> {
+  stubBridge({
+    docker: {
+      list: (cfg: Cfg) => Promise.resolve(listing(cfg.serverId.replace('srv-', ''))),
+      disk: () => Promise.resolve(DISK),
+      diskDetail: (cfg: Cfg) => diskDetailImpl(cfg),
+      inspect: () => Promise.resolve(INSPECT),
+      scanImage: () => Promise.resolve(scanImage)
+    }
+  })
+  render(<DockerPanel servers={[ALPHA, BRAVO]} />)
+  await user.click(btn(/Read containers/))
+  await user.click(btn(/Ports, mounts/))
+  await screen.findByText(/Scan this image/)
+  await user.click(btn(/Scan this image/))
+}
+
+describe('DockerPanel — image scan', () => {
+  // Measured: alpine:3.18 reports ZERO vulnerabilities and is past its
+  // distribution's end of support. Zero there means nobody is issuing
+  // advisories, not that nothing is wrong.
+  it('does not render zero findings on an unsupported image as clean', async () => {
+    const user = userEvent.setup()
+    await openScan(user, EOSL_SCAN)
+    const note = await screen.findByText(/nobody is issuing advisories for it any more/)
+    // The TONE comes from the level, not the count. This case is zero findings
+    // and an alarm, so anything deriving the colour from the number renders it
+    // as calm.
+    expect(note.className).toContain('is-alarm')
+  })
+
+  it('shows the scanner’s own warning under the headline', async () => {
+    const user = userEvent.setup()
+    await openScan(user, EOSL_SCAN)
+    await screen.findByText(/security updates are not provided/)
+  })
+
+  it('puts the fixable count on every severity, not just the total', async () => {
+    const user = userEvent.setup()
+    await openScan(user, {
+      ok: true,
+      scannerPresent: true,
+      reading: {
+        rows: [
+          { severity: 'CRITICAL', fixed: false, id: 'CVE-1', pkg: 'perl-base' },
+          { severity: 'UNKNOWN', fixed: true, id: 'CVE-2', pkg: 'zlib1g' }
+        ],
+        endOfSupport: false,
+        warnings: [],
+        failure: null
+      }
+    })
+    await screen.findByText('critical 1 (0 fixable)')
+    expect(screen.getByText('unknown 1 (1 fixable)')).toBeTruthy()
+  })
+
+  // A host with no scanner looks identical to a clean one from here, and only
+  // one of those is true.
+  it('does not report a host with no scanner as clean', async () => {
+    const user = userEvent.setup()
+    await openScan(user, { ok: true, scannerPresent: false, reading: null })
+    await screen.findByText(/Nothing here installs one/)
+    expect(document.body.textContent).toContain('grype')
+  })
+
+  it('reports a scan that could not run', async () => {
+    const user = userEvent.setup()
+    await openScan(user, { ok: false, detail: 'trivy: command exploded' })
+    await screen.findByText(/trivy: command exploded/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The engine upgrade. Item 42.
+// ---------------------------------------------------------------------------
+
+describe('DockerPanel — engine upgrade', () => {
+  const PRECHECK = {
+    ok: true as const,
+    precheck: {
+      liveRestore: false,
+      packagesText: 'docker-ce 5:27.0.3-1~debian.12~bookworm install ok installed',
+      running: 4
+    }
+  }
+
+  const open = async (
+    user: ReturnType<typeof userEvent.setup>,
+    facts: unknown,
+    probe: unknown = PRECHECK
+  ): Promise<void> => {
+    useFleet.setState({ facts: facts as never, errors: {} })
+    stubBridge({
+      docker: {
+        list: (cfg: Cfg) => Promise.resolve(listing(cfg.serverId.replace('srv-', ''))),
+        disk: () => Promise.resolve(DISK),
+        diskDetail: (cfg: Cfg) => diskDetailImpl(cfg),
+        enginePrecheck: () => Promise.resolve(probe)
+      }
+    })
+    render(<DockerPanel servers={[ALPHA, BRAVO]} />)
+    await user.click(btn(/Read containers/))
+    await screen.findByText(/Check the engine/)
+  }
+
+  const withManager = (m: string): unknown => ({
+    'srv-alpha': { facts: { packageManager: m }, at: 1 }
+  })
+
+  // A server whose facts have not been collected gets the refusal rather than a
+  // read built on a guess about its distribution.
+  it('refuses before the facts say which package manager this server has', async () => {
+    const user = userEvent.setup()
+    await open(user, {})
+    await screen.findByText(/Run the precheck first/)
+  })
+
+  // Distinguishes the refusal from a guess: with a precheck already read, a
+  // build that fell back to apt would plan the upgrade here.
+  it('still refuses once a precheck has been read but the manager is unknown', async () => {
+    const user = userEvent.setup()
+    await open(user, {})
+    await user.click(btn(/Check the engine/))
+    await screen.findByText(/docker-ce 5:27\.0\.3/)
+    await user.click(screen.getByLabelText('I have read the package list'))
+    expect(screen.queryByText(/Upgrade the engine/)).toBeNull()
+    await screen.findByText(/Run the precheck first/)
+  })
+
+  // A confirmation is about the list that was on screen when it was given.
+  it('drops the confirmation when the precheck is read again', async () => {
+    const user = userEvent.setup()
+    await open(user, withManager('apt'))
+    await user.click(btn(/Check the engine/))
+    await user.click(await screen.findByLabelText('I have read the package list'))
+    await screen.findByText(/Upgrade the engine/)
+    await user.click(btn(/Check again/))
+    await waitFor(() => expect(screen.queryByText(/Upgrade the engine/)).toBeNull())
+  })
+
+  it('refuses a package manager Docker publishes no repository for', async () => {
+    const user = userEvent.setup()
+    await open(user, withManager('apk'))
+    await screen.findByText(/publishes no repository/)
+  })
+
+  // The package block is SHOWN, not parsed, and the operator is the check.
+  it('shows the package output and will not plan until it is confirmed', async () => {
+    const user = userEvent.setup()
+    await open(user, withManager('apt'))
+    await user.click(btn(/Check the engine/))
+    await screen.findByText(/docker-ce 5:27\.0\.3/)
+    expect(screen.queryByText(/Upgrade the engine/)).toBeNull()
+    await user.click(screen.getByLabelText('I have read the package list'))
+    await screen.findByText(/Upgrade the engine/)
+  })
+
+  // The first caveat is what happens to the containers.
+  it('leads with the containers stopping', async () => {
+    const user = userEvent.setup()
+    await open(user, withManager('apt'))
+    await user.click(btn(/Check the engine/))
+    await user.click(await screen.findByLabelText('I have read the package list'))
+    await screen.findByText(/stops all 4 running container\(s\)/)
+  })
+
+  it('reports a precheck that could not run', async () => {
+    const user = userEvent.setup()
+    await open(user, withManager('apt'), { ok: false, detail: 'ssh said no' })
+    await user.click(btn(/Check the engine/))
+    await screen.findByText(/ssh said no/)
   })
 })

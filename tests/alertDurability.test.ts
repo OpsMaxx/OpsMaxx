@@ -263,10 +263,27 @@ describe('the row is rebuilt from a whitelist', () => {
       'inode',
       'load',
       'cert-expiry',
+      // A sibling of cert-expiry, not the same kind: a VPN profile is not a
+      // server and the posture sweep never looks at one.
+      'vpn-cert-expiry',
+      // Item 5. Numeric and the right way up: journal lines at error or worse,
+      // per minute, counted by the posture sweep in the same hourly pass that
+      // counts OOM kills.
+      'error-rate',
       'host-unreachable',
       'job-failed',
       'tunnel-down',
       'oom-kill',
+      // Parked behind item 5 until there was a backup that could fail. A STATE,
+      // so it sits with the others: "there is no recent backup" stays true until
+      // one succeeds.
+      'backup-failed',
+      // Two, not one: up-but-silent and down have different fixes.
+      'vpn-down',
+      'vpn-degraded',
+      // Keyed on the cluster context rather than a server: a cluster is
+      // visible from every host holding a kubeconfig.
+      'pod-crashloop',
       'db-alarm',
       'db-watch'
     ])

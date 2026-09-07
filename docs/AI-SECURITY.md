@@ -48,7 +48,7 @@ Regardless of which access group a session holds:
   to run over the SSH connection that's already authenticated, not a credential handed to
   anything. Unrestricted root shells (`sudo -i`, `sudo su`, `sudo bash`, bare `su`) are refused
   unconditionally, before the access group is even consulted.
-- **A server's real host, IP, port or username.** Every tool that names a server takes and
+- **A server's real hostname, IP, port or username.** Every tool that names a server takes and
   returns a friendly name (e.g. "Production API"); `get_server_details` returns OS, access group
   and effective permissions, never connection details.
 - **A shell on your own machine.** OpsMaxx's local terminal — the tab that runs your zsh, bash,
@@ -110,7 +110,7 @@ request.
 | Risk | What closes it | Where |
 |---|---|---|
 | Credential exposure to a model's context (and whatever a provider retains of it) | Credentials are resolved inside the main process at connect time and never placed in a tool response | `credentialResolver.ts` |
-| Network/topology exposure — leaking internal IPs, hosts, usernames just by listing servers | Tool responses carry only names, OS and permissions | `mcpServer.ts` (`list_servers`, `get_server_details`) |
+| Network/topology exposure — leaking internal IPs, hostnames, usernames just by listing servers | Tool responses carry only names, OS and permissions | `mcpServer.ts` (`list_servers`, `get_server_details`) |
 | Prompt-injection or a confused agent running something destructive | Any capability set to ASK blocks until a human approves; the agent has no path to approve its own request | `approvals.ts`, `mcpServer.ts` |
 | Sudo / privilege escalation, including via disguised unrestricted shells | Hard-denied by pattern match, independent of access-group configuration | `policyEngine.ts` (`classifyCommand`, `evaluateCommand`) |
 | An agent silently changing which network the user's traffic crosses | Starting a VPN is always ASK, on every group, including one set to ALLOW; stopping one is ASK whenever live sessions depend on it | `policyEngine.ts` (`evaluateVpnControl`) |
@@ -136,7 +136,7 @@ terminal input or output has been added.
 Jobs and broadcasts are logged **separately again**, to `opsmaxx-job-approvals.jsonl`
 (`approvalLog.ts`, append-only, `0600`, same discipline — a separate module as well as a separate file, because `auditLog.ts` is inside the agent-reachable import closure and `tests/jobsNotExposed.test.ts` refuses to let anything in it import the job vocabulary). One entry per approval
 decision — granted, refused, resumed, or sealed — carrying the risk, the confirmation kind, the
-phrase the user typed where one was required, the host names and the step commands, all redacted
+phrase the user typed where one was required, the server names and the step commands, all redacted
 through the same `redactOutput` rules. **Never output**: a job's output is in the history store
 under its own retention, not here.
 
@@ -146,8 +146,35 @@ answers *"what did an agent do"*; its entries are agent-shaped (`agentName`, `ca
 AI-labelled log full of things no AI did, which is how a log stops being trusted. A job is
 human-only by construction — it is not reachable from the bridge and will not be, because
 durability defeats revocation: `denyAllPending()` resolves requests that are *pending*, and a job
-already detached on fifteen hosts has nothing pending to deny. So its rows would be AI-labelled rows
+already detached on fifteen servers has nothing pending to deny. So its rows would be AI-labelled rows
 no AI produced, for exactly the local terminal's reason.
+
+**One reader now spans all three, and it does not merge them.** The change log
+(`changelog.ts`) reads all three files to answer *"who changed what on this estate, and who
+approved it"* — a question none of them answers alone. It reads them; it does not combine them into
+a fourth file, and each row keeps the source it came from, so the argument above still holds: an
+entry from the local terminal is still labelled as the local terminal, not as an agent. The
+separation is in what each file *means*, and that survives being read together. The change log is
+also read-only over them — nothing it does writes back, and it is not reachable from the bridge.
+
+**All three are now pruned, on the same six-hourly pass that ages out the history store.** They had
+no horizon at all and grew for as long as the app was used; "slow" is not "bounded". A line is kept
+for a year — deliberately generous, because these answer *"who did what, and who approved it"*, a
+question asked long after the fact — with a second bound of 50,000 lines so a retry loop cannot
+outrun the age limit from inside the window.
+
+Two rules make the prune safe to leave running unattended. **A line whose timestamp cannot be read
+is kept**, never dropped: deleting a record precisely because it could not be understood is the
+worst available reason to destroy one, and a half-written line from a crash is still evidence. And
+**the newest hundred lines survive regardless of age**, so a vault used once and left alone for two
+years can still say what happened that once.
+
+The append-only property survives it. These files are documented as never rewritten in place so a
+crash costs at most the last line; a prune that truncated and rewrote would give that up during the
+one operation that touches every line. Survivors are written to a sibling and `rename`d over the
+original, which is atomic within a filesystem — at every instant a reader sees the whole old file or
+the whole new one. The mode stays `0600` across the rewrite, and the common case, nothing due,
+does not touch the file at all.
 
 ## Granting `vpnControl` is a bigger decision than it looks
 

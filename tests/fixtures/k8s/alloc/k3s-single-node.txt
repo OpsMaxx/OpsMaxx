@@ -1,0 +1,8 @@
+===OPSMAXX-ALLOCNODES===
+NAME         CPU   MEM          PODS   SCHED
+k3s-node-1   6     12247552Ki   110    <none>
+===OPSMAXX-ALLOCPODS===
+NS            NAME                                      NODE         PHASE     NAMES                    CPU      MEM      INAMES   ICPU     IMEM
+kube-system   coredns-54996dc9b4-svbkj                  k3s-node-1   Running   coredns                  100m     70Mi     <none>   <none>   <none>
+kube-system   local-path-provisioner-77b9867795-w582t   k3s-node-1   Running   local-path-provisioner   <none>   <none>   <none>   <none>   <none>
+kube-system   metrics-server-6dc596dfb8-4ldm7           k3s-node-1   Running   metrics-server           100m     70Mi     <none>   <none>   <none>

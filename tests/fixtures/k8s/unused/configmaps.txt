@@ -1,0 +1,14 @@
+default           kube-root-ca.crt                                       2026-09-05T19:51:36Z
+default           nobody-uses-me                                         2026-09-05T19:52:27Z
+default           only-a-scaled-down-deploy                              2026-09-05T19:52:27Z
+default           used-as-envfrom                                        2026-09-05T19:52:27Z
+default           used-as-keyref                                         2026-09-05T19:52:27Z
+default           used-as-volume                                         2026-09-05T19:52:27Z
+kube-node-lease   kube-root-ca.crt                                       2026-09-05T19:51:36Z
+kube-public       kube-root-ca.crt                                       2026-09-05T19:51:36Z
+kube-system       cluster-dns                                            2026-09-05T19:51:32Z
+kube-system       coredns                                                2026-09-05T19:51:34Z
+kube-system       extension-apiserver-authentication                     2026-09-05T19:51:29Z
+kube-system       kube-apiserver-legacy-service-account-token-tracking   2026-09-05T19:51:29Z
+kube-system       kube-root-ca.crt                                       2026-09-05T19:51:36Z
+kube-system       local-path-config                                      2026-09-05T19:51:34Z

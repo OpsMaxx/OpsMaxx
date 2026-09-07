@@ -75,8 +75,16 @@
 // written reason rather than a scarier dialog, and this follows that shape
 // exactly.
 
-import type { DockerContainer, DockerFailure } from './docker'
-import { DOCKER_MARKERS, classifyDockerFailure, resolveBinary, section } from './docker'
+import type { DockerActionPlan, DockerContainer, DockerFailure } from './docker'
+import {
+  DOCKER_ACTION_MAX_REFS,
+  DOCKER_MARKERS,
+  classifyDockerFailure,
+  planDockerAction,
+  resolveBinary,
+  section,
+  validateImageRef
+} from './docker'
 import type { JobSpec, JobStep } from './jobs'
 
 // ---------------------------------------------------------------- failure
@@ -90,19 +98,63 @@ import type { JobSpec, JobStep } from './jobs'
  * minimal install that did not ship the CLI plugin. Folding it into
  * `not-installed` would send someone to install docker on a host that has it.
  */
-export type ComposeFailure = DockerFailure | 'compose-unavailable'
+export type ComposeFailure =
+  | DockerFailure
+  | 'compose-unavailable'
+  | 'invalid-project'
+  | 'compose-provider-unsupported'
 
 export const COMPOSE_FAILURE_HELP: Record<ComposeFailure, string> = {
   'not-installed':
-    'No docker on this host. Looked on PATH and in /usr/bin, /usr/local/bin, /snap/bin, /opt/homebrew/bin and /usr/sbin.',
+    'No docker on this server. Looked on PATH and in /usr/bin, /usr/local/bin, /snap/bin, /opt/homebrew/bin and /usr/sbin.',
   'daemon-unreachable':
     'Docker is installed but its daemon is not answering, so it cannot say which compose projects it is running.',
   'permission-denied':
     'This user cannot talk to the docker socket, so compose cannot be asked anything. The compose FILES may still be readable — the filesystem search below does not go through the daemon.',
   'compose-unavailable':
-    'Docker is here, but `docker compose` is not. That is normal on hosts still running the v1 `docker-compose` script, which is a separate program with a different command line. OpsMaxx does not drive v1: its flags differ enough that guessing would be running an unverified command on someone else\u2019s host.',
+    'Docker is here, but `docker compose` is not. That is normal on servers still running the v1 `docker-compose` script, which is a separate program with a different command line. OpsMaxx does not drive v1: its flags differ enough that guessing would be running an unverified command on someone else\u2019s server.',
+  'compose-provider-unsupported':
+    'This host runs podman, and podman delegates `compose` to an external provider — here, `podman-compose`, which is a different program with a different command line. OpsMaxx does not drive it, and the reason is not tidiness: the ONE thing that keeps a compose read from printing every password in the project is `--no-interpolate --no-env-resolution`, and podman-compose rejects both flags outright. Measured on podman 5.8.4 with podman-compose 1.6.0, `podman compose config` printed a `.env` password in plaintext and there is no flag that stops it. Reading these projects here would mean choosing between an unverified command line and a credential dump.',
+  'invalid-project':
+    'Compose read the file and refused it. The line below is compose\u2019s own, verbatim \u2014 it names the service and the problem, and this panel has nothing to add to it.',
   unknown: 'Compose returned an error that could not be classified. The raw message is below.'
 }
+
+/**
+ * Compose refusing a file it could read, as its own validator words it.
+ *
+ * Measured against compose v5.1.4 on four broken files, and the finding is that
+ * NONE of these matches `BLOCK_FAILURE`:
+ *
+ *   service "web" depends on undefined service "nope": invalid compose project
+ *   yaml: while scanning a quoted scalar at line 5, column 9: ...
+ *   validating /srv/app/compose.yaml: services.web additional properties 'imagz' not allowed
+ *   service "web" has neither an image nor a build context specified: invalid compose project
+ *
+ * So all four fell through to \u201cdocker compose config returned nothing this
+ * parser could read\u201d \u2014 a sentence about this program, printed instead of the
+ * sentence compose wrote about the operator\u2019s file. Every one of them names
+ * the service and the problem.
+ */
+const COMPOSE_INVALID =
+  /invalid compose project|^yaml:|^validating .*:|additional properties .* not allowed|has neither an image nor a build context|depends on undefined service|dependency cycle detected|^env file .* not found|is invalid because|non-string key/i
+
+/**
+ * podman delegating `compose` to an external provider, in its own words.
+ *
+ * MEASURED on podman 5.8.4. Two shapes, and they mean different things:
+ *
+ *   * `Error: looking up compose provider failed` -- exit 125, no provider
+ *     installed at all. That is compose being absent, and it is classified as
+ *     such rather than as this.
+ *   * `>>>> Executing external compose provider "/usr/bin/podman-compose"` --
+ *     a provider IS present, printed on every single command, wrapped in ANSI
+ *     escapes that `--no-ansi` does not remove.
+ *
+ * Only the second is this failure. See `COMPOSE_FAILURE_HELP` for why a present
+ * provider is refused rather than driven.
+ */
+const COMPOSE_PODMAN_PROVIDER = /Executing external compose provider/i
 
 /** The `docker compose` plugin is missing, as the CLI words it. */
 const COMPOSE_MISSING =
@@ -154,6 +206,31 @@ function blockFailure(
   const lines = nonEmptyLines(text)
   const missing = lines.find((l) => COMPOSE_MISSING.test(l))
   if (missing) return { reason: 'compose-unavailable', detail: missing }
+  // BEFORE the validator and the generic classifier, and here the order IS
+  // load-bearing. podman prints the provider banner on every command including
+  // successful ones, so a `config` that leaked a password would otherwise be
+  // read as a successful project rather than as a host this build must not
+  // read. Refusing on the banner alone is deliberate: the refusal is about
+  // WHICH PROGRAM would run, not about whether this particular run failed.
+  const provider = lines.find((l) => COMPOSE_PODMAN_PROVIDER.test(l))
+  if (provider) {
+    return {
+      reason: 'compose-provider-unsupported',
+      // The banner carries ANSI escapes; they are stripped so the panel does
+      // not render control codes into a sentence about safety.
+      // eslint-disable-next-line no-control-regex
+      detail: provider.replace(/\u001b\[[0-9;]*m/g, '').trim()
+    }
+  }
+  // Before the generic classifier. The two patterns are disjoint on everything
+  // measured, so the order is not currently load-bearing -- a mutation swapping
+  // them changes nothing, and that is recorded here rather than defended with a
+  // test that would only be testing the mutation. It is this way round because
+  // a validator line is compose ANSWERING, and if one ever arrives carrying a
+  // word like "denied" it should still be printed as compose's own sentence
+  // rather than as a daemon failure.
+  const invalid = lines.find((l) => COMPOSE_INVALID.test(l))
+  if (invalid) return { reason: 'invalid-project', detail: invalid }
   const failing = lines.filter((l) => BLOCK_FAILURE.test(l))
   if (failing.length === 0) return null
   return {
@@ -664,6 +741,9 @@ export interface ComposeServiceDecl {
   /** Paths only. Their CONTENTS are never read by anything in this module. */
   envFiles: string[]
   restart: string | null
+  /** `host`, `none`, `service:x`, or null. Read because `host` makes a `ports:`
+   *  block do nothing at all, and compose accepts that file. */
+  networkMode: string | null
 }
 
 export interface ComposeProjectConfig {
@@ -715,7 +795,8 @@ export function parseComposeConfigJson(text: string): ComposeProjectConfig | nul
       profiles: stringsOf(s.profiles),
       environment: environmentOf(s.environment),
       envFiles: envFilesOf(s.env_file),
-      restart: typeof s.restart === 'string' ? s.restart : null
+      restart: typeof s.restart === 'string' ? s.restart : null,
+      networkMode: typeof s.network_mode === 'string' ? s.network_mode : null
     })
   }
   services.sort((a, b) => a.name.localeCompare(b.name))
@@ -873,7 +954,8 @@ export function parseComposeConfigOutput(output: string, exitCode: number | null
         profiles: [],
         environment: [],
         envFiles: [],
-        restart: null
+        restart: null,
+        networkMode: null
       })),
       volumes: [],
       networks: [],
@@ -963,9 +1045,9 @@ export function joinComposeState(
  */
 export const COMPOSE_ENV_DISCLOSURE =
   'OpsMaxx reads the NAMES of the variables in this file and never their values. ' +
-  'The values are cut off on the host itself, so they do not cross the connection, ' +
+  'The values are cut off on the server itself, so they do not cross the connection, ' +
   'are not held in memory here, and cannot appear in an error message. A variable is ' +
-  'shown as set or empty; to see a value, open the file on the host.'
+  'shown as set or empty; to see a value, open the file on the server.'
 
 export interface ComposeEnvName {
   name: string
@@ -1090,6 +1172,167 @@ export function composeRefusal(action: string): string | null {
   return COMPOSE_REFUSALS[key] ?? null
 }
 
+// ------------------------------------------------------------------- lint
+//
+// Item 42's lint over the PARSED model. Not a style checker: every rule here is
+// something that will surprise somebody at 3am, and each says what it will do
+// rather than that it is wrong.
+//
+// Compose's own validator already refuses the file for the things that are
+// invalid -- an undefined `depends_on` target, an unknown key, a service with
+// neither image nor build. Those arrive as `invalid-project` with compose's own
+// line, and repeating them here would be a second opinion on a settled
+// question. What is left is the set of files compose accepts and an operator
+// still needs told about.
+
+export type ComposeLintRule = 'floating-tag' | 'no-restart' | 'host-network-ports'
+
+export interface ComposeLintFinding {
+  rule: ComposeLintRule
+  service: string
+  because: string
+}
+
+/** A tag that means "whatever was pushed last". `latest` is the famous one and
+ *  it is not the only one: an untagged reference resolves to `latest` too. */
+function floatingTag(image: string): string | null {
+  const at = image.lastIndexOf(':')
+  const slash = image.lastIndexOf('/')
+  // `registry:5000/app` has a colon that is a PORT, not a tag.
+  if (at < 0 || at < slash) return ''
+  const tag = image.slice(at + 1)
+  return tag === 'latest' || tag === 'stable' || tag === 'main' || tag === 'edge' ? tag : null
+}
+
+/**
+ * The lint over a whole config, which is the entry point callers should use.
+ *
+ * A NAMES-ONLY MODEL IS NOT A MODEL. When the engine would only give service
+ * names, every field on every service is null or empty because nothing was
+ * read -- so `lintCompose` would say each one has no restart policy, no tag and
+ * no ports, confidently, about a file it never saw. That is the "absence is not
+ * a fact" bug in its purest form, and the guard lives here rather than in the
+ * panel so a caller cannot skip it.
+ */
+export function lintComposeConfig(config: ComposeProjectConfig): ComposeLintFinding[] {
+  if (config.namesOnly) return []
+  return lintCompose(config.services)
+}
+
+export function lintCompose(services: ComposeServiceDecl[]): ComposeLintFinding[] {
+  const out: ComposeLintFinding[] = []
+  for (const s of services) {
+    if (s.image !== null) {
+      const tag = floatingTag(s.image)
+      if (tag !== null) {
+        out.push({
+          rule: 'floating-tag',
+          service: s.name,
+          because:
+            tag === ''
+              ? `${s.name} has no tag on ${s.image}, which means \`latest\`. What \`up\` starts tomorrow is whatever was pushed by then, and the digest on the host is not the digest in the file.`
+              : `${s.name} runs ${s.image}. A \`${tag}\` tag moves, so \`pull\` then \`up\` can change what is running without any change to this file.`
+        })
+      }
+    }
+    // Compose's default is `no`. Not "unset and therefore fine": the container
+    // does not come back after a reboot, and nothing else on the panel says so.
+    if (s.restart === null || s.restart === '' || s.restart === 'no') {
+      out.push({
+        rule: 'no-restart',
+        service: s.name,
+        because: `${s.name} has no restart policy, so compose's default of \`no\` applies: it does not come back after a reboot or a daemon restart.`
+      })
+    }
+    // Measured: compose ACCEPTS this file and exits 0. The container joins the
+    // host's network stack, where a port mapping has nothing to map, so the
+    // `ports:` block does nothing and the service is reachable on whatever port
+    // it binds inside -- which is not the one written here.
+    if (s.networkMode === 'host' && s.ports.length > 0) {
+      out.push({
+        rule: 'host-network-ports',
+        service: s.name,
+        because: `${s.name} is on the host's network and also declares ${s.ports.length} port mapping(s). Compose accepts that and ignores the mappings: the service listens on whatever port it binds inside, not on ${s.ports[0]}.`
+      })
+    }
+  }
+  return out
+}
+
+// ------------------------------------------------------- restart one service
+
+/**
+ * Restarting one service, and why it is NOT a compose verb here.
+ *
+ * `docker compose restart <svc>` exists and does the obvious thing, and it was
+ * measured before this was written. Two facts came out of that:
+ *
+ *  1. IT DOES NOT APPLY AN EDITED COMPOSE FILE. With a service declared
+ *     `V: one`, the file changed to `V: two` and `docker compose restart a`
+ *     run, the container came back still carrying `V=one`. `up -d` recreated it
+ *     and it became `V=two`. Somebody who edits the file and reaches for
+ *     restart gets the old configuration and no indication of it.
+ *
+ *  2. IT TOUCHES EVERY REPLICA. A service with `replicas: 2` restarted both,
+ *     naming them one at a time in its output.
+ *
+ * So this routes to the container lifecycle path instead of adding a compose
+ * verb: `planDockerAction('restart', ...)` already grades a restart as
+ * elevated, already escalates past one container to a typed phrase -- which is
+ * exactly what the two-replica case deserves -- and, crucially, the containers
+ * are NAMED, so the fan-out is visible before it happens rather than hidden
+ * behind a service name.
+ */
+export interface ComposeRestartPlan {
+  service: string
+  /** Container names, as the dialog will list them. */
+  targets: string[]
+  plan: DockerActionPlan | null
+  /** Why this cannot be offered for this service, or null. */
+  refusal: string | null
+  /** What restarting will not do. Never empty when `plan` is set. */
+  caveats: string[]
+}
+
+export function planComposeServiceRestart(service: ComposeServiceState): ComposeRestartPlan {
+  const name = service.declared.name
+  const targets = service.containers.map((c) => (c.name === '' ? c.id : c.name))
+
+  if (targets.length === 0) {
+    // `restart` on a service with no container does not create one -- it is a
+    // lifecycle verb over containers that exist. The verb that creates is `up`,
+    // which is already offered, so say that rather than running something that
+    // will not do what the button implies.
+    return {
+      service: name,
+      targets,
+      plan: null,
+      refusal: `${name} has no container to restart. Starting it from the file is \`up\`, which is on this panel already.`,
+      caveats: []
+    }
+  }
+  if (targets.length > DOCKER_ACTION_MAX_REFS) {
+    return {
+      service: name,
+      targets,
+      plan: null,
+      refusal: `${name} has ${targets.length} containers, more than the ${DOCKER_ACTION_MAX_REFS} this acts on at once.`,
+      caveats: []
+    }
+  }
+
+  const caveats = [
+    'This restarts the containers as they are. A change to the compose file is not applied by a restart — measured: a container whose file said one thing and whose environment said another came back with the environment it already had. `up` is what applies the file.'
+  ]
+  if (targets.length > 1) {
+    caveats.push(
+      `${name} is ${targets.length} containers and all of them restart, which is what \`docker compose restart ${name}\` would also do.`
+    )
+  }
+
+  return { service: name, targets, plan: planDockerAction('restart', targets), refusal: null, caveats }
+}
+
 // ----------------------------------------------------------------- jobs
 
 /**
@@ -1100,8 +1343,8 @@ export function composeRefusal(action: string): string | null {
  * which is the line — and the line is drawn here in a list rather than in a
  * dialog, so a verb cannot be added by someone editing a UI file.
  */
-export type ComposeAction = 'pull' | 'up'
-export const COMPOSE_ACTIONS: readonly ComposeAction[] = ['pull', 'up']
+export type ComposeAction = 'pull' | 'up' | 'build'
+export const COMPOSE_ACTIONS: readonly ComposeAction[] = ['pull', 'up', 'build']
 
 /**
  * The shell for one compose verb.
@@ -1116,6 +1359,17 @@ export const COMPOSE_ACTIONS: readonly ComposeAction[] = ['pull', 'up']
  * `up` is `up -d` and nothing else. Not `--remove-orphans` (that removes
  * containers, see COMPOSE_REFUSALS), not `--force-recreate` (that restarts
  * services the operator did not ask about), not `--build`.
+ *
+ * `build` is `build --pull` and NO BUILD ARGS. `--pull` because a build that
+ * reuses a cached base image is a build that does not contain the security
+ * update somebody just asked for. No `--build-arg`, because a build arg is
+ * free text that reaches a `RUN` line, and this module does not have a way to
+ * show an operator what that will do.
+ *
+ * `up` STILL does not carry `--build`. Building and starting are separate
+ * decisions and a Dockerfile is code -- see the ELEVATED rule in
+ * `shared/commandRisk.ts`, which grades a build accordingly. Folding a build
+ * into `up` would run that code behind a button labelled start.
  */
 export function buildComposeActionCommand(
   action: ComposeAction,
@@ -1135,7 +1389,7 @@ export function buildComposeActionCommand(
     }
   }
   const tail = services.length === 0 ? '' : ` ${services.map(quote).join(' ')}`
-  const verb = action === 'up' ? 'up -d' : 'pull'
+  const verb = action === 'up' ? 'up -d' : action === 'build' ? 'build --pull' : 'pull'
   const run = opts.sudo ? 'sudo -n docker' : 'docker'
   return `${run} compose ${flags} ${verb}${tail}`
 }
@@ -1181,7 +1435,7 @@ export function composeJobSpec(
     detail,
     spec: {
       kind: 'command',
-      title: `Compose ${action === 'up' ? 'up -d' : 'pull'} · ${project.name}`,
+      title: `Compose ${action === 'up' ? 'up -d' : action === 'build' ? 'build --pull' : 'pull'} · ${project.name}`,
       steps
     }
   }
@@ -1197,34 +1451,22 @@ export function composeJobSpec(
  */
 export const COMPOSE_STEP_TIMEOUT_MS: Record<ComposeAction, number> = {
   pull: 1_800_000,
-  up: 900_000
+  up: 900_000,
+  // The same reasoning as `pull`, more so: a build fetches base layers AND
+  // runs every `RUN` line, and a compile step measured in tens of minutes is
+  // slow rather than broken.
+  build: 3_600_000
 }
 
 // ------------------------------------------------------- the image tag edit
 
-/**
- * An image reference, validated before it is written into someone's file.
- *
- * Deliberately strict about the tag and permissive about the registry: a
- * registry host can carry a port and a path, a tag cannot carry a slash, and a
- * digest is hex of a stated length. The thing being prevented is not a shell
- * injection — this value is written into a file, not a command — it is a file
- * edit that leaves the project unparseable, which is a worse outcome than a
- * refused edit because it is discovered at the next deploy.
- */
-const IMAGE_RE =
-  /^(?:[a-zA-Z0-9._-]+(?::\d+)?\/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*(?::[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127})?(?:@sha256:[a-f0-9]{64})?$/
-
-export function validateImageRef(ref: unknown): boolean {
-  if (typeof ref !== 'string' || ref.length === 0 || ref.length > 512) return false
-  // Checked BEFORE the pattern, because the pattern alone accepted
-  // `../etc/passwd`: a registry component is `[a-zA-Z0-9._-]+`, which `..`
-  // satisfies, so a path traversal read as `registry `..`, image `etc/passwd``
-  // and was written straight into someone's compose file. Found by the test
-  // below rather than by review, which is why it is spelled out here.
-  if (ref.startsWith('.') || ref.startsWith('/') || ref.includes('..')) return false
-  return IMAGE_RE.test(ref)
-}
+// `validateImageRef` and its pattern live in `shared/docker.ts` and are
+// re-exported here. They moved when the pull/build builders needed them: this
+// module imports docker.ts, so keeping them here would have made that import
+// circular -- the same reason `commandRisk.ts` was split out of
+// `broadcast.ts`. Re-exported rather than relocated silently, so every existing
+// caller and every test keeps its import path.
+export { validateImageRef } from './docker'
 
 export type ComposeImageEditPlan =
   | {
@@ -1256,15 +1498,40 @@ export type ComposeImageEditPlan =
  * service key's level ends it — which is also why a service whose `image:` is
  * inside a nested map is not matched and is refused rather than guessed at.
  */
-export function planComposeImageEdit(
-  fileText: string,
-  service: string,
-  newRef: string
-): ComposeImageEditPlan {
-  if (!validateComposeService(service)) return { ok: false, reason: 'not a valid service name' }
-  if (!validateImageRef(newRef)) {
-    return { ok: false, reason: `\`${newRef}\` is not a valid image reference` }
-  }
+/** Where a service's own `image:` line is, and what is on it. */
+interface ComposeImageLine {
+  /** 1-based, as the panel shows it. */
+  line: number
+  raw: string
+  /** The whitespace before `image:`, and between the colon and the value. */
+  indent: string
+  gap: string
+  /** `'`, `"` or empty — whatever the file already used, preserved. */
+  quoteChar: string
+  /** The reference itself, trimmed. */
+  value: string
+  /** Anything after the value, comment included. */
+  trailing: string
+}
+
+type ComposeImageLocation = { ok: true; at: ComposeImageLine } | { ok: false; reason: string }
+
+/**
+ * Find the ONE line, and nothing else.
+ *
+ * ONE derivation, called by the edit and by the read of what a service is
+ * currently pinned to. They were the same twenty lines twice for about an hour
+ * and that is exactly long enough for the two to disagree about which `image:`
+ * belongs to the service -- the failure mode being a revert that reads a tag
+ * out of a `build:` block and writes it over the real one.
+ *
+ * Locate `services:`, locate the service key one indent level below it, locate
+ * that block's `image:` line. The indentation is what bounds the block -- the
+ * next line indented at or above the service key's level ends it -- which is
+ * also why a service whose `image:` is inside a nested map is not matched and
+ * is refused rather than guessed at.
+ */
+function locateComposeImage(fileText: string, service: string): ComposeImageLocation {
   const lines = fileText.split('\n')
 
   let inServices = false
@@ -1314,17 +1581,232 @@ export function planComposeImageEdit(
     if (m === null) continue
     const rest = m[3]
     const valueMatch = rest.match(/^(['"]?)([^'"#]*?)\1(\s*(?:#.*)?)$/)
-    if (valueMatch === null) return { ok: false, reason: `could not read the image value on line ${i + 1}` }
-    const quoteChar = valueMatch[1]
-    const from = valueMatch[2].trim()
-    if (from === '') return { ok: false, reason: `\`${service}\` has an empty image value` }
-    const trailing = valueMatch[3]
-    const after = `${m[1]}image:${m[2]}${quoteChar}${newRef}${quoteChar}${trailing}`
-    return { ok: true, service, line: i + 1, from, to: newRef, before: line, after }
+    if (valueMatch === null) {
+      return { ok: false, reason: `could not read the image value on line ${i + 1}` }
+    }
+    const value = valueMatch[2].trim()
+    if (value === '') return { ok: false, reason: `\`${service}\` has an empty image value` }
+    return {
+      ok: true,
+      at: {
+        line: i + 1,
+        raw: line,
+        indent: m[1],
+        gap: m[2],
+        quoteChar: valueMatch[1],
+        value,
+        trailing: valueMatch[3]
+      }
+    }
   }
 
   if (!inService) return { ok: false, reason: `\`${service}\` is not declared in this file` }
   return { ok: false, reason: `\`${service}\` declares no image in this file — it is built, not pulled` }
+}
+
+/**
+ * What a service is pinned to in this text, as written.
+ *
+ * A READ, and the reason it is exported: a revert needs to know what the
+ * previous file said without planning an edit against it, and planning a throw
+ * away edit just to read the `from` field would tie the read to the validity of
+ * a reference nobody intends to write.
+ */
+export function composeServiceImage(
+  fileText: string,
+  service: string
+): { ok: true; image: string } | { ok: false; reason: string } {
+  if (!validateComposeService(service)) return { ok: false, reason: 'not a valid service name' }
+  const at = locateComposeImage(fileText, service)
+  return at.ok ? { ok: true, image: at.at.value } : { ok: false, reason: at.reason }
+}
+
+/**
+ * Find the ONE line to change, and change nothing else.
+ *
+ * A text edit rather than a YAML round trip, and that is the decision here. The
+ * round trip is easy to write and it rewrites the whole file: it drops every
+ * comment, reorders keys, reflows anchors and normalises quoting. The operator
+ * asked to change a tag; handing them a diff touching two hundred lines means
+ * they cannot review it, and a compose file's comments are frequently the only
+ * documentation a stack has.
+ */
+export function planComposeImageEdit(
+  fileText: string,
+  service: string,
+  newRef: string
+): ComposeImageEditPlan {
+  if (!validateComposeService(service)) return { ok: false, reason: 'not a valid service name' }
+  if (!validateImageRef(newRef)) {
+    return { ok: false, reason: `\`${newRef}\` is not a valid image reference` }
+  }
+  const found = locateComposeImage(fileText, service)
+  if (!found.ok) return { ok: false, reason: found.reason }
+  const { at } = found
+  const after = `${at.indent}image:${at.gap}${at.quoteChar}${newRef}${at.quoteChar}${at.trailing}`
+  return { ok: true, service, line: at.line, from: at.value, to: newRef, before: at.raw, after }
+}
+
+// ---------------------------------------------------------------------------
+// DEPLOYMENT ROLLBACK
+// ---------------------------------------------------------------------------
+//
+// "We shipped v2, it is bad, put v1 back."
+//
+// THE APP REMEMBERS NOTHING, AND DOES NOT NEED TO. The roadmap assumed a new
+// per-project "last applied image" record, because the app does not remember
+// the previous tag. It does not have to: `buildComposeWriteCommand` has always
+// run `cp -p <file> <file>.opsmaxx-bak` BEFORE the write, so the previous
+// version of the file is already on the host. That record is better than
+// anything this app could keep -- it survives the app being closed,
+// reinstalled, or run from somebody else's laptop, and it cannot drift from
+// the file it describes because it IS the file.
+//
+// A REVERT IS AN IMAGE EDIT, NOT A FILE RESTORE. Copying the backup over the
+// file would also undo every unrelated change anybody made in between --
+// a port, an environment variable, a service added by a colleague this morning.
+// So the backup is read for ONE value, the tag that service used to be pinned
+// to, and the revert is then an ordinary edit of the current file back to it:
+// same planner, same approval, same dialog, same write.
+//
+// WHAT IT IS, SAID PLAINLY. One level deep, and it is "the file as it was
+// immediately before OpsMaxx last wrote to it" -- NOT "the last known good
+// version" and not "what is running". Those are three different claims and only
+// the first is true. A stack whose bad tag was applied by two OpsMaxx edits
+// has a backup holding the first bad tag, and `revertDescription` says which
+// edit it is undoing so nobody reads it as a guarantee.
+
+/**
+ * Reading the backup, with ABSENT and COULD-NOT-ASK kept apart.
+ *
+ * The ordinary compose read cannot answer this. It ends in `2>&1`, so a missing
+ * file comes back as a successful read whose "content" is `head: cannot open
+ * ...` — which parses as a compose file declaring no services, and would be
+ * reported as "this service is not in the backup". Three different facts
+ * collapsed into one wrong sentence.
+ *
+ * The distinction is the whole point here. "There is nothing to roll back" is a
+ * fine thing to tell somebody; saying it to somebody whose SERVER JUST DID NOT
+ * ANSWER is telling them their stack is fine because we could not look.
+ */
+export const COMPOSE_BACKUP_MARKER = '===SP-COMPOSE-BAK==='
+
+export type ComposeBackupState = 'present' | 'absent' | 'denied'
+
+export function composeBackupPath(path: string): string {
+  return `${path}.opsmaxx-bak`
+}
+
+export function buildComposeBackupReadCommand(
+  path: string,
+  opts: { sudo?: boolean } = {}
+): string {
+  if (!validateComposePath(path)) throw new Error('refusing to read an invalid compose file path')
+  const bak = quote(composeBackupPath(path))
+  const head = opts.sudo ? 'sudo -n head' : 'head'
+  // The state is printed BEFORE the content and read from the first line, so a
+  // compose file that happens to contain the marker cannot restate it.
+  return [
+    `if [ ! -f ${bak} ]; then echo "${COMPOSE_BACKUP_MARKER} absent"; exit 0; fi`,
+    `if [ ! -r ${bak} ]; then echo "${COMPOSE_BACKUP_MARKER} denied"; exit 0; fi`,
+    `echo "${COMPOSE_BACKUP_MARKER} present"`,
+    `${head} -c ${COMPOSE_MAX_FILE_BYTES} ${bak}`
+  ].join('\n')
+}
+
+export function parseComposeBackupRead(
+  output: string
+): { state: ComposeBackupState; text: string } | null {
+  const i = output.indexOf(COMPOSE_BACKUP_MARKER)
+  if (i === -1) return null
+  const rest = output.slice(i + COMPOSE_BACKUP_MARKER.length)
+  const nl = rest.indexOf('\n')
+  const state = (nl === -1 ? rest : rest.slice(0, nl)).trim()
+  if (state !== 'present' && state !== 'absent' && state !== 'denied') return null
+  return { state, text: nl === -1 ? '' : rest.slice(nl + 1) }
+}
+
+export type ComposeRevertRefusal =
+  | 'no-backup'
+  | 'not-in-backup'
+  | 'not-in-file'
+  | 'same-image'
+  /** The backup is there and this account may not read it. NOT the same as
+   *  absent, and never reported as "nothing to roll back". */
+  | 'backup-denied'
+  /** The server did not answer. The loudest of the five, because it is the one
+   *  that must never read as an all-clear. */
+  | 'unreachable'
+  | 'unreadable'
+
+export type ComposeRevertPlan =
+  | { ok: true; plan: Extract<ComposeImageEditPlan, { ok: true }>; from: string; to: string }
+  | { ok: false; refusal: ComposeRevertRefusal; reason: string }
+
+/**
+ * Plan a revert of one service to the tag the backup file has for it.
+ *
+ * Both texts are passed in rather than read here, for the reason every other
+ * planner in this file takes text: the caller re-reads BOTH from the host at
+ * the moment of the write, and a plan that fetched its own inputs would be
+ * planning against something nobody looked at.
+ */
+export function planComposeRevert(
+  fileText: string,
+  backupText: string | null,
+  service: string
+): ComposeRevertPlan {
+  if (!validateComposeService(service)) {
+    return { ok: false, refusal: 'unreadable', reason: 'not a valid service name' }
+  }
+  // A file this app has never written has no backup, and that is the common
+  // case rather than an error: it means there is nothing here to undo.
+  //
+  // ONLY NULL. An EMPTY backup is a different thing — the file is there and has
+  // nothing in it, which is what a `cp` that was interrupted leaves behind —
+  // and saying "there is no backup beside this file" about a file that is
+  // sitting right there is false in the direction that stops somebody looking.
+  // It falls through and is refused below for what it actually is.
+  if (backupText === null) {
+    return {
+      ok: false,
+      refusal: 'no-backup',
+      reason:
+        'there is no OpsMaxx backup beside this compose file on the server, so there is no previous tag to go back to. A backup is only written when OpsMaxx itself edits the file.'
+    }
+  }
+  const was = composeServiceImage(backupText, service)
+  if (!was.ok) {
+    return {
+      ok: false,
+      refusal: 'not-in-backup',
+      reason: `the backup file does not say what \`${service}\` was pinned to: ${was.reason}`
+    }
+  }
+  const now = composeServiceImage(fileText, service)
+  if (!now.ok) {
+    return { ok: false, refusal: 'not-in-file', reason: now.reason }
+  }
+  // Not an error and not a no-op worth hiding: it is the answer to "can I go
+  // back", and the answer is that this service never moved.
+  if (now.image === was.image) {
+    return {
+      ok: false,
+      refusal: 'same-image',
+      reason: `\`${service}\` is already on \`${was.image}\` — the last edit to this file did not change it.`
+    }
+  }
+  // Validated as an image reference on the way OUT of the backup as well as on
+  // the way in. The backup is a file on a host: it is input, not a record this
+  // app wrote and can vouch for.
+  const plan = planComposeImageEdit(fileText, service, was.image)
+  if (!plan.ok) return { ok: false, refusal: 'unreadable', reason: plan.reason }
+  return { ok: true, plan, from: now.image, to: was.image }
+}
+
+/** What the button is about to do, in one sentence, with no promise in it. */
+export function revertDescription(r: Extract<ComposeRevertPlan, { ok: true }>): string {
+  return `Put \`${r.plan.service}\` back to \`${r.to}\`, which is what it was pinned to immediately before OpsMaxx last edited this file. It is on \`${r.from}\` now. This is not a guarantee that \`${r.to}\` was working — it is the previous line, nothing more.`
 }
 
 /**
@@ -1414,6 +1896,14 @@ export function buildComposeReadCommand(path: string, opts: { sudo?: boolean } =
 
 // ------------------------------------------------------------- the bridge
 
+// `writeEnvValue` is deliberately NOT on this interface.
+//
+// `ComposeBridge` is the shape the PRELOAD implements, and the compiler checks
+// that it does. A `writeEnvValue(cfg, req, value)` member here would therefore
+// require the preload to expose a method taking a VALUE -- which would put the
+// secret in the renderer, the one thing this whole module is arranged to
+// prevent. It stays a method on the main-process class, and what the preload
+// exposes takes a vault REFERENCE instead.
 export interface ComposeBridge {
   list(cfg: unknown, opts?: { sudo?: boolean; autoSudo?: boolean; search?: boolean }): Promise<ComposeListProbe>
   config(
@@ -1431,11 +1921,40 @@ export interface ComposeBridge {
     path: string,
     opts?: { sudo?: boolean }
   ): Promise<{ ok: boolean; text?: string; error?: string }>
+  /** A read. Returns the plan for putting a service back to the tag the backup
+   *  beside the file holds, and writes nothing itself. */
+  planRevert(
+    cfg: unknown,
+    req: { path: string; service: string },
+    opts?: { sudo?: boolean }
+  ): Promise<ComposeRevertPlan>
   writeImageTag(
     cfg: unknown,
     req: ComposeImageWriteRequest,
     opts?: { sudo?: boolean }
   ): Promise<ComposeImageWriteResult>
+}
+
+/**
+ * What the preload exposes: everything main's reader does, PLUS a write that
+ * takes a vault reference.
+ *
+ * Split from `ComposeBridge` rather than added to it so the two signatures
+ * cannot converge by accident. Main's method takes a `value: string`; this one
+ * has no such parameter and no way to grow one without a reviewer seeing this
+ * comment.
+ */
+export interface ComposePreloadBridge extends ComposeBridge {
+  writeEnvValue(
+    cfg: unknown,
+    req: { path: string; name: string; serverId: string },
+    ref: {
+      vaultEntryId: string
+      slot: 'password' | 'privateKey' | 'username' | 'field'
+      fieldKey?: string
+    },
+    opts?: { sudo?: boolean }
+  ): Promise<ComposeEnvWriteResult>
 }
 
 export type ComposeEnvProbe =
@@ -1449,6 +1968,12 @@ export interface ComposeImageWriteRequest {
   /** The plan the operator was shown. Re-derived and compared before anything is written. */
   expect: { line: number; before: string }
 }
+
+/** What comes back from an env write. Every field is a fact about WHERE the
+ *  change landed; there is no field that could carry a value. */
+export type ComposeEnvWriteResult =
+  | { ok: true; name: string; line: number | null; action: 'replace' | 'append'; backup: string }
+  | { ok: false; reason: string }
 
 export type ComposeImageWriteResult =
   | { ok: true; plan: Extract<ComposeImageEditPlan, { ok: true }>; backup: string }

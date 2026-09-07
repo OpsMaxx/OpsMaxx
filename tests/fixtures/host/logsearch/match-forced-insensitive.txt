@@ -1,0 +1,4 @@
+===SP-LOGSEARCH===
+Sep 06 19:38:57 vmi3529687 systemd[1]: Started session-3078.scope - Session 3078 of User root.
+Sep 06 19:38:57 vmi3529687 systemd[3781482]: Listening on snapd.session-agent.socket - REST API socket for snapd user session agent.
+Sep 06 19:38:57 vmi3529687 (systemd)[3781482]: pam_unix(systemd-user:session): session opened for user root(uid=0) by root(uid=0)

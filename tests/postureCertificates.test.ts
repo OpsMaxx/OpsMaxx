@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   CERT_EXPIRY_DAYS,
+  CERT_NAMES,
   CERT_SEARCH_MAX_DEPTH,
   CERT_SEARCH_MAX_FILES,
   CERT_SEARCH_ROOTS,
@@ -171,7 +172,7 @@ describe('a certificate that could not be read is never a certificate that is va
     expect(postureAlertReadings(p).certDays).toBe(-26)
   })
 
-  it('takes the SOONEST expiry across the host, not the first or the last', () => {
+  it('takes the SOONEST expiry across the server, not the first or the last', () => {
     const p = collect([
       [CERT_FAR, '/etc/nginx/a.pem'],
       [CERT_SOON, '/etc/nginx/b.pem'],
@@ -214,7 +215,7 @@ describe('a certificate that could not be read is never a certificate that is va
     expect(soonestCertificateExpiry(p.certificates)).toBeNull()
   })
 
-  it('a directory that could not be entered is NOT a host with no certificates', () => {
+  it('a directory that could not be entered is NOT a server with no certificates', () => {
     // The line this whole half of the item exists for. /etc/letsencrypt is
     // 0700 root on Debian, so this is the common case.
     const p = parsePosture(
@@ -222,7 +223,7 @@ describe('a certificate that could not be read is never a certificate that is va
         'V cert-searched 1',
         'V cert-refused 2',
         '===OPSMAXX-POSTURE===',
-        'certificates denied - every certificate directory present on this host refused to be entered'
+        'certificates denied - every certificate directory present on this server refused to be entered'
       ].join('\n'),
       NOW
     )
@@ -284,10 +285,25 @@ describe('the search is bounded, and says what its bounds are', () => {
         '/etc/pki/tls/certs',
         '/etc/nginx',
         '/etc/apache2',
-        '/etc/httpd'
+        '/etc/httpd',
+        // Item 39. kubeadm issues control-plane certificates for ONE YEAR and
+        // renews them on upgrade, so a cluster nobody upgrades stops dead a
+        // year later with no warning anywhere. They are certificates on a
+        // server, so the `cert-expiry` kind that already exists fires for them.
+        //
+        // AFTER the web roots on purpose: `find` walks its arguments in order
+        // and the file cap is a `head`, so on a server that is somehow both,
+        // the certificates somebody renews by hand survive the truncation.
+        '/etc/kubernetes/pki',
+        '/var/lib/kubelet/pki',
+        '/var/lib/rancher/k3s/server/tls',
+        '/var/lib/rancher/rke2/server/tls'
       ],
       maxDepth: 3,
-      maxFiles: 16,
+      // 32, not 16: a kubeadm control plane holds about thirteen certificates
+      // in /etc/kubernetes/pki alone once etcd/ is counted, and at 16 such a
+      // node would have reported a truncated list of its own and nothing else.
+      maxFiles: 32,
       names: ['*.pem', '*.crt', '*.cer'],
       skipped: [
         'ca-bundle.crt',
@@ -354,5 +370,79 @@ describe('the incompleteness flag', () => {
 
   it('is false only when the whole search read', () => {
     expect(certificatesIncomplete(inv({}))).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Item 39: Kubernetes control-plane certificates
+// ---------------------------------------------------------------------------
+//
+// kubeadm issues these for ONE YEAR and renews them on upgrade, so a cluster
+// nobody upgrades stops dead a year later -- every component at once, with
+// `x509: certificate has expired` in every log -- and nothing warns first.
+//
+// No new alert kind: they are certificates on a server, so the `cert-expiry`
+// kind that already exists fires for them. That is the whole reason they are
+// roots here rather than a Kubernetes-specific probe.
+
+describe('the Kubernetes roots reach a real control-plane layout', () => {
+  // Built on disk and searched with the probe's own depth and name list, rather
+  // than asserted against the command string. A root that is spelled right and
+  // a depth that stops one directory short would both pass a text assertion.
+  it('finds every certificate kubeadm writes, including the ones under etcd/', async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join, relative } = await import('node:path')
+    const { execFileSync } = await import('node:child_process')
+
+    const root = mkdtempSync(join(tmpdir(), 'sp-k8s-pki-'))
+    try {
+      const pki = join(root, 'etc/kubernetes/pki')
+      mkdirSync(join(pki, 'etcd'), { recursive: true })
+      const top = [
+        'ca', 'apiserver', 'apiserver-kubelet-client', 'front-proxy-ca',
+        'front-proxy-client', 'apiserver-etcd-client'
+      ]
+      const etcd = ['ca', 'server', 'peer', 'healthcheck-client']
+      for (const n of top) writeFileSync(join(pki, `${n}.crt`), 'x')
+      for (const n of etcd) writeFileSync(join(pki, 'etcd', `${n}.crt`), 'x')
+
+      const names = CERT_NAMES.flatMap((n, i) => (i === 0 ? ['-name', n] : ['-o', '-name', n]))
+      const found = execFileSync(
+        'find',
+        [pki, '-xdev', '-maxdepth', String(CERT_SEARCH_MAX_DEPTH), '-type', 'f', '(', ...names, ')', '-print'],
+        { encoding: 'utf8' }
+      )
+        .split('\n')
+        .filter(Boolean)
+        .map((f) => relative(pki, f))
+        .sort()
+
+      expect(found).toHaveLength(top.length + etcd.length)
+      // The depth is what this is really about: etcd's certificates are one
+      // directory down and expire on the same clock as the rest.
+      expect(found).toContain('etcd/server.crt')
+      expect(found).toContain('apiserver.crt')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  // Ten in pki plus etcd, plus the kubelet's two, is twelve on a control plane
+  // before a single web certificate is counted. At the old cap of 16 such a
+  // node reported a truncated list of its own certificates and little else.
+  it('leaves room for a control plane and a web server on the same host', () => {
+    expect(CERT_SEARCH_MAX_FILES).toBeGreaterThanOrEqual(24)
+  })
+
+  it('searches the web roots first, so they survive a truncation', () => {
+    const roots = [...CERT_SEARCH_ROOTS]
+    // `find` walks its arguments in order and the cap is a `head`.
+    expect(roots.indexOf('/etc/nginx')).toBeLessThan(roots.indexOf('/etc/kubernetes/pki'))
+  })
+
+  it('covers k3s and rke2, which keep the same certificates somewhere else', () => {
+    expect(CERT_SEARCH_ROOTS).toContain('/var/lib/rancher/k3s/server/tls')
+    expect(CERT_SEARCH_ROOTS).toContain('/var/lib/rancher/rke2/server/tls')
   })
 })

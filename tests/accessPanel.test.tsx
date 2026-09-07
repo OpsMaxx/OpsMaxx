@@ -12,6 +12,7 @@ import {
   type HostAccess,
   type Sha256
 } from '../src/shared/access'
+import { parseSudoers } from '../src/shared/sudoers'
 import type { Server } from '../src/renderer/src/types'
 
 // Fleet keys and access — roadmap item 23, renderer half.
@@ -121,8 +122,8 @@ function mount(servers: Server[], byId: Record<string, Entry>, withWrite = false
   render(<AccessPanel servers={servers} />)
 }
 
-describe('a host that could not be read', () => {
-  it('is named, excluded, and explicitly not called a host with no keys', async () => {
+describe('a server that could not be read', () => {
+  it('is named, excluded, and explicitly not called a server with no keys', async () => {
     // The sentence this panel exists to print. Without it, a failed probe
     // renders as a host that contributed nothing to the totals — which reads
     // as a host that trusts nobody.
@@ -132,7 +133,7 @@ describe('a host that could not be read', () => {
     })
     const failed = await screen.findByTestId('failed-db-1')
     expect(failed.textContent).toContain('the access probe failed')
-    expect(failed.textContent).toContain('it is not a host with no keys')
+    expect(failed.textContent).toContain('it is not a server with no keys')
     expect(failed.textContent).not.toMatch(/\b0 keys\b/)
   })
 
@@ -142,11 +143,11 @@ describe('a host that could not be read', () => {
       b: { error: 'unreachable', errorAt: 1 }
     })
     const unchecked = await screen.findByTestId('unchecked-hosts')
-    expect(unchecked.textContent).toContain('1 host could not be checked')
+    expect(unchecked.textContent).toContain('1 server could not be checked')
     expect(unchecked.textContent).toContain('not in that count')
   })
 
-  it('names a host that has simply never been collected, separately from a failure', async () => {
+  it('names a server that has simply never been collected, separately from a failure', async () => {
     // Three states, not two: read, failed, and never looked at. A server added
     // ten minutes ago is the third and it is not a failure.
     mount([server('a', 'web-1'), server('b', 'db-1')], { a: { access: complete(), at: 1 } })
@@ -168,7 +169,7 @@ describe('what the panel refuses to conclude', () => {
     expect(banner.textContent).toContain('lower bound')
   })
 
-  it('raises the same warning for a host that answered only partly', async () => {
+  it('raises the same warning for a server that answered only partly', async () => {
     // A host can be perfectly reachable and still hide half its accounts behind
     // a home directory this account cannot traverse. That is the same size of
     // gap as an unreachable host and gets the same sentence.
@@ -178,7 +179,7 @@ describe('what the panel refuses to conclude', () => {
     expect(why.textContent).toContain('1 of 2 accounts could not be read')
   })
 
-  it('does NOT raise it when every host answered completely', async () => {
+  it('does NOT raise it when every server answered completely', async () => {
     // The other half of the assertion, and the one that keeps the warning
     // meaningful: a banner that is always on is a banner nobody reads.
     mount([server('a', 'web-1')], { a: { access: complete(), at: 1 } })
@@ -202,7 +203,7 @@ describe('what the panel refuses to conclude', () => {
 })
 
 describe('the by-key view', () => {
-  it('shows where a key is, across hosts', async () => {
+  it('shows where a key is, across servers', async () => {
     // The question the whole item exists for: which of my hosts still trusts
     // this key.
     mount([server('a', 'web-1'), server('b', 'db-1')], {
@@ -353,7 +354,7 @@ describe('the write half, which this build does not have', () => {
   })
 })
 
-describe('a host whose last collection is old and whose probe is failing now', () => {
+describe('a server whose last collection is old and whose probe is failing now', () => {
   // fleetSampler deliberately keeps the last good collection ALONGSIDE a live
   // error, and its own comment says why: "'read an hour ago and the probe is
   // failing now' is two facts and both matter — most of all here." The panel
@@ -379,7 +380,7 @@ describe('a host whose last collection is old and whose probe is failing now', (
       b: staleEntry()
     })
     const unchecked = await screen.findByTestId('unchecked-hosts')
-    expect(unchecked.textContent).toContain('1 host')
+    expect(unchecked.textContent).toContain('1 server')
   })
 
   it('is named as stale, with how old the reading is and what is failing now', async () => {
@@ -400,11 +401,11 @@ describe('a host whose last collection is old and whose probe is failing now', (
   })
 })
 
-describe('the by-host view', () => {
+describe('the by-server view', () => {
   async function hosts(access: HostAccess): Promise<void> {
     mount([server('a', 'web-1')], { a: { access, at: 1 } })
-    await screen.findByRole('button', { name: /By host/ })
-    await userEvent.click(screen.getByRole('button', { name: /By host/ }))
+    await screen.findByRole('button', { name: /By server/ })
+    await userEvent.click(screen.getByRole('button', { name: /By server/ }))
   }
 
   it('shows a reason, not a zero, for an account whose file was not read', async () => {
@@ -475,7 +476,7 @@ describe('the by-host view', () => {
     expect(chip.className).not.toContain('warn')
   })
 
-  it('keeps the host’s own last-login phrase when it could not be dated', async () => {
+  it('keeps the server’s own last-login phrase when it could not be dated', async () => {
     // "We cannot make a date out of this" is not "we do not know when they
     // logged in", and showing the phrase is the better of the two answers.
     await hosts(
@@ -494,7 +495,7 @@ describe('the by-host view', () => {
 })
 
 describe('before anything has been collected', () => {
-  it('says so, and says nothing is written to any host', async () => {
+  it('says so, and says nothing is written to any server', async () => {
     mount([server('a', 'web-1')], {})
     expect((await screen.findByText(/No authorized_keys have been collected yet/)).textContent).toBeTruthy()
     expect(document.body.textContent).toContain('no private key is touched')
@@ -627,7 +628,7 @@ describe.skipIf(!ACCESS_WRITE_ENABLED)('revoking a key', () => {
     expect(Object.keys(target.cfg)).not.toContain('passphrase')
   })
 
-  it('names every host it will not touch, in the same dialog as the ones it will', async () => {
+  it('names every server it will not touch, in the same dialog as the ones it will', async () => {
     // A host quietly left out of a fleet-wide revocation is the exact failure
     // the read half exists to prevent.
     mountWrite({
@@ -679,7 +680,7 @@ describe.skipIf(!ACCESS_WRITE_ENABLED)('revoking a key', () => {
     const unconfirmed = await screen.findByTestId('outcome-c')
 
     expect(committed.textContent).toContain('Committed')
-    expect(failed.textContent).toContain('Reverted — the host would not let a new session in')
+    expect(failed.textContent).toContain('Reverted — the server would not let a new session in')
     expect(unconfirmed.textContent).toContain('Reverted — nothing confirmed it in time')
 
     // Three labels, three chips, three classes. The one that is not a fault is
@@ -694,7 +695,7 @@ describe.skipIf(!ACCESS_WRITE_ENABLED)('revoking a key', () => {
     ).toBe(3)
   })
 
-  it('keeps a host whose staged write never landed apart from all three', async () => {
+  it('keeps a server whose staged write never landed apart from all three', async () => {
     // Nothing happened there at all: no backup, no watchdog, no change. It is a
     // fourth thing, and calling it "reverted" would say a file was put back
     // that was never replaced.
@@ -720,5 +721,245 @@ describe.skipIf(!ACCESS_WRITE_ENABLED)('revoking a key', () => {
     const problem = await screen.findByTestId('access-problem')
     expect(problem.textContent).toContain('Nothing was changed')
     expect(problem.textContent).toContain('the collection has changed since the plan was shown')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Item 45: keys nobody is using
+// ---------------------------------------------------------------------------
+//
+// The verdict itself is tested in tests/staleAccounts.test.ts. What is tested
+// here is that the panel ACTUALLY CALLS IT -- a builder nothing calls is the
+// failure this roadmap section keeps turning up -- and that the two answers it
+// must never merge stay separate on screen.
+
+/** A collection with one account, built directly: the wire parser has its own
+ *  tests and this one is about what the panel does with the result. */
+const withAccounts = (accounts: unknown[]): HostAccess =>
+  ({
+    ...complete(),
+    accounts
+  }) as HostAccess
+
+const account = (over: Record<string, unknown>): Record<string, unknown> => ({
+  user: 'deploy',
+  uid: 1001,
+  shell: '/bin/bash',
+  home: '/home/deploy',
+  keys: [{ type: 'ssh-ed25519', comment: 'laptop', fingerprint: ED25519_FP }],
+  keysStatus: 'ok',
+  keyPath: '/home/deploy/.ssh/authorized_keys',
+  hasLegacyKeyFile: false,
+  passwordLocked: false,
+  accountStatus: 'ok',
+  expiresText: null,
+  expired: false,
+  adminGroups: [],
+  lastLoginText: null,
+  lastLoginAt: null,
+  neverLoggedIn: true,
+  ...over
+})
+
+describe('keys nobody is using', () => {
+  it('names an account that holds a key and has never logged in', async () => {
+    mount([server('a', 'web-1')], { a: { access: withAccounts([account({})]), at: 1 } })
+    await waitFor(() => screen.getByText('Keys nobody is using'))
+    expect(document.body.textContent).toContain('never used')
+    expect(document.body.textContent).toContain('deploy')
+  })
+
+  // The distinction the whole verdict exists for. A server without `lastlog`
+  // answers "no login recorded" about every account, including the one somebody
+  // used a minute ago.
+  it('does not call an account idle when the server could not say', async () => {
+    mount([server('a', 'web-1')], {
+      a: {
+        access: withAccounts([account({ neverLoggedIn: false, lastLoginAt: null, lastLoginText: null })]),
+        at: 1
+      }
+    })
+    await waitFor(() => screen.getByText('Keys nobody is using'))
+    expect(document.body.textContent).toContain('could not tell')
+    expect(document.body.textContent).toContain('lastlog')
+    expect(document.body.textContent).not.toContain('never used')
+  })
+
+  it('says nothing is idle when every key has been used recently', async () => {
+    mount([server('a', 'web-1')], {
+      a: {
+        access: withAccounts([
+          account({ neverLoggedIn: false, lastLoginAt: Date.now() - 86_400_000 })
+        ]),
+        at: 1
+      }
+    })
+    await waitFor(() => screen.getByText('Keys nobody is using'))
+    expect(document.body.textContent).toContain('used recently')
+  })
+
+  // Revoke is item 36's, behind its own gate and its own rollback.
+  it('offers no revoke of its own from this list', async () => {
+    mount([server('a', 'web-1')], { a: { access: withAccounts([account({})]), at: 1 } })
+    await waitFor(() => screen.getByText('Keys nobody is using'))
+    expect(document.body.textContent).toContain('staged with a rollback')
+  })
+})
+
+describe('service accounts with keys', () => {
+  it('names a daemon account that could be logged into', async () => {
+    mount([server('a', 'web-1')], {
+      a: {
+        access: withAccounts([
+          account({ user: 'postgres', uid: 26, shell: '/bin/bash', neverLoggedIn: false, lastLoginAt: Date.now() })
+        ]),
+        at: 1
+      }
+    })
+    await waitFor(() => screen.getByText('Service accounts with keys'))
+    expect(document.body.textContent).toContain('postgres')
+    expect(document.body.textContent).toContain('can log in')
+  })
+
+  it('does not list root, because a key there is how this app connects', async () => {
+    mount([server('a', 'web-1')], {
+      a: { access: withAccounts([account({ user: 'root', uid: 0, shell: '/bin/bash' })]), at: 1 }
+    })
+    await waitFor(() => screen.getByText('Keys nobody is using'))
+    expect(screen.queryByText('Service accounts with keys')).toBeNull()
+  })
+})
+
+describe('what sudo actually grants', () => {
+  // THREE states, and the panel has to keep them apart: `undefined` is nobody
+  // consented to the read, `null` is the read was asked for and failed, and an
+  // array is an answer. Rendering all three the same loses the whole feature.
+  const withSudoers = (sudoers: unknown): HostAccess =>
+    ({
+      ...complete(),
+      accounts: [account({ user: 'ops', adminGroups: ['wheel'] })],
+      sudoers
+    }) as unknown as HostAccess
+
+  it('shows nothing at all when nobody consented to the read', async () => {
+    mount([server('a', 'web-1')], { a: { access: withSudoers(undefined), at: 1 } })
+    await waitFor(() => screen.getByText('Keys nobody is using'))
+    expect(screen.queryByText('What sudo actually grants')).toBeNull()
+  })
+
+  it('says the read failed rather than showing a server with no sudo rules', async () => {
+    mount([server('a', 'web-1')], { a: { access: withSudoers(null), at: 1 } })
+    await waitFor(() => screen.getByText('What sudo actually grants'))
+    expect(document.body.textContent).toContain('could not be read')
+    expect(document.body.textContent).toContain('not a server with no sudo rules')
+  })
+
+  it('reports what a rule grants, matched through the account’s group', async () => {
+    const files = [
+      {
+        path: '/etc/sudoers',
+        unreadable: false,
+        ...parseSudoers('%wheel ALL=(ALL) NOPASSWD: ALL\n')
+      }
+    ]
+    mount([server('a', 'web-1')], { a: { access: withSudoers(files), at: 1 } })
+    await waitFor(() => screen.getByText('What sudo actually grants'))
+    // `ops` is not named in the file; it is in `wheel`, which is.
+    expect(document.body.textContent).toContain('ANY command')
+    expect(document.body.textContent).toContain('WITHOUT a password')
+  })
+
+  it('says the picture is incomplete when a file could not be read', async () => {
+    const files = [
+      { path: '/etc/sudoers', unreadable: false, ...parseSudoers('%wheel ALL=(ALL) ALL\n') },
+      { path: '/etc/sudoers.d/10-ops', unreadable: true, ...parseSudoers('') }
+    ]
+    mount([server('a', 'web-1')], { a: { access: withSudoers(files), at: 1 } })
+    await waitFor(() => screen.getByText('What sudo actually grants'))
+    expect(document.body.textContent).toContain('could not be read')
+    expect(document.body.textContent).toContain('not root')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The access-review export. Item 46.
+// ---------------------------------------------------------------------------
+
+describe('exporting the review', () => {
+  /** The download, captured. jsdom has no file save, and what matters is the
+   *  BYTES this hands over — an export whose gaps are invisible is the failure
+   *  this feature is written against. */
+  function captureDownload(): { body: () => string; name: () => string } {
+    let body = ''
+    let name = ''
+    const realCreate = URL.createObjectURL
+    const realRevoke = URL.revokeObjectURL
+    const realClick = HTMLAnchorElement.prototype.click
+    ;(URL as unknown as { createObjectURL: (b: Blob) => string }).createObjectURL = (b: Blob): string => {
+      void b.text().then((t) => {
+        body = t
+      })
+      return 'blob:x'
+    }
+    ;(URL as unknown as { revokeObjectURL: () => void }).revokeObjectURL = (): void => {}
+    HTMLAnchorElement.prototype.click = function click(this: HTMLAnchorElement): void {
+      name = this.download
+    }
+    return {
+      body: () => {
+        URL.createObjectURL = realCreate
+        URL.revokeObjectURL = realRevoke
+        HTMLAnchorElement.prototype.click = realClick
+        return body
+      },
+      name: () => name
+    }
+  }
+
+  it('puts a server that could not be read into the file, not out of it', async () => {
+    // The whole point. A host missing from an access review reads as a host
+    // nobody can reach.
+    mount([server('a', 'web-1'), server('b', 'db-1')], {
+      a: { access: complete(), at: 1 },
+      b: { error: 'permission denied', errorAt: 1 }
+    })
+    await waitFor(() => expect(screen.getByText('Export CSV')).toBeTruthy())
+    const cap = captureDownload()
+    await userEvent.click(screen.getByText('Export CSV'))
+    await waitFor(() => expect(cap.body()).toContain('db-1'))
+    const csv = cap.body()
+    expect(csv).toContain('permission denied')
+    expect(csv).toContain('web-1')
+  })
+
+  it('writes the coverage into the same file as the rows', async () => {
+    // A caveat in a second download is a caveat nobody has when they read the
+    // first.
+    mount([server('a', 'web-1')], { a: { access: complete(), at: 1 } })
+    await waitFor(() => expect(screen.getByText('Export CSV')).toBeTruthy())
+    const cap = captureDownload()
+    await userEvent.click(screen.getByText('Export CSV'))
+    await waitFor(() => expect(cap.body()).toContain('# coverage'))
+    expect(cap.body()).toContain('accountsWithUnreadKeys')
+  })
+
+  it('writes JSON with the coverage first', async () => {
+    mount([server('a', 'web-1')], { a: { access: complete(), at: 1 } })
+    await waitFor(() => expect(screen.getByText('Export JSON')).toBeTruthy())
+    const cap = captureDownload()
+    await userEvent.click(screen.getByText('Export JSON'))
+    await waitFor(() => expect(cap.body()).toContain('"coverage"'))
+    const json = cap.body()
+    expect(json.indexOf('"coverage"')).toBeLessThan(json.indexOf('"accounts"'))
+    expect(cap.name()).toMatch(/^access-review-\d{4}-\d\d-\d\d\.json$/)
+  })
+
+  it('never writes key material', async () => {
+    mount([server('a', 'web-1')], { a: { access: complete(), at: 1 } })
+    await waitFor(() => expect(screen.getByText('Export CSV')).toBeTruthy())
+    const cap = captureDownload()
+    await userEvent.click(screen.getByText('Export CSV'))
+    await waitFor(() => expect(cap.body().length).toBeGreaterThan(0))
+    expect(cap.body()).not.toContain(ED25519)
   })
 })

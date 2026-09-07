@@ -49,10 +49,10 @@ const metrics = (over: Partial<HostMetrics> = {}): HostMetrics => ({
 })
 
 describe('mapping a sample onto the schema', () => {
-  it('keeps exactly the eight numeric series', () => {
-    const s = metricsToSamples(metrics())
+  it('keeps exactly the nine numeric series', () => {
+    const s = metricsToSamples({ ...metrics(), inodePct: 21 })
     expect(Object.keys(s).sort()).toEqual(
-      ['cpu', 'diskPct', 'diskUsed', 'memPct', 'memUsed', 'netRx', 'netTx', 'uptime'].sort()
+      ['cpu', 'diskPct', 'diskUsed', 'inodePct', 'memPct', 'memUsed', 'netRx', 'netTx', 'uptime'].sort()
     )
     expect(s.cpu).toBe(12)
     expect(s.uptime).toBe(9000)
@@ -214,7 +214,7 @@ describe('a sweep against a real store', () => {
     })
   })
 
-  it('records an unreachable host once, not once per sweep', async () => {
+  it('records an unreachable server once, not once per sweep', async () => {
     let ok = true
     const s = sampler(() => (ok ? { ok: true, data: metrics() } : { ok: false, error: 'timeout' }))
     s.configure({ enabled: true, intervalMs: 120_000, targets: [target('a')] })
@@ -290,7 +290,7 @@ describe('the store never breaks a sweep', () => {
     expect(await run(() => angry)).toEqual(['fleet:a', 'fleet:b', 'fleet:a', 'fleet:b'])
   })
 
-  it('writes one transaction per sweep, not one per host', async () => {
+  it('writes one transaction per sweep, not one per server', async () => {
     let transactions = 0
     let samples = 0
     const counter: HistoryWriter = {

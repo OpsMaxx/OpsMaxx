@@ -1,0 +1,6 @@
+===SP-KERNEL-RUNNING===
+6.12.76-linuxkit
+===SP-KERNEL-BOOT===
+===SP-KERNEL-DPKG===
+===SP-KERNEL-DPKGARCH===
+arm64

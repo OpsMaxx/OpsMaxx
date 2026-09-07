@@ -8,10 +8,14 @@ import type {
   DockerProbe,
   DockerReclaimItem,
   DockerReclaimResult,
+  DockerHealthLogProbe,
+  DockerNetworkProbe,
   DockerStatsProbe
 } from '../../shared/docker'
 import {
   SUDO_PROBE,
+  buildDockerHealthLogCommand,
+  buildDockerNetworkCommand,
   buildDockerActionCommand,
   buildDockerReclaimCommand,
   parseDockerReclaimOutput,
@@ -23,10 +27,26 @@ import {
   parseDockerActionOutput,
   parseDockerDiskDetailOutput,
   parseDockerDiskOutput,
+  parseDockerHealthLogOutput,
+  parseDockerNetworkOutput,
   parseDockerInspectOutput,
   parseDockerOutput,
-  parseDockerStatsOutput
+  parseDockerStatsOutput,
+  validateImageRef
 } from '../../shared/docker'
+import {
+  buildScannerProbeCommand,
+  buildTrivyCommand,
+  parseTrivyOutput,
+  type ImageScanProbe
+} from '../../shared/imageScan'
+import {
+  buildEnginePrecheckCommand,
+  parseEnginePrecheck,
+  type EnginePrecheckProbe
+} from '../../shared/enginePrecheck'
+import type { PackageManager } from '../../shared/hostFacts'
+import { redactOutput } from './secretRedaction'
 
 // Reading docker on a remote host, and the three lifecycle verbs.
 //
@@ -141,7 +161,7 @@ export class DockerReader {
       // A transport failure is not a docker failure, and saying "docker is
       // not installed" when the host was simply unreachable sends someone to
       // fix the wrong machine.
-      return onTransportFailure(r.error ?? 'could not reach the host')
+      return onTransportFailure(r.error ?? 'could not reach the server')
     }
     // Both streams, joined on a newline rather than glued. The collectors
     // redirect docker's own stderr into stdout, so anything left on stderr
@@ -304,6 +324,136 @@ export class DockerReader {
       return result.ok && usedSudo ? { ...result, usedSudo: true } : result
     } catch (e) {
       return { ok: false, reason: 'unknown', detail: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  /**
+   * The healthcheck log for named containers, REDACTED HERE.
+   *
+   * The one place in this file where a read is rewritten before it is returned.
+   * A healthcheck's `Output` is whatever the check printed, and a measured one
+   * carried a URL with a password in it, a query token and an
+   * `Authorization: Bearer` header. Everything below this line -- the renderer,
+   * the panel, anything that later logs what the panel showed -- sees the
+   * redacted form and never the original, which is the property that could not
+   * be had by redacting in the shared parser.
+   *
+   * `redactOutput` with no known secrets: the pattern rules are what apply to a
+   * healthcheck's stdout, and the per-server secrets are not this reader's to
+   * resolve.
+   */
+  async healthLogs(
+    cfg: unknown,
+    refs: string[],
+    opts: DockerListOptions = {}
+  ): Promise<DockerHealthLogProbe> {
+    const build = (sudo: boolean): string => buildDockerHealthLogCommand(refs, { sudo })
+    build(opts.sudo === true)
+    try {
+      const { result, usedSudo } = await this.readWithFailover<DockerHealthLogProbe>(
+        cfg,
+        build,
+        parseDockerHealthLogOutput,
+        (detail) => ({ ok: false, reason: 'unknown', detail }),
+        opts,
+        READ_TIMEOUT_MS
+      )
+      if (!result.ok) return result
+      const logs = result.logs.map((l) => ({
+        ...l,
+        entries: l.entries.map((e) => ({ ...e, output: redactOutput(e.output) }))
+      }))
+      return usedSudo ? { ok: true, logs, usedSudo: true } : { ok: true, logs }
+    } catch (e) {
+      return { ok: false, reason: 'unknown', detail: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  /**
+   * Networks, and what holds each one.
+   *
+   * A separate read from `system df -v`, which lists no networks at all. Two
+   * commands rather than a `network inspect`: inspect counts the containers
+   * attached RIGHT NOW, and a stopped container still holds its network. See
+   * the builder.
+   */
+  async networks(cfg: unknown, opts: DockerListOptions = {}): Promise<DockerNetworkProbe> {
+    try {
+      const { result, usedSudo } = await this.readWithFailover<DockerNetworkProbe>(
+        cfg,
+        (sudo) => buildDockerNetworkCommand({ sudo }),
+        parseDockerNetworkOutput,
+        (detail) => ({ ok: false, reason: 'unknown', detail }),
+        opts,
+        READ_TIMEOUT_MS
+      )
+      return result.ok && usedSudo ? { ...result, usedSudo: true } : result
+    } catch (e) {
+      return { ok: false, reason: 'unknown', detail: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  /**
+   * A vulnerability scan of one image, if the host already has a scanner.
+   *
+   * NO SUDO, and no failover to it. Every other read here escalates when the
+   * socket refuses; this one does not, because escalating means running a
+   * THIRD-PARTY BINARY as root on somebody's server to satisfy a panel. A scan
+   * that cannot reach the socket says so.
+   *
+   * TWO COMMANDS AND NEVER AN INSTALL. The probe is `command -v trivy`; if it
+   * says nothing, the answer is "no scanner", which is its own class and is not
+   * a clean image. Putting a security tool on somebody's server because a panel
+   * wanted a number is not a decision this app makes.
+   */
+  async scanImage(cfg: unknown, ref: string): Promise<ImageScanProbe> {
+    if (!validateImageRef(ref)) {
+      return { ok: false, detail: 'refusing to scan an image reference that could not be validated' }
+    }
+    try {
+      const probe = await this.deps.exec(cfg, buildScannerProbeCommand(), 15_000)
+      if (!probe.ok) return { ok: false, detail: probe.error ?? 'could not reach the server' }
+      if ((probe.stdout ?? '').trim() === '') {
+        return { ok: true, scannerPresent: false, reading: null }
+      }
+      // 10 minutes: a first scan downloads a ~111 MB vulnerability database,
+      // measured, and reporting that as a failure part way through would be
+      // reporting a working scan as broken.
+      const run = await this.deps.exec(cfg, buildTrivyCommand(ref), 600_000)
+      if (!run.ok) return { ok: false, detail: run.error ?? 'the scan did not run' }
+      // Joined the way `readWithFailover` joins them and for the same reason:
+      // the builder already redirects trivy's stderr into stdout, so anything
+      // left on stderr came from the shell or the transport, and gluing it on
+      // directly would weld it to the last vulnerability row.
+      const out = run.stdout ?? ''
+      const err = run.stderr ?? ''
+      return {
+        ok: true,
+        scannerPresent: true,
+        reading: parseTrivyOutput(err === '' ? out : `${out}\n${err}`)
+      }
+    } catch (e) {
+      return { ok: false, detail: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  /**
+   * The engine-upgrade precheck -- item 42.
+   *
+   * Read-only and unelevated. Its package block is SHOWN rather than parsed;
+   * the only thing this returns parsed is the live-restore flag, which was
+   * measured. See `shared/engineUpgrade.ts` for why the installed set is left
+   * to a person.
+   */
+  async enginePrecheck(cfg: unknown, manager: PackageManager): Promise<EnginePrecheckProbe> {
+    try {
+      const r = await this.deps.exec(cfg, buildEnginePrecheckCommand(manager), READ_TIMEOUT_MS)
+      if (!r.ok) return { ok: false, detail: r.error ?? 'could not reach the server' }
+      const out = r.stdout ?? ''
+      const err = r.stderr ?? ''
+      return { ok: true, precheck: parseEnginePrecheck(err === '' ? out : `${out}\n${err}`) }
+    } catch (e) {
+      return { ok: false, detail: e instanceof Error ? e.message : String(e) }
     }
   }
 

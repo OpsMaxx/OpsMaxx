@@ -6,6 +6,9 @@ import {
   DISABLE_ENV,
   HISTORY_FILE,
   METRICS,
+  SWEEP_METRICS,
+  databaseSubject,
+  historySubjectIsDatabase,
   RETENTION_FULL_DAYS,
   RETENTION_HOURLY_DAYS,
   eventRetentionDays,
@@ -198,7 +201,7 @@ describe('samples round-trip', () => {
     ])
   })
 
-  it('stores hosts as small integers, so the id length does not reach the rows', async () => {
+  it('stores servers as small integers, so the id length does not reach the rows', async () => {
     // The 21.9 bytes/row measurement assumes there is nothing in a row but four
     // small values. A server id repeated 86,400 times a day as a string would
     // be most of the file, so this is a size assertion wearing a schema costume:
@@ -309,7 +312,7 @@ describe('facts', () => {
     expect(s.readFacts('h1').map((f) => f.key)).toEqual(['unit:fooXbar', 'unit:other'])
   })
 
-  it('returns nothing for a host it has never seen', async () => {
+  it('returns nothing for a server it has never seen', async () => {
     const s = await open()
     expect(s.readFacts('never-sampled')).toEqual([])
     expect(s.readEvents({ hostId: 'never-sampled' })).toEqual([])
@@ -317,7 +320,7 @@ describe('facts', () => {
 })
 
 describe('events', () => {
-  it('filters by host, kind and time, newest first', async () => {
+  it('filters by server, kind and time, newest first', async () => {
     const s = await open()
     s.recordEvent('host-unreachable', 'a', { error: 'timeout' }, 1000)
     s.recordEvent('host-recovered', 'a', undefined, 2000)
@@ -340,7 +343,7 @@ describe('events', () => {
     expect(s.readEvents({ kind: 'retention' })[0].cursor.ts).toBe(4000)
   })
 
-  it('an unknown host filter returns nothing, not everything', async () => {
+  it('an unknown server filter returns nothing, not everything', async () => {
     const s = await open()
     s.recordEvent('x', 'a', undefined, 1000)
     // Falling back to "no filter" here would be a quiet lie: a caller asking
@@ -496,17 +499,30 @@ describe('retention', () => {
     // same connection and a write landing while it steps fails it. See the
     // ordering note on 'takes a .bak through the backup API'.
     await expect(s.backupReady).resolves.toBe(true)
-    // The roadmap's reference estate: fifteen hosts, two-minute cadence, eight
-    // metrics. 15 * 8 * 30/hour = 3,600 rows an hour, 86,400 a day.
+    // The roadmap's reference estate: fifteen hosts, two-minute cadence, NINE
+    // metrics. 15 * 9 * 30/hour = 4,050 rows an hour, 97,200 a day.
+    //
+    // Eight until item 47 appended `inodePct`, which is why these numbers moved
+    // by an eighth. That is the point of pinning them as literals: a metric is
+    // 12.5% more storage per host per day, and the decision to spend it should
+    // fail a test and be re-typed rather than pass quietly. Item A's warning is
+    // about the 5x version of exactly this.
     // Literals, not the implementation's own formula retyped: writing
     // `15 * 8 * 30 * 24 * RETENTION_FULL_DAYS` here asserts that multiplication
     // works, and passes for any horizon anybody later changes.
     const expected = steadyStateRows(15, 120_000)
-    expect(expected.samples).toBe(604_800)
-    expect(expected.hourly).toBe(239_040)
+    expect(expected.samples).toBe(680_400)
+    expect(expected.hourly).toBe(268_920)
     expect(RETENTION_FULL_DAYS).toBe(7)
     expect(RETENTION_HOURLY_DAYS).toBe(90)
-    expect(METRICS.length).toBe(8)
+    // NINE sweep metrics and TEN metrics in all. `dbBytes` was appended for
+    // item 47's database growth series and is written when somebody opens a
+    // database panel, not on the sweep -- so it costs a handful of rows a day
+    // rather than 30 an hour per host, and the budget above is arithmetic over
+    // the sweep ones. Both numbers are pinned: appending a SWEEP metric should
+    // still fail this test and be re-typed.
+    expect(SWEEP_METRICS.length).toBe(9)
+    expect(METRICS.length).toBe(10)
 
     // Writing 604,800 rows in a unit test is a minute of CI for a number that
     // scales linearly, so this writes one host for eight days and checks that
@@ -525,11 +541,14 @@ describe('retention', () => {
           diskUsed: 3,
           netRx: 4,
           netTx: 5,
-          uptime: 6
+          uptime: 6,
+          inodePct: 7
         })
       }
     })
-    const written = days * 24 * 30 * METRICS.length
+    // Nine, because this loop writes the nine SWEEP metrics -- which is what a
+    // real sweep writes. `dbBytes` is not one of them and is not written here.
+    const written = days * 24 * 30 * SWEEP_METRICS.length
     expect(s.counts().samples).toBe(written)
 
     s.retain(now)
@@ -537,9 +556,9 @@ describe('retention', () => {
     const oneHost = steadyStateRows(1, cadence)
     // Seven days at full resolution, to the row.
     expect(after.samples).toBe(oneHost.samples)
-    expect(after.samples).toBe(7 * 24 * 30 * 8)
-    // And the eighth day folded into 24 hours x 8 metrics.
-    expect(after.hourly).toBe(24 * METRICS.length)
+    expect(after.samples).toBe(7 * 24 * 30 * 9)
+    // And the eighth day folded into 24 hours x the nine SWEEP metrics.
+    expect(after.hourly).toBe(24 * SWEEP_METRICS.length)
 
     // A second pass with no new data is a no-op: retention converges rather
     // than eating into the window it is supposed to keep.
@@ -562,9 +581,9 @@ describe('retention', () => {
     const rows = after.samples + after.hourly
     const perRow = primary / rows
     console.log(
-      `[history] 1 host, 7d full + 1d hourly: ${rows} rows, ` +
+      `[history] 1 server, 7d full + 1d hourly: ${rows} rows, ` +
         `${(primary / 1024 / 1024).toFixed(2)} MB in the primary, ${perRow.toFixed(1)} bytes/row. ` +
-        `15-host steady state extrapolates to ${((perRow * steadyStateRows(15, cadence).total) / 1024 / 1024).toFixed(1)} MB, ` +
+        `15-server steady state extrapolates to ${((perRow * steadyStateRows(15, cadence).total) / 1024 / 1024).toFixed(1)} MB, ` +
         `about twice that on disk once the .bak is counted.`
     )
     // The whole retention argument is that 15 hosts fit in tens of megabytes,
@@ -1041,7 +1060,7 @@ describe('file permissions', () => {
 })
 
 describe('the event read path', () => {
-  it('uses the (host, ts) index instead of scanning the ts index', async () => {
+  it('uses the (server, ts) index instead of scanning the ts index', async () => {
     // `(?1 IS NULL OR e.host = ?1)` is not sargable: SQLite cannot use an index
     // for a comparison that might be "match everything". Measured on HEAD, the
     // shipped statement plans as `SCAN e USING INDEX events_ts` — so
@@ -1146,7 +1165,11 @@ describe('the three capacity series, in one pass', () => {
     // metric ids are derived from METRICS rather than typed out — inserting a
     // metric into the middle of that array would otherwise silently read three
     // different series.
-    expect(CAPACITY_METRIC_IDS_FOR_TESTS).toBe('1, 2, 4')
+    // `9`, not `4`: `inodePct` was APPENDED in item 47, so it took the next id
+    // rather than displacing anything. An id list of 1, 2, 4, 9 is what
+    // append-only looks like from here, and a reordering would show up as this
+    // string changing shape.
+    expect(CAPACITY_METRIC_IDS_FOR_TESTS).toBe('1, 2, 4, 9')
     expect(METRICS[0]).toBe('cpu')
     expect(METRICS[1]).toBe('memPct')
     expect(METRICS[3]).toBe('diskPct')
@@ -1160,7 +1183,7 @@ describe('the three capacity series, in one pass', () => {
           .map((r) => r.detail)
           .join(' | ')
       const full = plan(
-        'SELECT ts, metric, v FROM samples WHERE host = ? AND ts >= ? AND ts <= ? ' +
+        'SELECT ts, metric, v FROM samples WHERE server = ? AND ts >= ? AND ts <= ? ' +
           'AND metric IN (1, 2, 4) ORDER BY ts'
       )
       // One range seek on the primary key, and no sort afterwards: the key
@@ -1191,7 +1214,7 @@ describe('the three capacity series, in one pass', () => {
       }
     })
     const trends = s.readTrends('h1', 0, 5 * 60_000)
-    expect(Object.keys(trends).sort()).toEqual(['cpu', 'diskPct', 'memPct'])
+    expect(Object.keys(trends).sort()).toEqual(['cpu', 'diskPct', 'inodePct', 'memPct'])
     expect(trends.cpu.map((p) => p.v)).toEqual([10, 11, 12, 13, 14])
     expect(trends.memPct.map((p) => p.v)).toEqual([20, 21, 22, 23, 24])
     expect(trends.diskPct.map((p) => p.v)).toEqual([30, 31, 32, 33, 34])
@@ -1233,14 +1256,17 @@ describe('the three capacity series, in one pass', () => {
     expect(s.readTrends('h1', 3 * 60_000, 5 * 60_000).diskPct.map((p) => p.v)).toEqual([3, 4, 5])
   })
 
-  it('answers a host it has never seen with three empty series, not with everything', async () => {
+  it('answers a server it has never seen with empty series, not with everything', async () => {
     const s = await open()
     s.recordSamples('h1', 1000, { diskPct: 50 })
     const trends = s.readTrends('h2', 0, 9999)
-    expect(trends).toEqual({ cpu: [], memPct: [], diskPct: [] })
+    // One key per CAPACITY_METRIC and every one of them empty. Empty is the
+    // honest answer for a server nobody has sampled; absent keys would read as
+    // "this server has no disk".
+    expect(trends).toEqual({ cpu: [], memPct: [], diskPct: [], inodePct: [] })
   })
 
-  it('does not leak one host samples into another host trends', async () => {
+  it('does not leak one server samples into another server trends', async () => {
     const s = await open()
     s.transaction(() => {
       for (let i = 0; i < 20; i++) {
@@ -1442,7 +1468,7 @@ describe('jobsForHost', () => {
     })
   }
 
-  it('returns the job together with this host own target row, not another host row', async () => {
+  it('returns the job together with this server own target row, not another server row', async () => {
     const s = await open()
     seed(s, 'j1', AT, ['journalctl --vacuum-time=2d'], ['a', 'b'])
     s.updateJobTarget('j1', 'a', { outcome: 'ok', exitCode: 0 })
@@ -1474,7 +1500,7 @@ describe('jobsForHost', () => {
     expect(s.jobsForHost('h', AT, AT + 100).map((r) => r.job.id)).toEqual(['upper', 'lower'])
   })
 
-  it('returns nothing for a host that ran nothing, and for no host at all', async () => {
+  it('returns nothing for a server that ran nothing, and for no server at all', async () => {
     const s = await open()
     seed(s, 'j1', AT, ['a'], ['h'])
     expect(s.jobsForHost('other', AT - 1000, AT + 1000)).toEqual([])
@@ -1494,7 +1520,7 @@ describe('jobsForHost', () => {
     expect(s.jobsForHost('h', AT - 1000, AT + 100_000, 2).map((r) => r.job.id)).toEqual(['j4', 'j3'])
   })
 
-  it('reads the host index rather than scanning a year of targets', async () => {
+  it('reads the server index rather than scanning a year of targets', async () => {
     // The read a runbook does on every open. job_target's primary key leads
     // with job_id, so without job_target_server this is a full scan of every
     // target row on every host.
@@ -1515,5 +1541,37 @@ describe('jobsForHost', () => {
     db.close()
     expect(plan).toContain('job_target_server')
     expect(plan).not.toContain('SCAN t')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Item 47's database growth series: a subject that is not a server.
+// ---------------------------------------------------------------------------
+
+describe('a database as a history subject', () => {
+  it('interns beside a host without a schema change', () => {
+    // `host_key` is opaque TEXT and always has been, which is the whole reason
+    // this needed no migration.
+    expect(databaseSubject('conn-7')).toBe('db:conn-7')
+    expect(historySubjectIsDatabase(databaseSubject('conn-7'))).toBe(true)
+    expect(historySubjectIsDatabase('srv-7')).toBe(false)
+  })
+
+  // The budget is arithmetic over what a SWEEP writes. Counting an on-demand
+  // series there would overstate the cost of adding one by four orders of
+  // magnitude, which would make the budget useless for the decision it exists
+  // to force.
+  it('is not counted in the per-host sweep budget', () => {
+    expect(SWEEP_METRICS).not.toContain('dbBytes')
+    expect(METRICS).toContain('dbBytes')
+    expect(steadyStateRows(1, 120_000).samples).toBe(7 * 24 * 30 * SWEEP_METRICS.length)
+  })
+
+  // Ids are the index + 1 and never move. A reordering would silently
+  // reinterpret every row already on disk.
+  it('took the next id rather than displacing one', () => {
+    expect(METRICS.indexOf('dbBytes')).toBe(METRICS.length - 1)
+    expect(METRICS.indexOf('cpu')).toBe(0)
+    expect(METRICS.indexOf('inodePct')).toBe(8)
   })
 })

@@ -5,10 +5,27 @@ import { describeConsequence, formatRiskLabel, riskTone } from '../../../../shar
 import { bridgeOn } from '../../lib/bridge'
 
 export function AiApprovals(): React.JSX.Element {
-  const [approvals, setApprovals] = useState<ApprovalRequest[]>([])
+  // `null` until the first read comes back, NOT `[]`.
+  //
+  // This panel says "Nothing waiting on you right now", and that sentence is
+  // the reason an operator walks away from this screen. Said before the read
+  // returned, it is a claim about an agent that may be blocked on a decision
+  // this very moment. Of the three screens in this app that assert an absence,
+  // this is the one whose absence someone acts on.
+  const [approvals, setApprovals] = useState<ApprovalRequest[] | null>(null)
+  // A read that FAILED is not an empty list either, and it used to become one:
+  // the promise had no rejection path, so a bridge error left the panel saying
+  // nothing was waiting, for as long as it stayed open.
+  const [unreadable, setUnreadable] = useState(false)
 
   const load = (): void => {
-    void window.opsmaxx?.aiMcp.listApprovals().then((a) => setApprovals(a ?? []))
+    void window.opsmaxx?.aiMcp
+      .listApprovals()
+      .then((a) => {
+        setApprovals(a ?? [])
+        setUnreadable(false)
+      })
+      .catch(() => setUnreadable(true))
   }
 
   useEffect(() => {
@@ -34,14 +51,23 @@ export function AiApprovals(): React.JSX.Element {
         its own request — only this UI can.
       </div>
 
-      {approvals.length === 0 && <div className="s-desc">Nothing waiting on you right now.</div>}
+      {unreadable ? (
+        <div className="s-desc state-unknown">
+          The list of pending approvals could not be read, so this is not a statement that none are
+          waiting.
+        </div>
+      ) : approvals === null ? (
+        <div className="s-desc state-unknown">Checking for anything waiting…</div>
+      ) : approvals.length === 0 ? (
+        <div className="s-desc">Nothing waiting on you right now.</div>
+      ) : null}
 
       {/* Same vocabulary as the modal, from the same module. This list used to
           print a bare "risk: HIGH", which is a word with no scale next to it —
           it cannot be read as the top of three rather than the middle of five,
           and it says nothing about what the action does. Two surfaces showing
           the same request must not disagree about how serious it is. */}
-      {approvals.map((a) => {
+      {(approvals ?? []).map((a) => {
         const subject = {
           capability: a.capability,
           action: a.action,

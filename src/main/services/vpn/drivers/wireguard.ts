@@ -13,6 +13,12 @@ import type {
   VpnProfile,
   VpnStartResult,
   VpnState,
+  VpnPeerStat,
+  VpnCheckName,
+  VpnCheckStatus,
+  VpnDiagnoseCheck,
+  VpnDiagnoseResult,
+  VpnDiagnoseTarget,
   VpnStats,
   VpnStatus,
   VpnValidation,
@@ -192,7 +198,16 @@ interface NetdUpResult {
   assignedIp?: string
 }
 
-interface NetdStatsResult {
+/** The sidecar's `wg.diagnose` reply. Field-for-field with `DiagnoseResult` in
+ *  `sidecar/netd/protocol.go`; the shapes are two halves of one wire format. */
+interface NetdDiagnoseResult {
+  tunnelId: string
+  checks: { name: string; status: string; detail: string; elapsed?: number }[]
+  latencyMs?: number
+  sampledAt: number
+}
+
+export interface NetdStatsResult {
   tunnelId: string
   rxBytes: number
   txBytes: number
@@ -201,7 +216,17 @@ interface NetdStatsResult {
   remoteEndpoint?: string
   assignedIp?: string
   peers: number
+  peerRows?: NetdPeerStats[]
   sampledAt: number
+}
+
+export interface NetdPeerStats {
+  publicKey: string
+  endpoint?: string
+  rxBytes: number
+  txBytes: number
+  /** ABSOLUTE unix seconds, like the aggregate. Zero means never. */
+  lastHandshakeUnixSec?: number
 }
 
 interface NetdForwardOpenResult {
@@ -821,7 +846,7 @@ async function awaitHandshake(run: Run): Promise<void> {
   for (;;) {
     const stats = await send<NetdStatsResult>(run, 'wg.stats', { tunnelId: run.profile.id })
     if (handshakeAgeSec(stats.lastHandshakeUnixSec, run.clock) !== undefined) {
-      publish(run, { stats: toStats(run, stats) })
+      publish(run, { stats: toStats(run.clock, stats) })
       return
     }
     if (run.clock.nowMs() >= deadline) throw handshakeTimeout(run)
@@ -830,17 +855,81 @@ async function awaitHandshake(run: Run): Promise<void> {
   }
 }
 
-function toStats(run: Run, s: NetdStatsResult): VpnStats {
-  const age = handshakeAgeSec(s.lastHandshakeUnixSec, run.clock)
+/**
+ * One peer's row, with the absolute stamp turned into an age exactly as the
+ * aggregate's is -- two conversions of the same field would drift.
+ *
+ * Takes a CLOCK rather than the whole `Run`, which is all it ever used, and is
+ * exported for the same reason `handshakeAgeSec` is: the conversion is the part
+ * worth pinning and a test should not have to build a tunnel to reach it.
+ */
+export function toPeerStat(clock: MonotonicClock, p: NetdPeerStats): VpnPeerStat {
+  const age = handshakeAgeSec(p.lastHandshakeUnixSec, clock)
+  return {
+    publicKey: p.publicKey,
+    ...(p.endpoint ? { endpoint: p.endpoint } : {}),
+    rxBytes: p.rxBytes ?? 0,
+    txBytes: p.txBytes ?? 0,
+    ...(age === undefined ? {} : { lastHandshakeSec: age })
+  }
+}
+
+/**
+ * The sidecar's checklist, narrowed to this side's vocabulary.
+ *
+ * A row whose status is NOT one of the three words is dropped rather than
+ * carried through as an unknown string. The renderer switches on the status to
+ * pick a colour, and a word it has no case for renders as neither pass nor
+ * fail -- which is the one outcome a checklist may not have.
+ */
+export function toDiagnose(id: string, r: NetdDiagnoseResult): VpnDiagnoseResult {
+  const checks: VpnDiagnoseCheck[] = []
+  for (const c of r.checks ?? []) {
+    if (!isCheckName(c.name) || !isCheckStatus(c.status)) continue
+    checks.push({
+      name: c.name,
+      status: c.status,
+      detail: c.detail,
+      ...(typeof c.elapsed === 'number' && Number.isFinite(c.elapsed) ? { elapsed: c.elapsed } : {})
+    })
+  }
+  return {
+    id,
+    checks,
+    // Only ever from a connect that succeeded. A zero here would be a latency
+    // of nothing rather than a latency nobody measured.
+    ...(typeof r.latencyMs === 'number' && r.latencyMs > 0 ? { latencyMs: r.latencyMs } : {}),
+    sampledAt: typeof r.sampledAt === 'number' ? r.sampledAt : Date.now()
+  }
+}
+
+const CHECK_NAMES: readonly VpnCheckName[] = ['handshake', 'dns', 'tcp', 'ipv6', 'server']
+const CHECK_STATUSES: readonly VpnCheckStatus[] = ['ok', 'failed', 'skipped']
+
+function isCheckName(v: string): v is VpnCheckName {
+  return (CHECK_NAMES as readonly string[]).includes(v)
+}
+function isCheckStatus(v: string): v is VpnCheckStatus {
+  return (CHECK_STATUSES as readonly string[]).includes(v)
+}
+
+/** The whole sample. Exported, and taking a clock rather than a `Run`, for the
+ *  reason `toPeerStat` above does. */
+export function toStats(clock: MonotonicClock, s: NetdStatsResult): VpnStats {
+  const age = handshakeAgeSec(s.lastHandshakeUnixSec, clock)
   return {
     rxBytes: s.rxBytes ?? 0,
     txBytes: s.txBytes ?? 0,
     ...(age === undefined ? {} : { lastHandshakeSec: age }),
     ...(s.assignedIp ? { assignedIp: s.assignedIp } : {}),
     ...(s.remoteEndpoint ? { remoteEndpoint: s.remoteEndpoint } : {}),
+    // Absent rather than empty when the sidecar sent no rows: a tunnel whose
+    // peers were removed and a sidecar that does not report rows are different
+    // answers, and only the first is a fact about this tunnel.
+    ...(s.peerRows && s.peerRows.length > 0 ? { peers: s.peerRows.map((p) => toPeerStat(clock, p)) } : {}),
     // The pinned clock, for the same reason the age uses it: a status card
     // whose "as of" time jumps backwards is a card nobody trusts.
-    sampledAt: Math.round(run.clock.nowMs())
+    sampledAt: Math.round(clock.nowMs())
   }
 }
 
@@ -853,7 +942,7 @@ async function sampleHealth(run: Run): Promise<void> {
   const state = stateFromHandshakeAge(age)
   publish(run, {
     state,
-    stats: toStats(run, stats),
+    stats: toStats(run.clock, stats),
     error: state === 'degraded' ? describeVpnError('handshake-timeout', staleDetail(run, stats.remoteEndpoint)) : undefined,
     errorCode: state === 'degraded' ? 'handshake-timeout' : undefined
   })
@@ -1830,7 +1919,7 @@ export const wireguardDriver: VpnDriver<WireGuardSpec> & {
       // That is not a statistic worth an error dialog.
       return null
     }
-    const stats = toStats(run, raw)
+    const stats = toStats(run.clock, raw)
     const state = stateFromHandshakeAge(stats.lastHandshakeSec)
     publish(run, {
       state,
@@ -1839,6 +1928,36 @@ export const wireguardDriver: VpnDriver<WireGuardSpec> & {
       errorCode: state === 'degraded' ? 'handshake-timeout' : undefined
     })
     return stats
+  },
+
+  /**
+   * Run the sidecar's checklist against a live tunnel.
+   *
+   * The TARGET COMES FROM THE OPERATOR and is passed through unexamined: this
+   * is a person naming a host on their own network to see whether their VPN
+   * reaches it, and a list of addresses this app considers acceptable would be
+   * wrong on every estate but the one it was written for. What keeps that
+   * honest is WHERE the call can come from: `vpn:diagnose` is a renderer
+   * channel and the MCP bridge has no route to it, because an agent that could
+   * ask this repeatedly would have a port scanner pointed through somebody's
+   * VPN. `tests/vpnDiagnose.test.ts` fails if that changes.
+   */
+  async diagnose(
+    profile: VpnProfile,
+    target: VpnDiagnoseTarget
+  ): Promise<VpnDiagnoseResult | null> {
+    const id = profile.id
+    const run = runs.get(id)
+    // Not an error: a tunnel that is stopping has nothing to probe, and the
+    // manager turns a null into the same sentence it uses for a profile that
+    // is not running.
+    if (!run || !run.transport || run.stopping) return null
+    const raw = await send<NetdDiagnoseResult>(run, 'wg.diagnose', {
+      tunnelId: id,
+      host: target.host,
+      port: target.port
+    })
+    return toDiagnose(id, raw)
   },
 
   openForward,

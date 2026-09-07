@@ -1,4 +1,5 @@
 import type {
+  ApprovalSurface,
   ApprovalVerdict,
   BroadcastConfirmation,
   BroadcastHostOutcome,
@@ -204,7 +205,7 @@ export type JobHostOutcome = BroadcastHostOutcome | 'abandoned' | 'orphaned' | '
 export const JOB_OUTCOME_LABEL: Record<JobHostOutcome, string> = {
   ok: 'ok',
   nonzero: 'non-zero exit',
-  'missing-command': 'command not on this host',
+  'missing-command': 'command not on this server',
   'permission-denied': 'permission denied',
   timeout: 'timed out',
   unreachable: 'unreachable',
@@ -222,8 +223,8 @@ export const JOB_OUTCOME_LABEL: Record<JobHostOutcome, string> = {
  * bug waiting for someone to reword a sentence.
  */
 export const JOB_ABANDONED_ERROR =
-  'OpsMaxx stopped while this host was running — the SSH channel closed and the remote ' +
-  'command was sent SIGHUP. If it was a package operation, the host may need `dpkg --configure -a`.'
+  'OpsMaxx stopped while this server was running — the SSH channel closed and the remote ' +
+  'command was sent SIGHUP. If it was a package operation, the server may need `dpkg --configure -a`.'
 
 const ABANDONED = /OpsMaxx stopped while/i
 
@@ -391,6 +392,21 @@ export interface JobSpec {
    * are different blast radii.
    */
   gate?: JobGate
+  /**
+   * How to undo this, if the operator wrote one down — item 44.
+   *
+   * NEVER RUN AUTOMATICALLY. Not by the stage gate, not by a halt, not by the
+   * runner. A rollback is a second blast radius: `systemctl stop` to undo a
+   * `start` is still a stop, and the moment a machine decides to run one is
+   * the moment an operator finds out their estate was changed twice by a
+   * decision nobody made. It runs when a human presses the button and answers
+   * a SECOND confirmation, graded on its own commands.
+   *
+   * Carried on the spec rather than remembered elsewhere so it is inside the
+   * approval record: see approvalCommands(). An undo that could be edited
+   * after the fact is not an undo anybody should trust.
+   */
+  rollback?: JobStep[]
 }
 
 /**
@@ -503,6 +519,27 @@ export function planJob(spec: JobSpec, targets: JobTargetRef[]): JobPlan {
 // turned into a record or checked against one, so the two can never drift.
 
 /** The record, minted at the moment the human answers the dialog. */
+/**
+ * The exact strings an approval covers, for one spec.
+ *
+ * ONE implementation, called by the mint and by the verify, because they are
+ * the two halves of a literal comparison: a rollback added to the minting side
+ * and not to the verifying side would be a set of commands recorded as approved
+ * and never checked, which is worse than not recording them.
+ *
+ * The rollback steps are prefixed rather than concatenated plainly, so a job
+ * whose forward step is `X` and whose rollback is `Y` cannot produce the same
+ * approved list as one whose steps are `X` and `Y` -- which would let a
+ * two-step job be re-presented as a one-step job with an undo, under an
+ * approval that verifies.
+ */
+export function approvalCommands(spec: JobSpec): string[] {
+  return [
+    ...spec.steps.map((st) => st.command),
+    ...(spec.rollback ?? []).map((st) => `rollback: ${st.command}`)
+  ]
+}
+
 export function jobApprovalFor(
   spec: JobSpec,
   targets: JobTargetRef[],
@@ -510,11 +547,15 @@ export function jobApprovalFor(
 ): CommandApproval {
   return approvalFor({
     surface: 'job',
-    commands: spec.steps.map((st) => st.command),
+    commands: approvalCommands(spec),
     targets,
     plan: planJob(spec, targets),
     phrase: o.phrase ?? null,
-    confirmedAt: o.confirmedAt
+    confirmedAt: o.confirmedAt,
+    // Recorded so the check below has something to compare against. Not a
+    // command, so it does not appear in the approved step list and does not
+    // make a one-step job report as two.
+    gate: spec.gate
   })
 }
 
@@ -530,11 +571,54 @@ export function verifyJobApproval(
   spec: JobSpec,
   targets: JobTargetRef[]
 ): ApprovalVerdict {
-  return verifyApproval(
+  const verdict = verifyApproval(
     approval,
-    { commands: spec.steps.map((st) => st.command), targets },
+    { commands: approvalCommands(spec), targets },
     planJob(spec, targets)
   )
+  if (!verdict.ok) return verdict
+
+  // ---- the gate, which nothing used to check -----------------------------
+  //
+  // The comment on `JobSpec.gate` has always said a job confirmed with a gate
+  // cannot be resumed without one, "because the two are different blast radii".
+  // NOTHING ENFORCED IT. `verifyApproval` compares commands, targets and the
+  // re-derived plan, and the gate is in none of the three, so a spec approved
+  // with `gate: 'health'` verified CLEAN with the gate deleted -- measured, not
+  // inferred. That turns a staged run which checks between every wave into one
+  // that rolls through all of them unchecked, on the strength of a confirmation
+  // somebody gave for the careful version.
+  //
+  // Checked HERE rather than by adding a line to `approvalCommands`, which was
+  // the first attempt: a gate is not a command, and putting it in that list
+  // made a one-step job report itself as "2 step(s)" in the refusal an operator
+  // reads.
+  const record = approval as { gate?: unknown }
+  // Any value that is PRESENT is the approved gate, including one that is not a
+  // string. A `typeof` filter was here first and made things worse: it turned a
+  // corrupt or tampered value into `undefined`, which takes the
+  // pre-upgrade-record branch below and ALLOWS the run. A value nobody can
+  // interpret must refuse, not wave through.
+  const approvedGate = record.gate === undefined ? undefined : record.gate
+  // An absent `gate` on the SPEC is `none` — no gate — and must compare as
+  // such. Reading it as "whatever was approved" would make deleting the field
+  // outright, which is the likelier edit, the one way past this check.
+  const now: unknown = spec.gate ?? 'none'
+  // A record with NO gate field predates this check and cannot say what it was
+  // confirmed with. Refusing every such job would strand runs launched by the
+  // previous build mid-flight, and the risk it guards against needs an operator
+  // to have edited a spec between launch and resume. It is allowed, and this
+  // comment is the record of that trade.
+  if (approvedGate !== undefined && approvedGate !== now) {
+    return {
+      ok: false,
+      reason:
+        `this run was confirmed with the stage gate set to \`${approvedGate}\` and it is now ` +
+        `\`${now}\`. The gate decides whether each wave is checked before the next one starts, ` +
+        'so the two are different blast radii. Confirm it again.'
+    }
+  }
+  return verdict
 }
 
 /**
@@ -554,7 +638,11 @@ export function verifyJobApproval(
 export interface JobApprovalEntry {
   id: string
   timestamp: string
-  surface: 'broadcast' | 'job'
+  /** ONE vocabulary. This was its own narrower copy -- `'broadcast' | 'job'` --
+   *  beside ApprovalSurface, so the two disagreed about `k8s-exec` and a row
+   *  the k8s path wrote could not be described by the type of the log it was
+   *  written to. */
+  surface: ApprovalSurface
   event: JobApprovalEvent
   /** The job id, or a broadcast run id. */
   jobId: string
@@ -618,11 +706,11 @@ export type JobApprovalEvent = 'granted' | 'refused' | 'resumed' | 'sealed'
  * of its inputs is not a rule.
  */
 export const JOB_RESUME_NOT_REAUTHORISED = (confirmedAt: number | null): string =>
-  'OpsMaxx stopped before this host was reached, and it was not started at the next launch. ' +
+  'OpsMaxx stopped before this server was reached, and it was not started at the next launch. ' +
   (confirmedAt === null
     ? 'The job carries no confirmation this process could check.'
     : `The confirmation it was authorised with was given at ${new Date(confirmedAt).toISOString()}, ` +
-      'by a window that is gone — a host that never started needs a fresh one.')
+      'by a window that is gone — a server that never started needs a fresh one.')
 
 // ------------------------------------------------------------------ records
 
@@ -866,7 +954,7 @@ export const JOB_OUTPUT_CAP = JOB_OUTPUT_HEAD + JOB_OUTPUT_TAIL
 /** The marker written where the elided middle was, so a reader of the stored
  *  output sees a gap rather than a seam. */
 export function elisionNotice(bytes: number): string {
-  return `\n… ${bytes} bytes elided from the middle of this host's output …\n`
+  return `\n… ${bytes} bytes elided from the middle of this server's output …\n`
 }
 
 /**
@@ -1133,7 +1221,7 @@ export const JOB_INSTANCE_NOTE =
  * worse than the fact it was hiding.
  */
 export const JOB_DETACHED_SETTING_NOTE =
-  'Detached jobs write one directory per step under your own state directory on each host — five ' +
+  'Detached jobs write one directory per step under your own state directory on each server — five ' +
   'small marker files, plus the job’s own output, which is as large as the command makes it — so ' +
   'a job survives the connection dropping. Nothing is installed and nothing runs after the job, ' +
   'and the directory is removed as soon as OpsMaxx has read the exit status, or swept seven ' +
@@ -1166,7 +1254,7 @@ export const JOB_DETACHED_SETTING_NOTE =
  */
 export const JOB_OUT_SIZE_NOTE =
   'A detached job’s output file grows with the command: OpsMaxx caps what it stores and what ' +
-  'each poll carries, but it does not truncate the file on the host, because the only portable ' +
+  'each poll carries, but it does not truncate the file on the server, because the only portable ' +
   'way to do that would kill the command with SIGPIPE mid-run. The directory is removed once the ' +
   'exit status has been read, and an abandoned one is swept after seven days.'
 
@@ -1910,7 +1998,7 @@ export function parseJobSignal(stdout: string): JobSignalOutcome {
 
 /** What a host is told when its pid could not be verified, so nothing was sent. */
 export const JOB_SIGNAL_UNVERIFIED_ERROR = (ms: number, dir: string): string =>
-  `Command timed out after ${ms}ms. NOTHING WAS SIGNALLED: this host has no usable \`ps\`, so ` +
+  `Command timed out after ${ms}ms. NOTHING WAS SIGNALLED: this server has no usable \`ps\`, so ` +
   'OpsMaxx could not confirm that the recorded pid is still this job rather than a process ' +
   'that has since been given the same number — and sending SIGTERM on that basis could stop ' +
   `something unrelated. The command may still be running; its marker directory is left at ${dir} ` +
@@ -2089,7 +2177,7 @@ export function isJobDetachedHandle(v: unknown): v is JobDetachedHandle {
 /** The error a reclaimed host carries when its wrapper died without an answer. */
 export const JOB_ORPHANED_ERROR =
   'The command was launched and its marker directory is still here, but the process is gone and ' +
-  'no exit status was ever written \u2014 the OOM killer, a kill -9, or the host going down under ' +
+  'no exit status was ever written \u2014 the OOM killer, a kill -9, or the server going down under ' +
   'it. Whether the work completed is not knowable from here; check the output above.'
 
 /** The error a host carries when a detached launch could not even start. */
@@ -2152,13 +2240,13 @@ export function waveLabel(name: string): string {
  * first.
  */
 export const JOB_GATE_SKIPPED_ERROR = (wave: string, reason: string): string =>
-  `Nothing was installed on this host. The run stopped after ${waveLabel(wave)} because the ` +
+  `Nothing was installed on this server. The run stopped after ${waveLabel(wave)} because the ` +
   `health check between waves would not pass: ${reason}`
 
 /** The error a reboot step carries when the host came back wrong. */
 export const JOB_REBOOT_UNHEALTHY_ERROR = (detail: string): string =>
-  `The reboot was issued and the host came back, but not cleanly: ${detail} The wave gate will ` +
-  'not pass on this host, so nothing after it was started.'
+  `The reboot was issued and the server came back, but not cleanly: ${detail} The wave gate will ` +
+  'not pass on this server, so nothing after it was started.'
 
 /**
  * What the row says while a reboot has been accepted but has not happened yet.
@@ -2173,12 +2261,12 @@ export const JOB_REBOOT_UNHEALTHY_ERROR = (detail: string): string =>
  * waits for the host to actually go, and says what it is waiting for.
  */
 export const JOB_REBOOT_ACCEPTED_NOTE =
-  'The reboot has been accepted by the host and it is still answering, which is normal: the exit ' +
+  'The reboot has been accepted by the server and it is still answering, which is normal: the exit ' +
   'status of a reboot command is the status of asking. OpsMaxx is waiting for it to go down, ' +
   'and will then check that it really restarted and that nothing failed on the way up.'
 
 /** The error a reboot step carries when the host never came back. */
 export const JOB_REBOOT_TIMEOUT_ERROR = (ms: number): string =>
-  `The reboot was issued and the host has not answered in ${Math.round(ms / 1000)}s. It is NOT ` +
+  `The reboot was issued and the server has not answered in ${Math.round(ms / 1000)}s. It is NOT ` +
   'recorded as unreachable in the ordinary sense — the disconnect was expected and asked for — ' +
   'but it has now been gone long enough that somebody should look at it.'

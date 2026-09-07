@@ -46,7 +46,16 @@
  * comment on redisCall says so rather than implying one.
  */
 
+import {
+  MSSQL_QUERIES,
+  MSSQL_SYSTEM_DBS,
+  msRows,
+  mssqlAlwaysOnStatus,
+  mssqlBackupVerdict,
+  mssqlConnectionCeiling
+} from './dbOpsMssql'
 import type { DbConnectConfig } from '../../shared/db'
+import { parseMysqlDigests, mysqlScanFindings } from '../../shared/dbSlowReads'
 import {
   DB_QUESTION_LABEL,
   MONGO_COMMANDS,
@@ -163,6 +172,12 @@ const STATEMENT_TIMEOUT_MS = 8000
 /** Rows per list. Enough to see the shape, small enough that the answer is a
  *  judgement and not a data dump the operator has to scroll. */
 const ROW_LIMIT = 20
+
+/** The same limit, for the one caller outside this file that has to know it:
+ *  `reportSizeSample` refuses a MySQL total that came back AT the limit,
+ *  because that total is then the biggest N tables rather than the schema. A
+ *  second literal would be a second thing to keep in step. */
+export const DB_OPS_ROW_LIMIT = ROW_LIMIT
 
 // ---------------------------------------------------------------------------
 // Postgres
@@ -514,6 +529,63 @@ async function collectMysql(client: any): Promise<DbAnswer<unknown>[]> {
         return { value, verdict, status: statusFailure.status, detail: statusFailure.detail }
       }
       return { value, verdict, status: value.enabled ? undefined : ('absent' as const) }
+    }, mysqlFailure)
+  )
+
+  // ---- statements that scan (item 37)
+  //
+  // performance_schema can be compiled out or switched off, and then this
+  // table does not exist. That is `absent` -- a first-class answer -- and not
+  // an error, and certainly not "no statements are scanning".
+  answers.push(
+    await answer('digests', async () => {
+      let rows: Row[]
+      try {
+        rows = await myRows(client, MYSQL_QUERIES.digests, [ROW_LIMIT])
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        if (/performance_schema|doesn't exist|denied/i.test(msg)) {
+          return {
+            value: [],
+            status: 'absent' as const,
+            verdict: {
+              level: 'unknown' as const,
+              headline: 'performance_schema is not readable on this server.',
+              because:
+                'It can be compiled out, switched off with performance_schema=0, or readable only by an account with SELECT on it. Without it MySQL keeps no per-statement history, so there is nothing to show — which is different from no statement scanning a table.'
+            }
+          }
+        }
+        throw e
+      }
+      const value = parseMysqlDigests(
+        rows
+          .map((r) =>
+            [
+              str(r.schema_name),
+              str(r.digest_text),
+              num(r.count_star),
+              num(r.total_ms),
+              num(r.max_ms),
+              num(r.sum_rows_examined),
+              num(r.sum_rows_sent),
+              num(r.sum_no_index_used)
+            ].join('|')
+          )
+          .join('\n')
+      )
+      const findings = mysqlScanFindings(value)
+      return {
+        value: findings,
+        verdict:
+          findings.length === 0
+            ? { level: 'ok' as const, headline: 'No statement is reading a table without an index.' }
+            : {
+                level: 'watch' as const,
+                headline: `${findings.length} statement(s) read a table without an index.`,
+                because: `${findings[0].digest} — ${findings[0].because}.`
+              }
+      }
     }, mysqlFailure)
   )
 
@@ -1070,6 +1142,161 @@ function deniedHeadline(id: DbQuestionId, failure: DbFailure): string | undefine
 // Entry point
 // ---------------------------------------------------------------------------
 
+/**
+ * SQL Server. The queries and the readings that mean the opposite of what they
+ * look like live in ./dbOpsMssql, which was written against a real server.
+ */
+async function collectMssql(client: unknown): Promise<DbAnswer<unknown>[]> {
+  const answers: DbAnswer<unknown>[] = []
+  const now = Date.now()
+  const c = client as Parameters<typeof msRows>[0]
+
+  let hadr: number | null = null
+  try {
+    const row = (await msRows(c, MSSQL_QUERIES.overview))[0] ?? {}
+    hadr = row.hadr === null || row.hadr === undefined ? null : Number(row.hadr)
+    answers.push({
+      id: 'overview',
+      status: 'ok',
+      value: row,
+      verdict: {
+        level: 'ok',
+        headline: `SQL Server ${String(row.version ?? '?')} — ${String(row.edition ?? 'unknown edition')}`,
+        because: `Up for ${Math.floor(Number(row.uptime_seconds ?? 0) / 3600)}h.`
+      }
+    })
+  } catch (err) {
+    answers.push({
+      id: 'overview',
+      status: 'denied',
+      verdict: { level: 'unknown', headline: 'Could not read the server overview' },
+      detail: (err as Error).message
+    })
+  }
+
+  try {
+    const n = Number((await msRows(c, MSSQL_QUERIES.replicas))[0]?.n ?? 0)
+    const judged = mssqlAlwaysOnStatus(hadr, n)
+    answers.push({
+      id: 'alwayson',
+      status: judged.status,
+      value: { hadrEnabled: hadr, replicas: n },
+      verdict: { level: judged.level, headline: judged.headline }
+    })
+  } catch (err) {
+    answers.push({
+      id: 'alwayson',
+      status: 'denied',
+      verdict: { level: 'unknown', headline: 'Could not read availability replicas' },
+      detail: (err as Error).message
+    })
+  }
+
+  try {
+    const rows = (await msRows(c, MSSQL_QUERIES.backups))
+      .map((r) => ({
+        name: String(r.name ?? ''),
+        recovery: String(r.recovery ?? ''),
+        lastFull: r.lastFull === null || r.lastFull === undefined ? null : String(r.lastFull),
+        lastLog: r.lastLog === null || r.lastLog === undefined ? null : String(r.lastLog)
+      }))
+      // tempdb is never backed up by design, and the container-only system
+      // databases are noise nobody can act on. See MSSQL_SYSTEM_DBS.
+      .filter((r) => !MSSQL_SYSTEM_DBS.has(r.name))
+    const judged = rows.map((r) => ({ row: r, v: mssqlBackupVerdict(r, now) }))
+    const worst = judged.find((j) => j.v.level === 'alarm') ?? judged.find((j) => j.v.level === 'watch')
+    answers.push({
+      id: 'backups',
+      status: rows.length === 0 ? 'absent' : 'ok',
+      value: judged.map((j) => ({ ...j.row, verdict: j.v.level, because: j.v.because })),
+      verdict: {
+        level: worst?.v.level ?? 'ok',
+        headline:
+          rows.length === 0
+            ? 'No user databases on this server'
+            : (worst?.v.because ?? `${rows.length} database(s) backed up`)
+      }
+    })
+  } catch (err) {
+    answers.push({
+      id: 'backups',
+      status: 'denied',
+      verdict: { level: 'unknown', headline: 'Could not read the backup history' },
+      detail: (err as Error).message
+    })
+  }
+
+  try {
+    const row = (await msRows(c, MSSQL_QUERIES.connections))[0] ?? {}
+    const sessions = Number(row.sessions ?? 0)
+    const ceiling = mssqlConnectionCeiling(
+      row.ceiling === null || row.ceiling === undefined ? null : Number(row.ceiling)
+    )
+    answers.push({
+      id: 'connections',
+      status: 'ok',
+      value: { sessions, ceiling },
+      verdict: {
+        level: ceiling !== null && sessions / ceiling > 0.9 ? 'alarm' : 'ok',
+        headline: `${sessions} user session(s)`,
+        // Said out loud rather than shown as a percentage of nothing: a
+        // configured 0 is unlimited, and "1 of 0" would read as full.
+        because: ceiling === null ? 'No configured connection limit (unlimited).' : `Limit ${ceiling}.`
+      }
+    })
+  } catch (err) {
+    answers.push({
+      id: 'connections',
+      status: 'denied',
+      verdict: { level: 'unknown', headline: 'Could not read sessions' },
+      detail: (err as Error).message
+    })
+  }
+
+  try {
+    const rows = await msRows(c, MSSQL_QUERIES.blocking)
+    answers.push({
+      id: 'blocking',
+      status: 'ok',
+      value: rows,
+      verdict: {
+        level: rows.length > 0 ? 'alarm' : 'ok',
+        headline: rows.length === 0 ? 'Nothing is blocked' : `${rows.length} session(s) blocked`,
+        because:
+          rows.length > 0
+            ? `Head blocker: session ${String(rows[0]?.blocker ?? '?')}.`
+            : undefined
+      }
+    })
+  } catch (err) {
+    answers.push({
+      id: 'blocking',
+      status: 'denied',
+      verdict: { level: 'unknown', headline: 'Could not read blocking' },
+      detail: (err as Error).message
+    })
+  }
+
+  try {
+    const rows = await msRows(c, MSSQL_QUERIES.sizes)
+    answers.push({
+      id: 'sizes',
+      status: 'ok',
+      value: rows,
+      verdict: { level: 'ok', headline: `${rows.length} file group(s) measured` }
+    })
+  } catch (err) {
+    answers.push({
+      id: 'sizes',
+      status: 'denied',
+      verdict: { level: 'unknown', headline: 'Could not read file sizes' },
+      detail: (err as Error).message
+    })
+  }
+
+  return answers
+}
+
 export async function dbOps(cfg: DbConnectConfig): Promise<DbOpsReport> {
   const started = Date.now()
   const base = {
@@ -1097,7 +1324,12 @@ export async function dbOps(cfg: DbConnectConfig): Promise<DbOpsReport> {
               // collection sizes are questions about the data they are looking
               // at. Everything else runs against admin or local.
               await collectMongo(conn.client, mongoDbName(cfg) ?? 'admin')
-            : await collectRedis(conn.client)
+            : cfg.kind === 'redis'
+              ? await collectRedis(conn.client)
+              : // mssql. The catch-all used to be Redis, which would have run
+                // Redis commands against SQL Server had supportsDbOps not
+                // refused it first; naming every engine removes that reliance.
+                await collectMssql(conn.client)
     return { ...base, ok: true, answers, elapsedMs: Date.now() - started }
   } catch (err) {
     return {

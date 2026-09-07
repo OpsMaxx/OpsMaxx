@@ -1,0 +1,2 @@
+time="2026-09-06T00:51:37+04:00" level=warning msg="The \"NOT_SET_ANYWHERE\" variable is not set. Defaulting to a blank string."
+exit=0

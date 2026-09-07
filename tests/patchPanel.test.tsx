@@ -108,7 +108,7 @@ beforeEach(() => {
 })
 
 describe('the security column', () => {
-  it('excludes a host that cannot answer from the total and from the all-clear', async () => {
+  it('excludes a server that cannot answer from the total and from the all-clear', async () => {
     // Two hosts, nothing pending on either as far as anyone can tell — and one
     // of them can NEVER report a security count. The estate is not clear, and
     // the screen has to say so rather than printing a reassuring zero.
@@ -136,12 +136,12 @@ describe('the security column', () => {
     )
   })
 
-  it('says all clear only when every host answered', async () => {
+  it('says all clear only when every server answered', async () => {
     seedFacts({ a: facts(), b: facts() })
     render(<PatchPanel servers={[server('a', 'one'), server('b', 'two')]} />)
     const summary = await screen.findByTestId('patch-summary')
     expect(summary.textContent).toContain('All clear')
-    expect(summary.textContent).toContain('Every host answered')
+    expect(summary.textContent).toContain('Every server answered')
   })
 })
 
@@ -159,7 +159,7 @@ describe('the reboot refusal', () => {
     await user.click(screen.getByLabelText('Select web-1'))
     // Restarting is opt-in; the refusal only exists once it is asked for.
     expect(screen.queryByTestId('patch-block')).toBeNull()
-    await user.click(screen.getByRole('checkbox', { name: /restart the hosts/i }))
+    await user.click(screen.getByRole('checkbox', { name: /restart the servers/i }))
 
     const block = await screen.findByTestId('patch-block')
     expect(block.textContent).toContain('bastion is the jump host')
@@ -195,7 +195,7 @@ describe('the hole in the topology', () => {
     )
     const user = userEvent.setup()
     await user.click(screen.getByLabelText('Select web-1'))
-    await user.click(screen.getByRole('checkbox', { name: /restart the hosts/i }))
+    await user.click(screen.getByRole('checkbox', { name: /restart the servers/i }))
 
     const note = await screen.findByTestId('patch-unmatched-hops')
     expect(note.textContent).toContain('2 hops are not backed by a saved server')
@@ -205,7 +205,7 @@ describe('the hole in the topology', () => {
     expect(screen.queryByTestId('patch-block')).toBeNull()
   })
 
-  it('refuses instead of counting when the unmatched hop is a host on this screen', async () => {
+  it('refuses instead of counting when the unmatched hop is a server on this screen', async () => {
     // The panel end of blocker A. web-1's route names no saved server, but the
     // address it names IS `bastion`, which the operator has just selected for a
     // restart. The old screen printed "1 hop is not backed by a saved server
@@ -221,7 +221,7 @@ describe('the hole in the topology', () => {
 
     const user = userEvent.setup()
     await user.click(screen.getByLabelText('Select bastion'))
-    await user.click(screen.getByRole('checkbox', { name: /restart the hosts/i }))
+    await user.click(screen.getByRole('checkbox', { name: /restart the servers/i }))
 
     const block = await screen.findByTestId('patch-block')
     expect(block.textContent).toContain('web-1')
@@ -289,8 +289,8 @@ describe('the health gate and the sampler it needs', () => {
   })
 })
 
-describe('selecting the hosts nobody can vouch for', () => {
-  it('offers the unanswerable hosts rather than quietly leaving them out', async () => {
+describe('selecting the servers nobody can vouch for', () => {
+  it('offers the unanswerable servers rather than quietly leaving them out', async () => {
     // `hasWork` used to be a boolean, so "cannot say" was spent as "no" and
     // this button silently omitted precisely the hosts an operator most needs
     // to look at. Now they are offered, separately and with a count.
@@ -337,7 +337,7 @@ describe('selecting the hosts nobody can vouch for', () => {
     expect(unknown.disabled).toBe(false)
   })
 
-  it('offers nothing extra when every host answered', async () => {
+  it('offers nothing extra when every server answered', async () => {
     seedFacts({ a: facts({ pendingUpdates: 1 }), b: facts() })
     render(<PatchPanel servers={[server('a', 'one'), server('b', 'two')]} />)
     await screen.findByTestId('patch-summary')
@@ -353,7 +353,7 @@ describe('what the screen refuses to offer', () => {
     expect(note.textContent).toContain('unattended-upgrades')
   })
 
-  it('excludes a host it has no security-only command for, by name', async () => {
+  it('excludes a server it has no security-only command for, by name', async () => {
     seedFacts({
       a: facts({
         distroId: 'arch',
@@ -383,7 +383,7 @@ describe('running it', () => {
 
     const user = userEvent.setup()
     await user.click(screen.getByLabelText('Select web-1'))
-    await user.click(screen.getByRole('checkbox', { name: /restart the hosts/i }))
+    await user.click(screen.getByRole('checkbox', { name: /restart the servers/i }))
 
     // Read what the operator was SHOWN, off the screen, before anything runs.
     // This is the independent record the approval is checked against below.
@@ -429,7 +429,7 @@ describe('running it', () => {
     render(<PatchPanel servers={[server('a', 'web-1')]} />)
     const user = userEvent.setup()
     await user.click(screen.getByLabelText('Select web-1'))
-    await user.click(screen.getByRole('checkbox', { name: /restart the hosts/i }))
+    await user.click(screen.getByRole('checkbox', { name: /restart the servers/i }))
 
     const block = await screen.findByTestId('patch-command')
     const lines = (block.querySelector('.mono')?.textContent ?? '').split('\n')
@@ -457,7 +457,7 @@ describe('running it', () => {
 })
 
 describe('the workspace’s own databases', () => {
-  it('will not restart two hosts carrying the same saved database in one wave', async () => {
+  it('will not restart two servers carrying the same saved database in one wave', async () => {
     seedFacts({
       a: facts({ pendingUpdates: 1, rebootRequired: true }),
       b: facts({ pendingUpdates: 1, rebootRequired: true })
@@ -501,14 +501,14 @@ describe('the workspace’s own databases', () => {
     const user = userEvent.setup()
     await user.click(screen.getByLabelText('Select db-a'))
     await user.click(screen.getByLabelText('Select db-b'))
-    await user.click(screen.getByRole('checkbox', { name: /restart the hosts/i }))
+    await user.click(screen.getByRole('checkbox', { name: /restart the servers/i }))
     // Waves of one is the default, and by itself it already separates them.
     // Widen the wave so both would restart together: refused.
     // fireEvent, not user.type: the field is a controlled number input, so
     // clear-then-type appends to the value React re-rendered rather than
     // replacing it — and a test that set 12 while believing it set 2 would
     // pass for the wrong reason.
-    fireEvent.change(screen.getByLabelText('Hosts per wave'), { target: { value: '2' } })
+    fireEvent.change(screen.getByLabelText('Servers per wave'), { target: { value: '2' } })
     // Both in one wave: refused.
     const blocks = await screen.findAllByTestId('patch-block')
     expect(blocks).toHaveLength(2)
@@ -516,7 +516,103 @@ describe('the workspace’s own databases', () => {
     expect((screen.getByTestId('patch-run') as HTMLButtonElement).disabled).toBe(true)
 
     // One per wave: allowed.
-    fireEvent.change(screen.getByLabelText('Hosts per wave'), { target: { value: '1' } })
+    fireEvent.change(screen.getByLabelText('Servers per wave'), { target: { value: '1' } })
     await waitFor(() => expect(screen.queryByTestId('patch-block')).toBeNull())
+  })
+})
+
+describe('what a colour claims', () => {
+  it('marks a question that cannot be answered as unknown, not as a warning', () => {
+    // Arch publishes no security channel, so the security count there is
+    // "cannot be answered" -- nothing is wrong and nothing wants attention.
+    // It was painted `warn`, the same amber as a real degradation, directly
+    // under a comment saying the two must not be confusable. Amber says "look
+    // at this"; this is the app saying "I cannot tell you", and those are the
+    // two meanings an operator most needs kept apart.
+    seedFacts({
+      b: facts({
+        distroId: 'arch',
+        packageManager: 'pacman',
+        securityUpdates: null,
+        sources: sources({ 'security-updates': 'unsupported' })
+      })
+    })
+    render(<PatchPanel servers={[server('b', 'archbox')]} />)
+
+    const cell = document.querySelector('tr[data-host="archbox"] td[data-col="security"]')
+    const marked = cell?.querySelector('.state-unknown')
+    expect(marked).toBeTruthy()
+    expect(cell?.querySelector('.warn')).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The list behind the security count. Item 46.
+// ---------------------------------------------------------------------------
+
+describe('which packages, per host', () => {
+  const withList = (probe: unknown): ReturnType<typeof vi.fn> => {
+    const call = vi.fn(async () => probe)
+    stubBridge({
+      jobs: { onProgress: () => () => {}, run: vi.fn() },
+      fleet: { securityList: call }
+    })
+    return call
+  }
+
+  it('offers the list only where there is a count above zero', async () => {
+    withList({ ok: true, listing: { source: 'apt', updates: [], advisories: null, note: '' } })
+    seedFacts({
+      a: facts({ securityUpdates: 3 }),
+      b: facts({ securityUpdates: 0 }),
+      // `null` is "we could not tell", not zero. Offering a list for it would
+      // imply there is one to fetch.
+      c: facts({ securityUpdates: null, sources: sources({ 'security-updates': 'unsupported' }) })
+    })
+    render(<PatchPanel servers={[server('a', 'has-some'), server('b', 'clean'), server('c', 'cannot-say')]} />)
+    await waitFor(() => expect(screen.getByLabelText('Which packages on has-some')).toBeTruthy())
+    expect(screen.queryByLabelText('Which packages on clean')).toBeNull()
+    expect(screen.queryByLabelText('Which packages on cannot-say')).toBeNull()
+  })
+
+  it('shows the packages worst first, with the advisories that cover them', async () => {
+    withList({
+      ok: true,
+      listing: {
+        source: 'dnf',
+        advisories: 133,
+        note: '55 package(s) will change, covered by 133 advisories',
+        updates: [
+          { name: 'zlib', candidate: '1.2', current: '', advisories: ['ALSA-1:1'], severity: 'Low' },
+          { name: 'expat', candidate: '2.5', current: '', advisories: ['ALSA-1:2', 'ALSA-1:3'], severity: 'Important' }
+        ]
+      }
+    })
+    seedFacts({ a: facts({ securityUpdates: 2 }) })
+    render(<PatchPanel servers={[server('a', 'alma-1')]} />)
+    await userEvent.click(await screen.findByLabelText('Which packages on alma-1'))
+    await screen.findByText('Security updates on alma-1')
+    const body = document.body.textContent!
+    expect(body.indexOf('expat')).toBeLessThan(body.indexOf('zlib'))
+    expect(body).toContain('ALSA-1:2, ALSA-1:3')
+    expect(body).toContain('covered by 133 advisories')
+  })
+
+  // A read that could not happen and a host with nothing pending are different
+  // answers, and only one of them is good news.
+  it('reports a read that failed rather than an empty list', async () => {
+    withList({ ok: false, detail: "Cache-only enabled but no cache for 'appstream'" })
+    seedFacts({ a: facts({ securityUpdates: 2 }) })
+    render(<PatchPanel servers={[server('a', 'alma-1')]} />)
+    await userEvent.click(await screen.findByLabelText('Which packages on alma-1'))
+    await screen.findByText(/Cache-only enabled but no cache/)
+  })
+
+  it('says so when the build has no such channel', async () => {
+    stubBridge({ jobs: { onProgress: () => () => {}, run: vi.fn() } })
+    seedFacts({ a: facts({ securityUpdates: 2 }) })
+    render(<PatchPanel servers={[server('a', 'alma-1')]} />)
+    await userEvent.click(await screen.findByLabelText('Which packages on alma-1'))
+    await screen.findByText(/cannot list security updates/)
   })
 })

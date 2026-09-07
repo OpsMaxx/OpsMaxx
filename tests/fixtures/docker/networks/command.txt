@@ -1,0 +1,2 @@
+docker network ls --format {{.ID}}|{{.Name}}|{{.Driver}}|{{.Scope}}
+docker ps -a --format {{.ID}}|{{.Names}}|{{.State}}|{{.Networks}}
