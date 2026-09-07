@@ -1,0 +1,217 @@
+/* Monitoring / Operations navigation.
+   ---------------------------------------------------------------------------
+   Kept out of global.css because it is one feature's furniture rather than a
+   shared primitive, and because every rule here is either a sticky container or
+   an override of a `.segment` default. Both are the kind of thing that reads as
+   a mistake when it is sitting between the button and the table styles.
+
+   Every selector is written to beat the global rule it overrides on
+   SPECIFICITY rather than on source order, so it does not matter where this
+   file is imported relative to global.css. `.segment.monitor-strip` is (0,2,0)
+   against `.monitor-tabs`'s (0,1,0); `.monitor-strip .seg-btn.active` is
+   (0,3,0) against `.seg-btn.active`'s (0,2,0). */
+
+/* ---------------------------------------------------------------- sticky */
+
+/* `.content` is the scroll container (overflow-y: auto, padding var(--sp-5)),
+   so a child pinned at top: 0 would pin BELOW the padding and let the page
+   scroll through the gap above it. The negative top and the matching negative
+   margins bleed this block across that padding: it scrolls normally for its own
+   top padding, then pins flush against the top of the scrollport with an opaque
+   background covering everything passing underneath. */
+.monitor-sticky,
+.ops-sticky {
+  position: sticky;
+  top: calc(var(--sp-5) * -1);
+  z-index: 6;
+  margin: calc(var(--sp-5) * -1) calc(var(--sp-5) * -1) var(--sp-4);
+  padding: var(--sp-5) var(--sp-5) 10px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+.monitor-sticky .content-header,
+.ops-sticky .content-header {
+  margin-bottom: 10px;
+}
+
+/* ------------------------------------------------------- monitoring strip */
+
+/* One row, never two. `.monitor-tabs` in global.css sets flex-wrap: wrap,
+   which is what let one extra module reflow every tab; the ceiling in
+   FleetMonitor is what makes nowrap safe rather than truncating. */
+.segment.monitor-strip {
+  flex-wrap: nowrap;
+  align-items: center;
+  margin: 0;
+}
+.monitor-strip .grow {
+  flex: 1;
+}
+/* The selected tab, at full strength.
+   `.seg-btn.active` marks selection with a background fill alone, which at this
+   tab count gave Overview and Kubernetes the same visual weight — the fill is
+   two or three percent of luminance against the segment's own ground. An
+   accent underline is a second, independent channel, so the mark survives a
+   low-contrast display, a bright room and a colour-blind reader. */
+.monitor-strip .seg-btn {
+  color: var(--text-muted);
+  white-space: nowrap;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
+}
+.monitor-strip .seg-btn.active {
+  color: var(--text);
+  font-weight: 650;
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+}
+
+/* ------------------------------------------------------------- overflow */
+
+.mon-pop-host {
+  position: relative;
+  display: flex;
+}
+.mon-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  min-width: 200px;
+  max-height: 60vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+}
+.mon-pop.wide {
+  width: 380px;
+}
+.mon-pop-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  text-align: left;
+  border-radius: var(--r-sm);
+  color: var(--text);
+}
+.mon-pop-row:not(.static):hover {
+  background: var(--bg-hover);
+}
+/* A row in the "switched off" list is a description, not a destination.
+   Nothing here toggles a module: enabling one is a Settings decision with its
+   own consent argument (see the per-module comments in shared/modules.ts), and
+   a one-click enable in a popover would be exactly the silent opt-in
+   `backfillModules` exists to prevent. */
+.mon-pop-row.static {
+  cursor: default;
+}
+
+/* ----------------------------------------------------------- operations */
+
+/* A different register, on purpose. Monitoring leads with an h1 and a stat
+   line; this leads with a statement about what the rail does. If Operations
+   looked like another Monitoring page, the split would have moved the problem
+   rather than fixed it. */
+.ops-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--warn-soft);
+  border: 1px solid var(--border);
+  color: var(--warn);
+}
+.ops-banner-title {
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.ops-banner-sub {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+/* Two tabs, so each one has room to say what it will do. Monitoring's strip
+   cannot afford that at thirteen; this one can at two, and a person who reads
+   only the tab still learns the consequence before arriving at the panel. */
+.ops-rail {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ops-rail-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 8px 10px;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-card);
+  color: var(--text-muted);
+}
+.ops-rail-btn:hover {
+  background: var(--bg-hover);
+}
+.ops-rail-btn.active {
+  color: var(--text);
+  border-color: var(--accent-border);
+  box-shadow: inset 3px 0 0 0 var(--accent);
+}
+.ops-rail-label {
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--text);
+}
+.ops-rail-consequence {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.ops-empty {
+  padding: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.ops-card {
+  padding: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+/* The execute slot.
+   A bar at the FOOT of the card, never the top-right corner every read-only
+   panel puts "Check now" in. The separator and the standing sentence on the
+   left are what make it a decision point rather than a button: by the time the
+   eye reaches the control it has already passed the command, the targets and
+   the risk line. */
+.op-actionbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.op-actionbar .grow {
+  flex: 1;
+}
+.op-actionbar-what {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

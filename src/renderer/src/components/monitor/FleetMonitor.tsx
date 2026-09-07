@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
+  ChevronDown,
   ChevronRight,
   Cpu,
   FolderPlus,
   HardDrive,
   MemoryStick,
+  Plus,
   Server as ServerIcon,
-  Trash2
+  Trash2,
+  Wrench
 } from 'lucide-react'
 import { useApp, useWorkspaceMonitorGroups, useWorkspaceServers } from '../../store/app'
 import { EmptyState } from '../common/EmptyState'
@@ -25,14 +28,20 @@ import { AccessPanel } from './AccessPanel'
 import { PosturePanel } from './PosturePanel'
 import { DriftPanel } from './DriftPanel'
 import { CapacityPanel } from './CapacityPanel'
-import { BroadcastPanel } from './BroadcastPanel'
-import { PatchPanel } from './PatchPanel'
 import { LogTailPanel } from './LogTailPanel'
 import { CronPanel } from './CronPanel'
 import { RulesPanel } from './RulesPanel'
 import { ChangeLogPanel } from './ChangeLogPanel'
-import { MODULES, moduleEnabled, type ModuleDef, type ModuleId } from '../../../../shared/modules'
+import {
+  isOperateModule,
+  moduleEnabled,
+  modulesOnSurface,
+  type ModuleDef,
+  type ModuleId
+} from '../../../../shared/modules'
 import { openSettings, useNav } from '../../store/nav'
+import { OperationsView } from '../operations/OperationsView'
+import { splitTabStrip } from './tabStrip'
 import { DockerPanel } from '../docker/DockerPanel'
 import { KubernetesPanel } from '../kubernetes/KubernetesPanel'
 import { ProcessesPanel } from '../processes/ProcessesPanel'
@@ -40,6 +49,18 @@ import { ProcessesPanel } from '../processes/ProcessesPanel'
 function pct(used: number, total: number): number {
   return total > 0 ? (used / total) * 100 : 0
 }
+
+/**
+ * How many tabs may stand in the strip at once, Overview and Alerts included.
+ *
+ * Eight is not a taste judgement. At the app's minimum useful width the strip
+ * wrapped onto a second row somewhere between eight and nine buttons, and a
+ * wrapped row is where this went wrong before: enabling one module reflowed
+ * every row and could exile Kubernetes onto a line of its own, so the position
+ * of every tab depended on which OTHER modules were on. A ceiling makes each
+ * tab's position depend only on the tabs before it.
+ */
+const MAX_STRIP_TABS = 8
 
 // What is being dragged, and where it would land. Cards and groups share one
 // drag state because a card can be dropped on a group header and a group can
@@ -253,16 +274,55 @@ export function FleetMonitor(): React.JSX.Element {
   // already paid for, and this tab is a table over rows that exist either way.
   const tab = useNav((s) => s.monitorTab)
   const setTab = useNav((s) => s.setMonitorTab)
+  const rail = useNav((s) => s.fleetRail)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const [offOpen, setOffOpen] = useState(false)
+
+  // Only the READ half. The two modules that change servers moved to
+  // Operations — see ModuleSurface in src/shared/modules.ts for why, and
+  // OperationsView for what they moved into.
   const tabs = useMemo<ModuleDef[]>(
-    () => MODULES.filter((m) => moduleEnabled(modules, m.id)),
+    () => modulesOnSurface('read').filter((m) => moduleEnabled(modules, m.id)),
     [modules]
   )
+  // The read modules a person has NOT switched on, so the strip can say they
+  // exist. Nothing in Monitoring used to: ten of the thirteen read modules ship
+  // off, and a user who never opened Settings never learned the product had
+  // them.
+  const offTabs = useMemo<ModuleDef[]>(
+    () => modulesOnSurface('read').filter((m) => !moduleEnabled(modules, m.id)),
+    [modules]
+  )
+
   // A module switched off while its tab is open would otherwise leave the page
-  // blank with no way back.
+  // blank with no way back. `isOperateModule` is the new half of the same
+  // guard: an `operate` id can still reach `monitorTab` through a persisted
+  // store written before the split, and its panel is not mounted here any more.
   const activeTab =
-    tab === 'overview' || tab === 'alerts' || tabs.some((t) => t.id === tab) ? tab : 'overview'
+    tab === 'overview' || tab === 'alerts' || (!isOperateModule(tab) && tabs.some((t) => t.id === tab))
+      ? tab
+      : 'overview'
   const show = (id: 'overview' | 'alerts' | ModuleId): React.CSSProperties | undefined =>
     activeTab === id ? undefined : { display: 'none' }
+
+  // One row, hard ceiling, overflow behind `More`.
+  //
+  // Grouping was the other candidate and it loses. Thirteen read modules do not
+  // fall into a small fixed set of groups anyone would agree on — Capacity is
+  // as much "storage" as "trends", Change log is as much "audit" as "history" —
+  // and a wrong grouping is worse than none, because it makes a person look in
+  // the group we chose rather than in the strip. A ceiling makes no claim about
+  // what the tabs mean. It only claims that eight is as many as a row holds,
+  // which is a fact about the window rather than an opinion about the estate.
+  //
+  // The ceiling counts Overview and Alerts, because a row does not care which
+  // buttons are fixed. That leaves six module slots. The rule that makes an
+  // overflow survivable — the selected tab is always in the strip — is in
+  // splitTabStrip, where it can be stated without mounting this component.
+  const stripped = useMemo(
+    () => splitTabStrip(tabs, activeTab, MAX_STRIP_TABS - 2),
+    [tabs, activeTab]
+  )
   const groups = useWorkspaceMonitorGroups()
   const hosts = useFleet((s) => s.hosts)
   const workspaceId = useApp((s) => s.activeWorkspaceId)
@@ -309,13 +369,20 @@ export function FleetMonitor(): React.JSX.Element {
     setGroupDrop(null)
   }
 
+  // Covers both rails, because both are empty for the same reason and neither
+  // has anything useful to show first. The message names the rail so the
+  // activity-bar icon the user just pressed is the one being answered.
   if (servers.length === 0) {
     return (
       <div className="panel-body">
         <EmptyState
-          icon={<Activity size={26} />}
-          title="Nothing to monitor"
-          message="Add a server to start streaming live CPU, memory, disk and network metrics."
+          icon={rail === 'operations' ? <Wrench size={26} /> : <Activity size={26} />}
+          title={rail === 'operations' ? 'Nothing to operate on' : 'Nothing to monitor'}
+          message={
+            rail === 'operations'
+              ? 'Add a server before running commands or installing updates across the estate.'
+              : 'Add a server to start streaming live CPU, memory, disk and network metrics.'
+          }
         />
       </div>
     )
@@ -324,56 +391,47 @@ export function FleetMonitor(): React.JSX.Element {
   const byId = new Map(servers.map((s) => [s.id, s]))
 
   return (
-    <div className="content">
-      <div className="content-header">
-        <div>
-          <h1>Fleet Monitor</h1>
-          <div className="sub">
-            {online} of {servers.length} servers online · live metrics
+    <>
+    <div className="content" style={rail === 'operations' ? { display: 'none' } : undefined}>
+      {/* Sticky, and this is the single change with the most effect on the page.
+          `.content` is the scroll container, so the title and the strip used to
+          scroll away — one screen down, nothing on screen said which of the
+          tabs you were in, on a page whose whole job is to be several different
+          pages. A tab strip you cannot see is a tab strip you cannot use. */}
+      <div className="monitor-sticky">
+        <div className="content-header">
+          <div>
+            <h1>Monitoring</h1>
+            <div className="sub">
+              {online} of {servers.length} servers online · reading only
+            </div>
           </div>
-        </div>
-        <span className="spacer" />
-        <button className="btn ghost" onClick={() => addMonitorGroup('New group')}>
-          <FolderPlus size={14} /> New group
-        </button>
-      </div>
-
-      {/* Correctly switching every new module off on upgrade has a cost: the
-          user sees nothing new and has no reason to look for it. One line,
-          shown only when they are ALL off, rather than a per-module nag that
-          would teach people to ignore this row. */}
-      {tabs.length === 0 && (
-        <div className="s-desc" style={{ marginBottom: 12 }}>
-          Search, estate inventory, running a command across servers, log tailing, scheduled
-          jobs, Docker and Kubernetes are available and switched off.{' '}
-          <button className="btn ghost sm" onClick={() => openSettings('modules')}>
-            Choose modules
+          <span className="spacer" />
+          <button className="btn ghost" onClick={() => addMonitorGroup('New group')}>
+            <FolderPlus size={14} /> New group
           </button>
         </div>
-      )}
 
-      {/* Always rendered, where it used to appear only once a module was on.
-          Overview and Alerts are both here whatever the module state is, and a
-          bar that vanished would take the inbox with it. */}
-      <div className="segment monitor-tabs">
-        <button
-          className={clsx('seg-btn', activeTab === 'overview' && 'active')}
-          onClick={() => setTab('overview')}
-        >
-          Overview
-        </button>
-        <button
-          className={clsx('seg-btn', activeTab === 'alerts' && 'active')}
-          onClick={() => setTab('alerts')}
-        >
-          Alerts
-          {/* The count, so the tab says whether it is worth opening. Only when
-              there is one: a permanent "0" trains people to stop reading it. */}
-          {alertCount > 0 && <span className="chip danger" style={{ marginLeft: 6 }}>{alertCount}</span>}
-        </button>
-        {tabs.length > 0 && (
-          <>
-          {tabs.map((m) => (
+        {/* Always rendered, where it used to appear only once a module was on.
+            Overview and Alerts are both here whatever the module state is, and a
+            bar that vanished would take the inbox with it. */}
+        <div className="segment monitor-tabs monitor-strip">
+          <button
+            className={clsx('seg-btn', activeTab === 'overview' && 'active')}
+            onClick={() => setTab('overview')}
+          >
+            Overview
+          </button>
+          <button
+            className={clsx('seg-btn', activeTab === 'alerts' && 'active')}
+            onClick={() => setTab('alerts')}
+          >
+            Alerts
+            {/* The count, so the tab says whether it is worth opening. Only when
+                there is one: a permanent "0" trains people to stop reading it. */}
+            {alertCount > 0 && <span className="chip danger" style={{ marginLeft: 6 }}>{alertCount}</span>}
+          </button>
+          {stripped.head.map((m) => (
             <button
               key={m.id}
               className={clsx('seg-btn', activeTab === m.id && 'active')}
@@ -382,8 +440,87 @@ export function FleetMonitor(): React.JSX.Element {
               {m.label}
             </button>
           ))}
-          </>
-        )}
+
+          <span className="grow" />
+
+          {stripped.rest.length > 0 && (
+            <div className="mon-pop-host">
+              <button
+                className={clsx('seg-btn', moreOpen && 'active')}
+                aria-expanded={moreOpen}
+                onClick={() => {
+                  setMoreOpen((v) => !v)
+                  setOffOpen(false)
+                }}
+              >
+                More <ChevronDown size={13} />
+              </button>
+              {moreOpen && (
+                <div className="mon-pop">
+                  {stripped.rest.map((m) => (
+                    <button
+                      key={m.id}
+                      className="mon-pop-row"
+                      onClick={() => {
+                        setTab(m.id)
+                        setMoreOpen(false)
+                      }}
+                    >
+                      <span className="s-title">{m.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* The ten capabilities nobody can see.
+              Correctly switching every module off on upgrade has a cost, and
+              the old line here only paid it when they were ALL off — so a fresh
+              install, which has three of the thirteen read modules on,
+              advertised nothing, and a person who never opened Settings never
+              learned the product had drift comparison. This says so from the
+              strip, with each module's own one-line `detail`, and it disappears
+              entirely once everything is on. */}
+          {offTabs.length > 0 && (
+            <div className="mon-pop-host">
+              <button
+                className={clsx('seg-btn', offOpen && 'active')}
+                title={`${offTabs.length} more monitoring modules are available and switched off`}
+                aria-expanded={offOpen}
+                onClick={() => {
+                  setOffOpen((v) => !v)
+                  setMoreOpen(false)
+                }}
+              >
+                <Plus size={14} />
+              </button>
+              {offOpen && (
+                <div className="mon-pop wide">
+                  <div className="s-desc" style={{ marginBottom: 6 }}>
+                    Switched off. Enabling one adds a tab here.
+                  </div>
+                  {offTabs.map((m) => (
+                    <div key={m.id} className="mon-pop-row static">
+                      <span className="s-title">{m.label}</span>
+                      <span className="s-desc">{m.detail}</span>
+                    </div>
+                  ))}
+                  <button
+                    className="btn sm primary"
+                    style={{ marginTop: 8 }}
+                    onClick={() => {
+                      setOffOpen(false)
+                      openSettings('modules')
+                    }}
+                  >
+                    Choose modules
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Mounted always and hidden with the rest, for the reason written at
@@ -424,17 +561,11 @@ export function FleetMonitor(): React.JSX.Element {
           <DriftPanel servers={servers} />
         </div>
       )}
-      {moduleEnabled(modules, 'patch') && (
-        <div style={show('patch')}>
-          <PatchPanel servers={servers} />
-        </div>
-      )}
-
-      {moduleEnabled(modules, 'broadcast') && (
-        <div style={show('broadcast')}>
-          <BroadcastPanel servers={servers} />
-        </div>
-      )}
+      {/* Patch and Broadcast used to be mounted here, between Drift and
+          LogTail. They are the two `operate` modules and they now live on the
+          Operations rail — same components, mounted by OperationsView at the
+          bottom of this file's own render so a live broadcast survives coming
+          back here to read a log. */}
       {moduleEnabled(modules, 'logTail') && (
         <div style={show('logTail')}>
           <LogTailPanel servers={servers} />
@@ -547,5 +678,16 @@ export function FleetMonitor(): React.JSX.Element {
         </div>
       </div>
     </div>
+
+    {/* The other rail, a sibling rather than a route.
+        Monitoring and Operations are two destinations with two icons, and this
+        component mounts both because the alternative is App.tsx unmounting one
+        to show the other. LogTailPanel stops its remote command on unmount and
+        BroadcastPanel holds a live fan-out in component state; a split that
+        unmounted would mean crossing rails killed a tail or stranded a run.
+        Hidden, never unmounted, is the same property the tab strip above has
+        always had \u2014 the split just widened what it covers. */}
+    <OperationsView servers={servers} modules={modules} hidden={rail !== 'operations'} />
+    </>
   )
 }
