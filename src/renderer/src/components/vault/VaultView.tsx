@@ -247,7 +247,7 @@ function BiometricOffer(): React.JSX.Element | null {
 
   return (
     <div className="vault-bio-offer">
-      <Fingerprint size={18} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+      <Fingerprint size={18} style={{ color: 'var(--accent-ink)', flexShrink: 0 }} />
       <div style={{ flex: 1 }}>
         <div className="s-title">Unlock with {label} next time?</div>
         <div className="s-desc">
@@ -297,7 +297,7 @@ function VaultBrowser(): React.JSX.Element {
   return (
     <div className="main">
       <div className="viewbar">
-        <KeyRound size={14} style={{ color: 'var(--accent)' }} />
+        <KeyRound size={14} style={{ color: 'var(--accent-ink)' }} />
         <b>Vault</b>
         <span className="server-meta">{entries.length} entries</span>
         <span className="spacer" />

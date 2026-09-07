@@ -75,7 +75,7 @@ export function WorkspaceSwitcher(): React.JSX.Element {
               {w.locked && <span className="chip">🔒</span>}
               <span className="spacer" />
               {badge(w.id)}
-              {w.id === activeId && <Check size={14} className="accent" style={{ color: 'var(--accent)' }} />}
+              {w.id === activeId && <Check size={14} className="accent" style={{ color: 'var(--accent-ink)' }} />}
             </button>
           ))}
 
@@ -100,7 +100,7 @@ export function WorkspaceSwitcher(): React.JSX.Element {
                     <span>{w.name}</span>
                     <span className="spacer" />
                     {badge(w.id)}
-                    {w.id === activeId && <Check size={14} style={{ color: 'var(--accent)' }} />}
+                    {w.id === activeId && <Check size={14} style={{ color: 'var(--accent-ink)' }} />}
                   </button>
                 ))
               ) : (

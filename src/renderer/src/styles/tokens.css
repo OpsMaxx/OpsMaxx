@@ -25,11 +25,28 @@
   /* Text */
   --text: #e6edf3;
   --text-muted: #9aa4b2;
-  --text-faint: #6b7484;
+  /* Was #6b7484, which measured 3.41:1 on --bg-card — below the 4.5:1 minimum
+     for normal text. That matters more here than the number suggests: this is
+     the colour of "not collected yet" / "not identified" / NULL, which is the
+     MAJORITY of the visible cells on the inventory, drift and posture tables.
+     The least legible text on screen was the most common text on screen, and
+     it is not decoration — "we have no data" is the finding. 4.5:1 is now met
+     against every surface in this theme, --bg-card included. */
+  --text-faint: #8f97a6;
   --text-inverse: #0d1017;
 
-  /* Brand — OpsMaxx cyan/teal */
+  /* Brand — OpsMaxx cyan/teal.
+     Two roles, two tokens, and they are not interchangeable:
+       --accent      a FILL, and whatever sits on it is --accent-text
+       --accent-ink  the accent used AS TEXT, on one of the --bg-* surfaces
+     One value can satisfy both only by accident. In this theme it does
+     (9.30:1 as a fill under --accent-text, 7.36:1 as text on the lightest
+     surface), so --accent-ink repeats it. In the light theme it cannot, which
+     is where the distinction earns itself — see below. Keeping both tokens in
+     both themes means a future change to the brand colour cannot silently
+     break one role while the other still looks right. */
   --accent: #22c7d6;
+  --accent-ink: #22c7d6;
   --accent-hover: #45d6e2;
   --accent-press: #17aab8;
   --accent-soft: rgba(34, 199, 214, 0.14);
@@ -45,6 +62,18 @@
   --danger-soft: rgba(248, 81, 73, 0.15);
   --info: #58a6ff;
   --info-soft: rgba(88, 166, 255, 0.15);
+
+  /* Database engine identity, used as a coloured label BESIDE the engine name
+     and, in the tab header, as the colour OF it. That second use makes these
+     text colours, not decoration, so they carry the same 4.5:1 obligation as
+     anything else — which the dark values already met and the light theme had
+     no values for at all. Hard-coding one set in the component meant the dark
+     palette rendered on a white ground at 2.19:1 to 2.92:1. */
+  --db-postgres: #58a6ff;
+  --db-mysql: #e3873c;
+  --db-mssql: #f85149;
+  --db-mongodb: #3fb950;
+  --db-redis: #db61a2;
 
   /* Workspace accent colors */
   --ws-green: #3fb950;
@@ -111,14 +140,27 @@
 
   --text: #1c2333;
   --text-muted: #55617a;
-  --text-faint: #8a93a6;
+  /* Was #8a93a6 — 3.09:1 on white. Same story as the dark theme's faint, and
+     worse, because the light theme's surfaces sit within 4% luminance of one
+     another so there is nothing else holding those cells together. */
+  --text-faint: #5c6577;
   --text-inverse: #ffffff;
 
-  --accent: #0e9aa8;
-  --accent-hover: #12aebe;
-  --accent-press: #0b808c;
-  --accent-soft: rgba(14, 154, 168, 0.12);
-  --accent-border: rgba(14, 154, 168, 0.4);
+  /* The light theme's accent was #0e9aa8, and it was the only WCAG AA failure
+     found across the whole product: 3.38:1 carrying a white label, and 3.13:1
+     used as body text. It sits on the primary control of every panel, so the
+     single most important thing on each screen was the hardest to read — in a
+     bright room, which is when a person picks the light theme.
+     Both roles now clear 4.5:1 against every surface in this theme, and the
+     hover/press pair goes DARKER rather than lighter: on a light ground,
+     lightening a fill reduces its contrast with the white label on top of it,
+     which is what --accent-hover: #12aebe used to do (3.86:1). */
+  --accent: #157c86;
+  --accent-ink: #0f6570;
+  --accent-hover: #11666f;
+  --accent-press: #0d525a;
+  --accent-soft: rgba(21, 124, 134, 0.12);
+  --accent-border: rgba(21, 124, 134, 0.45);
   --accent-text: #ffffff;
 
   --ok: #1a7f37;
@@ -129,6 +171,13 @@
   --danger-soft: rgba(207, 34, 46, 0.12);
   --info: #0969da;
   --info-soft: rgba(9, 105, 218, 0.12);
+
+  /* Same hue, darkened until each clears 4.5:1 on every light surface. */
+  --db-postgres: #0066db;
+  --db-mysql: #a45718;
+  --db-mssql: #d61208;
+  --db-mongodb: #2a7a35;
+  --db-redis: #c22c7c;
 
   --shadow-sm: 0 1px 2px rgba(30, 41, 59, 0.1);
   --shadow-md: 0 8px 24px rgba(30, 41, 59, 0.12);
