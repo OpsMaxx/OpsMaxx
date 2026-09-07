@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useOnboarding } from '../src/renderer/src/store/onboarding'
-import { TOUR_STEPS } from '../src/renderer/src/components/onboarding/tourSteps'
+import { FULL_WALKTHROUGH, TOUR_STEPS } from '../src/renderer/src/components/onboarding/tourSteps'
 
 const store = new Map<string, string>()
 
@@ -88,16 +88,29 @@ describe('moving through it', () => {
 })
 
 describe('the steps themselves', () => {
+  // The guarantee is unchanged — a new user is told these things exist — but it
+  // is no longer all delivered up front. Five of the six now arrive the first
+  // time the user opens the view each describes, so the assertion moved to the
+  // union rather than being weakened: nothing was dropped, it was deferred.
   it('covers the features a new user would otherwise find by accident', () => {
-    const ids = TOUR_STEPS.map((s) => s.id)
-    for (const required of ['workspaces', 'connections', 'vault', 'monitor', 'tunnels', 'ai']) {
+    const ids = FULL_WALKTHROUGH.map((s) => s.id)
+    for (const required of [
+      'connections',
+      'tip-workspaces',
+      'tip-vault',
+      'tip-monitor',
+      'tip-tunnels',
+      'tip-ai'
+    ]) {
       expect(ids, required).toContain(required)
     }
   })
 
   it('stays short enough that people finish it', () => {
-    // A tour people skip teaches nothing.
-    expect(TOUR_STEPS.length).toBeLessThanOrEqual(9)
+    // A tour people skip teaches nothing, and eight panels before the user has
+    // done anything is a tour people skip. Two is the whole first run.
+    expect(TOUR_STEPS.length).toBeLessThanOrEqual(2)
+    expect(FULL_WALKTHROUGH.length).toBeLessThanOrEqual(9)
   })
 
   it('has unique ids, since they key the progress dots', () => {

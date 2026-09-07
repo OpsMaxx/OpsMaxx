@@ -2584,6 +2584,26 @@ details[open] > .disclosure-head .chev {
 .tour-card .s-desc {
   line-height: 1.5;
 }
+/* The deferred tour steps, shown once when their view is first opened. Sits
+   where the tour card sits, and is deliberately quieter: it is a note beside
+   what the user came to do, not a gate in front of it. It never dims the
+   screen and never takes focus. */
+.tip-card {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 880;
+  width: 360px;
+  max-width: calc(100vw - 40px);
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-md);
+}
+.tip-card .s-desc {
+  line-height: 1.5;
+}
 .tour-action {
   display: flex;
   align-items: center;
