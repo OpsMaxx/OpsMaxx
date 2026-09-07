@@ -55,6 +55,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -78,6 +79,7 @@ import (
 	"time"
 
 	"github.com/elazarl/goproxy"
+	"golang.org/x/net/http2"
 )
 
 const (
@@ -185,6 +187,15 @@ type InspectStartParams struct {
 	// connection on the machine, which is the one failure a security tool
 	// must never introduce by accident. Turning it on says so in the log.
 	InsecureUpstream bool `json:"insecureUpstream,omitempty"`
+	// Credentials every client must present, as `Proxy-Authorization: Basic`.
+	//
+	// Empty is allowed and is the normal case: a listener on 127.0.0.1 is
+	// reachable only by processes already running as this user, who can read
+	// the traffic anyway. A listener on any other address is a different
+	// thing entirely — an open proxy for the network — and start refuses one
+	// without credentials rather than leaving it to the caller to remember.
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
 	// Where bodies larger than the inline preview are spilled. Empty disables
 	// spilling, which caps every recorded body at the preview size — the right
 	// setting for a machine where writing payloads to disk is not acceptable.
@@ -347,6 +358,9 @@ type Inspector struct {
 
 	viaTunnelID string
 	dial        func(ctx context.Context, host string, port int) (net.Conn, error)
+	// The expected `Proxy-Authorization` header value, precomputed, or empty
+	// when the listener is on loopback and needs none.
+	authHeader string
 
 	maxBody  int64
 	spillDir string
@@ -369,8 +383,11 @@ type Inspector struct {
 	// HTTP or TLS, so a client that retries does not repeat the notice.
 	reportedOpaque map[string]bool
 	certs          map[string]*tls.Certificate
-	certLRU        []string
-	live           map[string]*flowRec
+	// Most-recently-used last. A slice rather than a linked list because the
+	// cap is 512 and a linear move-to-back on a hit costs less than the
+	// allocations a list would at that size.
+	certLRU []string
+	live    map[string]*flowRec
 	// Recorded bodies on disk, oldest first, and what they add up to. The
 	// budget is enforced here rather than by the parent because this is the
 	// only side that knows when a file finished being written.
@@ -563,6 +580,18 @@ func newInspector(parent context.Context, out *Writer, p *InspectStartParams, vi
 	if bindHost == "" {
 		bindHost = "127.0.0.1"
 	}
+	authHeader := ""
+	if p.Username != "" || p.Password != "" {
+		authHeader = "Basic " + base64.StdEncoding.EncodeToString([]byte(p.Username+":"+p.Password))
+	} else if !isLoopbackHost(bindHost) {
+		// Refused rather than warned. A proxy on 0.0.0.0 with no credentials
+		// is an open relay that will also decrypt TLS for anyone on the
+		// network who finds it, and "we told you in the log" is not a
+		// defensible answer to that.
+		return nil, codedf(ErrConfigInvalid,
+			"a traffic inspector bound to %s must have a username and password: without them it is an open proxy for the whole network",
+			bindHost)
+	}
 	spill := strings.TrimSpace(p.SpillDir)
 	if spill != "" {
 		// Fail now rather than on the first large body. An unwritable spill
@@ -599,6 +628,7 @@ func newInspector(parent context.Context, out *Writer, p *InspectStartParams, vi
 		caLeaf:           leaf,
 		caFingerprint:    fingerprint(leaf.Raw),
 		leafKey:          leafKey,
+		authHeader:       authHeader,
 		maxBody:          maxBody,
 		spillDir:         spill,
 		upstreamRoots:    roots,
@@ -695,11 +725,27 @@ func (ins *Inspector) buildProxy() *goproxy.ProxyHttpServer {
 	// stream as a log event like everything else, redacted on the way.
 	proxy.Logger = inspectLogger{ins}
 	proxy.Verbose = false
+	// HTTP/2 both ways.
+	//
+	// It was off at first because goproxy parses HTTP/1.1 off the hijacked
+	// connection, and advertising h2 to a client we then could not read would
+	// break every request. goproxy does have a separate h2 path, and it runs
+	// the same filterRequest/filterResponse handlers this file registers, so
+	// flows are recorded there exactly as on the 1.1 path. Leaving it off cost
+	// gRPC entirely, which speaks h2 and does not fall back.
+	//
+	// This flag and the "h2" in the client ALPN list below are ONE decision.
+	// Advertising h2 without setting this drops an h2 connection into the
+	// HTTP/1 parser, which reads a frame, fails, and dereferences a nil
+	// request URL — a panic inside a goroutine goproxy started, which no
+	// recover in this process can catch and which therefore kills the whole
+	// sidecar. Never change one without the other.
+	proxy.AllowHTTP2 = true
 	// We terminate TLS ourselves and re-originate it, so the transport is the
 	// only thing that validates the real server's certificate — turning that
 	// off would silently make every intercepted connection insecure, which is
 	// the exact failure a traffic inspector must not introduce.
-	proxy.Tr = &http.Transport{
+	tr := &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return ins.dialAddr(ctx, addr)
 		},
@@ -709,7 +755,6 @@ func (ins *Inspector) buildProxy() *goproxy.ProxyHttpServer {
 			//nolint:gosec // G402: never true unless a person set insecureUpstream.
 			InsecureSkipVerify: ins.insecureUpstream,
 		},
-		ForceAttemptHTTP2:     false,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   30 * time.Second,
@@ -719,6 +764,20 @@ func (ins *Inspector) buildProxy() *goproxy.ProxyHttpServer {
 		// into itself the moment the user turns the system proxy on.
 		Proxy: nil,
 	}
+	// The upstream half of HTTP/2, wired explicitly.
+	//
+	// `ForceAttemptHTTP2` is not enough on a transport with a custom
+	// DialContext: ALPN negotiates h2 with the origin while the transport
+	// keeps HTTP/1 framing, and the first thing it reads is an h2 SETTINGS
+	// frame that it reports as a malformed HTTP response. ConfigureTransport
+	// installs the h2 protocol handler AND adds "h2" to the ALPN list itself,
+	// so the two cannot disagree.
+	if err := http2.ConfigureTransport(tr); err != nil {
+		// Not fatal: an inspector that reads only HTTP/1.1 is still a working
+		// inspector, and every ordinary client falls back to it.
+		ins.out.Log("warn", "", "HTTP/2 interception is unavailable: "+redact(err.Error()))
+	}
+	proxy.Tr = tr
 	proxy.ConnectDialWithReq = func(_ *http.Request, _ string, addr string) (net.Conn, error) {
 		return ins.dialAddr(context.Background(), addr)
 	}
@@ -731,6 +790,12 @@ func (ins *Inspector) buildProxy() *goproxy.ProxyHttpServer {
 		_, _ = io.WriteString(w, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
 	}
 
+	// Before every other handler, so an unauthenticated caller is answered
+	// without a certificate ever being minted for it or a flow recorded.
+	if ins.authHeader != "" {
+		proxy.OnRequest().HandleConnectFunc(ins.authConnect)
+		proxy.OnRequest().DoFunc(ins.authRequest)
+	}
 	proxy.OnRequest().HandleConnectFunc(ins.onConnect)
 	proxy.OnRequest().DoFunc(ins.onRequest)
 	proxy.OnResponse().DoFunc(ins.onResponse)
@@ -774,6 +839,76 @@ type connectMark struct {
 	tls atomic.Bool
 	// An HTTP request was parsed off the tunnel, TLS or not.
 	used atomic.Bool
+}
+
+// authorised reports whether one request carried the expected credentials.
+// Constant-time, because the comparison is against a secret and a proxy on a
+// network is exactly where a timing oracle would be reachable.
+func (ins *Inspector) authorised(h http.Header) bool {
+	if ins.authHeader == "" {
+		return true
+	}
+	return subtle.ConstantTimeCompare(
+		[]byte(h.Get("Proxy-Authorization")), []byte(ins.authHeader),
+	) == 1
+}
+
+func (ins *Inspector) authConnect(_ string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
+	if ctx != nil && ctx.Req != nil && ins.authorised(ctx.Req.Header) {
+		// Nil action means "not handled here": goproxy carries on to the next
+		// matching handler, which is the real one.
+		return nil, ""
+	}
+	// Hijacked rather than rejected so the client is told WHY. A closed
+	// connection makes a missing password look like a broken proxy, and every
+	// HTTP client knows what to do with a 407.
+	return &goproxy.ConnectAction{
+		Action: goproxy.ConnectHijack,
+		Hijack: func(_ *http.Request, client net.Conn, _ *goproxy.ProxyCtx) {
+			defer client.Close()
+			_, _ = io.WriteString(client,
+				"HTTP/1.1 407 Proxy Authentication Required\r\n"+
+					"Proxy-Authenticate: Basic realm=\"ShellPilot traffic inspector\"\r\n"+
+					"Content-Length: 0\r\n\r\n")
+		},
+	}, ""
+}
+
+func (ins *Inspector) authRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+	// A request that arrived INSIDE a tunnel has already been authorised: the
+	// CONNECT that opened it carried the credentials, and `Proxy-Authorization`
+	// is a hop-by-hop header that no client repeats on the requests it then
+	// sends through. Demanding it again rejected every intercepted request on
+	// an authenticated proxy.
+	//
+	// `UserData` is the marker because only our own onConnect sets it, and
+	// onConnect runs only after this handler has already allowed the CONNECT.
+	// A direct proxy request — plain HTTP, absolute form — has none, and must
+	// carry the header itself.
+	if ctx != nil && ctx.UserData != nil {
+		return req, nil
+	}
+	if req != nil && ins.authorised(req.Header) {
+		return req, nil
+	}
+	resp := goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusProxyAuthRequired,
+		"This traffic inspector requires proxy credentials.")
+	if resp != nil {
+		resp.Header.Set("Proxy-Authenticate", `Basic realm="ShellPilot traffic inspector"`)
+	}
+	return req, resp
+}
+
+// isLoopbackHost is the whole test for "can anything but this machine reach
+// it". A hostname that is not an IP literal is treated as remote: resolving it
+// here to decide a security question would mean trusting DNS for it.
+func isLoopbackHost(host string) bool {
+	h := hostOnly(host)
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
 }
 
 // onConnect decides, per host, whether this connection is intercepted or
@@ -838,12 +973,12 @@ func (ins *Inspector) tlsConfigFor(host string, ctx *goproxy.ProxyCtx) (*tls.Con
 	return &tls.Config{
 		Certificates: []tls.Certificate{*cert},
 		MinVersion:   tls.VersionTLS12,
-		// HTTP/2 is deliberately absent from NextProtos. goproxy parses
-		// HTTP/1.1 off the hijacked connection; advertising h2 to the client
-		// would have it speak a framing nothing here reads. The client falls
-		// back to HTTP/1.1 on its own, which is exactly what every other
-		// intercepting proxy does.
-		NextProtos: []string{"http/1.1"},
+		// Order is the whole point. A TLS server picks the first protocol on
+		// ITS list that the client also offers, and goproxy appends "h2"
+		// AFTER whatever is here — so listing only "http/1.1" answered 1.1 to
+		// every client that offered both, and the h2 path was never taken.
+		// Naming both, h2 first, is what actually enables it.
+		NextProtos: []string{"h2", "http/1.1"},
 	}, nil
 }
 
@@ -1145,12 +1280,18 @@ func normalisePassthrough(in []string) []string {
 
 // leafFor returns a certificate for one host, minting it if necessary.
 func (ins *Inspector) leafFor(host string) (*tls.Certificate, error) {
-	ins.mu.RLock()
+	ins.mu.Lock()
 	cached := ins.certs[host]
-	ins.mu.RUnlock()
 	if cached != nil {
+		// Genuinely least-RECENTLY-used, not merely oldest-minted. The order
+		// used to be insertion order, so a host touched on every page load was
+		// evicted ahead of one seen once an hour ago — the opposite of what a
+		// cache is for, under a name that said otherwise.
+		ins.touchCert(host)
+		ins.mu.Unlock()
 		return cached, nil
 	}
+	ins.mu.Unlock()
 	cert, err := ins.signHost(host)
 	if err != nil {
 		return nil, err
@@ -1164,14 +1305,27 @@ func (ins *Inspector) leafFor(host string) (*tls.Certificate, error) {
 		return existing, nil
 	}
 	if len(ins.certLRU) >= inspectCertCacheMax {
-		oldest := ins.certLRU[0]
+		coldest := ins.certLRU[0]
 		ins.certLRU = ins.certLRU[1:]
-		delete(ins.certs, oldest)
+		delete(ins.certs, coldest)
 	}
 	ins.certs[host] = cert
 	ins.certLRU = append(ins.certLRU, host)
 	ins.mu.Unlock()
 	return cert, nil
+}
+
+// touchCert moves one host to the most-recently-used end. The caller holds the
+// write lock.
+func (ins *Inspector) touchCert(host string) {
+	for i, h := range ins.certLRU {
+		if h != host {
+			continue
+		}
+		ins.certLRU = append(ins.certLRU[:i], ins.certLRU[i+1:]...)
+		ins.certLRU = append(ins.certLRU, host)
+		return
+	}
 }
 
 // signHost mints one leaf. It exists instead of goproxy's TLSConfigFromCA for

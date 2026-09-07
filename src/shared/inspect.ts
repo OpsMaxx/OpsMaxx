@@ -117,6 +117,10 @@ export interface InspectCaInfo {
   /** Where the certificate was written for the user to install by hand, and
    *  for tools that take a path (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`). */
   certPath: string
+  /** Seconds until the authority expires; negative once it has. Everything it
+   *  has signed stops being accepted at that moment, so this is surfaced
+   *  rather than left to be discovered as an unexplained certificate error. */
+  expiresInSec: number
   /** Whether the private key survived a restart. False means the OS keychain
    *  refused to seal it, and a new authority will be minted next time — which
    *  the user needs to know, because the one they installed will stop working. */
@@ -160,9 +164,17 @@ export interface InspectStatus {
   /** Upstream certificate verification is off. Present and true only when a
    *  person deliberately turned it off; the UI is expected to say so loudly. */
   insecureUpstream?: boolean
+  /** Set while the listener requires proxy credentials, which it does
+   *  whenever it is not on loopback. The values themselves are in the env the
+   *  panel hands out, never in the status. */
+  requiresCredentials?: boolean
   /** Why the inspector stopped on its own, when it did. */
   stoppedReason?: string
 }
+
+/** How long before expiry the UI starts saying so. Long enough that nobody is
+ *  surprised, short enough that it is not permanent furniture. */
+export const INSPECT_CA_EXPIRY_WARN_SEC = 14 * 24 * 60 * 60
 
 export interface InspectStartOptions {
   /** Defaults to 127.0.0.1. Anything else is an open proxy on the LAN and the
@@ -177,6 +189,11 @@ export interface InspectStartOptions {
   maxBodyBytes?: number
   upstreamCAsPem?: string[]
   insecureUpstream?: boolean
+  /** Required when `bindHost` is anything but loopback: without credentials
+   *  such a listener is an open proxy that also decrypts TLS for anyone on the
+   *  network. The sidecar refuses to start one, rather than warning. */
+  username?: string
+  password?: string
 }
 
 export interface InspectBodyPage {

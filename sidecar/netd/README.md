@@ -262,10 +262,20 @@ Four things are deliberate and easy to undo by accident:
 3. **Upstream verification is on.** Terminating TLS makes this process the only
    thing checking the far side is who it claims to be. `upstreamCAsPem` adds
    roots; `insecureUpstream` removes the check and logs a warning every start.
-4. **`h2` is not advertised to the client.** goproxy reads HTTP/1.1 off the
-   hijacked connection; offering h2 would have the client speak a framing
-   nothing here parses. Clients downgrade on their own, which is what every
-   intercepting proxy does.
+4. **HTTP/2 is on, and its two switches are one decision.** `proxy.AllowHTTP2`
+   and the `"h2"` in the client ALPN list must change together: advertising h2
+   without the flag drops the connection into goproxy's HTTP/1 parser, which
+   reads a frame, fails, and dereferences a nil request URL — inside a goroutine
+   goproxy started, so no `recover()` here catches it and the whole sidecar
+   dies. Order matters too, since a TLS server picks the first protocol on its
+   own list that the client also offers. Upstream h2 is wired with
+   `http2.ConfigureTransport`, not `ForceAttemptHTTP2`, which does nothing on a
+   transport with a custom dialer beyond negotiating a protocol it then cannot
+   speak.
+5. **A listener off loopback must have credentials.** `inspect.start` refuses
+   one without them. The check is on the CONNECT only: `Proxy-Authorization` is
+   hop-by-hop and no client repeats it on the requests it sends through a
+   tunnel.
 
 ## System mode (`--privileged`)
 

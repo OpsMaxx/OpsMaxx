@@ -133,6 +133,7 @@ async function systemTrustState(ctx: TrustContext): Promise<InspectTrustStore> {
       hint: trusted ? undefined : 'Install the certificate to intercept HTTPS in Safari, Chrome and native apps.'
     }
   }
+  invalidateTrustCache()
   if (ctx.platform === 'win32') {
     const thumb = sha1Hex(ctx.certPem).toUpperCase()
     const { stdout } = await tryRun('certutil', ['-user', '-store', 'Root', thumb])
@@ -218,9 +219,30 @@ function reportOnlyStores(ctx: TrustContext): InspectTrustStore[] {
   ]
 }
 
+/** Trust does not change between two calls a second apart, and every call
+ *  shells out to `security` or `certutil` with a ten-second timeout each. The
+ *  status is read on every start, stop and passthrough change, so without this
+ *  a busy panel spawns a process per keystroke. Invalidated explicitly by the
+ *  two things that actually change trust. */
+let trustCache: { key: string; at: number; value: InspectTrustStore[] } | null = null
+const TRUST_CACHE_MS = 5_000
+
+export function invalidateTrustCache(): void {
+  trustCache = null
+}
+
 export async function trustStatus(ctx: TrustContext): Promise<InspectTrustStore[]> {
+  // Keyed on the fingerprint: regenerating the authority must not be answered
+  // from a cache describing the one it replaced.
+  const key = `${ctx.platform}:${sha256Hex(ctx.certPem)}`
+  const now = Date.now()
+  if (trustCache && trustCache.key === key && now - trustCache.at < TRUST_CACHE_MS) {
+    return trustCache.value
+  }
   const [system, nss] = await Promise.all([systemTrustState(ctx), nssTrustState(ctx)])
-  return [system, nss, ...reportOnlyStores(ctx)]
+  const value = [system, nss, ...reportOnlyStores(ctx)]
+  trustCache = { key, at: now, value }
+  return value
 }
 
 // ------------------------------------------------------------------ install
@@ -241,6 +263,7 @@ export interface TrustChangeResult {
  *  not require administrator rights, and asking for rights we do not need is
  *  how an application teaches people to click through prompts. */
 export async function installSystemTrust(ctx: TrustContext): Promise<TrustChangeResult> {
+  invalidateTrustCache()
   if (ctx.platform === 'win32') {
     const res = await tryRun('certutil', ['-user', '-addstore', 'Root', ctx.certPath])
     return res.ok
@@ -328,6 +351,7 @@ export async function removeSystemTrust(ctx: TrustContext): Promise<TrustChangeR
 
 /** NSS needs no elevation: the database belongs to the user. */
 export async function installNssTrust(ctx: TrustContext): Promise<TrustChangeResult> {
+  invalidateTrustCache()
   const dbDir = join(homedir(), '.pki', 'nssdb')
   if (!which('certutil') || !existsSync(dbDir)) {
     return { ok: false, message: 'No NSS database to add the certificate to.' }
@@ -350,10 +374,36 @@ export async function installNssTrust(ctx: TrustContext): Promise<TrustChangeRes
 }
 
 export async function removeNssTrust(): Promise<TrustChangeResult> {
+  invalidateTrustCache()
   const dbDir = join(homedir(), '.pki', 'nssdb')
   if (!which('certutil') || !existsSync(dbDir)) return { ok: true }
   await tryRun('certutil', ['-d', `sql:${dbDir}`, '-D', '-n', NSS_NICKNAME])
   return { ok: true }
+}
+
+/**
+ * Tell WinINET that the proxy settings changed.
+ *
+ * Writing the registry alone only affects processes that start afterwards:
+ * every browser and .NET application already running reads its proxy
+ * configuration once and keeps it. Without this, turning capture on appears to
+ * do nothing until the user restarts their browser — and turning it off leaves
+ * them proxied through a closed port until they do.
+ *
+ * There is no command-line way to raise `InternetSetOption`, so this goes
+ * through PowerShell with a P/Invoke declaration. Best-effort: a machine with
+ * PowerShell locked down still gets the registry change, which is what a newly
+ * started process reads.
+ */
+async function notifyWinInetSettingsChanged(): Promise<void> {
+  const script = [
+    "$sig = '[DllImport(\"wininet.dll\", SetLastError=true)] public static extern bool InternetSetOption(IntPtr h, int o, IntPtr b, int l);'",
+    "$t = Add-Type -MemberDefinition $sig -Name W -Namespace S -PassThru",
+    // 39 = INTERNET_OPTION_SETTINGS_CHANGED, 37 = INTERNET_OPTION_REFRESH.
+    "$null = $t::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0)",
+    "$null = $t::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0)"
+  ].join('; ')
+  await tryRun('powershell', ['-NoProfile', '-NonInteractive', '-Command', script])
 }
 
 /** POSIX single-quote escaping. The paths here are ours, but they run through
@@ -377,6 +427,7 @@ interface ProxyBackup {
   darwin?: { service: string; web: string[]; secure: string[] }[]
   win32?: { proxyEnable?: string; proxyServer?: string; proxyOverride?: string }
   linux?: { mode: string; host: string; port: string; httpsHost: string; httpsPort: string }
+  kde?: { proxyType: string; httpProxy: string; httpsProxy: string }
 }
 
 function backupPath(): string {
@@ -403,6 +454,31 @@ async function clearBackup(): Promise<void> {
 /** True when this machine's proxy settings are currently pointed at us. */
 export async function systemProxyEngaged(): Promise<boolean> {
   return (await loadBackup()) !== null
+}
+
+/** KDE's config tools are versioned by major release and only one is present. */
+function kwriteconfig(): string {
+  return which('kwriteconfig6') ? 'kwriteconfig6' : 'kwriteconfig5'
+}
+
+function kreadconfig(): string {
+  return which('kreadconfig6') ? 'kreadconfig6' : 'kreadconfig5'
+}
+
+function isKde(): boolean {
+  const desktop = `${process.env.XDG_CURRENT_DESKTOP ?? ''} ${process.env.DESKTOP_SESSION ?? ''}`
+  return /kde|plasma/i.test(desktop)
+}
+
+async function readKdeProxy(): Promise<{ proxyType: string; httpProxy: string; httpsProxy: string }> {
+  const r = kreadconfig()
+  const get = async (k: string): Promise<string> =>
+    (await tryRun(r, ['--file', 'kioslaverc', '--group', 'Proxy Settings', '--key', k])).stdout.trim()
+  return {
+    proxyType: await get('ProxyType'),
+    httpProxy: await get('httpProxy'),
+    httpsProxy: await get('httpsProxy')
+  }
 }
 
 async function darwinServices(): Promise<string[]> {
@@ -507,12 +583,34 @@ export async function engageSystemProxy(
       await restoreSystemProxy()
       return { ok: false, message: 'Windows did not accept the proxy setting.' }
     }
+    await notifyWinInetSettingsChanged()
     return { ok: true }
   }
 
   if (platform === 'linux') {
+    // KDE keeps its proxy settings in kioslaverc, not in gsettings, so a KDE
+    // machine previously got "no gsettings" and no way forward at all.
+    if (isKde() && which(kwriteconfig())) {
+      await saveBackup({ platform, takenAt: Date.now(), kde: await readKdeProxy() })
+      const w = kwriteconfig()
+      const url = `http://${host}:${port}`
+      await tryRun(w, ['--file', 'kioslaverc', '--group', 'Proxy Settings', '--key', 'ProxyType', '1'])
+      await tryRun(w, ['--file', 'kioslaverc', '--group', 'Proxy Settings', '--key', 'httpProxy', url])
+      const ok = await tryRun(w, [
+        '--file', 'kioslaverc', '--group', 'Proxy Settings', '--key', 'httpsProxy', url
+      ])
+      if (!ok.ok) {
+        await restoreSystemProxy()
+        return { ok: false, message: 'KDE did not accept the proxy setting.' }
+      }
+      return { ok: true }
+    }
     if (!which('gsettings')) {
-      return { ok: false, message: 'No gsettings on this desktop. Point applications at the proxy yourself.' }
+      return {
+        ok: false,
+        message:
+          'This desktop exposes no proxy setting ShellPilot can change. Use “Copy shell setup” and point applications at the proxy yourself.'
+      }
     }
     const get = async (schema: string, k: string): Promise<string> =>
       (await tryRun('gsettings', ['get', schema, k])).stdout.trim()
@@ -610,6 +708,21 @@ export async function restoreSystemProxy(): Promise<TrustChangeResult> {
     }
     const enable = prior.proxyEnable && /1|0x1/.test(prior.proxyEnable) ? '1' : '0'
     await tryRun('reg', ['add', key, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', enable, '/f'])
+    await notifyWinInetSettingsChanged()
+    await clearBackup()
+    return { ok: true }
+  }
+
+  if (backup.kde) {
+    const w = kwriteconfig()
+    const prior = backup.kde
+    const set = async (k: string, v: string): Promise<void> => {
+      await tryRun(w, ['--file', 'kioslaverc', '--group', 'Proxy Settings', '--key', k, v])
+    }
+    await set('httpProxy', prior.httpProxy)
+    await set('httpsProxy', prior.httpsProxy)
+    // Last, so the type only flips back once the addresses are already right.
+    await set('ProxyType', prior.proxyType || '0')
     await clearBackup()
     return { ok: true }
   }

@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+  INSPECT_CA_EXPIRY_WARN_SEC,
   INSPECT_DEFAULT_PASSTHROUGH,
   describeFlow,
   formatFingerprint,
@@ -285,5 +286,29 @@ describe('host:port splitting for passthrough rules', () => {
     for (const [input, want] of Object.entries(cases)) {
       expect(hostWithoutPort(input), input).toBe(want)
     }
+  })
+})
+
+describe('which listeners need a password', () => {
+  it('treats only genuine loopback addresses as safe', async () => {
+    // A proxy off loopback is reachable by the whole network AND decrypts
+    // TLS, so this predicate decides whether credentials are mandatory. A
+    // hostname that is not an IP literal counts as remote: resolving it to
+    // answer a security question would mean trusting DNS for it.
+    const { isLoopbackBind } = await import('../src/main/services/inspect')
+    for (const host of ['127.0.0.1', '127.0.0.53', '::1', '[::1]', 'localhost', '', '  ']) {
+      expect(isLoopbackBind(host), host).toBe(true)
+    }
+    for (const host of ['0.0.0.0', '::', '192.168.1.10', '10.0.0.1', 'example.com', '169.254.1.1']) {
+      expect(isLoopbackBind(host), host).toBe(false)
+    }
+  })
+})
+
+describe('certificate expiry', () => {
+  it('warns for a fortnight, which is long enough to act and short enough to notice', () => {
+    // Pinned because the number is a judgement, and a silent change to it is
+    // the difference between a warning nobody sees and permanent furniture.
+    expect(INSPECT_CA_EXPIRY_WARN_SEC).toBe(14 * 24 * 60 * 60)
   })
 })
