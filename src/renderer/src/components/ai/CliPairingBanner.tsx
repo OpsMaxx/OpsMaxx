@@ -56,7 +56,7 @@ export function CliPairingBanner(): React.JSX.Element | null {
         </div>
       </div>
       <div className="setting-row" style={{ marginTop: 12 }}>
-        <button className="btn danger" onClick={cancel}>
+        <button className="btn danger outline" onClick={cancel}>
           Cancel
         </button>
       </div>

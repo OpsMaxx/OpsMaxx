@@ -1,0 +1,254 @@
+/* Dialogs, inline commit panels, empty states, and the button size system.
+   Loaded after global.css, which is where the older rules these extend live.
+
+   ---------------------------------------------------------------------------
+   WHY THIS IS A SEPARATE FILE AND NOT MORE OF global.css
+   ---------------------------------------------------------------------------
+
+   global.css is 86KB of every rule in the app, and the three things below are
+   contracts rather than styling: where a dialog's commit button is, what a
+   button's height is allowed to be, and what a field says when it is wrong.
+   Keeping them in one readable file is what makes the next dialog copy the
+   contract instead of inventing a fourth one — which is exactly how the app
+   arrived at seven add-flows with four container types and three button
+   positions.
+
+   ---------------------------------------------------------------------------
+   THE BUTTON SYSTEM IS OPT-IN, AND THAT IS DELIBERATE
+   ---------------------------------------------------------------------------
+
+   The measured inventory was 30, 28, 28, 26, 25, 22, 18 and 16 pixels tall.
+   Three sizes replace it: 32 / 28 / 24. They are NEW classes rather than a
+   redefinition of `.btn.sm` (26px), because `.btn.sm` is used a few hundred
+   times across panels other agents hold, and silently resizing all of them
+   from a stylesheet is a change nobody reviewed.
+
+   The same reasoning is why the ghost variant is `.btn.quiet` rather than a
+   rule added to the existing `.btn.ghost`. Ghost's whole problem is that a
+   tertiary action reads as a label — so the fix is an underline that is there
+   at REST, not on hover. But roughly forty `.btn.ghost` buttons in this app
+   contain a single icon and no text, and an underline drawn under a trash icon
+   is a defect, not a system. `.quiet` is the ghost variant for a button with
+   words in it; a caller opts in, which is also what makes the remaining sites
+   countable.
+   ============================================================================ */
+
+/* --------------------------------------------------------------------------
+   Sizes — 32 / 28 / 24, and nothing else
+   -------------------------------------------------------------------------- */
+
+/* 32 is already `.btn`'s height. The class exists anyway so that a row of
+   mixed sizes states all three rather than leaving the largest implicit. */
+.btn.size-32 {
+  height: 32px;
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-md);
+}
+.btn.size-28 {
+  height: 28px;
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-sm);
+}
+.btn.size-24 {
+  height: 24px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-sm);
+}
+
+/* --------------------------------------------------------------------------
+   Variants — primary, secondary, quiet (ghost), danger
+   -------------------------------------------------------------------------- */
+
+/* primary is `.btn.primary` in global.css: an accent FILL carrying
+   --accent-text. Nothing to add here; it is listed so the set of four is
+   readable in one place. */
+
+.btn.secondary {
+  background: var(--bg-card);
+  border-color: var(--border);
+  color: var(--text);
+}
+.btn.secondary:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+/* The ghost variant. Transparent, border on hover — and an underline at rest,
+   which is the entire point: without it this is 13px body text standing beside
+   a 32px filled button, and users do not find it. */
+.btn.quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 3px;
+}
+.btn.quiet:hover {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text);
+  text-decoration-color: currentColor;
+}
+
+/* Destructive, outlined. The default treatment for a destructive action:
+   --danger as both border and text, so the role is legible without the weight
+   of a filled button sitting in a row of ordinary controls. */
+.btn.danger.outline {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.btn.danger.outline:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
+
+/* Destructive, filled. Reserved for a confirmation that cannot be undone —
+   "Restore and restart", which replaces the user's whole local state. A fill
+   on anything reversible spends the one treatment that should still mean
+   something when it is genuinely needed. */
+.btn.danger.fill {
+  background: var(--danger);
+  border-color: transparent;
+  color: var(--text-inverse);
+}
+.btn.danger.fill:hover {
+  background: var(--danger);
+  border-color: var(--border-strong);
+  opacity: 0.92;
+}
+
+/* --------------------------------------------------------------------------
+   Dialog footer
+   -------------------------------------------------------------------------- */
+
+/* Right-aligned, always. Button position is muscle memory, and the cost of
+   moving the confirm between two dialogs of the same product is paid on every
+   single use. `.modal-footer` already draws the divider above itself and every
+   existing caller pushes with a `flex: 1` spacer, so this changes no dialog's
+   current appearance — it removes the ability of the NEXT one to differ. */
+.modal-footer {
+  justify-content: flex-end;
+}
+
+/* The sentence that explains the footer — a status line, or why the primary is
+   disabled. Left of the buttons, and it never pushes them off the row. */
+.modal-footer .footer-note {
+  margin-right: auto;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  text-align: left;
+}
+
+/* --------------------------------------------------------------------------
+   Inline commit panels (Settings)
+   -------------------------------------------------------------------------- */
+
+/* Two add-flows are inline expanding panels rather than dialogs, and that
+   shape is right for Settings — a modal over a settings page hides the row the
+   user was reading. What was wrong was the footer contract, and in one case it
+   was wrong in a way that made the form unusable: the backup destination
+   editor put "Save destination" at the TOP-RIGHT, as a flex sibling of the
+   fields, so in two of its states the form continued past the bottom of the
+   window and the primary action ended up off-screen BEHIND the user as they
+   scrolled down to finish typing.
+
+   So an inline panel gets the same contract as a dialog: primary bottom-right,
+   after the fields it commits, with a divider above it. */
+.inline-panel-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border-subtle);
+}
+.inline-panel-footer .footer-note {
+  margin-right: auto;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  text-align: left;
+}
+
+/* --------------------------------------------------------------------------
+   Field validation
+   -------------------------------------------------------------------------- */
+
+/* The frp dialog already did this and was the only one that did: the message
+   goes directly under the field it is about, not in a banner at the top of the
+   body and not in a toast after the submit fails.
+
+   `.field-control` wraps the input so the error styling lands on the control
+   without every call site having to thread a conditional class into its own
+   <input>. A rule that is easy to apply is a rule that gets applied. */
+.field-control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.field-control > .input,
+.field-control > .select,
+.field-control > .textarea {
+  width: 100%;
+}
+.field-control.invalid > .input,
+.field-control.invalid > .select,
+.field-control.invalid > .textarea {
+  border-color: var(--danger);
+}
+.field-control.invalid > .input:focus,
+.field-control.invalid > .select:focus,
+.field-control.invalid > .textarea:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-soft);
+}
+
+.field-error {
+  font-size: var(--fs-xs);
+  color: var(--danger);
+}
+
+/* "Required" is stated in the label, at rest, before anything is typed.
+   Discovering a required field by pressing a disabled button and reading a
+   banner is the failure mode this replaces. */
+.field-req {
+  margin-left: var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: 450;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* --------------------------------------------------------------------------
+   Compact empty state
+   -------------------------------------------------------------------------- */
+
+/* `.empty` centres a 56px glyph tile in the full height of a pane, which is
+   right for a whole screen and wrong for a slot inside one — a query-results
+   pane or a list under a heading. Without a compact variant those slots each
+   grew their own grammar: a left-aligned line with an inline icon here, a bare
+   sentence with no container there. Same component, same words, no tile. */
+.empty.compact {
+  height: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: var(--sp-2);
+  text-align: left;
+  padding: var(--sp-4) 0;
+}
+.empty.compact h3 {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+.empty.compact p {
+  max-width: 60ch;
+  font-size: var(--fs-sm);
+}

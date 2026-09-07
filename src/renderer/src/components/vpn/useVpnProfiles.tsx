@@ -724,7 +724,7 @@ export function useVpnProfiles(): VpnProfiles {
                 Keep it running
               </button>
               <button
-                className="btn danger sm"
+                className="btn danger outline sm"
                 onClick={() => {
                   const p = confirmStop.profile
                   setConfirmStop(null)
@@ -796,7 +796,7 @@ export function useVpnProfiles(): VpnProfiles {
                 Keep it
               </button>
               <button
-                className="btn danger sm"
+                className="btn danger outline sm"
                 onClick={() => {
                   const p = confirmDelete.profile
                   setConfirmDelete(null)

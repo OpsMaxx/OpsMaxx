@@ -268,7 +268,7 @@ export function BackupPanel(): React.JSX.Element {
           <button className="btn sm" onClick={() => setStaged(null)}>
             Cancel
           </button>
-          <button className="btn sm danger" disabled={busy !== null} onClick={() => void runImport()}>
+          <button className="btn sm danger fill" disabled={busy !== null} onClick={() => void runImport()}>
             {busy === 'import' ? <Loader2 size={13} className="spin" /> : null}
             Restore and restart
           </button>
@@ -311,7 +311,7 @@ export function BackupPanel(): React.JSX.Element {
           </button>
         </div>
       ) : !confirmDelete ? (
-        <button className="btn danger" onClick={() => setConfirmDelete(true)}>
+        <button className="btn danger outline" onClick={() => setConfirmDelete(true)}>
           <Trash2 size={14} /> Delete all data
         </button>
       ) : (
@@ -341,7 +341,7 @@ export function BackupPanel(): React.JSX.Element {
             Cancel
           </button>
           <button
-            className="btn sm danger"
+            className="btn sm danger fill"
             disabled={deleteTyped !== 'DELETE' || busy !== null}
             onClick={() => void runDeleteAll()}
           >

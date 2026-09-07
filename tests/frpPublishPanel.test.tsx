@@ -191,7 +191,7 @@ describe('the guided setup happens once', () => {
 
     // Said here, in full, once.
     expect(
-      await screen.findByText(/OpsMaxx does not server public addresses/)
+      await screen.findByText(/OpsMaxx does not serve public addresses/)
     ).toBeTruthy()
 
     await user.type(screen.getByPlaceholderText('frp.example.com'), 'frp.example.com')
@@ -211,7 +211,7 @@ describe('the guided setup happens once', () => {
     // carries on by itself.
     await waitFor(() =>
       expect(
-        screen.queryByText(/OpsMaxx does not server public addresses/)
+        screen.queryByText(/OpsMaxx does not serve public addresses/)
       ).toBe(null)
     )
     expect(
@@ -227,7 +227,7 @@ describe('the guided setup happens once', () => {
     await user.click(screen.getByRole('button', { name: /Get a public URL/ }))
     expect(await screen.findByRole('button', { name: /Publish/ })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Set up a tunnel server/ })).toBe(null)
-    expect(document.body.textContent).not.toContain('OpsMaxx does not server public addresses')
+    expect(document.body.textContent).not.toContain('OpsMaxx does not serve public addresses')
   })
 
   it('stores the domain on the profile, so it survives the dialog closing', async () => {

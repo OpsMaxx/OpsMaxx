@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Copy, Globe, Plus, Share2 } from 'lucide-react'
+import { Copy, Globe, Share2 } from 'lucide-react'
 import { EmptyState } from '../common/EmptyState'
 import { useApp, useWorkspaceVpns } from '../../store/app'
 import { toast } from '../../store/toast'
@@ -100,11 +100,17 @@ export function FrpManager(): React.JSX.Element {
           <div className="sub">Publish a local service through an frp server</div>
         </div>
         <div className="spacer" />
-        <button className="btn sm" onClick={() => importProfile('frp')}>
-          <Plus size={14} /> Import frpc config
+        {/* Demoted, both of them. This screen used to stack four things that
+            all looked like the way in — "Import frpc config", "New frp client",
+            "Get a public URL", and a filled "New frp client" in the middle of
+            the empty state. Three of the four are named in frp's own
+            vocabulary and none of those three is what a person came here to
+            do. One primary survives, below. */}
+        <button className="btn quiet size-28" onClick={() => importProfile('frp')}>
+          Import frpc config
         </button>
-        <button className="btn sm" onClick={newClient}>
-          <Share2 size={14} /> New frp client
+        <button className="btn quiet size-28" onClick={newClient}>
+          New frp client
         </button>
       </div>
 
@@ -122,7 +128,7 @@ export function FrpManager(): React.JSX.Element {
               if (e.key === 'Enter') publish()
             }}
           />
-          <button className="btn primary sm" onClick={publish}>
+          <button className="btn primary size-32" onClick={publish}>
             <Globe size={14} /> Get a public URL
           </button>
           <span className="grow" />
@@ -137,7 +143,7 @@ export function FrpManager(): React.JSX.Element {
               </span>
             ))}
             <div className="row">
-              <button className="btn sm" onClick={() => setSettingUp(true)}>
+              <button className="btn secondary size-28" onClick={() => setSettingUp(true)}>
                 Set up a tunnel server
               </button>
             </div>
@@ -171,9 +177,9 @@ export function FrpManager(): React.JSX.Element {
         <EmptyState
           icon={<Share2 size={26} />}
           title="No reverse proxies"
-          message="An frp client makes a service on this machine reachable through a server you control."
+          message="An frp client makes a service on this machine reachable through a server you control. The box above is the short way in — type the port your service is on."
           action={
-            <button className="btn primary" onClick={newClient}>
+            <button className="btn secondary size-32" onClick={newClient}>
               <Share2 size={15} /> New frp client
             </button>
           }

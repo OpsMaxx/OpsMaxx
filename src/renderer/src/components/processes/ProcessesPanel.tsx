@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, Play, Plus, RotateCw, Square, Trash2 } from 'lucide-react'
+import { Play, Plus, RotateCw, Square, Trash2 } from 'lucide-react'
+import { EmptyState } from '../common/EmptyState'
 import { clsx } from '../../lib/format'
 import {
   PROCESS_LOG_PAGE,
@@ -199,12 +200,16 @@ export function ProcessesPanel(): React.JSX.Element {
           </div>
         </div>
         <span className="spacer" />
-        <button className="btn ghost" onClick={() => setAdding((v) => !v)}>
+        <button className="btn secondary size-28" onClick={() => setAdding((v) => !v)}>
           <Plus size={14} /> Add a process
         </button>
       </div>
 
-      {error && (
+      {/* Only what happened OUTSIDE the form — a start that failed, a remove
+          that did not. While the form is open its own problem belongs beside
+          its own footer, not in a banner above the fields it is about, where
+          the user has to scroll back up past everything they just typed. */}
+      {error && !adding && (
         <div className="s-desc danger" role="alert" style={{ marginBottom: 10 }}>
           {error}
         </div>
@@ -292,7 +297,7 @@ export function ProcessesPanel(): React.JSX.Element {
                 />
               )}
               <button
-                className="btn ghost sm"
+                className="btn ghost size-28"
                 aria-label={`Remove variable ${i + 1}`}
                 onClick={() => setDraft({ ...draft, env: draft.env.filter((_x, j) => j !== i) })}
               >
@@ -301,7 +306,7 @@ export function ProcessesPanel(): React.JSX.Element {
             </div>
           ))}
           <button
-            className="btn ghost sm"
+            className="btn quiet size-24"
             onClick={() =>
               setDraft({
                 ...draft,
@@ -372,12 +377,21 @@ export function ProcessesPanel(): React.JSX.Element {
               </div>
             </>
           )}
-          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-            <button className="btn" onClick={() => void submit()}>
-              Add
-            </button>
-            <button className="btn ghost" onClick={() => setAdding(false)}>
+          {/* The dialog footer contract, in an inline panel: the commit is
+              bottom-RIGHT and after the fields it commits, it is filled rather
+              than the same unfilled grey as Cancel, and the reason it did not
+              work sits beside it instead of at the top of the panel. */}
+          <div className="inline-panel-footer">
+            {error && (
+              <span className="footer-note field-error" role="alert">
+                {error}
+              </span>
+            )}
+            <button className="btn secondary size-28" onClick={() => setAdding(false)}>
               Cancel
+            </button>
+            <button className="btn primary size-28" onClick={() => void submit()}>
+              Add process
             </button>
           </div>
         </div>
@@ -388,10 +402,22 @@ export function ProcessesPanel(): React.JSX.Element {
       )}
 
       {rows?.length === 0 && !adding && (
-        <div className="s-desc">
-          <Activity size={14} /> No processes yet. Add one to run it under supervision —
-          restarts, backoff and crash-loop detection included.
-        </div>
+        // Was a single left-aligned line of body text with an inline icon —
+        // its own grammar, in a product that already has one for this.
+        <EmptyState
+          compact
+          title="No processes yet"
+          message="Add one to run it under supervision — restarts, backoff and crash-loop detection included."
+          // Not "Add a process" a second time: the header button says exactly
+          // that eighty pixels above, and two controls with one name is a
+          // thing a screen reader reads out twice and a person reads as a
+          // choice between two options that do not differ.
+          action={
+            <button className="btn secondary size-28" onClick={() => setAdding(true)}>
+              <Plus size={14} /> Add your first process
+            </button>
+          }
+        />
       )}
 
       {(rows ?? []).map((p) => {
@@ -411,28 +437,28 @@ export function ProcessesPanel(): React.JSX.Element {
               )}
               <span className="spacer" />
               <button
-                className="btn ghost sm"
+                className="btn quiet size-24"
                 disabled={busy === p.id || live}
                 onClick={() => void act(p.id, () => bridge.start(p.id))}
               >
                 <Play size={13} /> Start
               </button>
               <button
-                className="btn ghost sm"
+                className="btn quiet size-24"
                 disabled={busy === p.id || !live}
                 onClick={() => void act(p.id, () => bridge.stop(p.id))}
               >
                 <Square size={13} /> Stop
               </button>
               <button
-                className="btn ghost sm"
+                className="btn quiet size-24"
                 disabled={busy === p.id}
                 onClick={() => void act(p.id, () => bridge.restart(p.id))}
               >
                 <RotateCw size={13} /> Restart
               </button>
               <button
-                className="btn ghost sm"
+                className="btn ghost size-24"
                 disabled={busy === p.id}
                 onClick={() => void act(p.id, () => bridge.remove(p.id))}
                 aria-label="Delete"
@@ -473,7 +499,7 @@ export function ProcessesPanel(): React.JSX.Element {
             )}
 
             <button
-              className="btn ghost sm"
+              className="btn quiet size-24"
               style={{ marginTop: 6 }}
               onClick={() => setOpenId(openId === p.id ? null : p.id)}
             >

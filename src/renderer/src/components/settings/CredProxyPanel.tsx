@@ -360,7 +360,7 @@ export function CredProxyPanel(): React.JSX.Element {
                       <button className="btn sm" onClick={() => void copyToken(t.id)}>
                         Copy
                       </button>
-                      <button className="btn sm danger" onClick={() => void revokeToken(t.id, t.name)}>
+                      <button className="btn sm danger outline" onClick={() => void revokeToken(t.id, t.name)}>
                         Revoke
                       </button>
                     </>
@@ -446,7 +446,7 @@ export function CredProxyPanel(): React.JSX.Element {
               >
                 Edit
               </button>
-              <button className="btn danger" onClick={() => void remove(r.id)}>
+              <button className="btn danger outline" onClick={() => void remove(r.id)}>
                 Remove
               </button>
             </div>
