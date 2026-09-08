@@ -81,7 +81,24 @@ describe('when the status bar warns that nothing is being checked', () => {
       const w = samplerWarning(s, true)
       expect(w).not.toBeNull()
       expect(w!.label.length).toBeLessThanOrEqual(20)
-      expect(w!.detail).toMatch(/Click to open Monitoring settings/)
+      // Every tooltip ends by naming what the click does. It used to be able
+      // to say one thing, because the chip always went to Monitoring settings.
+      expect(w!.detail).toMatch(/Click to /)
+    }
+  })
+
+  it('offers the unlock itself, not a route to the screen with the button on it', () => {
+    // The chip is the most visible "something is wrong" control in the app,
+    // and a locked vault is a dialog to answer rather than a setting to change.
+    // Sending it to Settings made it a signpost to another button.
+    const w = samplerWarning(status({ running: false, idleReason: 'vault-locked' }), true)
+    expect(w!.detail).toMatch(/Click to unlock/)
+    expect(w!.detail).not.toMatch(/Monitoring settings/)
+  })
+
+  it('still routes the settings-shaped warnings to settings', () => {
+    for (const s of [status({ running: false, idleReason: 'no-targets' }), status({ running: false })]) {
+      expect(samplerWarning(s, true)!.detail).toMatch(/Click to open Monitoring settings/)
     }
   })
 })

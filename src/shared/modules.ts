@@ -486,6 +486,37 @@ export const MODULE_FORBIDDEN_IMPORTS = [
 ] as const
 
 /**
+ * Whether one file path is a forbidden import, matched at a PATH BOUNDARY.
+ *
+ * The check used to be a bare substring, and `'store/vault'` therefore also
+ * matched `store/vaultPrompt.ts` — a different file, holding no secret. It
+ * carries `{ open, reason, resolve }` and a `request()` that resolves to a
+ * boolean; the user types into the vault's own modal, which is mounted at the
+ * app root, and nothing about a credential passes back to the caller.
+ *
+ * That accident had a cost. The rule this list encodes is that a module may not
+ * READ the vault, and the reason `store/vault` is on it is spelled out above:
+ * a module importing it can read `VaultEntry.password` out of renderer memory.
+ * Blocking the PROMPT as well blocked the one thing store/vaultPrompt.ts was
+ * built for — its own header says it exists so a caller can ask the user to
+ * unlock "rather than the operation simply failing with advice the user then
+ * has to act on manually and retry by hand". Which is precisely what the
+ * monitoring panels were reduced to doing: naming a locked vault and sending
+ * the reader to a settings screen to go and act on it.
+ *
+ * So the boundary is tightened, not widened. `store/vault.ts` and anything
+ * under `store/vault/` stay forbidden; a sibling whose name merely starts with
+ * the same letters does not. Each of the other four entries names exactly one
+ * file and is unaffected.
+ */
+export function isForbiddenModuleImport(path: string): boolean {
+  const normalised = path.replace(/\\/g, '/')
+  return MODULE_FORBIDDEN_IMPORTS.some(
+    (forbidden) => normalised.includes(`${forbidden}.`) || normalised.includes(`${forbidden}/`)
+  )
+}
+
+/**
  * The same four things, named the way the RENDERER reaches them.
  *
  * Every path above lives under src/main. Three of the five modules are renderer

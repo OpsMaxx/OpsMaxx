@@ -7,7 +7,7 @@ import {
   buildAccessExport
 } from '../../../../shared/accessExport'
 import { KeyRound, RefreshCw, ShieldAlert } from 'lucide-react'
-import { openKeyRevoke, openSettings } from '../../store/nav'
+import { openKeyRevoke } from '../../store/nav'
 import { useApp } from '../../store/app'
 import { bridgeHas } from '../../lib/bridge'
 import { clsx, duration } from '../../lib/format'
@@ -31,6 +31,7 @@ import {
 } from '../../../../shared/access'
 import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
+import { SweepEmpty } from './SweepEmpty'
 
 // Fleet keys and access — roadmap item 23, renderer half.
 //
@@ -551,29 +552,28 @@ export function AccessPanel({
       )}
 
       {collected.length === 0 ? (
-        <div className="panel-empty">
-          <p className="panel-empty-title">No authorized_keys have been collected yet.</p>
-          <p className="panel-empty-body">
-            ShellPilot reads them about once an
-          hour, on the same background sweep as server facts — so a server added in the last hour, or
-          an estate where this module has just been switched on, will not have any yet. Press{' '}
-          <b>Check now</b> to sweep immediately, and make sure background checking is on in
-          Settings. Nothing is written to any server by this: the files are read, never edited, and no
-          private key is touched.
-          {failed.length > 0 && (
+        <SweepEmpty
+          subject="No authorized_keys have been collected yet."
+          busy={busy}
+          onCheckNow={() => void refresh()}
+          note={
             <>
-              {' '}
-              <b>{failed.length}</b> server{failed.length === 1 ? '' : 's'} refused the probe — see
-              below.
+              {/* Stays on the page rather than moving behind the ⓘ. PanelShell's
+                  header draws that line: `about` is what a panel is for, and a
+                  standing promise about what the probe does to a host is not a
+                  description you read once. Shortened from three sentences to
+                  one — the wall of text was the complaint, not this clause. */}
+              The files are read, never edited, and no private key is touched.
+              {failed.length > 0 && (
+                <>
+                  {' '}
+                  <b>{failed.length}</b> server{failed.length === 1 ? '' : 's'} refused the probe —
+                  see below.
+                </>
+              )}
             </>
-          )}
-          </p>
-          <div className="panel-empty-actions">
-            <button className="btn ghost sm" onClick={() => openSettings('monitoring')}>
-              Open Monitoring settings
-            </button>
-          </div>
-        </div>
+          }
+        />
       ) : (
         <>
           {/* The headline, and the reason the second half of the sentence is

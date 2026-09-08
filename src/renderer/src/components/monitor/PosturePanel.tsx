@@ -1,6 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { RefreshCw, ShieldAlert, ShieldQuestion } from 'lucide-react'
-import { openSettings } from '../../store/nav'
 import { bridgeHas } from '../../lib/bridge'
 import { clsx, duration } from '../../lib/format'
 import {
@@ -23,6 +22,7 @@ import {
 import { FACT_STATUS_HELP, type HostFacts } from '../../../../shared/hostFacts'
 import type { Server } from '../../types'
 import { NoteWhy, PanelShell } from './PanelShell'
+import { SweepEmpty } from './SweepEmpty'
 
 // Security posture — roadmap item 24, renderer half.
 //
@@ -665,22 +665,12 @@ export function PosturePanel({
       actions={checkNow(summary.collected === 0)}
     >
       {summary.collected === 0 ? (
-        <div className="panel-empty">
-          <p className="panel-empty-title">No security posture has been collected yet.</p>
-          <p className="panel-empty-body">
-            ShellPilot reads it about once an hour, on the same background sweep as the inventory —
-            so a server added in the last hour, or an estate where this has just been switched on,
-            will not have any yet. Press <b>Check now</b> to sweep immediately, and make sure
-            background checking is on in Settings. Nothing is changed by the probe: firewalls are
-            read, never enabled; SELinux modes are read, never set; and no configuration file is
-            written.
-          </p>
-          <div className="panel-empty-actions">
-            <button className="btn ghost sm" onClick={() => openSettings('monitoring')}>
-              Open Monitoring settings
-            </button>
-          </div>
-        </div>
+        <SweepEmpty
+          subject="No security posture has been collected yet."
+          busy={busy}
+          onCheckNow={() => void refresh()}
+          note="Firewalls are read, never enabled; SELinux modes are read, never set; no configuration file is written."
+        />
       ) : (
         <>
           <div className="panel-stats">
