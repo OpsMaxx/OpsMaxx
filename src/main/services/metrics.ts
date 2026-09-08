@@ -312,9 +312,34 @@ function parse(text: string, prev: CpuSnap | null): { data: HostMetrics; snap: C
   const memTotal = kv.MemTotal || 0
   const memUsed = Math.max(0, memTotal - (kv.MemAvailable || 0))
 
+  // `df -kP /` gives: Filesystem 1024-blocks Used Available Capacity Mounted-on
   const disk = section(text, 'DISK')[0]?.trim().split(/\s+/) ?? []
   const diskTotal = (parseInt(disk[1]) || 0) * 1024
   const diskUsed = (parseInt(disk[2]) || 0) * 1024
+  /**
+   * df's OWN Capacity column, not a percentage derived here.
+   *
+   * This used to be `used / total`, which is not what df means by Capacity and
+   * not what any operator comparing the two will see. df reports
+   * `used / (used + available)` — it excludes the blocks ext4 reserves for
+   * root, because they are not space anyone can fill. On a filesystem with the
+   * default 5% reservation the two answers differ by several points, and this
+   * app showed the lower one:
+   *
+   *   /boot on a test host — 901520 total, 119388 used, 719004 available
+   *     used / total            = 13.2%
+   *     used / (used + avail)   = 14.2%   ← what df prints, rounded up to 15%
+   *
+   * Worse, the app already disagreed with ITSELF: parseDfRows in shared/mounts
+   * reads the Capacity column verbatim, so the per-filesystem list and the
+   * headline reported different numbers for the same disk. Reading the column
+   * is what makes them the same number, and the same number df prints.
+   *
+   * The cost is precision — df's column is a rounded-up integer — and that is
+   * the right trade here. A figure an operator can check against `df -h` is
+   * worth more than a decimal place nobody can reconcile.
+   */
+  const diskCapacity = /^(\d+)%$/.exec(disk[4] ?? '')
 
   // Inodes. `df -iP` gives: Filesystem Inodes IUsed IFree IUse% Mounted.
   //
@@ -369,7 +394,7 @@ function parse(text: string, prev: CpuSnap | null): { data: HostMetrics; snap: C
     memPct: memTotal ? (memUsed / memTotal) * 100 : null,
     memUsed,
     memTotal,
-    diskPct: diskTotal ? (diskUsed / diskTotal) * 100 : null,
+    diskPct: diskCapacity ? Number(diskCapacity[1]) : null,
     diskUsed,
     diskTotal,
     inodePct,

@@ -304,6 +304,36 @@ describe('the per-mount read reaches HostMetrics', () => {
     expect(m.diskPct).toBeCloseTo(61, 0)
   })
 
+  /**
+   * The reserved blocks, which are the whole reason this reads df's column
+   * instead of dividing.
+   *
+   * ext4 keeps 5% for root by default, so `used + available` is smaller than
+   * the total — and df's Capacity is used over what is ACTUALLY fillable, not
+   * over the raw size. Dividing used by total therefore under-reports every
+   * ext4 filesystem, and the fixture above cannot show it because its numbers
+   * happen to add up exactly.
+   *
+   * Real figures from /boot on a test host.
+   */
+  it('reports what df reports on a filesystem with reserved blocks', () => {
+    const withReserve = [
+      '__DISK__',
+      '/dev/sda16 901520 119388 719004 15% /',
+      '__INODE__',
+      '/dev/sda16 58596 320 58276 1% /'
+    ].join('\n')
+
+    const m = parseMetricsForTests(withReserve)
+    // df says 15%. used/total is 13.2% — the number this used to show.
+    expect(m.diskPct).toBe(15)
+    expect(m.diskPct).not.toBeCloseTo(13.2, 1)
+  })
+
+  it('reports no percentage rather than a zero when df said nothing', () => {
+    expect(parseMetricsForTests('__DISK__\n__INODE__\n').diskPct).toBeNull()
+  })
+
   it('drops the pseudo filesystems on the way through', () => {
     expect(parseMetricsForTests(probe).mounts?.map((x) => x.type)).not.toContain('tmpfs')
   })
