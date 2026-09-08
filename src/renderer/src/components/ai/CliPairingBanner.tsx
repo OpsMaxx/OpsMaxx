@@ -51,7 +51,7 @@ export function CliPairingBanner(): React.JSX.Element | null {
             {request.code}
           </div>
           <div className="s-desc" style={{ marginTop: 6 }}>
-            Expires in {secondsLeft}s. If you did not run a OpsMaxx CLI command, click Cancel.
+            Expires in {secondsLeft}s. If you did not run an OpsMaxx CLI command, click Cancel.
           </div>
         </div>
       </div>
