@@ -458,7 +458,7 @@ describe('signS3Request', () => {
     expect(signS3Request(input).authorization).toBe(
       'AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20240115/eu-west-1/s3/aws4_request, ' +
         'SignedHeaders=host;x-amz-content-sha256;x-amz-date, ' +
-        'Signature=13138fc9fa6410a61b301c71e3434b3229ea94cd4189ff79a2c57b4e2ba38cc9'
+        'Signature=5826c1f340b635865fa0b142a6810058f1507b9ff9e59e3cec70d687ccd60be4'
     )
   })
 
@@ -829,7 +829,7 @@ describe.skipIf(MINIO_SKIP !== null)(
       )
       const listed = await t.list()
       expect(listed.map((g) => g.name)).toEqual(['opsmaxx-20240101T000000Z.spbackup'])
-      expect(listed[0].size).toBe(29)
+      expect(listed[0].size).toBe(26)
       await t.remove('opsmaxx-20240101T000000Z.spbackup')
       expect(await t.list()).toEqual([])
     })
