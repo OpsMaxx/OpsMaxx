@@ -117,7 +117,12 @@ const ALLOWED_TOOLS = [
   // fleet-wide "which hosts are behind" question is still absent and has no
   // tool; see the drift block in the forbidden list below for why the shape
   // matters more than the subject here.
-  'get_config_drift'
+  'get_config_drift',
+  // The fleet-wide form, added by an explicit decision. Graded `high` — the
+  // only read here that is — because the same information about every host at
+  // once sorts an estate into the machines that are behind and the ones that
+  // are not.
+  'fleet_drift'
 ]
 
 // A hint, not the gate. Anything this regex matches is by construction absent

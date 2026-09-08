@@ -217,7 +217,7 @@ describe('MCP server (integration)', () => {
     })
   })
 
-  describe('drift is per host, never per fleet', () => {
+  describe('drift, per host and per fleet', () => {
     it('takes one server and offers no way to ask about all of them', async () => {
       // The argument this tool was carved out of objects to the FLEET-WIDE
       // question — "which of these forty hosts has drifted" is a ranked list of
@@ -236,12 +236,30 @@ describe('MCP server (integration)', () => {
       await client.close()
     })
 
-    it('has no whole-fleet drift tool alongside it', async () => {
+    it('offers the fleet-wide form as its own tool rather than by looping the per-host one', async () => {
+      // `fleet_drift` exists by an explicit decision. What this asserts is that
+      // it is a NAMED tool rather than something assembled by calling the
+      // per-host one forty times — one approval and one audit row that records
+      // what was actually being asked, instead of forty that hide it.
       const client = await connectedClient(token)
-      const names = (await client.listTools()).tools.map((t) => t.name)
-      for (const forbidden of ['fleet_drift', 'list_drift', 'drift_report', 'fleet_config_drift']) {
-        expect(names).not.toContain(forbidden)
-      }
+      const tools = (await client.listTools()).tools
+      const fleet = tools.find((t) => t.name === 'fleet_drift')
+      expect(fleet, 'fleet_drift must exist').toBeTruthy()
+      // And it takes no serverName: it is the whole-workspace question or it is
+      // the other tool.
+      const schema = fleet?.inputSchema as { properties?: Record<string, unknown> }
+      expect(Object.keys(schema?.properties ?? {})).not.toContain('serverName')
+      await client.close()
+    })
+
+    it('says unsampled hosts are unknown rather than letting them read as clean', async () => {
+      // The failure this area keeps producing: a host that was never compared
+      // reported alongside the compliant ones. The description has to carry it
+      // because the answer often will not — an estate where nothing has drifted
+      // and an estate that was never sampled produce the same short reply.
+      const client = await connectedClient(token)
+      const fleet = (await client.listTools()).tools.find((t) => t.name === 'fleet_drift')
+      expect(fleet?.description ?? '').toMatch(/not been sampled|no baseline|unknown rather than/i)
       await client.close()
     })
   })
