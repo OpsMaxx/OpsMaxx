@@ -1,4 +1,5 @@
 import type { HostFacts, HostFactsCollectOptions, PackageManager } from '../../shared/hostFacts'
+import { buildNetworkCommand, parseNetwork, type NetworkInfo } from '../../shared/network'
 import {
   buildInstalledPackagesCommand,
   parseInstalledPackages,
@@ -157,6 +158,26 @@ export class HostFactsReader {
    * partition table does not change between hourly sweeps, and this is the read
    * behind a row somebody has clicked.
    */
+  /**
+   * Interfaces, their addresses and the resolvers in use.
+   *
+   * Asked for, not sampled: an address changes when somebody changes it, and
+   * the two-second metrics poll shares the interactive connection.
+   */
+  async network(cfg: unknown): Promise<NetworkInfo | { error: string }> {
+    try {
+      const r = await this.deps.exec(cfg, buildNetworkCommand(), HOST_FACTS_TIMEOUT_MS)
+      // A transport failure is not a host answering "no interfaces".
+      if (!r.ok && (r.stdout ?? '') === '') {
+        return { error: r.error ?? 'could not reach the server' }
+      }
+      const merged = (r.stderr ?? '') === '' ? (r.stdout ?? '') : `${r.stdout ?? ''}\n${r.stderr}`
+      return parseNetwork(merged)
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
   async storage(cfg: unknown): Promise<StorageLayout | { error: string }> {
     try {
       const r = await this.deps.exec(cfg, buildStorageLayoutCommand(), HOST_FACTS_TIMEOUT_MS)

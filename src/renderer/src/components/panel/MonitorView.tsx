@@ -2,7 +2,10 @@ import { Cpu, MemoryStick, HardDrive, ArrowDown, ArrowUp, Loader2, AlertTriangle
 import { useServerMetrics } from '../../hooks/useServerMetrics'
 import { Sparkline } from '../common/Sparkline'
 import { rate, bytes, clsx } from '../../lib/format'
+import { useEffect, useState } from 'react'
 import { useFleet } from '../../store/fleet'
+import { sshTargetFor } from '../../lib/ssh'
+import { isStubResolver, type NetworkInfo } from '../../../../shared/network'
 import type { Server } from '../../types'
 
 function level(v: number): string {
@@ -27,6 +30,29 @@ export function MonitorView({
 }): React.JSX.Element {
   const m = useServerMetrics(server, visible && server.status !== 'offline')
   const real = server.demo === false
+
+  /**
+   * Interfaces and resolvers, asked for once when the panel becomes visible.
+   *
+   * Not on the metrics poll: an address changes when somebody changes it, and
+   * that poll shares the connection the terminal types over.
+   */
+  const [net, setNet] = useState<NetworkInfo | { error: string } | null>(null)
+  useEffect(() => {
+    if (!visible || !real) return
+    let live = true
+    void window.opsmaxx?.fleet
+      ?.network?.(sshTargetFor(server))
+      .then((r) => {
+        if (live) setNet(r)
+      })
+      .catch((e: unknown) => {
+        if (live) setNet({ error: e instanceof Error ? e.message : String(e) })
+      })
+    return () => {
+      live = false
+    }
+  }, [server, visible, real])
 
   // The distribution the host reported about itself, from the hourly facts
   // sweep. Absent until that has run at least once, which is why it falls back
@@ -233,6 +259,57 @@ export function MonitorView({
                 </span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Interfaces, their addresses and the resolvers. The panel is a quick
+          server overview, and "which address is this box on, and who resolves
+          its names" is the part an administrator otherwise opens a shell for. */}
+      {net !== null && 'interfaces' in net && (net.interfaces.length > 0 || net.dns.length > 0) && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="sidebar-title" style={{ marginBottom: 12 }}>
+            Network
+          </div>
+          <div className="col" style={{ gap: 8 }}>
+            {net.interfaces.map((iface) => (
+              <div className="row" key={iface.name} style={{ alignItems: 'baseline', gap: 'var(--sp-3)' }}>
+                <span className="mono" style={{ minWidth: 96 }}>
+                  {iface.name}
+                </span>
+                <span className="col" style={{ gap: 2 }}>
+                  {iface.addresses.map((a) => (
+                    <span key={`${a.family}-${a.address}`} className="row" style={{ gap: 6 }}>
+                      <span className="faint" style={{ fontSize: 11, minWidth: 34 }}>
+                        {a.family === 'ipv4' ? 'IPv4' : 'IPv6'}
+                      </span>
+                      <span className="mono selectable">
+                        {a.address}
+                        {a.prefix === null ? '' : `/${a.prefix}`}
+                      </span>
+                    </span>
+                  ))}
+                </span>
+              </div>
+            ))}
+            {net.dns.length > 0 && (
+              <div className="row" style={{ alignItems: 'baseline', gap: 'var(--sp-3)' }}>
+                <span className="mono" style={{ minWidth: 96 }}>
+                  DNS
+                </span>
+                <span className="col" style={{ gap: 2 }}>
+                  <span className="mono selectable">{net.dns.join('  ')}</span>
+                  {/* Worth saying: "your DNS server is 127.0.0.53" sends people
+                      looking for a problem that is not there. */}
+                  {isStubResolver(net) && (
+                    <span className="faint" style={{ fontSize: 11 }}>
+                      systemd-resolved stub — the upstream resolvers are not in
+                      /etc/resolv.conf
+                    </span>
+                  )}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       )}
