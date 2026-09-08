@@ -51,6 +51,7 @@ export function VaultUnlockModal(): React.JSX.Element | null {
   const error = useVault((s) => s.error)
   const clearError = useVault((s) => s.clearError)
   const exists = useVault((s) => s.exists)
+  const refresh = useVault((s) => s.refresh)
   const bioAvailable = useVault((s) => s.bioAvailable)
   const bioEnabled = useVault((s) => s.bioEnabled)
   const bioKind = useVault((s) => s.bioKind)
@@ -84,8 +85,24 @@ export function VaultUnlockModal(): React.JSX.Element | null {
     (creating ? password.length >= VAULT_MIN_PASSWORD && confirm === password : password.length > 0)
 
   useEffect(() => {
-    if (open) void refreshBiometrics()
-  }, [open, refreshBiometrics])
+    if (!open) return
+    void refreshBiometrics()
+    // AND the vault's own status, which is what `checking` is derived from.
+    //
+    // Without this the dialog is unusable anywhere the Vault screen has not
+    // already been opened. `exists` starts null, `checking` is `exists ===
+    // null`, and `ready` — the submit button's enabled gate — requires
+    // `!checking`. So the modal sat on "Checking this machine for a vault…"
+    // with a live password field above a button that could never be pressed.
+    //
+    // Found by driving the real app: every unlock this app offers from a
+    // monitoring panel — SweepEmpty, PanelError, VaultLockedHosts,
+    // withVaultUnlock — opens exactly here, from a screen that has no reason
+    // to have loaded vault status. The Vault view and Settings refresh on
+    // mount, which is why this never showed up there, and why the one path
+    // that was tested by hand looked fine.
+    void refresh()
+  }, [open, refreshBiometrics, refresh])
 
   // Same as the main gate: the prompt is not fired automatically. See the note
   // there — an unbidden biometric prompt teaches the reflex that makes prompts
