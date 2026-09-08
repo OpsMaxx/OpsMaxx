@@ -15,6 +15,7 @@ import { EmptyState } from '../common/EmptyState'
 import { useApp } from '../../store/app'
 import { useVault } from '../../store/vault'
 import { toast } from '../../store/toast'
+import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import {
   BACKUP_DESTINATION_EXPOSURE,
   BACKUP_DESTINATION_KINDS,
@@ -606,7 +607,12 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
               The access key id goes in that entry&apos;s username and the secret key in its secret.
               It has to be a vault entry: application settings travel inside every backup written
               here, so a secret key kept there would be sitting in the bucket it unlocks.
-              {!props.vaultUnlocked && ' Unlock the vault to choose one.'}
+              {!props.vaultUnlocked && (
+                <>
+                  {' '}
+                  <UnlockVaultButton reason="Unlocking lets you choose the vault entry holding this bucket's keys." />
+                </>
+              )}
             </div>
           </>
         )}

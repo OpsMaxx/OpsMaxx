@@ -246,12 +246,16 @@ describe('how it reads the vault', () => {
 describe('when it will not offer the form', () => {
   // The value comes from the vault. Collecting a choice and then refusing it
   // wastes somebody's time twice.
-  it('asks for an unlock rather than showing the picker', async () => {
+  it('offers the unlock rather than showing the picker', async () => {
     mount(async () => ({ ok: true, name: 'X', line: 1, action: 'replace', backup: 'b' }), {
       unlocked: false
     })
     await open()
-    expect(screen.getByText(/unlock the vault/i)).toBeTruthy()
+    // A BUTTON, not a sentence. This used to read "Unlock the vault to set X
+    // from it" — an instruction to go and do something on another screen and
+    // come back, which is the pattern store/toast.ts calls handing the user a
+    // research task. The dialog it raises does Touch ID or the passphrase.
+    expect(screen.getByRole('button', { name: /unlock vault/i })).toBeTruthy()
     expect(screen.queryByLabelText('Vault entry')).toBeNull()
   })
 

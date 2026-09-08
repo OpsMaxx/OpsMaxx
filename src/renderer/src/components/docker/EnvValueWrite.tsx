@@ -5,6 +5,7 @@ import { ENV_WRITE_DISCLOSURE } from '../../../../shared/envWrite'
 import type { ComposeEnvWriteResult } from '../../../../shared/compose'
 import type { VaultEntryDescriptor, VaultIndexResult } from '../../../../shared/vaultIndex'
 import { bridgeHas } from '../../lib/bridge'
+import { UnlockVaultButton } from '../common/UnlockVaultButton'
 
 // Setting one `.env` variable from the vault.
 //
@@ -102,8 +103,14 @@ export function EnvValueWrite({
   // locked would collect a choice and then refuse it.
   if (locked || entries === null) {
     return (
-      <div className="faint" style={{ fontSize: 11 }}>
-        Unlock the vault to set <span className="mono">{name}</span> from it.
+      <div className="faint" style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span>
+          Set <span className="mono">{name}</span> from the vault.
+        </span>
+        <UnlockVaultButton
+          className="btn sm"
+          reason={`Unlocking lets you set ${name} from a vault entry.`}
+        />
       </div>
     )
   }

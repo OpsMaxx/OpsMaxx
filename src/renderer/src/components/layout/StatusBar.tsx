@@ -3,6 +3,7 @@ import { GitBranch, Wifi, Bell, Cpu, AlertTriangle, ShieldAlert } from 'lucide-r
 import { useApp } from '../../store/app'
 import { LABEL, chipValue, useAlerts } from '../../store/alerts'
 import { useFleetStatus, samplerWarning } from '../../store/fleetStatus'
+import { useVaultPrompt } from '../../store/vaultPrompt'
 import { openMonitor, openSettings } from '../../store/nav'
 import { resumeApprovals, startApprovalQueue, useApprovalFuse, useApprovalQueue } from '../../store/approvalQueue'
 import { colorVar } from './WorkspaceSwitcher'
@@ -117,8 +118,24 @@ export function StatusBar(): React.JSX.Element {
           you the incident. Deliberately shown even when the alert count is
           zero — that zero is precisely what is not trustworthy while this is
           up. */}
+      {/* A locked vault unlocks from the chip. Every other warning here is a
+          setting to change, but this one is a dialog to answer — and routing it
+          to Settings made the single most visible "something is wrong" control
+          in the app a signpost to a screen with another button on it. */}
       {warning && (
-        <button className="item resource-alert" title={warning.detail} onClick={() => openSettings('monitoring')}>
+        <button
+          className="item resource-alert"
+          title={warning.detail}
+          onClick={() => {
+            if (warning.kind === 'vault-locked') {
+              void useVaultPrompt
+                .getState()
+                .request('Unlocking resumes background checking, so alerts can be raised again.')
+              return
+            }
+            openSettings('monitoring')
+          }}
+        >
           <AlertTriangle size={12} />
           <span>{warning.label}</span>
         </button>

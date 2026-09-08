@@ -18,6 +18,7 @@ import type {
   CredProxyStatus
 } from '../../../../shared/credproxy'
 import type { VaultEntry } from '../../../../shared/vault'
+import { UnlockVaultButton } from '../common/UnlockVaultButton'
 
 // The API credential proxy — roadmap item 7, settings half.
 //
@@ -286,7 +287,12 @@ export function CredProxyPanel(): React.JSX.Element {
       {status?.parked && (
         <div className="s-note warn" role="status">
           {status.parked.reason === 'vault-locked'
-            ? `The vault is locked, so ${status.parked.calls} call${status.parked.calls === 1 ? '' : 's'} ${status.parked.calls === 1 ? 'was' : 'were'} parked since ${new Date(status.parked.since).toLocaleTimeString()} rather than sent without a credential. Unlock it and they will go through.`
+            ? (
+                <>
+                  {`The vault is locked, so ${status.parked.calls} call${status.parked.calls === 1 ? '' : 's'} ${status.parked.calls === 1 ? 'was' : 'were'} parked since ${new Date(status.parked.since).toLocaleTimeString()} rather than sent without a credential. `}
+                  <UnlockVaultButton reason="Unlocking releases the calls parked while the vault was closed." />
+                </>
+              )
             : `A rule points at a vault entry that no longer holds anything. ${status.parked.calls} call${status.parked.calls === 1 ? '' : 's'} refused since ${new Date(status.parked.since).toLocaleTimeString()}.`}
         </div>
       )}

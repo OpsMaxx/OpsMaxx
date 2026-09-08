@@ -4,7 +4,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import ts from 'typescript'
 import {
   MODULES,
-  MODULE_FORBIDDEN_IMPORTS,
+  isForbiddenModuleImport,
   MODULE_FORBIDDEN_BRIDGE,
   backfillModules,
   defaultModuleState,
@@ -386,6 +386,51 @@ describe('the walker itself', () => {
   })
 })
 
+describe('the forbidden-import matcher', () => {
+  // This became a function, from a bare `f.includes(forbidden)`, because that
+  // substring also matched store/vaultPrompt.ts — a file with no secret in it,
+  // whose whole job is raising the app's own unlock dialog. Blocking it left
+  // the monitoring panels naming a locked vault and sending the reader to a
+  // settings screen to go and fix it by hand.
+  //
+  // A precision change to a security guard has to prove it kept what mattered,
+  // so both halves are asserted here rather than assumed.
+
+  it('still forbids the renderer vault store, which holds the passwords', () => {
+    expect(isForbiddenModuleImport('src/renderer/src/store/vault.ts')).toBe(true)
+  })
+
+  it('still forbids anything nested under it', () => {
+    expect(isForbiddenModuleImport('src/renderer/src/store/vault/entries.ts')).toBe(true)
+  })
+
+  it('still forbids all four main-process paths', () => {
+    for (const f of [
+      'src/main/services/vault.ts',
+      'src/main/services/credentialResolver.ts',
+      'src/main/services/localPty.ts',
+      'src/main/services/secrets.ts'
+    ]) {
+      expect(isForbiddenModuleImport(f), f).toBe(true)
+    }
+  })
+
+  it('no longer catches the unlock PROMPT, which carries no credential', () => {
+    expect(isForbiddenModuleImport('src/renderer/src/store/vaultPrompt.ts')).toBe(false)
+  })
+
+  it('does not let a lookalike name through the boundary either way', () => {
+    // The tightening is a boundary, not an allowlist: a real vault file with a
+    // longer path is still caught, and an unrelated sibling still is not.
+    expect(isForbiddenModuleImport('src/renderer/src/store/vaultThings.ts')).toBe(false)
+    expect(isForbiddenModuleImport('src/main/services/vault.helpers.ts')).toBe(true)
+  })
+
+  it('matches windows separators, since the closure walk yields real paths', () => {
+    expect(isForbiddenModuleImport('src\\renderer\\src\\store\\vault.ts')).toBe(true)
+  })
+})
+
 describe('what a module may not reach', () => {
   for (const [id, files] of Object.entries(MODULE_FILES)) {
     it(`${id} cannot reach the vault, credentials, secrets or the local terminal`, () => {
@@ -397,9 +442,7 @@ describe('what a module may not reach', () => {
         expect(existsSync(abs), `${f} is listed for ${id} but does not exist`).toBe(true)
         for (const r of closure(abs)) reachable.add(relative(ROOT, r))
       }
-      const violations = [...reachable].filter((f) =>
-        MODULE_FORBIDDEN_IMPORTS.some((forbidden) => f.includes(forbidden))
-      )
+      const violations = [...reachable].filter((f) => isForbiddenModuleImport(f))
       // If you are here because this failed: the failure is the feature. The
       // four things listed are what the security model is made of, and part (a)
       // exists precisely so it does not drift into part (b).
@@ -443,9 +486,7 @@ describe('what a module may not reach', () => {
       const abs = join(ROOT, f)
       expect(existsSync(abs), `${f} is listed as a fixed panel but does not exist`).toBe(true)
       const reachable = [...closure(abs)].map((r) => relative(ROOT, r))
-      const violations = reachable.filter((r) =>
-        MODULE_FORBIDDEN_IMPORTS.some((forbidden) => r.includes(forbidden))
-      )
+      const violations = reachable.filter((r) => isForbiddenModuleImport(r))
       expect(violations, `${f} reaches: ${violations.join(', ')}`).toEqual([])
     })
 
