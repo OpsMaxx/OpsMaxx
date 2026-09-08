@@ -55,6 +55,7 @@ import { jobApprovalFor, planJob, type JobSpec } from '../../../../shared/jobs'
 import { ImageScanPanel } from './ImageScan'
 import type { ImageScanProbe } from '../../../../shared/imageScan'
 import { ReclaimDialog, ReclaimOutcome } from './Reclaim'
+import { withVaultUnlock } from '../../lib/withVaultUnlock'
 
 // Containers on a server, and what an operator does with them.
 //
@@ -323,7 +324,12 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
     clearReads()
     const gen = generation.current
     try {
-      const r = await bridge()?.list?.(targetCfg(), { sudo: sudoOverride ?? useSudo })
+      const r = await withVaultUnlock(
+        'Reading containers on this server needs its stored credential.',
+        // `async` so the optional chain's `undefined` (no bridge) is a resolved
+        // value rather than a non-Promise return type.
+        async () => bridge()?.list?.(targetCfg(), { sudo: sudoOverride ?? useSudo })
+      )
       if (generation.current !== gen) return
       setProbe(r ?? null)
       // Only ask about sudo once something has actually been refused by it —

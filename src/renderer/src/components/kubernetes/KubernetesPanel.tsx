@@ -69,6 +69,7 @@ import {
 } from '../../../../shared/k8sReview'
 import { approvalFor, type CommandApproval } from '../../../../shared/broadcast'
 import type { Server } from '../../types'
+import { withVaultUnlock } from '../../lib/withVaultUnlock'
 
 // Pods on a cluster reachable from a server, and what you do about them.
 //
@@ -364,7 +365,10 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
     setLogs(null)
     setDiag(null)
     try {
-      const r = await bridge().read?.(targetCfg(), ctx || undefined, (ns ?? namespace) || undefined)
+      const r = await withVaultUnlock(
+        'Reading this cluster needs the server’s stored credential.',
+        async () => bridge().read?.(targetCfg(), ctx || undefined, (ns ?? namespace) || undefined)
+      )
       setProbe(r ?? null)
     } catch (e) {
       setProbe({ ok: false, reason: 'unknown', detail: e instanceof Error ? e.message : String(e) })

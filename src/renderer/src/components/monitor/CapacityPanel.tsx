@@ -7,6 +7,8 @@ import {
 } from '../../../../shared/storageLayout'
 import { bytes, clsx } from '../../lib/format'
 import { SweepEmpty } from './SweepEmpty'
+import { PanelError } from '../common/PanelError'
+import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import {
   CAPACITY_THRESHOLDS,
   CAPACITY_WINDOWS,
@@ -333,7 +335,9 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
             // wrapped the handler in resolveChainSecrets/withVpnTransport,
             // which repaired credentials and VPN but not the chain, because
             // the SHAPE was still wrong here.
-            await call(sshTargetFor(server))
+            await withVaultUnlock('Reading this host’s filesystems needs its stored credential.', () =>
+              call(sshTargetFor(server))
+            )
           : { error: 'This build cannot read filesystems. Restart the app to rebuild it.' }
       )
     } catch (e) {
@@ -573,7 +577,11 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
           {storage !== null && 'error' in storage && (
             // NOT an empty list: a read that could not happen and a host with
             // one filesystem are different answers.
-            <div className="panel-note is-alarm">The filesystems could not be read: {storage.error}</div>
+            <PanelError
+              error={`The filesystems could not be read: ${storage.error}`}
+              reason="Reading this host’s filesystems needs its stored credential."
+              onRetry={() => void loadStorage()}
+            />
           )}
           {storage !== null && !('error' in storage) && (
             <>
