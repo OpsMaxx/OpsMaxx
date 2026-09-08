@@ -17,6 +17,33 @@ import type {
 // stores it and never transports it. That is the whole reason to go through
 // AppleScript rather than pipe a password into `sudo -S` ourselves.
 //
+// KNOWN LIMIT: this gives you root. It does not give you the user's
+// authorization session.
+//
+// `do shell script … with administrator privileges` has the security framework
+// start the command, detached, outside the login session that authenticated
+// it. Anything that only needs uid 0 — writing a file, binding a low port,
+// configuring an interface — works exactly as it would under `sudo`. Anything
+// that goes through the Security server on behalf of a *session* may be
+// dropped, and dropped quietly.
+//
+// Measured, on macOS 15.7.3 (Darwin 24), Mosyle-managed, while chasing a
+// traffic-inspector bug (the long version is in
+// `src/main/services/inspectTrust.ts`, above `darwinAdminTrustScript`):
+//
+//   sudo security add-trusted-cert -d -r trustRoot -p ssl \
+//        -k /Library/Keychains/System.keychain <cert>
+//
+// run in Terminal wrote the admin trust setting and `verify-cert -p ssl` then
+// exited 0. The identical command through this elevator imported the
+// certificate into the system keychain, wrote NO trust setting, and exited 0
+// anyway. Same command, same machine, same minute.
+//
+// So: never treat exit 0 from this route as proof that a Security-framework
+// change landed. Verify the state you wanted, from a process running as the
+// user, and have a route that does not need this elevator at all when the
+// verification fails.
+//
 // NOT SMJobBless. NOT a launchd privileged helper. NOT a setuid binary.
 // All three require a Developer ID certificate this project does not have —
 // electron-builder.yml signs ad-hoc (`identity: '-'`) and does not notarize,

@@ -28,6 +28,13 @@ interface InspectState {
   selectedId: string | null
   busy: boolean
   error: string | null
+  /** A terminal command that finishes what the Install button could not.
+   *
+   *  Set only when main has exhausted every automatic route — on macOS that is
+   *  the elevated machine-wide write and then the per-user one. It is held
+   *  separately from `error` so the panel can render it as something to copy
+   *  rather than as prose, and so a later success can clear it. */
+  manualTrustCommand: string | null
   /** True once the listeners are attached, so mounting the panel twice does
    *  not subscribe twice. */
   wired: boolean
@@ -73,6 +80,7 @@ export const useInspect = create<InspectState>((set, get) => ({
   selectedId: null,
   busy: false,
   error: null,
+  manualTrustCommand: null,
   wired: false,
 
   wire: () => {
@@ -176,6 +184,9 @@ export const useInspect = create<InspectState>((set, get) => ({
       // error would tell someone who deliberately said no that something
       // broke.
       if (!res.ok && !res.declined) set({ error: res.message ?? 'The certificate was not installed.' })
+      // Cleared on any outcome that is not "we ran out of automatic routes",
+      // so a command that has already been run stops being advice.
+      set({ manualTrustCommand: res.ok ? null : (res.manualCommand ?? null) })
       await get().refresh()
     } catch (e) {
       set({ error: describe(e) })
@@ -191,6 +202,7 @@ export const useInspect = create<InspectState>((set, get) => ({
     try {
       const res = await api.removeTrust(store)
       if (!res.ok && !res.declined) set({ error: res.message ?? 'The certificate was not removed.' })
+      if (res.ok) set({ manualTrustCommand: null })
       await get().refresh()
     } catch (e) {
       set({ error: describe(e) })

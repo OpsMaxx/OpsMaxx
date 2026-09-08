@@ -39,9 +39,17 @@ const CERT_BASENAME = 'opsmaxx-inspector-ca.crt'
 const NSS_NICKNAME = 'OpsMaxx Traffic Inspector'
 const LINUX_ANCHOR_DEBIAN = '/usr/local/share/ca-certificates'
 const LINUX_ANCHOR_RHEL = '/etc/pki/ca-trust/source/anchors'
+const DARWIN_SYSTEM_KEYCHAIN = '/Library/Keychains/System.keychain'
 
 /** Bounded so a hung `security` or `certutil` cannot wedge the status panel. */
 const PROBE_TIMEOUT_MS = 10_000
+
+/** The macOS user-domain trust write raises macOS's own SecurityAgent dialog,
+ *  which a human answers. `PROBE_TIMEOUT_MS` is the right bound for a question
+ *  `security` answers by itself and completely the wrong one here: it would
+ *  cancel the prompt while the user is still reaching for the keyboard, and
+ *  the failure would look like a refusal by the operating system. */
+const USER_TRUST_PROMPT_TIMEOUT_MS = 180_000
 
 export interface TrustContext {
   platform: NodeJS.Platform
@@ -92,9 +100,13 @@ export async function removeCertFile(): Promise<void> {
 
 // ------------------------------------------------------------------ detection
 
-async function tryRun(cmd: string, args: string[]): Promise<{ ok: boolean; stdout: string }> {
+async function tryRun(
+  cmd: string,
+  args: string[],
+  timeoutMs: number = PROBE_TIMEOUT_MS
+): Promise<{ ok: boolean; stdout: string }> {
   try {
-    const { stdout } = await run(cmd, args, { timeout: PROBE_TIMEOUT_MS, windowsHide: true })
+    const { stdout } = await run(cmd, args, { timeout: timeoutMs, windowsHide: true })
     return { ok: true, stdout: String(stdout ?? '') }
   } catch (e) {
     const stdout = (e as { stdout?: string })?.stdout
@@ -135,13 +147,24 @@ async function systemTrustState(ctx: TrustContext): Promise<InspectTrustStore> {
       '/Library/Keychains/System.keychain'
     ])
     const installed = present.stdout.toUpperCase().includes(sha256Hex(ctx.certPem).toUpperCase())
+    // Run unelevated, as the signed-in user, which is deliberate rather than
+    // incidental: SecTrustEvaluate consults the user domain first, then admin,
+    // then the system roots, so this asks exactly the question every client on
+    // the machine asks. That is what makes the user-domain fallback in
+    // `installDarwinTrust` a real answer and not a placebo — a certificate
+    // trusted only for this login is reported trusted here because Safari,
+    // Chrome and every other process running as this user will also trust it.
     const verified = await tryRun('security', ['verify-cert', '-c', ctx.certPath, '-p', 'ssl'])
     if (verified.ok) return { ...base, state: 'trusted' }
     return {
       ...base,
       state: 'untrusted',
+      // Not "install it again". Repeating an identical attempt is what turned
+      // this state into a loop for the user who reported it (see
+      // `installDarwinTrust`), so the sentence promises the second, different
+      // attempt and the printed command that follows if that is refused too.
       hint: installed
-        ? 'The certificate is in your keychain but is not trusted, so every HTTPS request still fails. Install it again to add the trust setting.'
+        ? 'The certificate is in your keychain but macOS has attached no trust setting, so every HTTPS request still fails. Install once more: OpsMaxx will ask macOS a second way and, if that is refused, show you the exact command to run.'
         : 'Install the certificate to intercept HTTPS in Safari, Chrome and native apps.'
     }
   }
@@ -271,6 +294,106 @@ export interface TrustChangeResult {
    *  outcome and not a failure to report as an error. */
   declined?: boolean
   message?: string
+  /** A command the user can paste into a terminal to finish the job when every
+   *  automatic route has been refused.
+   *
+   *  This exists because the alternative, on the machine that produced the
+   *  macOS incident recorded below, was a button that did the same thing
+   *  forever. A failure with no way forward is a worse bug than the failure. */
+  manualCommand?: string
+}
+
+// ---------------------------------------------------------------- macOS trust
+//
+// INCIDENT, macOS 15.7.3 (Darwin 24), Mac managed by Mosyle MDM.
+//
+// "Install certificate" looped: the panel kept saying the certificate was in
+// the keychain and not trusted, and pressing the button again changed nothing.
+// What was measured on that machine, before anything was done by hand:
+//
+//   • The CA *was* in /Library/Keychains/System.keychain (SHA-256 3401F8CD…).
+//   • `security dump-trust-settings -d` listed three certificates and none of
+//     them was ours: the admin-domain trust setting had never been written.
+//   • `security dump-trust-settings` (user domain) had nothing either.
+//   • `security verify-cert -c <cert> -p ssl` exited 1.
+//   • The certificate itself was fine — CA:TRUE, pathlen:0, Key Usage with
+//     Certificate Sign. Not a certificate-generation bug.
+//   • Other CAs on the same machine *did* have admin trust settings, so MDM
+//     was not blocking trust settings outright.
+//
+// The decisive experiment: the user ran the byte-for-byte command OpsMaxx
+// runs, in Terminal, under `sudo`:
+//
+//   sudo security add-trusted-cert -d -r trustRoot -p ssl \
+//        -k /Library/Keychains/System.keychain <certPath>
+//
+// It printed nothing, exited 0, and afterwards the trust setting was present
+// (Policy OID SSL) and `verify-cert -p ssl` exited 0.
+//
+// So the command is right and the ELEVATION MECHANISM is wrong. Under
+// `osascript -e 'do shell script … with administrator privileges'` the command
+// runs as root but outside the user's Security session — root without an
+// authorization session. The keychain *import* is a plain file write and
+// succeeds; the trust-settings write goes through the Security server, is
+// dropped, and `security add-trusted-cert` still exits 0. An exit code from
+// that route therefore proves nothing, which is why installs are verified and
+// never assumed.
+//
+// Do not "simplify" this back to a single elevated `add-trusted-cert`. It is
+// three attempts on purpose: elevated admin domain, then the user domain,
+// then printing the command above for the human.
+
+/** The elevated /bin/sh command for the admin (machine-wide) trust setting.
+ *
+ *  `add-trusted-cert` and a `verify-cert` in one shell, joined by `&&`, so the
+ *  partial success described above — certificate imported, trust setting
+ *  silently dropped — becomes a non-zero exit *inside* the elevated context
+ *  instead of a success we have to disprove afterwards. The verify runs as
+ *  root, whose user domain is empty, so it is answering about the admin domain
+ *  this line just tried to write. */
+export function darwinAdminTrustScript(certPath: string): string {
+  return (
+    `security add-trusted-cert -d -r trustRoot -p ssl -k ${shq(DARWIN_SYSTEM_KEYCHAIN)} ${shq(certPath)} && ` +
+    `security verify-cert -c ${shq(certPath)} -p ssl`
+  )
+}
+
+/** The user-domain trust write: no `-d`, no `-k`, no root.
+ *
+ *  Not a placebo and not a lesser form of the same failure. It needs no
+ *  administrator rights, so it never leaves the user's Security session — the
+ *  app is running in the login session, which is precisely what the elevated
+ *  process was missing — and macOS raises its own authentication dialog for
+ *  it. SecTrustEvaluate reads the user domain BEFORE the admin domain, so a
+ *  certificate trusted this way is trusted by Safari, Chrome, curl and every
+ *  other process running as this user. It is narrower than the admin domain in
+ *  exactly one way: other accounts on the machine do not get it, which for a
+ *  developer tool intercepting this user's own traffic is not a loss.
+ *
+ *  No `-k`: without it `security` writes to the default keychain, which is the
+ *  login keychain. Naming a path instead would break on the machines where
+ *  the login keychain is somewhere other than where we guessed. */
+export function darwinUserTrustArgs(certPath: string): string[] {
+  return ['add-trusted-cert', '-r', 'trustRoot', '-p', 'ssl', certPath]
+}
+
+/** The command printed to the user when both automatic routes are refused.
+ *
+ *  Proven on the machine in the incident above, which is the only reason it is
+ *  worth printing: `sudo` in a terminal keeps the user's Security session, so
+ *  the trust-settings write that the osascript route drops goes through. */
+export function darwinManualTrustCommand(certPath: string): string {
+  return `sudo security add-trusted-cert -d -r trustRoot -p ssl -k ${DARWIN_SYSTEM_KEYCHAIN} ${shq(certPath)}`
+}
+
+/** Is there a user-domain trust setting for this authority right now?
+ *
+ *  Used only to decide whether removal needs to raise a second prompt.
+ *  `dump-trust-settings` with no domain flag reads the user domain and exits
+ *  non-zero when there is nothing there at all. */
+async function darwinUserTrustPresent(commonName: string): Promise<boolean> {
+  const dump = await tryRun('security', ['dump-trust-settings'])
+  return dump.stdout.includes(commonName)
 }
 
 /** Installs the CA into the operating system's trust store.
@@ -289,6 +412,8 @@ export async function installSystemTrust(ctx: TrustContext): Promise<TrustChange
       : { ok: false, message: 'Windows refused to add the certificate to the user trust store.' }
   }
 
+  if (ctx.platform === 'darwin') return installDarwinTrust(ctx)
+
   const elevator = elevatorForPlatform(ctx.platform)
   const probe = await elevator.probe()
   if (!probe.available) {
@@ -296,36 +421,19 @@ export async function installSystemTrust(ctx: TrustContext): Promise<TrustChange
   }
 
   const reason = 'OpsMaxx needs administrator rights once to trust its traffic-inspection certificate.'
-  let command: string
-  let args: string[]
-  if (ctx.platform === 'darwin') {
-    command = 'security'
-    args = [
-      'add-trusted-cert',
-      '-d',
-      '-r',
-      'trustRoot',
-      '-p',
-      'ssl',
-      '-k',
-      '/Library/Keychains/System.keychain',
-      ctx.certPath
-    ]
-  } else {
-    // Debian and RHEL keep anchors in different places and update them with
-    // different commands. Running the pair that exists, rather than detecting
-    // the distribution, is both shorter and correct on the derivatives that
-    // ship one of each.
-    const anchor = existsSync(LINUX_ANCHOR_RHEL) ? LINUX_ANCHOR_RHEL : LINUX_ANCHOR_DEBIAN
-    const update = existsSync('/usr/sbin/update-ca-trust') || which('update-ca-trust')
-      ? 'update-ca-trust extract'
-      : 'update-ca-certificates'
-    command = 'sh'
-    args = [
-      '-c',
-      `mkdir -p ${shq(anchor)} && cp ${shq(ctx.certPath)} ${shq(join(anchor, CERT_BASENAME))} && chmod 644 ${shq(join(anchor, CERT_BASENAME))} && ${update}`
-    ]
-  }
+  // Debian and RHEL keep anchors in different places and update them with
+  // different commands. Running the pair that exists, rather than detecting
+  // the distribution, is both shorter and correct on the derivatives that
+  // ship one of each.
+  const anchor = existsSync(LINUX_ANCHOR_RHEL) ? LINUX_ANCHOR_RHEL : LINUX_ANCHOR_DEBIAN
+  const update = existsSync('/usr/sbin/update-ca-trust') || which('update-ca-trust')
+    ? 'update-ca-trust extract'
+    : 'update-ca-certificates'
+  const command = 'sh'
+  const args = [
+    '-c',
+    `mkdir -p ${shq(anchor)} && cp ${shq(ctx.certPath)} ${shq(join(anchor, CERT_BASENAME))} && chmod 644 ${shq(join(anchor, CERT_BASENAME))} && ${update}`
+  ]
 
   const proc = await elevator.run({ reason, command, args })
   const exit = await proc.wait()
@@ -334,11 +442,11 @@ export async function installSystemTrust(ctx: TrustContext): Promise<TrustChange
     return { ok: false, message: `The trust store rejected the certificate (exit ${exit.code ?? 'unknown'}).` }
   }
 
-  // Verified rather than assumed. `security add-trusted-cert` can exit 0 having
-  // added the certificate to the keychain without attaching the trust setting
-  // — a managed Mac can drop it, and so can a policy this process cannot see.
-  // The result is a certificate that looks installed and is refused by every
-  // client, which is far worse than an install that admits it failed.
+  // Verified rather than assumed, on every platform. An elevated command can
+  // exit 0 having done half the job — the macOS incident above is the proof,
+  // and a policy this process cannot see can do the same to an anchor
+  // directory. A certificate that looks installed and is refused by every
+  // client is far worse than an install that admits it failed.
   invalidateTrustCache()
   const after = await systemTrustState(ctx)
   if (after.state !== 'trusted') {
@@ -352,12 +460,88 @@ export async function installSystemTrust(ctx: TrustContext): Promise<TrustChange
   return { ok: true }
 }
 
+/**
+ * macOS, in three attempts that stop as soon as the certificate is trusted.
+ *
+ * Read the INCIDENT block above before changing the order. Briefly:
+ *
+ *  1. **Elevated, admin domain.** What every other Mac gets, and what the
+ *     machine-wide trust setting requires. The elevated shell verifies its own
+ *     work so a dropped trust write is a non-zero exit rather than a lie.
+ *  2. **Unelevated, user domain.** Reached only when (1) did not produce
+ *     trust. It runs in the app's own login session — the thing the elevated
+ *     process lacked — and macOS raises its own authentication dialog. Trust
+ *     for this user is what this user's browsers and tools actually consult.
+ *  3. **The printed command.** Nothing left to try automatically, so the user
+ *     gets the exact `sudo` line that is known to work, instead of a button
+ *     that repeats step (1) forever.
+ *
+ * Every step is followed by `systemTrustState`, which asks `verify-cert` — the
+ * same question a client asks. Success is never inferred from an exit code.
+ */
+async function installDarwinTrust(ctx: TrustContext): Promise<TrustChangeResult> {
+  const manualCommand = darwinManualTrustCommand(ctx.certPath)
+  const trusted = async (): Promise<boolean> => {
+    invalidateTrustCache()
+    return (await systemTrustState(ctx)).state === 'trusted'
+  }
+
+  const elevator = elevatorForPlatform('darwin')
+  const probe = await elevator.probe()
+  if (probe.available) {
+    const proc = await elevator.run({
+      reason: 'OpsMaxx needs administrator rights once to trust its traffic-inspection certificate.',
+      command: 'sh',
+      args: ['-c', darwinAdminTrustScript(ctx.certPath)]
+    })
+    const exit = await proc.wait()
+    // A declined prompt is an answer, and the answer was no. Following it
+    // immediately with a second password dialog would be the application
+    // arguing with the user.
+    if (exit.declined) return { ok: false, declined: true, message: 'The administrator prompt was declined.' }
+    if (await trusted()) return { ok: true }
+  }
+
+  // Second attempt. Unelevated on purpose — see `darwinUserTrustArgs`.
+  await tryRun('security', darwinUserTrustArgs(ctx.certPath), USER_TRUST_PROMPT_TIMEOUT_MS)
+  if (await trusted()) {
+    return {
+      ok: true,
+      message:
+        'macOS would not let OpsMaxx write the machine-wide trust setting, so the certificate is trusted for your user account instead. Safari, Chrome and anything else running as you will accept it; other accounts on this Mac will not.'
+    }
+  }
+
+  return {
+    ok: false,
+    manualCommand,
+    // Deliberately does not name who refused. The second attempt raises a
+    // macOS dialog, and this same path is reached whether the operating system
+    // rejected the write or the user closed the dialog — claiming the former
+    // when it was the latter would be the app telling the user a small lie.
+    message:
+      'The trust setting was not written, machine-wide or for your account. Run this in Terminal — it works where OpsMaxx cannot, because a terminal keeps your login session — then press Install again.'
+  }
+}
+
 export async function removeSystemTrust(ctx: TrustContext): Promise<TrustChangeResult> {
   if (ctx.platform === 'win32') {
     const thumb = sha1Hex(ctx.certPem).toUpperCase()
     const res = await tryRun('certutil', ['-user', '-delstore', 'Root', thumb])
     return res.ok ? { ok: true } : { ok: false, message: 'Windows did not remove the certificate.' }
   }
+  // Rule 1 at the top of this file: nothing is installed that cannot be
+  // uninstalled by the same code. The user-domain fallback added a second
+  // place trust can live, so removal has to clear that one too — a root left
+  // trusted for this login is exactly the litter the rule exists to prevent.
+  // Guarded by a lookup rather than run unconditionally: `remove-trusted-cert`
+  // raises its own authentication dialog, and a prompt to undo something that
+  // was never done is a prompt people learn to click through.
+  if (ctx.platform === 'darwin' && (await darwinUserTrustPresent(ctx.commonName))) {
+    await tryRun('security', ['remove-trusted-cert', ctx.certPath], USER_TRUST_PROMPT_TIMEOUT_MS)
+    await tryRun('security', ['delete-certificate', '-c', ctx.commonName])
+  }
+
   const elevator = elevatorForPlatform(ctx.platform)
   const probe = await elevator.probe()
   if (!probe.available) {
@@ -367,8 +551,16 @@ export async function removeSystemTrust(ctx: TrustContext): Promise<TrustChangeR
   let command: string
   let args: string[]
   if (ctx.platform === 'darwin') {
-    command = 'security'
-    args = ['delete-certificate', '-c', ctx.commonName, '-t', '/Library/Keychains/System.keychain']
+    // `;` and not `&&`: the trust setting may be absent (that is the whole
+    // subject of the incident above) and the certificate must still be
+    // deleted. Removing the trust setting first, so no window exists in which
+    // a trust setting points at a certificate that is already gone.
+    command = 'sh'
+    args = [
+      '-c',
+      `security remove-trusted-cert -d ${shq(ctx.certPath)} ; ` +
+        `security delete-certificate -c ${shq(ctx.commonName)} -t ${shq(DARWIN_SYSTEM_KEYCHAIN)}`
+    ]
   } else {
     const update = which('update-ca-trust') ? 'update-ca-trust extract' : 'update-ca-certificates --fresh'
     command = 'sh'
