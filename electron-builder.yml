@@ -4,7 +4,7 @@ copyright: Copyright © 2026 OpsMaxx contributors
 
 publish:
   provider: github
-  owner: ghauri01
+  owner: OpsMaxx
   repo: OpsMaxx
 
 directories:

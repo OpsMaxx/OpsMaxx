@@ -19,7 +19,7 @@ const { autoUpdater } = electronUpdater
 // all electron-updater needs to know where to check — nothing to configure
 // here beyond the event wiring below.
 
-const RELEASES_URL = 'https://github.com/ghauri01/OpsMaxx/releases/latest'
+const RELEASES_URL = 'https://github.com/OpsMaxx/OpsMaxx/releases/latest'
 
 // Windows (NSIS) and Linux (AppImage) builds can safely self-replace with
 // electron-updater's default flow. Two builds cannot.
