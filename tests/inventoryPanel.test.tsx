@@ -494,8 +494,15 @@ describe('the first thing a user sees', () => {
     render(<InventoryPanel servers={[server('srv-u', 'ubuntu-01')]} />)
     const text = document.body.textContent ?? ''
     expect(text).toMatch(/No server facts have been collected yet/i)
-    expect(text).toMatch(/once an hour/i)
-    expect(text).toMatch(/background checking/i)
+    // It used to recite every reason the panel might be empty — hourly sweep,
+    // new server, module off, checking off — and end by saying press Check
+    // now. Four maybes, none of them the answer on any given day. It now names
+    // the ONE thing actually stopping the sweep, which in this fixture is that
+    // background checking is switched off, and offers the control for that.
+    expect(text).toMatch(/background checking is off/i)
+    expect(screen.getByRole('button', { name: /Open Monitoring settings/ })).toBeTruthy()
+    // Check now stays reachable in the header; it is simply no longer the
+    // accent, because it cannot help while the sweep is switched off.
     expect(screen.getByRole('button', { name: /Check now/ })).toBeTruthy()
   })
 

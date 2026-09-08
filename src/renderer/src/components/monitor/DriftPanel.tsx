@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FileDiff, Info, Pin, RefreshCw } from 'lucide-react'
 import { bridgeHas } from '../../lib/bridge'
-import { openSettings } from '../../store/nav'
 import { useApp } from '../../store/app'
 import {
   checkDriftWatch,
@@ -14,6 +13,7 @@ import {
 import { clsx } from '../../lib/format'
 import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
+import { SweepEmpty } from './SweepEmpty'
 import {
   DRIFT_NO_PUSH,
   DRIFT_PREVIEW_CHARS,
@@ -410,20 +410,12 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
       )}
 
       {collected === 0 ? (
-        <div className="panel-empty">
-          <p className="panel-empty-title">No configuration files have been read yet.</p>
-          <p className="panel-empty-body">
-            OpsMaxx reads them about once an hour, on the same background sweep as the inventory
-            — so a server added in the last hour, or an estate where this has just been switched
-            on, will not have any yet. Press <b>Check now</b> to sweep immediately, and make sure
-            background checking is on in Settings.
-          </p>
-          <div className="panel-empty-actions">
-            <button className="btn ghost sm" onClick={() => openSettings('monitoring')}>
-              Open Monitoring settings
-            </button>
-          </div>
-        </div>
+        <SweepEmpty
+          subject="No configuration files have been read yet."
+          busy={busy}
+          onCheckNow={() => void refresh()}
+          note="The watched files are read, never written."
+        />
       ) : (
         <>
           <div className="panel-stats">

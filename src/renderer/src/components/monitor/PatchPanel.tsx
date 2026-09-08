@@ -5,7 +5,7 @@ import { AlertTriangle, Ban, RefreshCw, ShieldQuestion, Wrench } from 'lucide-re
 import { useFleet } from '../../store/fleet'
 import { useApp } from '../../store/app'
 import { bridgeHas } from '../../lib/bridge'
-import { openSettings } from '../../store/nav'
+import { SweepEmpty } from './SweepEmpty'
 import { clsx } from '../../lib/format'
 import { sshHopsFor, sshTargetFor } from '../../lib/ssh'
 import {
@@ -490,18 +490,12 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
       }
     >
       {summary.withFacts === 0 ? (
-        <div className="panel-empty">
-          <p className="panel-empty-title">No server facts have been collected yet.</p>
-          <p className="panel-empty-body">
-            Update counts come from the same hourly sweep the inventory reads. Press{' '}
-            <b>Check now</b>, and make sure background checking is on in Settings.
-          </p>
-          <div className="panel-empty-actions">
-            <button className="btn ghost sm" onClick={() => openSettings('monitoring')}>
-              Open Monitoring settings
-            </button>
-          </div>
-        </div>
+        <SweepEmpty
+          subject="No server facts have been collected yet."
+          busy={busy}
+          onCheckNow={() => void check()}
+          note="Update counts come from the same hourly sweep the inventory reads. Nothing is installed and no package cache is refreshed."
+        />
       ) : (
         <>
           <div

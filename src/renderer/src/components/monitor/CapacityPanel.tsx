@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, RefreshCw, TrendingUp } from 'lucide-react'
-import { openSettings } from '../../store/nav'
 import { useApp } from '../../store/app'
 import {
   storageHeadline,
   type StorageLayout
 } from '../../../../shared/storageLayout'
 import { bytes, clsx } from '../../lib/format'
+import { SweepEmpty } from './SweepEmpty'
 import {
   CAPACITY_THRESHOLDS,
   CAPACITY_WINDOWS,
@@ -525,18 +525,12 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
         loading ? (
           <div className="panel-note">Reading…</div>
         ) : (
-          <div className="panel-empty">
-            <p className="panel-empty-title">No stored history.</p>
-            <p className="panel-empty-body">
-              Trends come from the fleet sampler’s own samples, so this fills in once sampling has
-              been running. Turn background checking on and leave it for an hour.
-            </p>
-            <div className="panel-empty-actions">
-              <button className="btn ghost sm" onClick={() => openSettings('monitoring')}>
-                Open Monitoring settings
-              </button>
-            </div>
-          </div>
+          <SweepEmpty
+            subject="No stored history."
+            busy={loading}
+            onCheckNow={refresh}
+            note="Trends are drawn from the sampler’s own samples. Nothing is measured for this panel, so it fills only while background checking is running."
+          />
         )
       ) : (
         <>
@@ -544,9 +538,16 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
             {selected?.name ?? serverId} over the last {span(report.to - report.from)}, from the
             samples the fleet sampler already writes. Nothing is measured for this panel.
           </div>
-          {report.trends.map((t) => (
-            <TrendRow key={t.metric} trend={t} report={report} />
-          ))}
+          {report.trends.every((t) => t.read === 0) ? (
+            <SweepEmpty
+              subject={`Nothing has been sampled for ${selected?.name ?? serverId} in this window.`}
+              busy={loading}
+              onCheckNow={refresh}
+              note="A longer window will not help until sampling resumes — the store has no readings for this host at any resolution."
+            />
+          ) : (
+            report.trends.map((t) => <TrendRow key={t.metric} trend={t} report={report} />)
+          )}
           <div className="faint" style={{ marginTop: 12 }}>
             The store keeps {report.fullResolutionDays} days of {RES_LABEL.full} and{' '}
             {report.retainedDays} days of {RES_LABEL.hourly}. Older than that is gone, which is why

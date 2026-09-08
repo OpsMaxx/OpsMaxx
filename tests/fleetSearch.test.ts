@@ -634,3 +634,85 @@ describe('a server listed twice', () => {
     expect(r.coverage.searched).toEqual(['web-01'])
   })
 })
+
+// ---------------------------------------------------------------------------
+// A configured server is findable by name before anything is sampled.
+//
+// Reported by a tester whose vault had auto-locked: the sweep was collecting
+// nothing, so typing a server's own name into fleet search found nothing and
+// the panel answered "nothing has been sampled yet" — to a question that never
+// needed a sample. A name is known the moment somebody adds the server.
+// ---------------------------------------------------------------------------
+describe('servers with no sample', () => {
+  const unsampled = (): FleetSearchInput => ({
+    servers: [
+      { id: 'a', name: 'web-01' },
+      { id: 'b', name: 'db-01' }
+    ],
+    hosts: {},
+    errors: {},
+    facts: {}
+  })
+
+  it('matches a server by name with no sample and no facts', () => {
+    const r = searchFleet(unsampled(), 'web')
+    expect(r.matches).toHaveLength(1)
+    expect(r.matches[0]).toMatchObject({
+      kind: 'host',
+      serverId: 'a',
+      label: 'web-01',
+      badge: 'not sampled',
+      unsampled: true
+    })
+  })
+
+  it('does not match a server whose name does not contain the query', () => {
+    expect(searchFleet(unsampled(), 'redis').matches).toHaveLength(0)
+  })
+
+  it('still reports the host as not checked rather than as searched', () => {
+    // The row must not buy the host a place in the coverage denominator: its
+    // units and ports were never looked at, and this is the overstatement the
+    // whole coverage structure exists to prevent.
+    const r = searchFleet(unsampled(), 'web')
+    expect(r.coverage.notChecked).toEqual(['web-01', 'db-01'])
+    expect(r.coverage.searched).toEqual([])
+  })
+
+  it('carries no age, because there is no reading behind it', () => {
+    // The renderer keys off `unsampled` to print "never sampled" instead of
+    // duration(0), which would draw a confident "56 years ago".
+    expect(searchFleet(unsampled(), 'web').matches[0].at).toBe(0)
+  })
+
+  it('matches an unsampled server by facts collected on their own clock', () => {
+    // Facts are hourly and independent of the metrics sweep, so a host can have
+    // facts and no sample. Its distro is just as findable as its name.
+    const r = searchFleet(
+      { ...unsampled(), facts: { b: { facts: archFacts(), at: 500 } } },
+      'arch'
+    )
+    expect(r.matches).toHaveLength(1)
+    expect(r.matches[0]).toMatchObject({ serverId: 'b', unsampled: true, at: 500 })
+  })
+
+  it('ranks an exact name match above a substring one', () => {
+    const r = searchFleet(
+      {
+        ...unsampled(),
+        servers: [
+          { id: 'a', name: 'web-01-staging' },
+          { id: 'b', name: 'web' }
+        ]
+      },
+      'web'
+    )
+    expect(r.matches.map((m) => m.serverName)).toEqual(['web', 'web-01-staging'])
+  })
+
+  it('a sampled host is unaffected and is not marked unsampled', () => {
+    const r = searchFleet(input(), 'web-01')
+    expect(r.matches[0].unsampled).toBeUndefined()
+    expect(r.coverage.searched).toEqual(['web-01'])
+  })
+})

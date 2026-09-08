@@ -40,6 +40,21 @@ export interface FleetMatch {
    */
   stale?: boolean
   /**
+   * Matched from configuration alone, with no sample behind it.
+   *
+   * A server's NAME is known the moment somebody adds it; nothing has to be
+   * collected for "does this workspace have a box called redis" to be
+   * answerable. This search nevertheless skipped every unsampled host before it
+   * looked at the name — so on an estate whose sweep was stopped, typing a
+   * server's own name found nothing, and the panel said "nothing has been
+   * sampled yet" to a question that never needed a sample. Reported by a
+   * tester whose vault had auto-locked.
+   *
+   * The row is marked rather than presented as an ordinary hit, because what is
+   * known about it is only its name: no units, no ports, no distribution.
+   */
+  unsampled?: true
+  /**
    * Sort position, 0 (exact) to 3 (other), computed against the text that
    * actually matched rather than against `label`.
    *
@@ -163,6 +178,31 @@ export const FLEET_SEARCH_CAP = 200
 
 const norm = (s: string): string => s.toLowerCase()
 
+/**
+ * The searchable text a host reported about itself.
+ *
+ * Lifted out because BOTH branches of the loop need it — a host with no metrics
+ * sample can still have facts, and its distro is just as findable. Two copies
+ * would be two lists to keep in step.
+ *
+ * Every value here is the host's own words and arrives already stripped of
+ * control characters and bidi marks by parseHostFacts.
+ */
+function factTermsOf(facts: HostFacts | undefined): string[] {
+  if (!facts) return []
+  return [
+    facts.distroId,
+    facts.distroVersion,
+    facts.prettyName,
+    facts.packageManager,
+    facts.virtualisation,
+    facts.arch,
+    facts.cpuModel
+  ]
+    .filter((t): t is string => t !== null && t !== '')
+    .map(norm)
+}
+
 /** The highest port number there is. Above it, digits are not a port at all. */
 const MAX_PORT = 65535
 
@@ -285,6 +325,25 @@ export function searchFleet(input: FleetSearchInput, rawQuery: string): FleetSea
       // explains both absences and saying it twice says less.
       const early = input.facts[server.id]?.facts
       if (early) bucketFacts(server.name, early)
+
+      // The name, and whatever facts happen to exist on their own hourly clock.
+      // Deliberately NOT counted in `searched`: this host's units and ports
+      // were not looked at, and saying otherwise is the overstatement the whole
+      // coverage structure exists to prevent.
+      const earlyTerms = [norm(server.name), ...factTermsOf(early)]
+      if (earlyTerms.some((t) => t.includes(q))) {
+        matches.push({
+          serverId: server.id,
+          serverName: server.name,
+          at: input.facts[server.id]?.at ?? 0,
+          kind: 'host',
+          label: server.name,
+          detail: early?.prettyName ?? 'Configured, but nothing has been sampled from it yet',
+          badge: 'not sampled',
+          unsampled: true,
+          score: bestRank(earlyTerms, q)
+        })
+      }
       continue
     }
     const { host, at } = entry
@@ -326,22 +385,7 @@ export function searchFleet(input: FleetSearchInput, rawQuery: string): FleetSea
     const nameTerm = norm(server.name)
     const hostTerm = norm(host.hostname || '')
     const kernelTerm = norm(host.kernel || '')
-    // Every allow-listed and free-text fact the host reported about itself.
-    // `prettyName` and `cpuModel` are the host's own words and arrive already
-    // stripped of control characters and bidi marks by parseHostFacts.
-    const factTerms = facts
-      ? [
-          facts.distroId,
-          facts.distroVersion,
-          facts.prettyName,
-          facts.packageManager,
-          facts.virtualisation,
-          facts.arch,
-          facts.cpuModel
-        ]
-          .filter((t): t is string => t !== null && t !== '')
-          .map(norm)
-      : []
+    const factTerms = factTermsOf(facts)
     const hostTerms = [nameTerm, hostTerm, kernelTerm, ...factTerms]
     if (hostTerms.some((t) => t.includes(q))) {
       // Distro and package manager earn a place in the detail line for the same

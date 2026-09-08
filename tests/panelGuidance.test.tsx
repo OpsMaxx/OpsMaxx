@@ -153,13 +153,20 @@ describe('an inventory that has collected nothing', () => {
     expect(screen.getByRole('button', { name: /Open Monitoring settings/ })).toBeTruthy()
   })
 
-  it('highlights exactly one action, and it is Check now', () => {
+  it('highlights exactly one action, and it is the one that can help', () => {
+    // The COUNT is the property this file guards and it is unchanged. Which
+    // action wins is not fixed any more, and deliberately: the empty state is
+    // SweepEmpty, which asks the sampler what is actually stopping the sweep.
+    // Background checking is off in this fixture, so Check now would run the
+    // sweep that is already not running — the accent belongs on the setting
+    // that turns it back on. Reported by a tester whose vault had auto-locked
+    // and who pressed Check now repeatedly against a paused sampler.
     stubBridge({})
     const { container } = render(<InventoryPanel servers={SERVERS} />)
 
     const actions = primaryActions(container as HTMLElement)
     expect(actions).toHaveLength(1)
-    expect(actions[0].textContent).toContain('Check now')
+    expect(actions[0].textContent).toContain('Open Monitoring settings')
   })
 })
 

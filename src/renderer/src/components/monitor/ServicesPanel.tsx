@@ -58,15 +58,48 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
     }
   }, [servers])
 
-  const readNow = (primary: boolean): React.JSX.Element => (
-    <button
-      className={primary ? 'btn primary sm' : 'btn ghost sm'}
-      disabled={loading || servers.length === 0}
-      onClick={() => void read()}
-    >
-      <RefreshCw size={13} className={clsx(loading && 'spin')} /> {rows ? 'Refresh' : 'Read services'}
-    </button>
-  )
+  // WHY A DISABLED BUTTON NEEDS A SENTENCE.
+  //
+  // A tester reported "Read services appears unavailable" — he hovered, got the
+  // not-allowed cursor, and had nothing telling him whether that was a
+  // permission, an unsupported OS, or a broken build. It is neither: the read
+  // opens a channel to every server in the workspace in one call, and on a
+  // fifteen-host estate that takes long enough that the disabled-while-loading
+  // state is most of what anyone sees. A cursor is not an explanation, so the
+  // button now carries the reason and the label says the read is in progress.
+  const disabledReason = (): string | null => {
+    if (servers.length === 0) return 'This workspace has no servers to ask.'
+    if (loading) {
+      return `Reading ${servers.length} server${servers.length === 1 ? '' : 's'}. Each is asked over its own connection, so this takes longer on a large estate.`
+    }
+    return null
+  }
+
+  const readNow = (primary: boolean): React.JSX.Element => {
+    const why = disabledReason()
+    return (
+      <button
+        className={primary ? 'btn primary sm' : 'btn ghost sm'}
+        disabled={loading || servers.length === 0}
+        // Present whether or not the button is disabled: the enabled tooltip
+        // says what pressing it does, and the disabled one says why it will
+        // not — a control that goes silent exactly when it stops working is
+        // the shape of this whole report.
+        title={
+          why ??
+          'Asks each server in this workspace what its own systemd is supervising for your account. Read-only.'
+        }
+        onClick={() => void read()}
+      >
+        <RefreshCw size={13} className={clsx(loading && 'spin')} />{' '}
+        {loading
+          ? `Reading ${servers.length}…`
+          : rows
+            ? 'Refresh'
+            : 'Read services'}
+      </button>
+    )
+  }
 
   return (
     // This panel had the root cause of M11 in its markup twice over: the header
@@ -91,7 +124,21 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
 
       {error && <div className="panel-note is-alarm">{error}</div>}
 
-      {rows === null ? (
+      {loading && rows === null ? (
+        // A progress state of its own. Previously the panel kept saying
+        // "Nothing read yet. Press Read services" while the read it is
+        // describing was already running behind a disabled button — an
+        // instruction to press the thing you just pressed.
+        <div className="panel-empty">
+          <p className="panel-empty-title">
+            Reading {servers.length} server{servers.length === 1 ? '' : 's'}…
+          </p>
+          <p className="panel-empty-body">
+            Each is asked over its own connection, so a large estate takes a moment. Servers that
+            are unreachable or have no systemd are reported rather than skipped.
+          </p>
+        </div>
+      ) : rows === null ? (
         <div className="panel-empty">
           <p className="panel-empty-title">Nothing read yet.</p>
           <p className="panel-empty-body">

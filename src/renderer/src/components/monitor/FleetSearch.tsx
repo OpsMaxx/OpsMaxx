@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
 import { Search, X, Server as ServerIcon, Boxes, Network } from 'lucide-react'
 import { useFleet } from '../../store/fleet'
-import { openSettings } from '../../store/nav'
+import { bridgeHas } from '../../lib/bridge'
 import { searchFleet, coverageSentence, matchKey, type FleetMatch } from '../../lib/fleetSearch'
 import { duration } from '../../lib/format'
 import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
+import { SweepEmpty } from './SweepEmpty'
 
 // Fleet-wide search over what the sampler already knows.
 //
@@ -46,8 +47,17 @@ function Row({ m, onOpen }: { m: FleetMatch; onOpen: (serverId: string) => void 
           minutes old and does not say so is indistinguishable from one that
           just asked the host. */}
       <span className="faint mono">
-        {m.stale ? 'last seen ' : ''}
-        {duration(m.at)} ago
+        {/* An unsampled row has no reading behind it, so there is no age to
+            print — `at` is 0 there, and duration(0) draws a confident "56 years
+            ago" under a name the app only knows from its own config. */}
+        {m.unsampled ? (
+          'never sampled'
+        ) : (
+          <>
+            {m.stale ? 'last seen ' : ''}
+            {duration(m.at)} ago
+          </>
+        )}
       </span>
     </button>
   )
@@ -61,6 +71,19 @@ export function FleetSearch({
   onOpen: (serverId: string) => void
 }): React.JSX.Element {
   const [query, setQuery] = useState('')
+  const [sweeping, setSweeping] = useState(false)
+  // The sweep is what fills this panel, so the empty state's button has to
+  // start one. Everything else here reads the store the sweep writes.
+  const sweepNow = async (): Promise<void> => {
+    setSweeping(true)
+    try {
+      if (bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'sampleNow')) {
+        await window.opsmaxx?.fleet?.sampleNow()
+      }
+    } finally {
+      setSweeping(false)
+    }
+  }
   const samples = useFleet((s) => s.samples)
   const errors = useFleet((s) => s.errors)
   // Hourly, and independent of the samples above. An empty record is the
@@ -127,17 +150,18 @@ export function FleetSearch({
                   ran on them" — that last one has a sample and would otherwise
                   be told to turn on background checking it already has on. */}
               {nothingSampled ? (
-                <>
-                  <p className="panel-empty-title">Nothing has been sampled yet.</p>
-                  <p className="panel-empty-body">
-                    There is nothing to search. Turn on background checking, or open a server.
-                  </p>
-                  <div className="panel-empty-actions">
-                    <button className="btn ghost sm" onClick={() => openSettings('monitoring')}>
-                      Open Monitoring settings
-                    </button>
-                  </div>
-                </>
+                // Was: "Turn on background checking, or open a server" — advice
+                // that is wrong on the day it matters most, because background
+                // checking was already ON and the vault was locked underneath
+                // it. SweepEmpty asks the sampler what is actually stopping it
+                // and offers the one control that fixes that, which for a
+                // locked vault is the unlock prompt rather than a settings tab.
+                <SweepEmpty
+                  subject="Nothing has been sampled yet."
+                  busy={sweeping}
+                  onCheckNow={() => void sweepNow()}
+                  note="Servers are still matched by name above — everything else here comes from the sweep."
+                />
               ) : (
                 <>
                   <p className="panel-empty-title">
