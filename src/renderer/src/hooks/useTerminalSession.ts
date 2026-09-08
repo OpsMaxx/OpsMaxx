@@ -286,7 +286,13 @@ export function useTerminalSession(
   useEffect(() => {
     const term = termRef.current
     if (!term) return
-    const sessionId = `sess-${transport.key}-${Math.random().toString(36).slice(2)}`
+    // crypto.randomUUID rather than Math.random: this id is what incoming
+    // events are matched against to decide whether they belong to the live
+    // session or a torn-down one, so a collision routes another session's
+    // output into this terminal. Math.random makes no promise about
+    // collisions across rapid reconnects, and the secure generator costs
+    // nothing here.
+    const sessionId = `sess-${transport.key}-${crypto.randomUUID()}`
     sessionRef.current = sessionId
 
     if (generation > 0) term.writeln('')

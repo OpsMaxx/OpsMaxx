@@ -236,7 +236,16 @@ describe('a command survives being written back', () => {
     ['/x', '%'],
     ['/x', 'a\nb\nc'],
     ['printf %s%s a b', 'trailing'],
-    ["/usr/bin/sh -c 'echo it'\\''s fine'", undefined]
+    ["/usr/bin/sh -c 'echo it'\\''s fine'", undefined],
+    // The backslash cases, WITH stdin. The list above had a command with a
+    // backslash in it, but only ever with `undefined` input, so it never
+    // reached the separator -- which is the only place the bug showed.
+    ['a\\', 'b'],
+    ['find . -name *.log -exec rm {} \\', 'go'],
+    ['echo 50%\\', 'still input'],
+    ['a\\\\', 'b'],
+    ['/x', 'trailing\\'],
+    ['/x', 'a\\\nb']
   ]
 
   for (const [command, input] of cases) {

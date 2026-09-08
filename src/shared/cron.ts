@@ -400,8 +400,10 @@ export function splitCronCommand(raw: string): { command: string; input?: string
     let text = ''
     let i = from
     for (; i < raw.length; i++) {
-      if (raw[i] === '\\' && raw[i + 1] === '%') {
-        text += '%'
+      // `\%` is a literal percent and `\\` a literal backslash. Both, because
+      // the writer escapes both -- see serialiseCronCommand for why it must.
+      if (raw[i] === '\\' && (raw[i + 1] === '%' || raw[i + 1] === '\\')) {
+        text += raw[i + 1]
         i++
         continue
       }
@@ -1191,7 +1193,18 @@ export function serialiseCrontabDocument(doc: CronDocument): string {
  * for every c and i, which is asserted as a property rather than on examples.
  */
 export function serialiseCronCommand(command: string, input?: string): string {
-  const esc = (s: string): string => s.replace(/%/g, '\\%')
+  // The backslash has to be escaped BEFORE the percent, and it has to be
+  // escaped at all -- which it was not, and that was a real defect rather
+  // than a theoretical one. `%` became `\%`, but a `\` the operator typed
+  // stayed a bare `\`. So a command ending in one produced `...\` + `%` +
+  // input, and the reader ahead saw that `\%` as an escaped literal percent,
+  // swallowed the separator, and handed back one command with the stdin
+  // glued onto it and no input at all:
+  //
+  //   serialise('a\\', 'b')  ->  'a\\%b'  ->  split  ->  { command: 'a%b' }
+  //
+  // Escaping the escape character closes it, and the reader unescapes both.
+  const esc = (s: string): string => s.replace(/\\/g, '\\\\').replace(/%/g, '\\%')
   if (input === undefined) return esc(command)
   return `${esc(command)}%${input.split('\n').map(esc).join('%')}`
 }

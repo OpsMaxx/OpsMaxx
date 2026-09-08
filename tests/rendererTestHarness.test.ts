@@ -68,13 +68,20 @@ describe('renderer test harness containment', () => {
     ).toEqual([])
   })
 
+/** Escapes every character that means something to a regular expression, not
+ *  the two that happen to appear in the package names listed today. The old
+ *  version escaped `/` and `@` only, so adding a name containing `.` or `-`
+ *  to TEST_ONLY would have silently widened the pattern instead of matching
+ *  it literally. */
+const escapeForRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\/@-]/g, '\\$&')
+
   it('no file under src/ imports them', () => {
     const offenders: string[] = []
     // `from 'jsdom'`, `require('jsdom')`, `import('jsdom')` and subpaths of
     // each. Comments are not excluded: a commented-out import of jsdom in
     // production source is a plan, and this file is the place to argue with it.
     const pattern = new RegExp(
-      `['"\`](${TEST_ONLY.map((n) => n.replace(/[/@]/g, '\\$&')).join('|')})(/[^'"\`]*)?['"\`]`
+      `['"\`](${TEST_ONLY.map(escapeForRegExp).join('|')})(/[^'"\`]*)?['"\`]`
     )
 
     for (const file of sourceFiles(SRC)) {

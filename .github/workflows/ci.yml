@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# The default GITHUB_TOKEN is broadly scoped; this workflow only ever reads the
+# repository, so it says so. Nothing here calls `gh` or the API.
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
