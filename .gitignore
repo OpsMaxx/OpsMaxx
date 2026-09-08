@@ -26,3 +26,7 @@ resources/bin/*
 # Scratch root for tests that need a directory no other user can write to
 # (os.tmpdir() is /tmp on Linux, which the binary resolver correctly refuses).
 .tmp-tests/
+
+# Stray local build of the Go sidecar. The shipped binaries go to
+# resources/bin/ via scripts/build-sidecar.sh; this one is nobody's artifact.
+sidecar/netd/netd

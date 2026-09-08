@@ -1,8 +1,13 @@
 # Working on OpsMaxx
 
-The app was renamed from OpsMaxx to OpsMaxx. The **GitHub repo slug is still
-`OpsMaxx/OpsMaxx`** and changing it would break every existing download link, so
-`OpsMaxx` in a URL is correct and `OpsMaxx` in user-facing text is not.
+The app and the GitHub repo are both `OpsMaxx` now — the slug is `OpsMaxx/OpsMaxx`.
+The name "OpsMaxx" is retired everywhere, including in URLs, and
+`tests/branding.test.ts` fails the build if it comes back. If you are about to write
+`OpsMaxx`, you are wrong.
+
+**`OpsMaxx/OpsMaxx` must never be recreated on GitHub.** The rename left a 301
+behind it that carries every already-published release-asset URL, and creating any
+repo at the old name kills that redirect permanently.
 
 ## Release surfaces
 
