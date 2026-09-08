@@ -166,7 +166,7 @@ HERA280aziJnTyFfAZACIQCg62rWQl7p8jJU1m0CzD+YKbXbtxPZtuTi8otNu1Y3
     // nothing.
     const { X509Certificate } = await import("node:crypto");
     expect(new X509Certificate(PEM).subject).toContain(
-      "OpsMaxx Traffic Inspector Test",
+      "ShellPilot Traffic Inspector Test",
     );
   });
 
