@@ -14,7 +14,7 @@ import {
   Trash2,
   Link2,
   Loader2,
-  AlertTriangle
+  AlertTriangle, CornerLeftUp
 } from 'lucide-react'
 import { ContextMenu, MenuEntry } from '../connections/ContextMenu'
 import { Modal } from '../common/Modal'
@@ -489,6 +489,29 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   ]
 
   const parts = path === '/' ? [] : path.split('/').filter(Boolean)
+  const parent = parts.length > 0 ? `/${parts.slice(0, -1).join('/')}` : null
+
+  /**
+   * The parent, written the way every shell and file manager writes it.
+   *
+   * The breadcrumb above can already go up, but `..` is the notation people
+   * arrive with — from `ls`, from Finder, from every SFTP client — and its
+   * absence is the kind of small unfamiliarity that makes a tree feel like
+   * somebody else's idea of a filesystem.
+   *
+   * Only `..`, not `.`: it is the one that DOES something. A row for the
+   * directory you are already looking at is a control that cannot be pressed,
+   * and `ls` prints it because `ls` prints entries, not because anyone
+   * navigates to it.
+   *
+   * Filtered out while searching, because it matches no query and a stray `..`
+   * on top of three results reads as a result.
+   */
+  const upRow: SftpEntry | null =
+    parent !== null && query.trim() === ''
+      ? { name: '..', dir: true, link: false, size: 0, mtime: 0, perms: '' }
+      : null
+
   const visible = entries.filter((e) => e.name.toLowerCase().includes(query.toLowerCase()))
 
   return (
@@ -637,6 +660,27 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
                     />
                   </div>
                 </td>
+              </tr>
+            )}
+            {upRow && (
+              <tr
+                key=".."
+                style={{ cursor: 'pointer' }}
+                onDoubleClick={() => void list(parent as string)}
+                data-testid="parent-row"
+              >
+                <td>
+                  <span className="row" style={{ gap: 8 }} onClick={() => void list(parent as string)}>
+                    <CornerLeftUp size={15} style={{ color: 'var(--text-faint)' }} />
+                    <span className="mono">..</span>
+                    <span className="faint" style={{ fontSize: 11 }}>
+                      parent directory
+                    </span>
+                  </span>
+                </td>
+                <td />
+                <td />
+                <td />
               </tr>
             )}
             {visible.map((e) => (
