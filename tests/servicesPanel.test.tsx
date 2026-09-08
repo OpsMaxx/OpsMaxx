@@ -7,8 +7,13 @@ import { ServicesPanel } from '../src/renderer/src/components/monitor/ServicesPa
 import { UnitInstallPanel } from '../src/renderer/src/components/operations/UnitInstallPanel'
 import type { Server } from '../src/renderer/src/types'
 
+// `route` is not optional padding. The panel builds its targets with
+// sshTargetFor, which reads `server.route` — a fixture without it throws where
+// a real server never would, because every path that creates or hydrates one
+// normalises `route` to at least []. Omitting it here made this suite assert
+// against a shape the app cannot produce.
 const server = (id: string, name: string): Server =>
-  ({ id, name, host: 'h', port: 22, username: 'u' }) as unknown as Server
+  ({ id, name, host: 'h', port: 22, username: 'u', auth: 'key', route: [] }) as unknown as Server
 
 const reading = (over: Record<string, unknown> = {}) => ({
   status: 'ok',

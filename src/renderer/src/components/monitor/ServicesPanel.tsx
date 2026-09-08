@@ -7,6 +7,7 @@ import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
 import { PanelError } from '../common/PanelError'
 import { withVaultUnlock, isVaultLocked } from '../../lib/withVaultUnlock'
+import { sshTargetFor } from '../../lib/ssh'
 
 // What each server supervises for this account, read from its own systemd.
 //
@@ -51,7 +52,23 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
     setLoading(true)
     setError(null)
     try {
-      const targets = servers.map((s) => ({ serverId: s.id, serverName: s.name, cfg: s }))
+      // sshTargetFor, NOT the Server. Found by running this against a real
+      // server with a vault credential: a Server carries its id as `id` and
+      // its jump chain as `route`, while main reads `serverId` and `hops`. So
+      // a raw Server crosses the bridge, resolves NOTHING, and the host is
+      // dialled with no credential at all —
+      //
+      //   No private key is configured for root@<host>. Edit the server and
+      //   select a key file, or switch it to password/agent authentication.
+      //
+      // on a server that has a perfectly good key in the vault. It is the same
+      // defect the storage, kernel and cron reads each shipped and fixed; this
+      // panel was simply never on that list. See the note on sshTargetFor.
+      const targets = servers.map((s) => ({
+        serverId: s.id,
+        serverName: s.name,
+        cfg: sshTargetFor(s)
+      }))
       // A locked vault is the one failure with an answer that is not "read the
       // message and go elsewhere", so it gets the prompt and one retry rather
       // than a red note carrying an internal token.
