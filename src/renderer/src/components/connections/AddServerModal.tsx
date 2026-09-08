@@ -267,32 +267,49 @@ export function AddServerModal(): React.JSX.Element {
       title={editId ? 'Edit Server' : 'Add Server'}
       subtitle={editId ? 'Change this connection profile' : 'Create a new SSH connection profile'}
       onClose={() => setModal(null)}
-      footer={
+      // The footer is Modal's, not this dialog's.
+      //
+      // Reported from the running app: the Edit Server dialog showed TWO
+      // Cancel buttons — [Cancel] [Test connection] [Save Changes] [Cancel].
+      // This form predates the footer refactor and still hand-composed the
+      // whole action row, including its own Cancel, while Modal renders one of
+      // its own unless `cancelLabel={null}` says the dialog has no way back.
+      // Suppressing Modal's would have kept this dialog the one that decides
+      // where its confirm sits, which is the exact drift Modal's header comment
+      // was written to end. So the row is described instead of drawn: `confirm`
+      // is the commit, `footer` the one extra control, `footerNote` the
+      // sentence — and this dialog can no longer differ from its neighbours.
+      //
+      // Says what is missing rather than only going grey. A disabled button
+      // with no explanation is a form the user has to guess at, and the
+      // previous gate (`name && host`) let a profile be saved with an auth
+      // method it had no credential for — met much later as an undifferentiated
+      // "Connection failed" on a different screen.
+      footerNote={
         <>
-          <span className="spacer" />
-          <button className="btn" onClick={() => setModal(null)}>
-            Cancel
-          </button>
-          {/* Says what is missing rather than only going grey. A disabled
-              button with no explanation is a form the user has to guess at,
-              and the previous gate (`name && host`) let a profile be saved
-              with an auth method it had no credential for — met much later as
-              an undifferentiated "Connection failed" on a different screen. */}
           {missing && <span className="field-hint danger">{missing.why}</span>}
           {!missing && testResult && (
             <span className={clsx('field-hint', testResult.ok ? 'ok' : 'danger')}>{testResult.text}</span>
           )}
-          {/* Beside the primary, where the fields are still editable. A failure
-              reported here can be corrected without saving a profile that does
-              not work and coming back to it. */}
-          <button className="btn" disabled={!valid || testing} onClick={() => void testConnection()}>
-            {testing ? 'Testing…' : 'Test connection'}
-          </button>
-          <button className="btn primary" disabled={!valid} onClick={save}>
-            {editId ? 'Save Changes' : 'Add Server'}
-          </button>
         </>
       }
+      // Beside the primary, where the fields are still editable. A failure
+      // reported here can be corrected without saving a profile that does not
+      // work and coming back to it.
+      footer={
+        <button
+          className="btn secondary size-28"
+          disabled={!valid || testing}
+          onClick={() => void testConnection()}
+        >
+          {testing ? 'Testing…' : 'Test connection'}
+        </button>
+      }
+      confirm={{
+        label: editId ? 'Save Changes' : 'Add Server',
+        onClick: () => void save(),
+        disabled: !valid
+      }}
     >
       <div className="field">
         <label className="field-label">Connection Name</label>

@@ -4,6 +4,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
 import { AddDatabaseModal } from '../src/renderer/src/components/databases/AddDatabaseModal'
+import { AddServerModal } from '../src/renderer/src/components/connections/AddServerModal'
 import { TunnelManager } from '../src/renderer/src/components/tunnels/TunnelManager'
 import { FrpPublishDialog } from '../src/renderer/src/components/vpn/FrpPublishDialog'
 import { FrpTunnelSetup } from '../src/renderer/src/components/vpn/FrpTunnelSetup'
@@ -150,6 +151,41 @@ describe('every add-flow dialog puts its commit in the same place', () => {
       />
     )
     expect(confirmButton().textContent).toBe('Finish setup')
+  })
+
+  // -------------------------------------------------------------------------
+  // The dialog that still drew its own footer
+  // -------------------------------------------------------------------------
+  //
+  // Reported from the running app: the Edit Server dialog's footer read
+  // [Cancel] [Test connection] [Save Changes] [Cancel]. AddServerModal predates
+  // the refactor above and hand-composed the whole row, including a Cancel of
+  // its own, while Modal renders one unless a dialog says it has no way back.
+  //
+  // Counted rather than shape-matched, because "two Cancels" is what the user
+  // saw and a source grep cannot see it: each button was correct on its own.
+  it('Edit Server: there is exactly one Cancel, and Save Changes is last', () => {
+    withOneServer()
+    useApp.setState({ editServerId: 'srv-1', modal: 'add-server' } as never)
+    render(<AddServerModal />)
+
+    const labels = [...footer().querySelectorAll('button')].map((b) => b.textContent)
+    expect(labels.filter((l) => l === 'Cancel')).toHaveLength(1)
+    expect(labels).toEqual(['Test connection', 'Cancel', 'Save Changes'])
+  })
+
+  it('Add Server: the same footer, with the label the un-saved case needs', () => {
+    // Private key is the default method, and the form offers what is already
+    // in ~/.ssh rather than opening a file picker over a hidden directory.
+    stubBridge({ ssh: { defaultKeys: () => Promise.resolve([]) } })
+    render(<AddServerModal />)
+    const labels = [...footer().querySelectorAll('button')].map((b) => b.textContent)
+    expect(labels.filter((l) => l === 'Cancel')).toHaveLength(1)
+    expect(confirmButton().textContent).toBe('Add Server')
+    // Off until the form is complete, with the reason stated rather than left
+    // to be guessed at from a grey button.
+    expect(confirmButton().hasAttribute('disabled')).toBe(true)
+    expect(footer().querySelector('.footer-note')?.textContent).toBe('Give this connection a name.')
   })
 
   it.each([

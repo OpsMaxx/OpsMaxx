@@ -1648,6 +1648,42 @@ details[open] > .disclosure-head .chev {
   font-size: var(--fs-md);
   text-align: left;
 }
+/* Settings search. Reported from the running app: "no way to search it in the
+   monitoring settings panel" — fourteen long sections and no way in except
+   guessing which one owned the row you wanted. */
+.settings-search {
+  width: 100%;
+  margin-bottom: var(--sp-2);
+}
+.settings-results {
+  margin-bottom: var(--sp-2);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+/* A result is two lines — what the setting is called, and which page it is on.
+   The section is the half that tells you where you are about to be sent. */
+.settings-nav .nav-item.result {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+}
+.settings-nav .nav-item.result .result-title {
+  color: var(--text);
+}
+/* One step down from the title, not two: 11px is the tracked all-caps caption
+   role in this scale, and this is running text — see tests/typeScale. */
+.settings-nav .nav-item.result .result-section {
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+}
+/* The row a search result asked for, marked briefly after the jump. Landing on
+   the right PAGE is not the same as landing on the right row when the page is
+   as long as Monitoring. */
+.setting-row.setting-hit {
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-ink);
+  border-radius: var(--r-sm);
+}
 .settings-nav .nav-item:hover {
   background: var(--bg-hover);
   color: var(--text);
@@ -2109,6 +2145,56 @@ details[open] > .disclosure-head .chev {
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-md);
   background: var(--bg-panel);
+}
+
+/* The four labelled columns of a hop: Label / Server / IP / Port / Username.
+   Reported from the running app: the Server / IP box was a few pixels wide —
+   13.213.210.170 read as "1" — and its header wrapped to three lines.
+
+   These were flex items sized by inline `flex: 0 0 30%` / `76px` / `24%`, and
+   none of those bases were honoured. An <input> has an intrinsic width (the
+   default size=20, ~172px), a flex item's automatic minimum size is its
+   min-content width, and so every column was really ~172px wide. Three of them
+   filled the row; the host column, the only one with `min-width: 0`, was
+   therefore the only one that could shrink and took the whole deficit — zero
+   width, its input overflowing beneath the Port field.
+
+   The fix is `min-width: 0` on EVERY column, which is what lets a declared
+   basis mean what it says, plus a basis per column that reflects what has to
+   be readable: a full IPv4 address and room to type in the host, a port number
+   in the port. The row still wraps rather than overflowing a narrow dialog. */
+.hop-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-2);
+}
+.hop-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* THE fix. Without it the bases below are decorative and the input's
+     intrinsic width decides the layout. */
+  min-width: 0;
+}
+.hop-field > .input {
+  min-width: 0;
+  width: 100%;
+}
+.hop-field.hop-name {
+  flex: 2 1 120px;
+}
+/* Widest basis and the largest share of any spare room: it holds the longest
+   value in the row and is the one that was unreadable. */
+.hop-field.hop-host {
+  flex: 3 1 168px;
+}
+.hop-field.hop-port {
+  flex: 0 1 76px;
+  min-width: 64px;
+}
+.hop-field.hop-user {
+  flex: 1 1 110px;
 }
 
 /* Failed connection detail, shown in full rather than only as a tooltip. */
