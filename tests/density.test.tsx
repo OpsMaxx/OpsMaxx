@@ -67,6 +67,7 @@ function server(id: string, name: string): Server {
 
 const metrics = (): HostMetrics => ({
   cpu: 1, memPct: 1, memUsed: 1, memTotal: 8 * 1024 * 1024 * 1024,
+  cpuCores: null, memAvailable: null, memFree: null, memCache: null,
   diskPct: 1, diskUsed: 1, diskTotal: 2, netRx: 0, netTx: 0, uptime: 100,
   hostname: 'box', kernel: 'Linux 6.8.0-45-generic', cores: 4,
   services: [], listeners: [], listenerSource: 'ss'

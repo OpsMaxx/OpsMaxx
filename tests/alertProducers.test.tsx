@@ -96,6 +96,7 @@ function healthy(serverId: string): Record<string, unknown> {
     at: T0,
     host: {
       cpu: 1,
+      cpuCores: null, memAvailable: null, memFree: null, memCache: null,
       memPct: 1,
       diskPct: 1,
       diskTotal: 100,
