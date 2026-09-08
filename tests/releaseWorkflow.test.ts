@@ -219,10 +219,20 @@ describe('inline shell in the release job does not keep growing', () => {
   // following it returned them to the same dialog. Net +20 lines after deleting
   // the paragraph it replaced, and the notes now open with the one thing a
   // first-time downloader has to read before they act on a Trash button.
+  //
+  // "Rebuild opsmaxx.dev" arrived with #20 and is measured from the start. It
+  // asks Cloudflare Pages to rebuild the download page for the tag just
+  // published, and its whole shape is the two ways that can fail to matter: no
+  // deploy hook configured, and the hook not answering. Both warn and exit
+  // zero, because a release whose installers all built is not a failed release
+  // because a marketing page is a few hours stale — the site rebuilds on its
+  // own schedule regardless. That is the reasoning worth re-reading if this
+  // step ever needs to grow.
   const CEILING: Record<string, number> = {
     'Scan installers with ClamAV': 25,
     'Build release notes': 145,
-    'Publish release notes': 75
+    'Publish release notes': 75,
+    'Rebuild opsmaxx.dev': 15
   }
 
   it.each(Object.entries(CEILING))('%s stays within its ceiling', (name, max) => {
