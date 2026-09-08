@@ -143,6 +143,7 @@ import type { DbOpsReport } from '../shared/dbOps'
 import type { VaultEntry, VaultListResult, VaultResult, VaultStatus } from '../shared/vault'
 import type { KernelStatus } from '../shared/kernelStatus'
 import type { StorageLayout } from '../shared/storageLayout'
+import type { NetworkInfo } from '../shared/network'
 import type { TunnelConfig, TunnelResult, TunnelSshConfig, TunnelStatus } from '../shared/tunnel'
 import type {
   FrpTokenResult,
@@ -892,6 +893,9 @@ const api = {
     /** Disks, filesystems, LVM, software RAID. Asked for, not sampled. */
     storage: (cfg: OnDemandTarget): Promise<StorageLayout | { error: string }> =>
       ipcRenderer.invoke('fleet:storage', cfg),
+    /** Interfaces with their IPv4/IPv6 addresses, and the resolvers in use. */
+    network: (cfg: OnDemandTarget): Promise<NetworkInfo | { error: string }> =>
+      ipcRenderer.invoke('fleet:network', cfg),
     /** One timer and the service it activates. Both, because a timer that fires
      *  into a failing service looks healthy from the timer alone. */
     timer: (
