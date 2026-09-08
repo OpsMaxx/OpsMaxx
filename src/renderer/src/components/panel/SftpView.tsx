@@ -128,6 +128,8 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   const [editor, setEditor] = useState<{ path: string; content: string } | null>(null)
   const [progress, setProgress] = useState<SftpProgress | null>(null)
   const [dropping, setDropping] = useState(false)
+  // Non-null while the breadcrumb is being typed into.
+  const [editingPath, setEditingPath] = useState<string | null>(null)
   const editorCommand = useApp((s) => s.settings.externalEditorCommand)
   const preferExternal = useApp((s) => s.settings.openFilesExternally)
   const openServerEditor = useApp((s) => s.openServerEditor)
@@ -536,16 +538,57 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
         <button className="icon-btn" onClick={() => void navigate('/')} title="Root">
           <Home size={15} />
         </button>
-        <div className="row" style={{ gap: 2, flex: 1, overflow: 'hidden' }}>
-          {parts.map((p, i) => (
-            <span key={i} className="row" style={{ gap: 2 }}>
-              <ChevronRight size={13} className="faint" />
-              <button className="btn ghost sm" onClick={() => void navigate('/' + parts.slice(0, i + 1).join('/'))}>
-                {p}
-              </button>
-            </span>
-          ))}
-        </div>
+        {/* Click the trail to type a path.
+            Crumbs are for walking a tree you are exploring; an administrator
+            who already knows they want /etc/postgresql should not have to walk
+            there. Editing turns the same strip into a field, which is where
+            everyone looks for it — the address bar of a browser, the path bar
+            of a file manager. */}
+        {editingPath === null ? (
+          <div
+            className="row"
+            style={{ gap: 2, flex: 1, overflow: 'hidden', cursor: 'text' }}
+            title="Click to type a path"
+            onClick={() => setEditingPath(path)}
+          >
+            {parts.map((p, i) => (
+              <span key={i} className="row" style={{ gap: 2 }}>
+                <ChevronRight size={13} className="faint" />
+                <button
+                  className="btn ghost sm"
+                  onClick={(ev) => {
+                    ev.stopPropagation()
+                    void navigate('/' + parts.slice(0, i + 1).join('/'))
+                  }}
+                >
+                  {p}
+                </button>
+              </span>
+            ))}
+            {parts.length === 0 && <span className="faint mono">/</span>}
+          </div>
+        ) : (
+          <input
+            className="input mono"
+            style={{ flex: 1, height: 26 }}
+            autoFocus
+            aria-label="Path"
+            value={editingPath}
+            onChange={(ev) => setEditingPath(ev.target.value)}
+            onKeyDown={(ev) => {
+              if (ev.key === 'Enter') {
+                const target = editingPath.trim()
+                setEditingPath(null)
+                // A path that does not exist reports itself through the usual
+                // failure banner rather than being validated here, so the
+                // message says what the server said.
+                if (target !== '') void navigate(target.startsWith('/') ? target : `/${target}`)
+              }
+              if (ev.key === 'Escape') setEditingPath(null)
+            }}
+            onBlur={() => setEditingPath(null)}
+          />
+        )}
         <button
           className={clsx('icon-btn', linked && 'active')}
           title={linked ? 'Following terminal directory — click to unlink' : 'Not following terminal — click to link'}
