@@ -621,3 +621,35 @@ jobs:
               gh release edit "$TAG" --draft=false --latest
               ;;
           esac
+
+      # opsmaxx.dev bakes its download links in at build time by reading
+      # releases/latest, so the site has to rebuild before it offers this
+      # version. A daily job on that repo is the safety net; this makes it
+      # immediate.
+      #
+      # Prereleases are skipped, because releases/latest ignores them and the
+      # rebuild would produce a byte-identical site. The dash test is the same
+      # one the publish step above uses to pick the update channel: the tag is
+      # "v" plus the package.json version, so the only dash it can contain is
+      # the semver prerelease separator.
+      #
+      # Never fails the run: the release is already public by this point, and
+      # a red cross on a shipped release would be misleading when the worst
+      # case is a landing page that is a few hours stale.
+      - name: Rebuild opsmaxx.dev
+        if: ${{ !contains(github.ref_name, '-') }}
+        continue-on-error: true
+        env:
+          HOOK: ${{ secrets.CF_PAGES_DEPLOY_HOOK }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::warning::CF_PAGES_DEPLOY_HOOK is not set. opsmaxx.dev will pick $TAG up on its next scheduled rebuild."
+            exit 0
+          fi
+
+          if curl -fsS --retry 3 --retry-delay 5 -X POST "$HOOK" -o /dev/null; then
+            echo "Asked Cloudflare Pages to rebuild opsmaxx.dev for $TAG."
+          else
+            echo "::warning::Could not reach the Cloudflare Pages deploy hook. opsmaxx.dev will pick $TAG up on its next scheduled rebuild."
+          fi

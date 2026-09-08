@@ -64,7 +64,7 @@ export function ShortcutManager(): React.JSX.Element {
     if (!raw) return
     const parsed = parseShortcutFile(raw)
     if (!parsed) {
-      return toast('That file is not a OpsMaxx shortcut export.', 'error', {
+      return toast('That file is not an OpsMaxx shortcut export.', 'error', {
         label: 'Choose another file',
         run: () => void importJson()
       })

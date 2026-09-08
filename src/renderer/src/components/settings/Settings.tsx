@@ -123,7 +123,7 @@ const SETTING_INDEX: SettingEntry[] = [
   {
     section: 'general',
     title: 'Check for updates automatically',
-    desc: 'Look for a newer ShellPilot on a schedule.',
+    desc: 'Look for a newer OpsMaxx on a schedule.',
     aliases: 'auto update upgrade version release'
   },
   {
@@ -135,11 +135,11 @@ const SETTING_INDEX: SettingEntry[] = [
   { section: 'general', title: 'Install on quit', desc: 'Apply a downloaded update when you quit.', aliases: 'update upgrade restart' },
   { section: 'general', title: 'Channel', desc: 'Which release channel updates come from.', aliases: 'beta stable release channel update' },
   // Appearance
-  { section: 'appearance', title: 'Theme', desc: 'Dark is the primary ShellPilot experience.', aliases: 'dark light system colour color' },
+  { section: 'appearance', title: 'Theme', desc: 'Dark is the primary OpsMaxx experience.', aliases: 'dark light system colour color' },
   {
     section: 'appearance',
     title: 'Start when I log in',
-    desc: 'Launch ShellPilot with your machine, so background checking and alerts run from login.',
+    desc: 'Launch OpsMaxx with your machine, so background checking and alerts run from login.',
     aliases: 'autostart auto start login item startup boot'
   },
   {
@@ -151,7 +151,7 @@ const SETTING_INDEX: SettingEntry[] = [
   {
     section: 'appearance',
     title: 'Allow adding and revoking keys on servers',
-    desc: 'Whether ShellPilot may write authorized_keys on your machines.',
+    desc: 'Whether OpsMaxx may write authorized_keys on your machines.',
     aliases: 'access write authorized keys revoke'
   },
   {
@@ -285,7 +285,7 @@ function SettingSwitch({
  * Starting with the machine.
  *
  * This pairs with background checking rather than being a cosmetic preference:
- * the fleet poll runs from the app root, so a OpsMaxx that starts at login
+ * the fleet poll runs from the app root, so an OpsMaxx that starts at login
  * is a fleet watched from login. Without it, "background checking" only means
  * background of whenever somebody last opened the app.
  *
