@@ -165,14 +165,46 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
           openApiDocument as { 'x-scalar-navigation'?: { children?: TraversedEntry[] } } | null
         )?.['x-scalar-navigation']
         const entries: TraversedEntry[] = navigation?.children ?? []
-        const sidebarState = createSidebarState(entries)
-        const sidebarWidth = ref(280)
         // Selecting an entry re-points the operation view at it. Held in refs
         // so a click re-renders without rebuilding the client and losing what
         // the user has typed.
         const currentPath = ref(landingPath)
         const currentMethod = ref<HttpMethodName>(landingMethod)
-        sidebarState.setSelected(null)
+
+        // The tree used to be decorative.
+        //
+        // Reported against 0.27.0: clicking an endpoint highlighted the row and
+        // the pane went on saying "Select an operation to view details". These
+        // two refs existed and were read by the render function, so the view
+        // WOULD have followed them — nothing ever wrote to them. The sidebar
+        // kept its selection to itself, and the only operation reachable was
+        // whichever one `landing*` happened to name.
+        //
+        // createSidebarState takes the hook that closes the gap. `onAfterSelect`
+        // rather than `onBeforeSelect`, so the row the user sees highlighted is
+        // the one the pane is showing.
+        const sidebarState = createSidebarState(entries, {
+          hooks: {
+            onAfterSelect: (id: string | null) => {
+              if (id === null) return
+              const entry = sidebarState.getEntryById(id)
+              // Tags, descriptions and schema entries are all legal selections
+              // and none of them is a request. Ignoring them leaves the pane on
+              // the last operation, which is better than blanking it.
+              if (!entry || entry.type !== 'operation') return
+              currentPath.value = entry.path
+              currentMethod.value = entry.method as HttpMethodName
+            }
+          }
+        })
+        const sidebarWidth = ref(280)
+
+        // Land ON something, rather than on null with a pane already rendering
+        // the landing operation. The two disagreed: the view showed the first
+        // operation and the tree showed nothing selected, so the first click on
+        // that same row was a no-op that looked like a dead control.
+        const landingEntry = findOperationEntry(entries, landingPath, landingMethod)
+        sidebarState.setSelected(landingEntry?.id ?? null)
 
         const vueApp = createApp({
           render: () =>
@@ -369,6 +401,31 @@ async function parseSpec(text: string, path: string): Promise<Record<string, unk
  */
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'] as const
 type HttpMethodName = (typeof HTTP_METHODS)[number]
+
+/**
+ * The navigation entry for one path+method, at any depth.
+ *
+ * A description groups its operations under tags, so the entry for an operation
+ * is usually a grandchild of the root rather than a child, and a flat scan of
+ * `children` finds nothing on exactly the documents that have the most in them.
+ */
+function findOperationEntry(
+  entries: TraversedEntry[],
+  path: string,
+  method: HttpMethodName
+): (TraversedEntry & { type: 'operation' }) | null {
+  for (const entry of entries) {
+    if (entry.type === 'operation' && entry.path === path && entry.method === method) {
+      return entry as TraversedEntry & { type: 'operation' }
+    }
+    const children = (entry as { children?: TraversedEntry[] }).children
+    if (children) {
+      const found = findOperationEntry(children, path, method)
+      if (found) return found
+    }
+  }
+  return null
+}
 
 function firstOperationOf(
   store: { workspace: { documents: Record<string, unknown> } },
