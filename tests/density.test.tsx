@@ -216,15 +216,25 @@ describe('the loudest pixel is not the refresh button', () => {
     expect(check.className).not.toContain('primary')
   })
 
-  it('spends the accent on Check now only when pressing it IS the task', () => {
-    // Nothing collected: the panel has one action and the empty state's own
-    // prose names it. One button, in the header where it is on every panel —
-    // an empty state that grew a second copy would put two identically-named
-    // controls on one screen.
-    render(<InventoryPanel servers={SERVERS} onOpen={() => {}} />)
+  it('spends the accent on the action that can actually help', () => {
+    // Nothing collected. The no-duplicate half of this is unchanged and is the
+    // half worth guarding: ONE Check now, in the header where it sits on every
+    // panel, never a second copy inside the empty state.
+    //
+    // Which control gets the accent is no longer fixed. The empty state is
+    // SweepEmpty, which asks the sampler what is stopping it — and with
+    // background checking off (the default, and this fixture) Check now would
+    // re-run a sweep that is not running. Spending the accent on it there is
+    // how a tester ended up pressing it repeatedly against a paused sampler
+    // and filing the panel as broken. Still exactly one accent on screen.
+    const { container } = render(<InventoryPanel servers={SERVERS} onOpen={() => {}} />)
     const checks = screen.getAllByRole('button', { name: /Check now/ })
     expect(checks).toHaveLength(1)
-    expect(checks[0].className).toContain('primary')
+    expect(checks[0].className).not.toContain('primary')
+
+    const accents = container.querySelectorAll('.btn.primary')
+    expect(accents).toHaveLength(1)
+    expect(accents[0].textContent).toContain('Open Monitoring settings')
   })
 
   it('never has more than one accent control on screen at once', () => {

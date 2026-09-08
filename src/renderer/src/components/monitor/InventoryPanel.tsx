@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, Boxes, RefreshCw, ShieldQuestion } from 'lucide-react'
 import { useFleet } from '../../store/fleet'
-import { openSettings } from '../../store/nav'
 import { bridgeHas } from '../../lib/bridge'
 import { clsx } from '../../lib/format'
 import {
@@ -17,6 +16,7 @@ import {
 } from '../../lib/inventory'
 import type { Server } from '../../types'
 import { NoteWhy, PanelShell } from './PanelShell'
+import { SweepEmpty } from './SweepEmpty'
 
 // The estate inventory — roadmap item C, renderer half.
 //
@@ -232,7 +232,13 @@ export function InventoryPanel({
               there are rows, the rows are the point and refresh goes quiet.
               One button, not two: an empty state that grew its own copy of the
               header control put two identically-named buttons on the screen. */}
-          {checkNow(summary.withFacts === 0)}
+          {/* Never solid. The empty state below is SweepEmpty now, and it
+              carries the one accent control — which is deliberately NOT always
+              Check now: with background checking off or the vault locked,
+              pressing Check now runs the sweep that is already failing. Making
+              this solid too would put two accents on the panel, one of them on
+              the button that cannot help. */}
+          {checkNow(false)}
         </>
       }
     >
@@ -245,22 +251,12 @@ export function InventoryPanel({
         // ("make sure background checking is on in Settings") gets the button
         // it never had: the primary stays in the header, where it is in the
         // same place on every panel, so it is deliberately NOT repeated here.
-        <div className="panel-empty">
-          <p className="panel-empty-title">No server facts have been collected yet.</p>
-          <p className="panel-empty-body">
-            OpsMaxx collects them about once an hour, on the same background sweep as metrics —
-            so a server added in the last hour, or an estate whose background checking has just
-            been switched on, will not have any yet. Press <b>Check now</b> to sweep immediately,
-            and make sure background checking is on in Settings. Nothing is installed, refreshed or
-            changed by this: package caches are read as they are, and their age is reported next to
-            the counts.
-          </p>
-          <div className="panel-empty-actions">
-            <button className="btn ghost sm" onClick={() => openSettings('monitoring')}>
-              Open Monitoring settings
-            </button>
-          </div>
-        </div>
+        <SweepEmpty
+          subject="No server facts have been collected yet."
+          busy={busy}
+          onCheckNow={() => void check()}
+          note="Nothing is installed or refreshed by this: package caches are read as they are, and their age is reported next to the counts."
+        />
       ) : (
         <>
           <div className="panel-stats">

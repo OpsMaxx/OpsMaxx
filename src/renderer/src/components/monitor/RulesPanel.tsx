@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Plus, Trash2, Zap } from 'lucide-react'
 import { clsx } from '../../lib/format'
+import { ruleWarnings } from '../../lib/ruleReach'
+import { useApp } from '../../store/app'
+import { hostThreshold } from '../../store/alerts'
 import {
   RULE_ALERT_KINDS,
   RULE_LIMIT_DEFAULT,
@@ -211,6 +214,26 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   const [maxFirings, setMaxFirings] = useState(RULE_LIMIT_DEFAULT.maxFirings)
   const [windowMs, setWindowMs] = useState(RULE_LIMIT_DEFAULT.windowMs)
   const [actionType, setActionType] = useState<'notify' | 'job'>('notify')
+  // Resolved for the SERVER the rule names, not the workspace default, so the
+  // number in the sentence is the one this rule will actually be compared
+  // against. `hostFilter` empty means "any server", where the global is the
+  // only honest thing to quote.
+  const resourceAlertThreshold = useApp((s) => s.settings.resourceAlertThreshold)
+  const resourceAlertThresholds = useApp((s) => s.settings.resourceAlertThresholds)
+  const webhookAlertsEnabled = useApp((s) => s.settings.webhookAlertsEnabled)
+  const warnings = ruleWarnings({
+    kind,
+    minValue,
+    event,
+    action: actionType,
+    resourceThreshold:
+      hostFilter === ''
+        ? resourceAlertThreshold
+        : hostThreshold(resourceAlertThreshold, resourceAlertThresholds, hostFilter),
+    webhookEnabled: webhookAlertsEnabled
+  })
+  const warningFor = (field: 'minValue' | 'action'): string | null =>
+    warnings.find((w) => w.field === field)?.text ?? null
   const [title, setTitle] = useState('')
   const [commands, setCommands] = useState('')
   const [targetIds, setTargetIds] = useState<string[]>([])
@@ -428,6 +451,15 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
             </label>
           </div>
 
+          {/* Under the box it is about, not beside the save button. The number
+              is a FILTER on an alert the engine has already raised, and a
+              tester read it as the threshold itself and filed the silence as a
+              bug — see lib/ruleReach.ts. `is-watch` rather than `is-alarm`:
+              the rule is valid and will be saved. */}
+          {warningFor('minValue') && (
+            <div className="panel-note is-watch">{warningFor('minValue')}</div>
+          )}
+
           <div className="row" style={{ gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <label className="col" style={{ gap: 4 }}>
               At most
@@ -476,6 +508,10 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
               Run a job
             </label>
           </div>
+
+          {warningFor('action') && (
+            <div className="panel-note is-watch">{warningFor('action')}</div>
+          )}
 
           {actionType === 'job' && (
             <div className="col" style={{ gap: 8 }}>
