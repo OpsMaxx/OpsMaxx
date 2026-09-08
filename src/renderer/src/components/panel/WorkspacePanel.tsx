@@ -99,7 +99,10 @@ function TabPane({
 
   return (
     <>
-      {visited.has('terminal') && (
+      {/* No terminal is started for a files-only account: sshd would refuse
+          the shell, and the refusal is what used to mark the server offline
+          and take the Files view down with it. */}
+      {server.sftpOnly !== true && visited.has('terminal') && (
         <div style={paneStyle('terminal')}>
           <Terminals tab={tab} tp={tp} />
           {/* Docked under the terminal rather than a separate view, so host
@@ -107,7 +110,7 @@ function TabPane({
           <MonitorStrip server={server} visible={active} />
         </div>
       )}
-      {visited.has('monitor') && (
+      {server.sftpOnly !== true && visited.has('monitor') && (
         <div style={paneStyle('monitor')}>
           <MonitorView server={server} visible={active && tab.view === 'monitor'} />
         </div>
@@ -269,6 +272,7 @@ export function WorkspacePanel(): React.JSX.Element {
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string } | null>(null)
 
   const server = active?.kind === 'ssh' ? servers.find((s) => s.id === active.serverId) : undefined
+  const filesOnly = server?.sftpOnly === true
   // Null while the tab holds a single pane: `TabPanes.direction` always holds a
   // letter, but there is no split to highlight until there are two panes. This
   // is the replacement for reading `tabSplit[id]`, which is gone.
@@ -378,8 +382,13 @@ export function WorkspacePanel(): React.JSX.Element {
               views take a non-optional Server, and the collector behind them
               reads /proc and Linux `df` semantics — on a Mac or a Windows box
               it would draw numbers that look right and are not. */}
+          {/* Terminal and Monitor both run commands, which a files-only
+              account cannot do. Offering them and letting them fail is the
+              behaviour this flag exists to remove. */}
           <div className="segment">
-            {VIEWS.filter((v) => active.kind === 'ssh' || v.id !== 'monitor').map((v) => (
+            {VIEWS.filter((v) =>
+              filesOnly ? v.id === 'files' : active.kind === 'ssh' || v.id !== 'monitor'
+            ).map((v) => (
               <button
                 key={v.id}
                 className={clsx('seg-btn', active.view === v.id && 'active')}
