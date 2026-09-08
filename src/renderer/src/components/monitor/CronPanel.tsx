@@ -18,6 +18,7 @@ import { openCronEdit } from '../../store/nav'
 import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
 import type { OnDemandTarget } from '../../../../shared/ssh'
+import { withVaultUnlock } from '../../lib/withVaultUnlock'
 
 // What is scheduled across the estate — currently unanswerable without visiting
 // every box.
@@ -252,16 +253,20 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
   const collect = async (): Promise<void> => {
     setLoading(true)
     try {
-      const res = await window.opsmaxx?.cron?.collect([
-        ...eligible.map((s) => ({
-          serverId: s.id,
-          serverName: s.name,
-          cfg: cfgFor(s)
-        })),
-        // Last, so the estate reads first and this machine is the tail of the
-        // list rather than the headline.
-        LOCAL_HOST
-      ])
+      const res = await withVaultUnlock(
+        'Reading scheduled jobs needs each server’s stored credential.',
+        async () =>
+          window.opsmaxx?.cron?.collect([
+            ...eligible.map((s) => ({
+              serverId: s.id,
+              serverName: s.name,
+              cfg: cfgFor(s)
+            })),
+            // Last, so the estate reads first and this machine is the tail of
+            // the list rather than the headline.
+            LOCAL_HOST
+          ])
+      )
       setRows(res ?? [])
     } finally {
       // The handler catches per host today, so nothing here throws — but one

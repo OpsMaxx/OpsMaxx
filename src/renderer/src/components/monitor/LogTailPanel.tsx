@@ -17,6 +17,7 @@ import {
 } from '../../../../shared/logtail'
 import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
+import { withVaultUnlock } from '../../lib/withVaultUnlock'
 
 // "A unit failed" is the question the monitor now answers. This is "why".
 //
@@ -248,24 +249,28 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
     startedOn.current = targets.map((s) => s.id)
     setRunning(true)
     try {
-      const res = await window.opsmaxx?.logtail?.start(
-        id,
-        source,
-        targets.map((s) => ({
-          serverId: s.id,
-          serverName: s.name,
-          cfg: {
-            sessionId: `logtail-${s.id}`,
-            cols: 80,
-            rows: 24,
-            serverId: s.id,
-            host: s.host,
-            port: s.port,
-            username: s.username,
-            auth: s.auth === 'password' || s.auth === 'agent' ? s.auth : 'key',
-            hops: sshHopsFor(s)
-          }
-        }))
+      const res = await withVaultUnlock(
+        'Tailing logs needs each server’s stored credential.',
+        async () =>
+          window.opsmaxx?.logtail?.start(
+            id,
+            source,
+            targets.map((s) => ({
+              serverId: s.id,
+              serverName: s.name,
+              cfg: {
+                sessionId: `logtail-${s.id}`,
+                cols: 80,
+                rows: 24,
+                serverId: s.id,
+                host: s.host,
+                port: s.port,
+                username: s.username,
+                auth: s.auth === 'password' || s.auth === 'agent' ? s.auth : 'key',
+                hops: sshHopsFor(s)
+              }
+            }))
+          )
       )
       // `undefined` means the bridge is not there at all, which is a tail that
       // will never produce a line. Treating only `{ok:false}` as failure left

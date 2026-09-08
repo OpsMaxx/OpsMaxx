@@ -5,6 +5,8 @@ import { openSettings, openUnitInstall } from '../../store/nav'
 import { summariseUserUnits, type UserUnitsReading } from '../../../../shared/userUnits'
 import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
+import { PanelError } from '../common/PanelError'
+import { withVaultUnlock } from '../../lib/withVaultUnlock'
 
 // What each server supervises for this account, read from its own systemd.
 //
@@ -50,7 +52,14 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
     setError(null)
     try {
       const targets = servers.map((s) => ({ serverId: s.id, serverName: s.name, cfg: s }))
-      setRows(await collect(targets))
+      // A locked vault is the one failure with an answer that is not "read the
+      // message and go elsewhere", so it gets the prompt and one retry rather
+      // than a red note carrying an internal token.
+      setRows(
+        await withVaultUnlock('Reading what each server supervises needs its stored credential.', () =>
+          collect(targets)
+        )
+      )
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -122,7 +131,11 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
       actions={readNow(rows === null)}
     >
 
-      {error && <div className="panel-note is-alarm">{error}</div>}
+      <PanelError
+        error={error}
+        reason="Reading what each server supervises needs its stored credential."
+        onRetry={() => void read()}
+      />
 
       {loading && rows === null ? (
         // A progress state of its own. Previously the panel kept saying
