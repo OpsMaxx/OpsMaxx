@@ -578,3 +578,189 @@ describe('coming back after the vault was locked', () => {
     expect(h.calls.length).toBe(after)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Reconfiguring with a configuration that did not change.
+//
+// The incident: Monitoring settings read "Running · 4 servers · last pass 55s
+// ago, took 0 ms", and Security posture, Fleet keys and access and Capacity
+// trends were all permanently empty. A sweep over four hosts cannot take no
+// time. It was not taking any — configure() bumped the generation
+// unconditionally, so every call abandoned the sweep in flight, and the
+// renderer re-sends the same configuration every time its target list is
+// rebuilt (setServerStatus does that on 'connecting' and again on 'online',
+// per session). With a few servers connected, configure() arrived faster than
+// a sweep could finish and none ever did.
+//
+// These tests pin both halves: an unchanged configuration must not disturb
+// anything, and a changed one must invalidate exactly as it always has.
+// ---------------------------------------------------------------------------
+describe('a configuration that did not change', () => {
+  const fourish = (): FleetTarget[] => [target('a'), target('b')]
+
+  it('lets a sweep in flight finish, and records how long it really took', async () => {
+    // The assertion that would have caught the bug in the field: a sweep that
+    // visits every target and reports a duration that is not zero.
+    const h = harness({ slow: true })
+    const cfg = { enabled: true, intervalMs: 60_000, targets: fourish() }
+    h.sampler.configure(cfg)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.calls).toEqual(['fleet:a'])
+
+    // Time passes while the first host is outstanding, and the renderer
+    // re-sends the identical configuration in the middle of it. Fresh objects
+    // every time -- the renderer rebuilds the array, so identity is never the
+    // thing being compared.
+    await vi.advanceTimersByTimeAsync(1_000)
+    h.sampler.configure({ enabled: true, intervalMs: 60_000, targets: fourish() })
+    h.resolveAll()
+    await vi.advanceTimersByTimeAsync(0)
+
+    h.sampler.configure({ enabled: true, intervalMs: 60_000, targets: fourish() })
+    h.resolveAll()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(h.calls).toEqual(['fleet:a', 'fleet:b'])
+    expect(h.events.map((e) => e.serverId)).toEqual(['a', 'b'])
+    expect(h.sampler.status().lastSweepMs).toBeGreaterThan(0)
+    h.sampler.dispose()
+  })
+
+  it('does not hand back the pooled connections it is still using', async () => {
+    // A release on every no-op reconfigure tears down an authenticated master
+    // the very next sweep has to rebuild, on every server, several times a
+    // session.
+    const h = harness()
+    h.sampler.configure({ enabled: true, intervalMs: 60_000, targets: fourish() })
+    await vi.advanceTimersByTimeAsync(0)
+    h.sampler.configure({ enabled: true, intervalMs: 60_000, targets: fourish() })
+    expect(h.released).toEqual([])
+    h.sampler.dispose()
+  })
+
+  it('does not restart the interval clock', async () => {
+    // Rescheduling at zero on every no-op would make the cadence a function of
+    // how often the renderer happens to re-render rather than of the setting.
+    const h = harness()
+    h.sampler.configure({ enabled: true, intervalMs: 60_000, targets: [target('a')] })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.calls).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(30_000)
+    h.sampler.configure({ enabled: true, intervalMs: 60_000, targets: [target('a')] })
+    await vi.advanceTimersByTimeAsync(29_999)
+    expect(h.calls).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(h.calls).toHaveLength(2)
+    h.sampler.dispose()
+  })
+
+  it('still re-arms a loop that has genuinely stalled', async () => {
+    // An identical configure() was also the accidental way a stopped loop got
+    // restarted -- it is what "turn it off and on again" did. Trading one
+    // stall for another would not be a fix.
+    const h = harness()
+    h.setUnlocked(false)
+    h.sampler.configure({ enabled: true, intervalMs: 60_000, targets: [target('a')] })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.calls).toEqual([])
+
+    h.setUnlocked(true)
+    h.sampler.configure({ enabled: true, intervalMs: 60_000, targets: [target('a')] })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.calls).toEqual(['fleet:a'])
+    h.sampler.dispose()
+  })
+})
+
+describe('a configuration that did change', () => {
+  it('still abandons a sweep in flight when the target list changed', async () => {
+    const h = harness({ slow: true })
+    h.sampler.configure({ enabled: true, intervalMs: 60_000, targets: [target('a')] })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.calls).toEqual(['fleet:a'])
+
+    h.sampler.configure({ enabled: true, intervalMs: 60_000, targets: [target('c')] })
+    h.resolveAll()
+    await vi.advanceTimersByTimeAsync(0)
+
+    // 'a' belongs to a configuration that no longer exists, and its connection
+    // goes back to the pool.
+    expect(h.events.some((e) => e.serverId === 'a')).toBe(false)
+    expect(h.released).toContain('fleet:a')
+    expect(h.calls).toContain('fleet:c')
+    h.sampler.dispose()
+  })
+
+  it("still abandons a sweep in flight when a target's connection details changed", async () => {
+    // The case an id-only comparison would miss: same server, new address. If
+    // this is treated as unchanged the sampler connects to the old host for the
+    // rest of the session, silently and with no error anywhere.
+    const h = harness({ slow: true })
+    const before: FleetTarget = { ...target('a'), cfg: { host: 'old', port: 22, username: 'u' } as FleetTarget['cfg'] }
+    const after: FleetTarget = { ...target('a'), cfg: { host: 'new', port: 22, username: 'u' } as FleetTarget['cfg'] }
+    h.sampler.configure({ enabled: true, intervalMs: 60_000, targets: [before] })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.calls).toEqual(['fleet:a'])
+
+    h.sampler.configure({ enabled: true, intervalMs: 60_000, targets: [after] })
+    h.resolveAll()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.events).toEqual([])
+    expect(h.calls).toHaveLength(2)
+    h.sampler.dispose()
+  })
+
+  it('still abandons a sweep in flight when the interval changed', async () => {
+    const h = harness({ slow: true })
+    h.sampler.configure({ enabled: true, intervalMs: 60_000, targets: [target('a')] })
+    await vi.advanceTimersByTimeAsync(0)
+
+    h.sampler.configure({ enabled: true, intervalMs: 120_000, targets: [target('a')] })
+    h.resolveAll()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.events).toEqual([])
+    // And the run under the new cadence is already going.
+    expect(h.calls).toHaveLength(2)
+    h.sampler.dispose()
+  })
+
+  it('still abandons a sweep in flight when the facts cadence changed', async () => {
+    const h = harness({ slow: true })
+    h.sampler.configure({ enabled: true, intervalMs: 60_000, targets: [target('a')], factsIntervalMs: 3_600_000 })
+    await vi.advanceTimersByTimeAsync(0)
+
+    h.sampler.configure({ enabled: true, intervalMs: 60_000, targets: [target('a')], factsIntervalMs: 7_200_000 })
+    h.resolveAll()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.events).toEqual([])
+    h.sampler.dispose()
+  })
+
+  it('still stops the loop when the feature is switched off mid-sweep', async () => {
+    const h = harness({ slow: true })
+    h.sampler.configure({ enabled: true, intervalMs: 60_000, targets: [target('a')] })
+    await vi.advanceTimersByTimeAsync(0)
+
+    h.sampler.configure({ enabled: false, intervalMs: 60_000, targets: [target('a')] })
+    h.resolveAll()
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+
+    expect(h.calls).toHaveLength(1)
+    expect(h.events).toEqual([])
+    expect(h.released).toContain('fleet:a')
+    expect(h.sampler.status()).toMatchObject({ running: false, idleReason: 'disabled' })
+  })
+
+  it('still starts the loop when the feature is switched back on', async () => {
+    const h = harness()
+    h.sampler.configure({ enabled: false, intervalMs: 60_000, targets: [target('a')] })
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+    expect(h.calls).toEqual([])
+
+    h.sampler.configure({ enabled: true, intervalMs: 60_000, targets: [target('a')] })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.calls).toEqual(['fleet:a'])
+    h.sampler.dispose()
+  })
+})
