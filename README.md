@@ -8,17 +8,17 @@
 
 Your DevOps workstation, everywhere. Windows · macOS · Linux.
 
-<a href="https://github.com/ghauri01/OpsMaxx/releases/latest">
+<a href="https://github.com/OpsMaxx/ShellPilot/releases/latest">
 <img src="https://img.shields.io/badge/Download%20OpsMaxx-22c7d6?style=for-the-badge&labelColor=0d1119" alt="Download OpsMaxx" height="34" />
 </a>
 
-<a href="https://github.com/ghauri01/OpsMaxx/releases/latest"><img src="https://img.shields.io/badge/Windows-0d1119?style=for-the-badge&logo=windows&logoColor=22c7d6" alt="Windows" height="26" /></a>
-<a href="https://github.com/ghauri01/OpsMaxx/releases/latest"><img src="https://img.shields.io/badge/macOS-0d1119?style=for-the-badge&logo=apple&logoColor=22c7d6" alt="macOS" height="26" /></a>
-<a href="https://github.com/ghauri01/OpsMaxx/releases/latest"><img src="https://img.shields.io/badge/Linux-0d1119?style=for-the-badge&logo=linux&logoColor=22c7d6" alt="Linux" height="26" /></a>
+<a href="https://github.com/OpsMaxx/ShellPilot/releases/latest"><img src="https://img.shields.io/badge/Windows-0d1119?style=for-the-badge&logo=windows&logoColor=22c7d6" alt="Windows" height="26" /></a>
+<a href="https://github.com/OpsMaxx/ShellPilot/releases/latest"><img src="https://img.shields.io/badge/macOS-0d1119?style=for-the-badge&logo=apple&logoColor=22c7d6" alt="macOS" height="26" /></a>
+<a href="https://github.com/OpsMaxx/ShellPilot/releases/latest"><img src="https://img.shields.io/badge/Linux-0d1119?style=for-the-badge&logo=linux&logoColor=22c7d6" alt="Linux" height="26" /></a>
 
-[![Latest release](https://img.shields.io/github/v/release/ghauri01/OpsMaxx?style=flat-square&label=release&color=22c7d6&labelColor=30363d&sort=semver)](https://github.com/ghauri01/OpsMaxx/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/ghauri01/OpsMaxx/total?style=flat-square&label=downloads&color=22c7d6&labelColor=30363d)](https://github.com/ghauri01/OpsMaxx/releases)
-[![Stars](https://img.shields.io/github/stars/ghauri01/OpsMaxx?style=flat-square&label=stars&color=22c7d6&labelColor=30363d)](https://github.com/ghauri01/OpsMaxx/stargazers)
+[![Latest release](https://img.shields.io/github/v/release/OpsMaxx/ShellPilot?style=flat-square&label=release&color=22c7d6&labelColor=30363d&sort=semver)](https://github.com/OpsMaxx/ShellPilot/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/OpsMaxx/ShellPilot/total?style=flat-square&label=downloads&color=22c7d6&labelColor=30363d)](https://github.com/OpsMaxx/ShellPilot/releases)
+[![Stars](https://img.shields.io/github/stars/OpsMaxx/ShellPilot?style=flat-square&label=stars&color=22c7d6&labelColor=30363d)](https://github.com/OpsMaxx/ShellPilot/stargazers)
 [![License](https://img.shields.io/badge/license-MIT-22c7d6?style=flat-square&labelColor=30363d)](LICENSE)
 
 [Features](#features) · [AI Agent Access](#ai-agent-access) · [Install](#install) · [Quick start](#quick-start) · [Comparison](#opsmaxx-vs-mobaxterm-putty-termius-and-securecrt) · [Workspaces](#workspaces) · [Local terminal](#local-terminal) · [Command palette](#command-palette) · [Shortcuts](#keyboard-shortcuts) · [Databases](#databases) · [Vault](#vault) · [Use cases](#real-world-use-cases) · [FAQ](#faq) · [Contributing](#contributing) · [Licence](#licence)
@@ -321,16 +321,16 @@ under **Active Sessions** and create a new one rather than hunting for it:
 
 ## Install
 
-Download the latest build from the [Releases](https://github.com/ghauri01/OpsMaxx/releases/latest) page.
+Download the latest build from the [Releases](https://github.com/OpsMaxx/ShellPilot/releases/latest) page.
 
 | Platform | File | Notes |
 |---|---|---|
-| **Windows 10/11** | [`OpsMaxx-x.y.z-setup.exe`](https://github.com/ghauri01/OpsMaxx/releases/latest) | Installer, desktop + Start-menu shortcut. Pick this one if unsure. |
-| **Windows (portable)** | [`OpsMaxx-x.y.z-portable.exe`](https://github.com/ghauri01/OpsMaxx/releases/latest) | Single file, no install, keeps its data beside the `.exe` — runs from a USB stick |
-| **macOS (Apple Silicon)** | [`OpsMaxx-x.y.z-arm64.dmg`](https://github.com/ghauri01/OpsMaxx/releases/latest) | M1 and later |
-| **macOS (Intel)** | [`OpsMaxx-x.y.z-x64.dmg`](https://github.com/ghauri01/OpsMaxx/releases/latest) | Intel Macs |
-| **Linux** | [`OpsMaxx-x.y.z-x86_64.AppImage`](https://github.com/ghauri01/OpsMaxx/releases/latest) | `chmod +x OpsMaxx-*.AppImage` and run — works on any distribution |
-| **Linux (Debian / Ubuntu)** | [`OpsMaxx-x.y.z-amd64.deb`](https://github.com/ghauri01/OpsMaxx/releases/latest) | `sudo apt install ./OpsMaxx-*-amd64.deb` |
+| **Windows 10/11** | [`OpsMaxx-x.y.z-setup.exe`](https://github.com/OpsMaxx/ShellPilot/releases/latest) | Installer, desktop + Start-menu shortcut. Pick this one if unsure. |
+| **Windows (portable)** | [`OpsMaxx-x.y.z-portable.exe`](https://github.com/OpsMaxx/ShellPilot/releases/latest) | Single file, no install, keeps its data beside the `.exe` — runs from a USB stick |
+| **macOS (Apple Silicon)** | [`OpsMaxx-x.y.z-arm64.dmg`](https://github.com/OpsMaxx/ShellPilot/releases/latest) | M1 and later |
+| **macOS (Intel)** | [`OpsMaxx-x.y.z-x64.dmg`](https://github.com/OpsMaxx/ShellPilot/releases/latest) | Intel Macs |
+| **Linux** | [`OpsMaxx-x.y.z-x86_64.AppImage`](https://github.com/OpsMaxx/ShellPilot/releases/latest) | `chmod +x OpsMaxx-*.AppImage` and run — works on any distribution |
+| **Linux (Debian / Ubuntu)** | [`OpsMaxx-x.y.z-amd64.deb`](https://github.com/OpsMaxx/ShellPilot/releases/latest) | `sudo apt install ./OpsMaxx-*-amd64.deb` |
 
 <details>
 <summary><b>What are the other files on the release page?</b></summary>
@@ -511,7 +511,7 @@ Get-FileHash OpsMaxx-x.y.z-setup.exe -Algorithm SHA256    # Windows
 ### Build from source
 
 ```bash
-git clone https://github.com/ghauri01/OpsMaxx.git
+git clone https://github.com/OpsMaxx/ShellPilot.git
 cd OpsMaxx
 npm install
 
@@ -1236,7 +1236,7 @@ Star the repository, report bugs, or open a pull request — see [Contributing](
 
 Contributions are very welcome, whether that is code, documentation, a bug report or a translation. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for the architecture overview and development workflow, and please follow our [Code of Conduct](CODE_OF_CONDUCT.md).
 
-Good first issues are labelled [`good first issue`](https://github.com/ghauri01/OpsMaxx/labels/good%20first%20issue).
+Good first issues are labelled [`good first issue`](https://github.com/OpsMaxx/ShellPilot/labels/good%20first%20issue).
 
 ## Licence
 
@@ -1252,7 +1252,7 @@ Please do keep the copyright notice, and do not imply the maintainers endorse a 
 
 **Built for the DevOps community.** If OpsMaxx saves you time, a ⭐ helps others find it.
 
-[⬇ Download OpsMaxx](https://github.com/ghauri01/OpsMaxx/releases/latest) · [🐞 Report a bug](https://github.com/ghauri01/OpsMaxx/issues/new/choose) · [📧 Contact](mailto:aliwaqarofficial@gmail.com)
+[⬇ Download OpsMaxx](https://github.com/OpsMaxx/ShellPilot/releases/latest) · [🐞 Report a bug](https://github.com/OpsMaxx/ShellPilot/issues/new/choose) · [📧 Contact](mailto:aliwaqarofficial@gmail.com)
 
 *Keywords: open source SSH client, free SSH client for Windows, free MobaXterm alternative, PuTTY alternative, Termius alternative, SecureCRT alternative, Xshell alternative, MobaXterm for Mac, SSH client for macOS, SSH client for Linux, SSH terminal manager, SSH connection manager, SFTP client, SCP file transfer, SSH tunnel manager, port forwarding tool, SOCKS5 proxy client, bastion host client, jump host SSH client, ProxyJump GUI, ssh config importer, server monitoring tool, database GUI client, PostgreSQL client, MySQL client, MongoDB client, Redis client, SQL Server client, database over SSH tunnel, password manager for developers, encrypted secrets vault, AES-256-GCM vault, DevOps tools, sysadmin tools, self-hosted, no telemetry, no subscription, Electron SSH client, cross-platform terminal, Windows macOS Linux, MCP server, Model Context Protocol, AI agent SSH access, Claude Code MCP integration, Claude Desktop MCP server, Codex MCP server, Gemini CLI MCP, AI DevOps tool, secure AI infrastructure access, AI agent access control, credential-free AI automation, human-in-the-loop AI approvals, AI audit log.*
 

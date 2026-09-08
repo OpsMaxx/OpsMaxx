@@ -36,13 +36,13 @@
     "macos",
     "linux"
   ],
-  "homepage": "https://github.com/ghauri01/OpsMaxx#readme",
+  "homepage": "https://github.com/OpsMaxx/ShellPilot#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ghauri01/OpsMaxx.git"
+    "url": "git+https://github.com/OpsMaxx/ShellPilot.git"
   },
   "bugs": {
-    "url": "https://github.com/ghauri01/OpsMaxx/issues"
+    "url": "https://github.com/OpsMaxx/ShellPilot/issues"
   },
   "author": {
     "name": "ghauri01",

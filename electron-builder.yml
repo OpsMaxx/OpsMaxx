@@ -4,8 +4,8 @@ copyright: Copyright © 2026 OpsMaxx contributors
 
 publish:
   provider: github
-  owner: ghauri01
-  repo: OpsMaxx
+  owner: OpsMaxx
+  repo: ShellPilot
 
 directories:
   buildResources: build

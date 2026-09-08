@@ -1,4 +1,4 @@
-module github.com/ghauri01/opsmaxx/sidecar/netd
+module github.com/opsmaxx/shellpilot/sidecar/netd
 
 go 1.24.0
 

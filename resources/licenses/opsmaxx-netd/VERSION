@@ -2,7 +2,7 @@ opsmaxx-netd 0.22.3 (92d41f1)
 
 Bundled Go dependencies, from sidecar/netd/go.mod:
 
-  github.com/ghauri01/opsmaxx/sidecar/netd
+  github.com/opsmaxx/shellpilot/sidecar/netd
   github.com/BurntSushi/toml v1.4.1-0.20240526193622-a339e1f7089c
   github.com/Microsoft/go-winio v0.6.0
   github.com/Microsoft/hcsshim v0.9.12

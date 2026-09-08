@@ -6,7 +6,7 @@ and code are all welcome, and you do not need to be an Electron expert to help.
 ## Getting set up
 
 ```bash
-git clone https://github.com/ghauri01/OpsMaxx.git
+git clone https://github.com/OpsMaxx/ShellPilot.git
 cd opsmaxx
 npm install
 npm run dev
@@ -122,7 +122,7 @@ Please **redact hostnames, usernames, keys and IPs** before pasting logs.
 ## Suggesting features
 
 Open a discussion or an issue describing the problem you hit, not only the
-solution you have in mind. The [issue tracker](https://github.com/ghauri01/OpsMaxx/issues)
+solution you have in mind. The [issue tracker](https://github.com/OpsMaxx/ShellPilot/issues)
 lists what is already planned, and the roadmap is kept there.
 
 ## Where help is most needed
