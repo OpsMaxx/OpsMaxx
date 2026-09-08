@@ -1199,6 +1199,32 @@ const targetExecQuiet = (
 // three of the probes inside the collector use exit status as their API.
 const hostFactsReader = new HostFactsReader({ exec: targetExecQuiet })
 
+/**
+ * The connection config for an ON-DEMAND host read.
+ *
+ * targetExecQuiet passes its config through unresolved and says so: its
+ * callers resolve their own secrets. The sampler's injected probes do exactly
+ * that — every one of them wraps in resolveChainSecrets. The four IPC handlers
+ * below did not, and what they are handed comes from the RENDERER, where a
+ * stored password is a placeholder and a jump chain is a list of server ids.
+ *
+ * Found by running it. `Read filesystems` on a host behind a bastion dialled
+ * the private address straight from the laptop and failed with
+ *
+ *   The filesystems could not be read: connect ETIMEDOUT 192.168.19.7:1051
+ *
+ * on a host the monitor was sampling perfectly well one panel over — because
+ * the sampler resolved the chain and this did not. Every other SSH entry point
+ * in this file already wraps: sshConnect, sshTest, httpRequest, sftpConnect
+ * and all four db handlers.
+ *
+ * A local target owns no credentials and no transport, so it passes through
+ * untouched — resolving one would look up secrets for a server id that is not
+ * a server.
+ */
+const onDemandTarget = (cfg: unknown): unknown =>
+  isLocalTarget(cfg) ? cfg : withVpnTransport(resolveChainSecrets(cfg as SshConnectConfig))
+
 // Whether the key and access probe may run — roadmap item 23.
 //
 // Main is not given the renderer's settings, so this does what the local
@@ -1443,19 +1469,21 @@ ipcMain.handle('fleet:facts', (_e, serverId: string) => fleetSampler.factsFor(se
 // The security-update LIST, on demand. Not part of the hourly facts sweep --
 // see `HostFactsReader.securityList` for why the counts are sampled and the
 // list is asked for.
-ipcMain.handle('fleet:security-list', (_e, cfg: unknown) => hostFactsReader.securityList(cfg))
+ipcMain.handle('fleet:security-list', (_e, cfg: unknown) =>
+  hostFactsReader.securityList(onDemandTarget(cfg))
+)
 // Running kernel against installed kernels — roadmap item 46. Asked for rather
 // than sampled: the hourly sweep already carries the restart flag, and this is
 // the explanation behind it.
-ipcMain.handle('fleet:kernel', (_e, cfg: unknown) => hostFactsReader.kernel(cfg))
+ipcMain.handle('fleet:kernel', (_e, cfg: unknown) => hostFactsReader.kernel(onDemandTarget(cfg)))
 // Disks, filesystems, LVM and software RAID — roadmap item 46. Asked for rather
 // than sampled: a partition table does not move between hourly sweeps.
-ipcMain.handle('fleet:storage', (_e, cfg: unknown) => hostFactsReader.storage(cfg))
+ipcMain.handle('fleet:storage', (_e, cfg: unknown) => hostFactsReader.storage(onDemandTarget(cfg)))
 // One systemd timer AND the service it activates — roadmap item 46's certbot
 // row, generalised. A timer that fires into a failing service is the case the
 // row is about, and reading only the timer cannot see it.
 ipcMain.handle('fleet:timer', (_e, cfg: unknown, timerUnit: string, serviceUnit: string) =>
-  hostFactsReader.timer(cfg, timerUnit, serviceUnit)
+  hostFactsReader.timer(onDemandTarget(cfg), timerUnit, serviceUnit)
 )
 // Who can get into one server, as the sweep last saw it — roadmap item 23.
 //
