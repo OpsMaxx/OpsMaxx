@@ -10,7 +10,7 @@ import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 // workspace's servers/databases on disk; those still live in the normal data
 // file. Use the Vault for secrets that must be encrypted at rest.
 
-const FILE = join(app.getPath('userData'), 'shellpilot-wslocks.json')
+const FILE = join(app.getPath('userData'), 'opsmaxx-wslocks.json')
 const TMP = `${FILE}.tmp`
 const KDF = { N: 32768, r: 8, p: 1, keylen: 32, maxmem: 96 * 1024 * 1024 }
 

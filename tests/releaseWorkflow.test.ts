@@ -135,7 +135,7 @@ describe('the update manifests ship as deliberately as the installers', () => {
   const upload = steps(wf.jobs.build).find(
     (s) =>
       (s.uses ?? '').includes('upload-artifact') &&
-      String(s.with?.name ?? '').startsWith('shellpilot-')
+      String(s.with?.name ?? '').startsWith('opsmaxx-')
   )
   const path = String(upload?.with?.path ?? '')
 
@@ -247,7 +247,7 @@ describe('macOS build hardening', () => {
   }
 
   it('enables the hardened runtime', () => {
-    // Without it a same-user process can inject into ShellPilot and read an
+    // Without it a same-user process can inject into OpsMaxx and read an
     // unlocked vault key from memory, which defeats every protection the vault
     // has. It needs no Developer ID — ad-hoc signing carries it fine.
     expect(builder.mac?.hardenedRuntime).toBe(true)
@@ -264,7 +264,7 @@ describe('macOS build hardening', () => {
 })
 
 describe('GPL-2.0 §3: the OpenVPN source is published with the binaries', () => {
-  // ShellPilot bundles OpenVPN on macOS and Linux. That makes this project a
+  // OpsMaxx bundles OpenVPN on macOS and Linux. That makes this project a
   // distributor of GPL-2.0 binaries, and §3 obliges a distributor to supply
   // the corresponding source. The obligation is not discharged by a script
   // that *can* produce a tarball — it is discharged by the tarball being on

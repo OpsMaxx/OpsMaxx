@@ -88,7 +88,7 @@ function mount(s: Stub = {}): void {
 describe('the pane says what the token grants, where the token is', () => {
   it('names the header and states the power before the token is on screen', async () => {
     mount()
-    await screen.findByText('x-shellpilot-proxy-token')
+    await screen.findByText('x-opsmaxx-proxy-token')
     expect(
       screen.getByText(/Anything holding this token can spend your API budget/)
     ).toBeTruthy()

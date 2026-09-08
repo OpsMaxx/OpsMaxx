@@ -1,4 +1,4 @@
-# ShellPilot roadmap
+# OpsMaxx roadmap
 
 What we intended to build, what each one actually rests on in the code today, and what is genuinely
 hard about it. It began as sixteen items and grew to thirty-two as the work found things the plan
@@ -120,7 +120,7 @@ was built and that reasoning outlives the ticket.
 | **11. Run one command across many servers** | **Built.** Approval model settled and tested first: confirmation scales with blast radius, nothing is safe by omission, cancel means queued hosts never start. Three at a time, 60s per host, output capped at 20 kB. Not exposed to the MCP bridge. Those three bounds are correct for a command and wrong for a task — see item B. |
 | **12. Live log tailing across hosts** | **Built.** journalctl, `tail -F` or `docker logs`, several hosts interleaved and colour-keyed, with a real source picker across all three modes. The remote command is built from a validated source and never from user text. |
 | **6. Cron, read-only** | **Built.** Crontabs, /etc/cron.d and systemd timers across the estate. Read-only until the parser is proven — the user-field trap is a silent misread, not an error. |
-| **15a. Optional first-party modules** | **Built.** Six modules behind the registry. Borrows the AI_CAPABILITIES shape: absent reads as OFF, and an upgrade never switches a new module on for an existing install. Enforced twice — `MODULE_FORBIDDEN_IMPORTS` by walking the real import closure, and `MODULE_FORBIDDEN_BRIDGE` for the `window.shellpilot` namespaces a closure walk cannot see. Part (b) is not started and `tests/moduleBoundaries.test.ts` guards against drifting into it. |
+| **15a. Optional first-party modules** | **Built.** Six modules behind the registry. Borrows the AI_CAPABILITIES shape: absent reads as OFF, and an upgrade never switches a new module on for an existing install. Enforced twice — `MODULE_FORBIDDEN_IMPORTS` by walking the real import closure, and `MODULE_FORBIDDEN_BRIDGE` for the `window.opsmaxx` namespaces a closure walk cannot see. Part (b) is not started and `tests/moduleBoundaries.test.ts` guards against drifting into it. |
 | **4a. Docker** | **Built** as the first module behind that gate, off by default. Shells out to the host's own binary. The work was in telling the three failures apart: missing binary, stopped daemon, and permission denied have three different fixes. Now beyond listing: start/stop/restart with graded confirmation, `docker exec` as a third `TerminalTransport`, container logs followed live, and `docker system df` parsed down to reclaimable bytes per type. |
 | **4b. Kubernetes** | **Built, read-only plus one write.** Pods, nodes, deployments/statefulsets/daemonsets with ready-versus-desired, namespace events, `kubectl top` where a Metrics API answers, and a diagnosis view. The first mutation was `kubectl rollout restart`; cordon, uncordon, drain and a one-command exec followed under item 22. It deliberately does not switch contexts, apply, scale, or delete anything, and `src/shared/kubernetes.ts` states why in the file rather than in a commit message. This document previously said Kubernetes should stay "separate and later"; it arrived earlier because the Docker module's failure classification and sudo discipline transferred wholesale. |
 
@@ -157,7 +157,7 @@ so consent had been given for something narrower than what was taken.
 ### Measured against a real estate, 2 Sep
 
 Run on the author's own machine against two live hosts, background checking on at a 2-minute
-cadence. 174 samples over ~45 minutes, counting ShellPilot's own sockets by PID.
+cadence. 174 samples over ~45 minutes, counting OpsMaxx's own sockets by PID.
 
 | | |
 |---|---|
@@ -401,7 +401,7 @@ top of them, because each is a hole in a safety property this document claims.
 4. **Approval-log vocabulary.** `JobApprovalEntry.surface` is `'broadcast' | 'job'`
    (`jobs.ts:557`) and `ApprovalSurface` is `'broadcast' | 'job' | 'k8s-exec'`
    (`broadcast.ts:603-605`). Key add/revoke (`index.ts:1309-1400`), `kubectl exec`, cordon, drain
-   and every item-37 statement need a row in `shellpilot-job-approvals.jsonl`. Widen both unions
+   and every item-37 statement need a row in `opsmaxx-job-approvals.jsonl`. Widen both unions
    once — `'access'`, `'k8s'`, `'db-statement'` — so item 36's first real revoke is recorded.
    Half a day.
 
@@ -773,7 +773,7 @@ steps and goes through the same dialog, so `planJob` grades it on its OWN comman
 
 **Deployment rollback — SHIPPED for compose.** The premise above was wrong, and finding that out
 was most of the work. The app does not need to remember the previous tag: `buildComposeWriteCommand`
-has always run `cp -p <file> <file>.shellpilot-bak` BEFORE writing, so the previous version of the
+has always run `cp -p <file> <file>.opsmaxx-bak` BEFORE writing, so the previous version of the
 file is already on the host. That record beats anything the app could keep — it survives the app
 being closed, reinstalled or run from a colleague's laptop, and it cannot drift from the file it
 describes because it IS the file. No new store.
@@ -794,8 +794,8 @@ comes back as a successful read whose "content" is `head: cannot open` — three
 one wrong sentence. **A host that did not answer is never reported as "nothing to roll back."**
 
 It says what it is and promises nothing: one level deep, "the file as it was immediately before
-ShellPilot last wrote to it" — not the last known good version and not what is running. 11
-mutations, 11 killed, including one that revealed a real bug: an empty `.shellpilot-bak` was being
+OpsMaxx last wrote to it" — not the last known good version and not what is running. 11
+mutations, 11 killed, including one that revealed a real bug: an empty `.opsmaxx-bak` was being
 called a missing one. All three read states verified against a real host.
 
 Kubernetes: `rollout undo` **contradicts the header** — it rewrites `.spec.template`,
@@ -1075,7 +1075,7 @@ laptop lid closes at minute nine of an `apt upgrade`. The honest options are to 
 remote side and poll for a marker (`nohup`/`setsid` plus a status file, or a `systemd-run --unit`
 where systemd exists), or to accept that jobs die with the connection and say so plainly. The first
 is the useful one and costs a real design decision about naming, orphan reclamation and what
-happens when two ShellPilots poll the same job.
+happens when two OpsMaxxs poll the same job.
 
 Everything else follows: a job list, a persisted history in A, resumable output, and per-job audit
 rows that item 14 can read.
@@ -1093,7 +1093,7 @@ feature.
 temp-then-renamed so its presence means it is complete. Resume reads from a byte offset,
 which is an exact monotonic cursor. Three honest states fall out that today's vocabulary
 cannot express — `detached` (launched, channel gone), `orphaned` (marker present, pid gone,
-no exit status) and `foreign` (started by another ShellPilot instance) — and today an
+no exit status) and `foreign` (started by another OpsMaxx instance) — and today an
 *expected* reboot classifies as `unreachable`, which is the opposite of the truth.
 
 Nothing is installed: no binary, no package, no service, no cron entry, nothing that runs
@@ -1113,7 +1113,7 @@ refuses on disagreement, at launch and again at resume, and it is called from BO
 in `shared/jobs.ts`: a job resumed **within one process lifetime** carries its approval; a job
 adopted **after a restart** finishes the hosts already running and may not start one it never
 reached, because finishing is not an action and starting is. That makes B2's `reclaim()` refusal
-principled rather than incidental. Decisions are written to `shellpilot-job-approvals.jsonl` — a
+principled rather than incidental. Decisions are written to `opsmaxx-job-approvals.jsonl` — a
 third log, not a second caller of `recordAudit`, for the reason the local terminal already has its
 own file, and because `auditLog.ts` sits inside the agent-reachable import closure that
 `tests/jobsNotExposed.test.ts` guards.
@@ -1782,7 +1782,7 @@ per-feature cost like any other test, rather than a project.
 ### 30. Two gaps in the gates themselves — SHIPPED
 
 **Both closed since this was written, verified 6 Sep.** `tsconfig.tests.json` exists, covers
-`tests/**` plus `src/renderer/src/env.d.ts` for the `window.shellpilot` augmentation, and
+`tests/**` plus `src/renderer/src/env.d.ts` for the `window.opsmaxx` augmentation, and
 `typecheck:tests` is in the `npm run typecheck` chain — so the test tree is type-checked on
 every run, which is how the `.env` picker's `VaultState` mistake and the missing
 `ComposeEnvWriteResult` import were caught rather than shipped. `npm audit` reports **0

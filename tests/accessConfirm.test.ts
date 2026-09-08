@@ -118,7 +118,7 @@ describe('the disarm is issued only after an independent session', () => {
     // connection.
     expect(s.ran.findIndex(isVerify)).toBeLessThan(s.ran.findIndex(isDisarm))
     expect(report.outcome).toBe('committed')
-    expect(report.backupPath).toBe('/home/ops/.ssh/authorized_keys.shellpilot-t42.bak')
+    expect(report.backupPath).toBe('/home/ops/.ssh/authorized_keys.opsmaxx-t42.bak')
   })
 
   it('issues nothing at all when no second session can be opened', async () => {
@@ -132,7 +132,7 @@ describe('the disarm is issued only after an independent session', () => {
     // claim about something this process cannot see. It says the rollback was
     // proved running before anything was replaced, and where it restores from.
     expect(report.detail).toContain('armed and confirmed running')
-    expect(report.detail).toContain('/home/ops/.ssh/authorized_keys.shellpilot-t42.bak')
+    expect(report.detail).toContain('/home/ops/.ssh/authorized_keys.opsmaxx-t42.bak')
   })
 
   it('does not confirm when the check fails on the server', async () => {

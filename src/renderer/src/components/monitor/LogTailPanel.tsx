@@ -127,7 +127,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
       return
     }
     let live = true
-    void (window.shellpilot?.logtail as { units?: (cfg: unknown) => Promise<{ ok: boolean; units: UnitChoice[] }> })
+    void (window.opsmaxx?.logtail as { units?: (cfg: unknown) => Promise<{ ok: boolean; units: UnitChoice[] }> })
       ?.units?.(cfgFor(unitHost))
       .then((r) => {
         // A failure here is silent on purpose: the field still works typed, and
@@ -161,7 +161,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
     }
     let live = true
     void (
-      window.shellpilot?.docker as
+      window.opsmaxx?.docker as
         | { list?: (cfg: unknown) => Promise<{ ok: boolean; containers?: { name: string }[] }> }
         | undefined
     )
@@ -183,13 +183,13 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
   }, [eligible])
 
   useEffect(() => {
-    const offLine = bridgeOn('logtail.onLine', window.shellpilot?.logtail?.onLine, (l: LogLine) => {
+    const offLine = bridgeOn('logtail.onLine', window.opsmaxx?.logtail?.onLine, (l: LogLine) => {
       if (l.tailId !== tailId.current) return
       // A ring, not an ever-growing array: a chatty host will otherwise put a
       // million nodes in the DOM and the pane stops scrolling.
       setLines((prev) => (prev.length >= LOG_RING ? [...prev.slice(prev.length - LOG_RING + 1), l] : [...prev, l]))
     })
-    const offState = bridgeOn('logtail.onState', window.shellpilot?.logtail?.onState, (s: LogTailState) => {
+    const offState = bridgeOn('logtail.onState', window.opsmaxx?.logtail?.onState, (s: LogTailState) => {
       if (s.tailId !== tailId.current) return
       setStates((prev) => ({ ...prev, [s.serverId]: s }))
     })
@@ -203,7 +203,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
   // journalctl keeps running on every selected host with nobody reading it.
   useEffect(() => {
     return () => {
-      if (tailId.current) void window.shellpilot?.logtail?.stop(tailId.current)
+      if (tailId.current) void window.opsmaxx?.logtail?.stop(tailId.current)
     }
   }, [])
 
@@ -248,7 +248,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
     startedOn.current = targets.map((s) => s.id)
     setRunning(true)
     try {
-      const res = await window.shellpilot?.logtail?.start(
+      const res = await window.opsmaxx?.logtail?.start(
         id,
         source,
         targets.map((s) => ({
@@ -301,7 +301,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
    */
   const retryAsRoot = (): Promise<void> => begin(sourceFrom({ sudo: 'always' }), startedOn.current)
 
-  const bridge = window.shellpilot?.logtail as (PauseBridge & { stop?: (id: string) => Promise<boolean> }) | undefined
+  const bridge = window.opsmaxx?.logtail as (PauseBridge & { stop?: (id: string) => Promise<boolean> }) | undefined
 
   const togglePause = async (): Promise<void> => {
     const call = paused ? bridge?.resume : bridge?.pause
@@ -319,7 +319,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
 
   const stop = async (): Promise<void> => {
     try {
-      await window.shellpilot?.logtail?.stop(tailId.current)
+      await window.opsmaxx?.logtail?.stop(tailId.current)
     } finally {
       // Stop must always leave the panel usable, even if the call itself threw:
       // a Stop button that stays a Stop button is a pane you cannot get out of.
@@ -373,7 +373,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
     }
     let live = true
     void (
-      window.shellpilot?.logtail as
+      window.opsmaxx?.logtail as
         | { logfiles?: (cfg: unknown) => Promise<{ ok: boolean; files: string[] }> }
         | undefined
     )

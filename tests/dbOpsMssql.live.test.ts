@@ -14,10 +14,10 @@ import {
 //     -e MSSQL_SA_PASSWORD='Sh3llP1lot!test' -p 21433:1433 \
 //     mcr.microsoft.com/mssql/server:2022-latest
 //
-// Skipped when SHELLPILOT_MSSQL_LIVE is unset, so the suite stays runnable
+// Skipped when OPSMAXX_MSSQL_LIVE is unset, so the suite stays runnable
 // without Docker — and CI does not silently lose the check, because the whole
 // point of the file is what it proves when it DOES run.
-const LIVE = process.env.SHELLPILOT_MSSQL_LIVE === '1'
+const LIVE = process.env.OPSMAXX_MSSQL_LIVE === '1'
 
 async function connect(): Promise<{ client: never; close: () => Promise<void> }> {
   const mod: Record<string, unknown> = await import('mssql')
@@ -28,7 +28,7 @@ async function connect(): Promise<{ client: never; close: () => Promise<void> }>
     server: '127.0.0.1',
     port: 21433,
     user: 'sa',
-    password: process.env.SHELLPILOT_MSSQL_PASSWORD ?? 'Sh3llP1lot!test',
+    password: process.env.OPSMAXX_MSSQL_PASSWORD ?? 'Sh3llP1lot!test',
     options: { encrypt: false, trustServerCertificate: true }
   })
   const client = await pool.connect()

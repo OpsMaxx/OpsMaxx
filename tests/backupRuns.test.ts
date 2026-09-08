@@ -44,7 +44,7 @@ import type { VaultEntry } from '../src/shared/vault'
 
 const PASSPHRASE = 'correct-horse-battery'
 const FIXED = new Date('2024-05-06T07:08:09.000Z')
-const FIXED_NAME = 'shellpilot-20240506T070809Z.spbackup'
+const FIXED_NAME = 'opsmaxx-20240506T070809Z.spbackup'
 
 const dirs: string[] = []
 function temp(): string {
@@ -165,14 +165,14 @@ describe('verifyBundle', () => {
     // valid empty database and reported a successful recovery.
     const v = await verifyBundle(Buffer.alloc(0), PASSPHRASE)
     expect(v.ok).toBe(false)
-    expect(v.error).toBe('That file is not a ShellPilot backup.')
+    expect(v.error).toBe('That file is not a OpsMaxx backup.')
   })
 
   it('detects a truncated upload', async () => {
     const { bytes } = await buildBundle(PASSPHRASE)
     const v = await verifyBundle(bytes.subarray(0, Math.floor(bytes.length / 2)), PASSPHRASE)
     expect(v.ok).toBe(false)
-    expect(v.error).toBe('That file is not a ShellPilot backup.')
+    expect(v.error).toBe('That file is not a OpsMaxx backup.')
   })
 
   it('detects a single flipped byte in the ciphertext', async () => {
@@ -196,7 +196,7 @@ describe('verifyBundle', () => {
   it('detects a file that is not one of ours at all', async () => {
     const v = await verifyBundle(Buffer.from('{"magic":"something-else"}'), PASSPHRASE)
     expect(v.ok).toBe(false)
-    expect(v.error).toBe('That file is not a ShellPilot backup.')
+    expect(v.error).toBe('That file is not a OpsMaxx backup.')
   })
 
   it('rejects the wrong passphrase rather than returning an empty payload', async () => {
@@ -293,7 +293,7 @@ describe('runBackupToDestination', () => {
     const report = await runBackupToDestination(localDest(dir), PASSPHRASE, {
       now: () => FIXED,
       bundle: async () => ({
-        bytes: Buffer.from('{"magic":"shellpilot-backup","version":1,"kdf":"scrypt","salt":"","iv":"","tag":"","data":""}'),
+        bytes: Buffer.from('{"magic":"opsmaxx-backup","version":1,"kdf":"scrypt","salt":"","iv":"","tag":"","data":""}'),
         summary: {
           createdAt: FIXED.toISOString(),
           app: '0.6.2',
@@ -340,9 +340,9 @@ describe('runBackupToDestination', () => {
 
 describe('retention during a run', () => {
   const older = [
-    'shellpilot-20240101T000000Z.spbackup',
-    'shellpilot-20240102T000000Z.spbackup',
-    'shellpilot-20240103T000000Z.spbackup'
+    'opsmaxx-20240101T000000Z.spbackup',
+    'opsmaxx-20240102T000000Z.spbackup',
+    'opsmaxx-20240103T000000Z.spbackup'
   ]
 
   it('deletes the oldest generations and keeps the newest, including the one just written', async () => {
@@ -355,11 +355,11 @@ describe('retention during a run', () => {
 
     expect(report.ok).toBe(true)
     expect(report.removed).toEqual([
-      'shellpilot-20240102T000000Z.spbackup',
-      'shellpilot-20240101T000000Z.spbackup'
+      'opsmaxx-20240102T000000Z.spbackup',
+      'opsmaxx-20240101T000000Z.spbackup'
     ])
     expect(readdirSync(dir).sort()).toEqual([
-      'shellpilot-20240103T000000Z.spbackup',
+      'opsmaxx-20240103T000000Z.spbackup',
       FIXED_NAME
     ].sort())
   })
@@ -391,7 +391,7 @@ describe('retention during a run', () => {
     expect(readdirSync(dir).sort()).toEqual([...older].sort())
   })
 
-  it('leaves files that are not ShellPilot backups alone', async () => {
+  it('leaves files that are not OpsMaxx backups alone', async () => {
     const dir = temp()
     for (const name of older) writeFileSync(join(dir, name), 'an older bundle')
     writeFileSync(join(dir, 'photos.zip'), 'somebody else’s file')
@@ -409,8 +409,8 @@ describe('retention during a run', () => {
     // bucket accepted the PUT. Trusting either would delete the wrong file on
     // a server whose clock is wrong.
     const generations = [
-      { name: 'shellpilot-20240103T000000Z.spbackup', size: 1, modified: 5 },
-      { name: 'shellpilot-20240101T000000Z.spbackup', size: 1, modified: 9999 }
+      { name: 'opsmaxx-20240103T000000Z.spbackup', size: 1, modified: 5 },
+      { name: 'opsmaxx-20240101T000000Z.spbackup', size: 1, modified: 9999 }
     ]
     expect(withNameTimes(generations).map((g) => g.modified)).toEqual([
       Date.parse('2024-01-03T00:00:00Z'),
@@ -424,19 +424,19 @@ describe('retention during a run', () => {
 // ---------------------------------------------------------------------------
 
 describe('restore from a destination', () => {
-  it('lists only ShellPilot backups, newest first', async () => {
+  it('lists only OpsMaxx backups, newest first', async () => {
     const dir = temp()
-    writeFileSync(join(dir, 'shellpilot-20240101T000000Z.spbackup'), 'a')
-    writeFileSync(join(dir, 'shellpilot-20240301T000000Z.spbackup'), 'b')
-    writeFileSync(join(dir, 'shellpilot-20240201T000000Z.spbackup'), 'c')
+    writeFileSync(join(dir, 'opsmaxx-20240101T000000Z.spbackup'), 'a')
+    writeFileSync(join(dir, 'opsmaxx-20240301T000000Z.spbackup'), 'b')
+    writeFileSync(join(dir, 'opsmaxx-20240201T000000Z.spbackup'), 'c')
     writeFileSync(join(dir, 'holiday.jpg'), 'not a backup')
 
     const result = await listRemoteBackups(localDest(dir))
     expect(result.ok).toBe(true)
     expect(result.generations?.map((g) => g.name)).toEqual([
-      'shellpilot-20240301T000000Z.spbackup',
-      'shellpilot-20240201T000000Z.spbackup',
-      'shellpilot-20240101T000000Z.spbackup'
+      'opsmaxx-20240301T000000Z.spbackup',
+      'opsmaxx-20240201T000000Z.spbackup',
+      'opsmaxx-20240101T000000Z.spbackup'
     ])
   })
 
@@ -461,7 +461,7 @@ describe('restore from a destination', () => {
 
   it('refuses a corrupt archive at the destination instead of staging it for import', async () => {
     const dir = temp()
-    writeFileSync(join(dir, FIXED_NAME), '{"magic":"shellpilot-backup","salt":"","iv":"","tag":"","data":""}')
+    writeFileSync(join(dir, FIXED_NAME), '{"magic":"opsmaxx-backup","salt":"","iv":"","tag":"","data":""}')
 
     const inspected = await inspectRemoteBackup(localDest(dir), FIXED_NAME, PASSPHRASE)
 
@@ -472,11 +472,11 @@ describe('restore from a destination', () => {
     expect(readdirSync(USER_DATA).filter((f) => f.startsWith('staged-'))).toEqual([])
   })
 
-  it('refuses a name that is not a ShellPilot backup', async () => {
+  it('refuses a name that is not a OpsMaxx backup', async () => {
     const dir = temp()
     const inspected = await inspectRemoteBackup(localDest(dir), '../../etc/passwd', PASSPHRASE)
     expect(inspected.ok).toBe(false)
-    expect(inspected.error).toBe('“../../etc/passwd” is not a ShellPilot backup name.')
+    expect(inspected.error).toBe('“../../etc/passwd” is not a OpsMaxx backup name.')
   })
 
   it('reports a destination that cannot be reached rather than an empty list', async () => {
@@ -511,12 +511,12 @@ describe('destination storage', () => {
   })
 
   it('is stored outside the file that travels inside every bundle', async () => {
-    // shellpilot-data.json IS payload.data. A destination configuration kept
+    // opsmaxx-data.json IS payload.data. A destination configuration kept
     // there would ride inside every bundle uploaded to the bucket it names.
     saveDestinations([localDest('/tmp/x')])
     const { bytes } = await buildBundle(PASSPHRASE)
     expect(bytes.toString('utf8')).not.toContain('/tmp/x')
-    expect(existsSync(join(USER_DATA, 'shellpilot-backup-targets.json'))).toBe(true)
+    expect(existsSync(join(USER_DATA, 'opsmaxx-backup-targets.json'))).toBe(true)
   })
 })
 
@@ -682,7 +682,7 @@ describe('dumpCommand', () => {
   })
 
   it('names the dump so retention never mistakes it for an encrypted bundle', () => {
-    expect(dumpObjectName(target, FIXED)).toBe('shellpilot-dump-orders-20240506T070809Z.sql')
+    expect(dumpObjectName(target, FIXED)).toBe('opsmaxx-dump-orders-20240506T070809Z.sql')
   })
 })
 
@@ -709,7 +709,7 @@ describe('dumpToDestination', () => {
 
     expect(report.ok).toBe(true)
     expect(report.verified).toBe(true)
-    expect(report.name).toBe('shellpilot-dump-orders-20240506T070809Z.sql')
+    expect(report.name).toBe('opsmaxx-dump-orders-20240506T070809Z.sql')
     expect(readFileSync(join(dir, report.name as string), 'utf8')).toBe(
       '-- PostgreSQL database dump\nCREATE TABLE orders();\n'
     )
@@ -800,7 +800,7 @@ describe('describeRun', () => {
         name: FIXED_NAME,
         verified: true,
         restoreTested: true,
-        removed: ['shellpilot-20240101T000000Z.spbackup']
+        removed: ['opsmaxx-20240101T000000Z.spbackup']
       })
     ).toBe(
       `Off-site bucket: wrote ${FIXED_NAME}, read back and test-restored, removed 1 older`
@@ -861,7 +861,7 @@ describe('staged downloads', () => {
 
 describe('databaseDumpTarget', () => {
   function saveDatabases(databases: Record<string, unknown>[]): void {
-    writeFileSync(join(USER_DATA, 'shellpilot-data.json'), JSON.stringify({ databases }))
+    writeFileSync(join(USER_DATA, 'opsmaxx-data.json'), JSON.stringify({ databases }))
   }
 
   const direct = {
@@ -1032,7 +1032,7 @@ describe('a destination that starts failing', () => {
 // ---------------------------------------------------------------------------
 
 describe('a destinations file that cannot be read', () => {
-  const path = join(USER_DATA, 'shellpilot-backup-targets.json')
+  const path = join(USER_DATA, 'opsmaxx-backup-targets.json')
 
   it('is not the same thing as having no destinations', () => {
     // A corrupt file reading as "no destinations" would stop every scheduled
@@ -1041,14 +1041,14 @@ describe('a destinations file that cannot be read', () => {
     writeFileSync(path, '{"version":1,"destinations":[{"id":"a"')
     const read = readTargets()
     expect(read.destinations).toEqual([])
-    expect(read.corrupt).toContain('shellpilot-backup-targets.json could not be read')
+    expect(read.corrupt).toContain('opsmaxx-backup-targets.json could not be read')
     expect(read.corrupt).toContain('nothing is being backed up on a schedule')
   })
 
   it('reports a file holding something that is not a destination list', () => {
     writeFileSync(path, '{"version":1,"destinations":"all of them"}')
     expect(readTargets().corrupt).toBe(
-      'shellpilot-backup-targets.json does not hold a list of destinations, so nothing is being backed up on a schedule.'
+      'opsmaxx-backup-targets.json does not hold a list of destinations, so nothing is being backed up on a schedule.'
     )
   })
 
@@ -1064,7 +1064,7 @@ describe('a destinations file that cannot be read', () => {
     saveDestinations([localDest('/tmp/new')])
 
     const kept = readdirSync(USER_DATA).filter((f) =>
-      f.startsWith('shellpilot-backup-targets.json.corrupt-')
+      f.startsWith('opsmaxx-backup-targets.json.corrupt-')
     )
     expect(kept).toHaveLength(1)
     expect(readFileSync(join(USER_DATA, kept[0]), 'utf8')).toBe(
@@ -1083,7 +1083,7 @@ const S3_RUN_SKIP = minioSkipReason()
 describe.skipIf(S3_RUN_SKIP !== null)(
   `a backup run against a real MinIO in Docker${S3_RUN_SKIP ? ` [SKIPPED: ${S3_RUN_SKIP}]` : ''}`,
   () => {
-    const CONTAINER = 'shellpilot-s3-run-test'
+    const CONTAINER = 'opsmaxx-s3-run-test'
     const PORT = 19732
     const BUCKET = 'estate-backups'
     let endpoint: string
@@ -1160,11 +1160,11 @@ describe.skipIf(S3_RUN_SKIP !== null)(
       // Nothing on the first run, because the last backup is never deleted;
       // then one per run, oldest first, once there is a second one to keep.
       expect(reports[0].removed).toEqual([])
-      expect(reports[1].removed).toEqual(['shellpilot-20240501T010000Z.spbackup'])
-      expect(reports[2].removed).toEqual(['shellpilot-20240502T010000Z.spbackup'])
+      expect(reports[1].removed).toEqual(['opsmaxx-20240501T010000Z.spbackup'])
+      expect(reports[2].removed).toEqual(['opsmaxx-20240502T010000Z.spbackup'])
 
       const left = await listRemoteBackups(dest, creds)
-      expect(left.generations?.map((g) => g.name)).toEqual(['shellpilot-20240503T010000Z.spbackup'])
+      expect(left.generations?.map((g) => g.name)).toEqual(['opsmaxx-20240503T010000Z.spbackup'])
     }, 120_000)
 
     it('still applies retention when the prefix contains an ampersand', async () => {
@@ -1185,11 +1185,11 @@ describe.skipIf(S3_RUN_SKIP !== null)(
       }
       expect(removed).toEqual([
         [],
-        ['shellpilot-20240501T010000Z.spbackup'],
-        ['shellpilot-20240502T010000Z.spbackup']
+        ['opsmaxx-20240501T010000Z.spbackup'],
+        ['opsmaxx-20240502T010000Z.spbackup']
       ])
       const left = await listRemoteBackups(dest, creds)
-      expect(left.generations?.map((g) => g.name)).toEqual(['shellpilot-20240503T010000Z.spbackup'])
+      expect(left.generations?.map((g) => g.name)).toEqual(['opsmaxx-20240503T010000Z.spbackup'])
     }, 120_000)
 
     it('fails the run, and removes what it wrote, when the bundle will not open', async () => {

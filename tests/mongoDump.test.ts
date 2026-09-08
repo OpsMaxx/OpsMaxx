@@ -74,9 +74,9 @@ describe('what the dump is called', () => {
   // only discovers when they try to read it.
   it('names a mongo dump .archive and a SQL dump .sql', () => {
     const when = new Date('2026-09-06T12:00:00Z')
-    expect(dumpObjectName(target, when)).toBe('shellpilot-dump-appdb-20260906T120000Z.archive')
+    expect(dumpObjectName(target, when)).toBe('opsmaxx-dump-appdb-20260906T120000Z.archive')
     expect(dumpObjectName({ ...target, engine: 'postgres' }, when)).toBe(
-      'shellpilot-dump-appdb-20260906T120000Z.sql'
+      'opsmaxx-dump-appdb-20260906T120000Z.sql'
     )
     expect(DUMP_EXTENSION.mongo).toBe('archive')
   })
@@ -105,7 +105,7 @@ describe('what the dump is called', () => {
 
   it('does not recognise something that merely ends in .archive', () => {
     expect(isDumpObjectName('holiday-photos.archive')).toBe(false)
-    expect(isDumpObjectName('shellpilot-dump-appdb-nope.archive')).toBe(false)
+    expect(isDumpObjectName('opsmaxx-dump-appdb-nope.archive')).toBe(false)
   })
 })
 

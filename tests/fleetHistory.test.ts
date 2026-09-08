@@ -95,7 +95,7 @@ describe('a sweep against a real store', () => {
   beforeEach(async () => {
     vi.useFakeTimers()
     resetHistoryModuleForTests()
-    dir = mkdtempSync(join(tmpdir(), 'shellpilot-fleethist-'))
+    dir = mkdtempSync(join(tmpdir(), 'opsmaxx-fleethist-'))
     store = (await loadHistory(dir))!
     expect(store).not.toBeNull()
   })
@@ -321,7 +321,7 @@ describe('the store never stops the sampler', () => {
   beforeEach(async () => {
     vi.useFakeTimers()
     resetHistoryModuleForTests()
-    dir = mkdtempSync(join(tmpdir(), 'shellpilot-fleethist2-'))
+    dir = mkdtempSync(join(tmpdir(), 'opsmaxx-fleethist2-'))
     store = (await loadHistory(dir))!
   })
 

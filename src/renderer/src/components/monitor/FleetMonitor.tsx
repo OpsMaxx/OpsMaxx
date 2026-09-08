@@ -356,10 +356,10 @@ export function FleetMonitor(): React.JSX.Element {
   // here, and re-requesting on every server edit would be a full sweep per
   // keystroke in the rename box.
   useEffect(() => {
-    if (!bridgeHas(window.shellpilot?.fleet as Record<string, unknown> | undefined, 'sampleNow')) {
+    if (!bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'sampleNow')) {
       return
     }
-    void window.shellpilot?.fleet?.sampleNow()
+    void window.opsmaxx?.fleet?.sampleNow()
   }, [])
 
   const online = servers.filter((s) => s.status === 'online').length

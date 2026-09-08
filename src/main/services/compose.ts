@@ -323,12 +323,12 @@ export class ComposeReader {
       const r = await this.deps.exec(cfg, command, WRITE_TIMEOUT_MS)
       if (!r.ok) return { ok: false, reason: r.error ?? 'could not reach the server' }
       const merged = `${r.stdout ?? ''}${r.stderr ?? ''}`
-      if ((r.code ?? 0) !== 0 || !merged.includes('===SHELLPILOT-END===')) {
+      if ((r.code ?? 0) !== 0 || !merged.includes('===OPSMAXX-END===')) {
         // The remote's own words, and they are about `cp`/`tee`/`mv` rather
         // than about the content -- the heredoc body is never echoed back.
         return { ok: false, reason: merged.trim() || 'the file was not written' }
       }
-      return { ok: true, name: plan.name, line: plan.line, action: plan.action, backup: `${req.path}.shellpilot-bak` }
+      return { ok: true, name: plan.name, line: plan.line, action: plan.action, backup: `${req.path}.opsmaxx-bak` }
     } catch {
       return { ok: false, reason: 'the file could not be written' }
     }
@@ -348,7 +348,7 @@ export class ComposeReader {
    * No sudo failover. See the header: a write is not a read.
    */
   /**
-   * Plan putting one service back to the tag it had before ShellPilot's last
+   * Plan putting one service back to the tag it had before OpsMaxx's last
    * edit to this file.
    *
    * BOTH FILES ARE RE-READ HERE, at the moment the revert is planned, for the
@@ -400,7 +400,7 @@ export class ComposeReader {
           ok: false,
           refusal: 'backup-denied',
           reason:
-            'a ShellPilot backup is beside this compose file and this account may not read it. There may well be a tag to go back to — this is not a report that there is none.'
+            'a OpsMaxx backup is beside this compose file and this account may not read it. There may well be a tag to go back to — this is not a report that there is none.'
         }
       }
       backupText = read.state === 'present' ? read.text : null
@@ -463,10 +463,10 @@ export class ComposeReader {
       // is the only proof the `mv` ran: a non-zero exit is conclusive, but a
       // shell that died between stages can exit 0 with the file half replaced,
       // and reporting that as a successful edit is the worst outcome here.
-      if ((r.code ?? 0) !== 0 || !merged.includes('===SHELLPILOT-END===')) {
+      if ((r.code ?? 0) !== 0 || !merged.includes('===OPSMAXX-END===')) {
         return { ok: false, reason: merged.trim() || 'the compose file was not written' }
       }
-      return { ok: true, plan, backup: `${req.path}.shellpilot-bak` }
+      return { ok: true, plan, backup: `${req.path}.opsmaxx-bak` }
     } catch (e) {
       return { ok: false, reason: e instanceof Error ? e.message : String(e) }
     }

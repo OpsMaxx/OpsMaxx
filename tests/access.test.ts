@@ -518,7 +518,7 @@ describe('a collection, and the nulls in it', () => {
   })
 
   it('cannot have a status forged by a key comment', () => {
-    // The comment is `===SHELLPILOT-ACCESS===`. Every record carries a tag and
+    // The comment is `===OPSMAXX-ACCESS===`. Every record carries a tag and
     // a space in front of it, so a file's content can never be an exact-match
     // marker line — and the status block is printed once, at the end, out of a
     // variable nothing read from a file ever touched.
@@ -1464,7 +1464,7 @@ describe.skipIf(process.platform === 'win32')('the collector, run against a host
   })
 
   it('is not sure when the session used no key at all', () => {
-    // Provable, and still not enough: nothing here is what ShellPilot's own
+    // Provable, and still not enough: nothing here is what OpsMaxx's own
     // reconnection will present, and the account it connects as is not where
     // this build spends a maybe.
     const a = parse(host().collect({ env: { SSH_AUTH_INFO_0: 'password' } }))

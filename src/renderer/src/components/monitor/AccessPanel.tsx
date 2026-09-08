@@ -194,11 +194,11 @@ export function AccessPanel({
   }
 
   const load = useCallback(async (): Promise<void> => {
-    if (!bridgeHas(window.shellpilot?.fleet as Record<string, unknown> | undefined, 'access')) return
+    if (!bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'access')) return
     const next: Record<string, Entry> = {}
     await Promise.all(
       servers.map(async (s) => {
-        const r = await window.shellpilot?.fleet?.access(s.id)
+        const r = await window.opsmaxx?.fleet?.access(s.id)
         if (r) next[s.id] = { access: r.access, at: r.at, error: r.error, errorAt: r.errorAt }
       })
     )
@@ -214,8 +214,8 @@ export function AccessPanel({
     try {
       // A sweep first, so a server added since the last one is collected rather
       // than reported as never checked, then a read of what main now holds.
-      if (bridgeHas(window.shellpilot?.fleet as Record<string, unknown> | undefined, 'sampleNow')) {
-        await window.shellpilot?.fleet?.sampleNow()
+      if (bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'sampleNow')) {
+        await window.opsmaxx?.fleet?.sampleNow()
       }
       await load()
     } finally {
@@ -355,7 +355,7 @@ export function AccessPanel({
   const writeOptIn = useApp((st) => st.settings.accessWriteEnabled)
   const canWrite =
     (ACCESS_WRITE_ENABLED || writeOptIn) &&
-    bridgeHas(window.shellpilot?.fleet as Record<string, unknown> | undefined, 'accessPlan')
+    bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'accessPlan')
 
   return (
     <PanelShell
@@ -517,7 +517,7 @@ export function AccessPanel({
           <div className="r-sub faint">
             Accounts below uid 1000 — software, not people — that hold a key. Ordered by whether
             the account&rsquo;s own shell would let somebody in. root is not listed: a key there is
-            how ShellPilot usually connects.
+            how OpsMaxx usually connects.
           </div>
           <table className="mini-table">
             <tbody>
@@ -735,7 +735,7 @@ export function AccessPanel({
                             className="btn ghost sm"
                             data-testid={`revoke-${k.fingerprint}`}
                             onClick={() => openKeyRevoke(k.fingerprint)}
-                            title="Opens Operations › Revoke a key, with this key chosen. Nothing is written until you confirm it there, and nothing becomes permanent until a second, independent session has proved the server still lets ShellPilot in."
+                            title="Opens Operations › Revoke a key, with this key chosen. Nothing is written until you confirm it there, and nothing becomes permanent until a second, independent session has proved the server still lets OpsMaxx in."
                           >
                             Revoke…
                           </button>
@@ -769,7 +769,7 @@ export function AccessPanel({
                           {a.hasLegacyKeyFile === true && (
                             <span
                               className="chip warn"
-                              title="This account has a .ssh/authorized_keys2 file. sshd still reads it and ShellPilot does not, so this account may trust keys that are not listed here."
+                              title="This account has a .ssh/authorized_keys2 file. sshd still reads it and OpsMaxx does not, so this account may trust keys that are not listed here."
                             >
                               authorized_keys2
                             </span>
@@ -781,7 +781,7 @@ export function AccessPanel({
                             <span
                               className="inv-na loud"
                               data-testid={`keys2-unknown-${a.user}`}
-                              title="ShellPilot could not tell whether this account has a .ssh/authorized_keys2 file — the path to it could not be traversed, and root could not settle it either. sshd still reads that file, so this account may trust keys that are not listed here."
+                              title="OpsMaxx could not tell whether this account has a .ssh/authorized_keys2 file — the path to it could not be traversed, and root could not settle it either. sshd still reads that file, so this account may trust keys that are not listed here."
                             >
                               authorized_keys2 unchecked
                             </span>
@@ -843,7 +843,7 @@ export function AccessPanel({
                             // of this" is not "we do not know when they logged
                             // in", and showing the phrase is the better of the
                             // two answers.
-                            <span title="The server reported this and ShellPilot could not read a date out of it.">
+                            <span title="The server reported this and OpsMaxx could not read a date out of it.">
                               {a.lastLoginText}
                             </span>
                           ) : (
@@ -877,7 +877,7 @@ export function AccessPanel({
         <div key={h.server.id} className="panel-note is-unknown" data-testid={`stale-${h.server.name}`}>
           <ShieldAlert size={12} /> <b>{h.server.name}</b>: the keys shown above were read{' '}
           <b>{duration(h.entry!.at ?? null)} ago</b> and the probe has been failing since —{' '}
-          {h.entry!.error}. They are what ShellPilot last saw, not what the server trusts now, and
+          {h.entry!.error}. They are what OpsMaxx last saw, not what the server trusts now, and
           this server is counted as unchecked.
         </div>
       ))}

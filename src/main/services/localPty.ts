@@ -16,7 +16,7 @@ import { inspectEnv, inspectInjectsSessions, onInspectStopped } from './inspect'
 // A machine where the native binding will not load (an unsupported libc, a
 // hardened-runtime failure we did not predict) must still get an app that
 // starts and does everything else — the local terminal is the feature that
-// fails, not ShellPilot.
+// fails, not OpsMaxx.
 //
 // The laziness is also what keeps this module unit-testable: everything above
 // localConnect is pure and importable with the native package absent entirely.
@@ -48,7 +48,7 @@ async function loadPty(): Promise<NodePty> {
   if (process.env[DISABLE_ENV] === '1') {
     ptyLoadError =
       `The local terminal is disabled on this machine (${DISABLE_ENV}=1). ` +
-      `Unset it and restart ShellPilot to use local shells. SSH sessions are unaffected.`
+      `Unset it and restart OpsMaxx to use local shells. SSH sessions are unaffected.`
     throw new Error(ptyLoadError)
   }
 
@@ -77,7 +77,7 @@ async function loadPty(): Promise<NodePty> {
     ptyLoadError =
       `The local terminal is unavailable on this machine: @lydell/node-pty loaded ` +
       `but exposes no spawn() function (got ${typeof mod.spawn}) — the module's ` +
-      `export shape is not what ShellPilot expects. SSH sessions are unaffected.`
+      `export shape is not what OpsMaxx expects. SSH sessions are unaffected.`
     throw new Error(ptyLoadError)
   }
 
@@ -97,8 +97,8 @@ async function loadPty(): Promise<NodePty> {
 // Q1 is closed: handleFlowControl / flowControlPause / flowControlResume were
 // verified present in the shipped tarball (lib/terminal.js:33-35, 76-84), so
 // there is no capability fallback here and none is needed. Do not re-open it.
-const FLOW_PAUSE = '\u001b]777;shellpilot-pause\u0007'
-const FLOW_RESUME = '\u001b]777;shellpilot-resume\u0007'
+const FLOW_PAUSE = '\u001b]777;opsmaxx-pause\u0007'
+const FLOW_RESUME = '\u001b]777;opsmaxx-resume\u0007'
 
 // UTF-16 code units in flight to the renderer before we stop reading, and the
 // level we wait to fall back to before reading again. 512 KB is roughly a
@@ -358,7 +358,7 @@ export async function localConnect(wc: WebContents, cfg: LocalConnectConfig): Pr
       inspected: Object.keys(inspectVars).length > 0
     })
     status(wc, sessionId, 'ready', { pid: pty.pid, shellLabel: shell.label })
-    // One line per session start, to shellpilot-local-sessions.jsonl — never the
+    // One line per session start, to opsmaxx-local-sessions.jsonl — never the
     // AI audit log, which answers a different question. Nothing typed into the
     // shell is recorded, here or anywhere.
     recordLocalSession({
@@ -479,7 +479,7 @@ export function localNotifyInspectStopped(): void {
     // Dim, on its own line, and ending with a fresh line so the prompt is not
     // left dangling mid-sentence.
     const notice =
-      '\r\n\x1b[2m[ShellPilot] Traffic capture stopped. This shell still points at the ' +
+      '\r\n\x1b[2m[OpsMaxx] Traffic capture stopped. This shell still points at the ' +
       'inspector; run `unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy` or open a new ' +
       'terminal.\x1b[0m\r\n'
     send(wc, `local:data:${sessionIdOf(s)}`, notice)

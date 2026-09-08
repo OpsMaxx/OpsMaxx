@@ -41,7 +41,7 @@ beforeEach(() => {
   resetHistoryModuleForTests()
   delete process.env[DISABLE_ENV]
   opened.length = 0
-  dir = mkdtempSync(join(tmpdir(), 'shellpilot-approval-'))
+  dir = mkdtempSync(join(tmpdir(), 'opsmaxx-approval-'))
 })
 
 afterEach(async () => {
@@ -393,7 +393,7 @@ function seedInterrupted(
   })
   const handle: JobDetachedHandle = {
     v: 1,
-    dir: '/var/tmp/shellpilot-1000/jobs/j1.1',
+    dir: '/var/tmp/opsmaxx-1000/jobs/j1.1',
     step: 1,
     instanceId: 'sp-test',
     launcher: 'setsid',
@@ -473,7 +473,7 @@ describe('resuming after a restart', () => {
     await settle()
 
     // FINISHING IS NOT AN ACTION. The command is running on that machine
-    // whether or not ShellPilot is watching; refusing to read its output would
+    // whether or not OpsMaxx is watching; refusing to read its output would
     // throw away the exit status of something already happening and leave the
     // marker directory behind.
     expect(h.reached('a'), 'the running server is still followed').toBe(true)

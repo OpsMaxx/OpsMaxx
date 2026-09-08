@@ -517,7 +517,7 @@ export function AlertsPanel(): React.JSX.Element {
   const [runbookOpen, setRunbookOpen] = useState(false)
 
   const read = useCallback(() => {
-    const history = window.shellpilot?.alerts?.history
+    const history = window.opsmaxx?.alerts?.history
     if (!history) {
       setFailed(true)
       return

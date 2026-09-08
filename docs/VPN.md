@@ -1,6 +1,6 @@
 # VPN and reverse-proxy tunnels
 
-ShellPilot can carry your SSH sessions, SFTP browsing and database connections
+OpsMaxx can carry your SSH sessions, SFTP browsing and database connections
 over a VPN, and can publish a local port through an frp server. Three engines
 are supported: **WireGuard**, **OpenVPN** and **frp**.
 
@@ -16,21 +16,21 @@ routing table, and send some or all of your traffic through it. That needs root
 or an administrator prompt, it rewrites DNS, and if the app is killed hard it
 can leave your machine's networking in a state you have to fix by hand.
 
-ShellPilot's default for WireGuard is different:
+OpsMaxx's default for WireGuard is different:
 
 | | Userspace (default) | System (opt-in) |
 |---|---|---|
 | Administrator rights | **none** | prompt on every connect |
-| Network interface | none — the TCP/IP stack runs inside ShellPilot | a real `utun`/`wg`/Wintun device |
+| Network interface | none — the TCP/IP stack runs inside OpsMaxx | a real `utun`/`wg`/Wintun device |
 | Your routing table | untouched | modified |
 | Your DNS | untouched | replaced while connected |
 | What goes through it | only what you point at it | whatever the routes say — but **not** a full tunnel; see below |
-| If ShellPilot is killed | nothing to clean up | routes and DNS restored on next launch |
+| If OpsMaxx is killed | nothing to clean up | routes and DNS restored on next launch |
 | Available for | WireGuard, everywhere | WireGuard on Linux and Windows. macOS is refused; OpenVPN is always system-mode |
 
 In userspace mode the tunnel appears as **local listeners**: a SOCKS5 proxy on
 `127.0.0.1`, and/or specific forwarded ports. Your browser and the rest of your
-system carry on exactly as before. ShellPilot's own SSH and database
+system carry on exactly as before. OpsMaxx's own SSH and database
 connections can be pointed through the tunnel individually.
 
 That is a deliberate trade. It means a userspace WireGuard profile with
@@ -54,7 +54,7 @@ rather than a bug you will hit:
   endpoint pinned outside the tunnel — a firewall mark and a routing rule on
   Linux, a host route via the previous gateway elsewhere. That is route surgery
   on a live machine, and it has not been verified against a real kernel here, so
-  ShellPilot refuses it and says why rather than shipping something plausible.
+  OpsMaxx refuses it and says why rather than shipping something plausible.
   Split routes (`10.0.0.0/8`, `192.168.0.0/16`, and so on) work normally.
   **Userspace mode is unaffected** — `0.0.0.0/0` there is harmless, because
   nothing is routed system-wide in the first place.
@@ -63,8 +63,8 @@ rather than a bug you will hit:
   fully on macOS and needs no permission at all.
 
 Windows system mode used to be a third limit, and is not one any more:
-`wintun.dll` now ships with ShellPilot, so nothing has to be installed for it.
-The DLL is proprietary — the one component in ShellPilot that is not open
+`wintun.dll` now ships with OpsMaxx, so nothing has to be installed for it.
+The DLL is proprietary — the one component in OpsMaxx that is not open
 source — and [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md) says so
 plainly along with what that does and does not permit.
 
@@ -75,14 +75,14 @@ platforms with no administrator rights and no driver.
 
 ## WireGuard
 
-Runs on `shellpilot-netd`, a small Go program shipped with ShellPilot that
+Runs on `opsmaxx-netd`, a small Go program shipped with OpsMaxx that
 embeds the official `wireguard-go` implementation and a userspace TCP/IP stack.
-It is MIT-licensed like the rest of ShellPilot, and is built from source in
+It is MIT-licensed like the rest of OpsMaxx, and is built from source in
 this repository (`sidecar/netd/`).
 
 ### Importing a profile
 
-Paste or drop a standard `wg-quick` `.conf`. ShellPilot parses it, does not
+Paste or drop a standard `wg-quick` `.conf`. OpsMaxx parses it, does not
 keep the file, and re-derives everything it runs from the parsed model.
 
 **`PostUp`, `PreUp`, `PostDown` and `PreDown` are rejected.** Those are
@@ -125,19 +125,19 @@ portal you have not signed into yet.
 
 - **WireGuard is UDP and cannot go through an HTTP proxy.** If your network
   forces one, WireGuard will not work there; use OpenVPN over TCP instead.
-  ShellPilot says this rather than timing out mysteriously.
+  OpsMaxx says this rather than timing out mysteriously.
 - If a profile carries no IPv6 (`AllowedIPs` without `::/0`) and your machine
-  has IPv6, IPv6 traffic bypasses the tunnel. ShellPilot warns at import.
+  has IPv6, IPv6 traffic bypasses the tunnel. OpsMaxx warns at import.
 
 ---
 
 ## OpenVPN
 
-ShellPilot drives OpenVPN over OpenVPN's own management interface — the same
+OpsMaxx drives OpenVPN over OpenVPN's own management interface — the same
 mechanism the official GUI uses — as a separate process. It never links against
 it.
 
-**On macOS and Linux, OpenVPN comes with ShellPilot.** There is nothing to
+**On macOS and Linux, OpenVPN comes with OpsMaxx.** There is nothing to
 install. It is built from a pinned upstream tag by `scripts/build-openvpn.sh`,
 statically linked against a pinned OpenSSL so it does not depend on anything on
 your machine, and hash-verified before it is run — the same treatment the
@@ -146,7 +146,7 @@ WireGuard sidecar and the frp client get.
 **On Windows you still install OpenVPN yourself**, and the reason is a driver
 rather than a licence. OpenVPN needs a tun adapter, and neither adapter it
 supports can be provided by copying a file into place: `tap-windows6` is a
-kernel driver with its own installer, and Wintun — which ShellPilot *does*
+kernel driver with its own installer, and Wintun — which OpsMaxx *does*
 bundle, for WireGuard — is never loaded by `openvpn.exe`, which opens an
 adapter that already exists rather than creating one. The official package
 brings the driver, and it brings the Interactive Service, which is what removes
@@ -159,16 +159,16 @@ the permission prompt on every connect.
 | Windows | the official OpenVPN MSI from [openvpn.net](https://openvpn.net/community-downloads/) (installs the Interactive Service too — see below) |
 
 Where the binary comes from, in order: a path you set on the profile and
-confirmed; then the copy ShellPilot ships; then a fixed list of standard
+confirmed; then the copy OpsMaxx ships; then a fixed list of standard
 install locations, and on POSIX also `PATH`. **It never searches `PATH` on
 Windows**, where `PATH` and current-directory search is a well-known way to get
-the wrong `openvpn.exe` run. ShellPilot records the resolved path, version and
+the wrong `openvpn.exe` run. OpsMaxx records the resolved path, version and
 SHA-256 in the audit log the first time a binary is used and whenever it
 changes — so switching between the bundled copy and your own is visible rather
 than silent.
 
-OpenVPN is GPL-2.0 and ShellPilot is MIT. Running it as a separate process is
-mere aggregation, so ShellPilot's licence is unaffected; distributing the binary
+OpenVPN is GPL-2.0 and OpsMaxx is MIT. Running it as a separate process is
+mere aggregation, so OpsMaxx's licence is unaffected; distributing the binary
 does oblige this project to publish the matching source, and every release
 carries it as an asset. [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md) has
 the full reasoning.
@@ -176,15 +176,15 @@ the full reasoning.
 ### Administrator rights
 
 OpenVPN has no userspace mode — it needs a TUN device, so it needs elevation.
-Bundling it removed the install, not the prompt: ShellPilot still asks on every
+Bundling it removed the install, not the prompt: OpsMaxx still asks on every
 connect, exactly as before, and never stores the answer.
 
 - **Windows**: if the OpenVPN Interactive Service is present (it comes with the
-  official MSI) ShellPilot uses it and there is no UAC prompt. Otherwise you get
+  official MSI) OpsMaxx uses it and there is no UAC prompt. Otherwise you get
   one UAC prompt per connect.
-- **macOS**: the standard macOS administrator dialog. ShellPilot never sees,
+- **macOS**: the standard macOS administrator dialog. OpsMaxx never sees,
   stores or transmits your password — macOS collects it.
-- **Linux**: `pkexec`, falling back to `sudo`. ShellPilot does not install a
+- **Linux**: `pkexec`, falling back to `sudo`. OpsMaxx does not install a
   helper, does not use `setcap`, and does not create a service.
 
 Dismissing the prompt is a normal outcome, not an error.
@@ -198,7 +198,7 @@ runs *before any server is contacted* — so a malicious profile needs no server
 at all, just for you to open it. This is a documented attack class, not a
 hypothetical.
 
-ShellPilot therefore **never hands your file to OpenVPN**. It parses the file
+OpsMaxx therefore **never hands your file to OpenVPN**. It parses the file
 into a typed model and generates a fresh configuration from that model. Three
 outcomes per directive:
 
@@ -210,7 +210,7 @@ outcomes per directive:
    or writes an arbitrary file, or re-points the management interface. The
    offending line is quoted back to you.
 
-A rejection is not ShellPilot being fussy. A profile that uses `up` expects
+A rejection is not OpsMaxx being fussy. A profile that uses `up` expects
 those side effects; connecting without them would be a different thing than the
 one you were given, and you would not know.
 
@@ -218,7 +218,7 @@ Certificates referenced by path are read **only** from the directory you
 imported from — no absolute paths, no `..`, no symlinks leading out.
 
 A clean local file is only half of it: a hostile *server* can push options too.
-ShellPilot always runs OpenVPN with `--script-security 0` and a set of
+OpsMaxx always runs OpenVPN with `--script-security 0` and a set of
 `--pull-filter reject` rules so a pushed `up` or `script-security` is refused at
 the source.
 
@@ -226,15 +226,15 @@ the source.
 
 `redirect-gateway` is **off by default**, even when the profile asks for it.
 Downloading a profile should not silently reroute your entire machine.
-ShellPilot adds `--route-nopull` and ignores a pushed `redirect-gateway` unless
+OpsMaxx adds `--route-nopull` and ignores a pushed `redirect-gateway` unless
 you explicitly turn full-tunnel on for that profile.
 
 ### One-time codes
 
 Profiles using a static challenge (`SC:` on the password request) prompt for the
 code each time. The code is never stored and never pre-filled. With
-`--auth-nocache` — which ShellPilot always sets — a reconnect asks again. That
-is expected behaviour, not a failure, and ShellPilot waits in
+`--auth-nocache` — which OpsMaxx always sets — a reconnect asks again. That
+is expected behaviour, not a failure, and OpsMaxx waits in
 "authenticating" rather than dropping the connection if you are away from the
 keyboard.
 
@@ -243,10 +243,10 @@ keyboard.
 ## frp — publishing a local port
 
 frp is the opposite direction from a VPN: instead of reaching in, it makes
-something on your machine reachable **from** an frp server. ShellPilot bundles
+something on your machine reachable **from** an frp server. OpsMaxx bundles
 `frpc` v0.71.0 (Apache-2.0, built from source).
 
-This inverts ShellPilot's usual threat model, so it is gated accordingly:
+This inverts OpsMaxx's usual threat model, so it is gated accordingly:
 
 - Every proxy has a confirmation whose label is literal: *"Make 127.0.0.1:5432
   reachable from frp.example.com."* You cannot start the profile until every
@@ -274,7 +274,7 @@ is already the actionable thing.
 
 A server or database connection can name a VPN profile. When you connect:
 
-1. ShellPilot starts the profile if it is not already up and waits for it.
+1. OpsMaxx starts the profile if it is not already up and waits for it.
 2. In userspace mode it opens a short-lived local forward into the tunnel and
    dials that. In system mode the route already exists and it just dials.
 3. If the VPN fails to come up, you see **the VPN's** error, not a downstream
@@ -288,7 +288,7 @@ with an explicit reason — there is no silent fallback to an unprotected path.
 
 ### There is no kill switch
 
-ShellPilot tears down what it started when a tunnel drops. It does **not**
+OpsMaxx tears down what it started when a tunnel drops. It does **not**
 install firewall rules to block all other traffic, and it does not claim to.
 A real fail-closed kill switch means OS-level firewall state that has to survive
 the app being killed, and calling anything less by that name would be
@@ -310,13 +310,13 @@ machine can read it:
 |---|---|
 | WireGuard | written to the sidecar's stdin; never touches disk |
 | OpenVPN — password, OTP, key passphrase | the management channel |
-| OpenVPN — config and certificates | the process's stdin on Linux, where `pkexec` and `sudo` fork the engine so a pipe reaches it. On macOS and Windows the administrator prompt starts the engine detached from ShellPilot, so there is no pipe to inherit: the config goes into a `0600` file inside a `0700` directory, is deleted on stop, and any left by a crash are swept at the next launch |
+| OpenVPN — config and certificates | the process's stdin on Linux, where `pkexec` and `sudo` fork the engine so a pipe reaches it. On macOS and Windows the administrator prompt starts the engine detached from OpsMaxx, so there is no pipe to inherit: the config goes into a `0600` file inside a `0700` directory, is deleted on stop, and any left by a crash are swept at the next launch |
 | frp | the child process's environment (`/proc/<pid>/environ` is owner-only; a command line is world-readable) |
 
 Engine output is scrubbed before it is stored, not before it is shown — the log
 you can read has already had keys removed from it. One consequence: WireGuard
 *public* keys are redacted too, because nothing in a log line distinguishes a
-public key from a private one. ShellPilot shows public keys from the profile
+public key from a private one. OpsMaxx shows public keys from the profile
 itself instead.
 
 ---
@@ -348,7 +348,7 @@ See [AI-SECURITY.md](AI-SECURITY.md).
 | WireGuard connects but nothing works; handshake never happens | Wrong endpoint, UDP blocked, or a captive portal you have not signed into |
 | Amber "degraded" after working fine | The tunnel stopped passing traffic — often a network change; it usually recovers |
 | Large transfers stall, small ones work | MTU. Try 1280 |
-| "The program that runs this tunnel could not be found" | Reinstall ShellPilot — antivirus sometimes quarantines bundled binaries. On Windows only, an OpenVPN profile also needs OpenVPN installed |
+| "The program that runs this tunnel could not be found" | Reinstall OpsMaxx — antivirus sometimes quarantines bundled binaries. On Windows only, an OpenVPN profile also needs OpenVPN installed |
 | "does not match its expected checksum" | The bundled binary was altered. Reinstall; do not override |
 | OpenVPN asks for the code again after a reconnect | Expected. Codes are never cached |
 | frp says "port already used" | Another proxy — possibly someone else's — already claims that remote port on that frp server |

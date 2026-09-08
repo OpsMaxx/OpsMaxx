@@ -37,7 +37,7 @@ export function auditOutcome(e: Pick<AuditEntry, 'approval' | 'result' | 'exitCo
       decidedBy: 'timeout',
       tone: 'warn',
       detail:
-        'Nobody answered before the approval timeout, so ShellPilot denied it. That is the fail-closed default, not a decision somebody made.'
+        'Nobody answered before the approval timeout, so OpsMaxx denied it. That is the fail-closed default, not a decision somebody made.'
     }
   }
   if (e.approval === 'denied') {

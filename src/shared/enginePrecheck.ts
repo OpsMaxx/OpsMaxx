@@ -71,9 +71,9 @@ export function engineRepoExists(manager: PackageManager): boolean {
 }
 
 export const ENGINE_PRECHECK_MARKERS = {
-  liveRestore: '===SHELLPILOT-ENGLR===',
-  packages: '===SHELLPILOT-ENGPKG===',
-  running: '===SHELLPILOT-ENGRUN==='
+  liveRestore: '===OPSMAXX-ENGLR===',
+  packages: '===OPSMAXX-ENGPKG===',
+  running: '===OPSMAXX-ENGRUN==='
 } as const
 
 /**

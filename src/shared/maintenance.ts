@@ -18,7 +18,7 @@ import { STORE_ALERT_KINDS, type StoreAlertKind } from './webhook'
 //
 //  2. It must not suppress `webhookNotify`. That is the silent discard the
 //     webhook module refuses by name: an endpoint that stops receiving cannot
-//     tell a deliberate silence from a ShellPilot that died.
+//     tell a deliberate silence from a OpsMaxx that died.
 //
 //  3. It must not clear the chips. A snooze deliberately leaves them up,
 //     because the condition is still true -- the window stops the ANNOUNCING,

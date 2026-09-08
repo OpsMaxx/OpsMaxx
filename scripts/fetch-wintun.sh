@@ -17,12 +17,12 @@
 #   * Clause 3(d) forbids redistribution "except insofar as the Software is
 #     distributed alongside other software that uses the Software only via the
 #     Permitted API" — the wintun.h interfaces. Both consumers here do exactly
-#     that: shellpilot-netd through golang.zx2c4.com/wintun, and nothing else.
+#     that: opsmaxx-netd through golang.zx2c4.com/wintun, and nothing else.
 #   * Clause 3(c) requires its proprietary notices to travel with it, which is
 #     why LICENSE.txt is copied into resources/licenses/wintun/ and ships.
 #
 # THIRD-PARTY-NOTICES.md states all of this in the open rather than filing it
-# in a table, because ShellPilot is marketed as open source and this component
+# in a table, because OpsMaxx is marketed as open source and this component
 # is not.
 #
 # Why the hash is pinned rather than trusted: wintun.net is a CDN over HTTPS,
@@ -49,13 +49,13 @@ WORK="${WINTUN_WORKDIR:-$ROOT/.wintun-build}"
 # Left of the arrow is the directory inside the ZIP, right is Node's
 # platform-arch name — the same directory layout every other engine uses, so
 # the DLL lands next to the executables that load it. That adjacency is the
-# whole mechanism: both shellpilot-netd (via golang.zx2c4.com/wintun) and
+# whole mechanism: both opsmaxx-netd (via golang.zx2c4.com/wintun) and
 # openvpn.exe load wintun.dll with LOAD_LIBRARY_SEARCH_APPLICATION_DIR, which
 # searches the directory of the running .exe and System32 and nothing else. No
 # PATH, no working directory — which is also why this is not a DLL-planting
 # hazard.
 #
-# x86 and arm (32-bit) are in the ZIP and are not copied: ShellPilot ships no
+# x86 and arm (32-bit) are in the ZIP and are not copied: OpsMaxx ships no
 # 32-bit Windows build.
 TARGETS=(
   "amd64 win32-x64"

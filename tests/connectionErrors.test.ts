@@ -56,10 +56,10 @@ describe('classifyConnectionError', () => {
 describe('errorText', () => {
   it('drops the IPC preamble that describes the transport, not the problem', () => {
     const err = new Error(
-      "Error invoking remote method 'sftp:connect': Error: SHELLPILOT_VAULT_LOCKED: this server authenticates with a vault credential, and the vault is locked."
+      "Error invoking remote method 'sftp:connect': Error: OPSMAXX_VAULT_LOCKED: this server authenticates with a vault credential, and the vault is locked."
     )
     expect(errorText(err)).toBe(
-      'SHELLPILOT_VAULT_LOCKED: this server authenticates with a vault credential, and the vault is locked.'
+      'OPSMAXX_VAULT_LOCKED: this server authenticates with a vault credential, and the vault is locked.'
     )
   })
 

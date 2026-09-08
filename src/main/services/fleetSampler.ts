@@ -110,7 +110,7 @@ type PostureSampler = (
  * normalisation rule cannot substitute a name nobody told it about — and
  * without it every templated file in the estate is unique and the whole
  * comparison is noise. `hostname` is what the metrics probe reported this
- * sweep; `serverName` is what the server is called in ShellPilot.
+ * sweep; `serverName` is what the server is called in OpsMaxx.
  */
 type DriftSampler = (
   key: string,
@@ -987,7 +987,7 @@ export class FleetSampler {
           }
 
           // Host facts, into the SAME store — item A's, not a second one, and
-          // never into shellpilot-data.json, which is the encrypted backup
+          // never into opsmaxx-data.json, which is the encrypted backup
           // payload rather than a place to keep an hourly inventory.
           //
           // Written only on the sweeps where the probe actually ran. `w.facts`

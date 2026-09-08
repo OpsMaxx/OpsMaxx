@@ -60,7 +60,7 @@ export function checkFilePush(path: string, content: string): FileStepCheck {
     if (rx.test(p)) {
       return {
         ok: false,
-        reason: `ShellPilot will not write ${p} from here. Files that decide who can log in, or that hold a private key, are changed through the key and access screen — which stages the change, verifies it over a fresh session and puts it back if that fails. A file push has none of that.`
+        reason: `OpsMaxx will not write ${p} from here. Files that decide who can log in, or that hold a private key, are changed through the key and access screen — which stages the change, verifies it over a fresh session and puts it back if that fails. A file push has none of that.`
       }
     }
   }
@@ -105,8 +105,8 @@ export function buildFilePushCommand(
 
   const lines = [
     `SP_F=${p}`,
-    'SP_T="$SP_F.shellpilot-new"',
-    'SP_B="$SP_F.shellpilot-bak"',
+    'SP_T="$SP_F.opsmaxx-new"',
+    'SP_B="$SP_F.opsmaxx-bak"',
     // What is there now, or the empty string when it is not there at all.
     `SP_NOW=$(${s}sha256sum "$SP_F" 2>/dev/null | cut -d' ' -f1 || true)`
   ]

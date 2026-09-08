@@ -9,7 +9,7 @@ import { sha256File } from './binaries'
 import { VpnError } from './errors'
 import { disposeRunDir, runIdSegment, sweepRunDirs, vpnRunRoot } from './runDir'
 
-// Every engine ShellPilot runs is an external process, and every external
+// Every engine OpsMaxx runs is an external process, and every external
 // process has the same four failure modes: it never comes up, it comes up and
 // dies, it dies over and over, or it outlives us. Drivers do not touch
 // `child_process` directly so that backoff, crash-loop detection, bounded log

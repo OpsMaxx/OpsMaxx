@@ -44,7 +44,7 @@ import { PanelShell } from './PanelShell'
 // `ruleCreationConfirmation`.
 
 function bridge(): Partial<RulesBridge> | undefined {
-  return (window.shellpilot as unknown as { rules?: Partial<RulesBridge> } | undefined)?.rules
+  return (window.opsmaxx as unknown as { rules?: Partial<RulesBridge> } | undefined)?.rules
 }
 
 const KIND_LABEL: Record<RuleAlertKind, string> = {

@@ -127,7 +127,7 @@ export function BroadcastPanel({ servers }: { servers: Server[] }): React.JSX.El
   const plan = useMemo(() => planBroadcast(command, targets), [command, targets])
 
   useEffect(() => {
-    return bridgeOn('broadcast.onProgress', window.shellpilot?.broadcast?.onProgress, (p: BroadcastProgress) => {
+    return bridgeOn('broadcast.onProgress', window.opsmaxx?.broadcast?.onProgress, (p: BroadcastProgress) => {
       if (p.runId !== runId.current) return
       if (p.done) {
         liveRun = null
@@ -186,7 +186,7 @@ export function BroadcastPanel({ servers }: { servers: Server[] }): React.JSX.El
     runId.current = id
     liveRun = { runId: id, results: seeded }
     try {
-      await window.shellpilot?.broadcast?.run({
+      await window.opsmaxx?.broadcast?.run({
         runId: id,
         command,
         approval,
@@ -334,7 +334,7 @@ export function BroadcastPanel({ servers }: { servers: Server[] }): React.JSX.El
         {running ? (
           <button
             className="btn danger"
-            onClick={() => void window.shellpilot?.broadcast?.cancel(runId.current)}
+            onClick={() => void window.opsmaxx?.broadcast?.cancel(runId.current)}
             title="Hosts that have not started will not start. A host already running is left to finish — killing it mid-write is how a change ends up half applied."
           >
             <Square size={13} /> Stop

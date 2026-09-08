@@ -29,7 +29,7 @@ const KINDS: VaultKind[] = ['login', 'url', 'key', 'sshkey', 'note']
 
 function copy(label: string, value: string): void {
   if (!value) return
-  window.shellpilot?.clipboard.write(value)
+  window.opsmaxx?.clipboard.write(value)
   toast(`${label} copied`)
 }
 
@@ -47,7 +47,7 @@ export function VaultView(): React.JSX.Element {
   // plaintext lives here too.
   useEffect(
     () =>
-      bridgeOn('vault.onAutoLocked', window.shellpilot?.vault?.onAutoLocked, () => {
+      bridgeOn('vault.onAutoLocked', window.opsmaxx?.vault?.onAutoLocked, () => {
         useVault.setState({ unlocked: false, entries: [], selectedId: null })
         // The unlock field is on screen the moment this fires — this view is
         // the only thing that listens — so the message points at it rather
@@ -72,7 +72,7 @@ export function VaultView(): React.JSX.Element {
           <h2>Opening the vault</h2>
           <p className="faint">
             Checking this machine for a vault. If your keychain asks for permission, that is
-            ShellPilot reading the key it stored there.
+            OpsMaxx reading the key it stored there.
           </p>
         </div>
       </div>
@@ -174,8 +174,8 @@ function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
         <h2>{creating ? 'Create your vault' : 'Vault locked'}</h2>
         <p className="faint">
           {creating
-            ? 'The vault keeps passwords, SSH keys and other secrets encrypted on this machine, so ShellPilot can use them without you retyping them. Pick a master password to protect it — it is never stored anywhere, so if you lose it the contents cannot be recovered.'
-            : 'Enter the master password you chose for this vault. It stays open until you lock it, quit ShellPilot, or leave it idle long enough to lock itself.'}
+            ? 'The vault keeps passwords, SSH keys and other secrets encrypted on this machine, so OpsMaxx can use them without you retyping them. Pick a master password to protect it — it is never stored anywhere, so if you lose it the contents cannot be recovered.'
+            : 'Enter the master password you chose for this vault. It stays open until you lock it, quit OpsMaxx, or leave it idle long enough to lock itself.'}
         </p>
 
         {canUseBio && (
@@ -264,7 +264,7 @@ function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
 
 // Remembers a decline so the offer is made once, not every unlock. A UI
 // preference, so it lives with the UI rather than in the vault file.
-const BIO_OFFER_DISMISSED = 'shellpilot.vault.bioOfferDismissed'
+const BIO_OFFER_DISMISSED = 'opsmaxx.vault.bioOfferDismissed'
 
 // Offered right after a successful unlock, which is the one moment the value
 // is obvious — the user has just typed a long password and is about to do it

@@ -149,8 +149,8 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
   const openId = useRef<string | null>(null)
   const sampled = useFleet((s) => s.hosts)
 
-  const bridge = (): NonNullable<typeof window.shellpilot>['jobs'] | undefined =>
-    window.shellpilot?.jobs
+  const bridge = (): NonNullable<typeof window.opsmaxx>['jobs'] | undefined =>
+    window.opsmaxx?.jobs
 
   const refresh = useCallback(async (): Promise<void> => {
     const b = bridge()

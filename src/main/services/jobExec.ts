@@ -26,7 +26,7 @@ import type { JobExecResult, JobExecutor } from './jobRunner'
 //
 // What it does NOT change is the honesty at the top of shared/jobs.ts: this is
 // still the ATTACHED path. A dying socket is SIGHUP, apt and dpkg do not ignore
-// it, and a job that was running when ShellPilot stopped is `abandoned`. B2
+// it, and a job that was running when OpsMaxx stopped is `abandoned`. B2
 // replaces this module with a detached launch; nothing else moves, which is the
 // whole reason the executor is an injected strategy.
 

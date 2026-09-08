@@ -11,7 +11,7 @@
 // The obvious build is a `changeLog.ts` beside the other three that everything
 // calls. It was rejected for the reason approvalLog.ts is a third file rather
 // than a second: each of the four exists because it answers a DIFFERENT
-// question, and `shellpilot-ai-audit.jsonl` in particular derives its whole
+// question, and `opsmaxx-ai-audit.jsonl` in particular derives its whole
 // value from the sentence in docs/AI-SECURITY.md that says `recordAudit` is
 // called from mcpServer.ts and nowhere else. A reader can trust every row in
 // that file to be an agent's. Copying its rows into a fifth file would produce

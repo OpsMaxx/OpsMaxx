@@ -419,14 +419,14 @@ export class CredProxy {
     const body = JSON.stringify({
       error: reason,
       message: REFUSAL_REASONS[reason],
-      proxy: 'shellpilot-credential-proxy'
+      proxy: 'opsmaxx-credential-proxy'
     })
     res.writeHead(REFUSAL_STATUS[reason], {
       'content-type': 'application/json',
       'content-length': Buffer.byteLength(body),
       // So a caller that gets an unexpected 403 knows which hop produced it,
       // rather than reading it as the far end's answer.
-      'x-shellpilot-proxy': 'refused'
+      'x-opsmaxx-proxy': 'refused'
     })
     res.end(body)
     this.record({
@@ -600,7 +600,7 @@ export class CredProxy {
     })
     const cookies = upstream.headers.getSetCookie?.() ?? []
     if (cookies.length > 0) outHeaders['set-cookie'] = cookies
-    outHeaders['x-shellpilot-proxy'] = 'forwarded'
+    outHeaders['x-opsmaxx-proxy'] = 'forwarded'
 
     let detail: string | undefined
     if (upstream.status >= 300 && upstream.status < 400) {
@@ -609,7 +609,7 @@ export class CredProxy {
       if (to !== null && to !== origin) {
         // The caller may follow this itself. It will not be carrying our
         // credential when it does, because it never had one.
-        outHeaders['x-shellpilot-proxy'] = 'redirect-not-followed'
+        outHeaders['x-opsmaxx-proxy'] = 'redirect-not-followed'
         detail = redactThenCap(`Upstream redirected to ${to}; not followed, credential not resent.`, [
           secret
         ])

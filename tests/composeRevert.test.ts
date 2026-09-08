@@ -17,7 +17,7 @@ import { ComposeReader } from '../src/main/services/compose'
 // THE ROADMAP'S PREMISE WAS WRONG, and finding that out was most of the work.
 // It said the app does not remember the previous tag and so "a small per-project
 // last applied image record is new". It does not need one: the write path has
-// always run `cp -p <file> <file>.shellpilot-bak` BEFORE writing, so the
+// always run `cp -p <file> <file>.opsmaxx-bak` BEFORE writing, so the
 // previous version of the file is already on the host — a better record than
 // anything this app could keep, because it survives the app being closed or run
 // from somebody else's laptop and cannot drift from the file it describes.
@@ -83,7 +83,7 @@ describe('the previous tag comes off the host, not out of a new record', () => {
     const r = planComposeRevert(FILE, BACKUP, 'gateway')
     if (!r.ok) throw new Error(r.reason)
     const d = revertDescription(r)
-    expect(d).toContain('immediately before ShellPilot last edited this file')
+    expect(d).toContain('immediately before OpsMaxx last edited this file')
     expect(d).toContain('not a guarantee')
     expect(d).not.toMatch(/last known good|working version|safe/i)
   })
@@ -94,10 +94,10 @@ describe('what it refuses, and why each is its own answer', () => {
     const r = planComposeRevert(FILE, null, 'gateway')
     expect(r).toMatchObject({ ok: false, refusal: 'no-backup' })
     if (r.ok) throw new Error('unreachable')
-    expect(r.reason).toContain('only written when ShellPilot itself edits the file')
+    expect(r.reason).toContain('only written when OpsMaxx itself edits the file')
   })
 
-  // An empty `.shellpilot-bak` is a file that IS there with nothing in it —
+  // An empty `.opsmaxx-bak` is a file that IS there with nothing in it —
   // what an interrupted `cp` leaves behind. Calling that "there is no backup
   // beside this compose file" is false in the direction that stops somebody
   // going to look at the file that is sitting right there.
@@ -106,7 +106,7 @@ describe('what it refuses, and why each is its own answer', () => {
     expect(r).toMatchObject({ ok: false })
     if (r.ok) throw new Error('unreachable')
     expect(r.refusal).not.toBe('no-backup')
-    expect(r.reason).not.toMatch(/there is no ShellPilot backup/i)
+    expect(r.reason).not.toMatch(/there is no OpsMaxx backup/i)
   })
 
   it('says so when the service never moved', () => {

@@ -94,7 +94,7 @@ describe('the config file mongodump is pointed at', () => {
   it('lives in a directory of its own', async () => {
     const r = await runWithConfig('echo "$2"')
     const path = r.stdout.trim()
-    expect(dirname(path)).toMatch(/shellpilot-dump-/)
+    expect(dirname(path)).toMatch(/opsmaxx-dump-/)
     expect(path.endsWith('/config.yaml')).toBe(true)
   })
 })

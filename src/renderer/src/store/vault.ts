@@ -94,7 +94,7 @@ export const useVault = create<VaultState>((set, get) => ({
   bioScope: null,
 
   refreshBiometrics: async () => {
-    const v = window.shellpilot?.vault
+    const v = window.opsmaxx?.vault
     if (typeof v?.bioSupport !== 'function') return
     const [support, enabled, scope] = await Promise.all([
       v.bioSupport(),
@@ -111,7 +111,7 @@ export const useVault = create<VaultState>((set, get) => ({
   },
 
   unlockWithBiometrics: async () => {
-    const v = window.shellpilot?.vault
+    const v = window.opsmaxx?.vault
     if (typeof v?.bioUnlock !== 'function') return false
     set({ busy: true, error: null })
     const r = await v.bioUnlock()
@@ -129,7 +129,7 @@ export const useVault = create<VaultState>((set, get) => ({
   },
 
   setBiometrics: async (on, scope = 'session') => {
-    const v = window.shellpilot?.vault
+    const v = window.opsmaxx?.vault
     if (typeof v?.bioEnable !== 'function') return false
     const r = on ? await v.bioEnable(scope) : await v.bioDisable()
     await get().refreshBiometrics()
@@ -138,18 +138,18 @@ export const useVault = create<VaultState>((set, get) => ({
   },
 
   refresh: async () => {
-    const st = await window.shellpilot?.vault.status()
+    const st = await window.opsmaxx?.vault.status()
     if (!st) return
     set({ exists: st.exists, unlocked: st.unlocked })
     if (st.unlocked) {
-      const r = await window.shellpilot?.vault.list()
+      const r = await window.opsmaxx?.vault.list()
       if (r?.ok && r.entries) set({ entries: r.entries })
     }
   },
 
   create: async (password) => {
     set({ busy: true, error: null })
-    const r = await window.shellpilot?.vault.create(password)
+    const r = await window.opsmaxx?.vault.create(password)
     set({ busy: false })
     if (!r?.ok) {
       set({ error: r?.error ?? 'Could not create the vault.' })
@@ -161,7 +161,7 @@ export const useVault = create<VaultState>((set, get) => ({
 
   unlock: async (password) => {
     set({ busy: true, error: null })
-    const r = await window.shellpilot?.vault.unlock(password)
+    const r = await window.opsmaxx?.vault.unlock(password)
     set({ busy: false })
     if (!r?.ok) {
       set({ error: r?.error ?? 'Could not unlock the vault.' })
@@ -173,13 +173,13 @@ export const useVault = create<VaultState>((set, get) => ({
   },
 
   lock: async () => {
-    await window.shellpilot?.vault.lock()
+    await window.opsmaxx?.vault.lock()
     set({ unlocked: false, entries: [], selectedId: null, query: '', error: null })
   },
 
   changePassword: async (current, next) => {
     set({ busy: true, error: null })
-    const r = await window.shellpilot?.vault.changePassword(current, next)
+    const r = await window.opsmaxx?.vault.changePassword(current, next)
     set({ busy: false })
     if (!r?.ok) {
       set({ error: r?.error ?? 'Could not change the password.' })
@@ -189,7 +189,7 @@ export const useVault = create<VaultState>((set, get) => ({
   },
 
   destroy: async () => {
-    const r = await window.shellpilot?.vault.destroy()
+    const r = await window.opsmaxx?.vault.destroy()
     if (!r?.ok) {
       set({ error: r?.error ?? 'Could not delete the vault.' })
       return false
@@ -239,6 +239,6 @@ async function persist(
   entries: VaultEntry[],
   set: (partial: Partial<VaultState>) => void
 ): Promise<void> {
-  const r = await window.shellpilot?.vault.save(entries)
+  const r = await window.opsmaxx?.vault.save(entries)
   if (!r?.ok) set({ error: r?.error ?? 'Could not save the vault.' })
 }

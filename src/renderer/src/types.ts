@@ -186,7 +186,7 @@ export interface ApiCollection {
    * Send requests down this server's SSH connection instead of from this
    * machine. Null is a direct request.
    *
-   * This is the reason the HTTP client lives in ShellPilot rather than beside
+   * This is the reason the HTTP client lives in OpsMaxx rather than beside
    * it: the host is resolved ON the server, so `localhost:9090` reaches a
    * service bound to that host's loopback and exposed to nothing else.
    */

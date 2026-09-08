@@ -19,7 +19,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 // scrubbed. The file is main-owned and written temp-then-rename, like the vault
 // and the workspace locks.
 //
-// It is NOT in `shellpilot-data.json`: that blob is the renderer's, written
+// It is NOT in `opsmaxx-data.json`: that blob is the renderer's, written
 // whole on every save, and a main-process write into it would race with one.
 
 export interface EnvSecretRef {
@@ -29,7 +29,7 @@ export interface EnvSecretRef {
   fieldKey?: string
 }
 
-const FILE = (): string => join(app.getPath('userData'), 'shellpilot-env-secrets.json')
+const FILE = (): string => join(app.getPath('userData'), 'opsmaxx-env-secrets.json')
 const TMP = (): string => `${FILE()}.tmp`
 
 let cache: EnvSecretRef[] | null = null

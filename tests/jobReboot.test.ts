@@ -61,11 +61,11 @@ class FakeHost {
       return { ok: false, code: null, stdout: '', stderr: '', error: 'Timed out after 30000ms connecting' }
     }
     // The one verb that is not a job wrapper: the post-boot check.
-    if (command.includes('shellpilot-postboot/1')) {
+    if (command.includes('opsmaxx-postboot/1')) {
       if (this.postbootGarbage) return ok('sh: 1: Syntax error: word unexpected\n')
       return ok(
         [
-          'shellpilot-postboot/1',
+          'opsmaxx-postboot/1',
           `boot-id=${this.bootId}`,
           'uptime=17',
           `unit-state=${this.unitState}`,
@@ -85,7 +85,7 @@ class FakeHost {
     switch (m[1]) {
       case 'probe':
         return ok(
-          'shellpilot-probe/1\nlauncher=setsid\nbase64=yes\nuid=1000\nroot=/home/ops/.local/state/shellpilot/jobs\n'
+          'opsmaxx-probe/1\nlauncher=setsid\nbase64=yes\nuid=1000\nroot=/home/ops/.local/state/opsmaxx/jobs\n'
         )
       case 'launch': {
         const instance = /printf '%s\\n' '([^']+)' > "\$SP_JOB_DIR\/instance"/.exec(command)?.[1]
@@ -99,19 +99,19 @@ class FakeHost {
           rc: null,
           alive: true
         })
-        return ok('shellpilot-launch/1\nerror=\n')
+        return ok('opsmaxx-launch/1\nerror=\n')
       }
       case 'poll': {
         const off = Number(/SP_JOB_OFF=(\d+);/.exec(command)?.[1] ?? 0)
         const max = Number(/SP_JOB_MAX=(\d+);/.exec(command)?.[1] ?? 1)
         const marker = this.dirs.get(dir)
-        if (!marker) return ok('shellpilot-poll/1\nmarker=missing\nbody/1\n')
+        if (!marker) return ok('opsmaxx-poll/1\nmarker=missing\nbody/1\n')
         const size = marker.out.length
         const sent = Math.max(0, Math.min(size - off, max))
         const body = marker.out.subarray(off, off + sent).toString('base64')
         return ok(
           [
-            'shellpilot-poll/1',
+            'opsmaxx-poll/1',
             'marker=present',
             `instance=${marker.instance}`,
             `pid=${marker.pid ?? ''}`,
@@ -130,10 +130,10 @@ class FakeHost {
         )
       }
       case 'signal':
-        return ok('shellpilot-signal/1\nsignalled=group\n')
+        return ok('opsmaxx-signal/1\nsignalled=group\n')
       case 'reap':
         this.dirs.delete(dir)
-        return ok('shellpilot-reap/1\nreaped=yes\n')
+        return ok('opsmaxx-reap/1\nreaped=yes\n')
       default:
         throw new Error(`unknown verb ${m[1]}`)
     }
@@ -369,7 +369,7 @@ describe('issuing a reboot and waiting for the server', () => {
     const seen = states.map((s) => s.state).filter(Boolean)
     expect(seen).toContain('rebooting')
     // The two words this must never be. `unreachable` points at a fault and
-    // `abandoned` says ShellPilot dropped it; the disconnect was asked for.
+    // `abandoned` says OpsMaxx dropped it; the disconnect was asked for.
     expect(seen).not.toContain('unreachable')
     expect(seen).not.toContain('orphaned')
 
@@ -404,7 +404,7 @@ describe('issuing a reboot and waiting for the server', () => {
     expect(r.error).toContain('nginx.service')
     expect(output.join('')).toContain('nginx.service')
     // The post-boot probe really ran, rather than the verdict being assumed.
-    expect(host.commands.some((c) => c.includes('shellpilot-postboot/1'))).toBe(true)
+    expect(host.commands.some((c) => c.includes('opsmaxx-postboot/1'))).toBe(true)
   })
 
   it('refuses to call it a restart when the boot id did not change', async () => {
@@ -492,7 +492,7 @@ describe('issuing a reboot and waiting for the server', () => {
     host.rebootAccepted()
     await h.tick()
     expect(
-      host.commands.some((c) => c.includes('shellpilot-postboot/1')),
+      host.commands.some((c) => c.includes('opsmaxx-postboot/1')),
       'a server that is still answering has not restarted yet, and must not be judged as if it had'
     ).toBe(false)
     let settled = false
@@ -517,7 +517,7 @@ describe('issuing a reboot and waiting for the server', () => {
     expect(r.finalOutcome).toBe('unhealthy')
     expect(r.error).toContain('nginx.service')
     expect(output.join('')).toContain('nginx.service')
-    expect(host.commands.some((c) => c.includes('shellpilot-postboot/1'))).toBe(true)
+    expect(host.commands.some((c) => c.includes('opsmaxx-postboot/1'))).toBe(true)
   })
 
   it('reports a clean reboot as a success, exit status and all', async () => {
@@ -591,7 +591,7 @@ describe('issuing a reboot and waiting for the server', () => {
   })
 
   it('verifies a reboot it is reclaiming, using the boot id from the row', async () => {
-    // The boot id is printed once, on the way down, and a ShellPilot that was
+    // The boot id is printed once, on the way down, and a OpsMaxx that was
     // restarted across the reboot never saw it go past. It is on the handle for
     // exactly this: without it every reclaimed reboot would come back
     // `unverifiable`, which is honest and which nothing could ever satisfy.
@@ -605,7 +605,7 @@ describe('issuing a reboot and waiting for the server', () => {
     const dir = host.dir
     host.rebootAccepted()
 
-    // A second ShellPilot picks the marker up from the row alone.
+    // A second OpsMaxx picks the marker up from the row alone.
     const second = harness(host)
     const { req: req2 } = request({
       resume: {
@@ -628,7 +628,7 @@ describe('issuing a reboot and waiting for the server', () => {
     const r2 = await p2
     expect(r2.ok, 'the boot id changed, so it restarted and came back clean').toBe(true)
     expect(
-      host.commands.some((c) => c.includes('shellpilot-postboot/1')),
+      host.commands.some((c) => c.includes('opsmaxx-postboot/1')),
       'and it was CHECKED rather than assumed from the exit status on the marker'
     ).toBe(true)
 

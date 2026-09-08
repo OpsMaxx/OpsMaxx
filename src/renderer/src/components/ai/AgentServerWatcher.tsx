@@ -23,7 +23,7 @@ interface CreateRequest {
 // that follows from changing it.
 export function AgentServerWatcher(): null {
   useEffect(() => {
-    const api = window.shellpilot?.aiMcp
+    const api = window.opsmaxx?.aiMcp
     const off = bridgeOn('aiMcp.onCreateServerRequest', api?.onCreateServerRequest, ({ id, request }) => {
       void (async () => {
         const req = request as unknown as CreateRequest
@@ -47,7 +47,7 @@ export function AgentServerWatcher(): null {
                 ? { keyPath: req.keyPath, passphrase: req.passphrase || undefined }
                 : null
           if (secret && (secret.password || secret.keyPath)) {
-            const ok = await window.shellpilot?.secrets.set(serverId, JSON.stringify(secret))
+            const ok = await window.opsmaxx?.secrets.set(serverId, JSON.stringify(secret))
             if (ok === false) {
               // The server row is useless without the credential the agent
               // supplied, and half-adding it would leave the user to guess what
@@ -58,7 +58,7 @@ export function AgentServerWatcher(): null {
               // app can grant it access to the OS keychain, so this one has no
               // button — the sentence is the whole of what can be done.
               toast(
-                `${req.name} was not added — this computer's secure storage refused the credential, and ShellPilot will not keep one anywhere else.`,
+                `${req.name} was not added — this computer's secure storage refused the credential, and OpsMaxx will not keep one anywhere else.`,
                 'error'
               )
               api?.replyCreateServer?.(id, {

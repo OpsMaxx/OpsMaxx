@@ -21,7 +21,7 @@ let app: AppStore
 
 beforeAll(async () => {
   ;(globalThis as { window?: unknown }).window = {
-    shellpilot: {
+    opsmaxx: {
       getVersion: () => Promise.resolve('9.9.9'),
       notify: {
         show: (title: string, body: string) => {
@@ -441,9 +441,9 @@ describe('an occurrence that has no recovery to observe', () => {
     const pending = new Promise<StoredAlertRow[]>((r) => {
       release = r
     })
-    const w = (globalThis as { window: { shellpilot: { alerts: { history: unknown } } } }).window
-    const original = w.shellpilot.alerts.history
-    w.shellpilot.alerts.history = () => pending
+    const w = (globalThis as { window: { opsmaxx: { alerts: { history: unknown } } } }).window
+    const original = w.opsmaxx.alerts.history
+    w.opsmaxx.alerts.history = () => pending
     const done = alerts.hydrateAlerts()
 
     alerts.noteAlertEvent('c1', 'orders-primary', 'db-alarm', 'replication', T0)
@@ -451,7 +451,7 @@ describe('an occurrence that has no recovery to observe', () => {
 
     release([])
     await done
-    w.shellpilot.alerts.history = original
+    w.opsmaxx.alerts.history = original
 
     // Not dropped: the next poll offers the same row and it is announced.
     alerts.noteAlertEvent('c1', 'orders-primary', 'db-alarm', 'replication', T0)

@@ -154,7 +154,7 @@ const cronBridge = (over: Record<string, unknown> = {}): Record<string, unknown>
       serverId: SERVER.id,
       serverName: SERVER.name,
       outcome: 'written',
-      backupPath: '/home/ops/.shellpilot-crontab-20260903T101112Z-a1b2c3.bak',
+      backupPath: '/home/ops/.opsmaxx-crontab-20260903T101112Z-a1b2c3.bak',
       detail: 'the crontab was replaced and read back identical'
     })),
     ...over
@@ -507,7 +507,7 @@ describe('changing a schedule, now that it lives in Operations', () => {
     await userEvent.type(await screen.findByPlaceholderText('Type RUN'), 'RUN')
     await userEvent.click(await screen.findByTestId('cron-apply'))
 
-    await screen.findByText(/\.shellpilot-crontab-20260903T101112Z-a1b2c3\.bak/)
+    await screen.findByText(/\.opsmaxx-crontab-20260903T101112Z-a1b2c3\.bak/)
     // Read again rather than patched from what we sent: the host is the only
     // thing that knows what its crontab says now.
     await waitFor(() =>

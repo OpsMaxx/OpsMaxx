@@ -29,7 +29,7 @@ function reader(over: Partial<{ text: string; code: number; stdout: string }> = 
       return {
         ok: true,
         code: over.code ?? 0,
-        stdout: over.stdout ?? '===SHELLPILOT-END===\n',
+        stdout: over.stdout ?? '===OPSMAXX-END===\n',
         stderr: ''
       }
     }
@@ -46,7 +46,7 @@ describe('writing the value', () => {
       name: 'B',
       line: 2,
       action: 'replace',
-      backup: '/srv/app/.env.shellpilot-bak'
+      backup: '/srv/app/.env.opsmaxx-bak'
     })
   })
 
@@ -75,7 +75,7 @@ describe('writing the value', () => {
   it('quotes the value into the command so a hash and a dollar survive', async () => {
     const { r, commands } = reader()
     await r.writeEnvValue({}, { path: '/srv/app/.env', name: 'B' }, SECRET)
-    const write = commands.find((c) => c.includes('SHELLPILOT_COMPOSE_EOF'))!
+    const write = commands.find((c) => c.includes('OPSMAXX_COMPOSE_EOF'))!
     expect(write).toContain('B="p@ss w0rd # not-a-comment $$HOME"')
   })
 
@@ -85,7 +85,7 @@ describe('writing the value', () => {
     const { r, commands } = reader({ text: 'B=1\nB=2\n' })
     const out = await r.writeEnvValue({}, { path: '/srv/app/.env', name: 'B' }, SECRET)
     expect(out.ok).toBe(false)
-    expect(commands.some((c) => c.includes('SHELLPILOT_COMPOSE_EOF'))).toBe(false)
+    expect(commands.some((c) => c.includes('OPSMAXX_COMPOSE_EOF'))).toBe(false)
   })
 
   it('refuses an empty value rather than writing NAME=""', async () => {

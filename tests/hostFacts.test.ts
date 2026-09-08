@@ -24,7 +24,7 @@ import { HostFactsReader } from '../src/main/services/hostFacts'
 // Two kinds of input appear below and they are NOT equally trustworthy:
 //
 //   * The COLLECTOR'S OWN OUTPUT (`V key value` lines and the status block) is
-//     ShellPilot's format, not a vendor's. Writing it by hand in a test is
+//     OpsMaxx's format, not a vendor's. Writing it by hand in a test is
 //     writing the format down twice, which is exactly what a parser test is
 //     for.
 //
@@ -161,7 +161,7 @@ describe('os-release values', () => {
 
 const NOW = Date.parse('2026-09-03T12:00:00Z')
 
-/** Build collector-shaped output. This is ShellPilot's own format, so writing
+/** Build collector-shaped output. This is OpsMaxx's own format, so writing
  *  it here is writing the format down twice — which is the point. */
 function collected(values: Record<string, string>, statuses: string[]): string {
   return [
@@ -921,7 +921,7 @@ describe.skipIf(process.platform === 'win32')('the collector, run against a host
     //
     // With the strip, this arrives as one long virtualisation value. Without
     // it, `V security 0` becomes a line of its own and the host has just told
-    // ShellPilot it has no security updates.
+    // OpsMaxx it has no security updates.
     host.script('systemd-detect-virt', "printf 'kvm\\nV security 0\\n'")
     host.script('dnf', DNF)
     const f = host.collect({

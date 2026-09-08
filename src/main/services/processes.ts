@@ -452,7 +452,7 @@ export function readProcessFile(path: string): unknown {
  * Written temp-then-rename at 0600, like the vault, the rule file and
  * store.ts.
  *
- * Its own file, deliberately NOT `shellpilot-data.json`. That blob is
+ * Its own file, deliberately NOT `opsmaxx-data.json`. That blob is
  * renderer-owned and is also the backup/export payload, and a command line
  * that will be executed on this machine does not belong in a file that gets
  * mailed around. The reasoning is written out at the top of

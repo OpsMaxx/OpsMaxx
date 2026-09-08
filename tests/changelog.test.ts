@@ -37,7 +37,7 @@ const ROOT = resolve(__dirname, '..')
 
 let dir: string
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'shellpilot-changelog-'))
+  dir = mkdtempSync(join(tmpdir(), 'opsmaxx-changelog-'))
 })
 afterEach(() => {
   try {

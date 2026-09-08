@@ -124,7 +124,7 @@ export const FACT_STATUS_HELP: Record<FactStatus, string> = {
   denied: 'It exists and this account was not allowed to read it. A different account might see more.',
   'no-tool': 'The program that answers this is not installed on this server.',
   'stale-metadata':
-    'The answer was read from a package cache that has not been refreshed recently, so it describes the estate as it was then, not now. ShellPilot never refreshes it, because that is a network operation and on some package managers it can break the server.',
+    'The answer was read from a package cache that has not been refreshed recently, so it describes the estate as it was then, not now. OpsMaxx never refreshes it, because that is a network operation and on some package managers it can break the server.',
   unsupported:
     'This server cannot answer this question at all — not because of a permission or a missing tool, but because the distribution does not publish the data. Treat it as UNKNOWN, never as zero.',
   unknown: 'The probe ran and its answer could not be read, or the collector never reported on it.'
@@ -393,7 +393,7 @@ export interface HostFactsCollectOptions {
 
 /** The only structural token in the output. Values can never contain it,
  *  because a value is always one line beginning `V `. */
-export const FACTS_STATUS_MARKER = '===SHELLPILOT-FACTS==='
+export const FACTS_STATUS_MARKER = '===OPSMAXX-FACTS==='
 
 /**
  * One round trip, no mutation, no sourcing, and no interpolation of host output

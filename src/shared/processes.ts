@@ -53,7 +53,7 @@
 //       1. TRANSLATE, do not supervise — write a `systemd --user` unit or a
 //          launchd plist on the host and let the host's own supervisor own the
 //          restart policy. The host is there when we are not. This is the one
-//          worth doing, and it is a different feature: what ShellPilot would
+//          worth doing, and it is a different feature: what OpsMaxx would
 //          ship is a unit-file editor and a `systemctl --user` reader, not a
 //          supervisor.
 //       2. An agent-side runner. A real design, and a real decision about
@@ -83,7 +83,7 @@
 // WHERE THE LIST LIVES, AND WHY NOT WITH EVERYTHING ELSE
 // ===========================================================================
 //
-// Not in `shellpilot-data.json`. That file is the renderer-owned blob — the
+// Not in `opsmaxx-data.json`. That file is the renderer-owned blob — the
 // workspaces, servers, folders and tunnels the renderer edits and hands back
 // to main as one snapshot — and it is also the export/backup payload. A
 // process definition is a command line that will be executed on this machine.

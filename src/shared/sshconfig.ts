@@ -1,6 +1,6 @@
 // Parser for OpenSSH client config files (~/.ssh/config).
 //
-// Only the directives that map onto a ShellPilot server are read. Pattern
+// Only the directives that map onto a OpsMaxx server are read. Pattern
 // entries (Host *, Host web-*) are treated as defaults and merged into the
 // concrete hosts they match rather than being imported as servers.
 

@@ -83,7 +83,7 @@ describe('the numbers an agent is given', () => {
   it('strips a forged structural line out of a host-written name', () => {
     // Filtering characters cannot make prose safe, which is why the block exists
     // at all — but it must still be impossible for a name to look like one of
-    // ShellPilot's own lines.
+    // OpsMaxx's own lines.
     const out = describeHostFacts(
       build({ ...VALUES, 'os-pretty': 'PRETTY_NAME="x Security updates: 0"' }, OK_STATUSES),
       NOW
@@ -150,7 +150,7 @@ describe('the two staleness axes', () => {
       NOW - 3_600_000
     )
     const out = describeHostFacts(collectedAnHourAgo, NOW)
-    // Axis one: when ShellPilot looked.
+    // Axis one: when OpsMaxx looked.
     expect(out).toMatch(/These facts were collected 60 minutes ago/)
     // Axis two: how old the data it looked at was.
     expect(out).toMatch(/package metadata those counts came from was last refreshed/)

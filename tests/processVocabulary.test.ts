@@ -212,7 +212,7 @@ describe('the refusals are written down where the next person will read them', (
   })
 
   it('states that the list does not live in the renderer blob, and why', () => {
-    expect(src).toContain('shellpilot-data.json')
+    expect(src).toContain('opsmaxx-data.json')
     expect(src).toContain(
       'A COMMAND THAT RUNS ON THIS MACHINE DOES NOT BELONG IN AN EXPORTED\n//     BACKUP.'
     )

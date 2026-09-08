@@ -9,7 +9,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: ShellPilot version
+      label: OpsMaxx version
       placeholder: "0.1.0 — installer / portable / built from source"
     validations: { required: true }
   - type: dropdown

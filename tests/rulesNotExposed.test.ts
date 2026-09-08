@@ -240,7 +240,7 @@ describe('nothing an agent can reach imports the rule engine', () => {
       .map((e) => `${relative(ROOT, e.from)} imports '${e.spec}'`)
     expect(
       offenders,
-      `A module reachable from the MCP bridge or the ShellPilot CLI now imports the rule ` +
+      `A module reachable from the MCP bridge or the OpsMaxx CLI now imports the rule ` +
         `engine.\n\n${offenders.join('\n')}\n\n` +
         `DURABILITY DEFEATS REVOCATION, and a rule is the worst case of it. denyAllPending() ` +
         `resolves requests that are PENDING; a rule between firings has none — no request, no ` +
@@ -266,7 +266,7 @@ describe('nothing an agent can reach imports the rule engine', () => {
 
 describe('the AI permission model has no word for a rule', () => {
   // The word "rule" is not owned by this file. A FIREWALL rule is a line in a
-  // packet filter on somebody else's machine; a ShellPilot rule is a standing
+  // packet filter on somebody else's machine; a OpsMaxx rule is a standing
   // consent record on this one, which is the thing below has no safe setting.
   // `firewallRules` is reviewed and named here rather than let through by a
   // looser regex, and rather than renamed to dodge one — a consent label that

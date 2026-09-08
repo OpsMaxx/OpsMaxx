@@ -19,7 +19,7 @@ export function AiApprovals(): React.JSX.Element {
   const [unreadable, setUnreadable] = useState(false)
 
   const load = (): void => {
-    void window.shellpilot?.aiMcp
+    void window.opsmaxx?.aiMcp
       .listApprovals()
       .then((a) => {
         setApprovals(a ?? [])
@@ -30,7 +30,7 @@ export function AiApprovals(): React.JSX.Element {
 
   useEffect(() => {
     load()
-    const off = bridgeOn('aiMcp.onApprovalEvent', window.shellpilot?.aiMcp?.onApprovalEvent, load)
+    const off = bridgeOn('aiMcp.onApprovalEvent', window.opsmaxx?.aiMcp?.onApprovalEvent, load)
     const t = setInterval(load, 3000)
     return () => {
       off?.()
@@ -39,7 +39,7 @@ export function AiApprovals(): React.JSX.Element {
   }, [])
 
   const respond = async (id: string, decision: 'approved' | 'denied'): Promise<void> => {
-    await window.shellpilot?.aiMcp.respondApproval(id, decision)
+    await window.opsmaxx?.aiMcp.respondApproval(id, decision)
     load()
   }
 

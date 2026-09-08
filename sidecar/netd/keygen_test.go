@@ -46,7 +46,7 @@ func TestGenerateKeypairDerivesItsOwnPublicKey(t *testing.T) {
 	}
 }
 
-// `wg genkey` clamps, so a key ShellPilot generated must be byte-identical to
+// `wg genkey` clamps, so a key OpsMaxx generated must be byte-identical to
 // one `wg` would have produced from the same entropy — otherwise a user who
 // copies it into a wg-quick config gets a different file back from `wg pubkey`
 // than the one they were shown here.
@@ -147,7 +147,7 @@ func TestDerivePublicKeyNeverQuotesItsInput(t *testing.T) {
 // A 32-byte value `wg` would accept has to be accepted here too, even the
 // degenerate ones: X25519 clamps internally, so the all-zero scalar becomes
 // 2^254 and derives a perfectly ordinary point. Rejecting it would make
-// ShellPilot disagree with `wg pubkey` about a key somebody already has.
+// OpsMaxx disagree with `wg pubkey` about a key somebody already has.
 func TestDerivePublicKeyAcceptsWhatWgWouldAccept(t *testing.T) {
 	zero := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	res, err := derivePublicKey(zero)

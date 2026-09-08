@@ -139,8 +139,8 @@ Three properties, each checked by running it:
   same two files with `docker` removed from `PATH`: 109 passed, 18 skipped, and
   every skipped name carries the reason.
 - **A machine that is meant to have Docker can refuse the skip.** Set
-  `SHELLPILOT_S3_LIVE=1` and the always-running test `is skipped only for a
-  reason it can name` fails instead. `SHELLPILOT_S3_LIVE=0` is the opposite
+  `OPSMAXX_S3_LIVE=1` and the always-running test `is skipped only for a
+  reason it can name` fails instead. `OPSMAXX_S3_LIVE=0` is the opposite
   lever, for bisecting something else.
 
 If Docker answers but the container will not come up, `startMinio` **throws**

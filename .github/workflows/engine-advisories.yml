@@ -1,6 +1,6 @@
 name: Engine advisories
 
-# ShellPilot bundles OpenVPN and OpenSSL on macOS and Linux, which moved their
+# OpsMaxx bundles OpenVPN and OpenSSL on macOS and Linux, which moved their
 # CVEs onto us: a user who used to get a fix from brew or apt within days of an
 # advisory now gets it when we cut a release. Nothing else in CI would notice
 # that an advisory exists, so without this job the first warning is a bug report.

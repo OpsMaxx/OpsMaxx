@@ -86,7 +86,7 @@ const ALLOWED_TOOLS = [
   'write_file',
   'list_files',
   'get_server_metrics',
-  // Item 47. A READ of history ShellPilot already stores: it opens no
+  // Item 47. A READ of history OpsMaxx already stores: it opens no
   // connection, reaches no shell, and answers about a server that is offline.
   // Gated on `serverMetrics`, the same capability as the tool whose numbers
   // these are over time.
@@ -605,7 +605,7 @@ describe('nothing an agent can reach imports the job engine', () => {
 
     expect(
       offenders,
-      `A module reachable from the MCP bridge or the ShellPilot CLI now imports the job engine.\n\n` +
+      `A module reachable from the MCP bridge or the OpsMaxx CLI now imports the job engine.\n\n` +
         `${offenders.join('\n')}\n\n` +
         `DURABILITY DEFEATS REVOCATION. denyAllPending() — the stop-all-AI-access switch — works ` +
         `by resolving requests that are PENDING. A job already running on fifteen servers has ` +
@@ -649,7 +649,7 @@ describe('the AI permission model has no word for a job', () => {
     'serverMetrics',
     'hostFacts',
     // Roadmap item 31, reviewed here as well: it grants an agent nothing at
-    // all. What it gates is whether ShellPilot's own hourly posture read may
+    // all. What it gates is whether OpsMaxx's own hourly posture read may
     // collect a host's firewall rule LINES — the addresses and ports it
     // accepts traffic on — for a person to look at. The bridge cannot reach
     // them at any setting; section 4 below holds that by name.
@@ -830,7 +830,7 @@ describe('what must NOT be able to reach this', () => {
       // GATED IS NOT AN ANSWER HERE, and this is the case where that has to be
       // said out loud, because unlike everything else on this list the rule
       // list HAS a capability of its own — `firewallRules`, item 31's line in
-      // the consent grid. That capability governs whether ShellPilot's own
+      // the consent grid. That capability governs whether OpsMaxx's own
       // hourly probe may COLLECT the lines for a person to read. It is not an
       // agent grant and no tool consults it, deliberately: an agent that can
       // read one host's ruleset can read forty, and an agent that can read
@@ -1041,7 +1041,7 @@ describe('what must NOT be able to reach this', () => {
       //
       // Everything above is a power over a REMOTE system, exercised through a
       // credential that could in principle be rotated afterwards. This is a
-      // child process of ShellPilot itself, on the machine the vault is on,
+      // child process of OpsMaxx itself, on the machine the vault is on,
       // with a restart policy — and the restart policy is what makes the kill
       // switch's guarantee not merely weaker but absent. `denyAllPending()`
       // resolves what is PENDING; a supervised process has nothing pending, is

@@ -57,7 +57,7 @@ describe('whether there is actually a backup', () => {
   })
 
   it('allows a missed period before it complains', () => {
-    // ShellPilot backs up only while it is running, so a daily schedule on a
+    // OpsMaxx backs up only while it is running, so a daily schedule on a
     // laptop shut overnight is routinely late and that is not a fault.
     const late = report({ finishedAt: new Date(NOW - 30 * H).toISOString() })
     expect(assessBackups([dest({ everyHours: 24 })], { d1: late }, NOW)).toEqual([])

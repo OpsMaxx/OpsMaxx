@@ -9,7 +9,7 @@ import { redactOutput } from './secretRedaction'
 // so a crash mid-write can corrupt at most the last line rather than the
 // whole history. Entries never carry secret material — every free-text field
 // is redacted before it is written, not just before it is displayed.
-const FILE = join(app.getPath('userData'), 'shellpilot-ai-audit.jsonl')
+const FILE = join(app.getPath('userData'), 'opsmaxx-ai-audit.jsonl')
 
 /** Exported so retention prunes THIS file rather than a second copy of the
  *  name. Two places spelling a filename is how one of them gets it wrong. */

@@ -101,7 +101,7 @@ function healthTone(health: string | null): string {
  * wired yet is worse than one with a button that says so.
  */
 function bridge(): Partial<DockerBridge> | undefined {
-  return (window.shellpilot as unknown as { docker?: Partial<DockerBridge> } | undefined)?.docker
+  return (window.opsmaxx as unknown as { docker?: Partial<DockerBridge> } | undefined)?.docker
 }
 
 /** Bytes as docker would have written them, for the totals docker does not total. */
@@ -644,7 +644,7 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
     if (phrase !== null && window.prompt(`Type ${phrase} to upgrade the engine on ${server.name}.`) !== phrase) {
       return
     }
-    await window.shellpilot?.jobs?.run?.({
+    await window.opsmaxx?.jobs?.run?.({
       jobId: crypto.randomUUID(),
       spec,
       approval: jobApprovalFor(spec, targets, { phrase, confirmedAt: Date.now() }),

@@ -268,7 +268,7 @@ describe('the provenance distinction the note and the server share a screen with
 
   it('says where host-reported text came from, the way hostReportedBlock does', () => {
     expect(RUNBOOK_HOST_REPORTED_NOTE).toContain('Reported by the server')
-    expect(RUNBOOK_HOST_REPORTED_NOTE).toContain('not by ShellPilot and not by you')
+    expect(RUNBOOK_HOST_REPORTED_NOTE).toContain('not by OpsMaxx and not by you')
     expect(RUNBOOK_HOST_REPORTED_NOTE).toContain('data rather than as instruction')
   })
 

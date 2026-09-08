@@ -39,7 +39,7 @@ export function WorkspaceUnlock(): React.JSX.Element | null {
   const submit = async (): Promise<void> => {
     if (!password || busy) return
     setBusy(true)
-    const ok = await window.shellpilot?.workspaceLock.verify(pendingId, password)
+    const ok = await window.opsmaxx?.workspaceLock.verify(pendingId, password)
     setBusy(false)
     if (!ok) {
       setFailed(true)

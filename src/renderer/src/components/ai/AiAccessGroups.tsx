@@ -341,12 +341,12 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('')
 
   const load = (): void => {
-    void window.shellpilot?.aiPolicy.listWorkspaces().then((w) => {
+    void window.opsmaxx?.aiPolicy.listWorkspaces().then((w) => {
       setWorkspaces(w ?? [])
       setActiveWorkspaceId((prev) => prev || w?.[0]?.id || '')
     })
-    void window.shellpilot?.aiPolicy.listServers().then((s) => setServers(s ?? []))
-    void window.shellpilot?.aiPolicy.listAssignments().then((a) => setAssignments(a ?? []))
+    void window.opsmaxx?.aiPolicy.listServers().then((s) => setServers(s ?? []))
+    void window.opsmaxx?.aiPolicy.listAssignments().then((a) => setAssignments(a ?? []))
   }
   useEffect(load, [])
 
@@ -376,13 +376,13 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
   const setWorkspaceGroup = async (groupId: string | null): Promise<void> => {
     const scope = { level: 'workspace', workspaceId: activeWorkspaceId } as const
     await apply(
-      () => window.shellpilot?.aiPolicy.setAssignment(scope, groupId),
+      () => window.opsmaxx?.aiPolicy.setAssignment(scope, groupId),
       () => void setWorkspaceGroup(groupId)
     )
   }
   const setServerOverride = async (serverId: string, groupId: string | null): Promise<void> => {
     await apply(
-      () => window.shellpilot?.aiPolicy.setAssignment({ level: 'server', serverId }, groupId),
+      () => window.opsmaxx?.aiPolicy.setAssignment({ level: 'server', serverId }, groupId),
       () => void setServerOverride(serverId, groupId)
     )
   }
@@ -390,7 +390,7 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
     const existing = assignments.find((a) => a.scope.level === 'server' && a.scope.serverId === serverId)
     if (!existing) return load()
     await apply(
-      () => window.shellpilot?.aiPolicy.removeAssignment(existing.id),
+      () => window.opsmaxx?.aiPolicy.removeAssignment(existing.id),
       () => void clearServerOverride(serverId)
     )
   }
@@ -502,7 +502,7 @@ export function AiAccessGroups(): React.JSX.Element {
   const clearAiGroup = useNav((s) => s.clearAiGroup)
 
   const load = (): void => {
-    void window.shellpilot?.aiPolicy.listGroups().then((g) => {
+    void window.opsmaxx?.aiPolicy.listGroups().then((g) => {
       setGroups(g ?? [])
       setSelectedId((prev) => prev ?? g?.[0]?.id ?? null)
     })
@@ -552,7 +552,7 @@ export function AiAccessGroups(): React.JSX.Element {
     const name = (newName ?? '').trim()
     if (!name) return
     try {
-      const g = await window.shellpilot?.aiPolicy.createGroup(name)
+      const g = await window.opsmaxx?.aiPolicy.createGroup(name)
       if (!g) throw new Error('No group came back')
       setNewName(null)
       load()
@@ -582,7 +582,7 @@ export function AiAccessGroups(): React.JSX.Element {
   const saveGroup = async (): Promise<boolean> => {
     if (!draft) return false
     try {
-      await window.shellpilot?.aiPolicy.saveGroup(draft)
+      await window.opsmaxx?.aiPolicy.saveGroup(draft)
       toast(`Saved ${draft.name}`, 'ok')
       load()
       return true
@@ -603,10 +603,10 @@ export function AiAccessGroups(): React.JSX.Element {
   // divergence the catch below describes.
   const deleteGroupById = async (id: string, name: string): Promise<void> => {
     try {
-      const result = await window.shellpilot?.aiPolicy.deleteGroup(id)
+      const result = await window.opsmaxx?.aiPolicy.deleteGroup(id)
       // No bridge means nothing was deleted. `result && !result.ok` read that
       // as success and toasted "Deleted X" over a call that never happened.
-      if (!result) throw new Error('ShellPilot is not available in this window.')
+      if (!result) throw new Error('OpsMaxx is not available in this window.')
       if (!result.ok) {
         toast(result.error ?? `${name} could not be deleted.`, 'error')
         return
@@ -628,7 +628,7 @@ export function AiAccessGroups(): React.JSX.Element {
       // that, rather than letting the user discover it a week later.
       load()
       toast(
-        `${name} was not deleted: ${err instanceof Error ? err.message : String(err)}. It may reappear when ShellPilot restarts.`,
+        `${name} was not deleted: ${err instanceof Error ? err.message : String(err)}. It may reappear when OpsMaxx restarts.`,
         'error',
         { label: 'Try again', run: () => void deleteGroupById(id, name) }
       )

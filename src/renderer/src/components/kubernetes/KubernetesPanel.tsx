@@ -102,7 +102,7 @@ import type { Server } from '../../types'
 /**
  * The channels this panel calls, described where it calls them.
  *
- * `window.shellpilot.k8s` is built in the preload and its type comes from
+ * `window.opsmaxx.k8s` is built in the preload and its type comes from
  * there, so the four operational channels do not exist on it until the main
  * process wires them. They are optional here on purpose: a panel that assumes a
  * channel exists renders a permanent spinner when it does not, and "this build
@@ -153,7 +153,7 @@ interface K8sBridge {
 }
 
 const bridge = (): K8sBridge =>
-  ((window.shellpilot as { k8s?: K8sBridge } | undefined)?.k8s ?? {}) as K8sBridge
+  ((window.opsmaxx as { k8s?: K8sBridge } | undefined)?.k8s ?? {}) as K8sBridge
 
 const NOT_WIRED = 'This build has no such channel — the main process has not registered it.'
 

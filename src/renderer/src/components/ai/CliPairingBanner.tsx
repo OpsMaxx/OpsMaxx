@@ -3,7 +3,7 @@ import { Modal } from '../common/Modal'
 import type { CliPairingRequest } from '../../../../shared/mcp'
 import { bridgeOn } from '../../lib/bridge'
 
-// Mounted once at the app root, like ApprovalWatcher: the `shellpilot
+// Mounted once at the app root, like ApprovalWatcher: the `opsmaxx
 // claude|codex|run` CLI launcher can pair from any tab the user happens to
 // be on. The code shown here is never sent back over the wire to whichever
 // local process asked for it — only display it and let the user type it into
@@ -13,7 +13,7 @@ export function CliPairingBanner(): React.JSX.Element | null {
   const [secondsLeft, setSecondsLeft] = useState(0)
 
   useEffect(() => {
-    const off = bridgeOn('aiMcp.onPairingEvent', window.shellpilot?.aiMcp?.onPairingEvent, (e) => {
+    const off = bridgeOn('aiMcp.onPairingEvent', window.opsmaxx?.aiMcp?.onPairingEvent, (e) => {
       if (e.type === 'created') setRequest(e.request)
       else setRequest((r) => (r && r.id === e.request.id ? null : r))
     })
@@ -32,7 +32,7 @@ export function CliPairingBanner(): React.JSX.Element | null {
   if (!request) return null
 
   const cancel = async (): Promise<void> => {
-    await window.shellpilot?.aiMcp.cancelPairing(request.id)
+    await window.opsmaxx?.aiMcp.cancelPairing(request.id)
     setRequest(null)
   }
 
@@ -51,7 +51,7 @@ export function CliPairingBanner(): React.JSX.Element | null {
             {request.code}
           </div>
           <div className="s-desc" style={{ marginTop: 6 }}>
-            Expires in {secondsLeft}s. If you did not run a ShellPilot CLI command, click Cancel.
+            Expires in {secondsLeft}s. If you did not run a OpsMaxx CLI command, click Cancel.
           </div>
         </div>
       </div>

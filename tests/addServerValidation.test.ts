@@ -23,7 +23,7 @@ describe('an authentication method the build cannot honour is not offered', () =
     expect(modal).toMatch(/id: 'certificate'[\s\S]{0,400}unavailable:/)
   })
 
-  // Disabled rather than deleted: the concept exists and ShellPilot reads
+  // Disabled rather than deleted: the concept exists and OpsMaxx reads
   // certificate state elsewhere. An option that vanishes teaches the user the
   // product cannot do something when the truth is that this build cannot.
   it('keeps the option visible so the absence is explained, not hidden', () => {

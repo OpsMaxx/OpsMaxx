@@ -4,10 +4,10 @@ import { FEATURE_TIPS } from '../components/onboarding/tourSteps'
 // Whether the walkthrough has been seen. A UI preference, so it lives with the
 // UI rather than in the workspace data file — it is about this installation,
 // not about the servers in it, and it should not travel in an encrypted backup.
-const SEEN_KEY = 'shellpilot.onboarding.seen'
+const SEEN_KEY = 'opsmaxx.onboarding.seen'
 // Which deferred tips have been shown. Same reasoning as SEEN_KEY: a UI
 // preference about this installation, not data about the servers in it.
-const TIPS_KEY = 'shellpilot.onboarding.tips'
+const TIPS_KEY = 'opsmaxx.onboarding.tips'
 
 function readTips(): string[] {
   try {

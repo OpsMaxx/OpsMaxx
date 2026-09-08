@@ -107,7 +107,7 @@ export function sshTransport(
   server: Server,
   setServerStatus: (id: string, s: Server['status']) => void
 ): TerminalTransport {
-  const api = (): typeof window.shellpilot.ssh | undefined => window.shellpilot?.ssh
+  const api = (): typeof window.opsmaxx.ssh | undefined => window.opsmaxx?.ssh
   return {
     key: `ssh:${server.id}`,
     title: server.name,
@@ -245,12 +245,12 @@ export function containerTransport(
     // containerCloseReason: "shell exited with 127" is true and tells nobody
     // that the image simply has no shell.
     onClose: (id, cb) =>
-      window.shellpilot?.ssh?.onClose(id, (info) => cb(containerCloseReason(info, containerRef))) ??
+      window.opsmaxx?.ssh?.onClose(id, (info) => cb(containerCloseReason(info, containerRef))) ??
       ((): void => {}),
     connect: (sessionId, cols, rows) =>
       withVaultUnlock(`Opening a shell in ${containerRef}`, () =>
         Promise.resolve(
-          window.shellpilot?.ssh?.connect({
+          window.opsmaxx?.ssh?.connect({
             sessionId,
             serverId: server.id,
             host: server.host,
@@ -271,7 +271,7 @@ export function localTransport(shell: LocalShell, cwd?: string): TerminalTranspo
   // Resolved per call rather than captured: the renderer can hot-reload while
   // the process keeps the preload bundle it booted with, and a namespace that
   // does not exist must degrade to a dead session, not a thrown effect.
-  const api = (): typeof window.shellpilot.local | undefined => window.shellpilot?.local
+  const api = (): typeof window.opsmaxx.local | undefined => window.opsmaxx?.local
   return {
     key: `local:${shell.id}:${cwd ?? ''}`,
     title: shell.label,

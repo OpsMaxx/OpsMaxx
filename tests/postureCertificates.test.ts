@@ -143,7 +143,7 @@ const collect = (records: [string, string][], status = 'certificates ok - read')
       ...records.map(([body, path]) => `C ${body} ${path}`),
       'V cert-searched 1',
       'V cert-refused 0',
-      '===SHELLPILOT-POSTURE===',
+      '===OPSMAXX-POSTURE===',
       status
     ].join('\n'),
     NOW
@@ -222,7 +222,7 @@ describe('a certificate that could not be read is never a certificate that is va
       [
         'V cert-searched 1',
         'V cert-refused 2',
-        '===SHELLPILOT-POSTURE===',
+        '===OPSMAXX-POSTURE===',
         'certificates denied - every certificate directory present on this server refused to be entered'
       ].join('\n'),
       NOW
@@ -246,7 +246,7 @@ describe('a certificate that could not be read is never a certificate that is va
   })
 
   it('says nothing at all when the certificate block never ran', () => {
-    const p = parsePosture(['===SHELLPILOT-POSTURE===', 'firewall ok - read'].join('\n'), NOW)
+    const p = parsePosture(['===OPSMAXX-POSTURE===', 'firewall ok - read'].join('\n'), NOW)
     expect(p.certificates).toBeNull()
     expect(postureAlertReadings(p).certDays).toBeNull()
     expect(certificatesIncomplete(null)).toBe(true)
@@ -254,7 +254,7 @@ describe('a certificate that could not be read is never a certificate that is va
 
   it('downgrades a source the collector called ok whose search did not survive', () => {
     const p = parsePosture(
-      ['===SHELLPILOT-POSTURE===', 'certificates ok - read'].join('\n'),
+      ['===OPSMAXX-POSTURE===', 'certificates ok - read'].join('\n'),
       NOW
     )
     expect(postureSource(p, 'certificates').status).toBe('unknown')

@@ -13,7 +13,7 @@ import {
   vaultDestroy
 } from '../src/main/services/vault'
 
-const FILE = join(app.getPath('userData'), 'shellpilot-vault.json')
+const FILE = join(app.getPath('userData'), 'opsmaxx-vault.json')
 const read = (): Record<string, unknown> => JSON.parse(readFileSync(FILE, 'utf8'))
 
 beforeEach(() => {

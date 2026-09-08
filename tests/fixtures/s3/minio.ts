@@ -39,8 +39,8 @@ let cachedReason: string | null | undefined
  * both is how a suite ends up silently never running on the machine everybody
  * assumed was covering it.
  *
- * `SHELLPILOT_S3_LIVE=0` skips regardless, for someone bisecting something
- * else. `SHELLPILOT_S3_LIVE=1` is the opposite lever and is checked by a test
+ * `OPSMAXX_S3_LIVE=0` skips regardless, for someone bisecting something
+ * else. `OPSMAXX_S3_LIVE=1` is the opposite lever and is checked by a test
  * that always runs: on a machine that is supposed to have Docker, a skip is a
  * failure.
  */
@@ -51,8 +51,8 @@ export function minioSkipReason(): string | null {
 }
 
 function computeSkipReason(): string | null {
-  if (process.env.SHELLPILOT_S3_LIVE === '0') {
-    return 'SHELLPILOT_S3_LIVE=0 asked for it to be skipped'
+  if (process.env.OPSMAXX_S3_LIVE === '0') {
+    return 'OPSMAXX_S3_LIVE=0 asked for it to be skipped'
   }
   try {
     run(['version', '--format', '{{.Server.Version}}'], 30_000)

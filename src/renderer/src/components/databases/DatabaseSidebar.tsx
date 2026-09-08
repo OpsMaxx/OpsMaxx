@@ -237,7 +237,7 @@ export function DatabaseSidebar(): React.JSX.Element {
               danger: true,
               onClick: () => {
                 deleteDatabase(ctx.id)
-                void window.shellpilot?.secrets.delete(ctx.id)
+                void window.opsmaxx?.secrets.delete(ctx.id)
                 toast(`${ctx.name} deleted`)
               }
             }

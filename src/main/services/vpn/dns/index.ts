@@ -82,7 +82,7 @@ export function dnsManagerFor(platform: NodeJS.Platform = process.platform): Dns
 /** Every run's changes are tagged with this so a sweep can find exactly ours
  *  and never someone else's (E10). */
 export function runTag(runId: string): string {
-  return `ShellPilot-${runId.replace(/[^A-Za-z0-9._-]/g, '_')}`
+  return `OpsMaxx-${runId.replace(/[^A-Za-z0-9._-]/g, '_')}`
 }
 
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/

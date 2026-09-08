@@ -126,7 +126,7 @@ describe('MCP authentication', () => {
         revoked: false
       }
     ]
-    writeFileSync(join(app.getPath('userData'), 'shellpilot-mcp-sessions.json'), JSON.stringify(legacy))
+    writeFileSync(join(app.getPath('userData'), 'opsmaxx-mcp-sessions.json'), JSON.stringify(legacy))
 
     const [migrated] = listSessions()
     expect(Array.isArray(migrated.workspaces)).toBe(true)

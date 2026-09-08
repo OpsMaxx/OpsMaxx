@@ -183,7 +183,7 @@ export class FrpAdminApi {
       // Either way it is not the user's password and must not read as one.
       throw new VpnError(
         'permission-denied',
-        `The tunnel program's control channel on ${ADMIN_HOST}:${this.port} rejected ShellPilot's credentials.`
+        `The tunnel program's control channel on ${ADMIN_HOST}:${this.port} rejected OpsMaxx's credentials.`
       )
     }
     if (res.status >= 300 && res.status < 400) {

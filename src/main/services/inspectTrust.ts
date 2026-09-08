@@ -35,8 +35,8 @@ const run = promisify(execFile)
 //     their certificate is installed while their Node script still fails is
 //     worse than telling them nothing.
 
-const CERT_BASENAME = 'shellpilot-inspector-ca.crt'
-const NSS_NICKNAME = 'ShellPilot Traffic Inspector'
+const CERT_BASENAME = 'opsmaxx-inspector-ca.crt'
+const NSS_NICKNAME = 'OpsMaxx Traffic Inspector'
 const LINUX_ANCHOR_DEBIAN = '/usr/local/share/ca-certificates'
 const LINUX_ANCHOR_RHEL = '/etc/pki/ca-trust/source/anchors'
 
@@ -195,7 +195,7 @@ async function nssTrustState(ctx: TrustContext): Promise<InspectTrustStore> {
       installable: false,
       hint: which('certutil')
         ? 'No NSS database found. Firefox creates one the first time it runs.'
-        : 'Install nss-tools (certutil) and ShellPilot can add the certificate for Firefox.'
+        : 'Install nss-tools (certutil) and OpsMaxx can add the certificate for Firefox.'
     }
   }
   const { stdout } = await tryRun('certutil', ['-d', `sql:${dbDir}`, '-L', '-n', NSS_NICKNAME])
@@ -208,7 +208,7 @@ async function nssTrustState(ctx: TrustContext): Promise<InspectTrustStore> {
   }
 }
 
-/** Stores ShellPilot deliberately does not touch. Reporting them is the whole
+/** Stores OpsMaxx deliberately does not touch. Reporting them is the whole
  *  contribution: each one is a real reason an intercepted request fails, and
  *  each has a one-line fix the user can apply themselves. */
 function reportOnlyStores(ctx: TrustContext): InspectTrustStore[] {
@@ -218,21 +218,21 @@ function reportOnlyStores(ctx: TrustContext): InspectTrustStore[] {
       label: 'Node.js',
       state: 'unknown',
       installable: false,
-      hint: `Node ignores the system store. Set NODE_EXTRA_CA_CERTS=${ctx.certPath} — sessions ShellPilot starts get this automatically.`
+      hint: `Node ignores the system store. Set NODE_EXTRA_CA_CERTS=${ctx.certPath} — sessions OpsMaxx starts get this automatically.`
     },
     {
       id: 'python',
       label: 'Python requests',
       state: 'unknown',
       installable: false,
-      hint: `requests uses its own bundle. Set REQUESTS_CA_BUNDLE=${ctx.certPath} — sessions ShellPilot starts get this automatically.`
+      hint: `requests uses its own bundle. Set REQUESTS_CA_BUNDLE=${ctx.certPath} — sessions OpsMaxx starts get this automatically.`
     },
     {
       id: 'java',
       label: 'Java',
       state: 'unknown',
       installable: false,
-      hint: `The JVM uses its own keystore: keytool -importcert -cacerts -alias shellpilot -file ${ctx.certPath}`
+      hint: `The JVM uses its own keystore: keytool -importcert -cacerts -alias opsmaxx -file ${ctx.certPath}`
     }
   ]
 }
@@ -295,7 +295,7 @@ export async function installSystemTrust(ctx: TrustContext): Promise<TrustChange
     return { ok: false, message: probe.reason ?? 'This machine has no way to ask for administrator rights.' }
   }
 
-  const reason = 'ShellPilot needs administrator rights once to trust its traffic-inspection certificate.'
+  const reason = 'OpsMaxx needs administrator rights once to trust its traffic-inspection certificate.'
   let command: string
   let args: string[]
   if (ctx.platform === 'darwin') {
@@ -363,7 +363,7 @@ export async function removeSystemTrust(ctx: TrustContext): Promise<TrustChangeR
   if (!probe.available) {
     return { ok: false, message: probe.reason ?? 'This machine has no way to ask for administrator rights.' }
   }
-  const reason = 'ShellPilot needs administrator rights once to remove its traffic-inspection certificate.'
+  const reason = 'OpsMaxx needs administrator rights once to remove its traffic-inspection certificate.'
   let command: string
   let args: string[]
   if (ctx.platform === 'darwin') {
@@ -568,7 +568,7 @@ export async function engageSystemProxy(
       return { ok: false, message: probe.reason ?? 'No way to ask for administrator rights.' }
     }
     const proc = await elevator.run({
-      reason: 'ShellPilot needs administrator rights to route this machine’s traffic through its inspector.',
+      reason: 'OpsMaxx needs administrator rights to route this machine’s traffic through its inspector.',
       command: 'sh',
       args: ['-c', script]
     })
@@ -643,7 +643,7 @@ export async function engageSystemProxy(
       return {
         ok: false,
         message:
-          'This desktop exposes no proxy setting ShellPilot can change. Use “Copy shell setup” and point applications at the proxy yourself.'
+          'This desktop exposes no proxy setting OpsMaxx can change. Use “Copy shell setup” and point applications at the proxy yourself.'
       }
     }
     const get = async (schema: string, k: string): Promise<string> =>
@@ -714,7 +714,7 @@ export async function restoreSystemProxy(): Promise<TrustChangeResult> {
       return { ok: false, message: 'Cannot restore the proxy settings without administrator rights.' }
     }
     const proc = await elevator.run({
-      reason: 'ShellPilot needs administrator rights to restore this machine’s proxy settings.',
+      reason: 'OpsMaxx needs administrator rights to restore this machine’s proxy settings.',
       command: 'sh',
       args: ['-c', script]
     })
@@ -725,7 +725,7 @@ export async function restoreSystemProxy(): Promise<TrustChangeResult> {
       return {
         ok: false,
         declined: exit.declined,
-        message: 'The proxy settings were not restored. ShellPilot will try again next time it starts.'
+        message: 'The proxy settings were not restored. OpsMaxx will try again next time it starts.'
       }
     }
     await clearBackup()

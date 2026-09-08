@@ -472,7 +472,7 @@ export function ruleNotice(rule: Rule, row: StoredAlertRow, outcome: RuleOutcome
     // Our words, the rule's name and the job's title — all typed by the user —
     // plus a kind from a closed list. No remote output reaches this string, for
     // the reason written at the top of shared/webhook.ts.
-    summary: `ShellPilot rule "${rule.name}" ${what} after a ${rule.trigger.kind} alert ${rule.trigger.event}.`
+    summary: `OpsMaxx rule "${rule.name}" ${what} after a ${rule.trigger.kind} alert ${rule.trigger.event}.`
   }
   if (typeof row.value === 'number') notice.value = row.value
   if (typeof row.threshold === 'number') notice.threshold = row.threshold
@@ -579,7 +579,7 @@ export function sanitiseRules(raw: unknown): Rule[] {
   return out
 }
 
-export const RULES_FILE = 'shellpilot-rules.json'
+export const RULES_FILE = 'opsmaxx-rules.json'
 
 // ---------------------------------------------------------------------------
 // What crosses the IPC boundary

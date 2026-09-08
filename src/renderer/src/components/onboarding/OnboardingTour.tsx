@@ -60,7 +60,7 @@ export function OnboardingTour(): React.JSX.Element | null {
   const last = step === steps.length - 1
 
   return (
-    <div className="tour-card" role="dialog" aria-label="ShellPilot walkthrough">
+    <div className="tour-card" role="dialog" aria-label="OpsMaxx walkthrough">
       <div className="row" style={{ gap: 8, alignItems: 'center' }}>
         <Compass size={16} style={{ color: 'var(--accent-ink)' }} />
         <b>{current.title}</b>

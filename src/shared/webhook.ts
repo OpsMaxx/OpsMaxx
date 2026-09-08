@@ -1,6 +1,6 @@
 // Outbound alert delivery.
 //
-// This is the first outbound network call ShellPilot makes to an endpoint the
+// This is the first outbound network call OpsMaxx makes to an endpoint the
 // user chooses, which makes the payload a security decision rather than a
 // formatting one. An alert naming a host and a unit is useful; an alert
 // carrying a log line carries whatever was in that log line to a third-party
@@ -57,8 +57,8 @@ export const ALERT_KINDS = [
 export type AlertKind = (typeof ALERT_KINDS)[number]
 
 export interface AlertPayload {
-  // Lets a shared endpoint tell ShellPilot's posts from anything else's.
-  source: 'shellpilot'
+  // Lets a shared endpoint tell OpsMaxx's posts from anything else's.
+  source: 'opsmaxx'
   version: string
   event: AlertEvent
   kind: AlertKind
@@ -84,7 +84,7 @@ export interface AlertPayload {
   // The endpoint needs this more than the desktop does. A person who stops
   // getting notifications about a host still has the app in front of them; an
   // endpoint that stops receiving has no way to tell a damped alert from a
-  // ShellPilot that died, and "we went quiet on purpose, here is when we will
+  // OpsMaxx that died, and "we went quiet on purpose, here is when we will
   // speak again" is the difference between a working integration and a silent
   // one.
   damped?: boolean

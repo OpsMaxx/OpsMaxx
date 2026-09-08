@@ -1,8 +1,8 @@
-import type { ShellPilotApi } from './index'
+import type { OpsMaxxApi } from './index'
 
 declare global {
   interface Window {
-    shellpilot: ShellPilotApi
+    opsmaxx: OpsMaxxApi
   }
 }
 

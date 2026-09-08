@@ -193,7 +193,7 @@ async function probeWin32(): Promise<ElevationProbe> {
     cached = {
       available: false,
       method: 'none',
-      reason: `${powershellPath()} is missing, so ShellPilot cannot ask Windows for administrator rights.`
+      reason: `${powershellPath()} is missing, so OpsMaxx cannot ask Windows for administrator rights.`
     }
   }
   return cached

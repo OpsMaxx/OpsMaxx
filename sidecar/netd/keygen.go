@@ -12,7 +12,7 @@ import (
 // Key generation, so that making a peer of your own does not mean installing
 // wireguard-tools.
 //
-// ShellPilot bundles everything needed to *run* WireGuard and, until this
+// OpsMaxx bundles everything needed to *run* WireGuard and, until this
 // existed, nothing at all to make a key with. Importing a provider's `.conf`
 // worked because the key is in the file; standing up your own peer meant
 // `wg genkey` in a terminal, which meant installing the very package the

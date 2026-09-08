@@ -9,7 +9,7 @@ import { setMcpConfig, resetMcpAuthForTests } from '../src/main/services/mcpAuth
 import { startMcpServer, stopMcpServer } from '../src/main/services/mcpServer'
 import { onCliPairingEvent, type CliPairingEvent } from '../src/main/services/cliPairing'
 
-// Exercises the whole `shellpilot claude|codex|run` launcher path against the
+// Exercises the whole `opsmaxx claude|codex|run` launcher path against the
 // real HTTP server: /pair/start never leaks the code (only an in-process
 // event, standing in for the app UI, does), /pair/confirm mints a real
 // session, and the compiled CLI's `bridge` subcommand relays a genuine MCP

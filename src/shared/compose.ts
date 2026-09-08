@@ -112,9 +112,9 @@ export const COMPOSE_FAILURE_HELP: Record<ComposeFailure, string> = {
   'permission-denied':
     'This user cannot talk to the docker socket, so compose cannot be asked anything. The compose FILES may still be readable — the filesystem search below does not go through the daemon.',
   'compose-unavailable':
-    'Docker is here, but `docker compose` is not. That is normal on servers still running the v1 `docker-compose` script, which is a separate program with a different command line. ShellPilot does not drive v1: its flags differ enough that guessing would be running an unverified command on someone else\u2019s server.',
+    'Docker is here, but `docker compose` is not. That is normal on servers still running the v1 `docker-compose` script, which is a separate program with a different command line. OpsMaxx does not drive v1: its flags differ enough that guessing would be running an unverified command on someone else\u2019s server.',
   'compose-provider-unsupported':
-    'This host runs podman, and podman delegates `compose` to an external provider — here, `podman-compose`, which is a different program with a different command line. ShellPilot does not drive it, and the reason is not tidiness: the ONE thing that keeps a compose read from printing every password in the project is `--no-interpolate --no-env-resolution`, and podman-compose rejects both flags outright. Measured on podman 5.8.4 with podman-compose 1.6.0, `podman compose config` printed a `.env` password in plaintext and there is no flag that stops it. Reading these projects here would mean choosing between an unverified command line and a credential dump.',
+    'This host runs podman, and podman delegates `compose` to an external provider — here, `podman-compose`, which is a different program with a different command line. OpsMaxx does not drive it, and the reason is not tidiness: the ONE thing that keeps a compose read from printing every password in the project is `--no-interpolate --no-env-resolution`, and podman-compose rejects both flags outright. Measured on podman 5.8.4 with podman-compose 1.6.0, `podman compose config` printed a `.env` password in plaintext and there is no flag that stops it. Reading these projects here would mean choosing between an unverified command line and a credential dump.',
   'invalid-project':
     'Compose read the file and refused it. The line below is compose\u2019s own, verbatim \u2014 it names the service and the problem, and this panel has nothing to add to it.',
   unknown: 'Compose returned an error that could not be classified. The raw message is below.'
@@ -168,7 +168,7 @@ const COMPOSE_MISSING =
  * The name between the affixes is `-` followed by uppercase letters ONLY, and
  * that is a constraint rather than a convention: docker.ts's `section()` finds
  * the end of a block by searching for the next string matching `ANY_MARKER`,
- * which is `/===SHELLPILOT-[A-Z]+===/`. A marker spelled any other way is
+ * which is `/===OPSMAXX-[A-Z]+===/`. A marker spelled any other way is
  * invisible to that search, so the block before it would silently swallow every
  * block after it — a config parse that quietly contained the service list too.
  *
@@ -176,12 +176,12 @@ const COMPOSE_MISSING =
  * the two collectors ever share a round trip.
  */
 export const COMPOSE_MARKERS = {
-  version: '===SHELLPILOT-CVER===',
-  ls: '===SHELLPILOT-CLS===',
-  find: '===SHELLPILOT-CFIND===',
-  config: '===SHELLPILOT-CCFG===',
-  services: '===SHELLPILOT-CSVC===',
-  envNames: '===SHELLPILOT-CENV===',
+  version: '===OPSMAXX-CVER===',
+  ls: '===OPSMAXX-CLS===',
+  find: '===OPSMAXX-CFIND===',
+  config: '===OPSMAXX-CCFG===',
+  services: '===OPSMAXX-CSVC===',
+  envNames: '===OPSMAXX-CENV===',
   end: DOCKER_MARKERS.end
 } as const
 
@@ -1039,12 +1039,12 @@ export function joinComposeState(
  * What the panel is allowed to say about a `.env`, and the sentence it says it with.
  *
  * On screen, verbatim. The operator should learn this from the UI rather than
- * from a surprise, because "ShellPilot cannot show me this" is a support
- * question and "ShellPilot showed my production database password to whoever
+ * from a surprise, because "OpsMaxx cannot show me this" is a support
+ * question and "OpsMaxx showed my production database password to whoever
  * was standing behind me" is an incident.
  */
 export const COMPOSE_ENV_DISCLOSURE =
-  'ShellPilot reads the NAMES of the variables in this file and never their values. ' +
+  'OpsMaxx reads the NAMES of the variables in this file and never their values. ' +
   'The values are cut off on the server itself, so they do not cross the connection, ' +
   'are not held in memory here, and cannot appear in an error message. A variable is ' +
   'shown as set or empty; to see a value, open the file on the server.'
@@ -1656,7 +1656,7 @@ export function planComposeImageEdit(
 // THE APP REMEMBERS NOTHING, AND DOES NOT NEED TO. The roadmap assumed a new
 // per-project "last applied image" record, because the app does not remember
 // the previous tag. It does not have to: `buildComposeWriteCommand` has always
-// run `cp -p <file> <file>.shellpilot-bak` BEFORE the write, so the previous
+// run `cp -p <file> <file>.opsmaxx-bak` BEFORE the write, so the previous
 // version of the file is already on the host. That record is better than
 // anything this app could keep -- it survives the app being closed,
 // reinstalled, or run from somebody else's laptop, and it cannot drift from
@@ -1670,9 +1670,9 @@ export function planComposeImageEdit(
 // same planner, same approval, same dialog, same write.
 //
 // WHAT IT IS, SAID PLAINLY. One level deep, and it is "the file as it was
-// immediately before ShellPilot last wrote to it" -- NOT "the last known good
+// immediately before OpsMaxx last wrote to it" -- NOT "the last known good
 // version" and not "what is running". Those are three different claims and only
-// the first is true. A stack whose bad tag was applied by two ShellPilot edits
+// the first is true. A stack whose bad tag was applied by two OpsMaxx edits
 // has a backup holding the first bad tag, and `revertDescription` says which
 // edit it is undoing so nobody reads it as a guarantee.
 
@@ -1694,7 +1694,7 @@ export const COMPOSE_BACKUP_MARKER = '===SP-COMPOSE-BAK==='
 export type ComposeBackupState = 'present' | 'absent' | 'denied'
 
 export function composeBackupPath(path: string): string {
-  return `${path}.shellpilot-bak`
+  return `${path}.opsmaxx-bak`
 }
 
 export function buildComposeBackupReadCommand(
@@ -1772,7 +1772,7 @@ export function planComposeRevert(
       ok: false,
       refusal: 'no-backup',
       reason:
-        'there is no ShellPilot backup beside this compose file on the server, so there is no previous tag to go back to. A backup is only written when ShellPilot itself edits the file.'
+        'there is no OpsMaxx backup beside this compose file on the server, so there is no previous tag to go back to. A backup is only written when OpsMaxx itself edits the file.'
     }
   }
   const was = composeServiceImage(backupText, service)
@@ -1806,7 +1806,7 @@ export function planComposeRevert(
 
 /** What the button is about to do, in one sentence, with no promise in it. */
 export function revertDescription(r: Extract<ComposeRevertPlan, { ok: true }>): string {
-  return `Put \`${r.plan.service}\` back to \`${r.to}\`, which is what it was pinned to immediately before ShellPilot last edited this file. It is on \`${r.from}\` now. This is not a guarantee that \`${r.to}\` was working — it is the previous line, nothing more.`
+  return `Put \`${r.plan.service}\` back to \`${r.to}\`, which is what it was pinned to immediately before OpsMaxx last edited this file. It is on \`${r.from}\` now. This is not a guarantee that \`${r.to}\` was working — it is the previous line, nothing more.`
 }
 
 /**
@@ -1846,7 +1846,7 @@ export function applyComposeImageEdit(fileText: string, plan: ComposeImageEditPl
  * also READABLE — the operator can see the file they are about to write in the
  * command itself.
  */
-export const COMPOSE_HEREDOC = 'SHELLPILOT_COMPOSE_EOF'
+export const COMPOSE_HEREDOC = 'OPSMAXX_COMPOSE_EOF'
 
 /**
  * Write a compose file back, keeping a copy of what was there.
@@ -1872,8 +1872,8 @@ export function buildComposeWriteCommand(
     throw new Error('refusing to write compose content containing the heredoc delimiter')
   }
   const body = content.endsWith('\n') ? content : `${content}\n`
-  const tmp = quote(`${path}.shellpilot-tmp`)
-  const bak = quote(`${path}.shellpilot-bak`)
+  const tmp = quote(`${path}.opsmaxx-tmp`)
+  const bak = quote(`${path}.opsmaxx-bak`)
   const target = quote(path)
   const sudo = opts.sudo ? 'sudo -n ' : ''
   return [

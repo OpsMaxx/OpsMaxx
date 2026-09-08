@@ -33,7 +33,7 @@ export function SshSessions(): React.JSX.Element {
   )
 
   const load = (): void => {
-    void window.shellpilot?.ssh.poolList().then((p) => setPool(p ?? []))
+    void window.opsmaxx?.ssh.poolList().then((p) => setPool(p ?? []))
   }
 
   useEffect(() => {
@@ -102,7 +102,7 @@ export function SshSessions(): React.JSX.Element {
             onClick={async () => {
               const close = async (): Promise<void> => {
                 try {
-                  await window.shellpilot?.ssh.poolClose(p.key)
+                  await window.opsmaxx?.ssh.poolClose(p.key)
                   toast(
                     `Disconnected ${p.username}@${p.host}. The next connection to it will authenticate again.`,
                     'ok'

@@ -6,10 +6,10 @@ package main
 // # Nothing is ever installed
 //
 // There is no setuid bit, no `setcap`, no launchd plist, no systemd unit, no
-// Windows service and no privileged helper of any kind. ShellPilot asks the
+// Windows service and no privileged helper of any kind. OpsMaxx asks the
 // operating system for administrator rights once per launch (pkexec/sudo on
 // Linux, UAC on Windows) and the rights die with the process. Deleting
-// ShellPilot therefore leaves nothing behind that can still become root, which
+// OpsMaxx therefore leaves nothing behind that can still become root, which
 // is the property an installed helper can never have: an installed helper is a
 // permanent root-capable surface maintained by an app that may not even be on
 // the machine any more. Do not add one. If a future change appears to need
@@ -111,19 +111,19 @@ const (
 // mode the protocol is on the socket.
 func runPrivileged(o *options) int {
 	if err := requireRoot(); err != nil {
-		fmt.Fprintf(os.Stderr, "shellpilot-netd: %s\n", err.Error())
+		fmt.Fprintf(os.Stderr, "opsmaxx-netd: %s\n", err.Error())
 		return exitPrivilegedSetup
 	}
 
 	nonce, err := loadNonce(o.nonceFile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "shellpilot-netd: %s\n", err.Error())
+		fmt.Fprintf(os.Stderr, "opsmaxx-netd: %s\n", err.Error())
 		return exitPrivilegedSetup
 	}
 
 	ln, err := listenControl(o.socket)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "shellpilot-netd: %s\n", err.Error())
+		fmt.Fprintf(os.Stderr, "opsmaxx-netd: %s\n", err.Error())
 		return exitPrivilegedSetup
 	}
 	// The socket file is ours to remove: leaving one behind would make the
@@ -135,7 +135,7 @@ func runPrivileged(o *options) int {
 	// client, ever.
 	_ = ln.Close()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "shellpilot-netd: %s\n", err.Error())
+		fmt.Fprintf(os.Stderr, "opsmaxx-netd: %s\n", err.Error())
 		return exitPrivilegedSetup
 	}
 	defer conn.Close()
@@ -145,7 +145,7 @@ func runPrivileged(o *options) int {
 	if err := authenticate(conn, br, out, nonce); err != nil {
 		// Never says which part was wrong and never echoes what was sent: the
 		// only useful audience for a detailed answer here is someone probing.
-		fmt.Fprintf(os.Stderr, "shellpilot-netd: %s\n", err.Error())
+		fmt.Fprintf(os.Stderr, "opsmaxx-netd: %s\n", err.Error())
 		return exitPrivilegedAuth
 	}
 
@@ -189,7 +189,7 @@ func requireRoot() error {
 	}
 	if os.Getuid() != 0 {
 		return errors.New(
-			"--privileged must run as root; ShellPilot elevates it once per launch and installs nothing")
+			"--privileged must run as root; OpsMaxx elevates it once per launch and installs nothing")
 	}
 	return nil
 }
@@ -507,8 +507,8 @@ func classifyDeviceErrorFor(goos string, err error, name string) error {
 		// by far the likeliest reason. Naming the file and the likely cause
 		// beats "Error loading wintun.dll".
 		return codedf(ErrUnsupported,
-			"System mode on Windows needs wintun.dll, which ShellPilot installs next to its network helper, "+
-				"and it could not be loaded. Antivirus quarantine is the usual cause; reinstalling ShellPilot puts it back. "+
+			"System mode on Windows needs wintun.dll, which OpsMaxx installs next to its network helper, "+
+				"and it could not be loaded. Antivirus quarantine is the usual cause; reinstalling OpsMaxx puts it back. "+
 				"Userspace mode needs no driver and works in the meantime.")
 	}
 	if denied {
@@ -566,7 +566,7 @@ func configureLinux(name string, addrs []netip.Prefix) error {
 	return runTool(ip, "link", "set", "dev", name, "up")
 }
 
-// macOS. Present so the binary is whole, and NEVER REACHED from ShellPilot:
+// macOS. Present so the binary is whole, and NEVER REACHED from OpsMaxx:
 // the driver refuses system mode on darwin (E02) because there is no Developer
 // ID, so there is no signed helper and `osascript` cannot carry the control
 // channel. Treat this function as unverified.
@@ -678,7 +678,7 @@ func findTool(name string) (string, error) {
 		}
 	}
 	return "", codedf(ErrUnsupported,
-		"%q is not installed in any of the standard locations, so ShellPilot cannot configure a system interface on this machine.", name)
+		"%q is not installed in any of the standard locations, so OpsMaxx cannot configure a system interface on this machine.", name)
 }
 
 // runTool executes one configuration command with a fixed, minimal

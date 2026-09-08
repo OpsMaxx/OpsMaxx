@@ -89,7 +89,7 @@ export function InspectFlowDetail({
         )}
         {tab === 'request' && flow.request.headersTruncated && (
           <div className="sub">
-            The header list was longer than ShellPilot records. The request itself was forwarded
+            The header list was longer than OpsMaxx records. The request itself was forwarded
             whole.
           </div>
         )}
@@ -213,7 +213,7 @@ function BodyView({
           onClick={() => {
             setLoading(true)
             setError(null)
-            void window.shellpilot?.inspect
+            void window.opsmaxx?.inspect
               .body(flow.id, side, offset, PAGE)
               .then((page) => {
                 setPages((p) => [...p, decode(page.base64)])

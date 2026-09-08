@@ -15,8 +15,8 @@ import { redactOutput } from './secretRedaction'
 // It was rejected twice over.
 //
 // FIRST, docs/AI-SECURITY.md states plainly that `recordAudit` is called from
-// `mcpServer.ts` and nowhere else, so `shellpilot-ai-audit.jsonl` is a record
-// of THE MCP BRIDGE rather than of everything ShellPilot does. That is not a
+// `mcpServer.ts` and nowhere else, so `opsmaxx-ai-audit.jsonl` is a record
+// of THE MCP BRIDGE rather than of everything OpsMaxx does. That is not a
 // stale sentence — it is what the "no record of what an agent did" row in the
 // threat table rests on, and its whole value is that a reader can trust every
 // row in that file to be an agent's. A job is human-only by construction: it is
@@ -25,7 +25,7 @@ import { redactOutput } from './secretRedaction'
 // already detached on fifteen hosts has nothing pending to deny. So every row a
 // job wrote there would be an AI-labelled row no AI produced, which is exactly
 // the argument this repository already accepted for the local terminal and its
-// own `shellpilot-local-sessions.jsonl`. The precedent is followed rather than
+// own `opsmaxx-local-sessions.jsonl`. The precedent is followed rather than
 // reopened.
 //
 // SECOND, and this is the half that decided the MODULE rather than just the
@@ -45,7 +45,7 @@ import { redactOutput } from './secretRedaction'
 // WHAT IS NEVER RECORDED HERE: a job's OUTPUT. That lives in the history store
 // under its own 30-day retention, capped and redacted there. This file answers
 // "was this authorised, by whom, for exactly what" and nothing finer.
-const FILE = join(app.getPath('userData'), 'shellpilot-job-approvals.jsonl')
+const FILE = join(app.getPath('userData'), 'opsmaxx-job-approvals.jsonl')
 
 /** See the note on AUDIT_LOG_PATH. */
 export const APPROVAL_LOG_PATH = FILE

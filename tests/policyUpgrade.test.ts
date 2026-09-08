@@ -6,7 +6,7 @@ import { listGroups, getGroup, resetPolicyCacheForTests } from '../src/main/serv
 import { evaluateCapability, evaluateVpnControl } from '../src/main/services/policyEngine'
 import { AI_CAPABILITIES } from '../src/shared/mcp'
 
-const FILE = join(app.getPath('userData'), 'shellpilot-ai-policy.json')
+const FILE = join(app.getPath('userData'), 'opsmaxx-ai-policy.json')
 
 // A policy file written before manageServers and vpnControl existed: every
 // group is missing both keys, which is what every upgraded install looks like.

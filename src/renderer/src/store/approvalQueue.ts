@@ -81,14 +81,14 @@ export function startApprovalQueue(): () => void {
   if (useApprovalQueue.getState().started) return () => {}
   useApprovalQueue.setState({ started: true })
 
-  void window.shellpilot?.aiMcp
+  void window.opsmaxx?.aiMcp
     ?.listApprovals?.()
     .then((a) => useApprovalQueue.setState({ pending: a ?? [] }))
     .catch(() => {})
 
   // Read the real configured timeout. It stays null on failure, which is what
   // switches the countdown off rather than making one up.
-  void window.shellpilot?.aiMcp
+  void window.opsmaxx?.aiMcp
     ?.getConfig?.()
     .then((c) => {
       const s = c?.approvalTimeoutSeconds
@@ -96,7 +96,7 @@ export function startApprovalQueue(): () => void {
     })
     .catch(() => useApprovalQueue.setState({ timeoutSeconds: null }))
 
-  const off = bridgeOn('aiMcp.onApprovalEvent', window.shellpilot?.aiMcp?.onApprovalEvent, (e) => {
+  const off = bridgeOn('aiMcp.onApprovalEvent', window.opsmaxx?.aiMcp?.onApprovalEvent, (e) => {
     if (e.type === 'created') {
       useApprovalQueue.setState((s) => ({ pending: [...s.pending, e.request] }))
       return
@@ -158,7 +158,7 @@ export function resumeApprovals(): void {
  * answered, which is the precise confusion this whole feature exists to remove.
  */
 export async function respondToApproval(id: string, decision: 'approved' | 'denied'): Promise<void> {
-  await window.shellpilot?.aiMcp?.respondApproval?.(id, decision)
+  await window.opsmaxx?.aiMcp?.respondApproval?.(id, decision)
 }
 
 /**
@@ -169,7 +169,7 @@ export async function respondToApproval(id: string, decision: 'approved' | 'deni
  * second thing to keep in step with it.
  */
 export async function denyAndStopAllAi(): Promise<void> {
-  const result = await window.shellpilot?.aiMcp?.killAllSessions?.()
+  const result = await window.opsmaxx?.aiMcp?.killAllSessions?.()
   if (!result) {
     toast('AI access was not stopped — every session is still live.', 'error', {
       label: 'Open AI security',
@@ -193,7 +193,7 @@ export async function denyAndStopAllAi(): Promise<void> {
  * not. See useApprovalFuse.
  */
 export function canExtendFuse(): boolean {
-  return bridgeHas(window.shellpilot?.aiMcp as Record<string, unknown> | undefined, 'extendApproval')
+  return bridgeHas(window.opsmaxx?.aiMcp as Record<string, unknown> | undefined, 'extendApproval')
 }
 
 /**
@@ -212,7 +212,7 @@ export function canExtendFuse(): boolean {
  * never agreed to.
  */
 export async function extendApprovalFuse(id: string, seconds: number): Promise<void> {
-  const fn = (window.shellpilot?.aiMcp as unknown as Record<string, unknown> | undefined)?.extendApproval
+  const fn = (window.opsmaxx?.aiMcp as unknown as Record<string, unknown> | undefined)?.extendApproval
   if (typeof fn !== 'function') return
   await (fn as (id: string, seconds: number) => Promise<unknown>)(id, seconds)
 }

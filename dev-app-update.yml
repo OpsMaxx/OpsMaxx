@@ -4,4 +4,4 @@
 # exactly — updater.ts only reads this when app.isPackaged is false.
 provider: github
 owner: ghauri01
-repo: ShellPilot
+repo: OpsMaxx

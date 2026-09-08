@@ -521,19 +521,19 @@ describe('the reboot step', () => {
   })
 
   it('reads the post-boot check, keeping "no systemd" apart from "nothing failed"', () => {
-    expect(buildRebootVerify()).toContain('shellpilot-postboot/1')
+    expect(buildRebootVerify()).toContain('opsmaxx-postboot/1')
     const withSystemd = parseRebootVerify(
-      'shellpilot-postboot/1\nboot-id=new\nuptime=42\nunit-state=running\nfailed=\n'
+      'opsmaxx-postboot/1\nboot-id=new\nuptime=42\nunit-state=running\nfailed=\n'
     )
     expect(withSystemd.failed).toEqual([])
-    const without = parseRebootVerify('shellpilot-postboot/1\nboot-id=new\nuptime=42\nunit-state=\nfailed=\n')
+    const without = parseRebootVerify('opsmaxx-postboot/1\nboot-id=new\nuptime=42\nunit-state=\nfailed=\n')
     // null, not []. "Nothing has failed" and "we cannot see whether anything
     // has failed" are different answers and must never read the same.
     expect(without.failed).toBeNull()
   })
 
   it('proves the machine restarted, rather than assuming it from a dropped link', () => {
-    const after = parseRebootVerify('shellpilot-postboot/1\nboot-id=new\nuptime=9\nunit-state=running\nfailed=\n')
+    const after = parseRebootVerify('opsmaxx-postboot/1\nboot-id=new\nuptime=9\nunit-state=running\nfailed=\n')
     expect(verifyReboot('old', after)).toMatchObject({ kind: 'rebooted', ok: true })
     // Same boot id: the host is answering and never restarted. The reboot was
     // issued and something swallowed it.
@@ -541,7 +541,7 @@ describe('the reboot step', () => {
   })
 
   it('refuses to claim a restart it cannot prove', () => {
-    const noBootId = parseRebootVerify('shellpilot-postboot/1\nboot-id=\nuptime=9\nunit-state=running\nfailed=\n')
+    const noBootId = parseRebootVerify('opsmaxx-postboot/1\nboot-id=\nuptime=9\nunit-state=running\nfailed=\n')
     const v = verifyReboot(null, noBootId)
     expect(v.kind).toBe('unverifiable')
     expect(v.ok).toBe(false)
@@ -550,7 +550,7 @@ describe('the reboot step', () => {
 
   it('calls a server that came back with failed units degraded, not ok', () => {
     const after = parseRebootVerify(
-      'shellpilot-postboot/1\nboot-id=new\nuptime=9\nunit-state=degraded\nfailed=nginx.service postgresql.service \n'
+      'opsmaxx-postboot/1\nboot-id=new\nuptime=9\nunit-state=degraded\nfailed=nginx.service postgresql.service \n'
     )
     const v = verifyReboot('old', after)
     expect(v.kind).toBe('degraded')

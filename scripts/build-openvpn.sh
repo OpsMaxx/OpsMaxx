@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build OpenVPN from pinned upstream source for the platforms ShellPilot ships
+# Build OpenVPN from pinned upstream source for the platforms OpsMaxx ships
 # it on, and fold the results into resources/bin/manifest.json.
 #
 # Why bundle at all: until this script existed an OpenVPN profile could not
@@ -8,10 +8,10 @@
 # front of a feature the app otherwise sets up for them.
 #
 # Why this is licence-safe, in one paragraph so nobody has to re-derive it:
-# OpenVPN 2.x is GPL-2.0 with an OpenSSL linking exception. ShellPilot runs
+# OpenVPN 2.x is GPL-2.0 with an OpenSSL linking exception. OpsMaxx runs
 # `openvpn` as a *separate process* and talks to it over its management socket
 # — separate address space, no linking, no combined work. That is GPL-2.0 §2
-# "mere aggregation", so ShellPilot stays MIT. What bundling *does* create is
+# "mere aggregation", so OpsMaxx stays MIT. What bundling *does* create is
 # the GPL-2.0 §3 obligation on us as a distributor of GPL binaries: we must
 # offer the corresponding source. That is why this script also writes a source
 # tarball of the exact tree it built (see SRC_TARBALL below) — the release
@@ -100,7 +100,7 @@ case "$(uname -s)" in
     # the Windows note below. Exiting 1 here would fail the Windows release for
     # doing exactly the right thing. `verify-bin-manifest.mjs` is the check
     # that a platform is missing something it actually needs.
-    echo "==> $(uname -s): ShellPilot does not bundle OpenVPN here; nothing to build."
+    echo "==> $(uname -s): OpsMaxx does not bundle OpenVPN here; nothing to build."
     exit 0
     ;;
 esac
@@ -153,7 +153,7 @@ if [ "$HOST_OS" = darwin ]; then
   UNIVERSAL=1
   # Without this, clang stamps the runner's own OS version as the minimum and
   # the binary refuses to launch on anything older — a CI image bump would
-  # silently drop support for macOS versions ShellPilot still runs on, and the
+  # silently drop support for macOS versions OpsMaxx still runs on, and the
   # only symptom would be "binary-missing" on a user's Mac. Electron 43 itself
   # runs on macOS 11, so that is the floor.
   export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}"
@@ -286,13 +286,13 @@ fi
 # What is switched off, and why each one:
 #
 #   lzo, lz4     compression inside a TLS tunnel is the VORACLE attack;
-#                OpenVPN 2.6 disables it by default and ShellPilot's importer
+#                OpenVPN 2.6 disables it by default and OpsMaxx's importer
 #                strips `comp-lzo`/`compress` anyway. Removing the code
 #                removes two more dependencies to pin.
 #   plugins      `.ovpn` plugin directives are already rejected at import as
 #                arbitrary code execution. A build that cannot load a plugin
 #                cannot be talked into loading one.
-#   pkcs11       needs a host PKCS#11 module; ShellPilot has no UI for one.
+#   pkcs11       needs a host PKCS#11 module; OpsMaxx has no UI for one.
 #   dco          the kernel data-channel-offload module. Bundling a userspace
 #                binary that behaves differently depending on whether a kernel
 #                module happens to be loaded is not a thing we can test.
@@ -438,7 +438,7 @@ cp "$OPENSSL_SRC/LICENSE.txt" "$LIC_ROOT/OPENSSL-LICENSE.txt"
 {
   printf '%s\n' "openvpn $OPENVPN_TAG ($SRC_SHA)"
   printf '%s\n' "statically linked against openssl $OPENSSL_VERSION"
-  printf '%s\n' "corresponding source: openvpn-${OPENVPN_TAG#v}-source.tar.gz, attached to the ShellPilot release this binary shipped in"
+  printf '%s\n' "corresponding source: openvpn-${OPENVPN_TAG#v}-source.tar.gz, attached to the OpsMaxx release this binary shipped in"
 } >"$LIC_ROOT/VERSION"
 
 echo "==> merging into manifest"

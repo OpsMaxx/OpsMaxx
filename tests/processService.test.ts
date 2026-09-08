@@ -182,7 +182,7 @@ function makeService(
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'sp-proc-'))
-  file = join(root, 'shellpilot-processes.json')
+  file = join(root, 'opsmaxx-processes.json')
   spawns = []
   signals = []
   vi.useFakeTimers({
@@ -209,14 +209,14 @@ describe('the list survives a restart of the app', () => {
   })
 
   it('writes the list to its own file at 0600, not to the renderer blob', async () => {
-    // The renderer blob (shellpilot-data.json) is also the backup/export
+    // The renderer blob (opsmaxx-data.json) is also the backup/export
     // payload. A command line that will be executed on this machine does not
     // belong in a file that gets mailed around.
     const { service } = makeService()
     service.create(draft())
 
     expect(existsSync(file)).toBe(true)
-    expect(existsSync(join(root, 'shellpilot-data.json'))).toBe(false)
+    expect(existsSync(join(root, 'opsmaxx-data.json'))).toBe(false)
     expect(statSync(file).mode & 0o777).toBe(0o600)
     expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ v: 1 })
   })

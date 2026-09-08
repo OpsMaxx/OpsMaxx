@@ -57,7 +57,7 @@ import type { TrustChangeResult, TrustContext } from './inspectTrust'
 //
 //  3. **Stopping puts the machine back.** The system proxy is restored on
 //     stop, on quit, and on the next launch after a crash. A user left with no
-//     internet because ShellPilot died at the wrong moment is the worst thing
+//     internet because OpsMaxx died at the wrong moment is the worst thing
 //     this feature can do, and it is entirely preventable.
 
 const CA_KEY_SECRET_ID = 'inspect.ca.key'
@@ -204,7 +204,7 @@ async function mintCa(): Promise<InspectCaInfo> {
     fingerprint?: unknown
     notAfter?: unknown
     notBefore?: unknown
-  }>('inspect.ca.generate', { commonName: 'ShellPilot Traffic Inspector', validDays: 365 })
+  }>('inspect.ca.generate', { commonName: 'OpsMaxx Traffic Inspector', validDays: 365 })
 
   if (typeof res?.certPem !== 'string' || typeof res?.keyPem !== 'string') {
     throw new Error('The sidecar did not return a certificate authority.')
@@ -248,7 +248,7 @@ async function describeCa(certPem: string, keyPersisted: boolean): Promise<Inspe
     // otherwise pass that check and then start failing every request with a
     // certificate error nothing on screen explained.
     expiresInSec: Math.floor((new Date(cert.validTo).getTime() - Date.now()) / 1000),
-    commonName: cert.subject.split('\n').find((l) => l.startsWith('CN='))?.slice(3) ?? 'ShellPilot Traffic Inspector',
+    commonName: cert.subject.split('\n').find((l) => l.startsWith('CN='))?.slice(3) ?? 'OpsMaxx Traffic Inspector',
     certPath,
     keyPersisted
   }
@@ -428,9 +428,9 @@ async function doStart(opts: InspectStartOptions): Promise<InspectStatus> {
     throw new Error('The certificate authority key is unavailable. Regenerate the certificate to continue.')
   }
 
-  const engine = await resolveBundled('shellpilot-netd')
+  const engine = await resolveBundled('opsmaxx-netd')
   if (engine.available === false) {
-    throw new Error(engine.reason ?? 'The ShellPilot network sidecar is not available in this build.')
+    throw new Error(engine.reason ?? 'The OpsMaxx network sidecar is not available in this build.')
   }
 
   const spillDir = join(app.getPath('userData'), 'inspect-capture')
@@ -448,7 +448,7 @@ async function doStart(opts: InspectStartOptions): Promise<InspectStatus> {
   const needsCredentials = !isLoopbackBind(bindHost)
   const credentials = needsCredentials
     ? {
-        username: opts.username?.trim() || 'shellpilot',
+        username: opts.username?.trim() || 'opsmaxx',
         password: opts.password?.trim() || randomBytes(18).toString('base64url')
       }
     : null
@@ -459,7 +459,7 @@ async function doStart(opts: InspectStartOptions): Promise<InspectStatus> {
   const handle = await sup().spawn({
     id: RUN_ID,
     noun: 'traffic inspector',
-    command: engine.path ?? 'shellpilot-netd',
+    command: engine.path ?? 'opsmaxx-netd',
     args: [],
     cwd: app.getPath('userData'),
     exeSha256: engine.sha256,
@@ -827,7 +827,7 @@ export function inspectEnv(): InspectEnv {
     https_proxy: url,
     // Without this, every request to the machine's own services would be
     // bounced through the proxy — which usually works and occasionally
-    // deadlocks, when the service being called is ShellPilot itself.
+    // deadlocks, when the service being called is OpsMaxx itself.
     NO_PROXY: 'localhost,127.0.0.1,::1',
     no_proxy: 'localhost,127.0.0.1,::1',
     NODE_EXTRA_CA_CERTS: certPath,

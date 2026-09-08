@@ -36,7 +36,7 @@ const opened: HistoryStore[] = []
 beforeEach(() => {
   resetHistoryModuleForTests()
   delete process.env[DISABLE_ENV]
-  dir = mkdtempSync(join(tmpdir(), 'shellpilot-runbook-'))
+  dir = mkdtempSync(join(tmpdir(), 'opsmaxx-runbook-'))
   opened.length = 0
 })
 
@@ -132,7 +132,7 @@ describe('a note', () => {
 
   it('is written 0600, temp-then-rename, like every other file main owns', () => {
     saveRunbookNote(deps(), 'disk', null, 'anything')
-    const mode = statSync(join(dir, 'shellpilot-runbooks.json')).mode & 0o777
+    const mode = statSync(join(dir, 'opsmaxx-runbooks.json')).mode & 0o777
     expect(mode).toBe(0o600)
   })
 
@@ -167,18 +167,18 @@ describe('a note', () => {
   })
 
   it('says the notes file could not be read rather than reporting no notes', () => {
-    writeFileSync(join(dir, 'shellpilot-runbooks.json'), '{ this is not json', { mode: 0o600 })
+    writeFileSync(join(dir, 'opsmaxx-runbooks.json'), '{ this is not json', { mode: 0o600 })
     const view = readRunbook(deps(), 'disk', 'web-1')
     expect(view.notesUnreadable).toBe(true)
     expect(view.hostNote).toBeNull()
     // And the same call on a machine with no file at all says the opposite.
-    rmSync(join(dir, 'shellpilot-runbooks.json'))
+    rmSync(join(dir, 'opsmaxx-runbooks.json'))
     expect(readRunbook(deps(), 'disk', 'web-1').notesUnreadable).toBe(false)
   })
 
   it('drops a row a hand-edited file invented, rather than trusting it because it parsed', () => {
     writeFileSync(
-      join(dir, 'shellpilot-runbooks.json'),
+      join(dir, 'opsmaxx-runbooks.json'),
       JSON.stringify({
         v: 1,
         notes: [
@@ -191,7 +191,7 @@ describe('a note', () => {
     const view = readRunbook(deps(), 'disk', 'web-1')
     expect(view.notesUnreadable).toBe(false)
     expect(view.hostNote?.text).toBe('kept')
-    expect(readFileSync(join(dir, 'shellpilot-runbooks.json'), 'utf8')).toContain('not-an-alert-kind')
+    expect(readFileSync(join(dir, 'opsmaxx-runbooks.json'), 'utf8')).toContain('not-an-alert-kind')
   })
 })
 
@@ -331,7 +331,7 @@ describe('what was run the last three times it fired', () => {
     unreachable: 'failed',
     unhealthy: 'failed',
     // Not failures. Each is a case where nobody watched the command end:
-    // `abandoned` is ShellPilot stopping, `cancelled` never started, and
+    // `abandoned` is OpsMaxx stopping, `cancelled` never started, and
     // `orphaned` lost the wrapper's pid before an `rc` was written — which
     // `src/shared/jobs.ts` says may be a command that finished a microsecond
     // before it could record so, or one that died mid-upgrade.

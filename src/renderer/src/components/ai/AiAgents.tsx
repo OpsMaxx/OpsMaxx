@@ -74,15 +74,15 @@ function CreateSessionForm({
       return
     }
     try {
-      const result = await window.shellpilot?.aiMcp.createSession({
+      const result = await window.opsmaxx?.aiMcp.createSession({
         agentName: agentName.trim() || 'Unnamed agent',
         workspaces: selected.map((w) => ({ id: w.id, name: w.name })),
         groupId: group?.id ?? null,
         groupName: group?.name ?? 'No AI Access',
         ttlMinutes: ttl === 0 ? null : ttl
       })
-      if (!result) throw new Error('ShellPilot returned no session')
-      const status = await window.shellpilot?.aiMcp.status()
+      if (!result) throw new Error('OpsMaxx returned no session')
+      const status = await window.opsmaxx?.aiMcp.status()
       setRevealed(false)
       setIssued({ token: result.token, port: status?.running ? status.port : null })
       onCreated()
@@ -98,7 +98,7 @@ function CreateSessionForm({
   if (issued) {
     const url = `http://127.0.0.1:${issued.port}/mcp`
     const jsonConfig = JSON.stringify(
-      { mcpServers: { shellpilot: { url, headers: { Authorization: `Bearer ${issued.token}` } } } },
+      { mcpServers: { opsmaxx: { url, headers: { Authorization: `Bearer ${issued.token}` } } } },
       null,
       2
     )
@@ -114,7 +114,7 @@ function CreateSessionForm({
                 <TriangleAlert size={13} /> Nothing can connect yet
               </div>
               <div className="s-desc">
-                The token below is valid, but AI &amp; MCP access is switched off, so ShellPilot is not
+                The token below is valid, but AI &amp; MCP access is switched off, so OpsMaxx is not
                 listening for any agent.
               </div>
             </div>
@@ -124,7 +124,7 @@ function CreateSessionForm({
           </div>
         )}
         <div className="s-desc">
-          ShellPilot keeps only a hash of this token, so this is the only time it can show it to
+          OpsMaxx keeps only a hash of this token, so this is the only time it can show it to
           you — if you lose it, revoke the session and create a new one. It is hidden below
           until you ask for it. Copy the block below into an MCP client that speaks
           Streamable HTTP (e.g. Gemini CLI). <b>Claude Desktop cannot use it</b> — it ignores{' '}
@@ -132,7 +132,7 @@ function CreateSessionForm({
           launches stdio servers; use <b>Overview → Connect Claude Desktop</b>, which writes the
           bridge entry it does understand. For Claude Code, <b>Overview → Connect Claude Code</b>
           gives you a one-line command; Codex has{' '}
-          <code className="mono">shellpilot codex</code>.
+          <code className="mono">opsmaxx codex</code>.
         </div>
         {issued.port !== null && (
           <div className="setting-row">
@@ -256,9 +256,9 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
   const [groups, setGroups] = useState<AccessGroup[]>([])
 
   const load = (): void => {
-    void window.shellpilot?.aiMcp.listSessions().then((s) => setSessions(s ?? []))
-    void window.shellpilot?.aiPolicy.listWorkspaces().then((w) => setWorkspaces(w ?? []))
-    void window.shellpilot?.aiPolicy.listGroups().then((g) => setGroups(g ?? []))
+    void window.opsmaxx?.aiMcp.listSessions().then((s) => setSessions(s ?? []))
+    void window.opsmaxx?.aiPolicy.listWorkspaces().then((w) => setWorkspaces(w ?? []))
+    void window.opsmaxx?.aiPolicy.listGroups().then((g) => setGroups(g ?? []))
   }
 
   useEffect(() => {
@@ -278,7 +278,7 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
   }
 
   const killAll = async (): Promise<void> => {
-    const result = await window.shellpilot?.aiMcp.killAllSessions()
+    const result = await window.opsmaxx?.aiMcp.killAllSessions()
     load()
     if (!result) {
       // "Failed" on a safety control is the least useful word available: the
@@ -300,7 +300,7 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
       <h2>{sessionsOnly ? 'Active Sessions' : 'AI Agents'}</h2>
       <div className="sub">
         {sessionsOnly
-          ? 'Every agent currently authorized to talk to ShellPilot, with its workspace(s) and access group.'
+          ? 'Every agent currently authorized to talk to OpsMaxx, with its workspace(s) and access group.'
           : 'Create a scoped session for each AI client, then paste its token into that client\'s MCP configuration.'}
       </div>
 
@@ -330,8 +330,8 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
               <button
                 className="btn sm danger outline"
                 onClick={async () => {
-                  await window.shellpilot?.aiMcp.revokeSession(s.id)
-                  toast(`${s.agentName} can no longer reach ShellPilot.`, 'ok')
+                  await window.opsmaxx?.aiMcp.revokeSession(s.id)
+                  toast(`${s.agentName} can no longer reach OpsMaxx.`, 'ok')
                   load()
                 }}
               >
@@ -350,7 +350,7 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
               title="Remove this session from the list entirely — revokes it too, if it's still live"
               onClick={async () => {
                 if (!confirm(`Delete the "${s.agentName}" session? This can't be undone.`)) return
-                await window.shellpilot?.aiMcp.deleteSession(s.id)
+                await window.opsmaxx?.aiMcp.deleteSession(s.id)
                 toast(`Deleted ${s.agentName}`, 'ok')
                 load()
               }}

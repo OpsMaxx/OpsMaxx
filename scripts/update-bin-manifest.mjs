@@ -10,7 +10,7 @@
 //
 // Usage: node scripts/update-bin-manifest.mjs <binaryName>
 //   e.g. node scripts/update-bin-manifest.mjs frpc
-//        node scripts/update-bin-manifest.mjs shellpilot-netd
+//        node scripts/update-bin-manifest.mjs opsmaxx-netd
 //        node scripts/update-bin-manifest.mjs wintun.dll
 //
 // A name with no extension is an executable and picks up `.exe` under the
@@ -96,7 +96,7 @@ async function main() {
     if (!st.isFile() || st.size === 0) continue
     // `version` is the field binaries.ts reads. It matters: without it the
     // resolver falls back to running the binary with --version, and
-    // shellpilot-netd answers that in JSON — so the engine version shown in
+    // opsmaxx-netd answers that in JSON — so the engine version shown in
     // the UI would be a JSON document rather than a version.
     const version = process.env[`${name.toUpperCase().replace(/[-.]/g, '_')}_VERSION`]
     manifest.binaries[`${dir}/${fileNameFor(name, dir)}`] = {

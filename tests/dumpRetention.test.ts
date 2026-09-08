@@ -64,7 +64,7 @@ describe('a dump is not a bundle, and neither retention sees the other', () => {
 
   it('does not let dump retention touch a bundle', () => {
     const p = planDumpRetention(
-      [gen('shellpilot-20260101T000000Z.spbackup', 1), gen(at('app', 2), 2)] as never,
+      [gen('opsmaxx-20260101T000000Z.spbackup', 1), gen(at('app', 2), 2)] as never,
       1,
       'app'
     )
@@ -80,7 +80,7 @@ describe('reading a database name back out of a dump object', () => {
   })
 
   it('is null for anything that is not one of ours', () => {
-    for (const n of ['dump.sql', 'shellpilot-20260101T000000Z.spbackup', 'shellpilot-dump-app.sql']) {
+    for (const n of ['dump.sql', 'opsmaxx-20260101T000000Z.spbackup', 'opsmaxx-dump-app.sql']) {
       expect(dumpDatabaseOf(n), n).toBeNull()
     }
   })

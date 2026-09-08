@@ -1,5 +1,5 @@
-===SHELLPILOT-ENGINE===
-===SHELLPILOT-DFV===
+===OPSMAXX-ENGINE===
+===OPSMAXX-DFV===
 Images space usage:
 
 REPOSITORY                 TAG         IMAGE ID      CREATED     SIZE        SHARED SIZE  UNIQUE SIZE  CONTAINERS
@@ -18,4 +18,4 @@ Local Volumes space usage:
 
 VOLUME NAME  LINKS       SIZE
 spvol        1           0B
-===SHELLPILOT-END===
+===OPSMAXX-END===

@@ -48,7 +48,7 @@ const POLL_MS = 1_500
  * and a button that silently does nothing is worse than an absent one.
  */
 function processBridge(): ProcessesBridge | null {
-  const p = (window.shellpilot as { processes?: Partial<ProcessesBridge> } | undefined)?.processes
+  const p = (window.opsmaxx as { processes?: Partial<ProcessesBridge> } | undefined)?.processes
   return p && typeof p.list === 'function' && typeof p.start === 'function'
     ? (p as ProcessesBridge)
     : null
@@ -183,7 +183,7 @@ export function ProcessesPanel(): React.JSX.Element {
     return (
       <div className="panel-body">
         <div className="s-desc">
-          This build of ShellPilot cannot supervise local processes.
+          This build of OpsMaxx cannot supervise local processes.
         </div>
       </div>
     )
@@ -323,7 +323,7 @@ export function ProcessesPanel(): React.JSX.Element {
             below before it is stored.
             {/* A vault entry is identified rather than PICKED, and that is a
                 boundary rather than an oversight: a module may not reach
-                `window.shellpilot.vault` (MODULE_FORBIDDEN_BRIDGE), which
+                `window.opsmaxx.vault` (MODULE_FORBIDDEN_BRIDGE), which
                 returns every entry with its password in it. A picker needs
                 main to offer names and ids WITHOUT values — a channel that
                 does not exist yet, and adding one is a decision about the

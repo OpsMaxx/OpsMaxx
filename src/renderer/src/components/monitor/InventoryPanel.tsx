@@ -170,16 +170,16 @@ export function InventoryPanel({
     try {
       // A sweep now, so a host whose facts have never been collected gets them
       // without waiting for the background interval.
-      if (bridgeHas(window.shellpilot?.fleet as Record<string, unknown> | undefined, 'sampleNow')) {
-        await window.shellpilot?.fleet?.sampleNow()
+      if (bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'sampleNow')) {
+        await window.opsmaxx?.fleet?.sampleNow()
       }
       // And a read of what main already holds, which is the part that fills the
       // table immediately: the sampler has been collecting facts since its
       // first sweep whether or not this panel was ever open.
-      if (!bridgeHas(window.shellpilot?.fleet as Record<string, unknown> | undefined, 'facts')) return
+      if (!bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'facts')) return
       await Promise.all(
         servers.map(async (s) => {
-          const r = await window.shellpilot?.fleet?.facts(s.id)
+          const r = await window.opsmaxx?.fleet?.facts(s.id)
           if (!r) return
           if (r.facts && r.at !== undefined) reportFacts(s.id, r.facts, r.at)
           if (r.error) reportFactsError(s.id, r.error, r.errorAt ?? Date.now())
@@ -248,7 +248,7 @@ export function InventoryPanel({
         <div className="panel-empty">
           <p className="panel-empty-title">No server facts have been collected yet.</p>
           <p className="panel-empty-body">
-            ShellPilot collects them about once an hour, on the same background sweep as metrics —
+            OpsMaxx collects them about once an hour, on the same background sweep as metrics —
             so a server added in the last hour, or an estate whose background checking has just
             been switched on, will not have any yet. Press <b>Check now</b> to sweep immediately,
             and make sure background checking is on in Settings. Nothing is installed, refreshed or
@@ -296,7 +296,7 @@ export function InventoryPanel({
             {summary.staleMetadata > 0 && (
               <span
                 className="state-watch"
-                title="ShellPilot never refreshes a package cache — refreshing is a network operation and on some package managers it can break the server — so a count read out of an old cache is reported with the cache's age beside it rather than silently presented as current."
+                title="OpsMaxx never refreshes a package cache — refreshing is a network operation and on some package managers it can break the server — so a count read out of an old cache is reported with the cache's age beside it rather than silently presented as current."
               >
                 {summary.staleMetadata} server{summary.staleMetadata === 1 ? '' : 's'} counted from a
                 stale package cache

@@ -23,7 +23,7 @@ let app: AppStore
 
 beforeAll(async () => {
   ;(globalThis as { window?: unknown }).window = {
-    shellpilot: {
+    opsmaxx: {
       getVersion: () => Promise.resolve('9.9.9'),
       notify: {
         show: (title: string, body: string) => {

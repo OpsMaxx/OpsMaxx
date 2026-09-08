@@ -1340,7 +1340,7 @@ details[open] > .disclosure-head .chev {
   justify-content: space-between;
   /* Both halves are identity strings and there was no gap between them, so a
      server name longer than the card ran straight into its address and pushed
-     the address off the edge — "TestServerShellPilot169.58.227.8", with the
+     the address off the edge — "TestServerOpsMaxx169.58.227.8", with the
      last octet gone. A clipped IP is not a shortened IP, it is a different one,
      and nothing on screen said it had been cut. */
   gap: var(--sp-3);
@@ -4041,7 +4041,7 @@ details[open] > .disclosure-head .chev {
 
 /* The client ships a close button and a click-outside backdrop for the modal it
    normally is. Here it is a pane: there is nothing to close, and a backdrop
-   over the whole app would swallow clicks meant for the rest of ShellPilot. */
+   over the whole app would swallow clicks meant for the rest of OpsMaxx. */
 .http-client-host .app-exit-button,
 .http-client-host .scalar-app-exit {
   display: none !important;
@@ -4096,7 +4096,7 @@ details[open] > .disclosure-head .chev {
   margin-bottom: var(--sp-3);
 }
 
-/* A transport failure, reported by ShellPilot because the API client renders
+/* A transport failure, reported by OpsMaxx because the API client renders
    nothing for one. Sits between the toolbar and the client, so it is attached
    to the request that failed rather than floating as a toast. */
 .http-error {

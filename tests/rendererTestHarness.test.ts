@@ -4,7 +4,7 @@ import { join, relative, resolve } from 'node:path'
 
 // The renderer test harness must not be able to reach the product.
 //
-// ShellPilot's standing constraint is no external runtime dependencies: what
+// OpsMaxx's standing constraint is no external runtime dependencies: what
 // ships is Electron, the drivers, and this codebase. Test tooling is explicitly
 // exempt from that — but "exempt" only holds while the exemption is enforced,
 // and the enforcement is two facts that are easy to break by accident and

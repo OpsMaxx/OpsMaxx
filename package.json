@@ -1,5 +1,5 @@
 {
-  "name": "shellpilot",
+  "name": "opsmaxx",
   "version": "0.27.0",
   "description": "Free, open-source SSH client, SFTP browser, SSH tunnel manager, multi-engine database GUI and encrypted secrets vault in one cross-platform desktop app. A MobaXterm, PuTTY and Termius alternative for Windows, macOS and Linux.",
   "keywords": [
@@ -36,13 +36,13 @@
     "macos",
     "linux"
   ],
-  "homepage": "https://github.com/ghauri01/ShellPilot#readme",
+  "homepage": "https://github.com/ghauri01/OpsMaxx#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ghauri01/ShellPilot.git"
+    "url": "git+https://github.com/ghauri01/OpsMaxx.git"
   },
   "bugs": {
-    "url": "https://github.com/ghauri01/ShellPilot/issues"
+    "url": "https://github.com/ghauri01/OpsMaxx/issues"
   },
   "author": {
     "name": "ghauri01",
@@ -53,7 +53,7 @@
   "main": "./out/main/index.js",
   "type": "module",
   "bin": {
-    "shellpilot": "./out/cli/index.js"
+    "opsmaxx": "./out/cli/index.js"
   },
   "scripts": {
     "dev": "electron-vite dev",
@@ -131,7 +131,7 @@
     "vite": "^7.3.6",
     "vitest": "^4.1.11"
   },
-  "productName": "ShellPilot",
+  "productName": "OpsMaxx",
   "engines": {
     "node": ">=20"
   }

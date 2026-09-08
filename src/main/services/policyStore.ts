@@ -14,7 +14,7 @@ import type {
 // Access groups, server/workspace assignments and AI aliases. Same
 // temp-then-rename write pattern as store.ts/vault.ts/knownhosts.ts. No
 // secrets live in this file — credentials never enter the AI policy layer.
-const FILE = join(app.getPath('userData'), 'shellpilot-ai-policy.json')
+const FILE = join(app.getPath('userData'), 'opsmaxx-ai-policy.json')
 const TMP = `${FILE}.tmp`
 
 const uid = (p: string): string => `${p}-${randomBytes(6).toString('hex')}`
@@ -70,7 +70,7 @@ function allowAll(overrides: Partial<AccessGroup['capabilities']> = {}): AccessG
     // nobody can answer during an unattended sweep.
     sudoersRead: 'deny',
     // Not 'allow', despite the name. Every other capability here is an action
-    // performed ON a server the user already added; this one edits ShellPilot's
+    // performed ON a server the user already added; this one edits OpsMaxx's
     // own connection list and stores a credential. Groups that predate it never
     // had that power, and a helper called allowAll should not be what silently
     // hands it to them — each group opts in below.
@@ -130,7 +130,7 @@ function defaultFilePolicies(): AccessGroup['filePolicies'] {
     // above. Same reasoning: a token pasted onto a command line is in the
     // history file in plaintext, and `.psql_history` / `.mysql_history` hold
     // connection strings with passwords in them — which matters here more than
-    // most places, because ShellPilot is also a database client.
+    // most places, because OpsMaxx is also a database client.
     //
     // `.*_history` is one rule per home root instead of a dozen literals: the
     // leading dot is matched literally and `*` stays inside the filename, so it

@@ -23,7 +23,7 @@ end:
 
 ```
 map auto_home   autofs   0 0 0 100% 0 0 -   /System/Volumes/Data/home
-/dev/disk10s1   hfs      406196 ...         /Volumes/ShellPilot 0.14.0-arm64
+/dev/disk10s1   hfs      406196 ...         /Volumes/OpsMaxx 0.14.0-arm64
 ```
 
 The first has a **source** containing a space; the second has a **target**

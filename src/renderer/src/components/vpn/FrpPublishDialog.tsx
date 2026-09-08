@@ -79,7 +79,7 @@ export function FrpPublishDialog({
 
       const url = publicUrl(target.host, clean)
       const running = status ? isVpnRunning(status.state) : false
-      const vpn = window.shellpilot?.vpn as Record<string, unknown> | undefined
+      const vpn = window.opsmaxx?.vpn as Record<string, unknown> | undefined
       const method = running ? 'reload' : 'start'
       if (!bridgeHas(vpn, method)) {
         // Saved, not started. Saying so beats a success toast for something
@@ -91,8 +91,8 @@ export function FrpPublishDialog({
 
       const result = await withVaultUnlock(`Publishing ${exposure.local}`, () =>
         running
-          ? window.shellpilot!.vpn.reload(target.profile.id)
-          : window.shellpilot!.vpn.start(target.profile.id)
+          ? window.opsmaxx!.vpn.reload(target.profile.id)
+          : window.opsmaxx!.vpn.start(target.profile.id)
       )
       if (result && result.ok === false) {
         // The proxy stays on the profile. It is valid and confirmed; what

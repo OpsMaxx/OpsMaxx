@@ -1,6 +1,6 @@
-===SHELLPILOT-ENGLR===
+===OPSMAXX-ENGLR===
 false
-===SHELLPILOT-ENGPKG===
+===OPSMAXX-ENGPKG===
 dpkg-query: no packages found matching docker-ce
-===SHELLPILOT-ENGRUN===
+===OPSMAXX-ENGRUN===
       10

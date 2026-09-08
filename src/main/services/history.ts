@@ -63,7 +63,7 @@ import { ALERT_HISTORY_KIND, DB_ALERT_HISTORY_KINDS } from '../../shared/webhook
 // ----------------------------------------------------------------------------
 // Its own file
 // ----------------------------------------------------------------------------
-// shellpilot-history.db, never inside shellpilot-data.json. That blob is the
+// opsmaxx-history.db, never inside opsmaxx-data.json. That blob is the
 // backup payload (backup.ts reads it into the encrypted export), so putting
 // observed host data there would silently change what a user's exported backup
 // contains. It is also renderer-owned and rewritten wholesale on a debounce.
@@ -610,7 +610,7 @@ export function steadyStateRows(hosts: number, cadenceMs: number): {
 // node:sqlite is not a native module and cannot fail to dlopen, but the rest of
 // the reasoning holds unchanged: an Electron whose bundled Node predates
 // node:sqlite, a read-only or full userData directory, a file that will not
-// open — none of those may stop ShellPilot from starting. History is the
+// open — none of those may stop OpsMaxx from starting. History is the
 // feature that fails, not the app. The renderer must render a fleet with no
 // history at all, which it does today: nothing reads from here yet.
 // ---------------------------------------------------------------------------
@@ -618,9 +618,9 @@ export function steadyStateRows(hosts: number, cadenceMs: number): {
 /** Kill switch, checked BEFORE the import so setting it genuinely prevents the
  *  module being loaded at all — the same contract as
  *  ELECTRON_DISABLE_LOCAL_TERMINAL. */
-export const DISABLE_ENV = 'SHELLPILOT_DISABLE_HISTORY'
+export const DISABLE_ENV = 'OPSMAXX_DISABLE_HISTORY'
 
-export const HISTORY_FILE = 'shellpilot-history.db'
+export const HISTORY_FILE = 'opsmaxx-history.db'
 
 type SqliteRow = Record<string, unknown>
 interface Stmt {
@@ -649,7 +649,7 @@ async function loadSqlite(): Promise<SqliteModule> {
   if (process.env[DISABLE_ENV] === '1') {
     loadError =
       `History is disabled on this machine (${DISABLE_ENV}=1). ` +
-      `Unset it and restart ShellPilot to record samples. Everything else is unaffected.`
+      `Unset it and restart OpsMaxx to record samples. Everything else is unaffected.`
     throw new Error(loadError)
   }
 
@@ -662,7 +662,7 @@ async function loadSqlite(): Promise<SqliteModule> {
     // shape check below: they have different fixes.
     loadError =
       `History is unavailable on this machine: node:sqlite would not load ` +
-      `(${err instanceof Error ? err.message : String(err)}). ShellPilot is otherwise unaffected.`
+      `(${err instanceof Error ? err.message : String(err)}). OpsMaxx is otherwise unaffected.`
     throw new Error(loadError)
   }
 
@@ -675,7 +675,7 @@ async function loadSqlite(): Promise<SqliteModule> {
     loadError =
       `History is unavailable on this machine: node:sqlite loaded but does not export ` +
       `DatabaseSync/backup (got ${typeof mod.DatabaseSync}/${typeof mod.backup}) — the ` +
-      `bundled SQLite module's shape is not what ShellPilot expects. ShellPilot is otherwise unaffected.`
+      `bundled SQLite module's shape is not what OpsMaxx expects. OpsMaxx is otherwise unaffected.`
     throw new Error(loadError)
   }
   sqlite = mod

@@ -1,6 +1,6 @@
 name: Release
 
-# Build ShellPilot for Windows, macOS and Linux whenever a version tag is
+# Build OpsMaxx for Windows, macOS and Linux whenever a version tag is
 # pushed, then attach every installer to the matching GitHub release.
 on:
   push:
@@ -291,7 +291,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: shellpilot-${{ matrix.os }}
+          name: opsmaxx-${{ matrix.os }}
           # The latest*.yml / beta*.yml entries are the channel manifests
           # electron-updater reads to decide whether an update exists at all —
           # one per platform, named by electron-builder from the version's
@@ -421,7 +421,7 @@ jobs:
             echo "**System Settings → Privacy & Security** and click **Open Anyway**, or run:"
             echo
             echo '```bash'
-            echo "/usr/bin/xattr -dr com.apple.quarantine /Applications/ShellPilot.app"
+            echo "/usr/bin/xattr -dr com.apple.quarantine /Applications/OpsMaxx.app"
             echo '```'
             echo
             echo "That clears the download flag and nothing else — the app's signature stays"
@@ -439,22 +439,22 @@ jobs:
             echo
             echo "| File | Notes |"
             echo "|---|---|"
-            echo "| [\`ShellPilot-${VERSION}-setup.exe\`]($BASE/ShellPilot-${VERSION}-setup.exe) | Installer with desktop and Start-menu shortcuts. **Pick this one if unsure.** |"
-            echo "| [\`ShellPilot-${VERSION}-portable.exe\`]($BASE/ShellPilot-${VERSION}-portable.exe) | Single file, no install, keeps its data beside the \`.exe\` — runs from a USB stick |"
+            echo "| [\`OpsMaxx-${VERSION}-setup.exe\`]($BASE/OpsMaxx-${VERSION}-setup.exe) | Installer with desktop and Start-menu shortcuts. **Pick this one if unsure.** |"
+            echo "| [\`OpsMaxx-${VERSION}-portable.exe\`]($BASE/OpsMaxx-${VERSION}-portable.exe) | Single file, no install, keeps its data beside the \`.exe\` — runs from a USB stick |"
             echo
             echo "### macOS"
             echo
             echo "| File | Notes |"
             echo "|---|---|"
-            echo "| [\`ShellPilot-${VERSION}-arm64.dmg\`]($BASE/ShellPilot-${VERSION}-arm64.dmg) | Apple Silicon (M1 and later) |"
-            echo "| [\`ShellPilot-${VERSION}-x64.dmg\`]($BASE/ShellPilot-${VERSION}-x64.dmg) | Intel Macs |"
+            echo "| [\`OpsMaxx-${VERSION}-arm64.dmg\`]($BASE/OpsMaxx-${VERSION}-arm64.dmg) | Apple Silicon (M1 and later) |"
+            echo "| [\`OpsMaxx-${VERSION}-x64.dmg\`]($BASE/OpsMaxx-${VERSION}-x64.dmg) | Intel Macs |"
             echo
             echo "### Linux"
             echo
             echo "| File | Notes |"
             echo "|---|---|"
-            echo "| [\`ShellPilot-${VERSION}-x86_64.AppImage\`]($BASE/ShellPilot-${VERSION}-x86_64.AppImage) | Any distribution — \`chmod +x\` and run |"
-            echo "| [\`ShellPilot-${VERSION}-amd64.deb\`]($BASE/ShellPilot-${VERSION}-amd64.deb) | Debian and Ubuntu — \`sudo apt install ./ShellPilot-${VERSION}-amd64.deb\` |"
+            echo "| [\`OpsMaxx-${VERSION}-x86_64.AppImage\`]($BASE/OpsMaxx-${VERSION}-x86_64.AppImage) | Any distribution — \`chmod +x\` and run |"
+            echo "| [\`OpsMaxx-${VERSION}-amd64.deb\`]($BASE/OpsMaxx-${VERSION}-amd64.deb) | Debian and Ubuntu — \`sudo apt install ./OpsMaxx-${VERSION}-amd64.deb\` |"
             echo
             echo "---"
             echo
@@ -462,7 +462,7 @@ jobs:
             echo
             OVPN_SRC=$(cd artifacts && find . -name 'openvpn-*-source.tar.gz' -printf '%f\n' 2>/dev/null | head -n1)
             if [ -n "$OVPN_SRC" ]; then
-              echo "ShellPilot bundles OpenVPN on macOS and Linux. OpenVPN is GPL-2.0, so the"
+              echo "OpsMaxx bundles OpenVPN on macOS and Linux. OpenVPN is GPL-2.0, so the"
               echo "corresponding source for the exact build in these installers is published"
               echo "here as [\`$OVPN_SRC\`]($BASE/$OVPN_SRC) — the pinned upstream commit,"
               echo "unmodified, with its SHA-256 in the table below. \`scripts/build-openvpn.sh\`"

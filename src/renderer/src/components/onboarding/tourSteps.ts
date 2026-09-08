@@ -59,7 +59,7 @@ export const TOUR_STEPS: TourStep[] = [
   {
     id: 'done',
     title: 'Everything else is behind one shortcut',
-    body: 'Cmd/Ctrl+K opens the command palette, which reaches every server, workspace, tunnel and action in the app. The rest of ShellPilot introduces itself as you open it, and this walkthrough is in Settings if you want it again.',
+    body: 'Cmd/Ctrl+K opens the command palette, which reaches every server, workspace, tunnel and action in the app. The rest of OpsMaxx introduces itself as you open it, and this walkthrough is in Settings if you want it again.',
     action: 'Press Cmd/Ctrl+K.'
   }
 ]
@@ -113,7 +113,7 @@ export const FEATURE_TIPS: FeatureTip[] = [
     id: 'tip-ai',
     view: 'ai',
     title: 'AI agents, without handing over credentials',
-    body: 'Claude Code, Claude Desktop and Codex can run commands and read files through ShellPilot, but never see a password, key, hostname or username. You choose per capability what is allowed, asked about or refused, and every action lands in the audit log.'
+    body: 'Claude Code, Claude Desktop and Codex can run commands and read files through OpsMaxx, but never see a password, key, hostname or username. You choose per capability what is allowed, asked about or refused, and every action lands in the audit log.'
   }
 ]
 

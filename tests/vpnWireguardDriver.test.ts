@@ -39,13 +39,13 @@ import { Supervisor } from '../src/main/services/vpn/supervisor'
 
 // What this file proves, and what it deliberately does not.
 //
-// The integration tests below drive the REAL `shellpilot-netd` through the
+// The integration tests below drive the REAL `opsmaxx-netd` through the
 // REAL `Supervisor`: two userspace WireGuard devices are brought up on
 // loopback UDP, they complete a genuine Noise handshake, and the driver is
 // asked the same questions the manager asks it. Nothing about the control
 // channel, the key path, the listeners or the teardown is faked.
 //
-// What is NOT claimed: payload delivery through the tunnel. `shellpilot-netd`
+// What is NOT claimed: payload delivery through the tunnel. `opsmaxx-netd`
 // is a client — it offers no way to publish a service *inside* the netstack
 // and does no forwarding, so two netd processes can handshake and exchange
 // keepalives but have nowhere to send a byte of application data. The
@@ -58,7 +58,7 @@ import { Supervisor } from '../src/main/services/vpn/supervisor'
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url))
 const PLATFORM_DIR = `${process.platform}-${process.arch}`
-const NETD = process.platform === 'win32' ? 'shellpilot-netd.exe' : 'shellpilot-netd'
+const NETD = process.platform === 'win32' ? 'opsmaxx-netd.exe' : 'opsmaxx-netd'
 const BIN_ROOT = join(REPO_ROOT, 'resources', 'bin')
 const NETD_PATH = join(BIN_ROOT, PLATFORM_DIR, NETD)
 
@@ -141,7 +141,7 @@ interface PeerReply {
 }
 
 /**
- * The far end of the tunnel: a second `shellpilot-netd`, driven straight over
+ * The far end of the tunnel: a second `opsmaxx-netd`, driven straight over
  * its stdio rather than through the driver, because the driver has no reason
  * to expose `iface.listenPort` — a client picks its own source port, and only
  * the node being dialled needs a fixed one.
@@ -466,8 +466,8 @@ beforeEach(async () => {
   runDir = join(root, 'run')
   mkdirSync(runDir, { recursive: true, mode: 0o700 })
 
-  previousBinDir = process.env.SHELLPILOT_VPN_BIN_DIR
-  process.env.SHELLPILOT_VPN_BIN_DIR = BIN_ROOT
+  previousBinDir = process.env.OPSMAXX_VPN_BIN_DIR
+  process.env.OPSMAXX_VPN_BIN_DIR = BIN_ROOT
   resetBinaryCache()
 
   spawns = []
@@ -523,7 +523,7 @@ const fakeEngine = async (): Promise<VpnEngineInfo> => ({
   kind: 'wireguard',
   available: true,
   bundled: true,
-  path: '/nonexistent/shellpilot-netd',
+  path: '/nonexistent/opsmaxx-netd',
   version: '0.0.0-test',
   sha256: '0'.repeat(64)
 })
@@ -545,8 +545,8 @@ afterEach(async () => {
   wireguardTuning.applyNet = null
   wireguardTuning.resolveEngine = null
 
-  if (previousBinDir === undefined) delete process.env.SHELLPILOT_VPN_BIN_DIR
-  else process.env.SHELLPILOT_VPN_BIN_DIR = previousBinDir
+  if (previousBinDir === undefined) delete process.env.OPSMAXX_VPN_BIN_DIR
+  else process.env.OPSMAXX_VPN_BIN_DIR = previousBinDir
   resetBinaryCache()
   rmSync(root, { recursive: true, force: true })
 })
@@ -694,7 +694,7 @@ describe('parseNetdVersion', () => {
 
 describe('system mode', () => {
   /**
-   * A stand-in for `shellpilot-netd --privileged`, speaking the real protocol
+   * A stand-in for `opsmaxx-netd --privileged`, speaking the real protocol
    * over a real unix socket.
    *
    * What this proves is the half that does not need root: the argv contract,
@@ -885,7 +885,7 @@ describe('system mode', () => {
 
   it('refuses a full-tunnel profile before it elevates, and says why', async () => {
     // A full tunnel routes the encrypted packets that carry it back into
-    // itself unless the peer endpoint is pinned outside, which ShellPilot does
+    // itself unless the peer endpoint is pinned outside, which OpsMaxx does
     // not do yet. Bringing it up would take the machine off the network.
     const calls: string[] = []
     const { ctx } = makeCtx()
@@ -1235,7 +1235,7 @@ describe.skipIf(!HAVE_NETD)('probe', () => {
   })
 
   it('reports an absent sidecar as unavailable rather than throwing', async () => {
-    process.env.SHELLPILOT_VPN_BIN_DIR = join(root, 'empty')
+    process.env.OPSMAXX_VPN_BIN_DIR = join(root, 'empty')
     resetBinaryCache()
     const info = await wireguardDriver.probe()
     expect(info.available).toBe(false)

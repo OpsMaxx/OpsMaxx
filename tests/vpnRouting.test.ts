@@ -124,7 +124,7 @@ default via fe80::1 dev eth0 proto ra metric 1024 expires 1798sec hoplimit 64 pr
 
 const WIN_ROUTE_PRINT = `===========================================================================
 Interface List
- 24...00 00 00 00 00 00 00 e0 ......ShellPilot Tunnel
+ 24...00 00 00 00 00 00 00 e0 ......OpsMaxx Tunnel
  12...ac de 48 00 11 22 ......Intel(R) Ethernet Connection
   1...........................Software Loopback Interface 1
 ===========================================================================
@@ -154,7 +154,7 @@ Idx     Met         MTU          State                Name
 ---  ----------  ----------  ------------  ---------------------------
   1          75  4294967295  connected     Loopback Pseudo-Interface 1
  12          25        1500  connected     Ethernet
- 24           5        1420  connected     ShellPilot Tunnel
+ 24           5        1420  connected     OpsMaxx Tunnel
 `
 
 const WIN_SHOW_ROUTE_V4 = `
@@ -535,7 +535,7 @@ describe('win32 routes', () => {
     expect(parseShowInterfaces(WIN_SHOW_INTERFACES)).toEqual({
       'Loopback Pseudo-Interface 1': 1,
       Ethernet: 12,
-      'ShellPilot Tunnel': 24
+      'OpsMaxx Tunnel': 24
     })
   })
 
@@ -571,7 +571,7 @@ describe('win32 routes', () => {
     winReads()
     const snap = await mgr().snapshot()
     expect(snap.defaults.map((d) => d.destination)).toEqual(['0.0.0.0/0', '::/0'])
-    expect(snap.interfaceIndex?.['ShellPilot Tunnel']).toBe(24)
+    expect(snap.interfaceIndex?.['OpsMaxx Tunnel']).toBe(24)
   })
 
   it('produces the exact argv for apply, addressing the interface by index', async () => {
@@ -579,9 +579,9 @@ describe('win32 routes', () => {
     const rec = recorder()
     await mgr().apply(
       [
-        { destination: '10.8.0.0/24', interfaceName: 'ShellPilot Tunnel' },
-        { destination: 'fd00::/64', interfaceName: 'ShellPilot Tunnel' },
-        { destination: '0.0.0.0/0', interfaceName: 'ShellPilot Tunnel', gateway: '10.8.0.1', metric: 5 }
+        { destination: '10.8.0.0/24', interfaceName: 'OpsMaxx Tunnel' },
+        { destination: 'fd00::/64', interfaceName: 'OpsMaxx Tunnel' },
+        { destination: '0.0.0.0/0', interfaceName: 'OpsMaxx Tunnel', gateway: '10.8.0.1', metric: 5 }
       ],
       rec.ctx
     )
@@ -634,8 +634,8 @@ describe('win32 routes', () => {
         platform: 'win32',
         capturedAt: 0,
         defaults: [],
-        planned: [{ destination: '10.8.0.0/24', interfaceName: 'ShellPilot Tunnel' }],
-        interfaceIndex: { 'ShellPilot Tunnel': 24 }
+        planned: [{ destination: '10.8.0.0/24', interfaceName: 'OpsMaxx Tunnel' }],
+        interfaceIndex: { 'OpsMaxx Tunnel': 24 }
       },
       rec.ctx
     )
@@ -653,7 +653,7 @@ describe('win32 routes', () => {
         platform: 'win32',
         capturedAt: 0,
         defaults: [],
-        planned: [{ destination: '10.8.0.0/24', interfaceName: 'ShellPilot Tunnel' }]
+        planned: [{ destination: '10.8.0.0/24', interfaceName: 'OpsMaxx Tunnel' }]
       },
       rec.ctx
     )
@@ -662,7 +662,7 @@ describe('win32 routes', () => {
 
   it('compares interfaces by index when detecting a conflict', async () => {
     winReads()
-    const routes: RouteSpec[] = [{ destination: '10.8.0.0/24', interfaceName: 'ShellPilot Tunnel' }]
+    const routes: RouteSpec[] = [{ destination: '10.8.0.0/24', interfaceName: 'OpsMaxx Tunnel' }]
     const conflicts = await mgr().conflicts(routes)
     const claimed = conflicts.filter((c) => c.kind === 'prefix-claimed')
     expect(claimed).toHaveLength(1)

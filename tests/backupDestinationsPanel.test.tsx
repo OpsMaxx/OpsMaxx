@@ -20,7 +20,7 @@ const LOCAL: BackupDestination = {
   id: 'd-local',
   name: 'NAS folder',
   kind: 'local',
-  directory: '/Volumes/nas/shellpilot',
+  directory: '/Volumes/nas/opsmaxx',
   keep: 3,
   everyHours: 6,
   restoreTest: true,
@@ -55,7 +55,7 @@ const failedRun: BackupRunReport = {
   destinationKind: 'local',
   startedAt: '2024-05-06T07:08:09.000Z',
   finishedAt: '2024-05-06T07:08:12.000Z',
-  name: 'shellpilot-20240506T070809Z.spbackup',
+  name: 'opsmaxx-20240506T070809Z.spbackup',
   verified: false,
   restoreTested: false,
   removed: [],
@@ -70,7 +70,7 @@ const goodRun: BackupRunReport = {
   restoreTested: true,
   failedStage: undefined,
   error: undefined,
-  removed: ['shellpilot-20240101T000000Z.spbackup']
+  removed: ['opsmaxx-20240101T000000Z.spbackup']
 }
 
 describe('the destination list', () => {
@@ -101,7 +101,7 @@ describe('the destination list', () => {
     render(<BackupDestinations />)
 
     await screen.findByText(
-      'shellpilot-20240506T070809Z.spbackup — read back off the destination and test-restored, 1 older removed'
+      'opsmaxx-20240506T070809Z.spbackup — read back off the destination and test-restored, 1 older removed'
     )
   })
 
@@ -144,13 +144,13 @@ describe('the destination list', () => {
     await userEvent.click(await screen.findByRole('button', { name: /Restore from here/ }))
 
     await screen.findByText('ENOENT: no such file or directory')
-    expect(screen.queryByText('No ShellPilot backups at this destination yet.')).toBe(null)
+    expect(screen.queryByText('No OpsMaxx backups at this destination yet.')).toBe(null)
   })
 
   it('inspects a remote backup before offering to restore it', async () => {
     const inspectRemote = vi.fn(async () => ({
       ok: true,
-      path: '/userdata/staged-shellpilot-20240506T070809Z.spbackup',
+      path: '/userdata/staged-opsmaxx-20240506T070809Z.spbackup',
       summary: {
         createdAt: '2024-05-06T07:08:09.000Z',
         app: '0.11.0',
@@ -167,7 +167,7 @@ describe('the destination list', () => {
         listRemote: vi.fn(async () => ({
           ok: true,
           generations: [
-            { name: 'shellpilot-20240506T070809Z.spbackup', size: 4096, modified: 1714979289000 }
+            { name: 'opsmaxx-20240506T070809Z.spbackup', size: 4096, modified: 1714979289000 }
           ]
         }))
       })
@@ -184,7 +184,7 @@ describe('the destination list', () => {
     await waitFor(() =>
       expect(inspectRemote).toHaveBeenCalledWith(
         'd-local',
-        'shellpilot-20240506T070809Z.spbackup',
+        'opsmaxx-20240506T070809Z.spbackup',
         'a-real-passphrase'
       )
     )
@@ -203,7 +203,7 @@ describe('the destination list', () => {
         listRemote: vi.fn(async () => ({
           ok: true,
           generations: [
-            { name: 'shellpilot-20240506T070809Z.spbackup', size: 4096, modified: 1714979289000 }
+            { name: 'opsmaxx-20240506T070809Z.spbackup', size: 4096, modified: 1714979289000 }
           ]
         }))
       })
@@ -367,7 +367,7 @@ describe('database dumps', () => {
           ok: true,
           destinationId: 'd-local',
           destinationName: 'NAS folder',
-          name: 'shellpilot-dump-orders-20240506T070809Z.sql',
+          name: 'opsmaxx-dump-orders-20240506T070809Z.sql',
           bytes: 81920,
           verified: true,
           startedAt: '',
@@ -384,7 +384,7 @@ describe('database dumps', () => {
     await userEvent.click(screen.getByRole('button', { name: /Dump now/ }))
 
     await screen.findByText(
-      'shellpilot-dump-orders-20240506T070809Z.sql written and read back (81920 bytes).'
+      'opsmaxx-dump-orders-20240506T070809Z.sql written and read back (81920 bytes).'
     )
   })
 
@@ -421,7 +421,7 @@ describe('when the destinations file cannot be read', () => {
           targets({
             destinations: [],
             corrupt:
-              'shellpilot-backup-targets.json could not be read (Unexpected end of JSON input), so no destination is configured and nothing is being backed up on a schedule.'
+              'opsmaxx-backup-targets.json could not be read (Unexpected end of JSON input), so no destination is configured and nothing is being backed up on a schedule.'
           })
         )
       })

@@ -23,13 +23,13 @@ import type { VaultResult } from '../../shared/vault'
 // The master password is never stored — only the derived key, so the password
 // itself cannot be recovered from this file even by someone who defeats both.
 
-const FILE = join(app.getPath('userData'), 'shellpilot-vault-bio.json')
+const FILE = join(app.getPath('userData'), 'opsmaxx-vault-bio.json')
 
 // The session-scoped store: the wrapped key lives here, in main-process memory,
 // and dies with the process. This is KeePassXC's model, and it is the reason
 // this feature can be defended at all — an attacker who can read your files
 // gets nothing, because there is nothing on disk to read. Touch ID reopens the
-// vault while ShellPilot is running; the master password is typed once per
+// vault while OpsMaxx is running; the master password is typed once per
 // launch.
 //
 // The on-disk variant below survives a restart and is the weaker thing. It is a
@@ -185,7 +185,7 @@ export async function authenticateFor(kind: BiometricKind, reason: string): Prom
   }
 }
 
-export async function biometricUnlock(reason = 'unlock your ShellPilot vault'): Promise<VaultResult> {
+export async function biometricUnlock(reason = 'unlock your OpsMaxx vault'): Promise<VaultResult> {
   const stored = sessionKey ?? read()
   if (!stored) return { ok: false, error: 'Biometric unlock is not set up for this vault.' }
   const support = biometricSupport()

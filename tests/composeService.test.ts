@@ -156,7 +156,7 @@ function writeReader(fileText: string, writeResult: { code?: number; stdout?: st
     exec: async (_cfg, cmd) => {
       commands.push(cmd)
       if (cmd.startsWith('head -c')) return { ok: true, code: 0, stdout: fileText }
-      return { ok: true, code: 0, stdout: '===SHELLPILOT-END===\n', ...writeResult }
+      return { ok: true, code: 0, stdout: '===OPSMAXX-END===\n', ...writeResult }
     }
   })
   return { reader: r, commands }
@@ -172,7 +172,7 @@ describe('writeImageTag', () => {
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.plan.from).toBe('nginx:1.27-alpine')
-    expect(r.backup).toBe('/srv/edge/compose.yaml.shellpilot-bak')
+    expect(r.backup).toBe('/srv/edge/compose.yaml.opsmaxx-bak')
     const write = h.commands[1]
     expect(write).toContain('image: nginx:1.29-alpine')
     // The one line changed and everything else is carried through verbatim.

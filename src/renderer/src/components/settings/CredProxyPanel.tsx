@@ -92,12 +92,12 @@ export function CredProxyPanel(): React.JSX.Element {
   const [newTokenExpiry, setNewTokenExpiry] = useState('')
 
   const loadTokens = useCallback(async (): Promise<void> => {
-    const list = await window.shellpilot?.credproxy?.tokens?.()
+    const list = await window.opsmaxx?.credproxy?.tokens?.()
     setTokens(list ?? [])
   }, [])
 
   const createToken = async (): Promise<void> => {
-    const res = await window.shellpilot?.credproxy?.createToken?.(
+    const res = await window.opsmaxx?.credproxy?.createToken?.(
       newTokenName.trim(),
       // A date input gives a day, and a token should last to the END of the day
       // it names rather than expiring at midnight as somebody starts work.
@@ -107,7 +107,7 @@ export function CredProxyPanel(): React.JSX.Element {
       await navigator.clipboard?.writeText(res.token).catch(() => {})
       setMsg({
         tone: 'ok',
-        text: `Token for “${newTokenName.trim()}” created and copied. It is the only copy you need — ShellPilot keeps it too.`
+        text: `Token for “${newTokenName.trim()}” created and copied. It is the only copy you need — OpsMaxx keeps it too.`
       })
       setNewTokenName('')
       setNewTokenExpiry('')
@@ -118,7 +118,7 @@ export function CredProxyPanel(): React.JSX.Element {
   }
 
   const copyToken = async (id: string): Promise<void> => {
-    const value = await window.shellpilot?.credproxy?.tokenValue?.(id)
+    const value = await window.opsmaxx?.credproxy?.tokenValue?.(id)
     if (value) {
       await navigator.clipboard?.writeText(value).catch(() => {})
       setMsg({ tone: 'ok', text: 'Token copied.' })
@@ -137,7 +137,7 @@ export function CredProxyPanel(): React.JSX.Element {
     ) {
       return
     }
-    const res = await window.shellpilot?.credproxy?.revokeToken?.(id)
+    const res = await window.opsmaxx?.credproxy?.revokeToken?.(id)
     if (res?.ok) {
       setMsg({ tone: 'ok', text: `“${name}” revoked.` })
       await loadTokens()
@@ -150,7 +150,7 @@ export function CredProxyPanel(): React.JSX.Element {
   const [portDraft, setPortDraft] = useState('')
 
   const refresh = useCallback(async (): Promise<void> => {
-    const api = window.shellpilot?.credproxy
+    const api = window.opsmaxx?.credproxy
     if (!api) {
       setUnavailable(true)
       return
@@ -174,7 +174,7 @@ export function CredProxyPanel(): React.JSX.Element {
   // never used here — a rule stores an entry id, and main reads the credential
   // at request time.
   useEffect(() => {
-    void window.shellpilot?.vault?.list().then((res) => {
+    void window.opsmaxx?.vault?.list().then((res) => {
       if (res?.ok && res.entries) setEntries(res.entries)
     })
   }, [])
@@ -189,7 +189,7 @@ export function CredProxyPanel(): React.JSX.Element {
 
   const toggle = async (on: boolean): Promise<void> => {
     setMsg(null)
-    const api = window.shellpilot?.credproxy
+    const api = window.opsmaxx?.credproxy
     if (!api) return
     if (!on) {
       const s = await api.stop()
@@ -208,7 +208,7 @@ export function CredProxyPanel(): React.JSX.Element {
   const save = async (): Promise<void> => {
     if (!draft) return
     setMsg(null)
-    const res = await window.shellpilot?.credproxy?.saveRule({
+    const res = await window.opsmaxx?.credproxy?.saveRule({
       id: draft.id,
       name: draft.name,
       origin: draft.origin,
@@ -230,7 +230,7 @@ export function CredProxyPanel(): React.JSX.Element {
   }
 
   const remove = async (id: string): Promise<void> => {
-    await window.shellpilot?.credproxy?.removeRule(id)
+    await window.opsmaxx?.credproxy?.removeRule(id)
     await refresh()
   }
 
@@ -245,7 +245,7 @@ export function CredProxyPanel(): React.JSX.Element {
         <div className="s-info">
           <div className="s-title">API credential proxy</div>
           <div className="s-desc">
-            A script, a dev server or an agent calls a third-party API through ShellPilot without
+            A script, a dev server or an agent calls a third-party API through OpsMaxx without
             ever holding the key. Point its base URL at the address below; the credential is added
             here, on the way out, and never comes back in a response.
             <br />

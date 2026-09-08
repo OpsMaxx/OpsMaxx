@@ -16,7 +16,7 @@ import type { FrpSpec, VpnProfile } from '../src/renderer/src/types'
 //   - It must not publish anything before it has said what it is publishing.
 //     A number typed into a box is one keystroke away from being the wrong
 //     number, and the wrong number here is a database on the internet.
-//   - It must not produce a URL it has no reason to believe in. ShellPilot
+//   - It must not produce a URL it has no reason to believe in. OpsMaxx
 //     does not own a domain; a plausible-looking address that resolves to
 //     nothing is worse than the form this replaces.
 //   - It must not keep asking. A setup that reappears is not a setup.
@@ -157,7 +157,7 @@ describe('a tunnel server that is not set up is explained, not papered over', ()
       'A public URL needs an frp server you control, with a domain pointed at it. ' +
         'Set that up once and this stops being a question.'
     )
-    // The whole point. A URL here would be one ShellPilot invented, and it
+    // The whole point. A URL here would be one OpsMaxx invented, and it
     // would resolve to nothing.
     expect(document.body.textContent).not.toContain('://')
     expect(screen.queryByRole('button', { name: /^Publish$/ })).toBe(null)
@@ -191,7 +191,7 @@ describe('the guided setup happens once', () => {
 
     // Said here, in full, once.
     expect(
-      await screen.findByText(/ShellPilot does not serve public addresses/)
+      await screen.findByText(/OpsMaxx does not serve public addresses/)
     ).toBeTruthy()
 
     await user.type(screen.getByPlaceholderText('frp.example.com'), 'frp.example.com')
@@ -211,7 +211,7 @@ describe('the guided setup happens once', () => {
     // carries on by itself.
     await waitFor(() =>
       expect(
-        screen.queryByText(/ShellPilot does not serve public addresses/)
+        screen.queryByText(/OpsMaxx does not serve public addresses/)
       ).toBe(null)
     )
     expect(
@@ -227,7 +227,7 @@ describe('the guided setup happens once', () => {
     await user.click(screen.getByRole('button', { name: /Get a public URL/ }))
     expect(await screen.findByRole('button', { name: /Publish/ })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Set up a tunnel server/ })).toBe(null)
-    expect(document.body.textContent).not.toContain('ShellPilot does not serve public addresses')
+    expect(document.body.textContent).not.toContain('OpsMaxx does not serve public addresses')
   })
 
   it('stores the domain on the profile, so it survives the dialog closing', async () => {

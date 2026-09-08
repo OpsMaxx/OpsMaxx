@@ -356,7 +356,7 @@ const T = ' --request-timeout=10s'
  * shifting the following one's output into it.
  */
 const call = (marker: string, args: string): string =>
-  `echo "===SHELLPILOT-${marker}==="; ${K} ${args}${T} 2>&1`
+  `echo "===OPSMAXX-${marker}==="; ${K} ${args}${T} 2>&1`
 
 /**
  * One round trip that reads everything.
@@ -402,13 +402,13 @@ export function buildK8sReadCommand(context?: string, namespace?: string): strin
   return [
     resolve,
     `${k} version --client -o json${t} 2>&1`,
-    'echo "===SHELLPILOT-CTX==="',
+    'echo "===OPSMAXX-CTX==="',
     `${k} config get-contexts --no-headers${t} 2>&1`,
-    'echo "===SHELLPILOT-NS==="',
+    'echo "===OPSMAXX-NS==="',
     `${k} get ns --no-headers -o custom-columns=NAME:.metadata.name${ctx}${t} 2>&1`,
-    'echo "===SHELLPILOT-PODS-ALL==="',
+    'echo "===OPSMAXX-PODS-ALL==="',
     `${k} get pods --all-namespaces --no-headers -o ${cols}${ctx}${t} 2>&1`,
-    'echo "===SHELLPILOT-PODS-NS==="',
+    'echo "===OPSMAXX-PODS-NS==="',
     `${k} get pods --no-headers -o ${cols}${ctx}${ns}${t} 2>&1`
   ].join('; ')
 }
@@ -416,7 +416,7 @@ export function buildK8sReadCommand(context?: string, namespace?: string): strin
 const section = (output: string, name: string): string => {
   // \r?\n: a host whose shell emits CRLF would otherwise match no marker at
   // all and report an empty cluster. The cron collector had this exact bug.
-  const m = output.match(new RegExp(`===SHELLPILOT-${name}===\\r?\\n([\\s\\S]*?)(?====SHELLPILOT-|$)`))
+  const m = output.match(new RegExp(`===OPSMAXX-${name}===\\r?\\n([\\s\\S]*?)(?====OPSMAXX-|$)`))
   return m ? m[1] : ''
 }
 
@@ -517,10 +517,10 @@ function parseContexts(text: string): { contexts: K8sContext[]; current: string 
 }
 
 export function parseK8sOutput(output: string, exitCode: number | null): K8sProbe {
-  const versionText = (output.split('===SHELLPILOT-CTX===')[0] ?? '').trim()
+  const versionText = (output.split('===OPSMAXX-CTX===')[0] ?? '').trim()
 
   // The version probe is the only one that tells us kubectl exists at all.
-  if (!output.includes('===SHELLPILOT-CTX===') || /command not found|not found/i.test(versionText)) {
+  if (!output.includes('===OPSMAXX-CTX===') || /command not found|not found/i.test(versionText)) {
     return {
       ok: false,
       reason: classifyK8sFailure(versionText, exitCode),
@@ -2679,7 +2679,7 @@ export function buildK8sExecCommand(target: K8sExecTarget): string {
   // on the near side of the separator.
   return [
     k8sResolve(),
-    'echo "===SHELLPILOT-EXEC==="',
+    'echo "===OPSMAXX-EXEC==="',
     // No -t and no -i, deliberately. See the header: this is one command, not
     // a session, and a TTY on a non-interactive SSH exec produces a stream
     // nobody is reading from.
@@ -3274,7 +3274,7 @@ export function buildK8sHelmListCommand(context?: string): string {
   const ctx = context && validateContext(context) ? ` --kube-context=${context}` : ''
   return [
     resolveBinary('helm', ['/usr/local/bin/helm', '/snap/bin/helm']),
-    'echo "===SHELLPILOT-HELM==="',
+    'echo "===OPSMAXX-HELM==="',
     `"$SP_BIN" list --all-namespaces --output json${ctx} 2>&1`
   ].join('; ')
 }

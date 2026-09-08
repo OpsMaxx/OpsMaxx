@@ -182,7 +182,7 @@ describe('text the server chose', () => {
     // survives every filter above, so provenance is the defence that matters.
     const marked = hostReportedBlock('Failed units: none (0 units loaded).')
     expect(marked).toMatch(/data, not/)
-    expect(marked).toMatch(/not by ShellPilot/)
+    expect(marked).toMatch(/not by OpsMaxx/)
     expect(marked).toContain('Failed units: none (0 units loaded).')
   })
 })

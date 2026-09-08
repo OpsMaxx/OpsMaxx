@@ -21,7 +21,7 @@ import {
 import { isVpnError } from '../src/main/services/vpn/errors'
 
 const PLATFORM_DIR = `${process.platform}-${process.arch}`
-const NETD = process.platform === 'win32' ? 'shellpilot-netd.exe' : 'shellpilot-netd'
+const NETD = process.platform === 'win32' ? 'opsmaxx-netd.exe' : 'opsmaxx-netd'
 const SHIM = '#!/bin/sh\necho "OpenVPN 2.6.99 fixture"\n'
 
 let root: string
@@ -69,17 +69,17 @@ beforeEach(() => {
   root = mkdtempSync(join(SANDBOX, 'sp-bin-'))
   binRoot = join(root, 'bin')
   mkdirSync(join(binRoot, PLATFORM_DIR), { recursive: true })
-  previousBinDir = process.env.SHELLPILOT_VPN_BIN_DIR
+  previousBinDir = process.env.OPSMAXX_VPN_BIN_DIR
   previousPath = process.env.PATH
-  process.env.SHELLPILOT_VPN_BIN_DIR = binRoot
+  process.env.OPSMAXX_VPN_BIN_DIR = binRoot
   resetBinaryCache()
 })
 
 afterEach(() => {
   if (platformDescriptor) Object.defineProperty(process, 'platform', platformDescriptor)
   platformDescriptor = undefined
-  if (previousBinDir === undefined) delete process.env.SHELLPILOT_VPN_BIN_DIR
-  else process.env.SHELLPILOT_VPN_BIN_DIR = previousBinDir
+  if (previousBinDir === undefined) delete process.env.OPSMAXX_VPN_BIN_DIR
+  else process.env.OPSMAXX_VPN_BIN_DIR = previousBinDir
   if (previousPath === undefined) delete process.env.PATH
   else process.env.PATH = previousPath
   resetBinaryCache()
@@ -93,7 +93,7 @@ describe('bundled binary integrity', () => {
     writeFileSync(file, body)
     writeManifest({ [`${PLATFORM_DIR}/${NETD}`]: { sha256: hash(body), size: body.length } })
 
-    const info = await resolveBundled('shellpilot-netd')
+    const info = await resolveBundled('opsmaxx-netd')
     expect(info.available).toBe(true)
     expect(info.bundled).toBe(true)
     expect(info.kind).toBe('wireguard')
@@ -109,14 +109,14 @@ describe('bundled binary integrity', () => {
     // per-run verification exists to catch (E42).
     writeFileSync(file, 'the bytes we got')
 
-    await expect(resolveBundled('shellpilot-netd')).rejects.toMatchObject({
+    await expect(resolveBundled('opsmaxx-netd')).rejects.toMatchObject({
       code: 'binary-untrusted'
     })
   })
 
   it('reports a missing binary by path and mentions antivirus', async () => {
     writeManifest({ [`${PLATFORM_DIR}/${NETD}`]: { sha256: hash('anything') } })
-    const err = await resolveBundled('shellpilot-netd').catch((e) => e)
+    const err = await resolveBundled('opsmaxx-netd').catch((e) => e)
     expect(isVpnError(err) && err.code).toBe('binary-missing')
     expect(err.detail).toContain(join(binRoot, PLATFORM_DIR, NETD))
     expect(err.detail).toContain('antivirus')
@@ -128,7 +128,7 @@ describe('bundled binary integrity', () => {
     writeFileSync(join(binRoot, PLATFORM_DIR, NETD), '')
     writeManifest({ [`${PLATFORM_DIR}/${NETD}`]: { sha256: hash('') } })
 
-    await expect(resolveBundled('shellpilot-netd')).rejects.toMatchObject({
+    await expect(resolveBundled('opsmaxx-netd')).rejects.toMatchObject({
       code: 'binary-missing'
     })
   })
@@ -139,7 +139,7 @@ describe('bundled binary integrity', () => {
     writeFileSync(join(binRoot, PLATFORM_DIR, NETD), 'built, but never recorded')
     writeManifest({})
 
-    const err = await resolveBundled('shellpilot-netd').catch((e) => e)
+    const err = await resolveBundled('opsmaxx-netd').catch((e) => e)
     expect(isVpnError(err) && err.code).toBe('binary-missing')
     expect(err.detail).toContain('build-sidecar')
   })
@@ -150,11 +150,11 @@ describe('bundled binary integrity', () => {
     writeFileSync(file, body)
     writeManifest({ [`${PLATFORM_DIR}/${NETD}`]: { sha256: hash(body) } })
 
-    const first = await resolveBundled('shellpilot-netd')
+    const first = await resolveBundled('opsmaxx-netd')
     rmSync(file)
     // Still cached: the check is a per-run gate before first exec, not a
     // filesystem watch.
-    expect((await resolveBundled('shellpilot-netd')).sha256).toBe(first.sha256)
+    expect((await resolveBundled('opsmaxx-netd')).sha256).toBe(first.sha256)
   })
 })
 
@@ -250,7 +250,7 @@ describe('system binary resolution', () => {
 })
 
 describe('bundled first, system second', () => {
-  // ShellPilot ships `openvpn` on macOS and Linux but not on Windows, and a
+  // OpsMaxx ships `openvpn` on macOS and Linux but not on Windows, and a
   // user may still have their own copy anywhere. `resolveEngineBinary` is the
   // one place that decides between them, and the order it decides in is a
   // security property rather than a preference — so each rung is asserted
@@ -267,7 +267,7 @@ describe('bundled first, system second', () => {
     return file
   }
 
-  it('prefers the copy ShellPilot ships', async () => {
+  it('prefers the copy OpsMaxx ships', async () => {
     const file = bundleOpenVpn('#!/bin/sh\necho "OpenVPN 2.6.22 bundled"\n')
 
     const info = await resolveEngineBinary('openvpn', {})
@@ -350,7 +350,7 @@ describe('bundled first, system second', () => {
 
   it('does not mention a bundled OpenVPN on Windows, where there is none', async () => {
     // The opposite failure: telling a Windows user to run a build script for a
-    // target ShellPilot deliberately does not produce.
+    // target OpsMaxx deliberately does not produce.
     process.env.PATH = ''
     stubPlatform('win32')
 

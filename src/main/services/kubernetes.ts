@@ -114,7 +114,7 @@ export class KubernetesReader {
       // script never got far enough to print one, and saying "kubectl is not
       // installed" when the HOST was unreachable sends someone to fix the wrong
       // machine entirely.
-      if (!r.ok && !output.includes('===SHELLPILOT-CTX===')) {
+      if (!r.ok && !output.includes('===OPSMAXX-CTX===')) {
         return { ok: false, reason: 'unknown', detail: r.error ?? 'could not reach the server' }
       }
       return parseK8sOutput(output, r.code ?? null)

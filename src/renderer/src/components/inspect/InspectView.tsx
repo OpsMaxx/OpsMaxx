@@ -72,7 +72,7 @@ export function InspectView(): React.JSX.Element {
             aria-label="What to capture"
             style={{ maxWidth: 260 }}
           >
-            <option value="sessions">Terminals ShellPilot opens</option>
+            <option value="sessions">Terminals OpsMaxx opens</option>
             <option value="system">This whole machine</option>
             <option value="manual">Nothing automatically</option>
           </select>
@@ -132,7 +132,7 @@ export function InspectView(): React.JSX.Element {
         <div className="banner">
           <ShieldCheck size={14} />
           <span>
-            {systemTrust.hint ?? 'Install ShellPilot’s certificate to read HTTPS traffic.'}
+            {systemTrust.hint ?? 'Install OpsMaxx’s certificate to read HTTPS traffic.'}
           </span>
           <div className="spacer" />
           {systemTrust.installable && (
@@ -153,7 +153,7 @@ export function InspectView(): React.JSX.Element {
         <div className="banner warn" key={p.host}>
           <AlertTriangle size={14} />
           <span>
-            <strong>{p.host}</strong> checks its certificate and will not accept ShellPilot’s. It
+            <strong>{p.host}</strong> checks its certificate and will not accept OpsMaxx’s. It
             cannot be inspected.
           </span>
           <div className="spacer" />
@@ -170,7 +170,7 @@ export function InspectView(): React.JSX.Element {
         <div className="banner warn" key={o.host}>
           <AlertTriangle size={14} />
           <span>
-            <strong>{o.host}</strong> is not HTTP or HTTPS. ShellPilot cannot inspect it, and
+            <strong>{o.host}</strong> is not HTTP or HTTPS. OpsMaxx cannot inspect it, and
             intercepting it stops it working.
           </span>
           <div className="spacer" />
@@ -181,13 +181,13 @@ export function InspectView(): React.JSX.Element {
       ))}
 
       {/* An expired authority makes every request fail with a certificate
-          error that says nothing about ShellPilot. Said before it happens,
+          error that says nothing about OpsMaxx. Said before it happens,
           and unmissably once it has. */}
       {status?.ca && status.ca.expiresInSec <= 0 && (
         <div className="banner danger">
           <AlertTriangle size={14} />
           <span>
-            ShellPilot’s certificate expired. Nothing can be inspected until you create a new one
+            OpsMaxx’s certificate expired. Nothing can be inspected until you create a new one
             and install it.
           </span>
           <div className="spacer" />
@@ -202,7 +202,7 @@ export function InspectView(): React.JSX.Element {
           <div className="banner warn">
             <AlertTriangle size={14} />
             <span>
-              ShellPilot’s certificate expires in {Math.ceil(status.ca.expiresInSec / 86400)} days.
+              OpsMaxx’s certificate expires in {Math.ceil(status.ca.expiresInSec / 86400)} days.
               After that nothing can be inspected until you create and install a new one.
             </span>
           </div>
@@ -245,7 +245,7 @@ export function InspectView(): React.JSX.Element {
           message={
             running
               ? 'Requests appear here as they happen. Local terminals you open now are routed through the inspector automatically.'
-              : 'Start capture, then use a terminal or your browser. ShellPilot decrypts HTTPS with a certificate authority it generates for this machine.'
+              : 'Start capture, then use a terminal or your browser. OpsMaxx decrypts HTTPS with a certificate authority it generates for this machine.'
           }
           action={
             running ? undefined : (
@@ -266,7 +266,7 @@ export function InspectView(): React.JSX.Element {
 }
 
 /**
- * The export lines for a shell ShellPilot did not open.
+ * The export lines for a shell OpsMaxx did not open.
  *
  * This is the whole answer for a remote session: `sshd` will not carry these
  * variables for us, so the honest thing is to hand the user the exact lines
@@ -279,7 +279,7 @@ function CopyEnvButton(): React.JSX.Element {
     <button
       className="btn secondary size-28"
       onClick={() => {
-        void window.shellpilot?.inspect.env().then((env) => {
+        void window.opsmaxx?.inspect.env().then((env) => {
           const lines = Object.entries(env)
             .map(([k, v]) => `export ${k}=${v}`)
             .join('\n')
@@ -410,7 +410,7 @@ function CaCard(): React.JSX.Element {
       {!ca.keyPersisted && (
         <div className="banner warn" style={{ marginTop: 8 }}>
           <AlertTriangle size={14} /> This machine’s keychain would not store the certificate’s
-          key, so a new certificate is created each time ShellPilot starts. You will have to
+          key, so a new certificate is created each time OpsMaxx starts. You will have to
           install it again after a restart.
         </div>
       )}

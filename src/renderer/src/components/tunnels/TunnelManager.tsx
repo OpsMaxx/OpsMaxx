@@ -131,9 +131,9 @@ export function TunnelManager(): React.JSX.Element {
   const tunnelIds = tunnels.map((t) => t.id).join(',')
   useEffect(() => {
     const ids = tunnelIds ? tunnelIds.split(',') : []
-    if (!bridgeHas(window.shellpilot?.tunnel as Record<string, unknown> | undefined, 'onStatus')) return
+    if (!bridgeHas(window.opsmaxx?.tunnel as Record<string, unknown> | undefined, 'onStatus')) return
     const offs = ids.map((id) =>
-      window.shellpilot?.tunnel.onStatus(id, (s) => {
+      window.opsmaxx?.tunnel.onStatus(id, (s) => {
         setLive((m) => ({ ...m, [id]: s }))
         setTunnelStatus(id, s.state === 'active' ? 'active' : 'inactive')
         if (s.state === 'error' && s.error) {
@@ -155,7 +155,7 @@ export function TunnelManager(): React.JSX.Element {
 
   // Reconcile with what is actually running (e.g. after a view remount).
   useEffect(() => {
-    void window.shellpilot?.tunnel.list().then((list) => {
+    void window.opsmaxx?.tunnel.list().then((list) => {
       if (!list) return
       setLive(Object.fromEntries(list.map((s) => [s.id, s])))
       list.forEach((s) => setTunnelStatus(s.id, s.state === 'active' ? 'active' : 'inactive'))
@@ -167,7 +167,7 @@ export function TunnelManager(): React.JSX.Element {
       const running = live[t.id]?.state === 'active'
       setBusy((b) => ({ ...b, [t.id]: true }))
       if (running) {
-        await window.shellpilot?.tunnel.stop(t.id)
+        await window.opsmaxx?.tunnel.stop(t.id)
         toast(`${t.name} stopped`)
       } else {
         const server = servers.find((s) => s.id === t.serverId)
@@ -188,7 +188,7 @@ export function TunnelManager(): React.JSX.Element {
         let listenPort: number | undefined
         try {
           const r = await withVaultUnlock(`Starting ${t.name}`, async () =>
-            window.shellpilot?.tunnel.start(
+            window.opsmaxx?.tunnel.start(
               {
                 id: t.id,
                 kind: t.kind,
@@ -299,7 +299,7 @@ export function TunnelManager(): React.JSX.Element {
               className="icon-btn sm"
               title="Delete tunnel"
               onClick={() => {
-                void window.shellpilot?.tunnel.stop(t.id)
+                void window.opsmaxx?.tunnel.stop(t.id)
                 deleteTunnel(t.id)
                 toast(`${t.name} deleted`)
               }}
@@ -351,7 +351,7 @@ function TunnelForm({ tunnel, onClose }: { tunnel?: Tunnel | null; onClose: () =
     if (tunnel) {
       // Stop first: the running tunnel still holds the old port, and leaving it
       // there is how "I changed the port and it is still in use" happens.
-      void window.shellpilot?.tunnel.stop(tunnel.id)
+      void window.opsmaxx?.tunnel.stop(tunnel.id)
       saveTunnelEdit(tunnel.id, fields)
       toast(`${fields.name} saved — press Start to open it`, 'ok')
     } else {

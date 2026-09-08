@@ -94,19 +94,19 @@ export function BackupDestinations(): React.JSX.Element {
   const [dumpResult, setDumpResult] = useState<Record<string, string>>({})
 
   const load = useCallback(async (): Promise<void> => {
-    const f = await window.shellpilot?.backup.destinations?.()
+    const f = await window.opsmaxx?.backup.destinations?.()
     if (f) setFile(f)
   }, [])
 
   useEffect(() => {
     void load()
-    void window.shellpilot?.backup.dumpableDatabases?.().then((d) => setDatabases(d ?? []))
+    void window.opsmaxx?.backup.dumpableDatabases?.().then((d) => setDatabases(d ?? []))
   }, [load])
 
   const destinations = file?.destinations ?? []
 
   const persist = async (next: BackupDestination[]): Promise<void> => {
-    const saved = await window.shellpilot?.backup.saveDestinations?.(next)
+    const saved = await window.opsmaxx?.backup.saveDestinations?.(next)
     if (saved) setFile(saved)
   }
 
@@ -114,7 +114,7 @@ export function BackupDestinations(): React.JSX.Element {
     const password = runPw[dest.id] ?? ''
     if (password.length < MIN_PASSPHRASE) return
     setBusy(dest.id)
-    const report = await window.shellpilot?.backup.runDestination?.(dest.id, password)
+    const report = await window.opsmaxx?.backup.runDestination?.(dest.id, password)
     setBusy(null)
     await load()
     if (!report) return
@@ -133,7 +133,7 @@ export function BackupDestinations(): React.JSX.Element {
     setBusy(dest.id)
     setBrowseError(null)
     setStaged(null)
-    const r = await window.shellpilot?.backup.listRemote?.(dest.id)
+    const r = await window.opsmaxx?.backup.listRemote?.(dest.id)
     setBusy(null)
     if (!r?.ok) {
       setBrowsing(dest.id)
@@ -149,7 +149,7 @@ export function BackupDestinations(): React.JSX.Element {
     const password = runPw[dest.id] ?? ''
     if (!password) return
     setBusy(dest.id)
-    const r = await window.shellpilot?.backup.inspectRemote?.(dest.id, name, password)
+    const r = await window.opsmaxx?.backup.inspectRemote?.(dest.id, name, password)
     setBusy(null)
     if (!r?.ok || !r.path || !r.summary) {
       setBrowseError(r?.error ?? 'That backup did not open.')
@@ -163,7 +163,7 @@ export function BackupDestinations(): React.JSX.Element {
   const restore = async (): Promise<void> => {
     if (!staged) return
     setBusy('restore')
-    const r = await window.shellpilot?.backup.import(
+    const r = await window.opsmaxx?.backup.import(
       runPw[browsing ?? ''] ?? '',
       staged.path
     )
@@ -173,14 +173,14 @@ export function BackupDestinations(): React.JSX.Element {
       return
     }
     toast('Backup restored — restarting', 'ok')
-    setTimeout(() => void window.shellpilot?.backup.relaunch(), 700)
+    setTimeout(() => void window.opsmaxx?.backup.relaunch(), 700)
   }
 
   const dump = async (dest: BackupDestination): Promise<void> => {
     const databaseId = dumpChoice[dest.id]
     if (!databaseId) return
     setBusy(dest.id)
-    const r = await window.shellpilot?.backup.dumpDatabase?.(dest.id, databaseId)
+    const r = await window.opsmaxx?.backup.dumpDatabase?.(dest.id, databaseId)
     setBusy(null)
     setDumpResult((p) => ({
       ...p,
@@ -191,7 +191,7 @@ export function BackupDestinations(): React.JSX.Element {
   }
 
   const cancelStaged = (): void => {
-    if (staged) void window.shellpilot?.backup.discardStaged?.(staged.path)
+    if (staged) void window.opsmaxx?.backup.discardStaged?.(staged.path)
     setStaged(null)
   }
 
@@ -328,7 +328,7 @@ export function BackupDestinations(): React.JSX.Element {
                 </button>
                 <button
                   className="btn danger outline size-28"
-                  title="Removes this destination from ShellPilot. The backups already at it are left alone."
+                  title="Removes this destination from OpsMaxx. The backups already at it are left alone."
                   onClick={() => void persist(destinations.filter((d) => d.id !== dest.id))}
                 >
                   <Trash2 size={13} />
@@ -359,7 +359,7 @@ export function BackupDestinations(): React.JSX.Element {
                     </button>
                   </div>
                   {/* Said at the button, not in documentation: a dump is not a
-                      ShellPilot bundle and nothing encrypts it. Somebody who
+                      OpsMaxx bundle and nothing encrypts it. Somebody who
                       assumed otherwise has just put a database in a bucket in
                       the clear. */}
                   <div className="s-desc">
@@ -379,7 +379,7 @@ export function BackupDestinations(): React.JSX.Element {
                     <div className="vault-error">{browseError}</div>
                   )}
                   {!browseError && generations.length === 0 && (
-                    <div className="s-desc">No ShellPilot backups at this destination yet.</div>
+                    <div className="s-desc">No OpsMaxx backups at this destination yet.</div>
                   )}
                   {generations.map((g) => (
                     <div key={g.name} className="row" style={{ gap: 8, marginTop: 4 }}>
@@ -509,7 +509,7 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
             <button
               className="btn secondary size-28"
               onClick={() => {
-                void window.shellpilot?.backup.chooseDirectory?.().then((dir) => {
+                void window.opsmaxx?.backup.chooseDirectory?.().then((dir) => {
                   if (dir) patch({ directory: dir })
                 })
               }}
@@ -535,7 +535,7 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
             </select>
             <input
               className="input grow"
-              placeholder="Remote directory, e.g. /srv/shellpilot-backups"
+              placeholder="Remote directory, e.g. /srv/opsmaxx-backups"
               value={dest.directory}
               onChange={(e) => patch({ directory: e.target.value })}
             />

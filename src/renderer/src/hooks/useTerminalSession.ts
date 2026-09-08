@@ -126,10 +126,10 @@ export function setupTerminalUX(
 ): () => void {
   const copySel = (): void => {
     const sel = term.getSelection()
-    if (sel) window.shellpilot?.clipboard.write(sel)
+    if (sel) window.opsmaxx?.clipboard.write(sel)
   }
   const paste = (): void => {
-    const t = window.shellpilot?.clipboard.read()
+    const t = window.opsmaxx?.clipboard.read()
     if (!t) return
     // A pasted block runs line by line the moment it lands. Confirm anything
     // multi-line so a stray paste cannot execute a script on a production box.
@@ -290,7 +290,7 @@ export function useTerminalSession(
     sessionRef.current = sessionId
 
     if (generation > 0) term.writeln('')
-    term.writeln('\x1b[38;5;80mShellPilot\x1b[0m')
+    term.writeln('\x1b[38;5;80mOpsMaxx\x1b[0m')
     term.writeln(`Connecting to \x1b[1m${transport.title}\x1b[0m (${transport.endpoint})…`)
 
     const offData = transport.onData(sessionId, (d) => {

@@ -33,7 +33,7 @@ function chip(status: UpdaterStatus): { tone: string; label: string } | null {
 }
 
 function describe(status: UpdaterStatus, version: string | null, beta: boolean): string {
-  const build = version ? `ShellPilot v${version}${beta ? ' (beta build)' : ''}.` : 'ShellPilot.'
+  const build = version ? `OpsMaxx v${version}${beta ? ' (beta build)' : ''}.` : 'OpsMaxx.'
   const detail = ((): string => {
     switch (status.state) {
       case 'checking':

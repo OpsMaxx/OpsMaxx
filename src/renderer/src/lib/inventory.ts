@@ -249,7 +249,7 @@ export const INVENTORY_COLUMNS: InventoryColumn[] = [
     label: 'Updates',
     primary: true,
     numeric: true,
-    help: 'Updates the local package cache knows about. ShellPilot never refreshes that cache — refreshing is a network operation and on some package managers it can break the server — so read this next to the metadata age.'
+    help: 'Updates the local package cache knows about. OpsMaxx never refreshes that cache — refreshing is a network operation and on some package managers it can break the server — so read this next to the metadata age.'
   },
   {
     id: 'security',

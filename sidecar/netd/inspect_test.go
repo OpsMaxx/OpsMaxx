@@ -89,7 +89,7 @@ func newCA(t *testing.T, opts ...func(*x509.Certificate)) (certPem, keyPem strin
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "ShellPilot Test CA"},
+		Subject:               pkix.Name{CommonName: "OpsMaxx Test CA"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(24 * time.Hour),
 		IsCA:                  true,

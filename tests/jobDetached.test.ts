@@ -122,10 +122,10 @@ function approved(req: Omit<JobRunRequest, 'approval'>): JobRunRequest {
 //   |                             | UI names the host as degraded if neither  |
 //   | RHEL 9 with SELinux         | marker created under ~/.local/state, no    |
 //   |                             | AVC denial in `ausearch`                  |
-//   | Read-only $HOME image       | falls through to /var/tmp/shellpilot-$uid |
+//   | Read-only $HOME image       | falls through to /var/tmp/opsmaxx-$uid |
 //   | Any host, then `reboot`     | state reads `rebooting`, not unreachable; |
 //   |                             | after boot the marker is gone or orphaned |
-//   | Two ShellPilots, one host   | the second reads output and rc, refuses   |
+//   | Two OpsMaxxs, one host   | the second reads output and rc, refuses   |
 //   |                             | to reap, reports `foreign`                |
 
 const DAY = 86_400_000
@@ -204,10 +204,10 @@ class FakeHost {
 
   private probe(): JobRunResult {
     if (this.opts.probeGarbage) return ok('sh: 1: Syntax error: word unexpected\n')
-    const root = this.opts.root === undefined ? '/var/tmp/shellpilot-1000/jobs' : this.opts.root
+    const root = this.opts.root === undefined ? '/var/tmp/opsmaxx-1000/jobs' : this.opts.root
     return ok(
       [
-        'shellpilot-probe/1',
+        'opsmaxx-probe/1',
         `launcher=${this.opts.launcher ?? 'setsid'}`,
         `base64=${this.opts.base64 === false ? 'no' : 'yes'}`,
         'uid=1000',
@@ -244,7 +244,7 @@ class FakeHost {
     const marker = this.dirs.get(dir) as Marker
     marker.pid = pid
     marker.pgid = (this.opts.launcher ?? 'setsid') === 'setsid' ? pid : 3000
-    return ok('shellpilot-launch/1\nerror=\n')
+    return ok('opsmaxx-launch/1\nerror=\n')
   }
 
   private poll(dir: string, command: string): JobRunResult {
@@ -254,7 +254,7 @@ class FakeHost {
     expect(max, 'the poll no longer carries a window size').toBeGreaterThan(0)
     const b64 = command.includes('| base64 |')
     const marker = this.dirs.get(dir)
-    if (!marker) return ok('shellpilot-poll/1\nmarker=missing\nbody/1\n')
+    if (!marker) return ok('opsmaxx-poll/1\nmarker=missing\nbody/1\n')
 
     // The poll's reads happen in an ORDER, and the fake takes them in it — the
     // exit status first, then the liveness check, then the exit status again,
@@ -273,7 +273,7 @@ class FakeHost {
     const sent = Math.max(0, Math.min(size - off, max))
     const slice = marker.out.subarray(off, off + sent)
     const head = [
-      'shellpilot-poll/1',
+      'opsmaxx-poll/1',
       'marker=present',
       `instance=${marker.instance}`,
       `pid=${marker.pid ?? ''}`,
@@ -302,7 +302,7 @@ class FakeHost {
     const marker = this.dirs.get(dir)
     if (!marker || marker.pid === null) {
       this.signals.push('none')
-      return ok('shellpilot-signal/1\nsignalled=none\n')
+      return ok('opsmaxx-signal/1\nsignalled=none\n')
     }
     // A HOST WITH NO USABLE `ps`: `SP_ARGS` comes back empty, and what the
     // wrapper does then is the whole question. This fake does whatever the
@@ -311,26 +311,26 @@ class FakeHost {
     if (this.opts.weakPidCheck) {
       if (command.includes('if [ -z "$SP_ARGS" ]; then echo "signalled=unverified"')) {
         this.signals.push('unverified')
-        return ok('shellpilot-signal/1\nsignalled=unverified\n')
+        return ok('opsmaxx-signal/1\nsignalled=unverified\n')
       }
       // The bug, modelled: the check is skipped and the signal goes anyway —
       // to a pid this host cannot show still belongs to the job, and to its
       // whole process group if it happens to lead one.
       marker.alive = false
       this.signals.push('blind')
-      return ok('shellpilot-signal/1\nsignalled=group\n')
+      return ok('opsmaxx-signal/1\nsignalled=group\n')
     }
     marker.alive = false
     // The rule the builder encodes: the group only goes when the wrapper leads
     // it, which under setsid it does and under nohup it does not.
     const outcome = marker.pid === marker.pgid ? 'group' : 'process'
     this.signals.push(outcome)
-    return ok(`shellpilot-signal/1\nsignalled=${outcome}\n`)
+    return ok(`opsmaxx-signal/1\nsignalled=${outcome}\n`)
   }
 
   private reap(dir: string): JobRunResult {
     this.dirs.delete(dir)
-    return ok('shellpilot-reap/1\nreaped=yes\n')
+    return ok('opsmaxx-reap/1\nreaped=yes\n')
   }
 
   // -- test verbs ------------------------------------------------------------
@@ -354,7 +354,7 @@ class FakeHost {
     this.marker(dir).alive = false
   }
 
-  /** A different ShellPilot launched this. */
+  /** A different OpsMaxx launched this. */
   steal(dir: string, instance: string): void {
     this.marker(dir).instance = instance
   }
@@ -928,7 +928,7 @@ describe('reclaiming a marker', () => {
   })
 
   it('reads a foreign marker, and refuses to reap it', async () => {
-    // Detect and degrade, do not lock. Two ShellPilots against one estate is a
+    // Detect and degrade, do not lock. Two OpsMaxxs against one estate is a
     // real configuration, and a lock file would turn it into a job neither of
     // them can read.
     const host = new FakeHost()
@@ -1193,15 +1193,15 @@ describe('a detached step that runs past its timeout', () => {
 describe('the capability probe', () => {
   it('resolves the state directory in order and never at the filesystem root', () => {
     const probe = buildJobProbe()
-    // An unset XDG_STATE_HOME must expand to NOTHING, not to "/shellpilot/jobs"
+    // An unset XDG_STATE_HOME must expand to NOTHING, not to "/opsmaxx/jobs"
     // — which as root would create a directory at the filesystem root.
-    expect(probe).toContain('${XDG_STATE_HOME:+$XDG_STATE_HOME/shellpilot/jobs}')
-    expect(probe).toContain('${HOME:+$HOME/.local/state/shellpilot/jobs}')
-    expect(probe).toContain('/var/tmp/shellpilot-$(id -u 2>/dev/null)/jobs')
+    expect(probe).toContain('${XDG_STATE_HOME:+$XDG_STATE_HOME/opsmaxx/jobs}')
+    expect(probe).toContain('${HOME:+$HOME/.local/state/opsmaxx/jobs}')
+    expect(probe).toContain('/var/tmp/opsmaxx-$(id -u 2>/dev/null)/jobs')
     // /tmp is tmpfs and reboot-cleared, and "the marker vanished" would be
     // indistinguishable from "the job never ran" in the one case — a host that
     // rebooted — where the difference is the whole answer.
-    expect(probe).not.toMatch(/(?<!\/var)\/tmp\/shellpilot/)
+    expect(probe).not.toMatch(/(?<!\/var)\/tmp\/opsmaxx/)
   })
 
   it('reads rc twice, both times BEFORE the output', () => {
@@ -1261,7 +1261,7 @@ describe('picking a job up after a restart', () => {
     resetHistoryModuleForTests()
     delete process.env[DISABLE_ENV]
     opened.length = 0
-    dir = mkdtempSync(join(tmpdir(), 'shellpilot-b2-'))
+    dir = mkdtempSync(join(tmpdir(), 'opsmaxx-b2-'))
   })
 
   afterEach(async () => {
@@ -1289,7 +1289,7 @@ describe('picking a job up after a restart', () => {
     const s = await store()
     const host = new FakeHost()
 
-    // --- the first ShellPilot: launches, reads some output, and is closed ---
+    // --- the first OpsMaxx: launches, reads some output, and is closed ---
     const first = harness(host)
     const progress: JobProgress[] = []
     const outputs: JobOutput[] = []
@@ -1324,7 +1324,7 @@ describe('picking a job up after a restart', () => {
     expect(isJobDetachedHandle(mid?.targets[0].detached)).toBe(true)
     expect(mid?.state, 'the job row stays open for the next launch to reclaim').toBe('running')
 
-    // --- a second ShellPilot, which never saw any of that ---
+    // --- a second OpsMaxx, which never saw any of that ---
     host.write(marker, 'second half\n')
     host.exit(marker, 0)
     const second = harness(host)
@@ -1608,7 +1608,7 @@ describe('stopping a job this build cannot identify', () => {
     // anyway, including `kill -TERM -- -$SP_PID` to a whole PROCESS GROUP. If
     // that host has rebooted since the marker was written, the recorded pid is
     // very likely to have been recycled onto something else; if that something
-    // else leads its own group, ShellPilot stops a stranger's processes. The
+    // else leads its own group, OpsMaxx stops a stranger's processes. The
     // poll has been computing `pidcheck=weak` for exactly this host all along,
     // and nothing consulted it.
     const host = new FakeHost({ weakPidCheck: true })
@@ -1638,7 +1638,7 @@ describe('stopping a job this build cannot identify', () => {
   it('does not kill another instance’s job because our own clock ran out', async () => {
     // JOB_INSTANCE_NOTE argues that cancel is not gated on the instance, and
     // that argument is about a PERSON deciding to stop an upgrade. An automatic
-    // timeout is a different act: it is one ShellPilot's deadline — measured
+    // timeout is a different act: it is one OpsMaxx's deadline — measured
     // from a launch it did not make — ending a run somebody else is watching.
     const host = new FakeHost()
     const h = harness(host)
@@ -1653,7 +1653,7 @@ describe('stopping a job this build cannot identify', () => {
     const r = await p
     expect(host.countVerb('signal'), 'their job, their decision').toBe(0)
     expect(host.dirs.has(dir), 'and their marker is left alone').toBe(true)
-    expect(r.error).toMatch(/different ShellPilot instance/i)
+    expect(r.error).toMatch(/different OpsMaxx instance/i)
     expect(r.finalOutcome).toBe('timeout')
   })
 
@@ -1723,7 +1723,7 @@ describe('stopping a job this build cannot identify', () => {
   })
 
   it('refuses at the builders too, which is where the rm -rf actually is', () => {
-    expect(isJobMarkerDir(jobMarkerDir('/var/tmp/shellpilot-1000/jobs', 'job1', 2))).toBe(true)
+    expect(isJobMarkerDir(jobMarkerDir('/var/tmp/opsmaxx-1000/jobs', 'job1', 2))).toBe(true)
     for (const bad of ['/etc', '/', '/var/tmp/x/../../etc', 'relative/j.1', '/var/tmp/jobs/j.1x']) {
       expect(isJobMarkerDir(bad), bad).toBe(false)
       expect(() => buildJobReap({ dir: bad }), bad).toThrow(/marker directory/)

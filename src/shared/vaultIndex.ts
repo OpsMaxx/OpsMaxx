@@ -1,6 +1,6 @@
 // The vault, named but never valued.
 //
-// `window.shellpilot.vault.list()` returns every entry WITH its password in it,
+// `window.opsmaxx.vault.list()` returns every entry WITH its password in it,
 // which is why `vault` is one of the three namespaces a module may not touch
 // (`MODULE_FORBIDDEN_BRIDGE`). But a module can have a legitimate need to let
 // somebody CHOOSE an entry -- the `.env` write does, and so would anything else
@@ -9,7 +9,7 @@
 // So this is a second, separate namespace whose whole contract is that it
 // carries no secret. It is not a filtered call on the vault namespace: the
 // namespace is the unit the guard works in, and a names-only method sitting
-// beside `list()` would make `shellpilot.vault` legal for modules again and put
+// beside `list()` would make `opsmaxx.vault` legal for modules again and put
 // the two one typo apart.
 //
 // WHAT IS ON THE DESCRIPTOR IS EVERYTHING IT MAY EVER CARRY. There is no field

@@ -599,7 +599,7 @@ export function evaluateTunnelOpen(group: AccessGroup | null): Decision {
 // not help: "Start VPN office" is indistinguishable, to the person clicking it,
 // from consent to publish a port. So it is not expressed as a permission an
 // administrator could raise to 'allow' — it is refused here, in code, and the
-// user opens an frp profile themselves in ShellPilot or it does not open.
+// user opens an frp profile themselves in OpsMaxx or it does not open.
 const AI_REFUSED_VPN_KINDS: ReadonlySet<VpnKind> = new Set<VpnKind>(['frp'])
 
 export function isVpnKindRefusedForAi(kind: VpnKind): boolean {

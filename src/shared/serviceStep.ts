@@ -92,7 +92,7 @@ export function checkServiceStep(
   if (INTERRUPTING.includes(action) && PROTECTED_UNITS.includes(full)) {
     return {
       ok: false,
-      reason: `ShellPilot will not ${action} ${full}. Its only channel to the server is that service, so this would cut the connection it needs to tell you what happened — and to put it back.`
+      reason: `OpsMaxx will not ${action} ${full}. Its only channel to the server is that service, so this would cut the connection it needs to tell you what happened — and to put it back.`
     }
   }
   if (known !== undefined && known.length > 0) {

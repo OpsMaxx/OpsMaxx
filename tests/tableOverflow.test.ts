@@ -73,7 +73,7 @@ describe('the wrapper says which side has more', () => {
 // ---------------------------------------------------------------------------
 //
 // Found in the shipped 0.22.0 build: a server card headed
-// "TestServerShellPilot169.58.227.8" — the name running straight into the
+// "TestServerOpsMaxx169.58.227.8" — the name running straight into the
 // address with no gap, and the address clipped by the card edge with its last
 // octet missing.
 //

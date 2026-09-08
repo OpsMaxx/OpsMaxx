@@ -15,7 +15,7 @@ export function SshPrompt(): React.JSX.Element | null {
   const firstField = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    return bridgeOn('ssh.onPrompt', window.shellpilot?.ssh?.onPrompt, (req) => {
+    return bridgeOn('ssh.onPrompt', window.opsmaxx?.ssh?.onPrompt, (req) => {
       setRequest(req)
       setAnswers(req.prompts.map(() => ''))
       setRemember(false)
@@ -36,14 +36,14 @@ export function SshPrompt(): React.JSX.Element | null {
   const canRemember = !looksOneTime && request.prompts.length === 1 && !!request.serverId
 
   const submit = (): void => {
-    window.shellpilot?.ssh.replyPrompt(request.id, answers, remember && canRemember, request.serverId)
+    window.opsmaxx?.ssh.replyPrompt(request.id, answers, remember && canRemember, request.serverId)
     setRequest(null)
     setAnswers([])
   }
 
   const cancel = (): void => {
     // An empty answer set makes the server reject the attempt cleanly.
-    window.shellpilot?.ssh.replyPrompt(request.id, [])
+    window.opsmaxx?.ssh.replyPrompt(request.id, [])
     setRequest(null)
     setAnswers([])
   }

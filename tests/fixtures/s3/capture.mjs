@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const IMAGE = 'quay.io/minio/minio:latest'
-const CONTAINER = 'shellpilot-s3-fixture-capture'
+const CONTAINER = 'opsmaxx-s3-fixture-capture'
 const PORT = 19733
 const BUCKET = 'sp-fixture'
 const PREFIX = 'bundles/'

@@ -8,9 +8,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, renam
 // path in it. Nothing here grants access — the token it embeds was already
 // minted by mcpAuth with an explicit workspace/group scope.
 
-const SERVER_KEY = 'shellpilot'
+const SERVER_KEY = 'opsmaxx'
 
-// process.execPath is ShellPilot's own Electron binary. With
+// process.execPath is OpsMaxx's own Electron binary. With
 // ELECTRON_RUN_AS_NODE it runs plain JS, so the bridge needs no separate Node
 // install and does not depend on PATH — which Claude Desktop does not inherit
 // from a login shell, and which is the usual reason a `"command": "node"` entry
@@ -46,10 +46,10 @@ export function httpUrl(port: number): string {
 // needs no bridge process at all.
 //
 // Removes first, because `claude mcp add` refuses a name that already exists
-// ("MCP server shellpilot already exists in user config") rather than replacing
+// ("MCP server opsmaxx already exists in user config") rather than replacing
 // it. Every time after the first is a re-registration — a new session, or a
 // revoked one being replaced — so the plain add would have failed exactly when
-// it was needed most. `shellpilot claude` has always done remove-then-add for
+// it was needed most. `opsmaxx claude` has always done remove-then-add for
 // this reason (src/cli/agents.ts); this just matches it.
 export function claudeCodeCommand(token: string, port: number): string {
   const add = [
@@ -87,7 +87,7 @@ export function writeClaudeDesktopConfig(token: string, port: number): WriteResu
   return writeClaudeDesktopConfigTo(claudeDesktopConfigPath(), token, port)
 }
 
-// Merges a `shellpilot` entry into whatever is already in the file. A user's
+// Merges a `opsmaxx` entry into whatever is already in the file. A user's
 // other MCP servers are none of our business, so an unreadable or non-JSON file
 // is a hard stop rather than something to overwrite with a clean config — the
 // entry can always be added by hand from the docs.
@@ -120,7 +120,7 @@ export function writeClaudeDesktopConfigTo(file: string, token: string, port: nu
         }
       }
     }
-    backedUpTo = `${file}.shellpilot-backup`
+    backedUpTo = `${file}.opsmaxx-backup`
     try {
       copyFileSync(file, backedUpTo)
     } catch {
@@ -142,7 +142,7 @@ export function writeClaudeDesktopConfigTo(file: string, token: string, port: nu
 
   try {
     mkdirSync(dirname(file), { recursive: true })
-    const tmp = `${file}.shellpilot-tmp`
+    const tmp = `${file}.opsmaxx-tmp`
     writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
     renameSync(tmp, file)
   } catch (err) {
@@ -157,11 +157,11 @@ export function writeClaudeDesktopConfigTo(file: string, token: string, port: nu
 //
 // There is no TOML dependency in this project and adding one for three
 // key/value pairs is not worth it, so the entry is spliced in as a marked
-// block, the same approach `shellpilot codex` already uses (src/cli/agents.ts).
+// block, the same approach `opsmaxx codex` already uses (src/cli/agents.ts).
 // TOML basic-string escaping is a subset of JSON's, which makes JSON.stringify
 // a safe way to quote each value.
-const TOML_START = '# >>> shellpilot managed block — written by ShellPilot, safe to remove >>>'
-const TOML_END = '# <<< shellpilot managed block <<<'
+const TOML_START = '# >>> opsmaxx managed block — written by OpsMaxx, safe to remove >>>'
+const TOML_END = '# <<< opsmaxx managed block <<<'
 
 export function writeCodexConfig(token: string, port: number): WriteResult {
   return writeCodexConfigTo(codexConfigPath(), token, port)
@@ -171,7 +171,7 @@ export function writeCodexConfigTo(file: string, token: string, port: number): W
   const { command, args, env } = bridgeInvocation(token, port)
   const block = [
     TOML_START,
-    '[mcp_servers.shellpilot]',
+    '[mcp_servers.opsmaxx]',
     `command = ${JSON.stringify(command)}`,
     `args = [${args.map((a) => JSON.stringify(a)).join(', ')}]`,
     `env = { ${Object.entries(env)
@@ -189,7 +189,7 @@ export function writeCodexConfigTo(file: string, token: string, port: number): W
     } catch (err) {
       return { ok: false, path: file, error: `Could not read ${file}: ${(err as Error).message}` }
     }
-    backedUpTo = `${file}.shellpilot-backup`
+    backedUpTo = `${file}.opsmaxx-backup`
     try {
       copyFileSync(file, backedUpTo)
     } catch {
@@ -208,7 +208,7 @@ export function writeCodexConfigTo(file: string, token: string, port: number): W
 
   try {
     mkdirSync(dirname(file), { recursive: true })
-    const tmp = `${file}.shellpilot-tmp`
+    const tmp = `${file}.opsmaxx-tmp`
     writeFileSync(tmp, next, 'utf8')
     renameSync(tmp, file)
   } catch (err) {

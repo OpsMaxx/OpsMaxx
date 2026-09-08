@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add local shell sessions (macOS/Windows/Linux) to ShellPilot as first-class tabs and panes, alongside the existing SSH sessions, without exposing a local shell over MCP.
+**Goal:** Add local shell sessions (macOS/Windows/Linux) to OpsMaxx as first-class tabs and panes, alongside the existing SSH sessions, without exposing a local shell over MCP.
 
 **Architecture:** A new main-process service `localPty.ts` mirrors `ssh.ts`'s data plane exactly — per-session IPC channels, a per-tick output coalescer, a `disposeAll` on `before-quit` — but drives an in-process `@lydell/node-pty` instead of an `ssh2` `ClientChannel`. The renderer's `useRealSession` hook is refactored to be transport-agnostic, and `Tab` becomes a discriminated union (`kind: 'ssh' | 'local'`) rather than a `Server` row with a synthesized pseudo-server. Panes become a per-tab array of session descriptors instead of the hard-coded 2-way split.
 
@@ -240,7 +240,7 @@ the tabs — is proven only on macOS.
     transitive closure from `mcpServer.ts` and `src/cli/index.ts`** (~30 LOC).
 23. **`localTerminalEnabled` is renderer-side only; the IPC handlers register unconditionally.** So
     **Phases 3–7 all ship a live local-shell IPC surface with the feature nominally off** — a
-    compromised renderer just calls `window.shellpilot.local.connect()`. Gate in main: read
+    compromised renderer just calls `window.opsmaxx.local.connect()`. Gate in main: read
     `settings.localTerminalEnabled` in the existing `data:save` handler (`main/index.ts:704`) and
     no-op every `local:*` handler when false, or do not register them at all.
 24. **`local:connect` validates nothing.** `cols`/`rows` go unclamped into `forkpty`'s `winsize` /
@@ -261,7 +261,7 @@ the tabs — is proven only on macOS.
     (same class as `NODE_OPTIONS`, not covered by it) and the rest of the `ELECTRON_*` family. Use a
     prefix strip plus an explicit `NODE_*` list. It is also the only pure export in its module with
     no test — and it cannot be tested until `tests/mocks/electron.ts` gains `getVersion`.
-    *Verified good news:* ShellPilot puts no credentials, vault material or MCP token into its own
+    *Verified good news:* OpsMaxx puts no credentials, vault material or MCP token into its own
     `process.env` (the only writes are `ELECTRON_RENDERER_URL`, dev only). Add a test asserting that
     stays true.
 28. **The pin is not a pin.** `npm i @lydell/node-pty@1.2.0-beta.15` writes `^1.2.0-beta.15`, which
@@ -597,7 +597,7 @@ import { findShell, sanitisedEnv } from './shellDiscovery'
 // A machine where the native binding will not load (an unsupported libc, a
 // hardened-runtime failure we did not predict) must still get an app that
 // starts and does everything else — the local terminal is the feature that
-// fails, not ShellPilot.
+// fails, not OpsMaxx.
 type Pty = {
   pid: number
   write(data: string): void
@@ -635,8 +635,8 @@ async function loadPty(): Promise<NodePty> {
 // data exactly '\x13' when the user presses Ctrl+S — so binding the token to
 // XOFF would silently swallow Ctrl+S in vim, in emacs, and in every program
 // that binds it. An OSC sequence nobody can type has no such collision.
-const FLOW_PAUSE = '\u001b]777;shellpilot-pause\u0007'
-const FLOW_RESUME = '\u001b]777;shellpilot-resume\u0007'
+const FLOW_PAUSE = '\u001b]777;opsmaxx-pause\u0007'
+const FLOW_RESUME = '\u001b]777;opsmaxx-resume\u0007'
 
 // Bytes in flight to the renderer before we stop reading, and the level we
 // wait to fall back to before reading again. 512 KB is roughly a screenful of
@@ -871,7 +871,7 @@ import { describe, it, expect } from 'vitest'
 describe('@lydell/node-pty spawns a real shell', () => {
   it.skipIf(process.platform === 'win32')('echoes back through a pty', async () => {
     const pty = await import('@lydell/node-pty')
-    const term = pty.spawn('/bin/sh', ['-c', 'echo SHELLPILOT_PTY_OK'], {
+    const term = pty.spawn('/bin/sh', ['-c', 'echo OPSMAXX_PTY_OK'], {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
@@ -882,17 +882,17 @@ describe('@lydell/node-pty spawns a real shell', () => {
       let buf = ''
       term.onData((d) => {
         buf += d
-        if (buf.includes('SHELLPILOT_PTY_OK')) resolve(buf)
+        if (buf.includes('OPSMAXX_PTY_OK')) resolve(buf)
       })
       setTimeout(() => resolve(buf), 8000)
     })
     term.kill()
-    expect(seen).toContain('SHELLPILOT_PTY_OK')
+    expect(seen).toContain('OPSMAXX_PTY_OK')
   })
 
   it.skipIf(process.platform !== 'win32')('echoes back through ConPTY', async () => {
     const pty = await import('@lydell/node-pty')
-    const term = pty.spawn(process.env.ComSpec ?? 'cmd.exe', ['/c', 'echo SHELLPILOT_PTY_OK'], {
+    const term = pty.spawn(process.env.ComSpec ?? 'cmd.exe', ['/c', 'echo OPSMAXX_PTY_OK'], {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
@@ -903,12 +903,12 @@ describe('@lydell/node-pty spawns a real shell', () => {
       let buf = ''
       term.onData((d) => {
         buf += d
-        if (buf.includes('SHELLPILOT_PTY_OK')) resolve(buf)
+        if (buf.includes('OPSMAXX_PTY_OK')) resolve(buf)
       })
       setTimeout(() => resolve(buf), 8000)
     })
     term.kill()
-    expect(seen).toContain('SHELLPILOT_PTY_OK')
+    expect(seen).toContain('OPSMAXX_PTY_OK')
   })
 })
 ```
@@ -1075,7 +1075,7 @@ export function sanitisedEnv(): Record<string, string> {
   }
   env.TERM = 'xterm-256color'
   env.COLORTERM = 'truecolor'
-  env.TERM_PROGRAM = 'ShellPilot'
+  env.TERM_PROGRAM = 'OpsMaxx'
   env.TERM_PROGRAM_VERSION = app.getVersion()
   // An AppImage started from a desktop launcher can have no locale at all,
   // which makes every UTF-8 box-drawing character in the shell prompt render
@@ -1096,7 +1096,7 @@ macOS:
 // assembled by path_helper, which runs from /etc/zprofile and /etc/profile.
 // Those are read by a LOGIN shell only. Without -l the user gets a terminal
 // where `brew`, `node`, `git` from Xcode-alternatives and their whole toolchain
-// are simply not found, and it looks like ShellPilot broke their machine.
+// are simply not found, and it looks like OpsMaxx broke their machine.
 // Terminal.app and iTerm2 both start login shells for exactly this reason.
 async function discoverDarwin(): Promise<LocalShell[]> {
   const shells: LocalShell[] = []
@@ -1309,7 +1309,7 @@ And the cached public surface:
 ```ts
 // Discovery shells out (dscl, reg, wsl) and the answer does not change while
 // the app runs, so it is computed once. `refresh` exists for the case that
-// does change it: the user installing WSL or Git while ShellPilot is open.
+// does change it: the user installing WSL or Git while OpsMaxx is open.
 let cache: Promise<LocalShell[]> | null = null
 
 export function listShells(refresh = false): Promise<LocalShell[]> {
@@ -1464,13 +1464,13 @@ npm run dev
 In the renderer devtools console:
 
 ```js
-await window.shellpilot.local.shells()
+await window.opsmaxx.local.shells()
 const id = 'smoke-1'
-window.shellpilot.local.onData(id, d => console.log(JSON.stringify(d)))
-await window.shellpilot.local.connect({ sessionId: id, shellId: (await window.shellpilot.local.shells())[0].id, cols: 80, rows: 24 })
-window.shellpilot.local.write(id, 'echo hello\r')
+window.opsmaxx.local.onData(id, d => console.log(JSON.stringify(d)))
+await window.opsmaxx.local.connect({ sessionId: id, shellId: (await window.opsmaxx.local.shells())[0].id, cols: 80, rows: 24 })
+window.opsmaxx.local.write(id, 'echo hello\r')
 ```
-Expected: a shell prompt then `hello` in the console. On macOS, also run `window.shellpilot.local.write(id, 'echo $PATH\r')` and confirm `/opt/homebrew/bin` (or `/usr/local/bin`) is present — that is the login-shell requirement paying off.
+Expected: a shell prompt then `hello` in the console. On macOS, also run `window.opsmaxx.local.write(id, 'echo $PATH\r')` and confirm `/opt/homebrew/bin` (or `/usr/local/bin`) is present — that is the login-shell requirement paying off.
 
 - [ ] **Step 6: Commit**
 
@@ -1548,7 +1548,7 @@ function localCloseReason(info: LocalCloseInfo): string {
 }
 
 export function sshTransport(server: Server, setServerStatus: (id: string, s: Server['status']) => void): TerminalTransport {
-  const api = () => window.shellpilot?.ssh
+  const api = () => window.opsmaxx?.ssh
   return {
     key: `ssh:${server.id}`,
     title: server.name,
@@ -1588,7 +1588,7 @@ export function sshTransport(server: Server, setServerStatus: (id: string, s: Se
 }
 
 export function localTransport(shell: LocalShell, cwd?: string): TerminalTransport {
-  const api = () => window.shellpilot?.local
+  const api = () => window.opsmaxx?.local
   return {
     key: `local:${shell.id}`,
     title: shell.label,
@@ -1668,7 +1668,7 @@ git add src/renderer/src/lib/transport.ts src/renderer/src/hooks/useTerminalSess
 git commit -m "refactor(terminal): make the session hook transport-agnostic"
 ```
 
-**Done when:** `TerminalView` no longer imports `sshHopsFor` or `window.shellpilot.ssh`, and every existing SSH behaviour is unchanged by manual test.
+**Done when:** `TerminalView` no longer imports `sshHopsFor` or `window.opsmaxx.ssh`, and every existing SSH behaviour is unchanged by manual test.
 
 **Rollback:** revert. This is the one phase with no feature flag, because it ships no feature — if SSH regresses, revert immediately.
 
@@ -1770,7 +1770,7 @@ npx vitest run tests/localTabModel.test.ts
 ```
 Expected: FAIL — `openLocal is not a function`.
 
-> **Note:** the store is renderer code and imports `zustand` and `./lib/bridge`. `vitest.config.ts:5` sets `environment: 'node'` and `include: ['tests/**/*.test.ts']`. `store/app.ts` touches `window.shellpilot` only inside `releaseVpnSecrets` (`:330`), guarded by `bridgeHas`, so it imports cleanly under node. If it does not, add `environmentMatchGlobs` for this one file rather than switching the whole suite to jsdom.
+> **Note:** the store is renderer code and imports `zustand` and `./lib/bridge`. `vitest.config.ts:5` sets `environment: 'node'` and `include: ['tests/**/*.test.ts']`. `store/app.ts` touches `window.opsmaxx` only inside `releaseVpnSecrets` (`:330`), guarded by `bridgeHas`, so it imports cleanly under node. If it does not, add `environmentMatchGlobs` for this one file rather than switching the whole suite to jsdom.
 
 - [ ] **Step 3: Change the type**
 
@@ -2003,7 +2003,7 @@ Actions:
 
 - [ ] **Step 3: Write the shell menu**
 
-`LocalShellMenu.tsx` is a dropdown anchored to the `+` button (`WorkspacePanel.tsx:191-193`), listing `await window.shellpilot.local.shells()` with the default first. Fetched once on mount into component state; a *Rescan* entry at the bottom calls `shells(true)`. Guard the whole component with `bridgeHas(window.shellpilot?.local, 'shells')` (the pattern at `store/app.ts:330`) so a renderer running against an older preload degrades to the current behaviour instead of throwing.
+`LocalShellMenu.tsx` is a dropdown anchored to the `+` button (`WorkspacePanel.tsx:191-193`), listing `await window.opsmaxx.local.shells()` with the default first. Fetched once on mount into component state; a *Rescan* entry at the bottom calls `shells(true)`. Guard the whole component with `bridgeHas(window.opsmaxx?.local, 'shells')` (the pattern at `store/app.ts:330`) so a renderer running against an older preload degrades to the current behaviour instead of throwing.
 
 The `+` button becomes a split button: click = the current tab's kind (as `addTab` at `:127-130`), the caret = the menu.
 
@@ -2227,16 +2227,16 @@ Under `mac:`, after `entitlementsInherit` (`:132`) and before the `target:` bloc
   # as the keychain-ACL note above, and another entry on the Developer ID case.
   extendInfo:
     NSDocumentsFolderUsageDescription: >-
-      ShellPilot needs access to your Documents folder so that commands you run
+      OpsMaxx needs access to your Documents folder so that commands you run
       in a local terminal can read and write files there.
     NSDesktopFolderUsageDescription: >-
-      ShellPilot needs access to your Desktop so that commands you run in a
+      OpsMaxx needs access to your Desktop so that commands you run in a
       local terminal can read and write files there.
     NSDownloadsFolderUsageDescription: >-
-      ShellPilot needs access to your Downloads folder so that commands you run
+      OpsMaxx needs access to your Downloads folder so that commands you run
       in a local terminal can read and write files there.
     NSRemovableVolumesUsageDescription: >-
-      ShellPilot needs access to removable volumes so that commands you run in a
+      OpsMaxx needs access to removable volumes so that commands you run in a
       local terminal can read and write files on external drives.
 ```
 
@@ -2328,7 +2328,7 @@ In `.github/workflows/release.yml`, in the *Verify macOS signature covers the en
 ```bash
 npm run build && npx electron-builder --dir --publish never
 node scripts/verify-local-pty-pack.mjs release
-open release/*/ShellPilot.app   # macOS: launch the packed app and open a local tab
+open release/*/OpsMaxx.app   # macOS: launch the packed app and open a local tab
 ```
 Expected: the verifier passes, and the packed app opens a working local terminal.
 
@@ -2538,7 +2538,7 @@ Two independent mechanisms, both required:
 
 2. **An ack-driven flow window** (`flowWindow`, `FLOW_HIGH_WATER = 512 KB`, `FLOW_LOW_WATER = 64 KB`). Bounds the *volume in flight*. `xterm.write(data, cb)` fires the callback once the chunk is parsed into the buffer; the renderer acks the byte count over `local:ack`; main stops reading the pty past the high-water mark and resumes below the low. This is how VS Code's terminal does it and it is the only thing that keeps `yes` in ten tabs from pinning the app.
 
-The pause and resume are driven through node-pty's `handleFlowControl`: writing a chunk exactly equal to `flowControlPause` makes node-pty pause its read loop instead of forwarding the bytes to the child. **The tokens must not be `\x13`/`\x11`.** A user pressing Ctrl+S sends `'\x13'` as its own `local:write` call, which would match the sentinel exactly and be swallowed — breaking Ctrl+S in vim, in emacs, and everywhere else it is bound. Use OSC sequences nobody can type (`\u001b]777;shellpilot-pause\u0007`). `localWrite` additionally refuses the tokens on the way in, so a compromised renderer cannot stall its own session permanently.
+The pause and resume are driven through node-pty's `handleFlowControl`: writing a chunk exactly equal to `flowControlPause` makes node-pty pause its read loop instead of forwarding the bytes to the child. **The tokens must not be `\x13`/`\x11`.** A user pressing Ctrl+S sends `'\x13'` as its own `local:write` call, which would match the sentinel exactly and be swallowed — breaking Ctrl+S in vim, in emacs, and everywhere else it is bound. Use OSC sequences nobody can type (`\u001b]777;opsmaxx-pause\u0007`). `localWrite` additionally refuses the tokens on the way in, so a compromised renderer cannot stall its own session permanently.
 
 SSH sessions are deliberately **not** given the ack path in v1: they already have the coalescer, and the far end's own TCP window plus the ssh2 channel window provide the backpressure a local pty lacks.
 
@@ -2570,7 +2570,7 @@ Phases 4 and 5 are the two with no flag, because neither ships a feature — the
 - **Local host metrics on the monitor strip.** Would need a whole second metrics implementation that reads this machine instead of shelling out over SSH.
 - **Shell profile management** (custom argv, per-profile env, saved working directories). Discovery only in v1.
 - **Any AI/MCP access to a local shell.** Permanently, not just in v1. See Phase 8.
-- **Windows on ARM, and Linux on arm64.** `@lydell/node-pty` prebuilds cover the four slots ShellPilot ships (`electron-builder.yml:63, 141, 163`) and no others. If the shipped arch list grows, this must be re-checked first.
+- **Windows on ARM, and Linux on arm64.** `@lydell/node-pty` prebuilds cover the four slots OpsMaxx ships (`electron-builder.yml:63, 141, 163`) and no others. If the shipped arch list grows, this must be re-checked first.
 
 ---
 
@@ -2606,7 +2606,7 @@ Answer these in Phase 0. Do not invent answers; a wrong guess here invalidates a
   through ConPTY. The check is now a permanent CI step rather than a one-off, and it hard-fails if
   the directory is not there to delete. **Do not re-open this by inspection; it is settled by
   execution on the platform in question.**
-- **Q4 — Does the AppImage build need anything extra?** AppImage relocates the app root at runtime; a `.node` under `app.asar.unpacked` normally resolves fine, but ShellPilot has never shipped a native module it actually loads (`cpu-features` does not load — `electron-builder.yml:124-129`), so this has never been exercised. Phase 0 Step 6 must include the AppImage, not just the `--dir` pack.
+- **Q4 — Does the AppImage build need anything extra?** AppImage relocates the app root at runtime; a `.node` under `app.asar.unpacked` normally resolves fine, but OpsMaxx has never shipped a native module it actually loads (`cpu-features` does not load — `electron-builder.yml:124-129`), so this has never been exercised. Phase 0 Step 6 must include the AppImage, not just the `--dir` pack.
 - **Q5 — Is `bash -i` without `-l` the right default on Linux?** The plan argues yes (a login bash reads `~/.bash_profile` and skips `~/.bashrc`, where Linux users keep everything, and the GUI session already inherits `~/.profile`). But a Wayland session started by a display manager that does not source `~/.profile` would leave PATH short. Test on both a GNOME/Wayland and a bare i3/X11 session before committing to it. If PATH is short, switch to `['-l', '-i']` and accept that `~/.bash_profile` then also runs.
 - **Q6 — Is `execute_command` the only tool name in `ALLOWED_TOOLS` that legitimately matches an "execution" pattern?** The whitelist in `tests/localTerminalNotExposed.test.ts` must be built by reading the `registerTool` calls in `src/main/services/mcpServer.ts`, not from this document. Do that before committing Phase 8.
 

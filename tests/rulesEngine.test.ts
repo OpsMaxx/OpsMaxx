@@ -385,11 +385,11 @@ describe('running the pinned job', () => {
     h.tick(1000)
     await h.engine.sweep()
     expect(h.notified[0]).toMatchObject({
-      source: 'shellpilot',
+      source: 'opsmaxx',
       version: '9.9.9',
       kind: 'disk',
       summary:
-        'ShellPilot rule "vacuum the journal" started the job "clear the journal" on 2 server(s) after a disk alert raised.'
+        'OpsMaxx rule "vacuum the journal" started the job "clear the journal" on 2 server(s) after a disk alert raised.'
     })
   })
 

@@ -5,9 +5,9 @@ import { randomBytes, createHash, timingSafeEqual } from 'node:crypto'
 import type { McpAgentSession, McpGlobalConfig, WorkspaceRef } from '../../shared/mcp'
 import { DEFAULT_MCP_PORT } from '../../shared/mcp'
 
-const CONFIG_FILE = join(app.getPath('userData'), 'shellpilot-mcp-config.json')
+const CONFIG_FILE = join(app.getPath('userData'), 'opsmaxx-mcp-config.json')
 const CONFIG_TMP = `${CONFIG_FILE}.tmp`
-const SESSIONS_FILE = join(app.getPath('userData'), 'shellpilot-mcp-sessions.json')
+const SESSIONS_FILE = join(app.getPath('userData'), 'opsmaxx-mcp-sessions.json')
 const SESSIONS_TMP = `${SESSIONS_FILE}.tmp`
 
 function defaultConfig(): McpGlobalConfig {
@@ -53,7 +53,7 @@ let sessions: McpAgentSession[] | null = null
 
 // Sessions saved before a session could be granted more than one workspace
 // are still `{ workspaceId, workspaceName }` on disk, not `{ workspaces }` —
-// upgrading ShellPilot must not turn every pre-existing session into a
+// upgrading OpsMaxx must not turn every pre-existing session into a
 // crash the first time something reads `.workspaces`.
 function migrateSession(raw: unknown): McpAgentSession {
   const r = raw as McpAgentSession & { workspaceId?: string; workspaceName?: string }

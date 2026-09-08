@@ -84,7 +84,7 @@ export function samplerWarning(
 // Why a read-only panel is empty.
 //
 // Six panels — posture, access, inventory, drift, patches, search — each said
-// the same paragraph when they had nothing: "ShellPilot reads this about once
+// the same paragraph when they had nothing: "OpsMaxx reads this about once
 // an hour... Press Check now, and make sure background checking is on in
 // Settings." Three sentences of maybe, and a button.
 //

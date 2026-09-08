@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { validateWebhookUrl } from '../src/shared/webhook'
 import type { AlertPayload } from '../src/shared/webhook'
 
-// This is the first outbound call ShellPilot makes to an endpoint a user
+// This is the first outbound call OpsMaxx makes to an endpoint a user
 // chooses, so the tests here are mostly about what must NOT happen: a
 // credential on the wire in clear, and infrastructure detail in a payload.
 
@@ -57,7 +57,7 @@ describe('payload sanitising — what actually leaves the machine', () => {
     // source, not the runtime object -- so main must not forward what it got.
     const { sanitisePayload } = await import('../src/main/services/webhookAlerts')
     const out = sanitisePayload({
-      source: 'not-shellpilot',
+      source: 'not-opsmaxx',
       event: 'raised',
       kind: 'cpu',
       server: 'box',
@@ -80,7 +80,7 @@ describe('payload sanitising — what actually leaves the machine', () => {
   it('forces source and timestamp rather than trusting them', async () => {
     const { sanitisePayload } = await import('../src/main/services/webhookAlerts')
     const out = sanitisePayload({ event: 'raised', kind: 'cpu', at: 'whenever', source: 'spoofed' })
-    expect(out!.source).toBe('shellpilot')
+    expect(out!.source).toBe('opsmaxx')
     expect(() => new Date(out!.at).toISOString()).not.toThrow()
   })
 
@@ -208,7 +208,7 @@ describe('delivery policy', () => {
   })
 
   const sample = (): AlertPayload => ({
-    source: 'shellpilot',
+    source: 'opsmaxx',
     version: '0.8.0',
     event: 'raised',
     kind: 'cpu',
@@ -366,7 +366,7 @@ describe('a webhook whose URL is taken away', () => {
       return new Response('', { status: 200 })
     }) as unknown as typeof fetch
     m.webhookNotify({
-      source: 'shellpilot',
+      source: 'opsmaxx',
       version: '0.8.0',
       event: 'raised',
       kind: 'cpu',

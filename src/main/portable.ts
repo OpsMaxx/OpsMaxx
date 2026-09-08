@@ -12,7 +12,7 @@ import { join } from 'node:path'
 const portableDir = process.env.PORTABLE_EXECUTABLE_DIR
 
 if (portableDir) {
-  app.setPath('userData', join(portableDir, 'ShellPilot-data'))
+  app.setPath('userData', join(portableDir, 'OpsMaxx-data'))
 }
 
 export const isPortable = !!portableDir

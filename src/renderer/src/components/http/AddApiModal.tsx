@@ -88,7 +88,7 @@ export function AddApiModal(): React.JSX.Element {
   return (
     <Modal
       title={editing ? `Edit ${editing.name}` : 'Add an API'}
-      subtitle="Requests are sent by ShellPilot, so internal certificates and APIs without CORS headers work."
+      subtitle="Requests are sent by OpsMaxx, so internal certificates and APIs without CORS headers work."
       onClose={() => setModal(null)}
       confirm={{ label: editing ? 'Save' : 'Add', onClick: create, disabled: !valid }}
     >
@@ -151,7 +151,7 @@ export function AddApiModal(): React.JSX.Element {
                 className="btn secondary size-28"
                 onClick={() => {
                   setFileError(null)
-                  void window.shellpilot?.http
+                  void window.opsmaxx?.http
                     .chooseSpecFile()
                     .then((chosen) => {
                       if (!chosen) return

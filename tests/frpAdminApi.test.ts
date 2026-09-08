@@ -25,7 +25,7 @@ import { VpnError } from '../src/main/services/vpn/errors'
 // with an actual HTTP response, an actual 401 and an actual dropped connection.
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/fake-frpc.mjs', import.meta.url))
-const ADMIN_USER = 'shellpilot'
+const ADMIN_USER = 'opsmaxx'
 const ADMIN_PASSWORD = 'run-password-7c1e'
 const TOKEN = 'tok_live_9d2f'
 

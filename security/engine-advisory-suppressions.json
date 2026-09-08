@@ -1,6 +1,6 @@
 {
   "$comment": [
-    "Advisories against a pinned engine that do not reach ShellPilot, each with the",
+    "Advisories against a pinned engine that do not reach OpsMaxx, each with the",
     "reason it does not. Read by scripts/check-engine-advisories.mjs.",
     "",
     "A suppression is a judgement made on a day about one version, so it carries both.",
@@ -26,7 +26,7 @@
         "pin, but the affected code is the separate Windows driver rather than the",
         "openvpn binary itself.",
         "",
-        "Two independent reasons it cannot reach a ShellPilot user. The build passes",
+        "Two independent reasons it cannot reach a OpsMaxx user. The build passes",
         "--disable-dco (scripts/build-openvpn.sh), so no DCO code is compiled into the",
         "binary we ship. And we ship no OpenVPN binary on Windows at all: Windows keeps",
         "the system-install requirement, so its openvpn comes from the OpenVPN",

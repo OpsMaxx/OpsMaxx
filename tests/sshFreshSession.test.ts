@@ -140,7 +140,7 @@ beforeAll(async () => {
   // Trusted before anything under test connects, so the trust-on-first-use
   // dialog never enters the picture.
   writeFileSync(
-    join(app.getPath('userData'), 'shellpilot-known-hosts.json'),
+    join(app.getPath('userData'), 'opsmaxx-known-hosts.json'),
     JSON.stringify({
       [`${HOST}:${port}`]: {
         id: `${HOST}:${port}`,

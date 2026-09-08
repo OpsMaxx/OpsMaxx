@@ -1,4 +1,4 @@
-===SHELLPILOT-SRVVER===
+===OPSMAXX-SRVVER===
 {
   "clientVersion": {
     "major": "1",
@@ -28,7 +28,7 @@
     "platform": "linux/arm64"
   }
 }
-===SHELLPILOT-APIVER===
+===OPSMAXX-APIVER===
 admissionregistration.k8s.io/v1
 apiextensions.k8s.io/v1
 apiregistration.k8s.io/v1

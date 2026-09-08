@@ -95,7 +95,7 @@ let root: string
 function baseSpec(over: Partial<SupervisedSpec> = {}): SupervisedSpec {
   return {
     id: 'run-1',
-    command: '/opt/shellpilot/engine',
+    command: '/opt/opsmaxx/engine',
     args: ['--config', 'stdin'],
     cwd: root,
     readiness: async () => {},
@@ -680,7 +680,7 @@ describe('a second, non-VPN consumer', () => {
     await sup.stop('proc-noun', { force: true })
 
     expect(await rejected).toBe(
-      'Something went wrong inside ShellPilot. The process was stopped while it was starting.'
+      'Something went wrong inside OpsMaxx. The process was stopped while it was starting.'
     )
   })
 
@@ -710,7 +710,7 @@ describe('a second, non-VPN consumer', () => {
     await sup.stop('vpn-noun', { force: true })
 
     expect(await rejected).toBe(
-      'Something went wrong inside ShellPilot. The tunnel was stopped while it was starting.'
+      'Something went wrong inside OpsMaxx. The tunnel was stopped while it was starting.'
     )
   })
 
@@ -740,7 +740,7 @@ describe('a second, non-VPN consumer', () => {
         JSON.stringify({
           pid: 9101,
           startedAtIso: new Date(startedAtMs).toISOString(),
-          exePath: '/opt/shellpilot/openvpn',
+          exePath: '/opt/opsmaxx/openvpn',
           runId: 'tunnel-1',
           runDir: join(vpnRoot, 'tunnel-1')
         })
@@ -755,7 +755,7 @@ describe('a second, non-VPN consumer', () => {
           if (signal !== 0) killed.push([pid, signal])
         },
         runProbe: async (command) =>
-          command === 'readlink' ? '/opt/shellpilot/openvpn\n' : `${startedAtMs / 1000}\n`,
+          command === 'readlink' ? '/opt/opsmaxx/openvpn\n' : `${startedAtMs / 1000}\n`,
         reapTermGraceMs: 0,
         spawn: () => new FakeChild() as unknown as ChildProcess
       })

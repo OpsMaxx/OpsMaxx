@@ -16,7 +16,7 @@ let dir: string
 let file: string
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'shellpilot-clientconfig-'))
+  dir = mkdtempSync(join(tmpdir(), 'opsmaxx-clientconfig-'))
   file = join(dir, 'claude_desktop_config.json')
 })
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
@@ -35,7 +35,7 @@ describe('bridge invocation', () => {
   it('points at the unpacked copy of the CLI when running from an asar archive', async () => {
     const electron = await import('electron')
     const original = electron.app.getAppPath
-    ;(electron.app as any).getAppPath = (): string => join('/Apps', 'ShellPilot.app', 'Contents', 'Resources', 'app.asar')
+    ;(electron.app as any).getAppPath = (): string => join('/Apps', 'OpsMaxx.app', 'Contents', 'Resources', 'app.asar')
     try {
       // A child process cannot be spawned from inside an asar archive, which is
       // why electron-builder.yml keeps out/cli unpacked.
@@ -53,7 +53,7 @@ describe('claude code command', () => {
     // rotated token, or a revoked session being replaced. A plain add would
     // fail exactly when it is needed.
     const cmd = claudeCodeCommand('tok', 5177)
-    expect(cmd).toContain('claude mcp remove shellpilot -s user')
+    expect(cmd).toContain('claude mcp remove opsmaxx -s user')
     expect(cmd.indexOf('mcp remove')).toBeLessThan(cmd.indexOf('mcp add'))
     // A missing entry is not an error worth stopping on.
     expect(cmd).toContain('2>/dev/null')
@@ -80,9 +80,9 @@ describe('writing the claude desktop config', () => {
     const result = writeClaudeDesktopConfigTo(nested, 'tok', 5177)
     expect(result.ok).toBe(true)
     const written = JSON.parse(readFileSync(nested, 'utf8'))
-    expect(written.mcpServers.shellpilot.args).toContain('--token')
-    expect(written.mcpServers.shellpilot.args).toContain('tok')
-    expect(written.mcpServers.shellpilot.env).toEqual({ ELECTRON_RUN_AS_NODE: '1' })
+    expect(written.mcpServers.opsmaxx.args).toContain('--token')
+    expect(written.mcpServers.opsmaxx.args).toContain('tok')
+    expect(written.mcpServers.opsmaxx.env).toEqual({ ELECTRON_RUN_AS_NODE: '1' })
   })
 
   it('keeps other mcp servers and unrelated top-level keys', () => {
@@ -97,23 +97,23 @@ describe('writing the claude desktop config', () => {
     const next = read()
     expect(next.globalShortcut).toBe('Alt+Space')
     expect(next.mcpServers.burp).toEqual({ command: 'python', args: ['burp.py'] })
-    expect(next.mcpServers.shellpilot).toBeDefined()
+    expect(next.mcpServers.opsmaxx).toBeDefined()
   })
 
   it('replaces its own previous entry rather than accumulating duplicates', () => {
     writeClaudeDesktopConfigTo(file, 'old-token', 5177)
     writeClaudeDesktopConfigTo(file, 'new-token', 6000)
-    const args: string[] = read().mcpServers.shellpilot.args
+    const args: string[] = read().mcpServers.opsmaxx.args
     expect(args).toContain('new-token')
     expect(args).not.toContain('old-token')
     expect(args[args.indexOf('--port') + 1]).toBe('6000')
-    expect(Object.keys(read().mcpServers)).toEqual(['shellpilot'])
+    expect(Object.keys(read().mcpServers)).toEqual(['opsmaxx'])
   })
 
   it('backs the file up before overwriting it', () => {
     writeFileSync(file, JSON.stringify({ mcpServers: {} }))
     const result = writeClaudeDesktopConfigTo(file, 'tok', 5177)
-    expect(result.backedUpTo).toBe(`${file}.shellpilot-backup`)
+    expect(result.backedUpTo).toBe(`${file}.opsmaxx-backup`)
     expect(existsSync(result.backedUpTo!)).toBe(true)
   })
 
@@ -129,13 +129,13 @@ describe('writing the claude desktop config', () => {
   it('treats an empty file as an empty config rather than an error', () => {
     writeFileSync(file, '   \n')
     expect(writeClaudeDesktopConfigTo(file, 'tok', 5177).ok).toBe(true)
-    expect(read().mcpServers.shellpilot).toBeDefined()
+    expect(read().mcpServers.opsmaxx).toBeDefined()
   })
 
   it('replaces a non-object mcpServers value instead of crashing on it', () => {
     writeFileSync(file, JSON.stringify({ mcpServers: 'nonsense' }))
     expect(writeClaudeDesktopConfigTo(file, 'tok', 5177).ok).toBe(true)
-    expect(read().mcpServers.shellpilot).toBeDefined()
+    expect(read().mcpServers.opsmaxx).toBeDefined()
   })
 })
 
@@ -150,7 +150,7 @@ describe('writing the codex config', () => {
   it('writes a bridge entry Codex can launch', () => {
     expect(writeCodexConfigTo(codex(), 'tok', 5177).ok).toBe(true)
     const toml = readToml()
-    expect(toml).toContain('[mcp_servers.shellpilot]')
+    expect(toml).toContain('[mcp_servers.opsmaxx]')
     expect(toml).toContain('"--token", "tok"')
     expect(toml).toContain('ELECTRON_RUN_AS_NODE = "1"')
   })
@@ -161,7 +161,7 @@ describe('writing the codex config', () => {
     const toml = readToml()
     expect(toml).toContain('model = "gpt-5"')
     expect(toml).toContain('[mcp_servers.other]')
-    expect(toml).toContain('[mcp_servers.shellpilot]')
+    expect(toml).toContain('[mcp_servers.opsmaxx]')
   })
 
   it('replaces its own block instead of appending another', () => {
@@ -170,20 +170,20 @@ describe('writing the codex config', () => {
     const toml = readToml()
     expect(toml).toContain('new-token')
     expect(toml).not.toContain('old-token')
-    expect(toml.match(/\[mcp_servers\.shellpilot\]/g)).toHaveLength(1)
-    expect(toml.match(/shellpilot managed block/g)).toHaveLength(2)
+    expect(toml.match(/\[mcp_servers\.opsmaxx\]/g)).toHaveLength(1)
+    expect(toml.match(/opsmaxx managed block/g)).toHaveLength(2)
   })
 
   it('backs up an existing file first', () => {
     writeFileSync(codex(), 'model = "gpt-5"\n')
     const result = writeCodexConfigTo(codex(), 'tok', 5177)
-    expect(result.backedUpTo).toBe(`${codex()}.shellpilot-backup`)
+    expect(result.backedUpTo).toBe(`${codex()}.opsmaxx-backup`)
     expect(existsSync(result.backedUpTo!)).toBe(true)
   })
 
   it('creates the .codex directory when it does not exist', () => {
     const nested = join(dir, '.codex', 'config.toml')
     expect(writeCodexConfigTo(nested, 'tok', 5177).ok).toBe(true)
-    expect(readFileSync(nested, 'utf8')).toContain('[mcp_servers.shellpilot]')
+    expect(readFileSync(nested, 'utf8')).toContain('[mcp_servers.opsmaxx]')
   })
 })

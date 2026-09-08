@@ -130,7 +130,7 @@ export interface FrpProxy {
 /**
  * Where a service published through this frp client actually appears.
  *
- * ShellPilot does not own a public endpoint and this record is the whole
+ * OpsMaxx does not own a public endpoint and this record is the whole
  * reason it never has to pretend otherwise. ngrok can hand out a URL because
  * ngrok runs the server the name resolves to; frp cannot, so somebody pointed
  * `*.<baseDomain>` at an frp server they control, and this is that somebody's
@@ -158,7 +158,7 @@ export interface FrpPublicHost {
    *
    * Its presence is what stops the guided setup asking again — the roadmap's
    * "a guided one-time thing and then never mentioned again" is this field.
-   * It records a claim, not a measurement: ShellPilot never resolves the name,
+   * It records a claim, not a measurement: OpsMaxx never resolves the name,
    * so this says the operator told us, and nothing stronger.
    */
   confirmedAt: number
@@ -512,7 +512,7 @@ export interface VpnImportResultInternal extends VpnImportResult {
 
 // ------------------------------------------------------------- key material
 
-// A WireGuard keypair is the one place ShellPilot mints a secret rather than
+// A WireGuard keypair is the one place OpsMaxx mints a secret rather than
 // being handed one, so these shapes are separate on purpose.
 //
 // `VpnKeygenResult` carries a private key and therefore never leaves the

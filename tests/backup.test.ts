@@ -7,15 +7,15 @@ import { backupImport, deleteAllData } from '../src/main/services/backup'
 import { HISTORY_FILE } from '../src/main/services/history'
 
 const ALL_DATA_FILES = [
-  'shellpilot-data.json',
-  'shellpilot-secrets.json',
-  'shellpilot-vault.json',
-  'shellpilot-wslocks.json',
-  'shellpilot-known-hosts.json',
-  'shellpilot-mcp-config.json',
-  'shellpilot-mcp-sessions.json',
-  'shellpilot-ai-policy.json',
-  'shellpilot-ai-audit.jsonl'
+  'opsmaxx-data.json',
+  'opsmaxx-secrets.json',
+  'opsmaxx-vault.json',
+  'opsmaxx-wslocks.json',
+  'opsmaxx-known-hosts.json',
+  'opsmaxx-mcp-config.json',
+  'opsmaxx-mcp-sessions.json',
+  'opsmaxx-ai-policy.json',
+  'opsmaxx-ai-audit.jsonl'
 ]
 
 function paths(): string[] {
@@ -83,7 +83,7 @@ describe('deleteAllData', () => {
   })
 
   it('deletes the history database, its sidecars, its backup and its corrupt copies', () => {
-    // "Delete all data" that leaves shellpilot-history.db behind relaunches the
+    // "Delete all data" that leaves opsmaxx-history.db behind relaunches the
     // app on a file still holding every hostname, kernel version, systemd unit
     // and listening port in the estate — for ninety days — and then goes on
     // appending to it. history.ts chmods that file 0600 precisely because it is
@@ -138,7 +138,7 @@ async function writeBundle(file: string, password: string): Promise<void> {
   writeFileSync(
     file,
     JSON.stringify({
-      magic: 'shellpilot-backup',
+      magic: 'opsmaxx-backup',
       version: 1,
       kdf: 'scrypt',
       salt: salt.toString('base64'),

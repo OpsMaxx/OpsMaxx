@@ -172,7 +172,7 @@ export function buildK8sReviewCommand(kubectl = 'kubectl', context?: string): st
   return keys
     .map(
       (k) =>
-        `echo "===SHELLPILOT-${REVIEW_MARKERS[k]}==="; ${kubectl} ${REVIEW_READS[k]}${ctx} 2>&1`
+        `echo "===OPSMAXX-${REVIEW_MARKERS[k]}==="; ${kubectl} ${REVIEW_READS[k]}${ctx} 2>&1`
     )
     .join('; ')
 }
@@ -195,7 +195,7 @@ export function splitReview(output: string): ReviewBlocks {
   const tail = output.trim().split('\n').filter((l) => l.trim() !== '').slice(-1)[0] ?? 'kubectl did not run'
   const out = {} as ReviewBlocks
   for (const key of keys) {
-    const marker = `===SHELLPILOT-${REVIEW_MARKERS[key]}===`
+    const marker = `===OPSMAXX-${REVIEW_MARKERS[key]}===`
     const at = output.indexOf(marker)
     if (at < 0) {
       out[key] = { ok: false, detail: tail }
@@ -206,7 +206,7 @@ export function splitReview(output: string): ReviewBlocks {
     // may be reordered later and this must not silently swallow a section.
     let end = output.length
     for (const other of keys) {
-      const m = `===SHELLPILOT-${REVIEW_MARKERS[other]}===`
+      const m = `===OPSMAXX-${REVIEW_MARKERS[other]}===`
       const i = output.indexOf(m, from)
       if (i >= 0 && i < end) end = i
     }

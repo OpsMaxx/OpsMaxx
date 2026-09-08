@@ -162,7 +162,7 @@ describe('a v1 TOML profile', () => {
     const oidc = parse('ok-oidc.toml')
     expect(frp(oidc).auth.method).toBe('oidc')
     expect(frp(oidc).auth.oidc).toMatchObject({
-      clientId: 'shellpilot',
+      clientId: 'opsmaxx',
       audience: 'frp',
       tokenEndpointUrl: 'https://idp.example.com/token'
     })

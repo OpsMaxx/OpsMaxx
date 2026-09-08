@@ -351,7 +351,7 @@ describe('the round trip', () => {
   // objects means the read did not work, and reporting it as "nothing is
   // scheduled" turns a failure into an all-clear.
   it('reads an empty node list as a failure, never as an empty cluster', () => {
-    const out = '===SHELLPILOT-ALLOCNODES===\nerror: You must be logged in to the server\n===SHELLPILOT-ALLOCPODS===\n'
+    const out = '===OPSMAXX-ALLOCNODES===\nerror: You must be logged in to the server\n===OPSMAXX-ALLOCPODS===\n'
     const p = parseK8sAllocatable(out, 1)
     expect(p.ok).toBe(false)
     expect(p.detail).toContain('logged in')
@@ -359,16 +359,16 @@ describe('the round trip', () => {
   })
 
   it('says so even when kubectl exited zero with nothing', () => {
-    const p = parseK8sAllocatable('===SHELLPILOT-ALLOCNODES===\n===SHELLPILOT-ALLOCPODS===\n', 0)
+    const p = parseK8sAllocatable('===OPSMAXX-ALLOCNODES===\n===OPSMAXX-ALLOCPODS===\n', 0)
     expect(p.ok).toBe(false)
     expect(p.detail).toContain('empty')
   })
 
   it('parses the recorded output of both sections', () => {
     const out = [
-      '===SHELLPILOT-ALLOCNODES===',
+      '===OPSMAXX-ALLOCNODES===',
       fx('node-allocatable.txt'),
-      '===SHELLPILOT-ALLOCPODS===',
+      '===OPSMAXX-ALLOCPODS===',
       fx('pod-requests.txt')
     ].join('\n')
     const p = parseK8sAllocatable(out, 0)

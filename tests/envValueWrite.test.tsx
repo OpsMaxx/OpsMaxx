@@ -58,7 +58,7 @@ const open = async (): Promise<void> => {
 
 describe('what it sends', () => {
   it('sends an entry id and a slot, and no value', async () => {
-    const spy = vi.fn(async () => ({ ok: true, name: 'REDIS_PASSWORD', line: 3, action: 'replace', backup: '/srv/app/.env.shellpilot-bak' }))
+    const spy = vi.fn(async () => ({ ok: true, name: 'REDIS_PASSWORD', line: 3, action: 'replace', backup: '/srv/app/.env.opsmaxx-bak' }))
     mount(spy)
     await open()
     await userEvent.selectOptions(screen.getByLabelText('Vault entry'), 'v1')
@@ -127,13 +127,13 @@ describe('what it says', () => {
       name: 'REDIS_PASSWORD',
       line: 3,
       action: 'replace',
-      backup: '/srv/app/.env.shellpilot-bak'
+      backup: '/srv/app/.env.opsmaxx-bak'
     }))
     await open()
     await userEvent.selectOptions(screen.getByLabelText('Vault entry'), 'v1')
     await userEvent.click(screen.getByRole('button', { name: /^write$/i }))
     await screen.findByText(/replaced on line 3/i)
-    expect(document.body.textContent).toContain('.env.shellpilot-bak')
+    expect(document.body.textContent).toContain('.env.opsmaxx-bak')
     expect(document.body.textContent).not.toContain('hunter2')
   })
 
@@ -194,8 +194,8 @@ describe('how it reads the vault', () => {
 
   it('never reaches the vault store or the vault namespace', () => {
     expect(src).not.toContain('store/vault')
-    expect(src).not.toMatch(/shellpilot\??\.vault\b/)
-    expect(src).toContain('shellpilot?.vaultIndex')
+    expect(src).not.toMatch(/opsmaxx\??\.vault\b/)
+    expect(src).toContain('opsmaxx?.vaultIndex')
   })
 
   // The projection is where a secret would be added, and an INLINE object

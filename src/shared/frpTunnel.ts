@@ -9,7 +9,7 @@
 //
 // frp owns nothing. It is a client and a server binary; the server is on a host
 // somebody rented, under a domain somebody registered, and neither of those
-// somebodies is ShellPilot. So the pleasant one-click flow is only honest if
+// somebodies is OpsMaxx. So the pleasant one-click flow is only honest if
 // the "somebody" step happens once, explicitly, and is written down — which is
 // `FrpPublicHost` on the profile — and is then never mentioned again.
 //

@@ -770,9 +770,9 @@ describe('planComposeImageEdit', () => {
 describe('writing the file back', () => {
   it('backs up, writes a temp and moves it into place', () => {
     const cmd = buildComposeWriteCommand('/srv/edge/compose.yaml', 'services: {}\n')
-    expect(cmd).toContain("cp -p '/srv/edge/compose.yaml' '/srv/edge/compose.yaml.shellpilot-bak'")
-    expect(cmd).toContain("tee '/srv/edge/compose.yaml.shellpilot-tmp'")
-    expect(cmd).toContain("mv '/srv/edge/compose.yaml.shellpilot-tmp' '/srv/edge/compose.yaml'")
+    expect(cmd).toContain("cp -p '/srv/edge/compose.yaml' '/srv/edge/compose.yaml.opsmaxx-bak'")
+    expect(cmd).toContain("tee '/srv/edge/compose.yaml.opsmaxx-tmp'")
+    expect(cmd).toContain("mv '/srv/edge/compose.yaml.opsmaxx-tmp' '/srv/edge/compose.yaml'")
     // && between every stage: a failed backup must not be followed by a write.
     expect(cmd.split(' && ').length).toBeGreaterThanOrEqual(4)
   })

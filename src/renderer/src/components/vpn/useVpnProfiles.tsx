@@ -83,7 +83,7 @@ function openExternal(url: string): void {
 
 /** The generic sentence `internal` carries. Matched, not guessed: it is the one
  *  message in VPN_ERROR_MESSAGE that describes nothing. */
-const INTERNAL_PREFIX = 'Something went wrong inside ShellPilot.'
+const INTERNAL_PREFIX = 'Something went wrong inside OpsMaxx.'
 
 /** The first sentence of a message from main.
  *
@@ -96,7 +96,7 @@ const INTERNAL_PREFIX = 'Something went wrong inside ShellPilot.'
  *
  *  Except for `internal`, whose first sentence says nothing at all. OpenVPN
  *  failing because its management socket path was too long produced the toast
- *  "Something went wrong inside ShellPilot." and an empty log drawer — a
+ *  "Something went wrong inside OpsMaxx." and an empty log drawer — a
  *  message with no fact in it, in front of the one detail that explained the
  *  failure. When the sentence is that one, the detail IS the headline. */
 export function headline(text: string): string {
@@ -140,7 +140,7 @@ function remedyFor(
     // originally pressed.
     case 'vault-locked':
       return { label: 'Unlock vault', run: r.start }
-    // WireGuard and frp always ship inside ShellPilot, and OpenVPN does too
+    // WireGuard and frp always ship inside OpsMaxx, and OpenVPN does too
     // everywhere except Windows — so on every other combination a missing
     // engine is a damaged install, which no button in this window can repair.
     // Offering a download page there would send the reader off to install
@@ -248,7 +248,7 @@ export function useVpnProfiles(): VpnProfiles {
   const [platform, setPlatform] = useState<NodeJS.Platform | null>(null)
   useEffect(() => {
     let live = true
-    void window.shellpilot?.platform().then((p) => {
+    void window.opsmaxx?.platform().then((p) => {
       if (live) setPlatform(p)
     })
     return () => {
@@ -280,9 +280,9 @@ export function useVpnProfiles(): VpnProfiles {
   const vpnIds = profiles.map((p) => p.id).join(',')
   useEffect(() => {
     const ids = vpnIds ? vpnIds.split(',') : []
-    if (!bridgeHas(window.shellpilot?.vpn as Record<string, unknown> | undefined, 'onStatus')) return
+    if (!bridgeHas(window.opsmaxx?.vpn as Record<string, unknown> | undefined, 'onStatus')) return
     const offs = ids.map((id) =>
-      window.shellpilot?.vpn.onStatus(id, (s) => {
+      window.opsmaxx?.vpn.onStatus(id, (s) => {
         setVpnStatus(id, s)
         if (s.state === 'error' && s.error) reportRef.current(id, s.error, s.errorCode)
       })
@@ -293,8 +293,8 @@ export function useVpnProfiles(): VpnProfiles {
   // Reconcile with what is actually running. This view unmounts whenever the
   // user switches activity, and a tunnel started before that is still up.
   useEffect(() => {
-    if (!bridgeHas(window.shellpilot?.vpn as Record<string, unknown> | undefined, 'list')) return
-    void window.shellpilot?.vpn.list().then((list) => {
+    if (!bridgeHas(window.opsmaxx?.vpn as Record<string, unknown> | undefined, 'list')) return
+    void window.opsmaxx?.vpn.list().then((list) => {
       if (!list) return
       list.forEach((s) => setVpnStatus(s.id, s))
     })
@@ -305,10 +305,10 @@ export function useVpnProfiles(): VpnProfiles {
   const kinds = useMemo(() => [...new Set(profiles.map((p) => p.spec.kind))].join(','), [profiles])
   useEffect(() => {
     if (!kinds) return
-    if (!bridgeHas(window.shellpilot?.vpn as Record<string, unknown> | undefined, 'probe')) return
+    if (!bridgeHas(window.opsmaxx?.vpn as Record<string, unknown> | undefined, 'probe')) return
     let live = true
     for (const k of kinds.split(',') as VpnKind[]) {
-      void window.shellpilot?.vpn.probe(k).then((info) => {
+      void window.opsmaxx?.vpn.probe(k).then((info) => {
         if (live && info) setEngines((e) => ({ ...e, [k]: info }))
       })
     }
@@ -334,7 +334,7 @@ export function useVpnProfiles(): VpnProfiles {
     let r: VpnStartResult | undefined
     try {
       r = await withVaultUnlock(`Starting ${p.name}`, () =>
-        Promise.resolve(window.shellpilot?.vpn.start(p.id))
+        Promise.resolve(window.opsmaxx?.vpn.start(p.id))
       )
     } catch (err) {
       // Same suppression the resolved-failure tail below applies: Cancel and
@@ -387,7 +387,7 @@ export function useVpnProfiles(): VpnProfiles {
     // spinner with no way back.
     let r: VpnResult | undefined
     try {
-      r = await window.shellpilot?.vpn.stop(p.id)
+      r = await window.opsmaxx?.vpn.stop(p.id)
     } catch (err) {
       if (!errorSpoken(p.id)) {
         reportRef.current(p.id, err instanceof Error ? err.message : String(err))
@@ -428,8 +428,8 @@ export function useVpnProfiles(): VpnProfiles {
       // Ask before pulling the transport out from under anything riding on it.
       // A stored definition can be restarted; a live session cannot, which is
       // what makes this destructive rather than merely inconvenient.
-      const ns = window.shellpilot?.vpn as Record<string, unknown> | undefined
-      const deps = bridgeHas(ns, 'dependents') ? await window.shellpilot?.vpn.dependents(p.id) : []
+      const ns = window.opsmaxx?.vpn as Record<string, unknown> | undefined
+      const deps = bridgeHas(ns, 'dependents') ? await window.opsmaxx?.vpn.dependents(p.id) : []
       const live = (deps ?? []).filter((d) => d.live)
       if (live.length > 0) {
         setConfirmStop({ profile: p, dependents: live })
@@ -458,8 +458,8 @@ export function useVpnProfiles(): VpnProfiles {
   // any of it was a toast after the fact. Everything the dialog needs is
   // gathered before the delete, because the same store action detaches them.
   const requestRemove = useCallback(async (p: VpnProfile): Promise<void> => {
-    const ns = window.shellpilot?.vpn as Record<string, unknown> | undefined
-    const deps = bridgeHas(ns, 'dependents') ? await window.shellpilot?.vpn.dependents(p.id) : []
+    const ns = window.opsmaxx?.vpn as Record<string, unknown> | undefined
+    const deps = bridgeHas(ns, 'dependents') ? await window.opsmaxx?.vpn.dependents(p.id) : []
     const st = useApp.getState()
     const attached = [
       ...st.servers
@@ -482,7 +482,7 @@ export function useVpnProfiles(): VpnProfiles {
       // so is the Stop button.
       let r: VpnResult | undefined
       try {
-        r = await window.shellpilot?.vpn.stop(p.id)
+        r = await window.opsmaxx?.vpn.stop(p.id)
       } catch (err) {
         r = { ok: false, error: err instanceof Error ? err.message : String(err) }
       }
@@ -611,7 +611,7 @@ export function useVpnProfiles(): VpnProfiles {
                   at a copy you installed yourself is a valid answer whether or
                   not we ship one. "Install OpenVPN" does not — see
                   `userSuppliesEngine`. WireGuard and frp get neither; both
-                  always ship with ShellPilot. */}
+                  always ship with OpsMaxx. */}
               {p.spec.kind === 'openvpn' && (
                 <>
                   {userSuppliesEngine('openvpn', platform) && (

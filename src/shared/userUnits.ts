@@ -34,8 +34,8 @@
 import { resolveBinary } from './docker'
 
 export const USER_UNIT_MARKERS = {
-  linger: '===SHELLPILOT-LINGER===',
-  units: '===SHELLPILOT-USERUNITS==='
+  linger: '===OPSMAXX-LINGER===',
+  units: '===OPSMAXX-USERUNITS==='
 } as const
 
 /**
@@ -235,7 +235,7 @@ export function summariseUserUnits(r: UserUnitsReading): {
  * manager is running — which is a failure of the ENVIRONMENT we handed it, not
  * a fact about the server, and reporting it as one would be our bug shown as
  * theirs. `id -u` rather than a literal, because the account is whoever
- * ShellPilot connected as.
+ * OpsMaxx connected as.
  *
  * `|| true` after each read: a missing loginctl must not take the units with
  * it, and the marker layout is what tells the two halves apart afterwards.
@@ -327,7 +327,7 @@ export function checkUnitDraft(d: UnitDraft): UnitDraftRefusal {
 /** The unit file itself. Deterministic, so a diff of two of these is readable. */
 export function renderUnitFile(d: UnitDraft): string {
   const lines = [
-    '# Written by ShellPilot. Edit here or on the server; ShellPilot reads it back either way.',
+    '# Written by OpsMaxx. Edit here or on the server; OpsMaxx reads it back either way.',
     '[Unit]',
     `Description=${d.description}`,
     '',
@@ -378,11 +378,11 @@ export function buildUnitWriteCommand(d: UnitDraft, token: string): string {
     'SP_DIR="$HOME/.config/systemd/user"',
     'mkdir -p "$SP_DIR" || { echo "could not create $SP_DIR" >&2; exit 3; }',
     `SP_UNIT="$SP_DIR/${d.name}"`,
-    `SP_BAK="$SP_UNIT.shellpilot-${token}.bak"`,
+    `SP_BAK="$SP_UNIT.opsmaxx-${token}.bak"`,
     // Only when one is already there: a backup of nothing is a confusing file
     // to find later.
     '[ -f "$SP_UNIT" ] && { cp -p "$SP_UNIT" "$SP_BAK" || { echo "the existing unit could not be backed up, so nothing was written" >&2; exit 4; }; }',
-    `SP_TMP="$SP_UNIT.shellpilot-${token}.tmp"`,
+    `SP_TMP="$SP_UNIT.opsmaxx-${token}.tmp"`,
     // BASE64, NOT A HEREDOC, and the difference was found by running it.
     //
     // Every fragment here is joined with '; ', which puts the next command on

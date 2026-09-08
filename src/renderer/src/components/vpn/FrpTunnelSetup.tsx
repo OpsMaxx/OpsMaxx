@@ -22,7 +22,7 @@ import type { FrpPublicHost, FrpSpec, FrpTokenResult, VpnProfile } from '../../.
  * older than the renderer (see lib/bridge.ts) — and it keeps the argument and
  * result types checked rather than reaching for `any`.
  *
- * Once the patch is applied this can become a plain `window.shellpilot.vpn`
+ * Once the patch is applied this can become a plain `window.opsmaxx.vpn`
  * call and this type can go.
  */
 type FrpTokenChannel = (req: {
@@ -33,14 +33,14 @@ type FrpTokenChannel = (req: {
 }) => Promise<FrpTokenResult>
 
 function frpTokenChannel(): FrpTokenChannel | undefined {
-  const vpn = window.shellpilot?.vpn as unknown as
+  const vpn = window.opsmaxx?.vpn as unknown as
     | { frpToken?: FrpTokenChannel }
     | undefined
   return typeof vpn?.frpToken === 'function' ? vpn.frpToken.bind(vpn) : undefined
 }
 
 /**
- * The one-time setup, and the only place ShellPilot says what frp cannot do
+ * The one-time setup, and the only place OpsMaxx says what frp cannot do
  * for you.
  *
  * ngrok hands out a URL because ngrok runs the server it resolves to. frp does
@@ -55,7 +55,7 @@ function frpTokenChannel(): FrpTokenChannel | undefined {
  * mentions domains again.
  *
  * What it deliberately does NOT do is check. There is no resolver call, no
- * "verifying…" spinner, no green tick. ShellPilot cannot see the operator's
+ * "verifying…" spinner, no green tick. OpsMaxx cannot see the operator's
  * zone, and a check that passed because a stale cache answered would be a
  * worse lie than no check at all. The confirmation records that the operator
  * says the record exists, and the wording says exactly that.
@@ -189,7 +189,7 @@ export function FrpTunnelSetup({
       <div className="col" style={{ gap: 14 }}>
         {/* Said once, here, and nowhere else in this pane. */}
         <p className="muted" style={{ fontSize: 12, margin: 0, lineHeight: 1.5 }}>
-          ShellPilot does not serve public addresses. frp publishes through an frp server you run,
+          OpsMaxx does not serve public addresses. frp publishes through an frp server you run,
           under a domain you own — so those are the two things this asks for. It is the only time
           it will.
         </p>
@@ -335,7 +335,7 @@ export function FrpTunnelSetup({
             }}
           />
           <span style={{ fontSize: 12, color: confirmed ? 'var(--text-muted)' : 'var(--warn)' }}>
-            I have created this record, and my frp server serves HTTP for these names. ShellPilot
+            I have created this record, and my frp server serves HTTP for these names. OpsMaxx
             does not check — it cannot see your DNS.
           </span>
         </label>

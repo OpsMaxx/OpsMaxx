@@ -221,7 +221,7 @@ function s3Dest(origin: string, over: Partial<S3BackupDestination> = {}): S3Back
     endpoint: origin,
     region: 'eu-west-1',
     bucket: 'estate-backups',
-    prefix: 'shellpilot',
+    prefix: 'opsmaxx',
     vaultEntryId: 'vault-1',
     pathStyle: true,
     keep: 0,
@@ -238,12 +238,12 @@ function s3Dest(origin: string, over: Partial<S3BackupDestination> = {}): S3Back
 describe('backup object names', () => {
   it('encodes the time in the name, which is the only clock we control', () => {
     expect(backupObjectName(new Date('2024-01-15T10:30:00.000Z'))).toBe(
-      'shellpilot-20240115T103000Z.spbackup'
+      'opsmaxx-20240115T103000Z.spbackup'
     )
   })
 
   it('reads that time back', () => {
-    expect(backupObjectTime('shellpilot-20240115T103000Z.spbackup')).toBe(
+    expect(backupObjectTime('opsmaxx-20240115T103000Z.spbackup')).toBe(
       Date.parse('2024-01-15T10:30:00.000Z')
     )
   })
@@ -251,9 +251,9 @@ describe('backup object names', () => {
   it('refuses names that are not ours, so retention never sees somebody else’s file', () => {
     // A directory a person also keeps things in. None of these is a generation.
     expect(isBackupObjectName('notes.txt')).toBe(false)
-    expect(isBackupObjectName('shellpilot-backup-2024-01-15.spbackup')).toBe(false)
-    expect(isBackupObjectName('shellpilot-20240115T103000Z.spbackup.part')).toBe(false)
-    expect(backupObjectTime('shellpilot-dump-orders-20240115T103000Z.sql')).toBe(null)
+    expect(isBackupObjectName('opsmaxx-backup-2024-01-15.spbackup')).toBe(false)
+    expect(isBackupObjectName('opsmaxx-20240115T103000Z.spbackup.part')).toBe(false)
+    expect(backupObjectTime('opsmaxx-dump-orders-20240115T103000Z.sql')).toBe(null)
   })
 })
 
@@ -263,17 +263,17 @@ describe('backup object names', () => {
 
 describe('planRetention', () => {
   const gen = (name: string, modified: number) => ({ name, size: 10, modified })
-  const a = gen('shellpilot-20240101T000000Z.spbackup', 1)
-  const b = gen('shellpilot-20240102T000000Z.spbackup', 2)
-  const c = gen('shellpilot-20240103T000000Z.spbackup', 3)
+  const a = gen('opsmaxx-20240101T000000Z.spbackup', 1)
+  const b = gen('opsmaxx-20240102T000000Z.spbackup', 2)
+  const c = gen('opsmaxx-20240103T000000Z.spbackup', 3)
 
   it('keeps the newest N and removes the rest', () => {
     const plan = planRetention([a, c, b], 2)
     expect(plan.keep.map((g) => g.name)).toEqual([
-      'shellpilot-20240103T000000Z.spbackup',
-      'shellpilot-20240102T000000Z.spbackup'
+      'opsmaxx-20240103T000000Z.spbackup',
+      'opsmaxx-20240102T000000Z.spbackup'
     ])
-    expect(plan.remove.map((g) => g.name)).toEqual(['shellpilot-20240101T000000Z.spbackup'])
+    expect(plan.remove.map((g) => g.name)).toEqual(['opsmaxx-20240101T000000Z.spbackup'])
   })
 
   it('never deletes the only remaining generation, whatever the limit says', () => {
@@ -288,9 +288,9 @@ describe('planRetention', () => {
     const plan = planRetention([a, b, c], 0)
     expect(plan.remove).toEqual([])
     expect(plan.keep.map((g) => g.name)).toEqual([
-      'shellpilot-20240103T000000Z.spbackup',
-      'shellpilot-20240102T000000Z.spbackup',
-      'shellpilot-20240101T000000Z.spbackup'
+      'opsmaxx-20240103T000000Z.spbackup',
+      'opsmaxx-20240102T000000Z.spbackup',
+      'opsmaxx-20240101T000000Z.spbackup'
     ])
     expect(plan.refused).toBe('No limit is set, so nothing is deleted.')
   })
@@ -298,8 +298,8 @@ describe('planRetention', () => {
   it('never proposes deleting a file that is not one of ours', () => {
     const plan = planRetention([a, b, c, gen('tax-return.pdf', 99), gen('.DS_Store', 98)], 1)
     expect(plan.remove.map((g) => g.name)).toEqual([
-      'shellpilot-20240102T000000Z.spbackup',
-      'shellpilot-20240101T000000Z.spbackup'
+      'opsmaxx-20240102T000000Z.spbackup',
+      'opsmaxx-20240101T000000Z.spbackup'
     ])
   })
 })
@@ -312,10 +312,10 @@ describe('local target', () => {
   it('round-trips a bundle and lists it', async () => {
     const dir = temp()
     const t = localTarget(local(dir))
-    await t.put('shellpilot-20240101T000000Z.spbackup', Buffer.from('bundle-bytes'))
-    expect((await t.get('shellpilot-20240101T000000Z.spbackup')).toString()).toBe('bundle-bytes')
-    expect((await t.list()).map((g) => g.name)).toEqual(['shellpilot-20240101T000000Z.spbackup'])
-    await t.remove('shellpilot-20240101T000000Z.spbackup')
+    await t.put('opsmaxx-20240101T000000Z.spbackup', Buffer.from('bundle-bytes'))
+    expect((await t.get('opsmaxx-20240101T000000Z.spbackup')).toString()).toBe('bundle-bytes')
+    expect((await t.list()).map((g) => g.name)).toEqual(['opsmaxx-20240101T000000Z.spbackup'])
+    await t.remove('opsmaxx-20240101T000000Z.spbackup')
     expect(await t.list()).toEqual([])
   })
 
@@ -324,20 +324,20 @@ describe('local target', () => {
     // via a rename, so a process killed during the write leaves a `.part`
     // rather than a truncated `.spbackup` that list() would count.
     const dir = temp()
-    writeFileSync(join(dir, 'shellpilot-20231231T000000Z.spbackup.part'), 'half a bundle')
+    writeFileSync(join(dir, 'opsmaxx-20231231T000000Z.spbackup.part'), 'half a bundle')
     const t = localTarget(local(dir))
     expect(await t.list()).toEqual([])
-    expect(isScratchName('shellpilot-20231231T000000Z.spbackup.part')).toBe(true)
-    expect(readdirSync(dir)).toEqual(['shellpilot-20231231T000000Z.spbackup.part'])
+    expect(isScratchName('opsmaxx-20231231T000000Z.spbackup.part')).toBe(true)
+    expect(readdirSync(dir)).toEqual(['opsmaxx-20231231T000000Z.spbackup.part'])
   })
 
   it('ignores directories sitting in the backup folder', async () => {
     const dir = temp()
     const t = localTarget(local(dir))
-    await t.put('shellpilot-20240101T000000Z.spbackup', Buffer.from('x'))
+    await t.put('opsmaxx-20240101T000000Z.spbackup', Buffer.from('x'))
     const { mkdirSync } = await import('node:fs')
     mkdirSync(join(dir, 'archive'))
-    expect((await t.list()).map((g) => g.name)).toEqual(['shellpilot-20240101T000000Z.spbackup'])
+    expect((await t.list()).map((g) => g.name)).toEqual(['opsmaxx-20240101T000000Z.spbackup'])
   })
 })
 
@@ -358,9 +358,9 @@ describe('sftp target', () => {
     const dir = temp()
     const io = tempSftpIo(dir)
     const t = sftpTargetFrom(sftpDest(dir), io)
-    await t.put('shellpilot-20240101T000000Z.spbackup', Buffer.from('remote bundle'))
-    expect((await t.get('shellpilot-20240101T000000Z.spbackup')).toString()).toBe('remote bundle')
-    expect((await t.list()).map((g) => g.name)).toEqual(['shellpilot-20240101T000000Z.spbackup'])
+    await t.put('opsmaxx-20240101T000000Z.spbackup', Buffer.from('remote bundle'))
+    expect((await t.get('opsmaxx-20240101T000000Z.spbackup')).toString()).toBe('remote bundle')
+    expect((await t.list()).map((g) => g.name)).toEqual(['opsmaxx-20240101T000000Z.spbackup'])
     await t.close()
     expect(io.closed).toBe(1)
   })
@@ -374,7 +374,7 @@ describe('sftp target', () => {
     const io = tempSftpIo(dir, { rename: 'Connection lost' })
     const t = sftpTargetFrom(sftpDest(dir), io)
 
-    await expect(t.put('shellpilot-20240101T000000Z.spbackup', Buffer.from('half'))).rejects.toThrow(
+    await expect(t.put('opsmaxx-20240101T000000Z.spbackup', Buffer.from('half'))).rejects.toThrow(
       'Connection lost'
     )
 
@@ -384,7 +384,7 @@ describe('sftp target', () => {
 
   it('does not report scratch files as generations', async () => {
     const dir = temp()
-    writeFileSync(join(dir, 'shellpilot-20240101T000000Z.spbackup.part'), 'partial')
+    writeFileSync(join(dir, 'opsmaxx-20240101T000000Z.spbackup.part'), 'partial')
     const t = sftpTargetFrom(sftpDest(dir), tempSftpIo(dir))
     expect(await t.list()).toEqual([])
   })
@@ -416,7 +416,7 @@ describe('awsUriEncode', () => {
 describe('signS3Request', () => {
   const input = {
     method: 'PUT',
-    path: '/estate-backups/shellpilot/shellpilot-20240115T103000Z.spbackup',
+    path: '/estate-backups/opsmaxx/opsmaxx-20240115T103000Z.spbackup',
     query: '',
     host: 's3.eu-west-1.amazonaws.com',
     payloadSha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
@@ -429,7 +429,7 @@ describe('signS3Request', () => {
   it('builds the canonical request AWS specifies, line for line', () => {
     expect(signS3Request(input).canonicalRequest).toBe(
       'PUT\n' +
-        '/estate-backups/shellpilot/shellpilot-20240115T103000Z.spbackup\n' +
+        '/estate-backups/opsmaxx/opsmaxx-20240115T103000Z.spbackup\n' +
         '\n' +
         'host:s3.eu-west-1.amazonaws.com\n' +
         'x-amz-content-sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n' +
@@ -470,23 +470,23 @@ describe('signS3Request', () => {
 
 describe('s3 addressing', () => {
   it('puts the prefix in front of the name', () => {
-    expect(s3Key(s3Dest('http://x'), 'shellpilot-20240101T000000Z.spbackup')).toBe(
-      'shellpilot/shellpilot-20240101T000000Z.spbackup'
+    expect(s3Key(s3Dest('http://x'), 'opsmaxx-20240101T000000Z.spbackup')).toBe(
+      'opsmaxx/opsmaxx-20240101T000000Z.spbackup'
     )
     expect(s3Key(s3Dest('http://x', { prefix: '' }), 'a.spbackup')).toBe('a.spbackup')
     expect(s3Key(s3Dest('http://x', { prefix: '/nested/dir/' }), 'a.spbackup')).toBe('nested/dir/a.spbackup')
   })
 
   it('addresses path-style for MinIO and virtual-host style for AWS', () => {
-    const pathStyle = s3Endpoint(s3Dest('http://127.0.0.1:9000'), 'shellpilot/a.spbackup')
-    expect(pathStyle.url).toBe('http://127.0.0.1:9000/estate-backups/shellpilot/a.spbackup')
+    const pathStyle = s3Endpoint(s3Dest('http://127.0.0.1:9000'), 'opsmaxx/a.spbackup')
+    expect(pathStyle.url).toBe('http://127.0.0.1:9000/estate-backups/opsmaxx/a.spbackup')
     expect(pathStyle.host).toBe('127.0.0.1:9000')
 
     const virtual = s3Endpoint(
       s3Dest('https://s3.eu-west-1.amazonaws.com', { pathStyle: false }),
-      'shellpilot/a.spbackup'
+      'opsmaxx/a.spbackup'
     )
-    expect(virtual.url).toBe('https://estate-backups.s3.eu-west-1.amazonaws.com/shellpilot/a.spbackup')
+    expect(virtual.url).toBe('https://estate-backups.s3.eu-west-1.amazonaws.com/opsmaxx/a.spbackup')
     expect(virtual.host).toBe('estate-backups.s3.eu-west-1.amazonaws.com')
   })
 })
@@ -539,24 +539,24 @@ describe('s3 target against a real HTTP object store', () => {
   it('uploads, reads back, lists and deletes', async () => {
     const dest = s3Dest(fake.origin)
     const t = await openTarget(dest, { credentials: () => creds })
-    const bytes = Buffer.from('{"magic":"shellpilot-backup"}')
+    const bytes = Buffer.from('{"magic":"opsmaxx-backup"}')
 
-    await t.put('shellpilot-20240101T000000Z.spbackup', bytes)
-    expect([...fake.objects.keys()]).toEqual(['shellpilot/shellpilot-20240101T000000Z.spbackup'])
+    await t.put('opsmaxx-20240101T000000Z.spbackup', bytes)
+    expect([...fake.objects.keys()]).toEqual(['opsmaxx/opsmaxx-20240101T000000Z.spbackup'])
 
-    expect((await t.get('shellpilot-20240101T000000Z.spbackup')).toString()).toBe(
-      '{"magic":"shellpilot-backup"}'
+    expect((await t.get('opsmaxx-20240101T000000Z.spbackup')).toString()).toBe(
+      '{"magic":"opsmaxx-backup"}'
     )
-    expect((await t.list()).map((g) => g.name)).toEqual(['shellpilot-20240101T000000Z.spbackup'])
+    expect((await t.list()).map((g) => g.name)).toEqual(['opsmaxx-20240101T000000Z.spbackup'])
 
-    await t.remove('shellpilot-20240101T000000Z.spbackup')
+    await t.remove('opsmaxx-20240101T000000Z.spbackup')
     expect([...fake.objects.keys()]).toEqual([])
   })
 
   it('signs every request and states the body hash the server can check', async () => {
     const t = await openTarget(s3Dest(fake.origin), { credentials: () => creds })
-    await t.put('shellpilot-20240101T000000Z.spbackup', Buffer.from('payload'))
-    await t.get('shellpilot-20240101T000000Z.spbackup')
+    await t.put('opsmaxx-20240101T000000Z.spbackup', Buffer.from('payload'))
+    await t.get('opsmaxx-20240101T000000Z.spbackup')
 
     expect(fake.badDigests).toEqual([])
     expect(fake.auth).toHaveLength(2)
@@ -569,19 +569,19 @@ describe('s3 target against a real HTTP object store', () => {
 
   it('reports the HTTP status when an object is not there, rather than an empty buffer', async () => {
     const t = await openTarget(s3Dest(fake.origin), { credentials: () => creds })
-    await expect(t.get('shellpilot-20240101T000000Z.spbackup')).rejects.toThrow(
-      'Downloading shellpilot-20240101T000000Z.spbackup failed with HTTP 404'
+    await expect(t.get('opsmaxx-20240101T000000Z.spbackup')).rejects.toThrow(
+      'Downloading opsmaxx-20240101T000000Z.spbackup failed with HTTP 404'
     )
   })
 
   it('does not list objects that belong to another prefix or a sub-folder', async () => {
     const dest = s3Dest(fake.origin)
     const t = await openTarget(dest, { credentials: () => creds })
-    await t.put('shellpilot-20240101T000000Z.spbackup', Buffer.from('ours'))
+    await t.put('opsmaxx-20240101T000000Z.spbackup', Buffer.from('ours'))
     fake.objects.set('other-app/thing.spbackup', Buffer.from('theirs'))
-    fake.objects.set('shellpilot/nested/deeper.spbackup', Buffer.from('nested'))
+    fake.objects.set('opsmaxx/nested/deeper.spbackup', Buffer.from('nested'))
 
-    expect((await t.list()).map((g) => g.name)).toEqual(['shellpilot-20240101T000000Z.spbackup'])
+    expect((await t.list()).map((g) => g.name)).toEqual(['opsmaxx-20240101T000000Z.spbackup'])
   })
 })
 
@@ -623,8 +623,8 @@ describe('nothing in this module writes outside its directory', () => {
     const a = temp()
     const b = temp()
     const t = localTarget(local(a))
-    await t.put('shellpilot-20240101T000000Z.spbackup', Buffer.from('x'))
-    expect(existsSync(join(a, 'shellpilot-20240101T000000Z.spbackup'))).toBe(true)
+    await t.put('opsmaxx-20240101T000000Z.spbackup', Buffer.from('x'))
+    expect(existsSync(join(a, 'opsmaxx-20240101T000000Z.spbackup'))).toBe(true)
     expect(readdirSync(b)).toEqual([])
   })
 })
@@ -729,7 +729,7 @@ const DOTDOT_PROBLEM =
 describe('s3PrefixProblem', () => {
   it('accepts the prefixes a destination normally has', () => {
     expect(s3PrefixProblem('')).toBe(null)
-    expect(s3PrefixProblem('/shellpilot/')).toBe(null)
+    expect(s3PrefixProblem('/opsmaxx/')).toBe(null)
     expect(s3PrefixProblem('estate/backups/nightly')).toBe(null)
     expect(s3PrefixProblem('has spaces and & and +')).toBe(null)
   })
@@ -752,7 +752,7 @@ describe('s3PrefixProblem', () => {
 
   it('is what the destination panel reports, so the destination cannot be saved', () => {
     expect(destinationProblem(s3Dest('http://x', { prefix: 'a/./b' }))).toBe(DOT_PROBLEM)
-    expect(destinationProblem(s3Dest('http://x', { prefix: 'shellpilot' }))).toBe(null)
+    expect(destinationProblem(s3Dest('http://x', { prefix: 'opsmaxx' }))).toBe(null)
   })
 
   it('is what openTarget refuses on, before it ever asks the vault for a key', async () => {
@@ -793,7 +793,7 @@ const MINIO_SKIP = minioSkipReason()
 describe.skipIf(MINIO_SKIP !== null)(
   `s3 target against a real MinIO in Docker${MINIO_SKIP ? ` [SKIPPED: ${MINIO_SKIP}]` : ''}`,
   () => {
-    const CONTAINER = 'shellpilot-s3-driver-test'
+    const CONTAINER = 'opsmaxx-s3-driver-test'
     const PORT = 19731
     const TEE_PORT = 19741
     let minio: Minio
@@ -823,14 +823,14 @@ describe.skipIf(MINIO_SKIP !== null)(
 
     it('uploads, reads back, lists and deletes', async () => {
       const t = await open({ prefix: 'roundtrip' })
-      await t.put('shellpilot-20240101T000000Z.spbackup', Buffer.from('{"magic":"shellpilot-backup"}'))
-      expect((await t.get('shellpilot-20240101T000000Z.spbackup')).toString()).toBe(
-        '{"magic":"shellpilot-backup"}'
+      await t.put('opsmaxx-20240101T000000Z.spbackup', Buffer.from('{"magic":"opsmaxx-backup"}'))
+      expect((await t.get('opsmaxx-20240101T000000Z.spbackup')).toString()).toBe(
+        '{"magic":"opsmaxx-backup"}'
       )
       const listed = await t.list()
-      expect(listed.map((g) => g.name)).toEqual(['shellpilot-20240101T000000Z.spbackup'])
+      expect(listed.map((g) => g.name)).toEqual(['opsmaxx-20240101T000000Z.spbackup'])
       expect(listed[0].size).toBe(29)
-      await t.remove('shellpilot-20240101T000000Z.spbackup')
+      await t.remove('opsmaxx-20240101T000000Z.spbackup')
       expect(await t.list()).toEqual([])
     })
 
@@ -861,9 +861,9 @@ describe.skipIf(MINIO_SKIP !== null)(
       // that lists nothing keeps every generation for ever and offers nothing
       // to restore from, while the run goes on reporting success.
       const t = await open({ prefix: 'tom&jerry' })
-      await t.put('shellpilot-20240101T000000Z.spbackup', Buffer.from('kept'))
+      await t.put('opsmaxx-20240101T000000Z.spbackup', Buffer.from('kept'))
       const listed = await t.list()
-      expect(listed.map((g) => g.name)).toEqual(['shellpilot-20240101T000000Z.spbackup'])
+      expect(listed.map((g) => g.name)).toEqual(['opsmaxx-20240101T000000Z.spbackup'])
       expect((await t.get(listed[0].name)).toString()).toBe('kept')
       await t.remove(listed[0].name)
       expect(await t.list()).toEqual([])
@@ -871,8 +871,8 @@ describe.skipIf(MINIO_SKIP !== null)(
 
     it('writes and reads a zero-byte object as zero bytes', async () => {
       const t = await open({ prefix: 'sizes-empty' })
-      await t.put('shellpilot-20240101T000000Z.spbackup', Buffer.alloc(0))
-      expect((await t.get('shellpilot-20240101T000000Z.spbackup')).length).toBe(0)
+      await t.put('opsmaxx-20240101T000000Z.spbackup', Buffer.alloc(0))
+      expect((await t.get('opsmaxx-20240101T000000Z.spbackup')).length).toBe(0)
       expect((await t.list())[0].size).toBe(0)
     })
 
@@ -883,8 +883,8 @@ describe.skipIf(MINIO_SKIP !== null)(
       const t = await open({ prefix: 'sizes-big' })
       const body = Buffer.alloc(5 * 1024 * 1024 + 1)
       for (let i = 0; i < body.length; i++) body[i] = i & 0xff
-      await t.put('shellpilot-20240101T000000Z.spbackup', body)
-      const back = await t.get('shellpilot-20240101T000000Z.spbackup')
+      await t.put('opsmaxx-20240101T000000Z.spbackup', body)
+      const back = await t.get('opsmaxx-20240101T000000Z.spbackup')
       expect(back.length).toBe(5 * 1024 * 1024 + 1)
       expect(sha256(back)).toBe(sha256(body))
       expect((await t.list())[0].size).toBe(5 * 1024 * 1024 + 1)
@@ -894,7 +894,7 @@ describe.skipIf(MINIO_SKIP !== null)(
       const t = await open({ prefix: 'paged' })
       const names: string[] = []
       for (let i = 0; i < 1001; i++) {
-        names.push(`shellpilot-20240101T${String(i).padStart(6, '0')}Z.spbackup`)
+        names.push(`opsmaxx-20240101T${String(i).padStart(6, '0')}Z.spbackup`)
       }
       for (let i = 0; i < names.length; i += 50) {
         await Promise.all(names.slice(i, i + 50).map((n) => t.put(n, Buffer.from('p'))))
@@ -903,8 +903,8 @@ describe.skipIf(MINIO_SKIP !== null)(
       expect(listed).toHaveLength(1001)
       expect(new Set(listed).size).toBe(1001)
       // Lexicographic order leaves this one alone on the second page.
-      expect(listed).toContain('shellpilot-20240101T000000Z.spbackup')
-      expect(listed).toContain('shellpilot-20240101T001000Z.spbackup')
+      expect(listed).toContain('opsmaxx-20240101T000000Z.spbackup')
+      expect(listed).toContain('opsmaxx-20240101T001000Z.spbackup')
     }, 180_000)
 
     it('addresses a bucket virtual-host style, with the bucket in the Host it signs', async () => {
@@ -916,15 +916,15 @@ describe.skipIf(MINIO_SKIP !== null)(
       })
       expect(s3Endpoint(dest, 'vh/a.spbackup').host).toBe(`vhstyle-bucket.localhost:${PORT}`)
       const t = s3TargetFrom(dest, MINIO_CREDENTIALS, (await loopbackFetch()) as unknown as FetchLike)
-      await t.put('shellpilot-20240101T000000Z.spbackup', Buffer.from('virtual host'))
-      expect((await t.get('shellpilot-20240101T000000Z.spbackup')).toString()).toBe('virtual host')
-      expect((await t.list()).map((g) => g.name)).toEqual(['shellpilot-20240101T000000Z.spbackup'])
+      await t.put('opsmaxx-20240101T000000Z.spbackup', Buffer.from('virtual host'))
+      expect((await t.get('opsmaxx-20240101T000000Z.spbackup')).toString()).toBe('virtual host')
+      expect((await t.list()).map((g) => g.name)).toEqual(['opsmaxx-20240101T000000Z.spbackup'])
     })
 
     it('addresses a bucket whose name has dots in it, which is why path-style exists', async () => {
       const t = await open({ bucket: 'dotted.bucket.name', prefix: 'dots' })
-      await t.put('shellpilot-20240101T000000Z.spbackup', Buffer.from('dotted'))
-      expect((await t.get('shellpilot-20240101T000000Z.spbackup')).toString()).toBe('dotted')
+      await t.put('opsmaxx-20240101T000000Z.spbackup', Buffer.from('dotted'))
+      expect((await t.get('opsmaxx-20240101T000000Z.spbackup')).toString()).toBe('dotted')
     })
 
     it('reports a wrong secret key as the store refusing the signature', async () => {
@@ -934,8 +934,8 @@ describe.skipIf(MINIO_SKIP !== null)(
           secretAccessKey: 'not-the-key'
         })
       })
-      await expect(t.put('shellpilot-20240101T000000Z.spbackup', Buffer.from('x'))).rejects.toThrow(
-        /^Uploading shellpilot-20240101T000000Z\.spbackup failed with HTTP 403:[\s\S]*SignatureDoesNotMatch/
+      await expect(t.put('opsmaxx-20240101T000000Z.spbackup', Buffer.from('x'))).rejects.toThrow(
+        /^Uploading opsmaxx-20240101T000000Z\.spbackup failed with HTTP 403:[\s\S]*SignatureDoesNotMatch/
       )
     })
 
@@ -950,7 +950,7 @@ describe.skipIf(MINIO_SKIP !== null)(
         ((url: string, init: RequestInit) => fetch(url, init)) as unknown as FetchLike,
         () => skewed
       )
-      await expect(t.put('shellpilot-20240101T000000Z.spbackup', Buffer.from('x'))).rejects.toThrow(
+      await expect(t.put('opsmaxx-20240101T000000Z.spbackup', Buffer.from('x'))).rejects.toThrow(
         /failed with HTTP 403:[\s\S]*RequestTimeTooSkewed/
       )
     })
@@ -990,8 +990,8 @@ describe.skipIf(MINIO_SKIP !== null)(
           live({ endpoint: `http://127.0.0.1:${TEE_PORT}`, prefix: 'wire' }),
           { credentials: () => MINIO_CREDENTIALS }
         )
-        await t.put('shellpilot-20240101T000000Z.spbackup', Buffer.from('abc'))
-        await t.put('shellpilot-20240101T000001Z.spbackup', Buffer.alloc(0))
+        await t.put('opsmaxx-20240101T000000Z.spbackup', Buffer.from('abc'))
+        await t.put('opsmaxx-20240101T000001Z.spbackup', Buffer.alloc(0))
       } finally {
         // fetch keeps the connection alive, so the tee has to be told to drop
         // it rather than waited on.
@@ -1019,8 +1019,8 @@ describe.skipIf(MINIO_SKIP !== null)(
       const t = await openTarget(live({ prefix: 'region', region: 'ap-southeast-2' }), {
         credentials: () => MINIO_CREDENTIALS
       })
-      await t.put('shellpilot-20240101T000000Z.spbackup', Buffer.from('any region'))
-      expect((await t.get('shellpilot-20240101T000000Z.spbackup')).toString()).toBe('any region')
+      await t.put('opsmaxx-20240101T000000Z.spbackup', Buffer.from('any region'))
+      expect((await t.get('opsmaxx-20240101T000000Z.spbackup')).toString()).toBe('any region')
     })
   }
 )
@@ -1028,15 +1028,15 @@ describe.skipIf(MINIO_SKIP !== null)(
 describe('the live MinIO suite', () => {
   it('is skipped only for a reason it can name', () => {
     // A suite that quietly stops running is worse than no suite at all. On a
-    // machine that is meant to have Docker, say so with SHELLPILOT_S3_LIVE=1
+    // machine that is meant to have Docker, say so with OPSMAXX_S3_LIVE=1
     // and a skip becomes a failure here rather than a green run that proved
     // nothing.
-    if (process.env.SHELLPILOT_S3_LIVE === '1') {
+    if (process.env.OPSMAXX_S3_LIVE === '1') {
       expect(MINIO_SKIP).toBe(null)
       return
     }
     if (MINIO_SKIP !== null) {
-      expect(MINIO_SKIP).toMatch(/^(Docker is not usable here|Docker works but|SHELLPILOT_S3_LIVE=0)/)
+      expect(MINIO_SKIP).toMatch(/^(Docker is not usable here|Docker works but|OPSMAXX_S3_LIVE=0)/)
     }
   })
 })

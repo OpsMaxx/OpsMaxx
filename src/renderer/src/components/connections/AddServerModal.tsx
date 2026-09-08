@@ -21,7 +21,7 @@ import type { AuthMethod, Hop, UUID } from '../../types'
 // profile saved that way cannot work and does not say why, and the user's
 // choice was reinterpreted without telling them.
 //
-// Disabled with a reason rather than deleted: the concept exists, ShellPilot
+// Disabled with a reason rather than deleted: the concept exists, OpsMaxx
 // reads certificate state elsewhere (shared/access.ts), and an option that
 // vanishes teaches a user the product cannot do something when the truth is
 // that this build cannot.
@@ -139,7 +139,7 @@ export function AddServerModal(): React.JSX.Element {
   const valid = missing === null
 
   const pickKey = async (): Promise<void> => {
-    const p = await window.shellpilot?.dialog.openKey()
+    const p = await window.opsmaxx?.dialog.openKey()
     if (p) setKeyPath(p)
   }
 
@@ -148,14 +148,14 @@ export function AddServerModal(): React.JSX.Element {
   // until the user clicks it.
   useEffect(() => {
     if (auth !== 'key' || foundKeys.length > 0) return
-    void window.shellpilot?.ssh.defaultKeys().then((k) => setFoundKeys(k ?? []))
+    void window.opsmaxx?.ssh.defaultKeys().then((k) => setFoundKeys(k ?? []))
   }, [auth, foundKeys.length])
 
   // Retryable on purpose: an OS keychain that refuses a write is usually a
   // login keyring nobody has unlocked yet, which is fixed outside this app and
   // then works. Without the button the credential is simply lost.
   const storeSecret = async (id: string, secret: Record<string, string | undefined>, label: string): Promise<void> => {
-    const ok = await window.shellpilot?.secrets.set(id, JSON.stringify(secret))
+    const ok = await window.opsmaxx?.secrets.set(id, JSON.stringify(secret))
     if (ok !== false) return
     toast(`${label} was saved, but this device would not store its credential.`, 'error', {
       label: 'Try again',
@@ -178,7 +178,7 @@ export function AddServerModal(): React.JSX.Element {
     setTesting(true)
     setTestResult(null)
     try {
-      const fn = window.shellpilot?.ssh?.test
+      const fn = window.opsmaxx?.ssh?.test
       if (!fn) {
         // Said, rather than a button that quietly does nothing. The same rule
         // the rest of the app applies to an unwired bridge.

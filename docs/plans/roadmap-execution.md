@@ -347,7 +347,7 @@ that a DOM exists; importing `@testing-library/react` unconditionally would put 
 front of every sqlite test in the suite. When there is a `window`, it pulls in
 `tests/setup/renderer.ts`, which does two things:
 
-**Installs `window.shellpilot` before the test module is imported.** The preload bridge is the
+**Installs `window.opsmaxx` before the test module is imported.** The preload bridge is the
 renderer's entire outside world and `store/alerts.ts` reads it at module scope. The previous
 way to work around that is at the top of `tests/diskAlerts.test.ts`: assign `globalThis.window`
 by hand, then `await import()` the module so the assignment happened first. That works, but it

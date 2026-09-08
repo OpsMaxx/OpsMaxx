@@ -49,7 +49,7 @@ const ACTOR_LABEL: Record<ChangeLogActor, string> = {
   // Not a person and not an agent. A host that went unreachable at 03:00 was
   // nobody's doing, and filing it under either of the other two would make
   // this screen answer "what did I do" with something nobody did.
-  system: 'ShellPilot itself'
+  system: 'OpsMaxx itself'
 }
 
 const KIND_LABEL: Record<ChangeLogKind, string> = {
@@ -62,7 +62,7 @@ const KIND_LABEL: Record<ChangeLogKind, string> = {
 }
 
 function bridge(): Partial<ChangeLogBridge> | undefined {
-  return (window.shellpilot as unknown as { changelog?: Partial<ChangeLogBridge> } | undefined)
+  return (window.opsmaxx as unknown as { changelog?: Partial<ChangeLogBridge> } | undefined)
     ?.changelog
 }
 
@@ -148,7 +148,7 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
       about={
         <>
           <p>
-            What ShellPilot itself changed on the estate, and when — with the coverage of each
+            What OpsMaxx itself changed on the estate, and when — with the coverage of each
             source stated, so a quiet window is not read as a quiet week.
           </p>
           <p data-testid="changelog-on">{CHANGELOG_SWITCH_ON}</p>

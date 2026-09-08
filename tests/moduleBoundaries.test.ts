@@ -301,7 +301,7 @@ function closure(entry: string, aliases: Record<string, string> = ALIASES): Set<
 }
 
 /**
- * Which forbidden `window.shellpilot` namespaces a file actually touches.
+ * Which forbidden `window.opsmaxx` namespaces a file actually touches.
  *
  * Read off the syntax tree rather than grepped, so a namespace named in a
  * comment — including the comment in src/shared/modules.ts explaining this
@@ -312,9 +312,9 @@ function bridgeUses(file: string): string[] {
   const hits = new Set<string>()
   const visit = (n: ts.Node): void => {
     if (ts.isPropertyAccessExpression(n) && (MODULE_FORBIDDEN_BRIDGE as readonly string[]).includes(n.name.text)) {
-      // `window.shellpilot.vault`, `window.shellpilot?.vault`, `bridge.vault`
+      // `window.opsmaxx.vault`, `window.opsmaxx?.vault`, `bridge.vault`
       // where bridge was read off the global — the last hop is what names it.
-      if (/(^|\W)shellpilot$/.test(n.expression.getText(src).trim())) hits.add(n.name.text)
+      if (/(^|\W)opsmaxx$/.test(n.expression.getText(src).trim())) hits.add(n.name.text)
     }
     ts.forEachChild(n, visit)
   }
@@ -376,9 +376,9 @@ describe('the walker itself', () => {
     const offender = write(
       'bridge.ts',
       [
-        '// window.shellpilot.secrets is described here and never called.',
-        'export const read = () => window.shellpilot?.vault.list()',
-        'export const shell = () => window.shellpilot.local.open()'
+        '// window.opsmaxx.secrets is described here and never called.',
+        'export const read = () => window.opsmaxx?.vault.list()',
+        'export const shell = () => window.opsmaxx.local.open()'
       ].join('\n')
     )
     expect(bridgeUses(offender).sort()).toEqual(['local', 'vault'])
@@ -450,7 +450,7 @@ describe('what a module may not reach', () => {
     })
 
     it(`${id} does not reach them through the preload bridge either`, () => {
-      // The import closure is blind to a global. `window.shellpilot.vault.list()`
+      // The import closure is blind to a global. `window.opsmaxx.vault.list()`
       // returns every entry with its password in it, from a file whose imports
       // are spotless — and the renderer half of every module is exactly where
       // that is easy to write.
@@ -463,7 +463,7 @@ describe('what a module may not reach', () => {
       // shared helper would pass this. It would also be a file added to a shared
       // directory in a diff a reviewer sees, which is the case this cannot cover
       // and review can.
-      const offenders = files.flatMap((f) => bridgeUses(join(ROOT, f)).map((ns) => `${f} → shellpilot.${ns}`))
+      const offenders = files.flatMap((f) => bridgeUses(join(ROOT, f)).map((ns) => `${f} → opsmaxx.${ns}`))
       expect(offenders, `${id} reaches: ${offenders.join(', ')}`).toEqual([])
     })
   }
@@ -491,7 +491,7 @@ describe('what a module may not reach', () => {
     })
 
     it(`${f} does not reach them through the preload bridge either`, () => {
-      const offenders = bridgeUses(join(ROOT, f)).map((ns) => `shellpilot.${ns}`)
+      const offenders = bridgeUses(join(ROOT, f)).map((ns) => `opsmaxx.${ns}`)
       expect(offenders, `${f} reaches: ${offenders.join(', ')}`).toEqual([])
     })
   }

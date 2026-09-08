@@ -169,7 +169,7 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
   const loadInfo = useCallback(
     async (dbn: string): Promise<DbInfo | undefined> => {
       try {
-        const i = await unlocked(async () => window.shellpilot?.db.info(cfgWith(dbn)))
+        const i = await unlocked(async () => window.opsmaxx?.db.info(cfgWith(dbn)))
         if (i) setInfo(i)
         return i
       } catch {
@@ -186,7 +186,7 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
       setConn({ phase: 'connecting' })
       let r: DbTestResult | undefined
       try {
-        r = await unlocked(async () => window.shellpilot?.db.test(cfgWith(dbn)))
+        r = await unlocked(async () => window.opsmaxx?.db.test(cfgWith(dbn)))
       } catch (err) {
         const detail = errorText(err)
         setConn({ phase: 'error', message: connSummary(db, jumpServer, detail), detail })
@@ -240,7 +240,7 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
     setRunning(true)
     let r: DbQueryResult | undefined
     try {
-      r = await unlocked(async () => window.shellpilot?.db.query(cfgWith(dbName), query))
+      r = await unlocked(async () => window.opsmaxx?.db.query(cfgWith(dbName), query))
     } catch (err) {
       r = { ok: false, error: errorText(err) }
     }
@@ -383,7 +383,7 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
           className="btn sm danger"
           onClick={() => {
             deleteDatabase(db.id)
-            void window.shellpilot?.secrets.delete(db.id)
+            void window.opsmaxx?.secrets.delete(db.id)
             toast(`${db.name} deleted`)
           }}
         >

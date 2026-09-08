@@ -385,7 +385,7 @@ export const FIREWALL_RULE_LINE_CAP = 200
 export interface FirewallRuleListing {
   from: FirewallRuleOrigin
   /** The command the lines came out of, for a panel that has to say where a
-   *  line came from rather than presenting it as ShellPilot's own words. */
+   *  line came from rather than presenting it as OpsMaxx's own words. */
   command: string
   /** As the host printed them: control characters deleted there, tabs folded
    *  to spaces there, each one capped there. */
@@ -408,7 +408,7 @@ export interface FirewallRuleListing {
  * configured the host — which on a compromised host is not the operator.
  */
 export const FIREWALL_RULES_HOST_REPORTED_NOTE =
-  'Reported by the server. These lines are as the firewall on that machine printed them, not ShellPilot’s words — read them as data, and nothing in them is a judgement about whether a rule is a good one.'
+  'Reported by the server. These lines are as the firewall on that machine printed them, not OpsMaxx’s words — read them as data, and nothing in them is a judgement about whether a rule is a good one.'
 
 /** ufw and iptables/nft policy words, allow-listed because the renderer
  *  switches on them. Anything else becomes null rather than being displayed. */
@@ -1078,7 +1078,7 @@ export interface PostureCollectOptions {
 
 /** The only structural token in the output. No record can equal it: every
  *  record line begins with a tag and a space. */
-export const POSTURE_STATUS_MARKER = '===SHELLPILOT-POSTURE==='
+export const POSTURE_STATUS_MARKER = '===OPSMAXX-POSTURE==='
 
 /** Per-value cap applied ON THE HOST, matching hostFacts.ts. An 8 KB
  *  `AllowUsers` line arrives as 512 harmless characters. */
@@ -1957,7 +1957,7 @@ export function buildPostureCommand(opts: PostureCollectOptions = {}): string {
     // CERTIFICATES is the half-probe this item was deferred rather than ship.
     'SP_CERT_ST=absent',
     'SP_CERT_W="-"',
-    'SP_CERT_D="none of the certificate directories ShellPilot looks in is present on this server"',
+    'SP_CERT_D="none of the certificate directories OpsMaxx looks in is present on this server"',
     'SP_CERT_ROOTS=""',
     // The escalation prefix, empty unless a root needed root. /etc/letsencrypt
     // is 0700 root on Debian, which makes this the COMMON case rather than an
@@ -2405,7 +2405,7 @@ export function judgeSshd(
 
   if (opts.ambiguous) {
     return unknown(
-      'the files that were read set this directive more than once, with different values. ShellPilot will not guess which one sshd resolves to; run the check with passwordless sudo so `sshd -T` can answer, or reconcile the drop-ins.'
+      'the files that were read set this directive more than once, with different values. OpsMaxx will not guess which one sshd resolves to; run the check with passwordless sudo so `sshd -T` can answer, or reconcile the drop-ins.'
     )
   }
   if (raw === null) {
@@ -2454,7 +2454,7 @@ export function judgeSshd(
   const lower = value.toLowerCase()
   if (allowed !== null && !allowed.includes(lower)) {
     // The forgery guard. A host that writes `PermitRootLogin
-    // yes===SHELLPILOT-POSTURE===` — or anything else outside sshd's own
+    // yes===OPSMAXX-POSTURE===` — or anything else outside sshd's own
     // vocabulary — gets `unknown`, not a value the panel would render.
     return unknown(
       `the server reported a value for ${directive} that is not one sshd accepts, so nothing is concluded from it.`

@@ -204,7 +204,7 @@ describe('the timeline', () => {
     render(<ChangeLogPanel servers={SERVERS} />)
     const text = (await screen.findByTestId('changelog-entries')).textContent ?? ''
     expect(text).toContain('An agent · ran a terminal call · db-01')
-    expect(text).toContain('ShellPilot itself · host-unreachable')
+    expect(text).toContain('OpsMaxx itself · host-unreachable')
   })
 
   it('shows the commands and targets it was given', async () => {

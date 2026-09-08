@@ -56,7 +56,7 @@ export class ErrorBoundary extends Component<Props, State> {
           <div className="row" style={{ gap: 8, justifyContent: 'center' }}>
             <button
               className="btn"
-              onClick={() => window.shellpilot?.clipboard.write(this.report())}
+              onClick={() => window.opsmaxx?.clipboard.write(this.report())}
             >
               <Copy size={14} /> Copy details
             </button>

@@ -1,8 +1,8 @@
-===SHELLPILOT-SECPM===
+===OPSMAXX-SECPM===
 dnf
-===SHELLPILOT-SECCHECK===
+===OPSMAXX-SECCHECK===
 Error: Cache-only enabled but no cache for 'appstream'
-===SHELLPILOT-SECLIST===
+===OPSMAXX-SECLIST===
 Error: Cache-only enabled but no cache for 'appstream'
-===SHELLPILOT-SECSUM===
+===OPSMAXX-SECSUM===
 Error: Cache-only enabled but no cache for 'appstream'

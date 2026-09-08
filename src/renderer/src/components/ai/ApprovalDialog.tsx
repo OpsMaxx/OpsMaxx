@@ -14,7 +14,7 @@ import {
 
 // The approval modal.
 //
-// WHAT THIS SCREEN IS. Everywhere else in ShellPilot the person confirming an
+// WHAT THIS SCREEN IS. Everywhere else in OpsMaxx the person confirming an
 // action is the person who started it, and the dialog only has to describe the
 // blast radius. Here they did not start it, are probably part-way through
 // something else, and have no idea what the agent is pursuing. Before this
@@ -61,7 +61,7 @@ interface Provenance {
  *
  * THE READS STAY, as the fallback for a request that arrives without them —
  * and they stay honest. Both can fail, and when they do this reports null
- * rather than 0: "this session has taken no actions" and "ShellPilot could not
+ * rather than 0: "this session has taken no actions" and "OpsMaxx could not
  * find out" are opposite pieces of news, and rendering the second as the first
  * is exactly the failure this product's rules forbid. The tail read also
  * reports `capped`, so a number derived from a truncated window can never be
@@ -86,7 +86,7 @@ function useProvenance(request: ApprovalRequest): Provenance {
     setP(initial())
 
     if (knownStart === null) {
-      void window.shellpilot?.aiMcp
+      void window.opsmaxx?.aiMcp
         ?.listSessions?.()
         .then((all: McpAgentSession[] | undefined) => {
           if (!live) return
@@ -102,7 +102,7 @@ function useProvenance(request: ApprovalRequest): Provenance {
     }
 
     if (typeof knownActions !== 'number') {
-      void window.shellpilot?.aiMcp
+      void window.opsmaxx?.aiMcp
         ?.listAudit?.(AUDIT_WINDOW)
         .then((entries: AuditEntry[] | undefined) => {
           if (!live || !entries) return
@@ -262,7 +262,7 @@ export function ApprovalDialog({
           {/* 3. The command, as evidence — secondary to the sentence above it. */}
           <div>
             <div style={{ color: 'var(--text-faint)', fontSize: 11, marginBottom: 4 }}>
-              What {request.agentName} asked ShellPilot to run
+              What {request.agentName} asked OpsMaxx to run
             </div>
             <pre
               className="mono"
@@ -309,7 +309,7 @@ export function ApprovalDialog({
                 </>
               ) : (
                 <span style={{ color: 'var(--warn)' }}>
-                  ShellPilot has no session record for {request.sessionId} — it cannot say who this is or when they
+                  OpsMaxx has no session record for {request.sessionId} — it cannot say who this is or when they
                   connected.
                 </span>
               )}
@@ -317,7 +317,7 @@ export function ApprovalDialog({
             <Row label="Actions so far">
               {prov.actions === null ? (
                 <span style={{ color: 'var(--warn)' }}>
-                  ShellPilot could not read the audit log, so it cannot say whether this is this session’s first
+                  OpsMaxx could not read the audit log, so it cannot say whether this is this session’s first
                   action or its fortieth.
                 </span>
               ) : (
@@ -331,7 +331,7 @@ export function ApprovalDialog({
             <Row label="What led to this">
               {/* THE ONE FIELD ON THIS SCREEN THE AGENT WROTE.
                   Rendered as an attributed quotation, in the agent's name, and
-                  never as ShellPilot's own voice — the party asking for
+                  never as OpsMaxx's own voice — the party asking for
                   permission also writes this sentence, so it is evidence about
                   the agent and never evidence about the action. It arrives
                   already flattened, stripped and capped (sanitizeAgentIntent);
@@ -345,12 +345,12 @@ export function ApprovalDialog({
                 <>
                   <span style={{ color: 'var(--text)' }}>“{request.intent}”</span>
                   <div style={{ color: 'var(--text-faint)', fontSize: 11, marginTop: 3 }}>
-                    {request.agentName}’s own words, not ShellPilot’s. Nothing checked whether they are true.
+                    {request.agentName}’s own words, not OpsMaxx’s. Nothing checked whether they are true.
                   </div>
                 </>
               ) : (
                 <span style={{ color: 'var(--warn)' }}>
-                  {request.agentName} sent no reason. ShellPilot asks for one on every gated call and does not
+                  {request.agentName} sent no reason. OpsMaxx asks for one on every gated call and does not
                   require it, so nothing here knows what task this action belongs to.
                 </span>
               )}

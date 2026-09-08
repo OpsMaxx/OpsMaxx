@@ -36,7 +36,7 @@ export function RouteEditor(): React.JSX.Element {
     let failure: string | undefined
     try {
       const r = await withVaultUnlock(`Testing the route to ${server.name}`, async () =>
-        window.shellpilot?.sftp.connect(probeKey, {
+        window.opsmaxx?.sftp.connect(probeKey, {
           sessionId: probeKey,
           serverId: server.id,
           host: server.host,
@@ -52,7 +52,7 @@ export function RouteEditor(): React.JSX.Element {
     } catch (err) {
       failure = errorText(err)
     }
-    void window.shellpilot?.sftp.disconnect(probeKey)
+    void window.opsmaxx?.sftp.disconnect(probeKey)
     setTesting(false)
     if (!failure) {
       setResult({

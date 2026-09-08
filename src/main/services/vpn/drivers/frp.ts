@@ -48,7 +48,7 @@ import type { SupervisedSpec, SupervisorExit, SupervisorHandle } from '../superv
 const FRPC = 'frpc'
 // Fixed: the admin API is our own control channel, not an account, and the
 // password beside it is 32 fresh random bytes per run.
-const ADMIN_USER = 'shellpilot'
+const ADMIN_USER = 'opsmaxx'
 const ADMIN_PASSWORD_BYTES = 32
 const CONFIG_FILE = 'frpc.toml'
 const POLL_INTERVAL_MS = 200

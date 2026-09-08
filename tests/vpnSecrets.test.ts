@@ -270,7 +270,7 @@ describe('a locked vault stops the start (E34)', () => {
     vaultUnlocked = false
     const err = await resolveVpnSecrets(profile(wireguard())).catch((e: unknown) => e)
     expect(isVaultLockedError(err)).toBe(true)
-    expect(String(err)).toContain('SHELLPILOT_VAULT_LOCKED')
+    expect(String(err)).toContain('OPSMAXX_VAULT_LOCKED')
   })
 
   it('has no fallback: it never reaches for the OS keychain instead', async () => {

@@ -135,7 +135,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   // Remote writes triggered by an external save happen in the main process, so
   // the result is reported back here.
   useEffect(() => {
-    return bridgeOn('sftp.onExternalSaved', window.shellpilot?.sftp?.onExternalSaved, (r) => {
+    return bridgeOn('sftp.onExternalSaved', window.opsmaxx?.sftp?.onExternalSaved, (r) => {
       const name = r.remotePath.split('/').pop()
       if (r.ok) toast(`${name} saved to the server`, 'ok')
       // No button: the file is open in the user's own editor, and saving it
@@ -212,7 +212,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       setError(null)
       let res: SftpResult<SftpEntry[]> | undefined
       try {
-        res = await unlocked(async () => window.shellpilot?.sftp.list(key, p))
+        res = await unlocked(async () => window.opsmaxx?.sftp.list(key, p))
       } catch (err) {
         res = { ok: false, error: errorText(err) }
       }
@@ -253,7 +253,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       if (paneId) setTabCwd(paneId, p)
       if (linked && session) {
         const q = p.replace(/'/g, `'\\''`)
-        window.shellpilot?.ssh.write(session, `cd '${q}'\n`)
+        window.opsmaxx?.ssh.write(session, `cd '${q}'\n`)
       }
     },
     [list, paneId, setTabCwd, linked, session]
@@ -268,7 +268,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       setError(null)
       let res: SftpResult<{ home: string }> | undefined
       try {
-        res = await unlocked(async () => window.shellpilot?.sftp.connect(key, cfg()))
+        res = await unlocked(async () => window.opsmaxx?.sftp.connect(key, cfg()))
       } catch (err) {
         res = { ok: false, error: errorText(err) }
       }
@@ -332,7 +332,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   // back on every save, instead of the built-in inline editor.
   const openExternally = async (e: SftpEntry): Promise<void> => {
     const remote = join(path, e.name)
-    const r = await window.shellpilot?.sftp.editExternal(key, remote, editorCommand)
+    const r = await window.opsmaxx?.sftp.editExternal(key, remote, editorCommand)
     if (r?.ok) toast(`Opened ${e.name} — saves upload automatically`, 'ok')
     else
       toast(fileFailure('open', e.name, path, r?.error), 'error', {
@@ -349,7 +349,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       })
       return
     }
-    const res = await window.shellpilot?.sftp.read(key, join(path, e.name))
+    const res = await window.opsmaxx?.sftp.read(key, join(path, e.name))
     if (res?.ok) setEditor({ path: join(path, e.name), content: res.data ?? '' })
     // No button: the same read through the external editor goes down the same
     // channel and is refused for the same reason.
@@ -359,7 +359,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   const saveFile = async (content: string): Promise<void> => {
     if (!editor) return
     const name = editor.path.split('/').pop() ?? editor.path
-    const res = await window.shellpilot?.sftp.write(key, editor.path, content)
+    const res = await window.opsmaxx?.sftp.write(key, editor.path, content)
     if (res?.ok) {
       toast(`${name} saved`, 'ok')
       setEditor(null)
@@ -374,7 +374,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
 
   const createFolder = async (): Promise<void> => {
     if (!newName.trim()) return setCreating(false)
-    const res = await window.shellpilot?.sftp.mkdir(key, join(path, newName.trim()))
+    const res = await window.opsmaxx?.sftp.mkdir(key, join(path, newName.trim()))
     if (res?.ok) {
       toast(`Created ${newName.trim()}`)
       setNewName('')
@@ -388,7 +388,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   const doRename = async (from: SftpEntry, to: string): Promise<void> => {
     setRenaming(null)
     if (!to.trim() || to === from.name) return
-    const res = await window.shellpilot?.sftp.rename(key, join(path, from.name), join(path, to.trim()))
+    const res = await window.opsmaxx?.sftp.rename(key, join(path, from.name), join(path, to.trim()))
     if (res?.ok) void list(path)
     else
       toast(fileFailure('rename', from.name, path, res?.error), 'error', {
@@ -399,7 +399,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
 
   const remove = async (e: SftpEntry): Promise<void> => {
     if (!window.confirm(`Delete ${e.name}? This cannot be undone.`)) return
-    const res = await window.shellpilot?.sftp.remove(key, join(path, e.name), e.dir)
+    const res = await window.opsmaxx?.sftp.remove(key, join(path, e.name), e.dir)
     if (res?.ok) {
       toast(`Deleted ${e.name}`)
       void list(path)
@@ -410,7 +410,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
 
   // Transfer progress is reported from the main process while an upload runs.
   useEffect(() => {
-    return bridgeOn('sftp.onProgress', window.shellpilot?.sftp?.onProgress, (p) => {
+    return bridgeOn('sftp.onProgress', window.opsmaxx?.sftp?.onProgress, (p) => {
       if (p.key === key) setProgress(p)
     })
   }, [key])
@@ -423,7 +423,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
     if (clashes.length && !window.confirm(`Overwrite on the server?\n\n${clashes.join('\n')}`)) return
     // Shown immediately: the first step event only arrives once bytes move.
     setProgress({ key, name: baseName(paths[0]), transferred: 0, total: 0, index: 1, count: paths.length })
-    const res = await window.shellpilot?.sftp.upload(key, paths, path)
+    const res = await window.opsmaxx?.sftp.upload(key, paths, path)
     setProgress(null)
     const done = res?.data?.uploaded.length ?? 0
     const failed = res?.data?.failed ?? []
@@ -447,7 +447,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   }
 
   const pickAndUpload = async (): Promise<void> => {
-    const picked = await window.shellpilot?.dialog.openUpload()
+    const picked = await window.opsmaxx?.dialog.openUpload()
     if (picked?.length) await upload(picked)
   }
 
@@ -455,7 +455,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
     ev.preventDefault()
     setDropping(false)
     const paths = Array.from(ev.dataTransfer.files)
-      .map((f) => window.shellpilot?.sftp.pathFor(f))
+      .map((f) => window.opsmaxx?.sftp.pathFor(f))
       .filter((p): p is string => !!p)
     if (paths.length) void upload(paths)
   }

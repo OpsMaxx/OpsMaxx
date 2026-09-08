@@ -119,8 +119,8 @@ describe('DNS validation', () => {
   })
 
   it('tags every change with the run id so a sweep can be exact (E10)', () => {
-    expect(runTag('run-1')).toBe('ShellPilot-run-1')
-    expect(runTag('../evil')).toBe('ShellPilot-.._evil')
+    expect(runTag('run-1')).toBe('OpsMaxx-run-1')
+    expect(runTag('../evil')).toBe('OpsMaxx-.._evil')
   })
 
   it('refuses a platform it has no implementation for', () => {
@@ -185,16 +185,16 @@ describe('darwin DNS', () => {
   })
 
   it('builds the exact scutil script for a full-tunnel resolver', () => {
-    expect(buildApplyScript(full, 'ShellPilot-run-1')).toBe(
+    expect(buildApplyScript(full, 'OpsMaxx-run-1')).toBe(
       [
         'd.init',
         'd.add ServerAddresses * 10.8.0.1 10.8.0.2',
         'd.add SearchDomains * corp.example',
         'd.add InterfaceName utun4',
-        'set State:/Network/Service/ShellPilot-run-1/DNS',
+        'set State:/Network/Service/OpsMaxx-run-1/DNS',
         'd.init',
         'd.add InterfaceName utun4',
-        'set State:/Network/Service/ShellPilot-run-1/IPv4',
+        'set State:/Network/Service/OpsMaxx-run-1/IPv4',
         'quit',
         ''
       ].join('\n')
@@ -202,17 +202,17 @@ describe('darwin DNS', () => {
   })
 
   it('uses SupplementalMatchDomains for split DNS (E12)', () => {
-    const script = buildApplyScript(split, 'ShellPilot-run-1')
+    const script = buildApplyScript(split, 'OpsMaxx-run-1')
     expect(script).toContain('d.add SupplementalMatchDomains * corp.example')
     expect(script).toContain('d.add SupplementalMatchOrders * 100')
     expect(script).not.toContain('SearchDomains')
   })
 
   it('removes exactly the keys it created and nothing else', () => {
-    expect(buildRevertScript('ShellPilot-run-1')).toBe(
+    expect(buildRevertScript('OpsMaxx-run-1')).toBe(
       [
-        'remove State:/Network/Service/ShellPilot-run-1/DNS',
-        'remove State:/Network/Service/ShellPilot-run-1/IPv4',
+        'remove State:/Network/Service/OpsMaxx-run-1/DNS',
+        'remove State:/Network/Service/OpsMaxx-run-1/IPv4',
         'quit',
         ''
       ].join('\n')
@@ -225,7 +225,7 @@ describe('darwin DNS', () => {
     expect(rec.calls).toHaveLength(1)
     expect(rec.calls[0].cmd).toBe('scutil')
     expect(rec.calls[0].args).toEqual([])
-    expect(rec.calls[0].stdin).toBe(buildApplyScript(full, 'ShellPilot-run-1'))
+    expect(rec.calls[0].stdin).toBe(buildApplyScript(full, 'OpsMaxx-run-1'))
   })
 
   it('refuses rather than pretending when the channel cannot carry stdin', async () => {
@@ -247,8 +247,8 @@ describe('darwin DNS', () => {
     await expect(mgr().revert(snapshot, rec.ctx)).resolves.toBeUndefined()
     await expect(mgr().revert(snapshot, rec.ctx)).resolves.toBeUndefined()
     expect(rec.calls.map((c) => c.stdin)).toEqual([
-      buildRevertScript('ShellPilot-run-1'),
-      buildRevertScript('ShellPilot-run-1')
+      buildRevertScript('OpsMaxx-run-1'),
+      buildRevertScript('OpsMaxx-run-1')
     ])
   })
 
@@ -300,7 +300,7 @@ describe('linux DNS', () => {
   let dir: string
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'shellpilot-dns-'))
+    dir = mkdtempSync(join(tmpdir(), 'opsmaxx-dns-'))
   })
   afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
@@ -483,25 +483,25 @@ describe('win32 DNS', () => {
   })
 
   it('tags every rule with the run id (E10)', () => {
-    const script = buildAddScript(split, 'ShellPilot-run-1')
+    const script = buildAddScript(split, 'OpsMaxx-run-1')
     expect(script).toBe(
-      "$ErrorActionPreference='Stop'; Add-DnsClientNrptRule -Namespace '.corp.example' -NameServers @('10.8.0.1') -Comment 'ShellPilot-run-1' -DisplayName 'ShellPilot-run-1'"
+      "$ErrorActionPreference='Stop'; Add-DnsClientNrptRule -Namespace '.corp.example' -NameServers @('10.8.0.1') -Comment 'OpsMaxx-run-1' -DisplayName 'OpsMaxx-run-1'"
     )
   })
 
   it('uses the whole tree for a full-tunnel profile and one rule per split domain', () => {
-    expect(buildAddScript(full, 'ShellPilot-run-1')).toContain("-Namespace '.'")
+    expect(buildAddScript(full, 'OpsMaxx-run-1')).toContain("-Namespace '.'")
     const many = buildAddScript(
       { ...split, splitDomains: ['corp.example', 'internal.example'] },
-      'ShellPilot-run-1'
+      'OpsMaxx-run-1'
     )
     expect(many).toContain("-Namespace '.corp.example'")
     expect(many).toContain("-Namespace '.internal.example'")
   })
 
   it('sweeps by exact tag so a run id cannot match another by prefix', () => {
-    const script = buildRemoveScript('ShellPilot-run-1')
-    expect(script).toContain("$_.Comment -eq 'ShellPilot-run-1'")
+    const script = buildRemoveScript('OpsMaxx-run-1')
+    expect(script).toContain("$_.Comment -eq 'OpsMaxx-run-1'")
     expect(script).not.toContain('-like')
     expect(script).toContain('Remove-DnsClientNrptRule -Name $_.Name -Force')
   })
@@ -510,7 +510,7 @@ describe('win32 DNS', () => {
     const rec = recorder()
     await mgr().apply(split, rec.ctx)
     expect(rec.calls).toEqual([
-      { cmd: 'powershell.exe', args: [...PS, buildAddScript(split, 'ShellPilot-run-1')], stdin: undefined }
+      { cmd: 'powershell.exe', args: [...PS, buildAddScript(split, 'OpsMaxx-run-1')], stdin: undefined }
     ])
   })
 
@@ -520,14 +520,14 @@ describe('win32 DNS', () => {
       platform: 'win32' as const,
       capturedAt: 0,
       runId: 'run-1',
-      interfaceName: 'ShellPilot Tunnel',
+      interfaceName: 'OpsMaxx Tunnel',
       previous: []
     }
     await mgr().revert(snapshot, rec.ctx)
     await mgr().revert(snapshot, rec.ctx)
     expect(rec.calls.map((c) => c.args)).toEqual([
-      [...PS, buildRemoveScript('ShellPilot-run-1')],
-      [...PS, buildRemoveScript('ShellPilot-run-1')]
+      [...PS, buildRemoveScript('OpsMaxx-run-1')],
+      [...PS, buildRemoveScript('OpsMaxx-run-1')]
     ])
   })
 
@@ -549,7 +549,7 @@ describe('win32 DNS', () => {
     const m = mgr()
     await m.apply(split, rec.ctx)
     reply(
-      `powershell.exe ${[...PS, buildQueryScript('ShellPilot-run-1')].join(' ')}`,
+      `powershell.exe ${[...PS, buildQueryScript('OpsMaxx-run-1')].join(' ')}`,
       '{"Namespace":".corp.example","NameServers":["10.8.0.1"]}'
     )
     expect(await m.verify(split)).toMatchObject({ ok: true, actual: ['10.8.0.1'] })
@@ -559,10 +559,10 @@ describe('win32 DNS', () => {
     const rec = recorder()
     const m = mgr()
     await m.apply(split, rec.ctx)
-    reply(`powershell.exe ${[...PS, buildQueryScript('ShellPilot-run-1')].join(' ')}`, '')
+    reply(`powershell.exe ${[...PS, buildQueryScript('OpsMaxx-run-1')].join(' ')}`, '')
     const result = await m.verify(split)
     expect(result.ok).toBe(false)
-    expect(result.reason).toContain('ShellPilot-run-1')
+    expect(result.reason).toContain('OpsMaxx-run-1')
   })
 
   it('verify() catches a rule that covers the wrong namespace', async () => {
@@ -570,7 +570,7 @@ describe('win32 DNS', () => {
     const m = mgr()
     await m.apply(split, rec.ctx)
     reply(
-      `powershell.exe ${[...PS, buildQueryScript('ShellPilot-run-1')].join(' ')}`,
+      `powershell.exe ${[...PS, buildQueryScript('OpsMaxx-run-1')].join(' ')}`,
       '{"Namespace":".other.example","NameServers":["10.8.0.1"]}'
     )
     const result = await m.verify(split)

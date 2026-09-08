@@ -10,8 +10,8 @@ import {
 
 // A real 64-hex bridge token, of the shape the page used to print in full.
 const TOKEN = '104162926be3692f3e60f75e56e1c126fd41c55f69c4e9fe4710ef76e482e5c0'
-const CLI = `claude mcp add -s user --transport http shellpilot http://127.0.0.1:5177/mcp --header "Authorization: Bearer ${TOKEN}"`
-const JSON_SNIPPET = `{"mcpServers":{"shellpilot":{"url":"http://127.0.0.1:5177/mcp","headers":{"Authorization":"Bearer ${TOKEN}"}}}}`
+const CLI = `claude mcp add -s user --transport http opsmaxx http://127.0.0.1:5177/mcp --header "Authorization: Bearer ${TOKEN}"`
+const JSON_SNIPPET = `{"mcpServers":{"opsmaxx":{"url":"http://127.0.0.1:5177/mcp","headers":{"Authorization":"Bearer ${TOKEN}"}}}}`
 
 describe('the token stops being readable', () => {
   it('keeps only the head and tail', () => {

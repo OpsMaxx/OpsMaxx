@@ -17,7 +17,7 @@ const ref = (fieldKey?: string): VpnSecretRef => ({
   ...(fieldKey ? { fieldKey } : {})
 })
 
-const RUN = { adminPort: 41731, adminUser: 'shellpilot' }
+const RUN = { adminPort: 41731, adminUser: 'opsmaxx' }
 const RUN_SECRETS = { ...RUN, adminPassword: 'admin-pw-3f9c' }
 
 function proxy(over: Partial<FrpProxy> = {}): FrpProxy {
@@ -91,7 +91,7 @@ transport.heartbeatInterval = 30
 
 webServer.addr     = "127.0.0.1"
 webServer.port     = 41731
-webServer.user     = "shellpilot"
+webServer.user     = "opsmaxx"
 webServer.password = "{{ .Envs.SP_FRP_ADMIN }}"
 
 log.to    = "console"
@@ -177,7 +177,7 @@ bindPort   = 9022
         auth: {
           method: 'oidc',
           oidc: {
-            clientId: 'shellpilot',
+            clientId: 'opsmaxx',
             clientSecretRef: ref(),
             audience: 'frps',
             tokenEndpointUrl: 'https://idp.example.com/token'

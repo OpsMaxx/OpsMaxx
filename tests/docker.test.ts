@@ -17,7 +17,7 @@ import {
 
 const row = (...f: string[]): string => f.join(DOCKER_SEP)
 const output = (version: string, rows: string[]): string =>
-  `${version}\n===SHELLPILOT-PS===\n${rows.join('\n')}\n`
+  `${version}\n===OPSMAXX-PS===\n${rows.join('\n')}\n`
 
 describe('reading containers', () => {
   it('parses a container list', () => {
@@ -208,7 +208,7 @@ describe('output with things printed before the answer', () => {
     const out = [
       'WARNING: Error loading config file: /home/deploy/.docker/config.json: open /home/deploy/.docker/config.json: permission denied',
       '24.0.7',
-      '===SHELLPILOT-PS===',
+      '===OPSMAXX-PS===',
       row('a1b2c3d4e5f6a7b8', 'web', 'nginx:1.25', 'running', 'Up 3 hours', '0.0.0.0:80->80/tcp', '2026-09-01 10:00:00 +0000 UTC')
     ].join('\n')
     const r = parseDockerOutput(out, 0)
@@ -221,7 +221,7 @@ describe('output with things printed before the answer', () => {
     const out = [
       'WARNING: Plugin "/usr/libexec/docker/cli-plugins/docker-buildx" is not valid: failed to fetch metadata: fork/exec: permission denied',
       '20.10.24',
-      '===SHELLPILOT-PS===',
+      '===OPSMAXX-PS===',
       ''
     ].join('\n')
     const r = parseDockerOutput(out, 0)
@@ -245,7 +245,7 @@ describe('output with things printed before the answer', () => {
     // and the collector merges stderr in. It is not an error and not a row.
     const out = [
       '4.9.4',
-      '===SHELLPILOT-PS===',
+      '===OPSMAXX-PS===',
       'Emulate Docker CLI using podman. Create /etc/containers/nodocker to quiet msg',
       row('9f8e7d6c5b4a3928', 'web', 'docker.io/library/nginx:latest', 'running', 'Up 2 hours', '0.0.0.0:8080->80/tcp', '2026-09-01 08:00:00 +0000 UTC')
     ].join('\n')
@@ -257,7 +257,7 @@ describe('output with things printed before the answer', () => {
   it('ignores a kernel warning docker prints before the list', () => {
     const out = [
       '24.0.7',
-      '===SHELLPILOT-PS===',
+      '===OPSMAXX-PS===',
       'WARNING: bridge-nf-call-iptables is disabled',
       'WARNING: No swap limit support',
       row('a1', 'web', 'nginx', 'running', 'Up 1 min', '', 'now')
@@ -274,7 +274,7 @@ describe('a podman server, whose docker is a shim', () => {
     // as a docker failure — while `docker ps` was working perfectly.
     const out = [
       'Error: template: version:1:2: executing "version" at <.Server.Version>: nil pointer evaluating *define.Version.Version',
-      '===SHELLPILOT-PS===',
+      '===OPSMAXX-PS===',
       row('c0ffee1234567890', 'db', 'quay.io/postgres:16', 'running', 'Up 4 days', '', '2026-08-28 12:00:00 +0000 UTC')
     ].join('\n')
     const r = parseDockerOutput(out, 0)
@@ -289,7 +289,7 @@ describe('a podman server, whose docker is a shim', () => {
     // "<no value>" is worse than one read off the status line.
     const out = [
       '19.03.15',
-      '===SHELLPILOT-PS===',
+      '===OPSMAXX-PS===',
       row('a1', 'web', 'nginx', '<no value>', 'Up 3 hours', '', 'now'),
       row('b2', 'old', 'busybox', '<no value>', 'Exited (0) 2 days ago', '', 'now')
     ].join('\n')
@@ -303,7 +303,7 @@ describe('rows that are not the shape this parser expects', () => {
     // A different runtime whose template renders a different number of fields
     // gives rows that cannot be read. "No containers" for that is the lie this
     // module exists to avoid, and it is indistinguishable from a quiet host.
-    const out = ['4.9.4', '===SHELLPILOT-PS===', ['a1', 'web', 'nginx'].join(DOCKER_SEP)].join('\n')
+    const out = ['4.9.4', '===OPSMAXX-PS===', ['a1', 'web', 'nginx'].join(DOCKER_SEP)].join('\n')
     const r = parseDockerOutput(out, 0)
     expect(r.ok).toBe(false)
     expect(!r.ok && r.reason).toBe('unknown')
@@ -313,7 +313,7 @@ describe('rows that are not the shape this parser expects', () => {
   it('surfaces a template error from docker ps', () => {
     const out = [
       '19.03.15',
-      '===SHELLPILOT-PS===',
+      '===OPSMAXX-PS===',
       'template: :1:2: executing "" at <.State>: can\'t evaluate field State in type *formatter.ContainerContext'
     ].join('\n')
     const r = parseDockerOutput(out, 1)
@@ -326,7 +326,7 @@ describe('rows that are not the shape this parser expects', () => {
     // so an image or name containing "error" or "permission denied" is safe.
     const out = [
       '24.0.7',
-      '===SHELLPILOT-PS===',
+      '===OPSMAXX-PS===',
       row('a1', 'permission-denied-test', 'acme/error-reporter:1', 'running', 'Up 1 min', '', 'now')
     ].join('\n')
     const r = parseDockerOutput(out, 0)
@@ -455,7 +455,7 @@ describe('the whole round trip on a server with no docker', () => {
     // is what the collector actually returns on such a host.
     const out = [
       'bash: docker: command not found',
-      '===SHELLPILOT-PS===',
+      '===OPSMAXX-PS===',
       'bash: docker: command not found',
       ''
     ].join('\n')
@@ -470,7 +470,7 @@ describe('the whole round trip on a server with no docker', () => {
     // reports a version AND a failure — and the failure is the one that matters.
     const out = [
       'Docker version 24.0.7, build afdd53b',
-      '===SHELLPILOT-PS===',
+      '===OPSMAXX-PS===',
       'Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?',
       ''
     ].join('\n')
@@ -480,7 +480,7 @@ describe('the whole round trip on a server with no docker', () => {
 
   it('does not turn a warning-only, exit-zero run into a failure', () => {
     // A host that genuinely has no containers still prints its warnings.
-    const out = ['24.0.7', '===SHELLPILOT-PS===', 'WARNING: No swap limit support', ''].join('\n')
+    const out = ['24.0.7', '===OPSMAXX-PS===', 'WARNING: No swap limit support', ''].join('\n')
     const r = parseDockerOutput(out, 0)
     expect(r.ok).toBe(true)
     expect(r.ok && r.containers).toEqual([])

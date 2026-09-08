@@ -1,4 +1,4 @@
-/* ShellPilot design tokens
+/* OpsMaxx design tokens
    Dark is the primary theme. Light is a full override on [data-theme="light"]. */
 
 :root,
@@ -35,7 +35,7 @@
   --text-faint: #8f97a6;
   --text-inverse: #0d1017;
 
-  /* Brand — ShellPilot cyan/teal.
+  /* Brand — OpsMaxx cyan/teal.
      Two roles, two tokens, and they are not interchangeable:
        --accent      a FILL, and whatever sits on it is --accent-text
        --accent-ink  the accent used AS TEXT, on one of the --bg-* surfaces

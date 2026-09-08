@@ -43,7 +43,7 @@ import type { SudoersFileReading } from './sudoers'
 // `authorized_keys` is attacker-controlled text on a host that may already be
 // compromised, and a key comment is free-form. cron.ts dumps file text between
 // section markers, which is fine there and would not be fine here: a key
-// comment reading `===SHELLPILOT-ACCESS===` would forge a section boundary.
+// comment reading `===OPSMAXX-ACCESS===` would forge a section boundary.
 //
 // So this borrows hostFacts.ts's stricter discipline and extends it to a
 // multi-record stream. EVERY line the collector emits is a tagged record —
@@ -242,9 +242,9 @@ export type KeyProblem =
 
 export const KEY_PROBLEM_HELP: Record<KeyProblem, string> = {
   malformed:
-    'This line is in the file and is not a key ShellPilot can read. sshd may still accept it, so it is counted rather than hidden.',
+    'This line is in the file and is not a key OpsMaxx can read. sshd may still accept it, so it is counted rather than hidden.',
   'unknown-type':
-    'The key type on this line is not one this version of ShellPilot knows. It is very likely valid — a newer algorithm — and it is NOT fingerprinted, so it will not match anything in the fleet view.',
+    'The key type on this line is not one this version of OpsMaxx knows. It is very likely valid — a newer algorithm — and it is NOT fingerprinted, so it will not match anything in the fleet view.',
   'bad-base64': 'The key body on this line is not valid base64, so no fingerprint could be computed from it.',
   'type-mismatch':
     'The algorithm named at the start of the line is not the algorithm inside the key itself. sshd rejects lines like this; a person reading the file would not notice.',
@@ -627,7 +627,7 @@ export interface AccessCollectOptions {
 
 /** The only structural token in the output. No record can equal it: every
  *  record line begins with a tag and a space. */
-export const ACCESS_STATUS_MARKER = '===SHELLPILOT-ACCESS==='
+export const ACCESS_STATUS_MARKER = '===OPSMAXX-ACCESS==='
 
 /**
  * The most accounts enumerated in one collection.
@@ -1771,7 +1771,7 @@ export function parseAccessCollection(output: string, deps: ParseAccessDeps): Ho
     else sessionKeyFingerprints.push(fp)
   }
   // A session the host says used no key at all leaves nothing to compare
-  // against, and the account ShellPilot connects as is not where this build
+  // against, and the account OpsMaxx connects as is not where this build
   // spends a maybe. Treated as "cannot tell", which is the conservative branch.
   if (sessionKeyFingerprints.length === 0) sessionKeysCertain = false
 
@@ -2195,7 +2195,7 @@ export function keyPresence(
 /**
  * The prefix every access fact is stored under in the durable store (item A).
  *
- * Same store as host facts, never a second one, and never `shellpilot-data.json`
+ * Same store as host facts, never a second one, and never `opsmaxx-data.json`
  * — that blob is the encrypted backup payload rather than somewhere to keep an
  * hourly inventory.
  */
@@ -2453,13 +2453,13 @@ export const ACCESS_WRITE_DISABLED_REASON =
  * refusal after somebody has selected twelve hosts. "Revoke a key across the
  * fleet" describes something broader than what this builds: the staged command
  * resolves `$HOME/.ssh/authorized_keys` on the host, so it can only ever edit
- * the account ShellPilot connects as — and rule 1 blocks it even there unless
+ * the account OpsMaxx connects as — and rule 1 blocks it even there unless
  * sshd will say which key the session is authenticated with, which is off by
  * default.
  */
 export const ACCESS_WRITE_SCOPE =
   'Even once it is enabled it will only ever edit ~/.ssh/authorized_keys for the account ' +
-  'ShellPilot connects as on each server — not another account\u2019s file, and not any path sshd was ' +
+  'OpsMaxx connects as on each server — not another account\u2019s file, and not any path sshd was ' +
   'configured to read instead. On the account it connects as it also needs the server to report ' +
   'which key this session authenticated with (sshd\u2019s ExposeAuthInfo, off by default); without ' +
   'that it refuses, because nothing can prove the key being removed is not the one holding the ' +
@@ -2476,7 +2476,7 @@ export const ACCESS_ROLLBACK_SECONDS = 300
 /** The marker whose EXISTENCE disarms the watchdog. Named per change, so two
  *  overlapping stages on one host cannot disarm each other. */
 export function accessCommitMarker(token: string): string {
-  return `.shellpilot-access-${token}.commit`
+  return `.opsmaxx-access-${token}.commit`
 }
 
 export type AccessChangeKind = 'add' | 'revoke'
@@ -2690,7 +2690,7 @@ export function planAccessChange(req: AccessChangeRequest): AccessChangePlan {
       if (protect.has(key)) {
         block(
           'is-session-key',
-          `that key is the one this session is authenticated with on ${t.serverName}. Removing it would end ShellPilot's own way back into the server, so it is refused here rather than confirmed anywhere.`
+          `that key is the one this session is authenticated with on ${t.serverName}. Removing it would end OpsMaxx's own way back into the server, so it is refused here rather than confirmed anywhere.`
         )
         continue
       }
@@ -2700,7 +2700,7 @@ export function planAccessChange(req: AccessChangeRequest): AccessChangePlan {
       if (!t.access.sessionKeysCertain && t.access.collectedAs === t.user) {
         block(
           'session-key-unknown',
-          `${t.serverName} did not name every key this session authenticated with — either sshd's ExposeAuthInfo is off, or what it said could not be turned into a fingerprint exactly — and this would edit the keys of the very account ShellPilot connects as. Without that fact nothing can prove the key being removed is not the one holding this connection open.`
+          `${t.serverName} did not name every key this session authenticated with — either sshd's ExposeAuthInfo is off, or what it said could not be turned into a fingerprint exactly — and this would edit the keys of the very account OpsMaxx connects as. Without that fact nothing can prove the key being removed is not the one holding this connection open.`
         )
         continue
       }
@@ -2930,10 +2930,10 @@ function buildStagedWrite(o: {
     // approved command text covers every host in the selection and
     // verifyApproval has something to compare.
     `SP_F="$HOME/.ssh/authorized_keys"`,
-    `SP_B="$SP_F.shellpilot-${o.token}.bak"`,
-    `SP_T="$SP_F.shellpilot-${o.token}.new"`,
+    `SP_B="$SP_F.opsmaxx-${o.token}.bak"`,
+    `SP_T="$SP_F.opsmaxx-${o.token}.new"`,
     `SP_M="$HOME/.ssh/${marker}"`,
-    'SP_LOCK="$HOME/.ssh/.shellpilot-access.lock"',
+    'SP_LOCK="$HOME/.ssh/.opsmaxx-access.lock"',
 
     // ---- ONE STAGED CHANGE AT A TIME -------------------------------------
     //
@@ -2976,7 +2976,7 @@ function buildStagedWrite(o: {
     // backup stays. Refusing further automated changes on that host is the
     // right answer and a person should look at it, so the sentence says which
     // file and what checking it means.
-    'for SP_OLD in "$HOME"/.ssh/*.shellpilot-*.bak; do [ -e "$SP_OLD" ] || continue; echo "a key change staged earlier is still waiting for its rollback window to close ($SP_OLD); nothing was changed. If that window has already passed, its rollback did not run on this server: compare that file against the live authorized_keys and remove it by hand once you are satisfied." >&2; exit 6; done',
+    'for SP_OLD in "$HOME"/.ssh/*.opsmaxx-*.bak; do [ -e "$SP_OLD" ] || continue; echo "a key change staged earlier is still waiting for its rollback window to close ($SP_OLD); nothing was changed. If that window has already passed, its rollback did not run on this server: compare that file against the live authorized_keys and remove it by hand once you are satisfied." >&2; exit 6; done',
 
     // Refuse before touching anything. A file this account cannot write is a
     // file the change cannot make, and finding that out after the backup is
@@ -3076,7 +3076,7 @@ function buildStagedWrite(o: {
     //     holds the backup path and the deadline. Polled for a few seconds, and
     //     the mv is gated on it. A watchdog that was launched into a slice
     //     about to be killed does not get that far, and nothing is replaced.
-    `SP_ARM="$SP_F.shellpilot-${o.token}.armed"`,
+    `SP_ARM="$SP_F.opsmaxx-${o.token}.armed"`,
     'rm -f "$SP_M" "$SP_ARM"',
     'SP_L=',
     // `--quiet` so the scope name does not land in the job output; `--collect`
@@ -3194,7 +3194,7 @@ export function accessVerifyCommand(token: string): string {
     'LC_ALL=C',
     'export LC_ALL',
     'SP_F="$HOME/.ssh/authorized_keys"',
-    `SP_B="$SP_F.shellpilot-${token}.bak"`,
+    `SP_B="$SP_F.opsmaxx-${token}.bak"`,
     // The backup is the staged change's own footprint, and it is named with
     // this change's token — so finding it is finding THIS change, on THIS
     // host, in THIS account's home directory. A session that landed somewhere
@@ -3263,7 +3263,7 @@ export function accessDisarmCommand(path: string, token: string): string {
 //                                  being rejected, and the operator has learned
 //                                  something real about that host.
 //   reverted-unconfirmed         — nobody ever told the host either way, so it
-//                                  did what it promised. ShellPilot was closed,
+//                                  did what it promised. OpsMaxx was closed,
 //                                  or the network went, or the confirmation
 //                                  itself could not be written. NOTHING IS
 //                                  WRONG WITH THE CHANGE. Reporting this as a
@@ -3448,7 +3448,7 @@ export function describeAccessOutcome(o: {
 /** Where the previous file is left, for the sentence above and for a person in
  *  a shell who needs it when this app is the thing that is locked out. */
 export function accessBackupPath(keyPath: string, token: string): string {
-  return `${keyPath}.shellpilot-${token}.bak`
+  return `${keyPath}.opsmaxx-${token}.bak`
 }
 
 /**

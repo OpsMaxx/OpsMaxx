@@ -47,8 +47,8 @@ export function VpnTransportSelect({
   // can be opened without ever going there. Without this reconcile the chip
   // would confidently say "Stopped" about a tunnel that is up.
   useEffect(() => {
-    if (!bridgeHas(window.shellpilot?.vpn as Record<string, unknown> | undefined, 'list')) return
-    void window.shellpilot?.vpn.list().then((list) => {
+    if (!bridgeHas(window.opsmaxx?.vpn as Record<string, unknown> | undefined, 'list')) return
+    void window.opsmaxx?.vpn.list().then((list) => {
       list?.forEach((st) => setVpnStatus(st.id, st))
     })
   }, [setVpnStatus])

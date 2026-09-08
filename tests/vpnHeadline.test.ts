@@ -13,14 +13,14 @@ describe('the toast says something', () => {
     // the one detail that explained the failure.
     expect(
       headline(
-        'Something went wrong inside ShellPilot. The management socket path is 123 bytes, which is too long: /Users/x/Library/Application Support/ShellPilot/vpn-run/vpn-abc/mgmt/m.sock'
+        'Something went wrong inside OpsMaxx. The management socket path is 123 bytes, which is too long: /Users/x/Library/Application Support/OpsMaxx/vpn-run/vpn-abc/mgmt/m.sock'
       )
-    ).toBe('The management socket path is 123 bytes, which is too long: /Users/x/Library/Application Support/ShellPilot/vpn-run/vpn-abc/mgmt/m.sock')
+    ).toBe('The management socket path is 123 bytes, which is too long: /Users/x/Library/Application Support/OpsMaxx/vpn-run/vpn-abc/mgmt/m.sock')
   })
 
   it('falls back to the generic sentence when there is genuinely nothing else', () => {
-    expect(headline('Something went wrong inside ShellPilot.')).toBe(
-      'Something went wrong inside ShellPilot.'
+    expect(headline('Something went wrong inside OpsMaxx.')).toBe(
+      'Something went wrong inside OpsMaxx.'
     )
   })
 

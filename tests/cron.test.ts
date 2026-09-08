@@ -120,16 +120,16 @@ describe('systemd timers', () => {
 
 describe('collecting from one server', () => {
   const output = [
-    '===SHELLPILOT-USER===',
+    '===OPSMAXX-USER===',
     '0 2 * * * /home/me/backup.sh',
-    '===SHELLPILOT-SYSTEM===',
+    '===OPSMAXX-SYSTEM===',
     '17 * * * * root cd / && run-parts --report /etc/cron.hourly',
-    '===SHELLPILOT-CROND===',
+    '===OPSMAXX-CROND===',
     '#FILE:/etc/cron.d/certbot',
     '0 */12 * * * root test -x /usr/bin/certbot && certbot -q renew',
     '#FILE:/etc/cron.d/sysstat',
     '5-55/10 * * * * sysstat /usr/lib/sysstat/debian-sa1 1 1',
-    '===SHELLPILOT-TIMERS===',
+    '===OPSMAXX-TIMERS===',
     'NEXT  LEFT  LAST  PASSED  UNIT  ACTIVATES',
     'Tue 2026-09-02 06:00:00 UTC  5h left  Mon 2026-09-01 06:00:00 UTC  18h ago   logrotate.timer  logrotate.service'
   ].join('\n')
@@ -157,7 +157,7 @@ describe('collecting from one server', () => {
   })
 
   it('survives a server with nothing scheduled', () => {
-    const empty = ['===SHELLPILOT-USER===', '===SHELLPILOT-SYSTEM===', '===SHELLPILOT-CROND===', '===SHELLPILOT-TIMERS==='].join('\n')
+    const empty = ['===OPSMAXX-USER===', '===OPSMAXX-SYSTEM===', '===OPSMAXX-CROND===', '===OPSMAXX-TIMERS==='].join('\n')
     const r = parseCronCollection(empty)
     expect(r.entries).toEqual([])
     expect(r.unparsed).toEqual([])
@@ -165,8 +165,8 @@ describe('collecting from one server', () => {
 
   it('survives output with sections missing entirely', () => {
     // A host without systemctl produces no timer section at all.
-    expect(() => parseCronCollection('===SHELLPILOT-USER===\n0 1 * * * /x')).not.toThrow()
-    expect(parseCronCollection('===SHELLPILOT-USER===\n0 1 * * * /x').entries).toHaveLength(1)
+    expect(() => parseCronCollection('===OPSMAXX-USER===\n0 1 * * * /x')).not.toThrow()
+    expect(parseCronCollection('===OPSMAXX-USER===\n0 1 * * * /x').entries).toHaveLength(1)
   })
 })
 
@@ -497,14 +497,14 @@ describe('output that did not come back as clean LF', () => {
     // with nothing scheduled and a host we failed to parse look identical from
     // the panel, and the second is the one worth knowing about.
     const out = [
-      '===SHELLPILOT-USER===',
+      '===OPSMAXX-USER===',
       '0 2 * * * /home/me/backup.sh',
-      '===SHELLPILOT-SYSTEM===',
+      '===OPSMAXX-SYSTEM===',
       '17 * * * * root cd / && run-parts --report /etc/cron.hourly',
-      '===SHELLPILOT-CROND===',
+      '===OPSMAXX-CROND===',
       '#FILE:/etc/cron.d/certbot',
       '0 */12 * * * root certbot -q renew',
-      '===SHELLPILOT-TIMERS===',
+      '===OPSMAXX-TIMERS===',
       'NEXT LEFT LAST PASSED UNIT ACTIVATES',
       'Tue 2026-09-02 06:00:00 UTC 5h left Mon 2026-09-01 06:00:00 UTC 18h ago logrotate.timer logrotate.service'
     ].join('\r\n')
@@ -539,7 +539,7 @@ describe('the cron.d collector, on files that do not end in a newline', () => {
 
   it('files each entry under the file it came from', () => {
     const out = [
-      '===SHELLPILOT-CROND===',
+      '===OPSMAXX-CROND===',
       '#FILE:/etc/cron.d/a',
       '0 1 * * * root /a',
       '',
@@ -836,7 +836,7 @@ describe('a collection that reported nothing about itself', () => {
     // The transport caps exec output, so a host with an enormous cron.d can
     // lose the tail — including the status block. Four sources silently
     // dropping off the list would read as a complete answer.
-    const r = parseCronCollection('===SHELLPILOT-USER===\n0 1 * * * /x')
+    const r = parseCronCollection('===OPSMAXX-USER===\n0 1 * * * /x')
     expect(r.entries).toHaveLength(1)
     expect(r.sources).toHaveLength(5)
     expect(r.sources.every((s) => s.status === 'unknown')).toBe(true)
@@ -847,10 +847,10 @@ describe('a collection that reported nothing about itself', () => {
     // The statuses are accumulated in a shell variable and printed in their own
     // block at the end, so nothing read out of a file can land in it.
     const out = [
-      '===SHELLPILOT-USER===',
+      '===OPSMAXX-USER===',
       'cron.d ok - read 9 of 9 files',
       '0 1 * * * /x',
-      '===SHELLPILOT-STATUS===',
+      '===OPSMAXX-STATUS===',
       'cron.d denied - the directory is readable only by root'
     ].join('\n')
     expect(statusOf(out, 'cron.d').status).toBe('denied')

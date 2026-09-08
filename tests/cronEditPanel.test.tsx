@@ -87,7 +87,7 @@ const bridge = (over: Record<string, unknown> = {}): Record<string, unknown> => 
       serverId: SERVER.id,
       serverName: SERVER.name,
       outcome: 'written',
-      backupPath: '/home/ops/.shellpilot-crontab-20260903T101112Z-a1b2c3.bak',
+      backupPath: '/home/ops/.opsmaxx-crontab-20260903T101112Z-a1b2c3.bak',
       detail: 'the crontab was replaced and read back identical'
     })),
     ...over
@@ -262,7 +262,7 @@ describe('the crontab editor, now on the Operations rail', () => {
     await userEvent.click(screen.getByRole('button', { name: /review change/i }))
     await userEvent.type(await screen.findByPlaceholderText('Type RUN'), 'RUN')
     await userEvent.click(screen.getByRole('button', { name: /apply to db-01/i }))
-    await screen.findByText(/\.shellpilot-crontab-20260903T101112Z-a1b2c3\.bak/)
+    await screen.findByText(/\.opsmaxx-crontab-20260903T101112Z-a1b2c3\.bak/)
     // Read again rather than patched from what we sent: the host is the only
     // thing that knows what its crontab says now.
     expect((stub.cron as { collect: ReturnType<typeof vi.fn> }).collect).toHaveBeenCalledTimes(2)
@@ -273,7 +273,7 @@ describe('the crontab editor, now on the Operations rail', () => {
       bridge({
         planEdit: vi.fn(async () => ({
           ok: false,
-          reason: 'this crontab has 1 line ShellPilot could not parse, starting with `wat`.'
+          reason: 'this crontab has 1 line OpsMaxx could not parse, starting with `wat`.'
         }))
       })
     )

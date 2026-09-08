@@ -90,8 +90,8 @@ function seedOrphan(state: NetStateFile): void {
 
 beforeEach(() => {
   h.replies.clear()
-  root = mkdtempSync(join(tmpdir(), 'shellpilot-netstate-'))
-  runDir = mkdtempSync(join(tmpdir(), 'shellpilot-rundir-'))
+  root = mkdtempSync(join(tmpdir(), 'opsmaxx-netstate-'))
+  runDir = mkdtempSync(join(tmpdir(), 'opsmaxx-rundir-'))
 })
 afterEach(() => {
   rmSync(root, { recursive: true, force: true })

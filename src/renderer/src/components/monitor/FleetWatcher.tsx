@@ -108,7 +108,7 @@ export function FleetWatcher(): null {
   // is separate from the configuration below and is never torn down by a
   // settings change.
   useEffect(() => {
-    const off = bridgeOn('fleet.onSample', window.shellpilot?.fleet?.onSample, (e) => {
+    const off = bridgeOn('fleet.onSample', window.opsmaxx?.fleet?.onSample, (e) => {
       // Host facts ride on roughly one sweep in thirty — they are collected
       // hourly, metrics every couple of minutes. Handled BEFORE the `!e.host`
       // return and independently of it, because the two are independent: a
@@ -207,10 +207,10 @@ export function FleetWatcher(): null {
   // read of an in-memory map in main, not a connection, and `fleet.facts` is
   // documented as never being a trigger.
   useEffect(() => {
-    if (!bridgeHas(window.shellpilot?.fleet as Record<string, unknown> | undefined, 'facts')) return
+    if (!bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'facts')) return
     let live = true
     for (const t of targets) {
-      void window.shellpilot?.fleet?.facts(t.serverId).then((r) => {
+      void window.opsmaxx?.fleet?.facts(t.serverId).then((r) => {
         if (!live || !r) return
         if (r.facts && r.at !== undefined) reportFacts(t.serverId, r.facts, r.at)
         if (r.error) reportFactsError(t.serverId, r.error, r.errorAt ?? Date.now())
@@ -230,7 +230,7 @@ export function FleetWatcher(): null {
   // here gets better for being asked more often.
   useEffect(() => {
     const ask = (): void => {
-      const alarms = window.shellpilot?.backup?.alarms
+      const alarms = window.opsmaxx?.backup?.alarms
       if (typeof alarms !== 'function') return
       void alarms().then((list) => {
         for (const a of list ?? []) {
@@ -254,7 +254,7 @@ export function FleetWatcher(): null {
   // Reconfigure whenever what should be watched changes. Main treats this as
   // the complete desired state, so removing a server here stops sampling it.
   useEffect(() => {
-    void window.shellpilot?.fleet?.configure({ enabled, intervalMs, targets })
+    void window.opsmaxx?.fleet?.configure({ enabled, intervalMs, targets })
   }, [enabled, intervalMs, targets])
 
   // A job step that failed.
@@ -274,7 +274,7 @@ export function FleetWatcher(): null {
     // signature, which is the point of the annotation on it in the preload.
     if (
       !bridgeHas(
-        window.shellpilot?.jobs as unknown as Record<string, unknown> | undefined,
+        window.opsmaxx?.jobs as unknown as Record<string, unknown> | undefined,
         'onProgress'
       )
     ) {
@@ -284,7 +284,7 @@ export function FleetWatcher(): null {
     // change a HOST do not repeat them. Held here so the alert can say which
     // job failed rather than quoting a UUID at somebody.
     const titles = new Map<string, string>()
-    const off = window.shellpilot?.jobs?.onProgress((p) => {
+    const off = window.opsmaxx?.jobs?.onProgress((p) => {
       if (p.job) titles.set(p.jobId, p.job.title)
       const host = p.host
       if (!host) return
@@ -306,10 +306,10 @@ export function FleetWatcher(): null {
   // neither in error nor carrying traffic, and calling it either would announce
   // a failure every time somebody starts one.
   useEffect(() => {
-    if (!bridgeHas(window.shellpilot?.tunnel as Record<string, unknown> | undefined, 'list')) return
+    if (!bridgeHas(window.opsmaxx?.tunnel as Record<string, unknown> | undefined, 'list')) return
     let live = true
     const read = (): void => {
-      void window.shellpilot?.tunnel?.list().then((list) => {
+      void window.opsmaxx?.tunnel?.list().then((list) => {
         if (!live || !Array.isArray(list)) return
         const named = useApp.getState().tunnels
         for (const t of list) {
@@ -346,10 +346,10 @@ export function FleetWatcher(): null {
   // it can be tested exhaustively without a timer. Read it before changing
   // anything here.
   useEffect(() => {
-    if (!bridgeHas(window.shellpilot?.vpn as Record<string, unknown> | undefined, 'list')) return
+    if (!bridgeHas(window.opsmaxx?.vpn as Record<string, unknown> | undefined, 'list')) return
     let live = true
     const read = (): void => {
-      void window.shellpilot?.vpn?.list().then((list) => {
+      void window.opsmaxx?.vpn?.list().then((list) => {
         if (!live || !Array.isArray(list)) return
         for (const v of list) {
           // The friendly name, from the profile list, for the reason the tunnel
@@ -397,7 +397,7 @@ export function FleetWatcher(): null {
   // nothing to compare against and says so.
   const lastPods = useRef<Map<string, CrashPodMinimal[]>>(new Map())
   useEffect(() => {
-    if (!bridgeHas(window.shellpilot?.k8s as Record<string, unknown> | undefined, 'read')) return
+    if (!bridgeHas(window.opsmaxx?.k8s as Record<string, unknown> | undefined, 'read')) return
     let live = true
     const read = (): void => {
       // Only what the operator asked for. Nothing is polled until they name a
@@ -408,7 +408,7 @@ export function FleetWatcher(): null {
       for (const w of watches) {
         const s = servers.find((x) => x.id === w.serverId)
         if (!s) continue
-        void window.shellpilot?.k8s
+        void window.opsmaxx?.k8s
           ?.read(s, w.context || undefined)
           .then((probe) => {
             if (!live || !probe) return
@@ -471,13 +471,13 @@ export function FleetWatcher(): null {
   // screen. This effect is what makes the rest of that sentence true: with
   // both on, they raise with no screen open.
   useEffect(() => {
-    if (!bridgeHas(window.shellpilot?.fleet as Record<string, unknown> | undefined, 'posture')) {
+    if (!bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'posture')) {
       return
     }
     let live = true
     const read = (): void => {
       for (const t of targets) {
-        void window.shellpilot?.fleet?.posture(t.serverId).then((r) => {
+        void window.opsmaxx?.fleet?.posture(t.serverId).then((r) => {
           if (!live || !r) return
           const name = serversRef.current.find((s) => s.id === t.serverId)?.name ?? t.serverId
           // `r.posture` absent is "never collected", and postureAlertReadings
@@ -523,12 +523,12 @@ export function FleetWatcher(): null {
   // operations read runs, which happens when somebody opens that page — there
   // is nothing here that moves between polls on its own.
   useEffect(() => {
-    if (!bridgeHas(window.shellpilot?.alerts as Record<string, unknown> | undefined, 'dbEvents')) {
+    if (!bridgeHas(window.opsmaxx?.alerts as Record<string, unknown> | undefined, 'dbEvents')) {
       return
     }
     let live = true
     const read = (): void => {
-      void window.shellpilot?.alerts?.dbEvents().then((rows) => {
+      void window.opsmaxx?.alerts?.dbEvents().then((rows) => {
         if (!live || !Array.isArray(rows)) return
         const named = useApp.getState().databases
         // Oldest first, so the flap counter sees the occurrences in the order
@@ -561,7 +561,7 @@ export function FleetWatcher(): null {
   // settings switch, so a restart silently disabled a feature whose whole job
   // is noticing failures while nobody is looking at the app.
   useEffect(() => {
-    void window.shellpilot?.webhook?.configure({
+    void window.opsmaxx?.webhook?.configure({
       enabled: webhookEnabled,
       notifyOnResolved: webhookOnResolved
     })
@@ -578,10 +578,10 @@ export function FleetWatcher(): null {
   // unlocked in another window should clear the warning without the user
   // wondering whether it is stuck. Cheap: one IPC call to main, no connection.
   useEffect(() => {
-    if (!bridgeHas(window.shellpilot?.fleet as Record<string, unknown> | undefined, 'status')) return
+    if (!bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'status')) return
     let live = true
     const read = (): void => {
-      void window.shellpilot?.fleet?.status().then((s) => {
+      void window.opsmaxx?.fleet?.status().then((s) => {
         if (live && s) useFleetStatus.getState().setStatus(s)
       })
     }

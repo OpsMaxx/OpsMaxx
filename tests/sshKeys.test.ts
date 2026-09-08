@@ -17,7 +17,7 @@ const RSA_ENCRYPTED = '-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\n
 
 beforeEach(() => {
   originalHome = process.env.HOME
-  home = mkdtempSync(join(tmpdir(), 'shellpilot-sshkeys-'))
+  home = mkdtempSync(join(tmpdir(), 'opsmaxx-sshkeys-'))
   ssh = join(home, '.ssh')
   mkdirSync(ssh)
   process.env.HOME = home

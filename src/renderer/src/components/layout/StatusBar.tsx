@@ -18,7 +18,7 @@ import { UpdateIndicator } from './UpdateIndicator'
  *
  * The countdown half disappears when the configured approval timeout could not
  * be read, and the chip still shows the count. "Something is waiting" is true
- * whether or not ShellPilot knows for how long; inventing a deadline to keep
+ * whether or not OpsMaxx knows for how long; inventing a deadline to keep
  * the chip's shape consistent would be inventing the one number here an
  * operator would actually plan around.
  */

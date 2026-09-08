@@ -55,7 +55,7 @@ export function BackupPanel(): React.JSX.Element {
   const runExport = async (): Promise<void> => {
     if (!exportReady || busy) return
     setBusy('export')
-    const r = await window.shellpilot?.backup.export(exportPw)
+    const r = await window.opsmaxx?.backup.export(exportPw)
     setBusy(null)
     if (r?.cancelled) return
     if (failed(r)) {
@@ -78,7 +78,7 @@ export function BackupPanel(): React.JSX.Element {
   const runInspect = async (path?: string): Promise<void> => {
     if (!importPw || busy) return
     setBusy('inspect')
-    const r = await window.shellpilot?.backup.inspect(importPw, path)
+    const r = await window.opsmaxx?.backup.inspect(importPw, path)
     setBusy(null)
     if (r?.cancelled) return
     if (failed(r)) {
@@ -102,7 +102,7 @@ export function BackupPanel(): React.JSX.Element {
   const runImport = async (): Promise<void> => {
     if (!staged || busy) return
     setBusy('import')
-    const r = await window.shellpilot?.backup.import(importPw, staged.path)
+    const r = await window.opsmaxx?.backup.import(importPw, staged.path)
     setBusy(null)
     if (failed(r)) {
       setError({
@@ -118,13 +118,13 @@ export function BackupPanel(): React.JSX.Element {
       return
     }
     toast('Backup restored — restarting', 'ok')
-    setTimeout(() => void window.shellpilot?.backup.relaunch(), 700)
+    setTimeout(() => void window.opsmaxx?.backup.relaunch(), 700)
   }
 
   const runDeleteAll = async (): Promise<void> => {
     if (settings.backupDirty || deleteTyped !== 'DELETE' || busy) return
     setBusy('delete')
-    const r = await window.shellpilot?.backup.deleteAll()
+    const r = await window.opsmaxx?.backup.deleteAll()
     setBusy(null)
     if (failed(r)) {
       setError({
@@ -137,7 +137,7 @@ export function BackupPanel(): React.JSX.Element {
       return
     }
     toast('All data deleted — restarting', 'ok')
-    setTimeout(() => void window.shellpilot?.backup.relaunch(), 700)
+    setTimeout(() => void window.opsmaxx?.backup.relaunch(), 700)
   }
 
   const errorFor = (where: PanelError['where']): React.JSX.Element | null =>

@@ -17,12 +17,12 @@ import { UnlockVaultButton } from '../common/UnlockVaultButton'
 // enforced by `ComposePreloadBridge` rather than by this file remembering.
 //
 // IT READS THE VAULT BY NAME AND CANNOT READ IT ANY OTHER WAY. `store/vault`
-// and `shellpilot.vault` are both forbidden to a module, and correctly so:
+// and `opsmaxx.vault` are both forbidden to a module, and correctly so:
 // `vault.list()` returns every entry with its password in it, so importing the
 // store here would have put the whole plaintext vault inside the docker
 // module's renderer half. `tests/moduleBoundaries.test.ts` caught exactly that
 // on the first version of this file. What it uses instead is
-// `shellpilot.vaultIndex`, whose descriptors have no field that could hold a
+// `opsmaxx.vaultIndex`, whose descriptors have no field that could hold a
 // value.
 //
 // AND IT CANNOT TELL YOU WHETHER THE VALUE IS ALREADY THE SAME. Knowing that
@@ -65,7 +65,7 @@ export function EnvValueWrite({
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<ComposeEnvWriteResult | null>(null)
 
-  const bridge = window.shellpilot?.compose as Record<string, unknown> | undefined
+  const bridge = window.opsmaxx?.compose as Record<string, unknown> | undefined
   // An older preload has no such method, and a button that cannot do anything
   // is worse than no button.
   if (!bridgeHas(bridge, 'writeEnvValue')) return null
@@ -75,7 +75,7 @@ export function EnvValueWrite({
   const openForm = async (): Promise<void> => {
     setOpen(true)
     const r = (await (
-      window.shellpilot?.vaultIndex as unknown as { list: () => Promise<VaultIndexResult> }
+      window.opsmaxx?.vaultIndex as unknown as { list: () => Promise<VaultIndexResult> }
     ).list()) as VaultIndexResult
     if (r.ok) {
       setEntries(r.entries)
@@ -123,7 +123,7 @@ export function EnvValueWrite({
     setResult(null)
     try {
       const r = (await (
-        window.shellpilot?.compose as unknown as {
+        window.opsmaxx?.compose as unknown as {
           writeEnvValue: (
             c: unknown,
             req: { path: string; name: string; serverId: string },

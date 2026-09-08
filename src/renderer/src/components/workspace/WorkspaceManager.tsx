@@ -52,7 +52,7 @@ export function WorkspaceManager(): React.JSX.Element {
       setWithPassword(false)
     }
     if (withPassword) {
-      const r = await window.shellpilot?.workspaceLock.set(id, newPassword)
+      const r = await window.opsmaxx?.workspaceLock.set(id, newPassword)
       if (!r?.ok) {
         // The workspace itself was created, so "could not set the password"
         // alone would leave someone believing a workspace is protected when it
@@ -181,8 +181,8 @@ export function WorkspaceManager(): React.JSX.Element {
                   ...useApp.getState().databases.filter((d) => d.workspaceId === id)
                 ]
                 deleteWorkspace(id)
-                await Promise.all(doomed.map((d) => window.shellpilot?.secrets.delete(d.id)))
-                await window.shellpilot?.workspaceLock.delete(id)
+                await Promise.all(doomed.map((d) => window.opsmaxx?.secrets.delete(d.id)))
+                await window.opsmaxx?.workspaceLock.delete(id)
                 setConfirming(null)
                 toast(`${wname} deleted`)
               }}
@@ -274,7 +274,7 @@ export function WorkspaceManager(): React.JSX.Element {
               </div>
             )}
             <div className="faint" style={{ fontSize: 11 }}>
-              Hides this workspace behind a password inside ShellPilot. It is not your vault master
+              Hides this workspace behind a password inside OpsMaxx. It is not your vault master
               password, and it does not encrypt anything on disk.
             </div>
           </>
@@ -339,7 +339,7 @@ function PasswordForm({
   const save = async (): Promise<void> => {
     if (!canSave) return
     setBusy(true)
-    const r = await window.shellpilot?.workspaceLock.set(id, next, current)
+    const r = await window.opsmaxx?.workspaceLock.set(id, next, current)
     setBusy(false)
     if (!r?.ok) {
       blame(r?.error ?? 'That password could not be saved. Try again.')
@@ -353,7 +353,7 @@ function PasswordForm({
   const clear = async (): Promise<void> => {
     if (busy || !current) return
     setBusy(true)
-    const r = await window.shellpilot?.workspaceLock.remove(id, current)
+    const r = await window.opsmaxx?.workspaceLock.remove(id, current)
     setBusy(false)
     if (!r?.ok) {
       blame(r?.error ?? 'The password could not be removed. Try again.')
@@ -427,7 +427,7 @@ function PasswordForm({
       </div>
       {error && <div className="vault-error">{error}</div>}
       <div className="faint" style={{ fontSize: 11 }}>
-        This password hides the workspace inside ShellPilot. It does not encrypt anything on disk,
+        This password hides the workspace inside OpsMaxx. It does not encrypt anything on disk,
         and it is not your vault master password — for secrets that must be encrypted at rest, put
         them in the Vault in the left sidebar.
       </div>

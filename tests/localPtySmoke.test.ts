@@ -37,7 +37,7 @@ function readUntilMarker(term: { onData(cb: (d: string) => void): unknown }): Pr
     let buf = ''
     term.onData((d) => {
       buf += d
-      if (buf.includes('SHELLPILOT_PTY_OK')) resolve(buf)
+      if (buf.includes('OPSMAXX_PTY_OK')) resolve(buf)
     })
     setTimeout(() => resolve(buf), 8000)
   })
@@ -46,7 +46,7 @@ function readUntilMarker(term: { onData(cb: (d: string) => void): unknown }): Pr
 describe('@lydell/node-pty spawns a real shell', () => {
   it.skipIf(process.platform === 'win32')('echoes back through a pty', async () => {
     const pty = await loadPty()
-    const term = pty.spawn('/bin/sh', ['-c', 'echo SHELLPILOT_PTY_OK'], {
+    const term = pty.spawn('/bin/sh', ['-c', 'echo OPSMAXX_PTY_OK'], {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
@@ -55,12 +55,12 @@ describe('@lydell/node-pty spawns a real shell', () => {
     })
     const seen = await readUntilMarker(term)
     term.kill()
-    expect(seen).toContain('SHELLPILOT_PTY_OK')
+    expect(seen).toContain('OPSMAXX_PTY_OK')
   })
 
   it.skipIf(process.platform !== 'win32')('echoes back through ConPTY', async () => {
     const pty = await loadPty()
-    const term = pty.spawn(process.env.ComSpec ?? 'cmd.exe', ['/c', 'echo SHELLPILOT_PTY_OK'], {
+    const term = pty.spawn(process.env.ComSpec ?? 'cmd.exe', ['/c', 'echo OPSMAXX_PTY_OK'], {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
@@ -73,7 +73,7 @@ describe('@lydell/node-pty spawns a real shell', () => {
     })
     const seen = await readUntilMarker(term)
     term.kill()
-    expect(seen).toContain('SHELLPILOT_PTY_OK')
+    expect(seen).toContain('OPSMAXX_PTY_OK')
   })
 
   // The options localPty passes are not node-pty defaults; if a future release

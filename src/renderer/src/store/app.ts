@@ -213,7 +213,7 @@ export interface AppSettings {
   // main, for localTerminalEnabled's reason a few lines above: a `false` that
   // ever shipped as a default would be written into every install's data file
   // and outrank a later change. Off yields B1's behaviour — nothing whatsoever
-  // is written to a host, and a job that was running when ShellPilot stopped is
+  // is written to a host, and a job that was running when OpsMaxx stopped is
   // abandoned, which for a package operation means dpkg took a SIGHUP.
   jobsDetached: boolean
   // Keyboard shortcut overrides, command id -> canonical combo ("Ctrl+Shift+P").
@@ -688,10 +688,10 @@ function releaseVpnSecrets(profiles: VpnProfile[]): void {
   // `environment: 'node'`, where every deleteWorkspace/removeVpnProfile call
   // used to throw here before reaching the state it was asserting on.
   if (typeof window === 'undefined') return
-  if (!bridgeHas(window.shellpilot?.vpn as Record<string, unknown> | undefined, 'deleteSecrets')) return
+  if (!bridgeHas(window.opsmaxx?.vpn as Record<string, unknown> | undefined, 'deleteSecrets')) return
   for (const p of profiles) {
     for (const entryId of vpnVaultEntryIds(p.spec)) {
-      void window.shellpilot?.vpn.deleteSecrets(entryId)
+      void window.opsmaxx?.vpn.deleteSecrets(entryId)
     }
   }
 }
@@ -987,7 +987,7 @@ export const useApp = create<AppState>((set, get) => ({
     // with, so a method added in this session is undefined for the rest of it.
     // A missing shell list is an empty menu, never a thrown effect.
     if (typeof window === 'undefined') return
-    const ns = window.shellpilot?.local
+    const ns = window.opsmaxx?.local
     if (!ns || !bridgeHas(ns as Record<string, unknown> | undefined, 'shells')) return
     const shells = await ns.shells(refresh)
     set({ localShells: Array.isArray(shells) ? shells : [] })

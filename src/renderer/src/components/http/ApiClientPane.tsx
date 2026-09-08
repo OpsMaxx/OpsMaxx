@@ -101,7 +101,7 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
           // on disk is a file someone edits, and showing them yesterday's copy
           // of their own API with no way to tell is worse than not offering
           // files at all.
-          const text = await window.shellpilot!.http.readSpecFile(specPath)
+          const text = await window.opsmaxx!.http.readSpecFile(specPath)
           await workspaceStore.addDocument({
             name: collection.id,
             document: await parseSpec(text, specPath)
@@ -182,7 +182,7 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
                     sidebarState,
                     layout: 'web',
                     eventBus,
-                    activeWorkspace: { id: 'shellpilot' },
+                    activeWorkspace: { id: 'opsmaxx' },
                     workspaces: [],
                     documents: openApiDocument ? [openApiDocument] : [],
                     isDroppable: () => false,
@@ -270,7 +270,7 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
       <div
         ref={hostRef}
         // scalar-app is the library's own root class; the mode class is how it
-        // is themed, so it follows ShellPilot's setting rather than guessing.
+        // is themed, so it follows OpsMaxx's setting rather than guessing.
         className={`scalar-app http-client-host ${theme === 'dark' ? 'dark-mode' : 'light-mode'}`}
         hidden={loading}
       />
@@ -417,10 +417,10 @@ function scratchDocument(title: string, baseUrl: string): Record<string, unknown
 }
 
 /**
- * A failed request, in ShellPilot's own words.
+ * A failed request, in OpsMaxx's own words.
  *
  * The API client renders nothing for a rejected fetch, and the two most common
- * reasons a request fails here are both ones ShellPilot can fix in a click —
+ * reasons a request fails here are both ones OpsMaxx can fix in a click —
  * so the fix is offered next to the reason rather than described.
  */
 function TransportError({

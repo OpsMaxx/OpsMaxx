@@ -1,6 +1,6 @@
 // Guarded access to the preload bridge.
 //
-// `window.shellpilot?.x.onY(...)` guards a missing bridge but not a missing
+// `window.opsmaxx?.x.onY(...)` guards a missing bridge but not a missing
 // METHOD. The two halves normally ship together, so in a packaged build they
 // cannot disagree — but under `electron-vite dev` the renderer hot-reloads
 // while the running process still holds the preload bundle it booted with, so
@@ -17,7 +17,7 @@ function warnOnce(name: string): void {
   if (warned) return
   warned = true
   console.warn(
-    `[shellpilot] preload bridge is missing "${name}". The renderer is newer than the preload ` +
+    `[opsmaxx] preload bridge is missing "${name}". The renderer is newer than the preload ` +
       'script — restart the dev server (or the app) to rebuild it. Live updates for this feature ' +
       'are disabled until then.'
   )

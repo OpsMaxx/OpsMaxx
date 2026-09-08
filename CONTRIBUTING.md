@@ -1,4 +1,4 @@
-# Contributing to ShellPilot
+# Contributing to OpsMaxx
 
 Thanks for considering a contribution. Bug reports, documentation, translations
 and code are all welcome, and you do not need to be an Electron expert to help.
@@ -6,8 +6,8 @@ and code are all welcome, and you do not need to be an Electron expert to help.
 ## Getting set up
 
 ```bash
-git clone https://github.com/ghauri01/ShellPilot.git
-cd shellpilot
+git clone https://github.com/ghauri01/OpsMaxx.git
+cd opsmaxx
 npm install
 npm run dev
 ```
@@ -35,7 +35,7 @@ be built on Windows.
 
 ## Architecture
 
-ShellPilot is Electron + React + TypeScript, built with electron-vite. Three
+OpsMaxx is Electron + React + TypeScript, built with electron-vite. Three
 processes, three source trees:
 
 ```
@@ -51,8 +51,8 @@ src/
       hooks/        Shortcuts, metrics polling, click-outside
       lib/          Small shared helpers
   shared/       Types and pure functions used by more than one process
-  cli/          The `shellpilot` CLI launcher (pairing, bridge, per-client registration),
-                compiled separately to out/cli/ and wrapped by bin/shellpilot.{cmd,sh}
+  cli/          The `opsmaxx` CLI launcher (pairing, bridge, per-client registration),
+                compiled separately to out/cli/ and wrapped by bin/opsmaxx.{cmd,sh}
 tests/          vitest suite — currently covers the AI/MCP services end to end
 ```
 
@@ -110,7 +110,7 @@ docs(readme): document folder drag and drop
 
 A good report includes:
 
-- ShellPilot version and how you installed it
+- OpsMaxx version and how you installed it
 - OS and version
 - What you did, what you expected, what happened
 - The exact error text, if there is one
@@ -122,7 +122,7 @@ Please **redact hostnames, usernames, keys and IPs** before pasting logs.
 ## Suggesting features
 
 Open a discussion or an issue describing the problem you hit, not only the
-solution you have in mind. The [issue tracker](https://github.com/ghauri01/ShellPilot/issues)
+solution you have in mind. The [issue tracker](https://github.com/ghauri01/OpsMaxx/issues)
 lists what is already planned, and the roadmap is kept there.
 
 ## Where help is most needed

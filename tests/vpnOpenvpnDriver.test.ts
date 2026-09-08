@@ -263,7 +263,7 @@ afterEach(async () => {
 describe('OpenVPN driver argv', () => {
   it('puts the management socket somewhere sun_path can hold', async () => {
     // OpenVPN could not start on macOS at all: the socket lived under the run
-    // directory, which is `~/Library/Application Support/ShellPilot/vpn-run/
+    // directory, which is `~/Library/Application Support/OpsMaxx/vpn-run/
     // vpn-<uuid>-<8 hex>` — 111 bytes for a seven-character username, so the
     // socket came to 123 and was refused before openvpn was ever launched. The
     // floor for that layout is 117, so no username made it fit.
@@ -767,7 +767,7 @@ describe('OpenVPN driver validation and probe', () => {
   }
 
   it('tells a Windows user how to install OpenVPN, and does not lecture them about licences', async () => {
-    // Windows is the one platform ShellPilot does not bundle OpenVPN for, so
+    // Windows is the one platform OpsMaxx does not bundle OpenVPN for, so
     // it is the one platform where "install it" is still the right answer.
     const info = await probeAs('win32')
     // On a real Windows machine with OpenVPN installed the probe succeeds and
@@ -775,8 +775,8 @@ describe('OpenVPN driver validation and probe', () => {
     if (info.available) return
     expect(info.reason).toContain('openvpn.net')
     expect(info.reason).toContain('Interactive Service')
-    // This used to carry "ShellPilot does not include OpenVPN, because its
-    // licence and ShellPilot's cannot be combined" — true when it was written,
+    // This used to carry "OpsMaxx does not include OpenVPN, because its
+    // licence and OpsMaxx's cannot be combined" — true when it was written,
     // no longer true, and of no use at all to somebody whose tunnel will not
     // start. The licence reasoning lives in THIRD-PARTY-NOTICES.md and
     // docs/VPN.md; an error gets the one thing the reader can act on.
@@ -799,7 +799,7 @@ describe('OpenVPN driver validation and probe', () => {
     // message must still not be an install instruction, because installing
     // OpenVPN is not what fixes it.
     if (!info.available) {
-      expect(info.reason).toContain('Reinstall ShellPilot')
+      expect(info.reason).toContain('Reinstall OpsMaxx')
       expect(info.reason).not.toContain('brew install')
       return
     }

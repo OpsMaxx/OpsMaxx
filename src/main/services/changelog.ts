@@ -76,9 +76,9 @@ const SURFACE_LABEL: Record<ApprovalSurface, string> = {
 // asserts each literal against the source module that owns it, so the drift is
 // caught rather than hoped against.
 
-export const AUDIT_FILE = 'shellpilot-ai-audit.jsonl'
-export const LOCAL_SESSION_FILE = 'shellpilot-local-sessions.jsonl'
-export const APPROVAL_FILE = 'shellpilot-job-approvals.jsonl'
+export const AUDIT_FILE = 'opsmaxx-ai-audit.jsonl'
+export const LOCAL_SESSION_FILE = 'opsmaxx-local-sessions.jsonl'
+export const APPROVAL_FILE = 'opsmaxx-job-approvals.jsonl'
 
 /** What a tail read produced. `null` from a TailReader means no such file,
  *  which is a different answer from an empty one. */

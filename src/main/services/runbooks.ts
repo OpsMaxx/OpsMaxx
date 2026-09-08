@@ -79,7 +79,7 @@ import { redactOutput } from './secretRedaction'
 //  * A HOST THE ALERT DID NOT NAME. Every read is per host, because the same
 //    alert on two machines was two incidents with two answers.
 
-const NOTES_FILE = 'shellpilot-runbooks.json'
+const NOTES_FILE = 'opsmaxx-runbooks.json'
 
 /** The stored shape. Versioned from the first write, so the first change that
  *  cannot be expressed by ignoring an unknown field has a number to branch on. */
@@ -231,7 +231,7 @@ export function removeRunbookNotesForTests(deps: RunbookDeps): void {
  * `unknown` is a real answer and is not folded into `failed`. The three that
  * sit there each mean something specific:
  *
- *  - `abandoned` — ShellPilot stopped while the host was running. The app's
+ *  - `abandoned` — OpsMaxx stopped while the host was running. The app's
  *    fault, not the host's, and the command may well have finished.
  *  - `cancelled` — nobody ever let it run.
  *  - `orphaned` — the marker directory outlived the wrapper's pid and no `rc`

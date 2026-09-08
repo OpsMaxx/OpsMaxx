@@ -192,10 +192,10 @@ describe('validateInjection', () => {
   // Injecting the credential under the proxy's own token header would put OUR
   // shared secret on the wire to a third party.
   it('refuses to inject a credential into the proxy token header', () => {
-    const r = validateInjection({ kind: 'header', name: 'X-ShellPilot-Proxy-Token' })
+    const r = validateInjection({ kind: 'header', name: 'X-OpsMaxx-Proxy-Token' })
     expect(r.ok).toBe(false)
     if (r.ok) return
-    expect(r.error).toBe('"X-ShellPilot-Proxy-Token" cannot carry a credential.')
+    expect(r.error).toBe('"X-OpsMaxx-Proxy-Token" cannot carry a credential.')
   })
 
   it('refuses to inject into Host or Content-Length', () => {
@@ -215,15 +215,15 @@ describe('the header lists name the proxy token', () => {
   // Both lists, for two different reasons — an injected credential must never
   // be given that name, and an inbound token must never be forwarded upstream.
   it('never lets a rule inject into it', () => {
-    expect(UNINJECTABLE_HEADERS).toContain('x-shellpilot-proxy-token')
+    expect(UNINJECTABLE_HEADERS).toContain('x-opsmaxx-proxy-token')
   })
 
   it('never forwards it to the upstream', () => {
-    expect(HOP_BY_HOP_HEADERS).toContain('x-shellpilot-proxy-token')
+    expect(HOP_BY_HOP_HEADERS).toContain('x-opsmaxx-proxy-token')
   })
 
   it('is the header the caller actually sends', () => {
-    expect(CRED_PROXY_TOKEN_HEADER).toBe('x-shellpilot-proxy-token')
+    expect(CRED_PROXY_TOKEN_HEADER).toBe('x-opsmaxx-proxy-token')
   })
 })
 

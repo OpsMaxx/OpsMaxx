@@ -31,20 +31,20 @@ describe('the manifest describes what actually shipped', () => {
     JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8')).binaries
 
   it('repoints an entry at the bytes on disk, and reports the change', () => {
-    writeFileSync(join(root, 'darwin-arm64', 'shellpilot-netd'), 'SIGNED BYTES')
+    writeFileSync(join(root, 'darwin-arm64', 'opsmaxx-netd'), 'SIGNED BYTES')
     writeFileSync(
       join(root, 'manifest.json'),
       JSON.stringify({
         version: 1,
-        binaries: { 'darwin-arm64/shellpilot-netd': { sha256: sha('UNSIGNED'), size: 8, version: '1.2.3' } }
+        binaries: { 'darwin-arm64/opsmaxx-netd': { sha256: sha('UNSIGNED'), size: 8, version: '1.2.3' } }
       })
     )
     const changed = rehashManifest(root)
     expect(changed).toHaveLength(1)
-    expect(manifest()['darwin-arm64/shellpilot-netd'].sha256).toBe(sha('SIGNED BYTES'))
+    expect(manifest()['darwin-arm64/opsmaxx-netd'].sha256).toBe(sha('SIGNED BYTES'))
     // The size has to move with the hash: a signature changes both, and a stale
     // size is the next thing to be wrong about.
-    expect(manifest()['darwin-arm64/shellpilot-netd'].size).toBe('SIGNED BYTES'.length)
+    expect(manifest()['darwin-arm64/opsmaxx-netd'].size).toBe('SIGNED BYTES'.length)
   })
 
   it('keeps the version, which is not derivable from the bytes', () => {

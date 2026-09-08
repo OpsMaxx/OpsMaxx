@@ -188,7 +188,7 @@ describe('httpRequest, direct', () => {
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.code).toBe('ECONNREFUSED')
-    // The message names the fix a ShellPilot user most often needs.
+    // The message names the fix a OpsMaxx user most often needs.
     expect(result.error).toMatch(/through that server/)
   })
 

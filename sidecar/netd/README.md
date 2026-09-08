@@ -1,6 +1,6 @@
-# shellpilot-netd
+# opsmaxx-netd
 
-ShellPilot's WireGuard sidecar. A single static Go binary that speaks
+OpsMaxx's WireGuard sidecar. A single static Go binary that speaks
 newline-delimited JSON. By default it needs **no root, on any platform**;
 `--privileged` opts into a real TUN device and does need root, per launch,
 with nothing installed.
@@ -13,15 +13,15 @@ macOS and Windows they need an installed privileged helper — a launchd job or
 a Windows service — which is a permanent piece of attack surface for a
 desktop app that is only occasionally used as a VPN client.
 
-`shellpilot-netd` runs the entire TCP/IP stack in-process on gVisor netstack
+`opsmaxx-netd` runs the entire TCP/IP stack in-process on gVisor netstack
 instead. There is no kernel interface, so there is nothing to elevate for:
 the tunnel is exposed to the rest of the app as ordinary loopback listeners
-(SOCKS5, HTTP CONNECT, and fixed local forwards). ShellPilot's SSH and
+(SOCKS5, HTTP CONNECT, and fixed local forwards). OpsMaxx's SSH and
 database code already knows how to consume a `{ port, close }` local
 forward — see `openEphemeralForward` in `src/main/services/tunnel.ts` — so
 "database over WireGuard" needs no database driver to learn about SOCKS.
 
-The trade is honest and worth stating in the UI: **only traffic ShellPilot
+The trade is honest and worth stating in the UI: **only traffic OpsMaxx
 sends through these listeners goes through the tunnel.** A peer configured
 with `AllowedIPs = 0.0.0.0/0` does not route the machine's traffic here, and
 we do not pretend otherwise (edge case E17 in the plan).
@@ -280,7 +280,7 @@ Four things are deliberate and easy to undo by accident:
 ## System mode (`--privileged`)
 
 ```
-shellpilot-netd --privileged --socket <path> --nonce-file <path>
+opsmaxx-netd --privileged --socket <path> --nonce-file <path>
 ```
 
 Creates a **real TUN device** with `tun.CreateTUN(name, mtu)` instead of a
@@ -289,11 +289,11 @@ after the device — the UAPI string, `IpcGet` stats, the handshake monitor, the
 teardown, the NDJSON dispatch — is the same code as userspace mode. The
 protocol is not forked.
 
-This mode requires root. **ShellPilot never installs anything to get it:** no
+This mode requires root. **OpsMaxx never installs anything to get it:** no
 setuid bit, no `setcap`, no launchd plist, no systemd unit, no Windows
 service, no privileged helper. The app asks the OS for administrator rights
 once per launch and those rights die with the process, so uninstalling
-ShellPilot leaves nothing behind that can still become root. Do not add an
+OpsMaxx leaves nothing behind that can still become root. Do not add an
 installed helper; a design that appears to need one needs a different design.
 
 One Windows caveat, stated rather than buried: `wintun.dll` ships beside the
@@ -317,7 +317,7 @@ Verified rather than assumed, since it qualifies the paragraph above: the
 shipped `wintun.dll` (0.14.1, amd64) contains the strings `wintun.sys` and
 `wintun.cat`, calls `SetupCopyOEMInfW`, and carries eight embedded PE headers —
 the driver binaries it installs. So the "nothing is left behind" claim is true
-of ShellPilot and not of Wintun, and saying so is the honest version.
+of OpsMaxx and not of Wintun, and saying so is the honest version.
 
 ### The control channel, and why it is a socket
 
@@ -395,7 +395,7 @@ it in userspace, so Windows sets it with `netsh` explicitly.
 |---|---|
 | Not running as root (POSIX) | stderr + exit 3. Not a panic. |
 | Linux without `/dev/net/tun` (container, hardened kernel) | `permission-denied` naming `/dev/net/tun` and pointing at userspace mode (E06) |
-| Windows where the bundled `wintun.dll` will not load | `unsupported`, naming the file and pointing at userspace mode. ShellPilot ships the DLL beside the executable, so this is quarantine or a broken install, not a missing prerequisite |
+| Windows where the bundled `wintun.dll` will not load | `unsupported`, naming the file and pointing at userspace mode. OpsMaxx ships the DLL beside the executable, so this is quarantine or a broken install, not a missing prerequisite |
 | `ip` / `ifconfig` / `netsh` not installed | `unsupported`, naming the tool |
 | Listeners requested | `config-invalid` |
 
@@ -417,7 +417,7 @@ bash scripts/build-sidecar.sh              # all six targets
 bash scripts/build-sidecar.sh darwin-arm64 # one, while iterating
 ```
 
-Output lands in `resources/bin/<platform>-<arch>/shellpilot-netd[.exe]`, using
+Output lands in `resources/bin/<platform>-<arch>/opsmaxx-netd[.exe]`, using
 **Node's** platform/arch names (`darwin-x64`, `darwin-arm64`, `linux-x64`,
 `linux-arm64`, `win32-x64`, `win32-arm64`) rather than Go's, because the
 TypeScript resolver looks the binary up with
@@ -465,7 +465,7 @@ Drive the built binary by hand:
 
 ```
 $ printf '%s\n' '{"id":"1","method":"ping"}' '{"id":"2","method":"shutdown"}' \
-    | ./resources/bin/darwin-arm64/shellpilot-netd
+    | ./resources/bin/darwin-arm64/opsmaxx-netd
 {"id":"1","ok":true,"result":{"version":"0.4.4","goVersion":"go1.26.5","buildSha":"b35037e"}}
 {"id":"2","ok":true,"result":{"stopping":true}}
 ```
@@ -525,7 +525,7 @@ traffic, and every client that matters issues `CONNECT` for `https://`.
 
 ## Licensing
 
-`shellpilot-netd` is part of ShellPilot and is MIT, like the rest of the
+`opsmaxx-netd` is part of OpsMaxx and is MIT, like the rest of the
 repository.
 
 | Dependency | Licence |
@@ -539,7 +539,7 @@ repository.
 
 All permissive; bundling the binary carries no obligation beyond preserving
 the copyright and permission notices. `scripts/build-sidecar.sh` writes the
-resolved dependency list to `resources/licenses/shellpilot-netd/VERSION`, and
+resolved dependency list to `resources/licenses/opsmaxx-netd/VERSION`, and
 `THIRD-PARTY-NOTICES.md` lists the bundled binaries and their licences.
 
 This is the specific reason WireGuard is bundled and OpenVPN is not: OpenVPN

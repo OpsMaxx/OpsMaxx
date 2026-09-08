@@ -24,7 +24,7 @@ file rather than assumed.
 ### Recording a removal, and the marker lines
 
 The three `reclaim-*` files are the only fixtures in this directory whose lines are
-not all docker's. The `===SHELLPILOT-RM…===` and `===SHELLPILOT-END===` lines are
+not all docker's. The `===OPSMAXX-RM…===` and `===OPSMAXX-END===` lines are
 **this repository's own**, echoed by `buildDockerReclaimCommand` between the four
 docker invocations and inserted by hand into the recording script so the captured
 file is exactly what `parseDockerReclaimOutput` is handed. **Every line between

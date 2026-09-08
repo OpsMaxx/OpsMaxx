@@ -13,7 +13,7 @@ import { bridgeHas } from '../../lib/bridge'
 //
 // WHY THERE IS A FORM AND NOT A BUTTON. The probe opens a TCP connection to a
 // host and port through the operator's tunnel, and there is no address this app
-// may pick on their behalf -- a default would be ShellPilot deciding to talk to
+// may pick on their behalf -- a default would be OpsMaxx deciding to talk to
 // a third party over somebody's VPN. So the target is typed, and a probe with
 // the fields empty still runs: the handshake check needs no target, and
 // "connected" with a three-minute-old handshake is the single most useful thing
@@ -69,7 +69,7 @@ export function VpnDiagnose({
 
   // An older preload has no such method. Rendering a button that cannot do
   // anything is worse than rendering nothing.
-  if (!bridgeHas(window.shellpilot?.vpn as Record<string, unknown> | undefined, 'diagnose')) {
+  if (!bridgeHas(window.opsmaxx?.vpn as Record<string, unknown> | undefined, 'diagnose')) {
     return null
   }
 
@@ -80,7 +80,7 @@ export function VpnDiagnose({
     setRes(null)
     try {
       const n = Number.parseInt(port, 10)
-      const r = await window.shellpilot?.vpn.diagnose(id, {
+      const r = await window.opsmaxx?.vpn.diagnose(id, {
         host: host.trim() || undefined,
         port: Number.isFinite(n) && n > 0 ? n : undefined
       })

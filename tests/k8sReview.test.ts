@@ -38,7 +38,7 @@ describe('the reads', () => {
 
   it('emits every marker, and never swallows a failure with || true', () => {
     const cmd = buildK8sReviewCommand()
-    for (const m of Object.values(REVIEW_MARKERS)) expect(cmd).toContain(`===SHELLPILOT-${m}===`)
+    for (const m of Object.values(REVIEW_MARKERS)) expect(cmd).toContain(`===OPSMAXX-${m}===`)
     // A denial has to arrive as its section's text so it becomes a blind spot
     // for that section alone. `|| true` would make one RBAC refusal look like a
     // clean read of an empty cluster.
@@ -68,7 +68,7 @@ describe('splitting one round trip', () => {
   // The command may stop part way -- the connection drops, kubectl is not
   // installed, the shell dies. A missing marker is NOT an empty section.
   it('calls a section that never arrived missing, with what the host last said', () => {
-    const b = splitReview('===SHELLPILOT-NODES===\nnode-1 False False False True 4 8Gi 110 <none>\nbash: kubectl: command not found')
+    const b = splitReview('===OPSMAXX-NODES===\nnode-1 False False False True 4 8Gi 110 <none>\nbash: kubectl: command not found')
     expect(b.nodes.ok).toBe(true)
     expect(b.pdb.ok).toBe(false)
     expect(b.pdb.ok === false && b.pdb.detail).toContain('command not found')
@@ -76,7 +76,7 @@ describe('splitting one round trip', () => {
 
   it('does not report a blind spot for a section that is simply empty', () => {
     // An empty section is a real answer: this cluster has none of that thing.
-    const b = splitReview('===SHELLPILOT-PV===\n===SHELLPILOT-NODES===\n')
+    const b = splitReview('===OPSMAXX-PV===\n===OPSMAXX-NODES===\n')
     expect(b.pv.ok && b.pv.text).toBe('')
   })
 })

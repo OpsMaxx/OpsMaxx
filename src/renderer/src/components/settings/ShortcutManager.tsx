@@ -52,19 +52,19 @@ export function ShortcutManager(): React.JSX.Element {
   }, [recording, setShortcut])
 
   const exportJson = async (): Promise<void> => {
-    const ok = await window.shellpilot?.dialog.saveJson(
-      'shellpilot-shortcuts.json',
+    const ok = await window.opsmaxx?.dialog.saveJson(
+      'opsmaxx-shortcuts.json',
       JSON.stringify({ shortcuts: overrides }, null, 2)
     )
     if (ok) toast('Shortcuts exported', 'ok')
   }
 
   const importJson = async (): Promise<void> => {
-    const raw = await window.shellpilot?.dialog.openJson()
+    const raw = await window.opsmaxx?.dialog.openJson()
     if (!raw) return
     const parsed = parseShortcutFile(raw)
     if (!parsed) {
-      return toast('That file is not a ShellPilot shortcut export.', 'error', {
+      return toast('That file is not a OpsMaxx shortcut export.', 'error', {
         label: 'Choose another file',
         run: () => void importJson()
       })

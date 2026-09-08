@@ -11,19 +11,19 @@ function bridgeArgs(execPath: string, selfScript: string, token: string, port: n
 // stale/expired token instead of leaving Claude Code pointed at one that no
 // longer works.
 export function registerClaudeMcp(execPath: string, selfScript: string, token: string, port: number): void {
-  spawnSync('claude', ['mcp', 'remove', 'shellpilot'], { stdio: 'ignore', shell: process.platform === 'win32' })
+  spawnSync('claude', ['mcp', 'remove', 'opsmaxx'], { stdio: 'ignore', shell: process.platform === 'win32' })
   const res = spawnSync(
     'claude',
-    ['mcp', 'add', '--transport', 'stdio', 'shellpilot', '--', execPath, ...bridgeArgs(execPath, selfScript, token, port)],
+    ['mcp', 'add', '--transport', 'stdio', 'opsmaxx', '--', execPath, ...bridgeArgs(execPath, selfScript, token, port)],
     { stdio: ['ignore', 'ignore', 'inherit'], shell: process.platform === 'win32' }
   )
   if (res.error || res.status !== 0) {
-    throw new Error('Could not register ShellPilot with Claude Code. Is the `claude` CLI installed and on PATH?')
+    throw new Error('Could not register OpsMaxx with Claude Code. Is the `claude` CLI installed and on PATH?')
   }
 }
 
-const TOML_START = '# >>> shellpilot managed block — edited by `shellpilot codex`, safe to remove >>>'
-const TOML_END = '# <<< shellpilot managed block <<<'
+const TOML_START = '# >>> opsmaxx managed block — edited by `opsmaxx codex`, safe to remove >>>'
+const TOML_END = '# <<< opsmaxx managed block <<<'
 
 // Codex's MCP config is a TOML file, not JSON, and there is no existing TOML
 // dependency in this project — string-splice a marked block instead of
@@ -38,7 +38,7 @@ export function registerCodexMcp(execPath: string, selfScript: string, token: st
   const args = bridgeArgs(execPath, selfScript, token, port)
   const block = [
     TOML_START,
-    '[mcp_servers.shellpilot]',
+    '[mcp_servers.opsmaxx]',
     `command = ${JSON.stringify(execPath)}`,
     `args = [${args.map((a) => JSON.stringify(a)).join(', ')}]`,
     TOML_END

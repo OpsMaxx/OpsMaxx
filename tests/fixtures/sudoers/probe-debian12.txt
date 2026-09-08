@@ -1,5 +1,5 @@
-===SHELLPILOT-SUDOERS===
-===SHELLPILOT-SUDOERS-FILE:/etc/sudoers===
+===OPSMAXX-SUDOERS===
+===OPSMAXX-SUDOERS-FILE:/etc/sudoers===
 #
 # This file MUST be edited with the 'visudo' command as root.
 #
@@ -54,11 +54,11 @@ root	ALL=(ALL:ALL) ALL
 # See sudoers(5) for more information on "@include" directives:
 
 @includedir /etc/sudoers.d
-===SHELLPILOT-SUDOERS-FILE:/etc/sudoers.d/10-ops===
+===OPSMAXX-SUDOERS-FILE:/etc/sudoers.d/10-ops===
 ops ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart nginx
-===SHELLPILOT-SUDOERS-FILE:/etc/sudoers.d/20-deploy===
+===OPSMAXX-SUDOERS-FILE:/etc/sudoers.d/20-deploy===
 %deployers ALL=(ALL) ALL
-===SHELLPILOT-SUDOERS-FILE:/etc/sudoers.d/README===
+===OPSMAXX-SUDOERS-FILE:/etc/sudoers.d/README===
 #
 # The default /etc/sudoers file created on installation of the
 # sudo  package now includes the directive:

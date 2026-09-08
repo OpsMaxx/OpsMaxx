@@ -13,7 +13,7 @@ import { parseK8sHelmList, buildK8sHelmListCommand } from '../src/shared/kuberne
 
 const DIR = fileURLToPath(new URL('./fixtures/k8s/helm', import.meta.url))
 const fixture = (n: string): string => readFileSync(join(DIR, n), 'utf8')
-const section = (body: string): string => `===SHELLPILOT-HELM===\n${body}`
+const section = (body: string): string => `===OPSMAXX-HELM===\n${body}`
 
 describe('the helm parse, against helm', () => {
   it('reads two real releases, every field', () => {

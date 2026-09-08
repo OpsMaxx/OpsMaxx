@@ -43,7 +43,7 @@ export function VpnLogDrawer({
   // drawer is the subscription, unmounting it is the unsubscribe.
   useEffect(() => {
     let live = true
-    const vpn = window.shellpilot?.vpn
+    const vpn = window.opsmaxx?.vpn
     const ns = vpn as Record<string, unknown> | undefined
 
     // Backfill first: lines that arrived before the drawer opened stopped at

@@ -19,15 +19,15 @@ export function AiSecurity(): React.JSX.Element {
   const portRef = useRef<HTMLInputElement>(null)
 
   const load = (): void => {
-    void window.shellpilot?.aiMcp.getConfig().then((c) => c && setConfig(c))
-    void window.shellpilot?.aiMcp.status().then((s) => s && setStatus(s))
+    void window.opsmaxx?.aiMcp.getConfig().then((c) => c && setConfig(c))
+    void window.opsmaxx?.aiMcp.status().then((s) => s && setStatus(s))
     // Read, not assumed. `null` stays null when either call fails, and the
     // confirmation then says it could not tell rather than printing a zero
     // nobody measured — a "0 sessions" on an emergency stop is the one number
     // that must never be a guess.
     void Promise.all([
-      window.shellpilot?.aiMcp.listSessions(),
-      window.shellpilot?.aiMcp.listApprovals()
+      window.opsmaxx?.aiMcp.listSessions(),
+      window.opsmaxx?.aiMcp.listApprovals()
     ])
       .then(([sessions, approvals]) => {
         if (!sessions || !approvals) {
@@ -44,12 +44,12 @@ export function AiSecurity(): React.JSX.Element {
   useEffect(load, [])
 
   const update = async (patch: Partial<McpGlobalConfig>): Promise<void> => {
-    const result = await window.shellpilot?.aiMcp.setConfig(patch)
+    const result = await window.opsmaxx?.aiMcp.setConfig(patch)
     if (!result) return
     setConfig(result.config)
     if (result.error) {
       toast(
-        `ShellPilot could not listen on port ${result.config.port}: ${result.error}. Another program is probably using it.`,
+        `OpsMaxx could not listen on port ${result.config.port}: ${result.error}. Another program is probably using it.`,
         'error',
         {
           label: 'Pick another port',
@@ -79,11 +79,11 @@ export function AiSecurity(): React.JSX.Element {
     const live = liveCount
     const ok = window.confirm(
       live === null
-        ? 'Stop all AI access?\n\nShellPilot could not read how many sessions are active, so it cannot say what this will revoke. It will revoke every one of them.'
+        ? 'Stop all AI access?\n\nOpsMaxx could not read how many sessions are active, so it cannot say what this will revoke. It will revoke every one of them.'
         : `Stop all AI access?\n\nThis revokes ${live.sessions} active session(s) and denies ${live.pending} waiting request(s). Agents will have to be reconnected by hand.`
     )
     if (!ok) return
-    const result = await window.shellpilot?.aiMcp.killAllSessions()
+    const result = await window.opsmaxx?.aiMcp.killAllSessions()
     load()
     if (!result) {
       toast('AI access was not stopped — every session is still live.', 'error', {
@@ -101,11 +101,11 @@ export function AiSecurity(): React.JSX.Element {
   if (!config) return <div className="settings-section" />
 
   const port = status.port ?? config.port
-  const cliCommand = `claude mcp add --transport http shellpilot http://127.0.0.1:${port}/mcp --header "Authorization: Bearer <token>"`
+  const cliCommand = `claude mcp add --transport http opsmaxx http://127.0.0.1:${port}/mcp --header "Authorization: Bearer <token>"`
   const jsonConfig = JSON.stringify(
     {
       mcpServers: {
-        shellpilot: {
+        opsmaxx: {
           type: 'http',
           url: `http://127.0.0.1:${port}/mcp`,
           headers: { Authorization: 'Bearer <token>' }
@@ -119,7 +119,7 @@ export function AiSecurity(): React.JSX.Element {
   return (
     <div className="settings-section">
       <h2>Security</h2>
-      <div className="sub">Global configuration for the ShellPilot MCP bridge itself.</div>
+      <div className="sub">Global configuration for the OpsMaxx MCP bridge itself.</div>
 
       <div className="setting-row">
         <div className="s-info">
@@ -127,7 +127,7 @@ export function AiSecurity(): React.JSX.Element {
           <div className="s-desc">
             {status.running
               ? `Listening on 127.0.0.1:${port} — never reachable from outside this machine.`
-              : 'Off. No AI agent can reach ShellPilot while disabled.'}
+              : 'Off. No AI agent can reach OpsMaxx while disabled.'}
           </div>
         </div>
         <span
@@ -223,17 +223,17 @@ export function AiSecurity(): React.JSX.Element {
         </button>
       </div>
       <div className="s-desc">
-        Works the same way whether ShellPilot is installed normally or running in portable mode — the
+        Works the same way whether OpsMaxx is installed normally or running in portable mode — the
         port and token are all any client needs.
       </div>
 
-      <h3 style={{ marginTop: 18 }}>Or skip typing tokens: the ShellPilot CLI launcher</h3>
+      <h3 style={{ marginTop: 18 }}>Or skip typing tokens: the OpsMaxx CLI launcher</h3>
       <div className="s-desc">
-        Install the CLI once (<code className="mono">npm install -g shellpilot</code>, or{' '}
+        Install the CLI once (<code className="mono">npm install -g opsmaxx</code>, or{' '}
         <code className="mono">npm install -g .</code> from this repo), then run{' '}
-        <code className="mono">shellpilot claude</code> or <code className="mono">shellpilot codex</code>. The
-        first run pops a one-time pairing code right here in ShellPilot — type it into the terminal and the
-        session, token and MCP config are wired up for you. <code className="mono">shellpilot run -- &lt;command&gt;</code>{' '}
+        <code className="mono">opsmaxx claude</code> or <code className="mono">opsmaxx codex</code>. The
+        first run pops a one-time pairing code right here in OpsMaxx — type it into the terminal and the
+        session, token and MCP config are wired up for you. <code className="mono">opsmaxx run -- &lt;command&gt;</code>{' '}
         works the same way for any other MCP-aware CLI.
       </div>
     </div>

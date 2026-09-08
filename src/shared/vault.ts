@@ -45,7 +45,7 @@ export interface VaultEntry {
   // leaves them empty, and absent on entries written before this existed.
   //
   // The private key is stored here rather than referenced by path: a path is
-  // the one credential ShellPilot never actually held — not in the OS keychain,
+  // the one credential OpsMaxx never actually held — not in the OS keychain,
   // not in the encrypted vault, just a filename pointing at plaintext on disk,
   // which also does not travel with an encrypted backup.
   privateKey?: string

@@ -51,7 +51,7 @@ import type { Server } from '../../types'
 // engine that already knows how to run one.
 
 function bridge(): Partial<ComposeBridge> | undefined {
-  return (window as unknown as { shellpilot?: { compose?: Partial<ComposeBridge> } }).shellpilot
+  return (window as unknown as { opsmaxx?: { compose?: Partial<ComposeBridge> } }).opsmaxx
     ?.compose
 }
 
@@ -59,8 +59,8 @@ function jobsBridge():
   | { run: (req: unknown) => Promise<unknown> }
   | undefined {
   return (
-    window as unknown as { shellpilot?: { jobs?: { run: (req: unknown) => Promise<unknown> } } }
-  ).shellpilot?.jobs
+    window as unknown as { opsmaxx?: { jobs?: { run: (req: unknown) => Promise<unknown> } } }
+  ).opsmaxx?.jobs
 }
 
 const STATE_TONE: Record<ComposeServiceRunState, string> = {
@@ -157,7 +157,7 @@ export function ComposePanel({
     setRestartResult(null)
     try {
       const act = (
-        window.shellpilot as
+        window.opsmaxx as
           | {
               docker?: {
                 act?: (
@@ -334,7 +334,7 @@ export function ComposePanel({
   }
 
   /**
-   * Ask the host what this service was pinned to before ShellPilot last wrote
+   * Ask the host what this service was pinned to before OpsMaxx last wrote
    * the file, and pre-fill the ordinary edit form with it.
    *
    * The plan comes from main, which reads the backup beside the file. Every
@@ -586,7 +586,7 @@ export function ComposePanel({
                         <button
                           className="icon-btn sm"
                           disabled={reverting}
-                          title={`Put ${s.declared.name} back to the tag it had before ShellPilot last edited this file. Opens the same edit, pre-filled — nothing is written until you confirm.`}
+                          title={`Put ${s.declared.name} back to the tag it had before OpsMaxx last edited this file. Opens the same edit, pre-filled — nothing is written until you confirm.`}
                           onClick={() => void startRevert(s.declared.name)}
                         >
                           <Undo2 size={13} />

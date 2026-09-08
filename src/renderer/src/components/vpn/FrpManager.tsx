@@ -88,7 +88,7 @@ export function FrpManager(): React.JSX.Element {
       : []
 
   const copy = (url: string): void => {
-    window.shellpilot?.clipboard.write(url)
+    window.opsmaxx?.clipboard.write(url)
     toast('Address copied', 'ok')
   }
 

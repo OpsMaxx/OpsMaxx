@@ -6,7 +6,7 @@
 //     out verbatim, so a command that happens to print one back can't leak it.
 //  2. Common secret-shaped patterns (KEY=value assignments, private key
 //     blocks, bearer/API tokens) are redacted even when the value itself
-//     isn't one ShellPilot already knows about.
+//     isn't one OpsMaxx already knows about.
 const PLACEHOLDER = '[REDACTED]'
 
 const PATTERN_RULES: { regex: RegExp; replace: (m: string[]) => string }[] = [

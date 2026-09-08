@@ -99,7 +99,7 @@ const DENIED_REPLICATION: DbAnswer<unknown> = {
   verdict: {
     level: 'unknown',
     headline: 'Replication: not permitted. Reading it needs pg_monitor on PostgreSQL, or REPLICATION CLIENT on MySQL — this is NOT "replication is fine".',
-    because: 'This exists and the account ShellPilot connected as was not allowed to read it.'
+    because: 'This exists and the account OpsMaxx connected as was not allowed to read it.'
   }
 }
 

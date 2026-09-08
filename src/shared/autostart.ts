@@ -48,7 +48,7 @@ export function hiddenLaunchSupported(platform: NodeJS.Platform): boolean {
 }
 
 export const AUTOSTART_UNSUPPORTED_REASON =
-  'Electron cannot register a login item on Linux. Add ShellPilot to your desktop environment\u2019s startup applications instead.'
+  'Electron cannot register a login item on Linux. Add OpsMaxx to your desktop environment\u2019s startup applications instead.'
 
 /**
  * What to hand Electron, given what the user asked for and where they are.

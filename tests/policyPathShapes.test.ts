@@ -176,7 +176,7 @@ describe('AppData is scoped to the credential stores', () => {
 describe('shell and REPL history', () => {
   // A token pasted onto a command line is in the history file in plaintext,
   // and the database CLIs store connection strings with passwords in theirs —
-  // which counts double here, because ShellPilot is also a database client.
+  // which counts double here, because OpsMaxx is also a database client.
   it.each([
     '/root/.bash_history',
     '/home/ubuntu/.bash_history',
@@ -221,7 +221,7 @@ describe('shell and REPL history', () => {
 
 describe('existing installs, not just fresh ones', () => {
   // The fix is worth nothing if it only reaches new installs: everyone who
-  // already runs ShellPilot is the population that is currently exposed.
+  // already runs OpsMaxx is the population that is currently exposed.
   // backfillCapabilities covers capabilities and explicitly not filePolicies,
   // so the seeds needed their own generation-based migration.
   const legacyState = () => ({

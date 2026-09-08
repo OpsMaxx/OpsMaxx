@@ -12,7 +12,7 @@ import type { DnsManager, DnsSnapshot, DnsSpec, DnsVerification } from './index'
 // profile is expressed.
 //
 // NRPT rules are machine-wide and persist across reboots. That is precisely
-// why every rule carries `ShellPilot-<runId>` in its comment and display name:
+// why every rule carries `OpsMaxx-<runId>` in its comment and display name:
 // the sweep removes rules matching exactly that tag, so a crashed run is
 // cleaned up and a rule some other product or a domain policy created is left
 // completely alone (E10).

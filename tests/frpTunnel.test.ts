@@ -17,7 +17,7 @@ import { validateFrpSpec } from '../src/main/services/vpn/frpConfig'
 // The arithmetic behind "give me a public URL for localhost:3000".
 //
 // The defect class this whole file is aimed at is a URL that looks like ngrok's
-// and is not: an address ShellPilot composed for itself, shown with a Copy
+// and is not: an address OpsMaxx composed for itself, shown with a Copy
 // button, that resolves to nothing because nobody ever created a DNS record.
 // So the assertions below are mostly about what does NOT come out — no URL
 // without a domain, no ticked exposure box, no scheme invented on the user's
@@ -206,7 +206,7 @@ describe('what the user is shown before anything is published', () => {
     )
   })
 
-  it('names the route rather than implying ShellPilot serves it', () => {
+  it('names the route rather than implying OpsMaxx serves it', () => {
     expect(exposure.route).toBe(
       'Traffic arrives through frp.example.com:7000, the frp server you set up.'
     )

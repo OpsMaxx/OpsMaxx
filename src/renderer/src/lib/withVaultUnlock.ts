@@ -3,7 +3,7 @@ import { useVaultPrompt } from '../store/vaultPrompt'
 // Matches the marker credentialResolver.ts puts in the message. Electron
 // rewrites a rejected IPC handler's error, so the class does not survive but
 // the token does.
-const VAULT_LOCKED = 'SHELLPILOT_VAULT_LOCKED'
+const VAULT_LOCKED = 'OPSMAXX_VAULT_LOCKED'
 
 /** The same condition, spelled as a code on a result object rather than thrown.
  *  Mirrors the `'vault-locked'` member of VpnErrorCode in shared/vpn.ts. */

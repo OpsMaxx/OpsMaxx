@@ -121,7 +121,7 @@ export function VaultUnlockModal(): React.JSX.Element | null {
           {checking
             ? 'Checking this machine for a vault…'
             : creating
-              ? `There is no vault on this machine yet, so there is nowhere to keep this secret. The vault keeps passwords, SSH keys and other secrets encrypted here, so ShellPilot can use them without you retyping them. Pick a master password to protect it — it is never stored anywhere, so if you lose it the contents cannot be recovered.`
+              ? `There is no vault on this machine yet, so there is nowhere to keep this secret. The vault keeps passwords, SSH keys and other secrets encrypted here, so OpsMaxx can use them without you retyping them. Pick a master password to protect it — it is never stored anywhere, so if you lose it the contents cannot be recovered.`
               : 'This credential is stored in your vault. Unlock it to continue — it stays unlocked for the rest of this session.'}
         </div>
       </div>

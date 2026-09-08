@@ -1,5 +1,5 @@
-; Adds the shellpilot CLI launcher's folder to the current user's PATH, so
-; `shellpilot claude`/`codex`/`run` work from any terminal right after
+; Adds the opsmaxx CLI launcher's folder to the current user's PATH, so
+; `opsmaxx claude`/`codex`/`run` work from any terminal right after
 ; installing — without this, the CLI is bundled but unreachable, since
 ; nothing else registers it (see docs/AI-MCP.md).
 ;
@@ -31,25 +31,25 @@
   StrLen $5 $6
   StrCpy $4 0
 
-  shellpilot_path_scan:
+  opsmaxx_path_scan:
     StrCpy $3 $7 $5 $4
-    StrCmp $3 $6 shellpilot_path_present
-    StrCmp $3 "" shellpilot_path_absent
+    StrCmp $3 $6 opsmaxx_path_present
+    StrCmp $3 "" opsmaxx_path_absent
     IntOp $4 $4 + 1
-    Goto shellpilot_path_scan
+    Goto opsmaxx_path_scan
 
-  shellpilot_path_absent:
-    StrCmp $8 "" shellpilot_path_empty shellpilot_path_append
-    shellpilot_path_empty:
+  opsmaxx_path_absent:
+    StrCmp $8 "" opsmaxx_path_empty opsmaxx_path_append
+    opsmaxx_path_empty:
       StrCpy $8 "$9"
-      Goto shellpilot_path_write
-    shellpilot_path_append:
+      Goto opsmaxx_path_write
+    opsmaxx_path_append:
       StrCpy $8 "$8;$9"
-    shellpilot_path_write:
+    opsmaxx_path_write:
       WriteRegExpandStr HKCU "Environment" "Path" "$8"
       ; HWND_BROADCAST = 0xFFFF, WM_SETTINGCHANGE = 0x001A — written as raw
       ; values so this doesn't depend on WinMessages.nsh being included.
       SendMessage 0xFFFF 0x001A 0 "STR:Environment" /TIMEOUT=5000
 
-  shellpilot_path_present:
+  opsmaxx_path_present:
 !macroend

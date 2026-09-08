@@ -1,32 +1,32 @@
 {
   "version": 1,
   "binaries": {
-    "darwin-x64/shellpilot-netd": {
+    "darwin-x64/opsmaxx-netd": {
       "sha256": "0e8723f8db05c286d1ae6d1d04315aae94638235606090e826ed38a1652c4a1b",
       "size": 11466032,
       "version": "0.22.3"
     },
-    "darwin-arm64/shellpilot-netd": {
+    "darwin-arm64/opsmaxx-netd": {
       "sha256": "38fe80ab58d1a6dbce5cdb576f4f11706a46df195246f635fac2e8921e9137f6",
       "size": 10726194,
       "version": "0.22.3"
     },
-    "linux-x64/shellpilot-netd": {
+    "linux-x64/opsmaxx-netd": {
       "sha256": "55a04ea1366e4eeca64081f88da6e0fb6419f24c16434f9be71360c090d882e5",
       "size": 11309182,
       "version": "0.22.3"
     },
-    "linux-arm64/shellpilot-netd": {
+    "linux-arm64/opsmaxx-netd": {
       "sha256": "836a8131138a470404aa72c3ab2ac4071a6059f39c3a430eedbf073f888d28ce",
       "size": 10551422,
       "version": "0.22.3"
     },
-    "win32-x64/shellpilot-netd.exe": {
+    "win32-x64/opsmaxx-netd.exe": {
       "sha256": "7352baeec2d7673d3fb033d900963d79f254db444834d91853ccebcea26f2278",
       "size": 11605504,
       "version": "0.22.3"
     },
-    "win32-arm64/shellpilot-netd.exe": {
+    "win32-arm64/opsmaxx-netd.exe": {
       "sha256": "0a29a27d7a2c7a8196c563dae780969e9ab40074505c6f99ef724f4eeadc8e93",
       "size": 10647552,
       "version": "0.22.3"

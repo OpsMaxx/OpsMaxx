@@ -70,11 +70,11 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
       setReport(null)
       return
     }
-    if (!bridgeHas(window.shellpilot?.vpn as Record<string, unknown> | undefined, 'import')) return
+    if (!bridgeHas(window.opsmaxx?.vpn as Record<string, unknown> | undefined, 'import')) return
     let live = true
     setParsing(true)
     const t = setTimeout(() => {
-      void window.shellpilot?.vpn.import(kind, body).then((r) => {
+      void window.opsmaxx?.vpn.import(kind, body).then((r) => {
         if (!live) return
         setParsing(false)
         setReport(r ?? null)
@@ -149,7 +149,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
     // withVaultUnlock reads the value rather than the declared type.
     const committed = await withVaultUnlock(`Importing ${name.trim()}`, () =>
       Promise.resolve(
-        window.shellpilot?.vpn.commitImport(name.trim(), workspaceId, kind, text.trim())
+        window.opsmaxx?.vpn.commitImport(name.trim(), workspaceId, kind, text.trim())
       )
     )
     setSaving(false)
@@ -297,7 +297,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
               </div>
             ))}
             <span style={{ fontSize: 11, opacity: 0.9 }}>
-              These directives run commands on your machine. ShellPilot re-emits a config it
+              These directives run commands on your machine. OpsMaxx re-emits a config it
               generated itself, so it cannot honour them — and importing while pretending it had
               would be a lie about what this profile does.
             </span>

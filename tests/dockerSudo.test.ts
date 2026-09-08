@@ -17,7 +17,7 @@ const DENIED =
 const okOutput = (): string =>
   [
     '24.0.7',
-    '===SHELLPILOT-PS===',
+    '===OPSMAXX-PS===',
     ['abc123', 'web', 'nginx', 'running', 'Up 2 hours', '', 'now'].join(DOCKER_SEP)
   ].join('\n')
 

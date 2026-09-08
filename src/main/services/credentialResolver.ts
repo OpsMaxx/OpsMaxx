@@ -30,7 +30,7 @@ export type CredentialSource = 'vault' | 'keychain' | 'inline' | 'none'
 // serialises a rejected handler into a plain Error whose message is prefixed
 // with "Error invoking remote method ...", so the class and its name do not
 // survive the trip — a stable token inside the message does.
-export const VAULT_LOCKED = 'SHELLPILOT_VAULT_LOCKED'
+export const VAULT_LOCKED = 'OPSMAXX_VAULT_LOCKED'
 
 export class VaultLockedError extends Error {
   // The subject is a parameter only so a VPN profile does not have to describe

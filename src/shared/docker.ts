@@ -291,7 +291,7 @@ export const DOCKER_LIST_COMMAND = [
   // its error text into the version block is what made a working host look
   // broken. The real diagnosis comes from `docker ps` below.
   'docker version --format "{{.Server.Version}}" 2>/dev/null || docker --version 2>&1',
-  `echo "===SHELLPILOT-PS==="`,
+  `echo "===OPSMAXX-PS==="`,
   `docker ps --all --no-trunc --format "{{.ID}}${DOCKER_SEP}{{.Names}}${DOCKER_SEP}{{.Image}}${DOCKER_SEP}{{.State}}${DOCKER_SEP}{{.Status}}${DOCKER_SEP}{{.Ports}}${DOCKER_SEP}{{.CreatedAt}}" 2>&1`
 ].join('; ')
 
@@ -365,7 +365,7 @@ function stateFrom(state: string, status: string): string {
  * whether `docker ps` works.
  */
 export function parseDockerOutput(output: string, exitCode: number | null): DockerProbe {
-  const MARKER = '===SHELLPILOT-PS==='
+  const MARKER = '===OPSMAXX-PS==='
   const at = output.indexOf(MARKER)
   const head = at === -1 ? output : output.slice(0, at)
   const psPart = at === -1 ? undefined : output.slice(at + MARKER.length)
@@ -714,7 +714,7 @@ export function buildDockerShellCommand(ref: string, opts: { sudo?: boolean } = 
 //    them means a target that stopped being safe fails on its own terms, in
 //    docker's own words, per item.
 
-const ANY_MARKER = /===SHELLPILOT-[A-Z]+===/
+const ANY_MARKER = /===OPSMAXX-[A-Z]+===/
 
 /**
  * Section markers.
@@ -724,19 +724,19 @@ const ANY_MARKER = /===SHELLPILOT-[A-Z]+===/
  * with it — the rule the version block already follows.
  */
 export const DOCKER_MARKERS = {
-  ps: '===SHELLPILOT-PS===',
-  compose: '===SHELLPILOT-COMPOSE===',
-  df: '===SHELLPILOT-DF===',
-  dfDetail: '===SHELLPILOT-DFV===',
-  engine: '===SHELLPILOT-ENGINE===',
-  inspect: '===SHELLPILOT-INSPECT===',
-  health: '===SHELLPILOT-HEALTH===',
-  stats: '===SHELLPILOT-STATS===',
-  images: '===SHELLPILOT-IMAGES===',
-  act: '===SHELLPILOT-ACT===',
-  networks: '===SHELLPILOT-NETWORKS===',
-  netAttach: '===SHELLPILOT-NETATTACH===',
-  healthLog: '===SHELLPILOT-HEALTHLOG===',
+  ps: '===OPSMAXX-PS===',
+  compose: '===OPSMAXX-COMPOSE===',
+  df: '===OPSMAXX-DF===',
+  dfDetail: '===OPSMAXX-DFV===',
+  engine: '===OPSMAXX-ENGINE===',
+  inspect: '===OPSMAXX-INSPECT===',
+  health: '===OPSMAXX-HEALTH===',
+  stats: '===OPSMAXX-STATS===',
+  images: '===OPSMAXX-IMAGES===',
+  act: '===OPSMAXX-ACT===',
+  networks: '===OPSMAXX-NETWORKS===',
+  netAttach: '===OPSMAXX-NETATTACH===',
+  healthLog: '===OPSMAXX-HEALTHLOG===',
   /**
    * One marker per removal kind, because the four commands are four different
    * programs and their output must never be pooled.
@@ -747,10 +747,10 @@ export const DOCKER_MARKERS = {
    * Attributing per block keeps that line inside the volume block, where the
    * only references it can be matched against are volume names.
    */
-  rmContainer: '===SHELLPILOT-RMCONTAINER===',
-  rmImage: '===SHELLPILOT-RMIMAGE===',
-  rmVolume: '===SHELLPILOT-RMVOLUME===',
-  rmNetwork: '===SHELLPILOT-RMNETWORK===',
+  rmContainer: '===OPSMAXX-RMCONTAINER===',
+  rmImage: '===OPSMAXX-RMIMAGE===',
+  rmVolume: '===OPSMAXX-RMVOLUME===',
+  rmNetwork: '===OPSMAXX-RMNETWORK===',
   /**
    * A CLOSING marker, which the others do not need.
    *
@@ -762,7 +762,7 @@ export const DOCKER_MARKERS = {
    * landed inside the final table's column offsets and was counted as a row
    * that could not be read.
    */
-  end: '===SHELLPILOT-END==='
+  end: '===OPSMAXX-END==='
 } as const
 
 /**

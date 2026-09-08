@@ -529,6 +529,6 @@ export class RuleEngine {
     row: StoredAlertRow,
     outcome: 'notified' | 'job-started' | 'job-refused'
   ): Record<string, unknown> {
-    return { source: 'shellpilot', version: this.deps.version(), ...ruleNotice(rule, row, outcome) }
+    return { source: 'opsmaxx', version: this.deps.version(), ...ruleNotice(rule, row, outcome) }
   }
 }

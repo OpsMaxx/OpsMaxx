@@ -9,7 +9,7 @@ import type { LocalConnectConfig } from '../../shared/local'
 // Both halves live in main on purpose. The renderer has a
 // `settings.localTerminalEnabled` toggle, but a renderer-side flag constrains
 // only the honest UI — the threat this guards against is a compromised renderer
-// calling window.shellpilot.local.connect() directly, which never goes near the
+// calling window.opsmaxx.local.connect() directly, which never goes near the
 // toggle. So the flag is mirrored here and every local:* handler consults this
 // copy.
 

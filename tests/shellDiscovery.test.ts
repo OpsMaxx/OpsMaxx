@@ -15,7 +15,7 @@ import {
   shellIdFor
 } from '../src/main/services/shellDiscovery'
 
-const scratch = mkdtempSync(join(tmpdir(), 'shellpilot-shells-'))
+const scratch = mkdtempSync(join(tmpdir(), 'opsmaxx-shells-'))
 
 describe('WSL distro enumeration', () => {
   it('decodes `wsl -l -q` output as UTF-16LE with a BOM', () => {
@@ -198,7 +198,7 @@ describe('sanitised environment', () => {
     const env = sanitisedEnv()
     expect(env.TERM).toBe('xterm-256color')
     expect(env.COLORTERM).toBe('truecolor')
-    expect(env.TERM_PROGRAM).toBe('ShellPilot')
+    expect(env.TERM_PROGRAM).toBe('OpsMaxx')
     // Comes from app.getVersion(). Asserting the shape rather than the mock's
     // literal: what matters is that a version reaches the shell, not which one,
     // and pinning the value would make a release bump break this test.
@@ -219,15 +219,15 @@ describe('sanitised environment', () => {
   })
 
   it('never invents a value for an unset variable', () => {
-    delete process.env.SHELLPILOT_NOT_SET
-    expect('SHELLPILOT_NOT_SET' in sanitisedEnv()).toBe(false)
+    delete process.env.OPSMAXX_NOT_SET
+    expect('OPSMAXX_NOT_SET' in sanitisedEnv()).toBe(false)
   })
 })
 
 describe('the app puts nothing secret into its own environment', () => {
   it('makes no process.env assignments outside the dev renderer URL', async () => {
     // sanitisedEnv() forwards the parent environment wholesale, so it is only
-    // safe as long as ShellPilot never parks a credential, a vault key or the
+    // safe as long as OpsMaxx never parks a credential, a vault key or the
     // MCP pairing token in process.env. Nothing enforces that but this.
     const files = ['src/main/index.ts']
     const assignments: string[] = []

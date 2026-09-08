@@ -442,7 +442,7 @@ describe('summariseAccessGroup — a value that is not a permission', () => {
   it('names it instead of dropping it out of the sentence', () => {
     const s = summariseAccessGroup(group(odd('maybe')))
     expect(s.clauses[0]).toBe(
-      'Read files ("maybe") is set to a value ShellPilot does not recognise, so the policy engine allows it. Set it again below.'
+      'Read files ("maybe") is set to a value OpsMaxx does not recognise, so the policy engine allows it. Set it again below.'
     )
     expect(s.unrecognised).toEqual(['readFiles'])
     // It used to match none of the three filters and appear in no clause at all
@@ -479,7 +479,7 @@ describe('summariseAccessGroup — a value that is not a permission', () => {
       group({ ...allowAll(), readFiles: 'maybe', terminal: 7 } as unknown as AiCapabilityPolicy)
     )
     expect(s.clauses[0]).toBe(
-      'Execute terminal commands ("7") and Read files ("maybe") are set to values ShellPilot does not recognise, so the policy engine allows them. Set them again below.'
+      'Execute terminal commands ("7") and Read files ("maybe") are set to values OpsMaxx does not recognise, so the policy engine allows them. Set them again below.'
     )
     expect(s.unrecognised).toEqual(['terminal', 'readFiles'])
   })

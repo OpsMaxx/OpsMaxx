@@ -3,7 +3,7 @@
 // lifecycle runs in CI without a real VPN, a TUN device or root.
 //
 // It speaks the management protocol the way openvpn does with
-// --management-client: it DIALS the endpoint ShellPilot is already listening
+// --management-client: it DIALS the endpoint OpsMaxx is already listening
 // on, greets, honours --management-hold, walks the >STATE: ladder and emits
 // >BYTECOUNT: on a timer. Failure modes are selected from argv so a test can
 // ask for the exact thing it wants to assert about.

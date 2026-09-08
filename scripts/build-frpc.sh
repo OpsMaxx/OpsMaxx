@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Build frpc (the frp client) from pinned upstream source for every platform
-# ShellPilot ships, and fold the results into resources/bin/manifest.json.
+# OpsMaxx ships, and fold the results into resources/bin/manifest.json.
 #
 # Why build rather than download a release tarball: the manifest records a
 # SHA-256 that the app verifies before every exec, so the bytes have to come
@@ -9,9 +9,9 @@
 # record of "whatever was on the CDN that day".
 #
 # Why frp at all, and why this is licence-safe: frp is Apache-2.0, which places
-# no obligation on ShellPilot beyond shipping the licence and NOTICE files —
+# no obligation on OpsMaxx beyond shipping the licence and NOTICE files —
 # unlike OpenVPN, which is GPL-2.0 and is therefore deliberately NOT bundled
-# (ShellPilot detects a system install instead). See docs/plans/vpn-tunnel-clients.md
+# (OpsMaxx detects a system install instead). See docs/plans/vpn-tunnel-clients.md
 # section 4.
 set -euo pipefail
 
@@ -57,7 +57,7 @@ echo "==> frp source $FRP_VERSION ($SRC_SHA)"
 
 # frpc embeds its admin dashboard with `//go:embed dist`, and an embed pattern
 # that matches nothing is a compile error — upstream builds those assets with a
-# separate Vue toolchain and only ships them in release tarballs. ShellPilot
+# separate Vue toolchain and only ships them in release tarballs. OpsMaxx
 # drives frpc through its HTTP API (/api/*, /healthz), which is registered
 # independently of the static asset routes, so the dashboard is dead weight
 # here. A placeholder satisfies the embed without pulling a JS build into this
@@ -70,7 +70,7 @@ if [ ! -f "$WORK/frp/web/frpc/dist/index.html" ]; then
 <!doctype html>
 <meta charset="utf-8">
 <title>frpc</title>
-<p>This frpc was built by ShellPilot, which uses the frpc HTTP API and does not
+<p>This frpc was built by OpsMaxx, which uses the frpc HTTP API and does not
 build the dashboard assets. The API under /api and /healthz is unaffected.</p>
 HTML
 fi

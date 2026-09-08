@@ -4,7 +4,7 @@
 // DOM with `// @vitest-environment jsdom`. It exists to remove the two reasons
 // a React component in this app could not previously be rendered in a test:
 //
-//  1. `window.shellpilot`. The preload bridge (src/preload/index.ts) is the
+//  1. `window.opsmaxx`. The preload bridge (src/preload/index.ts) is the
 //     renderer's entire outside world, and store/alerts.ts reads it at MODULE
 //     scope to stamp the app version into outbound payloads. Before this file,
 //     the only way to test anything that imported it was the manoeuvre at the
@@ -29,16 +29,16 @@ import { afterEach } from 'vitest'
 import { cleanup } from '@testing-library/react'
 
 /** Whatever slice of the preload bridge a test needs. Deliberately loose:
- *  ShellPilotApi is several hundred methods and a test that had to satisfy it
+ *  OpsMaxxApi is several hundred methods and a test that had to satisfy it
  *  would stub the whole app to assert on one button. */
 export type BridgeStub = Record<string, unknown>
 
 function install(stub: BridgeStub): void {
-  ;(window as unknown as { shellpilot: BridgeStub }).shellpilot = stub
+  ;(window as unknown as { opsmaxx: BridgeStub }).opsmaxx = stub
 }
 
 /**
- * Replace `window.shellpilot` for this test.
+ * Replace `window.opsmaxx` for this test.
  *
  * Whole-object replacement rather than a merge: a stub that silently inherits
  * a namespace from a previous test is the same order-dependence the store

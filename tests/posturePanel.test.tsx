@@ -252,7 +252,7 @@ describe('the security update count comes from the inventory probe', () => {
           facts: parseHostFacts(
             [
               'V pkg pacman',
-              '===SHELLPILOT-FACTS===',
+              '===OPSMAXX-FACTS===',
               'package-manager ok -',
               'security-updates unsupported - "Arch Linux has no security update channel"'
             ].join('\n'),
@@ -274,7 +274,7 @@ describe('the security update count comes from the inventory probe', () => {
             [
               'V pkg apt',
               'V security 0',
-              '===SHELLPILOT-FACTS===',
+              '===OPSMAXX-FACTS===',
               'package-manager ok -',
               'security-updates ok - apt-check'
             ].join('\n'),
@@ -364,7 +364,7 @@ describe('the firewall rules — roadmap item 31', () => {
     mount({ a: { posture: collected(RULES) } }, [server('a', 'web-1')])
     const detail = await openRules()
     expect(detail.textContent).toContain('3306/tcp ALLOW IN Anywhere')
-    // Marked as the host's words, not ShellPilot's. The line above is text
+    // Marked as the host's words, not OpsMaxx's. The line above is text
     // written by whoever configured that machine.
     expect(detail.textContent).toContain('Reported by the server')
     // And where it came from, named, so a reader can go and check it.

@@ -70,7 +70,7 @@ export function RouteHops({ hops, onChange, excludeServerId }: Props): React.JSX
   }
 
   const pickKey = async (id: string): Promise<void> => {
-    const p = await window.shellpilot?.dialog.openKey()
+    const p = await window.opsmaxx?.dialog.openKey()
     if (p) onChange(hops.map((h) => (h.id === id ? { ...h, keyPath: p, auth: 'key', serverId: null } : h)))
   }
 

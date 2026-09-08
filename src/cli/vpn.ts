@@ -1,7 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
-// `shellpilot vpn list|status|up|down`.
+// `opsmaxx vpn list|status|up|down`.
 //
 // Deliberately implemented as MCP tool calls against the running app rather
 // than as a direct path into main. That is not a shortcut — it is the security
@@ -33,7 +33,7 @@ async function withClient<T>(
   port: number,
   fn: (c: Client) => Promise<T>
 ): Promise<T> {
-  const client = new Client({ name: 'shellpilot-cli', version: '1' }, { capabilities: {} })
+  const client = new Client({ name: 'opsmaxx-cli', version: '1' }, { capabilities: {} })
   const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), {
     requestInit: { headers: { Authorization: `Bearer ${token}` } }
   })
@@ -46,15 +46,15 @@ async function withClient<T>(
 }
 
 export function printVpnHelp(): void {
-  console.log(`shellpilot vpn — control VPN and reverse-proxy profiles
+  console.log(`opsmaxx vpn — control VPN and reverse-proxy profiles
 
 Usage:
-  shellpilot vpn list              List profiles and whether each is running
-  shellpilot vpn status <name>     Show one profile
-  shellpilot vpn up <name>         Start a profile
-  shellpilot vpn down <name>       Stop a profile
+  opsmaxx vpn list              List profiles and whether each is running
+  opsmaxx vpn status <name>     Show one profile
+  opsmaxx vpn up <name>         Start a profile
+  opsmaxx vpn down <name>       Stop a profile
 
-Profiles are created in the ShellPilot app, not here — this command can only run
+Profiles are created in the OpsMaxx app, not here — this command can only run
 one you have already defined, and it cannot change where a profile points.
 
 Starting a VPN always asks for approval in the app, even when the access group
@@ -77,7 +77,7 @@ export async function runVpnCommand(
 
   if (sub === 'list' || sub === 'status') {
     if (sub === 'status' && !name) {
-      console.error('Usage: shellpilot vpn status <name>')
+      console.error('Usage: opsmaxx vpn status <name>')
       return 1
     }
     return withClient(session.token, session.port, async (client) => {
@@ -107,12 +107,12 @@ export async function runVpnCommand(
 
   if (sub === 'up' || sub === 'down') {
     if (!name) {
-      console.error(`Usage: shellpilot vpn ${sub} <name>`)
+      console.error(`Usage: opsmaxx vpn ${sub} <name>`)
       return 1
     }
     return withClient(session.token, session.port, async (client) => {
       if (sub === 'up') {
-        console.error('Waiting for approval in ShellPilot...')
+        console.error('Waiting for approval in OpsMaxx...')
       }
       const result = await client.callTool({
         name: 'set_vpn',

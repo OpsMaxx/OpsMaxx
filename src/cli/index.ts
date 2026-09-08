@@ -30,17 +30,17 @@ function spawnInherit(cmd: string, args: string[], extraEnv: Record<string, stri
 }
 
 function printHelp(): void {
-  console.log(`ShellPilot CLI launcher
+  console.log(`OpsMaxx CLI launcher
 
 Usage:
-  shellpilot claude            Launch Claude Code with ShellPilot MCP auto-configured
-  shellpilot codex             Launch Codex with ShellPilot MCP auto-configured
-  shellpilot run -- <command>  Launch any command with SHELLPILOT_MCP_COMMAND/ARGS set
-  shellpilot vpn <subcommand>  List, start or stop VPN profiles (see: shellpilot vpn help)
+  opsmaxx claude            Launch Claude Code with OpsMaxx MCP auto-configured
+  opsmaxx codex             Launch Codex with OpsMaxx MCP auto-configured
+  opsmaxx run -- <command>  Launch any command with OPSMAXX_MCP_COMMAND/ARGS set
+  opsmaxx vpn <subcommand>  List, start or stop VPN profiles (see: opsmaxx vpn help)
 
-Requires ShellPilot Desktop/Core already running, with AI & MCP enabled (AI & MCP → Security).
-First run pairs with it: a one-time code appears in ShellPilot for you to type here. Set
-SHELLPILOT_PORT if ShellPilot's MCP bridge is not on the default port 5177.`)
+Requires OpsMaxx Desktop/Core already running, with AI & MCP enabled (AI & MCP → Security).
+First run pairs with it: a one-time code appears in OpsMaxx for you to type here. Set
+OPSMAXX_PORT if OpsMaxx's MCP bridge is not on the default port 5177.`)
 }
 
 async function main(): Promise<void> {
@@ -50,7 +50,7 @@ async function main(): Promise<void> {
     const token = argValue(rest, '--token')
     const port = Number(argValue(rest, '--port'))
     if (!token || !port) {
-      console.error('Usage: shellpilot bridge --token <token> --port <port>')
+      console.error('Usage: opsmaxx bridge --token <token> --port <port>')
       process.exitCode = 1
       return
     }
@@ -76,15 +76,15 @@ async function main(): Promise<void> {
     const sepIdx = rest.indexOf('--')
     const target = sepIdx === -1 ? rest : rest.slice(sepIdx + 1)
     if (target.length === 0) {
-      console.error('Usage: shellpilot run -- <command> [args...]')
+      console.error('Usage: opsmaxx run -- <command> [args...]')
       process.exitCode = 1
       return
     }
     const [targetCmd, ...targetArgs] = target
     const { token, port } = await getOrPairSession(targetCmd, `${targetCmd} (CLI)`)
     process.exitCode = await spawnInherit(targetCmd, targetArgs, {
-      SHELLPILOT_MCP_COMMAND: execPath,
-      SHELLPILOT_MCP_ARGS: JSON.stringify([selfScript, 'bridge', '--token', token, '--port', String(port)])
+      OPSMAXX_MCP_COMMAND: execPath,
+      OPSMAXX_MCP_ARGS: JSON.stringify([selfScript, 'bridge', '--token', token, '--port', String(port)])
     })
     return
   }
@@ -93,7 +93,7 @@ async function main(): Promise<void> {
     // Routed through the MCP session rather than straight into the app, so it
     // inherits the vpnControl capability check, the approval prompt and the
     // audit entry instead of quietly bypassing all three.
-    const session = await getOrPairSession('cli-vpn', 'ShellPilot CLI (vpn)')
+    const session = await getOrPairSession('cli-vpn', 'OpsMaxx CLI (vpn)')
     process.exitCode = await runVpnCommand(rest, session)
     return
   }

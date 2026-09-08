@@ -44,13 +44,13 @@ const podRow = (o: {
 const out = (parts: Record<string, string>): string =>
   [
     parts.version ?? '{"clientVersion":{"gitVersion":"v1.29.2"}}',
-    '===SHELLPILOT-CTX===',
+    '===OPSMAXX-CTX===',
     parts.ctx ?? '',
-    '===SHELLPILOT-NS===',
+    '===OPSMAXX-NS===',
     parts.ns ?? '',
-    '===SHELLPILOT-PODS-ALL===',
+    '===OPSMAXX-PODS-ALL===',
     parts.all ?? '',
-    '===SHELLPILOT-PODS-NS===',
+    '===OPSMAXX-PODS-NS===',
     parts.nsPods ?? ''
   ].join('\n')
 
@@ -246,13 +246,13 @@ describe('mistakes inherited from the modules written before this one', () => {
     // marker at all and reported as empty — a silent, total failure.
     const crlf = [
       '{"clientVersion":{"gitVersion":"v1.29.2"}}',
-      '===SHELLPILOT-CTX===',
+      '===OPSMAXX-CTX===',
       '*  prod  prod  admin  default',
-      '===SHELLPILOT-NS===',
+      '===OPSMAXX-NS===',
       'default',
-      '===SHELLPILOT-PODS-ALL===',
+      '===OPSMAXX-PODS-ALL===',
       podRow({ name: 'web-1' }),
-      '===SHELLPILOT-PODS-NS===',
+      '===OPSMAXX-PODS-NS===',
       ''
     ].join('\r\n')
     const r = parseK8sOutput(crlf, 0)
@@ -363,7 +363,7 @@ import {
 
 const block = (parts: Record<string, string>): string =>
   Object.entries(parts)
-    .map(([k, v]) => `===SHELLPILOT-${k}===\n${v}`)
+    .map(([k, v]) => `===OPSMAXX-${k}===\n${v}`)
     .join('\n')
 
 // Real `kubectl describe pod` output, trimmed to the parts anyone reads.

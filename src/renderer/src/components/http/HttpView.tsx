@@ -161,7 +161,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }): React.JSX.Element {
         </p>
         <p>
           Internal certificates and APIs without CORS headers work here too: requests are sent by
-          ShellPilot, not by the browser engine.
+          OpsMaxx, not by the browser engine.
         </p>
         <button className="btn primary" onClick={onAdd}>
           <Plus size={15} /> Add an API

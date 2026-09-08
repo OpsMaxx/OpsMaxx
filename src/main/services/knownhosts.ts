@@ -8,7 +8,7 @@ import { readOpenSshKnownHosts, lookupInKnownHosts, canonicalHostname } from './
 // key presented, so a machine-in-the-middle on the path to a server can
 // capture the session and any credentials sent over it.
 
-const FILE = join(app.getPath('userData'), 'shellpilot-known-hosts.json')
+const FILE = join(app.getPath('userData'), 'opsmaxx-known-hosts.json')
 const TMP = `${FILE}.tmp`
 
 export interface KnownHost {
@@ -135,7 +135,7 @@ export function verifyHostKey(
         : `The authenticity of ${id} cannot be established.`,
       detail: recognised
         ? `Fingerprint: ${fp}\n\nThis is the same key OpenSSH has for ${canonicalHostname(host, port)}. ` +
-          'ShellPilot keeps its own list of trusted servers, so it has to be added here once too.'
+          'OpsMaxx keeps its own list of trusted servers, so it has to be added here once too.'
         : openssh.knownUnderAnotherKey
           ? `Fingerprint: ${fp}\n\nWarning: ~/.ssh/known_hosts has an entry for this server under a different key. ` +
             'That can mean the server was rebuilt, or that this connection is being intercepted. ' +

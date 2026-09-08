@@ -102,7 +102,7 @@ function SettingSwitch({
  * Starting with the machine.
  *
  * This pairs with background checking rather than being a cosmetic preference:
- * the fleet poll runs from the app root, so a ShellPilot that starts at login
+ * the fleet poll runs from the app root, so a OpsMaxx that starts at login
  * is a fleet watched from login. Without it, "background checking" only means
  * background of whenever somebody last opened the app.
  *
@@ -115,7 +115,7 @@ function AutoStartSetting(): React.JSX.Element | null {
   const [state, setState] = useState<AutoStartState | null>(null)
 
   useEffect(() => {
-    void window.shellpilot!.autoStart.get().then(setState)
+    void window.opsmaxx!.autoStart.get().then(setState)
   }, [])
 
   if (!state) return null
@@ -132,7 +132,7 @@ function AutoStartSetting(): React.JSX.Element | null {
   }
 
   const set = (next: Partial<AutoStartSettings>): void => {
-    void window.shellpilot!.autoStart
+    void window.opsmaxx!.autoStart
       .set({ openAtLogin: state.openAtLogin, openAsHidden: state.openAsHidden, ...next })
       .then(setState)
   }
@@ -141,14 +141,14 @@ function AutoStartSetting(): React.JSX.Element | null {
     <>
       <SettingSwitch
         label="Start when I log in"
-        desc="Launch ShellPilot with your machine, so background checking and alerts run from login rather than from whenever you next open the app."
+        desc="Launch OpsMaxx with your machine, so background checking and alerts run from login rather than from whenever you next open the app."
         checked={state.openAtLogin}
         onChange={(v) => set({ openAtLogin: v })}
       />
       {state.openAtLogin && state.hiddenSupported && (
         <SettingSwitch
           label="Start in the background"
-          desc="Launch without opening a window. Checks still run and alerts still fire — ShellPilot is waiting in the Dock rather than in front of you."
+          desc="Launch without opening a window. Checks still run and alerts still fire — OpsMaxx is waiting in the Dock rather than in front of you."
           checked={state.openAsHidden}
           onChange={(v) => set({ openAsHidden: v })}
         />
@@ -226,7 +226,7 @@ function KnownHosts(): React.JSX.Element {
   const [hosts, setHosts] = useState<{ id: string; fingerprint: string; addedAt: string }[]>([])
 
   const load = (): void => {
-    void window.shellpilot?.knownHosts.list().then((h) => setHosts(h ?? []))
+    void window.opsmaxx?.knownHosts.list().then((h) => setHosts(h ?? []))
   }
   useEffect(load, [])
 
@@ -256,7 +256,7 @@ function KnownHosts(): React.JSX.Element {
           <button
             className="btn sm danger"
             onClick={async () => {
-              await window.shellpilot?.knownHosts.forget(h.id)
+              await window.opsmaxx?.knownHosts.forget(h.id)
               toast(`Forgot the saved key for ${h.id}. The next connection to it will ask again.`, 'ok')
               load()
             }}
@@ -286,7 +286,7 @@ function VaultState(): React.JSX.Element {
     // The vault can lock itself on the inactivity timer configured just below
     // this row, and a row that goes on saying "unlocked" after that is worse
     // than no row at all.
-    const off = bridgeOn('vault.onAutoLocked', window.shellpilot?.vault?.onAutoLocked, () => void refresh())
+    const off = bridgeOn('vault.onAutoLocked', window.opsmaxx?.vault?.onAutoLocked, () => void refresh())
     return () => off()
   }, [refresh])
 
@@ -411,7 +411,7 @@ export function Settings(): React.JSX.Element {
               <div className="setting-row">
                 <div className="s-info">
                   <div className="s-title">Theme</div>
-                  <div className="s-desc">Dark is the primary ShellPilot experience.</div>
+                  <div className="s-desc">Dark is the primary OpsMaxx experience.</div>
                 </div>
                 <div className="segment">
                   {(['dark', 'light', 'system'] as ThemeMode[]).map((t) => (
@@ -543,7 +543,7 @@ export function Settings(): React.JSX.Element {
             <>
               <h2>Modules</h2>
               <p className="muted">
-                Features that ship with ShellPilot but stay off until you turn them on. Everything
+                Features that ship with OpsMaxx but stay off until you turn them on. Everything
                 here is first-party code in the same repo, reviewed the same way — this is about not
                 carrying what you do not use, not about running anyone else&rsquo;s code.
               </p>
@@ -689,7 +689,7 @@ export function Settings(): React.JSX.Element {
               <div className="sub">Connection reuse and re-authentication policy.</div>
               <SshSessions />
               {/* Spelled out rather than summarised, because it is the one
-                  setting here that decides whether ShellPilot writes anything
+                  setting here that decides whether OpsMaxx writes anything
                   to your machines. An operator is owed the exact list, and the
                   honest description of what turning it OFF costs — which is not
                   "less is written", it is "a long command dies with the

@@ -693,7 +693,7 @@ export interface CronCollectOptions {
  * block came from — and therefore whether it has a user field.
  *
  * The important change from the first version: every read now says what
- * happened to it, in a `===SHELLPILOT-STATUS===` block at the end. Before, a
+ * happened to it, in a `===OPSMAXX-STATUS===` block at the end. Before, a
  * missing `crontab` binary, an unreadable /etc/crontab and an empty crontab
  * were all "no output", and the panel rendered all three as "Nothing
  * scheduled." Two of those three were lies, and on a host whose /etc/cron.d is
@@ -746,7 +746,7 @@ export function buildCronCollectCommand(opts: CronCollectOptions = {}): string {
     'SP_SYSTEMCTL=""',
     'command -v "$SP_BIN" >/dev/null 2>&1 && SP_SYSTEMCTL="$SP_BIN"',
 
-    'echo "===SHELLPILOT-USER==="',
+    'echo "===OPSMAXX-USER==="',
     'if [ -z "$SP_CRONTAB" ]; then',
     'sp_note user-crontab no-tool - "this server has no crontab command"',
     'elif SP_OUT=$("$SP_CRONTAB" -l 2>/dev/null); then',
@@ -763,7 +763,7 @@ export function buildCronCollectCommand(opts: CronCollectOptions = {}): string {
     'esac',
     'fi',
 
-    'echo "===SHELLPILOT-SYSTEM==="',
+    'echo "===OPSMAXX-SYSTEM==="',
     'if [ ! -e /etc/crontab ]; then',
     'sp_note system-crontab absent -',
     'elif [ -r /etc/crontab ] && cat /etc/crontab 2>/dev/null; then',
@@ -776,7 +776,7 @@ export function buildCronCollectCommand(opts: CronCollectOptions = {}): string {
     'sp_note system-crontab denied -',
     'fi',
 
-    'echo "===SHELLPILOT-CROND==="',
+    'echo "===OPSMAXX-CROND==="',
     'SP_OK=0',
     'SP_DENIED=0',
     'SP_USED=-',
@@ -826,7 +826,7 @@ export function buildCronCollectCommand(opts: CronCollectOptions = {}): string {
 
     // Other accounts' crontabs. `crontab -l` reads exactly one account's file,
     // and it is not usually the interesting one: root's is.
-    'echo "===SHELLPILOT-SPOOL==="',
+    'echo "===OPSMAXX-SPOOL==="',
     `SP_ME=$(id -un 2>/dev/null || echo "")`,
     // Emitted so the parser can drop our own file rather than listing every
     // job in `crontab -l` a second time under a different heading.
@@ -882,7 +882,7 @@ export function buildCronCollectCommand(opts: CronCollectOptions = {}): string {
     'sp_note other-crontabs denied - "the spool is readable only by root"',
     'fi',
 
-    'echo "===SHELLPILOT-TIMERS==="',
+    'echo "===OPSMAXX-TIMERS==="',
     'if [ -z "$SP_SYSTEMCTL" ]; then',
     'sp_note systemd-timers no-tool - "this server has no systemctl"',
     'elif SP_TXT=$("$SP_SYSTEMCTL" list-timers --all --no-pager 2>&1); then',
@@ -900,7 +900,7 @@ export function buildCronCollectCommand(opts: CronCollectOptions = {}): string {
     'esac',
     'fi',
 
-    'echo "===SHELLPILOT-STATUS==="',
+    'echo "===OPSMAXX-STATUS==="',
     `printf '%s' "$SP_STATUS"`
   ].join('\n')
 }
@@ -951,7 +951,7 @@ export function parseCronCollection(output: string): CronCollection {
     // `\r?` because a transport that hands back CRLF would otherwise miss every
     // marker and report an entirely empty estate — a host with nothing
     // scheduled and a host we failed to read look identical from here.
-    const m = output.match(new RegExp(`===SHELLPILOT-${name}===\\r?\\n([\\s\\S]*?)(?====SHELLPILOT-|$)`))
+    const m = output.match(new RegExp(`===OPSMAXX-${name}===\\r?\\n([\\s\\S]*?)(?====OPSMAXX-|$)`))
     return m ? m[1] : ''
   }
 
@@ -1220,13 +1220,13 @@ export function isValidCronSchedule(schedule: string): boolean {
 const CRON_EDIT_REFUSAL: Record<CronSourceKind, string | null> = {
   'user-crontab': null,
   'system-crontab':
-    '/etc/crontab is root-owned and is rewritten by the distribution’s own packages. ShellPilot does not edit it: a write here needs root, and a root-owned file that a package manager also writes is not a file to round-trip from a laptop.',
+    '/etc/crontab is root-owned and is rewritten by the distribution’s own packages. OpsMaxx does not edit it: a write here needs root, and a root-owned file that a package manager also writes is not a file to round-trip from a laptop.',
   'cron.d':
-    '/etc/cron.d files are root-owned and mostly belong to packages, which replace them wholesale on upgrade. ShellPilot does not edit them.',
+    '/etc/cron.d files are root-owned and mostly belong to packages, which replace them wholesale on upgrade. OpsMaxx does not edit them.',
   'systemd-timer':
-    'a systemd timer is two unit files and a systemctl daemon-reload, not a line in a file. ShellPilot reads timers and does not edit them — doing it properly is its own piece of work, and doing it improperly leaves a unit that no longer matches what systemd has loaded.',
+    'a systemd timer is two unit files and a systemctl daemon-reload, not a line in a file. OpsMaxx reads timers and does not edit them — doing it properly is its own piece of work, and doing it improperly leaves a unit that no longer matches what systemd has loaded.',
   'other-user-crontab':
-    'another account’s crontab can only be written as that account or as root. ShellPilot edits only the crontab of the account it is connected as.'
+    'another account’s crontab can only be written as that account or as root. OpsMaxx edits only the crontab of the account it is connected as.'
 }
 
 /** `null` when this source can be edited, or the sentence saying why not. */
@@ -1319,7 +1319,7 @@ export function planCronEdit(doc: CronDocument, edit: CronEdit): CronEditPlan {
   if (doc.unparsed.length > 0) {
     const first = doc.unparsed[0].line
     return refuse(
-      `this crontab has ${doc.unparsed.length} line${doc.unparsed.length === 1 ? '' : 's'} ShellPilot could not parse, starting with \`${first.length > 60 ? `${first.slice(0, 57)}…` : first}\`. Writing a whole file back around a line we did not understand is how a schedule quietly stops running, so nothing here can be edited until that line is dealt with by hand.`
+      `this crontab has ${doc.unparsed.length} line${doc.unparsed.length === 1 ? '' : 's'} OpsMaxx could not parse, starting with \`${first.length > 60 ? `${first.slice(0, 57)}…` : first}\`. Writing a whole file back around a line we did not understand is how a schedule quietly stops running, so nothing here can be edited until that line is dealt with by hand.`
     )
   }
 
@@ -1365,7 +1365,7 @@ export function planCronEdit(doc: CronDocument, edit: CronEdit): CronEditPlan {
     // to that. It round-trips untouched; it just cannot be the line we edit.
     if (target.text.includes('\r')) {
       return refuse(
-        `line ${edit.lineIndex + 1} contains a carriage return inside the line itself. ShellPilot will not rewrite it, because there is no way to put that character back where it was.`
+        `line ${edit.lineIndex + 1} contains a carriage return inside the line itself. OpsMaxx will not rewrite it, because there is no way to put that character back where it was.`
       )
     }
     if (edit.op === 'remove') {
@@ -1396,7 +1396,7 @@ export function planCronEdit(doc: CronDocument, edit: CronEdit): CronEditPlan {
   const reparsed = parseCrontabDocument(after, doc.origin, doc.kind, doc.hasUserField)
   if (reparsed.unparsed.length > 0) {
     return refuse(
-      `the file this change would produce has a line ShellPilot cannot parse back (\`${reparsed.unparsed[0].line}\`), so it was not written.`
+      `the file this change would produce has a line OpsMaxx cannot parse back (\`${reparsed.unparsed[0].line}\`), so it was not written.`
     )
   }
   const expected = edit.op === 'remove' ? doc.entries.length - 1 : edit.op === 'add' ? doc.entries.length + 1 : doc.entries.length
@@ -1452,7 +1452,7 @@ function buildJobLine(
   // to edit anyway; this is the check that keeps the two facts consistent
   // rather than relying on them being consistent.
   if (hasUserField) {
-    return { ok: false, reason: 'ShellPilot does not add jobs to files that carry a user column.' }
+    return { ok: false, reason: 'OpsMaxx does not add jobs to files that carry a user column.' }
   }
   return { ok: true, text: `${s} ${rest}` }
 }
@@ -1474,7 +1474,7 @@ export const CRON_TOKEN_RE = /^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}$/
 /** Where the backup lands, relative to $HOME. The panel shows this path. */
 export function cronBackupName(token: string): string {
   if (!CRON_TOKEN_RE.test(token)) throw new Error('refusing to name a crontab backup from an unvalidated token')
-  return `.shellpilot-crontab-${token}.bak`
+  return `.opsmaxx-crontab-${token}.bak`
 }
 
 /**
@@ -1534,7 +1534,7 @@ export function buildCronWriteCommand(o: CronWriteRequest): string {
     throw new Error('refusing to build a crontab write from an unvalidated token')
   }
   const bak = cronBackupName(o.token)
-  const stem = `.shellpilot-crontab-${o.token}`
+  const stem = `.opsmaxx-crontab-${o.token}`
   return [
     'LC_ALL=C',
     'export LC_ALL',
@@ -1543,7 +1543,7 @@ export function buildCronWriteCommand(o: CronWriteRequest): string {
     'umask 077',
     'SP_OUT=""',
     // Printed ONCE, at the end, from a variable — see the doc comment.
-    `sp_end() { printf '===SHELLPILOT-CRON-WRITE===\\n%s %s\\n%s\\n' "$1" "$2" "$SP_OUT"; exit "$3"; }`,
+    `sp_end() { printf '===OPSMAXX-CRON-WRITE===\\n%s %s\\n%s\\n' "$1" "$2" "$SP_OUT"; exit "$3"; }`,
     `sp_say() { SP_OUT="$(printf '%s' "$*" | tr '\\r\\n' '  ')"; }`,
 
     resolveBinary('crontab'),
@@ -1560,7 +1560,7 @@ export function buildCronWriteCommand(o: CronWriteRequest): string {
     `SP_E="$HOME/${stem}.expected"`,
     `SP_T="$HOME/${stem}.new"`,
     `SP_V="$HOME/${stem}.verify"`,
-    'SP_LOCK="$HOME/.shellpilot-cron.lock"',
+    'SP_LOCK="$HOME/.opsmaxx-cron.lock"',
     // One change at a time, for the reason the key work gives: two edits a
     // second apart both read the same file, and the second one's "install"
     // silently discards the first one's. `mkdir` is atomic everywhere.
@@ -1685,7 +1685,7 @@ const CRON_WRITE_OUTCOMES: CronWriteOutcome[] = [
  * tells an operator their job is running when it is not.
  */
 export function parseCronWriteResult(stdout: string): CronWriteResult {
-  const m = stdout.match(/===SHELLPILOT-CRON-WRITE===\r?\n([^\n]*)\r?\n([\s\S]*)$/)
+  const m = stdout.match(/===OPSMAXX-CRON-WRITE===\r?\n([^\n]*)\r?\n([\s\S]*)$/)
   if (!m) {
     return {
       outcome: 'no-answer',
@@ -1729,7 +1729,7 @@ export function buildCronReadCommand(): string {
     resolveBinary('crontab'),
     'SP_CRONTAB=""',
     'command -v "$SP_BIN" >/dev/null 2>&1 && SP_CRONTAB="$SP_BIN"',
-    `printf '===SHELLPILOT-CRON-READ===\\n'`,
+    `printf '===OPSMAXX-CRON-READ===\\n'`,
     'if [ -z "$SP_CRONTAB" ]; then',
     `printf 'no-tool\\n'`,
     'elif "$SP_CRONTAB" -l >/dev/null 2>&1; then',
@@ -1746,7 +1746,7 @@ export function buildCronReadCommand(): string {
     `*) printf 'unknown %s\\n' "$(printf '%s' "$SP_ERR" | tr '\\r\\n' '  ')" ;;`,
     'esac',
     'fi',
-    `printf '===SHELLPILOT-CRON-BODY===\\n'`,
+    `printf '===OPSMAXX-CRON-BODY===\\n'`,
     // Last, and unquoted by any printf, so the file's own trailing bytes are
     // the command's trailing bytes.
     '[ -n "$SP_CRONTAB" ] && "$SP_CRONTAB" -l 2>/dev/null',
@@ -1763,7 +1763,7 @@ export interface CronReadResult {
 
 /** Split `buildCronReadCommand`'s output. Anything unrecognised is `unknown`. */
 export function parseCronRead(output: string): CronReadResult {
-  const m = output.match(/===SHELLPILOT-CRON-READ===\n([^\n]*)\n===SHELLPILOT-CRON-BODY===\n([\s\S]*)$/)
+  const m = output.match(/===OPSMAXX-CRON-READ===\n([^\n]*)\n===OPSMAXX-CRON-BODY===\n([\s\S]*)$/)
   if (!m) {
     return {
       status: 'unknown',

@@ -1211,7 +1211,7 @@ const api = {
     ): Promise<{ ok: boolean; declined?: boolean; message?: string }> =>
       ipcRenderer.invoke('inspect:removeTrust', store),
     /** The environment a shell needs to be intercepted, for the "copy for my
-     *  own terminal" button. Sessions ShellPilot starts get it applied. */
+     *  own terminal" button. Sessions OpsMaxx starts get it applied. */
     env: (): Promise<Record<string, string>> => ipcRenderer.invoke('inspect:env'),
     onFlow: (cb: (f: InspectFlow) => void): (() => void) => {
       const h = (_e: IpcRendererEvent, f: InspectFlow): void => cb(f)
@@ -1401,6 +1401,6 @@ const api = {
   }
 }
 
-contextBridge.exposeInMainWorld('shellpilot', api)
+contextBridge.exposeInMainWorld('opsmaxx', api)
 
-export type ShellPilotApi = typeof api
+export type OpsMaxxApi = typeof api

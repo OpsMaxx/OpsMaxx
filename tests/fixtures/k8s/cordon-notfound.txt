@@ -1,4 +1,4 @@
-===SHELLPILOT-CORDON===
+===OPSMAXX-CORDON===
 Error from server (NotFound): nodes "spk8s-nope" not found
-===SHELLPILOT-NODE===
+===OPSMAXX-NODE===
 Error from server (NotFound): nodes "spk8s-nope" not found

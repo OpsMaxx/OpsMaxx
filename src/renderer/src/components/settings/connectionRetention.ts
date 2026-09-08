@@ -54,6 +54,6 @@ export function retentionOverrideNotice(
     `Background checking is on, so every server in this workspace is contacted ${cadence}. ` +
     'Their connection never sits idle long enough for this to expire, so it does not apply to ' +
     'them at any setting — including Immediately. On a server with two-factor authentication, no ' +
-    'new code is requested while ShellPilot is running.'
+    'new code is requested while OpsMaxx is running.'
   )
 }

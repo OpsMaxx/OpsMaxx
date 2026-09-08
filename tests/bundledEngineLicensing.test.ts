@@ -79,7 +79,7 @@ describe('Wintun is redistributed on the terms it allows', () => {
 
 describe('the notices say what actually ships', () => {
   it('states plainly that a proprietary component is included', () => {
-    // ShellPilot is presented as open source. The single exception has to be
+    // OpsMaxx is presented as open source. The single exception has to be
     // findable by someone skimming, not buried in a table cell.
     expect(notices).toMatch(/not open source/i)
     expect(notices).toMatch(/wintun\.dll` is proprietary|Wintun is bundled on Windows/i)
@@ -125,7 +125,7 @@ describe('the licence texts reach the installed app', () => {
 
   it('copies the whole per-platform bin directory, not a list of executables', () => {
     // wintun.dll is a library rather than a program, and it only works if it
-    // lands beside shellpilot-netd.exe. A filter that named executables would
+    // lands beside opsmaxx-netd.exe. A filter that named executables would
     // silently leave it out.
     const bin = (builder.extraResources ?? []).find((r) => r.from.includes('resources/bin/$'))
     expect(bin?.filter).toEqual(['**/*'])

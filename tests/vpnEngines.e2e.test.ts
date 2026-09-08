@@ -28,9 +28,9 @@ import { emitOvpnConfig, ovpnArgs } from '../src/main/services/vpn/parsers'
 const ROOT = resolve(__dirname, '..')
 const platformDir = `${process.platform}-${process.arch}`
 const exe = process.platform === 'win32' ? '.exe' : ''
-const NETD = join(ROOT, 'resources', 'bin', platformDir, `shellpilot-netd${exe}`)
+const NETD = join(ROOT, 'resources', 'bin', platformDir, `opsmaxx-netd${exe}`)
 const FRPC = join(ROOT, 'resources', 'bin', platformDir, `frpc${exe}`)
-// No `${exe}`: ShellPilot bundles openvpn on macOS and Linux only, so there is
+// No `${exe}`: OpsMaxx bundles openvpn on macOS and Linux only, so there is
 // never an openvpn.exe here to name.
 const OPENVPN = join(ROOT, 'resources', 'bin', platformDir, 'openvpn')
 
@@ -104,7 +104,7 @@ function wgAvailable(): boolean {
   }
 }
 
-describeE2e('shellpilot-netd against itself', () => {
+describeE2e('opsmaxx-netd against itself', () => {
   it('is built', () => {
     expect(
       has(NETD),
@@ -294,7 +294,7 @@ describeE2e('frpc admin API', () => {
       'auth.token = "{{ .Envs.SP_FRP_TOKEN }}"',
       'webServer.addr = "127.0.0.1"',
       `webServer.port = ${adminPort}`,
-      'webServer.user = "shellpilot"',
+      'webServer.user = "opsmaxx"',
       'webServer.password = "{{ .Envs.SP_FRP_ADMIN }}"',
       // Without this frpc exits the moment its first login fails, and this
       // test deliberately has no frps to reach — the whole point is the admin
@@ -355,7 +355,7 @@ describeE2e('frpc admin API', () => {
     expect((await fetch(`${base}/healthz`)).status, `frpc output:\n${output}`).toBe(200)
     expect((await fetch(`${base}/api/status`)).status).toBe(401)
 
-    const auth = { Authorization: `Basic ${Buffer.from('shellpilot:zzadminpwzz').toString('base64')}` }
+    const auth = { Authorization: `Basic ${Buffer.from('opsmaxx:zzadminpwzz').toString('base64')}` }
     const status = await fetch(`${base}/api/status`, { headers: auth })
     expect(status.status).toBe(200)
 
@@ -406,7 +406,7 @@ describeE2e('bundled openvpn', () => {
   it('is built', () => {
     if (process.platform === 'win32') {
       // Windows drives a system install; see docs/VPN.md.
-      console.warn('skipping: ShellPilot does not bundle openvpn on Windows')
+      console.warn('skipping: OpsMaxx does not bundle openvpn on Windows')
       return
     }
     expect(has(OPENVPN), `${OPENVPN} is missing. Run: npm run build:engines`).toBe(true)

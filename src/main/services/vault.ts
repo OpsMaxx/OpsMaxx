@@ -15,7 +15,7 @@ import type { VaultEntry, VaultListResult, VaultResult, VaultStatus } from '../.
 // script injection reaches vault plaintext, and the threat model has to say so
 // rather than claim main-process confinement it does not have.
 
-const FILE = join(app.getPath('userData'), 'shellpilot-vault.json')
+const FILE = join(app.getPath('userData'), 'opsmaxx-vault.json')
 const TMP = `${FILE}.tmp`
 
 // 128 * N * r = 32 MiB of work per derivation; maxmem must exceed that.

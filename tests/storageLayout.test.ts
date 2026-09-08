@@ -282,8 +282,8 @@ describe('BSD df, which the allow-listed BSD targets use', () => {
     // only happens if `autofs` was read as the TYPE and not as the source.
     expect(s.df.excluded.map((e) => e.fstype)).toContain('autofs')
 
-    const dmg = s.df.mounts.find((m) => m.target.startsWith('/Volumes/ShellPilot'))!
-    expect(dmg.target).toMatch(/^\/Volumes\/ShellPilot \S+$/)
+    const dmg = s.df.mounts.find((m) => m.target.startsWith('/Volumes/OpsMaxx'))!
+    expect(dmg.target).toMatch(/^\/Volumes\/OpsMaxx \S+$/)
     expect(dmg.source).toMatch(/^\/dev\/disk\d+s\d+$/)
     expect(dmg.fstype).toBe('hfs')
   })

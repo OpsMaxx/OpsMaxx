@@ -24,8 +24,8 @@ describe('cordon and uncordon build one command', () => {
     const cmd = buildK8sCordonCommand('spk8s-worker', 'cordon', 'kind-spk8s')
     expect(cmd).toContain('cordon spk8s-worker --context=kind-spk8s')
     expect(cmd).toContain('get node spk8s-worker --no-headers --context=kind-spk8s')
-    expect(cmd).toContain('===SHELLPILOT-CORDON===')
-    expect(cmd).toContain('===SHELLPILOT-NODE===')
+    expect(cmd).toContain('===OPSMAXX-CORDON===')
+    expect(cmd).toContain('===OPSMAXX-NODE===')
   })
 
   it('puts --request-timeout on both calls', () => {
@@ -126,7 +126,7 @@ describe('what a real cluster said', () => {
     const r = parseK8sCordonResult(
       'cordon',
       'spk8s-worker',
-      '===SHELLPILOT-CORDON===\n\n===SHELLPILOT-NODE===\n',
+      '===OPSMAXX-CORDON===\n\n===OPSMAXX-NODE===\n',
       0
     )
     expect(r.ok).toBe(false)
@@ -274,13 +274,13 @@ describe('klog output is recognised as failure, not as data', () => {
   const withPods = (podSection: string): string =>
     [
       '{"clientVersion":{"gitVersion":"v1.33.2"}}',
-      '===SHELLPILOT-CTX===',
+      '===OPSMAXX-CTX===',
       '*     docker-desktop   docker-desktop   docker-desktop   default',
-      '===SHELLPILOT-NS===',
+      '===OPSMAXX-NS===',
       KLOG,
-      '===SHELLPILOT-PODS-ALL===',
+      '===OPSMAXX-PODS-ALL===',
       KLOG,
-      '===SHELLPILOT-PODS-NS===',
+      '===OPSMAXX-PODS-NS===',
       podSection
     ].join('\n')
 
@@ -324,14 +324,14 @@ describe('klog output is recognised as failure, not as data', () => {
 describe('a cluster that went quiet behind a readable kubeconfig', () => {
   const OUTPUT = [
     '{"clientVersion":{"gitVersion":"v1.33.2"}}',
-    '===SHELLPILOT-CTX===',
+    '===OPSMAXX-CTX===',
     '      docker-desktop   docker-desktop   docker-desktop',
     '*     minikube         minikube         minikube         default',
-    '===SHELLPILOT-NS===',
+    '===OPSMAXX-NS===',
     'Unable to connect to the server: dial tcp 127.0.0.1:8443: connect: connection refused',
-    '===SHELLPILOT-PODS-ALL===',
+    '===OPSMAXX-PODS-ALL===',
     'Unable to connect to the server: dial tcp 127.0.0.1:8443: connect: connection refused',
-    '===SHELLPILOT-PODS-NS===',
+    '===OPSMAXX-PODS-NS===',
     'Unable to connect to the server: dial tcp 127.0.0.1:8443: connect: connection refused'
   ].join('\n')
 
@@ -361,14 +361,14 @@ describe('a cluster that went quiet behind a readable kubeconfig', () => {
   it('prefers kubectl\'s sentence over its klog line', () => {
     const noisy = [
       '{"clientVersion":{"gitVersion":"v1.33.2"}}',
-      '===SHELLPILOT-CTX===',
+      '===OPSMAXX-CTX===',
       '*     docker-desktop   docker-desktop   docker-desktop   default',
-      '===SHELLPILOT-NS===',
+      '===OPSMAXX-NS===',
       'E0907 21:14:59.291121   83548 memcache.go:265] "Unhandled Error" err="x"',
       'Unable to connect to the server: connection refused',
-      '===SHELLPILOT-PODS-ALL===',
+      '===OPSMAXX-PODS-ALL===',
       'E0907 21:15:00.150896   83933 memcache.go:265] "Unhandled Error" err="x"',
-      '===SHELLPILOT-PODS-NS===',
+      '===OPSMAXX-PODS-NS===',
       'E0907 21:15:00.317007   84050 memcache.go:265] "Unhandled Error" err="x"'
     ].join('\n')
     const probe = parseK8sOutput(noisy, 1)
@@ -388,15 +388,15 @@ describe('a cluster that went quiet behind a readable kubeconfig', () => {
 describe('pod sections that are both errors', () => {
   const OUTPUT = [
     '{"clientVersion":{"gitVersion":"v1.33.2"}}',
-    '===SHELLPILOT-CTX===',
+    '===OPSMAXX-CTX===',
     '      docker-desktop   docker-desktop   docker-desktop',
     '*     minikube         minikube         minikube         default',
-    '===SHELLPILOT-NS===',
+    '===OPSMAXX-NS===',
     'E0907 18:32:06.388539   73814 memcache.go:265] "Unhandled Error" err="couldn\'t get server API group list"',
-    '===SHELLPILOT-PODS-ALL===',
+    '===OPSMAXX-PODS-ALL===',
     'E0907 18:32:06.421955   73814 memcache.go:265] "Unhandled Error" err="couldn\'t get server API group list"',
     'Unable to connect to the server: dial tcp 127.0.0.1:8443: connect: connection refused',
-    '===SHELLPILOT-PODS-NS===',
+    '===OPSMAXX-PODS-NS===',
     'E0907 18:32:06.444120   73814 memcache.go:265] "Unhandled Error" err="couldn\'t get server API group list"',
     'Unable to connect to the server: dial tcp 127.0.0.1:8443: connect: connection refused'
   ].join('\n')
@@ -429,7 +429,7 @@ describe('the overview reads what the readiness report needs', () => {
     // the convention readBlock sets -- what has to be distinguished is the
     // read that answered with an error.
     const out =
-      '===SHELLPILOT-PDBS===\nError from server (Forbidden): poddisruptionbudgets is forbidden\n'
+      '===OPSMAXX-PDBS===\nError from server (Forbidden): poddisruptionbudgets is forbidden\n'
     const o = parseK8sOverview(out, 1)
     expect(o.pdbs.ok).toBe(false)
   })

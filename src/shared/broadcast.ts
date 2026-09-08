@@ -358,7 +358,7 @@ export const BROADCAST_OUTPUT_CAP = 20_000
 //   job needs re-authorising.
 //
 // B2 made a job outlive the process. A job resumed at the next launch is being
-// acted on by a ShellPilot that never showed anybody a dialog, and "the
+// acted on by a OpsMaxx that never showed anybody a dialog, and "the
 // renderer computed a plan" is not a fact that survives a restart — it was
 // never written down anywhere. `BroadcastPlan` was computed in a `useMemo` and
 // thrown away.

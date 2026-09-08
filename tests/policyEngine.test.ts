@@ -40,7 +40,7 @@ function group(overrides: Partial<AccessGroup['capabilities']> = {}, filePolicie
       // Roadmap item 31, and denied here rather than allowed: it is the one
       // capability in the grid no MCP tool reads at all, so a fixture that
       // granted it would suggest the engine has something to hand an agent.
-      // What it gates is whether ShellPilot's own posture probe may collect a
+      // What it gates is whether OpsMaxx's own posture probe may collect a
       // host's firewall rule lines.
       firewallRules: 'deny',
       sudoersRead: 'deny',

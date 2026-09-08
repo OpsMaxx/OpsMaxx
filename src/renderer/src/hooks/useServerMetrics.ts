@@ -83,7 +83,7 @@ export function useServerMetrics(server: Server, active: boolean): LiveMetrics {
         hops: sshHopsFor(server)
       }
       const poll = async (): Promise<void> => {
-        const res = await window.shellpilot?.metrics.sample(server.id, cfg)
+        const res = await window.opsmaxx?.metrics.sample(server.id, cfg)
         if (!alive) return
         const s = ref.current
         if (res?.ok && res.data) {

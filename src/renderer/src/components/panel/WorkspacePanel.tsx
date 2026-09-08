@@ -192,7 +192,7 @@ function NoTabs(): React.JSX.Element {
 
   useEffect(() => {
     let live = true
-    void window.shellpilot?.sshConfig?.read().then((r) => {
+    void window.opsmaxx?.sshConfig?.read().then((r) => {
       if (!live) return
       setConfig(r?.ok ? { found: true, count: r.hosts?.length ?? 0 } : { found: false, count: 0 })
     })
@@ -219,7 +219,7 @@ function NoTabs(): React.JSX.Element {
       title="No servers yet"
       message={
         importFirst
-          ? `ShellPilot found ${config.count} host${config.count === 1 ? '' : 's'} in your ~/.ssh/config. Import them, or add one by hand.`
+          ? `OpsMaxx found ${config.count} host${config.count === 1 ? '' : 's'} in your ~/.ssh/config. Import them, or add one by hand.`
           : 'Add a connection to get started, or import the ones you already have from ~/.ssh/config.'
       }
       action={

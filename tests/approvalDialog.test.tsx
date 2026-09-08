@@ -108,7 +108,7 @@ describe('the approval modal', () => {
     // Order in the document, not merely presence: the old modal had the
     // command as the headline and no consequence at all.
     expect(consequence.compareDocumentPosition(command) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(screen.getByText(/What Claude Code asked ShellPilot to run/)).toBeTruthy()
+    expect(screen.getByText(/What Claude Code asked OpsMaxx to run/)).toBeTruthy()
   })
 
   it('says out loud that it cannot describe a command it does not recognise', async () => {
@@ -198,7 +198,7 @@ describe('provenance the request itself does not carry', () => {
   })
 
   // The bridge now DOES ask -- every gated tool takes an optional `intent` --
-  // so the absence moved from being ShellPilot's gap to being the agent's
+  // so the absence moved from being OpsMaxx's gap to being the agent's
   // silence, and the sentence had to move with it. See "what the agent itself
   // claims it is doing" below for both halves.
 })
@@ -245,12 +245,12 @@ describe('the facts main sends rather than the renderer re-deriving them', () =>
     harness({
       approvals: [
         request({
-          riskReason: 'ShellPilot could not classify this statement as a read, so it is treated as one that changes data'
+          riskReason: 'OpsMaxx could not classify this statement as a read, so it is treated as one that changes data'
         })
       ]
     })
     render(<ApprovalWatcher />)
-    expect(await screen.findByText(/HIGH because: ShellPilot could not classify this statement as a read/)).toBeTruthy()
+    expect(await screen.findByText(/HIGH because: OpsMaxx could not classify this statement as a read/)).toBeTruthy()
     // The local derivation's sentence for this same request. Seeing it would
     // mean the plumbing arrived and the modal ignored it.
     expect(screen.queryByText(/because: the command runs as root/)).toBeNull()
@@ -309,11 +309,11 @@ describe('the facts main sends rather than the renderer re-deriving them', () =>
 })
 
 describe('what the agent itself claims it is doing', () => {
-  it('shows the agent’s stated intent, attributed to the agent and not to ShellPilot', async () => {
+  it('shows the agent’s stated intent, attributed to the agent and not to OpsMaxx', async () => {
     harness({ approvals: [request({ intent: 'Restarting cron after the crontab edit you approved earlier' })] })
     render(<ApprovalWatcher />)
     expect(await screen.findByText(/Restarting cron after the crontab edit/)).toBeTruthy()
-    expect(screen.getByText(/Claude Code’s own words, not ShellPilot’s/)).toBeTruthy()
+    expect(screen.getByText(/Claude Code’s own words, not OpsMaxx’s/)).toBeTruthy()
     expect(screen.getByText(/Nothing checked whether they are true/)).toBeTruthy()
   })
 

@@ -196,7 +196,7 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
     setTimerHealthState(null)
     try {
       const call = (
-        window.shellpilot as
+        window.opsmaxx as
           | {
               fleet?: {
                 timer?: (
@@ -245,7 +245,7 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
   const collect = async (): Promise<void> => {
     setLoading(true)
     try {
-      const res = await window.shellpilot?.cron?.collect([
+      const res = await window.opsmaxx?.cron?.collect([
         ...eligible.map((s) => ({
           serverId: s.id,
           serverName: s.name,
@@ -446,7 +446,7 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
                     className="ui-note"
                     data-testid={`cron-not-editable-${h.serverId}`}
                   >
-                    {n} of these cannot be edited from ShellPilot: {reason}
+                    {n} of these cannot be edited from OpsMaxx: {reason}
                   </div>
                 ))}
                 {/* Why the pointer is not there, rather than simply not putting

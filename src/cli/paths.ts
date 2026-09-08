@@ -2,19 +2,19 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 
-// Deliberately separate from ShellPilot Desktop/Core's own userData directory:
+// Deliberately separate from OpsMaxx Desktop/Core's own userData directory:
 // this is a small cache the CLI keeps for itself, keyed by agent, so it does
 // not need to re-pair on every launch. It holds only an already-scoped MCP
 // bearer token — the same kind of secret a user would otherwise paste into a
 // client's mcp.json by hand, nothing more sensitive than that.
 function configDir(): string {
   if (process.platform === 'win32') {
-    return join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'ShellPilot', 'cli')
+    return join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'OpsMaxx', 'cli')
   }
   if (process.platform === 'darwin') {
-    return join(homedir(), 'Library', 'Application Support', 'ShellPilot', 'cli')
+    return join(homedir(), 'Library', 'Application Support', 'OpsMaxx', 'cli')
   }
-  return join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'shellpilot', 'cli')
+  return join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'opsmaxx', 'cli')
 }
 
 export interface CachedSession {

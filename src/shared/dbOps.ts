@@ -150,7 +150,7 @@ export const DB_ANSWER_HELP: Record<DbAnswerStatus, string> = {
   partial:
     'The server answered, but this account is only shown part of the picture and is not told so. Treat the numbers as a floor, never as the total.',
   denied:
-    'This exists and the account ShellPilot connected as was not allowed to read it. A more privileged account would see more. This is NOT the same as "there is nothing here".',
+    'This exists and the account OpsMaxx connected as was not allowed to read it. A more privileged account would see more. This is NOT the same as "there is nothing here".',
   absent: 'The feature this question is about is not enabled on this server, so there is nothing to read.',
   'not-applicable': 'This question does not apply to the role this server is playing.',
   unsupported: 'This server version cannot answer this question at all. Treat it as UNKNOWN, never as zero.',
@@ -1375,7 +1375,7 @@ export function judgePgReplication(v: PgReplicationValue): DbVerdict {
       level: 'unknown',
       headline: 'No standby is connected to this server.',
       because:
-        'pg_stat_replication is empty. On a server that was never meant to have a replica that is correct; on one that was, it means the replica is gone. ShellPilot cannot tell which, and will not guess.'
+        'pg_stat_replication is empty. On a server that was never meant to have a replica that is correct; on one that was, it means the replica is gone. OpsMaxx cannot tell which, and will not guess.'
     }
   }
 
@@ -1458,7 +1458,7 @@ export function judgePgArchiver(a: PgArchiver): DbVerdict {
       level: 'unknown',
       headline: `WAL archiving is off (archive_mode = ${a.archiveMode}).`,
       because:
-        'Nothing is being archived, so this server has no point-in-time recovery. That may be deliberate. It is reported rather than judged because ShellPilot cannot know your recovery plan.'
+        'Nothing is being archived, so this server has no point-in-time recovery. That may be deliberate. It is reported rather than judged because OpsMaxx cannot know your recovery plan.'
     }
   }
   const failed = a.failedCount ?? 0
@@ -4233,7 +4233,7 @@ export function judgeRedisReplication(v: RedisReplicationValue): DbVerdict {
       level: 'unknown',
       headline: 'This is a master with no replicas connected.',
       because:
-        'Whether that is correct cannot be answered from INFO. A standalone Redis reports exactly this line and is completely healthy; so does a master whose only replica died a minute ago, and the two are identical strings. ShellPilot does not read a Sentinel or a cluster configuration, so it does not know which this is — and calling it healthy would be a guess in the hour it matters.'
+        'Whether that is correct cannot be answered from INFO. A standalone Redis reports exactly this line and is completely healthy; so does a master whose only replica died a minute ago, and the two are identical strings. OpsMaxx does not read a Sentinel or a cluster configuration, so it does not know which this is — and calling it healthy would be a guess in the hour it matters.'
     }
   }
   const offline = v.replicas.filter((r) => r.state !== 'online')
@@ -4492,7 +4492,7 @@ export function worstVerdict(answers: DbAnswer<unknown>[]): DbVerdictLevel {
  *    reads and a table that grows forever.
  *  * `unknown` is excluded even though it is not `ok`, with one exception:
  *    a question that went from answerable to `denied` is itself an event —
- *    someone changed a grant — but ShellPilot cannot see the transition from a
+ *    someone changed a grant — but OpsMaxx cannot see the transition from a
  *    single read, so that belongs to whoever compares two reads, not here.
  */
 export function notableDbEvents(report: DbOpsReport): { kind: string; payload: Record<string, unknown> }[] {

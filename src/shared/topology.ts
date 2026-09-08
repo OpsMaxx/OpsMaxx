@@ -3,7 +3,7 @@
 //
 // This file exists for one question, asked at the moment a patch run is about
 // to restart a machine: WHO ELSE GOES DOWN WITH IT. There is no general answer
-// to that. ShellPilot is not a CMDB, it does not read your load balancer, it
+// to that. OpsMaxx is not a CMDB, it does not read your load balancer, it
 // has never seen your replication topology, and a feature that pretended
 // otherwise would be worse than one that says nothing — an operator who
 // believes a reboot has been checked stops checking it themselves.
@@ -353,7 +353,7 @@ export function unmatchedHopNote(topo: Topology): string | null {
   const who = names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} and others`
   return (
     `${n} ${n === 1 ? 'hop is' : 'hops are'} not backed by a saved server (on ${who}), so the ` +
-    'reboot checks below cannot see them. Two servers can share a bastion that ShellPilot has ' +
+    'reboot checks below cannot see them. Two servers can share a bastion that OpsMaxx has ' +
     'never been told about; if one of the servers below is that machine, nothing here will say so.'
   )
 }
@@ -464,7 +464,7 @@ export function sameWaveDatabaseBlocks(topo: Topology, waveServerIds: string[]):
         serverName: h.serverName,
         reason:
           `${names} both carry a saved ${list[0].dbName} database, and this wave would restart ` +
-          'them together. ShellPilot does not know whether they replicate — it only knows you ' +
+          'them together. OpsMaxx does not know whether they replicate — it only knows you ' +
           'saved the same database on both — so it will not restart them in the same wave. Put ' +
           'them in different waves.'
       })

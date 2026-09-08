@@ -35,7 +35,7 @@ package main
 //     clients pin their certificate and cannot be intercepted by anyone; the
 //     honest answer is to notice, say so, and let that host through untouched
 //     rather than leave the user with an application that simply does not
-//     work while ShellPilot is running.
+//     work while OpsMaxx is running.
 //
 // # Why flow payloads are not run through redact()
 //
@@ -890,7 +890,7 @@ func (ins *Inspector) authConnect(_ string, ctx *goproxy.ProxyCtx) (*goproxy.Con
 			defer client.Close()
 			_, _ = io.WriteString(client,
 				"HTTP/1.1 407 Proxy Authentication Required\r\n"+
-					"Proxy-Authenticate: Basic realm=\"ShellPilot traffic inspector\"\r\n"+
+					"Proxy-Authenticate: Basic realm=\"OpsMaxx traffic inspector\"\r\n"+
 					"Content-Length: 0\r\n\r\n")
 		},
 	}, ""
@@ -916,7 +916,7 @@ func (ins *Inspector) authRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*ht
 	resp := goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusProxyAuthRequired,
 		"This traffic inspector requires proxy credentials.")
 	if resp != nil {
-		resp.Header.Set("Proxy-Authenticate", `Basic realm="ShellPilot traffic inspector"`)
+		resp.Header.Set("Proxy-Authenticate", `Basic realm="OpsMaxx traffic inspector"`)
 	}
 	return req, resp
 }
@@ -960,7 +960,7 @@ func (ins *Inspector) onConnect(host string, ctx *goproxy.ProxyCtx) (*goproxy.Co
 //
 // Interception breaks these rather than merely failing to read them, so
 // silence is the one thing that must not happen: the user sees an application
-// stop working and has nothing connecting it to ShellPilot.
+// stop working and has nothing connecting it to OpsMaxx.
 func (ins *Inspector) reportIfOpaque(m *connectMark) {
 	if m.tls.Load() || m.used.Load() || ins.ctx.Err() != nil {
 		return
@@ -1096,7 +1096,7 @@ func (ins *Inspector) onResponse(resp *http.Response, ctx *goproxy.ProxyCtx) *ht
 		// should not have to learn that our 500 means their server's failure.
 		if ctx.Req != nil {
 			return goproxy.NewResponse(ctx.Req, goproxy.ContentTypeText, http.StatusBadGateway,
-				"ShellPilot could not reach the upstream server.")
+				"OpsMaxx could not reach the upstream server.")
 		}
 		return resp
 	}
@@ -1422,7 +1422,7 @@ func (ins *Inspector) signHost(host string) (*tls.Certificate, error) {
 }
 
 func pkixNameFor(host string) pkix.Name {
-	return pkix.Name{CommonName: host, Organization: []string{"ShellPilot Traffic Inspector"}}
+	return pkix.Name{CommonName: host, Organization: []string{"OpsMaxx Traffic Inspector"}}
 }
 
 // parseCA turns the PEM pair from the parent into something that can sign, and
@@ -1867,7 +1867,7 @@ func (s *Server) inspectCAGenerate(req *Request) (interface{}, error) {
 	}
 	name := strings.TrimSpace(p.CommonName)
 	if name == "" {
-		name = "ShellPilot Traffic Inspector"
+		name = "OpsMaxx Traffic Inspector"
 	}
 	if len(name) > 64 {
 		// RFC 5280 caps a CommonName at 64 characters and some trust stores
@@ -1895,7 +1895,7 @@ func (s *Server) inspectCAGenerate(req *Request) (interface{}, error) {
 		SerialNumber: serial,
 		Subject: pkix.Name{
 			CommonName:   name,
-			Organization: []string{"ShellPilot"},
+			Organization: []string{"OpsMaxx"},
 		},
 		NotBefore:             now.Add(-inspectLeafBackdate),
 		NotAfter:              now.AddDate(0, 0, days),

@@ -20,7 +20,7 @@ vi.mock('electron', async () => {
   const { mkdtempSync } = await import('node:fs')
   const { tmpdir } = await import('node:os')
   const { join } = await import('node:path')
-  const d = mkdtempSync(join(tmpdir(), 'shellpilot-bio-'))
+  const d = mkdtempSync(join(tmpdir(), 'opsmaxx-bio-'))
   return {
     app: { getPath: () => d },
     safeStorage: {
@@ -87,7 +87,7 @@ describe('session scope — the default, and the reason this is defensible', () 
     const { app } = await import('electron')
     // KeePassXC's model: an attacker who can read your files gets nothing,
     // because there is nothing on disk to read.
-    expect(existsSync(join(app.getPath('userData'), 'shellpilot-vault-bio.json'))).toBe(false)
+    expect(existsSync(join(app.getPath('userData'), 'opsmaxx-vault-bio.json'))).toBe(false)
     expect(bio.biometricScope()).toBe('session')
   })
 
@@ -111,7 +111,7 @@ describe('session scope — the default, and the reason this is defensible', () 
     if (!bio.biometricSupport().available) return
     bio.enableBiometricUnlock('persistent')
     const { app } = await import('electron')
-    const file = join(app.getPath('userData'), 'shellpilot-vault-bio.json')
+    const file = join(app.getPath('userData'), 'opsmaxx-vault-bio.json')
     expect(existsSync(file)).toBe(true)
     bio.enableBiometricUnlock('session')
     expect(existsSync(file)).toBe(false)
@@ -180,7 +180,7 @@ describe('enabling', () => {
     if (!bio.biometricSupport().available) return
     bio.enableBiometricUnlock('persistent')
     const { app } = await import('electron')
-    const raw = readFileSync(join(app.getPath('userData'), 'shellpilot-vault-bio.json'), 'utf8')
+    const raw = readFileSync(join(app.getPath('userData'), 'opsmaxx-vault-bio.json'), 'utf8')
     const keyB64 = Buffer.alloc(32, 7).toString('base64')
 
     // The derived key must not be recoverable by reading the file alone —

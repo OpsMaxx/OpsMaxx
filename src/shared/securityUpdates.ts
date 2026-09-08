@@ -18,10 +18,10 @@
 // count as a package count anywhere.
 
 export const SEC_MARKERS = {
-  manager: '===SHELLPILOT-SECPM===',
-  check: '===SHELLPILOT-SECCHECK===',
-  list: '===SHELLPILOT-SECLIST===',
-  summary: '===SHELLPILOT-SECSUM==='
+  manager: '===OPSMAXX-SECPM===',
+  check: '===OPSMAXX-SECCHECK===',
+  list: '===OPSMAXX-SECLIST===',
+  summary: '===OPSMAXX-SECSUM==='
 } as const
 
 /**

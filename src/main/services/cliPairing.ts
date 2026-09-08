@@ -5,9 +5,9 @@ import { listCachedWorkspaces } from './mcpDataCache'
 import { listGroups } from './policyStore'
 import { createSession } from './mcpAuth'
 
-// Bootstraps a session for the `shellpilot claude|codex|run` CLI launcher
+// Bootstraps a session for the `opsmaxx claude|codex|run` CLI launcher
 // without weakening the existing consent model: the code is only ever shown
-// inside ShellPilot itself (never returned to whichever local process called
+// inside OpsMaxx itself (never returned to whichever local process called
 // /pair/start), so completing a pairing proves the human at the keyboard can
 // see both the app window and the terminal — the same property a TV-app or
 // `gh auth login` device code gets from a physically separate screen.
@@ -98,7 +98,7 @@ export function confirmCliPairing(
   emitter.emit('event', { type: 'resolved', request: toRequest(id, p) } satisfies CliPairingEvent)
 
   const workspaces = listCachedWorkspaces()
-  if (workspaces.length === 0) return { ok: false, error: 'No workspace exists in ShellPilot yet — create one first.' }
+  if (workspaces.length === 0) return { ok: false, error: 'No workspace exists in OpsMaxx yet — create one first.' }
   const group = listGroups()[0]
 
   // There's no workspace picker at pairing time, so a CLI-paired session is

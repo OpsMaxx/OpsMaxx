@@ -271,11 +271,11 @@ export function vpnStart(id: string): Promise<VpnStartResult> {
 // The OS reports EADDRINUSE either way, and a driver turns that into
 // `port-in-use` — but "port 1080 is already in use" sends the user hunting
 // through their whole machine, when the answer is almost always the other
-// ShellPilot profile they left running. A driver cannot say that: it only
+// OpsMaxx profile they left running. A driver cannot say that: it only
 // knows its own run. The manager knows all of them, so the check belongs here.
 //
 // This does not replace the driver's EADDRINUSE handling. Something outside
-// ShellPilot can still hold the port, and two starts can still race between
+// OpsMaxx can still hold the port, and two starts can still race between
 // this check and the bind. It converts the common case from a puzzle into a
 // sentence.
 function portConflict(profile: VpnProfile): string | null {

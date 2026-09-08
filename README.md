@@ -1,34 +1,34 @@
 <div align="center">
 
-<img src="docs/images/logo.png" alt="ShellPilot logo" width="120" />
+<img src="docs/images/logo.png" alt="OpsMaxx logo" width="120" />
 
-# ShellPilot
+# OpsMaxx
 
 **A free, open-source SSH client, SFTP browser, database manager, secrets vault and secure AI-agent gateway — in one desktop app.**
 
 Your DevOps workstation, everywhere. Windows · macOS · Linux.
 
-<a href="https://github.com/ghauri01/ShellPilot/releases/latest">
-<img src="https://img.shields.io/badge/Download%20ShellPilot-22c7d6?style=for-the-badge&labelColor=0d1119" alt="Download ShellPilot" height="34" />
+<a href="https://github.com/ghauri01/OpsMaxx/releases/latest">
+<img src="https://img.shields.io/badge/Download%20OpsMaxx-22c7d6?style=for-the-badge&labelColor=0d1119" alt="Download OpsMaxx" height="34" />
 </a>
 
-<a href="https://github.com/ghauri01/ShellPilot/releases/latest"><img src="https://img.shields.io/badge/Windows-0d1119?style=for-the-badge&logo=windows&logoColor=22c7d6" alt="Windows" height="26" /></a>
-<a href="https://github.com/ghauri01/ShellPilot/releases/latest"><img src="https://img.shields.io/badge/macOS-0d1119?style=for-the-badge&logo=apple&logoColor=22c7d6" alt="macOS" height="26" /></a>
-<a href="https://github.com/ghauri01/ShellPilot/releases/latest"><img src="https://img.shields.io/badge/Linux-0d1119?style=for-the-badge&logo=linux&logoColor=22c7d6" alt="Linux" height="26" /></a>
+<a href="https://github.com/ghauri01/OpsMaxx/releases/latest"><img src="https://img.shields.io/badge/Windows-0d1119?style=for-the-badge&logo=windows&logoColor=22c7d6" alt="Windows" height="26" /></a>
+<a href="https://github.com/ghauri01/OpsMaxx/releases/latest"><img src="https://img.shields.io/badge/macOS-0d1119?style=for-the-badge&logo=apple&logoColor=22c7d6" alt="macOS" height="26" /></a>
+<a href="https://github.com/ghauri01/OpsMaxx/releases/latest"><img src="https://img.shields.io/badge/Linux-0d1119?style=for-the-badge&logo=linux&logoColor=22c7d6" alt="Linux" height="26" /></a>
 
-[![Latest release](https://img.shields.io/github/v/release/ghauri01/ShellPilot?style=flat-square&label=release&color=22c7d6&labelColor=30363d&sort=semver)](https://github.com/ghauri01/ShellPilot/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/ghauri01/ShellPilot/total?style=flat-square&label=downloads&color=22c7d6&labelColor=30363d)](https://github.com/ghauri01/ShellPilot/releases)
-[![Stars](https://img.shields.io/github/stars/ghauri01/ShellPilot?style=flat-square&label=stars&color=22c7d6&labelColor=30363d)](https://github.com/ghauri01/ShellPilot/stargazers)
+[![Latest release](https://img.shields.io/github/v/release/ghauri01/OpsMaxx?style=flat-square&label=release&color=22c7d6&labelColor=30363d&sort=semver)](https://github.com/ghauri01/OpsMaxx/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/ghauri01/OpsMaxx/total?style=flat-square&label=downloads&color=22c7d6&labelColor=30363d)](https://github.com/ghauri01/OpsMaxx/releases)
+[![Stars](https://img.shields.io/github/stars/ghauri01/OpsMaxx?style=flat-square&label=stars&color=22c7d6&labelColor=30363d)](https://github.com/ghauri01/OpsMaxx/stargazers)
 [![License](https://img.shields.io/badge/license-MIT-22c7d6?style=flat-square&labelColor=30363d)](LICENSE)
 
-[Features](#features) · [AI Agent Access](#ai-agent-access) · [Install](#install) · [Quick start](#quick-start) · [Comparison](#shellpilot-vs-mobaxterm-putty-termius-and-securecrt) · [Workspaces](#workspaces) · [Local terminal](#local-terminal) · [Command palette](#command-palette) · [Shortcuts](#keyboard-shortcuts) · [Databases](#databases) · [Vault](#vault) · [Use cases](#real-world-use-cases) · [FAQ](#faq) · [Contributing](#contributing) · [Licence](#licence)
+[Features](#features) · [AI Agent Access](#ai-agent-access) · [Install](#install) · [Quick start](#quick-start) · [Comparison](#opsmaxx-vs-mobaxterm-putty-termius-and-securecrt) · [Workspaces](#workspaces) · [Local terminal](#local-terminal) · [Command palette](#command-palette) · [Shortcuts](#keyboard-shortcuts) · [Databases](#databases) · [Vault](#vault) · [Use cases](#real-world-use-cases) · [FAQ](#faq) · [Contributing](#contributing) · [Licence](#licence)
 
 </div>
 
 ---
 
 > [!CAUTION]
-> **Windows and macOS will show a security warning the first time you run ShellPilot.
+> **Windows and macOS will show a security warning the first time you run OpsMaxx.
 > This is expected, and it is not a virus.**
 >
 > The app is **not notarized**, and on Windows not signed at all — a code-signing
@@ -40,28 +40,28 @@ Your DevOps workstation, everywhere. Windows · macOS · Linux.
 > each file, so you can verify the download yourself.
 > → [How to get past the warning, and the scan results](#first-run-why-your-computer-shows-a-warning)
 
-ShellPilot is a **free and open-source alternative to MobaXterm, PuTTY, Termius, SecureCRT and MobaXterm Personal Edition**, built for engineers who spend the day moving between bastions, production boxes and databases — and increasingly, for the AI coding agents helping them do it. It combines an **SSH terminal**, **SFTP file browser**, **server monitoring**, **SSH tunnels**, a **multi-engine database client**, an **encrypted password vault** and a **secure [MCP](#ai-agent-access) bridge for Claude Code, Claude Desktop, Codex and other AI agents** in a single window — with no account, no telemetry and no subscription.
+OpsMaxx is a **free and open-source alternative to MobaXterm, PuTTY, Termius, SecureCRT and MobaXterm Personal Edition**, built for engineers who spend the day moving between bastions, production boxes and databases — and increasingly, for the AI coding agents helping them do it. It combines an **SSH terminal**, **SFTP file browser**, **server monitoring**, **SSH tunnels**, a **multi-engine database client**, an **encrypted password vault** and a **secure [MCP](#ai-agent-access) bridge for Claude Code, Claude Desktop, Codex and other AI agents** in a single window — with no account, no telemetry and no subscription.
 
 **What makes it different** isn't any one of those — MobaXterm, Termius and the rest each do some of this. It's that they're all in the same place, sharing the same credential store, and that credential store is now also what stands *between* an AI agent and your infrastructure, not something an agent ever has to be handed directly.
 
-![ShellPilot main window](docs/images/main-window.png)
+![OpsMaxx main window](docs/images/main-window.png)
 
-## Why ShellPilot
+## Why OpsMaxx
 
-Most terminal tools do one thing. A typical DevOps task needs four: open a shell through a jump host, tail a file, poke a database that is only reachable from inside the network, and look up a credential. ShellPilot puts those in one place, keeps them organised per project, and stores every secret in your operating system's keychain rather than a plaintext config file.
+Most terminal tools do one thing. A typical DevOps task needs four: open a shell through a jump host, tail a file, poke a database that is only reachable from inside the network, and look up a credential. OpsMaxx puts those in one place, keeps them organised per project, and stores every secret in your operating system's keychain rather than a plaintext config file.
 
 - **No lock-in** — connections import from your existing `~/.ssh/config`
 - **No account** — nothing is uploaded, nothing phones home
 - **No cost** — MIT licensed, free forever, contributions welcome
 - **No exposed credentials, even to AI** — Claude Code, Claude Desktop and Codex can run commands and read files through it, but never see a password, private key, IP or username — see [AI Agent Access](#ai-agent-access)
 
-## ShellPilot vs MobaXterm, PuTTY, Termius and SecureCRT
+## OpsMaxx vs MobaXterm, PuTTY, Termius and SecureCRT
 
 If you are looking for a **free MobaXterm alternative**, a **modern PuTTY replacement**, or an
 **open-source Termius alternative** that does not put your saved servers behind a subscription,
 this is the short version:
 
-| | **ShellPilot** | MobaXterm | PuTTY | Termius | SecureCRT |
+| | **OpsMaxx** | MobaXterm | PuTTY | Termius | SecureCRT |
 |---|---|---|---|---|---|
 | Price | **Free, MIT** | Free tier, paid Pro | Free | Free tier, paid Pro | Paid licence |
 | Open source | **Yes** | No | Yes | No | No |
@@ -138,13 +138,13 @@ Fleet operations — <kbd>Ctrl</kbd>+<kbd>M</kbd>, and each one **off until you 
 
 Claude Code, Claude Desktop, Codex, Gemini CLI and anything else that speaks
 [MCP](https://modelcontextprotocol.io) can list your servers, run commands, browse/edit files and
-check metrics through ShellPilot. The agent asks for a server by its friendly name; ShellPilot
+check metrics through OpsMaxx. The agent asks for a server by its friendly name; OpsMaxx
 resolves the real connection, enforces per-capability policy, and can stop and ask you before
 anything sensitive runs.
 
-![AI agent → MCP → ShellPilot policy → approval → SSH/SFTP/database → servers](docs/images/ai-mcp-architecture.svg)
+![AI agent → MCP → OpsMaxx policy → approval → SSH/SFTP/database → servers](docs/images/ai-mcp-architecture.svg)
 
-**An AI agent connected through ShellPilot never receives:**
+**An AI agent connected through OpsMaxx never receives:**
 
 - SSH passwords
 - SSH private keys or passphrases
@@ -156,10 +156,10 @@ It only ever gets a friendly server name, whatever a capability's ALLOW/ASK/DENY
 and redacted text output. See [AI-SECURITY.md](docs/AI-SECURITY.md) for the full threat model —
 including what this design does **not** claim.
 
-![ShellPilot's AI & MCP overview screen](docs/images/ai-mcp-overview.png)
+![OpsMaxx's AI & MCP overview screen](docs/images/ai-mcp-overview.png)
 
 The **never receives** list above is enforced by an **access group** — a per-capability
-ALLOW/ASK/DENY policy, not a single yes/no switch. Four built-in groups ship with ShellPilot
+ALLOW/ASK/DENY policy, not a single yes/no switch. Four built-in groups ship with OpsMaxx
 (Read Only, Read & Write, Sudo Access, Full Access); create as many custom ones as you want, and
 override individual file paths on top of the blanket read/write setting:
 
@@ -172,11 +172,11 @@ override individual file paths on top of the blanket read/write setting:
 
 **You ask Claude Code:** *"Check my production Nginx server."*
 
-1. Claude Code calls ShellPilot's `list_servers` tool. It gets back friendly names for whatever
+1. Claude Code calls OpsMaxx's `list_servers` tool. It gets back friendly names for whatever
    the session's workspace(s) and access group can see — say, `Nginx Server Prod` — never a hostname,
    IP or username.
 2. It calls `get_server_metrics` (or `execute_command` with something like `systemctl status
-   nginx`) naming that server. ShellPilot resolves `"Nginx Server Prod"` to the real server record,
+   nginx`) naming that server. OpsMaxx resolves `"Nginx Server Prod"` to the real server record,
    checks the access group governing it, and — if that capability is ALLOW — looks up the actual
    SSH credential from your OS keychain and connects. If it's ASK, the request sits in
    **Approvals** until you decide.
@@ -185,7 +185,7 @@ override individual file paths on top of the blanket read/write setting:
    it's returned.
 4. Claude Code sees the result — CPU, memory, `systemctl` output, whatever was asked for — and
    reports back to you. It never saw the server's IP, its username, or the key that authenticated
-   the connection. The whole exchange is in the **Audit Log**, alongside anything else ShellPilot
+   the connection. The whole exchange is in the **Audit Log**, alongside anything else OpsMaxx
    allowed, asked about, denied or failed:
 
 ![Audit Log showing agent, workspace/server, action and result](docs/images/ai-audit-log.png)
@@ -199,7 +199,7 @@ gives any unassigned workspace an access group, creates a session, and hands it 
 |---|---|
 | **Connect Claude Code** | Copies a ready `claude mcp add` command, token already in it — paste it in a terminal |
 | **Connect Claude Desktop** | Writes the bridge entry into `claude_desktop_config.json`, merging with whatever is already there |
-| **Connect Codex** | Writes a managed `[mcp_servers.shellpilot]` block into `~/.codex/config.toml` |
+| **Connect Codex** | Writes a managed `[mcp_servers.opsmaxx]` block into `~/.codex/config.toml` |
 
 Existing config files are backed up first, other MCP servers in them are left alone, and running a
 button again replaces its own entry rather than adding a second one. A workspace you have already
@@ -209,15 +209,15 @@ There is also a CLI, if you would rather not click:
 
 | Command | What it does |
 |---|---|
-| `shellpilot claude` | Registers ShellPilot with Claude Code (`claude mcp add`) and launches it — a one-time pairing code appears in ShellPilot instead of copying a token by hand |
-| `shellpilot codex` | Same, for Codex — writes a managed block into `~/.codex/config.toml` |
-| `shellpilot run -- <command>` | Same pairing flow for any other MCP-aware CLI, via `SHELLPILOT_MCP_COMMAND`/`SHELLPILOT_MCP_ARGS` |
+| `opsmaxx claude` | Registers OpsMaxx with Claude Code (`claude mcp add`) and launches it — a one-time pairing code appears in OpsMaxx instead of copying a token by hand |
+| `opsmaxx codex` | Same, for Codex — writes a managed block into `~/.codex/config.toml` |
+| `opsmaxx run -- <command>` | Same pairing flow for any other MCP-aware CLI, via `OPSMAXX_MCP_COMMAND`/`OPSMAXX_MCP_ARGS` |
 
-> On macOS the `shellpilot` command is not added to your `PATH` by the installer — only the Windows
+> On macOS the `opsmaxx` command is not added to your `PATH` by the installer — only the Windows
 > installer does that. Use the Connect buttons, or call the launcher inside the app bundle directly.
 
 Every other client connects over **Streamable HTTP** with a URL and a bearer token that
-ShellPilot's own **Security** tab generates for you:
+OpsMaxx's own **Security** tab generates for you:
 
 ![Security tab: enable toggle, port, approval timeout, and connection snippets](docs/images/ai-security.png)
 
@@ -240,7 +240,7 @@ Not every client has a one-command launcher yet:
 ```json
 {
   "mcpServers": {
-    "shellpilot": {
+    "opsmaxx": {
       "type": "http",
       "url": "http://127.0.0.1:<port>/mcp",
       "headers": { "Authorization": "Bearer <token>" }
@@ -252,7 +252,7 @@ Not every client has a one-command launcher yet:
 **Claude Code** needs no file editing at all — one command registers the same thing:
 
 ```bash
-claude mcp add -s user --transport http shellpilot http://127.0.0.1:<port>/mcp --header "Authorization: Bearer <token>"
+claude mcp add -s user --transport http opsmaxx http://127.0.0.1:<port>/mcp --header "Authorization: Bearer <token>"
 ```
 
 ### Connecting Claude Desktop
@@ -261,17 +261,17 @@ Claude Desktop **does not read `url` or `headers`** from `claude_desktop_config.
 that file are launched as stdio subprocesses; Desktop's remote-server support is a separate
 account-level Connectors feature with nowhere to put a bearer token for a `127.0.0.1` address.
 
-ShellPilot ships a stdio bridge for exactly this case — a pure protocol relay that forwards
+OpsMaxx ships a stdio bridge for exactly this case — a pure protocol relay that forwards
 messages to the same authenticated HTTP endpoint, so a stdio-only client gets the identical
 policy, approval and audit path (`src/cli/bridge.ts`). Point Desktop at it:
 
 ```json
 {
   "mcpServers": {
-    "shellpilot": {
-      "command": "/Applications/ShellPilot.app/Contents/MacOS/ShellPilot",
+    "opsmaxx": {
+      "command": "/Applications/OpsMaxx.app/Contents/MacOS/OpsMaxx",
       "args": [
-        "/Applications/ShellPilot.app/Contents/Resources/app.asar.unpacked/out/cli/index.js",
+        "/Applications/OpsMaxx.app/Contents/Resources/app.asar.unpacked/out/cli/index.js",
         "bridge", "--token", "<token>", "--port", "<port>"
       ],
       "env": { "ELECTRON_RUN_AS_NODE": "1" }
@@ -280,18 +280,18 @@ policy, approval and audit path (`src/cli/bridge.ts`). Point Desktop at it:
 }
 ```
 
-On **Windows**, the two paths become `%LOCALAPPDATA%\Programs\ShellPilot\ShellPilot.exe` and
-`%LOCALAPPDATA%\Programs\ShellPilot\resources\app.asar.unpacked\out\cli\index.js`.
+On **Windows**, the two paths become `%LOCALAPPDATA%\Programs\OpsMaxx\OpsMaxx.exe` and
+`%LOCALAPPDATA%\Programs\OpsMaxx\resources\app.asar.unpacked\out\cli\index.js`.
 
 The config file lives at `~/Library/Application Support/Claude/claude_desktop_config.json` on
 macOS and `%APPDATA%\Claude\claude_desktop_config.json` on Windows. Restart Desktop afterwards.
 
-`ELECTRON_RUN_AS_NODE` makes ShellPilot's own bundled Electron binary run the bridge as plain
+`ELECTRON_RUN_AS_NODE` makes OpsMaxx's own bundled Electron binary run the bridge as plain
 Node, so nothing has to be installed separately and none of this depends on what is on your
 `PATH` — which Claude Desktop does not inherit from your shell.
 
 > **Give the Desktop session no expiry.** Set **Expires** to *Never* when creating it. The
-> default is 60 minutes, after which Desktop silently stops being able to reach ShellPilot until
+> default is 60 minutes, after which Desktop silently stops being able to reach OpsMaxx until
 > you issue a new token.
 
 The token is shown only once and stored only as a hash — if you lose it, revoke that session
@@ -321,16 +321,16 @@ under **Active Sessions** and create a new one rather than hunting for it:
 
 ## Install
 
-Download the latest build from the [Releases](https://github.com/ghauri01/ShellPilot/releases/latest) page.
+Download the latest build from the [Releases](https://github.com/ghauri01/OpsMaxx/releases/latest) page.
 
 | Platform | File | Notes |
 |---|---|---|
-| **Windows 10/11** | [`ShellPilot-x.y.z-setup.exe`](https://github.com/ghauri01/ShellPilot/releases/latest) | Installer, desktop + Start-menu shortcut. Pick this one if unsure. |
-| **Windows (portable)** | [`ShellPilot-x.y.z-portable.exe`](https://github.com/ghauri01/ShellPilot/releases/latest) | Single file, no install, keeps its data beside the `.exe` — runs from a USB stick |
-| **macOS (Apple Silicon)** | [`ShellPilot-x.y.z-arm64.dmg`](https://github.com/ghauri01/ShellPilot/releases/latest) | M1 and later |
-| **macOS (Intel)** | [`ShellPilot-x.y.z-x64.dmg`](https://github.com/ghauri01/ShellPilot/releases/latest) | Intel Macs |
-| **Linux** | [`ShellPilot-x.y.z-x86_64.AppImage`](https://github.com/ghauri01/ShellPilot/releases/latest) | `chmod +x ShellPilot-*.AppImage` and run — works on any distribution |
-| **Linux (Debian / Ubuntu)** | [`ShellPilot-x.y.z-amd64.deb`](https://github.com/ghauri01/ShellPilot/releases/latest) | `sudo apt install ./ShellPilot-*-amd64.deb` |
+| **Windows 10/11** | [`OpsMaxx-x.y.z-setup.exe`](https://github.com/ghauri01/OpsMaxx/releases/latest) | Installer, desktop + Start-menu shortcut. Pick this one if unsure. |
+| **Windows (portable)** | [`OpsMaxx-x.y.z-portable.exe`](https://github.com/ghauri01/OpsMaxx/releases/latest) | Single file, no install, keeps its data beside the `.exe` — runs from a USB stick |
+| **macOS (Apple Silicon)** | [`OpsMaxx-x.y.z-arm64.dmg`](https://github.com/ghauri01/OpsMaxx/releases/latest) | M1 and later |
+| **macOS (Intel)** | [`OpsMaxx-x.y.z-x64.dmg`](https://github.com/ghauri01/OpsMaxx/releases/latest) | Intel Macs |
+| **Linux** | [`OpsMaxx-x.y.z-x86_64.AppImage`](https://github.com/ghauri01/OpsMaxx/releases/latest) | `chmod +x OpsMaxx-*.AppImage` and run — works on any distribution |
+| **Linux (Debian / Ubuntu)** | [`OpsMaxx-x.y.z-amd64.deb`](https://github.com/ghauri01/OpsMaxx/releases/latest) | `sudo apt install ./OpsMaxx-*-amd64.deb` |
 
 <details>
 <summary><b>What are the other files on the release page?</b></summary>
@@ -347,14 +347,14 @@ metadata or source archives, and you can ignore them.
 
 ### First run: why your computer shows a warning
 
-**ShellPilot is not notarized**, so the first time you run it you will see a security
+**OpsMaxx is not notarized**, so the first time you run it you will see a security
 warning. Nothing is wrong with the download; the warning is about a missing certificate,
 not about the app.
 
 Windows and macOS both expect an application to be signed with a **code-signing
 certificate** — an identity certificate bought from a certificate authority, currently
 around **$200–$400 a year** for Windows (or roughly **$99/year** for an Apple Developer
-account on macOS). ShellPilot is free and MIT licensed with no income behind it, so that
+account on macOS). OpsMaxx is free and MIT licensed with no income behind it, so that
 certificate does not exist yet. Every unsigned app gets the same treatment, whoever wrote
 it.
 
@@ -382,7 +382,7 @@ same missing-certificate cause. This happens on the first run only.
 </details>
 
 <details>
-<summary><b>macOS — "Apple could not verify ShellPilot is free of malware"</b></summary>
+<summary><b>macOS — "Apple could not verify OpsMaxx is free of malware"</b></summary>
 
 Gatekeeper refuses to open the app, because the build has not been notarized — Apple has
 not been asked to scan it, which requires the paid developer account above. The wording
@@ -390,7 +390,7 @@ varies a little between macOS versions; older ones say *"cannot be opened becaus
 developer cannot be verified"*.
 
 - **macOS 15 Sequoia and later** — open **System Settings → Privacy & Security**, scroll
-  down to the message naming ShellPilot, and click **Open Anyway**. Sequoia removed the
+  down to the message naming OpsMaxx, and click **Open Anyway**. Sequoia removed the
   older right-click shortcut, so this is the only way through in the interface.
 - **macOS 14 and earlier** — **right-click** (or Control-click) the app → **Open** →
   **Open** in the dialog.
@@ -401,7 +401,7 @@ If you would rather do it from the Terminal, this clears the quarantine flag mac
 to anything downloaded through a browser:
 
 ```bash
-/usr/bin/xattr -cr /Applications/ShellPilot.app
+/usr/bin/xattr -cr /Applications/OpsMaxx.app
 ```
 
 The `/usr/bin/` prefix is deliberate. If you have installed `xattr` through Homebrew or
@@ -411,13 +411,13 @@ message and clears nothing, which looks exactly like the command having failed t
 </details>
 
 <details>
-<summary><b>macOS — "ShellPilot is damaged and can't be opened" (releases 0.2.2 and earlier)</b></summary>
+<summary><b>macOS — "OpsMaxx is damaged and can't be opened" (releases 0.2.2 and earlier)</b></summary>
 
-![macOS Gatekeeper dialog reading "ShellPilot is damaged and can't be opened. You should move it to the Trash."](docs/images/macos-damaged-dialog.png)
+![macOS Gatekeeper dialog reading "OpsMaxx is damaged and can't be opened. You should move it to the Trash."](docs/images/macos-damaged-dialog.png)
 
 **The download is not damaged, and this is fixed in releases after 0.2.2.** Builds up to and
 including 0.2.2 left the macOS app unsigned, which meant the bundle still carried the
-signature Electron itself ships with — a signature covering none of ShellPilot's own files.
+signature Electron itself ships with — a signature covering none of OpsMaxx's own files.
 Gatekeeper reads that mismatch as a corrupted download and words it this way instead of the
 ordinary "could not verify" message above. Unhelpfully, this particular dialog offers no
 **Open Anyway** button, so there is nothing to click through.
@@ -428,7 +428,7 @@ release's SHA-256 against your download — see [Verifying a download](#verifyin
 Do **not** move it to the Trash. Run this once instead:
 
 ```bash
-/usr/bin/xattr -cr /Applications/ShellPilot.app
+/usr/bin/xattr -cr /Applications/OpsMaxx.app
 ```
 
 Then open the app normally. If it still refuses:
@@ -452,7 +452,7 @@ Linux does not gatekeep unsigned binaries, so there is nothing to bypass. Just m
 AppImage executable:
 
 ```bash
-chmod +x ShellPilot-*.AppImage
+chmod +x OpsMaxx-*.AppImage
 ```
 
 </details>
@@ -500,19 +500,19 @@ you downloaded — the builds are unsigned, so this is the strongest integrity
 check available:
 
 ```bash
-sha256sum ShellPilot-x.y.z-x86_64.AppImage    # Linux
-shasum -a 256 ShellPilot-x.y.z-arm64.dmg      # macOS
+sha256sum OpsMaxx-x.y.z-x86_64.AppImage    # Linux
+shasum -a 256 OpsMaxx-x.y.z-arm64.dmg      # macOS
 ```
 
 ```powershell
-Get-FileHash ShellPilot-x.y.z-setup.exe -Algorithm SHA256    # Windows
+Get-FileHash OpsMaxx-x.y.z-setup.exe -Algorithm SHA256    # Windows
 ```
 
 ### Build from source
 
 ```bash
-git clone https://github.com/ghauri01/ShellPilot.git
-cd ShellPilot
+git clone https://github.com/ghauri01/OpsMaxx.git
+cd OpsMaxx
 npm install
 
 npm run dev          # run in development
@@ -619,7 +619,7 @@ Databases have their own, separate folder tree with the same behaviour, so a "St
 
 ### Import from `~/.ssh/config`
 
-Click the import icon to read your existing SSH config. ShellPilot parses `Host`, `HostName`, `User`, `Port`, `IdentityFile` and `ProxyJump`, applies `Host *` wildcard defaults the way OpenSSH does, and shows a preview so you choose what to import. `ProxyJump` entries become jump hosts automatically, carrying the referenced server's key.
+Click the import icon to read your existing SSH config. OpsMaxx parses `Host`, `HostName`, `User`, `Port`, `IdentityFile` and `ProxyJump`, applies `Host *` wildcard defaults the way OpenSSH does, and shows a preview so you choose what to import. `ProxyJump` entries become jump hosts automatically, carrying the referenced server's key.
 
 ## Terminal
 
@@ -779,7 +779,7 @@ terminal, same search, same copy-on-select, same scrollback. It is there so the
 not need a second application, and it runs as you, in your environment, exactly
 as your usual terminal would.
 
-ShellPilot finds the shells rather than asking you to configure one:
+OpsMaxx finds the shells rather than asking you to configure one:
 
 | Platform | What appears in the list |
 |---|---|
@@ -801,7 +801,7 @@ application is launched by launchd, whose `PATH` is the minimal
 assembled by `path_helper`, which runs from `/etc/zprofile` and `/etc/profile`,
 and those are read by a **login** shell only. Without `-l` you would get a
 terminal where `brew`, `node` and `git` are simply not found, and it would look
-like ShellPilot had broken your machine. Terminal.app and iTerm2 start login
+like OpsMaxx had broken your machine. Terminal.app and iTerm2 start login
 shells for the same reason. On Linux `bash` gets `-i` instead: a login bash reads
 `~/.bash_profile` and deliberately skips `~/.bashrc`, which is where Linux users
 keep their aliases and prompt, and the desktop session has already sourced
@@ -809,16 +809,16 @@ keep their aliases and prompt, and the desktop session has already sourced
 
 **macOS re-asks for folder access after every update, and that is expected.** The
 first time a command touches `~/Documents`, `~/Desktop`, `~/Downloads` or a
-removable volume, macOS shows its Files-and-Folders prompt naming ShellPilot and
+removable volume, macOS shows its Files-and-Folders prompt naming OpsMaxx and
 saying it is for locally run commands. macOS records that grant against the app's
-`cdhash`, and because ShellPilot is [ad-hoc signed](#first-run-why-your-computer-shows-a-warning)
+`cdhash`, and because OpsMaxx is [ad-hoc signed](#first-run-why-your-computer-shows-a-warning)
 rather than signed with a developer certificate, the `cdhash` changes with every
 build. So **every release starts from no grants and prompts again**. It is not a
 bug, and re-approving is the only way round it until the app is signed with a
 stable identity. A denial is an ordinary permission error, not a crash.
 
 **No AI agent can reach any of this.** The local terminal is deliberately absent
-from the MCP bridge and the `shellpilot` CLI — not gated behind a capability or
+from the MCP bridge and the `opsmaxx` CLI — not gated behind a capability or
 an approval, absent — and a test fails the build if that changes. See the *Local
 terminal* section of [SECURITY.md](SECURITY.md) for why, and what a local shell
 can read.
@@ -828,7 +828,7 @@ can read.
 Press <kbd>Ctrl</kbd>+<kbd>M</kbd> for a live wall of every server in the workspace —
 CPU, memory, disk and network for each, with the estate totalled across the top.
 
-![ShellPilot Fleet Monitor showing grouped servers with live CPU, memory, disk and network metrics](docs/images/fleet-monitor.png)
+![OpsMaxx Fleet Monitor showing grouped servers with live CPU, memory, disk and network metrics](docs/images/fleet-monitor.png)
 
 Cards are **grouped**, so databases, application servers and bastions stay visually
 separate rather than becoming one long list. Drag a card between groups, or create a
@@ -865,7 +865,7 @@ Three rules hold across all of them, and they are the reason this is not just a 
 - **Anything that writes goes through the same approval a human would need**, and is recorded in
   the change log with who approved it and what it did. A rule that fires a command does not get a
   quieter path than you typing it.
-- **Work outlives the window.** A broadcast or a patch wave keeps running on the server if ShellPilot
+- **Work outlives the window.** A broadcast or a patch wave keeps running on the server if OpsMaxx
   is closed, and is picked back up by id when it reopens — reported honestly as *abandoned* or
   *orphaned* when nobody can say how it ended, rather than guessed at.
 
@@ -996,7 +996,7 @@ Settings → Keyboard Shortcuts.
 - **Conflicts** — two commands sharing a combo are flagged, but only when their
   contexts actually overlap. A terminal binding and an outside-terminal binding
   can safely share keys, because they never see the same key press.
-- **Export / Import** — writes a small `shellpilot-shortcuts.json` holding only
+- **Export / Import** — writes a small `opsmaxx-shortcuts.json` holding only
   the shortcuts you changed, so it stays valid across upgrades. Importing
   replaces your current overrides.
 
@@ -1007,7 +1007,7 @@ they survive a restart.
 
 | Key | Why |
 |---|---|
-| <kbd>Ctrl</kbd>+<kbd>R</kbd> | Reserved for the shell's reverse history search. ShellPilot never reloads on it — a reload would destroy every open session. |
+| <kbd>Ctrl</kbd>+<kbd>R</kbd> | Reserved for the shell's reverse history search. OpsMaxx never reloads on it — a reload would destroy every open session. |
 | <kbd>Ctrl</kbd>+<kbd>C</kbd>, <kbd>Ctrl</kbd>+<kbd>A</kbd>, <kbd>Ctrl</kbd>+<kbd>E</kbd>, <kbd>Ctrl</kbd>+<kbd>O</kbd> | Passed to the remote shell so `vim`, `nano` and bash line editing behave normally. |
 | <kbd>F5</kbd> | Blocked — it would reload the window and close every terminal. |
 
@@ -1016,7 +1016,7 @@ Nothing stops you binding one of these yourself, but scoping it to
 
 ## Databases
 
-ShellPilot speaks **PostgreSQL, MySQL, SQL Server, MongoDB and Redis**. Add a connection with discrete fields or a full connection string, browse tables and collections in the sidebar, and open each database in its own tab.
+OpsMaxx speaks **PostgreSQL, MySQL, SQL Server, MongoDB and Redis**. Add a connection with discrete fields or a full connection string, browse tables and collections in the sidebar, and open each database in its own tab.
 
 Every engine gets an **interactive shell** alongside the query editor:
 
@@ -1024,7 +1024,7 @@ Every engine gets an **interactive shell** alongside the query editor:
 - **PostgreSQL / MySQL / SQL Server** — SQL plus psql-style meta commands: `\l`, `\dt`, `\d <table>`, `\du`, `\c <database>`
 - **Redis** — commands passed straight through
 
-**Databases over SSH:** pick a bastion in the *SSH tunnel* field and ShellPilot opens a forward automatically, so you can reach a database that is only routable from inside the network.
+**Databases over SSH:** pick a bastion in the *SSH tunnel* field and OpsMaxx opens a forward automatically, so you can reach a database that is only routable from inside the network.
 
 **Databases over a VPN:** pick a WireGuard or OpenVPN profile in the *Network* field and the tunnel is brought up before the connection is attempted. A bastion and a VPN can both be set — the VPN is the outer transport, and the bastion is reached through it.
 
@@ -1038,22 +1038,22 @@ Create local forwards, remote forwards or a SOCKS5 proxy over any saved server. 
 
 ## VPN and reverse-proxy tunnels
 
-ShellPilot speaks **WireGuard**, **OpenVPN** and **frp**. Full guide: **[docs/VPN.md](docs/VPN.md)**.
+OpsMaxx speaks **WireGuard**, **OpenVPN** and **frp**. Full guide: **[docs/VPN.md](docs/VPN.md)**.
 
-The default is the unusual part: **WireGuard runs entirely in userspace and needs no administrator rights.** There is no network interface, your routing table and DNS are untouched, and if ShellPilot is killed there is nothing to clean up. The tunnel appears instead as local listeners — a SOCKS5 proxy on `127.0.0.1`, and any forwards you define — and you point individual connections at it.
+The default is the unusual part: **WireGuard runs entirely in userspace and needs no administrator rights.** There is no network interface, your routing table and DNS are untouched, and if OpsMaxx is killed there is nothing to clean up. The tunnel appears instead as local listeners — a SOCKS5 proxy on `127.0.0.1`, and any forwards you define — and you point individual connections at it.
 
 That trade is deliberate. Reaching one bastion, one database or one internal service does not need your whole machine on the far network. When it genuinely does, system mode is one toggle away on Linux and Windows and asks for elevation each time you connect — with two stated limits: a full tunnel (`0.0.0.0/0`) is refused, and macOS is blocked for want of an Apple Developer ID. [docs/VPN.md](docs/VPN.md) explains both. Neither affects the default.
 
 - **Handshake age, not just a green dot.** A WireGuard tunnel whose process is up but whose handshake has gone stale is shown as **degraded** in amber, not connected in green. Up-but-not-passing-traffic and down are different problems, and almost no client distinguishes them.
 - **SSH and databases over a VPN.** Pick a profile on a server or a database and it is started, waited for, and torn down with the session. If it cannot come up you see *the VPN's* error, not a connect timeout twenty seconds later.
-- **Imported configs are treated as hostile.** A `.ovpn` file can run programs — `up`, `plugin`, `script-security` and friends execute before the server is ever contacted. ShellPilot never hands your file to OpenVPN: it parses it, rejects anything that runs a program (quoting the line back to you), and generates a fresh config from what is left. `PostUp`/`PostDown` in a WireGuard `.conf` are refused the same way.
+- **Imported configs are treated as hostile.** A `.ovpn` file can run programs — `up`, `plugin`, `script-security` and friends execute before the server is ever contacted. OpsMaxx never hands your file to OpenVPN: it parses it, rejects anything that runs a program (quoting the line back to you), and generates a fresh config from what is left. `PostUp`/`PostDown` in a WireGuard `.conf` are refused the same way.
 - **Split tunnelling by default.** `redirect-gateway` is off unless you turn it on, even when the profile asks for it. Downloading a profile should not silently reroute your machine.
 - **frp states what it exposes, in words.** Each proxy carries a confirmation reading *"Make 127.0.0.1:5432 reachable from frp.example.com."* and the profile will not start until every one is ticked.
 - **An AI agent can never start an frp profile**, and starting any VPN always asks for approval — even for an access group that allows it.
 
-**Every tunnel engine is bundled, and one of them is not open source.** WireGuard (via the MIT `wireguard-go`), frp (Apache-2.0) and OpenVPN (GPL-2.0, macOS and Linux) are all built from pinned upstream source at release time — nothing to install, and each binary hash-verified before it runs. OpenVPN needs an adapter driver on Windows that cannot be shipped as a file, so a Windows OpenVPN profile still uses an OpenVPN you installed. Windows also ships `wintun.dll`, which is **proprietary** — the single component in ShellPilot that is not open source, needed only by WireGuard system mode. Bundling GPL software obliges this project to publish the matching source, and every release carries OpenVPN's as an asset. All of it is set out in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+**Every tunnel engine is bundled, and one of them is not open source.** WireGuard (via the MIT `wireguard-go`), frp (Apache-2.0) and OpenVPN (GPL-2.0, macOS and Linux) are all built from pinned upstream source at release time — nothing to install, and each binary hash-verified before it runs. OpenVPN needs an adapter driver on Windows that cannot be shipped as a file, so a Windows OpenVPN profile still uses an OpenVPN you installed. Windows also ships `wintun.dll`, which is **proprietary** — the single component in OpsMaxx that is not open source, needed only by WireGuard system mode. Bundling GPL software obliges this project to publish the matching source, and every release carries OpenVPN's as an asset. All of it is set out in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
-**There is no kill switch.** ShellPilot tears down what it started when a tunnel drops, and says so — it does not install firewall rules, and does not claim to.
+**There is no kill switch.** OpsMaxx tears down what it started when a tunnel drops, and says so — it does not install firewall rules, and does not claim to.
 
 ## Vault
 
@@ -1110,9 +1110,9 @@ Found a vulnerability? Please read [SECURITY.md](SECURITY.md) — do not open a 
 
 ## FAQ
 
-### What is ShellPilot?
+### What is OpsMaxx?
 
-ShellPilot is a free, open-source, cross-platform desktop application that combines an SSH
+OpsMaxx is a free, open-source, cross-platform desktop application that combines an SSH
 terminal, an SFTP file browser, an SSH tunnel manager, a multi-engine database client, an
 encrypted secrets vault and a secure MCP bridge for AI coding agents (Claude Code, Claude
 Desktop, Codex and others) in a single window. It runs on Windows, macOS and Linux, is released
@@ -1120,19 +1120,19 @@ under the MIT licence, and needs no account.
 
 ### Which file should I download?
 
-On Windows, `ShellPilot-x.y.z-setup.exe` unless you specifically want the
+On Windows, `OpsMaxx-x.y.z-setup.exe` unless you specifically want the
 portable single-file build. On macOS, `-arm64.dmg` for an M1 or later and
 `-x64.dmg` for an Intel Mac. On Linux, the `.AppImage` works on any
 distribution, and the `.deb` is there if you would rather install through
 `apt` on Debian or Ubuntu. The `.blockmap` and `latest*.yml` files on the
 release page are build metadata — you never need to download them.
 
-### Is ShellPilot really free?
+### Is OpsMaxx really free?
 
 Yes. It is MIT licensed, free for personal and commercial use, with no paid tier, no
 session limit and no subscription. Nobody should be charging you for it.
 
-### Is ShellPilot a good MobaXterm alternative?
+### Is OpsMaxx a good MobaXterm alternative?
 
 It is the closest free alternative for most workflows, and unlike MobaXterm it runs on macOS
 and Linux as well as Windows. There is no 12-session cap, no Professional Edition, and the
@@ -1148,10 +1148,10 @@ right-click paste in the PuTTY style. It also imports the servers you already ha
 ### Is it an open-source Termius alternative?
 
 Yes. The functional difference is sync: Termius syncs your servers through its cloud on a
-paid plan, while ShellPilot keeps everything local and moves it between machines with a
+paid plan, while OpsMaxx keeps everything local and moves it between machines with a
 passphrase-encrypted backup file. Nothing is uploaded and nothing phones home.
 
-### Does ShellPilot support jump hosts and bastions?
+### Does OpsMaxx support jump hosts and bastions?
 
 Yes — unlimited chained hops per server, configured in the same dialog as the server itself.
 Each hop can either reuse a saved server's credentials or define its own server, port, user and
@@ -1169,7 +1169,7 @@ In your operating system's own credential store through Electron `safeStorage` �
 Windows, Keychain on macOS, libsecret on Linux. Nothing is written in plaintext. The vault
 and encrypted backups add AES-256-GCM with scrypt key derivation on top of that.
 
-### Does ShellPilot send any data anywhere?
+### Does OpsMaxx send any data anywhere?
 
 No. There is no account, no telemetry, no analytics and no update ping. Every connection it
 makes is one you configured.
@@ -1185,15 +1185,15 @@ file browsing and monitoring — so you enter a code once rather than once per t
 
 ### Why does Windows SmartScreen or macOS Gatekeeper warn about it?
 
-Because ShellPilot is not notarized, and on Windows not signed at all. Both systems expect
+Because OpsMaxx is not notarized, and on Windows not signed at all. Both systems expect
 an application to carry a code-signing certificate, which costs roughly $200–$400 a year for
 Windows and $99 a year for an Apple Developer account — money a free, MIT-licensed project
 with no income does not have. The warning means the operating system cannot confirm **who**
 published the app, not that the file is unsafe. On Windows choose *More info → Run anyway*;
 on macOS use **System Settings → Privacy & Security → Open Anyway** (or right-click →
-**Open** on macOS 14 and earlier). Releases up to 0.2.2 can show *"ShellPilot is damaged and
+**Open** on macOS 14 and earlier). Releases up to 0.2.2 can show *"OpsMaxx is damaged and
 can't be opened"* instead, which has no button to click through — run
-`/usr/bin/xattr -cr /Applications/ShellPilot.app` for those, not the Trash the dialog
+`/usr/bin/xattr -cr /Applications/OpsMaxx.app` for those, not the Trash the dialog
 suggests. Full instructions are under
 [First run: why your computer shows a warning](#first-run-why-your-computer-shows-a-warning),
 and every release publishes SHA-256 checksums so you can verify the download yourself.
@@ -1203,9 +1203,9 @@ and every release publishes SHA-256 checksums so you can verify the download you
 Windows 10 or later, macOS 11 or later (Apple Silicon and Intel), or a modern 64-bit Linux
 distribution. Building from source needs Node.js 20 or later.
 
-### Can I connect Claude Code, Claude Desktop or another AI agent to ShellPilot?
+### Can I connect Claude Code, Claude Desktop or another AI agent to OpsMaxx?
 
-Yes — see [AI Agent Access](#ai-agent-access). ShellPilot runs a local
+Yes — see [AI Agent Access](#ai-agent-access). OpsMaxx runs a local
 [MCP](https://modelcontextprotocol.io) server that Claude Code, Claude Desktop, Codex, Gemini CLI
 and other MCP-compatible clients can connect to, each session scoped to the workspace(s) and
 access group chosen for it. The agent never sees a password, private key, database credential or
@@ -1216,10 +1216,10 @@ allows.
 
 It's as safe as the access group you assign it, and that's a real limitation, not a slogan — see
 [docs/AI-SECURITY.md](docs/AI-SECURITY.md) for what this design does and does not protect against.
-What ShellPilot does provide: the bridge only listens on `127.0.0.1`, every capability (run
+What OpsMaxx does provide: the bridge only listens on `127.0.0.1`, every capability (run
 commands, read/write files, SFTP, tunnels, database access, sudo, metrics) is independently
 ALLOW/ASK/DENY, sudo/unrestricted shells are hard-blocked regardless of group, and anything marked
-ASK stops and waits for you to approve or deny it in ShellPilot — an agent can never approve its
+ASK stops and waits for you to approve or deny it in OpsMaxx — an agent can never approve its
 own request. Every action is logged in the Audit Log with secrets redacted.
 
 ### How do I move my setup to another machine?
@@ -1236,13 +1236,13 @@ Star the repository, report bugs, or open a pull request — see [Contributing](
 
 Contributions are very welcome, whether that is code, documentation, a bug report or a translation. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for the architecture overview and development workflow, and please follow our [Code of Conduct](CODE_OF_CONDUCT.md).
 
-Good first issues are labelled [`good first issue`](https://github.com/ghauri01/ShellPilot/labels/good%20first%20issue).
+Good first issues are labelled [`good first issue`](https://github.com/ghauri01/OpsMaxx/labels/good%20first%20issue).
 
 ## Licence
 
-ShellPilot is released under the **[MIT Licence](LICENSE)** — free to use, copy, modify and share, for personal and commercial work alike, with no fee and no subscription.
+OpsMaxx is released under the **[MIT Licence](LICENSE)** — free to use, copy, modify and share, for personal and commercial work alike, with no fee and no subscription.
 
-**This tool is not sold.** It is given to the community. If someone is charging you for ShellPilot itself, you are being overcharged — download it here for free. The MIT licence does permit others to redistribute or build commercial products on top of it; that is a deliberate part of being genuinely open source, and it is what lets companies adopt it without a legal review.
+**This tool is not sold.** It is given to the community. If someone is charging you for OpsMaxx itself, you are being overcharged — download it here for free. The MIT licence does permit others to redistribute or build commercial products on top of it; that is a deliberate part of being genuinely open source, and it is what lets companies adopt it without a legal review.
 
 Please do keep the copyright notice, and do not imply the maintainers endorse a fork.
 
@@ -1250,9 +1250,9 @@ Please do keep the copyright notice, and do not imply the maintainers endorse a 
 
 <div align="center">
 
-**Built for the DevOps community.** If ShellPilot saves you time, a ⭐ helps others find it.
+**Built for the DevOps community.** If OpsMaxx saves you time, a ⭐ helps others find it.
 
-[⬇ Download ShellPilot](https://github.com/ghauri01/ShellPilot/releases/latest) · [🐞 Report a bug](https://github.com/ghauri01/ShellPilot/issues/new/choose) · [📧 Contact](mailto:aliwaqarofficial@gmail.com)
+[⬇ Download OpsMaxx](https://github.com/ghauri01/OpsMaxx/releases/latest) · [🐞 Report a bug](https://github.com/ghauri01/OpsMaxx/issues/new/choose) · [📧 Contact](mailto:aliwaqarofficial@gmail.com)
 
 *Keywords: open source SSH client, free SSH client for Windows, free MobaXterm alternative, PuTTY alternative, Termius alternative, SecureCRT alternative, Xshell alternative, MobaXterm for Mac, SSH client for macOS, SSH client for Linux, SSH terminal manager, SSH connection manager, SFTP client, SCP file transfer, SSH tunnel manager, port forwarding tool, SOCKS5 proxy client, bastion host client, jump host SSH client, ProxyJump GUI, ssh config importer, server monitoring tool, database GUI client, PostgreSQL client, MySQL client, MongoDB client, Redis client, SQL Server client, database over SSH tunnel, password manager for developers, encrypted secrets vault, AES-256-GCM vault, DevOps tools, sysadmin tools, self-hosted, no telemetry, no subscription, Electron SSH client, cross-platform terminal, Windows macOS Linux, MCP server, Model Context Protocol, AI agent SSH access, Claude Code MCP integration, Claude Desktop MCP server, Codex MCP server, Gemini CLI MCP, AI DevOps tool, secure AI infrastructure access, AI agent access control, credential-free AI automation, human-in-the-loop AI approvals, AI audit log.*
 

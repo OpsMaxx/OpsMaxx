@@ -1,6 +1,6 @@
 # Security Policy
 
-ShellPilot handles SSH keys, passwords and database credentials. Security
+OpsMaxx handles SSH keys, passwords and database credentials. Security
 reports are taken seriously and are welcome.
 
 For the AI & MCP bridge's threat model specifically — what an AI agent can and cannot reach, and
@@ -31,22 +31,22 @@ Knowing the design may help you assess a finding.
 
 | Data | Storage | Protection |
 |---|---|---|
-| SSH passwords, key paths, key passphrases | `shellpilot-secrets.json` | Electron `safeStorage` — DPAPI / Keychain / libsecret. Machine and user bound. |
-| Vault entries | `shellpilot-vault.json` | AES-256-GCM, key from the master password via scrypt (N=32768). Password never stored. Decrypted entries are sent to the renderer while the vault is open, so they live in the renderer's memory too — not only in the main process. |
-| Biometric unlock key (opt-in, off by default) | main-process memory, or `shellpilot-vault-bio.json` | The vault's **derived key**, wrapped with Electron `safeStorage`. By default this is held in memory only and dies with the process, so nothing is written to disk. The file exists only if you explicitly choose to keep biometric unlock across restarts. |
-| Workspace passwords | `shellpilot-wslocks.json` | scrypt verifier with a random salt, compared with `timingSafeEqual`. Not reversible. |
-| Trusted SSH host keys | `shellpilot-known-hosts.json` | SHA-256 fingerprints, plaintext (not secret). |
+| SSH passwords, key paths, key passphrases | `opsmaxx-secrets.json` | Electron `safeStorage` — DPAPI / Keychain / libsecret. Machine and user bound. |
+| Vault entries | `opsmaxx-vault.json` | AES-256-GCM, key from the master password via scrypt (N=32768). Password never stored. Decrypted entries are sent to the renderer while the vault is open, so they live in the renderer's memory too — not only in the main process. |
+| Biometric unlock key (opt-in, off by default) | main-process memory, or `opsmaxx-vault-bio.json` | The vault's **derived key**, wrapped with Electron `safeStorage`. By default this is held in memory only and dies with the process, so nothing is written to disk. The file exists only if you explicitly choose to keep biometric unlock across restarts. |
+| Workspace passwords | `opsmaxx-wslocks.json` | scrypt verifier with a random salt, compared with `timingSafeEqual`. Not reversible. |
+| Trusted SSH host keys | `opsmaxx-known-hosts.json` | SHA-256 fingerprints, plaintext (not secret). |
 | Backups | user-chosen `.spbackup` file | AES-256-GCM under a passphrase you supply. Credentials are unsealed from the keychain and re-encrypted so the file is portable. |
-| Servers, folders, workspaces | `shellpilot-data.json` | Plaintext. Contains no credentials. |
-| AI/MCP agent sessions | `shellpilot-mcp-sessions.json` | Only a SHA-256 hash and a 4-character preview of the bearer token is stored — never the raw token. |
-| AI/MCP audit log | `shellpilot-ai-audit.jsonl` | Plaintext, append-only. Free-text fields are passed through the same secret-redaction as command output before being written, so it should never contain a credential. |
-| Local terminal sessions | `shellpilot-local-sessions.jsonl` | Plaintext, append-only, `0600`. One entry when a local shell starts and one when it exits — shell label, resolved path, pid, working directory, exit status. **Never keystrokes and never output.** Kept separate from the AI audit log, which answers a different question. |
-| AI/MCP access-group policy | `shellpilot-ai-policy.json` | Plaintext. Contains no credentials — capability rules and file-path patterns only. |
+| Servers, folders, workspaces | `opsmaxx-data.json` | Plaintext. Contains no credentials. |
+| AI/MCP agent sessions | `opsmaxx-mcp-sessions.json` | Only a SHA-256 hash and a 4-character preview of the bearer token is stored — never the raw token. |
+| AI/MCP audit log | `opsmaxx-ai-audit.jsonl` | Plaintext, append-only. Free-text fields are passed through the same secret-redaction as command output before being written, so it should never contain a credential. |
+| Local terminal sessions | `opsmaxx-local-sessions.jsonl` | Plaintext, append-only, `0600`. One entry when a local shell starts and one when it exits — shell label, resolved path, pid, working directory, exit status. **Never keystrokes and never output.** Kept separate from the AI audit log, which answers a different question. |
+| AI/MCP access-group policy | `opsmaxx-ai-policy.json` | Plaintext. Contains no credentials — capability rules and file-path patterns only. |
 
 ### SSH host keys
 
-ShellPilot does trust-on-first-use host key checking against its own
-`shellpilot-known-hosts.json`. Without it, ssh2 accepts any key presented, so
+OpsMaxx does trust-on-first-use host key checking against its own
+`opsmaxx-known-hosts.json`. Without it, ssh2 accepts any key presented, so
 anything on the path to a server could capture the session and the credentials
 sent over it.
 
@@ -65,7 +65,7 @@ Two cases there are not merely informational:
   prompt, since that is either a rebuilt server or an interception.
 
 `@cert-authority` lines are ignored. They authorise certificates rather than
-naming a host key, and ShellPilot cannot validate a certificate chain — so they
+naming a host key, and OpsMaxx cannot validate a certificate chain — so they
 are treated as no evidence rather than as trust.
 
 Once a host is trusted, a *changed* key is always refused outright and never
@@ -76,7 +76,7 @@ re-prompted: the user has to forget the saved key in Settings → Security first
 macOS builds run with the **hardened runtime**, which blocks
 `DYLD_INSERT_LIBRARIES` injection and debugger attach. This matters more than
 any of the vault's own protections: without it, a process running as the same
-user can inject into ShellPilot and read an unlocked vault key out of memory,
+user can inject into OpsMaxx and read an unlocked vault key out of memory,
 and no amount of encryption at rest or biometric gating prevents that.
 
 The hardened runtime does not require an Apple Developer certificate — it works
@@ -122,7 +122,7 @@ that key without ever triggering the prompt.
 The stronger designs — a Keychain item with a biometry ACL, or a Secure Enclave
 key wrapping the vault key — both require the macOS data-protection keychain,
 which requires entitlements authorised by a provisioning profile, which requires
-a paid Apple Developer account. ShellPilot is ad-hoc signed and has none, so
+a paid Apple Developer account. OpsMaxx is ad-hoc signed and has none, so
 neither is available to it. (Apple's TN3137 documents this; it is the design, not
 a gap we have failed to close.)
 
@@ -139,9 +139,9 @@ that writes the key to disk.
 Two consequences worth being concrete about:
 
 - With biometric unlock **off**, the master password exists nowhere on the
-  machine, and the vault is the only ShellPilot data an attacker with your files
+  machine, and the vault is the only OpsMaxx data an attacker with your files
   and your logged-in session cannot read. Turning it on gives that up.
-- Your SSH credentials in `shellpilot-secrets.json` have always been protected
+- Your SSH credentials in `opsmaxx-secrets.json` have always been protected
   by `safeStorage` alone. So enabling this moves the vault down to the protection
   the rest of the app already has, rather than opening a new category of risk.
 
@@ -150,7 +150,7 @@ is why the feature exists. It is not a barrier against code running as you.
 
 ### Local terminal
 
-ShellPilot can open a shell on the machine it is running on — your own zsh or
+OpsMaxx can open a shell on the machine it is running on — your own zsh or
 bash, PowerShell, Git Bash, a WSL distribution — in a tab next to the SSH ones.
 Two things about that are worth stating, and they pull in opposite directions.
 
@@ -167,26 +167,26 @@ unlocked vault key out of memory, and *What biometric unlock actually protects*
 says it "is not a barrier against code running as you."
 After this feature, code running as you is a UI affordance inside the same
 window, while the vault is open. Concretely, a shell started from that tab can
-read — with no prompt, no elevation and no ShellPilot involvement:
+read — with no prompt, no elevation and no OpsMaxx involvement:
 
-- `shellpilot-vault-bio.json`, if you chose to keep biometric unlock across
+- `opsmaxx-vault-bio.json`, if you chose to keep biometric unlock across
   restarts. It holds the vault's **derived key**, and `safeStorage` unwraps it
   for anything running as you. (This is the same point the section above makes;
   it is repeated here because the terminal is where it becomes convenient.)
-- `shellpilot-secrets.json` — SSH passwords, key paths and key passphrases. On
+- `opsmaxx-secrets.json` — SSH passwords, key paths and key passphrases. On
   Windows (DPAPI) and Linux (libsecret) `safeStorage` is scoped to the user, not
   to the application, so any process running as you decrypts it.
-- `shellpilot-ai-policy.json` — the access-group rules that constrain an AI
+- `opsmaxx-ai-policy.json` — the access-group rules that constrain an AI
   agent.
-- `shellpilot-mcp-sessions.json` — which agent sessions exist and when they
+- `opsmaxx-mcp-sessions.json` — which agent sessions exist and when they
   expire.
-- `shellpilot-ai-audit.jsonl` — the record of what an agent did. Append-only to
-  ShellPilot; an ordinary writable file to a shell.
+- `opsmaxx-ai-audit.jsonl` — the record of what an agent did. Append-only to
+  OpsMaxx; an ordinary writable file to a shell.
 
 **That list is exactly why the local terminal is a human-UI-only surface.** It is
-not exposed over the MCP bridge or the `shellpilot` CLI, it is not behind an AI
+not exposed over the MCP bridge or the `opsmaxx` CLI, it is not behind an AI
 capability, and it is not behind an ASK prompt — because no value of either would
-make it safe. Every constraint ShellPilot advertises to an agent is a file on the
+make it safe. Every constraint OpsMaxx advertises to an agent is a file on the
 same disk as the shell, so an agent that can run one local command can read the
 policy store that limits it and the audit log that records it. The answer is "not
 reachable", not "gated".
@@ -203,32 +203,32 @@ The `local:*` IPC handlers are gated in the main process
 `localTerminalEnabled` setting is mirrored on the main side and the connect
 arguments — session id, working directory, terminal dimensions — are validated
 there, because a renderer-side flag constrains only an honest renderer. Starting
-ShellPilot with `ELECTRON_DISABLE_LOCAL_TERMINAL=1` stops the pseudo-terminal
+OpsMaxx with `ELECTRON_DISABLE_LOCAL_TERMINAL=1` stops the pseudo-terminal
 binding being loaded at all. Neither is a security boundary against someone at
 your keyboard — they have a terminal either way — they are there so a machine can
-run ShellPilot without the feature.
+run OpsMaxx without the feature.
 
 ## The traffic inspector's certificate authority
 
 Reading HTTPS means terminating it, and terminating it means holding a
 certificate authority this machine trusts. That authority is the most dangerous
-key ShellPilot handles: whoever has it can impersonate any website to this
+key OpsMaxx handles: whoever has it can impersonate any website to this
 computer. It is treated accordingly.
 
 **The private key never leaves the two places it has to be.** It is generated
-inside the `shellpilot-netd` sidecar, sealed with the operating system's secure
+inside the `opsmaxx-netd` sidecar, sealed with the operating system's secure
 store through `safeStorage`, and handed back to a running sidecar on stdin —
 never on the command line, never in an environment variable, never to the
 renderer, and never to disk unsealed. If the OS keychain is unavailable the key
 is kept in memory for that session only and a new authority is minted next
-launch; ShellPilot will not write it in plaintext as a fallback. Generation
+launch; OpsMaxx will not write it in plaintext as a fallback. Generation
 deliberately bypasses the process supervisor's log ring, for the same reason
 WireGuard key generation does: the answer to the request is a private key.
 
 **It is only trusted while you say so.** Nothing is installed at first run.
 Installing into the system trust store is one explicit action behind one
 administrator prompt, it installs nothing permanent that can later become root,
-and there is a matching removal for every store ShellPilot can write to. The
+and there is a matching removal for every store OpsMaxx can write to. The
 certificate's SHA-256 fingerprint is shown in the panel in the same colon-separated
 form Keychain Access and `certmgr.msc` use, so you can confirm the certificate
 your machine trusts is the one the running proxy signs with.
@@ -240,11 +240,11 @@ mints last thirty days and carry a single host name each.
 **A proxy off loopback needs a password.** A listener on 127.0.0.1 is reachable
 only by processes already running as you, who can read the traffic anyway. A
 listener on any other address is an open proxy for the network that also
-decrypts TLS — so ShellPilot refuses to start one without credentials rather
+decrypts TLS — so OpsMaxx refuses to start one without credentials rather
 than warning about it, generates them itself, and puts them in the environment
 it hands out.
 
-**Upstream verification stays on.** ShellPilot validates the real server's
+**Upstream verification stays on.** OpsMaxx validates the real server's
 certificate against the system trust store on the outbound half of every
 intercepted connection, so interception does not silently downgrade a
 connection that was previously authenticated. Extra roots can be added for
@@ -252,12 +252,12 @@ internal services. Verification can be turned off, but only deliberately, and
 the panel and the log both say so for as long as it is off.
 
 **Some traffic is never intercepted.** Certificate revocation endpoints,
-platform update services and ShellPilot's own update endpoints are excluded by
+platform update services and OpsMaxx's own update endpoints are excluded by
 default and tunnelled untouched. Standing in the middle of an OS update while
 holding a key that can forge its signature is not a debugging feature.
 
 **Captured traffic is not shown to AI agents.** The MCP bridge and the
-`shellpilot` CLI have no access to flows. Request and response bodies routinely
+`opsmaxx` CLI have no access to flows. Request and response bodies routinely
 carry bearer tokens and session cookies, and the agent gateway's promise that it
 never sees key material is worth more than the convenience.
 
@@ -272,7 +272,7 @@ backup you intend to share.
 Capturing "this whole machine" changes your operating system's proxy settings
 and puts them back afterwards. The previous settings are written to disk
 **before** anything is changed, and the restore runs on stop, on quit, and again
-on the next launch if ShellPilot died in between. If a restore fails the record
+on the next launch if OpsMaxx died in between. If a restore fails the record
 is kept rather than discarded, so it is retried rather than forgotten. This
 ordering exists because the failure it prevents — a machine left pointing at a
 port nothing is listening on, with no working internet and no obvious cause —
@@ -293,7 +293,7 @@ vulnerabilities — but do open a discussion if you disagree with the tradeoff.
   about a download.
 - **Tunnels carrying something other than HTTP are broken, not just
   unreadable.** A CONNECT to an IMAP, SMTP or SSH port is handed to an HTTP
-  parser and dropped. ShellPilot detects this, names the host and port, and
+  parser and dropped. OpsMaxx detects this, names the host and port, and
   offers to let it through untouched — but the first connection is already
   lost. Add such hosts to the passthrough list before capturing machine-wide.
 - **A WebSocket's frames are not recorded.** The upgrade handshake is
@@ -303,8 +303,8 @@ vulnerabilities — but do open a discussion if you disagree with the tradeoff.
   oldest recorded bodies are deleted; their flows keep their headers, sizes and
   inline preview.
 - **Certificate pinning defeats traffic inspection.** An application that
-  checks for a specific certificate cannot be intercepted by ShellPilot, Burp,
-  Fiddler or anything else short of patching that application. ShellPilot
+  checks for a specific certificate cannot be intercepted by OpsMaxx, Burp,
+  Fiddler or anything else short of patching that application. OpsMaxx
   detects it, names the host, and offers to stop intercepting it. It does not
   ship a bypass.
 - **Per-process capture is not offered on any platform.** Choosing "intercept

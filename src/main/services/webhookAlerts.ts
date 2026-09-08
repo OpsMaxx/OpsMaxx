@@ -131,7 +131,7 @@ export function sanitisePayload(raw: unknown): AlertPayload | null {
   if (!event || !kind) return null
 
   const out: AlertPayload = {
-    source: 'shellpilot',
+    source: 'opsmaxx',
     version: text(r.version, 32),
     event,
     kind,
@@ -279,12 +279,12 @@ export async function webhookTest(): Promise<WebhookTestResult> {
   const url = getSecret(SECRET_ID)
   if (!url) return { ok: false, error: 'No webhook URL is set.' }
   return post(url, {
-    source: 'shellpilot',
+    source: 'opsmaxx',
     version: app.getVersion(),
     event: 'raised',
     kind: 'cpu',
     server: 'Test server',
-    summary: 'Test alert from ShellPilot. Nothing is wrong.',
+    summary: 'Test alert from OpsMaxx. Nothing is wrong.',
     at: new Date().toISOString(),
     value: 91,
     threshold: 80

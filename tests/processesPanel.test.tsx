@@ -120,7 +120,7 @@ describe('what the panel shows', () => {
     stubBridge({})
     render(<ProcessesPanel />)
     expect(
-      screen.getByText('This build of ShellPilot cannot supervise local processes.')
+      screen.getByText('This build of OpsMaxx cannot supervise local processes.')
     ).toBeTruthy()
   })
 })

@@ -7,7 +7,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const userDataDir = mkdtempSync(join(tmpdir(), 'shellpilot-test-'))
+const userDataDir = mkdtempSync(join(tmpdir(), 'opsmaxx-test-'))
 
 export const app = {
   getPath: (_name: string): string => userDataDir,

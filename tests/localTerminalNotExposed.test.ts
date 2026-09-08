@@ -55,7 +55,7 @@ const ALLOWED_TOOLS = [
   'write_file',
   'list_files',
   'get_server_metrics',
-  // Item 47. A READ of history ShellPilot already stores: it opens no
+  // Item 47. A READ of history OpsMaxx already stores: it opens no
   // connection, reaches no shell, and answers about a server that is offline.
   // Gated on `serverMetrics`, the same capability as the tool whose numbers
   // these are over time.
@@ -395,7 +395,7 @@ describe('nothing an agent can reach imports the local terminal', () => {
 
     expect(
       offenders,
-      `A module reachable from the MCP bridge or the ShellPilot CLI now imports the local ` +
+      `A module reachable from the MCP bridge or the OpsMaxx CLI now imports the local ` +
         `terminal. This is the thing the local terminal feature exists on the condition of not ` +
         `doing.\n\n${offenders.join('\n')}\n\n` +
         `An AI agent that can run a command on this machine can read the vault file, the policy ` +
@@ -448,7 +448,7 @@ describe('the AI permission model has no word for a local shell', () => {
     // vulnerabilities is materially different from CPU and memory.
     'hostFacts',
     // Roadmap item 31. Reviewed and added deliberately, and it is the one entry
-    // here that grants an agent NOTHING: it gates whether ShellPilot's own
+    // here that grants an agent NOTHING: it gates whether OpsMaxx's own
     // hourly posture probe may read a host's firewall rule lines, and no MCP
     // tool can reach them at any setting — see tests/jobsNotExposed.test.ts.
     // It is in the grid because that is where a consent to collect the

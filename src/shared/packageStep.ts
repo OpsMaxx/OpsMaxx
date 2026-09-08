@@ -59,7 +59,7 @@ export function checkPackageStep(
     if (manager === 'pacman') {
       return {
         ok: false,
-        reason: 'pacman holds a package by adding it to IgnorePkg in /etc/pacman.conf, which is a config-file edit rather than a command. ShellPilot does not write that file yet, and appending to it blindly is how the same line ends up in it fourteen times.'
+        reason: 'pacman holds a package by adding it to IgnorePkg in /etc/pacman.conf, which is a config-file edit rather than a command. OpsMaxx does not write that file yet, and appending to it blindly is how the same line ends up in it fourteen times.'
       }
     }
   }

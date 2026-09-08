@@ -36,7 +36,7 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
   const [error, setError] = useState<string | null>(null)
 
   const bridge = (): { collect?: (t: unknown[]) => Promise<Row[]> } | undefined =>
-    (window.shellpilot as { services?: { collect?: (t: unknown[]) => Promise<Row[]> } } | undefined)
+    (window.opsmaxx as { services?: { collect?: (t: unknown[]) => Promise<Row[]> } } | undefined)
       ?.services
 
   const read = useCallback(async (): Promise<void> => {
@@ -82,7 +82,7 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
         <p>
           What each server&rsquo;s own systemd supervises for your account. Read-only — nothing is
           started, stopped or written here, because the server&rsquo;s supervisor is the one that
-          is still there when ShellPilot is not. Installing a unit writes a file onto a host, so
+          is still there when OpsMaxx is not. Installing a unit writes a file onto a host, so
           it lives on the Operations rail.
         </p>
       }

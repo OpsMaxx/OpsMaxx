@@ -9,7 +9,7 @@ import { recordLocalSession, listLocalSessions } from '../src/main/services/loca
 // (agentName, capability, approval) and is displayed in the AI section. Local
 // terminal rows there would mean an AI-labelled log full of things no AI did.
 
-const FILE = join(app.getPath('userData'), 'shellpilot-local-sessions.jsonl')
+const FILE = join(app.getPath('userData'), 'opsmaxx-local-sessions.jsonl')
 
 const base = {
   sessionId: 'sess-1',

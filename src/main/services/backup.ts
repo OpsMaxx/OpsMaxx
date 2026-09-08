@@ -51,7 +51,7 @@ import type {
 // passphrase the user supplies, which travels with the file.
 
 const KDF = { N: 32768, r: 8, p: 1, keylen: 32, maxmem: 96 * 1024 * 1024 }
-const MAGIC = 'shellpilot-backup'
+const MAGIC = 'opsmaxx-backup'
 
 interface Envelope {
   magic: string
@@ -123,11 +123,11 @@ export async function buildBundle(
     version: 1,
     createdAt: new Date().toISOString(),
     app: app.getVersion(),
-    data: readJson('shellpilot-data.json'),
+    data: readJson('opsmaxx-data.json'),
     secrets: exportSecrets(),
-    vault: readJson('shellpilot-vault.json'),
-    workspaceLocks: readJson('shellpilot-wslocks.json'),
-    knownHosts: readJson('shellpilot-known-hosts.json')
+    vault: readJson('opsmaxx-vault.json'),
+    workspaceLocks: readJson('opsmaxx-wslocks.json'),
+    knownHosts: readJson('opsmaxx-known-hosts.json')
   }
 
   const salt = randomBytes(16)
@@ -156,9 +156,9 @@ export async function backupExport(password: string): Promise<BackupResult> {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   const stamp = new Date().toISOString().slice(0, 10)
   const chosen = await dialog.showSaveDialog(win, {
-    title: 'Save ShellPilot backup',
-    defaultPath: join(app.getPath('downloads'), `shellpilot-backup-${stamp}.spbackup`),
-    filters: [{ name: 'ShellPilot backup', extensions: ['spbackup'] }]
+    title: 'Save OpsMaxx backup',
+    defaultPath: join(app.getPath('downloads'), `opsmaxx-backup-${stamp}.spbackup`),
+    filters: [{ name: 'OpsMaxx backup', extensions: ['spbackup'] }]
   })
   if (chosen.canceled || !chosen.filePath) return { ok: false, cancelled: true }
 
@@ -177,11 +177,11 @@ async function decryptBundle(bytes: Buffer, password: string): Promise<BackupPay
     envelope = JSON.parse(bytes.toString('utf8')) as Envelope
   } catch {
     // A truncated upload, a text-mode transfer that mangled the file, or an
-    // object that was never ours. All three are "not a ShellPilot backup", and
+    // object that was never ours. All three are "not a OpsMaxx backup", and
     // saying so beats a JSON parser's offset.
-    throw new Error('That file is not a ShellPilot backup.')
+    throw new Error('That file is not a OpsMaxx backup.')
   }
-  if (envelope.magic !== MAGIC) throw new Error('That file is not a ShellPilot backup.')
+  if (envelope.magic !== MAGIC) throw new Error('That file is not a OpsMaxx backup.')
   const key = await derive(password, Buffer.from(envelope.salt, 'base64'))
   const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64'))
   decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'))
@@ -203,9 +203,9 @@ export async function backupInspect(password: string, path?: string): Promise<Ba
   let file = path
   if (!file) {
     const chosen = await dialog.showOpenDialog(win, {
-      title: 'Open ShellPilot backup',
+      title: 'Open OpsMaxx backup',
       properties: ['openFile'],
-      filters: [{ name: 'ShellPilot backup', extensions: ['spbackup'] }]
+      filters: [{ name: 'OpsMaxx backup', extensions: ['spbackup'] }]
     })
     if (chosen.canceled || !chosen.filePaths[0]) return { ok: false, cancelled: true }
     file = chosen.filePaths[0]
@@ -218,7 +218,7 @@ export async function backupInspect(password: string, path?: string): Promise<Ba
     return {
       ok: false,
       path: file,
-      error: message.includes('ShellPilot backup')
+      error: message.includes('OpsMaxx backup')
         ? message
         : 'Could not decrypt the backup — check the passphrase.'
     }
@@ -236,10 +236,10 @@ export async function backupImport(
     const payload = await decryptFile(path, password)
     const summary = summarise(payload)
 
-    if (payload.data !== null) writeJson('shellpilot-data.json', payload.data)
-    if (payload.vault !== null) writeJson('shellpilot-vault.json', payload.vault)
-    if (payload.workspaceLocks !== null) writeJson('shellpilot-wslocks.json', payload.workspaceLocks)
-    if (payload.knownHosts !== null) writeJson('shellpilot-known-hosts.json', payload.knownHosts)
+    if (payload.data !== null) writeJson('opsmaxx-data.json', payload.data)
+    if (payload.vault !== null) writeJson('opsmaxx-vault.json', payload.vault)
+    if (payload.workspaceLocks !== null) writeJson('opsmaxx-wslocks.json', payload.workspaceLocks)
+    if (payload.knownHosts !== null) writeJson('opsmaxx-known-hosts.json', payload.knownHosts)
 
     // The bundle carries connections, credentials and vault. It does not carry
     // history, and the history already on this machine belongs to a different
@@ -268,7 +268,7 @@ export async function backupImport(
     const message = err instanceof Error ? err.message : String(err)
     return {
       ok: false,
-      error: message.includes('ShellPilot backup')
+      error: message.includes('OpsMaxx backup')
         ? message
         : 'Could not decrypt the backup — check the passphrase.'
     }
@@ -280,17 +280,17 @@ export function relaunchApp(): void {
   app.exit(0)
 }
 
-// Deliberately its own file rather than a corner of shellpilot-data.json.
+// Deliberately its own file rather than a corner of opsmaxx-data.json.
 //
-// shellpilot-data.json is `payload.data` — it is INSIDE every bundle. A
+// opsmaxx-data.json is `payload.data` — it is INSIDE every bundle. A
 // destination's configuration describing the bucket that receives those
 // bundles would therefore ride along in each one, and the vault entry ids it
 // names would point at the credentials for the very store the file is sitting
 // in. Keeping it out of the payload also means a restore does not silently
 // re-point this machine at somebody else's bucket.
-export const TARGETS_FILE = 'shellpilot-backup-targets.json'
+export const TARGETS_FILE = 'opsmaxx-backup-targets.json'
 
-// Every JSON file ShellPilot writes to userData — connections, credentials,
+// Every JSON file OpsMaxx writes to userData — connections, credentials,
 // vault, workspace locks, trusted host keys, and the AI/MCP bridge's own
 // config, sessions, access-group policy and audit log. Deliberately exhaustive:
 // leaving one behind after a "delete everything" is worse than deleting one
@@ -302,15 +302,15 @@ export const TARGETS_FILE = 'shellpilot-backup-targets.json'
 // a second copy of those suffixes over here is exactly how the database came to
 // be missing from a delete that called itself exhaustive.
 const ALL_DATA_FILES = [
-  'shellpilot-data.json',
-  'shellpilot-secrets.json',
-  'shellpilot-vault.json',
-  'shellpilot-wslocks.json',
-  'shellpilot-known-hosts.json',
-  'shellpilot-mcp-config.json',
-  'shellpilot-mcp-sessions.json',
-  'shellpilot-ai-policy.json',
-  'shellpilot-ai-audit.jsonl',
+  'opsmaxx-data.json',
+  'opsmaxx-secrets.json',
+  'opsmaxx-vault.json',
+  'opsmaxx-wslocks.json',
+  'opsmaxx-known-hosts.json',
+  'opsmaxx-mcp-config.json',
+  'opsmaxx-mcp-sessions.json',
+  'opsmaxx-ai-policy.json',
+  'opsmaxx-ai-audit.jsonl',
   // Where backups go, how often, and which vault entries unlock the
   // destinations. No credential is in it — see backupTargets.ts — but the
   // endpoints, buckets and remote paths of every place this estate's secrets
@@ -482,7 +482,7 @@ export async function verifyBundle(bytes: Buffer, password: string): Promise<Bac
     return {
       ok: false,
       bytes: 0,
-      error: message.includes('ShellPilot backup')
+      error: message.includes('OpsMaxx backup')
         ? message
         : `The bundle at the destination did not decrypt — ${message}`
     }
@@ -726,7 +726,7 @@ export async function inspectRemoteBackup(
   deps: TargetDeps = {}
 ): Promise<BackupResult> {
   if (backupObjectTime(name) === null) {
-    return { ok: false, error: `“${name}” is not a ShellPilot backup name.` }
+    return { ok: false, error: `“${name}” is not a OpsMaxx backup name.` }
   }
   let target: BackupTarget
   try {
@@ -797,7 +797,7 @@ export const spawnDump: DumpSpawner = (cmd) =>
     let configDir: string | null = null
     const args = [...cmd.args]
     if (cmd.configFile) {
-      configDir = mkdtempSync(join(tmpdir(), 'shellpilot-dump-'))
+      configDir = mkdtempSync(join(tmpdir(), 'opsmaxx-dump-'))
       const file = join(configDir, 'config.yaml')
       writeFileSync(file, cmd.configFile.contents, { mode: 0o600 })
       args.push('--config', file)

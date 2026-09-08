@@ -1,8 +1,8 @@
-===SHELLPILOT-PVC===
+===OPSMAXX-PVC===
 shop   catalog-data   Pending   <none>   2Gi   <none>   <none>   standard
-===SHELLPILOT-ING===
+===OPSMAXX-ING===
 shop|shop-public|nginx||shop-tls;|shop.example.com /checkout->checkout:80 /catalog->catalog:80;
-===SHELLPILOT-RB===
+===OPSMAXX-RB===
 kube-public|kubeadm:bootstrap-signer-clusterinfo|Role|kubeadm:bootstrap-signer-clusterinfo|User:/system:anonymous;
 kube-public|system:controller:bootstrap-signer|Role|system:controller:bootstrap-signer|ServiceAccount:kube-system/bootstrap-signer;
 kube-system|kube-proxy|Role|kube-proxy|Group:/system:bootstrappers:kubeadm:default-node-token;
@@ -16,7 +16,7 @@ kube-system|system:controller:cloud-provider|Role|system:controller:cloud-provid
 kube-system|system:controller:token-cleaner|Role|system:controller:token-cleaner|ServiceAccount:kube-system/token-cleaner;
 local-path-storage|local-path-provisioner-bind|Role|local-path-provisioner-role|ServiceAccount:local-path-storage/local-path-provisioner-service-account;
 shop|deployer-reads-pods|Role|pod-reader|ServiceAccount:shop/deployer;
-===SHELLPILOT-CRB===
+===OPSMAXX-CRB===
 |cluster-admin|ClusterRole|cluster-admin|Group:/system:masters;
 |kindnet|ClusterRole|kindnet|ServiceAccount:kube-system/kindnet;
 |kubeadm:cluster-admins|ClusterRole|cluster-admin|Group:/kubeadm:cluster-admins;
@@ -74,6 +74,6 @@ shop|deployer-reads-pods|Role|pod-reader|ServiceAccount:shop/deployer;
 |system:public-info-viewer|ClusterRole|system:public-info-viewer|Group:/system:authenticated;Group:/system:unauthenticated;
 |system:service-account-issuer-discovery|ClusterRole|system:service-account-issuer-discovery|Group:/system:serviceaccounts;
 |system:volume-scheduler|ClusterRole|system:volume-scheduler|User:/system:kube-scheduler;
-===SHELLPILOT-SEC===
+===OPSMAXX-SEC===
 kube-system|bootstrap-token-abcdef|bootstrap.kubernetes.io/token|auth-extra-groups,expiration,token-id,token-secret,usage-bootstrap-authentication,usage-bootstrap-signing,|2026-09-04T04:41:40Z
 shop|checkout-stripe|Opaque|api-key,webhook-secret,|2026-09-04T04:42:46Z

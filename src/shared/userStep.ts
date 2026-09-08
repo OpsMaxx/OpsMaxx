@@ -59,7 +59,7 @@ export function checkUserStep(i: UserStepInput): UserStepCheck {
   if (PROTECTED_USERS.includes(user)) {
     return {
       ok: false,
-      reason: `ShellPilot will not change ${user}. Locking or deleting it can take away the only way back into a server, and no confirmation makes that recoverable from here.`
+      reason: `OpsMaxx will not change ${user}. Locking or deleting it can take away the only way back into a server, and no confirmation makes that recoverable from here.`
     }
   }
   if (i.action === 'add-group') {

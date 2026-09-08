@@ -57,7 +57,7 @@ import { PanelShell } from './PanelShell'
 const CHART = { width: 640, height: 96 }
 
 function bridge(): Partial<CapacityBridge> | undefined {
-  return (window.shellpilot as unknown as { capacity?: Partial<CapacityBridge> } | undefined)?.capacity
+  return (window.opsmaxx as unknown as { capacity?: Partial<CapacityBridge> } | undefined)?.capacity
 }
 
 function tone(v: number): string {
@@ -317,7 +317,7 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
     setStorage(null)
     try {
       const call = (
-        window.shellpilot as
+        window.opsmaxx as
           | { fleet?: { storage?: (cfg: unknown) => Promise<StorageLayout | { error: string }> } }
           | undefined
       )?.fleet?.storage

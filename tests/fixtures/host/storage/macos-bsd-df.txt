@@ -16,10 +16,10 @@ map auto_home   autofs           0         0         0   100%       0          0
 /dev/disk9s1    apfs      17231872  16741356    446332    98%  607237    4463320   12%   /Library/Developer/CoreSimulator/Volumes/iOS_23C54
 /dev/disk2s1    apfs       5242836   2247796   2972996    44%      67   29729960    0%   /System/Volumes/Update/SFR/mnt1
 /dev/disk3s3    apfs     482797652  18017788  11531876    61%  458732  115318760    0%   /System/Volumes/Update/mnt1
-/dev/disk10s1   hfs         406196    403316      2880   100%     805 4294966474    0%   /Volumes/ShellPilot 0.14.0-arm64
-/dev/disk11s1   hfs         406200    403320      2880   100%     805 4294966474    0%   /Volumes/ShellPilot 0.14.2-arm64
-/dev/disk12s1   hfs         406200    403320      2880   100%     805 4294966474    0%   /Volumes/ShellPilot 0.15.0-arm64
-/dev/disk13s1   hfs         406200    403320      2880   100%     805 4294966474    0%   /Volumes/ShellPilot 0.15.2-arm64
+/dev/disk10s1   hfs         406196    403316      2880   100%     805 4294966474    0%   /Volumes/OpsMaxx 0.14.0-arm64
+/dev/disk11s1   hfs         406200    403320      2880   100%     805 4294966474    0%   /Volumes/OpsMaxx 0.14.2-arm64
+/dev/disk12s1   hfs         406200    403320      2880   100%     805 4294966474    0%   /Volumes/OpsMaxx 0.15.0-arm64
+/dev/disk13s1   hfs         406200    403320      2880   100%     805 4294966474    0%   /Volumes/OpsMaxx 0.15.2-arm64
 ===SP-STORE-LSBLK===
 ===SP-STORE-FINDMNT===
 ===SP-STORE-VGS===

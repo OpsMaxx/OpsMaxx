@@ -36,7 +36,7 @@ export function SessionAccess({
 
   useEffect(() => {
     if (!open) return
-    void window.shellpilot?.aiMcp
+    void window.opsmaxx?.aiMcp
       .explainAccess?.(session.id, null)
       .then((r) => setRows((r as Explanation[] | null) ?? []))
   }, [open, session.id, session.groupId])
@@ -44,9 +44,9 @@ export function SessionAccess({
   const changeGroup = async (groupId: string): Promise<void> => {
     const group = groups.find((g) => g.id === groupId) ?? null
     const name = group?.name ?? 'No AI Access'
-    const api = window.shellpilot?.aiMcp
+    const api = window.opsmaxx?.aiMcp
     if (typeof api?.setSessionGroup !== 'function') {
-      toast('This build of ShellPilot cannot change what a running session is allowed to do.', 'error', {
+      toast('This build of OpsMaxx cannot change what a running session is allowed to do.', 'error', {
         label: 'Check for updates',
         run: () => openSettings('general')
       })

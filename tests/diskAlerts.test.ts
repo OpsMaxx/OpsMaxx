@@ -7,7 +7,7 @@ import { isDiskCritical } from '../src/renderer/src/components/monitor/hostHealt
 // was not already looking at the screen that showed it.
 //
 // store/alerts.ts had no test coverage at all before this file, and could not
-// be imported under `environment: 'node'`: it reads `window.shellpilot` at
+// be imported under `environment: 'node'`: it reads `window.opsmaxx` at
 // module scope to stamp the app version into outbound payloads, and a bare
 // `window` is a ReferenceError rather than undefined. So the stub goes in
 // first and the module is pulled in dynamically afterwards. Everything else it
@@ -30,7 +30,7 @@ let app: AppStore
 
 beforeAll(async () => {
   ;(globalThis as { window?: unknown }).window = {
-    shellpilot: {
+    opsmaxx: {
       getVersion: () => Promise.resolve('9.9.9'),
       notify: {
         show: (title: string, body: string) => {

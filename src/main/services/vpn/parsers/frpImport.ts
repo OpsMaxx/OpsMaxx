@@ -31,7 +31,7 @@ export const FRP_REJECT_RULES: readonly FrpRejectRule[] = [
   {
     id: 'plugin-unix-domain-socket',
     reason:
-      'The unix_domain_socket plugin exposes a local socket to the frp server. Pointed at docker.sock it is root-equivalent remote code execution, so ShellPilot does not offer it.'
+      'The unix_domain_socket plugin exposes a local socket to the frp server. Pointed at docker.sock it is root-equivalent remote code execution, so OpsMaxx does not offer it.'
   },
   {
     id: 'plugin-static-file',
@@ -40,7 +40,7 @@ export const FRP_REJECT_RULES: readonly FrpRejectRule[] = [
   {
     id: 'plugin-unsupported',
     reason:
-      'ShellPilot only runs the socks5 and http_proxy plugins. Dropping an unsupported one would silently change what this proxy exposes.'
+      'OpsMaxx only runs the socks5 and http_proxy plugins. Dropping an unsupported one would silently change what this proxy exposes.'
   }
 ]
 
@@ -489,7 +489,7 @@ function fromToml(text: string, ctx: Ctx): VpnImportResultInternal {
 
   for (const key of Object.keys(root)) {
     if (TOML_TOP_LEVEL_KNOWN.has(key)) continue
-    drop(ctx, key, 'ShellPilot generates the log, web-server and process settings itself.')
+    drop(ctx, key, 'OpsMaxx generates the log, web-server and process settings itself.')
   }
 
   const authTable = asTable(root.auth) ?? {}
@@ -543,7 +543,7 @@ function fromToml(text: string, ctx: Ctx): VpnImportResultInternal {
     spec.transport.tlsEnable = tls.enable
     if (!tls.enable) {
       ctx.warnings.push(
-        'This file turns off TLS between frpc and the frp server. ShellPilot leaves it off only because the file asked; turning it back on is safer.'
+        'This file turns off TLS between frpc and the frp server. OpsMaxx leaves it off only because the file asked; turning it back on is safer.'
       )
     }
   }
@@ -599,7 +599,7 @@ function fromToml(text: string, ctx: Ctx): VpnImportResultInternal {
 
     for (const key of Object.keys(p)) {
       if (TOML_PROXY_KNOWN.has(key)) continue
-      drop(ctx, `[${name}] ${key}`, 'Not a proxy setting ShellPilot carries over.')
+      drop(ctx, `[${name}] ${key}`, 'Not a proxy setting OpsMaxx carries over.')
     }
     spec.proxies.push(proxy)
   }
@@ -607,7 +607,7 @@ function fromToml(text: string, ctx: Ctx): VpnImportResultInternal {
   for (const v of asTableArray(root.visitors)) {
     for (const key of Object.keys(v)) {
       if (TOML_VISITOR_KNOWN.has(key)) continue
-      drop(ctx, `[${str(v.name) ?? '?'}] ${key}`, 'Not a visitor setting ShellPilot carries over.')
+      drop(ctx, `[${str(v.name) ?? '?'}] ${key}`, 'Not a visitor setting OpsMaxx carries over.')
     }
     spec.visitors.push(visitorFrom(ctx, {
       name: str(v.name) ?? '',
@@ -700,7 +700,7 @@ function fromIni(text: string, ctx: Ctx): VpnImportResultInternal {
   const common = sections.get('common') ?? new Map<string, string>()
 
   ctx.warnings.push(
-    'This is a legacy frp INI file. ShellPilot has converted it to the v1 model; check the proxies below before starting anything.'
+    'This is a legacy frp INI file. OpsMaxx has converted it to the v1 model; check the proxies below before starting anything.'
   )
 
   const serverAddr = requireHost(common.get('server_addr') ?? '', 'frp server address')
@@ -753,12 +753,12 @@ function fromIni(text: string, ctx: Ctx): VpnImportResultInternal {
   const tlsEnable = iniBool(common.get('tls_enable'))
   if (tlsEnable === undefined) {
     // v0 defaulted this off; v1 defaults it on, and so do we.
-    ctx.warnings.push('The original file did not set tls_enable. ShellPilot has turned TLS on.')
+    ctx.warnings.push('The original file did not set tls_enable. OpsMaxx has turned TLS on.')
   } else {
     spec.transport.tlsEnable = tlsEnable
     if (!tlsEnable) {
       ctx.warnings.push(
-        'This file turns off TLS between frpc and the frp server. ShellPilot leaves it off only because the file asked; turning it back on is safer.'
+        'This file turns off TLS between frpc and the frp server. OpsMaxx leaves it off only because the file asked; turning it back on is safer.'
       )
     }
   }
@@ -771,7 +771,7 @@ function fromIni(text: string, ctx: Ctx): VpnImportResultInternal {
 
   for (const [key] of common) {
     if (INI_COMMON_KNOWN.has(key)) continue
-    drop(ctx, `[common] ${key}`, 'ShellPilot generates the log, admin-API and process settings itself.')
+    drop(ctx, `[common] ${key}`, 'OpsMaxx generates the log, admin-API and process settings itself.')
   }
 
   for (const [section, values] of sections) {
@@ -791,7 +791,7 @@ function fromIni(text: string, ctx: Ctx): VpnImportResultInternal {
       )
       for (const [key] of values) {
         if (INI_PROXY_KNOWN.has(key)) continue
-        drop(ctx, `[${name}] ${key}`, 'Not a setting ShellPilot carries over.')
+        drop(ctx, `[${name}] ${key}`, 'Not a setting OpsMaxx carries over.')
       }
       continue
     }
@@ -846,7 +846,7 @@ function fromIni(text: string, ctx: Ctx): VpnImportResultInternal {
 
     for (const [key] of values) {
       if (INI_PROXY_KNOWN.has(key)) continue
-      drop(ctx, `[${name}] ${key}`, 'Not a setting ShellPilot carries over.')
+      drop(ctx, `[${name}] ${key}`, 'Not a setting OpsMaxx carries over.')
     }
 
     spec.proxies.push(proxy)

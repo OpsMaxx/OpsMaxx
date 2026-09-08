@@ -174,7 +174,7 @@ describe('planning against a server', () => {
       deps(async () => ({
         ok: true,
         code: 0,
-        stdout: '===SHELLPILOT-CRON-READ===\nno-tool\n===SHELLPILOT-CRON-BODY===\n'
+        stdout: '===OPSMAXX-CRON-READ===\nno-tool\n===OPSMAXX-CRON-BODY===\n'
       })),
       TARGET,
       { op: 'add', schedule: '@daily', command: '/x' }
@@ -188,7 +188,7 @@ describe('planning against a server', () => {
       deps(async () => ({
         ok: true,
         code: 0,
-        stdout: '===SHELLPILOT-CRON-READ===\nunknown must be run as root\n===SHELLPILOT-CRON-BODY===\n'
+        stdout: '===OPSMAXX-CRON-READ===\nunknown must be run as root\n===OPSMAXX-CRON-BODY===\n'
       })),
       TARGET,
       { op: 'add', schedule: '@daily', command: '/x' }

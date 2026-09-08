@@ -302,7 +302,7 @@ function certCell(posture: HostPosture): Cell {
       gap: null,
       help:
         s.status === 'absent'
-          ? `None of the directories ShellPilot looks in exists on this server, and that was checked rather than assumed. ${bound}`
+          ? `None of the directories OpsMaxx looks in exists on this server, and that was checked rather than assumed. ${bound}`
           : `Every directory was read and holds no certificate. This is a reading, not a gap — and it is not the same as "this server is fine", because nothing here has an expiry to be near. ${bound}`
     }
   }
@@ -428,7 +428,7 @@ function FirewallRules({ posture }: { posture: HostPosture }): React.JSX.Element
         The rule lines were not collected for this server, and this space is therefore not a
         statement about what it lets in. The capability <b>Firewall rules: the addresses and
         ports this server accepts</b> is not granted to the access group that governs this server,
-        so ShellPilot never asked for them. Grant it in AI access if you want them; the counts
+        so OpsMaxx never asked for them. Grant it in AI access if you want them; the counts
         above are unaffected either way.
       </div>
     )
@@ -440,7 +440,7 @@ function FirewallRules({ posture }: { posture: HostPosture }): React.JSX.Element
       <div className="inv-na loud">
         The rule lines could not be read on this server, which is not a report of an empty ruleset.
         {s.detail ? ` Collector said: ${s.detail}.` : ''} Most of these close with passwordless
-        sudo for the account ShellPilot connects as.
+        sudo for the account OpsMaxx connects as.
       </div>
     )
   }
@@ -491,7 +491,7 @@ const COLUMNS: { id: string; label: string; help: string }[] = [
   { id: 'mac', label: 'SELinux / AppArmor', help: 'Whether mandatory access control is enforcing. A server with neither is a finding, not a gap — and it is shown differently from a server that could not be asked.' },
   { id: 'sshd', label: 'sshd', help: 'Seven directives against a hardening baseline. A directive that could not be read is never counted as passing.' },
   { id: 'failed', label: 'Failed logins', help: 'How many failed attempts the server recorded and how many distinct account names they tried. Counts only: every field on a failed-login record is text an attacker chose.' },
-  { id: 'updates', label: 'Security updates', help: 'Pending security updates as the server’s own package manager counts them. Collected by the Inventory probe and shown here unchanged — ShellPilot computes nothing from a CVE feed.' },
+  { id: 'updates', label: 'Security updates', help: 'Pending security updates as the server’s own package manager counts them. Collected by the Inventory probe and shown here unchanged — OpsMaxx computes nothing from a CVE feed.' },
   { id: 'oom', label: 'OOM kills', help: 'Processes the kernel reaped for memory in the last 24 hours. Only the journal can be asked for a window — a count read from dmesg or kern.log is real, and a ZERO read from either is not a statement about a day and is not drawn as one.' },
   { id: 'certs', label: 'Certificates', help: 'Days left on the soonest certificate in a bounded set of named directories on this server. Not a TLS scanner: nothing is fetched over the network, the distribution trust store is deliberately not searched, and a directory that could not be entered is never rendered as a server with no certificates.' }
 ]
@@ -528,7 +528,7 @@ export function PosturePanel({
   const [openRules, setOpenRules] = useState<string | null>(null)
 
   const load = useCallback(async (): Promise<void> => {
-    const fleet = window.shellpilot?.fleet as Record<string, unknown> | undefined
+    const fleet = window.opsmaxx?.fleet as Record<string, unknown> | undefined
     if (!bridgeHas(fleet, 'posture')) return
     const nextEntries: Record<string, Entry> = {}
     const nextFacts: Record<string, HostFacts | null> = {}
@@ -540,7 +540,7 @@ export function PosturePanel({
       if (!bridgeHas(fleet, 'postureLocal')) return
       const at = Date.now()
       try {
-        const r = await window.shellpilot?.fleet?.postureLocal?.()
+        const r = await window.opsmaxx?.fleet?.postureLocal?.()
         if (!r) return
         nextEntries[LOCAL_ID] = r.ok
           ? { posture: r.posture, at }
@@ -553,12 +553,12 @@ export function PosturePanel({
     await Promise.all([
       readLocal(),
       ...servers.map(async (s) => {
-        const r = await window.shellpilot?.fleet?.posture(s.id)
+        const r = await window.opsmaxx?.fleet?.posture(s.id)
         if (r) nextEntries[s.id] = { posture: r.posture, at: r.at, error: r.error, errorAt: r.errorAt }
         // Item C's collection, read alongside. The security update count is
         // ITS answer, and this panel shows it rather than deriving one.
         if (bridgeHas(fleet, 'facts')) {
-          const f = await window.shellpilot?.fleet?.facts(s.id)
+          const f = await window.opsmaxx?.fleet?.facts(s.id)
           nextFacts[s.id] = f?.facts ?? null
         }
       })
@@ -576,8 +576,8 @@ export function PosturePanel({
     try {
       // A sweep first, so a server added since the last one is collected rather
       // than reported as never checked, then a read of what main now holds.
-      if (bridgeHas(window.shellpilot?.fleet as Record<string, unknown> | undefined, 'sampleNow')) {
-        await window.shellpilot?.fleet?.sampleNow()
+      if (bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'sampleNow')) {
+        await window.opsmaxx?.fleet?.sampleNow()
       }
       await load()
     } finally {
@@ -592,7 +592,7 @@ export function PosturePanel({
       // Only when the channel is actually wired. A build without it would
       // otherwise show a row that can never be filled, which reads as a host
       // that has never been collected rather than as a missing feature.
-      ...(bridgeHas(window.shellpilot?.fleet as Record<string, unknown> | undefined, 'postureLocal')
+      ...(bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'postureLocal')
         ? [{ id: LOCAL_ID, name: LOCAL_NAME }]
         : [])
     ],
@@ -745,7 +745,7 @@ export function PosturePanel({
               not run, and a check that could not run is not a check that passed. Those servers are not
               in the counts above and they are not clear.
               <NoteWhy summary="How to close them">
-                Most of these close with passwordless sudo for the account ShellPilot connects as,
+                Most of these close with passwordless sudo for the account OpsMaxx connects as,
                 which lets the probe read a ruleset and ask sshd for its effective configuration.
                 Nothing about that grants any write.
               </NoteWhy>

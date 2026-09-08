@@ -87,7 +87,7 @@ describe('writing a file, through a real shell', () => {
     const r = run(push(file, 'new contents\n', { expectedBefore: sha('old contents\n') }))
     expect(r.code).toBe(0)
     expect(readFileSync(file, 'utf8')).toBe('new contents\n')
-    expect(readFileSync(`${file}.shellpilot-bak`, 'utf8')).toBe('old contents\n')
+    expect(readFileSync(`${file}.opsmaxx-bak`, 'utf8')).toBe('old contents\n')
     expect(r.out).toContain('WROTE:')
   })
 
@@ -98,7 +98,7 @@ describe('writing a file, through a real shell', () => {
     expect(readFileSync(file, 'utf8')).toBe('hello\n')
     expect(r.out).toContain('(new file)')
     // Nothing to back up, so nothing left behind.
-    expect(existsSync(`${file}.shellpilot-bak`)).toBe(false)
+    expect(existsSync(`${file}.opsmaxx-bak`)).toBe(false)
   })
 
   it('applies the mode before the file becomes live', () => {
@@ -127,7 +127,7 @@ describe('what it leaves behind when it refuses', () => {
     expect(r.code).not.toBe(0)
     expect(r.out).toContain('changed on the server since it was read')
     expect(readFileSync(file, 'utf8')).toBe('somebody else edited it\n')
-    expect(existsSync(`${file}.shellpilot-new`)).toBe(false)
+    expect(existsSync(`${file}.opsmaxx-new`)).toBe(false)
   })
 
   it('changes nothing when a file expected to be new already exists', () => {
@@ -149,7 +149,7 @@ describe('what it leaves behind when it refuses', () => {
     expect(r.code).not.toBe(0)
     expect(r.out).toContain('not the file that was approved')
     expect(readFileSync(file, 'utf8')).toBe('old\n')
-    expect(existsSync(`${file}.shellpilot-new`)).toBe(false)
+    expect(existsSync(`${file}.opsmaxx-new`)).toBe(false)
   })
 })
 

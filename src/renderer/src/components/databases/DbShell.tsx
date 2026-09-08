@@ -67,7 +67,7 @@ export function DbShell({ cfg, kind, dbName, onUseDatabase, onSchemaChanged }: P
     setInput('')
     setBusy(true)
 
-    const r = (await window.shellpilot?.db.shell(cfg, line)) ?? { ok: false, error: 'No response' }
+    const r = (await window.opsmaxx?.db.shell(cfg, line)) ?? { ok: false, error: 'No response' }
 
     if (r.clear) setEntries([])
     else setEntries((e) => e.map((x) => (x.id === id ? { ...x, result: r } : x)))
@@ -112,12 +112,12 @@ export function DbShell({ cfg, kind, dbName, onUseDatabase, onSchemaChanged }: P
   const copySelection = (): boolean => {
     const sel = window.getSelection()?.toString()
     if (!sel) return false
-    window.shellpilot?.clipboard.write(sel)
+    window.opsmaxx?.clipboard.write(sel)
     return true
   }
 
   const pasteIntoInput = (): void => {
-    const t = window.shellpilot?.clipboard.read()
+    const t = window.opsmaxx?.clipboard.read()
     if (!t) return
     const el = inputRef.current
     if (el && document.activeElement === el) {

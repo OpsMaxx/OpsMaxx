@@ -57,7 +57,7 @@ export function SshConfigImport(): React.JSX.Element {
   const [intoFolder, setIntoFolder] = useState(true)
 
   useEffect(() => {
-    void window.shellpilot?.sshConfig.read().then((r) => {
+    void window.opsmaxx?.sshConfig.read().then((r) => {
       setLoading(false)
       if (!r) return
       setPath(r.path)
@@ -105,7 +105,7 @@ export function SshConfigImport(): React.JSX.Element {
       // The key path travels through the encrypted secret store, same as a
       // manually added server.
       if (h.identityFile) {
-        const ok = await window.shellpilot?.secrets.set(id, JSON.stringify({ keyPath: h.identityFile }))
+        const ok = await window.opsmaxx?.secrets.set(id, JSON.stringify({ keyPath: h.identityFile }))
         if (ok === false) unsaved.push(h.alias)
       }
     }

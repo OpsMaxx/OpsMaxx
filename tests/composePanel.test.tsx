@@ -140,7 +140,7 @@ function panelBridge(over: Record<string, unknown> = {}) {
           before: '    image: redis:7.2-alpine',
           after: '    image: redis:7.4-alpine'
         },
-        backup: '/srv/edge/compose.yaml.shellpilot-bak'
+        backup: '/srv/edge/compose.yaml.opsmaxx-bak'
       })),
       ...over
     },
@@ -261,9 +261,9 @@ describe('what the panel refuses', () => {
       'docker compose up -d for edge. Starts what is declared; removes nothing.',
       "Restart cache's container. Every connection they are serving is interrupted, and a change to the compose file is NOT applied by a restart.",
       "Change cache's image tag in the compose file. Nothing is pulled or restarted.",
-      'Put cache back to the tag it had before ShellPilot last edited this file. Opens the same edit, pre-filled — nothing is written until you confirm.',
+      'Put cache back to the tag it had before OpsMaxx last edited this file. Opens the same edit, pre-filled — nothing is written until you confirm.',
       "Change worker's image tag in the compose file. Nothing is pulled or restarted.",
-      'Put worker back to the tag it had before ShellPilot last edited this file. Opens the same edit, pre-filled — nothing is written until you confirm.'
+      'Put worker back to the tag it had before OpsMaxx last edited this file. Opens the same edit, pre-filled — nothing is written until you confirm.'
     ])
   })
 

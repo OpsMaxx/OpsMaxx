@@ -134,7 +134,7 @@ describe('what a rule may watch', () => {
     // "a whitelist that quietly says no to its own product".
     for (const kind of RULE_ALERT_KINDS) {
       const payload = sanitisePayload({
-        source: 'shellpilot',
+        source: 'opsmaxx',
         version: '1.0.0',
         event: 'raised',
         kind: ruleWireKind(kind),
@@ -361,7 +361,7 @@ describe('what the endpoint is told', () => {
   it('says the automation ran rather than repeating the alert', () => {
     const notice = ruleNotice(rule({ action: jobAction() }), row(), 'job-started')
     expect(notice.summary).toBe(
-      'ShellPilot rule "vacuum the journal" started the job "clear the journal" on 2 server(s) after a disk alert raised.'
+      'OpsMaxx rule "vacuum the journal" started the job "clear the journal" on 2 server(s) after a disk alert raised.'
     )
     expect(notice.kind).toBe('disk')
     expect(notice.server).toBe('alpha')
@@ -376,7 +376,7 @@ describe('what the endpoint is told', () => {
 
   it('survives the outbound whitelist unchanged', () => {
     const notice = ruleNotice(rule({ action: jobAction() }), row(), 'job-started')
-    const sent = sanitisePayload({ source: 'shellpilot', version: '1.2.3', ...notice })
+    const sent = sanitisePayload({ source: 'opsmaxx', version: '1.2.3', ...notice })
     expect(sent).not.toBeNull()
     expect(sent?.summary).toBe(notice.summary)
     expect(sent?.kind).toBe('disk')

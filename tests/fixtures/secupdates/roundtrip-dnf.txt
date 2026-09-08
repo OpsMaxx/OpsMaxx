@@ -1,6 +1,6 @@
-===SHELLPILOT-SECPM===
+===OPSMAXX-SECPM===
 dnf
-===SHELLPILOT-SECCHECK===
+===OPSMAXX-SECCHECK===
 
 acl.aarch64                              2.4.0-1.el9_8                    baseos
 binutils.aarch64                         2.35.2-72.el9                    baseos
@@ -57,7 +57,7 @@ tar.aarch64                              2:1.34-13.el9_8                  baseos
 util-linux.aarch64                       2.37.4-25.el9                    baseos
 util-linux-core.aarch64                  2.37.4-25.el9                    baseos
 vim-minimal.aarch64                      2:8.2.2637-26.el9_8.13           baseos
-===SHELLPILOT-SECLIST===
+===OPSMAXX-SECLIST===
 ALSA-2026:42736 Important/Sec. acl-2.4.0-1.el9_8.aarch64
 ALSA-2025:23343 Moderate/Sec.  binutils-2.35.2-67.el9_7.1.aarch64
 ALSA-2025:23343 Moderate/Sec.  binutils-gold-2.35.2-67.el9_7.1.aarch64
@@ -261,7 +261,7 @@ ALSA-2026:47982 Important/Sec. vim-minimal-2:8.2.2637-26.el9_8.13.aarch64
 ALSA-2026:19224 Important/Sec. vim-minimal-2:8.2.2637-26.el9_8.4.aarch64
 ALSA-2026:22717 Moderate/Sec.  vim-minimal-2:8.2.2637-26.el9_8.5.aarch64
 ALSA-2026:28209 Moderate/Sec.  vim-minimal-2:8.2.2637-26.el9_8.6.aarch64
-===SHELLPILOT-SECSUM===
+===OPSMAXX-SECSUM===
 Updates Information Summary: available
     133 Security notice(s)
          43 Important Security notice(s)

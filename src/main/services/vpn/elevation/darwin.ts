@@ -13,7 +13,7 @@ import type {
 // macOS elevation is `osascript -e 'do shell script "…" with administrator
 // privileges'` and nothing else.
 //
-// The Apple dialog collects the password; ShellPilot never sees it, never
+// The Apple dialog collects the password; OpsMaxx never sees it, never
 // stores it and never transports it. That is the whole reason to go through
 // AppleScript rather than pipe a password into `sudo -S` ourselves.
 //
@@ -95,7 +95,7 @@ export function buildShellCommand(req: ElevationRequest): string {
  *  `req.reason` is not in the script: `do shell script` takes no prompt
  *  parameter, so macOS always says "osascript wants to make changes". The
  *  reason still belongs on the interface — Windows and polkit can show it —
- *  and ShellPilot shows it in its own UI before this is ever called. */
+ *  and OpsMaxx shows it in its own UI before this is ever called. */
 export function buildOsascriptArgs(req: ElevationRequest): string[] {
   const script = `do shell script ${appleScriptQuote(buildShellCommand(req))} with administrator privileges`
   return ['-e', script]
@@ -130,7 +130,7 @@ async function probeDarwin(): Promise<ElevationProbe> {
     : {
         available: false,
         method: 'none',
-        reason: `${OSASCRIPT} is missing, so ShellPilot cannot ask macOS for administrator rights. Use a userspace WireGuard profile, which needs none.`
+        reason: `${OSASCRIPT} is missing, so OpsMaxx cannot ask macOS for administrator rights. Use a userspace WireGuard profile, which needs none.`
       }
   return cached
 }

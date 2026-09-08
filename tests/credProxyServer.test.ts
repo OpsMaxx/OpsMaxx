@@ -181,7 +181,7 @@ describe('the proxy injects at the boundary and the caller never holds the key',
 
     // The caller got none of it.
     expect(await seenByCaller(res)).not.toContain(SECRET)
-    expect(res.headers.get('x-shellpilot-proxy')).toBe('forwarded')
+    expect(res.headers.get('x-opsmaxx-proxy')).toBe('forwarded')
   })
 
   it('injects into a named header', async () => {
@@ -339,7 +339,7 @@ describe('a caller on loopback is not automatically trusted', () => {
     expect(res.status).toBe(401)
     const body = (await res.json()) as { error: string; message: string }
     expect(body.error).toBe('unauthenticated')
-    expect(body.message).toContain('x-shellpilot-proxy-token')
+    expect(body.message).toContain('x-opsmaxx-proxy-token')
     expect(up.hits).toEqual([])
   })
 
@@ -413,7 +413,7 @@ describe('a redirect to another origin does not carry the credential', () => {
     const res = await call(h, `${api.origin}/v1/x`)
 
     expect(res.status).toBe(302)
-    expect(res.headers.get('x-shellpilot-proxy')).toBe('redirect-not-followed')
+    expect(res.headers.get('x-opsmaxx-proxy')).toBe('redirect-not-followed')
     // The credential was injected exactly once, to the origin in the rule.
     expect(api.hits).toHaveLength(1)
     expect(api.hits[0].headers['x-api-key']).toBe(SECRET)
@@ -493,7 +493,7 @@ describe('a redirect to another origin does not carry the credential', () => {
     // re-issued on the strength of a header the upstream wrote.
     expect(api.hits).toHaveLength(1)
     // Same-origin is not a leak, so it is not flagged as one.
-    expect(res.headers.get('x-shellpilot-proxy')).toBe('forwarded')
+    expect(res.headers.get('x-opsmaxx-proxy')).toBe('forwarded')
   })
 })
 

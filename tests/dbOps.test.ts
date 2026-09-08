@@ -164,7 +164,7 @@ describe('Seconds_Behind_Source = NULL is BROKEN, never 0 and never healthy', ()
     expect(naive.level).toBe('ok')
     expect(naive.headline).toMatch(/0s behind/)
 
-    // What ShellPilot actually says about the same server.
+    // What OpsMaxx actually says about the same server.
     const real1 = judgeMysqlChannel(real)
     expect(real1.level).toBe('alarm')
     expect(real1.level).not.toBe(naive.level)
@@ -960,7 +960,7 @@ describe('the report', () => {
     expect(events.map((e) => e.kind)).toEqual(['db-alarm', 'db-watch'])
     expect(events[0].payload).toMatchObject({ connectionId: 'db-1', engine: 'mysql', question: 'replication' })
     // An `ok` every sweep is a table that grows forever, and an `unknown` is not
-    // a state change ShellPilot can see from one read.
+    // a state change OpsMaxx can see from one read.
     expect(events.some((e) => e.payload.question === 'sizes')).toBe(false)
     expect(events.some((e) => e.payload.question === 'slowlog')).toBe(false)
   })

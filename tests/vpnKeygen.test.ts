@@ -7,7 +7,7 @@ import { isWireGuardKey } from '../src/shared/vpn'
 import { wireguardDriver, wireguardTuning } from '../src/main/services/vpn/drivers/wireguard'
 
 // `wg.keygen` is the one thing the WireGuard driver does that has nothing to do
-// with running a profile, and the one place ShellPilot mints key material
+// with running a profile, and the one place OpsMaxx mints key material
 // rather than being handed it. Two properties matter enough to test:
 //
 //   1. The keys are real. A keypair that is well formed but whose halves do not
@@ -53,7 +53,7 @@ process.stdin.on('data', (c) => {
 })
 `
   )
-  const bin = join(dir, 'shellpilot-netd')
+  const bin = join(dir, 'opsmaxx-netd')
   writeFileSync(bin, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(body)}\n`)
   chmodSync(bin, 0o755)
   wireguardTuning.resolveEngine = async () => ({
@@ -163,7 +163,7 @@ describe.skipIf(!posix)('wireguardDriver.keygen', () => {
 // matters most here went unchecked on every developer machine.
 const platformDir = `${process.platform}-${process.arch}`
 const exe = process.platform === 'win32' ? '.exe' : ''
-const NETD = resolve(__dirname, '..', 'resources', 'bin', platformDir, `shellpilot-netd${exe}`)
+const NETD = resolve(__dirname, '..', 'resources', 'bin', platformDir, `opsmaxx-netd${exe}`)
 
 describe.skipIf(!existsSync(NETD))('keygen against the built sidecar', () => {
   const useRealNetd = (): void => {

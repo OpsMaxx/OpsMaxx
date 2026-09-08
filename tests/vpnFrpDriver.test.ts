@@ -201,8 +201,8 @@ beforeEach(() => {
   mkdirSync(runDir, { recursive: true, mode: 0o700 })
   installFrpcShim()
 
-  previousBinDir = process.env.SHELLPILOT_VPN_BIN_DIR
-  process.env.SHELLPILOT_VPN_BIN_DIR = binRoot
+  previousBinDir = process.env.OPSMAXX_VPN_BIN_DIR
+  process.env.OPSMAXX_VPN_BIN_DIR = binRoot
   resetBinaryCache()
 
   spawns = []
@@ -228,8 +228,8 @@ afterEach(async () => {
   frpTuning.reloadTimeoutMs = 10_000
   frpTuning.adminPortAttempts = 3
   frpTuning.adminPortPicker = null
-  if (previousBinDir === undefined) delete process.env.SHELLPILOT_VPN_BIN_DIR
-  else process.env.SHELLPILOT_VPN_BIN_DIR = previousBinDir
+  if (previousBinDir === undefined) delete process.env.OPSMAXX_VPN_BIN_DIR
+  else process.env.OPSMAXX_VPN_BIN_DIR = previousBinDir
   resetBinaryCache()
   rmSync(root, { recursive: true, force: true })
 })

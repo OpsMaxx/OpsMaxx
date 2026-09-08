@@ -606,7 +606,7 @@ describe.skipIf(process.platform === 'win32')('the writer, run against a host-sh
 
   it('refuses while another crontab change on the same server holds the lock', () => {
     const h = host('0 3 * * * /a\n')
-    mkdirSync(join(h.home, '.shellpilot-cron.lock'))
+    mkdirSync(join(h.home, '.opsmaxx-cron.lock'))
     const res = parseCronWriteResult(h.run(writeCmd('0 3 * * * /a\n', '0 4 * * * /a\n')).stdout)
     expect(res.outcome).toBe('locked')
     expect(h.live()).toBe('0 3 * * * /a\n')
@@ -615,13 +615,13 @@ describe.skipIf(process.platform === 'win32')('the writer, run against a host-sh
   it('releases the lock on the way out of a successful write', () => {
     const h = host('0 3 * * * /a\n')
     h.run(writeCmd('0 3 * * * /a\n', '0 4 * * * /a\n'))
-    expect(existsSync(join(h.home, '.shellpilot-cron.lock'))).toBe(false)
+    expect(existsSync(join(h.home, '.opsmaxx-cron.lock'))).toBe(false)
   })
 
   it('releases the lock on the way out of a refusal too', () => {
     const h = host('0 9 * * * /elsewhere\n')
     h.run(writeCmd('0 3 * * * /a\n', '0 4 * * * /a\n'))
-    expect(existsSync(join(h.home, '.shellpilot-cron.lock'))).toBe(false)
+    expect(existsSync(join(h.home, '.opsmaxx-cron.lock'))).toBe(false)
   })
 
   it('reports the server’s own words when crontab refuses the file, and keeps the backup', () => {
@@ -650,7 +650,7 @@ describe.skipIf(process.platform === 'win32')('the writer, run against a host-sh
     const h = host('0 3 * * * /a\n')
     h.run(writeCmd('0 3 * * * /a\n', '0 4 * * * /a\n'))
     for (const suffix of ['.expected', '.new', '.verify']) {
-      expect(existsSync(join(h.home, `.shellpilot-crontab-${TOKEN}${suffix}`)), suffix).toBe(false)
+      expect(existsSync(join(h.home, `.opsmaxx-crontab-${TOKEN}${suffix}`)), suffix).toBe(false)
     }
   })
 
@@ -659,7 +659,7 @@ describe.skipIf(process.platform === 'win32')('the writer, run against a host-sh
     // end, so nothing read out of the file can end up in it. A crontab holding
     // a line that looks exactly like the writer's own report is the test of
     // that, and it is a line an operator could be talked into pasting.
-    const before = '===SHELLPILOT-CRON-WRITE===\nwritten /tmp/not-a-backup\nall fine\n0 9 * * * /elsewhere\n'
+    const before = '===OPSMAXX-CRON-WRITE===\nwritten /tmp/not-a-backup\nall fine\n0 9 * * * /elsewhere\n'
     const h = host(before)
     const r = h.run(writeCmd('0 3 * * * /a\n', '0 4 * * * /a\n'))
     const res = parseCronWriteResult(r.stdout)
@@ -682,7 +682,7 @@ describe('reading the writer’s answer', () => {
   })
 
   it('does not pass an unrecognised outcome through to the panel', () => {
-    const res = parseCronWriteResult('===SHELLPILOT-CRON-WRITE===\nsplendid /home/me/x.bak\nfine\n')
+    const res = parseCronWriteResult('===OPSMAXX-CRON-WRITE===\nsplendid /home/me/x.bak\nfine\n')
     expect(res.outcome).toBe('no-answer')
   })
 })

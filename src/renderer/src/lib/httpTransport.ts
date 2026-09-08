@@ -1,7 +1,7 @@
 import type { HttpVia } from '../../../shared/httpClient'
 
 /**
- * A `fetch`-shaped function backed by ShellPilot's main process.
+ * A `fetch`-shaped function backed by OpsMaxx's main process.
  *
  * The API client accepts this as its `customFetch`, so every request it sends
  * leaves from Node rather than from this window. That is what lets a request
@@ -18,9 +18,9 @@ export interface HttpTransportOptions {
  * Told about every transport failure, and about the first success after one.
  *
  * The API client logs a rejected fetch to the console and renders nothing, so
- * a request that fails for a ShellPilot-shaped reason — an untrusted
+ * a request that fails for a OpsMaxx-shaped reason — an untrusted
  * certificate, a service that is only reachable through a server — would look
- * to the user like a button that does nothing. ShellPilot knows exactly why it
+ * to the user like a button that does nothing. OpsMaxx knows exactly why it
  * failed, so it reports it in its own chrome instead.
  */
 export type TransportReporter = (error: string | null) => void
@@ -39,7 +39,7 @@ export function createHttpTransport(
         ? undefined
         : await request.arrayBuffer()
 
-    const result = await window.shellpilot.http.request({
+    const result = await window.opsmaxx.http.request({
       url: request.url,
       method: request.method,
       headers: Object.fromEntries(request.headers.entries()),

@@ -329,7 +329,7 @@ describe('localShells slice', () => {
     const w = globalThis as { window?: unknown }
     const had = 'window' in w
     const prev = w.window
-    w.window = { shellpilot: { local: { shells: async () => [zsh, brewZsh] } } }
+    w.window = { opsmaxx: { local: { shells: async () => [zsh, brewZsh] } } }
     try {
       await useApp.getState().refreshLocalShells()
       expect(useApp.getState().localShells).toEqual([zsh, brewZsh])

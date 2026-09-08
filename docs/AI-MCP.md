@@ -1,6 +1,6 @@
 # AI & MCP — technical guide
 
-This is the detailed reference for ShellPilot's [MCP](https://modelcontextprotocol.io) bridge —
+This is the detailed reference for OpsMaxx's [MCP](https://modelcontextprotocol.io) bridge —
 how it's built, what each screen does, and how to connect Claude Code, Claude Desktop, Codex or
 another MCP client. For the short pitch and the security summary, see the
 [README's AI Agent Access section](../README.md#ai-agent-access). For the threat model, see
@@ -16,7 +16,7 @@ another MCP client. For the short pitch and the security summary, see the
 - [Approvals](#approvals)
 - [Audit Log](#audit-log)
 - [Credential isolation](#credential-isolation)
-- [The `shellpilot` CLI and pairing](#the-shellpilot-cli-and-pairing)
+- [The `opsmaxx` CLI and pairing](#the-opsmaxx-cli-and-pairing)
 - [Connecting Claude Code](#connecting-claude-code)
 - [Connecting Codex, Gemini CLI and other HTTP clients](#connecting-codex-gemini-cli-and-other-http-clients)
 - [Connecting Claude Desktop](#connecting-claude-desktop)
@@ -24,12 +24,12 @@ another MCP client. For the short pitch and the security summary, see the
 
 ## Architecture
 
-![Architecture: AI agent to MCP to ShellPilot policy to approval to SSH/SFTP/database to servers](images/ai-mcp-architecture.svg)
+![Architecture: AI agent to MCP to OpsMaxx policy to approval to SSH/SFTP/database to servers](images/ai-mcp-architecture.svg)
 
 1. An MCP client (Claude Code, Claude Desktop, Codex, Gemini CLI, ...) sends a tool call over
-   MCP — either **stdio** (via the `shellpilot` CLI's `bridge` subcommand) or **Streamable HTTP**
-   with an `Authorization: Bearer <token>` header, directly to ShellPilot.
-2. ShellPilot's MCP server (`src/main/services/mcpServer.ts`) is an HTTP server bound to
+   MCP — either **stdio** (via the `opsmaxx` CLI's `bridge` subcommand) or **Streamable HTTP**
+   with an `Authorization: Bearer <token>` header, directly to OpsMaxx.
+2. OpsMaxx's MCP server (`src/main/services/mcpServer.ts`) is an HTTP server bound to
    **`127.0.0.1` only** (`startMcpServer`, `mcpServer.ts`). Nothing outside the machine can reach
    it, regardless of firewall or network configuration.
 3. Every tool call authenticates the bearer token against a session (`mcpAuth.ts`), then resolves
@@ -39,7 +39,7 @@ another MCP client. For the short pitch and the security summary, see the
    the tool needs (`policyEngine.ts`), producing `allow`, `ask` or `deny`.
 5. `ask` blocks on a human decision (`approvals.ts`) before anything happens. `deny` returns an
    error immediately. `allow` proceeds.
-6. Only at this point does ShellPilot resolve the server's actual SSH/database credential
+6. Only at this point does OpsMaxx resolve the server's actual SSH/database credential
    (`credentialResolver.ts`) and open the connection — using the exact same connection-pooling
    path (`ssh.ts`) an interactive terminal session uses.
 7. Command/file output is redacted (`secretRedaction.ts`) before it is returned to the agent, and
@@ -160,7 +160,7 @@ cannot read a Vault entry no matter what access group it holds, including when a
 credential is stored there.
 
 The server also exposes two unauthenticated bootstrap endpoints used only by the CLI pairing flow:
-`POST /pair/start` and `POST /pair/confirm` (see [Pairing](#the-shellpilot-cli-and-pairing) below).
+`POST /pair/start` and `POST /pair/confirm` (see [Pairing](#the-opsmaxx-cli-and-pairing) below).
 
 ## Sessions
 
@@ -177,13 +177,13 @@ CLI pairing. Each one has:
 - a bearer token, shown **once** at creation
 
 Only the token's SHA-256 hash and a 4-character preview (`tokenPreview`) are ever persisted
-(`mcpAuth.ts`) — there is no way to recover a lost token from ShellPilot's own storage. Revoking a
+(`mcpAuth.ts`) — there is no way to recover a lost token from OpsMaxx's own storage. Revoking a
 session, or the global **Stop all AI access** switch (Security tab), sets `revoked: true`
 immediately; a revoked or expired token fails authentication on its next use.
 
 ![Active Sessions: every session that exists, with Revoke and Stop all AI access](images/ai-active-sessions.png)
 
-Sessions are stored at `shellpilot-mcp-sessions.json` in ShellPilot's userData directory.
+Sessions are stored at `opsmaxx-mcp-sessions.json` in OpsMaxx's userData directory.
 
 ## Workspaces
 
@@ -199,7 +199,7 @@ looks up the access group governing a server using **that server's own workspace
 session's workspace" — which matters once a session spans more than one, since a server's
 governing group can differ per workspace even inside the same multi-workspace session.
 
-CLI-paired sessions (`shellpilot claude`/`codex`/`run`) are a special case: there's no workspace
+CLI-paired sessions (`opsmaxx claude`/`codex`/`run`) are a special case: there's no workspace
 picker at pairing time, so a paired session is granted every workspace that exists at the moment
 of pairing (`confirmCliPairing`, `cliPairing.ts`). A session scoped to specific workspaces still
 has to be created by hand under **AI & MCP → AI Agents**.
@@ -214,7 +214,7 @@ download, SFTP upload, SSH tunnels, database access, sudo/privilege escalation, 
 add servers to the workspace, VPN & reverse proxies. Each is independently `allow`, `ask` or
 `deny`.
 
-Four built-in groups ship with ShellPilot (`policyStore.ts`) — **Read Only**, **Read & Write**,
+Four built-in groups ship with OpsMaxx (`policyStore.ts`) — **Read Only**, **Read & Write**,
 **Sudo Access**, **Full Access** — and every field on them, including capabilities, is editable.
 They cannot be deleted (so an assignment referencing one never dangles), but there is no
 hard-coded three-tier model underneath; create as many custom groups as you want.
@@ -266,7 +266,7 @@ its own request by construction, not by convention.
 ![Audit Log showing agent, workspace/server, action and result](images/ai-audit-log.png)
 
 Every gated action — allowed outright, approved, denied, or failed — is appended to
-`shellpilot-ai-audit.jsonl` (`auditLog.ts`) as one JSON object per line, **append-only** (a crash
+`opsmaxx-ai-audit.jsonl` (`auditLog.ts`) as one JSON object per line, **append-only** (a crash
 mid-write can corrupt at most the last line). Every free-text field (`action`, `error`) is passed
 through the same redaction (`secretRedaction.ts`) used for tool output before it's written, so the
 audit trail itself never becomes a place secrets end up.
@@ -285,42 +285,42 @@ Jump hosts resolve independently: every hop in a chain gets its own credential l
 (`resolveChainSecrets`), so a multi-hop path to a bastion doesn't skip this for the intermediate
 servers.
 
-## The `shellpilot` CLI and pairing
+## The `opsmaxx` CLI and pairing
 
 `src/cli/index.ts` is a small Node launcher, built to `out/cli/index.js` and wrapped by
-`bin/shellpilot.cmd` / `bin/shellpilot.sh`:
+`bin/opsmaxx.cmd` / `bin/opsmaxx.sh`:
 
 ```
-shellpilot claude            Registers ShellPilot with Claude Code, then launches `claude`
-shellpilot codex             Registers ShellPilot with Codex, then launches `codex`
-shellpilot run -- <command>  Sets SHELLPILOT_MCP_COMMAND/ARGS, then launches <command>
+opsmaxx claude            Registers OpsMaxx with Claude Code, then launches `claude`
+opsmaxx codex             Registers OpsMaxx with Codex, then launches `codex`
+opsmaxx run -- <command>  Sets OPSMAXX_MCP_COMMAND/ARGS, then launches <command>
 ```
 
-`shellpilot bridge --token <token> --port <port>` is the fourth, internal subcommand these three
+`opsmaxx bridge --token <token> --port <port>` is the fourth, internal subcommand these three
 configure their target client to run — a pure stdio↔HTTP relay (`src/cli/bridge.ts`) with no
 tool/session/policy logic of its own. Whatever client spawns it gets the exact same
-authenticated, audited, policy-gated path an HTTP client talking to ShellPilot directly would.
+authenticated, audited, policy-gated path an HTTP client talking to OpsMaxx directly would.
 
 **Pairing** (`getOrPairSession`, `src/cli/pairing.ts`; `startCliPairing`/`confirmCliPairing`,
 `src/main/services/cliPairing.ts`) is a device-code-style flow:
 
 1. The CLI `POST`s `/pair/start` with an agent name and gets back a `pairingId` — never a code.
-2. ShellPilot generates a random 6-digit code and shows it **only in the ShellPilot window**,
+2. OpsMaxx generates a random 6-digit code and shows it **only in the OpsMaxx window**,
    never over the HTTP response. The code expires in **60 seconds** (`CODE_TTL_MS`).
 3. You read the code off your screen and type it into the terminal running the CLI.
 4. The CLI `POST`s `/pair/confirm` with the code. **5 wrong attempts** (`MAX_ATTEMPTS`) expires the
    pairing outright; the same code cannot be replayed once accepted.
-5. On success, ShellPilot mints a real session (8-hour TTL) in the first workspace with the first
+5. On success, OpsMaxx mints a real session (8-hour TTL) in the first workspace with the first
    access group, and hands back the token — which the CLI then caches
-   (`~/.config/shellpilot/cli/sessions.json` on Linux, `%APPDATA%\ShellPilot\cli\sessions.json` on
-   Windows, `~/Library/Application Support/ShellPilot/cli` on macOS) so it doesn't re-pair on
+   (`~/.config/opsmaxx/cli/sessions.json` on Linux, `%APPDATA%\OpsMaxx\cli\sessions.json` on
+   Windows, `~/Library/Application Support/OpsMaxx/cli` on macOS) so it doesn't re-pair on
    every launch.
 
 The property this buys: completing a pairing proves the human at the keyboard can see **both** the
-ShellPilot window and the terminal — the same property a TV-app or `gh auth login` device code
+OpsMaxx window and the terminal — the same property a TV-app or `gh auth login` device code
 relies on, from a physically separate screen. Nothing sent back to the CLI process ever contains
 the code, so a local process cannot complete a pairing purely on its own, without a human reading
-the code off the ShellPilot window.
+the code off the OpsMaxx window.
 
 ## Connecting Claude Code
 
@@ -332,16 +332,16 @@ in, and is also where the bridge is enabled/disabled and the approval timeout is
 Once you have a token (from **AI & MCP → AI Agents**, or via pairing):
 
 ```bash
-claude mcp add --transport http shellpilot http://127.0.0.1:<port>/mcp --header "Authorization: Bearer <token>"
+claude mcp add --transport http opsmaxx http://127.0.0.1:<port>/mcp --header "Authorization: Bearer <token>"
 ```
 
 Or skip the manual token entirely:
 
 ```bash
-shellpilot claude
+opsmaxx claude
 ```
 
-First run shows a one-time 6-digit code in ShellPilot; type it into the terminal. Every later run
+First run shows a one-time 6-digit code in OpsMaxx; type it into the terminal. Every later run
 reuses the cached session until it expires.
 
 ## Connecting Codex, Gemini CLI and other HTTP clients
@@ -351,7 +351,7 @@ Most clients that take a JSON MCP config accept a Streamable HTTP entry:
 ```json
 {
   "mcpServers": {
-    "shellpilot": {
+    "opsmaxx": {
       "type": "http",
       "url": "http://127.0.0.1:<port>/mcp",
       "headers": { "Authorization": "Bearer <token>" }
@@ -374,7 +374,7 @@ Desktop reads `command`/`args`/`env` there and ignores `url` and `headers` entir
 remote-MCP support is a separate, account-level Connectors feature that expects a publicly
 reachable server with OAuth, and offers no field for a bearer token against `127.0.0.1`.
 
-Use the stdio bridge instead. `shellpilot bridge --token <token> --port <port>`
+Use the stdio bridge instead. `opsmaxx bridge --token <token> --port <port>`
 (`src/cli/bridge.ts`) is a pure protocol relay: stdio in, Streamable HTTP out, `Authorization`
 header attached on the way. No tool, session or policy logic lives in it, so a stdio client is
 subject to exactly the same Access Group checks, approval prompts and audit entries as an HTTP
@@ -389,10 +389,10 @@ one.
 ```json
 {
   "mcpServers": {
-    "shellpilot": {
-      "command": "/Applications/ShellPilot.app/Contents/MacOS/ShellPilot",
+    "opsmaxx": {
+      "command": "/Applications/OpsMaxx.app/Contents/MacOS/OpsMaxx",
       "args": [
-        "/Applications/ShellPilot.app/Contents/Resources/app.asar.unpacked/out/cli/index.js",
+        "/Applications/OpsMaxx.app/Contents/Resources/app.asar.unpacked/out/cli/index.js",
         "bridge", "--token", "<token>", "--port", "<port>"
       ],
       "env": { "ELECTRON_RUN_AS_NODE": "1" }
@@ -401,12 +401,12 @@ one.
 }
 ```
 
-   On Windows the two paths are `%LOCALAPPDATA%\Programs\ShellPilot\ShellPilot.exe` and
-   `%LOCALAPPDATA%\Programs\ShellPilot\resources\app.asar.unpacked\out\cli\index.js`.
+   On Windows the two paths are `%LOCALAPPDATA%\Programs\OpsMaxx\OpsMaxx.exe` and
+   `%LOCALAPPDATA%\Programs\OpsMaxx\resources\app.asar.unpacked\out\cli\index.js`.
 
 3. Restart Claude Desktop.
 
-`ELECTRON_RUN_AS_NODE=1` runs ShellPilot's bundled Electron binary as plain Node, so the bridge
+`ELECTRON_RUN_AS_NODE=1` runs OpsMaxx's bundled Electron binary as plain Node, so the bridge
 needs no separate Node install and does not depend on `PATH` — which Claude Desktop does not
 inherit from a login shell. `out/cli/**` and `bin/**` are kept outside the asar archive
 (`asarUnpack` in `electron-builder.yml`) precisely so they can be spawned as real files.
@@ -417,24 +417,24 @@ and a fresh token; the manual steps are here for anyone who would rather see wha
 If you lose the token before pasting it, there's nothing to recover — revoke that session under
 **Active Sessions** and create a new one.
 
-Codex specifically can also be wired up with `shellpilot codex`, which splices a
-`[mcp_servers.shellpilot]` block into `~/.codex/config.toml` (`registerCodexMcp`,
-`src/cli/agents.ts`) inside a marked, safely-removable region, the same way `shellpilot claude`
+Codex specifically can also be wired up with `opsmaxx codex`, which splices a
+`[mcp_servers.opsmaxx]` block into `~/.codex/config.toml` (`registerCodexMcp`,
+`src/cli/agents.ts`) inside a marked, safely-removable region, the same way `opsmaxx claude`
 calls `claude mcp add`.
 
-`shellpilot run -- <command>` works for anything else that reads
-`SHELLPILOT_MCP_COMMAND`/`SHELLPILOT_MCP_ARGS` environment variables to find an MCP server to
+`opsmaxx run -- <command>` works for anything else that reads
+`OPSMAXX_MCP_COMMAND`/`OPSMAXX_MCP_ARGS` environment variables to find an MCP server to
 launch.
 
 ## Troubleshooting
 
-**"Could not reach ShellPilot on 127.0.0.1:`<port>`."** — ShellPilot Desktop isn't running, or
+**"Could not reach OpsMaxx on 127.0.0.1:`<port>`."** — OpsMaxx Desktop isn't running, or
 **AI & MCP → Security → Enable AI & MCP access** is off. If it's on a non-default port, set
-`SHELLPILOT_PORT` before running `shellpilot claude`/`codex`/`run`.
+`OPSMAXX_PORT` before running `opsmaxx claude`/`codex`/`run`.
 
 **"This token is not recognized" / "revoked" / "expired."** — The session behind that token was
 deleted, revoked (individually or via Stop all AI access), or its expiry passed. Create a new
-session, or re-run `shellpilot claude`/`codex` to re-pair.
+session, or re-run `opsmaxx claude`/`codex` to re-pair.
 
 **"No AI access is assigned to this server."** — The server's workspace has no access-group
 assignment (defaults to No AI Access), and there's no server-level override either. Assign one
@@ -444,9 +444,9 @@ under **AI & MCP → Access Groups → Server & workspace assignment**.
 matches an unrestricted-shell pattern (`sudo -i`, `sudo su`, `sudo bash`, plain `su`, ...) — those
 are denied unconditionally, independent of the group's `sudo` capability.
 
-**Connecting from inside WSL to a ShellPilot instance running on Windows.** — The bridge only
+**Connecting from inside WSL to a OpsMaxx instance running on Windows.** — The bridge only
 binds to `127.0.0.1`, so WSL2 needs to actually reach the Windows loopback address. If a request
-from WSL to `127.0.0.1:<port>` times out or is refused even though ShellPilot is running on
+from WSL to `127.0.0.1:<port>` times out or is refused even though OpsMaxx is running on
 Windows, check `wslinfo --networking-mode`: `mirrored` networking mode shares the network
 namespace directly and is the most reliable option; if `.wslconfig` requests `networkingMode=mirrored`
 but this still reports `nat`, run `wsl --shutdown` from **Windows** PowerShell (not from inside

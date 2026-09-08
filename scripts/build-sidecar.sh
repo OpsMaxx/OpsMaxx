@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Cross-compile shellpilot-netd, ShellPilot's userspace WireGuard sidecar, for
-# every platform ShellPilot ships, and fold the results into
+# Cross-compile opsmaxx-netd, OpsMaxx's userspace WireGuard sidecar, for
+# every platform OpsMaxx ships, and fold the results into
 # resources/bin/manifest.json.
 #
 # The sidecar is our own code plus wireguard-go and gVisor netstack, all MIT /
@@ -25,8 +25,8 @@ OUT_ROOT="$ROOT/resources/bin"
 
 # The sidecar version tracks the app version: they are released together and a
 # mismatch between the two is a packaging bug, not a supported configuration.
-VERSION="${SHELLPILOT_NETD_VERSION:-$(node -p "require('$ROOT/package.json').version" 2>/dev/null || echo '0.0.0-dev')}"
-BUILD_SHA="${SHELLPILOT_NETD_SHA:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
+VERSION="${OPSMAXX_NETD_VERSION:-$(node -p "require('$ROOT/package.json').version" 2>/dev/null || echo '0.0.0-dev')}"
+BUILD_SHA="${OPSMAXX_NETD_SHA:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
 
 # GOOS/GOARCH on the left, Node's platform-arch on the right. The right-hand
 # names are what process.platform/process.arch produce and what
@@ -63,7 +63,7 @@ fi
 command -v go >/dev/null 2>&1 || { echo "go toolchain not found" >&2; exit 1; }
 command -v node >/dev/null 2>&1 || { echo "node not found (needed to merge the manifest)" >&2; exit 1; }
 
-echo "==> shellpilot-netd $VERSION ($BUILD_SHA)"
+echo "==> opsmaxx-netd $VERSION ($BUILD_SHA)"
 echo "==> $(go version)"
 
 # Before vet and test, not only before the build loop: those are the first
@@ -84,7 +84,7 @@ for t in "${TARGETS[@]}"; do
   [ "$goos" = "windows" ] && exe=".exe"
   dest="$OUT_ROOT/$nodedir"
   mkdir -p "$dest"
-  echo "==> shellpilot-netd $goos/$goarch -> $nodedir/shellpilot-netd$exe"
+  echo "==> opsmaxx-netd $goos/$goarch -> $nodedir/opsmaxx-netd$exe"
   # CGO_ENABLED=0 is load-bearing, not a preference: it is what makes this a
   # pure cross-compile with no per-platform C toolchain, and what keeps the
   # binary from picking up a host libc at runtime. Nothing in the dependency
@@ -97,17 +97,17 @@ for t in "${TARGETS[@]}"; do
     CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
     go build -trimpath \
       -ldflags "-s -w -buildid= -X main.Version=$VERSION -X main.BuildSha=$BUILD_SHA" \
-      -o "$dest/shellpilot-netd$exe" . )
+      -o "$dest/opsmaxx-netd$exe" . )
 done
 
 # Upstream notices travel with the binaries. wireguard-go is MIT and gVisor is
 # Apache-2.0; both require the notice to be reproduced in distributions.
-mkdir -p "$ROOT/resources/licenses/shellpilot-netd"
+mkdir -p "$ROOT/resources/licenses/opsmaxx-netd"
 {
-  printf 'shellpilot-netd %s (%s)\n\n' "$VERSION" "$BUILD_SHA"
+  printf 'opsmaxx-netd %s (%s)\n\n' "$VERSION" "$BUILD_SHA"
   printf 'Bundled Go dependencies, from sidecar/netd/go.mod:\n\n'
   ( cd "$SRC" && go list -m all 2>/dev/null | sed 's/^/  /' )
-} > "$ROOT/resources/licenses/shellpilot-netd/VERSION"
+} > "$ROOT/resources/licenses/opsmaxx-netd/VERSION"
 
 # Smoke test: the host-platform binary must answer --version with parseable
 # JSON on stdout, because that is exactly what the TypeScript probe() does
@@ -118,7 +118,7 @@ for t in "${TARGETS[@]}"; do
   read -r goos goarch nodedir <<<"$t"
   if [ "$goos" = "$host_os" ] && [ "$goarch" = "$host_arch" ]; then
     echo "==> smoke test $nodedir"
-    "$OUT_ROOT/$nodedir/shellpilot-netd" --version | node -e '
+    "$OUT_ROOT/$nodedir/opsmaxx-netd" --version | node -e '
       let s = ""
       process.stdin.on("data", (c) => (s += c))
       process.stdin.on("end", () => {
@@ -131,6 +131,6 @@ for t in "${TARGETS[@]}"; do
 done
 
 echo "==> merging into manifest"
-SHELLPILOT_NETD_VERSION="$VERSION" node "$ROOT/scripts/update-bin-manifest.mjs" shellpilot-netd
+OPSMAXX_NETD_VERSION="$VERSION" node "$ROOT/scripts/update-bin-manifest.mjs" opsmaxx-netd
 
 echo "done."

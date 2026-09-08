@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 // Credentials are encrypted with the OS secure store (safeStorage) and the
 // ciphertext is persisted as base64. Plaintext never touches disk. If the OS
 // keychain is unavailable we refuse to persist rather than store plaintext.
-const FILE = join(app.getPath('userData'), 'shellpilot-secrets.json')
+const FILE = join(app.getPath('userData'), 'opsmaxx-secrets.json')
 
 type SecretMap = Record<string, string> // id -> base64 ciphertext
 

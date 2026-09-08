@@ -1,4 +1,4 @@
-// Which tunnel engines ShellPilot actually ships, and where.
+// Which tunnel engines OpsMaxx actually ships, and where.
 //
 // This is one fact that two processes have to agree on, and they cannot import
 // each other's code to get it. The main process asks it to decide whether to
@@ -17,7 +17,7 @@
 /**
  * Engines shipped on some platforms but not all, keyed by binary base name.
  * Anything absent from this map is shipped everywhere, which is true of
- * `shellpilot-netd` and `frpc`.
+ * `opsmaxx-netd` and `frpc`.
  */
 const BUNDLED_PLATFORMS: Record<string, readonly NodeJS.Platform[]> = {
   // OpenVPN needs a tun adapter driver on Windows and cannot produce one
@@ -31,7 +31,7 @@ const BUNDLED_PLATFORMS: Record<string, readonly NodeJS.Platform[]> = {
   openvpn: ['darwin', 'linux']
 }
 
-/** Whether ShellPilot ships `name` on `platform`. */
+/** Whether OpsMaxx ships `name` on `platform`. */
 export function isEngineBundledOn(name: string, platform: NodeJS.Platform): boolean {
   const base = name.endsWith('.exe') ? name.slice(0, -4) : name
   const platforms = BUNDLED_PLATFORMS[base]

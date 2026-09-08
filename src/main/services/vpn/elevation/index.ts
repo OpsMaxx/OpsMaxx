@@ -11,7 +11,7 @@ import { createWin32Elevator, resetWin32Probe, ERROR_CANCELLED } from './win32'
 //
 //  1. Elevation is a per-launch permission, never an install. No setuid
 //     binary, no launchd helper, no systemd unit, no setcap. Uninstalling
-//     ShellPilot must leave nothing behind that can still become root.
+//     OpsMaxx must leave nothing behind that can still become root.
 //  2. Declining is a first-class outcome. A user who dismisses the prompt has
 //     answered the question, so it surfaces as `elevation-declined` with a
 //     "Try again" affordance, never as a crash and never as a restart loop.
@@ -108,7 +108,7 @@ export function elevatorForPlatform(platform: NodeJS.Platform = process.platform
 }
 
 // Probe results are cached for the app run: they answer "is pkexec installed",
-// which does not change while ShellPilot is open, and a start button that
+// which does not change while OpsMaxx is open, and a start button that
 // stats the filesystem on every render is a waste. Tests need the caches gone
 // between cases, so the reset is public.
 export function resetElevationProbeCache(): void {
@@ -117,7 +117,7 @@ export function resetElevationProbeCache(): void {
   resetLinuxProbe()
 }
 
-// The helper's exit status, read as a ShellPilot error code.
+// The helper's exit status, read as a OpsMaxx error code.
 //
 // This is separate from `wait()` because `wait()` reports what happened and
 // this reports what it means: 127 from pkexec is "polkit vanished between the
@@ -148,7 +148,7 @@ function createUnsupportedElevator(platform: NodeJS.Platform): Elevator {
   const probe: ElevationProbe = {
     available: false,
     method: 'none',
-    reason: `ShellPilot cannot request administrator rights on ${platform}. Use a userspace WireGuard profile, which needs none.`
+    reason: `OpsMaxx cannot request administrator rights on ${platform}. Use a userspace WireGuard profile, which needs none.`
   }
   return {
     method: 'none',

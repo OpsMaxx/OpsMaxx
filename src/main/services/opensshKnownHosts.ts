@@ -5,12 +5,12 @@ import { createHmac } from 'node:crypto'
 
 // Reads OpenSSH's own ~/.ssh/known_hosts.
 //
-// ShellPilot keeps a separate trust store, which is deliberate: importing
+// OpsMaxx keeps a separate trust store, which is deliberate: importing
 // someone's accumulated known_hosts wholesale would silently adopt years of
 // trust decisions, including everything an `accept-new` ever waved through.
 // But not looking at it at all produces the opposite problem, and that is the
 // one users actually hit — a host you connect to from your terminal every day
-// is announced as an unknown host the first time ShellPilot sees it.
+// is announced as an unknown host the first time OpsMaxx sees it.
 //
 // So this module only ever *informs* the prompt. It never grants trust on its
 // own. The one exception is @revoked, which is a negative signal and is

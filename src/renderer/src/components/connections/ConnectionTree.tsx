@@ -135,7 +135,7 @@ export function ConnectionTree(): React.JSX.Element {
       danger: true,
       onClick: () => {
         deleteServer(s.id)
-        void window.shellpilot?.secrets.delete(s.id)
+        void window.opsmaxx?.secrets.delete(s.id)
         toast(`${s.name} deleted`)
       }
     }

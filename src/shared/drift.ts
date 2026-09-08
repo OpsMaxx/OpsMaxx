@@ -203,7 +203,7 @@ export const DRIFT_RULES: DriftRule[] = [
     id: 'hostnames',
     label: "The server's own name",
     detail:
-      "Replaces this server's hostname, its short name and the server's name in ShellPilot with a placeholder, case-insensitively. A template that stamps the machine's name into a file makes every copy unique; this is what makes them comparable. It cannot see a per-server name it was not told about.",
+      "Replaces this server's hostname, its short name and the server's name in OpsMaxx with a placeholder, case-insensitively. A template that stamps the machine's name into a file makes every copy unique; this is what makes them comparable. It cannot see a per-server name it was not told about.",
     example: { before: 'server_name web-03.example.internal;', after: 'server_name <host>.example.internal;' }
   },
   {
@@ -244,7 +244,7 @@ export function driftRule(id: DriftRuleId): DriftRule {
     r ?? {
       id,
       label: id,
-      detail: 'This version of ShellPilot does not know what this rule does, so it is not applied.',
+      detail: 'This version of OpsMaxx does not know what this rule does, so it is not applied.',
       example: { before: '', after: '' }
     }
   )
@@ -393,7 +393,7 @@ export function driftWatch(id: string): DriftWatch | undefined {
 export interface DriftNormaliseContext {
   /** The host's own hostname, as the metrics probe reported it. */
   hostname?: string
-  /** The server's name in ShellPilot, which is often the short hostname. */
+  /** The server's name in OpsMaxx, which is often the short hostname. */
   serverName?: string
   /**
    * The comment character the `comments` rule uses, from the WATCH.
@@ -537,8 +537,8 @@ export function normaliseForWatch(
 // The collector protocol
 // ---------------------------------------------------------------------------
 
-export const DRIFT_MARKER = '===SHELLPILOT-DRIFT==='
-export const DRIFT_STATUS_MARKER = '===SHELLPILOT-DRIFT-STATUS==='
+export const DRIFT_MARKER = '===OPSMAXX-DRIFT==='
+export const DRIFT_STATUS_MARKER = '===OPSMAXX-DRIFT-STATUS==='
 
 /**
  * The biggest file the collector will carry back, in bytes.
@@ -579,7 +579,7 @@ export const DRIFT_PREVIEW_CHARS = 4_000
  *
  * CONTENT IS BASE64. The alternative is dumping file text between markers,
  * which is fine in cron.ts and is not fine here: a watched file is exactly the
- * sort of place a line reading `===SHELLPILOT-DRIFT-STATUS===` could be
+ * sort of place a line reading `===OPSMAXX-DRIFT-STATUS===` could be
  * planted. Base64's alphabet contains no space, no `-` and no `=` except as
  * terminator, and every content line is prefixed anyway, so file content cannot
  * forge a record tag or a marker.

@@ -53,7 +53,7 @@ export const VPN_ERROR_MESSAGE: Record<VpnErrorCode, string> = {
   'exposure-unacknowledged':
     'This profile exposes a local port to a remote server and has not been confirmed.',
   unsupported: 'That is not supported on this platform.',
-  internal: 'Something went wrong inside ShellPilot.'
+  internal: 'Something went wrong inside OpsMaxx.'
 }
 
 // What the user should do next, in one short instruction. Empty string means
@@ -65,14 +65,14 @@ export const VPN_ERROR_MESSAGE: Record<VpnErrorCode, string> = {
 // reads instead of clicking. The CLI and the log still print the sentence, so
 // it has to stand alone; it does not have to teach.
 export const VPN_ERROR_HINT: Record<VpnErrorCode, string> = {
-  // Deliberately empty. ShellPilot now ships the sidecar, frpc, and — on macOS
+  // Deliberately empty. OpsMaxx now ships the sidecar, frpc, and — on macOS
   // and Linux — OpenVPN, so "install it" is wrong for three of the four
   // engines, and which advice is right depends on both the engine and the
   // platform. `resolveBundled` and `absentReason` already build a detail that
   // knows both (reinstall vs. antivirus vs. openvpn.net), and describeVpnError
   // appends this after it. A generic sentence here could only contradict them.
   'binary-missing': '',
-  'binary-untrusted': 'Reinstall ShellPilot — antivirus software sometimes alters bundled files.',
+  'binary-untrusted': 'Reinstall OpsMaxx — antivirus software sometimes alters bundled files.',
   // Not "check the highlighted fields": this arrives as a toast when the
   // profile form is closed, so there is nothing highlighted to look at.
   'config-invalid': 'Open the profile to fix it.',
@@ -92,7 +92,7 @@ export const VPN_ERROR_HINT: Record<VpnErrorCode, string> = {
   'crash-loop': 'Open the log to see why it stopped.',
   'vault-locked': 'Unlock the vault to continue.',
   'proxy-required': 'Set a proxy in the profile.',
-  'version-mismatch': 'Update ShellPilot, or ask the server operator which version to use.',
+  'version-mismatch': 'Update OpsMaxx, or ask the server operator which version to use.',
   'interface-conflict': 'Stop the other tunnel using that interface first.',
   'already-running': '',
   'clock-skew': 'Correct your system clock.',

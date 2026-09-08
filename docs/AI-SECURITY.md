@@ -1,18 +1,18 @@
 # AI & MCP — threat model and security boundaries
 
-This document describes what ShellPilot's MCP bridge is designed to protect against, exactly
+This document describes what OpsMaxx's MCP bridge is designed to protect against, exactly
 where the trust boundary sits, and — just as importantly — what it does **not** claim. For how
-the bridge is built and how to use it, see [AI-MCP.md](AI-MCP.md). For ShellPilot's general
+the bridge is built and how to use it, see [AI-MCP.md](AI-MCP.md). For OpsMaxx's general
 security posture and how to report a vulnerability, see [SECURITY.md](../SECURITY.md).
 
 ## The trust boundary
 
 ```
-AI Agent  --(MCP: stdio or HTTP + Bearer token)-->  ShellPilot main process
+AI Agent  --(MCP: stdio or HTTP + Bearer token)-->  OpsMaxx main process
 ```
 
 Everything to the right of that arrow — policy evaluation, approval, credential lookup, the SSH/
-SFTP/database connection itself — runs inside ShellPilot's own main process, on your machine. The
+SFTP/database connection itself — runs inside OpsMaxx's own main process, on your machine. The
 AI agent is a client on the *left* of that boundary: it sends a tool call and a friendly server
 name, and receives back either an error, a text result, or a redacted command output. Nothing
 else ever crosses back.
@@ -21,7 +21,7 @@ The bridge's HTTP listener binds to `127.0.0.1` only (`startMcpServer`, `mcpServ
 no configuration option that exposes it to a network interface — the boundary is not "trust
 whoever can reach this port," it's "nothing beyond this machine can reach this port at all."
 
-**The local terminal is on the human side of that boundary, permanently.** ShellPilot can open a
+**The local terminal is on the human side of that boundary, permanently.** OpsMaxx can open a
 shell on the machine it is itself running on — your own zsh, PowerShell, WSL, with your own
 privileges — and no part of that surface is reachable from the left of the arrow. It is not a tool,
 not a capability and not an ASK prompt, because an agent that can run local commands can read the
@@ -43,7 +43,7 @@ Regardless of which access group a session holds:
   the agent sees it (`secretRedaction.ts`).
 - **Vault secrets.** There is no MCP tool that reads the Vault. This isn't a policy that could be
   misconfigured to `allow` — the code path doesn't exist.
-- **Sudo / root credentials.** ShellPilot does not separately store a "sudo password" for any
+- **Sudo / root credentials.** OpsMaxx does not separately store a "sudo password" for any
   server — sudo capability is a policy decision about whether a `sudo`/`doas` command is allowed
   to run over the SSH connection that's already authenticated, not a credential handed to
   anything. Unrestricted root shells (`sudo -i`, `sudo su`, `sudo bash`, bare `su`) are refused
@@ -51,7 +51,7 @@ Regardless of which access group a session holds:
 - **A server's real hostname, IP, port or username.** Every tool that names a server takes and
   returns a friendly name (e.g. "Production API"); `get_server_details` returns OS, access group
   and effective permissions, never connection details.
-- **A shell on your own machine.** ShellPilot's local terminal — the tab that runs your zsh, bash,
+- **A shell on your own machine.** OpsMaxx's local terminal — the tab that runs your zsh, bash,
   PowerShell or WSL with your own privileges — has no MCP tool, no capability and no ASK prompt,
   and that is deliberate rather than a gap waiting to be filled. There is no setting of either that
   would make it safe: an agent that can run local commands can read the vault file, the policy store
@@ -80,7 +80,7 @@ Regardless of which access group a session holds:
 Worth drawing out, because the broad version of the claim is false and stating the narrow one is
 the only way to keep the guard honest.
 
-ShellPilot does run programs on this machine while serving an agent. Ten modules inside the very
+OpsMaxx does run programs on this machine while serving an agent. Ten modules inside the very
 import closure that `tests/localTerminalNotExposed.test.ts` walks spawn child processes:
 `vpn/supervisor.ts`, `vpn/binaries.ts`, `vpn/drivers/wireguard.ts`, `vpn/netstate.ts`, the three
 `vpn/elevation/*.ts`, `vpn/driver.ts`, and two modules under `src/cli/`. Bringing up a WireGuard
@@ -88,15 +88,15 @@ tunnel means executing a binary locally; there is no version of that feature tha
 
 Those are fine, and the reasons they are fine are exactly the properties a shell lacks:
 
-- **The argv is ShellPilot's, not the agent's.** An agent supplies a profile name. It never supplies
-  a command, an argument or a path. `vpn/binaries.ts` runs either an engine ShellPilot ships,
+- **The argv is OpsMaxx's, not the agent's.** An agent supplies a profile name. It never supplies
+  a command, an argument or a path. `vpn/binaries.ts` runs either an engine OpsMaxx ships,
   checked against a manifest of its exact bytes before the first exec, or a system-installed one
   from a fixed allowlist of directories — never a `PATH` search, because on Windows the search *is*
   the vulnerability.
 - **They are behind `vpnControl` and an approval.** No built-in group grants it outright, and
   starting a VPN is ASK on every group including one raised to ALLOW — see the section below.
-- **The two `src/cli` spawns are not agent-driven at all.** They are what `shellpilot claude`,
-  `shellpilot codex` and `shellpilot run -- …` do when a human types them in their own terminal:
+- **The two `src/cli` spawns are not agent-driven at all.** They are what `opsmaxx claude`,
+  `opsmaxx codex` and `opsmaxx run -- …` do when a human types them in their own terminal:
   launch that agent's CLI as a child of the CLI process, before any MCP session exists. No tool call
   reaches them.
 
@@ -119,21 +119,21 @@ request.
 | A leaked or stolen token granting standing access | Only a SHA-256 hash + 4-character preview is ever stored; every session has its own expiry and is individually revocable, or all revocable at once | `mcpAuth.ts` |
 | Lateral movement — a session reaching a workspace it wasn't granted | A server outside the session's granted workspace(s) is never in the candidate list a tool call resolves against — invisible, not merely denied. Workspaces are chosen explicitly per session, never "all, including future ones" | `mcpDataCache.ts`, `serverResolver.ts` |
 | No record of what an agent actually did | Every decision the bridge makes — allowed, asked, approved, denied, failed — is written to an append-only, redacted audit log. It records the *bridge*, not the whole application — see the note under this table | `auditLog.ts` |
-| A compromised local process trying to complete CLI pairing on its own | The pairing code is shown only inside the ShellPilot window, never returned over HTTP to whatever process asked for it | `cliPairing.ts` |
+| A compromised local process trying to complete CLI pairing on its own | The pairing code is shown only inside the OpsMaxx window, never returned over HTTP to whatever process asked for it | `cliPairing.ts` |
 
 **What the audit log does and does not cover.** `recordAudit` is called from `mcpServer.ts` and
-nowhere else, so `shellpilot-ai-audit.jsonl` is a record of **the MCP bridge**, not of everything
-that happens in ShellPilot. Nothing an agent does is missing from it, so the row above holds for the
+nowhere else, so `opsmaxx-ai-audit.jsonl` is a record of **the MCP bridge**, not of everything
+that happens in OpsMaxx. Nothing an agent does is missing from it, so the row above holds for the
 threat it names — but do not read the broader claim out of that row.
 
-The local terminal is logged **separately**, to `shellpilot-local-sessions.jsonl`
+The local terminal is logged **separately**, to `opsmaxx-local-sessions.jsonl`
 (`localSessionLog.ts`, append-only, `0600`, same discipline). One entry when a shell starts and one
 when it exits: shell label, resolved path, pid, working directory, exit status. **Never keystrokes,
 never output** — a shell session's contents are yours, and a log of them would be a more attractive
 target than the thing it was meant to protect. There is a test asserting no field capable of holding
 terminal input or output has been added.
 
-Jobs and broadcasts are logged **separately again**, to `shellpilot-job-approvals.jsonl`
+Jobs and broadcasts are logged **separately again**, to `opsmaxx-job-approvals.jsonl`
 (`approvalLog.ts`, append-only, `0600`, same discipline — a separate module as well as a separate file, because `auditLog.ts` is inside the agent-reachable import closure and `tests/jobsNotExposed.test.ts` refuses to let anything in it import the job vocabulary). One entry per approval
 decision — granted, refused, resumed, or sealed — carrying the risk, the confirmation kind, the
 phrase the user typed where one was required, the server names and the step commands, all redacted
@@ -198,7 +198,7 @@ them is a preference:
   read (`isVpnKindRefusedForAi`). An frp proxy makes a port on the user's own machine reachable
   from the frp server — from the internet — and an approval dialog is not a meaningful control
   there, because "Start VPN office" reads nothing like "publish port 5432 to the internet" to the
-  person clicking it. If an frp profile is to run, the user starts it in ShellPilot themselves.
+  person clicking it. If an frp profile is to run, the user starts it in OpsMaxx themselves.
 - **There is no tool that creates or edits a VPN profile.** No `add_vpn`, no `edit_vpn`, and this
   is asserted by a test rather than left to reviewer memory. An agent can run a profile the user
   wrote; it can never author where one points.
@@ -225,16 +225,16 @@ README:
   reading what an ASK request is actually asking to do, the approval gate provides no protection.
   It only helps if the decision is actually considered.
 - **This does not protect against a compromised local machine.** If an attacker has your OS user
-  account, they have the same keychain access ShellPilot itself uses to resolve credentials — the
+  account, they have the same keychain access OpsMaxx itself uses to resolve credentials — the
   MCP policy layer is not a substitute for endpoint security.
 - **Redaction is pattern-based, not exhaustive.** `secretRedaction.ts` catches known secret values
   and common secret-*shaped* text (env-style assignments, PEM blocks, bearer tokens, AWS key IDs,
   connection-string passwords). A credential in a format none of those patterns match, and that
-  ShellPilot doesn't already hold as a known value for that server, will not be caught.
-- **A denied or ASK-gated capability is a policy decision, not a sandbox.** ShellPilot does not
+  OpsMaxx doesn't already hold as a known value for that server, will not be caught.
+- **A denied or ASK-gated capability is a policy decision, not a sandbox.** OpsMaxx does not
   run commands inside a container or restricted shell on the target server; `execute_command` runs
   exactly what it's given, over the same SSH session an interactive terminal would use, once
   policy allows it.
-- **This document describes the MCP bridge specifically.** It does not extend to ShellPilot's
+- **This document describes the MCP bridge specifically.** It does not extend to OpsMaxx's
   general attack surface (the desktop app itself, its update mechanism, its dependencies) — see
   [SECURITY.md](../SECURITY.md) for that, and to report a vulnerability.

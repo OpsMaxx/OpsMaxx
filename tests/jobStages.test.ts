@@ -29,7 +29,7 @@ beforeEach(() => {
   resetHistoryModuleForTests()
   delete process.env[DISABLE_ENV]
   opened.length = 0
-  dir = mkdtempSync(join(tmpdir(), 'shellpilot-stages-'))
+  dir = mkdtempSync(join(tmpdir(), 'opsmaxx-stages-'))
 })
 
 afterEach(async () => {

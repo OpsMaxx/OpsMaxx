@@ -272,7 +272,7 @@ describe('saved databases on a server', () => {
     const blocks = sameWaveDatabaseBlocks(topo, ['a', 'b'])
     expect(blocks.map((b) => b.serverName).sort()).toEqual(['db-a', 'db-b'])
     // And it says what the claim actually rests on, rather than implying
-    // ShellPilot understands replication.
+    // OpsMaxx understands replication.
     expect(blocks[0].reason).toContain('does not know whether they replicate')
   })
 

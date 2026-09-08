@@ -127,7 +127,7 @@ const errorLog = (where, message) => log('E', where, message)
 
 // ------------------------------------------------------------------ toml
 
-// A deliberately small TOML reader: enough for the config ShellPilot
+// A deliberately small TOML reader: enough for the config OpsMaxx
 // generates, and nothing more. Anything it does not understand is ignored,
 // which is the right failure mode for a fixture.
 const ENV_TEMPLATE = /\{\{\s*\.Envs\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g

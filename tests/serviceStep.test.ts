@@ -39,7 +39,7 @@ describe('the unit name, which is interpolated into a command that runs as root'
   })
 })
 
-describe('the service ShellPilot reaches the server through', () => {
+describe('the service OpsMaxx reaches the server through', () => {
   // Restarting sshd from a tool whose only channel to the server IS sshd is,
   // in posture.ts's words, sawing the branch off. Not a confirmation: there is
   // no phrase that makes it a good idea, and offering one would imply there is.

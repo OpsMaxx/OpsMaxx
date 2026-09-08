@@ -15,7 +15,7 @@ import (
 // A minimal SOCKS5 server (RFC 1928), CONNECT only.
 //
 // UDP ASSOCIATE and BIND are deliberately absent. BIND needs an inbound
-// listener inside the tunnel, which nothing in ShellPilot asks for, and UDP
+// listener inside the tunnel, which nothing in OpsMaxx asks for, and UDP
 // ASSOCIATE needs a UDP relay whose lifetime is tied to the TCP control
 // connection — real work for a feature no database driver or SSH client uses.
 // Both answer 0x07 "command not supported", which every client understands.

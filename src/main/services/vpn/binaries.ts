@@ -21,7 +21,7 @@ import { VpnError } from './errors'
 //    or symlinks out of an allowlisted root (E45).
 //
 // `resolveEngineBinary` is the two in order, and is what the OpenVPN driver
-// calls: ShellPilot now ships `openvpn` on macOS and Linux, but a Windows
+// calls: OpsMaxx now ships `openvpn` on macOS and Linux, but a Windows
 // build has none — and someone may still want the copy they installed
 // themselves. See its own comment for why the ordering is not symmetric.
 
@@ -34,7 +34,7 @@ function exeSuffix(): string {
 // Which engine each binary implements. The name alone reaches the caller, so
 // this is where it turns back into a `VpnKind` for the returned info.
 const ENGINE_KIND: Record<string, VpnKind> = {
-  'shellpilot-netd': 'wireguard',
+  'opsmaxx-netd': 'wireguard',
   frpc: 'frp',
   openvpn: 'openvpn'
 }
@@ -71,7 +71,7 @@ const PLATFORM_ROOTS: { posix: string[]; win32: string[] } = {
 // build. An unknown name falls back to `npm run build:engines`, which is
 // always right and only less specific.
 const BUILD_SCRIPT: Record<string, string> = {
-  'shellpilot-netd': 'scripts/build-sidecar.sh',
+  'opsmaxx-netd': 'scripts/build-sidecar.sh',
   frpc: 'scripts/build-frpc.sh',
   openvpn: 'scripts/build-openvpn.sh'
 }
@@ -122,7 +122,7 @@ function kindOf(name: string): VpnKind {
  *  The relative shape below the root is identical in both, so nothing else in
  *  this module has to know which one it got. */
 function bundledRoot(): string {
-  const override = process.env.SHELLPILOT_VPN_BIN_DIR
+  const override = process.env.OPSMAXX_VPN_BIN_DIR
   if (override) return override
   if (app?.isPackaged && process.resourcesPath) return join(process.resourcesPath, 'bin')
   const appPath = typeof app?.getAppPath === 'function' ? app.getAppPath() : process.cwd()
@@ -153,7 +153,7 @@ function entryOf(manifest: BinaryManifest | null, key: string): ManifestEntry | 
 }
 
 /**
- * Locate and integrity-check a binary ShellPilot ships. Throws rather than
+ * Locate and integrity-check a binary OpsMaxx ships. Throws rather than
  * returning an unavailable `VpnEngineInfo` so a caller cannot accidentally
  * treat a tampered binary as merely absent; `VpnDriver.probe()` catches and
  * shapes it for the UI.
@@ -275,13 +275,13 @@ export async function resolveSystem(
   throw new VpnError(
     'binary-missing',
     win32
-      ? `Looked in ${where}. ShellPilot does not search PATH on Windows.`
+      ? `Looked in ${where}. OpsMaxx does not search PATH on Windows.`
       : `Looked in ${where} and on PATH.`
   )
 }
 
 /**
- * Locate an engine: the copy ShellPilot ships if there is one, otherwise the
+ * Locate an engine: the copy OpsMaxx ships if there is one, otherwise the
  * copy the user installed.
  *
  * The order is not symmetric, and each step is a separate decision:
@@ -293,7 +293,7 @@ export async function resolveSystem(
  *     manifest check runs before the first exec. A system install can be any
  *     version, patched or not, and on Windows arrives from a `PATH` we refuse
  *     to search at all.
- *  3. **Then the system allowlist.** ShellPilot ships `openvpn` on macOS and
+ *  3. **Then the system allowlist.** OpsMaxx ships `openvpn` on macOS and
  *     Linux only, so on Windows this is the sole path — and on the other two
  *     it still serves the person who deliberately runs their distribution's
  *     build.

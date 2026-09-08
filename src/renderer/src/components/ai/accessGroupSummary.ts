@@ -51,7 +51,7 @@ const PHRASING: Record<AiCapability, Phrasing> = {
     gerund: 'reading the server inventory and its pending security updates'
   },
   // "collect", not "read": no agent can read these at all, and the verb has to
-  // survive being read quickly. What the grant does is let ShellPilot's own
+  // survive being read quickly. What the grant does is let OpsMaxx's own
   // hourly posture probe ASK the host for its rule lines.
   sudoersRead: {
     verb: 'collect this server’s sudoers rules',
@@ -76,7 +76,7 @@ const PHRASING: Record<AiCapability, Phrasing> = {
 }
 
 // The three that do not merely act on a server the user already trusts: sudo is
-// root, manageServers writes a new credential into ShellPilot itself, and
+// root, manageServers writes a new credential into OpsMaxx itself, and
 // vpnControl decides which network every later session travels over. They are
 // listed first inside whichever clause they land in, so a summary can never
 // bury "can use sudo" behind six mundane capabilities.
@@ -251,8 +251,8 @@ function fileCapabilityClause(
 function unrecognisedClause(items: CapabilityDecision[]): string {
   const named = items.map((d) => `${d.label} ("${d.unrecognised}")`)
   return items.length === 1
-    ? `${named[0]} is set to a value ShellPilot does not recognise, so the policy engine allows it. Set it again below.`
-    : `${join(named, 'and')} are set to values ShellPilot does not recognise, so the policy engine allows them. Set them again below.`
+    ? `${named[0]} is set to a value OpsMaxx does not recognise, so the policy engine allows it. Set it again below.`
+    : `${join(named, 'and')} are set to values OpsMaxx does not recognise, so the policy engine allows them. Set them again below.`
 }
 
 export interface AccessGroupSummary {

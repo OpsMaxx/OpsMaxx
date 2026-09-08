@@ -17,7 +17,7 @@ import { randomBytes } from 'node:crypto'
 // something run locally at 03:00, and what was it" and nothing finer. A shell
 // session's contents are the user's, and a log of them would be a far more
 // attractive target than the thing it was meant to protect.
-const FILE = join(app.getPath('userData'), 'shellpilot-local-sessions.jsonl')
+const FILE = join(app.getPath('userData'), 'opsmaxx-local-sessions.jsonl')
 
 /** See the note on AUDIT_LOG_PATH. */
 export const LOCAL_SESSION_LOG_PATH = FILE

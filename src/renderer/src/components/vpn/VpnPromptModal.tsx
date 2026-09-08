@@ -29,7 +29,7 @@ export function VpnPromptModal(): React.JSX.Element | null {
   const field = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    return bridgeOn('vpn.onPrompt', window.shellpilot?.vpn?.onPrompt, (p) => {
+    return bridgeOn('vpn.onPrompt', window.opsmaxx?.vpn?.onPrompt, (p) => {
       // Never prefilled and never carried over: `value` belongs to the request
       // at the head of the queue and is cleared as the queue advances. A
       // one-time code is worthless the moment it is reused, and a remembered
@@ -63,14 +63,14 @@ export function VpnPromptModal(): React.JSX.Element | null {
   const submit = (): void => {
     // Matches the disabled Continue button, so Enter and the button agree.
     if (!value) return
-    window.shellpilot?.vpn.replyPrompt(request.id, value)
+    window.opsmaxx?.vpn.replyPrompt(request.id, value)
     advance()
   }
 
   // null, not an empty string: an empty answer is an answer, and the engine
   // would try it and fail. null means the user declined, and the driver aborts.
   const cancel = (): void => {
-    window.shellpilot?.vpn.replyPrompt(request.id, null)
+    window.opsmaxx?.vpn.replyPrompt(request.id, null)
     advance()
   }
 

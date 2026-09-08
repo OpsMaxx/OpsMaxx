@@ -145,7 +145,7 @@ const ADVICE: Record<ConnectionFault, FaultAdvice> = {
   // four different problems came to share a single wrong explanation in the
   // first place — the raw text underneath is the honest thing to show.
   unknown: {
-    cause: 'ShellPilot could not tell what went wrong from what the server said.',
+    cause: 'OpsMaxx could not tell what went wrong from what the server said.',
     retry: true,
     edit: true
   }

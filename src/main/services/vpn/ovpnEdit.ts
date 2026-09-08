@@ -51,10 +51,10 @@ export type InlineTag = (typeof INLINE_TAGS)[number]
  *  config: openvpn would reject it, so a placeholder left in a file by a bug
  *  fails loudly rather than being read as a directive. */
 export function placeholderFor(tag: string): string {
-  return `### SHELLPILOT-KEEP <${tag}> ###`
+  return `### OPSMAXX-KEEP <${tag}> ###`
 }
 
-const PLACEHOLDER_RE = /^###\s*SHELLPILOT-KEEP\s*<([A-Za-z0-9_-]+)>\s*###$/
+const PLACEHOLDER_RE = /^###\s*OPSMAXX-KEEP\s*<([A-Za-z0-9_-]+)>\s*###$/
 
 export interface RedactedConfig {
   /** Safe to send to a renderer: no key material. */

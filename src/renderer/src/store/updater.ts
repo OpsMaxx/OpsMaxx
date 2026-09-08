@@ -22,7 +22,7 @@ import {
 
 // Survives restarts on purpose: a user who has decided to skip a version has
 // decided it for good, not just until the next launch.
-const DISMISSED_KEY = 'shellpilot.updater.dismissedVersion'
+const DISMISSED_KEY = 'opsmaxx.updater.dismissedVersion'
 
 function readDismissed(): string | null {
   try {
@@ -108,7 +108,7 @@ export const useUpdater = create<UpdaterState>((set, get) => {
   // front of someone at the exact moment they need the right ones.
   const degradedCapabilities = async (): Promise<void> => {
     try {
-      const version = await window.shellpilot?.getVersion()
+      const version = await window.opsmaxx?.getVersion()
       if (!version) return
       set({
         capabilities: {
@@ -135,7 +135,7 @@ export const useUpdater = create<UpdaterState>((set, get) => {
       if (started) return
       started = true
 
-      const u = window.shellpilot?.updater
+      const u = window.opsmaxx?.updater
       if (bridgeHas(u, 'status')) void u?.status().then(applyStatus).catch(noop)
       if (bridgeHas(u, 'getPrefs')) void u?.getPrefs().then((prefs) => set({ prefs })).catch(noop)
 
@@ -161,15 +161,15 @@ export const useUpdater = create<UpdaterState>((set, get) => {
     },
 
     check: () => {
-      if (bridgeHas(window.shellpilot?.updater, 'check')) void window.shellpilot?.updater.check()
+      if (bridgeHas(window.opsmaxx?.updater, 'check')) void window.opsmaxx?.updater.check()
     },
 
     download: () => {
-      if (bridgeHas(window.shellpilot?.updater, 'download')) void window.shellpilot?.updater.download()
+      if (bridgeHas(window.opsmaxx?.updater, 'download')) void window.opsmaxx?.updater.download()
     },
 
     install: () => {
-      if (bridgeHas(window.shellpilot?.updater, 'install')) void window.shellpilot?.updater.install()
+      if (bridgeHas(window.opsmaxx?.updater, 'install')) void window.opsmaxx?.updater.install()
     },
 
     setPrefs: (patch) => {
@@ -177,8 +177,8 @@ export const useUpdater = create<UpdaterState>((set, get) => {
       // by what main actually stored — main is the authority, and it may refuse
       // a preference this platform cannot honour.
       set({ prefs: { ...get().prefs, ...patch } })
-      if (bridgeHas(window.shellpilot?.updater, 'setPrefs')) {
-        void window.shellpilot?.updater.setPrefs(patch).then((prefs) => set({ prefs }))
+      if (bridgeHas(window.opsmaxx?.updater, 'setPrefs')) {
+        void window.opsmaxx?.updater.setPrefs(patch).then((prefs) => set({ prefs }))
       }
     },
 

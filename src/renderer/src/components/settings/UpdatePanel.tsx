@@ -80,10 +80,10 @@ function checkedAgo(iso: string | null): string {
 // will run.
 function noSelfInstallReason(caps: UpdaterCapabilities): string {
   if (caps.platform === 'darwin') {
-    return 'macOS builds here are not notarized, so ShellPilot cannot safely replace itself automatically — download the new version and open it the same way as the first install.'
+    return 'macOS builds here are not notarized, so OpsMaxx cannot safely replace itself automatically — download the new version and open it the same way as the first install.'
   }
   if (caps.isPortable) {
-    return 'This is the portable build, which runs from wherever you put it — ShellPilot cannot replace its own executable, so download the new version and swap it in.'
+    return 'This is the portable build, which runs from wherever you put it — OpsMaxx cannot replace its own executable, so download the new version and swap it in.'
   }
   return 'This build cannot install updates itself — download the new version from the releases page.'
 }
@@ -130,7 +130,7 @@ export function UpdatePanel(): React.JSX.Element {
       <div className="setting-row">
         <div className="s-info">
           <div className="s-title">
-            ShellPilot {caps ? `v${caps.currentVersion}` : ''}
+            OpsMaxx {caps ? `v${caps.currentVersion}` : ''}
             {caps?.runningChannel === 'beta' && <span className="build-tag">beta</span>}
           </div>
           <div className="s-desc">
@@ -167,7 +167,7 @@ export function UpdatePanel(): React.JSX.Element {
             </div>
             <div className="s-desc">
               {canAutoInstall
-                ? `ShellPilot will restart to finish installing v${status.version}.`
+                ? `OpsMaxx will restart to finish installing v${status.version}.`
                 : `v${status.version} has been downloaded, but this build cannot install it itself.`}
             </div>
           </div>
@@ -176,7 +176,7 @@ export function UpdatePanel(): React.JSX.Element {
               Restart &amp; update
             </button>
           ) : (
-            <button className="btn sm" onClick={() => void window.shellpilot?.updater.openReleasePage()}>
+            <button className="btn sm" onClick={() => void window.opsmaxx?.updater.openReleasePage()}>
               <ExternalLink size={13} /> Releases page
             </button>
           )}
@@ -192,7 +192,7 @@ export function UpdatePanel(): React.JSX.Element {
             </div>
             <div className="s-desc">{noSelfInstallReason(caps)}</div>
           </div>
-          <button className="btn sm" onClick={() => void window.shellpilot?.updater.openReleasePage()}>
+          <button className="btn sm" onClick={() => void window.opsmaxx?.updater.openReleasePage()}>
             <ExternalLink size={13} /> Download
           </button>
         </div>
@@ -205,7 +205,7 @@ export function UpdatePanel(): React.JSX.Element {
             <div className="s-title">Update check failed</div>
             <div className="s-desc">{status.message} — you can always grab the latest release directly.</div>
           </div>
-          <button className="btn sm" onClick={() => void window.shellpilot?.updater.openReleasePage()}>
+          <button className="btn sm" onClick={() => void window.opsmaxx?.updater.openReleasePage()}>
             <Download size={13} /> Releases page
           </button>
         </div>
@@ -234,7 +234,7 @@ export function UpdatePanel(): React.JSX.Element {
       <div className="backup-h">Automatic updates</div>
       <SettingSwitch
         label="Check for updates automatically"
-        desc="Off means ShellPilot only looks when you press Check for updates."
+        desc="Off means OpsMaxx only looks when you press Check for updates."
         checked={prefs.autoCheck}
         onChange={(autoCheck) => setPrefs({ autoCheck })}
       />
@@ -270,10 +270,10 @@ export function UpdatePanel(): React.JSX.Element {
         label="Install on quit"
         desc={
           canAutoInstall
-            ? 'Apply a downloaded update the next time you close ShellPilot, instead of waiting for you to restart it now.'
+            ? 'Apply a downloaded update the next time you close OpsMaxx, instead of waiting for you to restart it now.'
             : caps
               ? `Unavailable on this build. ${noSelfInstallReason(caps)}`
-              : 'Unavailable until ShellPilot knows what this build can install.'
+              : 'Unavailable until OpsMaxx knows what this build can install.'
         }
         checked={prefs.autoInstallOnQuit}
         disabled={!canAutoInstall}
@@ -313,7 +313,7 @@ export function UpdatePanel(): React.JSX.Element {
       {confirmRestart && (
         <Modal
           title="Restart to finish updating?"
-          subtitle="ShellPilot closes and reopens on the new version."
+          subtitle="OpsMaxx closes and reopens on the new version."
           onClose={() => setConfirmRestart(false)}
           footer={
             <>
@@ -329,7 +329,7 @@ export function UpdatePanel(): React.JSX.Element {
         >
           <p>
             Every open SSH session, tunnel and file transfer ends when the app closes. Anything
-            running on a server keeps running there, but ShellPilot will not be watching it.
+            running on a server keeps running there, but OpsMaxx will not be watching it.
           </p>
         </Modal>
       )}
@@ -358,7 +358,7 @@ export function UpdatePanel(): React.JSX.Element {
           }
         >
           <p>
-            The newest stable release is probably older than the beta you are on. ShellPilot will
+            The newest stable release is probably older than the beta you are on. OpsMaxx will
             offer it as an update and installing it moves this app <b>down</b> a version, taking the
             beta-only features with it.
           </p>

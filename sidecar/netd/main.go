@@ -1,4 +1,4 @@
-// Command shellpilot-netd is ShellPilot's WireGuard sidecar.
+// Command opsmaxx-netd is OpsMaxx's WireGuard sidecar.
 //
 // By default it runs the entire TCP/IP stack in-process on gVisor netstack, so
 // there is no TUN device, no route-table change, no DNS change and no
@@ -118,7 +118,7 @@ type options struct {
 	nonceFile string
 }
 
-const usage = `shellpilot-netd %s
+const usage = `opsmaxx-netd %s
 
 Speaks newline-delimited JSON on stdin/stdout.
 
@@ -196,7 +196,7 @@ func parseArgs(argv []string) (*options, error) {
 func main() {
 	opts, err := parseArgs(os.Args[1:])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "shellpilot-netd: %s\n", err.Error())
+		fmt.Fprintf(os.Stderr, "opsmaxx-netd: %s\n", err.Error())
 		os.Exit(2)
 	}
 	// --version is used by the TS driver's probe() to identify the binary

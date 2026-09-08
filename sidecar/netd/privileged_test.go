@@ -483,7 +483,7 @@ func TestRequestedIfaceNameValidatesLinuxAndWindowsNames(t *testing.T) {
 		{"linux", "wg 0", false},
 		{"linux", "wg/0", false},
 		{"linux", "wg;reboot", false},
-		{"windows", "ShellPilot vpn1", true},
+		{"windows", "OpsMaxx vpn1", true},
 		{"windows", "", false},
 		{"windows", "bad\"quote", false},
 		{"windows", "bad\nnewline", false},

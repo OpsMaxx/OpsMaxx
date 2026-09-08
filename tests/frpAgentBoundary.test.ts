@@ -186,7 +186,7 @@ describe('nothing an agent can reach imports the publish flow', () => {
     const reachable = ITEM_2_MODULES.filter((m) => relFiles.has(m))
     expect(
       reachable,
-      `These modules are now reachable from the MCP bridge or the ShellPilot CLI:\n  ` +
+      `These modules are now reachable from the MCP bridge or the OpsMaxx CLI:\n  ` +
         `${reachable.join('\n  ')}\n\n` +
         `frp is refused to agents outright because an frp proxy makes a port on the USER'S OWN ` +
         `machine reachable from the internet. The one-click flow does not change that judgement; ` +

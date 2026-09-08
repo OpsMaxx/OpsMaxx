@@ -38,7 +38,7 @@ beforeEach(() => {
   resetHistoryModuleForTests()
   delete process.env[DISABLE_ENV]
   opened.length = 0
-  dir = mkdtempSync(join(tmpdir(), 'shellpilot-history-'))
+  dir = mkdtempSync(join(tmpdir(), 'opsmaxx-history-'))
 })
 
 afterEach(async () => {
@@ -62,15 +62,15 @@ async function open(at = dir): Promise<HistoryStore> {
 }
 
 describe('open', () => {
-  it('creates its own file, never inside shellpilot-data.json', async () => {
+  it('creates its own file, never inside opsmaxx-data.json', async () => {
     const s = await open()
     expect(s.path).toBe(join(dir, HISTORY_FILE))
     expect(existsSync(s.path)).toBe(true)
-    // shellpilot-data.json is the backup payload backup.ts reads into the
+    // opsmaxx-data.json is the backup payload backup.ts reads into the
     // encrypted export, and it is renderer-owned and rewritten wholesale on a
     // debounce. Observed host data landing there would silently change what a
     // user's exported backup contains.
-    expect(existsSync(join(dir, 'shellpilot-data.json'))).toBe(false)
+    expect(existsSync(join(dir, 'opsmaxx-data.json'))).toBe(false)
   })
 
   it('runs in WAL with a busy timeout and NORMAL sync', async () => {

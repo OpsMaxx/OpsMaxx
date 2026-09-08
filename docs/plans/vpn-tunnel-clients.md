@@ -1,4 +1,4 @@
-# VPN & Tunnel Clients for ShellPilot
+# VPN & Tunnel Clients for OpsMaxx
 
 > **Status: partly superseded, 2026-08-31.** This is the design record as written,
 > kept unedited below so the reasoning stays readable. One decision has since been
@@ -6,14 +6,14 @@
 > obligation this document treats as disqualifying is real, and is discharged by
 > publishing the exact pinned source tarball as a release asset; the aggregation
 > question is settled by running `openvpn` as a separate process over its management
-> socket (GPL-2.0 §2), so ShellPilot stays MIT. Windows is unchanged and still needs a
+> socket (GPL-2.0 §2), so OpsMaxx stays MIT. Windows is unchanged and still needs a
 > system install, for driver reasons rather than licence ones. Wintun's proprietary DLL
 > is also now bundled. See `docs/VPN.md` and `THIRD-PARTY-NOTICES.md` for what actually
 > ships; where they disagree with this file, they are right.
 
 ## 1. Executive summary + recommendation
 
-Ship **WireGuard first, in fully userspace mode, with no admin rights** — a single small MIT Go sidecar (`shellpilot-netd`) that statically links `wireguard-go` plus its gVisor `tun/netstack` TCP/IP stack and exposes each tunnel as a local SOCKS5 listener and/or ephemeral port-forwards, driven over newline-delimited JSON on stdin/stdout so private keys never touch argv or disk. This maps one-to-one onto the SOCKS/local-forward UX the app already has (`src/main/services/tunnel.ts:250-262`) and onto `openEphemeralForward` (`src/main/services/tunnel.ts:313`), which means SSH-over-VPN and DB-over-VPN fall out almost for free. **Bundle `frpc` (Apache-2.0) and drive it through its documented admin API**; **never bundle `openvpn`** — it is GPL-2.0 and shipping the binary would saddle an MIT volunteer project with a perpetual per-platform corresponding-source obligation, so detect a system install instead and drive it through the management interface. Model VPN as a **separate `VpnProfile` domain**, not an extension of `TunnelKind` — `TunnelConfig` (`src/shared/tunnel.ts:5-16`) is SSH-shaped and the renderer already has a `vpns` slice waiting for a real type (`src/renderer/src/types.ts:82-97`, `src/renderer/src/store/app.ts:93`). Treat every imported `.ovpn`/`.conf`/`.toml` as hostile input: parse into a typed model against a strict allowlist and **re-emit** a config we generated, because `up`/`down`/`script-security` in a `.ovpn` and `unix_domain_socket` in an frp TOML are both remote-code-execution primitives.
+Ship **WireGuard first, in fully userspace mode, with no admin rights** — a single small MIT Go sidecar (`opsmaxx-netd`) that statically links `wireguard-go` plus its gVisor `tun/netstack` TCP/IP stack and exposes each tunnel as a local SOCKS5 listener and/or ephemeral port-forwards, driven over newline-delimited JSON on stdin/stdout so private keys never touch argv or disk. This maps one-to-one onto the SOCKS/local-forward UX the app already has (`src/main/services/tunnel.ts:250-262`) and onto `openEphemeralForward` (`src/main/services/tunnel.ts:313`), which means SSH-over-VPN and DB-over-VPN fall out almost for free. **Bundle `frpc` (Apache-2.0) and drive it through its documented admin API**; **never bundle `openvpn`** — it is GPL-2.0 and shipping the binary would saddle an MIT volunteer project with a perpetual per-platform corresponding-source obligation, so detect a system install instead and drive it through the management interface. Model VPN as a **separate `VpnProfile` domain**, not an extension of `TunnelKind` — `TunnelConfig` (`src/shared/tunnel.ts:5-16`) is SSH-shaped and the renderer already has a `vpns` slice waiting for a real type (`src/renderer/src/types.ts:82-97`, `src/renderer/src/store/app.ts:93`). Treat every imported `.ovpn`/`.conf`/`.toml` as hostile input: parse into a typed model against a strict allowlist and **re-emit** a config we generated, because `up`/`down`/`script-security` in a `.ovpn` and `unix_domain_socket` in an frp TOML are both remote-code-execution primitives.
 
 ---
 
@@ -49,7 +49,7 @@ Forcing WireGuard into this shape would mean six of eight `TunnelConfig` fields 
 ### 2.3 IPC wiring
 
 - Main handlers: `src/main/index.ts:494-499` (`tunnel:start` / `tunnel:stop` / `tunnel:list`). `tunnel:start` passes `e.sender` and wraps ssh config in `resolveChainSecrets(ssh)` (`:496`).
-- Preload: `src/preload/index.ts:200-210`, exposed via `contextBridge.exposeInMainWorld('shellpilot', api)` at `:353`, typed by `export type ShellPilotApi = typeof api` (`:355`) and re-declared on `Window` in `src/preload/index.d.ts:3-7`. Adding a namespace is purely additive.
+- Preload: `src/preload/index.ts:200-210`, exposed via `contextBridge.exposeInMainWorld('opsmaxx', api)` at `:353`, typed by `export type OpsMaxxApi = typeof api` (`:355`) and re-declared on `Window` in `src/preload/index.d.ts:3-7`. Adding a namespace is purely additive.
 - Renderer guards missing preload methods with `bridgeHas` / `bridgeOn` (`src/renderer/src/lib/bridge.ts:30-45`) — required, because `electron-vite dev` hot-reloads the renderer against a stale preload.
 - Interactive prompting precedent: `setSshPrompter` (`src/main/services/ssh.ts:33-39`) + `SshPromptRequest` (`src/preload/index.ts:14-22`). OpenVPN OTP/password prompts reuse this exact shape.
 
@@ -63,9 +63,9 @@ Forcing WireGuard into this shape would mean six of eight `TunnelConfig` fields 
 
 ### 2.5 Secrets
 
-- `src/main/services/secrets.ts` — `safeStorage`-sealed base64 map at `shellpilot-secrets.json`, mode `0600` (`:22`). Refuses to persist rather than store plaintext (`:30`).
+- `src/main/services/secrets.ts` — `safeStorage`-sealed base64 map at `opsmaxx-secrets.json`, mode `0600` (`:22`). Refuses to persist rather than store plaintext (`:30`).
 - `src/main/services/vault.ts` — AES-256-GCM under scrypt `N=32768,r=8,p=3` (`:27`); key lives only in main memory; the comment at `:11-16` is honest that decrypted entries do reach the renderer.
-- `src/main/services/credentialResolver.ts` — `SecretBlob.vaultEntryId` (`:12`) is the canonical pattern: *a reference to a vault entry, one record, changed in one place when it rotates* (`:7-11`). `VaultLockedError` (`:32-39`) with the `SHELLPILOT_VAULT_LOCKED` marker (`:30`) survives the IPC boundary. `knownSecretValuesForServer` (`:122-142`) feeds redaction.
+- `src/main/services/credentialResolver.ts` — `SecretBlob.vaultEntryId` (`:12`) is the canonical pattern: *a reference to a vault entry, one record, changed in one place when it rotates* (`:7-11`). `VaultLockedError` (`:32-39`) with the `OPSMAXX_VAULT_LOCKED` marker (`:30`) survives the IPC boundary. `knownSecretValuesForServer` (`:122-142`) feeds redaction.
 - `src/shared/vault.ts:10` `VaultKind`, `:126-134` `VAULT_KIND_FIELDS` (tests assert coverage — see the comment at `:120-125`).
 - `src/main/services/secretRedaction.ts:12-35` `PATTERN_RULES`, `:59-61` `redactOutput(text, knownSecrets)`. `auditLog.ts:21-22` redacts *before* writing, not before displaying.
 
@@ -144,9 +144,9 @@ Both bundled binaries are built from **pinned source in CI** with `-trimpath -ld
 
 ## 4. Licensing analysis + distribution recommendation
 
-ShellPilot is MIT (`LICENSE`, `package.json:"license":"MIT"`). Three distinct questions get conflated constantly; separate them.
+OpsMaxx is MIT (`LICENSE`, `package.json:"license":"MIT"`). Three distinct questions get conflated constantly; separate them.
 
-**Q1 — does talking to a GPL program over a socket make our code GPL?** No. `openvpn` runs as a separate process; ShellPilot exchanges bytes over a UNIX socket / loopback TCP / pipe. Arm's-length inter-process communication does not create a derivative work under GPLv2. ShellPilot's source stays MIT regardless.
+**Q1 — does talking to a GPL program over a socket make our code GPL?** No. `openvpn` runs as a separate process; OpsMaxx exchanges bytes over a UNIX socket / loopback TCP / pipe. Arm's-length inter-process communication does not create a derivative work under GPLv2. OpsMaxx's source stays MIT regardless.
 
 **Q2 — does *distributing* the GPL binary create obligations?** **Yes, and this is the one that bites.** GPLv2 §3 requires that anyone who distributes a binary accompany it with the complete corresponding machine-readable source, or a written offer valid for three years. Concretely, shipping `openvpn.exe` in the NSIS installer would mean: hosting the exact `openvpn-2.7.x` source tarball plus every patch plus the build recipe, plus (because you linked them) OpenSSL, lzo, pkcs11-helper and `tap-windows6`, for **every** release artifact, **for three years after the last distribution** — on a volunteer project with no legal function. It also means the Windows installer would need to install the TAP/DCO driver, which requires an EV-signed installer this project does not have (`electron-builder.yml` has no `win.certificateFile` and `mac.identity: '-'`).
 
@@ -156,16 +156,16 @@ ShellPilot is MIT (`LICENSE`, `package.json:"license":"MIT"`). Three distinct qu
 
 | Binary | License | Bundle? | Obligation if bundled | Decision |
 |---|---|---|---|---|
-| `shellpilot-netd` (our code + `wireguard-go`) | **MIT** + MIT | **Yes** | Preserve copyright + permission notice | ✅ bundle; add WireGuard's MIT text to `THIRD-PARTY-LICENSES.md` |
+| `opsmaxx-netd` (our code + `wireguard-go`) | **MIT** + MIT | **Yes** | Preserve copyright + permission notice | ✅ bundle; add WireGuard's MIT text to `THIRD-PARTY-LICENSES.md` |
 | `frpc` | **Apache-2.0** | **Yes** | Retain LICENSE, retain/propagate `NOTICE`, state changes if modified (we make none) | ✅ bundle; ship `LICENSE` + `NOTICE` under `resources/bin/frp/` and list in `THIRD-PARTY-LICENSES.md` |
 | `boringtun` | BSD-3 | n/a | Reproduce copyright + disclaimer, no endorsement | not used |
 | **`openvpn`** | **GPL-2.0** | **NO** | Perpetual per-platform corresponding-source offer + driver signing | ❌ **bring-your-own** |
 
 ### Recommendation
 
-1. **Never ship an `openvpn` binary in any ShellPilot artifact.** Detect a system install. If missing, the OpenVPN profile UI shows a per-OS install hint (`brew install openvpn`, `sudo apt install openvpn`, `winget install OpenVPNTechnologies.OpenVPN`) and a "Locate binary…" file picker. `errorCode: 'binary-missing'`.
+1. **Never ship an `openvpn` binary in any OpsMaxx artifact.** Detect a system install. If missing, the OpenVPN profile UI shows a per-OS install hint (`brew install openvpn`, `sudo apt install openvpn`, `winget install OpenVPNTechnologies.OpenVPN`) and a "Locate binary…" file picker. `errorCode: 'binary-missing'`.
 2. Add `THIRD-PARTY-LICENSES.md` at the repo root, generated in CI from `resources/bin/manifest.json`, and surface it in Settings → About.
-3. Add a `LICENSING.md` note for downstream packagers: *"Do not vendor `openvpn` into a ShellPilot AppImage/Flatpak/Homebrew cask without independently satisfying GPLv2 §3."* An AppImage that bundles openvpn is a redistribution and the obligation lands on whoever built it.
+3. Add a `LICENSING.md` note for downstream packagers: *"Do not vendor `openvpn` into a OpsMaxx AppImage/Flatpak/Homebrew cask without independently satisfying GPLv2 §3."* An AppImage that bundles openvpn is a redistribution and the obligation lands on whoever built it.
 4. `NOTICE` propagation for frp is a hard requirement, not a courtesy — Apache-2.0 §4(d).
 
 ---
@@ -182,7 +182,7 @@ export type VpnKind = 'wireguard' | 'openvpn' | 'frp'
 export type VpnMode = 'userspace' | 'system'
 
 /** A pointer into the vault. A literal secret must never appear in a VpnProfile:
- *  profiles are persisted by store.ts into plain JSON (shellpilot-data.json). */
+ *  profiles are persisted by store.ts into plain JSON (opsmaxx-data.json). */
 export interface VpnSecretRef { vaultEntryId: string; field: VpnSecretField }
 export type VpnSecretField =
   | 'privateKey' | 'presharedKey' | 'password' | 'username'
@@ -529,7 +529,7 @@ New directory `src/renderer/src/components/vpn/`, siblings of `components/tunnel
 
 **Storage.** Add `'vpn'` to `VaultKind` (`src/shared/vault.ts:10`), to `VAULT_KIND_LABEL` (`:68-74`) and to `VAULT_KIND_FIELDS` (`:126-134`) as `{ url: true, username: true, secret: 'password', keys: true }` — `privateKey` carries WG private keys / OpenVPN key material / the sanitized config body, `password` carries the auth password or frp token, `fields[]` carries the rest (preshared keys, per-proxy secretKeys). `tests/vaultKinds.test.ts` asserts coverage of that map, so the addition is caught if incomplete.
 
-Why the vault and not `secrets.ts`: the vault comment at `src/shared/vault.ts:38-42` states the rule — *"a path is the one credential ShellPilot never actually held… which also does not travel with an encrypted backup."* A WireGuard private key must travel with `backupExport` exactly as an SSH key does.
+Why the vault and not `secrets.ts`: the vault comment at `src/shared/vault.ts:38-42` states the rule — *"a path is the one credential OpsMaxx never actually held… which also does not travel with an encrypted backup."* A WireGuard private key must travel with `backupExport` exactly as an SSH key does.
 
 **Resolution.** New `resolveVpnSecrets(profile): ResolvedVpnSecrets` in `credentialResolver.ts`, throwing `VaultLockedError` (`:32-39`) so the renderer's existing `withVaultUnlock` flow prompts. Starting a VPN with a locked vault fails with `errorCode:'vault-locked'` — **never** a fallback, matching the reasoning at `credentialResolver.ts:76-80`.
 
@@ -539,7 +539,7 @@ Why the vault and not `secrets.ts`: the vault comment at `src/shared/vault.ts:38
 |---|---|---|
 | **WireGuard** | NDJSON request on `netd`'s **stdin** → `dev.IpcSet()` in-process | argv is world-readable via `ps aux` on Linux/macOS and `Get-CimInstance Win32_Process` on Windows. Nothing ever hits disk. |
 | **OpenVPN — credentials** | **management interface**: `--management-query-passwords` + `username "Auth" <u>` / `password "Auth" <p>` written on the socket | `--auth-user-pass <file>` and `--askpass <file>` both put plaintext on disk |
-| **OpenVPN — config + certs** | POSIX: `--config /dev/stdin`, body written to the child's stdin then closed. Windows: `%LOCALAPPDATA%\ShellPilot\vpn-run\<runId>\p.ovpn`, created 0600-equivalent in a 0700 dir, deleted on stop + swept at startup | OpenVPN cannot take inline cert material any other way. Windows has no `/dev/stdin`. Residual risk is documented, not hidden. Phase 7 hardening: `--management-external-key` moves the private key out of the file entirely and does the signing over the management channel |
+| **OpenVPN — config + certs** | POSIX: `--config /dev/stdin`, body written to the child's stdin then closed. Windows: `%LOCALAPPDATA%\OpsMaxx\vpn-run\<runId>\p.ovpn`, created 0600-equivalent in a 0700 dir, deleted on stop + swept at startup | OpenVPN cannot take inline cert material any other way. Windows has no `/dev/stdin`. Residual risk is documented, not hidden. Phase 7 hardening: `--management-external-key` moves the private key out of the file entirely and does the signing over the management channel |
 | **frp** | Config uses frp's Go-template env syntax: `auth.token = "{{ .Envs.SP_FRP_TOKEN }}"`, `webServer.password = "{{ .Envs.SP_FRP_ADMIN }}"`; values passed in the child's **env** | frpc has no stdin config path. `/proc/<pid>/environ` is `0400` owner-only, argv is world-readable — env is strictly better, though not perfect. Say so |
 
 **Redaction.** Add to `PATTERN_RULES` (`secretRedaction.ts:12-35`):
@@ -638,7 +638,7 @@ MCP tools in `mcpServer.ts`, mirroring `:903` and `:930`:
 
 ## 6. Per-protocol integration detail
 
-### 6.1 WireGuard — `shellpilot-netd`
+### 6.1 WireGuard — `opsmaxx-netd`
 
 **Sidecar protocol.** Newline-delimited JSON, request/response + unsolicited events, over stdio.
 
@@ -770,7 +770,7 @@ Silently dropping the reject tier would be worse than failing: the profile autho
 
 - **Windows:** if `\\.\pipe\openvpn\service` exists (the OpenVPN Interactive Service, installed by the standard MSI), use it — that is the supported no-UAC path and what OpenVPN-GUI does. Otherwise `Start-Process -Verb RunAs`, one UAC prompt per connect.
 - **Linux:** per-launch `pkexec` (falling back to `sudo -A` with an askpass helper). Never `setcap`, never a persistent service unit.
-- **macOS:** `osascript -e 'do shell script "…" with administrator privileges'`. ShellPilot never sees, stores or transports the password — the Apple dialog does. **No `SMJobBless`, no launchd privileged helper**: both require a Developer ID the project does not have (`electron-builder.yml:64-77`).
+- **macOS:** `osascript -e 'do shell script "…" with administrator privileges'`. OpsMaxx never sees, stores or transports the password — the Apple dialog does. **No `SMJobBless`, no launchd privileged helper**: both require a Developer ID the project does not have (`electron-builder.yml:64-77`).
 
 ### 6.3 frp
 
@@ -791,7 +791,7 @@ transport.heartbeatInterval = 30
 
 webServer.addr     = "127.0.0.1"
 webServer.port     = 41731              # ephemeral, bound by us first then released
-webServer.user     = "shellpilot"
+webServer.user     = "opsmaxx"
 webServer.password = "{{ .Envs.SP_FRP_ADMIN }}"
 
 log.to = "console"
@@ -863,7 +863,7 @@ Bytes: frp exposes no client-side byte counters, so `VpnStats.rxBytes/txBytes` a
 | **DNS** |
 | E08 | DNS leak in system mode | resolver config after up | System mode sets tunnel DNS and asserts it; userspace mode resolves *inside* netstack via `LookupContextHost`, so there is nothing to leak | integration: resolve through `tnet` |
 | E09 | macOS `scutil` resolver not restored after SIGKILL | startup scan of `/Library/Preferences/SystemConfiguration` snapshot | Snapshot before change, restore at startup if a stale marker exists | manual |
-| E10 | Windows NRPT rules left behind | `Get-DnsClientNrptRule` filtered by our tag | Tag every rule `ShellPilot-<runId>`; sweep untagged-by-live-run at startup | manual |
+| E10 | Windows NRPT rules left behind | `Get-DnsClientNrptRule` filtered by our tag | Tag every rule `OpsMaxx-<runId>`; sweep untagged-by-live-run at startup | manual |
 | E11 | Linux systemd-resolved vs raw `resolv.conf` | `resolvectl status` / `is-symlink` | Prefer `resolvectl dns <if>`; fall back to a backed-up `resolv.conf` restored at startup | manual |
 | E12 | Split DNS: only `*.corp` through the tunnel | `dhcp-option DOMAIN` | Supported in system mode; userspace mode documents that split DNS is per-connection, not system-wide | unit |
 | **Routing** |
@@ -971,7 +971,7 @@ No UI. Internal only.
 **Note:** macOS system mode stays **blocked** until a Developer ID exists.
 
 ### Phase 7 — Hardening & polish (4 days)
-CLI `shellpilot vpn list|up|down|status` — **implemented as MCP tool calls over the existing paired session** (`src/cli/bridge.ts`, `src/cli/pairing.ts`), so it inherits `vpnControl` policy and approvals for free. **Never give the CLI a direct path into main.** Plus: localized error-message table, log drawer, WG QR import, `--management-external-key`, portable-mode verification, `docs/VPN.md`, README.
+CLI `opsmaxx vpn list|up|down|status` — **implemented as MCP tool calls over the existing paired session** (`src/cli/bridge.ts`, `src/cli/pairing.ts`), so it inherits `vpnControl` policy and approvals for free. **Never give the CLI a direct path into main.** Plus: localized error-message table, log drawer, WG QR import, `--management-external-key`, portable-mode verification, `docs/VPN.md`, README.
 
 **Total ≈ 39 developer-days.**
 
@@ -1013,7 +1013,7 @@ All three are plain Node, cross-platform, and let the **entire lifecycle** run i
 
 ## 11. Open questions / decisions needed from the maintainer
 
-1. **Go toolchain in the release pipeline.** Phase 1 requires building `shellpilot-netd` (and Phase 4 `frpc`) for 6 platform/arch targets in CI, adding roughly 25 MB to each installer. Acceptable? If not, WireGuard degrades to "bring your own `wireproxy`/`boringtun`", which is a materially worse product and I would rather drop WireGuard than ship that.
+1. **Go toolchain in the release pipeline.** Phase 1 requires building `opsmaxx-netd` (and Phase 4 `frpc`) for 6 platform/arch targets in CI, adding roughly 25 MB to each installer. Acceptable? If not, WireGuard degrades to "bring your own `wireproxy`/`boringtun`", which is a materially worse product and I would rather drop WireGuard than ship that.
 2. **Confirm the never-bundle-OpenVPN call**, and therefore that OpenVPN profiles show an "install openvpn" hint on a clean machine.
 3. **macOS system mode.** Without a Developer ID, system-mode VPN on macOS means an `osascript` sudo prompt raised by an ad-hoc-signed, unnotarized app. My recommendation is to **block macOS system mode entirely** until a certificate exists, and ship userspace only there. Confirm?
 4. **Workspace scoping.** VPN profiles workspace-scoped (matching the existing `vpns` slice and `Tunnel`) or global? Recommendation: workspace-scoped, with vault entries able to be shared via the existing `workspaceId?` escape hatch (`src/shared/vault.ts:16-28`).
@@ -1039,11 +1039,11 @@ All three are plain Node, cross-platform, and let the **entire lifecycle** run i
 ---
 
 ### Critical Files for Implementation
-- `/Users/zeeshan/ShellPilot/.claude/worktrees/vpn-client-implementation-c87bab/src/main/services/tunnel.ts`
-- `/Users/zeeshan/ShellPilot/.claude/worktrees/vpn-client-implementation-c87bab/src/main/index.ts`
-- `/Users/zeeshan/ShellPilot/.claude/worktrees/vpn-client-implementation-c87bab/src/main/services/credentialResolver.ts`
-- `/Users/zeeshan/ShellPilot/.claude/worktrees/vpn-client-implementation-c87bab/src/main/services/policyEngine.ts`
-- `/Users/zeeshan/ShellPilot/.claude/worktrees/vpn-client-implementation-c87bab/electron-builder.yml`
+- `/Users/zeeshan/OpsMaxx/.claude/worktrees/vpn-client-implementation-c87bab/src/main/services/tunnel.ts`
+- `/Users/zeeshan/OpsMaxx/.claude/worktrees/vpn-client-implementation-c87bab/src/main/index.ts`
+- `/Users/zeeshan/OpsMaxx/.claude/worktrees/vpn-client-implementation-c87bab/src/main/services/credentialResolver.ts`
+- `/Users/zeeshan/OpsMaxx/.claude/worktrees/vpn-client-implementation-c87bab/src/main/services/policyEngine.ts`
+- `/Users/zeeshan/OpsMaxx/.claude/worktrees/vpn-client-implementation-c87bab/electron-builder.yml`
 
 ---
 

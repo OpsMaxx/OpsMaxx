@@ -121,7 +121,7 @@ export function finaliseLabels(shells: LocalShell[]): LocalShell[] {
 // ELECTRON_* is ours wholesale: ELECTRON_RUN_AS_NODE turns any Electron binary
 // the user runs into a bare Node, ELECTRON_NO_ASAR changes how their next
 // Electron app loads its own code, and ELECTRON_RENDERER_URL is a dev-only
-// artefact of ShellPilot's own launch. None of them mean anything in a user's
+// artefact of OpsMaxx's own launch. None of them mean anything in a user's
 // terminal. Naming three of them (as an earlier draft did) leaves the rest.
 const STRIPPED_PREFIXES = ['ELECTRON_']
 
@@ -138,7 +138,7 @@ const STRIPPED_NAMES = new Set(['NODE_OPTIONS', 'NODE_REPL_EXTERNAL_MODULE', 'NO
 // Two jobs. First, strip what Electron put there for its own child processes.
 // Second, declare what a terminal is, so programs stop guessing.
 //
-// Everything else is forwarded verbatim, which is only safe because ShellPilot
+// Everything else is forwarded verbatim, which is only safe because OpsMaxx
 // parks nothing sensitive in its own process.env — no vault material, no
 // credentials, no MCP pairing token. tests/shellDiscovery.test.ts asserts that
 // stays true; if that test ever has to be relaxed, this function becomes an
@@ -153,7 +153,7 @@ export function sanitisedEnv(): Record<string, string> {
   }
   env.TERM = 'xterm-256color'
   env.COLORTERM = 'truecolor'
-  env.TERM_PROGRAM = 'ShellPilot'
+  env.TERM_PROGRAM = 'OpsMaxx'
   env.TERM_PROGRAM_VERSION = app.getVersion()
   // An AppImage started from a desktop launcher can have no locale at all,
   // which makes every UTF-8 box-drawing character in the shell prompt render
@@ -174,7 +174,7 @@ export function sanitisedEnv(): Record<string, string> {
 // assembled by path_helper, which runs from /etc/zprofile and /etc/profile.
 // Those are read by a LOGIN shell only. Without -l the user gets a terminal
 // where `brew`, `node`, `git` from Xcode-alternatives and their whole toolchain
-// are simply not found, and it looks like ShellPilot broke their machine.
+// are simply not found, and it looks like OpsMaxx broke their machine.
 // Terminal.app and iTerm2 both start login shells for exactly this reason.
 async function discoverDarwin(): Promise<LocalShell[]> {
   const shells: LocalShell[] = []
@@ -438,7 +438,7 @@ async function wslDistros(): Promise<string[]> {
 
 // Discovery shells out (dscl, reg, wsl) and the answer does not change while
 // the app runs, so it is computed once. `refresh` exists for the case that
-// does change it: the user installing WSL or Git while ShellPilot is open.
+// does change it: the user installing WSL or Git while OpsMaxx is open.
 let cache: Promise<LocalShell[]> | null = null
 
 export function listShells(refresh = false): Promise<LocalShell[]> {

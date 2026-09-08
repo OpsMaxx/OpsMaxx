@@ -229,9 +229,9 @@ describe('the deprecated-API scan', () => {
   it('finds a served API the table knows about, and says what replaced it', () => {
     const older = parseK8sApiScan(
       [
-        '===SHELLPILOT-SRVVER===',
+        '===OPSMAXX-SRVVER===',
         '{"serverVersion":{"gitVersion":"v1.21.14"}}',
-        '===SHELLPILOT-APIVER===',
+        '===OPSMAXX-APIVER===',
         'apps/v1',
         'batch/v1beta1',
         'policy/v1beta1',
@@ -254,9 +254,9 @@ describe('the deprecated-API scan', () => {
   it('flags a server already PAST a removal release that still serves it', () => {
     const patched = parseK8sApiScan(
       [
-        '===SHELLPILOT-SRVVER===',
+        '===OPSMAXX-SRVVER===',
         '{"serverVersion":{"gitVersion":"v1.28.9+vendor.3"}}',
-        '===SHELLPILOT-APIVER===',
+        '===OPSMAXX-APIVER===',
         'policy/v1beta1'
       ].join('\n'),
       0
@@ -268,9 +268,9 @@ describe('the deprecated-API scan', () => {
   it('says the scan found nothing BECAUSE it was denied, not because nothing is there', () => {
     const denied = parseK8sApiScan(
       [
-        '===SHELLPILOT-SRVVER===',
+        '===OPSMAXX-SRVVER===',
         'error: You must be logged in to the server (Unauthorized)',
-        '===SHELLPILOT-APIVER===',
+        '===OPSMAXX-APIVER===',
         'Error from server (Forbidden): forbidden: User "x" cannot get path "/apis"'
       ].join('\n'),
       1
@@ -317,7 +317,7 @@ describe('helm, which most servers do not have', () => {
     // shape of `helm list -o json`, and the parse of a real one is unproven.
     const r = parseK8sHelmList(
       [
-        '===SHELLPILOT-HELM===',
+        '===OPSMAXX-HELM===',
         JSON.stringify([
           {
             name: 'ingress-nginx',

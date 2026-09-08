@@ -46,8 +46,8 @@ interface InspectState {
   forgetCa: () => Promise<void>
 }
 
-function bridge(): NonNullable<Window['shellpilot']>['inspect'] | null {
-  return window.shellpilot?.inspect ?? null
+function bridge(): NonNullable<Window['opsmaxx']>['inspect'] | null {
+  return window.opsmaxx?.inspect ?? null
 }
 
 /** Upserts a flow in place.

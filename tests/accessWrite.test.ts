@@ -224,7 +224,7 @@ describe('rule 1 — never remove the key this session is on', () => {
   it('refuses to touch the connecting account at all when the server will not say', async () => {
     // ExposeAuthInfo is off by default, so this is what most hosts look like.
     // Without that fact nothing can prove the key being removed is not the one
-    // holding the connection open — so the account ShellPilot connects as is
+    // holding the connection open — so the account OpsMaxx connects as is
     // off limits.
     const plan = revoke({ fingerprint: B_FP, targets: [target(host({ self: 'ops' }), 'ops')] })
     expect(plan.write).toBeNull()
@@ -455,7 +455,7 @@ describe('rule 3 — always leave a timestamped backup on the server', () => {
     expect(backup).toBeLessThan(command.indexOf('mv "$SP_T" "$SP_F"'))
     // Named with the change's own token, so two changes cannot overwrite each
     // other's backup and a person can tell which is which in a shell.
-    expect(command).toContain('.shellpilot-1800000000000.bak')
+    expect(command).toContain('.opsmaxx-1800000000000.bak')
   })
 })
 
@@ -784,13 +784,13 @@ describe.skipIf(process.platform === 'win32')('the staged write, run for real', 
     expect(h.read()).toContain(B)
     expect(h.read()).not.toContain(A)
     // RULE 3, on disk rather than in a string.
-    expect(h.backups()).toEqual(['authorized_keys.shellpilot-t1.bak'])
+    expect(h.backups()).toEqual(['authorized_keys.opsmaxx-t1.bak'])
     expect(readFileSync(join(h.home, '.ssh', h.backups()[0]), 'utf8')).toContain(A)
   })
 
   it('puts the file back by itself when nobody confirms the change', async () => {
     // RULE 2, watched rather than asserted. This is the only property that
-    // survives ShellPilot being the thing that is locked out.
+    // survives OpsMaxx being the thing that is locked out.
     const h = fakeHome([`ssh-ed25519 ${A} alice@laptop`, `ssh-ed25519 ${B} bob@desktop`, ''])
     h.run(buildRevokeKeyCommand({ path: h.file, blob: A, token: 't2', rollbackSeconds: 1 }))
     expect(h.read()).not.toContain(A)
@@ -798,7 +798,7 @@ describe.skipIf(process.platform === 'win32')('the staged write, run for real', 
     expect(h.read()).toContain(A)
     expect(h.read()).toContain(B)
     // And it cleans up after itself: no backup left behind once it has been used.
-    expect(existsSync(join(h.home, '.ssh/authorized_keys.shellpilot-t2.bak'))).toBe(false)
+    expect(existsSync(join(h.home, '.ssh/authorized_keys.opsmaxx-t2.bak'))).toBe(false)
   })
 
   it('leaves the change alone once a confirmation lands', async () => {
@@ -884,7 +884,7 @@ describe.skipIf(process.platform === 'win32')('the staged write, run for real', 
     )
     expect(r.code).toBe(0)
     expect(h.read().trim()).toBe('')
-    expect(readFileSync(join(h.home, '.ssh/authorized_keys.shellpilot-t9.bak'), 'utf8')).toContain(A)
+    expect(readFileSync(join(h.home, '.ssh/authorized_keys.opsmaxx-t9.bak'), 'utf8')).toContain(A)
   })
 
   // -------------------------------------------------------------------------
@@ -991,13 +991,13 @@ describe.skipIf(process.platform === 'win32')('the staged write, run for real', 
     // killed after it armed — rare now, not impossible — and there the change
     // is live and unprotected. Refusing is right and a person has to look, so
     // the message names the file and says what looking at it means.
-    expect(second.out).toContain('authorized_keys.shellpilot-x1.bak')
+    expect(second.out).toContain('authorized_keys.opsmaxx-x1.bak')
     expect(second.out).toMatch(/remove it by hand/)
     // Untouched, and — the part that matters — the first change's backup is
     // still the only one on the host, so its watchdog still holds the file it
     // was armed to restore.
     expect(h.read()).toBe(after)
-    expect(h.backups()).toEqual(['authorized_keys.shellpilot-x1.bak'])
+    expect(h.backups()).toEqual(['authorized_keys.opsmaxx-x1.bak'])
   })
 
   it('stages again once the first change’s window has closed', async () => {

@@ -7,7 +7,7 @@
 //
 // It is emphatically NOT part (b), a third-party extension API. The two share a
 // registry and almost nothing else, and letting (a) drift into (b) by accident
-// is the failure this file is written to prevent. ShellPilot's whole thesis is
+// is the failure this file is written to prevent. OpsMaxx's whole thesis is
 // that credentials never leave it; code we did not write, running in-process
 // with access to `credentialResolver`, is a vault with no lock. (b) needs a real
 // sandbox and a capability-scoped API. It is a product, not a refactor.
@@ -180,7 +180,7 @@ export const MODULES: ModuleDef[] = [
     surface: 'operate',
     label: 'Revoke a key',
     detail:
-      'Remove one SSH key from every account across the estate that trusts it. Each server takes a timestamped backup, arms its own rollback before ShellPilot lets go, and keeps the change only once a second, independent session has authenticated against the changed file. Accounts it may not touch are listed by name with the reason, and a key is never reported as gone from an estate that could not be fully read.',
+      'Remove one SSH key from every account across the estate that trusts it. Each server takes a timestamped backup, arms its own rollback before OpsMaxx lets go, and keeps the change only once a second, independent session has authenticated against the changed file. Accounts it may not touch are listed by name with the reason, and a key is never reported as gone from an estate that could not be fully read.',
     // A module of its own rather than a sub-tab, and the case is different from
     // the other two splits.
     //
@@ -521,12 +521,12 @@ export function isForbiddenModuleImport(path: string): boolean {
  *
  * Every path above lives under src/main. Three of the five modules are renderer
  * components, and a renderer file does not import the vault — it calls
- * `window.shellpilot.vault.list()`, which returns every entry with its password
+ * `window.opsmaxx.vault.list()`, which returns every entry with its password
  * in it, from a file whose import closure is spotless. An import-closure guard
  * cannot see a global, so the closure walk alone was checking the modules least
  * able to violate it and saying nothing about the ones most able to.
  *
- * These are `window.shellpilot` namespaces (src/preload/index.ts): `vault` is
+ * These are `window.opsmaxx` namespaces (src/preload/index.ts): `vault` is
  * the vault, `secrets` is the OS keychain, `local` is a shell on the user's own
  * machine. A module needing any of them is not a module — it is part (b), and
  * needs the sandbox and the capability-scoped API that part (b) means.

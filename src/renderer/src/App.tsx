@@ -87,7 +87,7 @@ export default function App(): React.JSX.Element {
       document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
     }
     apply(theme)
-    window.shellpilot?.theme.set(theme as 'dark' | 'light' | 'system')
+    window.opsmaxx?.theme.set(theme as 'dark' | 'light' | 'system')
   }, [theme])
 
   return (

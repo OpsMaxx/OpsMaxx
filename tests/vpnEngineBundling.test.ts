@@ -9,7 +9,7 @@ import { isEngineBundledOn, userSuppliesEngine } from '../src/shared/vpnEngines'
 // process and the renderer in agreement. `binaries.ts` asks it whether to look
 // for a bundled binary; three pieces of UI copy ask it whether to offer a
 // download link. Those used to be separate `platform === 'win32'` checks, and
-// the failure mode when they drifted was not a crash — it was ShellPilot
+// the failure mode when they drifted was not a crash — it was OpsMaxx
 // telling a macOS user to go and install an OpenVPN that was already on their
 // disk, hash-verified, a directory away.
 
@@ -42,9 +42,9 @@ describe('isEngineBundledOn', () => {
     // make a quarantined sidecar look like something the user should download
     // from the WireGuard project, which is the wrong project entirely.
     for (const platform of EVERY_PLATFORM) {
-      expect(isEngineBundledOn('shellpilot-netd', platform)).toBe(true)
+      expect(isEngineBundledOn('opsmaxx-netd', platform)).toBe(true)
       expect(isEngineBundledOn('frpc', platform)).toBe(true)
-      expect(isEngineBundledOn('shellpilot-netd.exe', platform)).toBe(true)
+      expect(isEngineBundledOn('opsmaxx-netd.exe', platform)).toBe(true)
       expect(isEngineBundledOn('frpc.exe', platform)).toBe(true)
     }
   })
@@ -60,7 +60,7 @@ describe('userSuppliesEngine', () => {
 
   it('is never true for an engine that always ships', () => {
     for (const platform of EVERY_PLATFORM) {
-      expect(userSuppliesEngine('shellpilot-netd', platform)).toBe(false)
+      expect(userSuppliesEngine('opsmaxx-netd', platform)).toBe(false)
       expect(userSuppliesEngine('frpc', platform)).toBe(false)
     }
   })
@@ -74,7 +74,7 @@ describe('userSuppliesEngine', () => {
     // every macOS and Linux user on startup.
     expect(userSuppliesEngine('openvpn', null)).toBe(false)
     expect(userSuppliesEngine('openvpn.exe', null)).toBe(false)
-    expect(userSuppliesEngine('shellpilot-netd', null)).toBe(false)
+    expect(userSuppliesEngine('opsmaxx-netd', null)).toBe(false)
   })
 
   it('is exactly the negation of isEngineBundledOn once the platform is known', () => {
@@ -83,7 +83,7 @@ describe('userSuppliesEngine', () => {
     // engine the resolver is about to find is the bug this module exists to
     // prevent.
     for (const platform of EVERY_PLATFORM) {
-      for (const name of ['openvpn', 'openvpn.exe', 'shellpilot-netd', 'frpc']) {
+      for (const name of ['openvpn', 'openvpn.exe', 'opsmaxx-netd', 'frpc']) {
         expect(userSuppliesEngine(name, platform)).toBe(!isEngineBundledOn(name, platform))
       }
     }

@@ -34,7 +34,7 @@ import { NoteWhy, PanelShell } from './PanelShell'
 // Patch and update management — roadmap item 17, renderer half.
 //
 // The most common recurring task in the job this app is named for, and the
-// first screen in ShellPilot that does it.
+// first screen in OpsMaxx that does it.
 //
 // FOUR THINGS THIS SCREEN REFUSES TO DO, all of them argued in
 // src/shared/patch.ts and src/shared/topology.ts rather than here:
@@ -148,7 +148,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
     setKernel(null)
     try {
       const call = (
-        window.shellpilot as
+        window.opsmaxx as
           | { fleet?: { kernel?: (cfg: unknown) => Promise<KernelStatus | { error: string }> } }
           | undefined
       )?.fleet?.kernel
@@ -179,7 +179,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
     setSecList(null)
     try {
       const call = (
-        window.shellpilot as
+        window.opsmaxx as
           | { fleet?: { securityList?: (cfg: unknown) => Promise<SecurityListProbe> } }
           | undefined
       )?.fleet?.securityList
@@ -306,8 +306,8 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   )
 
   useEffect(() => {
-    if (!window.shellpilot?.jobs) return
-    return window.shellpilot.jobs.onProgress((p: JobProgress) => {
+    if (!window.opsmaxx?.jobs) return
+    return window.opsmaxx.jobs.onProgress((p: JobProgress) => {
       if (p.host) setResults((r) => ({ ...r, [p.host!.serverId]: { ...r[p.host!.serverId], ...p.host! } }))
       if (p.done) setRunning(false)
     })
@@ -324,13 +324,13 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   const check = async (): Promise<void> => {
     setBusy(true)
     try {
-      if (bridgeHas(window.shellpilot?.fleet as Record<string, unknown> | undefined, 'sampleNow')) {
-        await window.shellpilot?.fleet?.sampleNow()
+      if (bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'sampleNow')) {
+        await window.opsmaxx?.fleet?.sampleNow()
       }
-      if (!bridgeHas(window.shellpilot?.fleet as Record<string, unknown> | undefined, 'facts')) return
+      if (!bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'facts')) return
       await Promise.all(
         servers.map(async (s) => {
-          const r = await window.shellpilot?.fleet?.facts(s.id)
+          const r = await window.opsmaxx?.fleet?.facts(s.id)
           if (!r) return
           if (r.facts && r.at !== undefined) reportFacts(s.id, r.facts, r.at)
           if (r.error) reportFactsError(s.id, r.error, r.errorAt ?? Date.now())
@@ -371,7 +371,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
           phrase: j.plan.confirmation.kind === 'type-to-confirm' ? phrase.trim() : null,
           confirmedAt
         })
-        await window.shellpilot?.jobs?.run({
+        await window.opsmaxx?.jobs?.run({
           jobId: crypto.randomUUID(),
           spec: j.spec,
           approval,

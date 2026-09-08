@@ -211,7 +211,7 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   const [showRules, setShowRules] = useState(false)
 
   const load = useCallback(async (): Promise<void> => {
-    const fleet = window.shellpilot?.fleet as Record<string, unknown> | undefined
+    const fleet = window.opsmaxx?.fleet as Record<string, unknown> | undefined
     if (!bridgeHas(fleet, 'drift')) return
     const next: Record<string, Entry> = {}
 
@@ -222,7 +222,7 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
       if (!bridgeHas(fleet, 'driftLocal')) return
       const at = Date.now()
       try {
-        const r = await window.shellpilot?.fleet?.driftLocal?.({ serverName: LOCAL_NAME })
+        const r = await window.opsmaxx?.fleet?.driftLocal?.({ serverName: LOCAL_NAME })
         if (!r) return
         next[LOCAL_ID] = r.ok ? { drift: r.drift, at } : { error: `${r.reason}: ${r.detail}`, at }
       } catch (e) {
@@ -233,7 +233,7 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
     await Promise.all([
       readLocal(),
       ...servers.map(async (s) => {
-        const r = await window.shellpilot?.fleet?.drift(s.id)
+        const r = await window.opsmaxx?.fleet?.drift(s.id)
         if (r) next[s.id] = { drift: r.drift, at: r.at, error: r.error }
       })
     ])
@@ -247,8 +247,8 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   const refresh = async (): Promise<void> => {
     setBusy(true)
     try {
-      if (bridgeHas(window.shellpilot?.fleet as Record<string, unknown> | undefined, 'sampleNow')) {
-        await window.shellpilot?.fleet?.sampleNow()
+      if (bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'sampleNow')) {
+        await window.opsmaxx?.fleet?.sampleNow()
       }
       await load()
     } finally {
@@ -265,7 +265,7 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
       // Only when the channel is actually wired. A build without it would
       // otherwise show a row that can never be filled, which reads as a host
       // that has never been collected rather than as a missing feature.
-      ...(bridgeHas(window.shellpilot?.fleet as Record<string, unknown> | undefined, 'driftLocal')
+      ...(bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'driftLocal')
         ? [{ id: LOCAL_ID, name: LOCAL_NAME }]
         : [])
     ],
@@ -298,7 +298,7 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
         <>
           <p>
             Pick a watched file and see which servers still agree on it. Compared over hashes, and
-            read-only — ShellPilot never pushes a file back.
+            read-only — OpsMaxx never pushes a file back.
           </p>
           {/* Behind the disclosure for the reason written out in PatchPanel:
               this states a limit of what the app WRITES, not a limit of what it
@@ -413,7 +413,7 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
         <div className="panel-empty">
           <p className="panel-empty-title">No configuration files have been read yet.</p>
           <p className="panel-empty-body">
-            ShellPilot reads them about once an hour, on the same background sweep as the inventory
+            OpsMaxx reads them about once an hour, on the same background sweep as the inventory
             — so a server added in the last hour, or an estate where this has just been switched
             on, will not have any yet. Press <b>Check now</b> to sweep immediately, and make sure
             background checking is on in Settings.
@@ -493,7 +493,7 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
           </div>
 
           <div className="panel-note faint">
-            Comparison is over hashes. ShellPilot keeps two hashes and a status per file per server —
+            Comparison is over hashes. OpsMaxx keeps two hashes and a status per file per server —
             never the file — so a divergence survives a restart while the configuration itself is
             not copied into its store. The first {DRIFT_PREVIEW_CHARS} characters of each file are
             held in memory for this session only, after every redaction rule has run over the whole

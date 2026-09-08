@@ -1,2 +1,2 @@
-===SHELLPILOT-HELM===
+===OPSMAXX-HELM===
 /opt/homebrew/bin/bash: line 1: helm: command not found

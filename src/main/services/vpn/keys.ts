@@ -1,7 +1,7 @@
 // Minting a WireGuard keypair, and storing one. Two operations, deliberately
 // not one.
 //
-// ShellPilot mints key material in exactly one place, and this is it. The split
+// OpsMaxx mints key material in exactly one place, and this is it. The split
 // below is the whole design: `mintKeypair` makes a pair and touches nothing,
 // `storeKeypair` is the only thing here that writes to the vault. The profile
 // form generates through the first and, if and only if the user presses Save,

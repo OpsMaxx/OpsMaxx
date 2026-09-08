@@ -23,7 +23,7 @@ import {
 //
 // Rate limiting is per host and deliberate. A misconfigured service can emit
 // tens of thousands of lines a second; without a cap that becomes an IPC flood
-// that wedges the renderer, and the user's conclusion is "ShellPilot froze"
+// that wedges the renderer, and the user's conclusion is "OpsMaxx froze"
 // rather than "that service is screaming".
 //
 // Two things arrive on the same channel: the preflight's facts, and then the

@@ -2,7 +2,7 @@
 export interface BackupPayload {
   version: 1
   createdAt: string
-  app: string // ShellPilot version that wrote the bundle
+  app: string // OpsMaxx version that wrote the bundle
   // Non-secret application state (workspaces, folders, servers, databases…).
   data: unknown | null
   // Credentials, unsealed from the OS keychain. Only ever exists inside the
@@ -88,13 +88,13 @@ interface BackupDestinationBase {
 
 export interface LocalBackupDestination extends BackupDestinationBase {
   kind: 'local'
-  /** Absolute path on the machine running ShellPilot. */
+  /** Absolute path on the machine running OpsMaxx. */
   directory: string
 }
 
 export interface SftpBackupDestination extends BackupDestinationBase {
   kind: 'sftp'
-  /** A server already configured in ShellPilot. Its credentials are resolved
+  /** A server already configured in OpsMaxx. Its credentials are resolved
    *  through credentialResolver, exactly as the terminal and file browser do —
    *  this destination stores no credential of its own. */
   serverId: string
@@ -191,7 +191,7 @@ export function s3PrefixProblem(prefix: string): string | null {
 
 /** Roots the object name so a destination directory holding other things is
  *  never a retention candidate. */
-export const BACKUP_OBJECT_PREFIX = 'shellpilot-'
+export const BACKUP_OBJECT_PREFIX = 'opsmaxx-'
 export const BACKUP_OBJECT_SUFFIX = '.spbackup'
 
 /**
@@ -208,7 +208,7 @@ export function backupObjectName(when: Date): string {
   return `${BACKUP_OBJECT_PREFIX}${iso}${BACKUP_OBJECT_SUFFIX}`
 }
 
-const NAME_RE = /^shellpilot-(\d{8})T(\d{6})Z\.spbackup$/
+const NAME_RE = /^opsmaxx-(\d{8})T(\d{6})Z\.spbackup$/
 
 export function isBackupObjectName(name: string): boolean {
   return NAME_RE.test(name)
@@ -580,7 +580,7 @@ export function safeDumpDatabase(database: string): string {
   return database.replace(/[^A-Za-z0-9_.-]/g, '_')
 }
 
-/** `shellpilot-dump-<db>-<ISO>.sql`, parsed from the RIGHT: the database name
+/** `opsmaxx-dump-<db>-<ISO>.sql`, parsed from the RIGHT: the database name
  *  may contain `-` and `.`, so only the timestamp's fixed shape makes the
  *  boundary unambiguous. */
 const DUMP_NAME_RE = new RegExp(
@@ -686,7 +686,7 @@ export interface BackupAlarm {
 /**
  * How late a backup may be before it is worth interrupting somebody.
  *
- * TWO periods, not one. ShellPilot only backs up while it is running, so a
+ * TWO periods, not one. OpsMaxx only backs up while it is running, so a
  * daily schedule on a laptop that was shut overnight is routinely a few hours
  * late and that is not a fault. Two missed periods is not lateness, it is a
  * schedule that has stopped.

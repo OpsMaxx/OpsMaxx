@@ -23,7 +23,7 @@ import {
 // Patch and update management — roadmap item 17.
 //
 // The most common recurring task in the job this app is named for, and the
-// first thing in ShellPilot that does it. Everything it stands on already
+// first thing in OpsMaxx that does it. Everything it stands on already
 // exists: item C collects the counts (shared/hostFacts.ts), B1/B2 make a job
 // durable and detached, B3 makes its approval a record, and B4's staging lives
 // here rather than being paid for twice.
@@ -50,7 +50,7 @@ import {
 //    and waits forever; a kernel upgrade wants a reboot the app cannot decide
 //    to take; a mirror serves a half-published repository. Each of those needs
 //    a person, and an unattended run's only options are to hang or to guess.
-//  * It cannot know what the host does. ShellPilot has never seen your load
+//  * It cannot know what the host does. OpsMaxx has never seen your load
 //    balancer, your replication topology or your maintenance window. See
 //    shared/topology.ts for the full version of that argument; the short form
 //    is that the two facts it genuinely holds are not enough to schedule
@@ -63,7 +63,7 @@ import {
 // So: this module reports, plans, stages and — when a human confirms a specific
 // target list at a specific moment — applies. It never decides.
 export const PATCH_NO_AUTOMATION_NOTE =
-  'ShellPilot does not patch on a schedule and will not add one. It is a desktop app that gets ' +
+  'OpsMaxx does not patch on a schedule and will not add one. It is a desktop app that gets ' +
   'closed, it cannot answer a dpkg conffile prompt, and it does not know what your servers do. ' +
   'Reporting what is pending and letting you choose is the honest version of this; for genuinely ' +
   'unattended patching use unattended-upgrades or dnf-automatic on the server itself.'
@@ -253,7 +253,7 @@ export function patchCommandFor(
  * went down, which is precisely the `orphaned` case B2 named and refused to
  * paper over.
  */
-export const REBOOT_BOOT_ID_MARK = 'shellpilot-boot-id='
+export const REBOOT_BOOT_ID_MARK = 'opsmaxx-boot-id='
 
 /**
  * Issue the restart.
@@ -304,7 +304,7 @@ export function parseRebootBootId(output: string): string | null {
  */
 export function buildRebootVerify(): string {
   return [
-    "echo 'shellpilot-postboot/1';",
+    "echo 'opsmaxx-postboot/1';",
     'echo "boot-id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)";',
     'echo "uptime=$(cut -d. -f1 /proc/uptime 2>/dev/null)";',
     'if command -v systemctl >/dev/null 2>&1; then',
@@ -326,7 +326,7 @@ export interface RebootVerification {
 }
 
 export function parseRebootVerify(stdout: string): RebootVerification {
-  if (!stdout.includes('shellpilot-postboot/1')) {
+  if (!stdout.includes('opsmaxx-postboot/1')) {
     return { answered: false, bootId: null, uptimeSeconds: null, unitState: null, failed: null }
   }
   const fields = new Map<string, string>()
@@ -395,7 +395,7 @@ export function verifyReboot(
       kind: 'unverifiable',
       ok: false,
       reason:
-        'The server is answering again, but it does not expose a boot id, so ShellPilot cannot ' +
+        'The server is answering again, but it does not expose a boot id, so OpsMaxx cannot ' +
         'prove it actually restarted rather than merely dropping the connection' +
         (up === null ? '.' : ` — its uptime is ${up}s, which is the only evidence available.`)
     }
@@ -439,7 +439,7 @@ export function verifyReboot(
 /** What a host's row says when its reboot step is still waiting for it. */
 export const JOB_REBOOTING_NOTE =
   'The reboot has been issued and the server has stopped answering, which is what was expected. ' +
-  'ShellPilot is polling until it comes back and will then check that it really restarted and ' +
+  'OpsMaxx is polling until it comes back and will then check that it really restarted and ' +
   'that nothing failed on the way up. This is not "unreachable": nothing is wrong yet.'
 
 // ---------------------------------------------------------------------------
@@ -835,7 +835,7 @@ export function planPatch(req: PatchPlanRequest): PatchPlan {
     }
     if (h.packageManager === null) {
       const reason =
-        'ShellPilot has not identified a package manager on this server, so it cannot know what ' +
+        'OpsMaxx has not identified a package manager on this server, so it cannot know what ' +
         'command would update it. Nothing is guessed.'
       excluded.push({ serverId: h.serverId, serverName: h.serverName, reason })
       hosts.push({

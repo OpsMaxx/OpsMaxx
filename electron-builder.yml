@@ -1,11 +1,11 @@
-appId: com.shellpilot.app
-productName: ShellPilot
-copyright: Copyright © 2026 ShellPilot contributors
+appId: com.opsmaxx.app
+productName: OpsMaxx
+copyright: Copyright © 2026 OpsMaxx contributors
 
 publish:
   provider: github
   owner: ghauri01
-  repo: ShellPilot
+  repo: OpsMaxx
 
 directories:
   buildResources: build
@@ -52,7 +52,7 @@ files:
   - '!**/node_modules/@lydell/node-pty-*/prebuilds/*/conpty/**'
   - package.json
 
-# Tunnel engines: shellpilot-netd (our WireGuard sidecar, MIT), frpc
+# Tunnel engines: opsmaxx-netd (our WireGuard sidecar, MIT), frpc
 # (Apache-2.0), openvpn (GPL-2.0, macOS and Linux only) and wintun.dll
 # (proprietary, Windows only — see THIRD-PARTY-NOTICES.md). Built or fetched by
 # scripts/{build-sidecar,build-frpc,build-openvpn,fetch-wintun} before
@@ -61,7 +61,7 @@ files:
 #
 # The `filter: **/*` below is what carries wintun.dll: the directory is copied
 # whole rather than by a list of executable names, and the DLL has to land in
-# the same directory as shellpilot-netd.exe to be found at all.
+# the same directory as opsmaxx-netd.exe to be found at all.
 #
 # ${platform}-${arch} expands to Node's own names (darwin-arm64, win32-x64,
 # ...), which is exactly what process.platform/process.arch produce at
@@ -75,8 +75,8 @@ extraResources:
     to: bin/manifest.json
 
 # ssh2 pulls in an optional native crypto binding; keep it unpacked so it can
-# be dlopen'd from outside the asar archive. bin/ (shellpilot.cmd|.sh) and
-# out/cli (what they invoke) are the `shellpilot` CLI launcher — cmd.exe/a
+# be dlopen'd from outside the asar archive. bin/ (opsmaxx.cmd|.sh) and
+# out/cli (what they invoke) are the `opsmaxx` CLI launcher — cmd.exe/a
 # shell can't execute a script or load a module from inside an asar archive
 # at all, so both must stay unpacked, real files on disk.
 asarUnpack:
@@ -128,7 +128,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: always
   createStartMenuShortcut: true
-  shortcutName: ShellPilot
+  shortcutName: OpsMaxx
   # Adds the CLI launcher's folder to the user's PATH on install — see the
   # script itself for why it deliberately does not undo that on uninstall.
   include: build/installer.nsh
@@ -137,7 +137,7 @@ portable:
   artifactName: ${productName}-${version}-portable.${ext}
   # Keep settings/vault next to the exe rather than in the Windows profile, so
   # the whole thing really is portable.
-  unpackDirName: ShellPilot
+  unpackDirName: OpsMaxx
 
 # Runs after electron-builder signs, and rewrites resources/bin/manifest.json to
 # the hashes of the binaries as signed. Signing rewrites every nested Mach-O, so
@@ -173,7 +173,7 @@ mac:
   # On, despite there being no Developer ID. The hardened runtime blocks
   # DYLD_INSERT_LIBRARIES injection and debugger attach regardless of
   # notarization, and without it a process running as the same user can inject
-  # into ShellPilot and read an unlocked vault key straight out of memory —
+  # into OpsMaxx and read an unlocked vault key straight out of memory —
   # which defeats every protection the vault has, biometrics included.
   #
   # The entitlements plist disables library validation, because asarUnpack
@@ -214,16 +214,16 @@ mac:
   # Developer ID case.
   extendInfo:
     NSDocumentsFolderUsageDescription: >-
-      ShellPilot needs access to your Documents folder so that commands you run
+      OpsMaxx needs access to your Documents folder so that commands you run
       in a local terminal can read and write files there.
     NSDesktopFolderUsageDescription: >-
-      ShellPilot needs access to your Desktop so that commands you run in a
+      OpsMaxx needs access to your Desktop so that commands you run in a
       local terminal can read and write files there.
     NSDownloadsFolderUsageDescription: >-
-      ShellPilot needs access to your Downloads folder so that commands you run
+      OpsMaxx needs access to your Downloads folder so that commands you run
       in a local terminal can read and write files there.
     NSRemovableVolumesUsageDescription: >-
-      ShellPilot needs access to removable volumes so that commands you run in a
+      OpsMaxx needs access to removable volumes so that commands you run in a
       local terminal can read and write files on external drives.
   # The tunnel engines under Resources/bin are Mach-O executables and arm64
   # macOS refuses to run an unsigned one at all. electron-builder discovers and
@@ -261,7 +261,7 @@ linux:
     alternative to MobaXterm, PuTTY and Termius.
   desktop:
     entry:
-      Name: ShellPilot
+      Name: OpsMaxx
       Comment: SSH, SFTP, tunnels and databases in one place
       Categories: Development;Utility;
       Terminal: 'false'

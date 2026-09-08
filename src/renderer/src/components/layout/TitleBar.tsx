@@ -14,14 +14,14 @@ export function TitleBar(): React.JSX.Element {
   const [isMac, setIsMac] = useState(false)
 
   useEffect(() => {
-    window.shellpilot?.platform().then((p) => setIsMac(p === 'darwin'))
-    window.shellpilot?.window.isMaximized().then(setMaximized)
-    const off = bridgeOn('window.onMaximizedChange', window.shellpilot?.window?.onMaximizedChange, setMaximized)
+    window.opsmaxx?.platform().then((p) => setIsMac(p === 'darwin'))
+    window.opsmaxx?.window.isMaximized().then(setMaximized)
+    const off = bridgeOn('window.onMaximizedChange', window.opsmaxx?.window?.onMaximizedChange, setMaximized)
     return off
   }, [])
 
   const ctrl = (a: 'minimize' | 'toggle-maximize' | 'close'): void => {
-    window.shellpilot?.window.control(a)
+    window.opsmaxx?.window.control(a)
   }
 
   return (

@@ -91,7 +91,7 @@ export function AddDatabaseModal(): React.JSX.Element {
     secret: { uri: string } | { password: string },
     label: string
   ): Promise<void> => {
-    const ok = await window.shellpilot?.secrets.set(id, JSON.stringify(secret))
+    const ok = await window.opsmaxx?.secrets.set(id, JSON.stringify(secret))
     if (ok !== false) return
     toast(`${label} was saved, but this device would not store its password.`, 'error', {
       label: 'Try again',
@@ -138,7 +138,7 @@ export function AddDatabaseModal(): React.JSX.Element {
   return (
     <Modal
       title={editId ? 'Edit Database' : 'Add Database'}
-      subtitle={editId ? `Change how ShellPilot reaches ${existing?.name ?? 'this database'}` : 'Create a database connection profile'}
+      subtitle={editId ? `Change how OpsMaxx reaches ${existing?.name ?? 'this database'}` : 'Create a database connection profile'}
       onClose={() => setModal(null)}
       confirm={{
         label: editId ? 'Save changes' : 'Add database',

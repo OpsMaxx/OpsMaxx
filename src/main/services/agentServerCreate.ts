@@ -33,7 +33,7 @@ export function setAgentServerCreator(fn: Creator): void {
 // A closed window is not an error worth retrying — the approval it would have
 // needed cannot be shown either.
 export function createServerForAgent(req: AgentServerRequest): Promise<AgentServerResult> {
-  if (!creator) return Promise.resolve({ ok: false, error: 'ShellPilot is not ready to add a server right now.' })
+  if (!creator) return Promise.resolve({ ok: false, error: 'OpsMaxx is not ready to add a server right now.' })
   return creator(req)
 }
 

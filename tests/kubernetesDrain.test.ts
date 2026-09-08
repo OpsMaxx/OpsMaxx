@@ -41,10 +41,10 @@ describe('the preflight reads all four things in one round trip', () => {
   const cmd = buildK8sDrainPreflightCommand('spk8s-worker', 'kind-spk8s')
 
   it('asks for the node, the pods on it, every PDB and every EndpointSlice', () => {
-    expect(cmd).toContain('===SHELLPILOT-DNODE===')
-    expect(cmd).toContain('===SHELLPILOT-DPODS===')
-    expect(cmd).toContain('===SHELLPILOT-DPDB===')
-    expect(cmd).toContain('===SHELLPILOT-DEPS===')
+    expect(cmd).toContain('===OPSMAXX-DNODE===')
+    expect(cmd).toContain('===OPSMAXX-DPODS===')
+    expect(cmd).toContain('===OPSMAXX-DPDB===')
+    expect(cmd).toContain('===OPSMAXX-DEPS===')
     expect(cmd).toContain('--field-selector spec.nodeName=spk8s-worker')
     expect(cmd).toContain('get poddisruptionbudgets --all-namespaces')
   })
@@ -506,7 +506,7 @@ describe('the drain refuses before it runs, not after', () => {
     expect(out.detail).toContain('shop/orphan-debug')
     // Exactly one command reached the host, and it was the preflight.
     expect(sent).toHaveLength(1)
-    expect(sent[0]).toContain('===SHELLPILOT-DPDB===')
+    expect(sent[0]).toContain('===OPSMAXX-DPDB===')
     expect(sent.join(' ')).not.toContain('drain spk8s-worker')
   })
 
@@ -522,7 +522,7 @@ describe('the drain refuses before it runs, not after', () => {
     const out = await r.drain(cfg, 'spk8s-worker', 'kind-spk8s', true)
     expect(out.ok).toBe(true)
     expect(sent).toHaveLength(2)
-    expect(sent[0]).toContain('===SHELLPILOT-DPDB===')
+    expect(sent[0]).toContain('===OPSMAXX-DPDB===')
     expect(sent[1]).toContain('drain spk8s-worker --ignore-daemonsets')
   })
 

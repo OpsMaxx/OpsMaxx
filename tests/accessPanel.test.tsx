@@ -349,7 +349,7 @@ describe('the write half, which this build does not have', () => {
     mount([server('a', 'web-1')], { a: { access: complete(), at: Date.now() } })
     const note = await screen.findByTestId('write-gated')
     expect(note.textContent).toContain('authorized_keys')
-    expect(note.textContent).toMatch(/account ShellPilot connects as|connecting account/i)
+    expect(note.textContent).toMatch(/account OpsMaxx connects as|connecting account/i)
     expect(note.textContent).toMatch(/ExposeAuthInfo|which key this session/i)
   })
 })
@@ -572,7 +572,7 @@ const report = (outcome: string, detail: string): Record<string, unknown> => ({
   token: '1800000000000',
   outcome,
   detail,
-  backupPath: '/home/ops/.ssh/authorized_keys.shellpilot-1800000000000.bak',
+  backupPath: '/home/ops/.ssh/authorized_keys.opsmaxx-1800000000000.bak',
   at: 1
 })
 

@@ -3,7 +3,7 @@
 //
 // Bundling OpenVPN and OpenSSL moved their patching onto us. A macOS or Linux
 // user used to get fixes from brew or apt within days of an advisory; now they
-// get them when ShellPilot cuts a release. Nothing in the build notices that an
+// get them when OpsMaxx cuts a release. Nothing in the build notices that an
 // advisory exists, so without this the first warning would be a bug report.
 //
 // Exit codes are the interface, because the difference matters:

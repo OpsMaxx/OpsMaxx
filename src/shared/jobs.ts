@@ -35,7 +35,7 @@ import {
 // closing the lid is not "lost output": it is dpkg interrupted on every host,
 // and the recovery is `dpkg --configure -a` on each of them.
 //
-// So a job that was running when ShellPilot stopped is `abandoned`, not
+// So a job that was running when OpsMaxx stopped is `abandoned`, not
 // `resumed` and not `unknown`. That outcome is the point: it is the difference
 // between a store that records what happened and a UI that quietly implies the
 // work is still going. B2 swaps the execution strategy underneath — a detached
@@ -89,7 +89,7 @@ export { assessCommand, confirmationFor, isCommandApproval, verifyApproval } fro
  * B2 adds four more, and each one is in this union because a code path in this
  * build reaches it — the rule B1 stated when it refused to add them early:
  *
- *  - `detached` — the command is running on the host and ShellPilot is not
+ *  - `detached` — the command is running on the host and OpsMaxx is not
  *    holding the channel. Either it never held one after the launch, or the
  *    link dropped and the poller is backing off. It is NOT `unreachable`: the
  *    host may well be fine and the work is certainly continuing.
@@ -102,7 +102,7 @@ export { assessCommand, confirmationFor, isCommandApproval, verifyApproval } fro
  *    vocabulary gets exactly backwards: an EXPECTED reboot classified as
  *    `unreachable`. Reached from `restartsTheMachine()` below, which is why it
  *    is in the union rather than reserved.
- *  - `foreign` — the marker was written by a different ShellPilot instance.
+ *  - `foreign` — the marker was written by a different OpsMaxx instance.
  *    Readable, never reapable. See JOB_INSTANCE_NOTE.
  *
  * `waiting` is B1's, and it is not a synonym for `pending`. `pending` means the
@@ -174,7 +174,7 @@ export function isJobHostLive(state: string): boolean {
  * What actually happened to one host, one level below `state`.
  *
  * Broadcast's seven, plus `abandoned`. That one is B1's honest name for the
- * case the attached path really has: ShellPilot stopped while this host was
+ * case the attached path really has: OpsMaxx stopped while this host was
  * running, so the channel went with it and the remote process was sent SIGHUP.
  * It is NOT `timeout` (we did not wait and give up), NOT `unreachable` (the
  * host was fine), and NOT `cancelled` (nobody asked for it). Filing it under
@@ -210,7 +210,7 @@ export const JOB_OUTCOME_LABEL: Record<JobHostOutcome, string> = {
   timeout: 'timed out',
   unreachable: 'unreachable',
   cancelled: 'not run',
-  abandoned: 'abandoned when ShellPilot stopped',
+  abandoned: 'abandoned when OpsMaxx stopped',
   orphaned: 'ended without recording an exit status',
   unhealthy: 'restarted, and came back with something broken'
 }
@@ -223,10 +223,10 @@ export const JOB_OUTCOME_LABEL: Record<JobHostOutcome, string> = {
  * bug waiting for someone to reword a sentence.
  */
 export const JOB_ABANDONED_ERROR =
-  'ShellPilot stopped while this server was running — the SSH channel closed and the remote ' +
+  'OpsMaxx stopped while this server was running — the SSH channel closed and the remote ' +
   'command was sent SIGHUP. If it was a package operation, the server may need `dpkg --configure -a`.'
 
-const ABANDONED = /ShellPilot stopped while/i
+const ABANDONED = /OpsMaxx stopped while/i
 
 /**
  * Which category a finished host falls into.
@@ -288,7 +288,7 @@ export interface JobHostResult {
    * B2's marker handle, when this host's step was launched detached.
    *
    * Persisted on the row rather than held in memory, because the whole claim of
-   * a detached job is that a ShellPilot which never saw it start can pick it
+   * a detached job is that a OpsMaxx which never saw it start can pick it
    * up. Null on every host that ran attached, which is how a reader tells the
    * two apart a month later.
    */
@@ -624,14 +624,14 @@ export function verifyJobApproval(
 /**
  * What a job's approval lifecycle writes down, one row per event.
  *
- * NOT the AI audit log. `recordAudit` writes `shellpilot-ai-audit.jsonl`, whose
+ * NOT the AI audit log. `recordAudit` writes `opsmaxx-ai-audit.jsonl`, whose
  * entries are agent-shaped — `agentName`, `capability`, `approval` — and which
  * docs/AI-SECURITY.md describes as a record of the MCP bridge specifically. A
  * job is human-only by construction (durability defeats revocation; see the
  * header of this file), so every row it wrote there would be an AI-labelled row
  * that no AI produced, which is how a log stops being trusted. That argument is
  * already settled in this repository for the local terminal, which writes
- * `shellpilot-local-sessions.jsonl` for the same reason, and this follows the
+ * `opsmaxx-local-sessions.jsonl` for the same reason, and this follows the
  * precedent rather than reopening it: a third file, same discipline —
  * append-only, 0600, redacted before it is written.
  */
@@ -688,7 +688,7 @@ export type JobApprovalEvent = 'granted' | 'refused' | 'resumed' | 'sealed'
  * and may NOT start a host it never reached. Both halves are deliberate:
  *
  *  - FINISHING IS NOT AN ACTION. The command is running on that machine whether
- *    or not ShellPilot is watching; refusing to read its output does not
+ *    or not OpsMaxx is watching; refusing to read its output does not
  *    un-run it, it only throws away the exit status of something already
  *    happening. A refusal that destroys the record while leaving the risk is
  *    the worst of both.
@@ -706,7 +706,7 @@ export type JobApprovalEvent = 'granted' | 'refused' | 'resumed' | 'sealed'
  * of its inputs is not a rule.
  */
 export const JOB_RESUME_NOT_REAUTHORISED = (confirmedAt: number | null): string =>
-  'ShellPilot stopped before this server was reached, and it was not started at the next launch. ' +
+  'OpsMaxx stopped before this server was reached, and it was not started at the next launch. ' +
   (confirmedAt === null
     ? 'The job carries no confirmation this process could check.'
     : `The confirmation it was authorised with was given at ${new Date(confirmedAt).toISOString()}, ` +
@@ -846,7 +846,7 @@ export interface JobsBridge {
    * Turn detached execution on or off for this machine.
    *
    * Off yields B1's behaviour exactly — nothing is written to any host, and a
-   * job that was running when ShellPilot stopped is `abandoned`. Pushed from
+   * job that was running when OpsMaxx stopped is `abandoned`. Pushed from
    * the renderer's settings the way `ssh.setPoolIdle` is, because that is where
    * the switch the user flicks lives; main holds the value and the executor
    * reads it per launch, so flipping it does not disturb a job already going.
@@ -1050,7 +1050,7 @@ export const JOB_REDACT_BLOCK_CARRY = 64 * 1024
  *
  * Coalesced per tick like ssh.ts's interactive terminal, NOT per line like
  * logTail: `apt` writes a progress line per download and a job emitting one IPC
- * message each floods the renderer, and the user's conclusion is "ShellPilot
+ * message each floods the renderer, and the user's conclusion is "OpsMaxx
  * froze" rather than "that upgrade is chatty". The cap is on MESSAGES, so a
  * host that produces a megabyte in one tick still sends it — as one message.
  */
@@ -1098,7 +1098,7 @@ export const JOB_RECORD_RETENTION_DAYS = 365
 // One directory, and five small files inside it:
 //
 //   <root>/<jobId>.<step>/cmd       the command text, as the user typed it
-//   <root>/<jobId>.<step>/instance  the id of the ShellPilot that launched it
+//   <root>/<jobId>.<step>/instance  the id of the OpsMaxx that launched it
 //   <root>/<jobId>.<step>/pid       the wrapper's pid, written by the wrapper
 //   <root>/<jobId>.<step>/pgid      its process group, for the cancel rule
 //   <root>/<jobId>.<step>/out       the command's stdout and stderr, appended
@@ -1136,8 +1136,8 @@ export const JOB_RECORD_RETENTION_DAYS = 365
 // ---------------------------------------------------------------------------
 // WHY THE STATE DIRECTORY IS RESOLVED IN THAT ORDER
 // ---------------------------------------------------------------------------
-// `$XDG_STATE_HOME/shellpilot/jobs`, then `~/.local/state/shellpilot/jobs`,
-// then `/var/tmp/shellpilot-$(id -u)/jobs`. State, not cache and not runtime:
+// `$XDG_STATE_HOME/opsmaxx/jobs`, then `~/.local/state/opsmaxx/jobs`,
+// then `/var/tmp/opsmaxx-$(id -u)/jobs`. State, not cache and not runtime:
 // this outlives a login by design. `$HOME` is tried before `/var/tmp` because
 // it is the user's own and is where an operator would look; `/var/tmp` is the
 // fallback because `$HOME` may be read-only (immutable images), full (quota),
@@ -1192,7 +1192,7 @@ export const JOB_SUDO_NOTE =
 /**
  * Why the launching instance is recorded, and what happens when it is not us.
  *
- * DETECT AND DEGRADE, DO NOT LOCK. Two ShellPilots against one estate is a
+ * DETECT AND DEGRADE, DO NOT LOCK. Two OpsMaxxs against one estate is a
  * real configuration — a laptop and a desktop, or one person and their
  * colleague — and a lock file would turn that into a job neither of them can
  * read. So:
@@ -1208,7 +1208,7 @@ export const JOB_SUDO_NOTE =
  *    destroys something another reader still needs.
  */
 export const JOB_INSTANCE_NOTE =
-  'This job was launched by a different ShellPilot instance. Its output and exit status are ' +
+  'This job was launched by a different OpsMaxx instance. Its output and exit status are ' +
   'readable here and it can still be cancelled; its marker directory is left in place for the ' +
   'instance that started it.'
 
@@ -1224,16 +1224,16 @@ export const JOB_DETACHED_SETTING_NOTE =
   'Detached jobs write one directory per step under your own state directory on each server — five ' +
   'small marker files, plus the job’s own output, which is as large as the command makes it — so ' +
   'a job survives the connection dropping. Nothing is installed and nothing runs after the job, ' +
-  'and the directory is removed as soon as ShellPilot has read the exit status, or swept seven ' +
+  'and the directory is removed as soon as OpsMaxx has read the exit status, or swept seven ' +
   'days later if it never gets back. With this off, jobs run on the attached path: closing the ' +
   'lid mid-upgrade sends SIGHUP to the remote command, and apt and dpkg do not ignore it.'
 
 /**
  * Why the remote `out` file has no size cap, when everything else here does.
  *
- * ShellPilot caps what it persists and what one poll carries; the file on the
+ * OpsMaxx caps what it persists and what one poll carries; the file on the
  * host is bounded by nothing but the command. A runaway step therefore fills
- * `$HOME` or `/var/tmp` on every target, and if ShellPilot never comes back it
+ * `$HOME` or `/var/tmp` on every target, and if OpsMaxx never comes back it
  * sits there until the seven-day sweep.
  *
  * A cap was written and thrown away, and the reason is worth keeping. The only
@@ -1241,7 +1241,7 @@ export const JOB_DETACHED_SETTING_NOTE =
  * front of it — `sh cmd 2>&1 | head -c N` — and when `head` has had its N bytes
  * it exits, which sends SIGPIPE to the command. On the exact workload this
  * whole item exists for, that is `apt` taking a fatal signal mid-transaction:
- * DPKG INTERRUPTED, on every host that was chatty enough, caused by ShellPilot
+ * DPKG INTERRUPTED, on every host that was chatty enough, caused by OpsMaxx
  * and by nothing else. `ulimit -f` is worse — it kills with SIGXFSZ and it
  * counts every file the command writes, not just ours.
  *
@@ -1253,7 +1253,7 @@ export const JOB_DETACHED_SETTING_NOTE =
  * the byte cursor means, and is a piece of work, not a line.
  */
 export const JOB_OUT_SIZE_NOTE =
-  'A detached job’s output file grows with the command: ShellPilot caps what it stores and what ' +
+  'A detached job’s output file grows with the command: OpsMaxx caps what it stores and what ' +
   'each poll carries, but it does not truncate the file on the server, because the only portable ' +
   'way to do that would kill the command with SIGPIPE mid-run. The directory is removed once the ' +
   'exit status has been read, and an abandoned one is swept after seven days.'
@@ -1261,9 +1261,9 @@ export const JOB_OUT_SIZE_NOTE =
 /** The three candidate roots, in resolution order. Documentation for the UI;
  *  the shell in `buildJobProbe` is what actually decides. */
 export const JOB_STATE_ROOTS: readonly string[] = [
-  '$XDG_STATE_HOME/shellpilot/jobs',
-  '$HOME/.local/state/shellpilot/jobs',
-  '/var/tmp/shellpilot-$(id -u)/jobs'
+  '$XDG_STATE_HOME/opsmaxx/jobs',
+  '$HOME/.local/state/opsmaxx/jobs',
+  '/var/tmp/opsmaxx-$(id -u)/jobs'
 ]
 
 // ------------------------------------------------------------------ numbers
@@ -1361,7 +1361,7 @@ export function shQuote(s: string): string {
 /**
  * Ids that may be used to build a path on a remote host.
  *
- * Job ids and instance ids are minted by ShellPilot and are already uuid-like,
+ * Job ids and instance ids are minted by OpsMaxx and are already uuid-like,
  * so this rejects nothing real. It exists because the alternative — trusting
  * that — is one refactor away from a caller passing something with a `/` or a
  * `..` in it, and the marker root is a directory this code creates and deletes
@@ -1481,9 +1481,9 @@ export function buildJobProbe(opts: { sweepDays?: number; nowSeconds?: number } 
     'sp_try() { [ -n "$1" ] || return 1; mkdir -p "$1" 2>/dev/null || return 1; [ -w "$1" ] || return 1; SP_ROOT=$1; return 0; };',
     'SP_ROOT=;',
     // ${VAR:+...} expands to NOTHING when the variable is unset or empty, so an
-    // unset XDG_STATE_HOME cannot resolve to "/shellpilot/jobs" — which as root
+    // unset XDG_STATE_HOME cannot resolve to "/opsmaxx/jobs" — which as root
     // would create a directory at the filesystem root.
-    'sp_try "${XDG_STATE_HOME:+$XDG_STATE_HOME/shellpilot/jobs}" || sp_try "${HOME:+$HOME/.local/state/shellpilot/jobs}" || sp_try "/var/tmp/shellpilot-$(id -u 2>/dev/null)/jobs" || SP_ROOT=;',
+    'sp_try "${XDG_STATE_HOME:+$XDG_STATE_HOME/opsmaxx/jobs}" || sp_try "${HOME:+$HOME/.local/state/opsmaxx/jobs}" || sp_try "/var/tmp/opsmaxx-$(id -u 2>/dev/null)/jobs" || SP_ROOT=;',
     'SP_LAUNCH=none;',
     'if command -v setsid >/dev/null 2>&1; then SP_LAUNCH=setsid; elif command -v nohup >/dev/null 2>&1; then SP_LAUNCH=nohup; fi;',
     'SP_B64=no;',
@@ -1492,7 +1492,7 @@ export function buildJobProbe(opts: { sweepDays?: number; nowSeconds?: number } 
     // question about one path and prints nothing when the answer is no.
     clockGuard,
     `if [ -n "$SP_ROOT" ] && [ "$SP_SWEEP" = ok ]; then for d in "$SP_ROOT"/*; do [ -d "$d" ] || continue; [ -n "$(find "$d" -maxdepth 0 -mtime +${days} 2>/dev/null)" ] || continue; p=$(cat "$d/pid" 2>/dev/null); if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then continue; fi; rm -rf "$d"; done; fi;`,
-    "echo 'shellpilot-probe/1';",
+    "echo 'opsmaxx-probe/1';",
     'echo "sweep=$SP_SWEEP";',
     'echo "launcher=$SP_LAUNCH";',
     'echo "base64=$SP_B64";',
@@ -1512,7 +1512,7 @@ export function parseJobProbe(stdout: string): JobHostCapability {
   const uidRaw = fields.get('uid')
   const uid = uidRaw !== undefined && /^\d+$/.test(uidRaw) ? Number(uidRaw) : null
   const base64 = fields.get('base64') === 'yes'
-  const signed = stdout.includes('shellpilot-probe/1')
+  const signed = stdout.includes('opsmaxx-probe/1')
   let reason: string | null = null
   if (!signed) {
     reason =
@@ -1589,17 +1589,17 @@ export function buildJobLaunch(spec: JobLaunchSpec): string {
     'printf "%s\\n" "$?" > "$1/rc.tmp"; mv "$1/rc.tmp" "$1/rc"'
   return [
     `SP_JOB_VERB=launch; SP_JOB_DIR=${d};`,
-    'mkdir -p "$SP_JOB_DIR" || { echo "shellpilot-launch/1"; echo "error=cannot create the marker directory"; exit 0; };',
+    'mkdir -p "$SP_JOB_DIR" || { echo "opsmaxx-launch/1"; echo "error=cannot create the marker directory"; exit 0; };',
     `cat > "$SP_JOB_DIR/cmd" <<'${eof}'\n${spec.command}\n${eof}\n`,
     `printf '%s\\n' ${shQuote(spec.instanceId)} > "$SP_JOB_DIR/instance";`,
     ': > "$SP_JOB_DIR/out";',
     `${spec.launcher} sh -c ${shQuote(wrapper)} sh "$SP_JOB_DIR" </dev/null >/dev/null 2>&1 &`,
-    'echo "shellpilot-launch/1"; echo "error="'
+    'echo "opsmaxx-launch/1"; echo "error="'
   ].join(' ')
 }
 
 export function parseJobLaunch(stdout: string): JobLaunchResult {
-  if (!stdout.includes('shellpilot-launch/1')) {
+  if (!stdout.includes('opsmaxx-launch/1')) {
     return {
       ok: false,
       error: 'the launch produced nothing this build understands — the remote shell may not be a POSIX sh'
@@ -1678,7 +1678,7 @@ export function buildJobPoll(p: {
     : 'tail -c +$((SP_JOB_OFF + 1)) "$SP_JOB_DIR/out" 2>/dev/null | head -c "$SP_N"'
   return [
     `SP_JOB_VERB=poll; SP_JOB_DIR=${shQuote(p.dir)}; SP_JOB_OFF=${off}; SP_JOB_MAX=${max};`,
-    'echo "shellpilot-poll/1";',
+    'echo "opsmaxx-poll/1";',
     'if [ ! -d "$SP_JOB_DIR" ]; then echo "marker=missing"; echo "body/1"; exit 0; fi;',
     'echo "marker=present";',
     'echo "instance=$(head -n1 "$SP_JOB_DIR/instance" 2>/dev/null)";',
@@ -1858,7 +1858,7 @@ export type JobPollPhase =
 
 export interface JobPollVerdict {
   phase: JobPollPhase
-  /** The marker belongs to another ShellPilot. Reads and cancel are fine; reap
+  /** The marker belongs to another OpsMaxx. Reads and cancel are fine; reap
    *  is not. See JOB_INSTANCE_NOTE. */
   foreign: boolean
 }
@@ -1938,7 +1938,7 @@ export function classifyJobPoll(
  *
  * IDEMPOTENT BY CONSTRUCTION: signalling a pid that is gone is a no-op that
  * reports success, which is what lets cancel be pressed twice, or by a second
- * ShellPilot, without anything having to hold a lock.
+ * OpsMaxx, without anything having to hold a lock.
  *
  * THE GROUP IS ONLY SIGNALLED WHEN THE WRAPPER IS ITS OWN GROUP LEADER, i.e.
  * when the recorded pgid equals the recorded pid. Under `setsid` that is always
@@ -1952,7 +1952,7 @@ export function classifyJobPoll(
  *
  * THE PID IS VERIFIED BEFORE IT IS SIGNALLED, by the same argument-list check
  * the poll uses. A recorded pid on a host that has since rebooted is very
- * likely to belong to somebody else's process, and "ShellPilot sent SIGTERM to
+ * likely to belong to somebody else's process, and "OpsMaxx sent SIGTERM to
  * an unrelated pid" is the one bug in this file that could not be undone.
  */
 export function buildJobSignal(p: { dir: string; signal?: 'TERM' | 'KILL' }): string {
@@ -1960,7 +1960,7 @@ export function buildJobSignal(p: { dir: string; signal?: 'TERM' | 'KILL' }): st
   assertJobMarkerDir(p.dir, 'the directory of a job to signal')
   return [
     `SP_JOB_VERB=signal; SP_JOB_DIR=${shQuote(p.dir)}; SP_JOB_SIG=${sig};`,
-    'echo "shellpilot-signal/1";',
+    'echo "opsmaxx-signal/1";',
     'SP_PID=$(head -n1 "$SP_JOB_DIR/pid" 2>/dev/null); SP_PGID=$(head -n1 "$SP_JOB_DIR/pgid" 2>/dev/null);',
     'if [ -z "$SP_PID" ]; then echo "signalled=none"; exit 0; fi;',
     'SP_ARGS=$(ps -o args= -p "$SP_PID" 2>/dev/null) || SP_ARGS=;',
@@ -1999,7 +1999,7 @@ export function parseJobSignal(stdout: string): JobSignalOutcome {
 /** What a host is told when its pid could not be verified, so nothing was sent. */
 export const JOB_SIGNAL_UNVERIFIED_ERROR = (ms: number, dir: string): string =>
   `Command timed out after ${ms}ms. NOTHING WAS SIGNALLED: this server has no usable \`ps\`, so ` +
-  'ShellPilot could not confirm that the recorded pid is still this job rather than a process ' +
+  'OpsMaxx could not confirm that the recorded pid is still this job rather than a process ' +
   'that has since been given the same number — and sending SIGTERM on that basis could stop ' +
   `something unrelated. The command may still be running; its marker directory is left at ${dir} ` +
   'so it can be read, and stopped by hand.'
@@ -2024,7 +2024,7 @@ export function buildJobReap(p: { dir: string }): string {
   return [
     `SP_JOB_VERB=reap; SP_JOB_DIR=${shQuote(p.dir)};`,
     'rm -rf "$SP_JOB_DIR" 2>/dev/null;',
-    'if [ -d "$SP_JOB_DIR" ]; then echo "shellpilot-reap/1"; echo "reaped=no"; else echo "shellpilot-reap/1"; echo "reaped=yes"; fi'
+    'if [ -d "$SP_JOB_DIR" ]; then echo "opsmaxx-reap/1"; echo "reaped=no"; else echo "opsmaxx-reap/1"; echo "reaped=yes"; fi'
   ].join(' ')
 }
 
@@ -2124,7 +2124,7 @@ function headerFields(text: string): Map<string, string> {
  * The handle that makes a detached job reclaimable FROM ROWS ALONE.
  *
  * Written to the target row at launch, before the first poll. Everything a
- * cold-started ShellPilot needs in order to find a job it never saw start: the
+ * cold-started OpsMaxx needs in order to find a job it never saw start: the
  * directory, the step it belongs to, who launched it, when, and how far the
  * output cursor got.
  *
@@ -2153,7 +2153,7 @@ export interface JobDetachedHandle {
    * Scraped out of the output as it goes past and kept HERE rather than in a
    * local, because it is the only evidence a reboot really happened and the
    * output it came from has already been consumed by the time anybody asks. A
-   * ShellPilot that is restarted across the reboot reads it back from the row
+   * OpsMaxx that is restarted across the reboot reads it back from the row
    * and can still verify; without it, every reclaimed reboot step would report
    * `unverifiable` — a refusal that is honest but that nothing could ever
    * satisfy.
@@ -2257,12 +2257,12 @@ export const JOB_REBOOT_UNHEALTHY_ERROR = (detail: string): string =>
  * seconds and occasionally longer, in which the exit status exists, the host is
  * up, and the boot id has not changed. Verifying in that window would report
  * "it never restarted" about a machine that is halfway through restarting,
- * which is the same false answer as before with the sign flipped. ShellPilot
+ * which is the same false answer as before with the sign flipped. OpsMaxx
  * waits for the host to actually go, and says what it is waiting for.
  */
 export const JOB_REBOOT_ACCEPTED_NOTE =
   'The reboot has been accepted by the server and it is still answering, which is normal: the exit ' +
-  'status of a reboot command is the status of asking. ShellPilot is waiting for it to go down, ' +
+  'status of a reboot command is the status of asking. OpsMaxx is waiting for it to go down, ' +
   'and will then check that it really restarted and that nothing failed on the way up.'
 
 /** The error a reboot step carries when the host never came back. */

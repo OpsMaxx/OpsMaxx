@@ -14,7 +14,7 @@ import { writeClaudeDesktopConfigTo, writeCodexConfigTo, claudeCodeCommand } fro
 
 // Exercises exactly what the "Connect Claude Code" / "Connect Claude Desktop"
 // buttons do, end to end: gap-fill the workspace assignments, mint a session,
-// then reach ShellPilot with the credential each button hands out. Clicking the
+// then reach OpsMaxx with the credential each button hands out. Clicking the
 // buttons proves a session was created; only this proves the agent on the other
 // end can actually see a server, which is the part that silently fails.
 const PORT = 58734
@@ -42,7 +42,7 @@ const sampleData = {
 let dir: string
 
 beforeAll(async () => {
-  dir = mkdtempSync(join(tmpdir(), 'shellpilot-connect-'))
+  dir = mkdtempSync(join(tmpdir(), 'opsmaxx-connect-'))
   resetPolicyCacheForTests()
   resetMcpAuthForTests()
   refreshMcpDataCache(sampleData)
@@ -186,7 +186,7 @@ describe('connect flow', () => {
 
     // Spawn strictly from what was written to disk — nothing hardcoded — so
     // this fails if the entry Claude Desktop would read is wrong in any way.
-    const entry = JSON.parse(readFileSync(file, 'utf8')).mcpServers.shellpilot as {
+    const entry = JSON.parse(readFileSync(file, 'utf8')).mcpServers.opsmaxx as {
       command: string
       args: string[]
       env: Record<string, string>

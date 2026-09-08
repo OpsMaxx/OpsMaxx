@@ -1,4 +1,4 @@
-===SHELLPILOT-CORDON===
+===OPSMAXX-CORDON===
 node/spk8s-worker cordoned
-===SHELLPILOT-NODE===
+===OPSMAXX-NODE===
 spk8s-worker   Ready,SchedulingDisabled   <none>   7m50s   v1.33.1

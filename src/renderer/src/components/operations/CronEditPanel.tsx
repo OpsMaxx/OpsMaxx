@@ -63,7 +63,7 @@ interface HostCron {
  * worse than no button.
  */
 function editBridge(): CronEditBridge | null {
-  const c = (window.shellpilot as { cron?: Partial<CronEditBridge> } | undefined)?.cron
+  const c = (window.opsmaxx as { cron?: Partial<CronEditBridge> } | undefined)?.cron
   return c && typeof c.planEdit === 'function' && typeof c.write === 'function' ? (c as CronEditBridge) : null
 }
 
@@ -195,7 +195,7 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
       if (!s) return null
       setLoading(true)
       try {
-        const res = await window.shellpilot?.cron?.collect([
+        const res = await window.opsmaxx?.cron?.collect([
           { serverId: s.id, serverName: s.name, cfg: cfgFor(s) }
         ])
         const h = (res ?? [])[0] ?? null

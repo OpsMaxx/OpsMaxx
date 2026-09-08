@@ -20,7 +20,7 @@ const target = (id: string): FleetTarget => ({
 })
 
 const facts = (pm: string): HostFacts =>
-  parseHostFacts(['V pkg ' + pm, '===SHELLPILOT-FACTS===', 'package-manager ok -'].join('\n'))
+  parseHostFacts(['V pkg ' + pm, '===OPSMAXX-FACTS===', 'package-manager ok -'].join('\n'))
 
 interface Store {
   upserts: { host: string; key: string; value: string; at: number }[]

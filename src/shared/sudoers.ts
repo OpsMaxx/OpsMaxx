@@ -303,8 +303,8 @@ export const SUDOERS_MAX_FILES = 40
 /** Bytes per file. A real sudoers is a few kilobytes. */
 export const SUDOERS_MAX_BYTES = 64 * 1024
 
-export const SUDOERS_MARKER = '===SHELLPILOT-SUDOERS==='
-export const SUDOERS_FILE_MARKER = '===SHELLPILOT-SUDOERS-FILE:'
+export const SUDOERS_MARKER = '===OPSMAXX-SUDOERS==='
+export const SUDOERS_FILE_MARKER = '===OPSMAXX-SUDOERS-FILE:'
 
 /**
  * The command. Root, because /etc/sudoers is 0440 and unreadable otherwise --

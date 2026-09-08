@@ -2,7 +2,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
 // Pure protocol relay: an MCP client (Claude Code, Codex, ...) talks stdio to
-// this process; every message is forwarded, unmodified, to ShellPilot's own
+// this process; every message is forwarded, unmodified, to OpsMaxx's own
 // MCP server over the already-existing authenticated HTTP endpoint, and every
 // reply is forwarded back. No tool/session/policy logic lives here — that all
 // stays exactly where it already is, in mcpServer.ts and the services it
@@ -30,8 +30,8 @@ export async function runBridge(token: string, port: number): Promise<void> {
   }
   server.onclose = () => void shutdown()
   client.onclose = () => void shutdown()
-  server.onerror = (err) => console.error('[shellpilot bridge] stdio error:', err.message)
-  client.onerror = (err) => console.error('[shellpilot bridge] http error:', err.message)
+  server.onerror = (err) => console.error('[opsmaxx bridge] stdio error:', err.message)
+  client.onerror = (err) => console.error('[opsmaxx bridge] http error:', err.message)
 
   await client.start()
   await server.start()

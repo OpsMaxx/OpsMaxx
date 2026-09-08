@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-ShellPilot is licensed under the [MIT Licence](LICENSE). It also incorporates
+OpsMaxx is licensed under the [MIT Licence](LICENSE). It also incorporates
 open-source software from other projects, distributed under their own
 licenses. This file lists that software and satisfies the attribution
 requirements of those licenses.
@@ -12,7 +12,7 @@ are compiled from pinned upstream source at build time (or, for Wintun,
 downloaded from the vendor and verified against a pinned hash) and shipped
 inside the installer, so they are distributed rather than merely depended on.
 Licenses for everything listed here are unmodified and are not affected by
-ShellPilot's own license.
+OpsMaxx's own license.
 
 Three of the npm packages also carry **prebuilt native binaries** that npm
 installs and the installer then ships: `ssh2`, `cpu-features` and
@@ -24,7 +24,7 @@ that "merely depended on" is not read as "not distributed".
 
 **One shipped component is not open source.** `wintun.dll` is proprietary. It is
 the only one, it is Windows-only, and it is described in full below rather than
-left to a table — ShellPilot is presented as open-source software and that
+left to a table — OpsMaxx is presented as open-source software and that
 claim should not have an unmentioned exception behind it.
 
 This list was generated from the actual installed dependency tree
@@ -40,10 +40,10 @@ Built or fetched by the scripts in `scripts/`, verified against
 
 | Component | Version | License | Platforms | Source |
 |---|---|---|---|---|
-| `shellpilot-netd` | in-tree | MIT | all | `sidecar/netd/` in this repository |
-| `wireguard-go` (linked into `shellpilot-netd`) | pinned in `sidecar/netd/go.mod` | MIT | all | `golang.zx2c4.com/wireguard` |
-| gVisor `netstack` (linked into `shellpilot-netd`) | pinned in `sidecar/netd/go.mod` | Apache-2.0 | all | `gvisor.dev/gvisor` |
-| `goproxy` (linked into `shellpilot-netd`) | pinned in `sidecar/netd/go.mod` | BSD-3-Clause | all | `github.com/elazarl/goproxy` |
+| `opsmaxx-netd` | in-tree | MIT | all | `sidecar/netd/` in this repository |
+| `wireguard-go` (linked into `opsmaxx-netd`) | pinned in `sidecar/netd/go.mod` | MIT | all | `golang.zx2c4.com/wireguard` |
+| gVisor `netstack` (linked into `opsmaxx-netd`) | pinned in `sidecar/netd/go.mod` | Apache-2.0 | all | `gvisor.dev/gvisor` |
+| `goproxy` (linked into `opsmaxx-netd`) | pinned in `sidecar/netd/go.mod` | BSD-3-Clause | all | `github.com/elazarl/goproxy` |
 | `frpc` | v0.71.0 | Apache-2.0 | all | `github.com/fatedier/frp` |
 | `openvpn` | v2.6.22 | **GPL-2.0** with OpenSSL exception | macOS, Linux | `github.com/OpenVPN/openvpn` |
 | OpenSSL (statically linked into `openvpn`) | 3.5.8 | Apache-2.0 | macOS, Linux | `github.com/openssl/openssl` |
@@ -61,17 +61,17 @@ for OpenVPN (`resources/licenses/openvpn/`) and Wintun
 and ships the result inside the installer. Two things follow from that, and
 neither is optional.
 
-**ShellPilot stays MIT.** OpenVPN 2.x is GPL-2.0 (with an OpenSSL linking
-exception, which is what makes the static OpenSSL link lawful). ShellPilot does
+**OpsMaxx stays MIT.** OpenVPN 2.x is GPL-2.0 (with an OpenSSL linking
+exception, which is what makes the static OpenSSL link lawful). OpsMaxx does
 not link against OpenVPN: it starts `openvpn` as a *separate process* and
 drives it over OpenVPN's own management socket — separate address space, no
 shared symbols, a documented control protocol. That is GPL-2.0 §2 "mere
 aggregation" — two programs on one medium, not one combined work — so the GPL
-does not reach ShellPilot's own source.
+does not reach OpsMaxx's own source.
 
-**ShellPilot owes you the source.** What bundling *does* create is the GPL-2.0
+**OpsMaxx owes you the source.** What bundling *does* create is the GPL-2.0
 §3 obligation that falls on anyone who distributes GPL binaries. It is
-discharged by publication, not by an offer: every ShellPilot release that
+discharged by publication, not by an offer: every OpsMaxx release that
 contains an OpenVPN binary also carries `openvpn-<version>-source.tar.gz` as a
 release asset — a `git archive` of the exact commit that was compiled, with its
 SHA-256 in the release's checksum table. `scripts/build-openvpn.sh` in this
@@ -82,34 +82,34 @@ machine that ran it.
 
 The build switches off `--enable-plugins`, `--enable-lzo`, `--enable-lz4`,
 `--enable-pkcs11` and `--enable-dco`. Removing plugin support is a security
-decision as much as a size one: ShellPilot already rejects `plugin` directives
+decision as much as a size one: OpsMaxx already rejects `plugin` directives
 when importing a `.ovpn`, and a binary that cannot load a plugin cannot be
 talked into loading one.
 
 **Windows is the exception, and still needs an install.** OpenVPN on Windows
 needs a tun adapter driver, and neither of the two available drivers can be
 provided by copying a file. `tap-windows6` is a kernel driver with its own
-installer. Wintun would seem to be the way out — ShellPilot does bundle
+installer. Wintun would seem to be the way out — OpsMaxx does bundle
 `wintun.dll` — but `openvpn.exe` never loads it: it opens an adapter that
 already exists (`at_least_one_tap_win` in `tun.c`) and has no code path that
 calls `WintunCreateAdapter`, which is the only way an adapter, and Wintun's
-driver, come into being. So on Windows ShellPilot still drives an OpenVPN the
+driver, come into being. So on Windows OpsMaxx still drives an OpenVPN the
 user installed, whose installer brings the driver — and the Interactive
 Service, which removes the elevation prompt on every connect.
 
 **Bundling removes the install, not the administrator prompt.** OpenVPN has no
-userspace mode: it needs a TUN device, so it needs elevation, and ShellPilot
+userspace mode: it needs a TUN device, so it needs elevation, and OpsMaxx
 still asks on every connect. That was true before this change and is true
 after it.
 
-**If you repackage ShellPilot** — an AppImage, a Flatpak, a Homebrew cask, a
+**If you repackage OpsMaxx** — an AppImage, a Flatpak, a Homebrew cask, a
 distro package — the GPL-2.0 §3 obligation for the OpenVPN binary inside it
 travels with your package and lands on **you**. The source archive on the
-matching ShellPilot release is what you need to redistribute alongside it.
+matching OpsMaxx release is what you need to redistribute alongside it.
 
 ### Wintun is bundled on Windows, and it is **not open source**
 
-This is the one component in ShellPilot that is proprietary software, and it is
+This is the one component in OpsMaxx that is proprietary software, and it is
 stated here in the open rather than filed in a table.
 
 `wintun.dll` is the userspace half of the Wintun network adapter driver.
@@ -122,7 +122,7 @@ redistribution is permitted at all. The full text ships in the app at
 
 Redistribution is permitted here because clause 3(d) allows it "insofar as the
 Software is distributed alongside other software that uses the Software only
-via the Permitted API" — the interfaces declared in `wintun.h`. ShellPilot's
+via the Permitted API" — the interfaces declared in `wintun.h`. OpsMaxx's
 sidecar uses exactly that API, through `golang.zx2c4.com/wintun`, and nothing
 else. The conditions that come with it are honoured as follows:
 
@@ -130,11 +130,11 @@ else. The conditions that come with it are honoured as follows:
   the official signed ZIP. It is never rebuilt, repacked, stripped or re-signed
   (clause 3(a)).
 - **Nothing extracted from it.** The DLL carries Wintun's kernel driver inside
-  it and installs it itself on first use. ShellPilot does not unpack that
+  it and installs it itself on first use. OpsMaxx does not unpack that
   (clause 3(a)).
 - **Its notices travel with it.** `LICENSE.txt` is copied into
   `resources/licenses/wintun/` and ships in the installer (clause 3(c)).
-- **No endorsement is implied.** ShellPilot is not affiliated with, and not
+- **No endorsement is implied.** OpsMaxx is not affiliated with, and not
   endorsed by, WireGuard LLC or the Wintun project (clause 3(e)).
 
 The ZIP is pinned by SHA-256 (`07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51`
@@ -150,12 +150,12 @@ of that one feature.
 ### Trademarks
 
 WireGuard is a registered trademark of Jason A. Donenfeld. OpenVPN is a
-registered trademark of OpenVPN Inc. ShellPilot is not affiliated with or
+registered trademark of OpenVPN Inc. OpsMaxx is not affiliated with or
 endorsed by either project, nor by fatedier and the frp contributors.
 
 ## Key runtime dependencies
 
-These are the libraries ShellPilot is built directly on top of. Some are
+These are the libraries OpsMaxx is built directly on top of. Some are
 declared under `devDependencies` in `package.json` because a bundler
 (Vite/electron-vite) compiles them into the application rather than loading
 them from `node_modules` at runtime (noted below) — they are still part of
@@ -185,7 +185,7 @@ what ships in the packaged app and are attributed here for that reason.
 | electron-builder | 26.15.3 | MIT | Packaging tool only — a build-time dependency, not distributed inside the packaged app |
 
 Electron itself bundles Chromium, V8 and Node.js under their own upstream
-licenses (BSD-style and MIT). ShellPilot redistributes these only as the
+licenses (BSD-style and MIT). OpsMaxx redistributes these only as the
 official, unmodified Electron binary via `electron-builder` and does not
 alter or separately relicense them.
 

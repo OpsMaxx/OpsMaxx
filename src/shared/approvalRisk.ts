@@ -1,6 +1,6 @@
 // The words an AI approval prompt is allowed to say.
 //
-// An approval modal is the one screen in ShellPilot where the person deciding
+// An approval modal is the one screen in OpsMaxx where the person deciding
 // did not start the thing they are deciding about. Everywhere else — a cordon,
 // a drain, a broadcast — the operator typed the intent themselves and the
 // dialog only has to describe the blast radius. Here the operator arrives cold,
@@ -78,7 +78,7 @@ export interface ApprovalSubject {
  * Null is the honest answer for an unrecognised word and the callers below
  * treat it as *more* serious than `high`, never less. Defaulting an unknown
  * level to `low` — the tempting one-liner — would take the single case where
- * ShellPilot understands the request least and render it as the case where
+ * OpsMaxx understands the request least and render it as the case where
  * there is least to worry about.
  */
 export function riskPosition(level: string): { ordinal: number; of: number } | null {
@@ -90,7 +90,7 @@ export function riskPosition(level: string): { ordinal: number; of: number } | n
 /** "HIGH — 3 of 3", or a sentence saying the word is not on the scale. */
 export function formatRiskLabel(level: string): string {
   const pos = riskPosition(level)
-  if (!pos) return `${level.toUpperCase() || 'UNLABELLED'} — not on ShellPilot's ${APPROVAL_RISK_SCALE.length}-level scale`
+  if (!pos) return `${level.toUpperCase() || 'UNLABELLED'} — not on OpsMaxx's ${APPROVAL_RISK_SCALE.length}-level scale`
   return `${level.toUpperCase()} — ${pos.ordinal} of ${pos.of}`
 }
 
@@ -110,7 +110,7 @@ export function riskTone(level: string): 'danger' | 'warn' | 'neutral' {
 // than importing it: that module is 127KB of cluster parsing and the approval
 // path should not pull it in for one regex, and the constant is not exported
 // there anyway. Widened by one character class — whitespace is a separator
-// here, because ShellPilot server names are display names ("Nginx Server Prod")
+// here, because OpsMaxx server names are display names ("Nginx Server Prod")
 // and not DNS labels, and the k8s version would have missed that one entirely.
 const PROD_RE = /(^|[\s\-_./:])(prod|production|prd|live)([\s\-_./:]|$)/i
 
@@ -150,7 +150,7 @@ export function riskReasons(s: ApprovalSubject): string[] {
   if (s.capability === 'databaseAccess')
     out.push(
       high
-        ? 'the statement was not classified as a read, so ShellPilot is treating it as one that changes data'
+        ? 'the statement was not classified as a read, so OpsMaxx is treating it as one that changes data'
         : 'it reads from a database through the host'
     )
   if (s.capability === 'hostFacts')
@@ -170,7 +170,7 @@ export function riskReasons(s: ApprovalSubject): string[] {
         : 'it stops a VPN that other sessions may depend on'
     )
   if (s.capability === 'manageServers')
-    out.push('it writes to ShellPilot’s own connection list and stores a credential there')
+    out.push('it writes to OpsMaxx’s own connection list and stores a credential there')
 
   const prod = productionHint(s)
   if (prod) out.push(`"${prod}" reads as production`)
@@ -213,7 +213,7 @@ export interface RiskExplanation {
  * `sentence` is never empty and never omitted, which is the point. A band that
  * renders a reason when it has one and blank space when it does not teaches the
  * operator that blank space means "nothing to say", when what it actually means
- * is "ShellPilot did not record why". Those are opposite readings of the same
+ * is "OpsMaxx did not record why". Those are opposite readings of the same
  * pixels.
  */
 export function explainRisk(s: ApprovalSubject): RiskExplanation {
@@ -232,8 +232,8 @@ export function explainRisk(s: ApprovalSubject): RiskExplanation {
     sentence: reasons.length
       ? `${word} because: ${reasons.join('; ')}.`
       : position
-        ? `ShellPilot did not record why this scored ${s.risk.toUpperCase()}, and cannot derive it from the request. Judge it from the command below, not from the word.`
-        : `ShellPilot does not recognise the risk word "${s.risk}" and cannot place it on its own scale. Treat this as unscored, not as safe.`
+        ? `OpsMaxx did not record why this scored ${s.risk.toUpperCase()}, and cannot derive it from the request. Judge it from the command below, not from the word.`
+        : `OpsMaxx does not recognise the risk word "${s.risk}" and cannot place it on its own scale. Treat this as unscored, not as safe.`
   }
 }
 
@@ -272,15 +272,15 @@ const INTENT_INVISIBLE = /[\u0000-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u202A-\
 // complete rule rather than a sample of one. The bracket form is capped short
 // so it cannot swallow INTENT_REDACTION.
 const INTENT_SPEAKER_LABEL =
-  /^\s*(?:\[[^\]]{0,24}\]|(?:shellpilot|system|admin(?:istrator)?|operator|user|security|note|notice|warning|important|assistant|claude|codex)\s*[:>»\-–—])\s*/i
+  /^\s*(?:\[[^\]]{0,24}\]|(?:opsmaxx|system|admin(?:istrator)?|operator|user|security|note|notice|warning|important|assistant|claude|codex)\s*[:>»\-–—])\s*/i
 
 // Claims that the decision has already been made. These are the sentences that
 // would actually change an operator's answer, and every one of them is a lie
-// by construction: ShellPilot is asking BECAUSE nothing has approved this. They
+// by construction: OpsMaxx is asking BECAUSE nothing has approved this. They
 // are replaced rather than deleted, so the operator can see that the agent
 // asking for permission also tried to tell them permission was not needed.
 const INTENT_IMPERSONATION: RegExp[] = [
-  /\bshellpilot\b[^.!?]{0,60}?\b(?:approv\w*|authoris\w*|authoriz\w*|verified|whitelist\w*|permits?|allows?)\b[^.!?]*/gi,
+  /\bopsmaxx\b[^.!?]{0,60}?\b(?:approv\w*|authoris\w*|authoriz\w*|verified|whitelist\w*|permits?|allows?)\b[^.!?]*/gi,
   /\b(?:pre-?approved|auto-?approved|already approved|previously approved|no approval (?:is )?(?:required|needed)|approval (?:is )?not (?:required|needed))\b[^.!?]*/gi,
   /\b(?:the )?(?:user|operator|admin(?:istrator)?|human)\b[^.!?]{0,40}?\b(?:already )?(?:approved|authoris\w+|authoriz\w+|consented|signed off)\b[^.!?]*/gi
 ]
@@ -289,11 +289,11 @@ const INTENT_IMPERSONATION: RegExp[] = [
  * An agent's stated intent, made safe to put on the screen — or null.
  *
  * WHY THIS EXISTS AT ALL. Every other string in this dialog is written by
- * ShellPilot or read off a host. This one is written by the party asking for
+ * OpsMaxx or read off a host. This one is written by the party asking for
  * permission, which makes the justification the human reads an input controlled
  * by the thing being judged. That is a prompt-injection surface pointed at a
  * person rather than at a model, and the person is the last check in the chain:
- * if this text can make itself look like ShellPilot's own copy, the agent gets
+ * if this text can make itself look like OpsMaxx's own copy, the agent gets
  * to write the sentence that decides its own approval.
  *
  * So the intent is treated as DATA end to end. Nothing here is parsed, matched
@@ -306,7 +306,7 @@ const INTENT_IMPERSONATION: RegExp[] = [
  *     imitates the dialog's own rows cannot be built;
  *   - phrases claiming the action was already approved are replaced with a
  *     visible marker rather than dropped silently;
- *   - a leading speaker label ("ShellPilot:", "[SYSTEM]", "Warning —") is
+ *   - a leading speaker label ("OpsMaxx:", "[SYSTEM]", "Warning —") is
  *     stripped, so the quotation cannot open in somebody else's voice;
  *   - the result is capped at INTENT_MAX_CHARS.
  *
@@ -324,7 +324,7 @@ export function sanitizeAgentIntent(raw: unknown): string | null {
   // the gap left by a stripped label — reaches the screen.
   let s = raw.replace(INTENT_INVISIBLE, ' ')
   for (const rx of INTENT_IMPERSONATION) s = s.replace(rx, INTENT_REDACTION)
-  // Loop: "[SYSTEM] ShellPilot: ..." is two labels, and stripping one would
+  // Loop: "[SYSTEM] OpsMaxx: ..." is two labels, and stripping one would
   // leave the other doing exactly the job the strip was for.
   for (;;) {
     const next = s.replace(INTENT_SPEAKER_LABEL, '')
@@ -351,7 +351,7 @@ export function sanitizeAgentIntent(raw: unknown): string | null {
  * risk signal, so it renders as loudly as any other line here.
  */
 export const NO_CONSEQUENCE_TEXT =
-  'ShellPilot cannot describe what this command does. It matched none of the shapes ShellPilot knows, so the command itself is the only evidence there is.'
+  'OpsMaxx cannot describe what this command does. It matched none of the shapes OpsMaxx knows, so the command itself is the only evidence there is.'
 
 export interface Consequence {
   /** Always a sentence. NO_CONSEQUENCE_TEXT when `known` is false. */
@@ -365,7 +365,7 @@ interface CommandShape {
 }
 
 // Small on purpose. Every entry here is a shape whose consequence is the same
-// on every Linux host ShellPilot talks to; anything whose effect depends on the
+// on every Linux host OpsMaxx talks to; anything whose effect depends on the
 // host's own configuration is left out, because a confident sentence about
 // something that varies is worse than NO_CONSEQUENCE_TEXT.
 const COMMAND_SHAPES: CommandShape[] = [
@@ -377,7 +377,7 @@ const COMMAND_SHAPES: CommandShape[] = [
         case 'restart':
           return `Restarts ${unit} on ${host}. Every connection it is serving right now is dropped, and it comes back only if the unit starts cleanly — if it does not, the service stays down and nothing here starts it again.`
         case 'stop':
-          return `Stops ${unit} on ${host} and leaves it stopped. Nothing in ShellPilot starts it again.`
+          return `Stops ${unit} on ${host} and leaves it stopped. Nothing in OpsMaxx starts it again.`
         case 'start':
           return `Starts ${unit} on ${host}. If it is already running this changes nothing.`
         case 'reload':
@@ -394,7 +394,7 @@ const COMMAND_SHAPES: CommandShape[] = [
   {
     match: /(^|[\s;&|])(reboot|poweroff|halt|shutdown)\b|\binit\s+[06]\b/,
     say: (_m, host) =>
-      `Takes ${host} down. Every SSH session, tunnel and service on it stops, and whether it comes back is up to the machine, not to ShellPilot.`
+      `Takes ${host} down. Every SSH session, tunnel and service on it stops, and whether it comes back is up to the machine, not to OpsMaxx.`
   },
   {
     match: /(^|[\s;&|])(kill|pkill|killall)\s/,
@@ -422,7 +422,7 @@ const COMMAND_SHAPES: CommandShape[] = [
   {
     match: /\b(mkfs(\.\w+)?|fdisk|parted|wipefs)\b|\bdd\s+.*\bof=/,
     say: (_m, host) =>
-      `Writes to a disk or partition on ${host} directly, underneath the filesystem. Whatever is on it is destroyed and no backup ShellPilot knows about is taken first.`
+      `Writes to a disk or partition on ${host} directly, underneath the filesystem. Whatever is on it is destroyed and no backup OpsMaxx knows about is taken first.`
   },
   {
     match: /\bcrontab\b|\/etc\/cron/,
@@ -478,14 +478,14 @@ export function describeConsequence(s: ApprovalSubject): Consequence {
     case 'writeFiles':
     case 'sftpUpload':
       return {
-        text: `Overwrites ${path} on ${host}. The previous contents are not kept anywhere ShellPilot can restore them from.`,
+        text: `Overwrites ${path} on ${host}. The previous contents are not kept anywhere OpsMaxx can restore them from.`,
         known: true
       }
     case 'sftpDownload':
       return { text: `Copies ${path} off ${host} to this machine.`, known: true }
     case 'databaseAccess':
       return {
-        text: `Runs this statement against a database on ${host}. ShellPilot does not dry-run it first, and a statement that changes rows cannot be undone from here.`,
+        text: `Runs this statement against a database on ${host}. OpsMaxx does not dry-run it first, and a statement that changes rows cannot be undone from here.`,
         known: true
       }
     case 'serverMetrics':
@@ -514,7 +514,7 @@ export function describeConsequence(s: ApprovalSubject): Consequence {
       }
     case 'manageServers':
       return {
-        text: `Adds a server to ShellPilot’s own connection list and stores a credential for it. It does not give the agent any access to the server it adds.`,
+        text: `Adds a server to OpsMaxx’s own connection list and stores a credential for it. It does not give the agent any access to the server it adds.`,
         known: true
       }
     case 'viewServer':

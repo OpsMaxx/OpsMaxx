@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, existsSync, renameSync, copyFileSync } fro
 // Non-secret application data (workspaces, folders, servers, vpns, tunnels).
 // Secrets live separately in secrets.ts. This is a plain JSON snapshot the
 // renderer owns; main only reads and writes the blob.
-const FILE = join(app.getPath('userData'), 'shellpilot-data.json')
+const FILE = join(app.getPath('userData'), 'opsmaxx-data.json')
 const TMP = `${FILE}.tmp`
 const BAK = `${FILE}.bak`
 

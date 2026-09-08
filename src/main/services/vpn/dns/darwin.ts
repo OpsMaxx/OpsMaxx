@@ -14,7 +14,7 @@ import type { DnsManager, DnsSnapshot, DnsSpec, DnsVerification } from './index'
 // other is to publish our own State: key, which is what every VPN client on
 // the platform does and what mDNSResponder merges alongside the interfaces'
 // own configuration. Publishing under a key named after the run is also what
-// makes the cleanup exact: removing `State:/Network/Service/ShellPilot-<runId>`
+// makes the cleanup exact: removing `State:/Network/Service/OpsMaxx-<runId>`
 // takes away everything we added and nothing anybody else did (E09).
 
 const SCUTIL = 'scutil'

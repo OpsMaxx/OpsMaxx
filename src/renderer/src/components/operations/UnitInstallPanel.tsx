@@ -63,7 +63,7 @@ export function UnitInstallPanel({ servers }: { servers: Server[] }): React.JSX.
   const install = async (): Promise<void> => {
     if (!target) return
     const w = (
-      window.shellpilot as
+      window.opsmaxx as
         | {
             services?: {
               write?: (t: unknown, d: UnitDraft) => Promise<{ ok: boolean; output?: string; error?: string }>
@@ -105,7 +105,7 @@ export function UnitInstallPanel({ servers }: { servers: Server[] }): React.JSX.
         <p>
           Writes a unit to <code>~/.config/systemd/user/</code> on one server and enables it. It
           is not started: the server&rsquo;s own systemd owns it from then on, which is the point
-          — it is there when ShellPilot is not.
+          — it is there when OpsMaxx is not.
         </p>
       }
       actions={

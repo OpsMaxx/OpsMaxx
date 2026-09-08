@@ -29,7 +29,7 @@ import type {
 // version posted. Read once: app.getVersion() is an IPC round trip and this is
 // on the alert path.
 let APP_VERSION = '0.0.0'
-void window.shellpilot?.getVersion?.().then((v) => {
+void window.opsmaxx?.getVersion?.().then((v) => {
   APP_VERSION = v
 })
 
@@ -601,7 +601,7 @@ function record(
     at: number
   }
 ): void {
-  void window.shellpilot?.alerts?.record?.(
+  void window.opsmaxx?.alerts?.record?.(
     {
       event,
       kind,
@@ -782,7 +782,7 @@ function isQuiet(k: string, now: number): boolean {
 
 export function hydrateAlerts(): Promise<void> {
   if (hydrating) return hydrating
-  const read = window.shellpilot?.alerts?.history
+  const read = window.opsmaxx?.alerts?.history
   if (!read) return Promise.resolve()
   hydrated = false
   hydrating = Promise.resolve(read(HISTORY_LIMIT))
@@ -1046,8 +1046,8 @@ function evaluate(
     // all-clears against a single alarm.
     if (announced.delete(k)) {
       record(kind, 'resolved', { serverId, serverName, value, threshold, at: now })
-      void window.shellpilot?.webhook?.notify({
-        source: 'shellpilot',
+      void window.opsmaxx?.webhook?.notify({
+        source: 'opsmaxx',
         version: APP_VERSION,
         event: 'resolved',
         kind: WEBHOOK_KIND[kind],
@@ -1170,14 +1170,14 @@ function evaluate(
       `will be said about it until it has gone ${dampHours} hours without crossing again. ` +
       `The Alerts tab still lists every crossing.`
     : ''
-  void window.shellpilot?.notify.show(
+  void window.opsmaxx?.notify.show(
     `${serverName}: ${LABEL[kind]} ${VALUE_PHRASE[kind](value)}`,
     `${SUBJECT[kind]} has been ${OVER_WORD[kind]} ${threshold}${UNIT[kind]}${forHow}.${quiet}`
   )
   // Same repeat window as the desktop notification, so the endpoint sees the
   // same cadence a person does rather than one message per sample.
-  void window.shellpilot?.webhook?.notify({
-    source: 'shellpilot',
+  void window.opsmaxx?.webhook?.notify({
+    source: 'opsmaxx',
     version: APP_VERSION,
     event: 'raised',
     kind: WEBHOOK_KIND[kind],
@@ -1191,7 +1191,7 @@ function evaluate(
     ...(mins >= 1 ? { minutes: mins } : {}),
     // The endpoint has to be told too, and for a stronger reason than the
     // desktop does: an endpoint that stops receiving has no way to tell "damped"
-    // from "ShellPilot died".
+    // from "OpsMaxx died".
     ...(tripped ? { damped: true } : {})
   })
 }
@@ -1321,8 +1321,8 @@ export function checkStateAlert(
     if (isQuiet(k, now)) return
     if (announced.delete(k)) {
       lastNotified.set(k, now)
-      void window.shellpilot?.webhook?.notify({
-        source: 'shellpilot',
+      void window.opsmaxx?.webhook?.notify({
+        source: 'opsmaxx',
         version: APP_VERSION,
         event: 'resolved',
         kind: WEBHOOK_KIND[kind],
@@ -1388,9 +1388,9 @@ export function checkStateAlert(
       `The Alerts tab still lists every one.`
     : ''
   const summary = STATE_WORDS[kind].raised(who, what)
-  void window.shellpilot?.notify.show(`${who}: ${LABEL[kind]}`, `${summary}.${quiet}`)
-  void window.shellpilot?.webhook?.notify({
-    source: 'shellpilot',
+  void window.opsmaxx?.notify.show(`${who}: ${LABEL[kind]}`, `${summary}.${quiet}`)
+  void window.opsmaxx?.webhook?.notify({
+    source: 'opsmaxx',
     version: APP_VERSION,
     event: 'raised',
     kind: WEBHOOK_KIND[kind],
@@ -1461,7 +1461,7 @@ export function noteAlertEvent(
   const tripped = noteCrossing(k, at)
   const summary = EVENT_WORDS[kind](who, what)
   const dampHours = Math.round(FLAP_DAMP_MS / 3_600_000)
-  void window.shellpilot?.notify.show(
+  void window.opsmaxx?.notify.show(
     `${who}: ${LABEL[kind]}`,
     `${summary}.` +
       (tripped
@@ -1470,8 +1470,8 @@ export function noteAlertEvent(
           `The Alerts tab still lists every one.`
         : '')
   )
-  void window.shellpilot?.webhook?.notify({
-    source: 'shellpilot',
+  void window.opsmaxx?.webhook?.notify({
+    source: 'opsmaxx',
     version: APP_VERSION,
     event: 'raised',
     kind: WEBHOOK_KIND[kind],
@@ -1651,12 +1651,12 @@ export function checkUnitAlerts(serverId: string, serverName: string, units: str
 
   if (fresh.length > 0) {
     const what = fresh.length === 1 ? fresh[0] : `${fresh.length} units`
-    void window.shellpilot?.notify.show(
+    void window.opsmaxx?.notify.show(
       `${serverName}: ${what} failed`,
       fresh.join(', ')
     )
-    void window.shellpilot?.webhook?.notify({
-      source: 'shellpilot',
+    void window.opsmaxx?.webhook?.notify({
+      source: 'opsmaxx',
       version: APP_VERSION,
       event: 'raised',
       kind: 'unit-failed',
@@ -1669,8 +1669,8 @@ export function checkUnitAlerts(serverId: string, serverName: string, units: str
   }
 
   if (previous.size > 0 && current.size === 0) {
-    void window.shellpilot?.webhook?.notify({
-      source: 'shellpilot',
+    void window.opsmaxx?.webhook?.notify({
+      source: 'opsmaxx',
       version: APP_VERSION,
       event: 'resolved',
       kind: 'unit-failed',
@@ -2078,9 +2078,9 @@ export const RUNBOOK_BRIDGE_MISSING =
  * The runbooks half of the preload bridge.
  *
  * Reached through a cast, and this is the ONE place in the renderer that does
- * it. `ShellPilotApi` is `typeof api` in src/preload/index.ts, and that file is
+ * it. `OpsMaxxApi` is `typeof api` in src/preload/index.ts, and that file is
  * not this change's to edit — the hunk that adds the `runbooks` namespace to it
- * was written out as a patch instead; that patch has landed, so `ShellPilotApi`
+ * was written out as a patch instead; that patch has landed, so `OpsMaxxApi`
  * carries the namespace and the cast is gone. Kept as a function rather than an
  * inline access at each call site because the `Partial` below is the point.
  *
@@ -2090,7 +2090,7 @@ export const RUNBOOK_BRIDGE_MISSING =
  * a missing METHOD is a real state and not a theoretical one.
  */
 function runbooksBridge(): Partial<RunbooksBridge> | undefined {
-  return window.shellpilot?.runbooks
+  return window.opsmaxx?.runbooks
 }
 
 /** The runbook for one alert kind on one host, or `null` when the bridge could

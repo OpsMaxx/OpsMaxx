@@ -558,7 +558,7 @@ export function DbOpsPanel({ cfg, kind, onVerdict }: Props): React.JSX.Element {
     setLoading(true)
     setError(null)
     try {
-      const r = await window.shellpilot?.db?.ops?.(cfg)
+      const r = await window.opsmaxx?.db?.ops?.(cfg)
       if (mine !== generation.current) return
       if (!r) setError('The preload bridge does not expose operational reads. Restart the app.')
       else if (!r.ok) setError(r.error ?? 'The read failed.')
@@ -605,7 +605,7 @@ export function DbOpsPanel({ cfg, kind, onVerdict }: Props): React.JSX.Element {
     const mine = generation.current
     void (async () => {
       const call = (
-        window.shellpilot as { capacity?: { dbGrowth?: CapacityBridge['dbGrowth'] } } | undefined
+        window.opsmaxx as { capacity?: { dbGrowth?: CapacityBridge['dbGrowth'] } } | undefined
       )?.capacity?.dbGrowth
       if (typeof call !== 'function') return
       const r = await call(cfg.id, 90).catch(() => null)

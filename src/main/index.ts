@@ -411,8 +411,8 @@ const isDev = !app.isPackaged
 // Windows shows the AppUserModelID as the heading on every notification, and
 // Electron's default is "electron.app.<name>". Setting it to the installer's
 // appId makes Windows resolve it to the Start-menu shortcut, so notifications
-// are headed "ShellPilot". Must be set before any notification is shown.
-if (process.platform === 'win32') app.setAppUserModelId('com.shellpilot.app')
+// are headed "OpsMaxx". Must be set before any notification is shown.
+if (process.platform === 'win32') app.setAppUserModelId('com.opsmaxx.app')
 
 let mainWindow: BrowserWindow | null = null
 
@@ -1009,7 +1009,7 @@ function startHistory(): void {
     try {
       const adopted = jobRunner.adopt()
       if (adopted.length > 0) {
-        console.log(`[jobs] closed ${adopted.length} job(s) abandoned when ShellPilot last stopped`)
+        console.log(`[jobs] closed ${adopted.length} job(s) abandoned when OpsMaxx last stopped`)
       }
       // Then the ones that are STILL RUNNING. adopt() deliberately leaves any
       // job with a detached marker open, because there is a command in its own
@@ -1579,7 +1579,7 @@ ipcMain.handle('fleet:drift-local', (_e, ctx: unknown) =>
 // the answer to "should an agent be able to revoke a key from twelve hosts" is
 // no, not "not yet".
 //
-// ONE ACCOUNT: THE ONE SHELLPILOT CONNECTS AS. The staged write resolves
+// ONE ACCOUNT: THE ONE OPSMAXX CONNECTS AS. The staged write resolves
 // `$HOME/.ssh/authorized_keys` on the host, so one approved command text covers
 // a whole selection — which also means it can only ever edit the connecting
 // account's file. `planAccessChange` permits a target on another account,
@@ -1820,7 +1820,7 @@ ipcMain.handle('access:run', async (_e, req: AccessRunRequest): Promise<AccessRu
 // Every clause of that is still true and the conclusion no longer follows,
 // because the premise it rested on was that the person who approved a run is
 // present for the whole of it. B2 made a job outlive the process. A job resumed
-// at the next launch is being acted on by a ShellPilot that never showed
+// at the next launch is being acted on by a OpsMaxx that never showed
 // anybody a dialog, and "the renderer computed a plan" was never a fact written
 // down anywhere — `BroadcastPlan` lived in a `useMemo` and was discarded.
 //
@@ -1891,20 +1891,20 @@ ipcMain.handle('broadcast:cancel', (_e, runId: string) => broadcast.cancel(runId
 // ---- Jobs ----
 //
 /**
- * This ShellPilot's id, stable across restarts on this machine.
+ * This OpsMaxx's id, stable across restarts on this machine.
  *
  * STABLE is the requirement, not unique-per-launch. It is what a marker
  * directory records, and it is how a reclaim tells "this is mine, finish
- * watching it and reap it" from "another ShellPilot started this, read it and
+ * watching it and reap it" from "another OpsMaxx started this, read it and
  * leave the directory alone". An id minted per launch would make every job
  * foreign to the instance that started it the moment the app restarted, and
  * markers would accumulate on every host until the sweep took them.
  *
- * A file rather than a machine fingerprint: two ShellPilots on one machine with
+ * A file rather than a machine fingerprint: two OpsMaxxs on one machine with
  * separate userData directories — a portable build next to an installed one —
  * are genuinely two instances and should say so.
  */
-function shellpilotInstanceId(): string {
+function opsmaxxInstanceId(): string {
   const file = join(app.getPath('userData'), 'instance-id')
   try {
     const existing = readFileSync(file, 'utf8').trim()
@@ -1975,7 +1975,7 @@ const detachedExec = detachedJobExecutor({
     const r = await sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs, false)
     return { ok: r.ok, code: r.code, stdout: r.stdout, stderr: r.stderr, error: r.error }
   },
-  instanceId: shellpilotInstanceId(),
+  instanceId: opsmaxxInstanceId(),
   attached: attachedExec,
   enabled: () => jobsDetachedEnabled,
   // A vault that does not exist is not a locked vault — fleetSampler's rule,
@@ -2655,7 +2655,7 @@ ipcMain.handle('compose:read-file', (_e, cfg: unknown, path: string, opts?: { su
   composeReader.readFile(cfg, path, opts ?? {})
 )
 // A READ, and deliberately a separate channel from the write. It answers "what
-// was this service pinned to before ShellPilot last edited this file" by reading
+// was this service pinned to before OpsMaxx last edited this file" by reading
 // the backup the write path has always left beside it, and returns a PLAN.
 // Applying that plan goes back out through `compose:write-image-tag` like any
 // other tag change, so a revert cannot become a second write path with its own
@@ -2948,7 +2948,7 @@ ipcMain.handle('webhook:set-url', (_e, url: string) => {
     const u = new URL(String(url).trim())
     const loopback = ['localhost', '127.0.0.1', '::1'].includes(u.hostname)
     if (loopback && Number(u.port) === port) {
-      return { ok: false, error: `That is ShellPilot's own MCP port (${port}). Pick another endpoint.` }
+      return { ok: false, error: `That is OpsMaxx's own MCP port (${port}). Pick another endpoint.` }
     }
   } catch {
     // Not a URL — webhookSetUrl reports that properly.
@@ -2987,7 +2987,7 @@ const CRED_PROXY_TOKEN_SECRET_ID = 'credproxy.client.token'
 
 /** Module level, because the token IPC below reads and writes the same file the
  *  proxy does and two paths would eventually be two files. */
-const credProxyRulesPath = join(app.getPath('userData'), 'shellpilot-credproxy.json')
+const credProxyRulesPath = join(app.getPath('userData'), 'opsmaxx-credproxy.json')
 
 /**
  * The token records, with the pre-existing single token promoted on the way.
@@ -3012,7 +3012,7 @@ function credProxyTokenList(): CredProxyToken[] {
 
 const credProxy = ((): CredProxy => {
   const rulesPath = credProxyRulesPath
-  const auditPath = join(app.getPath('userData'), 'shellpilot-credproxy-audit.jsonl')
+  const auditPath = join(app.getPath('userData'), 'opsmaxx-credproxy-audit.jsonl')
   return new CredProxy(
     {
       now: () => Date.now(),
@@ -3149,7 +3149,7 @@ ipcMain.handle('credproxy:token-value', (_e, id: unknown): string | null =>
 // that fails with [[9101,'SIGTERM'],[9101,'SIGKILL']] when the roots are
 // shared.
 //
-// ITS OWN FILE, not `shellpilot-data.json`. That blob is renderer-owned and is
+// ITS OWN FILE, not `opsmaxx-data.json`. That blob is renderer-owned and is
 // also the backup/export payload, and a command line that will be executed on
 // this machine does not belong in a file that gets mailed around. Written
 // temp-then-rename at 0600 like the vault and the rule file.
@@ -3162,7 +3162,7 @@ ipcMain.handle('credproxy:token-value', (_e, id: unknown): string | null =>
 // exits. tests/jobsNotExposed.test.ts fails on the import closure and on the
 // symbol names, which is what keeps that true without anyone remembering it.
 const processService = ((): ProcessService => {
-  const path = join(app.getPath('userData'), 'shellpilot-processes.json')
+  const path = join(app.getPath('userData'), 'opsmaxx-processes.json')
   return new ProcessService({
     now: () => Date.now(),
     newId: () => randomUUID(),
@@ -3494,7 +3494,7 @@ setBackupReader(() => {
 // There is deliberately no MCP tool beside this, for the reason `fleet:posture`
 // has none: a merged account of everything a person did on every host is not
 // something an agent gets to ask for. It is also the one place in the app that
-// reads `shellpilot-ai-audit.jsonl`, and that file's value rests on its rows
+// reads `opsmaxx-ai-audit.jsonl`, and that file's value rests on its rows
 // being an agent's rather than about one.
 ipcMain.handle('changelog:read', (_e, filter: unknown): ChangeLogPage => {
   // Not an object is not a filter. An unparseable argument must narrow the
@@ -3664,7 +3664,7 @@ ipcMain.handle('sshconfig:read', () => {
 })
 
 // An approval blocks an AI agent until the user answers it, and the dialog it
-// renders lives inside the window. If ShellPilot is not in front, nothing tells
+// renders lives inside the window. If OpsMaxx is not in front, nothing tells
 // the user anything is waiting — the agent simply appears to hang for the
 // whole timeout, which is exactly how it was reported.
 function notifyApprovalPending(request: ApprovalRequest): void {
@@ -4201,7 +4201,7 @@ ipcMain.on('aiMcp:create-server-reply', (_e, id: string, result: AgentServerResu
 setAgentServerCreator((req: AgentServerRequest) => {
   const target = mainWindow
   if (!target || target.isDestroyed()) {
-    return Promise.resolve({ ok: false, error: 'The ShellPilot window is closed.' })
+    return Promise.resolve({ ok: false, error: 'The OpsMaxx window is closed.' })
   }
   const id = `mkserver-${createSeq++}`
   return new Promise<AgentServerResult>((resolve) => {
@@ -4222,7 +4222,7 @@ ipcMain.handle('aiMcp:writeClaudeDesktopConfig', (_e, token: string, port: numbe
 )
 ipcMain.handle('aiMcp:writeCodexConfig', (_e, token: string, port: number) => writeCodexConfig(token, port))
 
-// ---- AI & MCP: CLI pairing (the `shellpilot claude|codex|run` launcher) ----
+// ---- AI & MCP: CLI pairing (the `opsmaxx claude|codex|run` launcher) ----
 ipcMain.handle('aiMcp:cancelPairing', (_e, id: string) => cancelCliPairing(id))
 onCliPairingEvent((e) => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('ai:pairing-event', e)

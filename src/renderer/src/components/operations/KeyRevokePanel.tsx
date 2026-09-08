@@ -85,11 +85,11 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
   const [honoured, setHonoured] = useState(0)
 
   const load = useCallback(async (): Promise<void> => {
-    if (!bridgeHas(window.shellpilot?.fleet as Record<string, unknown> | undefined, 'access')) return
+    if (!bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'access')) return
     const next: Record<string, Entry> = {}
     await Promise.all(
       servers.map(async (s) => {
-        const r = await window.shellpilot?.fleet?.access(s.id)
+        const r = await window.opsmaxx?.fleet?.access(s.id)
         if (r) next[s.id] = { access: r.access, error: r.error }
       })
     )
@@ -120,7 +120,7 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
   // handlers, so this is the honest UI and not the boundary.
   const canWrite =
     (ACCESS_WRITE_ENABLED || writeOptIn) &&
-    bridgeHas(window.shellpilot?.fleet as Record<string, unknown> | undefined, 'accessPlan')
+    bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'accessPlan')
 
   /** Every host that did not produce a reading. Not a footnote: a key missing
    *  from this list may still be on those hosts, so "revoked from the fleet" is
@@ -218,7 +218,7 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
     setResult(null)
     setRunning(true)
     try {
-      const preview = await window.shellpilot?.fleet?.accessPlan({
+      const preview = await window.opsmaxx?.fleet?.accessPlan({
         kind: 'revoke',
         fingerprint,
         targets: targetsFor(fingerprint)
@@ -236,7 +236,7 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
     setRunning(true)
     setProblem(null)
     try {
-      const r = await window.shellpilot?.fleet?.accessRun({
+      const r = await window.opsmaxx?.fleet?.accessRun({
         kind: 'revoke',
         fingerprint: pending.fingerprint,
         token: pending.preview.token,
@@ -379,7 +379,7 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
                 {pending.preview.hosts.length === 1 ? '' : 's'}?
               </b>{' '}
               This is staged, not applied. Each server takes a timestamped backup, replaces the file,
-              and arms its OWN rollback before ShellPilot lets go — so if this app dies in the next
+              and arms its OWN rollback before OpsMaxx lets go — so if this app dies in the next
               instant, the server puts the previous file back by itself after{' '}
               {pending.preview.rollbackSeconds} seconds. Nothing becomes permanent until a second
               connection has authenticated against the changed file.
@@ -495,7 +495,7 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
                 data-testid="revoke-plan"
                 disabled={!canWrite || running || chosen === null}
                 onClick={() => chosen && void plan(chosen.fingerprint)}
-                title="Shows exactly what would run on which servers. Nothing is written until you confirm it, and nothing becomes permanent until a second, independent session has proved the server still lets ShellPilot in."
+                title="Shows exactly what would run on which servers. Nothing is written until you confirm it, and nothing becomes permanent until a second, independent session has proved the server still lets OpsMaxx in."
               >
                 Plan the revocation
               </button>

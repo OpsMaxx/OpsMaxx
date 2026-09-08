@@ -9,7 +9,7 @@ import type { VpnPidRecord } from '../src/main/services/vpn/supervisor'
 // this app started, so every test here is really the same question: did it
 // prove whose process that is before it killed it?
 
-const EXE = '/opt/shellpilot/resources/bin/shellpilot-netd'
+const EXE = '/opt/opsmaxx/resources/bin/opsmaxx-netd'
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 

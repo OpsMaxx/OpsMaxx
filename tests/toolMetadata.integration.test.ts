@@ -98,9 +98,9 @@ describe('tool metadata', () => {
     expect(byName('write_file').annotations?.destructiveHint).toBe(true)
   })
 
-  it('claims an open world only for the tools that reach outside ShellPilot', () => {
+  it('claims an open world only for the tools that reach outside OpsMaxx', () => {
     // A shell command and a database statement both act on a system whose
-    // contents ShellPilot does not model; everything else operates on things
+    // contents OpsMaxx does not model; everything else operates on things
     // it already knows about. A new tool appearing here should be a decision,
     // not a default — hence the exact list.
     const open = tools.filter((t) => t.annotations?.openWorldHint).map((t) => t.name).sort()
@@ -109,7 +109,7 @@ describe('tool metadata', () => {
 
   it('does not let a tunnel tool claim an open world', () => {
     // set_tunnel can only run a tunnel the user already defined, so its effects
-    // are fully described by ShellPilot's own configuration.
+    // are fully described by OpsMaxx's own configuration.
     expect(byName('set_tunnel').annotations?.openWorldHint).toBeFalsy()
   })
 

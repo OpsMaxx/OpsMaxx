@@ -357,7 +357,7 @@ export class OpenVpnManagement {
     // OpenVPN could not start on macOS at all.
     //
     // sun_path is 104 bytes and the run directory alone is longer than that:
-    // `~/Library/Application Support/ShellPilot/vpn-run/vpn-<uuid>-<8 hex>` is
+    // `~/Library/Application Support/OpsMaxx/vpn-run/vpn-<uuid>-<8 hex>` is
     // 111 bytes for a seven-character username, so the socket came to 123 and
     // the length guard below rejected it before openvpn was ever launched. No
     // shorter username saves it — the floor is 117.
@@ -686,7 +686,7 @@ export class OpenVpnManagement {
     // Auto-confirming a hardware-token prompt would answer a question the user
     // never saw, so without a way to ask, the answer is no.
     const ok = this.hooks.confirm ? await this.hooks.confirm(needType, text) : false
-    if (!this.hooks.confirm) this.hooks.log(`declined a confirmation ShellPilot cannot show: ${needType} ${text}`, 'app')
+    if (!this.hooks.confirm) this.hooks.log(`declined a confirmation OpsMaxx cannot show: ${needType} ${text}`, 'app')
     if (this.closed) return
     this.send(`needok ${needType} ${ok ? 'ok' : 'cancel'}`)
   }

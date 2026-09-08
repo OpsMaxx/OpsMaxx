@@ -107,7 +107,7 @@ function execFailure(r: ExecLike): string | null {
   // MISSING ITS TAIL, and writing that back would delete every job past the
   // cut — silently, because cron reports nothing when a job stops existing.
   if (r.truncated) {
-    return 'this crontab is larger than a single command can return, so ShellPilot will not edit it — the part it could not read is the part it would delete.'
+    return 'this crontab is larger than a single command can return, so OpsMaxx will not edit it — the part it could not read is the part it would delete.'
   }
   return null
 }
@@ -137,7 +137,7 @@ export async function planCronEditOnHost(
       ok: false,
       reason:
         `${target.serverName} reported this crontab as \`${source.status}\` when it was read` +
-        `${gaps[0]?.detail ? ` (${gaps[0].detail})` : ''}, so ShellPilot only has part of it. ` +
+        `${gaps[0]?.detail ? ` (${gaps[0].detail})` : ''}, so OpsMaxx only has part of it. ` +
         'A write replaces the whole file, and the part it could not read is the part it would delete.'
     }
   }

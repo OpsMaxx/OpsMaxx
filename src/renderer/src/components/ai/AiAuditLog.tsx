@@ -43,7 +43,7 @@ export function AiAuditLog(): React.JSX.Element {
   const [to, setTo] = useState('')
 
   const load = (): void => {
-    void window.shellpilot?.aiMcp.listAudit(FETCH_LIMIT).then((e) => setEntries(e ?? []))
+    void window.opsmaxx?.aiMcp.listAudit(FETCH_LIMIT).then((e) => setEntries(e ?? []))
   }
   useEffect(() => {
     load()
@@ -98,7 +98,7 @@ export function AiAuditLog(): React.JSX.Element {
     <div className="settings-section">
       <h2>Audit Log</h2>
       <div className="sub">
-        Every AI action ShellPilot processed, whether allowed, approved, denied or failed. Never
+        Every AI action OpsMaxx processed, whether allowed, approved, denied or failed. Never
         includes passwords, keys or other secrets.
       </div>
 
@@ -162,8 +162,8 @@ export function AiAuditLog(): React.JSX.Element {
               disabled={filtered.length === 0}
               onClick={() => {
                 void (async () => {
-                  const name = `shellpilot-audit-${new Date().toISOString().slice(0, 10)}.json`
-                  const ok = await window.shellpilot?.dialog.saveJson(name, auditExport(filtered))
+                  const name = `opsmaxx-audit-${new Date().toISOString().slice(0, 10)}.json`
+                  const ok = await window.opsmaxx?.dialog.saveJson(name, auditExport(filtered))
                   // Said either way. A silent no-op after a save is
                   // indistinguishable from a save that worked.
                   if (ok) toast(`${filtered.length} entries exported`, 'ok')

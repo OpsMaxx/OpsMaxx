@@ -27,14 +27,14 @@ const BIN_ROOT = join(ROOT, 'resources', 'bin')
 // The lists differ by platform, and the two differences are both deliberate:
 //
 //   * `openvpn` is bundled on macOS and Linux only. On Windows OpenVPN needs
-//     an adapter driver ShellPilot cannot install, so the Windows build still
+//     an adapter driver OpsMaxx cannot install, so the Windows build still
 //     drives a system install — see docs/VPN.md.
 //   * `wintun.dll` is Windows-only by nature. It is not an executable, so it
 //     is listed with its extension and gets no `.exe`.
 const REQUIRED = {
-  darwin: ['shellpilot-netd', 'frpc', 'openvpn'],
-  linux: ['shellpilot-netd', 'frpc', 'openvpn'],
-  win32: ['shellpilot-netd', 'frpc', 'wintun.dll']
+  darwin: ['opsmaxx-netd', 'frpc', 'openvpn'],
+  linux: ['opsmaxx-netd', 'frpc', 'openvpn'],
+  win32: ['opsmaxx-netd', 'frpc', 'wintun.dll']
 }
 
 function fileNameFor(name, dir) {
@@ -73,7 +73,7 @@ async function main() {
 
   const required = REQUIRED[process.platform]
   if (!required) {
-    console.error(`::error::no engine list for ${process.platform}; ShellPilot is not built there.`)
+    console.error(`::error::no engine list for ${process.platform}; OpsMaxx is not built there.`)
     process.exit(1)
   }
 
@@ -105,7 +105,7 @@ async function main() {
       }
       // `version` is what binaries.ts reports to the UI. Without it the
       // resolver falls back to running the binary with --version, and
-      // shellpilot-netd answers that in JSON — so a missing field here shows
+      // opsmaxx-netd answers that in JSON — so a missing field here shows
       // up as a JSON document where a version number should be.
       if (!entry.version) problems.push(`${key}: no version recorded in the manifest`)
       console.log(`ok  ${key}  ${entry.sha256.slice(0, 12)}  ${st.size} bytes  v${entry.version}`)

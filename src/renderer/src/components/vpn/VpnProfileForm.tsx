@@ -45,7 +45,7 @@ const parseList = (s: string): string[] =>
  *  field. */
 function copyValue(label: string, value: string): void {
   if (!value) return
-  window.shellpilot?.clipboard.write(value)
+  window.opsmaxx?.clipboard.write(value)
   toast(`${label} copied`, 'ok')
 }
 
@@ -80,10 +80,10 @@ export function VpnProfileForm({ profile, onClose, focus }: VpnProfileFormProps)
   // validate() is pure and cheap in main — no process, no network — so it can
   // run while the user types. Debounced only enough to collapse a burst.
   useEffect(() => {
-    if (!bridgeHas(window.shellpilot?.vpn as Record<string, unknown> | undefined, 'validate')) return
+    if (!bridgeHas(window.opsmaxx?.vpn as Record<string, unknown> | undefined, 'validate')) return
     let live = true
     const t = setTimeout(() => {
-      void window.shellpilot?.vpn.validate(draft.spec).then((v) => {
+      void window.opsmaxx?.vpn.validate(draft.spec).then((v) => {
         if (live && v) setIssues(v.issues)
       })
     }, 200)
@@ -156,7 +156,7 @@ export function VpnProfileForm({ profile, onClose, focus }: VpnProfileFormProps)
         const replaces = wg.privateKeyRef?.vaultEntryId
         const stored = await withVaultUnlock(`Saving the key for ${name}`, () =>
           Promise.resolve(
-            window.shellpilot?.vpn.wireguardKeygen({
+            window.opsmaxx?.vpn.wireguardKeygen({
               profileName: name,
               workspaceId: draft.workspaceId,
               privateKey: pendingKey.privateKey,
@@ -228,7 +228,7 @@ export function VpnProfileForm({ profile, onClose, focus }: VpnProfileFormProps)
             onClick={() => setDraft((d) => ({ ...d, autoStart: !d.autoStart }))}
           />
           <span className="muted" style={{ fontSize: 12 }}>
-            Connect automatically when ShellPilot starts
+            Connect automatically when OpsMaxx starts
           </span>
         </label>
 
@@ -335,14 +335,14 @@ function UnrenderedIssues({
 
 /** The host platform, or null until the round trip lands.
  *
- *  Several fields read differently depending on what ShellPilot ships here, and
+ *  Several fields read differently depending on what OpsMaxx ships here, and
  *  a wrong answer during the first frame is worse than a vague one, so callers
  *  are expected to treat null as "not yet known" rather than as a platform. */
 function usePlatform(): NodeJS.Platform | null {
   const [platform, setPlatform] = useState<NodeJS.Platform | null>(null)
   useEffect(() => {
     let live = true
-    void window.shellpilot?.platform().then((p) => {
+    void window.opsmaxx?.platform().then((p) => {
       if (live) setPlatform(p)
     })
     return () => {
@@ -360,7 +360,7 @@ function usePlatform(): NodeJS.Platform | null {
 function useSystemModeBlocked(): string | null {
   const platform = usePlatform()
   if (platform !== 'darwin') return null
-  return 'System mode is not available on macOS: ShellPilot has no signed privileged helper, so it cannot create a system network interface. Userspace mode gives the same tunnel through local listeners and needs no administrator rights.'
+  return 'System mode is not available on macOS: OpsMaxx has no signed privileged helper, so it cannot create a system network interface. Userspace mode gives the same tunnel through local listeners and needs no administrator rights.'
 }
 
 /** A checkbox that turns a blocking validation error into an accepted choice.
@@ -716,7 +716,7 @@ function InterfaceKeyField({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const bridge = window.shellpilot?.vpn as Record<string, unknown> | undefined
+  const bridge = window.opsmaxx?.vpn as Record<string, unknown> | undefined
   const canMint = bridgeHas(bridge, 'wireguardMint')
   const canDerive = bridgeHas(bridge, 'wireguardPublicKey')
   const shaped = isWireGuardKey(privateKey)
@@ -735,7 +735,7 @@ function InterfaceKeyField({
     }
     let live = true
     const t = setTimeout(() => {
-      void window.shellpilot?.vpn.wireguardPublicKey(privateKey).then((r) => {
+      void window.opsmaxx?.vpn.wireguardPublicKey(privateKey).then((r) => {
         if (!live) return
         setPublicKey(r?.ok && r.publicKey ? r.publicKey : '')
       })
@@ -752,7 +752,7 @@ function InterfaceKeyField({
     setBusy(true)
     setError(null)
     try {
-      const res = await window.shellpilot?.vpn.wireguardMint()
+      const res = await window.opsmaxx?.vpn.wireguardMint()
       if (!res?.ok || !res.privateKey || !res.publicKey) {
         setError(res?.error ?? 'The key could not be generated.')
         return
@@ -901,7 +901,7 @@ function InterfaceKeyField({
                 // in an unsaved form, and Cancel throws it away.
                 'The private key goes to the vault on Save, and never onto this profile, a config file, or a log line.'
               : inVault
-                ? 'Private key, held in the vault. ShellPilot cannot read it back to show you its public key — paste the key here to see it, or generate a new pair and authorise that one instead.'
+                ? 'Private key, held in the vault. OpsMaxx cannot read it back to show you its public key — paste the key here to see it, or generate a new pair and authorise that one instead.'
                 : 'No private key yet. Generate a pair, or paste one you already have; either way it goes to the vault on Save and the profile keeps only a pointer to it.'}
       </span>
     </div>
@@ -1112,10 +1112,10 @@ function OpenVpnFields({ spec, issue, onChange, shown, focus }: OvpnProps): Reac
             list, naming the platform here would be the thing that goes stale. */}
         <span className="field-hint">
           {userSuppliesEngine('openvpn', platform)
-            ? 'ShellPilot does not ship OpenVPN on this platform. Leave this empty to use an allowlisted system install.'
+            ? 'OpsMaxx does not ship OpenVPN on this platform. Leave this empty to use an allowlisted system install.'
             : platform
-              ? 'ShellPilot ships an OpenVPN and uses it by default. Set a path only to run a copy you installed yourself.'
-              : 'Leave this empty to use the OpenVPN ShellPilot finds by itself.'}
+              ? 'OpsMaxx ships an OpenVPN and uses it by default. Set a path only to run a copy you installed yourself.'
+              : 'Leave this empty to use the OpenVPN OpsMaxx finds by itself.'}
         </span>
       </label>
     </>

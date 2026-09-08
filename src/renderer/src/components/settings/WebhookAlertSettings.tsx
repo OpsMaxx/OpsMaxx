@@ -30,7 +30,7 @@ export function WebhookAlertSettings(): React.JSX.Element {
   const setSettings = useApp((s) => s.setSettings)
 
   useEffect(() => {
-    void window.shellpilot?.webhook?.status().then((s) => s && setCfg(s))
+    void window.opsmaxx?.webhook?.status().then((s) => s && setCfg(s))
   }, [])
 
   // What actually happened to the alerts this endpoint was supposed to carry.
@@ -40,7 +40,7 @@ export function WebhookAlertSettings(): React.JSX.Element {
   useEffect(() => {
     let live = true
     const read = (): void => {
-      void window.shellpilot?.webhook?.delivery().then((d) => {
+      void window.opsmaxx?.webhook?.delivery().then((d) => {
         if (live && d) setDelivery(d)
       })
     }
@@ -63,7 +63,7 @@ export function WebhookAlertSettings(): React.JSX.Element {
       webhookAlertsEnabled: merged.enabled,
       webhookNotifyOnResolved: merged.notifyOnResolved
     })
-    const s = await window.shellpilot?.webhook?.configure({
+    const s = await window.opsmaxx?.webhook?.configure({
       enabled: merged.enabled,
       notifyOnResolved: merged.notifyOnResolved
     })
@@ -71,7 +71,7 @@ export function WebhookAlertSettings(): React.JSX.Element {
   }
 
   const saveUrl = async (): Promise<void> => {
-    const res = await window.shellpilot?.webhook?.setUrl(draft)
+    const res = await window.opsmaxx?.webhook?.setUrl(draft)
     if (!res) return
     setSaveMsg(
       res.ok
@@ -81,7 +81,7 @@ export function WebhookAlertSettings(): React.JSX.Element {
     if (res.ok) {
       setDraft('')
       setTestMsg(null)
-      const s = await window.shellpilot?.webhook?.status()
+      const s = await window.opsmaxx?.webhook?.status()
       if (s) {
         setCfg(s)
         // Main turns the feature off when the URL is cleared, and settings has
@@ -97,7 +97,7 @@ export function WebhookAlertSettings(): React.JSX.Element {
   const test = async (): Promise<void> => {
     setTesting(true)
     setTestMsg(null)
-    const r = await window.shellpilot?.webhook?.test()
+    const r = await window.opsmaxx?.webhook?.test()
     setTesting(false)
     if (!r) return
     if (!r.ok) {

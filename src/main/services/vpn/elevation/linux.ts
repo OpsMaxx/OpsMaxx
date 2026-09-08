@@ -38,7 +38,7 @@ const SUDO_PATHS = ['/usr/bin/sudo', '/bin/sudo', '/usr/local/bin/sudo']
 const ENV_PATHS = ['/usr/bin/env', '/bin/env']
 
 // Graphical password helpers, in the order a desktop is likely to have them.
-// A terminal askpass is deliberately not on this list: ShellPilot has no
+// A terminal askpass is deliberately not on this list: OpsMaxx has no
 // terminal to prompt in, so a text prompt would hang the connect forever.
 const ASKPASS_PATHS = [
   '/usr/bin/ssh-askpass',
@@ -119,7 +119,7 @@ function resolveRoute(): Resolved {
       probe: {
         available: true,
         method: 'sudo',
-        reason: `polkit is not installed, so ShellPilot will ask for your password through ${askpass}.`
+        reason: `polkit is not installed, so OpsMaxx will ask for your password through ${askpass}.`
       },
       helper: sudo,
       method: 'sudo',
@@ -134,7 +134,7 @@ function resolveRoute(): Resolved {
       method: 'none',
       reason: sudo
         ? 'sudo is installed but there is no graphical password prompt for it. Install polkit (which provides pkexec) or an askpass helper such as ssh-askpass, or point SUDO_ASKPASS at one. A userspace WireGuard profile needs no administrator rights at all.'
-        : 'Neither pkexec nor sudo is installed, so ShellPilot cannot ask for administrator rights. Install polkit (which provides pkexec), or use a userspace WireGuard profile, which needs none.'
+        : 'Neither pkexec nor sudo is installed, so OpsMaxx cannot ask for administrator rights. Install polkit (which provides pkexec), or use a userspace WireGuard profile, which needs none.'
     },
     helper: null,
     method: 'none',

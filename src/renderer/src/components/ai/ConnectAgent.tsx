@@ -64,7 +64,7 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
   const [revealed, setRevealed] = useState(false)
 
   useEffect(() => {
-    void window.shellpilot?.aiPolicy.listGroups().then((g) => {
+    void window.opsmaxx?.aiPolicy.listGroups().then((g) => {
       const list = g ?? []
       setGroups(list)
       // Read & Write rather than Read Only, because a session's group is fixed
@@ -80,7 +80,7 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
   }, [])
 
   const connect = async (target: Target, agentName: string): Promise<void> => {
-    const api = window.shellpilot
+    const api = window.opsmaxx
     if (!api) return
     setBusy(target)
     setError(null)
@@ -92,7 +92,7 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
         const result = await api.aiMcp.setConfig({ enabled: true })
         if (result.error) {
           throw new StepError(
-            `ShellPilot could not listen on port ${config.port}: ${result.error}. Another program is probably using it.`,
+            `OpsMaxx could not listen on port ${config.port}: ${result.error}. Another program is probably using it.`,
             { label: 'Change the port', run: () => openAi('security') }
           )
         }
@@ -142,7 +142,7 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
         ttlMinutes: null
       })
       if (!created) {
-        throw new StepError('ShellPilot could not issue a session for this agent.', {
+        throw new StepError('OpsMaxx could not issue a session for this agent.', {
           label: 'Create one by hand',
           run: () => openAi('agents')
         })
@@ -157,7 +157,7 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
         const label = FILE_CLIENTS[target]
         const write = target === 'codex' ? api.aiMcp.writeCodexConfig : api.aiMcp.writeClaudeDesktopConfig
         if (typeof write !== 'function') {
-          throw new StepError(`This build of ShellPilot cannot configure ${label} for you.`, {
+          throw new StepError(`This build of OpsMaxx cannot configure ${label} for you.`, {
             label: 'Check for updates',
             run: () => openSettings('general')
           })
@@ -168,7 +168,7 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
         // button that would do nothing.
         if (!result.ok) throw new StepError(result.error ?? `The ${label} config file could not be written.`)
         setReady({ target, path: result.path, backedUpTo: result.backedUpTo })
-        toast(`${label} is configured. Quit it and open it again to pick ShellPilot up.`, 'ok')
+        toast(`${label} is configured. Quit it and open it again to pick OpsMaxx up.`, 'ok')
       }
       onConnected?.()
     } catch (err) {
@@ -251,8 +251,8 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
               that sentence to believe, so the token is now actually hidden and
               the sentence says what is true. */}
           <div className="s-desc">
-            Copied to your clipboard. Paste it into a terminal — it registers ShellPilot with Claude
-            Code for every project. ShellPilot keeps only a hash of the token, so this is the only
+            Copied to your clipboard. Paste it into a terminal — it registers OpsMaxx with Claude
+            Code for every project. OpsMaxx keeps only a hash of the token, so this is the only
             time it can show it to you; the copy on your clipboard is the whole command, token
             included.
           </div>
@@ -298,7 +298,7 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
           <h3>{FILE_CLIENTS[ready.target]}</h3>
           <div className="s-desc">
             Written to <code className="mono">{ready.path}</code>. That file is only read at
-            startup, so quit the app completely and reopen it — ShellPilot then appears in its
+            startup, so quit the app completely and reopen it — OpsMaxx then appears in its
             tools.
             {ready.backedUpTo ? (
               <>

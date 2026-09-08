@@ -12,7 +12,7 @@
 // The page this exists for showed a full 64-character bearer token in plain
 // selectable text, under the sentence "the token is in that command and is
 // shown only once here", beside a button labelled "Copy again". The sentence
-// was defensible — ShellPilot stores only the hash, so this really is the only
+// was defensible — OpsMaxx stores only the hash, so this really is the only
 // time it can be displayed — but "shown only once" reads as "already hidden",
 // and it was sitting in the clear on a page users screenshot for their team.
 // A claim the UI visibly contradicts teaches people that the security copy is
