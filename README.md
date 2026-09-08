@@ -8,6 +8,8 @@
 
 Your DevOps workstation, everywhere. Windows · macOS · Linux.
 
+**[opsmaxx.dev](https://opsmaxx.dev)**
+
 <a href="https://github.com/OpsMaxx/OpsMaxx/releases/latest">
 <img src="https://img.shields.io/badge/Download%20OpsMaxx-22c7d6?style=for-the-badge&labelColor=0d1119" alt="Download OpsMaxx" height="34" />
 </a>
@@ -21,7 +23,7 @@ Your DevOps workstation, everywhere. Windows · macOS · Linux.
 [![Stars](https://img.shields.io/github/stars/OpsMaxx/OpsMaxx?style=flat-square&label=stars&color=22c7d6&labelColor=30363d)](https://github.com/OpsMaxx/OpsMaxx/stargazers)
 [![License](https://img.shields.io/badge/license-MIT-22c7d6?style=flat-square&labelColor=30363d)](LICENSE)
 
-[Features](#features) · [AI Agent Access](#ai-agent-access) · [Install](#install) · [Quick start](#quick-start) · [Comparison](#opsmaxx-vs-mobaxterm-putty-termius-and-securecrt) · [Workspaces](#workspaces) · [Local terminal](#local-terminal) · [Command palette](#command-palette) · [Shortcuts](#keyboard-shortcuts) · [Databases](#databases) · [Vault](#vault) · [Use cases](#real-world-use-cases) · [FAQ](#faq) · [Contributing](#contributing) · [Licence](#licence)
+[Website](https://opsmaxx.dev) · [Features](#features) · [AI Agent Access](#ai-agent-access) · [Install](#install) · [Quick start](#quick-start) · [Comparison](#opsmaxx-vs-mobaxterm-putty-termius-and-securecrt) · [Workspaces](#workspaces) · [Local terminal](#local-terminal) · [Command palette](#command-palette) · [Shortcuts](#keyboard-shortcuts) · [Databases](#databases) · [Vault](#vault) · [Use cases](#real-world-use-cases) · [FAQ](#faq) · [Contributing](#contributing) · [Licence](#licence)
 
 </div>
 
@@ -263,7 +265,27 @@ account-level Connectors feature with nowhere to put a bearer token for a `127.0
 
 OpsMaxx ships a stdio bridge for exactly this case — a pure protocol relay that forwards
 messages to the same authenticated HTTP endpoint, so a stdio-only client gets the identical
-policy, approval and audit path (`src/cli/bridge.ts`). Point Desktop at it:
+policy, approval and audit path (`src/cli/bridge.ts`).
+
+The short way is the npm package, which is the same relay without the absolute paths:
+
+```json
+{
+  "mcpServers": {
+    "opsmaxx": {
+      "command": "npx",
+      "args": ["-y", "@opsmaxx/mcp"],
+      "env": { "OPSMAXX_MCP_TOKEN": "<token>", "OPSMAXX_MCP_PORT": "<port>" }
+    }
+  }
+}
+```
+
+If you have run `opsmaxx claude` at least once, the `env` block can be dropped: the package
+reads the session the CLI already cached. Source and detail:
+[`@opsmaxx/mcp`](https://github.com/OpsMaxx/opsmaxx-mcp).
+
+Or point Desktop straight at the bundled bridge, with no Node dependency at all:
 
 ```json
 {
@@ -331,6 +353,19 @@ Download the latest build from the [Releases](https://github.com/OpsMaxx/OpsMaxx
 | **macOS (Intel)** | [`OpsMaxx-x.y.z-x64.dmg`](https://github.com/OpsMaxx/OpsMaxx/releases/latest) | Intel Macs |
 | **Linux** | [`OpsMaxx-x.y.z-x86_64.AppImage`](https://github.com/OpsMaxx/OpsMaxx/releases/latest) | `chmod +x OpsMaxx-*.AppImage` and run — works on any distribution |
 | **Linux (Debian / Ubuntu)** | [`OpsMaxx-x.y.z-amd64.deb`](https://github.com/OpsMaxx/OpsMaxx/releases/latest) | `sudo apt install ./OpsMaxx-*-amd64.deb` |
+
+### Package managers
+
+| | |
+|---|---|
+| **macOS** | `brew trust opsmaxx/tap` then `brew install --cask opsmaxx/tap/opsmaxx` |
+| **Windows** | `winget install OpsMaxx.OpsMaxx` — [pending review](https://github.com/microsoft/winget-pkgs/pull/431465) |
+
+Homebrew's main cask repository has a notability threshold OpsMaxx does not meet yet, so
+the cask lives in [its own tap](https://github.com/OpsMaxx/homebrew-tap) for now. The
+`brew trust` step is Homebrew refusing to load a third-party tap until you say you trust
+it; the cask it guards is a few lines of metadata you can read first. Homebrew clears the
+quarantine flag on install, so this route also sidesteps the first-run warning below.
 
 <details>
 <summary><b>What are the other files on the release page?</b></summary>
