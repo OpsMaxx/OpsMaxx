@@ -94,6 +94,72 @@ describe('the jump-host row is labelled', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// …and wide enough to read
+// ---------------------------------------------------------------------------
+//
+// Reported from the running app: the Server / IP box was a few pixels wide — a
+// stored host of 13.213.210.170 showed as "1" — while its header wrapped over
+// three lines and Label, Port and Username sat comfortably beside it.
+//
+// The cause is one that no amount of reading the JSX reveals: an <input> has an
+// intrinsic width (~172px, the default size=20), a flex item's automatic
+// minimum size is its min-content width, and so `flex: 0 0 76px` on the Port
+// column was really ~172px. Three columns filled the row. The host column was
+// the only one carrying `min-width: 0` and therefore the only one able to
+// shrink, so it took the entire deficit and collapsed to nothing.
+//
+// What is assertable is the rule that prevents it: min-width: 0 on EVERY
+// column, so a declared basis is what decides, and a basis on the host column
+// wide enough for the value it holds.
+describe('the jump-host row is wide enough to read', () => {
+  const hops = read('src/renderer/src/components/connections/RouteHops.tsx')
+  const css = read('src/renderer/src/styles/global.css')
+
+  const rule = (selector: string): string => {
+    const i = css.indexOf(`${selector} {`)
+    expect(i, `${selector} must exist`).toBeGreaterThan(-1)
+    return css.slice(i, css.indexOf('}', i))
+  }
+
+  // In the stylesheet rather than in four inline `style` objects, which is
+  // where the wrong bases were and where nothing could be checked.
+  it('sizes the columns from a stylesheet, not from inline flex bases', () => {
+    for (const cls of ['hop-fields', 'hop-field hop-name', 'hop-field hop-host', 'hop-field hop-port', 'hop-field hop-user']) {
+      expect(hops, cls).toContain(`className="${cls}"`)
+    }
+    expect(hops).not.toMatch(/flex: '0 0 30%'/)
+    expect(hops).not.toMatch(/flex: '0 0 24%'/)
+  })
+
+  // THE fix. Without it the bases below are decorative.
+  it('lets every column shrink below its input\u2019s intrinsic width', () => {
+    expect(rule('.hop-field')).toMatch(/min-width:\s*0/)
+  })
+
+  // 168px holds a full IPv4 address plus room to type, at the 13px input font.
+  // The number matters: this is the field the user could not read.
+  it('gives the host column the widest basis in the row', () => {
+    const basis = (sel: string): number => {
+      const m = rule(sel).match(/flex:\s*[\d.]+\s+[\d.]+\s+(\d+)px/)
+      expect(m, `${sel} must declare a px basis`).not.toBeNull()
+      return Number(m![1])
+    }
+    const host = basis('.hop-field.hop-host')
+    expect(host).toBeGreaterThanOrEqual(150)
+    for (const other of ['.hop-field.hop-name', '.hop-field.hop-user']) {
+      expect(host, other).toBeGreaterThan(basis(other))
+    }
+  })
+
+  // A dialog is 620px at most and less on a small display, so four columns of
+  // at least 120 + 168 + 76 + 110 have to be allowed onto a second line rather
+  // than out of the dialog.
+  it('wraps on a narrow dialog instead of overflowing it', () => {
+    expect(rule('.hop-fields')).toMatch(/flex-wrap:\s*wrap/)
+  })
+})
+
 describe('a profile can be checked before it is saved', () => {
   const modal = read('src/renderer/src/components/connections/AddServerModal.tsx')
   const ssh = read('src/main/services/ssh.ts')

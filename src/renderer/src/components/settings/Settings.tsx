@@ -74,6 +74,189 @@ const SECTIONS: SettingsSection[] = [
   'advanced'
 ]
 
+/**
+ * Every setting, by the words a person would type looking for it.
+ *
+ * Reported from the running app: "there is no background checking settings and
+ * no way to search it in the monitoring settings panel". Half of that is a
+ * search box that did not exist — fourteen sections, each of them long, and the
+ * only way in was to guess which one owned what you wanted. The other half is
+ * subtler and is why a search box alone would not have fixed it: the setting IS
+ * there, and it is called "Check servers in the background". Somebody who calls
+ * it "background checking" — which is what the rest of this app's own copy
+ * calls it, see the auto-start description above — never types a string the
+ * visible row contains.
+ *
+ * So `aliases` carries the words the copy does not: the phrases people actually
+ * type, kept out of sight rather than pushed into a label somebody wrote
+ * carefully. Rewording the row to satisfy a search box would be the tail
+ * wagging the dog.
+ *
+ * `title` is the row's `.s-title` text VERBATIM, because that string is also
+ * how a result finds its row again after jumping to the section — see the jump
+ * effect in `Settings`. Change a label, change it here.
+ *
+ * This is a hand-kept list because there is no registry to drive it from:
+ * SECTION_META keys the sections, and the rows themselves are literal JSX. It
+ * covers what Settings renders, including the rows the sub-panels own; it is
+ * not required to be exhaustive to be useful, and a missing entry costs a
+ * search that finds nothing rather than a broken screen.
+ */
+interface SettingEntry {
+  section: SettingsSection
+  /** The row's `.s-title`, exactly. */
+  title: string
+  /** What the row is about, in roughly the row's own words. */
+  desc: string
+  /** What people type that the visible copy does not say. */
+  aliases?: string
+}
+
+const SETTING_INDEX: SettingEntry[] = [
+  // General
+  {
+    section: 'general',
+    title: 'Show the walkthrough',
+    desc: 'A short tour of what is here and where it lives.',
+    aliases: 'tour onboarding guide intro help getting started'
+  },
+  {
+    section: 'general',
+    title: 'Check for updates automatically',
+    desc: 'Look for a newer ShellPilot on a schedule.',
+    aliases: 'auto update upgrade version release'
+  },
+  {
+    section: 'general',
+    title: 'Download updates automatically',
+    desc: 'Fetch an update in the background once one is found.',
+    aliases: 'auto update upgrade download'
+  },
+  { section: 'general', title: 'Install on quit', desc: 'Apply a downloaded update when you quit.', aliases: 'update upgrade restart' },
+  { section: 'general', title: 'Channel', desc: 'Which release channel updates come from.', aliases: 'beta stable release channel update' },
+  // Appearance
+  { section: 'appearance', title: 'Theme', desc: 'Dark is the primary ShellPilot experience.', aliases: 'dark light system colour color' },
+  {
+    section: 'appearance',
+    title: 'Start when I log in',
+    desc: 'Launch ShellPilot with your machine, so background checking and alerts run from login.',
+    aliases: 'autostart auto start login item startup boot'
+  },
+  {
+    section: 'appearance',
+    title: 'Start in the background',
+    desc: 'Launch without opening a window. Checks still run and alerts still fire.',
+    aliases: 'autostart hidden headless tray dock'
+  },
+  {
+    section: 'appearance',
+    title: 'Allow adding and revoking keys on servers',
+    desc: 'Whether ShellPilot may write authorized_keys on your machines.',
+    aliases: 'access write authorized keys revoke'
+  },
+  {
+    section: 'appearance',
+    title: 'Ask for Touch ID when the vault is locked',
+    desc: 'Raise the fingerprint prompt when you open a locked vault.',
+    aliases: 'biometrics touchid fingerprint face id unlock'
+  },
+  { section: 'appearance', title: 'Compact density', desc: 'Tighter rows and padding across trees, lists and the docked monitor.', aliases: 'dense spacing compact size' },
+  // Terminal
+  { section: 'terminal', title: 'Font family', desc: 'Monospace font used in the terminal.', aliases: 'typeface monospace' },
+  { section: 'terminal', title: 'Font size', desc: 'Terminal text size. Also Ctrl + / Ctrl - / Ctrl 0.', aliases: 'zoom bigger smaller text size' },
+  { section: 'terminal', title: 'Cursor blink', desc: 'Blink the terminal cursor.', aliases: 'caret' },
+  { section: 'terminal', title: 'Copy on select', desc: 'Automatically copy selected text.', aliases: 'clipboard selection' },
+  { section: 'terminal', title: 'Scroll to bottom on output', desc: 'Follow new output automatically.', aliases: 'autoscroll follow tail' },
+  // Shortcuts
+  {
+    section: 'shortcuts',
+    title: 'Include hidden workspaces in Ctrl+1…9',
+    desc: 'Whether hidden workspaces take their place in the switching numbers.',
+    aliases: 'keyboard shortcut workspace switch'
+  },
+  // Editor
+  { section: 'editor', title: 'External editor command', desc: 'Run to open a remote file — code, subl, nvim, and so on.', aliases: 'vscode vim editor open with' },
+  { section: 'editor', title: 'Open files externally by default', desc: 'Double-clicking a file uses the external editor instead of the inline one.', aliases: 'editor default double click' },
+  // Monitoring — the reported one, and its neighbours.
+  {
+    section: 'monitoring',
+    title: 'Alerts',
+    desc: 'The master switch for CPU, memory, disk, inode, load and failed-unit alerts, and for webhook delivery.',
+    aliases: 'notifications alarms warnings turn off alerts'
+  },
+  {
+    section: 'monitoring',
+    title: 'Alert threshold',
+    desc: 'The percentage at which CPU and memory alert. Disk and inodes are fixed at 85%, load at 2 per core.',
+    aliases: 'percent percentage cpu memory limit'
+  },
+  {
+    section: 'monitoring',
+    title: 'Check servers in the background',
+    desc: 'Sample every server in this workspace on a schedule, even when the monitor is not open, so failures and resource alerts are noticed while you are elsewhere.',
+    // The reported miss. "Background checking" is this app's own name for it
+    // everywhere except the row itself.
+    aliases:
+      'background checking background checks background check checking servers polling poll sampler sampling fleet monitor while closed'
+  },
+  {
+    section: 'monitoring',
+    title: 'How often',
+    desc: 'How long between background checking passes.',
+    aliases: 'interval frequency cadence background checking schedule poll'
+  },
+  { section: 'monitoring', title: 'Send alerts to a webhook', desc: 'Post every alert to a URL — Slack, Discord, or your own endpoint.', aliases: 'slack discord http post integration' },
+  { section: 'monitoring', title: 'Webhook URL', desc: 'Where alerts are posted.', aliases: 'slack discord endpoint url' },
+  { section: 'monitoring', title: 'Test delivery', desc: 'Send one webhook now to prove the URL works.', aliases: 'webhook test try' },
+  { section: 'monitoring', title: 'Also send when it recovers', desc: 'Post a second webhook when the condition clears.', aliases: 'webhook recovery resolved clear' },
+  { section: 'monitoring', title: 'Show monitor under the terminal', desc: 'Live CPU, memory, disk and network docked below the session.', aliases: 'strip docked graphs charts' },
+  // SSH
+  {
+    section: 'ssh',
+    title: 'Keep authenticated connection',
+    desc: 'How long an authenticated SSH connection is reused before re-authenticating.',
+    aliases: 'reuse multiplexing idle timeout 2fa two factor re-auth'
+  },
+  { section: 'ssh', title: 'Shared connections', desc: 'The SSH connections currently held open.', aliases: 'sessions open connections multiplex' },
+  {
+    section: 'ssh',
+    title: 'Let jobs keep running when the connection drops',
+    desc: 'Whether a long job survives a dropped connection instead of dying with it.',
+    aliases: 'detached nohup background jobs apt dpkg'
+  },
+  // Security
+  { section: 'security', title: 'Lock after inactivity', desc: 'How long the vault stays unlocked without use.', aliases: 'vault auto lock timeout idle' },
+  { section: 'security', title: 'Trusted SSH host keys', desc: 'The host keys this machine has accepted.', aliases: 'known hosts fingerprint host key mismatch' },
+  { section: 'security', title: 'Store credentials in OS keychain', desc: 'Use the platform secure store — never plaintext.', aliases: 'keychain secrets password storage' },
+  { section: 'security', title: 'Auto-lock workspaces', desc: 'Lock password-protected workspaces after inactivity.', aliases: 'workspace lock idle' },
+  { section: 'security', title: 'Confirm destructive commands', desc: 'Require confirmation for rm, systemctl stop, etc.', aliases: 'confirmation dangerous guard' },
+  { section: 'security', title: 'API credential proxy', desc: 'A local proxy that injects vault credentials into outbound API calls.', aliases: 'proxy token api key injection' },
+  // Backup
+  { section: 'backup', title: 'Backup & Restore', desc: 'Export an encrypted copy of everything, or restore from one.', aliases: 'export import archive restore snapshot' },
+  // Modules
+  { section: 'modules', title: 'Modules', desc: 'Which subsystems are switched on for this workspace.', aliases: 'features enable disable subsystem' }
+]
+
+/**
+ * Every word of the query has to appear somewhere in the entry.
+ *
+ * Deliberately not fuzzy. A typo-tolerant matcher is a pile of scoring nobody
+ * can predict, and the failure it prevents ("bakcground") is rarer than the one
+ * it causes: a query that quietly matches something else. Token containment
+ * means "background checks" finds the row whose aliases say "background
+ * checks", and "check servers" finds the row whose title says both words.
+ */
+function settingMatches(entry: SettingEntry, query: string): boolean {
+  const hay = `${entry.title} ${entry.desc} ${entry.aliases ?? ''} ${SECTION_META[entry.section].label}`.toLowerCase()
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+  return words.length > 0 && words.every((w) => hay.includes(w))
+}
+
+export function searchSettings(query: string): SettingEntry[] {
+  if (!query.trim()) return []
+  return SETTING_INDEX.filter((e) => settingMatches(e, query))
+}
+
 // A toggle backed by real, persisted state — unlike `Toggle` below, which is
 // still placeholder UI holding its value in local state.
 function SettingSwitch({
@@ -366,10 +549,84 @@ export function Settings(): React.JSX.Element {
   const setSettings = useApp((s) => s.setSettings)
   const zoomTerminal = useApp((s) => s.zoomTerminal)
 
+  // The search box, and the row a result asked for.
+  //
+  // Reported from the running app: "there is no background checking settings
+  // and no way to search it in the monitoring settings panel". See
+  // SETTING_INDEX for why both halves of that are true.
+  const [query, setQuery] = useState('')
+  const [jumpTo, setJumpTo] = useState<string | null>(null)
+  const results = searchSettings(query)
+
+  // Landing on the section is most of the answer; landing on the ROW is the
+  // rest of it, and Monitoring is long enough that the difference matters —
+  // this is the page whose bottom half was unreachable at all until the scroll
+  // fix, and the reported setting sits below the fold on a short window.
+  //
+  // Found by title text rather than by threading a ref through forty rows in
+  // six components, only one of which this change is allowed to touch. The
+  // trade is that a renamed label silently stops jumping — which is why
+  // SETTING_INDEX says, at its `title` field, that the two are the same string.
+  useEffect(() => {
+    if (!jumpTo) return undefined
+    const title = [...document.querySelectorAll('.settings-content .s-title')].find(
+      (el) => el.textContent?.trim() === jumpTo
+    )
+    const row = title?.closest('.setting-row')
+    if (!row) return undefined
+    row.classList.add('setting-hit')
+    // Absent in jsdom, and a missing scroll is not worth an exception in a
+    // renderer.
+    row.scrollIntoView?.({ block: 'center' })
+    const t = setTimeout(() => row.classList.remove('setting-hit'), 2600)
+    return () => {
+      clearTimeout(t)
+      row.classList.remove('setting-hit')
+    }
+  }, [jumpTo, section])
+
   return (
     <div className="main">
       <div className="settings">
         <nav className="settings-nav">
+          <input
+            className="input settings-search"
+            type="search"
+            placeholder="Search settings"
+            aria-label="Search settings"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          {query.trim() !== '' && (
+            <div className="settings-results" role="listbox" aria-label="Search results">
+              {results.length === 0 ? (
+                // Said, rather than an empty box that looks broken.
+                <div className="field-hint" style={{ padding: 'var(--sp-2) var(--sp-3)' }}>
+                  No setting matches that. Try a word from what it does — “webhook”, “vault”,
+                  “background”.
+                </div>
+              ) : (
+                results.map((e) => (
+                  <button
+                    key={`${e.section}:${e.title}`}
+                    className="nav-item result"
+                    role="option"
+                    onClick={() => {
+                      setSection(e.section)
+                      setJumpTo(e.title)
+                      // Clearing it puts the section list back, which is where
+                      // the user now is. A result list left standing over the
+                      // page they just jumped to is a second thing to dismiss.
+                      setQuery('')
+                    }}
+                  >
+                    <span className="result-title">{e.title}</span>
+                    <span className="result-section">{SECTION_META[e.section].label}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
           {SECTIONS.map((id) => (
             <button
               key={id}

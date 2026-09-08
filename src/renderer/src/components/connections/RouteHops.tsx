@@ -133,8 +133,28 @@ export function RouteHops({ hops, onChange, excludeServerId }: Props): React.JSX
               strings, and there is nothing for a screen reader to announce
               either. The main host row a few lines up has always had real
               labels — this row simply never got them. */}
-          <div className="input-group" style={{ alignItems: 'flex-end' }}>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: '0 0 30%' }}>
+          {/* Reported from the running app: the Server / IP box was a few
+              pixels wide — a stored host of 13.213.210.170 showed as "1" — and
+              its header wrapped to three lines while Label, Port and Username
+              sat at a comfortable width beside it.
+
+              The data was never wrong; the row was. An <input> has an INTRINSIC
+              width (the default size=20, about 172px), and a flex item's
+              automatic minimum size is that intrinsic width — so `flex: 0 0
+              76px` on the Port column was not 76px, it was ~172px, and the same
+              for the other two. Those three claimed the whole row. This column
+              was the only one carrying `min-width: 0`, so it was the only one
+              allowed to shrink, and it absorbed the entire deficit: zero width,
+              with its 90px input overflowing underneath the Port field.
+
+              So the widths move to `.hop-fields` in the stylesheet, where every
+              column gets `min-width: 0` — the declared basis then decides
+              instead of the input's intrinsic width — and each column states
+              the basis it actually needs, the host column enough for a full
+              IPv4 address plus room to type. The row still wraps in a narrow
+              dialog rather than overflowing it. */}
+          <div className="hop-fields">
+            <label className="hop-field hop-name">
               <span className="field-label">Label</span>
               <input
                 className="input"
@@ -143,7 +163,7 @@ export function RouteHops({ hops, onChange, excludeServerId }: Props): React.JSX
                 onChange={(e) => patch(h.id, 'label', e.target.value)}
               />
             </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+            <label className="hop-field hop-host">
               <span className="field-label">Server / IP</span>
               <input
                 className="input"
@@ -153,7 +173,7 @@ export function RouteHops({ hops, onChange, excludeServerId }: Props): React.JSX
                 onChange={(e) => patch(h.id, 'host', e.target.value)}
               />
             </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: '0 0 76px' }}>
+            <label className="hop-field hop-port">
               <span className="field-label">Port</span>
               <input
                 className="input"
@@ -162,7 +182,7 @@ export function RouteHops({ hops, onChange, excludeServerId }: Props): React.JSX
                 onChange={(e) => patch(h.id, 'port', Number(e.target.value) || 22)}
               />
             </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: '0 0 24%' }}>
+            <label className="hop-field hop-user">
               <span className="field-label">Username</span>
               <input
                 className="input"
