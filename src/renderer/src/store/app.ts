@@ -897,6 +897,11 @@ export const useApp = create<AppState>((set, get) => ({
   openServer: (serverId, view = 'terminal') => {
     const server = get().servers.find((s) => s.id === serverId)
     if (!server) return
+    // A files-only account has no shell to open. Landing on Terminal would
+    // start a connection sshd refuses, and the refusal is what marks the whole
+    // server offline — so the view follows what the account can actually do,
+    // whatever the caller asked for.
+    if (server.sftpOnly === true) view = 'files'
     // `!t.containerRef` matters: a container shell is also an SSH tab for this
     // server, and without it "open this server" would focus a shell inside a
     // container instead of one on the host.
@@ -930,7 +935,8 @@ export const useApp = create<AppState>((set, get) => ({
   // Always open an additional session tab for a server (multiple terminals).
   newSession: (serverId) => {
     const server = get().servers.find((s) => s.id === serverId)
-    if (!server) return
+    if (!server || server.sftpOnly === true) return
+    // A files-only account has no shell, so a second one is not a thing to open.
     const tab: Tab = {
       id: uid('tab'),
       kind: 'ssh',
@@ -1699,7 +1705,10 @@ export const useApp = create<AppState>((set, get) => ({
       // "null means direct" the one representation the rest of the app sees.
       servers: (data.servers ?? s.servers).map((sv) => ({
         ...sv,
-        vpnProfileId: sv.vpnProfileId ?? null
+        vpnProfileId: sv.vpnProfileId ?? null,
+        // Absent in every save written before files-only servers existed, and
+        // absent means an ordinary server.
+        sftpOnly: sv.sftpOnly === true
       })),
       // Saves written before the HTTP client have no key at all; normalising
       // here keeps "null means direct" and "false means verify" the only

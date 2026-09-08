@@ -55,6 +55,24 @@ export interface Server {
   // pass it, and a reference to a deleted profile means "connect directly"
   // rather than "fail" — one deleted profile must not strand a fleet.
   vpnProfileId: UUID | null
+  /**
+   * This account can transfer files but cannot run anything.
+   *
+   * The ordinary shape of a delivery or backup account: sshd is configured
+   * with `ForceCommand internal-sftp`, often chrooted, so SFTP succeeds while
+   * a shell and `exec` are both refused. The transport already handles it —
+   * SFTP is a subsystem, not a shell — but the app assumed otherwise: opening
+   * such a server started a terminal, the shell was refused, and the failure
+   * marked the whole server offline.
+   *
+   * With this set, the server opens on Files, no shell is attempted, and the
+   * views that need `exec` (Terminal, Monitor) are not offered rather than
+   * offered and broken.
+   *
+   * Optional like `demo`: absent means an ordinary server, which is what every
+   * server saved before this existed is.
+   */
+  sftpOnly?: boolean
   demo?: boolean
 }
 

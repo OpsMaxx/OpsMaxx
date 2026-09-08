@@ -228,6 +228,48 @@ describe('deleteWorkspace', () => {
   })
 })
 
+/**
+ * An account that can move files but cannot run anything.
+ *
+ * sshd with `ForceCommand internal-sftp` refuses both a shell and `exec`
+ * while SFTP works — verified against a real one. The app used to open a
+ * terminal at such a server anyway, and the refusal marked the whole server
+ * offline, taking the Files view down with it.
+ */
+describe('a files-only server', () => {
+  beforeEach(reset)
+
+  const filesOnly = (id: string): Server => ({ ...server(id, 'delivery'), sftpOnly: true })
+
+  it('opens on Files rather than a shell it cannot have', () => {
+    useApp.setState({ servers: [filesOnly('s1')] })
+    useApp.getState().openServer('s1')
+    expect(useApp.getState().tabs[0].view).toBe('files')
+  })
+
+  // Whatever the caller asked for: the terminal is not a thing this account
+  // has, so a caller asking for one is asking for a connection sshd refuses.
+  it('ignores a request for the terminal view', () => {
+    useApp.setState({ servers: [filesOnly('s1')] })
+    useApp.getState().openServer('s1', 'terminal')
+    expect(useApp.getState().tabs[0].view).toBe('files')
+  })
+
+  it('refuses to open a second shell session', () => {
+    useApp.setState({ servers: [filesOnly('s1')] })
+    useApp.getState().newSession('s1')
+    expect(useApp.getState().tabs).toEqual([])
+  })
+
+  it('leaves an ordinary server alone', () => {
+    useApp.setState({ servers: [server('s2', 'web')] })
+    useApp.getState().openServer('s2')
+    expect(useApp.getState().tabs[0].view).toBe('terminal')
+    useApp.getState().newSession('s2')
+    expect(useApp.getState().tabs).toHaveLength(2)
+  })
+})
+
 describe('local tab views', () => {
   beforeEach(reset)
 

@@ -107,6 +107,7 @@ export function AddServerModal(): React.JSX.Element {
   >([])
   const [hops, setHops] = useState<Hop[]>(existing?.route ?? [])
   const [vpnProfileId, setVpnProfileId] = useState<UUID | null>(existing?.vpnProfileId ?? null)
+  const [sftpOnly, setSftpOnly] = useState(existing?.sftpOnly === true)
   const [passphrase, setPassphrase] = useState('')
   const [password, setPassword] = useState('')
   const [advanced, setAdvanced] = useState(false)
@@ -221,7 +222,8 @@ export function AddServerModal(): React.JSX.Element {
       username: username.trim() || 'root',
       auth,
       route: hops,
-      vpnProfileId
+      vpnProfileId,
+      sftpOnly
     }
     const id = editId ? (updateServer(editId, fields), editId) : addServer(fields)
 
@@ -467,6 +469,26 @@ export function AddServerModal(): React.JSX.Element {
           )}
         </div>
       )}
+
+      {/* The delivery/backup account shape: sshd forces internal-sftp, so
+          files work and nothing runs. Saying so up front is what stops the app
+          opening a terminal, failing, and marking the server offline. */}
+      <label className="row" style={{ gap: 'var(--sp-2)', alignItems: 'flex-start', marginBottom: 'var(--sp-3)' }}>
+        <input
+          type="checkbox"
+          checked={sftpOnly}
+          onChange={(e) => setSftpOnly(e.target.checked)}
+          style={{ marginTop: 3 }}
+        />
+        <span className="col" style={{ gap: 2 }}>
+          <span>Files only (no shell)</span>
+          <span className="field-hint">
+            For accounts restricted to SFTP — sshd forcing <span className="mono">internal-sftp</span>,
+            often chrooted. The server opens on Files, and Terminal and Monitor are not offered
+            because they need to run commands.
+          </span>
+        </span>
+      </label>
 
       <VpnTransportSelect
         value={vpnProfileId}
