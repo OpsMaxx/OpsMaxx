@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { timerHealth, type TimerHealth } from '../../../../shared/systemdTimers'
 import { CalendarClock, Pencil, Plus, RefreshCw, ShieldAlert } from 'lucide-react'
-import { sshHopsFor } from '../../lib/ssh'
+import { sshHopsFor, sshTargetFor } from '../../lib/ssh'
 import { LOCAL_TARGET } from '../../../../shared/execTarget'
 import { clsx } from '../../lib/format'
 import {
@@ -17,6 +17,7 @@ import type {
 import { openCronEdit } from '../../store/nav'
 import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
+import type { OnDemandTarget } from '../../../../shared/ssh'
 
 // What is scheduled across the estate — currently unanswerable without visiting
 // every box.
@@ -200,7 +201,7 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
           | {
               fleet?: {
                 timer?: (
-                  cfg: unknown,
+                  cfg: OnDemandTarget,
                   t: string,
                   s: string
                 ) => Promise<
@@ -214,7 +215,13 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
         setTimerHealthState({ key, error: 'This build cannot read timers. Restart the app to rebuild it.' })
         return
       }
-      const res = await call(server, unit, service)
+      // sshTargetFor, NOT `server` — the same defect the storage and kernel
+      // reads had. A Server holds its chain in `route` and main reads `hops`,
+      // so the raw record type-checks through `cfg: unknown`, resolves its
+      // credentials, and then dials the private address with no bastion. The
+      // v0.27.0 handler fix covered credentials and the VPN only; the shape
+      // crossing the bridge is what was left broken.
+      const res = await call(sshTargetFor(server), unit, service)
       if ('error' in res) {
         setTimerHealthState({ key, error: res.error })
         return

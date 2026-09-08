@@ -13,7 +13,8 @@ import type {
   SftpResult,
   SftpUploadSummary,
   MetricsResult,
-  SshCloseInfo
+  SshCloseInfo,
+  OnDemandTarget
 } from '../shared/ssh'
 import type {
   AccessChangePreview,
@@ -590,7 +591,7 @@ const api = {
       ipcRenderer.invoke('runbook:save-note', kind, hostId, text)
   } satisfies RunbooksBridge,
   k8s: {
-    read: (cfg: unknown, context?: string, namespace?: string): Promise<K8sProbe> =>
+    read: (cfg: OnDemandTarget, context?: string, namespace?: string): Promise<K8sProbe> =>
       ipcRenderer.invoke('k8s:read', cfg, context, namespace),
     logs: (
       cfg: unknown,
@@ -883,18 +884,18 @@ const api = {
       ipcRenderer.invoke('fleet:facts', serverId),
     // The security-update LIST, asked for rather than sampled: the counts come
     // with `facts` every hour, and this is the tens of rows behind them.
-    securityList: (cfg: unknown): Promise<SecurityListProbe> =>
+    securityList: (cfg: OnDemandTarget): Promise<SecurityListProbe> =>
       ipcRenderer.invoke('fleet:security-list', cfg),
     /** Running vs installed kernels. Asked for, not sampled. */
-    kernel: (cfg: unknown): Promise<KernelStatus | { error: string }> =>
+    kernel: (cfg: OnDemandTarget): Promise<KernelStatus | { error: string }> =>
       ipcRenderer.invoke('fleet:kernel', cfg),
     /** Disks, filesystems, LVM, software RAID. Asked for, not sampled. */
-    storage: (cfg: unknown): Promise<StorageLayout | { error: string }> =>
+    storage: (cfg: OnDemandTarget): Promise<StorageLayout | { error: string }> =>
       ipcRenderer.invoke('fleet:storage', cfg),
     /** One timer and the service it activates. Both, because a timer that fires
      *  into a failing service looks healthy from the timer alone. */
     timer: (
-      cfg: unknown,
+      cfg: OnDemandTarget,
       timerUnit: string,
       serviceUnit: string
     ): Promise<{ timer: Record<string, string>; service: Record<string, string> } | { error: string }> =>
@@ -1204,7 +1205,11 @@ const api = {
     forgetCa: (): Promise<void> => ipcRenderer.invoke('inspect:forgetCa'),
     installTrust: (
       store: 'system' | 'nss'
-    ): Promise<{ ok: boolean; declined?: boolean; message?: string }> =>
+      // `manualCommand` carries the terminal command that finishes the job
+      // when every automatic route was refused — see the macOS incident in
+      // `src/main/services/inspectTrust.ts`. It has to cross the bridge or the
+      // panel has nothing to offer but the button that already failed.
+    ): Promise<{ ok: boolean; declined?: boolean; message?: string; manualCommand?: string }> =>
       ipcRenderer.invoke('inspect:installTrust', store),
     removeTrust: (
       store: 'system' | 'nss'

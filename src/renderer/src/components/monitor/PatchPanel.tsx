@@ -7,7 +7,7 @@ import { useApp } from '../../store/app'
 import { bridgeHas } from '../../lib/bridge'
 import { openSettings } from '../../store/nav'
 import { clsx } from '../../lib/format'
-import { sshHopsFor } from '../../lib/ssh'
+import { sshHopsFor, sshTargetFor } from '../../lib/ssh'
 import {
   GATE_SAMPLER_NOTE,
   PATCH_GAP_LABEL,
@@ -30,6 +30,7 @@ import {
 } from '../../../../shared/jobs'
 import type { Server } from '../../types'
 import { NoteWhy, PanelShell } from './PanelShell'
+import type { OnDemandTarget } from '../../../../shared/ssh'
 
 // Patch and update management — roadmap item 17, renderer half.
 //
@@ -149,7 +150,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
     try {
       const call = (
         window.opsmaxx as
-          | { fleet?: { kernel?: (cfg: unknown) => Promise<KernelStatus | { error: string }> } }
+          | { fleet?: { kernel?: (cfg: OnDemandTarget) => Promise<KernelStatus | { error: string }> } }
           | undefined
       )?.fleet?.kernel
       if (typeof call !== 'function') {
@@ -159,7 +160,13 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
         })
         return
       }
-      const res = await call(server)
+      // sshTargetFor, NOT `server` — see the note on sshTargetFor. A Server
+      // names its jump chain `route` and main reads `hops`, so passing the
+      // record itself drops the chain without a type error and dials the
+      // private address from the laptop. v0.27.0 wrapped this handler in
+      // resolveChainSecrets/withVpnTransport, which fixed credentials and the
+      // VPN and left this shape mismatch in place.
+      const res = await call(sshTargetFor(server))
       if ('error' in res) {
         setKernel({ serverName: server.name, error: res.error })
         return
@@ -180,14 +187,17 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
     try {
       const call = (
         window.opsmaxx as
-          | { fleet?: { securityList?: (cfg: unknown) => Promise<SecurityListProbe> } }
+          | { fleet?: { securityList?: (cfg: OnDemandTarget) => Promise<SecurityListProbe> } }
           | undefined
       )?.fleet?.securityList
       setSecList({
         serverName: server.name,
         probe:
           typeof call === 'function'
-            ? await call(server)
+            ? // sshTargetFor for the same reason the kernel read above uses it:
+              // a raw Server carries `route`, main reads `hops`, and the chain
+              // vanishes silently on a bastion-only host.
+              await call(sshTargetFor(server))
             : { ok: false, detail: 'This build cannot list security updates. Restart the app to rebuild it.' }
       })
     } catch (e) {

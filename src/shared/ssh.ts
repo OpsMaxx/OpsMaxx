@@ -195,3 +195,36 @@ export interface MetricsResult {
   error?: string
   data?: HostMetrics
 }
+
+/**
+ * What an on-demand host read must be given.
+ *
+ * These are the reads a person asks for by pressing a button — filesystems,
+ * kernel, security-update list, a systemd timer, a kubeconfig — as opposed to
+ * the ones the background sweep takes. They all end at `openChain`, which
+ * reaches a server behind a bastion by walking `hops`.
+ *
+ * It exists because `cfg: unknown` let the wrong object through. Four call
+ * sites passed the RENDERER's `Server` record straight in, and a `Server`
+ * carries its chain as `route`, not `hops` — so the chain was dropped in
+ * silence and every one of those reads dialled the private address directly:
+ *
+ *   The filesystems could not be read: connect ETIMEDOUT 192.168.19.7:1051
+ *
+ * on a host the background monitor was sampling perfectly well one panel over.
+ * A first fix wrapped the handlers in resolveChainSecrets/withVpnTransport,
+ * which repaired credentials and VPN and left the shape mismatch untouched,
+ * because the config it was resolving had never carried the chain.
+ *
+ * Typing it is what makes the mistake impossible rather than merely fixed:
+ * `SshAuth` is 'password' | 'key' | 'agent', while the renderer's `AuthMethod`
+ * also has 'certificate', so a raw `Server` is not assignable here and every
+ * one of those call sites fails to compile. Build the value with
+ * `sshTargetFor(server)`.
+ *
+ * A local target is admitted because these same handlers serve "this machine",
+ * which owns no credentials and no chain.
+ */
+export type OnDemandTarget =
+  | { local: true }
+  | (SshHop & { serverId?: string; hops?: SshHop[]; vpnProfileId?: string; serverName?: string })

@@ -24,6 +24,7 @@ import { bridgeHas, bridgeOn } from '../../lib/bridge'
 import { sshHopsFor } from '../../lib/ssh'
 import type { FleetTarget } from '../../../../shared/fleet'
 import type { Server } from '../../types'
+import { sshTargetFor } from '../../lib/ssh'
 
 // Mounted once at the app root, for the same reason ApprovalWatcher is: the
 // thing it watches for does not wait until you are looking at the right tab.
@@ -408,8 +409,14 @@ export function FleetWatcher(): null {
       for (const w of watches) {
         const s = servers.find((x) => x.id === w.serverId)
         if (!s) continue
+        // sshTargetFor, not the Server. `k8s:read` ends at openChain like the
+        // other on-demand reads, and a Server carries its chain as `route`
+        // while openChain walks `hops` — so passing the record straight in
+        // dropped the bastion and this watcher timed out against exactly the
+        // hosts it exists to watch. KubernetesPanel already built the chain for
+        // the same reader; the two callers disagreed until now.
         void window.opsmaxx?.k8s
-          ?.read(s, w.context || undefined)
+          ?.read(sshTargetFor(s), w.context || undefined)
           .then((probe) => {
             if (!live || !probe) return
             const context = w.context || (probe.ok ? probe.currentContext : null) || ''
