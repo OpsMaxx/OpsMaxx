@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { rmTemp } from './fixtures/rmTemp'
 import { Supervisor, identityMatches, parseDarwinPs, parseWindowsProcess } from '../src/main/services/vpn/supervisor'
 import type { VpnPidRecord } from '../src/main/services/vpn/supervisor'
 
@@ -69,7 +70,9 @@ beforeEach(() => {
   alive = new Set()
   probes = []
 })
-afterEach(() => rmSync(root, { recursive: true, force: true }))
+afterEach(async () => {
+  await rmTemp(root)
+})
 
 describe('orphan reaping', () => {
   it('deletes the record of a pid that is gone without signalling anything', async () => {

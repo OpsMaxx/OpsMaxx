@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { rmTemp } from './fixtures/rmTemp'
 import { PassThrough } from 'node:stream'
 import type { ChildProcess } from 'node:child_process'
 import {
@@ -189,9 +190,9 @@ beforeEach(() => {
     toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']
   })
 })
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers()
-  rmSync(root, { recursive: true, force: true })
+  await rmTemp(root)
 })
 
 describe('the list survives a restart of the app', () => {
