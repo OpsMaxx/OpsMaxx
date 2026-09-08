@@ -12,14 +12,6 @@ import { execFileSync } from 'node:child_process'
 // quietly stops working.
 const NEEDLE = ['shell', 'pilot'].join('')
 
-// The single exemption, and it earns it: CLAUDE.md has to name the old repo in
-// order to say "never recreate it", and that warning is load-bearing — the 301
-// standing behind every already-published download URL dies the moment a repo
-// exists at the old slug. A rule cannot be stated without naming its subject.
-//
-// Nothing else goes in here. If a second entry ever looks necessary, the fix is
-// to rename the thing, not to widen the list.
-const ALLOWED = new Set(['CLAUDE.md'])
 
 describe('branding', () => {
   it('has no trace of the retired product name in any tracked file', () => {
@@ -45,11 +37,10 @@ describe('branding', () => {
       if (e.status !== 1) throw err
       hits = e.stdout ?? ''
     }
-    const offending = hits
-      .split('\n')
-      .filter((line) => line.trim() !== '')
-      .filter((line) => !ALLOWED.has(line.slice(0, line.indexOf(':'))))
-    expect(offending, `retired product name found:\n${offending.join('\n')}`).toEqual([])
+    // No allowlist. CLAUDE.md states the rule without spelling the word, so
+    // there is nothing left that legitimately needs to contain it -- and an
+    // exemption list is how a gate like this quietly rots.
+    expect(hits.trim(), `retired product name found:\n${hits}`).toBe('')
   })
 
   it('has no trace of the retired product name in any tracked path', () => {

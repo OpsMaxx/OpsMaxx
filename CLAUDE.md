@@ -1,13 +1,17 @@
 # Working on OpsMaxx
 
-The app and the GitHub repo are both `OpsMaxx` now — the slug is `OpsMaxx/OpsMaxx`.
-The name "OpsMaxx" is retired everywhere, including in URLs, and
-`tests/branding.test.ts` fails the build if it comes back. If you are about to write
-`OpsMaxx`, you are wrong.
+The app and the GitHub repo are both `OpsMaxx` — the slug is `OpsMaxx/OpsMaxx`.
+The product's former name is retired everywhere, including in URLs, and
+`tests/branding.test.ts` fails the build if any spelling of it reappears. That test
+is the authority; this file deliberately does not repeat the word, so that the
+check can run with no exemptions at all.
 
-**`OpsMaxx/OpsMaxx` must never be recreated on GitHub.** The rename left a 301
-behind it that carries every already-published release-asset URL, and creating any
-repo at the old name kills that redirect permanently.
+**Never create a repository at this project's previous name.** GitHub left a 301
+there when it was renamed, and that redirect is what keeps every already-published
+release-asset URL working. A repository at the old name replaces the redirect and
+breaks all of them permanently. Nothing needs the old name for any other reason —
+if you find yourself wanting to type it, you are working around the rename rather
+than finishing it.
 
 ## Release surfaces
 
