@@ -346,6 +346,8 @@ interface AppState {
   routeEditorServerId: string | null
   // Server being edited in the add/edit modal; null means "adding new".
   editServerId: string | null
+  /** Which saved API the add/edit modal is editing, or null when it is adding. */
+  editApiCollectionId: string | null
   paletteOpen: boolean
   theme: ThemeMode
   settings: AppSettings
@@ -428,6 +430,7 @@ interface AppState {
   // no new concepts. See the implementation for the full truth table.
   toggleSplit: (tabId: string, dir: SplitDirection) => void
   setModal: (m: ModalKind) => void
+  openApiEditor: (id: string) => void
   openRouteEditor: (serverId: string) => void
   openServerEditor: (serverId: string) => void
   togglePalette: (open?: boolean) => void
@@ -739,6 +742,7 @@ export const useApp = create<AppState>((set, get) => ({
   modal: null,
   routeEditorServerId: null,
   editServerId: null,
+  editApiCollectionId: null,
   paletteOpen: false,
   theme: 'dark',
   settings: DEFAULT_SETTINGS,
@@ -1223,8 +1227,16 @@ export const useApp = create<AppState>((set, get) => ({
     })
   },
 
-  setModal: (m) => set({ modal: m, editServerId: null }),
-  openServerEditor: (serverId) => set({ editServerId: serverId, modal: 'add-server' }),
+  setModal: (m) => set({ modal: m, editServerId: null, editApiCollectionId: null }),
+  // Clears the API id for the reason setModal clears both: these two editors
+  // share one modal slot, and an id left behind is a stale record the next
+  // opener could bind to.
+  openServerEditor: (serverId) =>
+    set({ editServerId: serverId, editApiCollectionId: null, modal: 'add-server' }),
+  // The same shape as openServerEditor, and for the same reason: the modal
+  // that adds a thing is the modal that knows every field of it, so editing
+  // is that modal with an id rather than a second one to keep in step.
+  openApiEditor: (id) => set({ editApiCollectionId: id, modal: 'add-api' }),
 
   openRouteEditor: (serverId) => set({ modal: 'route-editor', routeEditorServerId: serverId }),
   togglePalette: (open) => set((s) => ({ paletteOpen: open ?? !s.paletteOpen })),
