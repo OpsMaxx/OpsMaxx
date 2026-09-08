@@ -285,7 +285,7 @@ function SettingSwitch({
  * Starting with the machine.
  *
  * This pairs with background checking rather than being a cosmetic preference:
- * the fleet poll runs from the app root, so a OpsMaxx that starts at login
+ * the fleet poll runs from the app root, so an OpsMaxx that starts at login
  * is a fleet watched from login. Without it, "background checking" only means
  * background of whenever somebody last opened the app.
  *
