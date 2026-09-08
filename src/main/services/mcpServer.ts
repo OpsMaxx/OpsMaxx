@@ -316,8 +316,16 @@ export function setCapacityReader(
  */
 export interface FleetReader {
   factsFor(serverId: string): { facts?: unknown; at?: number; error?: string }
-  /** ONE server's drift. There is deliberately no whole-fleet accessor here —
-   *  see the tool that uses it. */
+  /**
+   * One server's drift.
+   *
+   * A previous version of this comment claimed the absence of a whole-fleet
+   * accessor here prevented a sweep. That was never true: iterating the cached
+   * server list and calling this per id IS a sweep, and nothing on this
+   * interface stopped it. The shape of the API was never the control — the
+   * tools are, and `fleet_drift` is now the one that answers the fleet-wide
+   * question explicitly rather than someone assembling it by hand.
+   */
   driftFor(serverId: string): { drift?: unknown; at?: number; error?: string }
 }
 let fleetReader: FleetReader | null = null
@@ -2983,12 +2991,10 @@ function buildServer(): McpServer {
         'the file contents are compared against a recorded baseline rather than read fresh and ' +
         'eyeballed. Secret-shaped text is redacted BEFORE the comparison is taken, so a changed ' +
         'password is reported as a change without disclosing either value. ' +
-        'ONE SERVER PER CALL, and there is no fleet-wide version of this at any permission level. ' +
-        '"Which of these forty hosts has drifted" sorts an estate into the machines that are behind ' +
-        'and the machines that are not, which is a ranked list of the weakest ones kept permanently ' +
-        'fresh. Asking per host is a question about a host; asking across the fleet is a target list, ' +
-        'and this tool cannot be made to answer the second by calling it in a loop any faster than a ' +
-        'human could.',
+        'ONE SERVER PER CALL. Use fleet_drift to ask the same question across a workspace — it is a ' +
+        'heavier disclosure and carries its own warning, but calling this one in a loop to assemble ' +
+        'the same answer is worse: it produces one audit row per host and hides what was actually ' +
+        'being asked.',
       inputSchema: {
         serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
         intent: INTENT_PARAM
@@ -3060,6 +3066,131 @@ function buildServer(): McpServer {
           `${drift.at ? `, as of ${agePhrase(Date.now() - drift.at)}` : ''}:\n\n` +
           changed.map((r) => `${r.watchId} — ${r.status}${r.detail ? `\n    ${r.detail}` : ''}`).join('\n\n')
       )
+    }
+  )
+
+  server.registerTool(
+    'fleet_drift',
+    {
+      title: 'Which servers have drifted from their baseline',
+      description:
+        'Every server in the workspace whose watched configuration no longer matches what it was when ' +
+        'it was last reviewed, and which files changed on each. ' +
+        'This is the fleet-wide form of get_config_drift and it is a heavier disclosure than the ' +
+        'per-host one: the answer sorts an estate into the machines that are behind and the machines ' +
+        'that are not. Read as an attacker would, that is a ranked list of the weakest hosts, kept ' +
+        'fresh. It exists because operators genuinely need "what changed across the estate after that ' +
+        'incident", and it reports servers that have NOT been sampled as unknown rather than as ' +
+        'clean — an unsampled host is not a compliant one. ' +
+        'Prefer it over calling get_config_drift per server: one call, one approval, one audit row ' +
+        'that records what was actually asked, instead of forty rows that hide it.',
+      inputSchema: {
+        changedOnly: z
+          .boolean()
+          .optional()
+          .describe(
+            'Default true — list only servers that have drifted. False also lists the servers that match, and the ones never sampled.'
+          ),
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: false }
+    },
+    async ({ changedOnly, intent }, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const workspaces = auth.session.workspaces
+      if (workspaces.length === 0) return errorText('This session has no workspaces.')
+
+      const permitted = workspaces.filter(
+        (w) => effectiveWorkspaceCapability(auth.session, w.id, 'fleetRead').decision !== 'deny'
+      )
+      if (permitted.length === 0) {
+        return errorText('This session is not permitted to read the fleet in any of its workspaces.')
+      }
+      const check = permitted
+        .map((w) => effectiveWorkspaceCapability(auth.session, w.id, 'fleetRead'))
+        .reduce((strictest, d) => (d.decision === 'ask' ? d : strictest))
+      const ctx: AuditContext = {
+        session: auth.session,
+        workspaceId: permitted[0].id,
+        workspaceName: permitted[0].name,
+        serverId: null,
+        serverName: null,
+        action: 'fleet_drift',
+        capability: 'fleetRead'
+      }
+      // 'high', which is a grade above every other read on this bridge and the
+      // only one among them to carry it. The per-host version is 'medium'; this
+      // is the same information about every host at once, and the difference
+      // between those two is the whole reason this tool was argued about.
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'fleet_drift',
+          level: 'high',
+          because:
+            'it names every server in the workspace whose configuration has drifted, which read together is a list of the estate’s weakest hosts',
+          intent
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      if (!fleetReader) {
+        return errorText(
+          'OpsMaxx is not sampling this fleet, so there is no baseline to compare against. ' +
+            'This does not mean nothing has changed.'
+        )
+      }
+      const servers = listCachedServers(permitted.map((w) => w.id))
+      if (servers.length === 0) return text('No servers in this workspace.')
+
+      const drifted: string[] = []
+      const matching: string[] = []
+      const unsampled: string[] = []
+      for (const srv of servers) {
+        const reading = fleetReader.driftFor(srv.id)
+        const drift = reading.drift as
+          | { at?: number; readings?: { watchId: string; status: string; detail?: string }[] }
+          | undefined
+        if (!drift) {
+          unsampled.push(srv.name)
+          continue
+        }
+        const readings = drift.readings ?? []
+        const changed = readings.filter((r) => r.status !== 'ok')
+        if (changed.length === 0) {
+          matching.push(srv.name)
+          continue
+        }
+        drifted.push(
+          `${srv.name} — ${changed.length} of ${readings.length} watched file(s) changed` +
+            `${drift.at ? `, as of ${agePhrase(Date.now() - drift.at)}` : ''}\n` +
+            changed.map((r) => `    ${r.watchId} — ${r.status}`).join('\n')
+        )
+      }
+      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+
+      const parts: string[] = []
+      parts.push(
+        drifted.length === 0
+          ? `No server in this workspace has drifted from its baseline.`
+          : `${drifted.length} of ${servers.length} server(s) have drifted:\n\n${drifted.join('\n\n')}`
+      )
+      // Always said, whatever changedOnly is. A host that has never been
+      // compared is not a host that matches, and a summary that mentions only
+      // the drifted ones lets the unsampled ones read as clean.
+      if (unsampled.length > 0) {
+        parts.push(
+          `${unsampled.length} server(s) have NO baseline and were not compared — this is not the ` +
+            `same as unchanged: ${unsampled.join(', ')}`
+        )
+      }
+      if (changedOnly === false && matching.length > 0) {
+        parts.push(`${matching.length} server(s) still match their baseline: ${matching.join(', ')}`)
+      }
+      return text(parts.join('\n\n'))
     }
   )
 
