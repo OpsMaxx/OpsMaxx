@@ -30,8 +30,10 @@ import {
   type FleetForecast,
   type FleetForecastInput
 } from '../../../../shared/fleetForecast'
+import { sshTargetFor } from '../../lib/ssh'
 import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
+import type { OnDemandTarget } from '../../../../shared/ssh'
 
 // "This disk fills in eleven days." — roadmap item 26.
 //
@@ -318,12 +320,20 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
     try {
       const call = (
         window.opsmaxx as
-          | { fleet?: { storage?: (cfg: unknown) => Promise<StorageLayout | { error: string }> } }
+          | { fleet?: { storage?: (cfg: OnDemandTarget) => Promise<StorageLayout | { error: string }> } }
           | undefined
       )?.fleet?.storage
       setStorage(
         typeof call === 'function'
-          ? await call(server)
+          ? // sshTargetFor, NOT `server`. A Server holds its jump chain in
+            // `route`; main reads `hops`, so a raw Server crosses the bridge
+            // intact, resolves its credentials, and then dials the private
+            // address direct — "connect ETIMEDOUT 192.168.19.7:1051" on a host
+            // the sampler one panel over reads perfectly. The v0.27.0 fix
+            // wrapped the handler in resolveChainSecrets/withVpnTransport,
+            // which repaired credentials and VPN but not the chain, because
+            // the SHAPE was still wrong here.
+            await call(sshTargetFor(server))
           : { error: 'This build cannot read filesystems. Restart the app to rebuild it.' }
       )
     } catch (e) {
