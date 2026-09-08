@@ -30,6 +30,11 @@ concurrency:
   group: engine-advisories-${{ github.ref }}
   cancel-in-progress: true
 
+# The default GITHUB_TOKEN is broadly scoped; this workflow only ever reads the
+# repository, so it says so. Nothing here calls `gh` or the API.
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest

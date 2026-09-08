@@ -158,11 +158,19 @@ function parseToml(text) {
   const visitors = []
   let target = root
 
+  // `__proto__` and friends are refused rather than walked. This is a test
+  // fixture reading a config this repo writes, so nothing hostile reaches it
+  // today -- but a dotted-path setter that will happily walk into the
+  // prototype is the kind of helper that gets copied somewhere that matters.
+  const UNSAFE_KEY = new Set(['__proto__', 'constructor', 'prototype'])
   const setDotted = (obj, key, value) => {
     const parts = key.split('.')
+    if (parts.some((k) => UNSAFE_KEY.has(k))) return
     let cur = obj
     for (let i = 0; i < parts.length - 1; i++) {
-      if (typeof cur[parts[i]] !== 'object' || cur[parts[i]] === null) cur[parts[i]] = {}
+      if (typeof cur[parts[i]] !== 'object' || cur[parts[i]] === null) {
+        cur[parts[i]] = Object.create(null)
+      }
       cur = cur[parts[i]]
     }
     cur[parts[parts.length - 1]] = value

@@ -23,6 +23,11 @@ on:
       - 'tests/vpnEngines.e2e.test.ts'
       - '.github/workflows/vpn-e2e.yml'
 
+# The default GITHUB_TOKEN is broadly scoped; this workflow only ever reads the
+# repository, so it says so. Nothing here calls `gh` or the API.
+permissions:
+  contents: read
+
 jobs:
   e2e:
     name: Real engines on ${{ matrix.os }}
