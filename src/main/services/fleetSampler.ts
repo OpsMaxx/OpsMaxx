@@ -622,8 +622,96 @@ export class FleetSampler {
     return (this.deps.now ?? Date.now)()
   }
 
+  /**
+   * Is the incoming configuration materially the same as the one in force?
+   *
+   * "Materially" means: would acting on it make the sampler do anything
+   * different. Everything that decides that is compared, and nothing else.
+   *
+   * `intervalMs` is compared AFTER clamping, because `this.cfg.intervalMs` is
+   * already clamped and the raw value never is — comparing raw against clamped
+   * would report a change every time a setting outside the allowed range was
+   * re-sent, which is the exact class of false positive this function exists to
+   * stop. `factsIntervalMs` is clamped on both sides for the same reason: the
+   * raw field is stored unclamped and `undefined` is a legal spelling of the
+   * default, so 3_600_000 and undefined are the same cadence.
+   *
+   * Targets are compared BY CONNECTION CONFIG, not by serverId alone. Comparing
+   * ids would be cheaper and wrong: a server whose host, port, username, auth
+   * method or bastion chain was edited keeps its id, so an id-only check would
+   * declare the reconfigure a no-op and the sampler would go on connecting to
+   * the old address forever — a silent, permanent stall with no error anywhere,
+   * which is a strictly worse bug than the one being fixed. `serverName` is
+   * compared too: it is not a cosmetic label here, it is fed to the drift probe
+   * as the substitution for the `hostnames` normalisation rule, so a rename
+   * changes what that probe computes.
+   *
+   * Order-sensitive, deliberately. Order does not change what is sampled, only
+   * the sequence, so a pure reorder could safely be called unchanged — but
+   * treating it as a change costs one abandoned sweep and behaves exactly as
+   * today, whereas an order-insensitive comparison needs a keyed structure that
+   * has to be kept right forever. This fails in the safe direction.
+   *
+   * The same rule covers the cfg serialisation: two objects with the same
+   * fields in a different key order compare as different, so an unexpected
+   * shape degrades to today's behaviour rather than to a missed change.
+   */
+  private sameConfig(next: FleetSamplerConfig): boolean {
+    const cur = this.cfg
+    if (cur.enabled !== next.enabled) return false
+    if (cur.intervalMs !== clampInterval(next.intervalMs)) return false
+    if (clampFactsInterval(cur.factsIntervalMs) !== clampFactsInterval(next.factsIntervalMs)) return false
+    if (cur.targets.length !== next.targets.length) return false
+    for (let i = 0; i < cur.targets.length; i++) {
+      const a = cur.targets[i]
+      const b = next.targets[i]
+      if (a.serverId !== b.serverId) return false
+      if (a.serverName !== b.serverName) return false
+      if (JSON.stringify(a.cfg) !== JSON.stringify(b.cfg)) return false
+    }
+    return true
+  }
+
   configure(next: FleetSamplerConfig): void {
     if (this.disposed) return
+
+    // An identical configuration is not a reconfiguration, and treating it as
+    // one is how the whole feature stopped working.
+    //
+    // Found on a running app. Monitoring settings read "Running · 4 servers ·
+    // last pass 55s ago, took 0 ms" — a sweep over four hosts cannot take no
+    // time — and Security posture, Fleet keys and access and Capacity trends
+    // were all permanently empty while every panel's Check now appeared to do
+    // nothing. Nothing was broken in any of those panels. No sweep was ever
+    // finishing to fill them.
+    //
+    // The mechanism is the one the comment in sweep() already records, run
+    // continuously instead of twice: configure() bumped `generation`
+    // unconditionally, so every call abandoned the sweep in flight at the next
+    // `gen !== this.generation` check. The renderer re-sends this configuration
+    // whenever its target list is rebuilt, and setServerStatus rebuilds it on
+    // 'connecting' and again on 'online' for every session — with several
+    // servers connected, configure() arrived faster than a sweep over four
+    // hosts could complete, and no sweep ever reached the end of its target
+    // loop. The estate was swept over and over and nothing was ever recorded.
+    //
+    // So the fix is not to weaken the generation check — it is load-bearing,
+    // and without it a sweep started under the old configuration writes samples
+    // and events for servers the user has just stopped watching. The fix is to
+    // stop manufacturing generation bumps for configurations that did not
+    // change. Revert this and the sampler goes back to being invalidated by its
+    // own callers: still "Running", still 0 ms, still nothing collected.
+    //
+    // resume() rather than a bare return, because an identical configure() was
+    // also the accidental way a stalled loop got re-armed, and dropping that
+    // silently would trade one stall for another. It is the method built for
+    // exactly this — idempotent, no generation bump, and a no-op unless the
+    // loop genuinely has no timer and is not sweeping.
+    if (this.sameConfig(next)) {
+      this.resume()
+      return
+    }
+
     this.generation++
     const previous = this.cfg.targets.map((t) => t.serverId)
     this.cfg = { ...next, intervalMs: clampInterval(next.intervalMs) }
@@ -720,7 +808,26 @@ export class FleetSampler {
     }, delayMs)
   }
 
-  /** Sweep now, out of band. Used when the monitor opens so it is not cold. */
+  /**
+   * Sweep now, out of band. Used when the monitor opens so it is not cold.
+   *
+   * Deliberately NOT given a retry when its sweep is abandoned by a concurrent
+   * configure(), even though that makes it report success having collected
+   * nothing. Before the equality check in configure() that was a real hazard:
+   * a reconfigure could land on every Check now and the button would spin,
+   * succeed and change nothing. Now the only way to abandon this sweep is a
+   * configuration that genuinely changed — and configure() answers that by
+   * scheduling at zero, so the estate is swept against the NEW configuration
+   * within a tick. Retrying here would sample the replaced configuration a
+   * second time, on top of that scheduled run, on hosts a user has six panels
+   * open against. The superseded result was not wanted; the sweep that replaces
+   * it is already on its way.
+   *
+   * The other early return — a request refused because a sweep is already in
+   * flight — is the same judgement and predates this: that sweep is asking the
+   * same question, and queuing a second one doubles the load on the estate to
+   * learn what is already being learned.
+   */
   async sampleNow(): Promise<void> {
     if (!this.cfg.enabled || this.cfg.targets.length === 0) return
     await this.sweep('requested')
