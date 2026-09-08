@@ -1,3 +1,18 @@
+import type { RdpSettings } from '../../shared/rdp'
+
+// Re-exported for the same reason the VPN domain is: one definition of the
+// record, shared with main, rather than a renderer-only restatement that can
+// disagree with it.
+export type {
+  RdpDesktopSize,
+  RdpErrorCode,
+  RdpRelayState,
+  RdpRelayStatus,
+  RdpSettings,
+  RdpTicket,
+  RdpTicketResult
+} from '../../shared/rdp'
+
 export type UUID = string
 
 export type WorkspaceColor =
@@ -73,6 +88,19 @@ export interface Server {
    * server saved before this existed is.
    */
   sftpOnly?: boolean
+  /**
+   * This server also speaks RDP, on the port and with the login named here.
+   *
+   * A field on `Server` rather than a record of its own, for the same reason
+   * `sftpOnly` is: the machine has already been described once — host,
+   * workspace, folder, VPN — and a second record would restate all of it and
+   * then drift from it. What RDP does get of its own is a tab kind, because a
+   * remote desktop is not a shell and cannot share the views of one.
+   *
+   * Absent means the server does not speak RDP, which is every server saved
+   * before this existed.
+   */
+  rdp?: RdpSettings
   demo?: boolean
 }
 
@@ -217,7 +245,11 @@ export interface ApiCollection {
   insecureTls: boolean
 }
 
-export type PanelView = 'terminal' | 'monitor' | 'files'
+// 'desktop' belongs to RdpTab alone and is the only view it has. It is in this
+// union rather than beside it so that `TabBase.view`, `setTabView` and the tab
+// strip stay one field across every kind of tab; the viewbar filters on the
+// tab's kind, so it is never offered next to Terminal and Files.
+export type PanelView = 'terminal' | 'monitor' | 'files' | 'desktop'
 export type ActivityView =
   | 'connections'
   | 'databases'
@@ -299,4 +331,22 @@ export interface LocalTab extends TabBase {
   view: 'terminal' | 'files'
 }
 
-export type Tab = SshTab | LocalTab
+/**
+ * A remote desktop on a saved server, backed by that server's `rdp` settings.
+ *
+ * Its own kind rather than a fourth `PanelView` on `SshTab`, because the three
+ * existing views all read an SSH transport that an RDP session does not have,
+ * and every one of them would have to learn to be absent. It is also the only
+ * tab that cannot be split: `PaneGrid` splits terminals, and half a desktop is
+ * not a smaller desktop.
+ *
+ * `view` is fixed rather than omitted so that the viewbar, the tab strip and
+ * `setTabView` keep working off one field across every tab kind.
+ */
+export interface RdpTab extends TabBase {
+  kind: 'rdp'
+  serverId: UUID
+  view: 'desktop'
+}
+
+export type Tab = SshTab | LocalTab | RdpTab

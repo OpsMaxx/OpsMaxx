@@ -10,6 +10,7 @@ import type { SshAuth, SshHop } from '../../shared/ssh'
 import type { DbKind } from '../../shared/db'
 import type { TunnelKind } from '../../shared/tunnel'
 import type { VpnKind, VpnMode } from '../../shared/vpn'
+import type { RdpSettings } from '../../shared/rdp'
 
 export type CachedHop = SshHop & { serverId?: string }
 
@@ -34,6 +35,17 @@ export interface CachedServer {
   // response, for the same reason CachedVpn omits endpoints — the bridge may
   // say a profile exists, not where anything points.
   vpnProfileId: string | null
+  /**
+   * Present when this server also speaks RDP. Absent means it does not.
+   *
+   * Cached for the same reason the rest of this record is: `rdpMintTicket`
+   * resolves the destination and the account from the saved record rather than
+   * from whatever the renderer passed, and it cannot do that if main has to
+   * ask the renderer what the record says. Main-internal like `vpnProfileId`:
+   * no MCP tool returns it, and none should — there is no RDP tool, because a
+   * remote desktop is not something an agent drives.
+   */
+  rdp?: RdpSettings
 }
 
 export interface CachedDatabase {
@@ -137,18 +149,40 @@ function parseServers(raw: unknown): CachedServer[] {
   return raw
     .filter(isRecord)
     .filter((s) => typeof s.id === 'string' && typeof s.workspaceId === 'string')
-    .map((s) => ({
-      id: s.id as string,
-      workspaceId: s.workspaceId as string,
-      name: asString(s.name, s.host as string),
-      host: asString(s.host),
-      port: asNumber(s.port, 22),
-      username: asString(s.username),
-      auth: isSshAuth(s.auth) ? s.auth : 'key',
-      os: asString(s.os, 'Linux'),
-      route: parseRoute(s.route),
-      vpnProfileId: typeof s.vpnProfileId === 'string' ? s.vpnProfileId : null
-    }))
+    .map((s) => {
+      const rdp = parseRdp(s.rdp)
+      return {
+        id: s.id as string,
+        workspaceId: s.workspaceId as string,
+        name: asString(s.name, s.host as string),
+        host: asString(s.host),
+        port: asNumber(s.port, 22),
+        username: asString(s.username),
+        auth: isSshAuth(s.auth) ? s.auth : 'key',
+        os: asString(s.os, 'Linux'),
+        route: parseRoute(s.route),
+        vpnProfileId: typeof s.vpnProfileId === 'string' ? s.vpnProfileId : null,
+        ...(rdp ? { rdp } : {})
+      }
+    })
+}
+
+// Absent, malformed, or a port that is not a port all mean the same thing: this
+// server does not speak RDP. Returning a default-shaped record instead would
+// offer an RDP session on every server in the fleet.
+function parseRdp(raw: unknown): RdpSettings | null {
+  if (!isRecord(raw)) return null
+  const port = asNumber(raw.port, 3389)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null
+  return {
+    port,
+    domain: typeof raw.domain === 'string' && raw.domain ? raw.domain : undefined,
+    // Defaults on, matching RdpSettings: a saved record from before this field
+    // existed is far more likely to be a Windows host than an xrdp one.
+    nla: raw.nla !== false,
+    kdcProxyUrl:
+      typeof raw.kdcProxyUrl === 'string' && raw.kdcProxyUrl ? raw.kdcProxyUrl : undefined
+  }
 }
 
 function isDbKind(v: unknown): v is DbKind {

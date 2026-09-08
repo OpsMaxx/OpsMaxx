@@ -13,6 +13,7 @@ import {
   Trash2,
   Route,
   Server as ServerIcon,
+  Monitor,
   Plug
 } from 'lucide-react'
 import { useApp, useWorkspaceFolders, useWorkspaceServers } from '../../store/app'
@@ -37,6 +38,7 @@ export function ConnectionTree(): React.JSX.Element {
   const labels = useMemo(() => disambiguateServerNames(servers), [servers])
   const openServer = useApp((s) => s.openServer)
   const newSession = useApp((s) => s.newSession)
+  const openRdp = useApp((s) => s.openRdp)
   const toggleFavorite = useApp((s) => s.toggleFavorite)
   const openRouteEditor = useApp((s) => s.openRouteEditor)
   const openServerEditor = useApp((s) => s.openServerEditor)
@@ -103,6 +105,18 @@ export function ConnectionTree(): React.JSX.Element {
     { label: 'Connect', icon: <Plug size={14} />, onClick: () => openServer(s.id, 'terminal') },
     { label: 'New session', icon: <TerminalIcon size={14} />, onClick: () => newSession(s.id) },
     { label: 'Open monitor', icon: <Activity size={14} />, onClick: () => openServer(s.id, 'monitor') },
+    // Only for a server that has RDP settings. Listed rather than always shown
+    // and disabled: on a fleet of Linux hosts a permanently greyed entry is
+    // three quarters of this menu's dead weight.
+    ...(s.rdp
+      ? [
+          {
+            label: 'Open remote desktop',
+            icon: <Monitor size={14} />,
+            onClick: () => openRdp(s.id)
+          }
+        ]
+      : []),
     { separator: true, label: '' },
     { label: 'Edit server', icon: <Pencil size={14} />, onClick: () => openServerEditor(s.id) },
     { label: 'Edit jump route', icon: <Route size={14} />, onClick: () => openRouteEditor(s.id) },

@@ -144,6 +144,7 @@ import type { VaultEntry, VaultListResult, VaultResult, VaultStatus } from '../s
 import type { KernelStatus } from '../shared/kernelStatus'
 import type { StorageLayout } from '../shared/storageLayout'
 import type { NetworkInfo } from '../shared/network'
+import type { RdpDesktopSize, RdpRelayStatus, RdpTicketResult } from '../shared/rdp'
 import type { TunnelConfig, TunnelResult, TunnelSshConfig, TunnelStatus } from '../shared/tunnel'
 import type {
   FrpTokenResult,
@@ -1056,6 +1057,27 @@ const api = {
   knownHosts: {
     list: (): Promise<KnownHost[]> => ipcRenderer.invoke('knownhosts:list'),
     forget: (id: string): Promise<void> => ipcRenderer.invoke('knownhosts:forget', id)
+  },
+  // Remote desktop. Deliberately two calls and no more: main mints a ticket
+  // for one saved server, and the renderer connects with it. There is no
+  // "connect to host" here, because a renderer that could name a destination
+  // could use the loopback relay to reach anything this machine can.
+  rdp: {
+    /**
+     * Ask main for a one-shot ticket to this server's desktop.
+     *
+     * The result carries the password, because the CredSSP exchange happens
+     * inside the WASM client in the renderer and there is nowhere else for it
+     * to happen. What the renderer cannot do is choose whose password it is.
+     */
+    ticket: (serverId: string, size?: RdpDesktopSize): Promise<RdpTicketResult> =>
+      ipcRenderer.invoke('rdp:ticket', serverId, size),
+    status: (): Promise<RdpRelayStatus> => ipcRenderer.invoke('rdp:status'),
+    onStatus: (cb: (s: RdpRelayStatus) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, s: RdpRelayStatus): void => cb(s)
+      ipcRenderer.on('rdp:status', h)
+      return () => ipcRenderer.removeListener('rdp:status', h)
+    }
   },
   tunnel: {
     start: (cfg: TunnelConfig, ssh: TunnelSshConfig): Promise<TunnelResult> =>

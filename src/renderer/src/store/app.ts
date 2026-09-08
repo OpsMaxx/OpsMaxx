@@ -11,6 +11,7 @@ import type {
   Server,
   Tab,
   LocalTab,
+  RdpTab,
   UUID,
   Workspace,
   Folder,
@@ -51,6 +52,10 @@ export type SplitDirection = 'h' | 'v'
 export type PaneTarget =
   | { kind: 'ssh'; serverId: string }
   | { kind: 'local'; shellId: string; cwd?: string }
+  // An RDP tab has exactly one pane and no way to make a second, so this
+  // member exists to keep `initialPanes` total rather than to be split. See
+  // `RdpTab`: half a desktop is not a smaller desktop.
+  | { kind: 'rdp'; serverId: string }
 
 export interface Pane {
   // Minted by the store when the pane is created and never derived during
@@ -387,6 +392,15 @@ interface AppState {
   /** A shell inside a container on that server. See the implementation. */
   openContainerShell: (serverId: string, containerRef: string, sudo?: boolean) => void
   newSession: (serverId: string) => void
+  /**
+   * A remote desktop on that server, in a new tab.
+   *
+   * Like `newSession` and unlike `openServer`, this never focuses an existing
+   * tab: a second desktop is a second session on the host, and silently
+   * raising the first one would look like the request was ignored. A no-op for
+   * a server with no `rdp` settings — there is nothing to connect to.
+   */
+  openRdp: (serverId: string) => void
   // A shell on this machine, in a new tab. Never focuses an existing one: a
   // second local shell is a second shell, never the same one.
   openLocal: (shell: LocalShell, cwd?: string) => void
@@ -567,7 +581,9 @@ function initialPanes(tab: Tab): TabPanes {
   const target: PaneTarget =
     tab.kind === 'local'
       ? { kind: 'local', shellId: tab.shellId, cwd: tab.cwd }
-      : { kind: 'ssh', serverId: tab.serverId }
+      : tab.kind === 'rdp'
+        ? { kind: 'rdp', serverId: tab.serverId }
+        : { kind: 'ssh', serverId: tab.serverId }
   const pane: Pane = { id: uid('pane'), target }
   return { direction: 'v', panes: [pane], activePaneId: pane.id }
 }
@@ -952,6 +968,28 @@ export const useApp = create<AppState>((set, get) => ({
     }))
   },
 
+  openRdp: (serverId) => {
+    const server = get().servers.find((s) => s.id === serverId)
+    if (!server || !server.rdp) return
+    const tab: RdpTab = {
+      id: uid('tab'),
+      kind: 'rdp',
+      workspaceId: server.workspaceId,
+      serverId,
+      title: sessionTitle(
+        get().tabs,
+        (t) => t.kind === 'rdp' && t.serverId === serverId,
+        server.name
+      ),
+      view: 'desktop'
+    }
+    set((s) => ({
+      tabs: [...s.tabs, tab],
+      activeTabId: tab.id,
+      panes: { ...s.panes, [tab.id]: initialPanes(tab) }
+    }))
+  },
+
   // A shell on this machine. Nothing is written to `servers` here, and that is
   // the entire point of the union: `servers` is persisted and mirrored into the
   // MCP data cache, so a synthesized row would hand an agent a target that no
@@ -1055,7 +1093,12 @@ export const useApp = create<AppState>((set, get) => ({
     // Narrowed before the spread, not after: spreading the union directly
     // produces an object TypeScript cannot match to either member, because the
     // discriminant is widened away along with everything keyed off it.
-    const t: Tab = tab.kind === 'ssh' ? { ...tab, workspaceId, id } : { ...tab, workspaceId, id }
+    const t: Tab =
+      tab.kind === 'ssh'
+        ? { ...tab, workspaceId, id }
+        : tab.kind === 'rdp'
+          ? { ...tab, workspaceId, id }
+          : { ...tab, workspaceId, id }
     set((s) => ({
       tabs: [...s.tabs, t],
       activeTabId: t.id,
@@ -1102,10 +1145,16 @@ export const useApp = create<AppState>((set, get) => ({
   // not only hidden in the viewbar: LocalTab.view has no 'monitor' member, and
   // the monitor views take a non-optional Server, so a state write that got
   // past the UI would put a tab in a shape nothing can render.
+  // An RDP tab is refused outright, for the same reason and one step further:
+  // 'desktop' is its only view, and every other member of PanelView names a
+  // pane it does not have. Symmetrically, 'desktop' is refused on every other
+  // kind — it is in the shared union so that `view` stays one field, not so
+  // that an SSH tab can be switched to a desktop it has no session for.
   setTabView: (id, view) =>
     set((s) => ({
       tabs: s.tabs.map((t) => {
         if (t.id !== id) return t
+        if (t.kind === 'rdp' || view === 'desktop') return t
         if (t.kind === 'ssh') return { ...t, view }
         return view === 'monitor' ? t : { ...t, view }
       })
