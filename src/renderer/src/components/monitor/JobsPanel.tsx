@@ -35,6 +35,8 @@ import { useFleet } from '../../store/fleet'
 import type { JobDetail, JobHostResult, JobProgress, JobRecord } from '../../../../shared/jobs'
 import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
+import { VaultLockedHosts } from '../common/PanelError'
+import { isVaultLocked } from '../../lib/withVaultUnlock'
 
 // Roadmap item 33. The job engine shipped in full -- waves, health gate,
 // reboot-and-verify, detached execution, approval record -- and NO RENDERER
@@ -402,6 +404,15 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
     >
 
       {error && <div className="panel-note is-alarm">{error}</div>}
+      {/* Named, not retried — a job carries an approval minted for ONE run and
+          re-verified in main, so a second execution earns a second
+          confirmation. See the note on VaultLockedHosts. */}
+      <VaultLockedHosts
+        names={(detail?.targets ?? [])
+          .filter((t) => isVaultLocked(t.error))
+          .map((t) => t.serverName)}
+        reason="Running this job needs the stored credentials of the servers it targets."
+      />
 
       {composing && pending === null && (
         <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>

@@ -6,7 +6,7 @@ import { summariseUserUnits, type UserUnitsReading } from '../../../../shared/us
 import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
 import { PanelError } from '../common/PanelError'
-import { withVaultUnlock } from '../../lib/withVaultUnlock'
+import { withVaultUnlock, isVaultLocked } from '../../lib/withVaultUnlock'
 
 // What each server supervises for this account, read from its own systemd.
 //
@@ -84,6 +84,12 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
     return null
   }
 
+  // The first host whose reading is a locked vault rather than a unit list.
+  // One banner, not one per host: the vault is a single thing and unlocking it
+  // fixes every row at once.
+  const lockedDetail =
+    rows?.map((r) => r.reading.detail).find((d) => isVaultLocked(d)) ?? null
+
   const readNow = (primary: boolean): React.JSX.Element => {
     const why = disabledReason()
     return (
@@ -131,8 +137,13 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
       actions={readNow(rows === null)}
     >
 
+      {/* Two places a locked vault can surface, because the handler reports
+          BOTH ways. `services:collect` catches per target and pushes a reading
+          per host, so most of the time the marker is down in a row's detail
+          and nothing was ever thrown — the reason the first cut of this,
+          which only handled the rejection, did nothing at all in practice. */}
       <PanelError
-        error={error}
+        error={error ?? lockedDetail}
         reason="Reading what each server supervises needs its stored credential."
         onRetry={() => void read()}
       />
@@ -170,6 +181,11 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
         rows.map((r) => {
           const s = summariseUserUnits(r.reading)
           const shown = r.reading.units.filter((u) => u.load !== 'not-found')
+          // The banner above already says the vault is locked and offers the
+          // unlock. Repeating the resolver's marker here — once in the summary
+          // headline it was built from, and again as the detail line — is the
+          // raw token back on screen three times over.
+          const locked = isVaultLocked(r.reading.detail)
           return (
             <div key={r.serverId} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
               <div className="r-title">
@@ -180,8 +196,12 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
               </div>
               {/* The headline first and the list second, deliberately: the list
                   is what people look at and the sentence is what they need. */}
-              <div className={clsx('r-sub', s.level === 'alarm' && 'danger')}>{s.headline}</div>
-              {r.reading.detail && <div className="r-sub faint mono">{r.reading.detail}</div>}
+              <div className={clsx('r-sub', s.level === 'alarm' && 'danger')}>
+                {locked ? 'Not read — this server’s credential is in the locked vault.' : s.headline}
+              </div>
+              {!locked && r.reading.detail && (
+                <div className="r-sub faint mono">{r.reading.detail}</div>
+              )}
               {/* A POINTER, not the form it replaced. It lands on the installer
                   with this server already chosen, which is the one fact the
                   operator was looking at when they pressed it — and it lands

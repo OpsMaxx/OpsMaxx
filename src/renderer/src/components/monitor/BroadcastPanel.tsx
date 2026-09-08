@@ -16,6 +16,8 @@ import {
 } from '../../../../shared/broadcast'
 import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
+import { VaultLockedHosts } from '../common/PanelError'
+import { isVaultLocked } from '../../lib/withVaultUnlock'
 
 // Run one command across many servers.
 //
@@ -303,6 +305,16 @@ export function BroadcastPanel({ servers }: { servers: Server[] }): React.JSX.El
           someone reading the command should see how it was read without
           having to press Run to find out. */}
       {error && <div className="panel-note is-alarm">{error}</div>}
+      {/* Named, never re-run automatically. A broadcast fails per host, so a
+          blanket retry would execute the command a second time on every host
+          that already ran it — and the confirmation that authorised this run
+          authorised one run. See the note on VaultLockedHosts. */}
+      <VaultLockedHosts
+        names={Object.values(results)
+          .filter((r) => isVaultLocked(r.error))
+          .map((r) => r.serverName)}
+        reason="Running a command on these servers needs their stored credentials."
+      />
 
       {plan.risk !== 'ordinary' && command.trim() !== '' && (
         <div className={clsx('panel-note', plan.risk === 'destructive' ? 'is-alarm' : 'is-watch')}>
