@@ -18,7 +18,7 @@ import { INSPECT_CA_EXPIRY_WARN_SEC, isSensitiveHeader } from '../../../../share
  * worse than no traffic inspector, because it is believed.
  */
 export function InspectView(): React.JSX.Element {
-  const { status, flows, selectedId, busy, error } = useInspect()
+  const { status, flows, selectedId, busy, error, manualTrustCommand } = useInspect()
   const wire = useInspect((s) => s.wire)
   const refresh = useInspect((s) => s.refresh)
   const start = useInspect((s) => s.start)
@@ -31,6 +31,7 @@ export function InspectView(): React.JSX.Element {
 
   const [filter, setFilter] = useState('')
   const [source, setSource] = useState<InspectSourceKind>('sessions')
+  const [commandCopied, setCommandCopied] = useState(false)
 
   useEffect(() => {
     const off = wire()
@@ -144,6 +145,35 @@ export function InspectView(): React.JSX.Element {
               Install certificate
             </button>
           )}
+        </div>
+      )}
+
+      {/* Every automatic route has been refused, so the button above is no
+          longer an answer — pressing it again is the loop this replaced. The
+          exact command is shown instead, because on the machine that produced
+          this failure it is the thing that works: a terminal keeps the login
+          session that the elevated process OpsMaxx starts does not have. */}
+      {manualTrustCommand && (
+        <div className="banner warn col" style={{ gap: 6, alignItems: 'stretch' }}>
+          <div className="row" style={{ gap: 'var(--sp-2)' }}>
+            <AlertTriangle size={14} />
+            <span>Finish the install in Terminal, then press Install certificate again.</span>
+          </div>
+          <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+            <code className="mono" style={{ flex: 1, minWidth: 0, overflowX: 'auto', userSelect: 'text' }}>
+              {manualTrustCommand}
+            </code>
+            <button
+              className="btn secondary size-24"
+              onClick={() => {
+                void navigator.clipboard.writeText(manualTrustCommand)
+                setCommandCopied(true)
+                setTimeout(() => setCommandCopied(false), 1500)
+              }}
+            >
+              {commandCopied ? <Check size={13} /> : <Copy size={13} />} Copy
+            </button>
+          </div>
         </div>
       )}
 
