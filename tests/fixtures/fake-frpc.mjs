@@ -162,18 +162,23 @@ function parseToml(text) {
   // fixture reading a config this repo writes, so nothing hostile reaches it
   // today -- but a dotted-path setter that will happily walk into the
   // prototype is the kind of helper that gets copied somewhere that matters.
-  const UNSAFE_KEY = new Set(['__proto__', 'constructor', 'prototype'])
+  //
+  // The check is written inline, per key, rather than as one `parts.some(...)`
+  // pass over a Set. Both are equally safe; only this shape is one CodeQL
+  // recognises as a guard, and an alert that stays open because the analyser
+  // cannot see a real check is worth as little as no check at all.
   const setDotted = (obj, key, value) => {
     const parts = key.split('.')
-    if (parts.some((k) => UNSAFE_KEY.has(k))) return
     let cur = obj
     for (let i = 0; i < parts.length - 1; i++) {
-      if (typeof cur[parts[i]] !== 'object' || cur[parts[i]] === null) {
-        cur[parts[i]] = Object.create(null)
-      }
-      cur = cur[parts[i]]
+      const k = parts[i]
+      if (k === '__proto__' || k === 'constructor' || k === 'prototype') return
+      if (typeof cur[k] !== 'object' || cur[k] === null) cur[k] = Object.create(null)
+      cur = cur[k]
     }
-    cur[parts[parts.length - 1]] = value
+    const last = parts[parts.length - 1]
+    if (last === '__proto__' || last === 'constructor' || last === 'prototype') return
+    cur[last] = value
   }
 
   for (const rawLine of text.split(/\r?\n/)) {
