@@ -3402,7 +3402,13 @@ setCapacityReader(capacityReportFor)
 // Read-only view of what the sampler has already collected. The sampler's own
 // on-demand sweep is deliberately not passed: an agent that could trigger one
 // would be starting work on every server in the workspace from a single call.
-setFleetReader({ factsFor: (id) => fleetSampler.factsFor(id) })
+setFleetReader({
+  factsFor: (id) => fleetSampler.factsFor(id),
+  // One server at a time. There is no whole-fleet drift accessor on this
+  // interface, so no tool can be written against it that sorts the estate into
+  // the hosts that are behind and the hosts that are not.
+  driftFor: (id) => fleetSampler.driftFor(id)
+})
 // Health only. There is no run and no restore on the interface this satisfies,
 // so a later edit cannot reach one without widening the interface first.
 // Alerts already recorded. A read of history, filtered by the caller to the

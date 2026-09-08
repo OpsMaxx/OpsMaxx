@@ -27,6 +27,8 @@ import {
   parseDockerOutput,
   parseDockerSize,
   parseDockerStatsOutput,
+  buildDockerImagesCommand,
+  parseDockerImages,
   planDockerAction,
   type DockerConfirmation,
   type DockerContainer,
@@ -1381,5 +1383,84 @@ describe('template quoting, which fails silently when it is wrong', () => {
     const cmd = buildDockerInspectCommand('web')
     const fmt = cmd.slice(cmd.lastIndexOf("--format '") + "--format '".length)
     expect(fmt.slice(0, fmt.indexOf("'")).split(DOCKER_SEP)).toHaveLength(DOCKER_INSPECT_FIELDS)
+  })
+})
+
+describe('the images read', () => {
+  it('asks what exists, never what it costs', () => {
+    // The whole reason this builder exists rather than reusing the disk one:
+    // `system df` is an account of the host's disk, which is a different
+    // disclosure and is kept off the agent bridge. This must never grow into
+    // it by someone adding a flag.
+    const cmd = buildDockerImagesCommand()
+    expect(cmd).toContain('images')
+    expect(cmd).not.toContain('system df')
+    expect(cmd).not.toContain('--digests')
+    // Full ids, for the same reason the container list uses them: a truncated
+    // id cannot be handed back to another command.
+    expect(cmd).toContain('--no-trunc')
+  })
+
+  it('runs as root only when asked', () => {
+    expect(buildDockerImagesCommand()).not.toContain('sudo')
+    expect(buildDockerImagesCommand({ sudo: true })).toContain('sudo -n')
+  })
+
+  it('reads the rows a runtime actually prints', () => {
+    const S = DOCKER_SEP
+    const out =
+      `${DOCKER_MARKERS.images}\n` +
+      `nginx${S}1.25${S}sha256:aaa${S}142MB${S}3 weeks ago\n` +
+      `<none>${S}<none>${S}sha256:bbb${S}98.2MB${S}2 days ago\n`
+    const probe = parseDockerImages(out, 0)
+    expect(probe.ok).toBe(true)
+    if (!probe.ok) return
+    expect(probe.images).toHaveLength(2)
+    expect(probe.images[0]).toMatchObject({ repository: 'nginx', tag: '1.25', size: '142MB' })
+    // A layer left behind by a rebuild, named as such rather than reported as
+    // an image called "<none>".
+    expect(probe.images[1].dangling).toBe(true)
+    expect(probe.images[0].dangling).toBe(false)
+  })
+
+  it('does not report a size it had to invent', () => {
+    // Runtimes disagree about units and about whether the number is virtual or
+    // unique. The string the runtime printed is the honest answer; a parsed
+    // byte count would be wrong on at least one of them.
+    const probe = parseDockerImages(
+      `${DOCKER_MARKERS.images}\nnginx${DOCKER_SEP}1.25${DOCKER_SEP}sha256:a${DOCKER_SEP}1.2GB${DOCKER_SEP}now\n`,
+      0
+    )
+    expect(probe.ok && probe.images[0].size).toBe('1.2GB')
+  })
+
+  it('tells a missing docker from a refused one', () => {
+    const missing = parseDockerImages('sh: docker: not found', 127)
+    expect(missing.ok).toBe(false)
+    if (!missing.ok) expect(missing.reason).toBe('not-installed')
+
+    const refused = parseDockerImages(
+      `${DOCKER_MARKERS.images}\npermission denied while trying to connect to the Docker daemon socket`,
+      1
+    )
+    expect(refused.ok).toBe(false)
+    if (!refused.ok) expect(refused.reason).toBe('permission-denied')
+  })
+
+  it('keeps rows a runtime warned about but still answered', () => {
+    // A non-zero exit WITH rows is a runtime that wrote to stderr and answered
+    // anyway, which is common. Treating that as failure loses the answer.
+    const probe = parseDockerImages(
+      `${DOCKER_MARKERS.images}\nWARNING: something\nnginx${DOCKER_SEP}1.25${DOCKER_SEP}sha256:a${DOCKER_SEP}1MB${DOCKER_SEP}now\n`,
+      1
+    )
+    expect(probe.ok).toBe(true)
+    if (probe.ok) expect(probe.images).toHaveLength(1)
+  })
+
+  it('reports an empty host as empty, not as broken', () => {
+    const probe = parseDockerImages(`${DOCKER_MARKERS.images}\n`, 0)
+    expect(probe.ok).toBe(true)
+    if (probe.ok) expect(probe.images).toEqual([])
   })
 })

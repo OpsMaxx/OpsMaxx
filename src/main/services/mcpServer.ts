@@ -316,6 +316,9 @@ export function setCapacityReader(
  */
 export interface FleetReader {
   factsFor(serverId: string): { facts?: unknown; at?: number; error?: string }
+  /** ONE server's drift. There is deliberately no whole-fleet accessor here —
+   *  see the tool that uses it. */
+  driftFor(serverId: string): { drift?: unknown; at?: number; error?: string }
 }
 let fleetReader: FleetReader | null = null
 export function setFleetReader(r: FleetReader): void {
@@ -2876,6 +2879,187 @@ function buildServer(): McpServer {
         })
         return errorText(`Could not read compose projects on ${s.name}: ${message}`)
       }
+    }
+  )
+
+  server.registerTool(
+    'list_images',
+    {
+      title: 'List container images on a server',
+      description:
+        'The images present on a server: repository, tag, id, the size the runtime reports and how ' +
+        'long ago it was created. Layers left behind by a rebuild are marked as dangling rather than ' +
+        'reported as an image called "<none>". ' +
+        'Answers "what version is deployed here" and "is the old image still around", which the ' +
+        'container list cannot: it shows the images IN USE, and an image nothing is running is ' +
+        'invisible to it. ' +
+        'It reports what EXISTS, not what it costs. There is no disk-usage tool on this bridge — an ' +
+        'account of what every image, volume and build cache is consuming is a different disclosure ' +
+        'and is not available at any permission level. ' +
+        'The size is the runtime\'s own string rather than a number: runtimes disagree about units and ' +
+        'about whether the figure is virtual or unique, and a parsed byte count would be wrong on at ' +
+        'least one of them.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: false }
+    },
+    async ({ serverName, intent }, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const resolved = resolveServerOrError(auth.session, serverName)
+      if ('error' in resolved) return resolved.error
+      const { server: s, workspace } = resolved.match
+      const check = effectiveCapability(auth.session, s.id, 'containers')
+      const ctx: AuditContext = {
+        session: auth.session,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        serverId: s.id,
+        serverName: s.name,
+        action: 'list_images',
+        capability: 'containers'
+      }
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'list_images',
+          level: 'low',
+          because: 'it returns which container images are present on this server',
+          intent
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      try {
+        const cfg = resolveChainSecrets(serverToSshConfig(s))
+        const probe = await dockerReader.images(cfg, { autoSudo: true })
+        if (!probe.ok) {
+          recordAudit({
+            ...auditBase(ctx),
+            approval: check.decision === 'ask' ? 'approved' : 'not-required',
+            result: 'error',
+            error: probe.reason
+          })
+          return errorText(`Images could not be read on ${s.name}: ${probe.detail ?? probe.reason}`)
+        }
+        auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+        if (probe.images.length === 0) return text(`No images on ${s.name}.`)
+        const dangling = probe.images.filter((i) => i.dangling)
+        const named = probe.images.filter((i) => !i.dangling)
+        const rows = named.map(
+          (i) => `${i.repository}:${i.tag}\n    ${i.size}, created ${i.created}\n    ${i.id}`
+        )
+        return text(
+          `${probe.images.length} image(s) on ${s.name}` +
+            `${probe.usedSudo ? ' — read as root, because the unprivileged read was refused' : ''}` +
+            `${dangling.length > 0 ? `, ${dangling.length} of them dangling layers from rebuilds` : ''}` +
+            `:\n\n${rows.join('\n\n')}`
+        )
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        recordAudit({
+          ...auditBase(ctx),
+          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          result: 'error',
+          error: message
+        })
+        return errorText(`Could not list images on ${s.name}: ${message}`)
+      }
+    }
+  )
+
+  server.registerTool(
+    'get_config_drift',
+    {
+      title: "Has one server's configuration changed",
+      description:
+        'Whether the watched configuration files on ONE named server still match what they were when ' +
+        'they were last reviewed, and which of them changed. ' +
+        'Answers "did something change on this box" after an incident, which nothing else here can: ' +
+        'the file contents are compared against a recorded baseline rather than read fresh and ' +
+        'eyeballed. Secret-shaped text is redacted BEFORE the comparison is taken, so a changed ' +
+        'password is reported as a change without disclosing either value. ' +
+        'ONE SERVER PER CALL, and there is no fleet-wide version of this at any permission level. ' +
+        '"Which of these forty hosts has drifted" sorts an estate into the machines that are behind ' +
+        'and the machines that are not, which is a ranked list of the weakest ones kept permanently ' +
+        'fresh. Asking per host is a question about a host; asking across the fleet is a target list, ' +
+        'and this tool cannot be made to answer the second by calling it in a loop any faster than a ' +
+        'human could.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: false }
+    },
+    async ({ serverName, intent }, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const resolved = resolveServerOrError(auth.session, serverName)
+      if ('error' in resolved) return resolved.error
+      const { server: s, workspace } = resolved.match
+      // Per-SERVER, unlike the inventory. That is the whole narrowing: the
+      // capability is checked against this host, so a workspace-wide grant is
+      // not what opens it.
+      const check = effectiveCapability(auth.session, s.id, 'fleetRead')
+      const ctx: AuditContext = {
+        session: auth.session,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        serverId: s.id,
+        serverName: s.name,
+        action: 'get_config_drift',
+        capability: 'fleetRead'
+      }
+      // 'medium'. It names which configuration files on this host no longer
+      // match their baseline, which is a description of what is unusual about
+      // it — and the approval dialog should weigh that above a metrics read.
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'get_config_drift',
+          level: 'medium',
+          because: 'it names which configuration files on this server no longer match their baseline',
+          intent
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      if (!fleetReader) {
+        return errorText(
+          'OpsMaxx is not sampling this fleet, so there is no baseline to compare against. ' +
+            'This does not mean nothing has changed.'
+        )
+      }
+      const reading = fleetReader.driftFor(s.id)
+      const drift = reading.drift as { at?: number; readings?: { watchId: string; status: string; detail?: string }[] } | undefined
+      if (!drift) {
+        // "Never sampled" is not "unchanged", and reporting it as a clean bill
+        // of health is the failure this whole file keeps guarding against.
+        return text(
+          `${s.name} has no drift baseline${reading.error ? ` — ${reading.error}` : ''}. ` +
+            `That is not the same as unchanged: nothing has been compared.`
+        )
+      }
+      const readings = drift.readings ?? []
+      const changed = readings.filter((r) => r.status !== 'ok')
+      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      if (changed.length === 0) {
+        return text(
+          `${readings.length} watched file(s) on ${s.name} still match their baseline` +
+            `${drift.at ? `, as of ${agePhrase(Date.now() - drift.at)}` : ''}.`
+        )
+      }
+      return text(
+        `${changed.length} of ${readings.length} watched file(s) on ${s.name} have changed` +
+          `${drift.at ? `, as of ${agePhrase(Date.now() - drift.at)}` : ''}:\n\n` +
+          changed.map((r) => `${r.watchId} — ${r.status}${r.detail ? `\n    ${r.detail}` : ''}`).join('\n\n')
+      )
     }
   )
 

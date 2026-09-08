@@ -108,7 +108,16 @@ const ALLOWED_TOOLS = [
   // The same container read as list_containers, grouped. No second command and
   // therefore no second thing that can be true of the host at a different
   // moment; on the `containers` capability for the same reason.
-  'compose_status'
+  'compose_status',
+  // What images EXIST, on the `containers` capability. Its own narrow builder
+  // rather than the disk read: `system df` is an account of what everything
+  // costs, which stays off this bridge.
+  'list_images',
+  // ONE named server's drift, on `fleetRead` but checked per server. The
+  // fleet-wide "which hosts are behind" question is still absent and has no
+  // tool; see the drift block in the forbidden list below for why the shape
+  // matters more than the subject here.
+  'get_config_drift'
 ]
 
 // A hint, not the gate. Anything this regex matches is by construction absent

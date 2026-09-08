@@ -217,6 +217,35 @@ describe('MCP server (integration)', () => {
     })
   })
 
+  describe('drift is per host, never per fleet', () => {
+    it('takes one server and offers no way to ask about all of them', async () => {
+      // The argument this tool was carved out of objects to the FLEET-WIDE
+      // question — "which of these forty hosts has drifted" is a ranked list of
+      // the weakest machines, kept fresh. Asking about one named host is a
+      // different question. The schema is what keeps them different: if a
+      // serverName ever becomes optional here, the fleet-wide version exists.
+      const client = await connectedClient(token)
+      const tool = (await client.listTools()).tools.find((t) => t.name === 'get_config_drift')
+      expect(tool, 'get_config_drift must exist').toBeTruthy()
+      const schema = tool?.inputSchema as {
+        properties?: Record<string, unknown>
+        required?: string[]
+      }
+      expect(Object.keys(schema?.properties ?? {})).toContain('serverName')
+      expect(schema?.required ?? []).toContain('serverName')
+      await client.close()
+    })
+
+    it('has no whole-fleet drift tool alongside it', async () => {
+      const client = await connectedClient(token)
+      const names = (await client.listTools()).tools.map((t) => t.name)
+      for (const forbidden of ['fleet_drift', 'list_drift', 'drift_report', 'fleet_config_drift']) {
+        expect(names).not.toContain(forbidden)
+      }
+      await client.close()
+    })
+  })
+
   describe('container tools', () => {
     it('offers both container tools to an agent', async () => {
       const client = await connectedClient(token)
