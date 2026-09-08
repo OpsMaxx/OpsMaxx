@@ -96,11 +96,34 @@ export interface HostMetrics {
    * all-clear for a host that is still pegged.
    */
   cpu: number | null // percent 0-100
+  /**
+   * Utilisation per core over the same window, index 0 = cpu0, or null when
+   * /proc/stat gave no per-core lines to diff.
+   *
+   * Beside the aggregate, never instead of it: one core at 88% on an eight-core
+   * box is 11% of the machine, and reporting either number alone answers the
+   * wrong question.
+   */
+  cpuCores: number[] | null
   /** Memory used as a percentage, or null when MemTotal could not be read. A
    *  cgroup-only container and an unreadable /proc/meminfo both land here, and
    *  0/0 is not 0%. */
   memPct: number | null
   memUsed: number // bytes
+  /**
+   * The columns `free` prints beside `used`, in bytes, or null when
+   * /proc/meminfo did not name them.
+   *
+   * `memUsed` is `MemTotal - MemAvailable`, which is what modern `free` calls
+   * used. htop's Mem bar is a different quantity — it excludes the reclaimable
+   * cache that `free` counts as available — so the two differ by roughly the
+   * size of the page cache, and a user comparing them has no way to see why
+   * unless the parts are on screen too.
+   */
+  memAvailable: number | null
+  memFree: number | null
+  /** Buffers + page cache + reclaimable slab: `free`'s buff/cache column. */
+  memCache: number | null
   memTotal: number
   /**
    * Root filesystem usage as a percentage, or null when `df` said nothing.

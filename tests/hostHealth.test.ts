@@ -27,6 +27,7 @@ const failedUnit = (name: string): ServiceUnit =>
 function host(over: Partial<HostMetrics> = {}): HostMetrics {
   return {
     cpu: 5,
+    cpuCores: null, memAvailable: null, memFree: null, memCache: null,
     memPct: 40,
     memUsed: 4_000_000_000,
     memTotal: 10_000_000_000,

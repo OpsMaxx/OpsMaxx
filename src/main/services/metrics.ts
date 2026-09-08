@@ -44,11 +44,20 @@ function exec(client: Client, cmd: string): Promise<string> {
 // representative average. Only the first sample, which has no previous
 // snapshot, pays for an in-command sleep.
 const script = (withSleep: boolean): string => [
+  // `^cpu` without the trailing space, so the aggregate line AND every per-core
+  // line come back. Same file, same read, one character cheaper than filtering
+  // — and it is what makes "overall 14%, core 0 at 88%" answerable instead of
+  // arguable.
   'echo __CPU__',
-  "grep '^cpu ' /proc/stat",
-  ...(withSleep ? ['sleep 0.3', "grep '^cpu ' /proc/stat"] : []),
+  "grep '^cpu' /proc/stat",
+  ...(withSleep ? ['sleep 0.3', "grep '^cpu' /proc/stat"] : []),
+  // Buffers, Cached and SReclaimable beside the two that decide the
+  // percentage. They are free — the same grep of the same file — and they are
+  // what settles "your number is 300 MB higher than htop": htop's bar excludes
+  // reclaimable cache, `free` does not, and a reader who can see both columns
+  // does not have to guess which question the headline answered.
   'echo __MEM__',
-  "grep -E '^(MemTotal|MemAvailable):' /proc/meminfo",
+  "grep -E '^(MemTotal|MemAvailable|MemFree|Buffers|Cached|SReclaimable):' /proc/meminfo",
   'echo __DISK__',
   'df -kP / | tail -1',
   // Inodes, separately from blocks. A filesystem that is 40% full and out of
@@ -229,6 +238,14 @@ export function parseListeners(lines: string[]): { listeners: PortListener[]; so
 export interface CpuSnap {
   total: number
   idle: number
+  /**
+   * The same two counters per core, index 0 = cpu0.
+   *
+   * Held on the snapshot rather than recomputed because a per-core percentage
+   * is a delta exactly like the aggregate one, and it has to be diffed against
+   * the same poll the aggregate was.
+   */
+  cores?: { total: number; idle: number }[]
 }
 
 function cpuTotals(line: string): CpuSnap {
@@ -289,7 +306,18 @@ export function parseMetrics(
 }
 
 function parse(text: string, prev: CpuSnap | null): { data: HostMetrics; snap: CpuSnap | null } {
-  const snaps = section(text, 'CPU').map(cpuTotals)
+  // /proc/stat opens with the aggregate `cpu` line and then one `cpuN` line per
+  // core. With the in-command sleep the whole set arrives twice, so a new block
+  // begins wherever an aggregate line appears.
+  const blocks: { agg: CpuSnap; cores: CpuSnap[] }[] = []
+  for (const line of section(text, 'CPU')) {
+    const name = line.trim().split(/\s+/)[0]
+    if (name === 'cpu') blocks.push({ agg: cpuTotals(line), cores: [] })
+    else if (/^cpu\d+$/.test(name) && blocks.length > 0) {
+      blocks[blocks.length - 1].cores.push(cpuTotals(line))
+    }
+  }
+  const snaps = blocks.map((b) => ({ ...b.agg, cores: b.cores }))
   const latest = snaps.length ? snaps[snaps.length - 1] : null
   const base = snaps.length >= 2 ? snaps[0] : prev
   // Null, not zero, when there is nothing to diff.
@@ -303,6 +331,20 @@ function parse(text: string, prev: CpuSnap | null): { data: HostMetrics; snap: C
   // function for exactly this reason.
   const cpu = base && latest ? cpuPct(base, latest) : null
 
+  /**
+   * Per core, over the same window as the aggregate.
+   *
+   * Reported beside the headline rather than instead of it. A single core at
+   * 88% on an eight-core box is 11% of the machine, and the two numbers answer
+   * different questions — "is this host saturated" and "is one thing pinned".
+   * Showing only the first makes a hotspot invisible; showing only the second
+   * makes an idle machine look on fire.
+   */
+  const cpuCores =
+    base?.cores && latest?.cores && base.cores.length === latest.cores.length
+      ? latest.cores.map((c, i) => cpuPct((base.cores as CpuSnap[])[i], c))
+      : null
+
   const mem = section(text, 'MEM')
   const kv: Record<string, number> = {}
   for (const l of mem) {
@@ -311,6 +353,18 @@ function parse(text: string, prev: CpuSnap | null): { data: HostMetrics; snap: C
   }
   const memTotal = kv.MemTotal || 0
   const memUsed = Math.max(0, memTotal - (kv.MemAvailable || 0))
+  // The columns `free` prints beside `used`, so a reader can see WHICH question
+  // the headline answered. `free` and htop disagree by exactly this much:
+  // htop's bar leaves reclaimable cache out of "used" and free counts it as
+  // available, and without these fields the difference is unattributable.
+  const memAvailable = kv.MemAvailable ?? null
+  const memFree = kv.MemFree ?? null
+  // Buffers plus page cache plus the reclaimable slab, which is the number
+  // `free` puts under buff/cache.
+  const memCache =
+    kv.Buffers === undefined && kv.Cached === undefined && kv.SReclaimable === undefined
+      ? null
+      : (kv.Buffers ?? 0) + (kv.Cached ?? 0) + (kv.SReclaimable ?? 0)
 
   // `df -kP /` gives: Filesystem 1024-blocks Used Available Capacity Mounted-on
   const disk = section(text, 'DISK')[0]?.trim().split(/\s+/) ?? []
@@ -394,6 +448,10 @@ function parse(text: string, prev: CpuSnap | null): { data: HostMetrics; snap: C
     memPct: memTotal ? (memUsed / memTotal) * 100 : null,
     memUsed,
     memTotal,
+    cpuCores,
+    memAvailable,
+    memFree,
+    memCache,
     diskPct: diskCapacity ? Number(diskCapacity[1]) : null,
     diskUsed,
     diskTotal,

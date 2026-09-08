@@ -30,6 +30,7 @@ const target = (id: string): FleetTarget => ({
 
 const metrics = (over: Partial<HostMetrics> = {}): HostMetrics => ({
   cpu: 12,
+  cpuCores: null, memAvailable: null, memFree: null, memCache: null,
   memPct: 34,
   memUsed: 1024,
   memTotal: 4096,

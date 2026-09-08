@@ -4206,3 +4206,20 @@ details[open] > .disclosure-head .chev {
 .http-error .btn {
   flex-shrink: 0;
 }
+
+/* Per-core CPU ticks under the aggregate bar. One column per core, height by
+   utilisation — enough to see a single pinned core beside a calm headline,
+   without turning the card into a second chart. */
+.core-tick {
+  flex: 1;
+  min-width: 2px;
+  align-self: flex-end;
+  border-radius: 1px;
+  background: var(--ok);
+}
+.core-tick.warn {
+  background: var(--warn);
+}
+.core-tick.danger {
+  background: var(--danger);
+}
