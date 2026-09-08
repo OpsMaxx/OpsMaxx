@@ -456,6 +456,13 @@ if (isWSL()) {
 //    exactly what this token permits. It does NOT re-enable `eval` for
 //    JavaScript, which is why it exists as a separate token rather than being
 //    covered by 'unsafe-eval'.
+//  - `data:` in connect-src, for the same module. The token above allows
+//    *instantiating* the WebAssembly; it does not allow *reading* it, and the
+//    package inlines the binary as a `data:application/wasm` URI which it
+//    fetches at init. Without this the module throws `TypeError: Failed to
+//    fetch` before a session is ever attempted — and only in a packaged build,
+//    because the development policy already allows `data:`. It is scoped to
+//    connect-src, where it can name only bytes the bundle already contains.
 //  - `ws://127.0.0.1:*` in connect-src, for the RDP relay's loopback socket.
 //    The relay listens on an ephemeral port chosen at connect time, so the
 //    exact port cannot be in a policy installed before the window loads, and
@@ -467,7 +474,7 @@ if (isWSL()) {
 function installCsp(): void {
   const policy = isDev
     ? "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: ws: http://localhost:* http://127.0.0.1:*"
-    : "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:*"
+    : "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' data: ws://127.0.0.1:*"
   session.defaultSession.webRequest.onHeadersReceived((details, cb) => {
     cb({
       responseHeaders: {

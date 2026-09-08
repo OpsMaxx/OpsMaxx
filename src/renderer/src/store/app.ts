@@ -625,9 +625,12 @@ function sessionTitle(tabs: Tab[], match: (t: Tab) => boolean, name: string): st
 // sessionTitle so the two halves of "what counts as the same session" cannot
 // drift apart.
 function sameTarget(src: Tab): (t: Tab) => boolean {
-  return src.kind === 'local'
-    ? (t) => t.kind === 'local' && t.shellId === src.shellId
-    : (t) => t.kind === 'ssh' && t.serverId === src.serverId
+  if (src.kind === 'local') return (t) => t.kind === 'local' && t.shellId === src.shellId
+  // Matched on kind as well as server, so a desktop is numbered against the
+  // other desktops on that host rather than against its terminals: "Win Box
+  // (2)" should mean the second desktop, not the second session of any sort.
+  if (src.kind === 'rdp') return (t) => t.kind === 'rdp' && t.serverId === src.serverId
+  return (t) => t.kind === 'ssh' && t.serverId === src.serverId
 }
 
 // The copy duplicateTab inserts. Built per kind rather than by spreading `src`
@@ -648,13 +651,30 @@ function duplicateOf(tabs: Tab[], servers: Server[], src: Tab, id: UUID): Tab {
   }
   const server = servers.find((sv) => sv.id === src.serverId)
   const base = server?.name ?? src.title.replace(/ \(\d+\)$/, '')
+  // Before the SSH copy, and not folded into it: an RDP tab reaching the
+  // branch below produced `kind: 'ssh'` carrying `view: 'desktop'`. That is a
+  // shape TypeScript accepts — 'desktop' is in PanelView so the field is one
+  // type across every tab — and that nothing renders, because the SSH pane
+  // matches its views by name and 'desktop' is none of them. The duplicate
+  // came back blank.
+  if (src.kind === 'rdp') {
+    return {
+      id,
+      kind: 'rdp',
+      workspaceId: src.workspaceId,
+      serverId: src.serverId,
+      title: sessionTitle(tabs, sameTarget(src), base),
+      view: 'desktop'
+    }
+  }
   return {
     id,
     kind: 'ssh',
     workspaceId: src.workspaceId,
     serverId: src.serverId,
     title: sessionTitle(tabs, sameTarget(src), base),
-    view: src.view
+    // 'desktop' can only arrive here from an RDP tab, which returned above.
+    view: src.view === 'desktop' ? 'terminal' : src.view
   }
 }
 
@@ -1172,6 +1192,12 @@ export const useApp = create<AppState>((set, get) => ({
 
   splitPane: (tabId, dir, target) =>
     set((s) => {
+      // Refused for a remote desktop, and refused here rather than only in the
+      // viewbar that has no split buttons for one: Ctrl+\ reaches this through
+      // toggleSplit whatever is on screen, and an RDP tab renders RdpView
+      // instead of PaneGrid — so a second pane would be state that exists,
+      // counts toward MAX_PANES, and is never drawn.
+      if (s.tabs.find((t) => t.id === tabId)?.kind === 'rdp') return {}
       const tp = s.panes[tabId]
       if (!tp || tp.panes.length >= MAX_PANES) return {}
       const source = tp.panes.find((p) => p.id === tp.activePaneId) ?? tp.panes[0]
@@ -1254,6 +1280,7 @@ export const useApp = create<AppState>((set, get) => ({
   // another's updater applies both but discards the first's result from the
   // reference the outer merge is built on.
   toggleSplit: (tabId, dir) => {
+    if (get().tabs.find((t) => t.id === tabId)?.kind === 'rdp') return
     const tp = get().panes[tabId]
     if (!tp) return
     if (tp.panes.length === 1) {
@@ -1413,6 +1440,15 @@ export const useApp = create<AppState>((set, get) => ({
           // Direct by default. A server that silently rode a VPN nobody chose
           // would be a surprising thing to inherit from a bulk import.
           vpnProfileId: input.vpnProfileId ?? null,
+          // Both of these are optional fields the *editor* has always sent and
+          // this action has always dropped, because it builds the record field
+          // by field rather than spreading the input. So a server saved with
+          // "Files only" ticked came back without it, and the app opened a
+          // terminal against an account that has no shell — the exact failure
+          // `sftpOnly` exists to prevent. Editing an existing server worked,
+          // because `updateServer` spreads its patch; only creation lost them.
+          ...(input.sftpOnly === true ? { sftpOnly: true } : {}),
+          ...(input.rdp ? { rdp: input.rdp } : {}),
           demo: false
         }
       ]

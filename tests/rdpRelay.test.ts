@@ -369,6 +369,78 @@ describe('relay lifecycle', () => {
   })
 })
 
+describe('status reporting', () => {
+  it('does not stay stuck on error after a later session succeeds', async () => {
+    defineServer('srv-1', fake.port)
+
+    // Fail one handshake: right socket, wrong token.
+    const bad = await rdpMintTicket('srv-1')
+    const w1 = connectRelay(bad.ticket!.proxyUrl, bad.ticket!.token)
+    await new Promise((r) => w1.once('open', r))
+    w1.send(buildRequestPdu(bad.ticket!.destination, 'wrong', X224_REQUEST))
+    await firstReply(w1)
+    w1.close()
+    expect(rdpRelayStatus().error).toBeDefined()
+
+    // Then succeed. Reading `lastError` first made the state sticky: every
+    // later status said 'error' while a desktop was open and drawing.
+    const good = await rdpMintTicket('srv-1')
+    const w2 = connectRelay(good.ticket!.proxyUrl, good.ticket!.token)
+    await new Promise((r) => w2.once('open', r))
+    w2.send(buildRequestPdu(good.ticket!.destination, good.ticket!.token, X224_REQUEST))
+    await firstReply(w2)
+
+    expect(rdpRelayStatus().state).toBe('connected')
+    expect(rdpRelayStatus().error).toBeUndefined()
+    w2.close()
+  })
+})
+
+describe('destination matching', () => {
+  it('accepts a host that differs only in case', async () => {
+    // The client echoes the destination it was given, but "byte for byte" is
+    // an assumption about someone else's code; DNS is case-insensitive, so a
+    // client that normalised the case would otherwise fail to connect.
+    cachedServers.set('srv-case', {
+      id: 'srv-case',
+      workspaceId: 'ws-1',
+      name: 'Win Box',
+      host: 'LOCALHOST',
+      port: 22,
+      username: 'admin',
+      auth: 'password',
+      os: 'Windows',
+      route: [],
+      vpnProfileId: null,
+      rdp: { port: fake.port, nla: true }
+    })
+    const { ticket } = await rdpMintTicket('srv-case')
+    expect(ticket?.destination).toBe(`LOCALHOST:${fake.port}`)
+
+    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    await new Promise((r) => ws.once('open', r))
+    ws.send(buildRequestPdu(`localhost:${fake.port}`, ticket!.token, X224_REQUEST))
+
+    const reply = await firstReply(ws)
+    expect(reply.data).toBeDefined()
+    // It connected rather than being refused as a mismatch.
+    expect(fake.received).toHaveLength(1)
+    ws.close()
+  })
+
+  it('still refuses a different port on the same host', async () => {
+    defineServer('srv-1', fake.port)
+    const { ticket } = await rdpMintTicket('srv-1')
+    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    await new Promise((r) => ws.once('open', r))
+    ws.send(buildRequestPdu(`127.0.0.1:${fake.port + 1}`, ticket!.token, X224_REQUEST))
+
+    await firstReply(ws)
+    expect(fake.received).toHaveLength(0)
+    ws.close()
+  })
+})
+
 describe('the response PDU', () => {
   it('is the shape the client parses', async () => {
     // Round-trips the encoder against the decoder the relay uses on requests,

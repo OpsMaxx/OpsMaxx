@@ -49,6 +49,14 @@ const TICKET_TTL_MS = 30_000
 const HANDSHAKE_TIMEOUT_MS = 20_000
 /** How long the relay stays up with nothing on it before shutting down. */
 const IDLE_SHUTDOWN_MS = 60_000
+/**
+ * How much may sit unsent toward the renderer before the server side is paused.
+ *
+ * A full-screen 1080p update is a few hundred kilobytes, so this is roughly one
+ * frame in flight: large enough that ordinary bursts never pause, small enough
+ * that a stalled consumer is noticed in milliseconds rather than megabytes.
+ */
+const HIGH_WATER_BYTES = 4 * 1024 * 1024
 
 const tickets = new Map<string, Ticket>()
 
@@ -56,6 +64,8 @@ let http: HttpServer | null = null
 let wss: WebSocketServer | null = null
 let port: number | null = null
 let sessions = 0
+// Sockets past the token check but not yet relaying. See inUse().
+let connecting = 0
 let lastError: string | undefined
 let idleTimer: NodeJS.Timeout | null = null
 let statusTarget: WebContents | null = null
@@ -66,13 +76,13 @@ function emitStatus(): void {
 }
 
 export function rdpRelayStatus(): RdpRelayStatus {
-  const state: RdpRelayStatus['state'] = lastError
-    ? 'error'
-    : sessions > 0
-      ? 'connected'
-      : http
-        ? 'listening'
-        : 'idle'
+  // Liveness first, and `lastError` only when nothing is actually running.
+  // Reading the error first made the state sticky: one refused handshake — a
+  // wrong password, a host that was asleep — left every later status saying
+  // 'error' while a desktop was open and drawing, because nothing but a relay
+  // restart ever cleared it.
+  const state: RdpRelayStatus['state'] =
+    sessions > 0 ? 'connected' : http ? 'listening' : lastError ? 'error' : 'idle'
   return { state, sessions, port: port ?? undefined, error: lastError }
 }
 
@@ -81,10 +91,42 @@ export function setRdpStatusTarget(wc: WebContents | null): void {
   statusTarget = wc
 }
 
+/**
+ * Whether anything is using the relay: a live session, a minted ticket nobody
+ * has spent yet, or a connection between its WebSocket upgrade and the end of
+ * its TLS handshake.
+ *
+ * `connecting` is the reason this is a function rather than two counters read
+ * inline. A ticket is deleted the moment its socket opens, and `sessions` is
+ * not incremented until the handshake finishes — which can take up to
+ * HANDSHAKE_TIMEOUT_MS. For that whole window the relay looked idle, and an
+ * idle check landing inside it would have shut down the listener out from
+ * under a connection that was still being negotiated.
+ */
+function inUse(): boolean {
+  return sessions > 0 || connecting > 0 || tickets.size > 0
+}
+
+/**
+ * Re-arms on every check rather than firing once.
+ *
+ * The previous version scheduled a single timeout whose callback did nothing
+ * when the relay was busy — and did not schedule another. So any check that
+ * landed while a ticket was outstanding disarmed the shutdown permanently, and
+ * the listener stayed up for the rest of the session. A repeating check is the
+ * whole fix: "idle for the last interval" is the condition, and it has to be
+ * asked more than once.
+ */
 function scheduleIdleShutdown(): void {
   if (idleTimer) clearTimeout(idleTimer)
   idleTimer = setTimeout(() => {
-    if (sessions === 0 && tickets.size === 0) void stopRdpRelay()
+    idleTimer = null
+    if (!http) return
+    if (inUse()) {
+      scheduleIdleShutdown()
+      return
+    }
+    void stopRdpRelay()
   }, IDLE_SHUTDOWN_MS)
   idleTimer.unref()
 }
@@ -144,6 +186,7 @@ export async function stopRdpRelay(): Promise<void> {
   http = null
   port = null
   sessions = 0
+  connecting = 0
   // Closing the WebSocketServer terminates live sessions; that is the point of
   // an explicit stop, and quitting the app must not leave a listener behind.
   await new Promise<void>((resolve) => {
@@ -263,11 +306,37 @@ function handleConnection(ws: WebSocket, req: { url?: string }): void {
   clearTimeout(ticket.expires)
   tickets.delete(token)
 
+  // Counted from here, not from the start of openSession: the ticket is gone
+  // as of the line above, so between now and the handshake finishing nothing
+  // else records that this socket exists.
+  connecting++
+  let counted = true
+  const uncount = (): void => {
+    if (!counted) return
+    counted = false
+    connecting = Math.max(0, connecting - 1)
+  }
+
+  // A socket that opens and never sends a PDU would otherwise sit here for as
+  // long as the relay lives, holding the connecting count above zero and so
+  // keeping the listener from ever shutting down.
+  const firstMessage = setTimeout(() => {
+    uncount()
+    ws.close(1008, 'no request')
+    scheduleIdleShutdown()
+  }, HANDSHAKE_TIMEOUT_MS)
+  firstMessage.unref()
+
   ws.once('message', (data: Buffer) => {
-    void openSession(ws, token, ticket.destination, Buffer.from(data))
+    clearTimeout(firstMessage)
+    void openSession(ws, token, ticket.destination, Buffer.from(data)).finally(uncount)
+  })
+  ws.on('close', () => {
+    clearTimeout(firstMessage)
+    uncount()
   })
   ws.on('error', () => {
-    /* the close handler in relay() does the cleanup */
+    /* the close handler above and the one in relay() do the cleanup */
   })
 }
 
@@ -285,11 +354,19 @@ async function openSession(
     // is the check that matters, because the PDU is what names a destination —
     // authenticating only the socket would leave the request itself unbound.
     if (request.proxyAuth !== token) throw new Error('proxy_auth does not match the ticket')
-    if (request.destination !== allowedDestination) {
+
+    // Compared as a parsed host and port, not as the two strings. The client
+    // echoes back the destination it was given, but "echoes it byte for byte"
+    // is an assumption about someone else's code, and the cost of it being
+    // wrong is a feature that fails to connect for anyone whose hostname the
+    // client happens to normalise. Host casing is ignored because DNS ignores
+    // it; everything else must match exactly.
+    const wanted = parseDestination(allowedDestination)
+    const asked = parseDestination(request.destination)
+    if (asked.host.toLowerCase() !== wanted.host.toLowerCase() || asked.port !== wanted.port) {
       throw new Error('destination does not match the ticket')
     }
-
-    const { host, port: target } = parseDestination(request.destination)
+    const { host, port: target } = wanted
     const handshake = await performHandshake(host, target, request.x224)
     tlsSocket = handshake.tlsSocket
 
@@ -402,14 +479,39 @@ function collectChain(peerCert: DetailedPeerCertificate | null): Buffer[] {
 
 function relay(ws: WebSocket, tlsSocket: TLSSocket): void {
   sessions++
+  // A session that reached this point supersedes whatever went wrong before it.
+  lastError = undefined
   if (idleTimer) clearTimeout(idleTimer)
   emitStatus()
 
+  // Both directions apply backpressure. A desktop under load produces frames
+  // faster than a busy renderer drains them, and `ws.send` buffers without
+  // bound — so an unpaused pipe turns a slow consumer on either side into main
+  // process memory growth for as long as the session lasts.
   tlsSocket.on('data', (chunk: Buffer) => {
-    if (ws.readyState === ws.OPEN) ws.send(chunk)
+    if (ws.readyState !== ws.OPEN) return
+    ws.send(chunk)
+    if (ws.bufferedAmount > HIGH_WATER_BYTES) {
+      tlsSocket.pause()
+      // `bufferedAmount` is a poll, not an event: ws offers no drain signal for
+      // a server socket, so the only way to notice it has emptied is to look.
+      const resume = setInterval(() => {
+        if (ws.readyState !== ws.OPEN || ws.bufferedAmount <= HIGH_WATER_BYTES) {
+          clearInterval(resume)
+          if (!tlsSocket.destroyed) tlsSocket.resume()
+        }
+      }, 20)
+      resume.unref()
+    }
   })
   ws.on('message', (chunk: Buffer) => {
-    if (!tlsSocket.destroyed) tlsSocket.write(chunk)
+    if (tlsSocket.destroyed) return
+    // The socket's own drain event is authoritative in this direction, so
+    // pausing the WebSocket until it fires is exact rather than sampled.
+    if (!tlsSocket.write(chunk)) {
+      ws.pause()
+      tlsSocket.once('drain', () => ws.resume())
+    }
   })
 
   let closed = false

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { KeyRound, Monitor, RotateCw } from 'lucide-react'
 import type { Server } from '../../types'
 import { clsx } from '../../lib/format'
+import { bridgeHas } from '../../lib/bridge'
 
 // A remote desktop, drawn by the IronRDP WebAssembly client into a canvas
 // owned by the <iron-remote-desktop> web component.
@@ -36,6 +37,31 @@ interface UserInteraction {
   resize(width: number, height: number, scale?: number): void
 }
 
+/**
+ * The size to ask the server for, from the space the pane actually has.
+ *
+ * Without this the component's own canvas default — 800x600 — is what gets
+ * negotiated, and `scale="fit"` then stretches that over whatever the pane is.
+ * The desktop is legible but soft, and every dialog is laid out for a screen
+ * nobody is looking at.
+ *
+ * Widths are rounded down to a multiple of 4: several RDP codecs encode in
+ * 4-pixel tiles, and a width that is not a multiple of one is a well-worn
+ * source of a green or torn right-hand column.
+ */
+function desktopSizeOf(el: HTMLElement): { width: number; height: number } {
+  const rect = el.getBoundingClientRect()
+  const clamp = (v: number, lo: number, hi: number): number =>
+    Math.max(lo, Math.min(hi, Math.floor(v)))
+  // The floor is what a pane that has not been laid out yet collapses to; the
+  // ceiling keeps a maximised window on a very large display from asking for a
+  // desktop the server will refuse.
+  return {
+    width: clamp(rect.width, 640, 4096) & ~3,
+    height: clamp(rect.height, 480, 2160) & ~3
+  }
+}
+
 interface ConfigBuilder {
   withUsername(v: string): ConfigBuilder
   withPassword(v: string): ConfigBuilder
@@ -44,6 +70,7 @@ interface ConfigBuilder {
   withServerDomain(v: string): ConfigBuilder
   withAuthToken(v: string): ConfigBuilder
   withExtension(ext: unknown): ConfigBuilder
+  withDesktopSize(size: { width: number; height: number }): ConfigBuilder
   build(): unknown
 }
 
@@ -115,6 +142,7 @@ export function RdpView({
 
     // Set before the first await so a teardown during module loading is seen.
     let disposed = false
+    let cleanupResize: (() => void) | null = null
     setPhase('loading')
     setError(null)
 
@@ -152,9 +180,21 @@ export function RdpView({
         uiRef.current = ui
 
         setPhase('connecting')
+        // Guarded rather than optional-chained: under `electron-vite dev` the
+        // renderer hot-reloads while the process keeps the preload bundle it
+        // booted with, so a newly added namespace is undefined for the rest of
+        // that session. Reaching through it throws "cannot read properties of
+        // undefined", which describes the symptom and not the fix.
+        if (!bridgeHas(window.opsmaxx?.rdp as Record<string, unknown> | undefined, 'ticket')) {
+          setError(
+            'The remote desktop bridge is not available in this session. Restart the app to rebuild the preload script.'
+          )
+          setPhase('failed')
+          return
+        }
         // Main resolves the host, the account and the credential from the saved
         // record; this passes a server id and gets back what to connect with.
-        const result = await window.opsmaxx?.rdp.ticket(server.id)
+        const result = await window.opsmaxx.rdp.ticket(server.id)
         if (disposed) return
         if (!result?.ok || !result.ticket) {
           setError(result?.error ?? 'The remote desktop bridge is unavailable.')
@@ -171,6 +211,7 @@ export function RdpView({
           .withProxyAddress(ticket.proxyUrl)
           .withAuthToken(ticket.token)
           .withServerDomain(ticket.domain ?? '')
+          .withDesktopSize(desktopSizeOf(host))
           .withExtension(backend.enableCredssp(ticket.nla))
 
         // Only when the target actually needs Kerberos: the renderer has no
@@ -182,6 +223,31 @@ export function RdpView({
         await ui.connect(config.build())
         if (disposed) return
         setPhase('connected')
+
+        // Follow the pane from here on. Debounced because a window drag emits a
+        // resize per frame and each one is a round trip to the server, which
+        // reallocates its framebuffer; a desktop that renegotiated sixty times
+        // a second would spend the drag redrawing rather than resizing.
+        let debounce: ReturnType<typeof setTimeout> | undefined
+        const observer = new ResizeObserver(() => {
+          clearTimeout(debounce)
+          debounce = setTimeout(() => {
+            if (disposed) return
+            const next = desktopSizeOf(host)
+            try {
+              ui.resize(next.width, next.height)
+            } catch {
+              // A session that died between the observation and the call has
+              // already surfaced its own failure; resizing it is not a second
+              // thing to report.
+            }
+          }, 250)
+        })
+        observer.observe(host)
+        cleanupResize = () => {
+          clearTimeout(debounce)
+          observer.disconnect()
+        }
       } catch (err) {
         if (disposed) return
         setError(describeError(err))
@@ -193,6 +259,7 @@ export function RdpView({
 
     return () => {
       disposed = true
+      cleanupResize?.()
       try {
         uiRef.current?.shutdown()
       } catch {
