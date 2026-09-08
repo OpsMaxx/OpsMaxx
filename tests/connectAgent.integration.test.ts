@@ -5,6 +5,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { hasBuiltCli, warnIfUnbuilt } from './fixtures/builtCli'
 
 import { refreshMcpDataCache, listCachedWorkspaces } from '../src/main/services/mcpDataCache'
 import { setAssignment, listAssignments, listGroups, resetPolicyCacheForTests } from '../src/main/services/policyStore'
@@ -93,6 +94,8 @@ async function callText(client: Client, name: string): Promise<string> {
   return res.content.map((c) => c.text).join('\n')
 }
 
+warnIfUnbuilt()
+
 describe('connect flow', () => {
   it('a session created without any assignment cannot see a server', async () => {
     // The pre-button state: policy seeded, assignments empty. This is the
@@ -153,7 +156,7 @@ describe('connect flow', () => {
     }
   })
 
-  it('the Codex config it writes is a usable MCP server', async () => {
+  it.skipIf(!hasBuiltCli)('the Codex config it writes is a usable MCP server', async () => {
     const file = join(dir, 'config.toml')
     const token = newSession('Codex', 'grp-read-only', 'Read Only')
     expect(writeCodexConfigTo(file, token, PORT).ok).toBe(true)
@@ -178,7 +181,7 @@ describe('connect flow', () => {
     }
   })
 
-  it('the Claude Desktop config it writes is a usable MCP server', async () => {
+  it.skipIf(!hasBuiltCli)('the Claude Desktop config it writes is a usable MCP server', async () => {
     const file = join(dir, 'claude_desktop_config.json')
     const token = newSession('Claude Desktop', 'grp-read-only', 'Read Only')
     const result = writeClaudeDesktopConfigTo(file, token, PORT)

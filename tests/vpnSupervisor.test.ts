@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { rmTemp } from './fixtures/rmTemp'
 import { PassThrough } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
@@ -112,9 +113,9 @@ function baseSpec(over: Partial<SupervisedSpec> = {}): SupervisedSpec {
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'sp-sup-'))
 })
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers()
-  rmSync(root, { recursive: true, force: true })
+  await rmTemp(root)
 })
 
 describe('backoff', () => {
@@ -767,8 +768,8 @@ describe('a second, non-VPN consumer', () => {
       expect(killed).toEqual([])
       expect(existsSync(join(vpnRoot, 'tunnel-1.pid'))).toBe(true)
     } finally {
-      rmSync(vpnRoot, { recursive: true, force: true })
-      rmSync(procRoot, { recursive: true, force: true })
+      await rmTemp(vpnRoot)
+      await rmTemp(procRoot)
     }
   })
 })

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { join } from 'node:path'
+import { hasBuiltCli, warnIfUnbuilt } from './fixtures/builtCli'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
@@ -42,6 +43,8 @@ async function postJson(path: string, body: unknown): Promise<Record<string, unk
   return (await res.json()) as Record<string, unknown>
 }
 
+warnIfUnbuilt()
+
 describe('CLI pairing (integration)', () => {
   beforeAll(async () => {
     resetMcpAuthForTests()
@@ -70,7 +73,7 @@ describe('CLI pairing (integration)', () => {
     expect(codes[0]).toMatch(/^\d{6}$/)
   })
 
-  it('rejects the wrong code, then accepts the right one and hands back a working token', async () => {
+  it.skipIf(!hasBuiltCli)('rejects the wrong code, then accepts the right one and hands back a working token', async () => {
     let code = ''
     const off = onCliPairingEvent((e: CliPairingEvent) => {
       if (e.type === 'created') code = e.request.code

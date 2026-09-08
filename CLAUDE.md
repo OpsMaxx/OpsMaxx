@@ -45,6 +45,15 @@ declares `assets.directory` and `not_found_handling: "404-page"`. Without that f
 `wrangler deploy` tries an interactive `astro add cloudflare` and every deploy fails while
 the build still reports success — check the Cloudflare dashboard, not just `git push`.
 
+## Running the tests
+
+`npm run build` first, or three integration tests skip: `cliPairing` and
+`connectAgent` spawn `out/cli/index.js` as a real MCP server, and it is a build
+artifact. CI builds before it tests, so they only skip locally, and they say so
+when they do. A fresh git worktree also has no `node_modules` of its own —
+dependencies live at the main checkout — so anything resolving a package should
+ask the resolver rather than assume a relative path.
+
 ## Traps that have already cost time
 
 - **`tests/releaseWorkflow.test.ts` ratchets the release job.** Every inline `run` step

@@ -88,7 +88,15 @@ describe('@lydell/node-pty spawns a real shell', () => {
   it('still ships the flow-control options localPty relies on', async () => {
     await loadPty()
     const { readdir, readFile } = await import('node:fs/promises')
-    const scope = new URL('../node_modules/@lydell/', import.meta.url)
+    const { createRequire } = await import('node:module')
+    const { pathToFileURL } = await import('node:url')
+    // Ask the resolver where the package actually is rather than assuming a
+    // `node_modules` next to this file. In a git worktree there isn't one —
+    // dependencies are installed once at the main checkout — so the hardcoded
+    // path made this fail with ENOENT on every worktree branch, which reads
+    // like a broken dependency rather than a test looking in the wrong place.
+    const entry = pathToFileURL(createRequire(import.meta.url).resolve('@lydell/node-pty'))
+    const scope = new URL('../', entry)
     const siblings = (await readdir(scope)).filter((n) => n.startsWith('node-pty-'))
     expect(siblings.length).toBeGreaterThan(0)
 
