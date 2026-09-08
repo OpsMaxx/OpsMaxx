@@ -466,6 +466,91 @@ export function parseDockerOutput(output: string, exitCode: number | null): Dock
 // generated `k8s_POD_<pod>_<ns>_<uid>_<n>` names get long.
 const REF_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,254}$/
 
+/**
+ * `docker images`, and deliberately NOT `docker system df`.
+ *
+ * The two answer overlapping questions and only one of them belongs on a
+ * narrow read. `system df` reports what every image, container, volume and
+ * build cache is COSTING — an account of a host's disk, which is a different
+ * disclosure with a different consent story, and the reason the disk builders
+ * are kept off the agent bridge. This asks only what images exist, their tag,
+ * their id and their size, which is what "what is deployed here" needs.
+ *
+ * `--no-trunc` on the id for the same reason the container list uses it: a
+ * truncated id is ambiguous across a large registry and cannot be handed back
+ * to another command.
+ */
+export function buildDockerImagesCommand(opts: { sudo?: boolean } = {}): string {
+  const run = opts.sudo ? 'sudo -n "$SP_BIN"' : '"$SP_BIN"'
+  return [
+    resolveBinary('docker', [], ['podman']),
+    `echo "${DOCKER_MARKERS.images}"`,
+    // `--digests` is not asked for. It doubles the width of every row and the
+    // question here is what is deployed, not what it hashes to.
+    `${run} images --all --no-trunc --format "{{.Repository}}${DOCKER_SEP}{{.Tag}}${DOCKER_SEP}{{.ID}}${DOCKER_SEP}{{.Size}}${DOCKER_SEP}{{.CreatedSince}}" 2>&1`
+  ].join('; ')
+}
+
+export interface DockerImage {
+  /** `repository:tag`, or `<none>:<none>` for a dangling layer. */
+  repository: string
+  tag: string
+  id: string
+  /** As docker prints it — "1.2GB". Not parsed to bytes: the runtimes disagree
+   *  about units and a wrong number is worse than the runtime's own string. */
+  size: string
+  created: string
+  /** A layer left behind by a rebuild: no repository and no tag. */
+  dangling: boolean
+}
+
+export type DockerImagesProbe =
+  | { ok: true; images: DockerImage[]; usedSudo?: boolean }
+  // The same failure vocabulary the rest of this module uses, so one help text
+  // and one set of UI strings covers every docker read rather than this one
+  // inventing a second set of words for the same three problems.
+  | { ok: false; reason: DockerFailure; detail?: string }
+
+export function parseDockerImages(output: string, exitCode: number | null): DockerImagesProbe {
+  const at = output.indexOf(DOCKER_MARKERS.images)
+  // No marker means the shell never reached the images command — docker is
+  // missing, or the transport truncated. The head is then the diagnosis.
+  if (at === -1) {
+    const head = output.trim()
+    if (/permission denied|cannot connect to the docker daemon/i.test(head)) {
+      return { ok: false, reason: 'permission-denied', detail: head.slice(0, 400) }
+    }
+    return { ok: false, reason: 'not-installed', detail: head.slice(0, 400) || undefined }
+  }
+  const body = output.slice(at + DOCKER_MARKERS.images.length)
+  if (/permission denied|cannot connect to the docker daemon/i.test(body)) {
+    return { ok: false, reason: 'permission-denied', detail: body.trim().slice(0, 400) }
+  }
+  // A non-zero exit with no rows is a failure; a non-zero exit with rows is a
+  // runtime that warned on stderr and still answered, which is common enough
+  // that treating it as failure would lose the answer.
+  const images: DockerImage[] = []
+  for (const line of body.split('\n')) {
+    const row = line.trim()
+    if (!row) continue
+    const parts = row.split(DOCKER_SEP)
+    if (parts.length < 5) continue
+    const [repository, tag, id, size, created] = parts
+    images.push({
+      repository,
+      tag,
+      id,
+      size,
+      created,
+      dangling: repository === '<none>' && tag === '<none>'
+    })
+  }
+  if (images.length === 0 && exitCode !== null && exitCode !== 0) {
+    return { ok: false, reason: 'unknown', detail: body.trim().slice(0, 400) || undefined }
+  }
+  return { ok: true, images }
+}
+
 export function validateContainerRef(ref: string): boolean {
   return REF_RE.test(ref.trim())
 }
@@ -647,6 +732,7 @@ export const DOCKER_MARKERS = {
   inspect: '===SHELLPILOT-INSPECT===',
   health: '===SHELLPILOT-HEALTH===',
   stats: '===SHELLPILOT-STATS===',
+  images: '===SHELLPILOT-IMAGES===',
   act: '===SHELLPILOT-ACT===',
   networks: '===SHELLPILOT-NETWORKS===',
   netAttach: '===SHELLPILOT-NETATTACH===',

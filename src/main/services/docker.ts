@@ -3,6 +3,7 @@ import type {
   DockerActionResult,
   DockerDiskDetailProbe,
   DockerDiskProbe,
+  DockerImagesProbe,
   DockerFailure,
   DockerInspectProbe,
   DockerProbe,
@@ -22,6 +23,7 @@ import {
   buildDockerDiskCommand,
   buildDockerDiskDetailCommand,
   buildDockerInspectCommand,
+  buildDockerImagesCommand,
   buildDockerListCommand,
   buildDockerStatsCommand,
   parseDockerActionOutput,
@@ -30,6 +32,7 @@ import {
   parseDockerHealthLogOutput,
   parseDockerNetworkOutput,
   parseDockerInspectOutput,
+  parseDockerImages,
   parseDockerOutput,
   parseDockerStatsOutput,
   validateImageRef
@@ -245,6 +248,30 @@ export class DockerReader {
    * than showing four zeroes — a host reported as using no disk is worse than
    * one reported as unreadable.
    */
+  /**
+   * What images exist on the host.
+   *
+   * Same failover as the list: the unprivileged read first, root only if it is
+   * refused, and the caller told which happened. Deliberately not `disk()` —
+   * that reports what everything COSTS, which is an account of the host's disk
+   * rather than of what is deployed on it.
+   */
+  async images(cfg: unknown, opts: DockerListOptions = {}): Promise<DockerImagesProbe> {
+    try {
+      const { result, usedSudo } = await this.readWithFailover<DockerImagesProbe>(
+        cfg,
+        (sudo) => buildDockerImagesCommand({ sudo }),
+        parseDockerImages,
+        (detail) => ({ ok: false, reason: 'unknown', detail }),
+        opts,
+        READ_TIMEOUT_MS
+      )
+      return result.ok && usedSudo ? { ...result, usedSudo: true } : result
+    } catch (e) {
+      return { ok: false, reason: 'unknown', detail: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
   async disk(cfg: unknown, opts: DockerListOptions = {}): Promise<DockerDiskProbe> {
     try {
       const { result, usedSudo } = await this.readWithFailover<DockerDiskProbe>(

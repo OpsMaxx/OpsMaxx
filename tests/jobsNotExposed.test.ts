@@ -136,7 +136,16 @@ const ALLOWED_TOOLS = [
   // The same container read as list_containers, grouped. No second command and
   // therefore no second thing that can be true of the host at a different
   // moment; on the `containers` capability for the same reason.
-  'compose_status'
+  'compose_status',
+  // What images EXIST, on the `containers` capability. Its own narrow builder
+  // rather than the disk read: `system df` is an account of what everything
+  // costs, which stays off this bridge.
+  'list_images',
+  // ONE named server's drift, on `fleetRead` but checked per server. The
+  // fleet-wide "which hosts are behind" question is still absent and has no
+  // tool; see the drift block in the forbidden list below for why the shape
+  // matters more than the subject here.
+  'get_config_drift'
 ]
 
 // A hint, not the gate — the whitelist above has already failed by the time
@@ -871,8 +880,24 @@ describe('what must NOT be able to reach this', () => {
       'shared/drift',
       'services/drift',
       'fleet:drift',
-      'driftFor',
-      'get_config_drift',
+      // `driftFor` and `get_config_drift` came off this list in their own
+      // commit, and the argument above is why the tool that replaced them
+      // looks the way it does.
+      //
+      // What that argument objects to is the FLEET-WIDE question. "Which of
+      // these forty hosts has an nginx.conf that does not match the other
+      // thirty-seven" sorts an estate into the machines that are behind and
+      // the machines that are not, which is a ranked list of the weakest ones,
+      // kept permanently fresh. That is still not available and there is no
+      // tool that answers it.
+      //
+      // Asking about ONE NAMED HOST is a different question, and the same one
+      // `get_host_facts` already answers in a different register: has this box
+      // changed since it was last reviewed. So the tool takes a single
+      // serverName, checks the capability against THAT server rather than the
+      // workspace, and the injected reader has no whole-fleet accessor on it —
+      // a sweep cannot be written against that interface without widening it
+      // here first, in a diff someone sees.
       // The API credential proxy — roadmap item 7. Two powers, and this file's
       // argument covers both, one turn past where `rules` leaves it.
       //
