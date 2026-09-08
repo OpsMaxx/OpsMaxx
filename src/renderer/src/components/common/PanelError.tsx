@@ -76,3 +76,59 @@ export function PanelError({
     </div>
   )
 }
+
+/**
+ * Hosts a WRITE did not reach, because their credential is in a locked vault.
+ *
+ * ===========================================================================
+ * WHY THIS DOES NOT RETRY, WHEN PanelError ABOVE DOES
+ * ===========================================================================
+ *
+ * A read is idempotent and a write is not. `withVaultUnlock` retries the same
+ * closure once, which is exactly right for "read the containers" and exactly
+ * wrong for "run this command on fifteen servers": a broadcast, a job and a key
+ * revoke each fail PER HOST, so a run where twelve hosts succeeded and three
+ * hit a locked vault would, on a blanket retry, run the command a second time
+ * on the twelve that already did it. That is a duplicate execution nobody
+ * asked for, on hosts nobody was told about.
+ *
+ * The safety argument that makes the READ retry sound does not extend here
+ * either. A locked vault throws inside `resolveChainSecrets`, which is
+ * evaluated as an argument before `sshExec` is entered, so a host that failed
+ * this way certainly ran nothing — but that is a statement about the hosts that
+ * FAILED, not about the ones that succeeded beside them.
+ *
+ * There is a second reason, and it is the stronger one. Every write in this app
+ * is authorised per run, by a human, at the moment of running: `planJob` sizes
+ * the confirmation by risk and blast radius, `jobApprovalFor` mints the record
+ * when the dialog is answered, and `verifyApproval` re-derives and compares it
+ * in main. Re-running after an unlock would be a second execution off one
+ * confirmation. So this offers the unlock and stops there; the operator presses
+ * Run again, and that press goes through the whole approval path exactly as the
+ * first one did.
+ */
+export function VaultLockedHosts({
+  names,
+  reason
+}: {
+  /** Hosts skipped this way. Empty renders nothing. */
+  names: string[]
+  reason: string
+}): React.JSX.Element | null {
+  if (names.length === 0) return null
+  const list = names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`
+  return (
+    <div className="panel-note is-watch">
+      <span className="grow">
+        {/* "did not run" rather than "failed": nothing was attempted on these
+            hosts, and an operator deciding what to do next needs that
+            distinction more than they need the word failed. */}
+        {list} did not run — {names.length === 1 ? 'its' : 'their'} credential is in the vault, and
+        the vault is locked. Unlock it and run again.
+      </span>
+      {/* No onUnlocked, deliberately. See the note above: a write gets a fresh
+          confirmation, not an automatic second execution. */}
+      <UnlockVaultButton reason={reason} />
+    </div>
+  )
+}

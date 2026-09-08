@@ -16,6 +16,8 @@ import {
 } from '../../../../shared/access'
 import type { Server } from '../../types'
 import { PanelShell } from '../monitor/PanelShell'
+import { VaultLockedHosts } from '../common/PanelError'
+import { isVaultLocked } from '../../lib/withVaultUnlock'
 
 // Revoking an SSH key across the estate — the write half of what used to be one
 // Monitoring tab.
@@ -231,6 +233,12 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
     }
   }
 
+  // `notStaged` is the bucket for "the write did not land and nothing was
+  // changed", which is exactly where a locked vault puts a host.
+  const vaultLockedHosts = (result?.notStaged ?? [])
+    .filter((f) => isVaultLocked(f.detail))
+    .map((f) => f.serverName)
+
   const run = async (): Promise<void> => {
     if (!pending) return
     setRunning(true)
@@ -371,6 +379,14 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
               <b>Nothing was changed.</b> {problem}
             </div>
           )}
+
+          {/* Offered, never taken automatically: revoking a key is a write with
+              its own confirmed command, and main re-derives and refuses if the
+              text differs. See the note on VaultLockedHosts. */}
+          <VaultLockedHosts
+            names={vaultLockedHosts}
+            reason="Revoking a key on these servers needs their stored credentials."
+          />
 
           {pending !== null && (
             <div className="s-desc" data-testid="revoke-confirm">

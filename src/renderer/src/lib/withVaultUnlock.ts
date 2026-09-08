@@ -26,17 +26,50 @@ const hasMarker = (v: unknown): boolean => typeof v === 'string' && v.includes(V
  * user reading advice with no way to act on it.
  */
 export function isVaultLocked(err: unknown): boolean {
-  if (err === null || err === undefined) return false
-  if (typeof err === 'object') {
-    // `errorCode` is the shared result shape; `code` is what a VpnError carries
-    // when one survives structured-cloning intact.
-    const o = err as { errorCode?: unknown; code?: unknown; message?: unknown; error?: unknown }
-    if (o.errorCode === VAULT_LOCKED_CODE || o.code === VAULT_LOCKED_CODE) return true
-    // An Error stringifies usefully, a plain object does not ("[object
-    // Object]"), so read the two fields either shape puts the text in.
-    return hasMarker(o.message) || hasMarker(o.error)
-  }
-  return hasMarker(String(err))
+  return scan(err, 0)
+}
+
+/**
+ * How deep to look, and how much of it.
+ *
+ * A locked vault does NOT always arrive as a rejection, and assuming it did
+ * was a real bug: the monitor's readers each catch everything and return a
+ * probe, so the marker turns up as
+ *
+ *   { ok: false, reason: 'unknown', detail: 'OPSMAXX_VAULT_LOCKED: …' }   docker, k8s
+ *   [{ serverName, reading: { detail: 'OPSMAXX_VAULT_LOCKED: …' } }, …]   services, cron
+ *
+ * and never as `message` or `error` at the top level. Checking only those two
+ * fields meant every one of those panels silently declined to offer the
+ * unlock, which is exactly the failure this module exists to prevent.
+ *
+ * So the shapes are not enumerated — there are too many and a new reader would
+ * quietly miss out. The marker is scanned for instead, bounded so a probe
+ * carrying two hundred containers cannot turn a failure check into real work.
+ */
+const MAX_DEPTH = 4
+const MAX_NODES = 500
+
+function scan(v: unknown, depth: number, budget = { n: MAX_NODES }): boolean {
+  if (v === null || v === undefined || depth > MAX_DEPTH) return false
+  if (budget.n-- <= 0) return false
+
+  if (typeof v === 'string') return hasMarker(v)
+  if (typeof v !== 'object') return false
+
+  if (Array.isArray(v)) return v.some((x) => scan(x, depth + 1, budget))
+
+  // `errorCode` is the shared result shape; `code` is what a VpnError carries
+  // when one survives structured-cloning intact. Both are exact values rather
+  // than marker text, so they are checked before the generic walk.
+  const o = v as { errorCode?: unknown; code?: unknown }
+  if (o.errorCode === VAULT_LOCKED_CODE || o.code === VAULT_LOCKED_CODE) return true
+
+  // An Error's own `message` is not an enumerable property, so a plain
+  // Object.values walk misses it entirely.
+  if (v instanceof Error) return hasMarker(v.message)
+
+  return Object.values(v).some((x) => scan(x, depth + 1, budget))
 }
 
 /**

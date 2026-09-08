@@ -10,6 +10,7 @@ import {
 } from '../../../../shared/userUnits'
 import type { Server } from '../../types'
 import { PanelShell } from '../monitor/PanelShell'
+import { withVaultUnlock } from '../../lib/withVaultUnlock'
 
 // Installing a `systemd --user` unit — the write half of what used to be one
 // Monitoring tab.
@@ -86,7 +87,15 @@ export function UnitInstallPanel({ servers }: { servers: Server[] }): React.JSX.
     }
     setBusy(true)
     try {
-      const res = await w({ cfg: target }, draft)
+      // Retried after an unlock, unlike the multi-host writers. This is ONE
+      // server, the confirmation above named it and the unit by name, and a
+      // locked vault fails in resolveChainSecrets before sshExec is entered —
+      // so nothing was written and the second attempt is the first one
+      // finishing, not a second install.
+      const res = await withVaultUnlock(
+        `Installing ${draft.name} on ${target.name} needs that server's stored credential.`,
+        () => w({ cfg: target }, draft)
+      )
       setResult({ ok: res.ok === true, text: res.output ?? res.error ?? 'No answer.' })
     } finally {
       setBusy(false)
