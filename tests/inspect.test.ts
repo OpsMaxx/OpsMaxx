@@ -141,16 +141,15 @@ describe("certificate hashing", () => {
   // certificate minted here would prove only that the code agrees with itself,
   // and the values below are what a user will compare against Keychain Access.
   const PEM = `-----BEGIN CERTIFICATE-----
-MIIBrTCCAVOgAwIBAgIUKS5oeaJq+q+nyudM1JqU57eFYG8wCgYIKoZIzj0EAwIw
-LDEqMCgGA1UEAwwhU2hlbGxQaWxvdCBUcmFmZmljIEluc3BlY3RvciBUZXN0MB4X
-DTI2MDkwNzE0MjkzOFoXDTM2MDkwNDE0MjkzOFowLDEqMCgGA1UEAwwhU2hlbGxQ
-aWxvdCBUcmFmZmljIEluc3BlY3RvciBUZXN0MFkwEwYHKoZIzj0CAQYIKoZIzj0D
-AQcDQgAEX+RLhM+VamMr0zWTvCfDyGn5h2RC8kzeb8OjjV1VppxACpBxgAJ+kSsk
-xjsns9SqgrOUhVU75PMlOCUD44C1VaNTMFEwHQYDVR0OBBYEFHnhz0OabrXzmn0U
-ABahrJsm+R6ZMB8GA1UdIwQYMBaAFHnhz0OabrXzmn0UABahrJsm+R6ZMA8GA1Ud
-EwEB/wQFMAMBAf8wCgYIKoZIzj0EAwIDSAAwRQIgcoGraSCKUpx6wgAZq/yiLCid
-HERA280aziJnTyFfAZACIQCg62rWQl7p8jJU1m0CzD+YKbXbtxPZtuTi8otNu1Y3
-8A==
+MIIBqDCCAU2gAwIBAgIUdON1HcbEwmYwlgBEFD9ZaPyoWnYwCgYIKoZIzj0EAwIw
+KTEnMCUGA1UEAwweT3BzTWF4eCBUcmFmZmljIEluc3BlY3RvciBUZXN0MB4XDTI2
+MDkwODIwMDkzNFoXDTM2MDkwNTIwMDkzNFowKTEnMCUGA1UEAwweT3BzTWF4eCBU
+cmFmZmljIEluc3BlY3RvciBUZXN0MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE
+yKlJL3+U/OnnUwo24giFmqLXpglOoWzi8GArutPTDa3o5DfidJVziWfEF7IgOeof
+xhMrOw+0tj8hkDdosk2KPaNTMFEwHQYDVR0OBBYEFAvp/agCrPDL77e8fQLfPiOJ
+TqlEMB8GA1UdIwQYMBaAFAvp/agCrPDL77e8fQLfPiOJTqlEMA8GA1UdEwEB/wQF
+MAMBAf8wCgYIKoZIzj0EAwIDSQAwRgIhAP8S+f1fsGDR0aJmhNBY4q7+2CxbQWHf
+aWc5wtPhj1rHAiEAmZTvcdHyhzPQCgHVKLzgcdB4swAQgoQZbkKa8LgVRJo=
 -----END CERTIFICATE-----`;
 
   it("extracts DER from PEM regardless of surrounding whitespace", () => {
@@ -180,9 +179,9 @@ HERA280aziJnTyFfAZACIQCg62rWQl7p8jJU1m0CzD+YKbXbtxPZtuTi8otNu1Y3
     // Pinned. A change here means the DER extraction changed, which would
     // silently break every trust-store lookup on every platform.
     expect(sha256Hex(PEM)).toBe(
-      "ef8634a33e070a330120e3b58ab04987f9bf1664346f8c9649d31f022d83b7d5",
+      "d64faa004652e428155452f733658fda5fe7cc59ac0942018e5b72075b018bdf",
     );
-    expect(sha1Hex(PEM)).toBe("9def34bb84c1898a788bb482127173dccd588186");
+    expect(sha1Hex(PEM)).toBe("68f3caf5446f57e07c86d11be745ea173f3445c4");
   });
 });
 
