@@ -27,6 +27,9 @@ export function MonitorView({
   const m = useServerMetrics(server, visible && server.status !== 'offline')
   const real = server.demo === false
 
+  // Worst first: the reason to look at this list is to find the full one.
+  const mounts = [...(m.host?.mounts ?? [])].sort((a, b) => b.usedPercent - a.usedPercent)
+
   const info: [string, string][] = m.host
     ? [
         ['Hostname', m.host.hostname],
@@ -44,7 +47,10 @@ export function MonitorView({
           `${bytes(m.host.memUsed)}${m.host.memPct === null ? '' : ` (${m.host.memPct.toFixed(0)}%)`}`
         ],
         [
-          'Used disk',
+          // Says WHICH filesystem. The headline has always been the root one —
+          // every stored sample means that — and on a host whose data volume
+          // is the full one, an unlabelled "57%" reads as the whole machine.
+          'Used disk (/)',
           `${bytes(m.host.diskUsed)}${m.host.diskPct === null ? '' : ` (${m.host.diskPct.toFixed(0)}%)`}`
         ],
         ['Server / IP', server.host]
@@ -150,6 +156,34 @@ export function MonitorView({
           <Sparkline data={m.rxHistory} color="var(--info)" height={40} />
         </div>
       </div>
+
+      {/* Every other filesystem, because the cards above are the root one and
+          a server's full disk is very often not root. A media box with `/` at
+          57% and `/data` at 95% showed nothing but the 57 — the number that
+          says everything is fine. Percentages are df's own, taken from its
+          Capacity column rather than recomputed. */}
+      {mounts.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="sidebar-title" style={{ marginBottom: 12 }}>
+            Filesystems
+          </div>
+          <div className="col" style={{ gap: 6 }}>
+            {mounts.map((mt) => (
+              <div className="row" key={mt.mount} style={{ alignItems: 'center', gap: 'var(--sp-3)' }}>
+                <span className="mono ellipsis" style={{ flex: 1, minWidth: 0 }} title={mt.device}>
+                  {mt.mount}
+                </span>
+                <span className="faint" style={{ fontSize: 11 }}>
+                  {bytes(mt.usedKb * 1024)} of {bytes(mt.totalKb * 1024)}
+                </span>
+                <span className={clsx('chip', mt.usedPercent >= 90 && 'danger', mt.usedPercent >= 75 && mt.usedPercent < 90 && 'warn')}>
+                  {mt.usedPercent}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="card">
         <div className="sidebar-title" style={{ marginBottom: 12 }}>

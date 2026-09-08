@@ -1,3 +1,4 @@
+import { formatBytes } from './bytesForecast'
 import type { JobSpec } from './jobs'
 
 // Growing a logical volume and the filesystem on it.
@@ -273,7 +274,7 @@ export function planLvGrow(
     ok: true,
     spec: {
       kind: 'command',
-      title: `Grow ${volume.vg}/${volume.name} by ${addBytes} bytes`,
+      title: `Grow ${volume.vg}/${volume.name} by ${formatBytes(addBytes)}`,
       steps: [
         {
           // `-r` resizes the filesystem with the volume. NO `--yes` and NO

@@ -7,6 +7,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { HostMetrics } from '../../shared/ssh'
+import { formatBytes } from '../../shared/bytesForecast'
 import { assessCommand } from '../../shared/commandRisk'
 
 import { authenticate, getSession, getMcpConfig, type AuthFailureReason } from './mcpAuth'
@@ -1436,8 +1437,11 @@ function buildServer(): McpServer {
           // model reading "CPU: 0.0%" concludes the host is idle; the honest
           // answer is that this sweep could not read /proc/stat.
           `CPU: ${m.cpu === null ? 'not measured' : `${m.cpu.toFixed(1)}%`}`,
-          `Memory: ${m.memPct === null ? 'not measured' : `${m.memPct.toFixed(1)}%`} (${m.memUsed}/${m.memTotal} bytes)`,
-          `Disk: ${m.diskPct === null ? 'not measured' : `${m.diskPct.toFixed(1)}%`} (${m.diskUsed}/${m.diskTotal} bytes)`,
+          // Sizes a person can read. A raw byte count is the thing a model
+          // then has to divide, and it gets that wrong as readily as it gets
+          // anything else arithmetic wrong.
+          `Memory: ${m.memPct === null ? 'not measured' : `${m.memPct.toFixed(1)}%`} (${formatBytes(m.memUsed)} of ${formatBytes(m.memTotal)})`,
+          `Disk: ${m.diskPct === null ? 'not measured' : `${m.diskPct.toFixed(1)}%`} (${formatBytes(m.diskUsed)} of ${formatBytes(m.diskTotal)})`,
           `Uptime: ${Math.round(m.uptime / 3600)}h`,
           provenance,
           '',

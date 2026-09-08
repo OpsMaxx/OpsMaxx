@@ -71,14 +71,15 @@ describe('the parser, on output the collector actually produces', () => {
     '0.33 0.58 0.58 1/1234 5678'
   ].join('\n')
 
-  it('reads used against used-plus-available, not against a container size', () => {
+  it('reports the percentage df itself reports', () => {
     const { data } = parseMetrics(LINUX, null)
-    // 30616192 / (30616192 + 171418480) = 15.15%, which is what df's own 16%
-    // column rounds from.
-    expect(data.diskPct).toBeCloseTo(15.15, 1)
+    // df's Capacity column, read rather than recomputed — so this figure and
+    // `df -h` on the same host cannot drift apart. It used to be derived as
+    // used/total, which under-reports every filesystem with reserved blocks.
+    expect(data.diskPct).toBe(16)
     // Inodes are their own figure and must not echo the disk one.
     expect(data.inodePct).toBeCloseTo(1.4, 1)
-    expect(data.inodePct).not.toBeCloseTo(data.diskPct as number, 1)
+    expect(data.inodePct).not.toBe(data.diskPct)
   })
 
   it('reads memory as total minus available', () => {
