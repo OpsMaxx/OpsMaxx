@@ -150,6 +150,7 @@ export type {
   ImportableVpnKind,
   NgrokEndpoint,
   NgrokSpec,
+  TailnetPeer,
   NgrokTunnel,
   TailscaleSpec,
   VpnImportResult,

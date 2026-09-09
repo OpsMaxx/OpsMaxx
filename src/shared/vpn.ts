@@ -265,6 +265,15 @@ export interface TailscaleSpec {
   strippedDirectives?: StrippedDirective[]
 }
 
+/** One device on a tailnet, as the UI shows it. */
+export interface TailnetPeer {
+  name: string
+  /** The address a connection would dial. */
+  host: string
+  online: boolean
+  os?: string
+}
+
 /** One endpoint an ngrok profile publishes. */
 export interface NgrokTunnel {
   name: string
@@ -458,6 +467,10 @@ export interface VpnStats {
   // needs — it is assigned by the server, changes per run without a reserved
   // domain, and exists nowhere else in the app.
   endpoints?: NgrokEndpoint[]
+  // Tailscale only. A tailnet is a mesh, so there is no single peer the way a
+  // WireGuard tunnel has one — `peers` above is the WireGuard shape and does
+  // not fit. Present only when the profile asked to list devices.
+  tailnetPeers?: TailnetPeer[]
   sampledAt: number
 }
 

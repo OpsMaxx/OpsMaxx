@@ -282,14 +282,22 @@ export const tailscaleDriver: VpnDriver<TailscaleSpec> = {
     return live.get(id)?.status ?? null
   },
 
-  async stats(): Promise<VpnStats | null> {
-    // A mesh has no single rx/tx pair, and collapsing per-peer counters into
-    // one would be inventing a number. The peer list is the useful reading.
-    return null
+  /**
+   * The tailnet's devices, which are the telemetry that matters here.
+   *
+   * No rx/tx: a mesh has no single pair, and collapsing per-peer counters into
+   * one would be inventing a number. The device list travels in `stats()` for
+   * the same reason ngrok's URLs do — it is the road that already reaches the
+   * profile card, and an accessor nothing calls is a feature nobody can see.
+   */
+  async stats(id: string): Promise<VpnStats | null> {
+    const entry = live.get(id)
+    if (!entry) return null
+    return {
+      rxBytes: 0,
+      txBytes: 0,
+      tailnetPeers: entry.peers,
+      sampledAt: Date.now()
+    }
   }
-}
-
-/** The tailnet's devices. Empty unless the profile asked for them. */
-export function tailscalePeers(id: string): TailscalePeer[] {
-  return live.get(id)?.peers ?? []
 }

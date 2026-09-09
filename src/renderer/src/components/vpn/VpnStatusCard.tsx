@@ -3,6 +3,7 @@ import { WG_HANDSHAKE_STALE_SEC } from '../../../../shared/vpn'
 import type {
   FrpProxyStatus,
   NgrokEndpoint,
+  TailnetPeer,
   FrpSpec,
   VpnBoundListener,
   VpnKind,
@@ -178,6 +179,7 @@ export function VpnStatusCard({ profile, status }: VpnStatusCardProps): React.JS
   const listeners = status?.listeners ?? []
   const proxies: FrpProxyStatus[] = stats?.proxies ?? []
   const endpoints: NgrokEndpoint[] = stats?.endpoints ?? []
+  const peers: TailnetPeer[] = stats?.tailnetPeers ?? []
 
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -230,6 +232,40 @@ export function VpnStatusCard({ profile, status }: VpnStatusCardProps): React.JS
               {e.localAddr && (
                 <span className="faint" style={{ fontSize: 11 }}>
                   → {e.localAddr}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* The tailnet's other devices, which are what a user joins a tailnet to
+          reach — and the answer to "is the machine I want actually up". Shown
+          only when the profile asked for them, so a profile that just wants a
+          connection is not handed a device inventory it did not request. */}
+      {peers.length > 0 && (
+        <div className="col" style={{ gap: 4 }}>
+          {peers.map((p) => (
+            <div key={p.host} className="row" style={{ gap: 8, alignItems: 'baseline' }}>
+              <span
+                aria-hidden
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  // Colour is not the only carrier: the title says it in words.
+                  background: p.online ? 'var(--ok)' : 'var(--muted)'
+                }}
+              />
+              <span style={{ minWidth: 90 }} title={p.online ? 'Online' : 'Offline'}>
+                {p.name}
+              </span>
+              <span className="mono selectable faint" style={{ fontSize: 11 }}>
+                {p.host}
+              </span>
+              {p.os && (
+                <span className="faint" style={{ fontSize: 11 }}>
+                  {p.os}
                 </span>
               )}
             </div>

@@ -237,3 +237,26 @@ describe('the authtoken never touches disk or a command line', () => {
     expect(SESSION).toMatch(/redact: \[\.\.\.ctx\.secrets\.all\]/)
   })
 })
+
+describe('what the sidecar reports actually reaches the screen', () => {
+  const CARD = strip(src('src/renderer/src/components/vpn/VpnStatusCard.tsx'))
+
+  /**
+   * The gap this closes, and the reason it is worth a test rather than a
+   * glance: the driver collected peers into a module-level accessor that no
+   * component ever called. Everything typechecked, every test passed, and
+   * `showPeers` was a switch the user could turn on to no effect.
+   *
+   * Both engines now travel the same road — `stats()`, which the card already
+   * reads — so the guard is that the card reads both.
+   */
+  it('renders the device list and the public URLs from stats', () => {
+    expect(CARD).toContain('stats?.tailnetPeers')
+    expect(CARD).toContain('stats?.endpoints')
+  })
+
+  // An accessor nothing calls is indistinguishable from a feature that works.
+  it('leaves no accessor that only the driver can see', () => {
+    expect(TS_DRIVER).not.toContain('export function tailscalePeers')
+  })
+})
