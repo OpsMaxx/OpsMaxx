@@ -19,19 +19,39 @@ describe.runIf(posix)('localExec', () => {
     expect(r.elided).toBe(0)
   })
 
-  // Three of the host-facts probes use exit status as their API, so a runner
-  // that flattened failure into ok:false with no code would break them.
-  it('keeps the exit code and stderr of a command that fails', async () => {
+  /**
+   * `ok` means the command RAN. A non-zero exit is a fact about the command,
+   * not about our ability to run it, and it reaches the caller as `code`.
+   *
+   * This is sshExec's meaning, and matching it is the entire contract this
+   * module claims in its header. It previously returned `code === 0`, which
+   * every injected reader misread: DockerReader.attempt routes `!ok` to
+   * `onTransportFailure`, so a local `docker ps` against a stopped daemon
+   * reported that this machine "could not be reached" instead of parsing the
+   * output that says the daemon is down. Three of the host-facts probes use
+   * exit status as their API and cannot work if failure is flattened away.
+   */
+  it('reports a non-zero exit through code, not through ok', async () => {
     const r = await localExec('echo problem >&2; exit 3')
-    expect(r.ok).toBe(false)
+    expect(r.ok).toBe(true)
     expect(r.code).toBe(3)
     expect(r.stderr.trim()).toBe('problem')
   })
 
-  it('reports a missing binary as a failure rather than throwing', async () => {
+  // A shell that cannot find the binary exits 127 the same way, so the
+  // classifier a reader already applies to remote hosts applies here too.
+  it('surfaces a missing binary as exit 127 rather than a run failure', async () => {
     const r = await localExec('definitely-not-a-real-binary-xyz')
+    expect(r.ok).toBe(true)
+    expect(r.code).toBe(127)
+  })
+
+  // The other half of the contract: a command that could not be run at all is
+  // still ok:false with an error, which is what a transport failure looks like.
+  it('reports a spawn-level failure as ok:false with an error', async () => {
+    const r = await localExec('sleep 30', 300)
     expect(r.ok).toBe(false)
-    expect(r.code).not.toBe(0)
+    expect(r.error).toBeTruthy()
   })
 
   it('kills a command that outlives its timeout', async () => {

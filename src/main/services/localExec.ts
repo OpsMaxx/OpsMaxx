@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { platform } from 'node:process'
+import { windowsPosixShell } from './shellDiscovery'
 
 /**
  * Runs one command on THIS machine, with the same result shape as sshExec.
@@ -84,7 +85,23 @@ async function resolveLoginPath(): Promise<string> {
 }
 
 /**
- * `sh`, deliberately, with the login shell's PATH handed to it.
+ * The POSIX shell to use on Windows, resolved once.
+ *
+ * `undefined` means "not looked yet"; `null` means "looked, and there is none".
+ * The lookup reads the registry, so it is worth not repeating per command.
+ */
+let winShell: string | null | undefined
+
+async function resolveWinShell(): Promise<string | null> {
+  if (winShell === undefined) winShell = await windowsPosixShell()
+  return winShell
+}
+
+export const NO_POSIX_SHELL =
+  'Reading this machine needs a POSIX shell, which was not found. Install Git for Windows (or MSYS2) and try again.'
+
+/**
+ * A POSIX shell, with the login shell's PATH handed to it on Unix.
  *
  * The commands come from the shared builders in src/shared, which are written
  * for the POSIX shell that `ssh host 'command'` lands in. Running them under
@@ -97,14 +114,31 @@ async function resolveLoginPath(): Promise<string> {
  *
  * So: the login shell answers "what is on PATH", and sh runs the command.
  */
-function runShell(command: string, path: string): { file: string; args: string[]; env: NodeJS.ProcessEnv } {
+function runShell(
+  command: string,
+  path: string,
+  shell: string | null
+): { file: string; args: string[]; env: NodeJS.ProcessEnv } {
   if (platform === 'win32') {
-    // PowerShell is present on every supported Windows build, and unlike cmd
-    // it does not need its own quoting rules for the command strings the
-    // shared builders produce.
+    /**
+     * A real POSIX shell, NOT PowerShell.
+     *
+     * This used to spawn `powershell.exe -Command <command>`, and the commands
+     * come from the shared builders in src/shared, which are written for the
+     * shell `ssh host 'command'` lands in. PowerShell has no `command -v`, does
+     * not chain with `&&`/`||`, and does not understand `2>/dev/null` — so
+     * every local Docker, Kubernetes and Compose read on Windows failed, and
+     * failed in the worst possible way: the probe returned nothing, and
+     * "nothing" is exactly what the parsers read as "it is not installed".
+     * A Windows user was told their own Docker Desktop was absent.
+     *
+     * `shell` is non-null here because localExec refuses before calling this.
+     */
     return {
-      file: 'powershell.exe',
-      args: ['-NoProfile', '-NonInteractive', '-Command', command],
+      file: shell as string,
+      args: ['-c', command],
+      // Not the login PATH: that was resolved through $SHELL, which on Windows
+      // is not this bash. Git Bash builds its own PATH from /etc/profile.
       env: process.env
     }
   }
@@ -113,8 +147,24 @@ function runShell(command: string, path: string): { file: string; args: string[]
 
 export async function localExec(command: string, timeoutMs = 30_000): Promise<LocalExecResult> {
   const path = await resolveLoginPath()
+  const shell = platform === 'win32' ? await resolveWinShell() : null
+  if (platform === 'win32' && !shell) {
+    // Said plainly, once, rather than letting every parser conclude the tool
+    // being probed is missing. `ok: false` is right: the command genuinely did
+    // not run, which is what a reader treats as "could not reach this target".
+    return {
+      ok: false,
+      stdout: '',
+      stderr: '',
+      code: null,
+      signal: null,
+      error: NO_POSIX_SHELL,
+      truncated: false,
+      elided: 0
+    }
+  }
   return new Promise((resolve) => {
-    const { file, args, env } = runShell(command, path)
+    const { file, args, env } = runShell(command, path, shell)
 
     let stdout = ''
     let stderr = ''
@@ -172,8 +222,28 @@ export async function localExec(command: string, timeoutMs = 30_000): Promise<Lo
     child.stderr?.on('data', (c: Buffer) => (stderr = append(stderr, c)))
 
     child.on('error', (err) => finish({ ok: false, error: err.message }))
+    /**
+     * `ok` means the command RAN, not that it succeeded — the same meaning
+     * sshExec gives it, which is the whole point of this module matching its
+     * shape.
+     *
+     * This used to be `code === 0`, and the divergence was not cosmetic. Every
+     * injected reader is written against the SSH meaning: DockerReader.attempt
+     * routes `!ok` to `onTransportFailure` precisely so that "docker is not
+     * installed" is never reported for a host that was simply unreachable. Under
+     * `code === 0` a local `docker ps` with the daemon stopped exited non-zero,
+     * took that branch, and told the user their own machine "could not be
+     * reached" — while discarding the stdout that would have classified it. It
+     * also made the sudo failover dead code locally, since that only retries a
+     * `permission-denied` reason the parser never got the chance to produce.
+     *
+     * A shell that cannot find the binary exits 127 through this same path, so
+     * the exit code reaches the parser and stays the classifier it already is
+     * for remote hosts. Genuine run failures — spawn refused, timeout — are
+     * still `ok: false` with `error` set, as they are in sshExec.
+     */
     child.on('close', (code, signal) =>
-      finish({ ok: code === 0, code: code ?? null, signal: signal ?? null })
+      finish({ ok: true, code: code ?? null, signal: signal ?? null })
     )
   })
 }

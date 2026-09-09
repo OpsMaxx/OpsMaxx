@@ -393,6 +393,29 @@ async function discoverWin32(): Promise<LocalShell[]> {
 // common case on a managed machine.
 // `reg query` rather than a registry npm package: no new native dependency for
 // one lookup, and reg.exe is in System32 on every Windows since 2000.
+/**
+ * A POSIX shell on Windows, for running the shared command builders locally.
+ *
+ * Exported because localExec needs it and must not grow its own copy. The
+ * builders in src/shared emit the POSIX shell forms `ssh host 'command'` lands
+ * in — `command -v`, `&&`, `2>/dev/null` — and PowerShell parses none of those.
+ * Running them under PowerShell did not fail loudly; it failed as "not
+ * installed", because a shell that cannot parse the probe returns nothing.
+ *
+ * Git for Windows first, since it is the one most machines already have, then
+ * MSYS2. Both are real POSIX shells; neither is bundled, and when neither is
+ * present the caller must say so rather than guess.
+ */
+export async function windowsPosixShell(): Promise<string | null> {
+  const git = await gitBashPath()
+  if (git) return git
+  for (const root of ['C:\\msys64', 'C:\\msys32']) {
+    const bash = join(root, 'usr', 'bin', 'bash.exe')
+    if (existsSync(bash)) return bash
+  }
+  return null
+}
+
 async function gitBashPath(): Promise<string | null> {
   const keys = [
     'HKCU\\SOFTWARE\\GitForWindows',
