@@ -31,6 +31,9 @@ export function PaneGrid({ tabId, tp }: { tabId: string; tp: TabPanes }): React.
   const setServerStatus = useApp((s) => s.setServerStatus)
   const setActivePane = useApp((s) => s.setActivePane)
   const closePane = useApp((s) => s.closePane)
+  // For the dead-session card's own dismiss. The `×` above appears only with a
+  // sibling to close, so a single failed pane had no way out but the tab strip.
+  const closeTab = useApp((s) => s.closeTab)
 
   // Transports are deliberately rebuilt on every render. Both effects in
   // useTerminalSession key on `transport.key`, never on the object, so identity
@@ -94,7 +97,15 @@ export function PaneGrid({ tabId, tp }: { tabId: string; tp: TabPanes }): React.
               <X size={13} />
             </button>
           )}
-          <PaneBody pane={p} resolve={resolve} />
+          {/* Both ids live here and nowhere below, so the closure is built here
+              rather than threading a second id through PaneBody — the `tabId`
+              prop TerminalView receives is a PANE id, as the note below says. */}
+          <PaneBody
+            pane={p}
+            resolve={resolve}
+            onClose={() => (single ? closeTab(tabId) : closePane(tabId, p.id))}
+            closeLabel={single ? 'Close tab' : 'Close pane'}
+          />
         </div>
       ))}
     </div>
@@ -103,10 +114,14 @@ export function PaneGrid({ tabId, tp }: { tabId: string; tp: TabPanes }): React.
 
 function PaneBody({
   pane,
-  resolve
+  resolve,
+  onClose,
+  closeLabel
 }: {
   pane: Pane
   resolve: (t: PaneTarget) => { transport?: TerminalTransport; server?: Server }
+  onClose: () => void
+  closeLabel: string
 }): React.JSX.Element {
   const { transport, server } = resolve(pane.target)
   if (!transport && !server) {
@@ -125,5 +140,13 @@ function PaneBody({
   // `tabId` is the prop's name, but a **pane** id is what it is given: it is the
   // key `tabSession`/`tabCwd` are written under, and a session belongs to a
   // pane. SftpView reads the active pane's entry back out through the same key.
-  return <TerminalView transport={transport} server={server} tabId={pane.id} />
+  return (
+    <TerminalView
+      transport={transport}
+      server={server}
+      tabId={pane.id}
+      onClose={onClose}
+      closeLabel={closeLabel}
+    />
+  )
 }

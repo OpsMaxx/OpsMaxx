@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Pencil, RotateCw, Terminal as TerminalIcon } from 'lucide-react'
+import { Pencil, RotateCw, Terminal as TerminalIcon, X } from 'lucide-react'
 import { TerminalSearch } from './TerminalSearch'
 import { PasteConfirm } from './PasteConfirm'
 import { EmptyState } from '../common/EmptyState'
@@ -26,7 +26,12 @@ const MOCK: Record<string, string> = {
 function useDemoSession(server: Server, hostRef: React.RefObject<HTMLDivElement | null>): void {
   useEffect(() => {
     if (!hostRef.current) return
-    const { term, fit } = createTerm(hostRef.current, useApp.getState().settings.terminalFontSize)
+    const { term, fit } = createTerm(
+      hostRef.current,
+      useApp.getState().settings.terminalFontSize,
+      useApp.getState().settings.terminalScheme,
+      useApp.getState().settings.terminalCustomSchemes
+    )
     const disposeUX = setupTerminalUX(term, hostRef.current)
     const user = server.username
     const short = server.name.toLowerCase().split(' ')[0]
@@ -115,11 +120,15 @@ function DemoTerminal({ server }: { server: Server }): React.JSX.Element {
 function DeadSession({
   dead,
   transport,
-  onReconnect
+  onReconnect,
+  onClose,
+  closeLabel
 }: {
   dead: string
   transport: TerminalTransport
   onReconnect: () => void
+  onClose?: () => void
+  closeLabel?: string
 }): React.JSX.Element {
   const openServerEditor = useApp((s) => s.openServerEditor)
   const advice = adviseOnError(dead)
@@ -161,6 +170,20 @@ function DeadSession({
               <RotateCw size={14} /> Try again
             </button>
           )}
+          {/* Giving up is an outcome too, and until now the only way to act on
+              it was the tab strip — the `×` PaneGrid draws over a pane appears
+              only when there is a sibling to distinguish it from, so a single
+              failed pane offered Reconnect or nothing.
+
+              Deliberately not autoFocus'd: Reconnect and Edit already compete
+              for it, and Enter on a dead session is documented as reconnect.
+              The label says which container goes, because "Close" over a split
+              is ambiguous in the one place ambiguity costs the other pane. */}
+          {onClose && (
+            <button className="btn" onClick={onClose}>
+              <X size={14} /> {closeLabel ?? 'Close'}
+            </button>
+          )}
         </div>
 
         {/* Only where it is true. Reconnecting reuses a pooled connection, which
@@ -180,10 +203,14 @@ function DeadSession({
 // ---- Real session ----------------------------------------------------------
 function RealTerminal({
   transport,
-  tabId
+  tabId,
+  onClose,
+  closeLabel
 }: {
   transport: TerminalTransport
   tabId?: string
+  onClose?: () => void
+  closeLabel?: string
 }): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null)
   const zoom = useApp((s) => s.zoomTerminal)
@@ -207,7 +234,15 @@ function RealTerminal({
       }}
     >
       <div className="xterm-host" ref={hostRef} />
-      {dead && <DeadSession dead={dead} transport={transport} onReconnect={reconnect} />}
+      {dead && (
+        <DeadSession
+          dead={dead}
+          transport={transport}
+          onReconnect={reconnect}
+          onClose={onClose}
+          closeLabel={closeLabel}
+        />
+      )}
       {pending && (
         <PasteConfirm
           text={pending.text}
@@ -241,14 +276,33 @@ function RealTerminal({
 export function TerminalView({
   transport,
   server,
-  tabId
+  tabId,
+  onClose,
+  closeLabel
 }: {
   transport?: TerminalTransport
   // Only for the demo path, which is still keyed on a Server.
   server?: Server
   tabId?: string
+  /**
+   * Dismisses whatever holds this terminal — the pane when it has a sibling,
+   * the tab when it is alone. PaneGrid decides which, because it is the only
+   * place that knows both ids and the pane count; see the note there.
+   *
+   * Optional because the demo and empty paths have nothing to dismiss.
+   */
+  onClose?: () => void
+  closeLabel?: string
 }): React.JSX.Element {
-  if (transport) return <RealTerminal transport={transport} tabId={tabId} />
+  if (transport)
+    return (
+      <RealTerminal
+        transport={transport}
+        tabId={tabId}
+        onClose={onClose}
+        closeLabel={closeLabel}
+      />
+    )
   if (server && server.demo !== false) return <DemoTerminal server={server} />
   return (
     <EmptyState

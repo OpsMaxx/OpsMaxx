@@ -5,16 +5,37 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
 import { useApp } from '../store/app'
 import { runShortcut } from './useHotkeys'
+import { useResolvedTheme } from './useResolvedTheme'
+import { resolveScheme, type TerminalScheme } from '../../../shared/terminalTheme'
+import { parseOsc133 } from '../../../shared/shellIntegration'
+import { NO_PROMPT, applyMark, movementFor, isClickNotDrag, type PromptState } from '../lib/clickToMove'
 import type { TerminalTransport } from '../lib/transport'
 
 // The xterm primitives live here rather than in TerminalView because the hook
 // is their only real consumer; TerminalView imports them back for the demo
 // shell. The other direction would be a module cycle.
 
-export function themeFromCss(): Record<string, string> {
+/**
+ * The terminal palette: surface colours from the app's own tokens, the sixteen
+ * ANSI slots fixed.
+ *
+ * All sixteen have to be named. xterm fills any slot this omits from its own
+ * defaults, which are not this palette — so listing nine of them did not mean
+ * "the rest inherit our styling", it meant seven colours came from somewhere
+ * else entirely. Every bright except brightBlack was missing, which is the half
+ * of the palette that `ls`, `git status` and most prompts actually reach for.
+ *
+ * The values are GitHub's dark set, matching the normals that were already
+ * here. Only the four surface colours track the app theme; the ANSI slots are
+ * deliberately fixed, because a program that asks for red has asked for red.
+ */
+export function themeFromCss(
+  schemeId?: string,
+  custom?: TerminalScheme[]
+): Record<string, string> {
   const css = getComputedStyle(document.documentElement)
   const v = (n: string): string => css.getPropertyValue(n).trim()
-  return {
+  const base = {
     background: v('--bg-terminal'),
     foreground: v('--text'),
     cursor: v('--accent'),
@@ -28,7 +49,35 @@ export function themeFromCss(): Record<string, string> {
     magenta: '#a371f7',
     cyan: '#22c7d6',
     white: '#e6edf3',
-    brightBlack: '#6b7484'
+    brightBlack: '#6b7484',
+    brightRed: '#ff7b72',
+    brightGreen: '#56d364',
+    brightYellow: '#e3b341',
+    brightBlue: '#79c0ff',
+    brightMagenta: '#d2a8ff',
+    brightCyan: '#56d4dd',
+    brightWhite: '#f0f6fc'
+  }
+
+  const scheme = resolveScheme(schemeId, custom)
+  if (!scheme) return base
+
+  /**
+   * A scheme replaces the sixteen, and its surface colours only if it has them.
+   *
+   * The split matters: an ANSI-only scheme keeps the app's own background and
+   * foreground, so it sits correctly in both light and dark without shipping
+   * two variants of itself. A scheme WITH a background is making a deliberate
+   * choice about the surface — Solarized Light is not Solarized Dark with a
+   * different ground — and overriding that would be worse than honouring it.
+   */
+  return {
+    ...base,
+    ...scheme.ansi,
+    ...(scheme.background ? { background: scheme.background, cursorAccent: scheme.background } : {}),
+    ...(scheme.foreground ? { foreground: scheme.foreground } : {}),
+    ...(scheme.cursor ? { cursor: scheme.cursor } : {}),
+    ...(scheme.selectionBackground ? { selectionBackground: scheme.selectionBackground } : {})
   }
 }
 
@@ -76,7 +125,9 @@ export function observeSize(
 
 export function createTerm(
   host: HTMLDivElement,
-  fontSize: number
+  fontSize: number,
+  schemeId?: string,
+  custom?: TerminalScheme[]
 ): { term: Terminal; fit: FitAddon; search: SearchAddon } {
   const term = new Terminal({
     fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim(),
@@ -84,7 +135,7 @@ export function createTerm(
     lineHeight: 1.35,
     cursorBlink: true,
     allowProposedApi: true,
-    theme: themeFromCss() as never,
+    theme: themeFromCss(schemeId, custom) as never,
     scrollback: 10000
   })
   const fit = new FitAddon()
@@ -218,9 +269,27 @@ export function useTerminalSession(
   const setTabSession = useApp((s) => s.setTabSession)
   const setTabCwd = useApp((s) => s.setTabCwd)
   const fontSize = useApp((s) => s.settings.terminalFontSize)
+  // Not the stored setting, which can be 'system': the concrete mode being
+  // painted, so an OS-level flip under 'system' repaints open terminals too.
+  const resolvedTheme = useResolvedTheme()
+  const terminalScheme = useApp((s) => s.settings.terminalScheme)
+  const customSchemes = useApp((s) => s.settings.terminalCustomSchemes)
+  // Read once at creation like the font size is, then re-applied by the effect
+  // below — the session must survive a palette change, not be rebuilt by it.
+  const schemeRef = useRef(terminalScheme)
+  schemeRef.current = terminalScheme
+  const customRef = useRef(customSchemes)
+  customRef.current = customSchemes
   // Kept in refs so the zoom effect can reach the live terminal without
   // rebuilding it — recreating would drop the session.
   const termRef = useRef<Terminal | null>(null)
+  // Where the shell says its editable input begins, from the OSC 133 marks.
+  const promptRef = useRef<PromptState>(NO_PROMPT)
+  // Read through a ref so toggling the setting reaches the live listener
+  // without rebuilding the terminal and dropping the session.
+  const clickToMove = useApp((s) => s.settings.terminalClickToMove === true)
+  const clickToMoveRef = useRef(clickToMove)
+  clickToMoveRef.current = clickToMove
   const fitRef = useRef<FitAddon | null>(null)
   const searchRef = useRef<SearchAddon | null>(null)
   const sessionRef = useRef<string | null>(null)
@@ -240,7 +309,12 @@ export function useTerminalSession(
   // would throw away the scrollback, so it deliberately outlives the session.
   useEffect(() => {
     if (!hostRef.current) return
-    const { term, fit, search } = createTerm(hostRef.current, initialFontSize.current)
+    const { term, fit, search } = createTerm(
+      hostRef.current,
+      initialFontSize.current,
+      schemeRef.current,
+      customRef.current
+    )
     termRef.current = term
     fitRef.current = fit
     searchRef.current = search
@@ -261,7 +335,97 @@ export function useTerminalSession(
       return true
     })
 
+    /**
+     * OSC 133 prompt marks, beside the OSC 7 one and for the same reason: a
+     * shell that emits them gets the features that need them, and one that does
+     * not is unaffected.
+     *
+     * `133;B` is the only mark that records a position, and it records where the
+     * cursor is when the shell has finished printing its prompt — which is
+     * exactly where the user's typing starts, whatever the prompt contains and
+     * however many lines it took. Nothing on screen can tell you that, which is
+     * why click-to-move without this can only guess.
+     *
+     * Kept in a ref, not state: it changes on every prompt, and re-rendering the
+     * terminal host once per command would be a pointless cost.
+     */
+    const promptDisp = term.parser.registerOscHandler(133, (data) => {
+      const mark = parseOsc133(data)
+      if (mark) {
+        promptRef.current = applyMark(promptRef.current, mark, {
+          row: term.buffer.active.baseY + term.buffer.active.cursorY,
+          col: term.buffer.active.cursorX,
+          // Recorded with the mark: a resize rewraps the buffer and moves the
+          // row this points at, so the width it was taken at is what tells the
+          // click handler the position is stale.
+          cols: term.cols
+        })
+      }
+      // False, not true: this is an observation, and other handlers (or xterm's
+      // own future support) should still see the sequence.
+      return false
+    })
+
     const host = hostRef.current
+
+    /**
+     * Click to move the shell's cursor.
+     *
+     * Geometry from `.xterm-screen`, NOT `.xterm-rows`: the latter is built by
+     * xterm's DOM renderer and removed when the WebGL addon attaches, and this
+     * app loads WebGL by async dynamic import — so both renderers are live
+     * paths depending on timing and GPU support, and only `.xterm-screen` is
+     * present on either. Both renderers size it to the grid, and xterm's own
+     * DOM renderer computes cell width as exactly this ratio.
+     *
+     * mouseup rather than mousedown, so a drag can be told from a click: taking
+     * the gesture on press would make text unselectable, which is a far worse
+     * regression than this is an improvement.
+     */
+    let downAt: { x: number; y: number } | null = null
+    const onDown = (e: MouseEvent): void => {
+      downAt = e.button === 0 ? { x: e.clientX, y: e.clientY } : null
+    }
+    const onUp = (e: MouseEvent): void => {
+      const start = downAt
+      downAt = null
+      // Left button only. The same host already binds contextmenu to paste, so
+      // acting on any button would move the cursor on a right-click paste too.
+      if (!start || e.button !== 0) return
+      if (!clickToMoveRef.current) return
+      if (!isClickNotDrag(start, { x: e.clientX, y: e.clientY })) return
+      // A selection is a selection even when the pointer barely moved.
+      if (term.getSelection()) return
+
+      const screen = host.querySelector('.xterm-screen') as HTMLElement | null
+      if (!screen) return
+      const rect = screen.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0) return
+      const cellW = rect.width / term.cols
+      const cellH = rect.height / term.rows
+      if (!Number.isFinite(cellW) || !Number.isFinite(cellH) || cellW <= 0 || cellH <= 0) return
+
+      const col = Math.floor((e.clientX - rect.left) / cellW)
+      const viewRow = Math.floor((e.clientY - rect.top) / cellH)
+      if (col < 0 || col >= term.cols || viewRow < 0 || viewRow >= term.rows) return
+
+      const buf = term.buffer.active
+      const seq = movementFor({
+        click: { row: buf.viewportY + viewRow, col },
+        cursor: { row: buf.baseY + buf.cursorY, col: buf.cursorX },
+        prompt: promptRef.current,
+        cols: term.cols,
+        normalScreen: buf.type === 'normal',
+        mouseReporting: term.modes.mouseTrackingMode !== 'none',
+        applicationCursorKeys: term.modes.applicationCursorKeysMode
+      })
+      if (!seq) return
+      const id = sessionRef.current
+      if (id) transport.write(id, seq)
+    }
+    host.addEventListener('mousedown', onDown)
+    host.addEventListener('mouseup', onUp)
+
     // Resizes reach whichever session is current, or nothing at all while the
     // terminal is sitting dead between sessions.
     const disposeSize = observeSize(fit, host, () => {
@@ -273,6 +437,9 @@ export function useTerminalSession(
       disposeSize()
       disposeUX()
       oscDisp.dispose()
+      promptDisp.dispose()
+      host.removeEventListener('mousedown', onDown)
+      host.removeEventListener('mouseup', onUp)
       termRef.current = null
       fitRef.current = null
       searchRef.current = null
@@ -362,6 +529,17 @@ export function useTerminalSession(
     if (sessionRef.current) transport.resize(sessionRef.current, term.cols, term.rows)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fontSize, hostRef])
+
+  // The palette is read from CSS at creation, so a terminal opened before the
+  // theme changed kept the old background and foreground for as long as it
+  // lived — switching to light left every existing tab dark while new ones came
+  // up light. Re-read on the resolved theme, the same way zoom is applied to
+  // the live terminal rather than recreating it and dropping the session.
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+    term.options.theme = themeFromCss(terminalScheme, customSchemes) as never
+  }, [resolvedTheme, terminalScheme, customSchemes])
 
   const reconnect = useCallback(() => {
     setDead(null)

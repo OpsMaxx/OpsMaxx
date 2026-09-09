@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   ChevronRight,
   Folder,
@@ -27,6 +27,78 @@ interface Ctx {
   x: number
   y: number
   server: Server
+}
+
+/**
+ * The shells on this machine, at the top of the connection list.
+ *
+ * A local terminal could already be opened three ways — the tab bar's caret
+ * menu, the palette, and Ctrl+Shift+T — and a user looking at a list of things
+ * to connect to found none of them, because the list was the one place that
+ * never mentioned this machine.
+ *
+ * This is a SECOND mount-time caller of `refreshLocalShells`, which the shell
+ * menu's header used to claim sole ownership of. That is fine and deliberate:
+ * the call is idempotent and answered from main's cache unless `refresh` is
+ * passed, and two independent surfaces both needing the list is a better reason
+ * to call it twice than to make one of them depend on the other being mounted.
+ * The sidebar is mounted earlier and more often than the tab bar, so in practice
+ * this is now what populates the list the palette and the hotkey read.
+ */
+function LocalMachineSection({ query }: { query: string }): React.JSX.Element | null {
+  const shells = useApp((s) => s.localShells)
+  const refreshLocalShells = useApp((s) => s.refreshLocalShells)
+  const openLocal = useApp((s) => s.openLocal)
+  // Absence means enabled, matching main's own copy in services/localGate.ts.
+  const enabled = useApp((s) => s.settings.localTerminalEnabled !== false)
+
+  useEffect(() => {
+    if (!enabled) return
+    // refreshLocalShells swallows a missing bridge and resolves to an empty
+    // list, which renders as nothing rather than as an error.
+    void refreshLocalShells()
+  }, [enabled, refreshLocalShells])
+
+  const q = query.trim().toLowerCase()
+  // The default shell first, then discovery order — chosen with `isDefault`
+  // rather than by matching the id, which is an opaque path digest.
+  const ordered = [...shells]
+    .sort((a, b) => Number(!!b.isDefault) - Number(!!a.isDefault))
+    .filter((sh) => !q || sh.label.toLowerCase().includes(q))
+
+  // Nothing to show is not an error state here: the section simply is not a
+  // section. The shell menu already owns the "no shells found" message.
+  if (!enabled || ordered.length === 0) return null
+
+  return (
+    <div className="tree-section">
+      <div className="tree-section-label">
+        <Monitor size={11} /> This machine
+      </div>
+      {ordered.map((sh) => (
+        // role/tabIndex/onKeyDown because `.tree-row` is a div with an onClick
+        // and nothing else. The rest of this tree has the same gap, which is
+        // worth fixing separately — but shipping a discoverability feature that
+        // a keyboard cannot reach would be a strange way to start.
+        <div
+          key={sh.id}
+          className="tree-row"
+          role="button"
+          tabIndex={0}
+          title={sh.path}
+          onClick={() => openLocal(sh)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return
+            e.preventDefault()
+            openLocal(sh)
+          }}
+        >
+          <TerminalIcon size={12} />
+          <span className="label">{sh.label}</span>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 export function ConnectionTree(): React.JSX.Element {
@@ -200,6 +272,10 @@ export function ConnectionTree(): React.JSX.Element {
           onChange={(e) => setQuery(e.target.value)}
         />
       </div>
+
+      {/* Above Favorites: this machine is the one target that is always there,
+          needs no credential and cannot fail to resolve. */}
+      <LocalMachineSection query={query} />
 
       {favorites.length > 0 && (
         <div className="tree-section">

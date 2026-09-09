@@ -7,13 +7,16 @@ import { ContextMenu, MenuEntry } from '../connections/ContextMenu'
 // this machine actually has, so a local terminal can be opened without there
 // being a local tab to duplicate.
 //
-// It is also the one thing that populates `localShells`. The store's
-// `refreshLocalShells` exists but nothing else calls it, and until something
-// does, `openLocalById` resolves nothing and the hotkey and the palette group
-// are both silently inert. This component is mounted for the life of the
-// workspace panel, so asking once on mount is effectively asking at app start —
-// deliberately here rather than in a shell-list-shaped `useEffect` bolted to
-// App.tsx, so there is exactly one owner of that call.
+// This used to be the ONLY thing that populated `localShells`, which meant
+// `openLocalById`, the hotkey and the palette group were all silently inert
+// until the tab bar happened to mount. ConnectionTree's "This machine" section
+// now asks on mount too, and it mounts earlier and more often, so in practice
+// it is the one that fills the list.
+//
+// Both callers are correct and neither is redundant: the call is idempotent and
+// answered from main's cache unless `refresh` is passed, and making either
+// surface depend on the other being mounted would be worse than asking twice.
+// What is NOT safe is removing both and assuming something else does it.
 export function LocalShellMenu(): React.JSX.Element | null {
   const shells = useApp((s) => s.localShells)
   const refreshLocalShells = useApp((s) => s.refreshLocalShells)
