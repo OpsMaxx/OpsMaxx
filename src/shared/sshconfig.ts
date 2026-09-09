@@ -11,6 +11,20 @@ export interface SshConfigHost {
   user: string
   port: number
   identityFile?: string
+  /**
+   * `IdentityAgent`, which names the agent socket to talk to.
+   *
+   * Read rather than dropped into `extras` because it is the difference between
+   * an agent connection that works and one that reports "All configured
+   * authentication methods failed": an app that ignores it falls back to the
+   * ambient SSH_AUTH_SOCK, which on a desktop is the session manager's own
+   * agent and holds none of the user's keys.
+   *
+   * Kept as written — `~`, `$VAR`, the literal `SSH_AUTH_SOCK` and `none` are
+   * all legal here, and resolving them needs an environment this parser does
+   * not have. shared/sshAgent.ts does that.
+   */
+  identityAgent?: string
   proxyJump?: string
   // Directives kept for display but not imported.
   extras: Record<string, string>
@@ -75,13 +89,14 @@ export function parseSshConfig(text: string): SshConfigHost[] {
         for (const [k, v] of Object.entries(b.values)) if (merged[k] === undefined) merged[k] = v
       }
 
-      const { hostname, user, port, identityfile, proxyjump, ...extras } = merged
+      const { hostname, user, port, identityfile, identityagent, proxyjump, ...extras } = merged
       out.push({
         alias,
         hostName: hostname || alias,
         user: user || '',
         port: Number(port) || 22,
         identityFile: identityfile,
+        identityAgent: identityagent,
         proxyJump: proxyjump,
         extras: extras as Record<string, string>
       })

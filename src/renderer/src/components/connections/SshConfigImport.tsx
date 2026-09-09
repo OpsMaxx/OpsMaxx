@@ -104,8 +104,18 @@ export function SshConfigImport(): React.JSX.Element {
       })
       // The key path travels through the encrypted secret store, same as a
       // manually added server.
-      if (h.identityFile) {
-        const ok = await window.opsmaxx?.secrets.set(id, JSON.stringify({ keyPath: h.identityFile }))
+      //
+      // `IdentityAgent` is stored even when the host also has an IdentityFile
+      // and therefore imports as key auth. OpenSSH would offer both; this app's
+      // model picks one, and keeping the socket means switching the connection
+      // to Agent afterwards works without the user having to find the path
+      // again. Previously it was parsed nowhere and dropped, so an agent-only
+      // host imported as agent auth and then failed against the wrong agent.
+      const secret: Record<string, string> = {}
+      if (h.identityFile) secret.keyPath = h.identityFile
+      if (h.identityAgent) secret.agentSocket = h.identityAgent
+      if (Object.keys(secret).length > 0) {
+        const ok = await window.opsmaxx?.secrets.set(id, JSON.stringify(secret))
         if (ok === false) unsaved.push(h.alias)
       }
     }
@@ -115,7 +125,7 @@ export function SshConfigImport(): React.JSX.Element {
     // is what naming them here lets the user go and do.
     if (unsaved.length)
       toast(
-        `This device would not store a key path for ${unsaved.join(', ')} — open each one and set it again.`,
+        `This device would not store the authentication details for ${unsaved.join(', ')} — open each one and set them again.`,
         'error'
       )
     setModal(null)

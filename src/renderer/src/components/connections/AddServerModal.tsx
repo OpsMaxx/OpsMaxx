@@ -99,6 +99,9 @@ export function AddServerModal(): React.JSX.Element {
   const [username, setUsername] = useState(existing?.username ?? 'root')
   const [auth, setAuth] = useState<AuthMethod>(existing?.auth ?? 'key')
   const [keyPath, setKeyPath] = useState('')
+  // Blank means "leave whatever is stored", the same contract the key path box
+  // has when editing — see the placeholder.
+  const [agentSocket, setAgentSocket] = useState('')
   // '' means "enter a new one"; anything else is a vault entry id.
   const [vaultEntryId, setVaultEntryId] = useState('')
   const [saveToVault, setSaveToVault] = useState(true)
@@ -203,6 +206,10 @@ export function AddServerModal(): React.JSX.Element {
         password: auth === 'password' ? password || undefined : undefined,
         keyPath: auth === 'key' ? keyPath || undefined : undefined,
         passphrase: auth === 'key' ? passphrase || undefined : undefined,
+        // So Test connection exercises the agent the user just typed rather
+        // than the one already stored — otherwise the test cannot tell them
+        // whether the path they are about to save actually works.
+        agentSocket: auth === 'agent' ? agentSocket.trim() || undefined : undefined,
         hops,
         vpnProfileId: vpnProfileId || undefined
       } as never)
@@ -272,6 +279,10 @@ export function AddServerModal(): React.JSX.Element {
       }
     } else if (auth === 'key' && keyPath.trim()) {
       secret = { keyPath: keyPath.trim(), passphrase: passphrase || undefined }
+    } else if (auth === 'agent' && agentSocket.trim()) {
+      // A socket path is not a credential, but it rides in the same per-server
+      // blob because that is where the auth method's details live.
+      secret = { agentSocket: agentSocket.trim() }
     }
 
     if (secret) await storeSecret(id, secret, fields.name)
@@ -409,6 +420,31 @@ export function AddServerModal(): React.JSX.Element {
           <span className="field-hint">
             No saved {auth === 'key' ? 'SSH key' : 'login'} in the vault yet — type one below and it
             will be saved there.
+          </span>
+        </div>
+      )}
+
+      {auth === 'agent' && (
+        <div className="field">
+          <label className="field-label">Agent socket</label>
+          <input
+            className="input"
+            placeholder={
+              editId
+                ? 'Leave blank to keep the stored agent'
+                : 'Optional — defaults to SSH_AUTH_SOCK'
+            }
+            value={agentSocket}
+            onChange={(e) => setAgentSocket(e.target.value)}
+          />
+          {/* Worth stating plainly, because the default is wrong more often
+              than it looks. A desktop app inherits whatever agent the session
+              manager started it with, which on macOS is launchd's own — so a
+              user whose keys live in Bitwarden, 1Password or KeePassXC has none
+              of them available unless this names their agent. */}
+          <span className="field-hint">
+            Where your agent listens, e.g. <code>~/.bitwarden-ssh-agent.sock</code>. Leave blank to
+            use the agent this app was started with, which is not always the one holding your keys.
           </span>
         </div>
       )}

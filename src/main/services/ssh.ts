@@ -2,8 +2,10 @@ import net from 'node:net'
 import { Client, type ConnectConfig } from 'ssh2'
 import type { ClientChannel } from 'ssh2'
 import { readFileSync, existsSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { WebContents } from 'electron'
 import type { SshCloseInfo, SshConnectConfig, SshHop, SshStatus, SshStatusPhase } from '../../shared/ssh'
+import { agentForHop } from '../../shared/sshAgent'
 import { verifyHostKey } from './knownhosts'
 import { isEncryptedPrivateKey } from './sshKeys'
 
@@ -90,12 +92,33 @@ function loadPrivateKey(hop: SshHop): string {
 }
 
 function authFor(hop: SshHop): Partial<ConnectConfig> {
-  const agent = process.env.SSH_AUTH_SOCK || (process.platform === 'win32' ? 'pageant' : undefined)
   switch (hop.auth) {
     case 'password':
       return { password: hop.password }
-    case 'agent':
+    case 'agent': {
+      /**
+       * The hop's own agent first, the ambient one only as a fallback.
+       *
+       * This used to read `process.env.SSH_AUTH_SOCK` and nothing else, which
+       * is wrong in a desktop app: the app inherits whatever agent the session
+       * manager launched it with — on macOS, launchd's own — and a user whose
+       * keys live in Bitwarden, 1Password or KeePassXC has none of them there.
+       * The symptom was "All configured authentication methods failed" against
+       * a host that connects fine from a terminal, because `ssh` had read the
+       * `IdentityAgent` line and we had thrown it away.
+       *
+       * A resolution error is raised rather than swallowed: an agent we cannot
+       * find is a thing the user can fix, and reporting it as a generic auth
+       * failure sends them to check their username instead.
+       */
+      const { agent, error } = agentForHop(hop.agentSocket, {
+        env: process.env,
+        home: homedir(),
+        platform: process.platform
+      })
+      if (error) throw new Error(error)
       return { agent }
+    }
     case 'key':
     default:
       return { privateKey: loadPrivateKey(hop), passphrase: hop.passphrase }
@@ -132,7 +155,21 @@ async function connectClient(
       host: hop.host,
       port: hop.port || 22,
       username: hop.username,
-      readyTimeout: 20000,
+      /**
+       * Longer for an agent, because an agent can require a human.
+       *
+       * Bitwarden, 1Password and KeePassXC all support asking the user to
+       * approve each signature, and that approval is a desktop prompt the
+       * person has to notice and click. Against a 20s handshake deadline the
+       * connection dies while the dialog is still open, and it dies as
+       * "Timed out" — which reads as a network fault and sends someone to
+       * check the host rather than their own screen.
+       *
+       * Only the agent path pays the longer wait: for a password or a key
+       * there is nothing to approve, and a genuinely unreachable host should
+       * still fail quickly.
+       */
+      readyTimeout: hop.auth === 'agent' ? 90000 : 20000,
       keepaliveInterval: 15000,
       // Required for the second factor after a public key is accepted.
       tryKeyboard: true,

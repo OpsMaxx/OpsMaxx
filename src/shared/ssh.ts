@@ -12,6 +12,16 @@ export interface SshHop {
   keyPath?: string
   privateKey?: string
   passphrase?: string
+  /**
+   * Where this hop's SSH agent listens, when `auth` is 'agent'.
+   *
+   * Set per hop rather than per connection because each hop authenticates
+   * independently, and a jump host and its target can legitimately use
+   * different agents. Absent means the ambient SSH_AUTH_SOCK — which in a
+   * desktop app is whatever the session manager provided, and is frequently NOT
+   * the agent the user actually keeps their keys in. See shared/sshAgent.ts.
+   */
+  agentSocket?: string
 }
 
 export interface SshConnectConfig extends SshHop {
