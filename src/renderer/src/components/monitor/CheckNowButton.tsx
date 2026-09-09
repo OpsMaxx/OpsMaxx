@@ -108,7 +108,16 @@ export function CheckNowButton({
        */}
       {phase.kind !== 'idle' && !working && (
         <span
-          className={clsx('check-now-said', phase.kind === 'refused' && 'warn')}
+          className={clsx(
+            'check-now-said',
+            // A shortfall reads the same as a refusal: both are "this did not
+            // do what the label implies". Carried on the ONE styled element
+            // rather than a second nested inside it, which is what a
+            // duplicated class here would be.
+            (phase.kind === 'refused' ||
+              (phase.kind === 'done' && phase.answered !== phase.servers)) &&
+              'warn'
+          )}
           aria-live="polite"
         >
           {phase.kind === 'done' ? (
@@ -124,12 +133,12 @@ export function CheckNowButton({
                 Collected from {phase.servers} {phase.servers === 1 ? 'server' : 'servers'}
               </>
             ) : (
-              <span className="check-now-said warn">
+              <>
                 <AlertTriangle size={12} />
                 {phase.answered === 0
-                  ? `No server answered — ${phase.servers === 1 ? 'it' : 'none of the ' + phase.servers} could be reached`
+                  ? `No server answered — nothing was collected`
                   : `Collected from ${phase.answered} of ${phase.servers}; the rest did not answer`}
-              </span>
+              </>
             )
           ) : (
             <>
