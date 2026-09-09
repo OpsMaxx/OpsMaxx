@@ -204,3 +204,69 @@ describe('what the strip tells you about each tab', () => {
     expect(p.onContextMenu).toHaveBeenCalledWith('b', expect.any(Number), expect.any(Number))
   })
 })
+
+/**
+ * One strip, two surfaces.
+ *
+ * The database view had a second implementation of this: a `<div onClick>`
+ * per tab with its own markup and its own close button. It agreed with this
+ * strip on every hard part — keep every tab mounted, hide the inactive ones —
+ * and shared no code, so the two drifted apart. When this one moved its
+ * scrolling onto an inner element, the database strip silently lost the
+ * ability to scroll at all: its tabs sat directly in `.tabbar`, where the
+ * `overflow-x` used to be.
+ *
+ * That is the class of bug a shared component makes impossible rather than
+ * merely unlikely, which is the reason for these two checks.
+ */
+describe('adopted by the database view as well', () => {
+  const dbView = readFileSync(
+    join(__dirname, '..', 'src/renderer/src/components/databases/DatabaseView.tsx'),
+    'utf8'
+  )
+
+  it('is what the database strip renders, rather than a second copy', () => {
+    expect(dbView).toContain('<TabStrip')
+    // The hand-rolled tab markup is gone, not merely unused.
+    expect(dbView).not.toMatch(/className=\{clsx\('tab'/)
+    expect(dbView).not.toContain('className="tabbar"')
+  })
+
+  /**
+   * The scrolling half has to be the inner element, because that is where the
+   * `overflow-x` lives now — and a strip whose tabs sit directly in `.tabbar`
+   * cannot scroll however many tabs it has.
+   */
+  it('keeps the scrolling on the element the stylesheet scrolls', () => {
+    const css = readFileSync(
+      join(__dirname, '..', 'src/renderer/src/styles/global.css'),
+      'utf8'
+    )
+    const rule = css.slice(css.indexOf('.tabbar-list {'))
+    expect(rule.slice(0, rule.indexOf('}'))).toContain('overflow-x: auto')
+
+    const strip = readFileSync(
+      join(__dirname, '..', 'src/renderer/src/components/panel/TabStrip.tsx'),
+      'utf8'
+    )
+    expect(strip).toContain('className="tabbar-list"')
+  })
+
+  // The database strip offers no per-tab menu, so a right-click there must be
+  // harmless rather than a call through an undefined handler.
+  it('survives a right-click on a strip that offers no menu', () => {
+    render(
+      <TabStrip
+        label="Database tabs"
+        items={items}
+        activeId="a"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+        onReorder={vi.fn()}
+      />
+    )
+    expect(() => screen.getAllByRole('tab')[0].dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true })
+    )).not.toThrow()
+  })
+})

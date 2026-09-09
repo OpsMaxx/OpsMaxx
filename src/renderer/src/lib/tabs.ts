@@ -106,12 +106,39 @@ export function moveTab<T extends TabLike>(
   fromId: string,
   toIndex: number
 ): T[] {
-  const from = tabs.findIndex((t) => t.id === fromId)
-  if (from === -1) return [...tabs]
-  const out = [...tabs]
+  return moveBy(tabs, (t) => t.id === fromId, toIndex)
+}
+
+/**
+ * The same rule, for a list that is just ids.
+ *
+ * Open databases are stored as an id array rather than as records, and their
+ * strip has to reorder by exactly the same arithmetic — otherwise dragging a
+ * database tab lands one place short of where a session tab does, which is
+ * the kind of difference a user feels without being able to name.
+ */
+export function moveId(ids: readonly string[], id: string, toIndex: number): string[] {
+  return moveBy(ids, (x) => x === id, toIndex)
+}
+
+/**
+ * Remove, then insert. One implementation, because the off-by-one lives here.
+ *
+ * `toIndex` is where the item should END UP in the list it is moving within,
+ * which is the index the user dropped on. Removing before inserting is what
+ * makes that true in both directions: insert at the raw target after removing
+ * a source that sat earlier, and a left-to-right drag lands one place short
+ * because every later index has shifted down by one.
+ *
+ * Out-of-range clamps rather than throws. A drop past the last item is a drop
+ * on the end, which is what the user meant and what every strip does.
+ */
+function moveBy<T>(items: readonly T[], match: (item: T) => boolean, toIndex: number): T[] {
+  const from = items.findIndex(match)
+  if (from === -1) return [...items]
+  const out = [...items]
   const [moved] = out.splice(from, 1)
-  const target = Math.max(0, Math.min(toIndex, out.length))
-  out.splice(target, 0, moved)
+  out.splice(Math.max(0, Math.min(toIndex, out.length)), 0, moved)
   return out
 }
 

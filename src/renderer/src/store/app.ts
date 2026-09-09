@@ -6,6 +6,7 @@ import type { DriftWatchProposal } from '../../../shared/driftWatch'
 import { forgetServer } from './serverCleanup'
 import {
   moveTab as moveTabIn,
+  moveId,
   nextSessionTitle,
   popClosed,
   rememberClosed,
@@ -531,6 +532,8 @@ interface AppState {
   setActiveDatabase: (id: string | null) => void
   openDatabase: (id: string) => void
   closeDatabase: (id: string) => void
+  /** Drag-to-reorder for the database strip. `toIndex` is among the open ones. */
+  moveOpenDatabase: (id: string, toIndex: number) => void
   addFolder: (name: string, parentId?: string | null, kind?: FolderKind) => string
   renameFolder: (id: string, name: string) => void
   deleteFolder: (id: string) => void
@@ -1708,6 +1711,11 @@ export const useApp = create<AppState>((set, get) => ({
       activeDatabaseId: id,
       openDatabaseIds: s.openDatabaseIds.includes(id) ? s.openDatabaseIds : [...s.openDatabaseIds, id]
     })),
+
+  // The same reorder rule the session strip uses — see moveId's note on why
+  // it is shared rather than written twice.
+  moveOpenDatabase: (id, toIndex) =>
+    set((s) => ({ openDatabaseIds: moveId(s.openDatabaseIds, id, toIndex) })),
 
   closeDatabase: (id) =>
     set((s) => {

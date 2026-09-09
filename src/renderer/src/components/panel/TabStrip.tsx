@@ -40,7 +40,8 @@ interface TabStripProps {
   onClose: (id: string) => void
   /** `toIndex` is a position among `items`. */
   onReorder: (id: string, toIndex: number) => void
-  onContextMenu: (id: string, x: number, y: number) => void
+  /** Optional: a strip with no per-tab menu simply does not offer one. */
+  onContextMenu?: (id: string, x: number, y: number) => void
   /** Named for a screen reader: "Session tabs", "Database tabs". */
   label: string
   /** Trailing controls — the new-tab button and anything beside it. */
@@ -225,10 +226,13 @@ export function TabStrip({
                     onClose(t.id)
                   }
                 }}
-                onContextMenu={(e) => {
-                  e.preventDefault()
-                  onContextMenu(t.id, e.clientX, e.clientY)
-                }}
+                onContextMenu={
+                  onContextMenu &&
+                  ((e) => {
+                    e.preventDefault()
+                    onContextMenu(t.id, e.clientX, e.clientY)
+                  })
+                }
               >
                 {t.status}
                 {t.icon}

@@ -4631,3 +4631,15 @@ details[open] > .disclosure-head .chev {
 .method-tag.m-delete {
   color: var(--danger);
 }
+
+/* The engine badge on a database tab. Its own class rather than an inline
+   style, so it sits in the same 11px tracked-caps family as the method tags
+   and the tab-kind glyphs instead of being a one-off font-size. */
+.db-kind {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}

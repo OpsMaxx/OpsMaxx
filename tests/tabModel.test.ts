@@ -3,6 +3,7 @@ import {
   successorAfterClose,
   nextSessionTitle,
   moveTab,
+  moveId,
   tabForNumberKey,
   rememberClosed,
   popClosed,
@@ -220,5 +221,28 @@ describe('reopening a closed tab', () => {
 
   it('returns null on an empty stack without throwing', () => {
     expect(popClosed<TabLike>([]).entry).toBeNull()
+  })
+})
+
+describe('reordering a plain list of ids', () => {
+  /**
+   * Open databases are stored as ids rather than records, and their strip has
+   * to reorder by exactly the same arithmetic — otherwise dragging a database
+   * tab lands one place short of where a session tab does, which is a
+   * difference a user feels without being able to name.
+   */
+  const ids = ['a', 'b', 'c', 'd']
+
+  it('behaves identically to moveTab', () => {
+    for (const to of [0, 1, 2, 3, 99, -5]) {
+      const viaIds = moveId(ids, 'a', to)
+      const viaTabs = moveTab(ids.map((id) => t(id)), 'a', to).map((x) => x.id)
+      expect(viaIds, `to=${to}`).toEqual(viaTabs)
+    }
+  })
+
+  it('leaves the list alone for an unknown id, without mutating it', () => {
+    expect(moveId(ids, 'zz', 0)).toEqual(ids)
+    expect(ids).toEqual(['a', 'b', 'c', 'd'])
   })
 })

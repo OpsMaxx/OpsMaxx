@@ -12,11 +12,10 @@ import {
   Activity,
   Loader2,
   Pencil,
-  Trash2,
-  X
+  Trash2
 } from 'lucide-react'
 import { useApp, useWorkspaceServers } from '../../store/app'
-import { clsx } from '../../lib/format'
+import { TabStrip } from '../panel/TabStrip'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { DbShell } from './DbShell'
 import { DbOpsPanel } from './DbOpsPanel'
@@ -603,6 +602,7 @@ export function DatabaseWorkspace(): React.JSX.Element {
   const openIds = useApp((s) => s.openDatabaseIds)
   const setActive = useApp((s) => s.setActiveDatabase)
   const closeDatabase = useApp((s) => s.closeDatabase)
+  const moveOpenDatabase = useApp((s) => s.moveOpenDatabase)
 
   const open = openIds.map((id) => databases.find((d) => d.id === id)).filter((d): d is DatabaseConn => !!d)
   const active = open.find((d) => d.id === activeId) ?? open[0]
@@ -627,30 +627,40 @@ export function DatabaseWorkspace(): React.JSX.Element {
   // shell history, results and connection survive switching tabs.
   return (
     <div className="main">
-      <div className="tabbar">
-        {open.map((d) => (
-          <div
-            key={d.id}
-            className={clsx('tab', d.id === active.id && 'active')}
-            onClick={() => setActive(d.id)}
-          >
-            <span className="mono" style={{ fontSize: 9, fontWeight: 700, color: KIND_COLOR[d.kind] }}>
+      {/**
+       * The same strip the session tabs use.
+       *
+       * This was a second implementation: a `<div onClick>` per tab, with its
+       * own markup and its own close button. It agreed with the session strip
+       * on every hard part — keep every tab mounted, hide the inactive ones —
+       * and shared no code, so the two drifted. When the session strip moved
+       * its scrolling onto an inner element this one silently lost the ability
+       * to scroll at all, which is exactly the failure a shared component
+       * makes impossible rather than merely unlikely.
+       *
+       * Adopting it also brings what was only ever built once: keyboard
+       * navigation through the ARIA tabs pattern, an overflow menu when the
+       * strip runs out of room, drag-to-reorder, and a close button that is
+       * not clickable while it is invisible.
+       */}
+      <TabStrip
+        label="Database tabs"
+        items={open.map((d) => ({
+          id: d.id,
+          title: d.name,
+          // The engine, in the colour the rest of the app uses for it.
+          icon: (
+            <span className="db-kind" style={{ color: KIND_COLOR[d.kind] }}>
               {KIND_SHORT[d.kind]}
             </span>
-            <span className="title">{d.name}</span>
-            <button
-              className="close"
-              title="Close"
-              onClick={(e) => {
-                e.stopPropagation()
-                closeDatabase(d.id)
-              }}
-            >
-              <X size={12} />
-            </button>
-          </div>
-        ))}
-      </div>
+          ),
+          tooltip: `${d.name} — ${KIND_LABEL[d.kind]}`
+        }))}
+        activeId={active.id}
+        onSelect={setActive}
+        onClose={closeDatabase}
+        onReorder={moveOpenDatabase}
+      />
       {open.map((d) => (
         <div
           key={d.id}
