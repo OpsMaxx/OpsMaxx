@@ -476,3 +476,30 @@ describe('the first-run note', () => {
     expect(notes.slice(0, notes.indexOf('## Downloads'))).toMatch(/SmartScreen/)
   })
 })
+
+describe('the Go toolchain CI installs', () => {
+  const WORKFLOWS = ['ci.yml', 'release.yml', 'vpn-e2e.yml']
+
+  /**
+   * A hardcoded `go-version` is a number that silently stops matching.
+   *
+   * Embedding tsnet raised the sidecar's requirement to Go 1.26.6, while all
+   * three workflows still said 1.25 — a release that would have failed on
+   * every platform at the sidecar build, which is exactly how the last one
+   * failed: something CI ran that nothing here ever did.
+   *
+   * `go-version-file` reads the module's own `go` line, so the two cannot
+   * disagree, and a dependency that raises the floor again fixes CI by being
+   * committed rather than by somebody remembering three more files.
+   */
+  it('comes from the module, not from a number copied beside it', () => {
+    for (const w of WORKFLOWS) {
+      const yml = readFileSync(join(__dirname, '..', '.github/workflows', w), 'utf8')
+      if (!yml.includes('actions/setup-go')) continue
+      expect(yml, `${w} pins a Go version by hand`).not.toMatch(/go-version:\s*['"]?\d/)
+      expect(yml, `${w} does not read the module's version`).toContain(
+        'go-version-file: sidecar/netd/go.mod'
+      )
+    }
+  })
+})

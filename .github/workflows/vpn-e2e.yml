@@ -47,7 +47,8 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          # Read from the module itself, so the two can never drift apart.
+          go-version-file: sidecar/netd/go.mod
           cache-dependency-path: sidecar/netd/go.sum
 
       # `wg genkey` only mints the keypairs; the tunnel itself is entirely
