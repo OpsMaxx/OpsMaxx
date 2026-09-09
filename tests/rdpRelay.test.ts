@@ -14,6 +14,18 @@ vi.mock('../src/main/services/mcpDataCache', () => ({
   getCachedServer: (id: string) => cachedServers.get(id) ?? null
 }))
 
+// The trust decision has its own tests. Here it is stubbed so the relay tests
+// exercise the transport rather than a dialog, and `certTrusted` lets one of
+// them check that a refusal actually stops the session.
+let certTrusted = true
+const certChecks: Array<{ host: string; port: number }> = []
+vi.mock('../src/main/services/rdpTrust', () => ({
+  verifyRdpCertificate: async (host: string, port: number) => {
+    certChecks.push({ host, port })
+    return certTrusted
+  }
+}))
+
 let storedPassword: string | undefined = 'hunter2'
 let credentialError: Error | null = null
 vi.mock('../src/main/services/credentialResolver', () => ({
@@ -202,6 +214,8 @@ function defineServer(id: string, port: number, extra: Record<string, unknown> =
 let fake: Awaited<ReturnType<typeof startFakeRdpServer>>
 
 beforeEach(async () => {
+  certTrusted = true
+  certChecks.length = 0
   chainCalls.length = 0
   chainEnded = 0
   cachedServers.clear()
@@ -384,6 +398,39 @@ describe('the RDCleanPath handshake', () => {
   })
 })
 
+describe('certificate trust', () => {
+  it('pins against the RDP host, not the bastion it was reached through', async () => {
+    // The identity being checked is the machine the desktop is on. Pinning the
+    // bastion instead would trust every host behind it interchangeably.
+    defineServer('srv-jump', fake.port, {
+      route: [{ host: 'bastion', port: 22, username: 'jump' }]
+    })
+    const { ticket } = await rdpMintTicket('srv-jump')
+    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    await new Promise((r) => ws.once('open', r))
+    ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
+    await firstReply(ws)
+
+    expect(certChecks).toEqual([{ host: '127.0.0.1', port: fake.port }])
+    ws.close()
+  })
+
+  it('refuses the session when the certificate is not trusted', async () => {
+    defineServer('srv-1', fake.port)
+    certTrusted = false
+    const { ticket } = await rdpMintTicket('srv-1')
+    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    await new Promise((r) => ws.once('open', r))
+    ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
+
+    const reply = await firstReply(ws)
+    // An error PDU, and no session: an untrusted server is not spoken to.
+    expect(reply.data?.[0]).toBe(0x30)
+    expect(rdpRelayStatus().sessions).toBe(0)
+    ws.close()
+  })
+})
+
 describe('relay lifecycle', () => {
   it('does not listen until a ticket is minted, then reports its port', async () => {
     // On demand, not at launch: an always-listening local proxy is standing
@@ -402,6 +449,29 @@ describe('relay lifecycle', () => {
     const b = await rdpMintTicket('srv-1')
     expect(a.ticket?.proxyUrl).toBe(b.ticket?.proxyUrl)
     expect(a.ticket?.token).not.toBe(b.ticket?.token)
+  })
+
+  it('tears down live sessions on shutdown, not just the listener', async () => {
+    // `WebSocketServer.close()` does not close the connections it already has,
+    // so relying on it left every open desktop's TLS session and its whole SSH
+    // chain alive with the counters reporting zero.
+    defineServer('srv-jump', fake.port, {
+      route: [{ host: 'bastion', port: 22, username: 'jump' }]
+    })
+    const { ticket } = await rdpMintTicket('srv-jump')
+    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    await new Promise((r) => ws.once('open', r))
+    ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
+    await firstReply(ws)
+    expect(rdpRelayStatus().sessions).toBe(1)
+    expect(chainEnded).toBe(0)
+
+    await stopRdpRelay()
+    await new Promise((r) => setTimeout(r, 120))
+
+    expect(rdpRelayStatus().sessions).toBe(0)
+    // The transport under the session, not just the socket above it.
+    expect(chainEnded).toBeGreaterThan(0)
   })
 
   it('stops listening on shutdown', async () => {

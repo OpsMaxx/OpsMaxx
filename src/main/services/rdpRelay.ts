@@ -8,6 +8,7 @@ import { buildError, buildResponse, parseDestination, parseRequest } from './rdc
 import { getCachedServer, type CachedServer } from './mcpDataCache'
 import { resolveChainSecrets, resolveSecrets } from './credentialResolver'
 import { openChain } from './ssh'
+import { verifyRdpCertificate } from './rdpTrust'
 import type { RdpTicket, RdpTicketResult, RdpDesktopSize } from '../../shared/rdp'
 import type { SshHop } from '../../shared/ssh'
 
@@ -46,6 +47,13 @@ const TICKET_TTL_MS = 30_000
 const HANDSHAKE_TIMEOUT_MS = 20_000
 /** How long the relay stays up with nothing on it before shutting down. */
 const IDLE_SHUTDOWN_MS = 60_000
+/**
+ * Concurrent desktops. A ceiling rather than a policy: each session can hold an
+ * SSH chain to a bastion open behind it, so a runaway caller — a UI loop, or a
+ * renderer that is not behaving — should hit a wall here rather than open
+ * connections until the machine or the bastion runs out.
+ */
+const MAX_SESSIONS = 16
 /**
  * How much may sit unsent toward the renderer before the server side is paused.
  *
@@ -171,8 +179,23 @@ export async function stopRdpRelay(): Promise<void> {
   port = null
   sessions = 0
   connecting = 0
-  // Closing the WebSocketServer terminates live sessions; that is the point of
-  // an explicit stop, and quitting the app must not leave a listener behind.
+
+  // Each live socket, explicitly. `WebSocketServer.close()` stops the server
+  // accepting new connections and does NOT close the ones it already has —
+  // verified, not assumed — so relying on it left every open desktop's TLS
+  // session and its whole SSH chain alive with nothing tracking them, while
+  // the counters above said zero. Terminating each one runs the session's own
+  // close handler, which is what releases the transport beneath it.
+  if (sockets) {
+    for (const client of sockets.clients) {
+      try {
+        client.terminate()
+      } catch {
+        /* already gone */
+      }
+    }
+  }
+
   await new Promise<void>((resolve) => {
     if (!sockets) return resolve()
     sockets.close(() => resolve())
@@ -341,10 +364,11 @@ async function openSession(
     // the seconds since should be the route this session takes.
     const server = getCachedServer(ticket.serverId)
     if (!server) throw new Error('that server no longer exists')
+    if (sessions >= MAX_SESSIONS) throw new Error('too many remote desktops are already open')
 
     const { host, port: target } = wanted
     dialled = await dialTarget(server, host, target)
-    const handshake = await performHandshake(dialled.stream, request.x224)
+    const handshake = await performHandshake(dialled.stream, request.x224, wanted)
     tlsSocket = handshake.tlsSocket
 
     ws.send(buildResponse(request.destination, handshake.x224Response, handshake.certChain))
@@ -444,11 +468,32 @@ async function dialThroughRoute(
   })
 
   const chain = await openChain(cfg)
+  let chainClosed = false
   const closeChain = (): void => {
-    chain.close?.()
+    // Idempotent: the session's teardown and the failure path below can both
+    // reach it, and a VPN forward's close is not guaranteed to tolerate twice.
+    if (chainClosed) return
+    chainClosed = true
     // Innermost first: ending an outer client tears down the channel the inner
     // one rides, and ssh2 logs that as an error rather than a clean close.
-    for (const client of [...chain.clients].reverse()) client.end()
+    // Each is guarded because `end()` on a client whose transport has already
+    // gone throws, and this runs from a socket close handler — where an
+    // exception is an unhandled one in the main process.
+    for (const client of [...chain.clients].reverse()) {
+      try {
+        client.end()
+      } catch {
+        /* already gone */
+      }
+    }
+    // After the clients, not before: this releases the VPN forward the whole
+    // chain is riding, and pulling it out from under a client still shutting
+    // down is what makes a clean close look like a transport error.
+    try {
+      chain.close?.()
+    } catch {
+      /* already released */
+    }
   }
 
   try {
@@ -526,7 +571,13 @@ async function dialThroughVpn(
 // channel run the identical code: an ssh2 channel has no `setTimeout` and no
 // `remoteAddress`, so anything socket-shaped here would fork the two paths at
 // exactly the point where they must not differ.
-function performHandshake(stream: Duplex, x224Request: Buffer): Promise<Handshake> {
+function performHandshake(
+  stream: Duplex,
+  x224Request: Buffer,
+  // The RDP host, for the certificate pin. Never the bastion: the identity
+  // being checked is the machine the desktop is on, not the route to it.
+  target: { host: string; port: number }
+): Promise<Handshake> {
   return new Promise<Handshake>((resolve, reject) => {
     let settled = false
     const fail = (err: Error): void => {
@@ -562,16 +613,40 @@ function performHandshake(stream: Duplex, x224Request: Buffer): Promise<Handshak
       const socket = tlsConnect(
         // `tls.connect` types the option as a net.Socket, but it wants a
         // Duplex and documents it as one; an ssh2 channel is exactly that.
+        //
+        // `rejectUnauthorized: false` is required, not a shortcut: RDP servers
+        // are self-signed by default, so CA validation would refuse nearly
+        // every real host — Windows' own client does not do it either. What
+        // replaces it is the pin checked below, which is the same policy this
+        // app applies to SSH host keys. Turning this to `true` does not harden
+        // the connection; it removes the feature.
         { socket: stream as unknown as import('node:net').Socket, rejectUnauthorized: false },
         () => {
           if (settled) return
-          settled = true
+          // The network half is done, so the deadline for it stops here. What
+          // remains is a person reading a fingerprint, and timing that out
+          // after twenty seconds would refuse the connection for thinking.
           clearTimeout(timer)
-          resolve({
-            x224Response: Buffer.from(x224Response),
-            certChain: collectChain(socket.getPeerCertificate(true)),
-            tlsSocket: socket
-          })
+          const peer = socket.getPeerCertificate(true)
+          const chain = collectChain(peer)
+          const leaf = peer?.raw
+          if (!leaf) {
+            fail(new Error('the server presented no certificate'))
+            return
+          }
+          // Before the response reaches the client and before a single byte is
+          // relayed: an untrusted server must not be spoken to at all.
+          void verifyRdpCertificate(target.host, target.port, Buffer.from(leaf))
+            .then((trusted) => {
+              if (settled) return
+              if (!trusted) {
+                fail(new Error('the certificate for this host was not trusted'))
+                return
+              }
+              settled = true
+              resolve({ x224Response: Buffer.from(x224Response), certChain: chain, tlsSocket: socket })
+            })
+            .catch((err: Error) => fail(err))
         }
       )
       socket.once('error', (err) => fail(new Error(`TLS handshake failed: ${err.message}`)))
