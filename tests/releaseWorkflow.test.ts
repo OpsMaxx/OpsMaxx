@@ -483,13 +483,14 @@ describe('the Go toolchain CI installs', () => {
   /**
    * A hardcoded `go-version` is a number that silently stops matching.
    *
-   * Embedding tsnet raised the sidecar's requirement to Go 1.26.6, while all
-   * three workflows still said 1.25 — a release that would have failed on
-   * every platform at the sidecar build, which is exactly how the last one
-   * failed: something CI ran that nothing here ever did.
+   * Embedding tsnet raised the sidecar's requirement to Go 1.26.6 while all
+   * three workflows still said 1.25. That did NOT break the build: setup-go
+   * leaves `GOTOOLCHAIN=auto`, and the logs show CI downloading go1.26.6 on
+   * every job and carrying on. The cost is a silent per-job toolchain download
+   * and a pinned number that no longer describes what runs.
    *
    * `go-version-file` reads the module's own `go` line, so the two cannot
-   * disagree, and a dependency that raises the floor again fixes CI by being
+   * disagree, and a dependency that raises the floor is handled by being
    * committed rather than by somebody remembering three more files.
    */
   it('comes from the module, not from a number copied beside it', () => {
