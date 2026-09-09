@@ -62,8 +62,15 @@ const (
 	ErrNetworkUnreachable = "network-unreachable"
 	ErrDNSFailure         = "dns-failure"
 	ErrAlreadyRunning     = "already-running"
-	ErrUnsupported        = "unsupported"
-	ErrInternal           = "internal"
+	// The engine is installed and reachable but not running. Emitted when a
+	// caller asks about a tunnel this process is not holding.
+	ErrEngineStopped = "engine-stopped"
+	// The engine itself failed — it started and then refused, timed out, or
+	// was rejected by the far side. Distinct from config-invalid, which is our
+	// input being wrong, and from network-unreachable, which is the path.
+	ErrEngineFailed = "engine-failed"
+	ErrUnsupported  = "unsupported"
+	ErrInternal     = "internal"
 )
 
 // knownCodes mirrors the subset of VpnErrorCode this binary can emit.
@@ -75,6 +82,8 @@ var knownCodes = map[string]bool{
 	ErrNetworkUnreachable: true,
 	ErrDNSFailure:         true,
 	ErrAlreadyRunning:     true,
+	ErrEngineStopped:      true,
+	ErrEngineFailed:       true,
 	ErrUnsupported:        true,
 	ErrInternal:           true,
 }

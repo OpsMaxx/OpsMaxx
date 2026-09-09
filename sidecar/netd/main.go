@@ -72,6 +72,13 @@ type Server struct {
 	// is a second thing to keep in sync and a second thing to get wrong.
 	privileged bool
 
+	// Embedded engines, each owning its own lock. Kept separate from the
+	// WireGuard state below rather than folded into it: a tsnet node and an
+	// ngrok listener share nothing with a wireguard-go device, and one mutex
+	// over all three would make an ngrok start wait on a wg teardown.
+	ts    *tsState
+	ngrok *ngrokState
+
 	mu      sync.Mutex
 	tunnels map[string]*Tunnel
 	// Reserves a tunnelId across the slow part of wg.up so two concurrent
@@ -258,6 +265,8 @@ func newServer(ctx context.Context, cancel context.CancelFunc, out *Writer) *Ser
 		tunnels:  map[string]*Tunnel{},
 		starting: map[string]bool{},
 		forwards: map[string]string{},
+		ts:       newTSState(),
+		ngrok:    newNgrokState(),
 		ctx:      ctx,
 		cancel:   cancel,
 		stopped:  make(chan struct{}),
@@ -344,6 +353,18 @@ func (s *Server) dispatch(req *Request) {
 		s.handle(req, s.forwardClose)
 	case "wg.keygen":
 		s.handle(req, s.wgKeygen)
+	case "ts.up":
+		s.handle(req, s.tsUp)
+	case "ts.status":
+		s.handle(req, s.tsStatus)
+	case "ts.down":
+		s.handle(req, s.tsDown)
+	case "ngrok.up":
+		s.handle(req, s.ngrokUp)
+	case "ngrok.status":
+		s.handle(req, s.ngrokStatus)
+	case "ngrok.down":
+		s.handle(req, s.ngrokDown)
 	case "inspect.start":
 		s.handle(req, s.inspectStart)
 	case "inspect.stop":
@@ -661,6 +682,13 @@ func (s *Server) stop() {
 		if ins != nil {
 			ins.close()
 		}
+
+		// The embedded engines. ngrok first and deliberately: an ngrok endpoint
+		// is a PUBLIC address, and a URL that outlives the process promising to
+		// serve it points at nothing while still resolving. Tailscale after,
+		// because a node going away is only visible inside the tailnet.
+		s.ngrokCloseAll()
+		s.tsCloseAll()
 
 		var wg sync.WaitGroup
 		for _, t := range all {

@@ -42,6 +42,7 @@ const ALL_CODES: VpnErrorCode[] = [
   // for an engine this app ATTACHES to rather than starts, which today means
   // Tailscale: the fix is in that engine's own client, not in a profile here.
   'engine-stopped',
+  'engine-failed',
   'internal'
 ]
 

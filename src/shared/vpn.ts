@@ -504,9 +504,12 @@ export type VpnErrorCode =
   | 'version-mismatch'
   | 'interface-conflict'
   | 'already-running'
-  // Installed and reachable, but not running — a daemon this app attaches to
-  // rather than starts, so the fix is to start it, not to reconfigure anything.
+  // Installed and reachable, but not running.
   | 'engine-stopped'
+  // The engine started and then failed — refused, timed out, or was rejected
+  // by the far side. Distinct from `config-invalid`, which is our input being
+  // wrong, and from `network-unreachable`, which is the path to it.
+  | 'engine-failed'
   | 'clock-skew'
   | 'exposure-unacknowledged'
   | 'unsupported'

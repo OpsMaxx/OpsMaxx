@@ -33,6 +33,8 @@ func newTestServer(w *syncBuf) *Server {
 		tunnels:  map[string]*Tunnel{},
 		starting: map[string]bool{},
 		forwards: map[string]string{},
+		ts:       newTSState(),
+		ngrok:    newNgrokState(),
 		stopped:  make(chan struct{}),
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
