@@ -46,6 +46,27 @@ export function parseVpnConfig(
       return parseOvpn(text, opts.baseDir, { hostHasIpv6: opts.hostHasIpv6 })
     case 'frp':
       return parseFrpConfig(text)
+    case 'ngrok':
+    case 'tailscale':
+      /**
+       * There is nothing to import.
+       *
+       * Tailscale has no profile file: the daemon holds its own state and its
+       * own login, and this app attaches to it rather than configuring it. So
+       * this is not an unimplemented parser — it is a kind that has no config
+       * to parse, and saying so is better than a parse failure that reads like
+       * the file was wrong.
+       */
+      return {
+        ok: false,
+        error:
+          kind === 'ngrok'
+            ? 'ngrok is configured in OpsMaxx rather than imported. Add it from the Tunnels view and choose which ports to publish.'
+            : 'Tailscale has no configuration file to import. Add it from the Tunnels view — it uses the Tailscale client already installed on this machine.',
+        errorCode: 'unsupported',
+        stripped: [],
+        warnings: []
+      }
   }
 }
 

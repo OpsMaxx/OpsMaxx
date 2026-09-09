@@ -38,6 +38,10 @@ const ALL_CODES: VpnErrorCode[] = [
   'clock-skew',
   'exposure-unacknowledged',
   'unsupported',
+  // An engine that is installed and reachable but not running. Only reachable
+  // for an engine this app ATTACHES to rather than starts, which today means
+  // Tailscale: the fix is in that engine's own client, not in a profile here.
+  'engine-stopped',
   'internal'
 ]
 

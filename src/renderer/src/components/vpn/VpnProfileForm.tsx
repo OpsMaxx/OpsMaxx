@@ -52,7 +52,9 @@ function copyValue(label: string, value: string): void {
 const KIND_SUBTITLE: Record<VpnProfile['spec']['kind'], string> = {
   wireguard: 'WireGuard',
   openvpn: 'OpenVPN',
-  frp: 'frp reverse proxy'
+  frp: 'frp reverse proxy',
+  tailscale: 'Tailscale — this machine’s own client',
+  ngrok: 'ngrok — public URL for a local port'
 }
 
 /** Which part of the form the caller wants the user standing in front of.

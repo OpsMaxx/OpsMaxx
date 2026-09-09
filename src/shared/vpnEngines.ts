@@ -28,7 +28,18 @@ const BUNDLED_PLATFORMS: Record<string, readonly NodeJS.Platform[]> = {
   // install, whose installer brings both the driver and the Interactive
   // Service. The obstacle is a driver, not the GPL — see
   // THIRD-PARTY-NOTICES.md, which explains why the licence permits bundling.
-  openvpn: ['darwin', 'linux']
+  openvpn: ['darwin', 'linux'],
+  // Never bundled, on any platform. The Tailscale client is the user's own
+  // install: it is a machine-wide daemon with its own updater and its own login
+  // flow, and shipping a second copy would fight the one they already run.
+  // An empty list is what says so — an ABSENT entry means "shipped everywhere",
+  // which would make the UI claim we provide it.
+  tailscale: [],
+  // Never bundled either, and for a different reason: the ngrok agent is
+  // closed-source and not redistributable. It is also deliberately not
+  // auto-downloaded — a binary fetched at runtime would sidestep the malware
+  // scanning every shipped artifact goes through.
+  ngrok: []
 }
 
 /** Whether OpsMaxx ships `name` on `platform`. */

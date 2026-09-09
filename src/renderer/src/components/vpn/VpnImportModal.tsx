@@ -4,30 +4,35 @@ import { Field, Modal } from '../common/Modal'
 import { VpnProfileForm } from './VpnProfileForm'
 import { useApp } from '../../store/app'
 import { toast } from '../../store/toast'
-import type { StrippedDirective, VpnImportResult, VpnKind, VpnProfile } from '../../types'
+import type {
+  ImportableVpnKind,
+  StrippedDirective,
+  VpnImportResult,
+  VpnProfile
+} from '../../types'
 import { bridgeHas } from '../../lib/bridge'
 import { isVaultLocked, withVaultUnlock } from '../../lib/withVaultUnlock'
 
-const ACCEPT: Record<VpnKind, string> = {
+const ACCEPT: Record<ImportableVpnKind, string> = {
   wireguard: '.conf',
   openvpn: '.ovpn,.conf',
   frp: '.toml,.ini'
 }
 
-const HINT: Record<VpnKind, string> = {
+const HINT: Record<ImportableVpnKind, string> = {
   wireguard: 'Paste a WireGuard .conf, or drop the file here.',
   openvpn: 'Paste an .ovpn profile, or drop the file here.',
   frp: 'Paste an frpc .toml (or .ini), or drop the file here.'
 }
 
-const TITLE: Record<VpnKind, string> = {
+const TITLE: Record<ImportableVpnKind, string> = {
   wireguard: 'Import WireGuard config',
   openvpn: 'Import OpenVPN profile',
   frp: 'Import frp client config'
 }
 
 interface VpnImportModalProps {
-  kind: VpnKind
+  kind: ImportableVpnKind
   onClose: () => void
 }
 

@@ -7,7 +7,9 @@ import { HealthDot, frpSummary, handshakeLabel, vpnHealth } from './VpnStatusCar
 const KIND_TAG: Record<VpnProfile['spec']['kind'], string> = {
   wireguard: 'wg',
   openvpn: 'ovpn',
-  frp: 'frp'
+  frp: 'frp',
+  tailscale: 'ts',
+  ngrok: 'ngrok'
 }
 
 // The one-line summary behind a row's tooltip. For WireGuard the handshake age
@@ -20,6 +22,14 @@ function hover(profile: VpnProfile, status: VpnStatus | undefined): string {
   if (spec.kind === 'wireguard') {
     const peer = spec.peers[0]?.endpoint ?? 'no peer'
     return `${peer} · ${handshakeLabel(status?.stats?.lastHandshakeSec)}`
+  }
+  if (spec.kind === 'ngrok') {
+    const first = spec.tunnels[0]
+    return first ? `publishes :${first.localPort}` : 'no endpoints'
+  }
+  if (spec.kind === 'tailscale') {
+    // A mesh has no single endpoint to name, and the daemon is not ours.
+    return 'attached to this machine’s client'
   }
   const r = spec.remotes?.[0]
   return r ? `${r.host}:${r.port} ${r.proto}` : 'OpenVPN'

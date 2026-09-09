@@ -1,6 +1,8 @@
 import { Globe, Network, Radar, Share2 } from 'lucide-react'
 import { useApp, useWorkspaceTunnels, useWorkspaceVpns } from '../../store/app'
 import type { TunnelsTab } from '../../store/app'
+import type { VpnProfile } from '../../types'
+import { isReverseProxyKind } from '../../../../shared/vpn'
 import { clsx } from '../../lib/format'
 import { TunnelManager } from './TunnelManager'
 import { VpnManager } from '../vpn/VpnManager'
@@ -21,6 +23,8 @@ import { useInspect } from '../inspect/useInspect'
  * and the same `.viewbar`/`.segment` the terminal's Terminal/Monitor/Files
  * switcher uses — one idiom in the app for "what is this panel showing".
  */
+const isReverseProxy = (p: VpnProfile): boolean => isReverseProxyKind(p.spec.kind)
+
 export function TunnelsView(): React.JSX.Element {
   const tab = useApp((s) => s.tunnelsTab)
   const setTab = useApp((s) => s.setTunnelsTab)
@@ -34,13 +38,13 @@ export function TunnelsView(): React.JSX.Element {
       id: 'vpn',
       label: 'VPN',
       icon: <Globe size={14} />,
-      count: vpns.filter((p) => p.spec.kind !== 'frp').length
+      count: vpns.filter((p) => !isReverseProxy(p)).length
     },
     {
       id: 'frp',
       label: 'Reverse proxies',
       icon: <Share2 size={14} />,
-      count: vpns.filter((p) => p.spec.kind === 'frp').length
+      count: vpns.filter(isReverseProxy).length
     },
     // The odd one out, and deliberately here: every other tab makes a remote
     // thing reachable, and this one shows what leaves. It belongs beside them

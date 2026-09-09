@@ -33,6 +33,7 @@ export const VPN_ERROR_MESSAGE: Record<VpnErrorCode, string> = {
   'config-invalid': 'This profile is not valid.',
   'config-rejected': 'This configuration was rejected because it tries to run programs.',
   'auth-failed': 'The server rejected these credentials.',
+  'engine-stopped': 'The program that runs this tunnel is installed but not running.',
   'auth-otp-required': 'A one-time code is needed to connect.',
   'tls-handshake-failed': 'The secure connection to the server could not be established.',
   'cert-expired': 'The client certificate is outside its validity period.',
@@ -73,6 +74,9 @@ export const VPN_ERROR_HINT: Record<VpnErrorCode, string> = {
   // appends this after it. A generic sentence here could only contradict them.
   'binary-missing': '',
   'binary-untrusted': 'Reinstall OpsMaxx — antivirus software sometimes alters bundled files.',
+  // The engine is one this app attaches to rather than starts, so the action is
+  // in the engine's own client and not anywhere in here.
+  'engine-stopped': 'Start it from its own app or service, then connect again.',
   // Not "check the highlighted fields": this arrives as a toast when the
   // profile form is closed, so there is nothing highlighted to look at.
   'config-invalid': 'Open the profile to fix it.',

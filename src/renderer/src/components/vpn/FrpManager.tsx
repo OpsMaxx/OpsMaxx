@@ -8,6 +8,8 @@ import { frpPublishReadiness, publicUrl, type FrpSetupGap } from '../../../../sh
 import { useVpnProfiles } from './useVpnProfiles'
 import { FrpPublishDialog } from './FrpPublishDialog'
 import { FrpTunnelSetup } from './FrpTunnelSetup'
+import { NgrokSetup } from './NgrokSetup'
+import { isReverseProxyKind } from '../../../../shared/vpn'
 
 function blankFrpProfile(workspaceId: string): VpnProfile {
   return {
@@ -33,7 +35,7 @@ function blankFrpProfile(workspaceId: string): VpnProfile {
  *  `useVpnProfiles` — but the reverse direction: a VPN brings you onto a remote
  *  network, an frp client publishes something here onto a remote one. */
 export function FrpManager(): React.JSX.Element {
-  const profiles = useWorkspaceVpns().filter((p) => p.spec.kind === 'frp')
+  const profiles = useWorkspaceVpns().filter((p) => isReverseProxyKind(p.spec.kind))
   const { row, dialogs, importProfile, editProfile } = useVpnProfiles()
 
   // The one-click flow. `port` is a string rather than a number so an empty box
@@ -43,6 +45,9 @@ export function FrpManager(): React.JSX.Element {
   const [gaps, setGaps] = useState<FrpSetupGap[] | null>(null)
   const [publishing, setPublishing] = useState<{ port: number } | null>(null)
   const [settingUp, setSettingUp] = useState(false)
+  // ngrok is configured rather than imported, so it needs its own way in —
+  // there is no file to drop. See NgrokSetup.
+  const [addingNgrok, setAddingNgrok] = useState(false)
 
   const readiness = frpPublishReadiness(profiles)
   const wanted = /^\d+$/.test(port.trim()) ? Number(port.trim()) : 0
@@ -111,6 +116,9 @@ export function FrpManager(): React.JSX.Element {
         </button>
         <button className="btn quiet size-28" onClick={newClient}>
           New frp client
+        </button>
+        <button className="btn quiet size-28" onClick={() => setAddingNgrok(true)}>
+          Add ngrok
         </button>
       </div>
 
@@ -188,6 +196,10 @@ export function FrpManager(): React.JSX.Element {
         <div className="col" style={{ gap: 8, paddingBottom: 16 }}>
           {profiles.map(row)}
         </div>
+      )}
+
+      {addingNgrok && (
+        <NgrokSetup onClose={() => setAddingNgrok(false)} onDone={() => setAddingNgrok(false)} />
       )}
 
       {settingUp && (

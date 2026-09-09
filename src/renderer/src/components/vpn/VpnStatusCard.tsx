@@ -2,6 +2,7 @@ import { AlertTriangle } from 'lucide-react'
 import { WG_HANDSHAKE_STALE_SEC } from '../../../../shared/vpn'
 import type {
   FrpProxyStatus,
+  NgrokEndpoint,
   FrpSpec,
   VpnBoundListener,
   VpnKind,
@@ -176,6 +177,7 @@ export function VpnStatusCard({ profile, status }: VpnStatusCardProps): React.JS
   const stats = status?.stats
   const listeners = status?.listeners ?? []
   const proxies: FrpProxyStatus[] = stats?.proxies ?? []
+  const endpoints: NgrokEndpoint[] = stats?.endpoints ?? []
 
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -198,8 +200,12 @@ export function VpnStatusCard({ profile, status }: VpnStatusCardProps): React.JS
         {profile.spec.kind === 'wireguard' && (
           <Item k="Handshake" v={handshakeLabel(stats?.lastHandshakeSec)} />
         )}
-        {stats && <Item k="Received" v={bytes(stats.rxBytes)} />}
-        {stats && <Item k="Sent" v={bytes(stats.txBytes)} />}
+        {/* Not for ngrok: it reports per-endpoint counters that cannot honestly
+            be collapsed into one pair, so the driver sends zeroes and two rows
+            reading "0 B" would be a claim about traffic rather than an absence
+            of one. */}
+        {stats && profile.spec.kind !== 'ngrok' && <Item k="Received" v={bytes(stats.rxBytes)} />}
+        {stats && profile.spec.kind !== 'ngrok' && <Item k="Sent" v={bytes(stats.txBytes)} />}
         {stats?.assignedIp && <Item k="Assigned IP" v={stats.assignedIp} />}
         {stats?.remoteEndpoint && <Item k="Endpoint" v={stats.remoteEndpoint} />}
         {stats?.latencyMs !== undefined && (
@@ -207,6 +213,29 @@ export function VpnStatusCard({ profile, status }: VpnStatusCardProps): React.JS
         )}
         {status && status.restarts > 0 && <Item k="Restarts" v={String(status.restarts)} />}
       </div>
+
+      {/* The public URLs. This is the entire point of an ngrok tunnel: the
+          address is assigned by the server, it changes on every run unless a
+          domain is reserved, and it exists nowhere else in the app — so a card
+          that showed state and not the URL would be showing everything except
+          the thing the user came for. Selectable, because it gets pasted. */}
+      {endpoints.length > 0 && (
+        <div className="col" style={{ gap: 4 }}>
+          {endpoints.map((e) => (
+            <div key={e.name} className="row" style={{ gap: 8, alignItems: 'baseline' }}>
+              <span className="faint" style={{ fontSize: 11, minWidth: 90 }}>
+                {e.name}
+              </span>
+              <span className="mono selectable">{e.publicUrl}</span>
+              {e.localAddr && (
+                <span className="faint" style={{ fontSize: 11 }}>
+                  → {e.localAddr}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {health === 'degraded' && (
         // Every kind, not just WireGuard: an frp client whose proxies failed

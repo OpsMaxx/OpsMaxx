@@ -104,6 +104,14 @@ function applyRefs(spec: VpnSpec, refs: StagedVpnSecretRefs): VpnSpec {
       return applyOpenVpnRefs(spec, refs)
     case 'frp':
       return applyFrpRefs(spec, refs)
+    case 'ngrok':
+      // The authtoken is chosen from the vault in the form, not carried in by a
+      // parser, so there is no staged ref to graft on.
+      return spec
+    case 'tailscale':
+      // No secret refs to fill in, because this app stores no Tailscale
+      // credential at all — the daemon owns its own login.
+      return spec
   }
 }
 

@@ -10,6 +10,8 @@ import { isVpnRunning } from '../../../../shared/vpn'
 import { userSuppliesEngine } from '../../../../shared/vpnEngines'
 import type {
   FrpProxy,
+  ImportableVpnKind,
+  NgrokSpec,
   VpnDependent,
   VpnEngineInfo,
   VpnErrorCode,
@@ -28,12 +30,15 @@ import {
 } from './VpnStatusCard'
 import { VpnImportModal } from './VpnImportModal'
 import { VpnProfileForm, type VpnFormFocus } from './VpnProfileForm'
+import { NgrokSetup } from './NgrokSetup'
 import { VpnLogDrawer } from './VpnLogDrawer'
 
 const KIND_LABEL: Record<VpnKind, string> = {
   wireguard: 'WireGuard',
   openvpn: 'OpenVPN',
-  frp: 'frp'
+  frp: 'frp',
+  tailscale: 'Tailscale',
+  ngrok: 'ngrok'
 }
 
 /** The proxies whose exposure the user has not ticked. Start refuses while this
@@ -54,6 +59,16 @@ function subtitle(profile: VpnProfile): string {
   if (spec.kind === 'openvpn') {
     const r = spec.remotes?.[0]
     return `OpenVPN${r ? ` · ${r.host}:${r.port}` : ''}`
+  }
+  if (spec.kind === 'ngrok') {
+    const n = spec.tunnels.length
+    return `ngrok · ${n} ${n === 1 ? 'endpoint' : 'endpoints'}`
+  }
+  if (spec.kind === 'tailscale') {
+    // No endpoint to name: the tailnet is a mesh and the daemon owns the
+    // connection. What is worth saying is that this app is attached to
+    // something it does not run.
+    return 'Tailscale · this machine’s own client'
   }
   return `frp · ${frpSummary(spec)}`
 }
@@ -203,7 +218,10 @@ export interface VpnProfiles {
   /** Every dialog the rows can open. Render it once, anywhere in the view. */
   dialogs: React.JSX.Element
   /** Open the importer for a kind of config file. */
-  importProfile: (kind: VpnKind) => void
+  // ImportableVpnKind: the import flow reads a configuration FILE, and
+  // Tailscale has none. Typed here so a future caller is refused at compile
+  // time rather than at the parser.
+  importProfile: (kind: ImportableVpnKind) => void
   /** Open the profile form — on a stored profile, or on a fresh blank one. */
   editProfile: (profile: VpnProfile) => void
 }
@@ -227,7 +245,10 @@ export function useVpnProfiles(): VpnProfiles {
 
   const [busy, setBusy] = useState<Record<string, boolean>>({})
   const [expanded, setExpanded] = useState<string | null>(null)
-  const [importing, setImporting] = useState<VpnKind | null>(null)
+  // ImportableVpnKind, not VpnKind: Tailscale has no configuration file, so the
+  // compiler refuses to route it here rather than the user reaching a parser
+  // whose only possible answer is "that file was wrong".
+  const [importing, setImporting] = useState<ImportableVpnKind | null>(null)
   // Carries where to stand as well as what to edit: a failure that knows the
   // port is taken can open the form on the port.
   const [editing, setEditing] = useState<{ profile: VpnProfile; focus?: VpnFormFocus } | null>(null)
@@ -679,7 +700,17 @@ export function useVpnProfiles(): VpnProfiles {
   const dialogs = (
     <>
       {importing && <VpnImportModal kind={importing} onClose={() => setImporting(null)} />}
-      {editing && (
+      {/* ngrok edits its own form. VpnProfileForm branches on kind and has no
+          ngrok branch, so routing an ngrok profile there showed a form with none
+          of its fields — and an authtoken with no way to rotate it. */}
+      {editing && editing.profile.spec.kind === 'ngrok' && (
+        <NgrokSetup
+          existing={editing.profile as VpnProfile & { spec: NgrokSpec }}
+          onClose={() => setEditing(null)}
+          onDone={() => setEditing(null)}
+        />
+      )}
+      {editing && editing.profile.spec.kind !== 'ngrok' && (
         <VpnProfileForm
           profile={editing.profile}
           focus={editing.focus}

@@ -7,7 +7,7 @@
 // `{ port, close }` pair `openEphemeralForward` does and `db.ts` can consume
 // either without knowing which it got.
 
-export type VpnKind = 'wireguard' | 'openvpn' | 'frp'
+export type VpnKind = 'wireguard' | 'openvpn' | 'frp' | 'tailscale' | 'ngrok'
 
 // `userspace` runs the whole TCP/IP stack in-process (gVisor netstack) and
 // exposes the tunnel as local listeners only: no TUN device, no route table
@@ -230,7 +230,133 @@ export interface FrpConfirmations {
   allowNonLoopbackBindAddr?: boolean
 }
 
-export type VpnSpec = WireGuardSpec | OpenVpnSpec | FrpSpec
+/**
+ * Tailscale, which this app ATTACHES to rather than runs.
+ *
+ * There is almost nothing to configure, and that is the design rather than an
+ * omission. `tailscaled` is a machine-wide daemon that other software depends
+ * on and that the user installed deliberately; OpsMaxx does not start it, does
+ * not stop it, and stores no credential for it — login is a browser flow the
+ * Tailscale client owns. What this profile holds is the app's own view of it.
+ */
+export interface TailscaleSpec {
+  kind: 'tailscale'
+  /**
+   * An absolute path to the `tailscale` CLI, when the user has one somewhere
+   * the standard search does not look. Confirmed in the UI like every other
+   * `binaryPath` — an unconfirmed one is never executed.
+   */
+  binaryPath?: string
+  confirmed?: boolean
+  /**
+   * Offer this tailnet's peers as connections to open.
+   *
+   * Read-only either way: it changes what the app SHOWS, never what the tailnet
+   * is. Off by default, because a device list is information about a network the
+   * user may not want mirrored into this app's UI.
+   */
+  showPeers?: boolean
+  /**
+   * Always absent, and present in the type only so the profile UI can read it
+   * without branching.
+   *
+   * Every other spec carries the directives an import refused to honour. There
+   * is no Tailscale import — nothing is parsed, so nothing is ever stripped —
+   * which makes this permanently empty rather than merely usually empty.
+   */
+  strippedDirectives?: StrippedDirective[]
+}
+
+/** One endpoint the ngrok agent publishes. */
+export interface NgrokTunnel {
+  /** The agent's own name for it, and the key its status is reported under. */
+  name: string
+  proto: 'http' | 'tcp' | 'tls'
+  /** The port on THIS machine that gets published. */
+  localPort: number
+  /**
+   * A reserved domain or TCP address, for accounts that have one.
+   *
+   * Absent means ngrok assigns a random one per run, which is what the free
+   * tier does — so the public address changes every restart, and anything that
+   * hardcoded the old one breaks. The UI says so rather than letting somebody
+   * discover it.
+   */
+  domain?: string
+  /**
+   * The user ticked "this makes localhost:<port> reachable from the public
+   * internet". start() refuses without it. Not a preference — a gate.
+   *
+   * It matters more here than it does for frp: an frp proxy is reachable from
+   * one server the user runs, while an ngrok endpoint is reachable from
+   * everywhere, immediately, by anyone with the URL.
+   */
+  acknowledgedExposure: boolean
+}
+
+/**
+ * ngrok, which publishes a local port to a public URL.
+ *
+ * Unlike Tailscale, the agent here IS ours to run: it is a per-user process
+ * with no system state, and stopping this profile must stop it. So this driver
+ * supervises normally.
+ *
+ * What it must NOT do is ship the agent. It is closed-source and not
+ * redistributable, so it cannot be bundled — and it must not be auto-downloaded
+ * either, because a binary fetched at runtime would bypass the ClamAV, Defender
+ * and VirusTotal scanning that every artifact in a release goes through. The
+ * user installs it; this app finds it. That matches how frp is handled, where
+ * the binary is built from pinned source and checksum-verified rather than
+ * downloaded.
+ */
+export interface NgrokSpec {
+  kind: 'ngrok'
+  /**
+   * The account authtoken, in the vault.
+   *
+   * A vault ref rather than a stored string, for the reason the WireGuard
+   * private key is: it has to travel with an encrypted backup, and the OS
+   * keychain is machine-local. It reaches the agent through the environment and
+   * never through argv — see the note on SupervisedSpec.env.
+   */
+  authtokenRef?: VpnSecretRef
+  tunnels: NgrokTunnel[]
+  /** `us`, `eu`, `ap`, … Absent lets the agent choose. */
+  region?: string
+  binaryPath?: string
+  confirmed?: boolean
+  strippedDirectives?: StrippedDirective[]
+}
+
+export type VpnSpec = WireGuardSpec | OpenVpnSpec | FrpSpec | TailscaleSpec | NgrokSpec
+
+/**
+ * The kinds that can be created from a config FILE.
+ *
+ * Excluded at the type level rather than by a runtime guard, so the compiler
+ * refuses an attempt to open the import flow instead of the user reaching a
+ * parser whose only possible answer is "that file was wrong".
+ *
+ * Tailscale has no configuration file at all — the daemon holds its own state
+ * and its own login. ngrok has one, but it is not the unit of exchange: what a
+ * user has is an account and a port they want published, and both are chosen in
+ * the profile form. Neither is an omission waiting to be filled in.
+ */
+export type ImportableVpnKind = Exclude<VpnKind, 'tailscale' | 'ngrok'>
+
+/**
+ * Whether a kind publishes outward rather than making the other side reachable
+ * here.
+ *
+ * One predicate, because this distinction is drawn in three places — the tab
+ * counts and each of the two manager panels — and each of them used to spell it
+ * as `kind === 'frp'` or `kind !== 'frp'`. That pair is only correct while frp
+ * is the only reverse proxy: adding ngrok to some of them and not others counts
+ * it in both tabs and lists it in neither reliably.
+ */
+export function isReverseProxyKind(kind: VpnKind): boolean {
+  return kind === 'frp' || kind === 'ngrok'
+}
 
 export interface VpnProfile {
   id: string
@@ -287,6 +413,20 @@ export const VPN_ALERT_READINGS: Record<VpnState, { down: boolean | null; silent
   stopped: { down: null, silent: null }
 }
 
+/**
+ * One endpoint the ngrok agent has published.
+ *
+ * In `shared/` rather than in the driver because the public URL is the entire
+ * point of an ngrok tunnel and the UI has to render it — the same reason
+ * FrpProxyStatus lives here.
+ */
+export interface NgrokEndpoint {
+  name: string
+  publicUrl: string
+  proto: string
+  localAddr?: string
+}
+
 export interface FrpProxyStatus {
   name: string
   type: string
@@ -334,6 +474,11 @@ export interface VpnStats {
   // frp only; frp exposes no client-side byte counters, so the proxy table is
   // the telemetry rather than faked rx/tx numbers.
   proxies?: FrpProxyStatus[]
+  // ngrok only, and the same reasoning: a mesh of endpoints has no single
+  // rx/tx pair worth reporting, and the public URL is what the user actually
+  // needs — it is assigned by the server, changes per run without a reserved
+  // domain, and exists nowhere else in the app.
+  endpoints?: NgrokEndpoint[]
   sampledAt: number
 }
 
@@ -359,6 +504,9 @@ export type VpnErrorCode =
   | 'version-mismatch'
   | 'interface-conflict'
   | 'already-running'
+  // Installed and reachable, but not running — a daemon this app attaches to
+  // rather than starts, so the fix is to start it, not to reconfigure anything.
+  | 'engine-stopped'
   | 'clock-skew'
   | 'exposure-unacknowledged'
   | 'unsupported'

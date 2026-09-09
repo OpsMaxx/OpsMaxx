@@ -16,7 +16,9 @@ import { HealthChip, vpnHealth } from './VpnStatusCard'
 const KIND_LABEL: Record<VpnKind, string> = {
   wireguard: 'WireGuard',
   openvpn: 'OpenVPN',
-  frp: 'frp'
+  frp: 'frp',
+  tailscale: 'Tailscale',
+  ngrok: 'ngrok'
 }
 
 interface VpnTransportSelectProps {
