@@ -12,7 +12,7 @@ import {
 } from '../../../../shared/driftWatch'
 import { clsx } from '../../lib/format'
 import type { Server } from '../../types'
-import { PanelShell } from './PanelShell'
+import { NoteWhy, PanelShell } from './PanelShell'
 import { SweepEmpty } from './SweepEmpty'
 import {
   DRIFT_NO_PUSH,
@@ -485,11 +485,19 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
           </div>
 
           <div className="panel-note faint">
-            Comparison is over hashes. OpsMaxx keeps two hashes and a status per file per server —
-            never the file — so a divergence survives a restart while the configuration itself is
-            not copied into its store. The first {DRIFT_PREVIEW_CHARS} characters of each file are
-            held in memory for this session only, after every redaction rule has run over the whole
-            of it.
+            {/* The privacy claim stays on the page; the mechanism behind it
+                folds. What a reader must not have to expand for is that the
+                file itself is never stored — the two-hashes-and-a-status
+                detail is how that is achieved, which is a different question
+                and one most people never ask. */}
+            Comparison is over hashes — the configuration itself is never copied into OpsMaxx&rsquo;s
+            store.
+            <NoteWhy summary="How the comparison works, and what is held">
+              OpsMaxx keeps two hashes and a status per file per server, so a divergence survives a
+              restart while the file does not. The first {DRIFT_PREVIEW_CHARS} characters of each
+              file are held in memory for this session only, after every redaction rule has run
+              over the whole of it.
+            </NoteWhy>
           </div>
         </>
       )}
