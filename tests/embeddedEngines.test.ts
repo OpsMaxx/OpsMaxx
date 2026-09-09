@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { tailscaleDriver, stateFor } from '../src/main/services/vpn/drivers/tailscale'
 import { ngrokDriver } from '../src/main/services/vpn/drivers/ngrok'
 import { isEngineBundledOn } from '../src/shared/vpnEngines'
+import { scrubSecrets } from '../src/main/services/vpn/netdSession'
 import { isReverseProxyKind } from '../src/shared/vpn'
 import type { NgrokSpec } from '../src/shared/vpn'
 
@@ -258,5 +259,50 @@ describe('what the sidecar reports actually reaches the screen', () => {
   // An accessor nothing calls is indistinguishable from a feature that works.
   it('leaves no accessor that only the driver can see', () => {
     expect(TS_DRIVER).not.toContain('export function tailscalePeers')
+  })
+})
+
+describe('a credential never rides out on an error message', () => {
+  /**
+   * Found by running the real sidecar, not by reading it: ngrok answers a bad
+   * authtoken with "Your authtoken: <the token>".
+   *
+   * That message is a RETURN VALUE. It travels send() → VpnError →
+   * VpnStartResult.error → the profile card, and is persisted with the status.
+   * The supervisor's `redact` option covers the captured log ring and nothing
+   * else — so the one path a secret was guaranteed to take was the one path
+   * nothing was scrubbing.
+   */
+  it('takes the token out of the message ngrok sends back', () => {
+    const token = '2abcdefghijklmnopqrstuvwxyz_0123456789ABCDEF'
+    const real =
+      `could not reach ngrok: The authtoken you specified does not look like a proper ngrok authtoken.\n` +
+      `Your authtoken: ${token}\n`
+    const scrubbed = scrubSecrets(real, [token])
+    expect(scrubbed).not.toContain(token)
+    // The rest of the sentence survives: the user still has to be told what
+    // went wrong, and "[redacted] is not a valid authtoken" is the useful half.
+    expect(scrubbed).toContain('does not look like a proper ngrok authtoken')
+  })
+
+  it('scrubs every secret it was given, not just the first', () => {
+    const out = scrubSecrets('key=AAAAAAAAAAAA and pass=BBBBBBBBBBBB', [
+      'AAAAAAAAAAAA',
+      'BBBBBBBBBBBB'
+    ])
+    expect(out).toBe('key=[redacted] and pass=[redacted]')
+  })
+
+  /**
+   * A short "secret" would redact half the alphabet out of every message —
+   * an empty string worst of all, which would match at every position.
+   */
+  it('ignores values too short to be a credential', () => {
+    const msg = 'connection refused on port 80'
+    expect(scrubSecrets(msg, ['', '80', 'on'])).toBe(msg)
+  })
+
+  it('is applied to the reply path, not only exported', () => {
+    expect(SESSION).toContain('scrubSecrets(frame.error?.message')
   })
 })

@@ -21,6 +21,31 @@ import { resolveBundled } from './binaries'
 
 const NETD = 'opsmaxx-netd'
 
+/**
+ * Take the secrets back out of a message before anybody sees it.
+ *
+ * Found by running the real thing: ngrok answers a bad authtoken with "Your
+ * authtoken: <the token>". That message is a RETURN VALUE — it travels
+ * `send()` → VpnError → VpnStartResult.error → the profile card, and it is
+ * persisted with the status. The supervisor's `redact` covers the log ring and
+ * nothing else, so the one path a secret was guaranteed to travel was the one
+ * path nothing was scrubbing.
+ *
+ * Applied to every reply rather than to ngrok's: a tsnet error can quote an
+ * auth key just as easily, and the next engine embedded here will have its own
+ * way of being helpful with a credential.
+ */
+export function scrubSecrets(message: string, secrets: readonly string[]): string {
+  let out = message
+  for (const secret of secrets) {
+    // Short strings are not credentials worth matching — a two-character
+    // "secret" would redact half the alphabet out of every error message.
+    if (secret.length < 8) continue
+    out = out.split(secret).join('[redacted]')
+  }
+  return out
+}
+
 /** The sidecar's reply frame. */
 interface Frame {
   id?: string
@@ -67,6 +92,10 @@ export async function openNetdSession(
     )
   }
 
+  // Captured once: the resolver flattens every literal into `all`, and the
+  // scrub below is the last thing standing between a credential and a screen.
+  const secrets = [...ctx.secrets.all]
+
   const pending = new Map<string, Pending>()
   let seq = 0
   let closed = false
@@ -91,7 +120,10 @@ export async function openNetdSession(
       // `log` event precisely so this cannot happen, so a line here is worth
       // keeping rather than dropping — it is usually a runtime writing to
       // stdout before main() ever ran.
-      ctx.log(text, 'stderr')
+      // Scrubbed for the same reason the error path is: this is a line the
+      // sidecar wrote to stdout without going through its own log event, so
+      // nothing else has looked at it.
+      ctx.log(scrubSecrets(text, secrets), 'stderr')
       return
     }
 
@@ -99,7 +131,7 @@ export async function openNetdSession(
       // `log` carries {level, tunnelId, msg}; anything else is a state event
       // the caller does not subscribe to here.
       const d = frame.data as { level?: string; msg?: string } | undefined
-      if (frame.event === 'log' && d?.msg) ctx.log(d.msg, 'ctl')
+      if (frame.event === 'log' && d?.msg) ctx.log(scrubSecrets(d.msg, secrets), 'ctl')
       return
     }
 
@@ -113,7 +145,7 @@ export async function openNetdSession(
       p.reject(
         new VpnError(
           (frame.error?.code as VpnError['code']) ?? 'internal',
-          frame.error?.message ?? 'The sidecar refused the request.'
+          scrubSecrets(frame.error?.message ?? 'The sidecar refused the request.', secrets)
         )
       )
     }
