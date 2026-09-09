@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
-import { ArrowDown, ArrowUp, Boxes, RefreshCw, ShieldQuestion } from 'lucide-react'
+import { ArrowDown, ArrowUp, Boxes, ShieldQuestion } from 'lucide-react'
 import { useFleet } from '../../store/fleet'
 import { bridgeHas } from '../../lib/bridge'
 import { clsx } from '../../lib/format'
+import { CheckNowButton } from './CheckNowButton'
 import {
   INVENTORY_COLUMNS,
   buildRow,
@@ -190,15 +191,23 @@ export function InventoryPanel({
     }
   }
 
+  /**
+   * CheckNowButton, not a button calling `check()`.
+   *
+   * `check()` reads `fleet:facts`, which is a PURE CACHE READ — so this
+   * control re-read what was already in memory and re-rendered it unchanged.
+   * Facts sit behind an hourly schedule, so even the sweep it hoped for
+   * skipped the data this table displays. The new one clears the schedule,
+   * sweeps, and says what it collected.
+   */
   const checkNow = (primary: boolean): React.JSX.Element => (
-    <button
-      className={primary ? 'btn primary sm' : 'btn ghost sm'}
-      disabled={busy || servers.length === 0}
-      onClick={() => void check()}
-      title="Sweeps the estate now and re-reads what has already been collected. Facts are re-collected at most once an hour per server, so a server checked recently keeps the figures it has."
-    >
-      <RefreshCw size={13} className={clsx(busy && 'spin')} /> Check now
-    </button>
+    <CheckNowButton
+      primary={primary}
+      disabled={servers.length === 0}
+      collects="host facts"
+      serverIds={servers.map((s) => s.id)}
+      onCollected={check}
+    />
   )
 
   return (

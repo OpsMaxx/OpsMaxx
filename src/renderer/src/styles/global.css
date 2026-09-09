@@ -4411,3 +4411,24 @@ details[open] > .disclosure-head .chev {
 .vault-rule.met {
   color: var(--ok);
 }
+
+/* "Check now" and what it did. The result sits beside the button rather than
+   replacing it, so a second check does not require hunting for the control
+   again. */
+.check-now {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.check-now-said {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-sm);
+  color: var(--ok);
+  min-width: 0;
+}
+.check-now-said.warn {
+  color: var(--warn);
+}

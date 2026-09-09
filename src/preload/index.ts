@@ -34,7 +34,9 @@ import type {
 } from '../shared/inspect'
 import type { HostFacts } from '../shared/hostFacts'
 import type { HostPosture } from '../shared/posture'
-import type { FleetSampleEvent, FleetSamplerConfig, FleetSamplerStatus } from '../shared/fleet'
+import type { FleetSampleEvent, FleetSamplerConfig, FleetSamplerStatus,
+  FleetCollectResult
+} from '../shared/fleet'
 import type { BroadcastHostResult, BroadcastProgress, BroadcastRequest } from '../shared/broadcast'
 import type {
   JobDetail,
@@ -920,6 +922,9 @@ const api = {
       ipcRenderer.invoke('fleet:configure', cfg),
     status: (): Promise<FleetSamplerStatus> => ipcRenderer.invoke('fleet:status'),
     sampleNow: (): Promise<FleetSamplerStatus> => ipcRenderer.invoke('fleet:sample-now'),
+    /** Collect now, ignoring the hourly schedules. What "Check now" means. */
+    collectNow: (serverIds?: string[]): Promise<FleetCollectResult> =>
+      ipcRenderer.invoke('fleet:collect-now', serverIds),
     // Host facts as the sampler last collected them — roadmap item C. Read-only
     // and never a trigger: `at` is when the collection happened and is normally
     // much older than a metrics sample, because facts are collected hourly.

@@ -6,7 +6,8 @@ import {
   accessExportJson,
   buildAccessExport
 } from '../../../../shared/accessExport'
-import { KeyRound, RefreshCw, ShieldAlert } from 'lucide-react'
+import { KeyRound, ShieldAlert } from 'lucide-react'
+import { CheckNowButton } from './CheckNowButton'
 import { openKeyRevoke } from '../../store/nav'
 import { useApp } from '../../store/app'
 import { bridgeHas } from '../../lib/bridge'
@@ -395,15 +396,19 @@ export function AccessPanel({
           </button>
           {/* Ghost while there are keys on screen, solid while there are not —
               the same rule Inventory and Security posture follow. At most one
-              accent control per view, and only where pressing it is the task. */}
-          <button
-            className={collected.length === 0 ? 'btn primary sm' : 'btn ghost sm'}
-            disabled={busy || servers.length === 0}
-            onClick={() => void refresh()}
-            title="Sweeps the estate now and re-reads what has already been collected. Keys are re-read at most once an hour per server."
-          >
-            <RefreshCw size={13} className={clsx(busy && 'spin')} /> Check now
-          </button>
+              accent control per view, and only where pressing it is the task.
+
+              CheckNowButton rather than a button calling refresh(): refresh()
+              re-reads the CACHE, which is why this control appeared to do
+              nothing. Keys sit behind an hourly schedule, so a sweep that did
+              not clear it skipped the very data this panel shows. */}
+          <CheckNowButton
+            primary={collected.length === 0}
+            disabled={servers.length === 0}
+            collects="keys and access"
+            serverIds={servers.map((sv) => sv.id)}
+            onCollected={refresh}
+          />
         </>
       }
     >

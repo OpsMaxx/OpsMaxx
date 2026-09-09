@@ -42,6 +42,20 @@ export interface FleetSamplerConfig {
   factsIntervalMs?: number
 }
 
+/**
+ * What a "Check now" actually did.
+ *
+ * Reported rather than inferred, because a button that collected nothing and
+ * one that collected everything must not look alike — which is the bug this
+ * type was added for. `reason` is present only when nothing was swept.
+ */
+export interface FleetCollectResult {
+  swept: boolean
+  reason?: 'disabled' | 'no-targets'
+  /** How many servers had their schedules cleared and were collected. */
+  servers: number
+}
+
 export type FleetSampleReason =
   // A scheduled sweep produced this.
   | 'scheduled'

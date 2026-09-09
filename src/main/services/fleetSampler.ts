@@ -3,7 +3,8 @@ import type {
   FleetSampleReason,
   FleetSamplerConfig,
   FleetSamplerStatus,
-  FleetTarget
+  FleetTarget,
+  FleetCollectResult
 } from '../../shared/fleet'
 import type { HostAccess } from '../../shared/access'
 import type { HostFacts } from '../../shared/hostFacts'
@@ -831,6 +832,54 @@ export class FleetSampler {
   async sampleNow(): Promise<void> {
     if (!this.cfg.enabled || this.cfg.targets.length === 0) return
     await this.sweep('requested')
+  }
+
+  /**
+   * Collect now, ignoring the hourly clocks. What "Check now" means.
+   *
+   * `sampleNow()` alone does NOT do this, and that gap is what made three
+   * "Check now" buttons look broken. A sweep collects metrics every time, but
+   * facts, keys, posture and drift each sit behind their own due time — so a
+   * requested sweep on an estate swept within the hour re-collected metrics
+   * and skipped everything those three panels actually display. The panels
+   * then re-read the same cached values and rendered them unchanged, which is
+   * indistinguishable from a button that does nothing.
+   *
+   * Clearing the due entries is the whole mechanism: the gate is
+   * `now >= (dueAt ?? 0)`, so a server with no entry is due immediately. It is
+   * the same thing configure() does when the target list changes.
+   *
+   * Returns what happened rather than void, because "sampling is switched off"
+   * and "collected" must not look alike to the caller either — that is the bug
+   * this method exists to fix, one layer up.
+   */
+  async collectNow(serverIds?: readonly string[]): Promise<FleetCollectResult> {
+    if (!this.cfg.enabled) return { swept: false, reason: 'disabled', servers: 0 }
+    if (this.cfg.targets.length === 0) return { swept: false, reason: 'no-targets', servers: 0 }
+
+    const ids =
+      serverIds && serverIds.length > 0
+        ? new Set(serverIds)
+        : new Set(this.cfg.targets.map((t) => t.serverId))
+    for (const id of ids) {
+      this.factsDueAt.delete(id)
+      this.accessDueAt.delete(id)
+      this.postureDueAt.delete(id)
+      this.driftDueAt.delete(id)
+    }
+
+    /**
+     * Wait out a sweep already in flight before asking for one.
+     *
+     * `sweep()` refuses a request while one is running — correctly, since two
+     * would double the load to answer one question. But that sweep may already
+     * have walked past these hosts under the old due times, so returning here
+     * would report a collection that did not happen. Waiting costs one sweep's
+     * latency and makes the answer true.
+     */
+    if (this.inFlight) await this.inFlight
+    await this.sweep('requested')
+    return { swept: true, servers: ids.size }
   }
 
   // A success clears the recorded error; a failure keeps the last good sample.

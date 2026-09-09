@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, RefreshCw, TrendingUp } from 'lucide-react'
+import { AlertTriangle, Check, RefreshCw, TrendingUp } from 'lucide-react'
 import { useApp } from '../../store/app'
 import {
   storageHeadline,
@@ -293,6 +293,8 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
   const [report, setReport] = useState<CapacityReport | null>(null)
   const hydrated = useApp((st) => st.hydrated)
   const [loading, setLoading] = useState(false)
+  // When the user last re-read, so the button can say it happened.
+  const [refreshedAt, setRefreshedAt] = useState<number | null>(null)
   const [failed, setFailed] = useState(false)
   /** Bumped by Refresh. A re-read of the SAME server and window has to be a
    *  new dependency or the effect does not run, and the button would spin
@@ -465,13 +467,39 @@ export function CapacityPanel({ servers }: { servers: Server[] }): React.JSX.Ele
             </option>
           ))}
         </select>
-        <button
-          className="btn ghost sm"
-          disabled={loading || typeof trends !== 'function' || serverId === ''}
-          onClick={refresh}
-        >
-          <RefreshCw size={13} className={clsx(loading && 'spin')} /> Refresh
-        </button>
+        {/**
+         * Refresh, and a word about what it did.
+         *
+         * Deliberately NOT a "Check now": trends are computed from samples
+         * already in the store, so re-querying is the honest description of
+         * what this button does. What was missing is any acknowledgement — on
+         * an estate whose numbers have not moved, a silent re-query is
+         * indistinguishable from a dead control, which is what it was
+         * reported as.
+         */}
+        <div className="check-now">
+          <button
+            className="btn ghost sm"
+            disabled={loading || typeof trends !== 'function' || serverId === ''}
+            onClick={() => {
+              void Promise.resolve(refresh()).then(() => setRefreshedAt(Date.now()))
+            }}
+            title="Re-reads the samples already collected for this window. New samples arrive with the hourly sweep."
+          >
+            <RefreshCw size={13} className={clsx(loading && 'spin')} />
+            {loading ? 'Reading…' : 'Refresh'}
+          </button>
+          {refreshedAt !== null && !loading && (
+            <span className="check-now-said" aria-live="polite">
+              <Check size={12} />
+              Re-read at{' '}
+              {new Date(refreshedAt).toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit'
+              })}
+            </span>
+          )}
+        </div>
         </>
       }
     >

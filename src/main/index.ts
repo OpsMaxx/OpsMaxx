@@ -3816,6 +3816,19 @@ ipcMain.handle('fleet:sample-now', async () => {
   return fleetSampler.status()
 })
 
+/**
+ * "Check now", which used to be a lie.
+ *
+ * The panels called `fleet:facts` and `fleet:access` — both PURE CACHE READS —
+ * so the button re-read what was already in memory and re-rendered it
+ * unchanged. Nothing collected, nothing moved, no way to tell. This clears the
+ * hourly schedules for the named servers and sweeps, and reports what it did
+ * so the UI can distinguish "collected" from "sampling is switched off".
+ */
+ipcMain.handle('fleet:collect-now', (_e, serverIds?: string[]) =>
+  fleetSampler.collectNow(Array.isArray(serverIds) ? serverIds : undefined)
+)
+
 // ---- Databases ----
 // withVpnTransportDb resolves the profile from the saved record, so a
 // connection cannot skip its VPN just because one call site predates the

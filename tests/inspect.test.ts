@@ -1,4 +1,20 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+/**
+ * The parity test at the bottom of this file COMPILES AND RUNS Go.
+ *
+ * That is the point of it — the passthrough rule exists twice, once in the
+ * sidecar and once here, and running both against the same cases is the only
+ * thing stopping them drifting apart. But a Go toolchain invocation on a cold
+ * build cache takes far longer than a unit test, and it flaked at 38s against
+ * the 15s global limit while the rest of the suite ran alongside it.
+ *
+ * Raised for this file rather than globally, for the reason access.test.ts
+ * gives: 15s is a good ceiling for tests that should never approach it, and
+ * lifting it everywhere turns a hung test somewhere else into a slow one
+ * nobody notices.
+ */
+vi.setConfig({ testTimeout: 120_000 });
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
