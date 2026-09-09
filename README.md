@@ -85,11 +85,14 @@ Most terminal tools do one thing. A typical DevOps task needs four: open a shell
 brew install --cask opsmaxx/tap/opsmaxx     # macOS
 ```
 
-```bash
-winget install OpsMaxx.OpsMaxx              # Windows
-```
+The tap is third-party, so Homebrew asks you to `brew tap opsmaxx/tap` and trust it first.
 
-Or download an installer directly from the **[latest release](https://github.com/OpsMaxx/OpsMaxx/releases/latest)** — `.exe` for Windows, `.dmg` for macOS, `.AppImage`, `.deb` or `.rpm` for Linux.
+**Windows** is a direct download for now: the winget manifest is
+[in review](https://github.com/microsoft/winget-pkgs/pulls?q=OpsMaxx) and community
+submissions wait on a volunteer moderator, so `winget install OpsMaxx.OpsMaxx` does not
+work yet. This line will say otherwise the day it does.
+
+Download an installer from the **[latest release](https://github.com/OpsMaxx/OpsMaxx/releases/latest)** — `.exe` for Windows, `.dmg` for macOS, `.AppImage` or `.deb` for Linux.
 
 → **[Every install route, checksums, and the first-run warning](docs/install.md)**
 
