@@ -2439,6 +2439,23 @@ export const ACCESS_WRITE_OPT_IN_NOTE =
  * What the panel says where the button would be. One source of words, so the
  * renderer and anything else that has to explain this cannot drift apart.
  */
+/**
+ * The operative half of the refusal, safe to read on its own.
+ *
+ * Both facts a user needs in order to know what they can do right now: the
+ * write half is off, and nothing here touches a server. The REASONING behind
+ * it — why a half-working rollback is worse than none — is true and worth
+ * keeping, but it is not what somebody looking at a keys table needs in front
+ * of them, and seven hundred characters of it above the table pushed the keys
+ * themselves off the screen.
+ *
+ * If a reader who never expands the detail would be misled by this sentence
+ * alone, then this sentence is wrong. It is not allowed to be merely shorter.
+ */
+export const ACCESS_WRITE_DISABLED_SUMMARY =
+  'Changing authorized keys is not enabled in this build. Reading is unaffected \u2014 nothing on ' +
+  'this screen writes to any server.'
+
 export const ACCESS_WRITE_DISABLED_REASON =
   'Changing authorized keys is not enabled in this build. The safety net behind it — the server ' +
   'restoring its own previous file if nothing confirms the change — is not yet dependable, and a ' +

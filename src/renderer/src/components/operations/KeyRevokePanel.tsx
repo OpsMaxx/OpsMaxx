@@ -7,6 +7,7 @@ import { useApp } from '../../store/app'
 import { openMonitor, openSettings, useNav } from '../../store/nav'
 import {
   ACCESS_WRITE_DISABLED_REASON,
+  ACCESS_WRITE_DISABLED_SUMMARY,
   ACCESS_WRITE_ENABLED,
   ACCESS_WRITE_SCOPE,
   type AccessChangePreview,
@@ -15,7 +16,7 @@ import {
   type HostAccess
 } from '../../../../shared/access'
 import type { Server } from '../../types'
-import { PanelShell } from '../monitor/PanelShell'
+import { NoteWhy, PanelShell } from '../monitor/PanelShell'
 import { VaultLockedHosts } from '../common/PanelError'
 import { isVaultLocked } from '../../lib/withVaultUnlock'
 
@@ -283,8 +284,17 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
           not be able to do when it is back. */}
       {!canWrite && (
         <div className="panel-note is-unknown" data-testid="write-gated">
-          <ShieldAlert size={12} /> <b>{ACCESS_WRITE_DISABLED_REASON}</b>{' '}
-          <span className="muted">{ACCESS_WRITE_SCOPE}</span>
+          {/* Folded behind NoteWhy — the same primitive PatchPanel already
+              uses — because the reasoning outweighed the data: seven hundred
+              characters of justification sat above the keys this screen
+              exists to show. What stays visible carries both operative facts,
+              that the write half is off and that nothing here writes
+              anywhere, so a reader who never expands it is not misled. */}
+          <ShieldAlert size={12} /> <b>{ACCESS_WRITE_DISABLED_SUMMARY}</b>
+          <NoteWhy summary="Why it is off, and what it will be able to do">
+            <p>{ACCESS_WRITE_DISABLED_REASON}</p>
+            <p>{ACCESS_WRITE_SCOPE}</p>
+          </NoteWhy>
         </div>
       )}
 
