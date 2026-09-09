@@ -97,6 +97,31 @@ describe('netstat', () => {
 })
 
 describe('lsof', () => {
+  /**
+   * lsof truncates COMMAND to nine characters unless told not to, which turned
+   * `JavaApplicationStub` into `JavaAppli` and `codebase-memory-mcp` into
+   * `codebase-` — an owner column naming something nobody could recognise or
+   * search for. `+c 0` lifts it, with a plain `lsof` fallback because `+c` is
+   * not universal and a truncated name beats no name.
+   */
+  it('asks lsof not to truncate, and still works if it cannot', () => {
+    const cmd = buildListeningPortsCommand()
+    expect(cmd).toContain('lsof +c 0')
+    expect(cmd).toContain('|| lsof -nP')
+  })
+
+  /**
+   * The trap inside that fix: with `+c 0`, lsof escapes a space as `\x20`. The
+   * allowlist rejects a backslash, so decoding has to happen first or the fix
+   * turns truncated names into missing ones.
+   */
+  it('decodes the escapes lsof writes for spaces', () => {
+    const ports = parseLsof(
+      'Burp\\x20Browser 900 me 5u IPv4 0x1 0t0 TCP 127.0.0.1:8080 (LISTEN)'
+    )
+    expect(ports[0]?.process).toBe('Burp Browser')
+  })
+
   it('reads the owner and the socket', () => {
     const ports = parseLsof(MAC_OUT.split('===OM_PORTS_LSOF===')[1])
     expect(ports[0]).toMatchObject({ proto: 'tcp', address: '*', port: 22, process: 'sshd', pid: 812 })

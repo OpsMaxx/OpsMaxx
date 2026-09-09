@@ -79,7 +79,20 @@ export function buildListeningPortsCommand(): string {
     // is tried first and its failure falls through.
     'netstat -tulpn 2>/dev/null || { netstat -an -p tcp 2>/dev/null; netstat -an -p udp 2>/dev/null; } || true',
     `echo ${LSOF}`,
-    'lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null || true'
+    /**
+     * `+c 0` means "do not truncate the command name".
+     *
+     * lsof's default is nine characters, which turned `JavaApplicationStub`
+     * into `JavaAppli` and `codebase-memory-mcp` into `codebase-` — so the
+     * owner column named something the user could not search for and could not
+     * recognise.
+     *
+     * Chained with a plain `lsof` fallback rather than assumed: `+c` is not
+     * universal, and a build without it would otherwise fail the whole
+     * invocation and lose the owner column altogether. A truncated name beats
+     * no name.
+     */
+    'lsof +c 0 -nP -iTCP -sTCP:LISTEN 2>/dev/null || lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null || true'
   ].join('\n')
 }
 
@@ -106,7 +119,21 @@ function section(output: string, marker: string): string {
  */
 function cleanName(raw: string | undefined): string | undefined {
   if (!raw) return undefined
-  const name = raw.trim().replace(/^["']|["']$/g, '').replace(/:$/, '')
+  const name = raw
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .replace(/:$/, '')
+    // lsof escapes non-printables in the command name as `\x20` — a space
+    // becomes four characters. Decoded here, because `Burp\x20Browser` is not
+    // a name anybody recognises, and because the backslash would otherwise fail
+    // the allowlist below and throw the name away entirely. Only printable
+    // ASCII is decoded: the point is to recover a space, not to reconstruct
+    // arbitrary bytes into something that then gets rendered.
+    .replace(/\\x([0-9A-Fa-f]{2})/g, (_m, hex) => {
+      const code = parseInt(hex, 16)
+      return code >= 0x20 && code < 0x7f ? String.fromCharCode(code) : ''
+    })
+    .trim()
   if (!name || name.length > 64) return undefined
   if (!/^[A-Za-z0-9 ._@:+()/-]+$/.test(name)) return undefined
   return name
