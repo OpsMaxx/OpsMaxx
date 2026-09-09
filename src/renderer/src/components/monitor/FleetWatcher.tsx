@@ -90,8 +90,19 @@ export function FleetWatcher(): null {
   // Demo servers have nothing to sample, and an offline one is a connection
   // attempt per sweep that will not succeed — main reports the failure rather
   // than hiding it, but there is no reason to generate it every interval.
+  /**
+   * What the sampler is asked to watch.
+   *
+   * `rdpOnly` is excluded, and it has to be: the sweep is an SSH exec, so a
+   * machine that speaks only RDP would fail every sweep, be recorded
+   * unreachable, and raise host-unreachable for a host that is perfectly
+   * healthy and simply does not run sshd. A monitor that cries about a
+   * working machine is worse than one that says nothing about it, and this is
+   * the seam where "which halves are real" has to be honoured — the desktop
+   * is reachable, the shell was never there to lose.
+   */
   const targets = useMemo(
-    () => servers.filter((s) => s.demo === false).map(toTarget),
+    () => servers.filter((s) => s.demo === false && s.rdpOnly !== true).map(toTarget),
     [servers]
   )
 

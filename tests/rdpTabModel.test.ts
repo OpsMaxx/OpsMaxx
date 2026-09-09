@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { useApp } from '../src/renderer/src/store/app'
 import type { PanelView, Server } from '../src/renderer/src/types'
 
@@ -256,5 +258,41 @@ describe('an RDP-only machine', () => {
     const tabs = useApp.getState().tabs
     expect(tabs).toHaveLength(1)
     expect(tabs[0].kind).toBe('ssh')
+  })
+})
+
+/**
+ * Where an RDP-only machine must NOT appear.
+ *
+ * Adding the flag was only half the work. Every surface that assumes a shell
+ * would otherwise offer one for a machine that has none, and each would fail
+ * in a way that reads as the estate being broken rather than as the target
+ * having been the wrong kind of target.
+ *
+ * These are source-level checks rather than renders because the two call sites
+ * are one-line filters inside components that mount half the app; what matters
+ * is that the filter exists and names the flag.
+ */
+describe('surfaces that assume a shell', () => {
+  const read = (p: string): string =>
+    readFileSync(resolve(__dirname, '..', 'src/renderer/src/components/monitor', p), 'utf8')
+
+  /**
+   * The false-alert bug this prevents: the sweep is an SSH exec, so an
+   * RDP-only host would fail every sweep, be recorded unreachable, and raise
+   * host-unreachable for a machine that is perfectly healthy and simply does
+   * not run sshd. A monitor that cries about a working machine is worse than
+   * one that says nothing about it.
+   */
+  it('is not handed to the fleet sampler', () => {
+    expect(read('FleetWatcher.tsx')).toContain("s.rdpOnly !== true")
+  })
+
+  // "Run a command on many servers" cannot run one here, and neither can it
+  // on a files-only account — sshd refuses a command from that too.
+  it('is not selectable as a broadcast target, and nor is a files-only account', () => {
+    const src = read('BroadcastPanel.tsx')
+    expect(src).toContain('s.rdpOnly !== true')
+    expect(src).toContain('s.sftpOnly !== true')
   })
 })

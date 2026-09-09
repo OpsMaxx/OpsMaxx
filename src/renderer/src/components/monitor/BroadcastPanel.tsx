@@ -118,9 +118,23 @@ export function BroadcastPanel({ servers }: { servers: Server[] }): React.JSX.El
   const runId = useRef<string>(liveRun?.runId ?? '')
   const setActivity = useApp((s) => s.setActivity)
 
-  // Only servers that are actually reachable can be targets. Offering an
-  // offline host is offering a guaranteed failure row.
-  const eligible = useMemo(() => servers.filter((s) => s.status !== 'offline'), [servers])
+  /**
+   * Only servers that can actually run a command.
+   *
+   * Offline is the obvious half — offering an unreachable host is offering a
+   * guaranteed failure row. The other two have no shell at all: an RDP-only
+   * machine does not run sshd, and a files-only account is one sshd refuses a
+   * command from. Both would be selectable, both would fail every time, and
+   * the failure would read as the estate being broken rather than as the
+   * target having been the wrong kind of target.
+   */
+  const eligible = useMemo(
+    () =>
+      servers.filter(
+        (s) => s.status !== 'offline' && s.rdpOnly !== true && s.sftpOnly !== true
+      ),
+    [servers]
+  )
   // The chosen servers, not just their ids: the cfg handed to main is built
   // from these rows, and looking each one up again by id afterwards is how a
   // lookup ends up with a `!` on it that nobody can prove.
