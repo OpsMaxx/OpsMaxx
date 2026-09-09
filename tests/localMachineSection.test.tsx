@@ -23,12 +23,14 @@ import type { LocalShell } from '../src/shared/local'
  * again for anyone who never opens the tab-bar caret.
  */
 
+// `posix` for both, which is what LocalShellKind actually has — it does not
+// distinguish bash from zsh, and the snippet chooser reads the path instead.
 const SHELLS: LocalShell[] = [
-  { id: 'darwin-bash-aaaa1111', label: 'bash', kind: 'bash', path: '/bin/bash', args: [] },
+  { id: 'darwin-bash-aaaa1111', label: 'bash', kind: 'posix', path: '/bin/bash', args: [] },
   {
     id: 'darwin-zsh-bbbb2222',
     label: 'zsh (default)',
-    kind: 'zsh',
+    kind: 'posix',
     path: '/bin/zsh',
     args: [],
     isDefault: true
