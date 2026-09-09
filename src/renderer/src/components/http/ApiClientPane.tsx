@@ -6,7 +6,12 @@ import { createHttpTransport, type HttpTransportOptions } from '../../lib/httpTr
 import { useResolvedTheme } from '../../hooks/useResolvedTheme'
 import type { TraversedEntry } from '@scalar/workspace-store/schemas/navigation'
 import type { ApiCollection } from '../../types'
-import { scratchDocument, scratchOriginOf, scratchPathOf } from '../../../../shared/apiScratch'
+import {
+  apiPathOf,
+  scratchDocument,
+  scratchOriginOf,
+  scratchPathOf
+} from '../../../../shared/apiScratch'
 
 /**
  * The API client itself, for one collection.
@@ -133,7 +138,11 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
             ? (first?.path ?? '/')
             : // The first endpoint the user wrote, so a collection lands on
               // something they recognise rather than on a synthetic stub.
-              (collection.endpoints?.[0]?.path ?? scratchPathOf(baseUrl))
+              // Normalised through the same function the document uses, so
+              // the two cannot disagree about a leading slash.
+              (collection.endpoints?.[0]
+                ? apiPathOf(collection.endpoints[0].path)
+                : scratchPathOf(baseUrl))
         const landingMethod = specUrl || specPath ? (first?.method ?? 'get') : 'get'
 
         // Mounted as the client's OWN operation view rather than through

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { scratchDocument, scratchOriginOf, scratchPathOf } from '../src/shared/apiScratch'
+import { apiPathOf, scratchDocument, scratchOriginOf, scratchPathOf } from '../src/shared/apiScratch'
 import type { ApiEndpoint } from '../src/shared/apiScratch'
 
 /**
@@ -148,5 +148,36 @@ describe('a collection with hand-written endpoints', () => {
       for (const op of Object.values(item)) ids.push((op as { operationId: string }).operationId)
     }
     expect(new Set(ids).size).toBe(ids.length)
+  })
+})
+
+/**
+ * The landing path and the document have to agree about a leading slash.
+ *
+ * Endpoints are normalised when typed, so this cannot happen from the form —
+ * but a collection restored from a backup or edited by hand can hold
+ * `v1/users`, and the document would then contain `/v1/users` while the
+ * client was told to open `v1/users`. An operation that does not exist
+ * renders as a blank pane rather than as an error, which is the failure this
+ * whole screen was reported for in the first place.
+ */
+describe('agreeing on the path', () => {
+  it('normalises the same way the document does', () => {
+    expect(apiPathOf('v1/users')).toBe('/v1/users')
+    expect(apiPathOf('/v1/users')).toBe('/v1/users')
+    expect(apiPathOf('  /spaced  ')).toBe('/spaced')
+  })
+
+  it('lands on a path the document actually contains', () => {
+    // The shape a hand-edited record can have: no leading slash.
+    const doc = scratchDocument('API', 'https://h', [ep('get', 'v1/users')])
+    const landing = apiPathOf('v1/users')
+    expect(Object.keys(pathsOf(doc))).toContain(landing)
+  })
+
+  it('keeps OpenAPI path parameters intact', () => {
+    // `{id}` is how a path parameter is written, and the client relies on it.
+    const doc = scratchDocument('API', 'https://h', [ep('get', '/v1/users/{id}')])
+    expect(Object.keys(pathsOf(doc))).toEqual(['/v1/users/{id}'])
   })
 })

@@ -75,6 +75,21 @@ export function scratchOriginOf(baseUrl: string): string {
  * the moment it is created rather than an empty screen with no obvious next
  * step; as soon as one endpoint exists, the list IS the document.
  */
+/**
+ * A path as the document will hold it.
+ *
+ * Exported so the landing path and the document cannot disagree. They could:
+ * endpoints are normalised when typed, but a collection restored from a
+ * backup or edited by hand can hold `v1/users`, and the document would then
+ * contain `/v1/users` while the client was told to open `v1/users` — an
+ * operation that does not exist, which renders as a blank pane rather than as
+ * an error.
+ */
+export function apiPathOf(raw: string): string {
+  const t = raw.trim()
+  return t.startsWith('/') ? t : `/${t}`
+}
+
 export function scratchDocument(
   title: string,
   baseUrl: string,
@@ -93,7 +108,7 @@ export function scratchDocument(
     for (const e of endpoints) {
       // Two endpoints may share a path with different methods, which is what
       // an OpenAPI path item is: a path, holding one operation per method.
-      const path = e.path.startsWith('/') ? e.path : `/${e.path}`
+      const path = apiPathOf(e.path)
       const item = paths[path] ?? (paths[path] = {})
       item[e.method] = operationFor(e.method, e.summary?.trim() || `${e.method.toUpperCase()} ${path}`)
     }

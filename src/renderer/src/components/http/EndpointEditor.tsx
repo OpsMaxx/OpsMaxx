@@ -28,7 +28,9 @@ function normalisePath(raw: string): string | null {
   if (t === '') return null
   const withSlash = t.startsWith('/') ? t : `/${t}`
   // A path carrying a query or a fragment would be silently dropped by the
-  // document, so it is refused here where the user can see why.
+  // document, so it is refused here where the user can see why. `{id}` is
+  // deliberately allowed: that is how an OpenAPI path parameter is written,
+  // and the client relies on it to offer a field for the value.
   if (/[?#\s]/.test(withSlash)) return null
   return withSlash
 }
