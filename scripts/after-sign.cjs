@@ -26,6 +26,7 @@
 // written here stays true.
 
 const { execFileSync, spawnSync } = require('node:child_process')
+const { rmSync } = require('node:fs')
 const { createHash } = require('node:crypto')
 const { existsSync, readdirSync, readFileSync, statSync, writeFileSync } = require('node:fs')
 const { join } = require('node:path')
@@ -141,4 +142,72 @@ exports.default = async function afterSign(context) {
   // what rewriting the manifest risks.
   execFileSync('codesign', ['--verify', '--strict', '--deep', app], { stdio: 'inherit' })
   console.log('  • after-sign: manifest rewritten and bundle re-sealed')
+
+  notarize(app)
+}
+
+/**
+ * Notarize and staple, HERE, because the re-seal above invalidates anything
+ * Apple has already been told about this bundle.
+ *
+ * electron-builder's own `notarize` option runs before this hook, not after:
+ * the build log reads sign -> notarization successful -> after-sign -> build
+ * dmg. So its ticket was stapled to a bundle that this hook then re-signed,
+ * which changes the cdhash and silently discards the staple. The 0.30.0
+ * artifacts went out signed, reported "notarization successful", and were
+ * rejected by Gatekeeper as `Unnotarized Developer ID`.
+ *
+ * Two things both want to be last — the manifest has to record post-signing
+ * bytes, and the notarization has to outlive the final signature — and only
+ * one of them can be. So the re-seal stays where it must be and notarization
+ * moves after it. `mac.notarize` is false in electron-builder.yml to stop it
+ * happening twice.
+ *
+ * Skipped without credentials, so a contributor's build is unaffected.
+ */
+function notarize(app) {
+  const appleId = process.env.APPLE_ID
+  const password = process.env.APPLE_APP_SPECIFIC_PASSWORD
+  const teamId = process.env.APPLE_TEAM_ID
+  if (!appleId || !password || !teamId) {
+    console.log('  • after-sign: no notarization credentials, skipping')
+    return
+  }
+
+  // notarytool takes an archive, not a bundle. `ditto -c -k --keepParent` is
+  // the form Apple documents; a plain `zip` loses symlinks and resource forks
+  // and gets the submission rejected.
+  const archive = `${app}.notarize.zip`
+  execFileSync('ditto', ['-c', '-k', '--keepParent', app, archive], { stdio: 'inherit' })
+
+  try {
+    console.log('  • after-sign: submitting to Apple for notarization')
+    execFileSync(
+      'xcrun',
+      [
+        'notarytool',
+        'submit',
+        archive,
+        '--apple-id',
+        appleId,
+        '--password',
+        password,
+        '--team-id',
+        teamId,
+        '--wait'
+      ],
+      // The password is an argument, so it must not reach a log. stdout is
+      // inherited for the progress and the submission id; that carries no
+      // credential.
+      { stdio: ['ignore', 'inherit', 'inherit'] }
+    )
+    // Staples the ticket INTO the bundle, which is what makes it work offline
+    // and what `spctl` reads. Without this the app is notarized on Apple's
+    // side and still refused on a machine that cannot reach them.
+    execFileSync('xcrun', ['stapler', 'staple', app], { stdio: 'inherit' })
+    execFileSync('xcrun', ['stapler', 'validate', app], { stdio: 'inherit' })
+    console.log('  • after-sign: notarized and stapled')
+  } finally {
+    rmSync(archive, { force: true })
+  }
 }

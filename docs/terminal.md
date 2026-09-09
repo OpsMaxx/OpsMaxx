@@ -198,7 +198,7 @@ keep their aliases and prompt, and the desktop session has already sourced
 first time a command touches `~/Documents`, `~/Desktop`, `~/Downloads` or a
 removable volume, macOS shows its Files-and-Folders prompt naming OpsMaxx and
 saying it is for locally run commands. macOS records that grant against the app's
-`cdhash`, and because OpsMaxx is [ad-hoc signed](install.md#first-run-why-your-computer-shows-a-warning)
+`cdhash`, and because OpsMaxx is [ad-hoc signed](install.md#first-run-why-windows-shows-a-warning)
 rather than signed with a developer certificate, the `cdhash` changes with every
 build. So **every release starts from no grants and prompts again**. It is not a
 bug, and re-approving is the only way round it until the app is signed with a

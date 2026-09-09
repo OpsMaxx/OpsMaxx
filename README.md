@@ -29,14 +29,16 @@ Your DevOps workstation, everywhere. Windows · macOS · Linux.
 
 ---
 
-> [!CAUTION]
-> **Windows and macOS will show a security warning the first time you run OpsMaxx.
-> This is expected, and it is not a virus.**
+> [!IMPORTANT]
+> **Windows will show a security warning the first time you run OpsMaxx.
+> This is expected, and it is not a virus. macOS no longer warns.**
 >
-> The app is **not notarized**, and on Windows not signed at all — a code-signing
-> certificate costs $200–$400 a year for Windows and $99 a year for Apple, which a free
-> MIT-licensed project has no income to cover. The warning means your operating system
-> cannot confirm **who published** the app. It says nothing about whether the file is safe.
+> From 0.30.1 the macOS build is **signed with an Apple Developer ID and notarized by
+> Apple**, so it opens normally with no warning and no right-click-Open dance.
+>
+> The Windows build is still **unsigned** — a certificate there costs $200–$400 a year,
+> which this project has no income to cover. That warning means Windows cannot confirm
+> **who published** the app. It says nothing about whether the file is safe.
 >
 > Every release is scanned before it is published — **ClamAV** over every artifact,
 > **Microsoft Defender** on the Windows installer, and **VirusTotal's 70+ engines** on the
@@ -83,11 +85,14 @@ Most terminal tools do one thing. A typical DevOps task needs four: open a shell
 brew install --cask opsmaxx/tap/opsmaxx     # macOS
 ```
 
-```bash
-winget install OpsMaxx.OpsMaxx              # Windows
-```
+The tap is third-party, so Homebrew asks you to `brew tap opsmaxx/tap` and trust it first.
 
-Or download an installer directly from the **[latest release](https://github.com/OpsMaxx/OpsMaxx/releases/latest)** — `.exe` for Windows, `.dmg` for macOS, `.AppImage`, `.deb` or `.rpm` for Linux.
+**Windows** is a direct download for now: the winget manifest is
+[in review](https://github.com/microsoft/winget-pkgs/pulls?q=OpsMaxx) and community
+submissions wait on a volunteer moderator, so `winget install OpsMaxx.OpsMaxx` does not
+work yet. This line will say otherwise the day it does.
+
+Download an installer from the **[latest release](https://github.com/OpsMaxx/OpsMaxx/releases/latest)** — `.exe` for Windows, `.dmg` for macOS, `.AppImage` or `.deb` for Linux.
 
 → **[Every install route, checksums, and the first-run warning](docs/install.md)**
 

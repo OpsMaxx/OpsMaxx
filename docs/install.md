@@ -46,23 +46,23 @@ metadata or source archives, and you can ignore them.
 
 </details>
 
-### First run: why your computer shows a warning
+### First run: why Windows shows a warning
 
-**OpsMaxx is not notarized**, so the first time you run it you will see a security
-warning. Nothing is wrong with the download; the warning is about a missing certificate,
-not about the app.
+**macOS does not warn any more.** From 0.30.1 the macOS build is signed with an Apple
+Developer ID and notarized by Apple, and the ticket is stapled into the app — so it opens
+normally, offline included, with no right-click-Open workaround. You can check it
+yourself:
 
-Windows and macOS both expect an application to be signed with a **code-signing
-certificate** — an identity certificate bought from a certificate authority, currently
-around **$200–$400 a year** for Windows (or roughly **$99/year** for an Apple Developer
-account on macOS). OpsMaxx is free and MIT licensed with no income behind it, so that
-certificate does not exist yet. Every unsigned app gets the same treatment, whoever wrote
-it.
+```bash
+spctl -a -vvv /Applications/OpsMaxx.app
+```
 
-The macOS builds are **ad-hoc signed** — a signature that seals the bundle's contents but
-carries no identity, so macOS can still tell you the app has not been tampered with since
-it was built. What it cannot do is tell you who built it, which is what notarization is
-for. The Windows builds carry no signature at all.
+`source=Notarized Developer ID` is the answer that matters.
+
+**Windows still warns**, because that build carries no signature at all. A Windows
+code-signing certificate costs around **$200–$400 a year** from a certificate authority,
+and this project is free and MIT licensed with no income behind it. Every unsigned app
+gets the same treatment, whoever wrote it.
 
 **The warning does not mean the file is unsafe.** It means the operating system cannot
 confirm *who* published it. You can confirm that yourself — see
@@ -158,15 +158,15 @@ chmod +x OpsMaxx-*.AppImage
 
 </details>
 
-> **Will this be fixed?** Yes — signing and notarization are planned once the project can
-> cover the annual certificate cost. Until then the macOS builds are ad-hoc signed so the
-> warning is at least the ordinary, clickable kind, and the SHA-256 checksums on each
-> release are the way to verify what you downloaded is what was built.
+> **Will Windows be fixed too?** Not yet. macOS was done in 0.30.1 — an Apple Developer
+> account is $99 a year, which was affordable; a Windows certificate is $200–$400 a year
+> and is not, for now. Until then the SHA-256 checksums on each release are the way to
+> verify that what you downloaded is what was built.
 
 ### Antivirus scan
 
-Because the builds are unsigned, every release is scanned automatically as part of the
-build, by three independent scanners, before anything is published:
+Every release is scanned automatically as part of the build, by three independent
+scanners, before anything is published:
 
 | Scanner | What it is | Runs on |
 |---|---|---|

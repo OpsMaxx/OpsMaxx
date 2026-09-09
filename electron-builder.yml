@@ -189,12 +189,15 @@ mac:
   # Notarization: Apple staples a ticket that removes the Gatekeeper warning
   # entirely, rather than only making it clickable-through.
   #
-  # electron-builder skips this automatically when the credentials are absent,
-  # so a contributor's `npm run dist:mac` still produces an ad-hoc build rather
-  # than failing. In CI it needs APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and
-  # APPLE_TEAM_ID — an app-specific password from appleid.apple.com, never the
-  # account password.
-  notarize: true
+  # FALSE, and notarization happens in scripts/after-sign.cjs instead.
+  #
+  # electron-builder runs its notarization BEFORE the afterSign hook — the
+  # build log reads sign, notarization successful, after-sign, build dmg. That
+  # hook re-signs the bundle to correct the engine manifest, which changes the
+  # cdhash and silently throws the staple away. 0.30.0 shipped exactly that:
+  # "notarization successful" in the log and `Unnotarized Developer ID` from
+  # Gatekeeper. Leaving this true would notarize a bundle that is then modified.
+  notarize: false
   # macOS TCC prompt copy for the local terminal.
   #
   # On macOS 10.15+ the first access to ~/Documents, ~/Desktop, ~/Downloads or a

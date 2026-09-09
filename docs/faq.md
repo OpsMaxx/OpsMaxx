@@ -81,20 +81,17 @@ Yes, entirely. The app has no online dependency beyond the servers you connect t
 Yes. It answers keyboard-interactive challenges, and connections are shared between sessions,
 file browsing and monitoring — so you enter a code once rather than once per tab.
 
-### Why does Windows SmartScreen or macOS Gatekeeper warn about it?
+### Why does Windows SmartScreen warn about it?
 
-Because OpsMaxx is not notarized, and on Windows not signed at all. Both systems expect
-an application to carry a code-signing certificate, which costs roughly $200–$400 a year for
-Windows and $99 a year for an Apple Developer account — money a free, MIT-licensed project
-with no income does not have. The warning means the operating system cannot confirm **who**
-published the app, not that the file is unsafe. On Windows choose *More info → Run anyway*;
-on macOS use **System Settings → Privacy & Security → Open Anyway** (or right-click →
-**Open** on macOS 14 and earlier). Releases up to 0.2.2 can show *"OpsMaxx is damaged and
-can't be opened"* instead, which has no button to click through — run
-`/usr/bin/xattr -cr /Applications/OpsMaxx.app` for those, not the Trash the dialog
-suggests. Full instructions are under
-[First run: why your computer shows a warning](install.md#first-run-why-your-computer-shows-a-warning),
-and every release publishes SHA-256 checksums so you can verify the download yourself.
+Because the Windows build carries no code-signing certificate. One costs roughly
+$200–$400 a year, which a free, MIT-licensed project with no income does not have. The
+warning means Windows cannot confirm **who** published the app, not that the file is
+unsafe — see [Install](install.md) for how to get past it and for the scan results.
+
+**macOS does not warn any more.** Since 0.30.1 the macOS build is signed with an Apple
+Developer ID and notarized by Apple, with the ticket stapled into the app, so it opens
+normally even offline. `spctl -a -vvv /Applications/OpsMaxx.app` reports
+`source=Notarized Developer ID`.
 
 ### What are the system requirements?
 
