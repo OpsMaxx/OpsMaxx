@@ -157,7 +157,7 @@ const SAFE_PROTO = new Set(['http', 'tcp', 'tls'])
 
 class NgrokConfigError extends Error {}
 
-function configYaml(spec: NgrokSpec): string {
+export function configYaml(spec: NgrokSpec): string {
   /**
    * Config version 2, quoted.
    *
