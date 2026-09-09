@@ -1,8 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Monitor, RefreshCw } from 'lucide-react'
+import { clsx } from '../../lib/format'
 import { useApp } from '../../store/app'
 import { LOCAL_TARGET } from '../../../../shared/execTarget'
-import type { ListeningPortsInfo } from '../../../../shared/listeningPorts'
+import {
+  filterByProto,
+  protoCounts,
+  type ListeningPortsInfo,
+  type ProtoFilter
+} from '../../../../shared/listeningPorts'
 import type { NetworkInfo } from '../../../../shared/network'
 
 /**
@@ -28,6 +34,10 @@ export function LocalHostCard(): React.JSX.Element | null {
   const [ports, setPorts] = useState<ListeningPortsInfo | { error: string } | null>(null)
   const [nonce, setNonce] = useState(0)
   const [busy, setBusy] = useState(false)
+  // TCP by default, for the reason the per-server card uses: it is what a
+  // terminal shows, and a panel that disagrees with the terminal on the same
+  // machine reads as wrong even when it is right.
+  const [proto, setProto] = useState<ProtoFilter>('tcp')
 
   useEffect(() => {
     if (!enabled) return
@@ -112,7 +122,26 @@ export function LocalHostCard(): React.JSX.Element | null {
             {portList !== null && portList.ports.length === 0 && (
               <span className="faint">Nothing is listening.</span>
             )}
-            {portList?.ports.map((p) => (
+            {portList !== null && portList.ports.length > 0 && (
+              <div className="segment" style={{ marginBottom: 4 }}>
+                {(['tcp', 'udp', 'all'] as const).map((f) => (
+                  <button
+                    key={f}
+                    className={clsx('seg-btn', proto === f && 'active')}
+                    onClick={() => setProto(f)}
+                  >
+                    {f === 'all' ? 'All' : f.toUpperCase()}{' '}
+                    <span className="count">{protoCounts(portList.ports)[f]}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {portList !== null && filterByProto(portList.ports, proto).length === 0 && (
+              <span className="faint">
+                Nothing is listening on {proto === 'all' ? 'this machine' : proto.toUpperCase()}.
+              </span>
+            )}
+            {portList && filterByProto(portList.ports, proto).map((p) => (
               <span
                 key={`${p.proto}-${p.address}-${p.port}`}
                 className="row"

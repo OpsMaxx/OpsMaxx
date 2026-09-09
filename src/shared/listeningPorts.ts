@@ -325,6 +325,36 @@ export function parseListeningPorts(output: string): ListeningPortsInfo {
   return { ports: sorted(merged), partialOwners: merged.some((p) => !p.process), source }
 }
 
+/**
+ * Which protocols the UI is showing.
+ *
+ * `tcp` is the default everywhere, because it is what a person sees when they
+ * run `lsof -i -P | grep LISTEN` or `ss -tlpn` in a terminal — and a panel that
+ * disagrees with the terminal on the same machine reads as wrong even when it
+ * is right. UDP is not removed: plenty of real services are UDP (DNS, mDNS,
+ * WireGuard, syslog), and hiding them permanently would be its own lie. It is
+ * one click away and its count is always on screen.
+ */
+export type ProtoFilter = 'tcp' | 'udp' | 'all'
+
+export function filterByProto(
+  ports: readonly ListeningPort[],
+  filter: ProtoFilter
+): ListeningPort[] {
+  return filter === 'all' ? [...ports] : ports.filter((p) => p.proto === filter)
+}
+
+/** How many of each, so a filter can say what it is hiding rather than imply
+ *  that nothing is there. */
+export function protoCounts(ports: readonly ListeningPort[]): {
+  tcp: number
+  udp: number
+  all: number
+} {
+  const tcp = ports.filter((p) => p.proto === 'tcp').length
+  return { tcp, udp: ports.length - tcp, all: ports.length }
+}
+
 /** Port ascending, then protocol, so the same host reads the same way twice. */
 function sorted(ports: ListeningPort[]): ListeningPort[] {
   return [...ports].sort((a, b) => a.port - b.port || a.proto.localeCompare(b.proto) || a.address.localeCompare(b.address))

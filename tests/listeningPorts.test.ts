@@ -2,10 +2,12 @@ import { describe, it, expect } from 'vitest'
 import { execSync } from 'node:child_process'
 import {
   buildListeningPortsCommand,
+  filterByProto,
   parseListeningPorts,
   parseLsof,
   parseNetstat,
-  parseSs
+  parseSs,
+  protoCounts
 } from '../src/shared/listeningPorts'
 
 /**
@@ -216,5 +218,46 @@ describe('the command and the parser, end to end', () => {
       expect(Number.isInteger(p.port), JSON.stringify(p)).toBe(true)
       expect(p.port).toBeGreaterThan(0)
     }
+  })
+})
+
+/**
+ * The protocol filter, and why TCP is the default.
+ *
+ * The panel listed UDP alongside TCP and showed roughly twice the rows a
+ * terminal does — `ss -tlpn` and `lsof -i -P | grep LISTEN` are both TCP. A
+ * panel that disagrees with the terminal on the same machine reads as wrong
+ * even when its data is right, which this one's was: the TCP ports verified
+ * exactly against netstat.
+ *
+ * UDP is filtered, never dropped. Plenty of real services are UDP — DNS, mDNS,
+ * WireGuard, syslog — and hiding them permanently would be its own lie.
+ */
+describe('protocol filter', () => {
+  const ports = parseListeningPorts(SS_OUT).ports
+
+  it('shows only TCP, only UDP, or everything', () => {
+    expect(filterByProto(ports, 'tcp').every((p) => p.proto === 'tcp')).toBe(true)
+    expect(filterByProto(ports, 'udp').every((p) => p.proto === 'udp')).toBe(true)
+    expect(filterByProto(ports, 'all')).toHaveLength(ports.length)
+  })
+
+  // Nothing is removed by filtering — the UDP rows are still there.
+  it('keeps every port available under one filter or another', () => {
+    const tcp = filterByProto(ports, 'tcp').length
+    const udp = filterByProto(ports, 'udp').length
+    expect(tcp + udp).toBe(ports.length)
+    expect(udp).toBeGreaterThan(0)
+  })
+
+  /**
+   * Every count is on screen at once, so the filter states what it is hiding
+   * rather than implying there is nothing there — which is the failure mode of
+   * a filter that silently defaults to a subset.
+   */
+  it('counts each protocol so the filter can say what it hides', () => {
+    const c = protoCounts(ports)
+    expect(c.tcp + c.udp).toBe(c.all)
+    expect(c.all).toBe(ports.length)
   })
 })

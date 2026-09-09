@@ -6,7 +6,12 @@ import { useEffect, useState } from 'react'
 import { useFleet } from '../../store/fleet'
 import { sshTargetFor } from '../../lib/ssh'
 import { isStubResolver, type NetworkInfo } from '../../../../shared/network'
-import type { ListeningPortsInfo } from '../../../../shared/listeningPorts'
+import {
+  filterByProto,
+  protoCounts,
+  type ListeningPortsInfo,
+  type ProtoFilter
+} from '../../../../shared/listeningPorts'
 import type { Server } from '../../types'
 
 function level(v: number): string {
@@ -61,6 +66,14 @@ export function MonitorView({
    * two-second metrics poll shares the connection the terminal types over.
    */
   const [ports, setPorts] = useState<ListeningPortsInfo | { error: string } | null>(null)
+  /**
+   * TCP by default, matching what a terminal shows.
+   *
+   * `ss -tlpn` and `lsof -i -P | grep LISTEN` are both TCP, so a panel that
+   * listed UDP alongside it showed roughly twice the rows and read as wrong on
+   * a host where it was right. UDP is one click away, never removed.
+   */
+  const [proto, setProto] = useState<ProtoFilter>('tcp')
   useEffect(() => {
     if (!visible || !real) return
     let live = true
@@ -369,12 +382,28 @@ export function MonitorView({
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="row" style={{ marginBottom: 12, alignItems: 'baseline', gap: 'var(--sp-3)' }}>
             <span className="sidebar-title">Listening ports</span>
-            <span className="faint" style={{ fontSize: 11 }}>
-              {ports.ports.length}
-            </span>
+            {/* Every count on screen, so the filter says what it is hiding
+                rather than implying there is nothing there. */}
+            <div className="segment" style={{ marginLeft: 'auto' }}>
+              {(['tcp', 'udp', 'all'] as const).map((f) => (
+                <button
+                  key={f}
+                  className={clsx('seg-btn', proto === f && 'active')}
+                  onClick={() => setProto(f)}
+                >
+                  {f === 'all' ? 'All' : f.toUpperCase()}{' '}
+                  <span className="count">{protoCounts(ports.ports)[f]}</span>
+                </button>
+              ))}
+            </div>
           </div>
           <div className="col" style={{ gap: 4 }}>
-            {ports.ports.map((p) => (
+            {filterByProto(ports.ports, proto).length === 0 && (
+              <span className="faint" style={{ fontSize: 11 }}>
+                Nothing is listening on {proto === 'all' ? 'this host' : proto.toUpperCase()}.
+              </span>
+            )}
+            {filterByProto(ports.ports, proto).map((p) => (
               <div
                 className="row"
                 key={`${p.proto}-${p.address}-${p.port}`}
