@@ -29,14 +29,16 @@ Your DevOps workstation, everywhere. Windows · macOS · Linux.
 
 ---
 
-> [!CAUTION]
-> **Windows and macOS will show a security warning the first time you run OpsMaxx.
-> This is expected, and it is not a virus.**
+> [!IMPORTANT]
+> **Windows will show a security warning the first time you run OpsMaxx.
+> This is expected, and it is not a virus. macOS no longer warns.**
 >
-> The app is **not notarized**, and on Windows not signed at all — a code-signing
-> certificate costs $200–$400 a year for Windows and $99 a year for Apple, which a free
-> MIT-licensed project has no income to cover. The warning means your operating system
-> cannot confirm **who published** the app. It says nothing about whether the file is safe.
+> From 0.30.1 the macOS build is **signed with an Apple Developer ID and notarized by
+> Apple**, so it opens normally with no warning and no right-click-Open dance.
+>
+> The Windows build is still **unsigned** — a certificate there costs $200–$400 a year,
+> which this project has no income to cover. That warning means Windows cannot confirm
+> **who published** the app. It says nothing about whether the file is safe.
 >
 > Every release is scanned before it is published — **ClamAV** over every artifact,
 > **Microsoft Defender** on the Windows installer, and **VirusTotal's 70+ engines** on the
