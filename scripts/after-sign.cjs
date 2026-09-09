@@ -25,7 +25,7 @@
 // (verified: their hashes are identical before and after), so the manifest
 // written here stays true.
 
-const { execFileSync } = require('node:child_process')
+const { execFileSync, spawnSync } = require('node:child_process')
 const { createHash } = require('node:crypto')
 const { existsSync, readdirSync, readFileSync, statSync, writeFileSync } = require('node:fs')
 const { join } = require('node:path')
@@ -41,6 +41,27 @@ const sha256 = (file) => createHash('sha256').update(readFileSync(file)).digest(
  * than what the manifest claims: an entry describing a binary that did not ship
  * is exactly the stale state this exists to stop, and only the directory knows.
  */
+/**
+ * The identity currently sealing `app`, or '-' when only an ad-hoc signature
+ * is there.
+ *
+ * `codesign -dvv` prints the certificate chain as `Authority=` lines, leaf
+ * first, so the first one is the signing identity. An ad-hoc signature has no
+ * chain and reports `Signature=adhoc`, which is what a contributor building
+ * without a certificate gets — the ad-hoc seal this hook then applies is what
+ * stops Gatekeeper calling the app damaged.
+ *
+ * `spawnSync`, not `execFileSync`: codesign writes all of this to stderr, and
+ * execFileSync hands back stdout only.
+ */
+function signingIdentity(app) {
+  const res = spawnSync('codesign', ['-dvv', app], { encoding: 'utf8' })
+  const text = `${res.stdout ?? ''}${res.stderr ?? ''}`
+  if (res.status !== 0 || /Signature=adhoc/.test(text)) return '-'
+  const authority = text.match(/^Authority=(.+)$/m)
+  return authority ? authority[1].trim() : '-'
+}
+
 function rehashManifest(binRoot) {
   const manifestPath = join(binRoot, 'manifest.json')
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
@@ -99,10 +120,17 @@ exports.default = async function afterSign(context) {
 
   // Re-seal with the SAME options electron-builder used, read from its own
   // config rather than repeated here — a hardcoded `--sign -` would silently
-  // strip the hardened runtime and the entitlements, and would be wrong the day
-  // this project gets a Developer ID.
+  // strip the hardened runtime and the entitlements.
   const mac = packager.platformSpecificBuildOptions ?? {}
-  const args = ['--force', '--sign', mac.identity ?? '-']
+  // And with the SAME identity, read off the signature that is on the bundle
+  // right now rather than out of the config. `mac.identity` is deliberately
+  // unset so that electron-builder discovers the Developer ID from CSC_LINK in
+  // CI and falls back to no signing on a contributor's machine — which means
+  // the config cannot answer this question. Taking `mac.identity ?? '-'` would
+  // have re-signed every CI build ad-hoc, stripping the Developer ID signature
+  // that had just been applied and failing notarization with an error pointing
+  // nowhere near this file.
+  const args = ['--force', '--sign', signingIdentity(app)]
   if (mac.hardenedRuntime) args.push('--options', 'runtime')
   if (mac.entitlements) args.push('--entitlements', mac.entitlements)
   args.push(app)

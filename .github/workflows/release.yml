@@ -160,10 +160,74 @@ jobs:
             fi
           done
 
+      # notarize: true is a no-op without credentials — electron-builder logs a
+      # warning and packages anyway. That is the shape of failure this repo
+      # keeps refusing: a release that looks finished and quietly is not, where
+      # the first person to find out is a user meeting a Gatekeeper dialog the
+      # notarization was supposed to remove. A tagged macOS build stops here
+      # instead. Pull-request packs are unaffected, because they never tag.
+      - name: Check the macOS signing credentials are present
+        if: matrix.os == 'macos-latest' && startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=()
+          for v in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            [ -n "${!v:-}" ] || missing+=("$v")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing macOS signing secrets: ${missing[*]}. A tagged build must be signed and notarized."
+            exit 1
+          fi
+          echo "all five macOS signing secrets are present"
+
       - name: Build installers
         run: npm run ${{ matrix.script }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS only. Empty on the other two runners, which electron-builder
+          # reads as absent — CSC_LINK in particular is also the Windows signing
+          # variable, so a macOS .p12 must not leak into that build.
+          #
+          # MAC_ prefixes on the certificate pair so a future Windows
+          # certificate can live beside these rather than colliding with them.
+          CSC_LINK: ${{ matrix.os == 'macos-latest' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.os == 'macos-latest' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ matrix.os == 'macos-latest' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.os == 'macos-latest' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.os == 'macos-latest' && secrets.APPLE_TEAM_ID || '' }}
+
+      # Which certificate actually signed it, not which one we hoped would.
+      #
+      # `mac.identity` is unset so electron-builder discovers the certificate,
+      # and discovery takes what the keychain offers. A machine holding only an
+      # "Apple Development" certificate — which is what an Apple Developer
+      # membership gives you first, and what a local `--dir` pack on this
+      # project picked — signs happily and produces something that cannot be
+      # distributed and that Apple will refuse to notarize. Signed with the
+      # wrong certificate looks identical to signed with the right one until a
+      # user opens it.
+      - name: Check the app was signed with a Developer ID
+        if: matrix.os == 'macos-latest' && startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          bad=0
+          for app in release/mac*/*.app; do
+            [ -e "$app" ] || continue
+            authority=$(codesign -dvv "$app" 2>&1 | awk -F= '/^Authority=/ { print $2; exit }')
+            echo "$app -> ${authority:-<unsigned>}"
+            case "$authority" in
+              "Developer ID Application:"*) ;;
+              *) echo "::error::$app is signed by '${authority:-nothing}', not a Developer ID Application certificate"; bad=1 ;;
+            esac
+          done
+          exit $bad
 
       # The same layout assertions the pack job runs on every pull request, now
       # against the artifacts that are actually about to be published — and on
@@ -338,9 +402,15 @@ jobs:
           # a default for the one file the entire update mechanism depends on.
           # Listing them puts them through the same upload, download and
           # verified release step every installer already goes through.
+          #
+          # `*.zip` is the macOS auto-update artifact and is listed for exactly
+          # the same reason: Squirrel.Mac applies the zip, latest-mac.yml points
+          # at it, and a zip that never reached the release would leave every
+          # macOS update failing to find the file its own manifest promised.
           path: |
             release/*.exe
             release/*.dmg
+            release/*.zip
             release/*.AppImage
             release/*.deb
             release/*.blockmap
@@ -430,8 +500,12 @@ jobs:
           BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
           # download-artifact nests one directory per build job, so find rather
           # than a flat glob. The four installer types plus the OpenVPN source
-          # tarball — .blockmap and the channel yml files are updater metadata
-          # nobody downloads by hand.
+          # tarball — .blockmap, the channel yml files and the macOS .zip are
+          # updater metadata nobody downloads by hand. The zip in particular is
+          # deliberately absent: it is the artifact Squirrel.Mac applies, its
+          # integrity is checked against the sha512 in latest-mac.yml by the
+          # updater itself, and listing it beside the two dmgs would invite
+          # someone to download the one file here that is not meant for them.
           CHECKSUMS=$(cd artifacts && find . -type f \
               \( -name '*.exe' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' \
                  -o -name 'openvpn-*-source.tar.gz' \) \

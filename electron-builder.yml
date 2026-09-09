@@ -148,28 +148,24 @@ afterSign: scripts/after-sign.cjs
 mac:
   icon: build/icon.icns
   category: public.app-category.developer-tools
-  # There is no Apple Developer ID certificate for this project, and with no
-  # identity electron-builder skips signing altogether — which leaves Electron's
-  # own linker-signed ad-hoc signature on the bundle, covering none of the files
-  # we added. Gatekeeper reads that mismatch as corruption and reports the app as
-  # "damaged", a dialog with no Open Anyway button. Signing ad-hoc ourselves seals
-  # the real bundle, so the app fails the ordinary "cannot be verified" way that
-  # users can click through. It is still not notarized.
-  # When a Developer ID certificate is available, this whole block becomes:
+  # `identity` is deliberately absent, and that is what makes one config serve
+  # two very different machines.
   #
-  #   identity: 'Developer ID Application: <NAME> (<TEAM_ID>)'
-  #   hardenedRuntime: true
-  #   entitlements: build/entitlements.mac.plist
-  #   entitlementsInherit: build/entitlements.mac.plist
-  #   notarize: true          # plus APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID in CI
+  #  - In CI, CSC_LINK and CSC_KEY_PASSWORD put the Developer ID certificate in
+  #    a temporary keychain and electron-builder discovers it. Naming the
+  #    identity here instead would hard-fail any build on a machine that does
+  #    not have that exact certificate, which is every contributor's.
+  #  - On a contributor's machine there is no certificate, electron-builder
+  #    skips signing, and scripts/after-sign.cjs seals the bundle ad-hoc.
   #
-  # That one change removes the Gatekeeper warning entirely, and it is also what
-  # unlocks hardened runtime (see below), a stable signing identity so keychain
-  # ACLs survive updates, and the data-protection keychain that biometry ACLs
-  # and Secure Enclave keys require. build/entitlements.mac.plist is already
-  # written and carries the library-validation exception the unpacked ssh2 and
-  # cpu-features binaries need.
-  identity: '-'
+  # That ad-hoc seal is not cosmetic. Without it the bundle keeps only
+  # Electron's own linker signature, which covers none of the files we added;
+  # Gatekeeper reads the mismatch as corruption and reports the app as
+  # "damaged" — a dialog with no Open Anyway button. Sealing it ourselves makes
+  # it fail the ordinary "cannot be verified" way a user can click through.
+  #
+  # The hook reads the identity off the bundle rather than out of this file,
+  # precisely because this key is missing. See its comment.
   # On, despite there being no Developer ID. The hardened runtime blocks
   # DYLD_INSERT_LIBRARIES injection and debugger attach regardless of
   # notarization, and without it a process running as the same user can inject
@@ -190,6 +186,15 @@ mac:
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  # Notarization: Apple staples a ticket that removes the Gatekeeper warning
+  # entirely, rather than only making it clickable-through.
+  #
+  # electron-builder skips this automatically when the credentials are absent,
+  # so a contributor's `npm run dist:mac` still produces an ad-hoc build rather
+  # than failing. In CI it needs APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and
+  # APPLE_TEAM_ID — an app-specific password from appleid.apple.com, never the
+  # account password.
+  notarize: true
   # macOS TCC prompt copy for the local terminal.
   #
   # On macOS 10.15+ the first access to ~/Documents, ~/Desktop, ~/Downloads or a
@@ -245,6 +250,13 @@ mac:
   # Anyone building an x64 dmg by hand needs the same step.
   target:
     - target: dmg
+      arch: [x64, arm64]
+    # The auto-updater's artifact, not a second thing for humans to download.
+    # Squirrel.Mac picks what it applies with findFile(files, "zip", ["pkg",
+    # "dmg"]) — it looks for a zip and will not fall back to the dmg. A
+    # dmg-only build therefore cannot self-update even with a valid Developer
+    # ID, which is why the certificate alone was never the whole story.
+    - target: zip
       arch: [x64, arm64]
 
 dmg:

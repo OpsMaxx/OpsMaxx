@@ -107,9 +107,10 @@ describe('deciding whether the status bar indicator should draw attention', () =
   const states = Object.keys(pending) as UpdaterStatus['state'][]
 
   it('lights up for every state where something is genuinely waiting', () => {
-    // `manual` is in here deliberately. On macOS and the Windows portable
-    // build there is nothing to install automatically, but a newer version
-    // still exists and the user still needs telling.
+    // `manual` is in here deliberately. The Windows portable build cannot
+    // install anything automatically — it runs from its own extraction — and a
+    // signed build falls back to it when a signature check fails. A newer
+    // version still exists either way, and the user still needs telling.
     for (const state of states.filter((s) => pending[s])) {
       expect(isUpdatePending(example[state]), state).toBe(true)
     }

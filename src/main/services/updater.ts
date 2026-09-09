@@ -21,26 +21,25 @@ const { autoUpdater } = electronUpdater
 
 const RELEASES_URL = 'https://github.com/OpsMaxx/OpsMaxx/releases/latest'
 
-// Windows (NSIS) and Linux (AppImage) builds can safely self-replace with
-// electron-updater's default flow. Two builds cannot.
+// Windows (NSIS), Linux (AppImage) and now macOS can self-replace with
+// electron-updater's default flow. One build cannot.
 //
-// macOS: there is no Apple Developer ID here, only an ad-hoc signature (see
-// electron-builder.yml's `mac.identity` comment) — Squirrel.Mac's apply step
-// needs a real signature to trust a silent replace. A certificate alone would
-// not be enough either: Squirrel.Mac downloads a zip, and MacUpdater.js picks
-// its artifact with findFile(files, "zip", ["pkg", "dmg"]), while `mac.target`
-// here is dmg-only. Shipping mac auto-update means a certificate AND a zip
-// target, not just the certificate.
+// macOS was excluded here until both halves of its requirement were met, and
+// it took both: Squirrel.Mac's apply step needs a real Developer ID signature
+// to trust a silent replace, AND it picks the artifact it applies with
+// findFile(files, "zip", ["pkg", "dmg"]) — it wants a zip and does not fall
+// back to a dmg. With a certificate but a dmg-only build it would have found
+// nothing to apply, so the certificate alone was never enough. Both are in
+// place now: see `mac.notarize` and the zip target in electron-builder.yml.
 //
 // Windows portable: the .exe unpacks itself to a temp dir and runs from there,
 // and electron-updater has no story for replacing an executable that is
 // currently running out of its own extraction. PORTABLE_EXECUTABLE_DIR is how
 // that target announces itself, which is what src/main/portable.ts keys off.
 //
-// Both cases still check and then point at the release page for a manual
-// download — the same experience a signed app's updater falls back to anyway
-// when a signature check fails.
-const CAN_AUTO_INSTALL = process.platform !== 'darwin' && !isPortable
+// It still checks, and then points at the release page for a manual download —
+// the same fallback a signed app's updater uses when a signature check fails.
+const CAN_AUTO_INSTALL = !isPortable
 
 let status: UpdaterStatus = { state: 'idle' }
 const listeners = new Set<(s: UpdaterStatus) => void>()

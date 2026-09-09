@@ -251,9 +251,58 @@ describe('inline shell in the release job does not keep growing', () => {
   })
 })
 
+describe('macOS release wiring', () => {
+  const yml = readFileSync('.github/workflows/release.yml', 'utf8')
+
+  it('uploads the zip, or the update manifest points at a file nobody published', () => {
+    // latest-mac.yml names the zip. If it is not in the upload list it never
+    // reaches the release, and every macOS update fails looking for the file
+    // its own manifest promised — with the build itself perfectly green.
+    expect(yml).toMatch(/release\/\*\.zip/)
+  })
+
+  it('fails a tagged macOS build when the signing secrets are absent', () => {
+    // `notarize: true` without credentials is a warning, not an error:
+    // electron-builder packages anyway and ships something un-notarized that
+    // looks finished. The gate turns that into a failed build.
+    expect(yml).toContain('Check the macOS signing credentials are present')
+    for (const secret of [
+      'MAC_CSC_LINK',
+      'MAC_CSC_KEY_PASSWORD',
+      'APPLE_ID',
+      'APPLE_APP_SPECIFIC_PASSWORD',
+      'APPLE_TEAM_ID'
+    ]) {
+      expect(yml).toContain(secret)
+    }
+  })
+
+  it('refuses a build signed by anything but a Developer ID certificate', () => {
+    // An Apple Developer membership hands you an "Apple Development"
+    // certificate first, and electron-builder's discovery will use it — giving
+    // a build that is signed, undistributable, and indistinguishable from a
+    // correct one until a user opens it.
+    const yml2 = readFileSync('.github/workflows/release.yml', 'utf8')
+    expect(yml2).toContain('Check the app was signed with a Developer ID')
+    expect(yml2).toContain('Developer ID Application:')
+  })
+
+  it('keeps the macOS certificate off the Windows and Linux runners', () => {
+    // CSC_LINK is the Windows signing variable too. Handing a macOS .p12 to
+    // that build would be a confusing failure at best.
+    expect(yml).toMatch(/CSC_LINK: \$\{\{ matrix\.os == 'macos-latest'/)
+  })
+})
+
 describe('macOS build hardening', () => {
   const builder = load(readFileSync('electron-builder.yml', 'utf8')) as {
-    mac?: { hardenedRuntime?: boolean; entitlements?: string; identity?: string }
+    mac?: {
+      hardenedRuntime?: boolean
+      entitlements?: string
+      identity?: string
+      notarize?: boolean
+      target?: { target: string }[]
+    }
   }
 
   it('enables the hardened runtime', () => {
@@ -261,6 +310,29 @@ describe('macOS build hardening', () => {
     // unlocked vault key from memory, which defeats every protection the vault
     // has. It needs no Developer ID — ad-hoc signing carries it fine.
     expect(builder.mac?.hardenedRuntime).toBe(true)
+  })
+
+  it('leaves the signing identity for electron-builder to discover', () => {
+    // Naming it would hard-fail every build on a machine without that exact
+    // certificate — which is every contributor's. CI supplies it through
+    // CSC_LINK instead, and scripts/after-sign.cjs reads the identity back off
+    // the signed bundle rather than out of this file, which is only correct
+    // while this key stays absent.
+    expect(builder.mac?.identity).toBeUndefined()
+  })
+
+  it('notarizes, so the Gatekeeper warning is removed rather than clickable', () => {
+    expect(builder.mac?.notarize).toBe(true)
+  })
+
+  it('builds a zip beside the dmg, because Squirrel.Mac will not apply a dmg', () => {
+    // findFile(files, "zip", ["pkg", "dmg"]) — the updater looks for a zip and
+    // does not fall back. A dmg-only build cannot self-update even when signed
+    // and notarized, which is the half of this that a certificate alone never
+    // fixed.
+    const targets = (builder.mac?.target ?? []).map((t) => t.target)
+    expect(targets).toContain('zip')
+    expect(targets).toContain('dmg')
   })
 
   it('ships the entitlements the hardened runtime needs', () => {
