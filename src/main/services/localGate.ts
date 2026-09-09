@@ -27,7 +27,7 @@ export function syncLocalTerminalEnabled(data: unknown): void {
     settings?: { localTerminalEnabled?: unknown; shellIntegration?: unknown }
   } | null)?.settings
   enabled = settings?.localTerminalEnabled !== false
-  integration = settings?.shellIntegration !== false
+  integration = settings?.shellIntegration === true
 }
 
 export function isLocalTerminalEnabled(): boolean {
@@ -38,12 +38,22 @@ export function isLocalTerminalEnabled(): boolean {
  * Whether local shells are started with OSC 133 prompt marks.
  *
  * Mirrored in main for the same reason the flag above is: the renderer's
- * setting governs the honest UI, and the spawn happens here. Absent reads as
- * ON, matching the flag above — and matching the fact that a shipped `false`
- * would be written to disk by the wholesale settings save and permanently
- * outrank any later change of default (store/app.ts documents this).
+ * setting governs the honest UI, and the spawn happens here.
+ *
+ * Absent reads as OFF, which is the opposite of the local-terminal flag above
+ * and deliberately so. This one CHANGES HOW EVERY LOCAL SHELL STARTS —
+ * redirecting zsh through ZDOTDIR, handing bash a different init file — and
+ * shipping that on by default would alter the shell startup of every existing
+ * user on upgrade, on machines with dotfiles nobody here has seen. A person who
+ * turns it on has decided to accept that; a person upgrading has not.
+ *
+ * The key is left ABSENT rather than shipped as `false`, which is what makes
+ * turning it on by default later a one-character change here that actually
+ * reaches existing installs — a shipped `false` would be written to disk by the
+ * wholesale settings save and permanently outrank any later default
+ * (store/app.ts documents that trap).
  */
-let integration = true
+let integration = false
 
 export function isShellIntegrationEnabled(): boolean {
   return integration

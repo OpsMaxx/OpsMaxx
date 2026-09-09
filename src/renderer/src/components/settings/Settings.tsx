@@ -839,8 +839,8 @@ export function Settings(): React.JSX.Element {
               <Toggle label="Scroll to bottom on output" desc="Follow new output automatically." initial />
               <SettingSwitch
                 label="Shell integration"
-                desc="Start local shells so they report where each prompt begins and what each command exited with. Uses the shell's own startup options for the session OpsMaxx starts — your shell config files are never modified. zsh, bash and fish; a login bash and PowerShell are not supported."
-                checked={settings.shellIntegration !== false}
+                desc="Start local shells so they report where each prompt begins and what each command exited with. Uses the shell's own startup options for the session OpsMaxx starts — your shell config files are never modified, and turning this off restores the previous behaviour exactly. zsh and bash get prompt and command marks; fish gets command marks only; a login bash and PowerShell are not supported."
+                checked={settings.shellIntegration === true}
                 onChange={(v) => setSettings({ shellIntegration: v })}
               />
               <SettingSwitch

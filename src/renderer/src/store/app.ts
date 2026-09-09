@@ -227,9 +227,14 @@ export interface AppSettings {
   /**
    * Start local shells with OSC 133 prompt marks.
    *
-   * Optional, and absence reads as ON — the trap documented above applies: a
-   * `false` shipped in DEFAULT_SETTINGS is written to disk by the wholesale
-   * save and then permanently outranks any later change of default.
+   * Optional, and absence reads as OFF. This changes how every local shell
+   * starts, so it is opt-in rather than something an upgrade does to a user's
+   * terminal without being asked.
+   *
+   * Left ABSENT rather than shipped as `false`, so enabling it by default later
+   * is a one-character change that reaches existing installs — the trap
+   * documented above is that a shipped `false` is written to disk by the
+   * wholesale save and then permanently outranks any later default.
    */
   shellIntegration?: boolean
   /**
