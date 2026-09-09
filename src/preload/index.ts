@@ -263,6 +263,21 @@ const api = {
     openJson: (): Promise<string | null> => ipcRenderer.invoke('dialog:openJson'),
     openScheme: (): Promise<string | null> => ipcRenderer.invoke('dialog:openScheme')
   },
+  /**
+   * ping and traceroute, run from a chosen target.
+   *
+   * The command is built by shared/netTools.ts, which refuses any host that is
+   * not a hostname or an IP literal — main re-asserts the shape, so this is not
+   * a general exec channel.
+   */
+  netTools: {
+    run: (
+      cfg: OnDemandTarget,
+      command: string,
+      timeoutMs?: number
+    ): Promise<{ ok: boolean; stdout: string; stderr: string; error?: string }> =>
+      ipcRenderer.invoke('net-tools:run', cfg, command, timeoutMs)
+  },
   clipboard: {
     read: (): string => clipboard.readText(),
     write: (text: string): void => clipboard.writeText(text)
@@ -358,6 +373,16 @@ const api = {
      */
     request: (spec: HttpRequestSpec): Promise<HttpResult> =>
       ipcRenderer.invoke('http:request', spec),
+    /**
+     * One monitor check. Returns the status and the duration and NOT the body:
+     * a check running every minute has no use for a response payload, and
+     * shipping one across IPC on a timer is the difference between a monitor
+     * and a download.
+     */
+    check: (
+      spec: HttpRequestSpec
+    ): Promise<{ ok: true; status: number; durationMs: number } | { ok: false; error: string }> =>
+      ipcRenderer.invoke('http:check', spec),
     /** Pick an OpenAPI description from disk. Returns its path and its
      *  contents, or null if the picker was dismissed. Both halves, because the
      *  collection stores the path and the client is handed the text. */

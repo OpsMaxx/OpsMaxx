@@ -24,6 +24,7 @@ import type {
   DatabaseConn
 } from '../types'
 import type { LocalShell } from '../../../shared/local'
+import type { HttpCheck } from '../../../shared/httpMonitor'
 import type { TerminalScheme } from '../../../shared/terminalTheme'
 import { bridgeHas } from '../lib/bridge'
 
@@ -339,6 +340,8 @@ interface AppState {
   tunnels: Tunnel[]
   databases: DatabaseConn[]
   apiCollections: ApiCollection[]
+  /** External service checks. See shared/httpMonitor.ts. */
+  httpChecks: HttpCheck[]
 
   // navigation
   activeWorkspaceId: string
@@ -528,6 +531,7 @@ interface AppState {
   setTunnelStatus: (id: string, status: Tunnel['status']) => void
   setVpnProfiles: (profiles: VpnProfile[]) => void
   upsertVpnProfile: (profile: VpnProfile) => void
+  setHttpChecks: (checks: HttpCheck[]) => void
   removeVpnProfile: (id: string) => void
   setVpnStatus: (id: string, status: VpnStatus) => void
   replaceAll: (
@@ -541,6 +545,7 @@ interface AppState {
         | 'tunnels'
         | 'databases'
         | 'apiCollections'
+        | 'httpChecks'
         | 'settings'
         | 'activeWorkspaceId'
         | 'monitorGroups'
@@ -795,6 +800,7 @@ export const useApp = create<AppState>((set, get) => ({
   tunnels: [],
   databases: [],
   apiCollections: [],
+  httpChecks: [],
 
   activeDatabaseId: null,
   openDatabaseIds: [],
@@ -1434,6 +1440,7 @@ export const useApp = create<AppState>((set, get) => ({
         vpns: s.vpns.filter((v) => v.workspaceId !== id),
         tunnels: s.tunnels.filter((t) => t.workspaceId !== id),
         apiCollections: s.apiCollections.filter((c) => c.workspaceId !== id),
+      httpChecks: s.httpChecks.filter((c) => c.workspaceId !== id),
         tabs: keptTabs,
         // Asked of the surviving list rather than of the doomed one: the old
         // form only cleared the active tab when a *server* took it, so an
@@ -1637,6 +1644,8 @@ export const useApp = create<AppState>((set, get) => ({
     ),
 
   setVpnProfiles: (profiles) => set({ vpns: profiles }),
+
+  setHttpChecks: (checks) => set({ httpChecks: checks }),
 
   upsertVpnProfile: (profile) =>
     set((s) => ({

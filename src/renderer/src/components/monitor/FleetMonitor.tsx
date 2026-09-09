@@ -23,6 +23,8 @@ import { AlertsPanel } from './AlertsPanel'
 import { useAlerts } from '../../store/alerts'
 import { FleetHealth } from './FleetHealth'
 import { LocalHostCard } from './LocalHostCard'
+import { HttpMonitorPanel } from './HttpMonitorPanel'
+import { NetToolsPanel } from './NetToolsPanel'
 import { FleetSearch } from './FleetSearch'
 import { InventoryPanel } from './InventoryPanel'
 import { AccessPanel } from './AccessPanel'
@@ -576,6 +578,16 @@ export function FleetMonitor(): React.JSX.Element {
           Operations rail — same components, mounted by OperationsView at the
           bottom of this file's own render so a live broadcast survives coming
           back here to read a log. */}
+      {moduleEnabled(modules, 'httpChecks') && (
+        <div style={show('httpChecks')}>
+          <HttpMonitorPanel />
+        </div>
+      )}
+      {moduleEnabled(modules, 'netTools') && (
+        <div style={show('netTools')}>
+          <NetToolsPanel />
+        </div>
+      )}
       {moduleEnabled(modules, 'logTail') && (
         <div style={show('logTail')}>
           <LogTailPanel servers={servers} jump={logTailJump ?? undefined} />

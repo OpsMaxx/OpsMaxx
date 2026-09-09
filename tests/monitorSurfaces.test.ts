@@ -75,6 +75,8 @@ describe('the read/operate split', () => {
         'drift',
         'posture',
         'logTail',
+        'httpChecks',
+        'netTools',
         'cron',
         'services',
         'processes',

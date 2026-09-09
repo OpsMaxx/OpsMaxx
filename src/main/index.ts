@@ -943,6 +943,32 @@ ipcMain.handle('http:request', (_e, spec: HttpRequestSpec) =>
   httpRequest(spec, { prepare: (target) => withVpnTransport(resolveChainSecrets(target)) })
 )
 
+/**
+ * One monitor check: the same transport, a compact answer.
+ *
+ * Deliberately NOT `http:request` from the renderer on a timer. That returns
+ * the response body — up to 32 MiB — and a monitor has no use for it, so
+ * checking a service every minute would ship a page across the IPC boundary
+ * every minute to look at one number. This returns the status, the duration and
+ * nothing else.
+ *
+ * HEAD by default for the same reason, chosen in the check rather than here.
+ */
+ipcMain.handle(
+  'http:check',
+  async (
+    _e,
+    spec: HttpRequestSpec
+  ): Promise<{ ok: true; status: number; durationMs: number } | { ok: false; error: string }> => {
+    const r = await httpRequest(spec, {
+      prepare: (target) => withVpnTransport(resolveChainSecrets(target))
+    })
+    return r.ok
+      ? { ok: true, status: r.status, durationMs: r.durationMs }
+      : { ok: false, error: r.error }
+  }
+)
+
 // ---- SFTP ----
 //
 // The local half is a PARALLEL implementation, not a swapped transport: SFTP
@@ -1583,6 +1609,43 @@ ipcMain.handle('fleet:network', (_e, cfg: unknown) => hostFactsReader.network(on
 // on-demand shape: it moves when somebody deploys, not every two seconds.
 ipcMain.handle('fleet:listening-ports', (_e, cfg: unknown) =>
   hostFactsReader.listeningPorts(onDemandTarget(cfg))
+)
+
+/**
+ * ping and traceroute, run from a chosen target.
+ *
+ * Through `targetExec` like every other read, so "this machine" and "that
+ * server" are the same code path — and so the local kill switch applies to it
+ * without a second gate.
+ *
+ * The command is BUILT IN THE RENDERER by shared/netTools.ts, which refuses any
+ * host that is not a hostname or an IP literal and returns null rather than
+ * escaping. That is the check that matters, and it is re-asserted here: a
+ * command reaching this handler must look like one of the two tools, so a
+ * compromised renderer cannot use this channel as a general exec.
+ */
+const NET_TOOL_COMMAND = /^(ping|traceroute|tracert) [A-Za-z0-9 ._:@%/-]+$/
+
+ipcMain.handle(
+  'net-tools:run',
+  (_e, cfg: unknown, command: unknown, timeoutMs: unknown): ReturnType<typeof sshExec> => {
+    if (typeof command !== 'string' || !NET_TOOL_COMMAND.test(command.replace(/ 2>&1$/, ''))) {
+      // Not a refusal the UI can trigger: the builder produces only these two
+      // shapes. Reaching it means something other than the builder called this.
+      return Promise.resolve({
+        ok: false,
+        stdout: '',
+        stderr: '',
+        code: null,
+        signal: null,
+        error: 'That is not a network-tool command.',
+        truncated: false,
+        elided: 0
+      })
+    }
+    const ms = typeof timeoutMs === 'number' && timeoutMs > 0 ? Math.min(timeoutMs, 120_000) : 30_000
+    return targetExec(onDemandTarget(cfg), command, ms)
+  }
 )
 // One systemd timer AND the service it activates — roadmap item 46's certbot
 // row, generalised. A timer that fires into a failing service is the case the

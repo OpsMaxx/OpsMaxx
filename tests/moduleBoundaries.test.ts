@@ -180,6 +180,22 @@ const MODULE_FILES: Record<string, string[]> = {
     'src/main/services/logTail.ts',
     'src/renderer/src/components/monitor/LogTailPanel.tsx'
   ],
+  // Checks a URL from the outside. No main half at all: the transport is
+  // `http:check`, which is main's existing HTTP client, so this module reaches
+  // no service of its own — which is the property this list exists to show.
+  httpChecks: [
+    'src/shared/httpMonitor.ts',
+    'src/renderer/src/components/monitor/HttpMonitorPanel.tsx'
+  ],
+  // ping and traceroute. Also no main half: the command is BUILT here, in
+  // shared, from a host this file refuses unless it is a hostname or an IP —
+  // and main re-asserts the shape before running it. The absence of a service
+  // file is the point; a module that could assemble its own command line would
+  // be a module that could run anything.
+  netTools: [
+    'src/shared/netTools.ts',
+    'src/renderer/src/components/monitor/NetToolsPanel.tsx'
+  ],
   cron: ['src/shared/cron.ts', 'src/renderer/src/components/monitor/CronPanel.tsx'],
   // Item 1. All three files are listed, and the main half is the one that most
   // needs the closure walked: it is the only module file in the repo that

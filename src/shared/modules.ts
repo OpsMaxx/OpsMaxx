@@ -18,6 +18,8 @@
 // `backfillModules`, which mirrors `backfillCapabilities`.
 
 export type ModuleId =
+  | 'httpChecks'
+  | 'netTools'
   | 'jobs'
   | 'services'
   | 'docker'
@@ -306,6 +308,22 @@ export const MODULES: ModuleDef[] = [
     detail:
       'Run one command across selected servers, with confirmation that scales to how many servers and how dangerous the command is.',
     defaultEnabled: false
+  },
+  {
+    id: 'httpChecks',
+    surface: 'read',
+    label: 'Service checks',
+    detail:
+      'Watch any URL from the outside and see whether it answers, how fast, and how often it has been up. External on purpose: a server can be perfectly healthy while the service in front of it returns 502.',
+    defaultEnabled: true
+  },
+  {
+    id: 'netTools',
+    surface: 'read',
+    label: 'Network tools',
+    detail:
+      'Run ping and traceroute from this machine or from any server. "Can this server reach that service" is a different question from "can my laptop reach it", and it is usually the one that matters.',
+    defaultEnabled: true
   },
   {
     id: 'logTail',

@@ -13,6 +13,7 @@ import type {
   FrpSpec,
   OpenVpnAuthMode,
   OpenVpnSpec,
+  TailscaleSpec,
   VpnListener,
   VpnProfile,
   VpnValidationIssue,
@@ -257,6 +258,15 @@ export function VpnProfileForm({ profile, onClose, focus }: VpnProfileFormProps)
         )}
         {draft.spec.kind === 'frp' && (
           <FrpFields
+            spec={draft.spec}
+            issue={byPath}
+            shown={shown}
+            onChange={setSpec}
+            focus={focus}
+          />
+        )}
+        {draft.spec.kind === 'tailscale' && (
+          <TailscaleFields
             spec={draft.spec}
             issue={byPath}
             shown={shown}
@@ -1030,6 +1040,85 @@ const AUTH_LABEL: Record<OpenVpnAuthMode, string> = {
   none: 'Certificate only',
   userpass: 'Username and password',
   'userpass-otp': 'Username, password and a one-time code'
+}
+
+/**
+ * Tailscale, which has almost nothing to configure — and that is the design.
+ *
+ * The daemon holds its own state and its own login; this profile is the app's
+ * view of it. What IS worth exposing is the two things the driver reads: where
+ * the CLI is, for an install the standard search does not find, and whether to
+ * list the tailnet's devices. Without a form for them a profile could be
+ * created and then never changed, and `showPeers` could never be turned on at
+ * all — so `peersFrom` always returned an empty list.
+ */
+interface TailscaleProps {
+  spec: TailscaleSpec
+  issue: IssueMap
+  shown: Set<string>
+  onChange: (spec: TailscaleSpec) => void
+  focus?: VpnFormFocus
+}
+
+function TailscaleFields({ spec, issue, shown, onChange, focus }: TailscaleProps): React.JSX.Element {
+  const set = (patch: Partial<TailscaleSpec>): void => onChange({ ...spec, ...patch })
+  return (
+    <>
+      <div className="field">
+        <span className="field-hint">
+          Tailscale runs as its own service on this machine, with its own login.
+          OpsMaxx reads its status and never starts or stops it — closing this profile
+          leaves your tailnet exactly as it was.
+        </span>
+      </div>
+
+      <label className="field">
+        <span className="field-label">Tailscale program</span>
+        <input
+          className="input"
+          placeholder="Detected automatically"
+          autoFocus={focus === 'binaryPath'}
+          value={spec.binaryPath ?? ''}
+          // A path is only run once it has been confirmed, which is the rule
+          // every binaryPath in this app is behind — so changing it clears the
+          // confirmation rather than silently inheriting the old one.
+          onChange={(e) => set({ binaryPath: e.target.value || undefined, confirmed: false })}
+        />
+        <Issue at="binaryPath" map={issue} shown={shown} />
+        <span className="field-hint">
+          Leave empty unless Tailscale is somewhere unusual. On macOS the App Store
+          build keeps its command-line tool inside the app bundle, which is found
+          automatically.
+        </span>
+      </label>
+
+      {spec.binaryPath && (
+        <label className="row" style={{ gap: 6, alignItems: 'flex-start' }}>
+          <input
+            type="checkbox"
+            checked={spec.confirmed === true}
+            onChange={(e) => set({ confirmed: e.target.checked })}
+          />
+          <span className="field-hint">
+            Run this program. A path that has not been confirmed is never executed.
+          </span>
+        </label>
+      )}
+
+      <label className="row" style={{ gap: 6, alignItems: 'flex-start' }}>
+        <input
+          type="checkbox"
+          checked={spec.showPeers === true}
+          onChange={(e) => set({ showPeers: e.target.checked })}
+        />
+        <span className="field-hint">
+          List the devices on this tailnet. Read-only — it changes what OpsMaxx shows,
+          never the tailnet itself. Off by default, because a device list is
+          information about a network you may not want mirrored here.
+        </span>
+      </label>
+    </>
+  )
 }
 
 function OpenVpnFields({ spec, issue, onChange, shown, focus }: OvpnProps): React.JSX.Element {

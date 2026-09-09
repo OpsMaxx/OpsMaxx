@@ -21,6 +21,8 @@ interface Persisted {
   databases: unknown
   // Absent in saves written before the HTTP client existed.
   apiCollections?: unknown
+  // Absent in saves written before external service checks existed.
+  httpChecks?: unknown
   settings: unknown
 }
 
@@ -134,7 +136,8 @@ async function hydrate(): Promise<void> {
       state.vpns !== prev.vpns ||
       state.tunnels !== prev.tunnels ||
       state.databases !== prev.databases ||
-      state.apiCollections !== prev.apiCollections
+      state.apiCollections !== prev.apiCollections ||
+      state.httpChecks !== prev.httpChecks
 
     const serversContentChanged =
       serversRefChanged &&
@@ -152,7 +155,10 @@ async function hydrate(): Promise<void> {
       state.vpns !== prev.vpns ||
       state.tunnels !== prev.tunnels ||
       state.databases !== prev.databases ||
-      state.apiCollections !== prev.apiCollections
+      state.apiCollections !== prev.apiCollections ||
+      // Checks are stored data a backup carries, so adding one has to mark the
+      // last backup stale like adding a server does.
+      state.httpChecks !== prev.httpChecks
 
     // Any change to stored data invalidates the last backup. Guarded on the
     // current flag so this cannot loop: writing settings re-enters with
@@ -193,6 +199,7 @@ function save(): Promise<void> {
       tunnels: s.tunnels,
       databases: s.databases,
       apiCollections: s.apiCollections,
+      httpChecks: s.httpChecks,
       settings: s.settings
     }) ?? Promise.resolve()
   )
