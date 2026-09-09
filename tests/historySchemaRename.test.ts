@@ -66,7 +66,13 @@ beforeEach(() => {
   resetHistoryModuleForTests()
   dir = mkdtempSync(join(tmpdir(), 'opsmaxx-schema-'))
 })
-afterEach(() => rmSync(dir, { recursive: true, force: true }))
+afterEach(() => {
+  // `maxRetries`, because the teardown of a SQLITE test races the database's
+  // own flushing: this failed once with ENOTEMPTY under parallel load, having
+  // deleted the files while a -wal was still being written beside them. A
+  // cleanup that can fail turns a passing migration test into a red one.
+  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+})
 
 describe('a store from before the rename', () => {
   /**
