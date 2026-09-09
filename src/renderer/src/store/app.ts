@@ -24,6 +24,7 @@ import type {
   DatabaseConn
 } from '../types'
 import type { LocalShell } from '../../../shared/local'
+import type { TerminalScheme } from '../../../shared/terminalTheme'
 import { bridgeHas } from '../lib/bridge'
 
 // Clean default: a single empty workspace. No sample servers/VPNs/tunnels.
@@ -213,6 +214,30 @@ export interface AppSettings {
   // enabled for the same reason; the two must agree, so only an explicit user
   // toggle may ever persist `false`.
   localTerminalEnabled: boolean
+  /**
+   * Terminal colour scheme id, or '' for the app's own palette.
+   *
+   * '' rather than an optional key: this one is chosen from a list where "the
+   * default" is a real, selectable entry, so an empty string is a value the
+   * user can pick rather than an absence to interpret.
+   */
+  terminalScheme: string
+  /** Schemes the user imported from an iTerm2 or Windows Terminal file. */
+  terminalCustomSchemes: TerminalScheme[]
+  /**
+   * Start local shells with OSC 133 prompt marks.
+   *
+   * Optional, and absence reads as ON — the trap documented above applies: a
+   * `false` shipped in DEFAULT_SETTINGS is written to disk by the wholesale
+   * save and then permanently outranks any later change of default.
+   */
+  shellIntegration?: boolean
+  /**
+   * Move the shell cursor to a click. Optional, absence reads as OFF, for the
+   * same persistence reason inverted: leaving the key absent means enabling it
+   * by default later is a one-character change that reaches existing installs.
+   */
+  terminalClickToMove?: boolean
   // Whether a job may detach from its channel and run on under a marker
   // directory (roadmap B2). Absence reads as ENABLED, in both the store and
   // main, for localTerminalEnabled's reason a few lines above: a `false` that
@@ -251,6 +276,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   externalEditorCommand: 'code',
   openFilesExternally: false,
   localTerminalEnabled: true,
+  terminalScheme: '',
+  terminalCustomSchemes: [],
   jobsDetached: true,
   shortcuts: {}
 }
@@ -701,6 +728,12 @@ function vpnVaultEntryIds(spec: VpnSpec): string[] {
     take(spec.usernameRef)
     take(spec.passwordRef)
     take(spec.keyPassphraseRef)
+  } else if (spec.kind === 'ngrok') {
+    take(spec.authtokenRef)
+  } else if (spec.kind === 'tailscale') {
+    // Nothing to take: this app stores no Tailscale credential, because the
+    // daemon owns its own login. An `else` that assumed frp is what this
+    // replaces — it only typechecked while frp was last in the union.
   } else {
     take(spec.auth.tokenRef)
     take(spec.auth.oidc?.clientSecretRef)

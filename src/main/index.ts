@@ -231,7 +231,8 @@ import { storeFrpToken } from './services/vpn/frpSetup'
 import { toVpnResult } from './services/vpn/errors'
 import { withVpnTransport, withVpnTransportDb } from './services/vpn/transport'
 import { httpRequest } from './services/httpClient'
-import { localExec } from './services/localExec'
+import { localExec, type LocalExecResult } from './services/localExec'
+import { setShellIntegrationRoot } from './services/shellIntegrationFiles'
 import { localMetricsForget, localMetricsSample } from './services/localMetrics'
 import {
   isLocalFileSession,
@@ -244,6 +245,7 @@ import {
   localFilesRead,
   localFilesRename,
   localFilesUpload,
+  setLocalFilesProtectedRoot,
   localFilesWrite
 } from './services/localFiles'
 import { isLocalTarget, LOCAL_TARGET } from '../shared/execTarget'
@@ -768,6 +770,33 @@ ipcMain.handle('dialog:openJson', async () => {
   }
 })
 
+/**
+ * A terminal colour scheme file.
+ *
+ * Two formats, and the extension is a hint rather than the answer: people
+ * rename these, and a Windows Terminal scheme is frequently pasted out of a
+ * settings.json into a file called anything at all. The renderer sniffs the
+ * content, so this only has to hand it the text.
+ */
+ipcMain.handle('dialog:openScheme', async () => {
+  if (!mainWindow) return null
+  const chosen = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import a colour scheme',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Colour schemes', extensions: ['itermcolors', 'json', 'txt'] },
+      { name: 'All files', extensions: ['*'] }
+    ]
+  })
+  const path = chosen.canceled ? null : chosen.filePaths[0] ?? null
+  if (!path) return null
+  try {
+    return await readFile(path, 'utf8')
+  } catch {
+    return null
+  }
+})
+
 ipcMain.handle('dialog:openUpload', async () => {
   if (!mainWindow) return null
   const result = await dialog.showOpenDialog(mainWindow, {
@@ -925,11 +954,17 @@ ipcMain.handle('http:request', (_e, spec: HttpRequestSpec) =>
 // deliberate: every call after connect carries only a key and a path, so
 // sniffing a target on each one would mean trusting a value the renderer could
 // vary between calls in the same session.
-ipcMain.handle('sftp:connect', (_e, key: string, cfg: SshConnectConfig & { serverId?: string }) =>
-  isLocalTarget(cfg)
-    ? localFilesConnect(key)
-    : sftpConnect(key, withVpnTransport(resolveChainSecrets(cfg)))
-)
+ipcMain.handle('sftp:connect', (_e, key: string, cfg: SshConnectConfig & { serverId?: string }) => {
+  if (isLocalTarget(cfg)) {
+    // Same switch as the exec dispatch, applied at the only point a local file
+    // session can begin. Every later call carries just the key, so refusing the
+    // connect is what keeps the whole session out — see the note above on why
+    // the key, not the config, decides which half answers.
+    if (!isLocalTerminalEnabled()) return { ok: false, error: LOCAL_TARGET_OFF }
+    return localFilesConnect(key)
+  }
+  return sftpConnect(key, withVpnTransport(resolveChainSecrets(cfg)))
+})
 ipcMain.handle('sftp:list', (_e, key: string, path: string) =>
   isLocalFileSession(key) ? localFilesList(path) : sftpList(key, path)
 )
@@ -967,9 +1002,13 @@ ipcMain.handle('sftp:edit-external-stop', (_e, path: string) => externalEditStop
 // services/mcpServer.ts imports metricsSample — a branch in that module would
 // pull localExec into the agent-facing import closure. See
 // tests/localTerminalNotExposed.test.ts.
-ipcMain.handle('metrics:sample', (_e, key: string, cfg: SshConnectConfig & { serverId?: string }) =>
-  isLocalTarget(cfg) ? localMetricsSample(key) : metricsSample(key, resolveChainSecrets(cfg))
-)
+ipcMain.handle('metrics:sample', (_e, key: string, cfg: SshConnectConfig & { serverId?: string }) => {
+  if (isLocalTarget(cfg)) {
+    if (!isLocalTerminalEnabled()) return Promise.resolve({ ok: false, error: LOCAL_TARGET_OFF })
+    return localMetricsSample(key)
+  }
+  return metricsSample(key, resolveChainSecrets(cfg))
+})
 ipcMain.handle('metrics:disconnect', (_e, key: string) => {
   // There is no connection to hand back for this machine, only the CPU
   // snapshot the next delta would have been measured against.
@@ -1191,13 +1230,44 @@ function closeHistoryNow(): void {
  * which is what keeps localExec out of their import closure and off the surface
  * an agent can reach. See tests/localTerminalNotExposed.test.ts.
  */
+/**
+ * The kill switch, applied to the local target rather than only to the shell.
+ *
+ * `isLocalTerminalEnabled()` was consulted by the three `local:*` handlers and
+ * by nothing else, so every panel that offers "This machine" reached localExec
+ * straight through the dispatch below — a switch that turned off the terminal
+ * while leaving arbitrary `kubectl` and `docker rm` running on the same box.
+ * localGate.ts states the threat as a compromised renderer, and a compromised
+ * renderer would simply have used a panel channel instead of local:connect.
+ *
+ * A refusal is shaped as a run failure, not an empty success: `ok: false` with
+ * an `error` is what every injected reader already treats as "could not run
+ * this", so the panels report the switch instead of misreading silence as an
+ * absent daemon.
+ */
+const LOCAL_TARGET_OFF = 'Local targets are turned off in Settings.'
+
+const localExecGated = (command: string, timeoutMs: number): Promise<LocalExecResult> =>
+  isLocalTerminalEnabled()
+    ? localExec(command, timeoutMs)
+    : Promise.resolve({
+        ok: false,
+        stdout: '',
+        stderr: '',
+        code: null,
+        signal: null,
+        error: LOCAL_TARGET_OFF,
+        truncated: false,
+        elided: 0
+      })
+
 const targetExec = (
   cfg: unknown,
   command: string,
   timeoutMs: number
 ): ReturnType<typeof sshExec> =>
   isLocalTarget(cfg)
-    ? localExec(command, timeoutMs)
+    ? localExecGated(command, timeoutMs)
     : sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs)
 
 /**
@@ -1214,7 +1284,7 @@ const targetExecQuiet = (
   timeoutMs: number
 ): ReturnType<typeof sshExec> =>
   isLocalTarget(cfg)
-    ? localExec(command, timeoutMs)
+    ? localExecGated(command, timeoutMs)
     : sshExec(cfg as Parameters<typeof sshExec>[0], command, timeoutMs, false)
 
 // Host facts, on the sampler's slow clock. One reader for the whole process:
@@ -1509,6 +1579,11 @@ ipcMain.handle('fleet:storage', (_e, cfg: unknown) => hostFactsReader.storage(on
 // same reasoning: none of it moves between hourly reads, and the poll it would
 // otherwise ride shares the interactive connection.
 ipcMain.handle('fleet:network', (_e, cfg: unknown) => hostFactsReader.network(onDemandTarget(cfg)))
+// What is listening, with the owning process where the host will say. Same
+// on-demand shape: it moves when somebody deploys, not every two seconds.
+ipcMain.handle('fleet:listening-ports', (_e, cfg: unknown) =>
+  hostFactsReader.listeningPorts(onDemandTarget(cfg))
+)
 // One systemd timer AND the service it activates — roadmap item 46's certbot
 // row, generalised. A timer that fires into a failing service is the case the
 // row is about, and reading only the timer cannot see it.
@@ -2914,7 +2989,7 @@ ipcMain.handle(
 const cronEditDeps = {
   exec: (cfg: unknown, command: string, timeoutMs: number) =>
     isLocalTarget(cfg)
-      ? localExec(command, timeoutMs)
+      ? localExecGated(command, timeoutMs)
       : sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs, false),
   recordApproval: recordJobApproval
 }
@@ -4139,6 +4214,12 @@ ipcMain.handle('data:save', (_e, data: unknown) => {
   // local.connect() directly and never read it. So main keeps its own copy,
   // refreshed from the same blob, and every local:* handler consults that.
   syncLocalTerminalEnabled(data)
+  // Turning the switch off has to end what it already allowed. A local Files
+  // session is keyed at connect and every later call carries only that key, so
+  // an open session would otherwise keep answering reads and writes for as long
+  // as the tab stayed open — the switch would apply to new sessions only, which
+  // is not what "off" means.
+  if (!isLocalTerminalEnabled()) localFilesDisposeAll()
   syncAccessWriteEnabled(data)
   // Same pattern again, and the sharpest instance of it: a custom drift watch's
   // PATH is interpolated into the collector script, so the process that runs
@@ -4451,6 +4532,24 @@ app.whenReady().then(() => {
   // shell before its first data:save, so main reads the persisted setting itself
   // rather than starting from a default it would later have to correct.
   syncLocalTerminalEnabled(loadData())
+  // The Files view's local half reads and writes arbitrary paths, and the vault,
+  // the access policy and the audit log are all files under this directory —
+  // every constraint this app advertises is enforced by one of them. Told once
+  // at boot, before any window exists to ask.
+  setLocalFilesProtectedRoot(app.getPath('userData'))
+  /**
+   * Where the OSC 133 snippets are written. Under userData because it is the one
+   * directory the app owns on every platform.
+   *
+   * These files are SOURCED BY A SHELL, so a write to one is code execution in
+   * the next local session. The Files view refuses this whole tree, which raises
+   * the cost of reaching them from inside the app — but that guard is a
+   * defence-in-depth measure and not a boundary: it constrains one view, while
+   * anything else running as this user can write here regardless. An earlier
+   * comment here claimed they "cannot be edited from inside the app", which
+   * overstated it, and this repo is public.
+   */
+  setShellIntegrationRoot(app.getPath('userData'))
 syncAccessWriteEnabled(loadData())
 syncDriftWatches(loadData())
   // Before the MCP server: the bridge asks the manager what is running, and a

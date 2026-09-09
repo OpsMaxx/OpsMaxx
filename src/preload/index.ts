@@ -144,6 +144,7 @@ import type { VaultEntry, VaultListResult, VaultResult, VaultStatus } from '../s
 import type { KernelStatus } from '../shared/kernelStatus'
 import type { StorageLayout } from '../shared/storageLayout'
 import type { NetworkInfo } from '../shared/network'
+import type { ListeningPortsInfo } from '../shared/listeningPorts'
 import type { RdpDesktopSize, RdpTicketResult } from '../shared/rdp'
 import type { TunnelConfig, TunnelResult, TunnelSshConfig, TunnelStatus } from '../shared/tunnel'
 import type {
@@ -259,7 +260,8 @@ const api = {
     openUpload: (): Promise<string[] | null> => ipcRenderer.invoke('dialog:openUpload'),
     saveJson: (suggestedName: string, contents: string): Promise<boolean> =>
       ipcRenderer.invoke('dialog:saveJson', suggestedName, contents),
-    openJson: (): Promise<string | null> => ipcRenderer.invoke('dialog:openJson')
+    openJson: (): Promise<string | null> => ipcRenderer.invoke('dialog:openJson'),
+    openScheme: (): Promise<string | null> => ipcRenderer.invoke('dialog:openScheme')
   },
   clipboard: {
     read: (): string => clipboard.readText(),
@@ -897,6 +899,9 @@ const api = {
     /** Interfaces with their IPv4/IPv6 addresses, and the resolvers in use. */
     network: (cfg: OnDemandTarget): Promise<NetworkInfo | { error: string }> =>
       ipcRenderer.invoke('fleet:network', cfg),
+    /** Listening TCP/UDP sockets, with the owning process where visible. */
+    listeningPorts: (cfg: OnDemandTarget): Promise<ListeningPortsInfo | { error: string }> =>
+      ipcRenderer.invoke('fleet:listening-ports', cfg),
     /** One timer and the service it activates. Both, because a timer that fires
      *  into a failing service looks healthy from the timer alone. */
     timer: (

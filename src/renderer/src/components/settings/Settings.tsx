@@ -33,6 +33,7 @@ import { WebhookAlertSettings } from './WebhookAlertSettings'
 import { CredProxyPanel } from './CredProxyPanel'
 import { alertCoverageText } from './alertCoverage'
 import { MODULES, moduleEnabled } from '../../../../shared/modules'
+import { TERMINAL_SCHEMES, parseTerminalScheme } from '../../../../shared/terminalTheme'
 import { useFleetStatus } from '../../store/fleetStatus'
 import { toast } from '../../store/toast'
 
@@ -162,11 +163,37 @@ const SETTING_INDEX: SettingEntry[] = [
   },
   { section: 'appearance', title: 'Compact density', desc: 'Tighter rows and padding across trees, lists and the docked monitor.', aliases: 'dense spacing compact size' },
   // Terminal
+  {
+    section: 'terminal',
+    title: 'Colour scheme',
+    desc: 'The sixteen ANSI colours the terminal draws with.',
+    aliases: 'color colours palette theme solarized dracula nord gruvbox one dark iterm'
+  },
+  {
+    section: 'terminal',
+    title: 'Shell integration',
+    desc: 'Local shells report where each prompt begins and how each command exited.',
+    aliases: 'osc 133 prompt marks shell integration zsh bash fish exit status'
+  },
+  {
+    section: 'terminal',
+    title: 'Click to move the cursor',
+    desc: 'Click inside the line you are typing to move the shell cursor there.',
+    aliases: 'mouse click cursor position move caret cmux'
+  },
   { section: 'terminal', title: 'Font family', desc: 'Monospace font used in the terminal.', aliases: 'typeface monospace' },
   { section: 'terminal', title: 'Font size', desc: 'Terminal text size. Also Ctrl + / Ctrl - / Ctrl 0.', aliases: 'zoom bigger smaller text size' },
   { section: 'terminal', title: 'Cursor blink', desc: 'Blink the terminal cursor.', aliases: 'caret' },
   { section: 'terminal', title: 'Copy on select', desc: 'Automatically copy selected text.', aliases: 'clipboard selection' },
   { section: 'terminal', title: 'Scroll to bottom on output', desc: 'Follow new output automatically.', aliases: 'autoscroll follow tail' },
+  {
+    section: 'terminal',
+    title: 'Allow this machine as a target',
+    desc: 'Whether a shell and the panels may run against this computer.',
+    // What someone types when they want this off: the words they know the
+    // feature by, not the words the row happens to use.
+    aliases: 'local terminal this machine localhost kill switch disable local shell docker kubernetes files own computer'
+  },
   // Shortcuts
   {
     section: 'shortcuts',
@@ -746,9 +773,98 @@ export function Settings(): React.JSX.Element {
                   </button>
                 </div>
               </div>
+              <div className="setting-row">
+                <div className="s-info">
+                  <div className="s-title">Colour scheme</div>
+                  <div className="s-desc">
+                    Applies to open terminals immediately. A scheme without its own background keeps
+                    the app&apos;s, so it follows light and dark.
+                  </div>
+                </div>
+                <div className="row" style={{ gap: 6 }}>
+                  <select
+                    className="input"
+                    value={settings.terminalScheme}
+                    onChange={(e) => setSettings({ terminalScheme: e.target.value })}
+                  >
+                    <option value="">App palette</option>
+                    {TERMINAL_SCHEMES.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                    {settings.terminalCustomSchemes.length > 0 && (
+                      <optgroup label="Imported">
+                        {settings.terminalCustomSchemes.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+                  <button
+                    className="btn sm"
+                    onClick={() => {
+                      void (async () => {
+                        const text = await window.opsmaxx?.dialog.openScheme()
+                        // Cancelled, or unreadable. Neither is worth a toast:
+                        // the user either chose nothing or already knows.
+                        if (!text) return
+                        const parsed = parseTerminalScheme(text)
+                        if (!parsed.ok) {
+                          toast(parsed.error, 'error')
+                          return
+                        }
+                        // Re-importing the same file replaces rather than
+                        // duplicates: the id is derived from the name, and two
+                        // rows reading "Campbell" would be unusable.
+                        const rest = settings.terminalCustomSchemes.filter(
+                          (s) => s.id !== parsed.scheme.id
+                        )
+                        setSettings({
+                          terminalCustomSchemes: [...rest, parsed.scheme],
+                          terminalScheme: parsed.scheme.id
+                        })
+                        toast(`${parsed.scheme.name} added`, 'ok')
+                      })()
+                    }}
+                  >
+                    Import a file
+                  </button>
+                </div>
+              </div>
               <Toggle label="Cursor blink" desc="Blink the terminal cursor." initial />
               <Toggle label="Copy on select" desc="Automatically copy selected text." />
               <Toggle label="Scroll to bottom on output" desc="Follow new output automatically." initial />
+              <SettingSwitch
+                label="Shell integration"
+                desc="Start local shells so they report where each prompt begins and what each command exited with. Uses the shell's own startup options for the session OpsMaxx starts — your shell config files are never modified. zsh, bash and fish; a login bash and PowerShell are not supported."
+                checked={settings.shellIntegration !== false}
+                onChange={(v) => setSettings({ shellIntegration: v })}
+              />
+              <SettingSwitch
+                label="Click to move the cursor"
+                desc="Click inside the line you are typing to put the shell cursor there. Needs shell integration, so it does nothing in a session without it, and stays out of the way while a command is running or a full-screen program is open."
+                checked={settings.terminalClickToMove === true}
+                onChange={(v) => setSettings({ terminalClickToMove: v })}
+              />
+              {/* The switch main already enforced and nothing could reach.
+                  services/localGate.ts kept its own copy of this flag and
+                  documented a user toggle for it, but no code ever wrote the
+                  setting — so the kill switch existed and could not be pulled.
+
+                  The copy says "this machine" rather than "local terminal"
+                  deliberately: it gates every local target, not only the shell.
+                  Turning it off also refuses the Docker, Kubernetes, Compose,
+                  cron, host-facts, Files and metrics panels' "This machine"
+                  option, and ends any local Files session already open. */}
+              <SettingSwitch
+                label="Allow this machine as a target"
+                desc="Open a shell on this computer, and offer it alongside your servers in the Docker, Kubernetes, cron, Files and monitoring panels. When off, every one of those refuses locally and open local file sessions are closed. Never available to the AI bridge either way."
+                checked={settings.localTerminalEnabled !== false}
+                onChange={(v) => setSettings({ localTerminalEnabled: v })}
+              />
             </div>
           )}
 

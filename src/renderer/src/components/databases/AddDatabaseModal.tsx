@@ -3,6 +3,7 @@ import { Database } from 'lucide-react'
 import { Field, Modal } from '../common/Modal'
 import { useApp, useWorkspaceServers } from '../../store/app'
 import { toast } from '../../store/toast'
+import { useVault } from '../../store/vault'
 import { clsx } from '../../lib/format'
 import { KIND_COLOR } from './DatabaseSidebar'
 import { VpnTransportSelect } from '../vpn/VpnTransportSelect'
@@ -58,6 +59,20 @@ export function AddDatabaseModal(): React.JSX.Element {
   const [ssl, setSsl] = useState(existing?.ssl ?? false)
   const [uri, setUri] = useState('')
   const [sshServerId, setSshServerId] = useState(existing?.sshServerId ?? '')
+
+  const vaultUnlocked = useVault((st) => st.unlocked)
+  const vaultEntries = useVault((st) => st.entries)
+  /**
+   * Only entries that can actually be a database password.
+   *
+   * A `login` entry is url/username/password, which is exactly a database
+   * credential's shape — so this needs no new vault kind. An SSH key entry is
+   * excluded because a private key cannot authenticate a database.
+   */
+  const usableEntries = vaultEntries.filter((e) => !!e.password && !e.privateKey)
+  // '' means "type a new one"; anything else is a vault entry id.
+  const [vaultEntryId, setVaultEntryId] = useState('')
+  const usingVault = vaultUnlocked && vaultEntryId !== ''
   const [vpnProfileId, setVpnProfileId] = useState<UUID | null>(existing?.vpnProfileId ?? null)
 
   // Whoever opened the dialog owns the target; leaving it set would make the
@@ -88,7 +103,7 @@ export function AddDatabaseModal(): React.JSX.Element {
   // this app and then works.
   const storeSecret = async (
     id: string,
-    secret: { uri: string } | { password: string },
+    secret: { uri: string } | { password: string } | { vaultEntryId: string },
     label: string
   ): Promise<void> => {
     const ok = await window.opsmaxx?.secrets.set(id, JSON.stringify(secret))
@@ -121,7 +136,24 @@ export function AddDatabaseModal(): React.JSX.Element {
       vpnProfileId
     }
     const id = editId ? (saveDatabaseEdit(editId, fields), editId) : addDatabase(fields)
-    const secret = useUri ? (uri.trim() ? { uri: uri.trim() } : null) : password ? { password } : null
+    /**
+     * A vault reference beats a typed password, and both beat nothing.
+     *
+     * Referencing an entry is what makes one database password one record:
+     * three connections to the same server stop being three copies rotated in
+     * three places. It is also the only form that survives a move to another
+     * machine — the OS keychain is machine-local and no backup can carry it,
+     * while the vault travels inside the encrypted bundle.
+     */
+    const secret = useUri
+      ? uri.trim()
+        ? { uri: uri.trim() }
+        : null
+      : usingVault
+        ? { vaultEntryId }
+        : password
+          ? { password }
+          : null
     if (secret) await storeSecret(id, secret, fields.name)
     toast(`${fields.name} ${editId ? 'updated' : 'added'}`, 'ok')
     setModal(null)
@@ -243,6 +275,31 @@ export function AddDatabaseModal(): React.JSX.Element {
               <label className="field-label">Username</label>
               <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} />
             </div>
+            {vaultUnlocked && usableEntries.length > 0 && (
+              <div className="field">
+                <label className="field-label">Credential</label>
+                <select
+                  className="input"
+                  value={vaultEntryId}
+                  onChange={(e) => setVaultEntryId(e.target.value)}
+                >
+                  <option value="">Enter a new one…</option>
+                  {usableEntries.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.name}
+                      {e.username ? ` — ${e.username}` : ''}
+                    </option>
+                  ))}
+                </select>
+                <span className="field-hint">
+                  {usingVault
+                    ? 'This database will reference the vault entry. Change the password there and every connection using it follows — and it travels with an encrypted backup, which a password kept only on this device cannot.'
+                    : 'Reuse a password you have already saved, or type a new one below.'}
+                </span>
+              </div>
+            )}
+
+            {!usingVault && (
             <div className="field">
               <label className="field-label">Password</label>
               <input
@@ -260,6 +317,7 @@ export function AddDatabaseModal(): React.JSX.Element {
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
+            )}
           </div>
 
           <div className="field-row">
