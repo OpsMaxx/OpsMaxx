@@ -242,6 +242,39 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.os == 'macos-latest' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ matrix.os == 'macos-latest' && secrets.APPLE_TEAM_ID || '' }}
 
+      # That the notarization SURVIVED, not that it happened.
+      #
+      # 0.30.0 logged "notarization successful" and shipped artifacts Gatekeeper
+      # rejected as `Unnotarized Developer ID`: electron-builder notarized the
+      # bundle and then the afterSign hook re-signed it, discarding the staple.
+      # Every check that existed passed — the secrets were present, the log said
+      # successful, the signature was a real Developer ID. Only asking the
+      # finished .app whether it carries a ticket catches that, so this asks.
+      - name: Check the notarization ticket is stapled
+        if: matrix.os == 'macos-latest' && startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          bad=0
+          for app in release/mac*/*.app; do
+            [ -e "$app" ] || continue
+            if xcrun stapler validate "$app" > /dev/null 2>&1; then
+              echo "$app -> stapled"
+            else
+              echo "::error::$app has no notarization ticket stapled to it"
+              bad=1
+            fi
+            # And what Gatekeeper will actually say to a user, which is the
+            # question the whole exercise is about.
+            assessment=$(spctl -a -vvv "$app" 2>&1 || true)
+            echo "$assessment" | sed 's/^/    /'
+            case "$assessment" in
+              *"source=Notarized Developer ID"*) ;;
+              *) echo "::error::$app is not accepted as notarized by Gatekeeper"; bad=1 ;;
+            esac
+          done
+          exit $bad
+
       # Which certificate actually signed it, not which one we hoped would.
       #
       # `mac.identity` is unset so electron-builder discovers the certificate,

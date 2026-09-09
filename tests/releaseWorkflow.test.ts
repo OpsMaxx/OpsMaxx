@@ -277,6 +277,24 @@ describe('macOS release wiring', () => {
     }
   })
 
+  it('checks the notarization ticket survived to the finished app', () => {
+    // "notarization successful" in the log is not the same claim. 0.30.0 had
+    // that line and shipped artifacts Gatekeeper called Unnotarized, because
+    // the bundle was re-signed after Apple saw it.
+    const yml3 = readFileSync('.github/workflows/release.yml', 'utf8')
+    expect(yml3).toContain('Check the notarization ticket is stapled')
+    expect(yml3).toContain('stapler validate')
+    expect(yml3).toContain('source=Notarized Developer ID')
+  })
+
+  it('does not let electron-builder notarize, because it does so too early', () => {
+    const builder2 = load(readFileSync('electron-builder.yml', 'utf8')) as { mac?: { notarize?: boolean } }
+    // It notarizes before the afterSign hook, which then re-signs and discards
+    // the staple. The hook notarizes instead, after its own re-seal.
+    expect(builder2.mac?.notarize).toBe(false)
+    expect(readFileSync('scripts/after-sign.cjs', 'utf8')).toContain('notarytool')
+  })
+
   it('refuses a build signed by anything but a Developer ID certificate', () => {
     // An Apple Developer membership hands you an "Apple Development"
     // certificate first, and electron-builder's discovery will use it — giving
@@ -329,10 +347,6 @@ describe('macOS build hardening', () => {
     // the signed bundle rather than out of this file, which is only correct
     // while this key stays absent.
     expect(builder.mac?.identity).toBeUndefined()
-  })
-
-  it('notarizes, so the Gatekeeper warning is removed rather than clickable', () => {
-    expect(builder.mac?.notarize).toBe(true)
   })
 
   it('builds a zip beside the dmg, because Squirrel.Mac will not apply a dmg', () => {
