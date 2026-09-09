@@ -338,10 +338,12 @@ export function AddServerModal(): React.JSX.Element {
 
     toast(`${fields.name} ${editId ? 'updated' : 'added'}`, 'ok')
     setModal(null)
-    // An RDP-only machine has no terminal to open, and openServer already
-    // routes it to its desktop — asked for by name here so the intent is
-    // visible at the call site rather than only in the store.
-    if (!editId) openServer(id, speaks === 'rdp' ? 'files' : 'terminal')
+    // 'terminal' for every kind, because openServer is what decides: an
+    // RDP-only machine is routed to its desktop there, deliberately in one
+    // place rather than at each of the sidebar, palette and recents call
+    // sites. Naming a different view here would have stated an intent this
+    // call cannot actually express.
+    if (!editId) openServer(id, 'terminal')
   }
 
   return (
