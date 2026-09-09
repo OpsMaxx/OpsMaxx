@@ -3,7 +3,7 @@
 This is the detailed reference for OpsMaxx's [MCP](https://modelcontextprotocol.io) bridge —
 how it's built, what each screen does, and how to connect Claude Code, Claude Desktop, Codex or
 another MCP client. For the short pitch and the security summary, see the
-[README's AI Agent Access section](../README.md#ai-agent-access). For the threat model, see
+[README's AI Agent Access section](ai-agents.md). For the threat model, see
 [AI-SECURITY.md](AI-SECURITY.md).
 
 ## Contents
