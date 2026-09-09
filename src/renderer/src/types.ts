@@ -1,3 +1,16 @@
+import type { RdpSettings } from '../../shared/rdp'
+
+// Re-exported for the same reason the VPN domain is: one definition of the
+// record, shared with main, rather than a renderer-only restatement that can
+// disagree with it.
+export type {
+  RdpDesktopSize,
+  RdpErrorCode,
+  RdpSettings,
+  RdpTicket,
+  RdpTicketResult
+} from '../../shared/rdp'
+
 export type UUID = string
 
 export type WorkspaceColor =
@@ -73,6 +86,19 @@ export interface Server {
    * server saved before this existed is.
    */
   sftpOnly?: boolean
+  /**
+   * This server also speaks RDP, on the port and with the login named here.
+   *
+   * A field on `Server` rather than a record of its own, for the same reason
+   * `sftpOnly` is: the machine has already been described once — host,
+   * workspace, folder, VPN — and a second record would restate all of it and
+   * then drift from it. What RDP does get of its own is a tab kind, because a
+   * remote desktop is not a shell and cannot share the views of one.
+   *
+   * Absent means the server does not speak RDP, which is every server saved
+   * before this existed.
+   */
+  rdp?: RdpSettings
   demo?: boolean
 }
 
@@ -217,6 +243,14 @@ export interface ApiCollection {
   insecureTls: boolean
 }
 
+/**
+ * The views an SSH tab can show. Deliberately NOT the union of every tab's
+ * views: 'desktop' lives on RdpTab alone, and putting it here made
+ * `{ kind: 'ssh', view: 'desktop' }` a shape the compiler accepted and nothing
+ * rendered — which is exactly the blank tab `duplicateOf` produced. A tab's
+ * view is declared per kind, below, so the invalid combinations cannot be
+ * written rather than being caught by guards someone has to remember.
+ */
 export type PanelView = 'terminal' | 'monitor' | 'files'
 export type ActivityView =
   | 'connections'
@@ -228,13 +262,14 @@ export type ActivityView =
   | 'ai'
   | 'settings'
 
+// `view` is deliberately absent here and declared on each member instead. It
+// is the one field whose legal values depend entirely on the discriminant.
 interface TabBase {
   id: UUID
   // Tabs belong to the workspace they were opened in, so switching workspaces
   // does not show another workspace's sessions.
   workspaceId: UUID
   title: string
-  view: PanelView
 }
 
 // A tab backed by a saved server. `serverId` is non-null here on purpose: it
@@ -243,6 +278,7 @@ interface TabBase {
 // server.
 export interface SshTab extends TabBase {
   kind: 'ssh'
+  view: PanelView
   serverId: UUID
   /**
    * Set when this tab is a shell inside a container on that server, rather than
@@ -299,4 +335,31 @@ export interface LocalTab extends TabBase {
   view: 'terminal' | 'files'
 }
 
-export type Tab = SshTab | LocalTab
+/**
+ * A remote desktop on a saved server, backed by that server's `rdp` settings.
+ *
+ * Its own kind rather than a fourth `PanelView` on `SshTab`, because the three
+ * existing views all read an SSH transport that an RDP session does not have,
+ * and every one of them would have to learn to be absent. It is also the only
+ * tab that cannot be split: `PaneGrid` splits terminals, and half a desktop is
+ * not a smaller desktop.
+ *
+ * `view` is fixed rather than omitted so that the viewbar, the tab strip and
+ * `setTabView` keep working off one field across every tab kind.
+ */
+export interface RdpTab extends TabBase {
+  kind: 'rdp'
+  serverId: UUID
+  view: 'desktop'
+}
+
+/**
+ * Every view any tab can be showing.
+ *
+ * Derived rather than declared, so it cannot drift from the members, and used
+ * only where something genuinely handles all three kinds at once. Anything
+ * that means "a view an SSH tab has" wants `PanelView`.
+ */
+export type TabView = Tab['view']
+
+export type Tab = SshTab | LocalTab | RdpTab

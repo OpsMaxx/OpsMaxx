@@ -171,6 +171,9 @@ what ships in the packaged app and are attributed here for that reason.
 | @xterm/addon-fit, addon-search, addon-web-links, addon-webgl | 0.10.0 / 0.15.0 / 0.11.0 / 0.18.0 | MIT | xterm.js addons |
 | @lydell/node-pty | 1.2.0-beta.15 | MIT | Pseudo-terminal for local shells — pinned to an exact version, and it ships native binaries (see below) |
 | ssh2 | 1.17.0 | MIT | SSH/SFTP client |
+| ws | 8.21.3 | MIT | WebSocket server for the loopback RDP relay |
+| @devolutions/iron-remote-desktop | 0.11.0 | MIT OR Apache-2.0 | Remote-desktop web component (bundled into the renderer) |
+| @devolutions/iron-remote-desktop-rdp | 0.7.0 | MIT OR Apache-2.0 | IronRDP client compiled to WebAssembly — the RDP protocol implementation (bundled into the renderer) |
 | mongodb | 7.5.0 | Apache-2.0 | MongoDB driver |
 | mssql | 12.7.0 | MIT | SQL Server driver |
 | mysql2 | 3.23.4 | MIT | MySQL/MariaDB driver |
@@ -229,10 +232,16 @@ Build-only tooling (TypeScript, Vite, Vitest, esbuild, electron-builder,
 `@types/*`, etc.) is excluded, since it never ships. License data comes
 from each package's own `package.json`.
 
-License summary: **201 MIT · 12 ISC · 7 BSD-3-Clause · 7 Apache-2.0 · 2
-BlueOak-1.0.0 · 2 BSD-2-Clause · 1 Python-2.0 · 1 0BSD · 1 Unlicense** — 234
-packages total. No GPL, AGPL, LGPL, SSPL, or proprietary-licensed
-dependencies were found anywhere in the tree.
+License summary: **202 MIT · 12 ISC · 7 BSD-3-Clause · 7 Apache-2.0 · 2
+BlueOak-1.0.0 · 2 BSD-2-Clause · 2 MIT OR Apache-2.0 · 1 Python-2.0 · 1 0BSD ·
+1 Unlicense** — 237 packages total. No GPL, AGPL, LGPL, SSPL, or
+proprietary-licensed dependencies were found anywhere in the tree.
+
+The two `MIT OR Apache-2.0` entries are the IronRDP packages, which offer the
+recipient either licence. Both are permissive and neither imposes an obligation
+beyond attribution, so the dual offer changes nothing about what OpsMaxx has to
+do — it is listed as its own category only because restating it as plain MIT
+would misdescribe what upstream actually published.
 
 That statement is about the **npm tree only**. It is not a statement about the
 installer, which also contains a GPL-2.0 program (`openvpn`) and a proprietary
@@ -271,6 +280,8 @@ the licence position.
 | @hono/node-server | 2.1.1 | MIT |
 | @ioredis/commands | 2.0.0 | MIT |
 | @js-joda/core | 6.1.0 | BSD-3-Clause |
+| @devolutions/iron-remote-desktop | 0.11.0 | MIT OR Apache-2.0 |
+| @devolutions/iron-remote-desktop-rdp | 0.7.0 | MIT OR Apache-2.0 |
 | @lydell/node-pty | 1.2.0-beta.15 | MIT |
 | @lydell/node-pty-`<platform>`-`<arch>` | 1.2.0-beta.15 | MIT |
 | @modelcontextprotocol/sdk | 1.30.0 | MIT |
@@ -461,6 +472,7 @@ the licence position.
 | sprintf-js | 1.1.3 | BSD-3-Clause |
 | sql-escaper | 1.5.1 | MIT |
 | ssh2 | 1.17.0 | MIT |
+| ws | 8.21.3 | MIT |
 | standard-as-callback | 2.1.0 | MIT |
 | statuses | 2.0.2 | MIT |
 | string_decoder | 1.3.0 | MIT |

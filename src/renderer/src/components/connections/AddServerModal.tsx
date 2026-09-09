@@ -108,6 +108,13 @@ export function AddServerModal(): React.JSX.Element {
   const [hops, setHops] = useState<Hop[]>(existing?.route ?? [])
   const [vpnProfileId, setVpnProfileId] = useState<UUID | null>(existing?.vpnProfileId ?? null)
   const [sftpOnly, setSftpOnly] = useState(existing?.sftpOnly === true)
+  const [rdpEnabled, setRdpEnabled] = useState(existing?.rdp !== undefined)
+  const [rdpPort, setRdpPort] = useState(String(existing?.rdp?.port ?? 3389))
+  const [rdpDomain, setRdpDomain] = useState(existing?.rdp?.domain ?? '')
+  // Defaults on, like RdpSettings.nla: every supported Windows Server requires
+  // it by policy, and connecting without it against one of those fails in a way
+  // that reads as a wrong password.
+  const [rdpNla, setRdpNla] = useState(existing?.rdp?.nla !== false)
   const [passphrase, setPassphrase] = useState('')
   const [password, setPassword] = useState('')
   const [advanced, setAdvanced] = useState(false)
@@ -223,7 +230,17 @@ export function AddServerModal(): React.JSX.Element {
       auth,
       route: hops,
       vpnProfileId,
-      sftpOnly
+      sftpOnly,
+      // Absent, not a disabled record: `Server.rdp` being undefined is what
+      // every other part of the app reads as "this server does not speak RDP",
+      // and a kept-but-off object would offer the menu entry anyway.
+      rdp: rdpEnabled
+        ? {
+            port: Number(rdpPort) || 3389,
+            domain: rdpDomain.trim() || undefined,
+            nla: rdpNla
+          }
+        : undefined
     }
     const id = editId ? (updateServer(editId, fields), editId) : addServer(fields)
 
@@ -490,10 +507,72 @@ export function AddServerModal(): React.JSX.Element {
         </span>
       </label>
 
+      {/* RDP is a second protocol to the same machine, not a second machine, so
+          it lives on this record rather than in a list of its own. Off by
+          default: the overwhelming majority of saved servers are Linux hosts
+          with nothing listening on 3389. */}
+      <label className="row" style={{ gap: 'var(--sp-2)', alignItems: 'flex-start', marginBottom: 'var(--sp-2)' }}>
+        <input
+          type="checkbox"
+          checked={rdpEnabled}
+          onChange={(e) => setRdpEnabled(e.target.checked)}
+          style={{ marginTop: 3 }}
+        />
+        <span className="col" style={{ gap: 2 }}>
+          <span>Also reachable by RDP</span>
+          <span className="field-hint">
+            Adds &ldquo;Open remote desktop&rdquo; for this server. It signs in with the username and
+            password above, so an account authenticating by key needs a password stored as well.
+          </span>
+        </span>
+      </label>
+
+      {rdpEnabled && (
+        <div className="col" style={{ gap: 'var(--sp-2)', marginBottom: 'var(--sp-3)', paddingLeft: 22 }}>
+          <div className="row" style={{ gap: 'var(--sp-2)' }}>
+            <label className="col" style={{ gap: 2, width: 110 }}>
+              <span className="field-label">RDP port</span>
+              <input
+                className="input"
+                value={rdpPort}
+                inputMode="numeric"
+                onChange={(e) => setRdpPort(e.target.value)}
+                placeholder="3389"
+              />
+            </label>
+            <label className="col" style={{ gap: 2, flex: 1 }}>
+              <span className="field-label">Domain (optional)</span>
+              <input
+                className="input"
+                value={rdpDomain}
+                onChange={(e) => setRdpDomain(e.target.value)}
+                placeholder="CORP"
+              />
+            </label>
+          </div>
+          <label className="row" style={{ gap: 'var(--sp-2)', alignItems: 'flex-start' }}>
+            <input
+              type="checkbox"
+              checked={rdpNla}
+              onChange={(e) => setRdpNla(e.target.checked)}
+              style={{ marginTop: 3 }}
+            />
+            <span className="col" style={{ gap: 2 }}>
+              <span>Network Level Authentication</span>
+              <span className="field-hint">
+                Leave on for Windows, which normally requires it. Turn it off for
+                <span className="mono"> xrdp </span>
+                on Linux, which is not a CredSSP server and refuses the connection with it on.
+              </span>
+            </span>
+          </label>
+        </div>
+      )}
+
       <VpnTransportSelect
         value={vpnProfileId}
         onChange={setVpnProfileId}
-        hint="The VPN is the outer transport: any jump hosts below are dialled through it, and so is everything that rides this server — terminals, SFTP, metrics and its SSH tunnels."
+        hint="The VPN is the outer transport: any jump hosts below are dialled through it, and so is everything that rides this server — terminals, SFTP, metrics, remote desktops and its SSH tunnels."
       />
 
       <RouteHops hops={hops} onChange={setHops} excludeServerId={editId} />

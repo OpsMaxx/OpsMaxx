@@ -179,6 +179,8 @@ import {
 import type { VaultEntry } from '../shared/vault'
 import { wsLockIds, wsLockSet, wsLockVerify, wsLockRemove, wsLockDelete } from './services/wslock'
 import { tunnelStart, tunnelStop, tunnelList, tunnelDisposeAll } from './services/tunnel'
+import { rdpMintTicket, stopRdpRelay } from './services/rdpRelay'
+import type { RdpDesktopSize } from '../shared/rdp'
 import type { TunnelConfig, TunnelSshConfig } from '../shared/tunnel'
 import { knownHostList, knownHostForget } from './services/knownhosts'
 import {
@@ -440,10 +442,34 @@ if (isWSL()) {
 
 // Content-Security-Policy applied via response headers.
 // Dev needs inline/eval for the Vite dev server + React fast-refresh; prod is strict.
+//
+// Two directives are wider than they would be without RDP, and both are
+// deliberate:
+//
+//  - `'wasm-unsafe-eval'` in script-src. The RDP client is a WebAssembly module
+//    shipped inside the renderer bundle as a data: URI, and instantiating it is
+//    exactly what this token permits. It does NOT re-enable `eval` for
+//    JavaScript, which is why it exists as a separate token rather than being
+//    covered by 'unsafe-eval'.
+//  - `data:` in connect-src, for the same module. The token above allows
+//    *instantiating* the WebAssembly; it does not allow *reading* it, and the
+//    package inlines the binary as a `data:application/wasm` URI which it
+//    fetches at init. Without this the module throws `TypeError: Failed to
+//    fetch` before a session is ever attempted — and only in a packaged build,
+//    because the development policy already allows `data:`. It is scoped to
+//    connect-src, where it can name only bytes the bundle already contains.
+//  - `ws://127.0.0.1:*` in connect-src, for the RDP relay's loopback socket.
+//    The relay listens on an ephemeral port chosen at connect time, so the
+//    exact port cannot be in a policy installed before the window loads, and
+//    the alternative — starting the relay eagerly at launch so the port is
+//    known — trades this for a listener that is up for every session including
+//    the ones that never open a desktop. The wildcard is scoped to loopback and
+//    to the ws: scheme; it does not widen http, and the relay itself refuses
+//    anything without a single-use ticket minted in main.
 function installCsp(): void {
   const policy = isDev
     ? "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: ws: http://localhost:* http://127.0.0.1:*"
-    : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'"
+    : "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' data: ws://127.0.0.1:*"
   session.defaultSession.webRequest.onHeadersReceived((details, cb) => {
     cb({
       responseHeaders: {
@@ -3871,6 +3897,15 @@ ipcMain.handle('tunnel:start', (e, cfg: TunnelConfig, ssh: TunnelSshConfig) =>
 ipcMain.handle('tunnel:stop', (_e, id: string) => tunnelStop(id))
 ipcMain.handle('tunnel:list', () => tunnelList())
 
+// ---- RDP ----
+// The renderer names a saved server and nothing else. Every field that decides
+// what is connected to — host, port, account, credential — is read in main from
+// the saved record, because the relay this ticket unlocks can reach anything
+// this machine can. See services/rdpRelay.ts.
+ipcMain.handle('rdp:ticket', (_e, serverId: string, size?: RdpDesktopSize) =>
+  rdpMintTicket(serverId, size)
+)
+
 // ---- VPN ----
 // -------------------------------------------------------------- inspector
 //
@@ -4297,6 +4332,10 @@ app.on('before-quit', (e) => {
   metricsDisposeAll()
   dbDisposeAll()
   tunnelDisposeAll()
+  // Closes the loopback listener as well as any live desktop. A relay that
+  // outlived the window would be an unowned local proxy holding a TLS session
+  // to a machine nobody is looking at any more.
+  void stopRdpRelay()
   externalEditDisposeAll()
   vaultDispose()
   void stopMcpServer()

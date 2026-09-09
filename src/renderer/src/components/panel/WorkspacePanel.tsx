@@ -33,7 +33,8 @@ import { PaneGrid } from './PaneGrid'
 import { MonitorView } from './MonitorView'
 import { MonitorStrip } from './MonitorStrip'
 import { SftpView } from './SftpView'
-import type { PanelView, Server, Tab } from '../../types'
+import { RdpView } from '../rdp/RdpView'
+import type { PanelView, Server, Tab, TabView } from '../../types'
 
 const VIEWS: { id: PanelView; label: string; icon: React.ReactNode }[] = [
   { id: 'terminal', label: 'Terminal', icon: <TerminalIcon size={14} /> },
@@ -61,7 +62,10 @@ function TabPane({
   // gated on visibility rather than on being rendered.
   active: boolean
 }): React.JSX.Element {
-  const [visited, setVisited] = useState<Set<PanelView>>(() => new Set([tab.view]))
+  // `TabView`, not `PanelView`: this runs for every kind of tab, including the
+  // RDP one whose only view is 'desktop'. The pane styles below stay on
+  // `PanelView`, because by the time they are called the tab is an SSH one.
+  const [visited, setVisited] = useState<Set<TabView>>(() => new Set([tab.view]))
   useEffect(() => {
     setVisited((v) => (v.has(tab.view) ? v : new Set(v).add(tab.view)))
   }, [tab.view])
@@ -95,6 +99,13 @@ function TabPane({
 
   if (!server) {
     return <EmptyState icon={<TerminalIcon size={26} />} title="Session unavailable" message="This server no longer exists." />
+  }
+
+  // Before the view-by-view rendering below, because an RDP tab has none of
+  // those views: no terminal to dock a monitor strip under, and no SFTP
+  // channel. It is one surface, and `paneStyle` would only ever hide it.
+  if (tab.kind === 'rdp') {
+    return <RdpView server={server} visible={active} />
   }
 
   return (
@@ -151,6 +162,18 @@ function Terminals({ tab, tp }: { tab: Tab; tp: TabPanes | undefined }): React.J
       )
     }
     return <TerminalView transport={localTransport(shell, tab.cwd)} tabId={tab.id} />
+  }
+  // An RDP tab never reaches here — TabPane returns RdpView before rendering
+  // any terminal — but the narrowing has to say so, because everything below
+  // reads fields that only an SSH tab has.
+  if (tab.kind === 'rdp') {
+    return (
+      <EmptyState
+        icon={<TerminalIcon size={26} />}
+        title="Session unavailable"
+        message="A remote desktop has no terminal."
+      />
+    )
   }
   const server = servers.find((sv) => sv.id === tab.serverId)
   if (!server) {
@@ -455,7 +478,13 @@ export function WorkspacePanel(): React.JSX.Element {
           >
             <TabPane
               tab={t}
-              server={t.kind === 'ssh' ? servers.find((s) => s.id === t.serverId) : undefined}
+              // A local tab has no server and must never be handed one. An RDP
+              // tab has the same server an SSH tab does — it is the same saved
+              // machine — so it is looked up the same way; what differs is the
+              // session, not the target.
+              server={
+                t.kind === 'local' ? undefined : servers.find((s) => s.id === t.serverId)
+              }
               tp={panes[t.id]}
               active={t.id === activeTabId}
             />

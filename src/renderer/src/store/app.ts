@@ -11,6 +11,7 @@ import type {
   Server,
   Tab,
   LocalTab,
+  RdpTab,
   UUID,
   Workspace,
   Folder,
@@ -51,6 +52,10 @@ export type SplitDirection = 'h' | 'v'
 export type PaneTarget =
   | { kind: 'ssh'; serverId: string }
   | { kind: 'local'; shellId: string; cwd?: string }
+  // An RDP tab has exactly one pane and no way to make a second, so this
+  // member exists to keep `initialPanes` total rather than to be split. See
+  // `RdpTab`: half a desktop is not a smaller desktop.
+  | { kind: 'rdp'; serverId: string }
 
 export interface Pane {
   // Minted by the store when the pane is created and never derived during
@@ -387,6 +392,15 @@ interface AppState {
   /** A shell inside a container on that server. See the implementation. */
   openContainerShell: (serverId: string, containerRef: string, sudo?: boolean) => void
   newSession: (serverId: string) => void
+  /**
+   * A remote desktop on that server, in a new tab.
+   *
+   * Like `newSession` and unlike `openServer`, this never focuses an existing
+   * tab: a second desktop is a second session on the host, and silently
+   * raising the first one would look like the request was ignored. A no-op for
+   * a server with no `rdp` settings — there is nothing to connect to.
+   */
+  openRdp: (serverId: string) => void
   // A shell on this machine, in a new tab. Never focuses an existing one: a
   // second local shell is a second shell, never the same one.
   openLocal: (shell: LocalShell, cwd?: string) => void
@@ -567,7 +581,9 @@ function initialPanes(tab: Tab): TabPanes {
   const target: PaneTarget =
     tab.kind === 'local'
       ? { kind: 'local', shellId: tab.shellId, cwd: tab.cwd }
-      : { kind: 'ssh', serverId: tab.serverId }
+      : tab.kind === 'rdp'
+        ? { kind: 'rdp', serverId: tab.serverId }
+        : { kind: 'ssh', serverId: tab.serverId }
   const pane: Pane = { id: uid('pane'), target }
   return { direction: 'v', panes: [pane], activePaneId: pane.id }
 }
@@ -609,9 +625,12 @@ function sessionTitle(tabs: Tab[], match: (t: Tab) => boolean, name: string): st
 // sessionTitle so the two halves of "what counts as the same session" cannot
 // drift apart.
 function sameTarget(src: Tab): (t: Tab) => boolean {
-  return src.kind === 'local'
-    ? (t) => t.kind === 'local' && t.shellId === src.shellId
-    : (t) => t.kind === 'ssh' && t.serverId === src.serverId
+  if (src.kind === 'local') return (t) => t.kind === 'local' && t.shellId === src.shellId
+  // Matched on kind as well as server, so a desktop is numbered against the
+  // other desktops on that host rather than against its terminals: "Win Box
+  // (2)" should mean the second desktop, not the second session of any sort.
+  if (src.kind === 'rdp') return (t) => t.kind === 'rdp' && t.serverId === src.serverId
+  return (t) => t.kind === 'ssh' && t.serverId === src.serverId
 }
 
 // The copy duplicateTab inserts. Built per kind rather than by spreading `src`
@@ -632,6 +651,22 @@ function duplicateOf(tabs: Tab[], servers: Server[], src: Tab, id: UUID): Tab {
   }
   const server = servers.find((sv) => sv.id === src.serverId)
   const base = server?.name ?? src.title.replace(/ \(\d+\)$/, '')
+  // Before the SSH copy, and not folded into it: an RDP tab reaching the
+  // branch below produced `kind: 'ssh'` carrying `view: 'desktop'`. That is a
+  // shape TypeScript accepts — 'desktop' is in PanelView so the field is one
+  // type across every tab — and that nothing renders, because the SSH pane
+  // matches its views by name and 'desktop' is none of them. The duplicate
+  // came back blank.
+  if (src.kind === 'rdp') {
+    return {
+      id,
+      kind: 'rdp',
+      workspaceId: src.workspaceId,
+      serverId: src.serverId,
+      title: sessionTitle(tabs, sameTarget(src), base),
+      view: 'desktop'
+    }
+  }
   return {
     id,
     kind: 'ssh',
@@ -952,6 +987,28 @@ export const useApp = create<AppState>((set, get) => ({
     }))
   },
 
+  openRdp: (serverId) => {
+    const server = get().servers.find((s) => s.id === serverId)
+    if (!server || !server.rdp) return
+    const tab: RdpTab = {
+      id: uid('tab'),
+      kind: 'rdp',
+      workspaceId: server.workspaceId,
+      serverId,
+      title: sessionTitle(
+        get().tabs,
+        (t) => t.kind === 'rdp' && t.serverId === serverId,
+        server.name
+      ),
+      view: 'desktop'
+    }
+    set((s) => ({
+      tabs: [...s.tabs, tab],
+      activeTabId: tab.id,
+      panes: { ...s.panes, [tab.id]: initialPanes(tab) }
+    }))
+  },
+
   // A shell on this machine. Nothing is written to `servers` here, and that is
   // the entire point of the union: `servers` is persisted and mirrored into the
   // MCP data cache, so a synthesized row would hand an agent a target that no
@@ -1055,7 +1112,12 @@ export const useApp = create<AppState>((set, get) => ({
     // Narrowed before the spread, not after: spreading the union directly
     // produces an object TypeScript cannot match to either member, because the
     // discriminant is widened away along with everything keyed off it.
-    const t: Tab = tab.kind === 'ssh' ? { ...tab, workspaceId, id } : { ...tab, workspaceId, id }
+    const t: Tab =
+      tab.kind === 'ssh'
+        ? { ...tab, workspaceId, id }
+        : tab.kind === 'rdp'
+          ? { ...tab, workspaceId, id }
+          : { ...tab, workspaceId, id }
     set((s) => ({
       tabs: [...s.tabs, t],
       activeTabId: t.id,
@@ -1102,10 +1164,15 @@ export const useApp = create<AppState>((set, get) => ({
   // not only hidden in the viewbar: LocalTab.view has no 'monitor' member, and
   // the monitor views take a non-optional Server, so a state write that got
   // past the UI would put a tab in a shape nothing can render.
+  // An RDP tab is refused outright: 'desktop' is its only view, and every
+  // member of PanelView names a pane it does not have. The reverse — sending an
+  // SSH tab to 'desktop' — needs no guard at all now, because `PanelView` does
+  // not contain it and the argument cannot be written.
   setTabView: (id, view) =>
     set((s) => ({
       tabs: s.tabs.map((t) => {
         if (t.id !== id) return t
+        if (t.kind === 'rdp') return t
         if (t.kind === 'ssh') return { ...t, view }
         return view === 'monitor' ? t : { ...t, view }
       })
@@ -1123,6 +1190,12 @@ export const useApp = create<AppState>((set, get) => ({
 
   splitPane: (tabId, dir, target) =>
     set((s) => {
+      // Refused for a remote desktop, and refused here rather than only in the
+      // viewbar that has no split buttons for one: Ctrl+\ reaches this through
+      // toggleSplit whatever is on screen, and an RDP tab renders RdpView
+      // instead of PaneGrid — so a second pane would be state that exists,
+      // counts toward MAX_PANES, and is never drawn.
+      if (s.tabs.find((t) => t.id === tabId)?.kind === 'rdp') return {}
       const tp = s.panes[tabId]
       if (!tp || tp.panes.length >= MAX_PANES) return {}
       const source = tp.panes.find((p) => p.id === tp.activePaneId) ?? tp.panes[0]
@@ -1205,6 +1278,7 @@ export const useApp = create<AppState>((set, get) => ({
   // another's updater applies both but discards the first's result from the
   // reference the outer merge is built on.
   toggleSplit: (tabId, dir) => {
+    if (get().tabs.find((t) => t.id === tabId)?.kind === 'rdp') return
     const tp = get().panes[tabId]
     if (!tp) return
     if (tp.panes.length === 1) {
@@ -1364,6 +1438,15 @@ export const useApp = create<AppState>((set, get) => ({
           // Direct by default. A server that silently rode a VPN nobody chose
           // would be a surprising thing to inherit from a bulk import.
           vpnProfileId: input.vpnProfileId ?? null,
+          // Both of these are optional fields the *editor* has always sent and
+          // this action has always dropped, because it builds the record field
+          // by field rather than spreading the input. So a server saved with
+          // "Files only" ticked came back without it, and the app opened a
+          // terminal against an account that has no shell — the exact failure
+          // `sftpOnly` exists to prevent. Editing an existing server worked,
+          // because `updateServer` spreads its patch; only creation lost them.
+          ...(input.sftpOnly === true ? { sftpOnly: true } : {}),
+          ...(input.rdp ? { rdp: input.rdp } : {}),
           demo: false
         }
       ]
