@@ -1,4 +1,19 @@
-import { describe, it, expect, afterAll } from 'vitest'
+import { describe, it, expect, afterAll, vi } from 'vitest'
+
+/**
+ * This file runs the real collector through a real shell, 31 times.
+ *
+ * That is the point of it — the collector is a shell script, and testing it
+ * against a mock would test the mock — but it means each case is genuinely
+ * slow, and on a loaded machine slow enough to pass the 15s global timeout.
+ * It has flaked twice that way while the rest of the suite ran alongside it,
+ * and passed on its own both times.
+ *
+ * Raised for this file rather than globally: 15s is a good ceiling for tests
+ * that should never approach it, and lifting it everywhere would turn a hung
+ * test somewhere else into a slow one nobody notices.
+ */
+vi.setConfig({ testTimeout: 60_000 })
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
