@@ -215,6 +215,35 @@ export interface DatabaseConn {
  * is a scratch pad: a single request against `baseUrl`, which is how most
  * "does this endpoint work" questions actually start.
  */
+/** The methods a hand-written request may use. */
+export const API_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'] as const
+export type ApiMethod = (typeof API_METHODS)[number]
+
+/**
+ * One request a user wrote by hand.
+ *
+ * The HTTP client was built around an imported OpenAPI description, and a
+ * collection with no description got a synthetic one: a single path with all
+ * seven methods stubbed on it. That is fine for poking one URL and useless for
+ * anything else — there was no way to name a second path, so no way to add or
+ * remove an endpoint, and no way to craft a request against a service that has
+ * no published description at all.
+ *
+ * These are those paths. A scratch collection builds its document from this
+ * list, so a hand-written endpoint reaches the same client, the same transport
+ * and the same Send button as an imported one — rather than a parallel
+ * request builder that would have to re-earn the SSH and VPN routing this one
+ * already has.
+ */
+export interface ApiEndpoint {
+  id: UUID
+  method: ApiMethod
+  /** Beginning with `/`. Query strings belong in the client, not here. */
+  path: string
+  /** What it does, shown in the operation list. */
+  summary?: string
+}
+
 export interface ApiCollection {
   id: UUID
   workspaceId: UUID
@@ -247,6 +276,14 @@ export interface ApiCollection {
    * verifying would be worse than failing.
    */
   insecureTls: boolean
+  /**
+   * Hand-written requests, for a collection with no description.
+   *
+   * Absent or empty on a collection that imports one — the document is then
+   * the source of truth and inventing paths beside it would show operations
+   * the API does not have.
+   */
+  endpoints?: ApiEndpoint[]
 }
 
 /**

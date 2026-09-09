@@ -2,6 +2,7 @@ import { Globe, Pencil, Plus, ServerCog, ShieldAlert, ShieldCheck } from 'lucide
 import { useApp, useWorkspaceApiCollections, useWorkspaceServers } from '../../store/app'
 import { clsx } from '../../lib/format'
 import { ApiClientPane } from './ApiClientPane'
+import { EndpointEditor } from './EndpointEditor'
 
 /**
  * The HTTP client.
@@ -25,9 +26,18 @@ export function HttpView(): React.JSX.Element {
   return (
     <div className="main">
       <HttpToolbar collectionId={active.id} />
+      {/* Above the client, and only for a collection with no description:
+          these ARE the operations the client will show, so defining them is
+          the step before using it rather than a setting somewhere else. */}
+      <EndpointEditor collection={active} />
       {/* Keyed so switching collections builds a fresh client rather than
-          trying to retarget a live one. */}
-      <ApiClientPane key={active.id} collection={active} />
+          trying to retarget a live one. Endpoints are part of that key: the
+          document is built from them, and the client holds it after mount, so
+          adding a path has to rebuild rather than be ignored. */}
+      <ApiClientPane
+        key={`${active.id}:${(active.endpoints ?? []).map((e) => `${e.method}${e.path}`).join(',')}`}
+        collection={active}
+      />
     </div>
   )
 }

@@ -6,6 +6,7 @@ import { createHttpTransport, type HttpTransportOptions } from '../../lib/httpTr
 import { useResolvedTheme } from '../../hooks/useResolvedTheme'
 import type { TraversedEntry } from '@scalar/workspace-store/schemas/navigation'
 import type { ApiCollection } from '../../types'
+import { scratchDocument, scratchOriginOf, scratchPathOf } from '../../../../shared/apiScratch'
 
 /**
  * The API client itself, for one collection.
@@ -118,7 +119,7 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
         } else {
           await workspaceStore.addDocument({
             name: collection.id,
-            document: scratchDocument(collection.name, baseUrl)
+            document: scratchDocument(collection.name, baseUrl, collection.endpoints ?? [])
           })
         }
         if (disposed) return
@@ -127,7 +128,12 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
         // first one is the only sensible answer; a scratch document has one we
         // wrote ourselves and can name outright.
         const first = firstOperationOf(workspaceStore, collection.id)
-        const landingPath = specUrl || specPath ? (first?.path ?? '/') : scratchPathOf(baseUrl)
+        const landingPath =
+          specUrl || specPath
+            ? (first?.path ?? '/')
+            : // The first endpoint the user wrote, so a collection lands on
+              // something they recognise rather than on a synthetic stub.
+              (collection.endpoints?.[0]?.path ?? scratchPathOf(baseUrl))
         const landingMethod = specUrl || specPath ? (first?.method ?? 'get') : 'get'
 
         // Mounted as the client's OWN operation view rather than through
@@ -257,7 +263,13 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
       disposed = true
       app?.unmount()
     }
-  }, [collection.id, collection.name, specUrl, specPath, baseUrl])
+    // `collection.endpoints` is listed because the document is built from it.
+    // HttpView also keys this component on those endpoints, so in practice the
+    // component remounts before this could re-run — but a dependency the
+    // effect genuinely reads belongs in the list, and relying on a key
+    // somewhere else to cover for an incomplete one is how a stale document
+    // survives an edit.
+  }, [collection.id, collection.name, collection.endpoints, specUrl, specPath, baseUrl])
 
   if (error) {
     return (
@@ -318,48 +330,6 @@ export function ApiClientPane({ collection }: { collection: ApiCollection }): Re
  * means the address bar is ready to type in rather than showing an empty state
  * inside an empty state.
  */
-/**
- * The path half of a collection's base URL.
- *
- * Someone adding a scratch collection pastes the URL they were going to curl,
- * and that URL usually has a path on it. Splitting it means
- * `http://host:9090/metrics` opens on /metrics — dropping the path and opening
- * on `/` sends the first request somewhere the user never asked for, and the
- * 404 that comes back looks like the service is broken.
- */
-function scratchPathOf(baseUrl: string): string {
-  try {
-    const path = new URL(baseUrl).pathname
-    return path && path !== '/' ? path : '/'
-  } catch {
-    return '/'
-  }
-}
-
-/** The origin, since the path is carried by the operation instead. */
-function scratchOriginOf(baseUrl: string): string {
-  try {
-    return new URL(baseUrl).origin
-  } catch {
-    return baseUrl
-  }
-}
-
-/**
- * The methods a scratch request offers.
- *
- * The client takes its method from the OPERATION, not from a control of its
- * own: a path that describes only `get` has no other method to switch to, and
- * the method beside the address bar is then a label rather than a choice. This
- * document used to define exactly one operation, which is why a scratch
- * request was stuck on GET — not a dropdown that failed to work, a document
- * with nothing else in it.
- *
- * Describing the whole set costs nothing — they are four lines of JSON each —
- * and turns the same control into a real choice.
- */
-const SCRATCH_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'] as const
-
 /**
  * An OpenAPI description read from disk, as an object.
  *
@@ -443,34 +413,6 @@ function firstOperationOf(
     }
   }
   return null
-}
-
-function scratchDocument(title: string, baseUrl: string): Record<string, unknown> {
-  const path = scratchPathOf(baseUrl)
-  const operations: Record<string, unknown> = {}
-  for (const method of SCRATCH_METHODS) {
-    operations[method] = {
-      operationId: `request-${method}`,
-      summary: `${method.toUpperCase()} ${path}`,
-      // A body only where one is meaningful. Offering it on GET is how a
-      // client ends up sending one, which some servers reject outright.
-      ...(method === 'post' || method === 'put' || method === 'patch'
-        ? {
-            requestBody: {
-              required: false,
-              content: { 'application/json': { schema: { type: 'object' } } }
-            }
-          }
-        : {}),
-      responses: { '200': { description: 'OK' } }
-    }
-  }
-  return {
-    openapi: '3.1.0',
-    info: { title, version: '1.0.0' },
-    ...(baseUrl ? { servers: [{ url: scratchOriginOf(baseUrl) }] } : {}),
-    paths: { [path]: operations }
-  }
 }
 
 /**

@@ -4535,3 +4535,99 @@ details[open] > .disclosure-head .chev {
 .kpi-meter-fill.danger {
   background: var(--danger);
 }
+
+/* ── Hand-written endpoints ─────────────────────────────────────────────────
+   The requests a collection defines when it imports no description. These
+   become the document the client renders, so they sit above it. */
+.endpoints {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-panel);
+}
+.endpoints-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+.endpoints-add {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+/* The method picker stays narrow; the path takes the room, because it is the
+   field with something to say. */
+.endpoints-add select {
+  flex: none;
+  width: 96px;
+}
+.endpoints-add input:nth-of-type(1) {
+  flex: 2 1 200px;
+  min-width: 0;
+}
+.endpoints-add input:nth-of-type(2) {
+  flex: 3 1 220px;
+  min-width: 0;
+}
+.endpoints-why {
+  font-size: var(--fs-sm);
+}
+.endpoints-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.endpoints-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 2px 0;
+  min-width: 0;
+}
+.endpoints-path {
+  flex: none;
+}
+.endpoints-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The method, coloured the way the operation list already colours it, so the
+   two readings of the same endpoint agree. */
+.method-tag {
+  flex: none;
+  min-width: 48px;
+  font-family: var(--font-mono);
+  /* 11px is defensible here for the reason the scale allows it at all: this is
+     a tracked all-caps label, read as a silhouette rather than letter by
+     letter. The transform is in CSS and not only in the JSX so that the
+     property carrying that claim is the one a reader — and typeScale's own
+     check — can see. */
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.method-tag.m-get {
+  color: var(--accent-ink);
+}
+.method-tag.m-post {
+  color: var(--ok);
+}
+.method-tag.m-put,
+.method-tag.m-patch {
+  color: var(--warn);
+}
+.method-tag.m-delete {
+  color: var(--danger);
+}
