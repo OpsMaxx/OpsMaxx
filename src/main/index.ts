@@ -231,6 +231,7 @@ import { storeFrpToken } from './services/vpn/frpSetup'
 import { toVpnResult } from './services/vpn/errors'
 import { withVpnTransport, withVpnTransportDb } from './services/vpn/transport'
 import { httpRequest } from './services/httpClient'
+import { ServiceCheckRunner } from './services/serviceChecks'
 import { localExec, type LocalExecResult } from './services/localExec'
 import { setShellIntegrationRoot } from './services/shellIntegrationFiles'
 import { localMetricsForget, localMetricsSample } from './services/localMetrics'
@@ -250,6 +251,7 @@ import {
 } from './services/localFiles'
 import { isLocalTarget, LOCAL_TARGET } from '../shared/execTarget'
 import type { HttpRequestSpec } from '../shared/httpClient'
+import type { HttpCheck } from '../shared/httpMonitor'
 import type {
   FrpTokenResult,
   VpnKeygenResult,
@@ -968,6 +970,63 @@ ipcMain.handle(
       : { ok: false, error: r.error }
   }
 )
+
+/**
+ * Service checks run HERE, not in the panel that shows them.
+ *
+ * They used to run in the component: a `setInterval` with the history in
+ * `useState`, which stopped and discarded everything the moment somebody
+ * navigated away. That answered "is this up while I watch it" rather than "has
+ * this been up", which is the only question a monitor exists to answer.
+ */
+const serviceChecks = new ServiceCheckRunner({
+  probe: async (check) => {
+    const r = await httpRequest(
+      {
+        url: check.url,
+        method: check.method,
+        headers: {},
+        via: { kind: 'direct' },
+        insecureTls: check.insecureTls,
+        timeoutMs: check.timeoutMs
+      } as HttpRequestSpec,
+      { prepare: (target) => withVpnTransport(resolveChainSecrets(target)) }
+    )
+    return r.ok
+      ? { ok: true as const, status: r.status, durationMs: r.durationMs }
+      : { ok: false as const, error: r.error }
+  },
+  // Every window, for the reason the inspector emitter gives: a service's
+  // state belongs to the machine, not to whichever window opened the panel.
+  emit: (event) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('serviceChecks:result', event)
+    }
+  },
+  /**
+   * A durable record of the transition, with a null host.
+   *
+   * `recordEvent` takes a nullable hostId precisely for events that are not
+   * about a host, and a service check is one: the URL belongs to whatever the
+   * user pointed it at. The payload carries the check's NAME and not its URL,
+   * matching what AlertPayload requires of servers.
+   */
+  alert: (a) =>
+    historyStore?.recordEvent(
+      a.state === 'down' ? 'service-down' : 'service-recovered',
+      null,
+      { name: a.name, error: a.error },
+      a.at
+    )
+})
+
+ipcMain.handle('serviceChecks:set', (_e, checks: HttpCheck[]) => {
+  serviceChecks.configure(Array.isArray(checks) ? checks : [])
+})
+
+// What a panel that has just mounted needs in order to draw a chart rather
+// than an empty row while it waits for the next interval.
+ipcMain.handle('serviceChecks:history', () => serviceChecks.snapshot())
 
 // ---- SFTP ----
 //
@@ -4470,6 +4529,9 @@ app.on('before-quit', (e) => {
   // Closing is what folds the WAL back into the primary, so it has to happen on
   // every quit rather than only on the fast ones.
   const lastSweep = fleetSampler.dispose().catch(() => undefined)
+  // Before the store closes: a check that lands afterwards would try to record
+  // a transition into a store that is already folding its WAL back.
+  serviceChecks.dispose()
   if (historyRetain) clearInterval(historyRetain)
   const sweepDeadline = new Promise<void>((resolve) => setTimeout(resolve, HISTORY_LAST_SWEEP_MS))
   const historyClosed = Promise.race([lastSweep, sweepDeadline]).then(() => historyStore?.close())

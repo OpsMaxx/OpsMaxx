@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Globe, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { EmptyState } from '../common/EmptyState'
 import { useApp } from '../../store/app'
@@ -63,13 +63,12 @@ export function HttpMonitorPanel(): React.JSX.Element {
   const mine = checks.filter((c) => c.workspaceId === activeId())
 
   /**
-   * Kept in a ref so the interval below can reach the current checks without
-   * being torn down and rebuilt every time one changes — which would restart
-   * every timer and skew the schedule each edit.
+   * Run one check now, out of schedule.
+   *
+   * The only thing the panel still triggers itself. Main owns the loop; this
+   * is the "check now" button, and its result arrives back through the same
+   * event stream as a scheduled one rather than by a second path.
    */
-  const checksRef = useRef(mine)
-  checksRef.current = mine
-
   const runCheck = async (check: HttpCheck): Promise<void> => {
     setRunning((s) => new Set(s).add(check.id))
     try {
@@ -94,28 +93,31 @@ export function HttpMonitorPanel(): React.JSX.Element {
   }
 
   /**
-   * One timer for every check rather than one per check.
+   * Hand main the list, and render what it reports.
    *
-   * A timer each would mean N intervals to reconcile on every edit; this ticks
-   * once a second and asks each check whether it is due, which is the same
-   * behaviour with one thing to clean up. A check with no history runs
-   * immediately, so opening the panel gives an answer rather than a blank row
-   * for a minute.
+   * The scheduler used to live in this component, which meant checks ran only
+   * while this panel was mounted and every result was discarded on unmount —
+   * a monitor that monitored exactly as long as somebody watched it. Main runs
+   * them now; this effect keeps its list current and subscribes to results.
+   *
+   * `checks` and not `mine`: main runs every workspace's checks, because a
+   * service does not stop mattering when the user switches workspace. The
+   * filtering below is a matter of what to DISPLAY.
    */
   useEffect(() => {
-    const tick = (): void => {
-      const now = Date.now()
-      for (const check of checksRef.current) {
-        if (!check.enabled) continue
-        const last = history[check.id]?.[history[check.id].length - 1]
-        const due = !last || now - last.at >= check.intervalSec * 1000
-        if (due && !running.has(check.id)) void runCheck(check)
-      }
-    }
-    tick()
-    const id = setInterval(tick, 1000)
-    return () => clearInterval(id)
-  }, [history, running])
+    void window.opsmaxx?.serviceChecks?.set(checks)
+  }, [checks])
+
+  useEffect(() => {
+    // Whatever ran before this panel existed, so it opens with a chart rather
+    // than an empty row waiting out an interval.
+    void window.opsmaxx?.serviceChecks?.history().then((h) => {
+      if (h) setHistory((current) => ({ ...h, ...current }))
+    })
+    return window.opsmaxx?.serviceChecks?.onResult(({ checkId, result }) => {
+      setHistory((h) => ({ ...h, [checkId]: appendResult(h[checkId] ?? [], result) }))
+    })
+  }, [])
 
   const add = (): void => {
     if (!isCheckableUrl(url)) return

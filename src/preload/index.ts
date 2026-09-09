@@ -4,6 +4,7 @@ import type { AutoStartSettings, AutoStartState } from '../shared/autostart'
 import type { UnitDraft, UserUnitsReading } from '../shared/userUnits'
 import type { BackupAlarm } from '../shared/backup'
 import type { HttpRequestSpec, HttpResult } from '../shared/httpClient'
+import type { CheckResult, HttpCheck } from '../shared/httpMonitor'
 import type { LocalTarget } from '../shared/execTarget'
 import type {
   SshConnectConfig,
@@ -390,6 +391,23 @@ const api = {
       ipcRenderer.invoke('http:chooseSpecFile'),
     /** Re-read a description a collection already points at. */
     readSpecFile: (path: string): Promise<string> => ipcRenderer.invoke('http:readSpecFile', path)
+  },
+  /**
+   * Service checks, which run in main whether or not anything is displaying
+   * them. The renderer owns the LIST (it is user configuration, persisted with
+   * the workspace) and main owns the RUNNING of it, so this bridge is: here is
+   * the list, tell me what happened.
+   */
+  serviceChecks: {
+    set: (checks: HttpCheck[]): Promise<void> => ipcRenderer.invoke('serviceChecks:set', checks),
+    history: (): Promise<Record<string, CheckResult[]>> =>
+      ipcRenderer.invoke('serviceChecks:history'),
+    onResult: (cb: (event: { checkId: string; result: CheckResult }) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, event: { checkId: string; result: CheckResult }): void =>
+        cb(event)
+      ipcRenderer.on('serviceChecks:result', h)
+      return () => ipcRenderer.removeListener('serviceChecks:result', h)
+    }
   },
   sftp: {
     /**
