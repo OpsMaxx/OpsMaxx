@@ -287,10 +287,20 @@ describe('macOS release wiring', () => {
     expect(yml2).toContain('Developer ID Application:')
   })
 
-  it('keeps the macOS certificate off the Windows and Linux runners', () => {
-    // CSC_LINK is the Windows signing variable too. Handing a macOS .p12 to
-    // that build would be a confusing failure at best.
-    expect(yml).toMatch(/CSC_LINK: \$\{\{ matrix\.os == 'macos-latest'/)
+  it('imports the certificate itself rather than handing CSC_LINK to electron-builder', () => {
+    // electron-builder's own keychain handling fails on the current runner with
+    // "SecKeychainUnlock: passphrase not correct" against a keychain it just
+    // created with a password it generated. Keeping the import here means every
+    // step has its own error, and find-identity proves the identity works
+    // before the build starts.
+    expect(yml).toContain('Import the Developer ID certificate')
+    expect(yml).toContain('security find-identity -v -p codesigning')
+    // CSC_LINK must NOT reach electron-builder, or its keychain code is back.
+    expect(yml).not.toMatch(/^\s+CSC_LINK:/m)
+  })
+
+  it('keeps the notarization credentials off the Windows and Linux runners', () => {
+    expect(yml).toMatch(/APPLE_ID: \$\{\{ matrix\.os == 'macos-latest'/)
   })
 })
 
