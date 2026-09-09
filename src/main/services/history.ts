@@ -1259,11 +1259,32 @@ export async function loadHistory(dir?: string): Promise<HistoryStore | null> {
   try {
     const mod = await loadSqlite()
     const base = dir ?? app.getPath('userData')
-    return openStore(mod, join(base, HISTORY_FILE))
+    const store = openStore(mod, join(base, HISTORY_FILE))
+    disabledBecause = null
+    return store
   } catch (err) {
-    console.error('[history] disabled:', err instanceof Error ? err.message : String(err))
+    const why = err instanceof Error ? err.message : String(err)
+    console.error('[history] disabled:', why)
+    // Kept, so the refusal a USER sees can say why. The jobs handler used to
+    // tell them to "see the console for why history is disabled", which in a
+    // packaged app is not a place anybody can look.
+    disabledBecause = why
     return null
   }
+}
+
+/**
+ * Why the store is not open, for the messages a user actually reads.
+ *
+ * Null when it opened, or before anything has tried. A reason here is the
+ * difference between "jobs need the history store" — which tells somebody
+ * nothing they can act on — and naming the column, the file or the toolchain
+ * that stopped it.
+ */
+let disabledBecause: string | null = null
+
+export function historyDisabledReason(): string | null {
+  return disabledBecause
 }
 
 // Written temp-then-rename is the wrong shape for a database, so the crash

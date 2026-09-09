@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { EyeOff, Eye, Trash2, Plus, Lock, LockOpen, Check } from 'lucide-react'
 import { Modal } from '../common/Modal'
 import { useApp } from '../../store/app'
+import { rdpSecretId } from '../../../../shared/rdp'
 import { toast } from '../../store/toast'
 import { colorVar } from '../layout/WorkspaceSwitcher'
 import { clsx } from '../../lib/format'
@@ -181,7 +182,14 @@ export function WorkspaceManager(): React.JSX.Element {
                   ...useApp.getState().databases.filter((d) => d.workspaceId === id)
                 ]
                 deleteWorkspace(id)
-                await Promise.all(doomed.map((d) => window.opsmaxx?.secrets.delete(d.id)))
+                // Both ids per server: the SSH credential and, where the
+                // machine speaks RDP, the desktop's own password beside it.
+                await Promise.all(
+                  doomed.flatMap((d) => [
+                    window.opsmaxx?.secrets.delete(d.id),
+                    window.opsmaxx?.secrets.delete(rdpSecretId(d.id))
+                  ])
+                )
                 await window.opsmaxx?.workspaceLock.delete(id)
                 setConfirming(null)
                 toast(`${wname} deleted`)

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { useApp, useWorkspaceFolders, useWorkspaceServers } from '../../store/app'
 import { disambiguateServerNames } from '../../../../shared/serverNames'
+import { rdpSecretId } from '../../../../shared/rdp'
 import { clsx } from '../../lib/format'
 import { toast } from '../../store/toast'
 import { ContextMenu, MenuEntry } from './ContextMenu'
@@ -222,6 +223,10 @@ export function ConnectionTree(): React.JSX.Element {
       onClick: () => {
         deleteServer(s.id)
         void window.opsmaxx?.secrets.delete(s.id)
+        // The desktop's password lives under its own id, so deleting the
+        // server's alone would leave it behind in the OS keychain — a
+        // credential for a machine the app no longer knows about.
+        void window.opsmaxx?.secrets.delete(rdpSecretId(s.id))
         toast(`${s.name} deleted`)
       }
     }

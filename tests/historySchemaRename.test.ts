@@ -192,3 +192,52 @@ describe('stores that must not be touched', () => {
     second?.close()
   })
 })
+
+/**
+ * Why the store is not open, in words a user can act on.
+ *
+ * The reported symptom was "error invoking remote method 'jobs:run'", and the
+ * message behind it ended with "see the console for why history is disabled"
+ * — which in a packaged app is advice nobody can take. The reason was
+ * specific and fixable every time: a store written before the host/server
+ * rename, an unreadable file, a runtime without node:sqlite.
+ */
+describe('the reason history is disabled', () => {
+  it('is null once a store has opened', async () => {
+    const m = await import('../src/main/services/history')
+    const store = await m.loadHistory(dir)
+    expect(store).not.toBeNull()
+    store?.close()
+    expect(m.historyDisabledReason()).toBeNull()
+  })
+
+  it('is recorded when the store cannot be opened', async () => {
+    const m = await import('../src/main/services/history')
+    // A directory where the database file should be: openStore cannot get a
+    // handle, which is the same shape as an unreadable file.
+    const { mkdirSync } = await import('node:fs')
+    mkdirSync(join(dir, HISTORY_FILE), { recursive: true })
+
+    const store = await m.loadHistory(dir)
+    expect(store, 'a store that cannot open is null, not a throw').toBeNull()
+    const why = m.historyDisabledReason()
+    expect(why, 'the reason has to survive for the message a user reads').toBeTruthy()
+    expect(typeof why).toBe('string')
+  })
+
+  // The pre-rename store opens, so it must NOT leave a stale reason behind
+  // from an earlier failure in the same process.
+  it('is cleared by a later successful open', async () => {
+    const m = await import('../src/main/services/history')
+    const { mkdirSync, rmSync: rm } = await import('node:fs')
+    mkdirSync(join(dir, HISTORY_FILE), { recursive: true })
+    await m.loadHistory(dir)
+    expect(m.historyDisabledReason()).toBeTruthy()
+
+    rm(join(dir, HISTORY_FILE), { recursive: true, force: true })
+    resetHistoryModuleForTests()
+    const store = await m.loadHistory(dir)
+    store?.close()
+    expect(m.historyDisabledReason()).toBeNull()
+  })
+})

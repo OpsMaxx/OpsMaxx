@@ -52,8 +52,17 @@ export interface FleetSamplerConfig {
 export interface FleetCollectResult {
   swept: boolean
   reason?: 'disabled' | 'no-targets'
-  /** How many servers had their schedules cleared and were collected. */
+  /** How many servers were asked. */
   servers: number
+  /**
+   * How many actually answered.
+   *
+   * Separate from `servers` because they differ exactly when it matters: an
+   * estate where every host refused would otherwise report a successful
+   * collection from all of them, which looks like success and is the same
+   * lie as a button that does nothing.
+   */
+  answered?: number
 }
 
 export type FleetSampleReason =

@@ -101,3 +101,48 @@ describe('the create-vault requirements', () => {
     expect(passwordBox().getAttribute('aria-describedby')).toBe('vault-password-rules')
   })
 })
+
+/**
+ * The same bug, one step further along.
+ *
+ * The first fix showed the matching rule only once the confirmation had
+ * content. So with twelve characters typed and the second box untouched, the
+ * button was disabled and every rule on screen was met — no explanation
+ * again, for exactly the reason the screen was changed in the first place.
+ * Confirming is a requirement, so it belongs on the list.
+ */
+describe('when the password is long enough but unconfirmed', () => {
+  it('asks for the confirmation rather than showing all rules met', async () => {
+    creatingVault()
+    render(<VaultView />)
+    await waitFor(() => expect(screen.getByText(/Create vault/i)).toBeTruthy())
+
+    fireEvent.change(passwordBox(), { target: { value: 'x'.repeat(VAULT_MIN_PASSWORD) } })
+
+    expect(screen.getByText(/Type it again to confirm/)).toBeTruthy()
+    expect(screen.queryByText(/to go/)).toBeNull()
+  })
+
+  it('turns into the match rule once the confirmation is started', async () => {
+    creatingVault()
+    render(<VaultView />)
+    await waitFor(() => expect(screen.getByText(/Create vault/i)).toBeTruthy())
+
+    fireEvent.change(passwordBox(), { target: { value: 'x'.repeat(VAULT_MIN_PASSWORD) } })
+    fireEvent.change(confirmBox(), { target: { value: 'x' } })
+
+    expect(screen.getByText(/Both entries match/)).toBeTruthy()
+    expect(screen.queryByText(/Type it again/)).toBeNull()
+  })
+
+  // And nothing about confirming while the password is still too short: one
+  // unmet rule at a time, in the order they have to be satisfied.
+  it('says nothing about confirming while the password is still short', async () => {
+    creatingVault()
+    render(<VaultView />)
+    await waitFor(() => expect(screen.getByText(/Create vault/i)).toBeTruthy())
+
+    fireEvent.change(passwordBox(), { target: { value: 'abc' } })
+    expect(screen.queryByText(/Type it again to confirm/)).toBeNull()
+  })
+})

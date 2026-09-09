@@ -28,10 +28,15 @@ interface Harness {
   factsCalls: string[]
 }
 
-function harness(over: { enabled?: boolean; targets?: FleetTarget[] } = {}): Harness {
+function harness(
+  over: { enabled?: boolean; targets?: FleetTarget[]; failSample?: boolean } = {}
+): Harness {
   const factsCalls: string[] = []
   const sampler = new FleetSampler({
-    sample: async () => ({ ok: true, data: { hostname: 'h', services: null, listeners: null } }),
+    sample: async () =>
+      over.failSample
+        ? { ok: false, error: 'connection refused' }
+        : { ok: true, data: { hostname: 'h', services: null, listeners: null } },
     sampleFacts: async (key: string) => {
       factsCalls.push(key)
       return { ok: true, facts: { at: 1, hostname: 'h' } } as never
@@ -88,6 +93,27 @@ describe('collecting on demand', () => {
     expect(r.swept).toBe(true)
     expect(r.servers).toBe(2)
     expect(r.reason).toBeUndefined()
+  })
+
+  /**
+   * What answered, not how many were asked.
+   *
+   * The first version returned the size of the request, which is true of the
+   * request and false of the result: on an estate where every host refused,
+   * the button said "Collected from 5 servers". That looks like success and
+   * is the same lie as a button that does nothing, only harder to catch.
+   */
+  it('counts what answered, which is not always what was asked', async () => {
+    const reachable = harness()
+    const r = await reachable.sampler.collectNow()
+    expect(r.answered).toBe(2)
+
+    // An estate that refuses every connection: asked two, answered none.
+    const refusing = harness({ failSample: true })
+    const bad = await refusing.sampler.collectNow()
+    expect(bad.swept, 'the sweep ran; the hosts refused').toBe(true)
+    expect(bad.servers).toBe(2)
+    expect(bad.answered).toBe(0)
   })
 
   it('collects only the servers it was given', async () => {

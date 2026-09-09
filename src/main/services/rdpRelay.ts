@@ -9,6 +9,7 @@ import { getCachedServer, type CachedServer } from './mcpDataCache'
 import { resolveChainSecrets, resolveSecrets } from './credentialResolver'
 import { openChain } from './ssh'
 import { verifyRdpCertificate } from './rdpTrust'
+import { rdpSecretId } from '../../shared/rdp'
 import type { RdpTicket, RdpTicketResult, RdpDesktopSize } from '../../shared/rdp'
 import type { SshHop } from '../../shared/ssh'
 
@@ -226,18 +227,41 @@ export async function rdpMintTicket(
     return { ok: false, code: 'no-target', error: `${server.name} is not configured for RDP.` }
   }
 
-  // Resolved through the same path as an interactive SSH session, so an RDP
-  // password lives in the same vault entry and rotates in the same place. A
-  // locked vault throws, and is reported as such rather than as a bad password.
+  /**
+   * RDP's OWN account, and RDP's own password.
+   *
+   * Both used to be SSH's: the username came from `Server.username` and the
+   * password from `getSecret(serverId)`, the one secret per server. That is
+   * what made the two protocols codependent rather than merely adjacent — a
+   * desktop signing in as Administrator and a shell signing in as root had to
+   * agree on one password, which on a Windows box they never do.
+   *
+   * The fallback to the server's own credential is what keeps every record
+   * saved before this working: no RDP username means the SSH one, and no
+   * secret under the derived id means the shared one. A locked vault throws
+   * and is reported as such rather than as a bad password.
+   */
+  const rdpUser = server.rdp.username?.trim() || server.username
   let password: string | undefined
   try {
-    const resolved = resolveSecrets({
+    const ownHop = {
       host: server.host,
       port: server.rdp.port,
-      username: server.username,
-      serverId: server.id
-    } as SshHop & { serverId?: string })
-    password = resolved.password
+      username: rdpUser,
+      serverId: rdpSecretId(server.id)
+    } as SshHop & { serverId?: string }
+    password = resolveSecrets(ownHop).password
+    if (!password) {
+      // Nothing stored against the desktop specifically, so the server's own
+      // credential stands in — which is what it was doing for everyone
+      // before RDP had a place of its own.
+      password = resolveSecrets({
+        host: server.host,
+        port: server.rdp.port,
+        username: rdpUser,
+        serverId: server.id
+      } as SshHop & { serverId?: string }).password
+    }
   } catch (err) {
     return { ok: false, code: 'no-credentials', error: (err as Error).message }
   }
@@ -245,7 +269,7 @@ export async function rdpMintTicket(
     return {
       ok: false,
       code: 'no-credentials',
-      error: `No password is stored for ${server.name}. RDP authenticates with a password.`
+      error: `No password is stored for ${rdpUser} on ${server.name}. RDP authenticates with a password.`
     }
   }
 
@@ -269,7 +293,9 @@ export async function rdpMintTicket(
     token,
     proxyUrl: `ws://127.0.0.1:${listenPort}/rdp`,
     destination,
-    username: server.username,
+    // The account the ticket signs in as, resolved above: RDP's own where one
+    // is set, the server's where it is not.
+    username: rdpUser,
     password,
     domain: server.rdp.domain || undefined,
     nla: server.rdp.nla,

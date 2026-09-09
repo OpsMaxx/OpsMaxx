@@ -69,6 +69,7 @@ import {
   RETENTION_HOURLY_DAYS,
   databaseSubject,
   loadHistory,
+  historyDisabledReason,
   type EventCursor,
   type HistoryStore
 } from './services/history'
@@ -2530,9 +2531,21 @@ ipcMain.handle('jobs:run', async (_e, req: JobRunRequest) => {
   // broadcast is the row. Refusing with a sentence beats running something the
   // user believes is being recorded and is not.
   if (!historyStore) {
+    /**
+     * Say WHY, because the console is not a place a user can look.
+     *
+     * This used to end with "see the console for why history is disabled",
+     * which in a packaged app is advice nobody can take — and the reason was
+     * usually specific and actionable: a store written before the
+     * host/server rename, an unreadable file, a runtime without node:sqlite.
+     * Reported as "error invoking remote method jobs:run", with nothing to go
+     * on.
+     */
+    const why = historyDisabledReason()
     throw new Error(
-      'Jobs need the history store, which is not open on this machine. Run this as a broadcast ' +
-        'instead, or see the console for why history is disabled.'
+      `Jobs need the history store, which is not open on this machine.${
+        why ? ` ${why}` : ''
+      } Run this as a broadcast instead, which needs no store.`
     )
   }
   return jobRunner.run(req)

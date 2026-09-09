@@ -22,7 +22,7 @@ import { clsx } from '../../lib/format'
 type Phase =
   | { kind: 'idle' }
   | { kind: 'working' }
-  | { kind: 'done'; servers: number; at: number }
+  | { kind: 'done'; servers: number; answered: number; at: number }
   | { kind: 'refused'; message: string }
 
 interface CheckNowButtonProps {
@@ -73,7 +73,12 @@ export function CheckNowButton({
         return
       }
       await onCollected?.()
-      setPhase({ kind: 'done', servers: r.servers, at: Date.now() })
+      setPhase({
+        kind: 'done',
+        servers: r.servers,
+        answered: r.answered ?? r.servers,
+        at: Date.now()
+      })
     } catch (e) {
       setPhase({
         kind: 'refused',
@@ -107,10 +112,25 @@ export function CheckNowButton({
           aria-live="polite"
         >
           {phase.kind === 'done' ? (
-            <>
-              <Check size={12} />
-              Collected from {phase.servers} {phase.servers === 1 ? 'server' : 'servers'}
-            </>
+            /**
+             * What answered, and what did not. "Collected from 5 servers" on
+             * an estate where all five refused looks like success and is the
+             * same lie as a button that does nothing — so the shortfall is
+             * named whenever there is one.
+             */
+            phase.answered === phase.servers ? (
+              <>
+                <Check size={12} />
+                Collected from {phase.servers} {phase.servers === 1 ? 'server' : 'servers'}
+              </>
+            ) : (
+              <span className="check-now-said warn">
+                <AlertTriangle size={12} />
+                {phase.answered === 0
+                  ? `No server answered — ${phase.servers === 1 ? 'it' : 'none of the ' + phase.servers} could be reached`
+                  : `Collected from ${phase.answered} of ${phase.servers}; the rest did not answer`}
+              </span>
+            )
           ) : (
             <>
               <AlertTriangle size={12} />

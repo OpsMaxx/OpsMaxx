@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { KeyRound, Lock, UserCheck, FileBadge, FolderOpen, ChevronRight } from 'lucide-react'
 import { Modal } from '../common/Modal'
 import { useApp } from '../../store/app'
+import { rdpSecretId } from '../../../../shared/rdp'
 import { RouteHops } from './RouteHops'
 import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
@@ -132,6 +133,8 @@ export function AddServerModal(): React.JSX.Element {
   const [speaks, setSpeaks] = useState<'ssh' | 'ssh+rdp' | 'rdp'>(
     existing?.rdpOnly === true ? 'rdp' : existing?.rdp ? 'ssh+rdp' : 'ssh'
   )
+  const [rdpUsername, setRdpUsername] = useState(existing?.rdp?.username ?? '')
+  const [rdpPassword, setRdpPassword] = useState('')
   const [rdpPort, setRdpPort] = useState(String(existing?.rdp?.port ?? 3389))
   const [rdpDomain, setRdpDomain] = useState(existing?.rdp?.domain ?? '')
   // Defaults on, like RdpSettings.nla: every supported Windows Server requires
@@ -271,6 +274,9 @@ export function AddServerModal(): React.JSX.Element {
       rdp: speaks !== 'ssh'
         ? {
             port: Number(rdpPort) || 3389,
+            // Absent means "use the server's", which is every record saved
+            // before RDP had an account of its own.
+            username: rdpUsername.trim() || undefined,
             domain: rdpDomain.trim() || undefined,
             nla: rdpNla
           }
@@ -314,9 +320,28 @@ export function AddServerModal(): React.JSX.Element {
 
     if (secret) await storeSecret(id, secret, fields.name)
 
+    /**
+     * The desktop's password, under its OWN id.
+     *
+     * Not merged into the blob above, which is the SSH credential: one secret
+     * per server is exactly what made the two protocols share a login, and a
+     * box reached as Administrator over RDP and as root over SSH cannot agree
+     * on one password. `rdpSecretId` derives the id, so nothing needs
+     * migrating — a record with no secret there falls back to the server's.
+     *
+     * Only written when something was typed: an empty box while editing means
+     * "unchanged", which is what its placeholder says.
+     */
+    if (speaks !== 'ssh' && rdpPassword) {
+      await storeSecret(rdpSecretId(id), { password: rdpPassword }, `${fields.name} (RDP)`)
+    }
+
     toast(`${fields.name} ${editId ? 'updated' : 'added'}`, 'ok')
     setModal(null)
-    if (!editId) openServer(id, 'terminal')
+    // An RDP-only machine has no terminal to open, and openServer already
+    // routes it to its desktop — asked for by name here so the intent is
+    // visible at the call site rather than only in the store.
+    if (!editId) openServer(id, speaks === 'rdp' ? 'files' : 'terminal')
   }
 
   return (
@@ -648,6 +673,41 @@ export function AddServerModal(): React.JSX.Element {
 
       {speaks !== 'ssh' && (
         <div className="col" style={{ gap: 'var(--sp-2)', marginBottom: 'var(--sp-3)', paddingLeft: 22 }}>
+          {/**
+           * RDP's own account and password.
+           *
+           * This is the codependence the report was about, and hiding the SSH
+           * fields was only half of it: the desktop resolved its login from
+           * `Server.username` and from the ONE secret per server, so a box
+           * reached as Administrator over RDP and as root over SSH had to
+           * agree on a single password. On Windows they never do.
+           *
+           * Both are optional and both fall back to the server's, so every
+           * record saved before this keeps working exactly as it did.
+           */}
+          <div className="row" style={{ gap: 'var(--sp-2)' }}>
+            <label className="col" style={{ gap: 2, flex: 1 }}>
+              <span className="field-label">
+                {speaks === 'rdp' ? 'Sign in as' : 'RDP account (optional)'}
+              </span>
+              <input
+                className="input"
+                value={rdpUsername}
+                onChange={(e) => setRdpUsername(e.target.value)}
+                placeholder={speaks === 'rdp' ? 'Administrator' : username || 'Administrator'}
+              />
+            </label>
+            <label className="col" style={{ gap: 2, flex: 1 }}>
+              <span className="field-label">RDP password</span>
+              <input
+                className="input"
+                type="password"
+                value={rdpPassword}
+                onChange={(e) => setRdpPassword(e.target.value)}
+                placeholder={editId ? 'Unchanged' : ''}
+              />
+            </label>
+          </div>
           <div className="row" style={{ gap: 'var(--sp-2)' }}>
             <label className="col" style={{ gap: 2, width: 110 }}>
               <span className="field-label">RDP port</span>

@@ -12,9 +12,35 @@
 // other views assume an SSH transport.
 
 /** RDP settings on a server that speaks it. Absent means the server does not. */
+/**
+ * Where an RDP password is stored, which is NOT where the SSH one is.
+ *
+ * One secret per server was the shape, and it is what made the two protocols
+ * codependent: `resolveSecrets` reads `getSecret(serverId)`, so a desktop
+ * signing in as Administrator and a shell signing in as root had to share one
+ * password. On a Windows box they are almost never the same account.
+ *
+ * Derived rather than stored, so nothing has to be migrated: a record saved
+ * before this simply has no secret under the derived id, and the caller falls
+ * back to the server's own.
+ */
+export function rdpSecretId(serverId: string): string {
+  return `${serverId}:rdp`
+}
+
 export interface RdpSettings {
   /** 3389 unless someone moved it. Separate from `Server.port`, which is SSH's. */
   port: number
+  /**
+   * The account the desktop signs in as, when it is not the SSH one.
+   *
+   * RDP used to borrow `Server.username`, which is the other half of the
+   * codependence: a Windows box is typically reached as Administrator or a
+   * domain account, and the shell — where there is one — as something else
+   * entirely. Absent means "use the server's", which is every record saved
+   * before this existed.
+   */
+  username?: string
   /**
    * Windows domain for the login, when the account is a domain account.
    *

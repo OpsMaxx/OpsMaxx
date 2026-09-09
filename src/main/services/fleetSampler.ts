@@ -879,7 +879,18 @@ export class FleetSampler {
      */
     if (this.inFlight) await this.inFlight
     await this.sweep('requested')
-    return { swept: true, servers: ids.size }
+
+    /**
+     * What actually answered, not how many were asked.
+     *
+     * Reporting `ids.size` was true of the request and false of the result:
+     * on an estate where every host refused, the button said "Collected from
+     * 5 servers" — which is the same lie in a new voice as the button that
+     * did nothing, and harder to catch because it looks like success.
+     */
+    let answered = 0
+    for (const id of ids) if (this.reachable.get(id) === true) answered++
+    return { swept: true, servers: ids.size, answered }
   }
 
   // A success clears the recorded error; a failure keeps the last good sample.

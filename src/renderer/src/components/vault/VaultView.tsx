@@ -267,10 +267,21 @@ function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
                 ? ` — ${MIN_PASSWORD - password.length} to go`
                 : ''}
             </Rule>
-            {/* Shown only once there is something to compare, so it is not a
-                red cross against a field the user has not reached yet. */}
-            {confirm.length > 0 && (
-              <Rule met={password === confirm}>Both entries match</Rule>
+            {/**
+             * Shown once the password is long enough OR the confirmation has
+             * been started, and not before — so it is not a pending rule
+             * against a field nobody has reached yet.
+             *
+             * The first version showed it only when `confirm` had content, and
+             * that left the original bug in place one step further along: with
+             * twelve characters typed and the confirmation untouched, the
+             * button was disabled and every visible rule was met. Confirming
+             * IS a requirement, so it has to be on the list.
+             */}
+            {(confirm.length > 0 || password.length >= MIN_PASSWORD) && (
+              <Rule met={confirm.length > 0 && password === confirm}>
+                {confirm.length === 0 ? 'Type it again to confirm' : 'Both entries match'}
+              </Rule>
             )}
           </div>
         )}
