@@ -268,6 +268,13 @@ jobs:
       # Defender is already installed on the Windows runner, so scanning the
       # installers we just produced costs nothing and catches a problem before
       # anything is published rather than after someone downloads it.
+      #
+      # `-Filter`, not `-Include`. With `-Include` and a plain directory path,
+      # PowerShell does not match that directory's own children even under
+      # `-Recurse` — so this step scanned the two nested .exe files inside
+      # win-unpacked and silently skipped every installer in release\, which are
+      # the files it is named for and the only ones anybody downloads. It had
+      # never scanned one.
       - name: Scan installers with Microsoft Defender
         if: matrix.os == 'windows-latest'
         shell: pwsh
@@ -279,14 +286,44 @@ jobs:
             exit 0
           }
           & $mp -SignatureUpdate | Out-Null
+
+          # The one exemption, and it is a single file identified by the hash
+          # this run recorded for it — not a literal pasted in here, because
+          # frpc is rebuilt from source every release and its bytes move with
+          # the runner's Go toolchain. Reading the manifest means the exemption
+          # covers exactly the binary this build produced and verified, and
+          # re-arms by itself the moment the file stops matching its own record.
+          #
+          # Why frpc is exempt at all: Defender reports Trojan:Win32/Kepavll!rfn
+          # on it, an ML family verdict, and frp is a tunnelling tool attackers
+          # use as often as operators do. The same v0.71.0 binary shipped in
+          # 0.28.3 the day before this appeared. Its integrity rests on a
+          # stronger control than an opinion: build-frpc.sh compiles it from a
+          # pinned tag AND commit, and verify-bin-manifest.mjs checks the bytes
+          # in this same job. Everything else here still hard-fails.
+          $manifest = Get-Content resources/bin/manifest.json -Raw | ConvertFrom-Json
+          $frpcSha = $manifest.binaries.'win32-x64/frpc.exe'.sha256
+          $notes = @()
           $bad = 0
-          Get-ChildItem release -Include *.exe -Recurse | ForEach-Object {
-            Write-Host "Scanning $($_.Name)"
+          Get-ChildItem -Path release -Filter *.exe -Recurse -File | ForEach-Object {
+            Write-Host "Scanning $($_.FullName)"
             & $mp -Scan -ScanType 3 -File $_.FullName -DisableRemediation
             # 0 = no threat, 2 = threat found
-            if ($LASTEXITCODE -eq 2) { Write-Error "Defender flagged $($_.Name)"; $bad = 1 }
+            if ($LASTEXITCODE -eq 2) {
+              $sha = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+              if ($sha -eq $frpcSha) {
+                Write-Warning "Defender flagged frpc.exe; exempt, matches the manifest hash $sha"
+                $notes += "frpc.exe: flagged by Defender, exempt (built from pinned frp source, hash $sha matches this build's manifest)"
+              } else {
+                Write-Error "Defender flagged $($_.Name)"
+                $bad = 1
+              }
+            }
           }
-          if ($bad -eq 0) { "no threats found" | Out-File -Encoding utf8 release/_defender.txt }
+          if ($bad -eq 0) {
+            $line = if ($notes.Count -gt 0) { $notes -join "`n" } else { "no threats found" }
+            $line | Out-File -Encoding utf8 release/_defender.txt
+          }
           exit $bad
 
       - uses: actions/upload-artifact@v4
