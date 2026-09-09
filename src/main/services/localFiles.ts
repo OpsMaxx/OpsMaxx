@@ -1,6 +1,6 @@
-import { basename, join, resolve as resolvePath } from 'node:path'
+import { basename, dirname, join, resolve as resolvePath, sep } from 'node:path'
 import { homedir } from 'node:os'
-import { createReadStream, createWriteStream } from 'node:fs'
+import { createReadStream, createWriteStream, realpathSync } from 'node:fs'
 import {
   lstat,
   mkdir,
@@ -39,6 +39,99 @@ import type { SftpEntry, SftpResult, SftpUploadSummary } from '../../shared/ssh'
  * handlers and nowhere else.
  */
 
+/**
+ * The app's own data directory, which this module refuses to touch.
+ *
+ * The header above names the stakes: the vault file, the policy store and the
+ * audit log are all files on this disk, and every constraint this app
+ * advertises is enforced by one of them. A Files view that can rewrite the
+ * policy store is a Files view that can grant itself anything, and one that can
+ * truncate the audit log can do it unobserved.
+ *
+ * Nobody edits these through a file browser on purpose — they are the app's
+ * internal state, not the user's documents — so refusing them costs nothing
+ * real and removes the one path from "browse my own machine" to "edit the thing
+ * that decides what is allowed".
+ *
+ * Injected rather than read from `electron` at import time: this module is
+ * imported directly by its tests, and pulling in `app` would make every one of
+ * them need a stubbed Electron. Absent means no restriction, which is the right
+ * default for a test that is writing into a temp directory.
+ */
+let protectedRoot: string | null = null
+
+export function setLocalFilesProtectedRoot(dir: string): void {
+  protectedRoot = canonical(dir)
+}
+
+/**
+ * A path reduced to what it actually points at.
+ *
+ * `resolve()` alone is not enough, and the first version of this guard learned
+ * that the hard way — three separate bypasses, all confirmed against the real
+ * module:
+ *
+ *   1. A SYMLINK. `resolve` normalises `..` and makes a path absolute; it does
+ *      not follow links. A link in a writable directory pointing at the
+ *      protected tree resolved to the link's own path and sailed through.
+ *   2. A path whose LEAF does not exist yet — every create and every write to a
+ *      new file — cannot be realpath'd directly, so a naive realpath would
+ *      throw and the caller would have to fall back to the unsafe form.
+ *
+ * So: walk up to the nearest ancestor that exists, realpath THAT (which
+ * resolves every link along the way), then re-append the part that does not
+ * exist yet. A symlinked parent is followed; a not-yet-created leaf is fine.
+ */
+function canonical(input: string): string {
+  const start = resolvePath(input)
+  const missing: string[] = []
+  let cur = start
+  for (;;) {
+    try {
+      const real = realpathSync(cur)
+      return missing.length === 0 ? real : join(real, ...missing.slice().reverse())
+    } catch {
+      const parent = dirname(cur)
+      // Reached the filesystem root without finding anything that exists.
+      if (parent === cur) return start
+      missing.push(basename(cur))
+      cur = parent
+    }
+  }
+}
+
+/**
+ * Case folded as well as compared exactly.
+ *
+ * This is a DENY rule, so the safe direction is to refuse more rather than
+ * less. macOS and Windows are case-insensitive by default — `<userData>` and
+ * `<userdata>` are the same file, and a case-sensitive `startsWith` refused the
+ * first and happily read and wrote the second. Both are also configurable per
+ * volume in both directions, so rather than branch on platform (and be wrong on
+ * a case-sensitive APFS volume or a case-insensitive Linux mount) this refuses
+ * a match under either comparison. The cost is refusing a genuinely distinct
+ * path that differs only in case, inside the app's own data directory — which
+ * is not a thing anyone has.
+ */
+function within(target: string, root: string): boolean {
+  const hit = (a: string, b: string): boolean => a === b || a.startsWith(b + sep)
+  return hit(target, root) || hit(target.toLowerCase(), root.toLowerCase())
+}
+
+/** Whether a path lands inside the protected root, once it is really resolved. */
+function isProtected(path: string): boolean {
+  if (!protectedRoot) return false
+  return within(canonical(path), protectedRoot)
+}
+
+const PROTECTED_MESSAGE =
+  "This is OpsMaxx's own data directory. It holds the vault, the access policy and the audit log, and is not editable from the Files view."
+
+/** Guard for every path this module takes. Returns a failed result, or null. */
+function refuse(...paths: string[]): SftpResult<never> | null {
+  return paths.some(isProtected) ? { ok: false, error: PROTECTED_MESSAGE } : null
+}
+
 /** Which keys the renderer opened against this machine rather than a server. */
 const sessions = new Map<string, { cwd: string }>()
 
@@ -76,6 +169,8 @@ function permString(mode: number, dir: boolean, link: boolean): string {
 }
 
 export async function localFilesList(path: string): Promise<SftpResult<SftpEntry[]>> {
+  const refused = refuse(path)
+  if (refused) return refused
   try {
     const names = await readdir(path)
     const entries: SftpEntry[] = []
@@ -107,6 +202,8 @@ export async function localFilesList(path: string): Promise<SftpResult<SftpEntry
 }
 
 export async function localFilesRead(path: string): Promise<SftpResult<string>> {
+  const refused = refuse(path)
+  if (refused) return refused
   try {
     return { ok: true, data: await readFile(path, 'utf8') }
   } catch (err) {
@@ -115,6 +212,8 @@ export async function localFilesRead(path: string): Promise<SftpResult<string>> 
 }
 
 export async function localFilesWrite(path: string, content: string): Promise<SftpResult> {
+  const refused = refuse(path)
+  if (refused) return refused
   try {
     await writeFile(path, content, 'utf8')
     return { ok: true }
@@ -124,6 +223,8 @@ export async function localFilesWrite(path: string, content: string): Promise<Sf
 }
 
 export async function localFilesMkdir(path: string): Promise<SftpResult> {
+  const refused = refuse(path)
+  if (refused) return refused
   try {
     // Not recursive, matching SFTP's mkdir: "make this one" fails when the
     // parent is missing, and silently creating a chain hides a typed path.
@@ -135,6 +236,8 @@ export async function localFilesMkdir(path: string): Promise<SftpResult> {
 }
 
 export async function localFilesRename(from: string, to: string): Promise<SftpResult> {
+  const refused = refuse(from, to)
+  if (refused) return refused
   try {
     await rename(from, to)
     return { ok: true }
@@ -144,6 +247,8 @@ export async function localFilesRename(from: string, to: string): Promise<SftpRe
 }
 
 export async function localFilesDelete(path: string, dir: boolean): Promise<SftpResult> {
+  const refused = refuse(path)
+  if (refused) return refused
   try {
     // rmdir, not rm -r. SFTP's rmdir refuses a directory with anything in it,
     // and the Files view's confirmation is written for one thing going away.
@@ -170,6 +275,17 @@ export async function localFilesUpload(
   localPaths: string[],
   destDir: string
 ): Promise<SftpResult<SftpUploadSummary>> {
+  /**
+   * Both ends, not just the destination.
+   *
+   * The first version checked `destDir` only, which stopped a copy INTO the
+   * protected tree and did nothing about a copy OUT of it — so
+   * `localFilesUpload(wc, key, ['<userData>/vault.json'], '/tmp')` returned
+   * `{ok: true}` and put the vault somewhere with no protection at all. Reading
+   * a file out is exactly as much of a disclosure as editing it in place.
+   */
+  const refused = refuse(destDir, ...localPaths)
+  if (refused) return refused
   const uploaded: string[] = []
   const failed: { name: string; error: string }[] = []
 

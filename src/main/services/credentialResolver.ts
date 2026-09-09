@@ -16,6 +16,14 @@ export interface SecretBlob {
   password?: string
   keyPath?: string
   passphrase?: string
+  /**
+   * Where this server's SSH agent listens. Not a secret — a socket path is not
+   * a credential — but it lives here because this is the per-server blob and it
+   * belongs with the auth method it configures. It is deliberately NOT treated
+   * as one by credentialSourceFor: a server that only knows an agent path has
+   * no stored credential.
+   */
+  agentSocket?: string
   // Saved answer to a single keyboard-interactive prompt (a static second
   // password). One-time codes are never stored.
   kbAnswer?: string
@@ -95,6 +103,7 @@ export function resolveSecrets<T extends SshHop & { serverId?: string }>(cfg: T)
         cfg.password = cfg.password ?? blob.password
         cfg.keyPath = cfg.keyPath ?? blob.keyPath
         cfg.passphrase = cfg.passphrase ?? blob.passphrase
+        cfg.agentSocket = cfg.agentSocket ?? blob.agentSocket
       }
     }
   }
@@ -221,11 +230,48 @@ export function resolveDbSecrets<T extends { id: string; password?: string; uri?
     const raw = getSecret(cfg.id)
     if (raw) {
       try {
-        const b = JSON.parse(raw) as { password?: string; uri?: string }
-        cfg.password = b.password
-        cfg.uri = b.uri
-      } catch {
-        cfg.password = raw // legacy plain-password secret
+        const b = JSON.parse(raw) as { password?: string; uri?: string; vaultEntryId?: string }
+        /**
+         * A vault reference wins, exactly as it does for a server.
+         *
+         * Database passwords used to live only in the per-record keychain blob,
+         * which made them the one credential class in the app that could not be
+         * kept as a single vault record: the same database password used by
+         * three connections was three copies, rotated in three places. It also
+         * meant they could not travel — the keychain is machine-local, and
+         * `backupExport` carries the vault but cannot carry the keychain.
+         *
+         * A VaultLockedError propagates rather than falling through to the
+         * legacy field below, for the reason stated on the server path:
+         * authenticating with a stale copy of a credential the user has since
+         * changed in the vault is worse than a clear failure.
+         *
+         * `login` entries are what these reference — url, username, password is
+         * already exactly a database credential's shape, so no new vault kind.
+         */
+        if (b.vaultEntryId) {
+          const entry = vaultEntry(b.vaultEntryId)
+          if (entry?.password) cfg.password = entry.password
+        }
+        // `||` and not `??`: the renderer sends '' for "unchanged", and `??`
+        // treats an empty string as a real value — which dropped the stored
+        // password and then failed to authenticate with nothing.
+        cfg.password = cfg.password || b.password
+        cfg.uri = cfg.uri || b.uri
+      } catch (e) {
+        // A vault that is locked must not be mistaken for a corrupt blob.
+        if (isVaultLockedError(e)) throw e
+        /**
+         * A legacy plain-password secret, which is what a blob that is not JSON
+         * is — but ONLY if the parse is what failed.
+         *
+         * This used to run for any throw in the block above, including one from
+         * `vaultEntry`, and then assigned `raw` as the password: for a
+         * vault-backed record that meant sending the whole JSON blob, vault id
+         * and all, to the database server as a password.
+         */
+        if (e instanceof SyntaxError) cfg.password = raw
+        else throw e
       }
     }
   }
@@ -332,6 +378,24 @@ function resolveVpnSpec(spec: VpnSpec, read: (ref: VpnSecretRef) => string): Res
     if (spec.usernameRef) out.username = read(spec.usernameRef)
     if (spec.passwordRef) out.password = read(spec.passwordRef)
     if (spec.keyPassphraseRef) out.keyPassphrase = read(spec.keyPassphraseRef)
+  } else if (spec.kind === 'ngrok') {
+    // The authtoken takes the `token` slot, the same slot frp's token uses —
+    // they are the same kind of thing and never both present on one spec.
+    //
+    // NOT an early return. Whatever follows this chain fills `out.all`, which
+    // is the flattened list the log redactor matches against — returning here
+    // left it empty, so the token would have been redacted from captured output
+    // against nothing at all.
+    if (spec.authtokenRef) out.token = read(spec.authtokenRef)
+  } else if (spec.kind === 'tailscale') {
+    // Nothing, deliberately. Tailscale authenticates in a browser and keeps its
+    // own state in its own daemon; this app stores no credential for it, so
+    // there is none to resolve and none to redact. An `else` that fell through
+    // to the frp branch is what this replaces — it typechecked only while frp
+    // was the last kind in the union.
+    //
+    // Falls through rather than returning, for the reason above: the tail of
+    // this function is what populates `out.all`.
   } else {
     if (spec.auth.tokenRef) out.token = read(spec.auth.tokenRef)
     // ResolvedVpnSecrets has one free single-value slot left and frp has one

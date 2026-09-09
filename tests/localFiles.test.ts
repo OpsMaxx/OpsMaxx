@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync, readFileSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import type { WebContents } from 'electron'
 import {
   isLocalFileSession,
@@ -13,7 +13,8 @@ import {
   localFilesRead,
   localFilesRename,
   localFilesUpload,
-  localFilesWrite
+  localFilesWrite,
+  setLocalFilesProtectedRoot
 } from '../src/main/services/localFiles'
 
 /**
@@ -193,5 +194,75 @@ describe('which half answers', () => {
     localFilesConnect('mine')
     expect(isLocalFileSession('someone-elses-server-id')).toBe(false)
     localFilesDisconnect('mine')
+  })
+})
+
+/**
+ * The app's own data directory is off limits.
+ *
+ * The module header names the stakes: the vault, the access policy and the
+ * audit log are files on this disk, and every constraint the app advertises is
+ * enforced by one of them. A Files view that can rewrite the policy store can
+ * grant itself anything; one that can truncate the audit log can do it
+ * unobserved. Nobody edits those through a file browser on purpose, so refusing
+ * them costs nothing real.
+ *
+ * The root is injected, so these tests point it at a temp directory rather than
+ * needing a stubbed Electron.
+ */
+describe('protected data directory', () => {
+  let root: string
+  let outside: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'om-protected-'))
+    outside = mkdtempSync(join(tmpdir(), 'om-outside-'))
+    writeFileSync(join(root, 'vault.json'), '{"sealed":true}')
+    setLocalFilesProtectedRoot(root)
+  })
+
+  afterEach(() => {
+    // Back to unrestricted, so the rest of the file keeps its own behaviour.
+    setLocalFilesProtectedRoot(tmpdir() + '/om-nonexistent-protected-root')
+    rmSync(root, { recursive: true, force: true })
+    rmSync(outside, { recursive: true, force: true })
+  })
+
+  it('refuses to write a file inside it', async () => {
+    const r = await localFilesWrite(join(root, 'vault.json'), 'tampered')
+    expect(r.ok).toBe(false)
+    // And genuinely did not write.
+    expect(readFileSync(join(root, 'vault.json'), 'utf8')).toBe('{"sealed":true}')
+  })
+
+  it('refuses to read, list, delete, rename into, or copy into it', async () => {
+    expect((await localFilesRead(join(root, 'vault.json'))).ok).toBe(false)
+    expect((await localFilesList(root)).ok).toBe(false)
+    expect((await localFilesDelete(join(root, 'vault.json'), false)).ok).toBe(false)
+    expect((await localFilesRename(join(outside, 'a'), join(root, 'b'))).ok).toBe(false)
+    expect((await localFilesMkdir(join(root, 'sub'))).ok).toBe(false)
+  })
+
+  // Resolution happens before the check, so a walk lands where it points.
+  it('refuses a path that traverses back into it', async () => {
+    const sneaky = join(root, '..', basename(root), 'vault.json')
+    expect((await localFilesWrite(sneaky, 'tampered')).ok).toBe(false)
+    expect(readFileSync(join(root, 'vault.json'), 'utf8')).toBe('{"sealed":true}')
+  })
+
+  // A sibling whose name merely starts the same is not inside it.
+  it('does not refuse a sibling directory with a similar name', async () => {
+    const sibling = `${root}-backup`
+    mkdirSync(sibling, { recursive: true })
+    try {
+      expect((await localFilesWrite(join(sibling, 'notes.txt'), 'fine')).ok).toBe(true)
+    } finally {
+      rmSync(sibling, { recursive: true, force: true })
+    }
+  })
+
+  it('leaves everything outside it alone', async () => {
+    expect((await localFilesWrite(join(outside, 'notes.txt'), 'fine')).ok).toBe(true)
+    expect((await localFilesRead(join(outside, 'notes.txt'))).data).toBe('fine')
   })
 })

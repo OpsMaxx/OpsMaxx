@@ -23,12 +23,34 @@ let enabled = true
 // user toggle can disable it, which is the same pattern `shortcuts` uses and
 // documents at store/app.ts:67-71.
 export function syncLocalTerminalEnabled(data: unknown): void {
-  const settings = (data as { settings?: { localTerminalEnabled?: unknown } } | null)?.settings
+  const settings = (data as {
+    settings?: { localTerminalEnabled?: unknown; shellIntegration?: unknown }
+  } | null)?.settings
   enabled = settings?.localTerminalEnabled !== false
+  integration = settings?.shellIntegration !== false
 }
 
 export function isLocalTerminalEnabled(): boolean {
   return enabled
+}
+
+/**
+ * Whether local shells are started with OSC 133 prompt marks.
+ *
+ * Mirrored in main for the same reason the flag above is: the renderer's
+ * setting governs the honest UI, and the spawn happens here. Absent reads as
+ * ON, matching the flag above — and matching the fact that a shipped `false`
+ * would be written to disk by the wholesale settings save and permanently
+ * outrank any later change of default (store/app.ts documents this).
+ */
+let integration = true
+
+export function isShellIntegrationEnabled(): boolean {
+  return integration
+}
+
+export function setShellIntegrationEnabledForTests(value: boolean): void {
+  integration = value
 }
 
 // Test seam. Not exported to the renderer or reachable over IPC.
