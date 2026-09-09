@@ -22,7 +22,7 @@ jobs:
           cache: npm
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.25'
           cache-dependency-path: sidecar/netd/go.sum
       - run: npm ci
       # `npm audit`, with the registry's own flakiness separated from a finding.

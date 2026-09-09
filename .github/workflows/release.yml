@@ -68,7 +68,7 @@ jobs:
       # shipping an app with no engines.
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.25'
           cache-dependency-path: sidecar/netd/go.sum
 
       # OpenVPN is autotools, and it is built from a git checkout rather than a
