@@ -71,7 +71,7 @@ const CLI_ENV = { TAILSCALE_BE_CLI: '1' } as const
 const DARWIN_ROOTS = ['/Applications']
 
 /** What `tailscale status --json` gives us, reduced to what is used. */
-interface TailscaleStatus {
+export interface TailscaleStatus {
   BackendState?: string
   Self?: { DNSName?: string; TailscaleIPs?: string[]; Online?: boolean }
   Peer?: Record<
@@ -145,7 +145,7 @@ async function locate(spec: TailscaleSpec): Promise<VpnEngineInfo> {
   })
 }
 
-function peersFrom(status: TailscaleStatus): TailscalePeer[] {
+export function peersFrom(status: TailscaleStatus): TailscalePeer[] {
   const suffix = status.MagicDNSSuffix ? `.${status.MagicDNSSuffix}.` : null
   return Object.values(status.Peer ?? {})
     .map((p) => {
@@ -181,7 +181,7 @@ function peersFrom(status: TailscaleStatus): TailscalePeer[] {
  * — but they are also not "connected", and reporting them as connected would be
  * the worst of the options.
  */
-function stateFor(backend: string | undefined): {
+export function stateFor(backend: string | undefined): {
   state: VpnStatus['state']
   error?: string
   code?: VpnStatus['errorCode']
