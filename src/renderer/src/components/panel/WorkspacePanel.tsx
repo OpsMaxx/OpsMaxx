@@ -13,6 +13,9 @@ import {
   Columns3,
   Search,
   Server as ServerIcon,
+  Monitor as MonitorIcon,
+  HardDrive,
+  Box,
   Download
 } from 'lucide-react'
 import {
@@ -29,6 +32,7 @@ import { EmptyState } from '../common/EmptyState'
 import { TerminalView } from '../terminal/TerminalView'
 import { containerTransport, localTransport, sshTransport } from '../../lib/transport'
 import { LocalShellMenu } from '../terminal/LocalShellMenu'
+import { TabStrip } from './TabStrip'
 import { PaneGrid } from './PaneGrid'
 import { MonitorView } from './MonitorView'
 import { MonitorStrip } from './MonitorStrip'
@@ -268,6 +272,24 @@ function NoTabs(): React.JSX.Element {
   )
 }
 
+/**
+ * What KIND of thing a tab is talking to.
+ *
+ * With shells on this machine, servers and desktops sharing one strip, the
+ * title stops being enough to tell them apart — "web" could be any of them —
+ * and the panel is the only other place that says which. A glyph in the tab
+ * answers it without switching to find out.
+ */
+function TabKindIcon({ tab }: { tab: Tab }): React.JSX.Element {
+  const size = 13
+  if (tab.kind === 'rdp') return <MonitorIcon size={size} className="tab-kind" />
+  if (tab.kind === 'local') return <HardDrive size={size} className="tab-kind" />
+  // A shell inside a container is still an SSH tab, but it is not a shell on
+  // the host and the strip is the only place that difference is visible.
+  if (tab.containerRef) return <Box size={size} className="tab-kind" />
+  return <TerminalIcon size={size} className="tab-kind" />
+}
+
 export function WorkspacePanel(): React.JSX.Element {
   // Tabs shown in the bar: this workspace only.
   const tabs = useWorkspaceTabs()
@@ -277,6 +299,7 @@ export function WorkspacePanel(): React.JSX.Element {
   const activeTabId = useApp((s) => s.activeTabId)
   const setActiveTab = useApp((s) => s.setActiveTab)
   const closeTab = useApp((s) => s.closeTab)
+  const moveTab = useApp((s) => s.moveTab)
   const setTabView = useApp((s) => s.setTabView)
   const setModal = useApp((s) => s.setModal)
   const newSession = useApp((s) => s.newSession)
@@ -349,41 +372,38 @@ export function WorkspacePanel(): React.JSX.Element {
 
   return (
     <div className="main">
-      <div className="tabbar">
-        {tabs.map((t) => {
-          const srv = t.kind === 'ssh' ? servers.find((s) => s.id === t.serverId) : undefined
-          return (
-            <div
-              key={t.id}
-              className={clsx('tab', t.id === activeTabId && 'active')}
-              onClick={() => setActiveTab(t.id)}
-              onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
-              onContextMenu={(e) => {
-                e.preventDefault()
-                setTabMenu({ x: e.clientX, y: e.clientY, tabId: t.id })
-              }}
-            >
-              {srv && <span className={clsx('status-dot', srv.status)} />}
-              <span className="title">{t.title}</span>
-              <button
-                className="close"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  closeTab(t.id)
-                }}
-              >
-                <X size={13} />
-              </button>
-            </div>
-          )
+      <TabStrip
+        label="Session tabs"
+        items={tabs.map((t) => {
+          const srv = t.kind === 'ssh' || t.kind === 'rdp' ? servers.find((s) => s.id === t.serverId) : undefined
+          return {
+            id: t.id,
+            title: t.title,
+            // The kind, at a glance. With local shells, servers and desktops
+            // in one strip the name alone stops being enough: "web" could be
+            // any of the three, and the icon is the only thing that says
+            // which without reading the panel.
+            icon: <TabKindIcon tab={t} />,
+            status: srv ? <span className={clsx('status-dot', srv.status)} /> : undefined,
+            // The full name plus what it is connected to, because the title
+            // itself is ellipsised at 220px and a truncated hostname is the
+            // one thing a user hovers a tab to find out.
+            tooltip: srv ? `${t.title} — ${srv.name}` : t.title
+          }
         })}
+        activeId={activeTabId}
+        onSelect={setActiveTab}
+        onClose={closeTab}
+        onReorder={moveTab}
+        onContextMenu={(tabId, x, y) => setTabMenu({ x, y, tabId })}
+      >
         {/* A split button: the plus repeats whatever the current tab is, the
             caret opens the list of shells on this machine. */}
         <button className="tab-new" title="New session" onClick={addTab}>
           <Plus size={16} />
         </button>
         <LocalShellMenu />
-      </div>
+      </TabStrip>
 
       {tabMenu && (
         <ContextMenu

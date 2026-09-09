@@ -481,24 +481,47 @@ button {
   height: 38px;
   background: var(--bg-sidebar);
   border-bottom: 1px solid var(--border-subtle);
+}
+/* The scrolling half. Separate from .tabbar so the new-tab button and the
+   overflow control stay pinned while the tabs themselves scroll under them —
+   a "+" that scrolls off the end is a "+" nobody can reach. */
+.tabbar-list {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
-.tabbar::-webkit-scrollbar {
+.tabbar-list::-webkit-scrollbar {
   display: none;
+}
+/* Wraps a tab plus the drop indicator that may sit beside it, so the
+   indicator can be positioned without taking part in the flex layout. */
+.tab-slot {
+  position: relative;
+  display: flex;
+  align-items: stretch;
 }
 .tab {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   padding: 0 var(--sp-2) 0 var(--sp-3);
-  min-width: 128px;
+  min-width: 108px;
   max-width: 220px;
+  /* Shrink before scrolling. A strip that jumps straight to scrolling keeps
+     every tab full-width and hides the overflow; letting them compress first
+     is what browsers do, and it keeps more tabs reachable without a menu. */
+  flex: 0 1 auto;
   border-right: 1px solid var(--border-subtle);
   color: var(--text-muted);
   font-size: var(--fs-md);
+  font: inherit;
+  background: none;
   position: relative;
   cursor: pointer;
+  text-align: left;
 }
 .tab:hover {
   background: var(--bg-hover);
@@ -517,7 +540,27 @@ button {
   height: 2px;
   background: var(--accent);
 }
+/* Keyboard focus has to be visible: the strip is one tab stop and the arrows
+   move within it, so without this a keyboard user cannot see where they are. */
+.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.tab.dragging {
+  opacity: 0.4;
+}
+.tab .tab-kind {
+  flex: none;
+  color: var(--text-faint);
+}
+.tab.active .tab-kind {
+  /* --accent-ink, not --accent: the fill token is tuned against the white
+     label ON it and fails contrast as text on the panel behind it. */
+  color: var(--accent-ink);
+}
 .tab .title {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -525,22 +568,46 @@ button {
 .tab .close {
   width: 18px;
   height: 18px;
+  flex: none;
   display: grid;
   place-items: center;
   border-radius: var(--r-sm);
   color: var(--text-faint);
   opacity: 0;
+  /* THE FIX. `opacity: 0` still hit-tests, so the invisible × on every
+     inactive tab was live: clicking the right-hand end of a tab to select it
+     closed it instead. Nothing about the tab said a control was there. */
+  pointer-events: none;
 }
 .tab:hover .close,
-.tab.active .close {
+.tab.active .close,
+.tab:focus-visible .close {
   opacity: 1;
+  pointer-events: auto;
 }
 .tab .close:hover {
   background: var(--bg-active);
   color: var(--text);
 }
+/* Where a dragged tab would land. Two pixels of accent in the gap, rather
+   than moving the tabs themselves: a live preview that reorders on every
+   pointer move makes it impossible to aim at a gap that keeps shifting. */
+.tab-drop {
+  position: absolute;
+  left: -1px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.tab-slot:last-child .tab-drop:last-child {
+  left: auto;
+  right: -1px;
+}
 .tab-new {
   width: 36px;
+  flex: none;
   display: grid;
   place-items: center;
   color: var(--text-muted);
@@ -548,6 +615,53 @@ button {
 .tab-new:hover {
   background: var(--bg-hover);
   color: var(--text);
+}
+.tab-overflow {
+  position: relative;
+  display: flex;
+  flex: none;
+}
+.tab-overflow-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+.tab-overflow-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 41;
+  min-width: 220px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: var(--sp-1);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg, 0 8px 24px rgb(0 0 0 / 0.3));
+}
+.tab-overflow-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2);
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  font-size: var(--fs-md);
+  text-align: left;
+}
+.tab-overflow-item .title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tab-overflow-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.tab-overflow-item.active {
+  color: var(--accent-ink);
 }
 
 /* View switcher (Terminal / Monitor / Files ...) */

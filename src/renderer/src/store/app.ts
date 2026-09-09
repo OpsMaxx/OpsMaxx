@@ -4,6 +4,15 @@ import { FLEET_INTERVAL_DEFAULT_MS } from '../../../shared/fleet'
 import { defaultModuleState, type ModuleState } from '../../../shared/modules'
 import type { DriftWatchProposal } from '../../../shared/driftWatch'
 import { forgetServer } from './serverCleanup'
+import {
+  moveTab as moveTabIn,
+  nextSessionTitle,
+  popClosed,
+  rememberClosed,
+  successorAfterClose,
+  tabForNumberKey,
+  type ClosedTab
+} from '../lib/tabs'
 import type {
   ActivityView,
   MonitorGroup,
@@ -358,6 +367,15 @@ interface AppState {
   // tabs
   tabs: Tab[]
   activeTabId: string | null
+  /**
+   * Recently closed tabs, oldest first, for reopening.
+   *
+   * Not persisted, like `tabs` itself: reopening is an undo for the mistake
+   * you just made, not a session restore across launches. A stack that
+   * outlived the process would offer to reopen sessions whose hosts, servers
+   * and shells may all have changed underneath it.
+   */
+  closedTabs: ClosedTab<Tab>[]
   // Terminal session id + working directory (for SFTP <-> terminal sync),
   // keyed by **pane** id, not tab id. A tab can hold up to MAX_PANES live
   // terminals and each has its own session and its own cwd; keying by tab meant
@@ -459,6 +477,12 @@ interface AppState {
   closeAllTabs: () => void
   setActiveTab: (id: string) => void
   cycleTab: (dir: 1 | -1) => void
+  /** Drag-to-reorder. `toIndex` is a position among the VISIBLE tabs. */
+  moveTab: (id: string, toIndex: number) => void
+  /** Cmd/Ctrl+1-8 by position, 9 for the last tab. A no-op if it is not there. */
+  selectTabByNumber: (n: number) => void
+  /** Reopen the most recently closed tab of this workspace. */
+  reopenClosedTab: () => void
   setTabView: (id: string, view: PanelView) => void
   // Both take a **pane** id. Named for the tab because that is what they were
   // keyed by before panes existed and every caller passes whatever it was given
@@ -554,7 +578,10 @@ interface AppState {
   ) => void
 }
 
-type TabSlice = Pick<AppState, 'tabs' | 'activeTabId' | 'tabSession' | 'tabCwd' | 'panes'>
+type TabSlice = Pick<
+  AppState,
+  'tabs' | 'activeTabId' | 'tabSession' | 'tabCwd' | 'panes' | 'closedTabs'
+>
 type PaneSlice = Pick<AppState, 'tabSession' | 'tabCwd' | 'panes'>
 
 // Everything a set of departing tabs owned: their layout, and the session and
@@ -596,17 +623,26 @@ function prunePaneState(s: PaneSlice, doomed: Set<string>): PaneSlice {
 function dropTabs(s: TabSlice, doomed: Set<string>): TabSlice {
   const tabs = s.tabs.filter((t) => !doomed.has(t.id))
   const { tabSession, tabCwd, panes } = prunePaneState(s, doomed)
-  let activeTabId = s.activeTabId
-  if (activeTabId && doomed.has(activeTabId)) {
-    const idx = s.tabs.findIndex((t) => t.id === activeTabId)
-    const ws = s.tabs[idx]?.workspaceId
-    const survives = (t: Tab): boolean => !doomed.has(t.id) && t.workspaceId === ws
-    activeTabId =
-      s.tabs.slice(idx + 1).find(survives)?.id ??
-      [...s.tabs.slice(0, idx)].reverse().find(survives)?.id ??
-      null
-  }
-  return { tabs, activeTabId, tabSession, tabCwd, panes }
+  // Right, then left, never out of the closing tab's workspace. Extracted to
+  // lib/tabs.ts so the edges are enumerated in a test rather than reachable
+  // only by clicking.
+  const activeTabId = successorAfterClose(s.tabs, doomed, s.activeTabId)
+
+  /**
+   * Every closed tab is remembered, whichever route closed it.
+   *
+   * Recorded HERE rather than in `closeTab`, because closeTab is one of six
+   * ways a tab dies — the bulk closes account for the rest, and those are
+   * exactly the ones worth being able to undo. Recorded in screen order so a
+   * "close others" can be walked back left to right.
+   */
+  const closedAt = Date.now()
+  const remembered = s.tabs
+    .map((tab, index) => ({ tab, index, closedAt }))
+    .filter((e) => doomed.has(e.tab.id))
+  const closedTabs = rememberClosed(s.closedTabs, remembered)
+
+  return { tabs, activeTabId, tabSession, tabCwd, panes, closedTabs }
 }
 
 // The pane every tab starts with: one, on the tab's own target.
@@ -653,9 +689,28 @@ function sideTabs(all: Tab[], id: string, side: 'left' | 'right'): Set<string> {
 // per-target, and the target is a server for an SSH tab and a shell for a local
 // one — a single `t.serverId === serverId` comparison across both would compare
 // `undefined === null`, never match, and title every local tab identically.
-function sessionTitle(tabs: Tab[], match: (t: Tab) => boolean, name: string): string {
-  const count = tabs.filter(match).length
-  return count ? `${name} (${count + 1})` : name
+/**
+ * The title a new session on `match`'s target should carry.
+ *
+ * Delegates to `nextSessionTitle`, which reads the names actually in use
+ * rather than counting the matches. Counting produced duplicates: open web,
+ * web (2) and web (3), close web (2), and the count is two — so the next
+ * session is called "web (3)" as well and two tabs share one name.
+ */
+function sessionTitle(
+  tabs: Tab[],
+  workspaceId: string,
+  match: (t: Tab) => boolean,
+  name: string
+): string {
+  return nextSessionTitle(
+    // Scoped to ONE workspace, because that is what the strip shows. Numbering
+    // against every workspace's tabs made the first bash in this workspace
+    // "bash (2)" on the strength of a bash the user cannot see — a name that
+    // looks like a mistake and points at nothing on screen.
+    tabs.filter((t) => t.workspaceId === workspaceId && match(t)).map((t) => t.title),
+    name
+  )
 }
 
 // Tabs on the same target as `src`, for the numbering above. Kept beside
@@ -682,7 +737,7 @@ function duplicateOf(tabs: Tab[], servers: Server[], src: Tab, id: UUID): Tab {
       workspaceId: src.workspaceId,
       shellId: src.shellId,
       cwd: src.cwd,
-      title: sessionTitle(tabs, sameTarget(src), src.title.replace(/ \(\d+\)$/, '')),
+      title: sessionTitle(tabs, src.workspaceId, sameTarget(src), src.title.replace(/ \(\d+\)$/, '')),
       view: 'terminal'
     }
   }
@@ -700,7 +755,7 @@ function duplicateOf(tabs: Tab[], servers: Server[], src: Tab, id: UUID): Tab {
       kind: 'rdp',
       workspaceId: src.workspaceId,
       serverId: src.serverId,
-      title: sessionTitle(tabs, sameTarget(src), base),
+      title: sessionTitle(tabs, src.workspaceId, sameTarget(src), base),
       view: 'desktop'
     }
   }
@@ -709,7 +764,7 @@ function duplicateOf(tabs: Tab[], servers: Server[], src: Tab, id: UUID): Tab {
     kind: 'ssh',
     workspaceId: src.workspaceId,
     serverId: src.serverId,
-    title: sessionTitle(tabs, sameTarget(src), base),
+    title: sessionTitle(tabs, src.workspaceId, sameTarget(src), base),
     view: src.view
   }
 }
@@ -813,6 +868,7 @@ export const useApp = create<AppState>((set, get) => ({
 
   tabs: [],
   activeTabId: null,
+  closedTabs: [],
   tabSession: {},
   tabCwd: {},
   panes: {},
@@ -1021,7 +1077,12 @@ export const useApp = create<AppState>((set, get) => ({
       kind: 'ssh',
       workspaceId: server.workspaceId,
       serverId,
-      title: sessionTitle(get().tabs, (t) => t.kind === 'ssh' && t.serverId === serverId, server.name),
+      title: sessionTitle(
+        get().tabs,
+        server.workspaceId,
+        (t) => t.kind === 'ssh' && t.serverId === serverId,
+        server.name
+      ),
       view: 'terminal'
     }
     set((s) => ({
@@ -1041,6 +1102,7 @@ export const useApp = create<AppState>((set, get) => ({
       serverId,
       title: sessionTitle(
         get().tabs,
+        server.workspaceId,
         (t) => t.kind === 'rdp' && t.serverId === serverId,
         server.name
       ),
@@ -1066,6 +1128,7 @@ export const useApp = create<AppState>((set, get) => ({
       cwd,
       title: sessionTitle(
         get().tabs,
+        get().activeId(),
         (t) => t.kind === 'local' && t.shellId === shell.id,
         shell.label
       ),
@@ -1198,6 +1261,79 @@ export const useApp = create<AppState>((set, get) => ({
       const idx = mine.findIndex((t) => t.id === s.activeTabId)
       const next = (idx + dir + mine.length) % mine.length
       return { activeTabId: mine[next].id }
+    }),
+
+  /**
+   * Move a tab, by its position among the tabs the user can SEE.
+   *
+   * The strip renders one workspace, so a drop index is an index into that
+   * workspace's tabs — while `tabs` holds every workspace's. Translating
+   * through the visible list is what keeps a drag from reordering tabs on
+   * another screen, or landing this one in the middle of them.
+   */
+  moveTab: (id, toIndex) =>
+    set((s) => {
+      const tab = s.tabs.find((t) => t.id === id)
+      if (!tab) return {}
+      const mine = s.tabs.filter((t) => t.workspaceId === tab.workspaceId)
+      const reordered = moveTabIn(mine, id, toIndex)
+      // Rebuilt by walking the original array and drawing this workspace's
+      // tabs from the reordered list in turn, so every other workspace's tabs
+      // keep both their order and their absolute positions.
+      const queue = [...reordered]
+      const tabs = s.tabs.map((t) => (t.workspaceId === tab.workspaceId ? queue.shift()! : t))
+      return { tabs }
+    }),
+
+  selectTabByNumber: (n) =>
+    set((s) => {
+      const mine = s.tabs.filter((t) => t.workspaceId === s.activeWorkspaceId)
+      const target = tabForNumberKey(mine, n)
+      return target ? { activeTabId: target.id } : {}
+    }),
+
+  /**
+   * Put back the tab that was closed most recently.
+   *
+   * The SESSION is not restored, and cannot be: closing a tab ends its pty or
+   * its SSH channel, so what comes back is a fresh session on the same target,
+   * in the same place in the strip. That is what every terminal that offers
+   * this does, and it is the honest reading of "reopen" — the alternative
+   * would be a tab that looks restored and has lost its scrollback.
+   */
+  reopenClosedTab: () =>
+    set((s) => {
+      const { entry, rest } = popClosed(
+        s.closedTabs,
+        // Only into a workspace that is on screen and unlocked. Reopening
+        // elsewhere would appear to do nothing while consuming the undo.
+        (e) => e.tab.workspaceId === s.activeWorkspaceId
+      )
+      if (!entry) return {}
+
+      // A fresh id: the old one keyed pane state that was pruned on close, and
+      // reusing it would let a stale entry elsewhere attach to the new tab.
+      const tab = { ...entry.tab, id: uid('tab') } as Tab
+      const mine = s.tabs.filter((t) => t.workspaceId === tab.workspaceId)
+      // Clamped, because tabs have closed or moved since it was remembered.
+      const at = Math.max(0, Math.min(entry.index, mine.length))
+      const restored = [...mine.slice(0, at), tab, ...mine.slice(at)]
+
+      const queue = [...restored]
+      const tabs: Tab[] = []
+      for (const t of s.tabs) {
+        if (t.workspaceId === tab.workspaceId) tabs.push(queue.shift()!)
+        else tabs.push(t)
+      }
+      // Anything left is the reopened tab itself when it lands past the end.
+      tabs.push(...queue)
+
+      return {
+        tabs,
+        activeTabId: tab.id,
+        closedTabs: rest,
+        panes: { ...s.panes, [tab.id]: initialPanes(tab) }
+      }
     }),
 
   // Monitor and Files are SSH-only views, so this is a no-op on a local tab

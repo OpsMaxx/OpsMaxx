@@ -61,8 +61,47 @@ export const COMMANDS: Command[] = [
   { id: 'close-tab', name: 'Close Tab', group: 'Tabs', scope: 'app', keys: 'Ctrl+W' },
   { id: 'next-tab', name: 'Next Tab', group: 'Tabs', scope: 'global', keys: 'Ctrl+Tab' },
   { id: 'prev-tab', name: 'Previous Tab', group: 'Tabs', scope: 'global', keys: 'Ctrl+Shift+Tab' },
+  /**
+   * NOT Ctrl+Shift+T, which every browser uses for this and which this app
+   * already spends on New Local Terminal. In a terminal client that meaning is
+   * the stronger convention — GNOME Terminal, Konsole and Terminator all use
+   * it — and moving a binding people already have in their fingers to gain the
+   * browser's is a bad trade. Ctrl+Shift+Z reads as the undo it is.
+   */
+  {
+    id: 'reopen-tab',
+    name: 'Reopen Closed Tab',
+    group: 'Tabs',
+    scope: 'app',
+    keys: 'Ctrl+Shift+Z',
+    hint: 'Reconnects a fresh session on the same target; scrollback is not restored.'
+  },
   { id: 'split-v', name: 'Split Right', group: 'Tabs', scope: 'app', keys: 'Ctrl+\\' },
   { id: 'split-h', name: 'Split Down', group: 'Tabs', scope: 'app', keys: 'Ctrl+Shift+\\' },
+
+  /**
+   * Jump to a tab by position, 9 meaning the last one however many there are.
+   *
+   * Spelled out rather than generated in a loop, because this list is also the
+   * settings pane's source of truth and a generated block cannot be read by
+   * someone scanning for a key they think is taken.
+   */
+  { id: 'select-tab-1', name: 'Go to Tab 1', group: 'Tabs', scope: 'app', keys: 'Ctrl+1' },
+  { id: 'select-tab-2', name: 'Go to Tab 2', group: 'Tabs', scope: 'app', keys: 'Ctrl+2' },
+  { id: 'select-tab-3', name: 'Go to Tab 3', group: 'Tabs', scope: 'app', keys: 'Ctrl+3' },
+  { id: 'select-tab-4', name: 'Go to Tab 4', group: 'Tabs', scope: 'app', keys: 'Ctrl+4' },
+  { id: 'select-tab-5', name: 'Go to Tab 5', group: 'Tabs', scope: 'app', keys: 'Ctrl+5' },
+  { id: 'select-tab-6', name: 'Go to Tab 6', group: 'Tabs', scope: 'app', keys: 'Ctrl+6' },
+  { id: 'select-tab-7', name: 'Go to Tab 7', group: 'Tabs', scope: 'app', keys: 'Ctrl+7' },
+  { id: 'select-tab-8', name: 'Go to Tab 8', group: 'Tabs', scope: 'app', keys: 'Ctrl+8' },
+  {
+    id: 'select-tab-last',
+    name: 'Go to Last Tab',
+    group: 'Tabs',
+    scope: 'app',
+    keys: 'Ctrl+9',
+    hint: 'The last tab, whatever the count — the same as every browser.'
+  },
 
   {
     id: 'new-workspace',
