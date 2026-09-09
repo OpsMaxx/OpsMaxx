@@ -1,5 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
-import { Copy, Eye, EyeOff, Fingerprint, KeyRound, Lock, Plus, ShieldCheck, Trash2, Unlock } from 'lucide-react'
+import {
+  Check,
+  Circle,
+  Copy,
+  Eye,
+  EyeOff,
+  Fingerprint,
+  KeyRound,
+  Lock,
+  Plus,
+  ShieldCheck,
+  Trash2,
+  Unlock
+} from 'lucide-react'
 import { useVault, newField } from '../../store/vault'
 import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
@@ -97,6 +110,23 @@ const BIO_LABEL: Record<string, string> = {
 // unlock UI does. Only applies to passwords being chosen now — an existing
 // vault is not forced to change on upgrade.
 const MIN_PASSWORD = VAULT_MIN_PASSWORD
+
+/**
+ * One requirement, and whether it is met yet.
+ *
+ * The icon is not the only carrier: the row's text says the requirement in
+ * words, so it reads the same to somebody who cannot tell the two colours
+ * apart. `met` only ever turns a pending dot into a tick — nothing here goes
+ * red, because a requirement not yet reached is not an error.
+ */
+function Rule({ met, children }: { met: boolean; children: React.ReactNode }): React.JSX.Element {
+  return (
+    <div className={clsx('vault-rule', met && 'met')}>
+      {met ? <Check size={13} /> : <Circle size={13} />}
+      <span>{children}</span>
+    </div>
+  )
+}
 
 function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
   const create = useVault((s) => s.create)
@@ -197,6 +227,8 @@ function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
             autoFocus
             style={{ flex: 1 }}
             placeholder={creating ? `Master password (min ${MIN_PASSWORD} characters)` : 'Master password'}
+            aria-describedby={creating ? 'vault-password-rules' : undefined}
+            aria-invalid={creating && password.length > 0 && password.length < MIN_PASSWORD}
             value={password}
             onChange={(e) => {
               clearError()
@@ -208,6 +240,40 @@ function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
             {show ? <EyeOff size={16} /> : <Eye size={16} />}
           </button>
         </div>
+
+        {/**
+         * The requirement, while it is being typed against.
+         *
+         * It used to live in the placeholder and NOWHERE else — and a
+         * placeholder disappears the moment there is a character in the field,
+         * so the rule was visible only while it was impossible to have broken
+         * it. Type six characters and the button is disabled with nothing on
+         * screen saying why, which reads as the app being broken rather than
+         * as a password being short.
+         *
+         * `aria-live` because this is the answer to "why can I not continue",
+         * and a sighted user gets it by watching the line change.
+         */}
+        {creating && (
+          <div
+            id="vault-password-rules"
+            className="vault-rules"
+            aria-live="polite"
+            style={{ marginTop: 8 }}
+          >
+            <Rule met={password.length >= MIN_PASSWORD}>
+              At least {MIN_PASSWORD} characters
+              {password.length > 0 && password.length < MIN_PASSWORD
+                ? ` — ${MIN_PASSWORD - password.length} to go`
+                : ''}
+            </Rule>
+            {/* Shown only once there is something to compare, so it is not a
+                red cross against a field the user has not reached yet. */}
+            {confirm.length > 0 && (
+              <Rule met={password === confirm}>Both entries match</Rule>
+            )}
+          </div>
+        )}
 
         {creating && (
           <input

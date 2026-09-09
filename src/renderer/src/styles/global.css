@@ -4389,3 +4389,25 @@ details[open] > .disclosure-head .chev {
   font-size: var(--fs-sm);
   line-height: 1.5;
 }
+
+/* The vault's password requirements, shown while they are being typed
+   against. Previously the minimum lived only in the placeholder, which
+   vanishes as soon as there is a character in the field — so the rule was
+   visible only while it could not yet have been broken. */
+.vault-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.vault-rule {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+}
+/* Nothing here goes red: a requirement not yet reached is not an error, and
+   colouring it as one makes filling in a form feel like failing at it. */
+.vault-rule.met {
+  color: var(--ok);
+}

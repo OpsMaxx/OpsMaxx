@@ -232,6 +232,7 @@ import { toVpnResult } from './services/vpn/errors'
 import { withVpnTransport, withVpnTransportDb } from './services/vpn/transport'
 import { httpRequest } from './services/httpClient'
 import { ServiceCheckRunner } from './services/serviceChecks'
+import { setStartupPrefs, shouldStartHidden, startupPrefs } from './services/startupPrefs'
 import { localExec, type LocalExecResult } from './services/localExec'
 import { setShellIntegrationRoot } from './services/shellIntegrationFiles'
 import { localMetricsForget, localMetricsSample } from './services/localMetrics'
@@ -511,7 +512,23 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => mainWindow?.show())
+  /**
+   * Shown unless this launch is meant to be a quiet one.
+   *
+   * This used to be an unconditional `show()`, which was the SECOND reason
+   * "Start in the background" did nothing: even an OS that honoured the login
+   * flag would have had its hidden launch overridden here a moment later.
+   * Either bug alone fully explained the symptom, so fixing one would have
+   * looked like fixing nothing.
+   *
+   * The window is still created — checks, alerts and the samplers all run from
+   * the renderer, so a hidden launch has to build it and simply not show it.
+   * Clicking the Dock icon brings it up; see the `activate` handler.
+   */
+  mainWindow.on('ready-to-show', () => {
+    if (shouldStartHidden()) return
+    mainWindow?.show()
+  })
 
   // A right-click menu, because Electron ships none.
   //
@@ -699,7 +716,15 @@ const autoStartState = (): AutoStartState => {
   const s = app.getLoginItemSettings()
   return {
     openAtLogin: s.openAtLogin,
-    openAsHidden: hiddenLaunchSupported(process.platform) && s.openAsHidden === true,
+    /**
+     * OURS, not the OS's.
+     *
+     * `s.openAsHidden` is dead: Electron's own docs say it "does not work on
+     * macOS 13 and up", and on 15 it reads back false whatever was written —
+     * so reporting it here made the switch write a flag, read the discard and
+     * snap itself off. A control that could not be turned on.
+     */
+    openAsHidden: hiddenLaunchSupported(process.platform) && startupPrefs().openAsHidden,
     supported: true,
     hiddenSupported: hiddenLaunchSupported(process.platform)
   }
@@ -707,7 +732,12 @@ const autoStartState = (): AutoStartState => {
 ipcMain.handle('app:autoStart', (): AutoStartState => autoStartState())
 ipcMain.handle('app:setAutoStart', (_e, next: AutoStartSettings): AutoStartState => {
   if (!autoStartSupported(process.platform)) return autoStartState()
-  app.setLoginItemSettings(autoStartRequest(process.platform, next))
+  const wanted = autoStartRequest(process.platform, next)
+  // The OS is asked only for the part it still does reliably. Whether that
+  // launch puts a window on screen is decided by us, at startup, from a file
+  // main owns — see services/startupPrefs.ts.
+  app.setLoginItemSettings({ openAtLogin: wanted.openAtLogin })
+  setStartupPrefs({ openAsHidden: wanted.openAsHidden })
   return autoStartState()
 })
 
@@ -4752,7 +4782,15 @@ syncDriftWatches(loadData())
     }
   })
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow()
+      return
+    }
+    // A hidden launch leaves a real window that was never shown, and clicking
+    // the Dock icon is how somebody asks for it. Without this the app would
+    // sit in the Dock and refuse to open — which is worse than the setting not
+    // working at all.
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) mainWindow.show()
   })
 })
 

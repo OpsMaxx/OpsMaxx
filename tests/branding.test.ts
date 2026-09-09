@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 
 // The product and the repo were both renamed to OpsMaxx, and the old name is
 // retired everywhere — user-facing text, code, config, and URLs alike. The
@@ -41,6 +42,47 @@ describe('branding', () => {
     // there is nothing left that legitimately needs to contain it -- and an
     // exemption list is how a gate like this quietly rots.
     expect(hits.trim(), `retired product name found:\n${hits}`).toBe('')
+  })
+
+  /**
+   * The hole the check above had, and how it was found: on screen.
+   *
+   * The title bar rendered the old name as a two-tone wordmark: its first
+   * half in plain text, its second wrapped in a `<b>`, with the tag sitting
+   * between them. `git grep` looks for the contiguous string, so the most
+   * prominent piece of branding in the whole app — visible on every screen of
+   * a shipped release — was invisible to the gate that exists to catch exactly
+   * this.
+   *
+   * The example is described rather than written out, for the reason the
+   * needle above is assembled rather than typed: this file must not be a hit
+   * against its own check, and an allowlist whose one entry is the test doing
+   * the checking is how a gate quietly stops working.
+   *
+   * So markup is removed before looking. This cannot catch every possible
+   * split — nothing can, short of running the app — but a tag between the
+   * halves is how a DESIGNER writes a two-tone wordmark, which makes it the
+   * one split that keeps happening.
+   */
+  it('has no trace of it once markup between the halves is removed', () => {
+    const files = execFileSync('git', ['ls-files', '-z'], { encoding: 'utf8' })
+      .split('\0')
+      .filter((f) => /\.(tsx?|html|md|css|json|ya?ml)$/.test(f))
+
+    const hits: string[] = []
+    for (const file of files) {
+      let text: string
+      try {
+        text = readFileSync(file, 'utf8')
+      } catch {
+        continue // unreadable or binary; the git grep above covers those
+      }
+      // Tags out, then whitespace collapsed: a wordmark split across lines by
+      // a formatter is the same bug wearing different trousers.
+      const flattened = text.replace(/<[^>]*>/g, '').replace(/\s+/g, '')
+      if (flattened.toLowerCase().includes(NEEDLE)) hits.push(file)
+    }
+    expect(hits, `retired product name, split by markup, in:\n${hits.join('\n')}`).toEqual([])
   })
 
   it('has no trace of the retired product name in any tracked path', () => {

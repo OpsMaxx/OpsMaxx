@@ -884,7 +884,15 @@ CREATE TABLE IF NOT EXISTS job_output (
 // every table above it, it is an idempotent CREATE ... IF NOT EXISTS, so an
 // existing store gains it at the next open and keeps every row it had. The
 // number is bumped anyway, for the reason 2, 3 and 4 were.
-const SCHEMA_VERSION = '5'
+// 6 is the `host` -> `server` column rename, and it is the version this whole
+// scheme was built for -- recorded LATE, because the rename itself shipped
+// without a bump. A store from before it declares 5 and has `host` columns,
+// so the number could not be trusted to tell the two shapes apart and
+// migrateHostToServer reads the tables instead. The bump is still worth
+// making: it is what a later change gets to start from, and leaving it at 5
+// would mean the next person has no way to know whether 5 means before or
+// after the rename.
+const SCHEMA_VERSION = '6'
 
 /**
  * The first change that CANNOT be expressed as `CREATE TABLE IF NOT EXISTS`,
@@ -908,6 +916,110 @@ function migrateJobTarget(db: Db): void {
   if (cols.length === 0) return // the table is about to be created with the column
   if (cols.some((c) => String(c.name) === 'detached')) return
   db.exec('ALTER TABLE job_target ADD COLUMN detached TEXT')
+}
+
+/**
+ * `host` -> `server`, on the four tables that carried it.
+ *
+ * The rename shipped WITHOUT bumping SCHEMA_VERSION, which is what made it a
+ * silent failure rather than a handled upgrade. A store written before it
+ * declares schema 5 and holds `events.host`, so the version says "current"
+ * while the columns say otherwise; every statement below then references a
+ * column that is not there, openStore throws, `loadHistory` returns null, and
+ * history is disabled with no user-visible reason. What the user sees is jobs
+ * refusing to run and a fleet with no past — two symptoms that look unrelated
+ * to a column name.
+ *
+ * Found by migrating a real store forward from before the rename, which is the
+ * only way this reproduces: a store created by a current build has `server`
+ * already and never takes this path.
+ *
+ * Guarded by reading each table's own shape and NOT by the version, for
+ * exactly the reason migrateJobTarget gives — a version that disagrees with
+ * the columns is the case that has to work. Renaming a column is
+ * metadata-only in SQLite, so this costs nothing on a store with a year of
+ * samples in it, and SQLite rewrites the indexes that referenced the old name
+ * itself.
+ */
+function migrateHostToServer(db: Db): void {
+  const columnsOf = (table: string): string[] =>
+    (db.prepare(`PRAGMA table_info(${table})`).all() as { name?: unknown }[]).map((c) =>
+      String(c.name)
+    )
+
+  // ── 1. The four data tables: `host` -> `server` ──────────────────────────
+  // A literal list, so nothing user-controlled is ever interpolated here.
+  for (const table of ['events', 'facts', 'samples', 'samples_hourly']) {
+    const names = columnsOf(table)
+    // Absent: about to be created by SCHEMA with `server` already.
+    if (names.length === 0) continue
+    // Already migrated, or created new. Checked before `host` so a store that
+    // somehow has both is left alone rather than half-renamed.
+    if (names.includes('server')) continue
+    if (!names.includes('host')) continue
+    db.exec(`ALTER TABLE ${table} RENAME COLUMN host TO server`)
+  }
+
+  /**
+   * ── 2. The `hosts` table became `servers` ──────────────────────────────
+   *
+   * The other half, and the half that loses DATA rather than throwing. Only
+   * the table was renamed — its `host_key` column kept its name — and SCHEMA
+   * creates `servers` with `CREATE TABLE IF NOT EXISTS`, so an old store gains
+   * an EMPTY `servers` at the next open while every real row stays in `hosts`.
+   *
+   * Nothing errors. `SELECT id FROM servers WHERE host_key = ?` simply matches
+   * nothing, so every host reads as one this store has never seen: the fleet
+   * appears to have no past, and the samples and events keyed to those ids are
+   * orphaned rather than gone. That is worse than a crash, because it looks
+   * like an empty database instead of a broken one.
+   *
+   * Ids are carried across unchanged. They are foreign keys in all four tables
+   * renamed above, so letting AUTOINCREMENT mint new ones would silently
+   * re-point a year of samples at the wrong servers.
+   */
+  const tableExists = (name: string): boolean =>
+    (
+      db
+        .prepare("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get(name) as { n?: number }
+    )?.n === 1
+
+  if (!tableExists('hosts')) return
+  if (!columnsOf('hosts').includes('host_key')) return
+
+  /**
+   * A RENAME where possible, and it usually is.
+   *
+   * These migrations run BEFORE `db.exec(SCHEMA)` — migrateJobTarget's own
+   * comment says so, in as many words: an absent table is "about to be
+   * created". So on the upgrade path `servers` does not exist yet, and
+   * renaming the table is both cheaper than copying and exactly right: the
+   * rows keep their ids, which are foreign keys in all four tables renamed
+   * above. SCHEMA's `CREATE TABLE IF NOT EXISTS servers` is then a no-op.
+   */
+  if (!tableExists('servers')) {
+    db.exec('ALTER TABLE hosts RENAME TO servers')
+    return
+  }
+
+  /**
+   * Both tables present, which is the store that has ALREADY been opened by a
+   * build carrying the rename: `servers` was created empty beside the real
+   * rows, and the fleet has been reading the empty one.
+   *
+   * Copied with ids intact rather than renamed, because the empty table is in
+   * the way. Only into an empty one: rows there mean a current build wrote
+   * them, and copying over that would invent duplicates rather than recover
+   * anything.
+   */
+  const already = (db.prepare('SELECT count(*) AS n FROM servers').get() as { n?: number })?.n ?? 0
+  if (already === 0) {
+    db.exec('INSERT INTO servers (id, host_key) SELECT id, host_key FROM hosts')
+    // Dropped only once the rows are somewhere else, so an interrupted upgrade
+    // leaves them in one of the two tables rather than neither.
+    db.exec('DROP TABLE hosts')
+  }
 }
 
 /** B3's approval record, added to `job` the same way and for the same reasons.
@@ -1247,6 +1359,10 @@ function openStore(mod: SqliteModule, path: string): HistoryStore {
   // a table that already exists, so this is the only chance an existing
   // job_target has to gain the column. On a fresh store the table is not there
   // yet and this is a no-op.
+  // FIRST of the three: the other two read `job`/`job_target`, which the
+  // rename does not touch, but every statement prepared after this point
+  // expects `server` and would throw against a store that still says `host`.
+  migrateHostToServer(db)
   migrateJobTarget(db)
   migrateJob(db)
   db.exec(SCHEMA)

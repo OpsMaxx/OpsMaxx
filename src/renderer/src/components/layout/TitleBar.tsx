@@ -31,7 +31,7 @@ export function TitleBar(): React.JSX.Element {
           <Compass size={14} strokeWidth={2.4} />
         </div>
         <span className="brand-name">
-          Shell<b>Pilot</b>
+          Ops<b>Maxx</b>
         </span>
       </div>
 
