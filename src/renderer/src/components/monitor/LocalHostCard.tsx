@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Monitor, RefreshCw } from 'lucide-react'
+import { ChevronRight, Monitor, RefreshCw } from 'lucide-react'
 import { clsx } from '../../lib/format'
 import { useApp } from '../../store/app'
 import { LOCAL_TARGET } from '../../../../shared/execTarget'
@@ -38,6 +38,16 @@ export function LocalHostCard(): React.JSX.Element | null {
   // terminal shows, and a panel that disagrees with the terminal on the same
   // machine reads as wrong even when it is right.
   const [proto, setProto] = useState<ProtoFilter>('tcp')
+  /**
+   * The port table opens on demand.
+   *
+   * Closed by default because this card sits on the fleet overview, and
+   * twenty-odd rows of monospace about THIS machine took most of the viewport
+   * on a screen about the estate — the servers being monitored were below the
+   * fold behind a list of local sockets. The COUNT stays visible, which is the
+   * part that belongs on an overview; the rows are one click away.
+   */
+  const [portsOpen, setPortsOpen] = useState(false)
 
   useEffect(() => {
     if (!enabled) return
@@ -122,8 +132,28 @@ export function LocalHostCard(): React.JSX.Element | null {
             {portList !== null && portList.ports.length === 0 && (
               <span className="faint">Nothing is listening.</span>
             )}
+            {/* The summary, always. A count is an overview fact; the rows are
+                a detail, and the toggle is what separates them. */}
             {portList !== null && portList.ports.length > 0 && (
-              <div className="segment" style={{ marginBottom: 4 }}>
+              <button
+                className="btn sm ghost"
+                style={{ alignSelf: 'flex-start' }}
+                aria-expanded={portsOpen}
+                onClick={() => setPortsOpen((o) => !o)}
+              >
+                <ChevronRight
+                  size={13}
+                  style={{
+                    transform: portsOpen ? 'rotate(90deg)' : undefined,
+                    transition: 'transform 120ms ease'
+                  }}
+                />
+                {portList.ports.length} listening{' '}
+                {portList.ports.length === 1 ? 'socket' : 'sockets'}
+              </button>
+            )}
+            {portsOpen && portList !== null && portList.ports.length > 0 && (
+              <div className="segment" style={{ marginBottom: 4, marginTop: 4 }}>
                 {(['tcp', 'udp', 'all'] as const).map((f) => (
                   <button
                     key={f}
@@ -136,12 +166,14 @@ export function LocalHostCard(): React.JSX.Element | null {
                 ))}
               </div>
             )}
-            {portList !== null && filterByProto(portList.ports, proto).length === 0 && (
+            {portsOpen && portList !== null && filterByProto(portList.ports, proto).length === 0 && (
               <span className="faint">
                 Nothing is listening on {proto === 'all' ? 'this machine' : proto.toUpperCase()}.
               </span>
             )}
-            {portList && filterByProto(portList.ports, proto).map((p) => (
+            {portsOpen &&
+              portList &&
+              filterByProto(portList.ports, proto).map((p) => (
               <span
                 key={`${p.proto}-${p.address}-${p.port}`}
                 className="row"
@@ -161,7 +193,7 @@ export function LocalHostCard(): React.JSX.Element | null {
                 <span className="mono">{p.process ?? '—'}</span>
               </span>
             ))}
-            {portList?.partialOwners && (
+            {portsOpen && portList?.partialOwners && (
               <span className="faint" style={{ fontSize: 11 }}>
                 Some owning processes need elevated privileges to see. Every listening socket is
                 listed.

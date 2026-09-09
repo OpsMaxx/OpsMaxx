@@ -4432,3 +4432,106 @@ details[open] > .disclosure-head .chev {
 .check-now-said.warn {
   color: var(--warn);
 }
+
+/* ── The overview's KPI band ────────────────────────────────────────────────
+   The estate in one row, at the top. Auto-fit rather than a fixed column
+   count: the band gains and loses tiles with the fleet's state (attention
+   and unreachable appear only when real), so a hard-coded grid would leave
+   a hole on a healthy day. */
+.kpi-band {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--sp-3);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  min-width: 0;
+}
+/* State is carried by a left edge rather than a full tint: the number stays
+   as legible as every other tile, and one glance finds the row that is
+   wrong without the band turning into a traffic light. */
+.kpi.danger {
+  border-left: 2px solid var(--danger);
+}
+.kpi.warn {
+  border-left: 2px solid var(--warn);
+}
+.kpi-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.kpi-icon {
+  display: grid;
+  place-items: center;
+  color: var(--text-faint);
+  flex: none;
+}
+.kpi.danger .kpi-icon {
+  color: var(--danger);
+}
+.kpi.warn .kpi-icon {
+  color: var(--warn);
+}
+.kpi-label {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kpi-value {
+  /* --fs-display, not a bespoke 26px. The scale was deliberately merged down
+     from twelve ad-hoc steps, and a dashboard figure is exactly what the
+     display role names — weight and tabular digits carry the emphasis
+     instead of a size nobody else uses. */
+  font-size: var(--fs-display);
+  font-weight: 650;
+  line-height: 1.05;
+  color: var(--text);
+  /* Digits line up between tiles, so the row reads as a set rather than as
+     six independently typeset numbers. */
+  font-variant-numeric: tabular-nums;
+}
+.kpi-unit {
+  font-size: var(--fs-lg);
+  font-weight: 550;
+  color: var(--text-muted);
+  margin-left: 1px;
+}
+.kpi-sub {
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kpi-meter {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-sidebar);
+  overflow: hidden;
+  margin: 2px 0 1px;
+}
+.kpi-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--ok);
+}
+.kpi-meter-fill.warn {
+  background: var(--warn);
+}
+.kpi-meter-fill.danger {
+  background: var(--danger);
+}

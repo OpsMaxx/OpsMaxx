@@ -3,12 +3,8 @@ import {
   Activity,
   ChevronDown,
   ChevronRight,
-  Cpu,
   FolderPlus,
-  HardDrive,
-  MemoryStick,
   Plus,
-  Server as ServerIcon,
   Trash2,
   Wrench
 } from 'lucide-react'
@@ -17,12 +13,14 @@ import { EmptyState } from '../common/EmptyState'
 import { ServerMonitorCard } from './ServerMonitorCard'
 import { fleetTotals, useFleet } from '../../store/fleet'
 import { bridgeHas } from '../../lib/bridge'
-import { bytes, clsx } from '../../lib/format'
+import { clsx } from '../../lib/format'
 import type { MonitorGroup, Server } from '../../types'
 import { AlertsPanel } from './AlertsPanel'
 import { useAlerts } from '../../store/alerts'
 import { FleetHealth } from './FleetHealth'
+import { summariseFleetHealth } from '../../../../shared/hostHealth'
 import { LocalHostCard } from './LocalHostCard'
+import { FleetKpis } from './FleetKpis'
 import { HttpMonitorPanel } from './HttpMonitorPanel'
 import { NetToolsPanel } from './NetToolsPanel'
 import { FleetSearch } from './FleetSearch'
@@ -49,10 +47,6 @@ import { splitTabStrip } from './tabStrip'
 import { DockerPanel } from '../docker/DockerPanel'
 import { KubernetesPanel } from '../kubernetes/KubernetesPanel'
 import { ProcessesPanel } from '../processes/ProcessesPanel'
-
-function pct(used: number, total: number): number {
-  return total > 0 ? (used / total) * 100 : 0
-}
 
 /**
  * How many tabs may stand in the strip at once, Overview and Alerts included.
@@ -335,6 +329,9 @@ export function FleetMonitor(): React.JSX.Element {
   )
   const groups = useWorkspaceMonitorGroups()
   const hosts = useFleet((s) => s.hosts)
+  // For the overview's KPI band: an unreachable host is a state the band has
+  // to be able to show, and only the error map knows about it.
+  const errors = useFleet((s) => s.errors)
   const workspaceId = useApp((s) => s.activeWorkspaceId)
   const syncMonitorLayout = useApp((s) => s.syncMonitorLayout)
   const moveMonitorCard = useApp((s) => s.moveMonitorCard)
@@ -369,6 +366,18 @@ export function FleetMonitor(): React.JSX.Element {
   const totals = fleetTotals(
     servers.map((s) => s.id),
     hosts
+  )
+  /**
+   * The same summary FleetHealth renders, for the KPI band above it.
+   *
+   * Computed once here and passed down rather than derived twice: two callers
+   * of the same pure function cannot disagree, but they can drift out of sync
+   * on WHICH servers they were given, and a band saying "3 failed" above a
+   * list showing two is worse than either number alone.
+   */
+  const overviewHealth = useMemo(
+    () => summariseFleetHealth(servers, hosts, errors),
+    [servers, hosts, errors]
   )
 
   const commit = (): void => {
@@ -634,53 +643,21 @@ export function FleetMonitor(): React.JSX.Element {
       )}
 
       <div style={show('overview')}>
+        {/**
+         * Reading order, which is the whole of this change.
+         *
+         * The overview used to open with per-host failure blocks, then every
+         * port open on THIS machine, and only then the estate's numbers — so
+         * "is the fleet all right" sat below two screens of detail, and the
+         * capacity figures a person reads first were in the middle of the
+         * page. Now: the estate in one band, then what needs attention, then
+         * the fleet itself, then this machine last.
+         */}
+        {totals.reporting > 0 && (
+          <FleetKpis totals={totals} health={overviewHealth} serverCount={servers.length} />
+        )}
+
         <FleetHealth servers={servers} />
-
-        {/* This machine, beside the estate. Asked for on mount rather than
-            sampled — see the note in LocalHostCard on why it is deliberately
-            not an entry in the fleet inventory. */}
-        <LocalHostCard />
-
-      {totals.reporting > 0 && (
-        <div className="fleet-totals">
-          <div className="ft-item">
-            <ServerIcon size={14} className="faint" />
-            <div>
-              <div className="ft-value">{totals.reporting}</div>
-              <div className="ft-label">
-                {totals.reporting === servers.length
-                  ? 'servers reporting'
-                  : `of ${servers.length} servers reporting`}
-              </div>
-            </div>
-          </div>
-          <div className="ft-item">
-            <Cpu size={14} className="faint" />
-            <div>
-              <div className="ft-value">{totals.cores}</div>
-              <div className="ft-label">vCPU total</div>
-            </div>
-          </div>
-          <div className="ft-item">
-            <MemoryStick size={14} className="faint" />
-            <div>
-              <div className="ft-value">{bytes(totals.memTotal)}</div>
-              <div className="ft-label">
-                RAM · {bytes(totals.memUsed)} used ({pct(totals.memUsed, totals.memTotal).toFixed(0)}%)
-              </div>
-            </div>
-          </div>
-          <div className="ft-item">
-            <HardDrive size={14} className="faint" />
-            <div>
-              <div className="ft-value">{bytes(totals.diskTotal)}</div>
-              <div className="ft-label">
-                Disk · {bytes(totals.diskUsed)} used ({pct(totals.diskUsed, totals.diskTotal).toFixed(0)}%)
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div
         className="monitor-groups"
@@ -708,6 +685,17 @@ export function FleetMonitor(): React.JSX.Element {
           />
         ))}
         </div>
+
+        {/**
+         * This machine, LAST.
+         *
+         * It used to sit second, directly under fleet health, where its
+         * listening-ports table — twenty-odd rows of monospace — took most of
+         * the viewport and pushed the estate's own servers below the fold. It
+         * is local detail on a screen about the fleet, so it goes after the
+         * fleet, and its table opens on demand rather than on arrival.
+         */}
+        <LocalHostCard />
       </div>
     </div>
 
