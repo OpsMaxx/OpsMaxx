@@ -6,8 +6,6 @@ import type { RdpSettings } from '../../shared/rdp'
 export type {
   RdpDesktopSize,
   RdpErrorCode,
-  RdpRelayState,
-  RdpRelayStatus,
   RdpSettings,
   RdpTicket,
   RdpTicketResult
@@ -245,11 +243,15 @@ export interface ApiCollection {
   insecureTls: boolean
 }
 
-// 'desktop' belongs to RdpTab alone and is the only view it has. It is in this
-// union rather than beside it so that `TabBase.view`, `setTabView` and the tab
-// strip stay one field across every kind of tab; the viewbar filters on the
-// tab's kind, so it is never offered next to Terminal and Files.
-export type PanelView = 'terminal' | 'monitor' | 'files' | 'desktop'
+/**
+ * The views an SSH tab can show. Deliberately NOT the union of every tab's
+ * views: 'desktop' lives on RdpTab alone, and putting it here made
+ * `{ kind: 'ssh', view: 'desktop' }` a shape the compiler accepted and nothing
+ * rendered — which is exactly the blank tab `duplicateOf` produced. A tab's
+ * view is declared per kind, below, so the invalid combinations cannot be
+ * written rather than being caught by guards someone has to remember.
+ */
+export type PanelView = 'terminal' | 'monitor' | 'files'
 export type ActivityView =
   | 'connections'
   | 'databases'
@@ -260,13 +262,14 @@ export type ActivityView =
   | 'ai'
   | 'settings'
 
+// `view` is deliberately absent here and declared on each member instead. It
+// is the one field whose legal values depend entirely on the discriminant.
 interface TabBase {
   id: UUID
   // Tabs belong to the workspace they were opened in, so switching workspaces
   // does not show another workspace's sessions.
   workspaceId: UUID
   title: string
-  view: PanelView
 }
 
 // A tab backed by a saved server. `serverId` is non-null here on purpose: it
@@ -275,6 +278,7 @@ interface TabBase {
 // server.
 export interface SshTab extends TabBase {
   kind: 'ssh'
+  view: PanelView
   serverId: UUID
   /**
    * Set when this tab is a shell inside a container on that server, rather than
@@ -348,5 +352,14 @@ export interface RdpTab extends TabBase {
   serverId: UUID
   view: 'desktop'
 }
+
+/**
+ * Every view any tab can be showing.
+ *
+ * Derived rather than declared, so it cannot drift from the members, and used
+ * only where something genuinely handles all three kinds at once. Anything
+ * that means "a view an SSH tab has" wants `PanelView`.
+ */
+export type TabView = Tab['view']
 
 export type Tab = SshTab | LocalTab | RdpTab

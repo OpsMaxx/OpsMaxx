@@ -179,12 +179,7 @@ import {
 import type { VaultEntry } from '../shared/vault'
 import { wsLockIds, wsLockSet, wsLockVerify, wsLockRemove, wsLockDelete } from './services/wslock'
 import { tunnelStart, tunnelStop, tunnelList, tunnelDisposeAll } from './services/tunnel'
-import {
-  rdpMintTicket,
-  rdpRelayStatus,
-  setRdpStatusTarget,
-  stopRdpRelay
-} from './services/rdpRelay'
+import { rdpMintTicket, stopRdpRelay } from './services/rdpRelay'
 import type { RdpDesktopSize } from '../shared/rdp'
 import type { TunnelConfig, TunnelSshConfig } from '../shared/tunnel'
 import { knownHostList, knownHostForget } from './services/knownhosts'
@@ -3907,13 +3902,9 @@ ipcMain.handle('tunnel:list', () => tunnelList())
 // what is connected to — host, port, account, credential — is read in main from
 // the saved record, because the relay this ticket unlocks can reach anything
 // this machine can. See services/rdpRelay.ts.
-ipcMain.handle('rdp:ticket', (e, serverId: string, size?: RdpDesktopSize) => {
-  // Status goes to whichever window asked for the session, set here rather than
-  // at window creation so a reload cannot leave it pointing at a dead sender.
-  setRdpStatusTarget(e.sender)
-  return rdpMintTicket(serverId, size)
-})
-ipcMain.handle('rdp:status', () => rdpRelayStatus())
+ipcMain.handle('rdp:ticket', (_e, serverId: string, size?: RdpDesktopSize) =>
+  rdpMintTicket(serverId, size)
+)
 
 // ---- VPN ----
 // -------------------------------------------------------------- inspector

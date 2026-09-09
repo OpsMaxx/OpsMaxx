@@ -20,6 +20,52 @@ vi.mock('../src/main/services/credentialResolver', () => ({
   resolveSecrets: <T extends object>(cfg: T): T => {
     if (credentialError) throw credentialError
     return { ...cfg, password: storedPassword }
+  },
+  resolveChainSecrets: <T extends object>(cfg: T): T => ({ ...cfg, password: storedPassword })
+}))
+
+// A stand-in for the SSH chain. It records the config it was built from — which
+// is the thing worth asserting, because building the chain to the wrong end
+// (the server rather than the bastion) is the mistake that would require sshd
+// on the Windows box — and forwards by dialling the target directly, which is
+// what a real `forwardOut` produces from the bastion's point of view.
+interface ChainCall {
+  destination: string
+  hops: string[]
+  forwarded: Array<{ host: string; port: number }>
+}
+const chainCalls: ChainCall[] = []
+let chainEnded = 0
+vi.mock('../src/main/services/ssh', () => ({
+  openChain: async (cfg: {
+    host: string
+    port: number
+    hops?: Array<{ host: string }>
+  }) => {
+    const call: ChainCall = {
+      destination: `${cfg.host}:${cfg.port}`,
+      hops: (cfg.hops ?? []).map((h) => h.host),
+      forwarded: []
+    }
+    chainCalls.push(call)
+    const client = {
+      forwardOut: (
+        _sh: string,
+        _sp: number,
+        host: string,
+        port: number,
+        cb: (err: Error | undefined, channel: unknown) => void
+      ) => {
+        call.forwarded.push({ host, port })
+        const { connect } = require('node:net') as typeof import('node:net')
+        const socket = connect({ host, port }, () => cb(undefined, socket))
+        socket.once('error', (e: Error) => cb(e, undefined))
+      },
+      end: () => {
+        chainEnded++
+      }
+    }
+    return { clients: [client], client, close: undefined }
   }
 }))
 
@@ -156,6 +202,8 @@ function defineServer(id: string, port: number, extra: Record<string, unknown> =
 let fake: Awaited<ReturnType<typeof startFakeRdpServer>>
 
 beforeEach(async () => {
+  chainCalls.length = 0
+  chainEnded = 0
   cachedServers.clear()
   storedPassword = 'hunter2'
   credentialError = null
@@ -204,15 +252,15 @@ describe('minting a ticket', () => {
     expect(result.code).toBe('no-target')
   })
 
-  it('refuses a server behind a jump route rather than dialling directly', async () => {
-    // The direct dial would reach whatever answers on that address from HERE,
-    // which is not the machine the route describes.
+  it('mints for a server behind a jump route', async () => {
     defineServer('srv-3', fake.port, {
       route: [{ host: 'bastion', port: 22, username: 'jump' }]
     })
     const result = await rdpMintTicket('srv-3')
-    expect(result.ok).toBe(false)
-    expect(result.error).toMatch(/jump host/)
+    expect(result.ok).toBe(true)
+    // The destination is still the RDP host. Where the route goes is main's
+    // business at dial time and never something the client is told.
+    expect(result.ticket?.destination).toBe(`127.0.0.1:${fake.port}`)
   })
 
   it('reports a missing password as a credential problem, not a login failure', async () => {
@@ -337,12 +385,14 @@ describe('the RDCleanPath handshake', () => {
 })
 
 describe('relay lifecycle', () => {
-  it('is idle until a ticket is minted, and reports its port once listening', async () => {
-    expect(rdpRelayStatus().state).toBe('idle')
+  it('does not listen until a ticket is minted, then reports its port', async () => {
+    // On demand, not at launch: an always-listening local proxy is standing
+    // attack surface for a feature most sessions never use.
+    expect(rdpRelayStatus().listening).toBe(false)
     defineServer('srv-1', fake.port)
     await rdpMintTicket('srv-1')
     const status = rdpRelayStatus()
-    expect(status.state).toBe('listening')
+    expect(status.listening).toBe(true)
     expect(status.port).toBeGreaterThan(0)
   })
 
@@ -358,7 +408,7 @@ describe('relay lifecycle', () => {
     defineServer('srv-1', fake.port)
     const { ticket } = await rdpMintTicket('srv-1')
     await stopRdpRelay()
-    expect(rdpRelayStatus().state).toBe('idle')
+    expect(rdpRelayStatus().listening).toBe(false)
 
     const ws = new WebSocket(`${ticket!.proxyUrl}?token=${ticket!.token}`)
     const failed = await new Promise<boolean>((resolve) => {
@@ -369,30 +419,81 @@ describe('relay lifecycle', () => {
   })
 })
 
-describe('status reporting', () => {
-  it('does not stay stuck on error after a later session succeeds', async () => {
-    defineServer('srv-1', fake.port)
+describe('reaching a host through a jump route', () => {
+  it('ends the SSH chain at the last hop and forwards to the RDP host from there', async () => {
+    // The bug this shape avoids: building the chain all the way to the server
+    // would need sshd on the Windows box, which is the one machine in the path
+    // least likely to have it.
+    defineServer('srv-jump', fake.port, {
+      route: [
+        { host: 'edge', port: 22, username: 'jump' },
+        { host: 'bastion', port: 2222, username: 'jump' }
+      ]
+    })
+    const { ticket } = await rdpMintTicket('srv-jump')
+    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    await new Promise((r) => ws.once('open', r))
+    ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
 
-    // Fail one handshake: right socket, wrong token.
-    const bad = await rdpMintTicket('srv-1')
-    const w1 = connectRelay(bad.ticket!.proxyUrl, bad.ticket!.token)
-    await new Promise((r) => w1.once('open', r))
-    w1.send(buildRequestPdu(bad.ticket!.destination, 'wrong', X224_REQUEST))
-    await firstReply(w1)
-    w1.close()
-    expect(rdpRelayStatus().error).toBeDefined()
+    const reply = await firstReply(ws)
+    expect(reply.data).toBeDefined()
 
-    // Then succeed. Reading `lastError` first made the state sticky: every
-    // later status said 'error' while a desktop was open and drawing.
-    const good = await rdpMintTicket('srv-1')
-    const w2 = connectRelay(good.ticket!.proxyUrl, good.ticket!.token)
-    await new Promise((r) => w2.once('open', r))
-    w2.send(buildRequestPdu(good.ticket!.destination, good.ticket!.token, X224_REQUEST))
-    await firstReply(w2)
+    expect(chainCalls).toHaveLength(1)
+    // Destination is the LAST hop; everything before it is an intermediate.
+    expect(chainCalls[0].destination).toBe('bastion:2222')
+    expect(chainCalls[0].hops).toEqual(['edge'])
+    // And the forward from there names the RDP host, not the bastion.
+    expect(chainCalls[0].forwarded).toEqual([{ host: '127.0.0.1', port: fake.port }])
 
-    expect(rdpRelayStatus().state).toBe('connected')
-    expect(rdpRelayStatus().error).toBeUndefined()
-    w2.close()
+    // The session runs through the channel like any other transport.
+    expect(fake.received[0]?.equals(X224_REQUEST)).toBe(true)
+    ws.send(Buffer.from('through-the-bastion'))
+    expect((await fake.afterTls).toString()).toBe('through-the-bastion')
+    ws.close()
+  })
+
+  it('uses a single hop as the chain destination, with no intermediates', async () => {
+    defineServer('srv-one', fake.port, {
+      route: [{ host: 'bastion', port: 22, username: 'jump' }]
+    })
+    const { ticket } = await rdpMintTicket('srv-one')
+    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    await new Promise((r) => ws.once('open', r))
+    ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
+    await firstReply(ws)
+
+    expect(chainCalls[0].destination).toBe('bastion:22')
+    expect(chainCalls[0].hops).toEqual([])
+    ws.close()
+  })
+
+  it('tears the chain down when the desktop closes', async () => {
+    // A bastion connection left open per closed desktop is how a fleet ends up
+    // holding dozens of authenticated sessions nobody is using.
+    defineServer('srv-jump', fake.port, {
+      route: [{ host: 'bastion', port: 22, username: 'jump' }]
+    })
+    const { ticket } = await rdpMintTicket('srv-jump')
+    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    await new Promise((r) => ws.once('open', r))
+    ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
+    await firstReply(ws)
+    expect(chainEnded).toBe(0)
+
+    ws.close()
+    await new Promise((r) => setTimeout(r, 120))
+    expect(chainEnded).toBeGreaterThan(0)
+  })
+
+  it('does not open a chain at all for a server with no route', async () => {
+    defineServer('srv-direct', fake.port)
+    const { ticket } = await rdpMintTicket('srv-direct')
+    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    await new Promise((r) => ws.once('open', r))
+    ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
+    await firstReply(ws)
+    expect(chainCalls).toHaveLength(0)
+    ws.close()
   })
 })
 

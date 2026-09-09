@@ -572,7 +572,7 @@ export function AddServerModal(): React.JSX.Element {
       <VpnTransportSelect
         value={vpnProfileId}
         onChange={setVpnProfileId}
-        hint="The VPN is the outer transport: any jump hosts below are dialled through it, and so is everything that rides this server — terminals, SFTP, metrics and its SSH tunnels."
+        hint="The VPN is the outer transport: any jump hosts below are dialled through it, and so is everything that rides this server — terminals, SFTP, metrics, remote desktops and its SSH tunnels."
       />
 
       <RouteHops hops={hops} onChange={setHops} excludeServerId={editId} />

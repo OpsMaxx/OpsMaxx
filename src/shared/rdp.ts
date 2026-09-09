@@ -96,15 +96,3 @@ export interface RdpTicketResult {
   code?: RdpErrorCode
   error?: string
 }
-
-/** What the relay is doing, for the status line under a session. */
-export type RdpRelayState = 'idle' | 'listening' | 'connected' | 'closed' | 'error'
-
-export interface RdpRelayStatus {
-  state: RdpRelayState
-  /** Sessions currently relaying. */
-  sessions: number
-  /** Loopback port, once listening. */
-  port?: number
-  error?: string
-}

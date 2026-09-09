@@ -1,18 +1,14 @@
 import { createServer, type Server as HttpServer } from 'node:http'
 import { connect as netConnect } from 'node:net'
+import type { Duplex } from 'node:stream'
 import { connect as tlsConnect, type TLSSocket, type DetailedPeerCertificate } from 'node:tls'
 import { randomUUID } from 'node:crypto'
-import type { WebContents } from 'electron'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { buildError, buildResponse, parseDestination, parseRequest } from './rdcleanpath'
-import { getCachedServer } from './mcpDataCache'
-import { resolveSecrets } from './credentialResolver'
-import type {
-  RdpRelayStatus,
-  RdpTicket,
-  RdpTicketResult,
-  RdpDesktopSize
-} from '../../shared/rdp'
+import { getCachedServer, type CachedServer } from './mcpDataCache'
+import { resolveChainSecrets, resolveSecrets } from './credentialResolver'
+import { openChain } from './ssh'
+import type { RdpTicket, RdpTicketResult, RdpDesktopSize } from '../../shared/rdp'
 import type { SshHop } from '../../shared/ssh'
 
 // The main-process half of an RDP session.
@@ -40,6 +36,7 @@ import type { SshHop } from '../../shared/ssh'
 
 /** A minted, unspent ticket. Deleted on use and on expiry, whichever is first. */
 interface Ticket {
+  serverId: string
   destination: string
   expires: NodeJS.Timeout
 }
@@ -66,29 +63,20 @@ let port: number | null = null
 let sessions = 0
 // Sockets past the token check but not yet relaying. See inUse().
 let connecting = 0
-let lastError: string | undefined
 let idleTimer: NodeJS.Timeout | null = null
-let statusTarget: WebContents | null = null
 
-function emitStatus(): void {
-  if (!statusTarget || statusTarget.isDestroyed()) return
-  statusTarget.send('rdp:status', rdpRelayStatus())
-}
-
-export function rdpRelayStatus(): RdpRelayStatus {
-  // Liveness first, and `lastError` only when nothing is actually running.
-  // Reading the error first made the state sticky: one refused handshake — a
-  // wrong password, a host that was asleep — left every later status saying
-  // 'error' while a desktop was open and drawing, because nothing but a relay
-  // restart ever cleared it.
-  const state: RdpRelayStatus['state'] =
-    sessions > 0 ? 'connected' : http ? 'listening' : lastError ? 'error' : 'idle'
-  return { state, sessions, port: port ?? undefined, error: lastError }
-}
-
-/** Where relay status is pushed. One window, like every other status channel. */
-export function setRdpStatusTarget(wc: WebContents | null): void {
-  statusTarget = wc
+/**
+ * The relay's own view of itself.
+ *
+ * Not an IPC contract and not a UI feed: this used to be pushed to the renderer
+ * over an `rdp:status` channel that nothing ever subscribed to. What is left is
+ * what the lifecycle tests assert against — whether a listener is up, on which
+ * port, and how many sessions are on it — so the deletion took the sticky
+ * `lastError` field with it, since a failure nobody displays is a failure the
+ * session itself already reported.
+ */
+export function rdpRelayStatus(): { listening: boolean; sessions: number; port?: number } {
+  return { listening: http !== null, sessions, port: port ?? undefined }
 }
 
 /**
@@ -145,11 +133,9 @@ function ensureRelay(): Promise<number> {
     sockets.on('connection', handleConnection)
 
     server.once('error', (err) => {
-      lastError = err.message
       http = null
       wss = null
       port = null
-      emitStatus()
       reject(err)
     })
 
@@ -165,8 +151,6 @@ function ensureRelay(): Promise<number> {
       http = server
       wss = sockets
       port = address.port
-      lastError = undefined
-      emitStatus()
       scheduleIdleShutdown()
       resolve(address.port)
     })
@@ -197,7 +181,6 @@ export async function stopRdpRelay(): Promise<void> {
     if (!server) return resolve()
     server.close(() => resolve())
   })
-  emitStatus()
 }
 
 /**
@@ -218,19 +201,6 @@ export async function rdpMintTicket(
   }
   if (!server.rdp) {
     return { ok: false, code: 'no-target', error: `${server.name} is not configured for RDP.` }
-  }
-
-  // A jump-host route means the target is not reachable from here directly,
-  // and this relay dials directly. Saying so is better than dialling a host
-  // that resolves to something else on this network. (A VPN profile is not in
-  // this list: a VPN moves the OS routing table, so a direct dial is exactly
-  // what it is for.)
-  if (server.route.length > 0) {
-    return {
-      ok: false,
-      code: 'no-target',
-      error: `${server.name} is reached through a jump host, and RDP over a jump host is not supported yet.`
-    }
   }
 
   // Resolved through the same path as an interactive SSH session, so an RDP
@@ -270,7 +240,7 @@ export async function rdpMintTicket(
     scheduleIdleShutdown()
   }, TICKET_TTL_MS)
   expires.unref()
-  tickets.set(token, { destination, expires })
+  tickets.set(token, { serverId: server.id, destination, expires })
 
   const ticket: RdpTicket = {
     token,
@@ -329,7 +299,7 @@ function handleConnection(ws: WebSocket, req: { url?: string }): void {
 
   ws.once('message', (data: Buffer) => {
     clearTimeout(firstMessage)
-    void openSession(ws, token, ticket.destination, Buffer.from(data)).finally(uncount)
+    void openSession(ws, token, ticket, Buffer.from(data)).finally(uncount)
   })
   ws.on('close', () => {
     clearTimeout(firstMessage)
@@ -343,9 +313,10 @@ function handleConnection(ws: WebSocket, req: { url?: string }): void {
 async function openSession(
   ws: WebSocket,
   token: string,
-  allowedDestination: string,
+  ticket: Ticket,
   first: Buffer
 ): Promise<void> {
+  let dialled: Dialled | null = null
   let tlsSocket: TLSSocket | null = null
   try {
     const request = parseRequest(first)
@@ -361,19 +332,24 @@ async function openSession(
     // wrong is a feature that fails to connect for anyone whose hostname the
     // client happens to normalise. Host casing is ignored because DNS ignores
     // it; everything else must match exactly.
-    const wanted = parseDestination(allowedDestination)
+    const wanted = parseDestination(ticket.destination)
     const asked = parseDestination(request.destination)
     if (asked.host.toLowerCase() !== wanted.host.toLowerCase() || asked.port !== wanted.port) {
       throw new Error('destination does not match the ticket')
     }
+    // Re-read rather than captured at mint time: a route the user edited in
+    // the seconds since should be the route this session takes.
+    const server = getCachedServer(ticket.serverId)
+    if (!server) throw new Error('that server no longer exists')
+
     const { host, port: target } = wanted
-    const handshake = await performHandshake(host, target, request.x224)
+    dialled = await dialTarget(server, host, target)
+    const handshake = await performHandshake(dialled.stream, request.x224)
     tlsSocket = handshake.tlsSocket
 
     ws.send(buildResponse(request.destination, handshake.x224Response, handshake.certChain))
-    relay(ws, handshake.tlsSocket)
+    relay(ws, handshake.tlsSocket, dialled.close)
   } catch (err) {
-    lastError = (err as Error).message
     try {
       // An error PDU rather than a bare close, so the client reports why.
       ws.send(buildError(1, 502))
@@ -381,8 +357,10 @@ async function openSession(
       /* the peer may already be gone; the close below is what matters */
     }
     tlsSocket?.destroy()
+    // The transport under it too: a failed handshake through a bastion would
+    // otherwise leave the whole SSH chain open with nothing on it.
+    dialled?.close()
     ws.close()
-    emitStatus()
     scheduleIdleShutdown()
   }
 }
@@ -393,52 +371,202 @@ interface Handshake {
   tlsSocket: TLSSocket
 }
 
-// TCP connect, replay the client's X.224 Connection Request, read the Confirm,
-// then upgrade to TLS and capture the chain. This is the entire reason the
-// relay is a protocol participant rather than a pipe.
-function performHandshake(host: string, target: number, x224Request: Buffer): Promise<Handshake> {
-  return new Promise<Handshake>((resolve, reject) => {
-    const tcp = netConnect({ host, port: target }, () => {
-      tcp.write(x224Request)
-    })
+/**
+ * A transport to the RDP host, and the way to tear down whatever carries it.
+ *
+ * `stream` is a `net.Socket` for a direct dial and an ssh2 channel for a
+ * jump-host one. Everything downstream — the X.224 exchange, the TLS handshake,
+ * the relay — only ever treats it as a Duplex, which is why the two cases do
+ * not fork past this point.
+ */
+interface Dialled {
+  stream: Duplex
+  /** Closes the SSH chain or VPN forward beneath the stream. A no-op for a direct dial. */
+  close: () => void
+}
 
+/**
+ * Reach `host:port` the way this server is reachable.
+ *
+ * Three cases, in the order they are tried:
+ *
+ *  - **Through a jump route.** The SSH chain is built to end at the LAST HOP,
+ *    not at the server: the target is a Windows box that usually runs no sshd
+ *    at all, so the connection is forwarded to it *from* the bastion. Building
+ *    the chain all the way to the server would require SSH on the very machine
+ *    the user is opening a desktop on.
+ *  - **Through a VPN with no route.** A userspace WireGuard profile carries
+ *    traffic through this app's own netd rather than the OS routing table, so a
+ *    direct dial would miss the tunnel entirely and connect to whatever else
+ *    answers on that address. `vpnOpenForward` gives a loopback port that is
+ *    genuinely inside it. System mode has a real route and reports
+ *    `unsupported`, which is the signal to dial directly after all.
+ *  - **Directly.**
+ */
+async function dialTarget(server: CachedServer, host: string, port: number): Promise<Dialled> {
+  if (server.route.length > 0) return dialThroughRoute(server, host, port)
+  if (server.vpnProfileId) return dialThroughVpn(server, host, port)
+  return dialDirect(host, port)
+}
+
+function dialDirect(host: string, port: number): Promise<Dialled> {
+  return new Promise<Dialled>((resolve, reject) => {
+    const socket = netConnect({ host, port }, () =>
+      resolve({ stream: socket, close: () => socket.destroy() })
+    )
+    socket.once('error', (err) =>
+      reject(new Error(`could not reach ${host}:${port}: ${err.message}`))
+    )
+  })
+}
+
+async function dialThroughRoute(
+  server: CachedServer,
+  host: string,
+  port: number
+): Promise<Dialled> {
+  const route = server.route
+  const last = route[route.length - 1]
+  // `openChain` connects `hops` in order and then `cfg` itself, so naming the
+  // last hop as the destination is what stops the chain at the bastion.
+  // Credentials for every hop are resolved through the same path an
+  // interactive session uses; a hop backed by a saved server authenticates by
+  // its own stored credential.
+  const cfg = resolveChainSecrets({
+    ...last,
+    hops: route.slice(0, -1),
+    // Carried so the chain's FIRST hop is itself reached through the VPN when
+    // the server has one. The RDP host beyond the bastion needs nothing more:
+    // it is reached from inside the chain.
+    vpnProfileId: server.vpnProfileId ?? undefined,
+    serverId: last.serverId,
+    serverName: server.name
+  })
+
+  const chain = await openChain(cfg)
+  const closeChain = (): void => {
+    chain.close?.()
+    // Innermost first: ending an outer client tears down the channel the inner
+    // one rides, and ssh2 logs that as an error rather than a clean close.
+    for (const client of [...chain.clients].reverse()) client.end()
+  }
+
+  try {
+    const stream = await new Promise<Duplex>((resolve, reject) => {
+      chain.client.forwardOut('127.0.0.1', 0, host, port, (err, channel) =>
+        err
+          ? reject(
+              new Error(
+                `${last.host} could not reach ${host}:${port}: ${err.message}`
+              )
+            )
+          : resolve(channel as unknown as Duplex)
+      )
+    })
+    return { stream, close: closeChain }
+  } catch (err) {
+    closeChain()
+    throw err
+  }
+}
+
+async function dialThroughVpn(
+  server: CachedServer,
+  host: string,
+  port: number
+): Promise<Dialled> {
+  const { vpnOpenForward, vpnStart } = await import('./vpn/manager')
+  const vpnId = server.vpnProfileId as string
+
+  const started = await vpnStart(vpnId)
+  if (!started.ok) {
+    // The VPN's own message, not a connect timeout twenty seconds later.
+    throw new Error(started.error ?? 'The VPN for this server could not be started.')
+  }
+
+  let forward: { port: number; close: () => void } | null = null
+  try {
+    forward = await vpnOpenForward(vpnId, host, port, {
+      kind: 'server',
+      id: server.id,
+      name: server.name
+    })
+  } catch (err) {
+    // System mode routes for real and has no forward to open.
+    if ((err as { code?: string }).code !== 'unsupported') throw err
+  }
+
+  if (!forward) {
+    const { registerVpnConsumer } = await import('./vpn/dependencies')
+    const release = registerVpnConsumer(vpnId, { kind: 'server', id: server.id, name: server.name })
+    try {
+      const direct = await dialDirect(host, port)
+      return { stream: direct.stream, close: () => (direct.close(), release()) }
+    } catch (err) {
+      release()
+      throw err
+    }
+  }
+
+  const local = forward
+  try {
+    const direct = await dialDirect('127.0.0.1', local.port)
+    return { stream: direct.stream, close: () => (direct.close(), local.close()) }
+  } catch (err) {
+    local.close()
+    throw err
+  }
+}
+
+// Replay the client's X.224 Connection Request on the transport, read the
+// Confirm, then upgrade to TLS and capture the chain. This is the entire reason
+// the relay is a protocol participant rather than a pipe.
+//
+// Takes a Duplex rather than a socket so that a direct dial and a jump-host
+// channel run the identical code: an ssh2 channel has no `setTimeout` and no
+// `remoteAddress`, so anything socket-shaped here would fork the two paths at
+// exactly the point where they must not differ.
+function performHandshake(stream: Duplex, x224Request: Buffer): Promise<Handshake> {
+  return new Promise<Handshake>((resolve, reject) => {
     let settled = false
     const fail = (err: Error): void => {
       if (settled) return
       settled = true
-      tcp.destroy()
+      clearTimeout(timer)
+      stream.destroy()
       reject(err)
     }
+    // A plain timer, not `socket.setTimeout`: see above.
+    const timer = setTimeout(() => fail(new Error('RDP handshake timed out')), HANDSHAKE_TIMEOUT_MS)
 
-    tcp.setTimeout(HANDSHAKE_TIMEOUT_MS, () => fail(new Error('RDP handshake timed out')))
-    tcp.once('error', (err) => fail(new Error(`could not reach ${host}:${target}: ${err.message}`)))
-
-    tcp.once('data', (x224Response: Buffer) => {
+    stream.once('error', (err: Error) => fail(new Error(`RDP handshake failed: ${err.message}`)))
+    stream.once('data', (x224Response: Buffer) => {
       if (x224Response.length === 0) {
         fail(new Error('the server closed the connection before the X.224 confirm'))
         return
       }
-      // Every listener has to go before the socket becomes TLS's, or the two
+      // Every listener has to go before the stream becomes TLS's, or the two
       // layers both consume from it.
-      tcp.removeAllListeners('error')
-      tcp.removeAllListeners('data')
-      tcp.setTimeout(0)
+      stream.removeAllListeners('error')
+      stream.removeAllListeners('data')
 
       // `rejectUnauthorized` stays false and that is deliberate: RDP servers
-      // are self-signed by default, and the trust decision is the client's —
+      // are self-signed by default, and the trust decision is the client's --
       // which is why the chain is handed back in the response rather than
       // judged here. Judging it here would also be judging it in the wrong
       // place, since CredSSP binds to the certificate the *client* saw.
+      //
+      // No `servername`: it is only ever an SNI hint, the RDP host is commonly
+      // named by address, and an IP there is invalid per RFC 6066 and warned
+      // about by Node. Nothing verifies the name, so sending none is honest.
       const socket = tlsConnect(
-        {
-          socket: tcp,
-          // An IP is not a valid SNI name (RFC 6066) and Node warns about it.
-          servername: isIpLiteral(host) ? undefined : host,
-          rejectUnauthorized: false
-        },
+        // `tls.connect` types the option as a net.Socket, but it wants a
+        // Duplex and documents it as one; an ssh2 channel is exactly that.
+        { socket: stream as unknown as import('node:net').Socket, rejectUnauthorized: false },
         () => {
           if (settled) return
           settled = true
+          clearTimeout(timer)
           resolve({
             x224Response: Buffer.from(x224Response),
             certChain: collectChain(socket.getPeerCertificate(true)),
@@ -448,13 +576,11 @@ function performHandshake(host: string, target: number, x224Request: Buffer): Pr
       )
       socket.once('error', (err) => fail(new Error(`TLS handshake failed: ${err.message}`)))
     })
+
+    stream.write(x224Request)
   })
 }
 
-function isIpLiteral(host: string): boolean {
-  if (host.includes(':')) return true
-  return /^\d{1,3}(\.\d{1,3}){3}$/.test(host)
-}
 
 // `getPeerCertificate(true)` returns the detailed shape, which is the one that
 // carries `issuerCertificate` -- the plain PeerCertificate does not, and the
@@ -477,12 +603,9 @@ function collectChain(peerCert: DetailedPeerCertificate | null): Buffer[] {
   return chain
 }
 
-function relay(ws: WebSocket, tlsSocket: TLSSocket): void {
+function relay(ws: WebSocket, tlsSocket: TLSSocket, closeTransport: () => void): void {
   sessions++
-  // A session that reached this point supersedes whatever went wrong before it.
-  lastError = undefined
   if (idleTimer) clearTimeout(idleTimer)
-  emitStatus()
 
   // Both directions apply backpressure. A desktop under load produces frames
   // faster than a busy renderer drains them, and `ws.send` buffers without
@@ -520,17 +643,16 @@ function relay(ws: WebSocket, tlsSocket: TLSSocket): void {
     closed = true
     sessions = Math.max(0, sessions - 1)
     if (!tlsSocket.destroyed) tlsSocket.destroy()
+    // The SSH chain or VPN forward beneath the TLS session. Destroying only the
+    // TLS socket would leave a bastion connection open per closed desktop.
+    closeTransport()
     if (ws.readyState === ws.OPEN) ws.close()
-    emitStatus()
     scheduleIdleShutdown()
   }
 
   tlsSocket.on('end', close)
   tlsSocket.on('close', close)
-  tlsSocket.on('error', (err) => {
-    lastError = err.message
-    close()
-  })
+  tlsSocket.on('error', close)
   ws.on('close', close)
   ws.on('error', close)
 }

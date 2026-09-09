@@ -673,8 +673,7 @@ function duplicateOf(tabs: Tab[], servers: Server[], src: Tab, id: UUID): Tab {
     workspaceId: src.workspaceId,
     serverId: src.serverId,
     title: sessionTitle(tabs, sameTarget(src), base),
-    // 'desktop' can only arrive here from an RDP tab, which returned above.
-    view: src.view === 'desktop' ? 'terminal' : src.view
+    view: src.view
   }
 }
 
@@ -1165,16 +1164,15 @@ export const useApp = create<AppState>((set, get) => ({
   // not only hidden in the viewbar: LocalTab.view has no 'monitor' member, and
   // the monitor views take a non-optional Server, so a state write that got
   // past the UI would put a tab in a shape nothing can render.
-  // An RDP tab is refused outright, for the same reason and one step further:
-  // 'desktop' is its only view, and every other member of PanelView names a
-  // pane it does not have. Symmetrically, 'desktop' is refused on every other
-  // kind — it is in the shared union so that `view` stays one field, not so
-  // that an SSH tab can be switched to a desktop it has no session for.
+  // An RDP tab is refused outright: 'desktop' is its only view, and every
+  // member of PanelView names a pane it does not have. The reverse — sending an
+  // SSH tab to 'desktop' — needs no guard at all now, because `PanelView` does
+  // not contain it and the argument cannot be written.
   setTabView: (id, view) =>
     set((s) => ({
       tabs: s.tabs.map((t) => {
         if (t.id !== id) return t
-        if (t.kind === 'rdp' || view === 'desktop') return t
+        if (t.kind === 'rdp') return t
         if (t.kind === 'ssh') return { ...t, view }
         return view === 'monitor' ? t : { ...t, view }
       })

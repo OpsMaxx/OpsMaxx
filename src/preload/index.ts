@@ -144,7 +144,7 @@ import type { VaultEntry, VaultListResult, VaultResult, VaultStatus } from '../s
 import type { KernelStatus } from '../shared/kernelStatus'
 import type { StorageLayout } from '../shared/storageLayout'
 import type { NetworkInfo } from '../shared/network'
-import type { RdpDesktopSize, RdpRelayStatus, RdpTicketResult } from '../shared/rdp'
+import type { RdpDesktopSize, RdpTicketResult } from '../shared/rdp'
 import type { TunnelConfig, TunnelResult, TunnelSshConfig, TunnelStatus } from '../shared/tunnel'
 import type {
   FrpTokenResult,
@@ -1071,13 +1071,7 @@ const api = {
      * to happen. What the renderer cannot do is choose whose password it is.
      */
     ticket: (serverId: string, size?: RdpDesktopSize): Promise<RdpTicketResult> =>
-      ipcRenderer.invoke('rdp:ticket', serverId, size),
-    status: (): Promise<RdpRelayStatus> => ipcRenderer.invoke('rdp:status'),
-    onStatus: (cb: (s: RdpRelayStatus) => void): (() => void) => {
-      const h = (_e: IpcRendererEvent, s: RdpRelayStatus): void => cb(s)
-      ipcRenderer.on('rdp:status', h)
-      return () => ipcRenderer.removeListener('rdp:status', h)
-    }
+      ipcRenderer.invoke('rdp:ticket', serverId, size)
   },
   tunnel: {
     start: (cfg: TunnelConfig, ssh: TunnelSshConfig): Promise<TunnelResult> =>

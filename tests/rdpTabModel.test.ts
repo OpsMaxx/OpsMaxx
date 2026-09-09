@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useApp } from '../src/renderer/src/store/app'
-import type { Server } from '../src/renderer/src/types'
+import type { PanelView, Server } from '../src/renderer/src/types'
 
 // An RDP tab is a third member of the tab union, and every one of these tests
 // exists because adding it silently broke something that already worked, or
@@ -123,13 +123,22 @@ describe('views and splits on a remote desktop', () => {
     expect(useApp.getState().tabs[0].view).toBe('desktop')
   })
 
-  it('does not let another kind of tab be switched to the desktop view', () => {
-    // Symmetric to the above: 'desktop' is in the shared union so `view` stays
-    // one field, not so an SSH tab can be sent to a session it does not have.
-    useApp.getState().newSession('srv-win')
-    const [tab] = useApp.getState().tabs
-    useApp.getState().setTabView(tab.id, 'desktop')
-    expect(useApp.getState().tabs[0].view).toBe('terminal')
+  it('keeps the desktop view out of PanelView entirely', () => {
+    // There is no runtime guard stopping an SSH tab reaching 'desktop', and
+    // there does not need to be: `setTabView` takes a `PanelView`, 'desktop' is
+    // not one, and every caller — the viewbar, the hotkeys, the palette — is
+    // typed. The type IS the protection, which is the whole point of narrowing
+    // it back; a guard would have to be written against a value the compiler
+    // already refuses, and TypeScript rejects that comparison as unreachable.
+    //
+    // Both directions are locked here. The annotation stops compiling if
+    // PanelView ever loses a member; the directive below becomes unused — and
+    // fails the typecheck — if PanelView ever regains 'desktop', which is how
+    // the blank-tab duplicate got in the first time.
+    const all: PanelView[] = ['terminal', 'monitor', 'files']
+    // @ts-expect-error 'desktop' is RdpTab's view alone, never a PanelView
+    const desktop: PanelView = 'desktop'
+    expect(all).not.toContain(desktop)
   })
 
   it('cannot be split', () => {

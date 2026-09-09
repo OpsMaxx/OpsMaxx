@@ -34,7 +34,7 @@ import { MonitorView } from './MonitorView'
 import { MonitorStrip } from './MonitorStrip'
 import { SftpView } from './SftpView'
 import { RdpView } from '../rdp/RdpView'
-import type { PanelView, Server, Tab } from '../../types'
+import type { PanelView, Server, Tab, TabView } from '../../types'
 
 const VIEWS: { id: PanelView; label: string; icon: React.ReactNode }[] = [
   { id: 'terminal', label: 'Terminal', icon: <TerminalIcon size={14} /> },
@@ -62,7 +62,10 @@ function TabPane({
   // gated on visibility rather than on being rendered.
   active: boolean
 }): React.JSX.Element {
-  const [visited, setVisited] = useState<Set<PanelView>>(() => new Set([tab.view]))
+  // `TabView`, not `PanelView`: this runs for every kind of tab, including the
+  // RDP one whose only view is 'desktop'. The pane styles below stay on
+  // `PanelView`, because by the time they are called the tab is an SSH one.
+  const [visited, setVisited] = useState<Set<TabView>>(() => new Set([tab.view]))
   useEffect(() => {
     setVisited((v) => (v.has(tab.view) ? v : new Set(v).add(tab.view)))
   }, [tab.view])
