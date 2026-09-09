@@ -620,6 +620,10 @@ button {
   position: relative;
   display: flex;
   flex: none;
+  /* Separated from the new-tab button beside it. Two bare glyph buttons flush
+     against each other read as one control with two halves, and these do
+     different things — one lists tabs, the other makes one. */
+  border-left: 1px solid var(--border-subtle);
 }
 .tab-overflow-scrim {
   position: fixed;
@@ -4637,6 +4641,10 @@ details[open] > .disclosure-head .chev {
    and the tab-kind glyphs instead of being a one-off font-size. */
 .db-kind {
   flex: none;
+  /* A floor, so PG and MDB start their titles at the same x. Without it the
+     names step in and out across the strip and the row stops reading as a
+     column of tabs. */
+  min-width: 26px;
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   font-weight: 700;
