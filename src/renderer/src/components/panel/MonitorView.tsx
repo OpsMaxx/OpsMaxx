@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { useFleet } from '../../store/fleet'
 import { sshTargetFor } from '../../lib/ssh'
 import { isStubResolver, type NetworkInfo } from '../../../../shared/network'
+import type { ListeningPortsInfo } from '../../../../shared/listeningPorts'
 import type { Server } from '../../types'
 
 function level(v: number): string {
@@ -48,6 +49,28 @@ export function MonitorView({
       })
       .catch((e: unknown) => {
         if (live) setNet({ error: e instanceof Error ? e.message : String(e) })
+      })
+    return () => {
+      live = false
+    }
+  }, [server, visible, real])
+
+  /**
+   * What is listening. Same on-demand shape as the network read above and for
+   * the same reason: a listening socket changes when somebody deploys, and the
+   * two-second metrics poll shares the connection the terminal types over.
+   */
+  const [ports, setPorts] = useState<ListeningPortsInfo | { error: string } | null>(null)
+  useEffect(() => {
+    if (!visible || !real) return
+    let live = true
+    void window.opsmaxx?.fleet
+      ?.listeningPorts?.(sshTargetFor(server))
+      .then((r) => {
+        if (live) setPorts(r)
+      })
+      .catch((e: unknown) => {
+        if (live) setPorts({ error: e instanceof Error ? e.message : String(e) })
       })
     return () => {
       live = false
@@ -266,6 +289,17 @@ export function MonitorView({
       {/* Interfaces, their addresses and the resolvers. The panel is a quick
           server overview, and "which address is this box on, and who resolves
           its names" is the part an administrator otherwise opens a shell for. */}
+      {net !== null && 'error' in net && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="sidebar-title" style={{ marginBottom: 8 }}>
+            Network
+          </div>
+          <span className="faint" style={{ fontSize: 11 }}>
+            Could not be read: {net.error}
+          </span>
+        </div>
+      )}
+
       {net !== null && 'interfaces' in net && (net.interfaces.length > 0 || net.dns.length > 0) && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="sidebar-title" style={{ marginBottom: 12 }}>
@@ -309,6 +343,73 @@ export function MonitorView({
                   )}
                 </span>
               </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* What is listening, and who owns it. The other half of "which address
+          is this box on": an administrator otherwise opens a shell and runs
+          `ss -tulpn` as the first thing they do. */}
+      {/* A failed read is SAID, not hidden. A card that silently vanishes when
+          the probe fails is indistinguishable from a host with nothing
+          listening, and those are opposite facts. */}
+      {ports !== null && 'error' in ports && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="sidebar-title" style={{ marginBottom: 8 }}>
+            Listening ports
+          </div>
+          <span className="faint" style={{ fontSize: 11 }}>
+            Could not be read: {ports.error}
+          </span>
+        </div>
+      )}
+
+      {ports !== null && 'ports' in ports && ports.ports.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="row" style={{ marginBottom: 12, alignItems: 'baseline', gap: 'var(--sp-3)' }}>
+            <span className="sidebar-title">Listening ports</span>
+            <span className="faint" style={{ fontSize: 11 }}>
+              {ports.ports.length}
+            </span>
+          </div>
+          <div className="col" style={{ gap: 4 }}>
+            {ports.ports.map((p) => (
+              <div
+                className="row"
+                key={`${p.proto}-${p.address}-${p.port}`}
+                style={{ alignItems: 'baseline', gap: 'var(--sp-3)' }}
+              >
+                <span className="mono selectable" style={{ minWidth: 62 }}>
+                  {p.port}
+                </span>
+                <span className="faint" style={{ fontSize: 11, minWidth: 30 }}>
+                  {p.proto}
+                </span>
+                <span className="mono selectable faint" style={{ fontSize: 11, minWidth: 120 }}>
+                  {p.address}
+                </span>
+                {/* An em dash rather than a blank: "we could not see the owner"
+                    and "nothing owns this socket" are different claims, and the
+                    note below says which one this is. */}
+                <span className="mono">{p.process ?? '\u2014'}</span>
+                {p.pid !== undefined && (
+                  <span className="faint" style={{ fontSize: 11 }}>
+                    {p.pid}
+                  </span>
+                )}
+              </div>
+            ))}
+            {/* Said plainly, because the alternative is a table that looks
+                complete and is not. Unprivileged lsof on macOS cannot see other
+                users' sockets at all, so the list is joined with netstat to stay
+                complete — which leaves the OWNERS partial rather than the list
+                short. That distinction is the whole point of saying this. */}
+            {ports.partialOwners && (
+              <span className="faint" style={{ fontSize: 11, marginTop: 4 }}>
+                Some owning processes are not visible without elevated privileges. Every listening
+                socket is listed.
+              </span>
             )}
           </div>
         </div>

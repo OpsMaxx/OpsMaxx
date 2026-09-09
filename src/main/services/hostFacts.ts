@@ -1,6 +1,11 @@
 import type { HostFacts, HostFactsCollectOptions, PackageManager } from '../../shared/hostFacts'
 import { buildNetworkCommand, parseNetwork, type NetworkInfo } from '../../shared/network'
 import {
+  buildListeningPortsCommand,
+  parseListeningPorts,
+  type ListeningPortsInfo
+} from '../../shared/listeningPorts'
+import {
   buildInstalledPackagesCommand,
   parseInstalledPackages,
   type InstalledPackagesRead
@@ -173,6 +178,31 @@ export class HostFactsReader {
       }
       const merged = (r.stderr ?? '') === '' ? (r.stdout ?? '') : `${r.stdout ?? ''}\n${r.stderr}`
       return parseNetwork(merged)
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  /**
+   * What is listening, and which process owns it.
+   *
+   * Asked for, not sampled, for the same reason as `network`: a listening
+   * socket changes when somebody deploys. The command asks `ss`, `netstat` and
+   * `lsof` in one round trip because no one of them is present-and-sufficient
+   * on every host, and on macOS the useful answer is the join of two — see the
+   * note in shared/listeningPorts.ts on why an unprivileged list is otherwise
+   * short rather than merely ownerless.
+   */
+  async listeningPorts(cfg: unknown): Promise<ListeningPortsInfo | { error: string }> {
+    try {
+      const r = await this.deps.exec(cfg, buildListeningPortsCommand(), HOST_FACTS_TIMEOUT_MS)
+      // A transport failure is not a host answering "nothing is listening",
+      // which would be a far more alarming and entirely fabricated claim.
+      if (!r.ok && (r.stdout ?? '') === '') {
+        return { error: r.error ?? 'could not reach the server' }
+      }
+      const merged = (r.stderr ?? '') === '' ? (r.stdout ?? '') : `${r.stdout ?? ''}\n${r.stderr}`
+      return parseListeningPorts(merged)
     } catch (e) {
       return { error: e instanceof Error ? e.message : String(e) }
     }

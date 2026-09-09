@@ -22,6 +22,7 @@ import type { MonitorGroup, Server } from '../../types'
 import { AlertsPanel } from './AlertsPanel'
 import { useAlerts } from '../../store/alerts'
 import { FleetHealth } from './FleetHealth'
+import { LocalHostCard } from './LocalHostCard'
 import { FleetSearch } from './FleetSearch'
 import { InventoryPanel } from './InventoryPanel'
 import { AccessPanel } from './AccessPanel'
@@ -622,6 +623,11 @@ export function FleetMonitor(): React.JSX.Element {
 
       <div style={show('overview')}>
         <FleetHealth servers={servers} />
+
+        {/* This machine, beside the estate. Asked for on mount rather than
+            sampled — see the note in LocalHostCard on why it is deliberately
+            not an entry in the fleet inventory. */}
+        <LocalHostCard />
 
       {totals.reporting > 0 && (
         <div className="fleet-totals">
