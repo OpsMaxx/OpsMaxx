@@ -225,6 +225,7 @@ func waitForBackend(ctx context.Context, srv *tsnet.Server) (*ipnstate.Status, e
 	ticker := time.NewTicker(300 * time.Millisecond)
 	defer ticker.Stop()
 	var last *ipnstate.Status
+	askedToLogIn := false
 	for {
 		st, err := lc.Status(ctx)
 		if err == nil {
@@ -232,9 +233,31 @@ func waitForBackend(ctx context.Context, srv *tsnet.Server) (*ipnstate.Status, e
 			switch st.BackendState {
 			case ipn.Running.String():
 				return st, nil
-			case ipn.NeedsLogin.String(), ipn.NeedsMachineAuth.String():
-				// An answer, not a failure. The caller shows the URL.
+			case ipn.NeedsMachineAuth.String():
+				// Waiting on a tailnet administrator. There is no URL for the
+				// user to open; somebody else has to approve the device.
 				return st, nil
+			case ipn.NeedsLogin.String():
+				/**
+				 * NeedsLogin arrives with an EMPTY AuthURL.
+				 *
+				 * The URL does not exist until an interactive login has actually
+				 * been started — the backend has nothing to hand out before
+				 * then. Returning here on the first sight of NeedsLogin, which
+				 * is what this did, produced "authorise this node" with nothing
+				 * to click: a dead end that looks like a bug in the app.
+				 *
+				 * So: ask once, then keep polling until the URL appears.
+				 */
+				if st.AuthURL != "" {
+					return st, nil
+				}
+				if !askedToLogIn {
+					askedToLogIn = true
+					if err := lc.StartLoginInteractive(ctx); err != nil {
+						return st, err
+					}
+				}
 			}
 		}
 		select {
