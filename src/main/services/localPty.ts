@@ -10,6 +10,8 @@ import type {
 } from '../../shared/local'
 import { recordLocalSession } from './localSessionLog'
 import { findShell, sanitisedEnv } from './shellDiscovery'
+import { integrationSpawn } from './shellIntegrationFiles'
+import { isShellIntegrationEnabled } from './localGate'
 import { inspectEnv, inspectInjectsSessions, onInspectStopped } from './inspect'
 
 // node-pty is loaded lazily, on the first connect, and never at module scope.
@@ -283,7 +285,17 @@ export async function localConnect(wc: WebContents, cfg: LocalConnectConfig): Pr
     // must be the same fact, or a capture that stops mid-spawn leaves a shell
     // nothing will ever warn about.
     const inspectVars = inspectSessionEnv()
-    const pty = (await loadPty()).spawn(shell.path, shell.args, {
+    /**
+     * OSC 133 prompt marks, when this shell can carry them.
+     *
+     * Additive: extra args and extra env, never a replacement for the shell's
+     * own. Null for a shell that cannot do it (cmd, PowerShell, WSL) or must
+     * not be displaced (a login bash), and a null here means the session starts
+     * exactly as it did before — the marks are a convenience on top of the
+     * shell, and the shell is the product.
+     */
+    const integration = isShellIntegrationEnabled() ? integrationSpawn(shell) : null
+    const pty = (await loadPty()).spawn(shell.path, [...shell.args, ...(integration?.args ?? [])], {
       name: 'xterm-256color',
       cols: cfg.cols,
       rows: cfg.rows,
@@ -293,7 +305,15 @@ export async function localConnect(wc: WebContents, cfg: LocalConnectConfig): Pr
       // still wins. This is rung one of traffic inspection: no privilege, no
       // system state, and a session started while capture is off is simply
       // not intercepted.
-      env: { ...sanitisedEnv(), ...inspectVars, ...(shell.env ?? {}) },
+      // Integration sits before the shell's own env for the same reason the
+      // inspector's does: a shell profile that sets one of these deliberately
+      // still wins.
+      env: {
+        ...sanitisedEnv(),
+        ...inspectVars,
+        ...(integration?.env ?? {}),
+        ...(shell.env ?? {})
+      },
       useConpty: true,
       // See Phase 0 Q3. The bundled redistributable ConPTY is deliberately not
       // shipped; the one in conhost.exe is used instead.
