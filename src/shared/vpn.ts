@@ -242,12 +242,13 @@ export interface FrpConfirmations {
 export interface TailscaleSpec {
   kind: 'tailscale'
   /**
-   * An absolute path to the `tailscale` CLI, when the user has one somewhere
-   * the standard search does not look. Confirmed in the UI like every other
-   * `binaryPath` — an unconfirmed one is never executed.
+   * The device name this node takes on the tailnet.
+   *
+   * This node is OURS — a separate device with its own key, not a view of a
+   * `tailscaled` the user may also run — so it needs a name of its own in the
+   * admin console. Absent means the sidecar picks one.
    */
-  binaryPath?: string
-  confirmed?: boolean
+  hostname?: string
   /**
    * Offer this tailnet's peers as connections to open.
    *
@@ -258,73 +259,51 @@ export interface TailscaleSpec {
   showPeers?: boolean
   /**
    * Always absent, and present in the type only so the profile UI can read it
-   * without branching.
-   *
-   * Every other spec carries the directives an import refused to honour. There
-   * is no Tailscale import — nothing is parsed, so nothing is ever stripped —
-   * which makes this permanently empty rather than merely usually empty.
+   * without branching. There is no Tailscale import, so nothing is ever
+   * stripped.
    */
   strippedDirectives?: StrippedDirective[]
 }
 
-/** One endpoint the ngrok agent publishes. */
+/** One endpoint an ngrok profile publishes. */
 export interface NgrokTunnel {
-  /** The agent's own name for it, and the key its status is reported under. */
   name: string
   proto: 'http' | 'tcp' | 'tls'
   /** The port on THIS machine that gets published. */
   localPort: number
   /**
-   * A reserved domain or TCP address, for accounts that have one.
-   *
-   * Absent means ngrok assigns a random one per run, which is what the free
-   * tier does — so the public address changes every restart, and anything that
-   * hardcoded the old one breaks. The UI says so rather than letting somebody
-   * discover it.
+   * A reserved domain or TCP address, for accounts that have one. Absent means
+   * ngrok assigns a random address per run — so the public URL changes every
+   * restart, and anything holding the old one breaks.
    */
   domain?: string
   /**
    * The user ticked "this makes localhost:<port> reachable from the public
    * internet". start() refuses without it. Not a preference — a gate.
-   *
-   * It matters more here than it does for frp: an frp proxy is reachable from
-   * one server the user runs, while an ngrok endpoint is reachable from
-   * everywhere, immediately, by anyone with the URL.
    */
   acknowledgedExposure: boolean
 }
 
 /**
- * ngrok, which publishes a local port to a public URL.
+ * ngrok, running inside the bundled sidecar.
  *
- * Unlike Tailscale, the agent here IS ours to run: it is a per-user process
- * with no system state, and stopping this profile must stop it. So this driver
- * supervises normally.
- *
- * What it must NOT do is ship the agent. It is closed-source and not
- * redistributable, so it cannot be bundled — and it must not be auto-downloaded
- * either, because a binary fetched at runtime would bypass the ClamAV, Defender
- * and VirusTotal scanning that every artifact in a release goes through. The
- * user installs it; this app finds it. That matches how frp is handled, where
- * the binary is built from pinned source and checksum-verified rather than
- * downloaded.
+ * No agent binary is involved. `golang.ngrok.com/ngrok/v2` is MIT and opens
+ * endpoints from inside `opsmaxx-netd`, so this works on a machine that has
+ * never heard of ngrok. The agent itself is closed-source and could not have
+ * been shipped — which is true, and is not the same question as whether ngrok
+ * can be embedded.
  */
 export interface NgrokSpec {
   kind: 'ngrok'
   /**
    * The account authtoken, in the vault.
    *
-   * A vault ref rather than a stored string, for the reason the WireGuard
-   * private key is: it has to travel with an encrypted backup, and the OS
-   * keychain is machine-local. It reaches the agent through the environment and
-   * never through argv — see the note on SupervisedSpec.env.
+   * A vault ref rather than a stored string: it has to travel with an encrypted
+   * backup, and the OS keychain is machine-local. It reaches the sidecar per
+   * call and is never written to disk by this app.
    */
   authtokenRef?: VpnSecretRef
   tunnels: NgrokTunnel[]
-  /** `us`, `eu`, `ap`, … Absent lets the agent choose. */
-  region?: string
-  binaryPath?: string
-  confirmed?: boolean
   strippedDirectives?: StrippedDirective[]
 }
 

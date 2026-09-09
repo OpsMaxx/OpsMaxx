@@ -44,6 +44,8 @@ Built or fetched by the scripts in `scripts/`, verified against
 | `wireguard-go` (linked into `opsmaxx-netd`) | pinned in `sidecar/netd/go.mod` | MIT | all | `golang.zx2c4.com/wireguard` |
 | gVisor `netstack` (linked into `opsmaxx-netd`) | pinned in `sidecar/netd/go.mod` | Apache-2.0 | all | `gvisor.dev/gvisor` |
 | `goproxy` (linked into `opsmaxx-netd`) | pinned in `sidecar/netd/go.mod` | BSD-3-Clause | all | `github.com/elazarl/goproxy` |
+| `tsnet` / Tailscale (linked into `opsmaxx-netd`) | pinned in `sidecar/netd/go.mod` | BSD-3-Clause | all | `tailscale.com` |
+| `ngrok-go` (linked into `opsmaxx-netd`) | pinned in `sidecar/netd/go.mod` | MIT | all | `golang.ngrok.com/ngrok/v2` |
 | `frpc` | v0.71.0 | Apache-2.0 | all | `github.com/fatedier/frp` |
 | `openvpn` | v2.6.22 | **GPL-2.0** with OpenSSL exception | macOS, Linux | `github.com/OpenVPN/openvpn` |
 | OpenSSL (statically linked into `openvpn`) | 3.5.8 | Apache-2.0 | macOS, Linux | `github.com/openssl/openssl` |

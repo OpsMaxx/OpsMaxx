@@ -4,7 +4,8 @@
 # every platform OpsMaxx ships, and fold the results into
 # resources/bin/manifest.json.
 #
-# The sidecar is our own code plus wireguard-go and gVisor netstack, all MIT /
+# The sidecar is our own code plus wireguard-go, gVisor netstack, Tailscale's
+# tsnet and ngrok-go, all MIT /
 # Apache-2.0 / BSD-3, so bundling it carries no obligation beyond preserving
 # the notices. See docs/plans/vpn-tunnel-clients.md section 4 for why openvpn
 # is deliberately NOT bundled the same way.
@@ -100,8 +101,11 @@ for t in "${TARGETS[@]}"; do
       -o "$dest/opsmaxx-netd$exe" . )
 done
 
-# Upstream notices travel with the binaries. wireguard-go is MIT and gVisor is
-# Apache-2.0; both require the notice to be reproduced in distributions.
+# Upstream notices travel with the binaries. wireguard-go and ngrok-go are MIT,
+# gVisor is Apache-2.0, and Tailscale is BSD-3-Clause; every one of them
+# requires the notice to be reproduced in distributions. The `go list -m all`
+# below is what keeps this honest as dependencies change — it enumerates what
+# actually got linked rather than what somebody remembered to write down.
 mkdir -p "$ROOT/resources/licenses/opsmaxx-netd"
 {
   printf 'opsmaxx-netd %s (%s)\n\n' "$VERSION" "$BUILD_SHA"

@@ -57,7 +57,6 @@ export function NgrokSetup({
   // The stored ref, so an edit shows which credential is in use rather than
   // presenting an empty picker over a profile that already has one.
   const [entryId, setEntryId] = useState(existing?.spec.authtokenRef?.vaultEntryId ?? '')
-  const [region, setRegion] = useState(existing?.spec.region ?? '')
   const [tunnels, setTunnels] = useState<NgrokTunnel[]>(
     existing?.spec.tunnels.length ? existing.spec.tunnels : [blankTunnel(0)]
   )
@@ -94,8 +93,7 @@ export function NgrokSetup({
     const spec: NgrokSpec = {
       kind: 'ngrok',
       authtokenRef: { vaultEntryId: entryId, field: 'token' },
-      tunnels,
-      region: region.trim() || undefined
+      tunnels
     }
     const profile: VpnProfile = {
       id: existing?.id ?? `vpn-${crypto.randomUUID()}`,
@@ -162,16 +160,6 @@ export function NgrokSetup({
           Stored in the vault and handed to the agent through its environment — never written into a
           config file and never on a command line.
         </span>
-      </div>
-
-      <div className="field">
-        <label className="field-label">Region (optional)</label>
-        <input
-          className="input"
-          placeholder="us, eu, ap, au, sa, jp, in"
-          value={region}
-          onChange={(e) => setRegion(e.target.value)}
-        />
       </div>
 
       <div className="field">

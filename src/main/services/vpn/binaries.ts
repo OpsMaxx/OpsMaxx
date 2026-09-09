@@ -37,12 +37,9 @@ const ENGINE_KIND: Record<string, VpnKind> = {
   'opsmaxx-netd': 'wireguard',
   frpc: 'frp',
   openvpn: 'openvpn',
-  // Not bundled and never spawned as a daemon by us — see drivers/tailscale.ts
   // on why this engine is attached to rather than supervised. It still needs an
   // entry here, because `kindOf` throws for any name absent from this map and
   // that throw is the first line of resolution.
-  tailscale: 'tailscale',
-  ngrok: 'ngrok'
 }
 
 // The only directories a system-installed OpenVPN is accepted from, in the
@@ -61,29 +58,6 @@ const SYSTEM_CANDIDATES: Record<string, { posix: string[]; win32: string[] }> = 
       'C:\\Program Files (x86)\\OpenVPN\\bin\\openvpn.exe'
     ]
   },
-  tailscale: {
-    posix: [
-      // The standalone macOS/Linux client installs a launcher here.
-      '/usr/local/bin/tailscale',
-      '/opt/homebrew/bin/tailscale',
-      '/usr/bin/tailscale',
-      // The App Store build ships its CLI INSIDE the app bundle, and this is
-      // the only way to reach it. Note the deliberate ordering: the launcher
-      // above is preferred, because a `/usr/local/bin/tailscale` that is a
-      // symlink to this bundle hangs with no output (tailscale#3805) — and
-      // resolution follows realpath, so a symlinked launcher resolves to the
-      // bundle path and is invoked as the bundle rather than through the link.
-      '/Applications/Tailscale.app/Contents/MacOS/Tailscale'
-    ],
-    win32: ['C:\\Program Files\\Tailscale\\tailscale.exe']
-  },
-  ngrok: {
-    posix: ['/usr/local/bin/ngrok', '/opt/homebrew/bin/ngrok', '/usr/bin/ngrok'],
-    // choco and winget both install outside the allowlisted roots, so a Windows
-    // user will usually have to point the profile at the binary by hand. The
-    // form leads with that rather than reporting "not found" and stopping.
-    win32: ['C:\\Program Files\\ngrok\\ngrok.exe']
-  }
 }
 
 // A symlink is allowed to move a candidate around inside these roots — Homebrew
@@ -246,26 +220,6 @@ export interface SystemResolveOptions {
    *  ignored: a `binaryPath` that arrived inside an imported `.ovpn` is the
    *  file's opinion about what to execute, not the user's (E44). */
   confirmed?: boolean
-  /**
-   * Extra allowed roots, for an engine whose installer does not use the
-   * standard ones.
-   *
-   * Per-call rather than added to PLATFORM_ROOTS, and that is the whole point:
-   * `/Applications` has to be acceptable for Tailscale without also becoming
-   * acceptable for OpenVPN or WireGuard, whose roots are a deliberate
-   * restriction. A widened global list would be a silent loosening of both.
-   */
-  extraRoots?: string[]
-  /**
-   * Environment for the version probe.
-   *
-   * Needed because probing SPAWNS the binary. The App Store Tailscale is one
-   * executable that decides between opening its GUI window and behaving as a
-   * CLI by sniffing SHLVL/TERM/TERM_PROGRAM/PS1 — none of which an Electron
-   * app inherits — so probing it without `TAILSCALE_BE_CLI=1` would open a
-   * window during resolution, before any driver had run anything.
-   */
-  probeEnv?: Record<string, string>
 }
 
 /**
@@ -278,10 +232,7 @@ export async function resolveSystem(
 ): Promise<VpnEngineInfo> {
   const kind = kindOf(name)
   const win32 = process.platform === 'win32'
-  const roots = [
-    ...(win32 ? PLATFORM_ROOTS.win32 : PLATFORM_ROOTS.posix),
-    ...(opts.extraRoots ?? [])
-  ]
+  const roots = win32 ? PLATFORM_ROOTS.win32 : PLATFORM_ROOTS.posix
 
   if (opts.binaryPath) {
     if (!opts.confirmed) {
@@ -295,14 +246,14 @@ export async function resolveSystem(
     // run something they did not choose.
     const problem = await checkExecutable(opts.binaryPath, [dirname(opts.binaryPath), ...roots])
     if (problem) throw new VpnError('config-invalid', `${opts.binaryPath} ${problem}`)
-    return describe(kind, opts.binaryPath, opts.probeEnv)
+    return describe(kind, opts.binaryPath)
   }
 
   const fixed = SYSTEM_CANDIDATES[name]
   const candidates = fixed ? (win32 ? fixed.win32 : fixed.posix) : []
   for (const candidate of candidates) {
     if (await checkExecutable(candidate, roots)) continue
-    return describe(kind, candidate, opts.probeEnv)
+    return describe(kind, candidate)
   }
 
   // No PATH search on Windows, ever. `PATH` there routinely contains
@@ -314,7 +265,7 @@ export async function resolveSystem(
       if (!dir) continue
       const candidate = join(dir, name)
       if (await checkExecutable(candidate, [dir, ...roots])) continue
-      return describe(kind, candidate, opts.probeEnv)
+      return describe(kind, candidate)
     }
   }
 
@@ -391,11 +342,7 @@ function detailOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-async function describe(
-  kind: VpnKind,
-  path: string,
-  probeEnv?: Record<string, string>
-): Promise<VpnEngineInfo> {
+async function describe(kind: VpnKind, path: string): Promise<VpnEngineInfo> {
   // The real path is what actually executes, so that is what gets hashed and
   // reported: auditing the symlink would audit the wrong bytes.
   const real = await realpath(path)
@@ -404,7 +351,7 @@ async function describe(
     available: true,
     path: real,
     sha256: await sha256File(real),
-    version: await probeVersion(real, probeEnv),
+    version: await probeVersion(real),
     bundled: false
   }
 }
@@ -462,7 +409,7 @@ function isInside(child: string, root: string): boolean {
 /** First non-empty line of `<binary> --version`, or undefined. Best effort:
  *  the version is shown in the UI and audited on change, but nothing refuses
  *  to run without it. */
-function probeVersion(file: string, env?: Record<string, string>): Promise<string | undefined> {
+function probeVersion(file: string): Promise<string | undefined> {
   return new Promise((resolve) => {
     // OpenVPN exits 1 from `--version`, so the exit code is deliberately
     // ignored and only the output is read. ENOEXEC — a file that is executable
@@ -473,12 +420,7 @@ function probeVersion(file: string, env?: Record<string, string>): Promise<strin
       execFile(
         file,
         ['--version'],
-        {
-          timeout: 5_000,
-          windowsHide: true,
-          maxBuffer: 1 << 20,
-          env: env ? { ...process.env, ...env } : process.env
-        },
+        { timeout: 5_000, windowsHide: true, maxBuffer: 1 << 20 },
         (_err, stdout, stderr) => {
           const line = `${stdout}\n${stderr}`
             .split(/\r?\n/)

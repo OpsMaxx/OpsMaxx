@@ -266,13 +266,7 @@ export function VpnProfileForm({ profile, onClose, focus }: VpnProfileFormProps)
           />
         )}
         {draft.spec.kind === 'tailscale' && (
-          <TailscaleFields
-            spec={draft.spec}
-            issue={byPath}
-            shown={shown}
-            onChange={setSpec}
-            focus={focus}
-          />
+          <TailscaleFields spec={draft.spec} issue={byPath} shown={shown} onChange={setSpec} />
         )}
 
         {stripped.length > 0 && (
@@ -1057,53 +1051,33 @@ interface TailscaleProps {
   issue: IssueMap
   shown: Set<string>
   onChange: (spec: TailscaleSpec) => void
-  focus?: VpnFormFocus
 }
 
-function TailscaleFields({ spec, issue, shown, onChange, focus }: TailscaleProps): React.JSX.Element {
+function TailscaleFields({ spec, issue, shown, onChange }: TailscaleProps): React.JSX.Element {
   const set = (patch: Partial<TailscaleSpec>): void => onChange({ ...spec, ...patch })
   return (
     <>
       <div className="field">
         <span className="field-hint">
-          Tailscale runs as its own service on this machine, with its own login.
-          OpsMaxx reads its status and never starts or stops it — closing this profile
-          leaves your tailnet exactly as it was.
+          OpsMaxx joins your tailnet itself — there is nothing to install. This profile
+          is its own device, with its own key, so it neither uses nor disturbs a
+          Tailscale app you may also be running on this machine.
         </span>
       </div>
 
       <label className="field">
-        <span className="field-label">Tailscale program</span>
+        <span className="field-label">Device name</span>
         <input
           className="input"
-          placeholder="Detected automatically"
-          autoFocus={focus === 'binaryPath'}
-          value={spec.binaryPath ?? ''}
-          // A path is only run once it has been confirmed, which is the rule
-          // every binaryPath in this app is behind — so changing it clears the
-          // confirmation rather than silently inheriting the old one.
-          onChange={(e) => set({ binaryPath: e.target.value || undefined, confirmed: false })}
+          placeholder="opsmaxx"
+          value={spec.hostname ?? ''}
+          onChange={(e) => set({ hostname: e.target.value || undefined })}
         />
-        <Issue at="binaryPath" map={issue} shown={shown} />
+        <Issue at="hostname" map={issue} shown={shown} />
         <span className="field-hint">
-          Leave empty unless Tailscale is somewhere unusual. On macOS the App Store
-          build keeps its command-line tool inside the app bundle, which is found
-          automatically.
+          How this appears in your tailnet&apos;s device list. Letters, digits and dashes.
         </span>
       </label>
-
-      {spec.binaryPath && (
-        <label className="row" style={{ gap: 6, alignItems: 'flex-start' }}>
-          <input
-            type="checkbox"
-            checked={spec.confirmed === true}
-            onChange={(e) => set({ confirmed: e.target.checked })}
-          />
-          <span className="field-hint">
-            Run this program. A path that has not been confirmed is never executed.
-          </span>
-        </label>
-      )}
 
       <label className="row" style={{ gap: 6, alignItems: 'flex-start' }}>
         <input

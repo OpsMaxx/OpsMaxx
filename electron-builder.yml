@@ -52,7 +52,8 @@ files:
   - '!**/node_modules/@lydell/node-pty-*/prebuilds/*/conpty/**'
   - package.json
 
-# Tunnel engines: opsmaxx-netd (our WireGuard sidecar, MIT), frpc
+# Tunnel engines: opsmaxx-netd (our sidecar — WireGuard, plus Tailscale via
+# tsnet and ngrok via ngrok-go, so neither needs a client on the machine), frpc
 # (Apache-2.0), openvpn (GPL-2.0, macOS and Linux only) and wintun.dll
 # (proprietary, Windows only — see THIRD-PARTY-NOTICES.md). Built or fetched by
 # scripts/{build-sidecar,build-frpc,build-openvpn,fetch-wintun} before
