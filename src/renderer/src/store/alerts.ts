@@ -802,6 +802,7 @@ export function hydrateAlerts(): Promise<void> {
 /** Short, for the status-bar chip and the notification title. */
 export const LABEL: Record<AlertKind, string> = {
   'vpn-down': 'VPN down',
+  'service-down': 'Service down',
   'pod-crashloop': 'Pods restarting',
   'vpn-degraded': 'VPN silent',
   cpu: 'CPU',
@@ -954,6 +955,7 @@ const VALUE_PHRASE: Record<NumericAlertKind, (v: number) => string> = {
 // is a type error here instead of a metric quietly posting as 'memory'.
 const WEBHOOK_KIND: Record<StoreAlertKind, WebhookAlertKind> = {
   'vpn-down': 'vpn-down',
+  'service-down': 'service-down',
   'pod-crashloop': 'pod-crashloop',
   'vpn-degraded': 'vpn-degraded',
   'backup-failed': 'backup-failed',
@@ -1236,6 +1238,12 @@ const STATE_WORDS: Record<
   'tunnel-down': {
     raised: (name) => `Tunnel ${name} is in error`,
     resolved: (name) => `Tunnel ${name} is carrying traffic again`
+  },
+  // `name` is the check's name and the detail is the transport's own words
+  // about why it failed. Neither is the URL: see the note on the kind.
+  'service-down': {
+    raised: (name, detail) => `${name} is not answering${detail ? ` (${detail})` : ''}`,
+    resolved: (name) => `${name} is answering again`
   },
   'vpn-down': {
     raised: (name) => `VPN ${name} is in error`,

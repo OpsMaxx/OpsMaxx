@@ -110,6 +110,10 @@ export const COVERAGE_SOURCE: Record<StoreAlertKind, AlertCoverageSource> = {
   inode: 'sampler',
   load: 'sampler',
   'host-unreachable': 'sampler',
+  // The checks run in the main process, but the ALERT is raised at the app
+  // root like the other app-root kinds — that is where damping, snoozing and
+  // acknowledgement live, and a second copy of them would drift.
+  'service-down': 'app-root',
   // The VPN poll runs in FleetWatcher, which is mounted at the app root, so it
   // is watched whenever the app is open and not only on the monitor page --
   // the same claim `tunnel-down` makes and for the same reason.

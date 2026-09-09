@@ -73,6 +73,11 @@ export function FleetWatcher(): null {
   // name its owner chose.
   const serversRef = useRef(servers)
   serversRef.current = servers
+  // The same trick, for the same reason: the subscription below is never torn
+  // down, so a check renamed after mount would otherwise alert under whatever
+  // name it had when this component mounted.
+  const checksRef = useRef(useApp.getState().httpChecks)
+  checksRef.current = useApp((s) => s.httpChecks)
   const enabled = useApp((s) => s.settings.fleetSamplingEnabled)
   const intervalMs = useApp((s) => s.settings.fleetSamplingIntervalMs)
   const webhookEnabled = useApp((s) => s.settings.webhookAlertsEnabled)
@@ -598,6 +603,32 @@ export function FleetWatcher(): null {
       live = false
       clearInterval(t)
     }
+  }, [])
+
+  /**
+   * Service checks, raised here rather than in the panel that shows them.
+   *
+   * The checks themselves run in main and keep running with no window open;
+   * this is the ALERT, which has to live where every other state alert lives.
+   * Damping, snoozing, acknowledgement and the all-clear are all owned by the
+   * alerts store, and a second copy of that machinery for one kind would drift
+   * from the original the first time either was touched.
+   *
+   * In the panel this would alert only while somebody had the monitor open —
+   * which is the exact bug that moving the scheduler out of the panel fixed.
+   */
+  useEffect(() => {
+    return window.opsmaxx?.serviceChecks?.onResult(({ checkId, result }) => {
+      // 'slow' is not down. It is worth a colour in the panel and is not worth
+      // waking anybody: the service answered, within the timeout, correctly.
+      checkStateAlert(
+        checkId,
+        checksRef.current.find((c) => c.id === checkId)?.name ?? checkId,
+        'service-down',
+        result.state === 'down',
+        result.error ?? ''
+      )
+    })
   }, [])
 
   return null

@@ -48,6 +48,7 @@ export const ALERT_KINDS = [
   'vpn-degraded',
   'vpn-cert-expiry',
   'pod-crashloop',
+  'service-down',
   // Item 5. How many error-priority journal lines a host is writing per
   // minute. The logging feature could tail and search; neither NOTICES, and a
   // host that starts writing errors at three in the morning is one nobody is
@@ -265,7 +266,20 @@ export const STATE_ALERT_KINDS = [
   // host holding a kubeconfig, so a serverId key would raise the same
   // crashloop once per such host. The `StoredDbAlertRow` precedent already
   // covers a subject that is not a fleet host.
-  'pod-crashloop'
+  'pod-crashloop',
+  // An external service check. A STATE for the same reason host-unreachable
+  // is: "this service is not answering" stays true until a check succeeds, and
+  // that success is a real observation rather than an assumption, so it clears
+  // itself instead of firing again every interval.
+  //
+  // KEYED ON THE CHECK, not on a server — the URL belongs to whatever the user
+  // pointed it at, which is frequently nothing this app manages. `pod-crashloop`
+  // set the precedent for a subject that is not a fleet host.
+  //
+  // The name carried here is the check's, never its URL. A webhook is the
+  // easiest way to leak addressing out of this app, and the name is both what
+  // a person needs in order to act and a string they chose.
+  'service-down'
 ] as const
 export type StateAlertKind = (typeof STATE_ALERT_KINDS)[number]
 

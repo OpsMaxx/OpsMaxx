@@ -121,6 +121,10 @@ describe('what a rule may watch', () => {
       // Keyed on the cluster context rather than a server: a cluster is
       // visible from every host holding a kubeconfig.
       'pod-crashloop',
+      // Keyed on the CHECK rather than a server: an external service check
+      // points at whatever the user aimed it at, frequently nothing this app
+      // manages, so there is no host to key on.
+      'service-down',
       'db-alarm',
       'db-watch'
     ])
