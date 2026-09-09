@@ -62,9 +62,21 @@ function missingField(f: {
   password: string
   usingVault: boolean
   editing: boolean
+  /** RDP only: there is no SSH credential to demand. */
+  rdpOnly: boolean
 }): { field: string; why: string } | null {
   if (!f.name.trim()) return { field: 'name', why: 'Give this connection a name.' }
   if (!f.host.trim()) return { field: 'host', why: 'Enter the server address.' }
+  /**
+   * An RDP-only machine has no SSH credential, so none is required.
+   *
+   * The desktop signs in with the username and the password stored against
+   * the record, and the SSH authentication method below describes a
+   * connection this server does not accept. Demanding a private key for a
+   * Windows box was the concrete shape of "RDP is not mutually exclusive of
+   * SSH, even though both are fully separate connections".
+   */
+  if (f.rdpOnly) return null
   if (f.auth === 'certificate') {
     return { field: 'auth', why: 'Pick an authentication method this build supports.' }
   }
@@ -111,7 +123,15 @@ export function AddServerModal(): React.JSX.Element {
   const [hops, setHops] = useState<Hop[]>(existing?.route ?? [])
   const [vpnProfileId, setVpnProfileId] = useState<UUID | null>(existing?.vpnProfileId ?? null)
   const [sftpOnly, setSftpOnly] = useState(existing?.sftpOnly === true)
-  const [rdpEnabled, setRdpEnabled] = useState(existing?.rdp !== undefined)
+  /**
+   * Which protocols this record describes, derived from what was saved.
+   *
+   * One control rather than two booleans, because two booleans could not say
+   * "RDP only" — and that was the gap: SSH was assumed by the dialog itself.
+   */
+  const [speaks, setSpeaks] = useState<'ssh' | 'ssh+rdp' | 'rdp'>(
+    existing?.rdpOnly === true ? 'rdp' : existing?.rdp ? 'ssh+rdp' : 'ssh'
+  )
   const [rdpPort, setRdpPort] = useState(String(existing?.rdp?.port ?? 3389))
   const [rdpDomain, setRdpDomain] = useState(existing?.rdp?.domain ?? '')
   // Defaults on, like RdpSettings.nla: every supported Windows Server requires
@@ -145,7 +165,8 @@ export function AddServerModal(): React.JSX.Element {
     keyPath,
     password,
     usingVault,
-    editing: !!editId
+    editing: !!editId,
+    rdpOnly: speaks === 'rdp'
   })
   const valid = missing === null
 
@@ -237,11 +258,17 @@ export function AddServerModal(): React.JSX.Element {
       auth,
       route: hops,
       vpnProfileId,
-      sftpOnly,
+      // Only meaningful where there is a shell to withhold. An RDP-only
+      // machine has none, and carrying `sftpOnly` there would describe a
+      // restriction on a protocol this record says nothing about.
+      sftpOnly: speaks === 'rdp' ? false : sftpOnly,
+      // Marks which halves are real. Absent means SSH, which is every server
+      // saved before this existed.
+      ...(speaks === 'rdp' ? { rdpOnly: true } : { rdpOnly: false }),
       // Absent, not a disabled record: `Server.rdp` being undefined is what
       // every other part of the app reads as "this server does not speak RDP",
       // and a kept-but-off object would offer the menu entry anyway.
-      rdp: rdpEnabled
+      rdp: speaks !== 'ssh'
         ? {
             port: Number(rdpPort) || 3389,
             domain: rdpDomain.trim() || undefined,
@@ -295,7 +322,14 @@ export function AddServerModal(): React.JSX.Element {
   return (
     <Modal
       title={editId ? 'Edit Server' : 'Add Server'}
-      subtitle={editId ? 'Change this connection profile' : 'Create a new SSH connection profile'}
+      subtitle={
+        editId
+          ? 'Change this connection profile'
+          : // Not "SSH connection profile". SSH and RDP are separate
+            // connections, and naming only one of them in the dialog's own
+            // subtitle is what made an RDP-only machine feel unsupported.
+            'Describe a machine and how to reach it'
+      }
       onClose={() => setModal(null)}
       // The footer is Modal's, not this dialog's.
       //
@@ -327,13 +361,21 @@ export function AddServerModal(): React.JSX.Element {
       // reported here can be corrected without saving a profile that does not
       // work and coming back to it.
       footer={
-        <button
-          className="btn secondary size-28"
-          disabled={!valid || testing}
-          onClick={() => void testConnection()}
-        >
-          {testing ? 'Testing…' : 'Test connection'}
-        </button>
+        /**
+         * Test connection dials SSH, so it is not offered for a machine that
+         * does not speak it. A button that always fails on a Windows box
+         * would read as the machine being unreachable rather than as the test
+         * being the wrong test.
+         */
+        speaks === 'rdp' ? null : (
+          <button
+            className="btn secondary size-28"
+            disabled={!valid || testing}
+            onClick={() => void testConnection()}
+          >
+            {testing ? 'Testing…' : 'Test connection'}
+          </button>
+        )
       }
       confirm={{
         label: editId ? 'Save Changes' : 'Add Server',
@@ -358,10 +400,15 @@ export function AddServerModal(): React.JSX.Element {
           <input className="input" placeholder="10.20.0.10" value={host} onChange={(e) => setHost(e.target.value)} />
         </div>
         <div className="field-row" style={{ gridColumn: 'span 1' }}>
-          <div className="field">
-            <label className="field-label">Port</label>
-            <input className="input" value={port} onChange={(e) => setPort(e.target.value)} />
-          </div>
+          {/* SSH's port, which an RDP-only machine does not have. Its own port
+              is set in the RDP section below, and showing both would be two
+              fields called Port meaning different things. */}
+          {speaks !== 'rdp' && (
+            <div className="field">
+              <label className="field-label">Port</label>
+              <input className="input" value={port} onChange={(e) => setPort(e.target.value)} />
+            </div>
+          )}
           <div className="field">
             <label className="field-label">Username</label>
             <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} />
@@ -369,6 +416,18 @@ export function AddServerModal(): React.JSX.Element {
         </div>
       </div>
 
+      {/**
+       * SSH authentication, hidden for a machine that does not speak SSH.
+       *
+       * This is the concrete shape of the complaint: the form demanded an SSH
+       * credential — a private key, or a password for port 22 — from a Windows
+       * box with nothing listening there. The desktop signs in with the
+       * username above and the password stored against the record, so an
+       * authentication method for a protocol this server does not accept is
+       * not a field to leave blank, it is a question not to ask.
+       */}
+      {speaks !== 'rdp' && (
+        <>
       <div className="field">
         <label className="field-label">Authentication</label>
         <div className="radio-cards">
@@ -523,47 +582,71 @@ export function AddServerModal(): React.JSX.Element {
         </div>
       )}
 
+      </>
+      )}
+
+      {/**
+       * What the machine speaks, as one choice.
+       *
+       * This was two independent checkboxes — "Files only (no shell)" and
+       * "Also reachable by RDP" — and between them they could not express
+       * "RDP only". SSH was assumed by the dialog's own subtitle, so a Windows
+       * box with nothing on port 22 had to be given an invented SSH account
+       * before it could be saved. The two protocols are separate connections
+       * and the form now says so.
+       */}
+      <div className="col" style={{ gap: 'var(--sp-2)', marginBottom: 'var(--sp-3)' }}>
+        <span className="field-label">This machine speaks</span>
+        <div className="segment">
+          {(
+            [
+              ['ssh', 'SSH'],
+              ['ssh+rdp', 'SSH and RDP'],
+              ['rdp', 'RDP only']
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={clsx('seg-btn', speaks === value && 'active')}
+              onClick={() => setSpeaks(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <span className="field-hint">
+          {speaks === 'rdp'
+            ? 'No shell, no files and no monitoring — those all need SSH. The server opens on its desktop.'
+            : speaks === 'ssh+rdp'
+              ? 'One machine, two connections. The desktop signs in with the username and password below, so an account authenticating by key needs a password stored as well.'
+              : 'Terminal, files and monitoring, over one authenticated connection.'}
+        </span>
+      </div>
+
       {/* The delivery/backup account shape: sshd forces internal-sftp, so
-          files work and nothing runs. Saying so up front is what stops the app
-          opening a terminal, failing, and marking the server offline. */}
-      <label className="row" style={{ gap: 'var(--sp-2)', alignItems: 'flex-start', marginBottom: 'var(--sp-3)' }}>
-        <input
-          type="checkbox"
-          checked={sftpOnly}
-          onChange={(e) => setSftpOnly(e.target.checked)}
-          style={{ marginTop: 3 }}
-        />
-        <span className="col" style={{ gap: 2 }}>
-          <span>Files only (no shell)</span>
-          <span className="field-hint">
-            For accounts restricted to SFTP — sshd forcing <span className="mono">internal-sftp</span>,
-            often chrooted. The server opens on Files, and Terminal and Monitor are not offered
-            because they need to run commands.
+          files work and nothing runs. Only meaningful where there is a shell
+          to withhold, so it is not offered for an RDP-only machine. */}
+      {speaks !== 'rdp' && (
+        <label className="row" style={{ gap: 'var(--sp-2)', alignItems: 'flex-start', marginBottom: 'var(--sp-3)' }}>
+          <input
+            type="checkbox"
+            checked={sftpOnly}
+            onChange={(e) => setSftpOnly(e.target.checked)}
+            style={{ marginTop: 3 }}
+          />
+          <span className="col" style={{ gap: 2 }}>
+            <span>Files only (no shell)</span>
+            <span className="field-hint">
+              For accounts restricted to SFTP — sshd forcing <span className="mono">internal-sftp</span>,
+              often chrooted. The server opens on Files, and Terminal and Monitor are not offered
+              because they need to run commands.
+            </span>
           </span>
-        </span>
-      </label>
+        </label>
+      )}
 
-      {/* RDP is a second protocol to the same machine, not a second machine, so
-          it lives on this record rather than in a list of its own. Off by
-          default: the overwhelming majority of saved servers are Linux hosts
-          with nothing listening on 3389. */}
-      <label className="row" style={{ gap: 'var(--sp-2)', alignItems: 'flex-start', marginBottom: 'var(--sp-2)' }}>
-        <input
-          type="checkbox"
-          checked={rdpEnabled}
-          onChange={(e) => setRdpEnabled(e.target.checked)}
-          style={{ marginTop: 3 }}
-        />
-        <span className="col" style={{ gap: 2 }}>
-          <span>Also reachable by RDP</span>
-          <span className="field-hint">
-            Adds &ldquo;Open remote desktop&rdquo; for this server. It signs in with the username and
-            password above, so an account authenticating by key needs a password stored as well.
-          </span>
-        </span>
-      </label>
-
-      {rdpEnabled && (
+      {speaks !== 'ssh' && (
         <div className="col" style={{ gap: 'var(--sp-2)', marginBottom: 'var(--sp-3)', paddingLeft: 22 }}>
           <div className="row" style={{ gap: 'var(--sp-2)' }}>
             <label className="col" style={{ gap: 2, width: 110 }}>

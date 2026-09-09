@@ -205,3 +205,56 @@ describe('saving a server', () => {
     expect(saved?.sftpOnly).toBeUndefined()
   })
 })
+
+/**
+ * A machine that speaks RDP and not SSH.
+ *
+ * Reported as: the form "suggests that RDP is not mutually exclusive of SSH,
+ * even though both protocols are fully separate connections". It was exactly
+ * that — the dialog was titled "Create a new SSH connection profile" and RDP
+ * was a checkbox on it, so a Windows box with nothing on port 22 could not be
+ * described without inventing an SSH account for it, and every route that
+ * opens a server opened a terminal against a port that refuses.
+ */
+describe('an RDP-only machine', () => {
+  const rdpOnlyServer = (): Server => server({ rdpOnly: true, auth: 'password' })
+
+  beforeEach(() => reset([rdpOnlyServer()]))
+
+  /**
+   * Handled in `openServer` rather than at each call site: the sidebar, the
+   * palette and the recents list all route through it, and three separate
+   * remembered checks are three chances to dial SSH on a host that has none.
+   */
+  it('opens its desktop when the server is opened', () => {
+    useApp.getState().openServer('srv-win', 'terminal')
+    const tabs = useApp.getState().tabs
+    expect(tabs).toHaveLength(1)
+    expect(tabs[0].kind).toBe('rdp')
+  })
+
+  // Even when the caller explicitly asks for a shell — there is none to give,
+  // and the refusal is what used to mark the whole server offline.
+  it('never opens a shell, whatever view was asked for', () => {
+    for (const view of ['terminal', 'files', 'monitor'] as const) {
+      reset([rdpOnlyServer()])
+      useApp.getState().openServer('srv-win', view)
+      expect(useApp.getState().tabs.every((t) => t.kind === 'rdp')).toBe(true)
+    }
+  })
+
+  it('offers no additional session, because there is no shell to duplicate', () => {
+    useApp.getState().newSession('srv-win')
+    expect(useApp.getState().tabs).toHaveLength(0)
+  })
+
+  // The distinction the flag carries: a server WITHOUT it is unchanged, which
+  // is every server saved before this existed.
+  it('leaves an ordinary server opening on its terminal', () => {
+    reset([server()])
+    useApp.getState().openServer('srv-win', 'terminal')
+    const tabs = useApp.getState().tabs
+    expect(tabs).toHaveLength(1)
+    expect(tabs[0].kind).toBe('ssh')
+  })
+})

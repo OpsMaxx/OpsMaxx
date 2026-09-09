@@ -99,6 +99,25 @@ export interface Server {
    * before this existed.
    */
   rdp?: RdpSettings
+  /**
+   * This machine speaks RDP and NOT SSH.
+   *
+   * The two protocols are wholly separate connections, and the app treated
+   * only one of them as the reason a server exists: the dialog was titled
+   * "Create a new SSH connection profile" and RDP was a checkbox on it, so a
+   * Windows box with nothing on port 22 could not be described at all without
+   * inventing an SSH account for it.
+   *
+   * Shaped like `sftpOnly` rather than as a second record, and for the same
+   * reason: the machine has been described once — host, workspace, folder,
+   * VPN — and a second record would restate all of it and then drift. What
+   * this marks is which halves are real, and everything that needs a shell
+   * asks before offering one.
+   *
+   * Absent means the server speaks SSH, which is every server saved before
+   * this existed.
+   */
+  rdpOnly?: boolean
   demo?: boolean
 }
 

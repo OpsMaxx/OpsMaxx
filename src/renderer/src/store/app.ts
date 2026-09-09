@@ -1037,6 +1037,17 @@ export const useApp = create<AppState>((set, get) => ({
     // server offline — so the view follows what the account can actually do,
     // whatever the caller asked for.
     if (server.sftpOnly === true) view = 'files'
+    /**
+     * An RDP-only machine has no SSH at all, so "open this server" is its
+     * desktop. Handled here rather than at every call site: the sidebar, the
+     * palette and the recents list all route through this, and each one
+     * separately remembering to check would be three chances to open a
+     * terminal against a host with nothing on port 22.
+     */
+    if (server.rdpOnly === true) {
+      get().openRdp(serverId)
+      return
+    }
     // `!t.containerRef` matters: a container shell is also an SSH tab for this
     // server, and without it "open this server" would focus a shell inside a
     // container instead of one on the host.
@@ -1070,8 +1081,9 @@ export const useApp = create<AppState>((set, get) => ({
   // Always open an additional session tab for a server (multiple terminals).
   newSession: (serverId) => {
     const server = get().servers.find((s) => s.id === serverId)
-    if (!server || server.sftpOnly === true) return
-    // A files-only account has no shell, so a second one is not a thing to open.
+    // A files-only account has no shell, and an RDP-only machine has no SSH
+    // at all, so a second shell is not a thing either of them can open.
+    if (!server || server.sftpOnly === true || server.rdpOnly === true) return
     const tab: Tab = {
       id: uid('tab'),
       kind: 'ssh',
