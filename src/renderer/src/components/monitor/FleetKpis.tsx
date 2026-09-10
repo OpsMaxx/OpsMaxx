@@ -1,4 +1,14 @@
-import { Cpu, HardDrive, MemoryStick, Server as ServerIcon, CircleAlert, Unplug } from 'lucide-react'
+import {
+  Activity,
+  Cpu,
+  HardDrive,
+  MemoryStick,
+  Server as ServerIcon,
+  CircleAlert,
+  Unplug
+} from 'lucide-react'
+import { Sparkline } from '../common/Sparkline'
+import type { EstatePoint } from '../../store/fleet'
 import type { FleetHealth } from '../../../../shared/hostHealth'
 import type { FleetTotals } from '../../store/fleet'
 import { bytes, clsx } from '../../lib/format'
@@ -32,6 +42,8 @@ interface FleetKpisProps {
   totals: FleetTotals
   health: FleetHealth
   serverCount: number
+  /** The estate's recent history, oldest first. Empty until a sweep lands. */
+  trend: EstatePoint[]
 }
 
 function pctOf(used: number, total: number): number {
@@ -88,7 +100,12 @@ function MeterTile({
   )
 }
 
-export function FleetKpis({ totals, health, serverCount }: FleetKpisProps): React.JSX.Element {
+export function FleetKpis({
+  totals,
+  health,
+  serverCount,
+  trend
+}: FleetKpisProps): React.JSX.Element {
   const unreachable = health.unreachable.length
   const reportingLabel =
     totals.reporting === serverCount ? 'reporting' : `of ${serverCount} reporting`
@@ -148,6 +165,40 @@ export function FleetKpis({ totals, health, serverCount }: FleetKpisProps): Reac
         </div>
         <div className="kpi-value">{totals.cores}</div>
         <div className="kpi-sub">across the estate</div>
+      </div>
+
+      {/**
+       * CPU across the estate, over time.
+       *
+       * The band was five numbers and no shape — everything it said was true
+       * of this instant and nothing said whether it was going anywhere. "32%
+       * memory" is a different fact when it was 12% ten minutes ago, and a
+       * dashboard read at a glance is mostly reading direction.
+       *
+       * Two points is the floor for drawing a line; below that the tile shows
+       * the number alone rather than a single dot pretending to be a trend.
+       */}
+      <div className="kpi">
+        <div className="kpi-top">
+          <span className="kpi-icon">
+            <Activity size={13} />
+          </span>
+          <span className="kpi-label">CPU</span>
+        </div>
+        <div className="kpi-value">
+          {Math.round(trend[trend.length - 1]?.cpu ?? 0)}
+          <span className="kpi-unit">%</span>
+        </div>
+        {trend.length > 1 ? (
+          <div className="kpi-spark">
+            <Sparkline data={trend.map((p) => p.cpu)} max={100} height={26} />
+          </div>
+        ) : (
+          <div className="kpi-meter" aria-hidden />
+        )}
+        <div className="kpi-sub">
+          {trend.length > 1 ? 'mean, across the estate' : 'waiting for a second sweep'}
+        </div>
       </div>
 
       <MeterTile

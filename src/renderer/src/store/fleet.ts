@@ -53,8 +53,32 @@ export interface FleetFacts {
   errorAt?: number
 }
 
+/**
+ * One point on the estate's own trend line.
+ *
+ * The overview had numbers and no shape: five tiles saying what is true right
+ * now and nothing saying whether it is going anywhere. A dashboard people
+ * read at a glance needs the direction as much as the value — "32% memory" is
+ * a different fact when it was 12% ten minutes ago.
+ *
+ * Aggregated across whatever answered on that sweep, so a host dropping out
+ * moves the line rather than silently changing what it measures.
+ */
+export interface EstatePoint {
+  at: number
+  /** Mean CPU across reporting servers, 0-100. */
+  cpu: number
+  /** Estate memory used as a percentage of estate memory total. */
+  mem: number
+}
+
+/** Enough points to show a shape without becoming a chart nobody asked for. */
+export const ESTATE_POINTS = 60
+
 interface FleetState {
   hosts: Record<string, HostMetrics>
+  /** The estate's recent history, oldest first. See EstatePoint. */
+  estate: EstatePoint[]
   samples: Record<string, FleetSample>
   errors: Record<string, FleetError>
   /** Keyed by server id. Absent means never collected — see FleetFacts. */
@@ -68,6 +92,7 @@ interface FleetState {
 
 export const useFleet = create<FleetState>((set) => ({
   hosts: {},
+  estate: [],
   samples: {},
   errors: {},
   facts: {},
@@ -76,8 +101,51 @@ export const useFleet = create<FleetState>((set) => ({
     set((s) => {
       const errors = { ...s.errors }
       delete errors[serverId]
+      const hosts = { ...s.hosts, [serverId]: host }
+
+      /**
+       * A point per sweep, computed from every host that has answered.
+       *
+       * Appended here rather than kept per server and averaged at render
+       * time: the cards already hold their own history, and a second copy of
+       * fifteen series to derive one line is work done on every paint for a
+       * number that changes once a sweep.
+       *
+       * Coalesced within a second so a sweep reporting fifteen servers adds
+       * ONE point rather than fifteen — otherwise the line's x-axis is the
+       * arrival order of hosts, not time.
+       */
+      const ids = Object.keys(hosts)
+      let cpuSum = 0
+      let cpuN = 0
+      let memUsed = 0
+      let memTotal = 0
+      for (const id of ids) {
+        const h = hosts[id]
+        // `cpu` is null, never zero, when the probe could not read it — so a
+        // host that cannot report CPU is left out of the mean rather than
+        // dragging it toward zero.
+        if (typeof h.cpu === 'number') {
+          cpuSum += h.cpu
+          cpuN++
+        }
+        memUsed += h.memUsed || 0
+        memTotal += h.memTotal || 0
+      }
+      const point: EstatePoint = {
+        at,
+        cpu: cpuN > 0 ? cpuSum / cpuN : 0,
+        mem: memTotal > 0 ? (memUsed / memTotal) * 100 : 0
+      }
+      const last = s.estate[s.estate.length - 1]
+      const estate =
+        last && at - last.at < 1000
+          ? [...s.estate.slice(0, -1), point]
+          : [...s.estate, point].slice(-ESTATE_POINTS)
+
       return {
-        hosts: { ...s.hosts, [serverId]: host },
+        hosts,
+        estate,
         samples: { ...s.samples, [serverId]: { host, at } },
         errors
       }

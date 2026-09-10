@@ -2716,10 +2716,15 @@ details[open] > .disclosure-head .chev {
   color: var(--text-muted);
   white-space: nowrap;
 }
+/* Tightened, because this section was spending the page.
+   Three failing servers filled the viewport with attention blocks and pushed
+   the per-server cards — the sparklines, the meters, the actual dashboard —
+   below the fold. What needs attention has to be visible AND small enough
+   that what is healthy is visible too. */
 .fh-list {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
+  gap: 6px;
   margin-bottom: var(--sp-2);
 }
 /* The list spaces itself with `gap`; the global stacking margin on adjacent
@@ -2733,7 +2738,8 @@ details[open] > .disclosure-head .chev {
 .fh-row {
   flex-direction: column;
   align-items: stretch;
-  gap: var(--sp-2);
+  gap: 4px;
+  padding: 8px 10px;
 }
 /* Same left-edge marker the toasts use, so "this one is shouting" is already
    a familiar shape in the app rather than a new idiom. */
@@ -2755,13 +2761,37 @@ details[open] > .disclosure-head .chev {
    naming what broke is the whole point of the section. Only the unit name is
    red — the description beside it is prose, and colouring it too would spend
    the alarm on the half of the line that is not the alarm. */
+/* One failed unit, one line.
+   The name, what it is, and its two actions used to wrap onto two or three
+   lines each — five failed services became a screenful. The description
+   takes whatever room is left and ellipsises, because the unit NAME is what
+   somebody is scanning for and the prose beside it is context. */
 .fh-units {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   font-size: var(--fs-sm);
   color: var(--text-muted);
+}
+.fh-units li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: 1px 0;
+}
+.fh-units .fh-unit-desc {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Actions sit at a fixed right edge across every row, so five of them read
+   as a column rather than as five differently-shaped lines. */
+.fh-units li .btn {
+  flex: none;
 }
 .fh-units b {
   font-family: var(--font-mono);
@@ -4657,4 +4687,12 @@ details[open] > .disclosure-head .chev {
 .td-credential {
   color: var(--text-faint);
   max-width: 60ch;
+}
+
+/* The trend inside a KPI tile. Sized to the meter it sits in place of, so a
+   tile with a chart and a tile with a bar are the same height and the row
+   still reads as one object. */
+.kpi-spark {
+  margin: 1px 0;
+  opacity: 0.85;
 }

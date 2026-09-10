@@ -176,7 +176,10 @@ function HostRowView({
           {failed.map((u) => (
             <li key={u.name}>
               <b>{u.name}</b>
-              {u.description ? ` — ${u.description}` : ''}{' '}
+              {/* Its own element so it can take the remaining width and
+                  ellipsise. As a bare text node it wrapped, and five failed
+                  services became a screenful. */}
+              <span className="fh-unit-desc">{u.description ?? ''}</span>
               {/* Item 43. LogTailPanel has taken a `jump` prop since it
                   shipped and its own comment names this list as the caller it
                   was for -- "the failed-unit list is the one that matters".

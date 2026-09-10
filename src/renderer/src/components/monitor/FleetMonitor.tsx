@@ -332,6 +332,8 @@ export function FleetMonitor(): React.JSX.Element {
   // For the overview's KPI band: an unreachable host is a state the band has
   // to be able to show, and only the error map knows about it.
   const errors = useFleet((s) => s.errors)
+  // The estate's own history, for the band's trend. See EstatePoint.
+  const estateTrend = useFleet((s) => s.estate)
   const workspaceId = useApp((s) => s.activeWorkspaceId)
   const syncMonitorLayout = useApp((s) => s.syncMonitorLayout)
   const moveMonitorCard = useApp((s) => s.moveMonitorCard)
@@ -654,7 +656,12 @@ export function FleetMonitor(): React.JSX.Element {
          * the fleet itself, then this machine last.
          */}
         {totals.reporting > 0 && (
-          <FleetKpis totals={totals} health={overviewHealth} serverCount={servers.length} />
+          <FleetKpis
+            totals={totals}
+            health={overviewHealth}
+            serverCount={servers.length}
+            trend={estateTrend}
+          />
         )}
 
         <FleetHealth servers={servers} />
