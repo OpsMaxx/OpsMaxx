@@ -174,3 +174,45 @@ jobs:
           }
           Write-Host "Spawning through ConPTY with no redistributable present..."
           npx vitest run tests/localPtySmoke.test.ts
+
+  # `winget validate`, which cannot be run where the manifests are written.
+  #
+  # They are prepared on macOS, where winget does not exist, so the two
+  # checklist items on every winget-pkgs PR — validate, and install from the
+  # manifest — went out unticked with a note explaining why. Schema-checking
+  # the YAML against the published v1.6.0 JSON schemas is not the same thing:
+  # winget enforces rules the schema does not, and a moderator reading an
+  # unticked box has to take the submitter's word for the rest.
+  #
+  # This runs the real tool on a real Windows runner, so the box is ticked
+  # because it ran.
+  winget:
+    name: Validate winget manifests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate the newest manifest with winget
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Absent winget is a FAILURE, not a skip. A job that quietly passes
+          # without running the tool is worse than no job: it turns "we did not
+          # check" into a green tick, which is the thing this exists to stop.
+          $winget = Get-Command winget -ErrorAction SilentlyContinue
+          if (-not $winget) {
+            Write-Error "winget is not on this runner, so the manifests were not validated."
+          }
+          winget --version
+
+          $base = 'packaging/winget/manifests/o/OpsMaxx/OpsMaxx'
+          $latest = Get-ChildItem $base -Directory |
+            Sort-Object { [version]$_.Name } |
+            Select-Object -Last 1
+          Write-Host "Validating $($latest.Name)"
+
+          winget validate --manifest $latest.FullName
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "winget validate rejected $($latest.Name)."
+          }
