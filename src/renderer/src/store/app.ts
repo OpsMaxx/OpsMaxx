@@ -369,6 +369,18 @@ interface AppState {
   tabs: Tab[]
   activeTabId: string | null
   /**
+   * A request to open Find in one terminal pane.
+   *
+   * A nonce rather than a boolean, because asking twice for the same pane has
+   * to be two events: pressing the toolbar's magnifier while the bar is
+   * already open should re-focus and re-select it, and a boolean that is
+   * already true produces no change for a component to react to.
+   *
+   * Keyed by the id TerminalView is given — a PANE id wherever PaneGrid
+   * renders it, which is everywhere that matters.
+   */
+  findRequest: { paneId: string; nonce: number } | null
+  /**
    * Recently closed tabs, oldest first, for reopening.
    *
    * Not persisted, like `tabs` itself: reopening is an undo for the mistake
@@ -477,6 +489,9 @@ interface AppState {
   closeTabsToRight: (id: string) => void
   closeAllTabs: () => void
   setActiveTab: (id: string) => void
+  /** Open Find in one terminal pane. The toolbar's magnifier, and anything
+   *  else that wants to reach the search bar without a keyboard. */
+  requestTerminalFind: (paneId: string) => void
   cycleTab: (dir: 1 | -1) => void
   /** Drag-to-reorder. `toIndex` is a position among the VISIBLE tabs. */
   moveTab: (id: string, toIndex: number) => void
@@ -871,6 +886,7 @@ export const useApp = create<AppState>((set, get) => ({
 
   tabs: [],
   activeTabId: null,
+  findRequest: null,
   closedTabs: [],
   tabSession: {},
   tabCwd: {},
@@ -1299,6 +1315,11 @@ export const useApp = create<AppState>((set, get) => ({
       const tabs = s.tabs.map((t) => (t.workspaceId === tab.workspaceId ? queue.shift()! : t))
       return { tabs }
     }),
+
+  requestTerminalFind: (paneId) =>
+    set((s) => ({
+      findRequest: { paneId, nonce: (s.findRequest?.nonce ?? 0) + 1 }
+    })),
 
   selectTabByNumber: (n) =>
     set((s) => {

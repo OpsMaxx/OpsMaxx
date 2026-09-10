@@ -7,12 +7,23 @@ import { clsx } from '../../lib/format'
 // but had no keybinding or UI, so searching did nothing.
 export function TerminalSearch({
   search,
-  onClose
+  onClose,
+  focusNonce,
+  seed
 }: {
   search: React.RefObject<SearchAddon | null>
   onClose: () => void
+  /**
+   * Bumped every time something asks for Find again while it is already open.
+   * Re-focusing and re-selecting is what every editor's find does, and
+   * without it pressing the magnifier twice appears to do nothing the second
+   * time — the same complaint the magnifier itself was reported for.
+   */
+  focusNonce?: number
+  /** The terminal's selection, which iTerm seeds the field with. */
+  seed?: string
 }): React.JSX.Element {
-  const [term, setTerm] = useState('')
+  const [term, setTerm] = useState(seed ?? '')
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [wholeWord, setWholeWord] = useState(false)
   const [regex, setRegex] = useState(false)
@@ -34,7 +45,7 @@ export function TerminalSearch({
   useEffect(() => {
     inputRef.current?.focus()
     inputRef.current?.select()
-  }, [])
+  }, [focusNonce])
 
   // The addon reports match counts asynchronously as it scans the buffer.
   useEffect(() => {

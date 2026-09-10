@@ -30,21 +30,12 @@ Your DevOps workstation, everywhere. Windows · macOS · Linux.
 ---
 
 > [!IMPORTANT]
-> **Windows will show a security warning the first time you run OpsMaxx.
-> This is expected, and it is not a virus. macOS no longer warns.**
+> **Windows shows a security warning the first time you run OpsMaxx.** The build is
+> unsigned — a certificate costs $200–$400 a year — so Windows cannot confirm **who
+> published** it. That says nothing about whether the file is safe.
 >
-> From 0.30.1 the macOS build is **signed with an Apple Developer ID and notarized by
-> Apple**, so it opens normally with no warning and no right-click-Open dance.
->
-> The Windows build is still **unsigned** — a certificate there costs $200–$400 a year,
-> which this project has no income to cover. That warning means Windows cannot confirm
-> **who published** the app. It says nothing about whether the file is safe.
->
-> Every release is scanned before it is published — **ClamAV** over every artifact,
-> **Microsoft Defender** on the Windows installer, and **VirusTotal's 70+ engines** on the
-> `.exe` and `.dmg` — and publishes a **SHA-256** for every file, so you can verify the
-> download yourself.
-> → [How to get past the warning, and the scan results](docs/install.md)
+> Every release is scanned before publishing and ships a **SHA-256** for every file.
+> → [Getting past the warning](docs/install.md#first-run-why-windows-shows-a-warning) · [Antivirus scan results](docs/install.md#antivirus-scan)
 
 OpsMaxx is a **free and open-source alternative to MobaXterm, PuTTY, Termius, SecureCRT and MobaXterm Personal Edition**, built for engineers who spend the day moving between bastions, production boxes and databases — and increasingly, for the AI coding agents helping them do it. It combines an **SSH terminal**, **SFTP file browser**, **server monitoring**, **SSH tunnels**, a **multi-engine database client**, an **encrypted password vault** and a **secure [MCP](docs/ai-agents.md) bridge for Claude Code, Claude Desktop, Codex and other AI agents** in a single window — with no account, no telemetry and no subscription.
 
@@ -70,10 +61,12 @@ Most terminal tools do one thing. A typical DevOps task needs four: open a shell
 | **SSH terminal** | xterm with GPU rendering, split panes, search, and unlimited chained jump hosts per server |
 | **Local terminal** | Your own zsh, bash, PowerShell, Git Bash, MSYS2 or WSL in a tab beside the SSH ones — and reachable by no AI agent |
 | **SFTP browser** | Browse, edit, upload and delete over the same connection |
-| **Remote desktop** | RDP to a Windows host, through a bastion when it needs one |
+| **Remote desktop** | RDP to a Windows host, through a bastion when it needs one — with its own account, and no SSH required |
 | **Monitoring** | Live CPU, memory, disk and network per server, a fleet wall, background checking and webhook alerts |
-| **Tunnels & VPN** | Local, remote and SOCKS5 forwards; userspace WireGuard with no administrator rights; OpenVPN and frp |
+| **Service checks** | HTTP checks against anything you can reach, running whether or not the window is open, with ping and traceroute beside them |
+| **Tunnels & VPN** | Local, remote and SOCKS5 forwards; userspace WireGuard with no administrator rights; OpenVPN, frp, and **Tailscale and ngrok embedded** — no client to install |
 | **Databases** | PostgreSQL, MySQL, SQL Server, MongoDB and Redis, direct or through a bastion |
+| **Containers** | Docker and Kubernetes on a server or on this machine — containers, images, logs and a shell inside one |
 | **Vault** | AES-256-GCM secrets store, with credentials in your OS keychain rather than a config file |
 | **AI agent gateway** | Claude Code, Claude Desktop and Codex can work through it without ever seeing a password, key, IP or username |
 

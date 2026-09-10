@@ -250,6 +250,24 @@ function RealTerminal({
   const hostRef = useRef<HTMLDivElement>(null)
   const zoom = useApp((s) => s.zoomTerminal)
   const [finding, setFinding] = useState(false)
+
+  /**
+   * The toolbar's magnifier, which used to be a button with no onClick.
+   *
+   * Search worked only from the keyboard, so the one affordance pointing at
+   * it did nothing — and a control that does nothing reads as a broken
+   * feature rather than a missing binding. Reported as "search and filter not
+   * working".
+   *
+   * Watched on the nonce so asking twice for the same pane is two events:
+   * pressing the magnifier while the bar is already open re-focuses and
+   * re-selects it, the way every editor's find does.
+   */
+  const findRequest = useApp((s) => s.findRequest)
+  useEffect(() => {
+    if (!findRequest || !tabId || findRequest.paneId !== tabId) return
+    setFinding(true)
+  }, [findRequest, tabId])
   const [pending, setPending] = useState<{ text: string; lines: number } | null>(null)
   const { termRef, searchRef, dead, reconnect } = useTerminalSession(
     transport,
@@ -294,6 +312,11 @@ function RealTerminal({
       {finding && (
         <TerminalSearch
           search={searchRef}
+          // Re-focus and re-select when asked again while already open.
+          focusNonce={findRequest?.nonce}
+          // What iTerm does: a selection becomes the thing you are looking
+          // for, so selecting an error and hitting find needs no retyping.
+          seed={termRef.current?.getSelection() || undefined}
           onClose={() => {
             setFinding(false)
             termRef.current?.focus()

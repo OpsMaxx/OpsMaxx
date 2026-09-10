@@ -300,6 +300,7 @@ export function WorkspacePanel(): React.JSX.Element {
   const setActiveTab = useApp((s) => s.setActiveTab)
   const closeTab = useApp((s) => s.closeTab)
   const moveTab = useApp((s) => s.moveTab)
+  const requestTerminalFind = useApp((s) => s.requestTerminalFind)
   const setTabView = useApp((s) => s.setTabView)
   const setModal = useApp((s) => s.setModal)
   const newSession = useApp((s) => s.newSession)
@@ -447,7 +448,17 @@ export function WorkspacePanel(): React.JSX.Element {
           </div>
           {active.view === 'terminal' && (
             <div className="row" style={{ gap: 2 }}>
-              <button className="icon-btn" title="Search">
+              {/* Was a button with no onClick — the only visible affordance
+                  for search, pointing at nothing. Sends the request to the
+                  ACTIVE pane, since a split tab has more than one terminal
+                  and the toolbar sits above all of them. */}
+              <button
+                className="icon-btn"
+                title="Find in terminal"
+                onClick={() =>
+                  requestTerminalFind(panes[active.id]?.activePaneId ?? active.id)
+                }
+              >
                 <Search size={15} />
               </button>
               <button
