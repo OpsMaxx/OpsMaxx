@@ -133,8 +133,10 @@ describe('what the collector is then handed', () => {
     expect(cmd.split("'").length % 2).toBe(1)
   })
 
-  it('contains no sudo, whatever was added', () => {
+  it('contains no sudo, whatever was added, when escalation is off', () => {
     syncDriftWatches(blob([{ path: '/etc/fstab', rules: ['comments'] }]))
-    expect(buildDriftCommand({ watches: driftWatchesForCollection() })).not.toContain('sudo')
+    expect(
+      buildDriftCommand({ watches: driftWatchesForCollection(), sudo: false })
+    ).not.toContain('sudo')
   })
 })

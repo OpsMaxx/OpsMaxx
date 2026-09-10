@@ -169,11 +169,25 @@ describe('normalising a file says which rules did the work', () => {
 // ---------------------------------------------------------------------------
 
 describe('the read command', () => {
-  it('contains no sudo anywhere', () => {
-    // A property a reader can check, because it is decided at build time rather
-    // than guarded at runtime. A background sweep reading configuration files
-    // as root once an hour is not a thing to arrive by accident.
-    expect(buildDriftCommand()).not.toMatch(/\bsudo\b/)
+  it('contains no sudo at all when escalation is off', () => {
+    // The property a reader can check, because it is decided at build time
+    // rather than guarded at runtime. Still the point; it is now conditional.
+    expect(buildDriftCommand({ sudo: false })).not.toMatch(/\bsudo\b/)
+  })
+
+  it('never escalates the FIRST read of a path', () => {
+    // Where the escalation sits is the whole of why it is defensible. The
+    // ordinary read runs as the connecting account, and `sudo` is only reached
+    // once that has already failed — so on a stock host, where every watched
+    // path is world-readable, no sudo runs and nothing reaches the sudo log.
+    const cmd = buildDriftCommand({ sudo: true })
+    // From the start of the per-file branch to the first `elif`. The one-time
+    // `sudo -n true` capability probe sits above this, runs once per sweep and
+    // reads nothing.
+    const firstRead = cmd.slice(cmd.indexOf('if [ -f '), cmd.indexOf('elif'))
+    expect(firstRead).not.toMatch(/\bsudo\b/)
+    // And it is genuinely there, after that.
+    expect(cmd).toMatch(/elif \[ "\$SP_SUDO" = 1 \]/)
   })
 
   it('embeds only literal paths from the catalogue', () => {

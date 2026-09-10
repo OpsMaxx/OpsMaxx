@@ -295,7 +295,12 @@ describe('the reader', () => {
       watches: [TZ]
     })
     await reader.read({})
-    expect(seen[0]).not.toMatch(/\bsudo\b/)
+    expect(seen).toHaveLength(1)
+    // The primary read is unescalated; `sudo` appears only in the branch taken
+    // after it has failed. See buildDriftCommand.
+    expect(
+      seen[0].slice(seen[0].indexOf('if [ -f '), seen[0].indexOf('elif'))
+    ).not.toMatch(/\bsudo\b/)
     expect(seen[0]).toContain("'/etc/timezone'")
   })
 

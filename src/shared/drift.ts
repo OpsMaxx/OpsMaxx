@@ -606,10 +606,22 @@ export function buildDriftCommand(
 ): string {
   const watches = opts.watches ?? DRIFT_WATCHES
   const cap = opts.cap ?? DRIFT_READ_CAP
-  // Off unless asked for, which is the opposite of the access collector's
-  // default and deliberate: that one is useless without escalation, this one
-  // works on a stock host and only needs it on a hardened one.
-  const sudo = opts.sudo === true
+  /**
+   * ON unless switched off, matching the access collector.
+   *
+   * The objection this file was written with — "better than teaching a
+   * background sweep to read configuration files as root once an hour" — is
+   * answered by WHERE the escalation sits rather than by refusing it. It is
+   * reached only after the ordinary read has already failed, so on a stock
+   * host where every watched path is world-readable, no `sudo` runs at all and
+   * nothing reaches the sudo log. On a hardened host it is one `sudo -n` per
+   * file that was going to report `denied` anyway.
+   *
+   * Off by default would have been the same as not building it: the panel has
+   * no switch for this, so the estate that needs it would go on reporting
+   * "could not be read" for most of the fleet.
+   */
+  const sudo = opts.sudo !== false
   const parts: string[] = [
     'SP_B64=""; for c in base64 /usr/bin/base64 /bin/base64; do ' +
       'command -v "$c" >/dev/null 2>&1 && SP_B64="$c" && break; done',
