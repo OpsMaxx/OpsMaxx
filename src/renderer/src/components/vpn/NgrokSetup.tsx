@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { ExternalLink, Plus, Trash2 } from 'lucide-react'
 import { Modal } from '../common/Modal'
 import { useApp } from '../../store/app'
 import { useVault } from '../../store/vault'
 import { toast } from '../../store/toast'
+import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import type { NgrokSpec, NgrokTunnel, VpnProfile } from '../../types'
 
 /**
@@ -30,6 +31,9 @@ function blankTunnel(n: number): NgrokTunnel {
   }
 }
 
+/** Where an ngrok authtoken is minted. */
+const NGROK_TOKEN_URL = 'https://dashboard.ngrok.com/get-started/your-authtoken'
+
 export function NgrokSetup({
   existing,
   onClose,
@@ -52,6 +56,7 @@ export function NgrokSetup({
   const activeId = useApp((s) => s.activeId)
   const vaultUnlocked = useVault((s) => s.unlocked)
   const vaultEntries = useVault((s) => s.entries)
+  const createEntry = useVault((s) => s.createEntry)
 
   const [name, setName] = useState(existing?.name ?? 'ngrok')
   // The stored ref, so an edit shows which credential is in use rather than
@@ -70,6 +75,39 @@ export function NgrokSetup({
    * offering something that cannot work.
    */
   const usable = vaultEntries.filter((e) => !!e.password && !e.privateKey)
+
+  // The inline add. Kept in this dialog rather than routed through the vault
+  // screen so the profile being built is still on screen when it finishes.
+  const [adding, setAdding] = useState(false)
+  const [newName, setNewName] = useState('ngrok')
+  const [newToken, setNewToken] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const addToken = async (): Promise<void> => {
+    setSaving(true)
+    try {
+      // A login entry, whose password slot is where the picker above already
+      // looks — so the thing just written is immediately selectable rather
+      // than a shape this form would filter out.
+      const id = await createEntry('login', {
+        name: newName.trim(),
+        password: newToken.trim(),
+        notes: 'ngrok authtoken'
+      })
+      if (!id) {
+        // createEntry returns null when the write failed; the vault store
+        // surfaces the reason. Saying nothing and selecting nothing would
+        // leave a Save button that stays disabled for no visible cause.
+        toast('The vault would not take that token.', 'error')
+        return
+      }
+      setEntryId(id)
+      setAdding(false)
+      setNewToken('')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const patch = (i: number, next: Partial<NgrokTunnel>): void =>
     setTunnels((ts) => ts.map((t, j) => (j === i ? { ...t, ...next } : t)))
@@ -116,17 +154,10 @@ export function NgrokSetup({
       subtitle="Publish a port on this machine to a public URL"
       size="lg"
       onClose={onClose}
-      footer={
-        <>
-          <span className="spacer" />
-          <button className="btn" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="btn primary" disabled={!ready} onClick={save}>
-            Save
-          </button>
-        </>
-      }
+      // `confirm` and the modal's own Cancel, rather than a hand-rolled pair
+      // inside `footer` — which is for EXTRA controls and sits beside the
+      // Cancel the modal already draws. This dialog shipped with two of them.
+      confirm={{ label: 'Save', onClick: save, disabled: !ready }}
     >
       <div className="field">
         <label className="field-label">Name</label>
@@ -135,26 +166,94 @@ export function NgrokSetup({
 
       <div className="field">
         <label className="field-label">Authtoken</label>
-        {vaultUnlocked && usable.length > 0 ? (
-          <select className="input" value={entryId} onChange={(e) => setEntryId(e.target.value)}>
-            <option value="">Choose a vault entry…</option>
-            {usable.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.name}
-                {e.username ? ` — ${e.username}` : ''}
-              </option>
-            ))}
-          </select>
+        {!vaultUnlocked ? (
+          /* The vault is where the token belongs, so unlocking is the step —
+             offered here rather than described, the same as everywhere else
+             this app needs it. */
+          <UnlockVaultButton
+            className="btn sm"
+            reason="An ngrok authtoken is kept in the vault, so it has to be open to choose or add one."
+          />
         ) : (
-          // No text box as a fallback. A token typed here would have to be
-          // stored somewhere, and the only place it belongs is the vault — so
-          // the honest answer is to send the user there rather than to accept
-          // it and keep it somewhere worse.
-          <span className="field-hint">
-            {vaultUnlocked
-              ? 'Add your ngrok authtoken to the vault first, then pick it here.'
-              : 'Unlock the vault to choose the authtoken.'}
-          </span>
+          <>
+            {usable.length > 0 && (
+              <select
+                className="input"
+                value={entryId}
+                onChange={(e) => setEntryId(e.target.value)}
+              >
+                <option value="">Choose a vault entry…</option>
+                {usable.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                    {e.username ? ` — ${e.username}` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {/**
+             * Adding one HERE, rather than being told to go and do it.
+             *
+             * The old copy said "add your ngrok authtoken to the vault first,
+             * then pick it here" beside a picker that was not rendered at all
+             * when the vault held nothing — a sentence naming a task, no
+             * control to do it with, and a Save button that could never
+             * enable. The user had to leave, find the vault, work out which
+             * entry shape a token wants, come back and reopen this.
+             *
+             * Still the vault and still not a text box on the profile: a token
+             * typed into a profile would have to live somewhere, and the only
+             * place it belongs is the vault. What changes is that this writes
+             * it there instead of describing the trip.
+             */}
+            {adding ? (
+              <div className="col" style={{ gap: 6 }}>
+                <input
+                  className="input"
+                  placeholder="Name it — e.g. ngrok (personal)"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                />
+                <input
+                  className="input mono"
+                  type="password"
+                  placeholder="Paste the authtoken"
+                  value={newToken}
+                  onChange={(e) => setNewToken(e.target.value)}
+                />
+                <div className="row" style={{ gap: 6 }}>
+                  <button
+                    className="btn primary sm"
+                    disabled={newName.trim() === '' || newToken.trim() === '' || saving}
+                    onClick={() => void addToken()}
+                  >
+                    {saving ? 'Saving…' : 'Save to vault'}
+                  </button>
+                  <button className="btn sm" onClick={() => setAdding(false)}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="row" style={{ gap: 6 }}>
+                <button className="btn sm" onClick={() => setAdding(true)}>
+                  <Plus size={13} /> Add an authtoken
+                </button>
+                {/* Where the token comes from. A dialog that asks for a
+                    credential and does not say where it is minted leaves the
+                    reader to go and find out. */}
+                <button
+                  className="btn ghost sm"
+                  onClick={() =>
+                    window.open(NGROK_TOKEN_URL, '_blank', 'noopener,noreferrer')
+                  }
+                >
+                  <ExternalLink size={13} /> Get one from ngrok
+                </button>
+              </div>
+            )}
+          </>
         )}
         <span className="field-hint">
           Stored in the vault and handed to the agent through its environment — never written into a
