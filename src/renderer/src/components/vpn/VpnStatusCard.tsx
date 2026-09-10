@@ -1,4 +1,5 @@
-import { AlertTriangle } from 'lucide-react'
+import { useState } from 'react'
+import { AlertTriangle, Check, Copy, ExternalLink } from 'lucide-react'
 import { WG_HANDSHAKE_STALE_SEC } from '../../../../shared/vpn'
 import type {
   FrpProxyStatus,
@@ -183,6 +184,19 @@ export function VpnStatusCard({ profile, status }: VpnStatusCardProps): React.JS
 
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/**
+       * The authorisation link, as controls.
+       *
+       * A tsnet node is OpsMaxx's OWN device on the tailnet — not a view of a
+       * Tailscale client the user may also be running — so it has to be
+       * authorised once, in a browser, the first time it starts. That link
+       * reached the user only as engine log output: wrapped across two lines
+       * by the log viewer, in text that could not be selected, inside a
+       * message the engine reprints every five seconds. So the one action the
+       * screen was asking for could not actually be taken from it.
+       */}
+      {status?.authUrl && <AuthoriseNode url={status.authUrl} />}
+
       {status?.error && (
         // The code is for a bug report, not for reading: it was the only
         // machine token on an otherwise written-out card. It stays reachable on
@@ -390,6 +404,54 @@ export function VpnStatusCard({ profile, status }: VpnStatusCardProps): React.JS
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * "Authorise this node", with the link itself in reach.
+ *
+ * Both halves are here on purpose. The button covers the ordinary case, and
+ * Copy covers the one that made this worth building: the browser that has to
+ * complete the login is not always the one on this machine — a headless box, a
+ * VM, a machine being set up over a remote session — and for those the link has
+ * to be movable. It was previously neither clickable nor selectable.
+ */
+function AuthoriseNode({ url }: { url: string }): React.JSX.Element {
+  const [copied, setCopied] = useState(false)
+
+  const copy = (): void => {
+    window.opsmaxx?.clipboard?.write(url)
+    setCopied(true)
+    // Long enough to read, short enough that the button is not stuck saying
+    // "Copied" over a link somebody has since changed their mind about.
+    setTimeout(() => setCopied(false), 1600)
+  }
+
+  return (
+    <div className="vpn-authorise">
+      <div className="vpn-authorise-say">
+        <AlertTriangle size={13} />
+        <span>
+          This node has not been authorised yet. It is a device of its own on your tailnet — separate
+          from any Tailscale client already running on this machine — so it needs approving once.
+        </span>
+      </div>
+      {/* Selectable, and on one line that scrolls rather than wrapping: a URL
+          broken across two lines is one nobody can copy by hand either. */}
+      <code className="vpn-authorise-url mono selectable">{url}</code>
+      <div className="vpn-authorise-actions">
+        <button
+          className="btn primary sm"
+          onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+        >
+          <ExternalLink size={13} /> Authorise this node
+        </button>
+        <button className="btn ghost sm" onClick={copy}>
+          {copied ? <Check size={13} /> : <Copy size={13} />}
+          {copied ? 'Copied' : 'Copy link'}
+        </button>
+      </div>
     </div>
   )
 }

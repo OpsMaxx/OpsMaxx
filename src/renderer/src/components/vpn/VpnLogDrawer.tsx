@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Check, Copy } from 'lucide-react'
 import { Modal } from '../common/Modal'
 import type { VpnLogLine } from '../../types'
 import { clsx } from '../../lib/format'
@@ -18,6 +19,32 @@ const STREAM_CLASS: Record<VpnLogLine['stream'], string> = {
   app: 'info'
 }
 
+type Collapsed = VpnLogLine & { repeats: number }
+
+/**
+ * Consecutive identical lines become one row with a count.
+ *
+ * Engines repeat themselves on a timer. Tailscale reprints "to start this
+ * tsnet server … go to <url>" every five seconds for as long as the node is
+ * unauthorised, so a drawer holding 500 lines held about forty minutes of the
+ * same sentence and nothing else — the log became unreadable exactly while it
+ * was carrying the one line somebody needed.
+ *
+ * Only CONSECUTIVE runs collapse, and the timestamp kept is the FIRST of the
+ * run: the question a repeated line answers is when it started, not that it is
+ * still going, which the count already says. Nothing is discarded — the row is
+ * still one line of output, counted.
+ */
+function collapse(lines: VpnLogLine[]): Collapsed[] {
+  const out: Collapsed[] = []
+  for (const l of lines) {
+    const prev = out[out.length - 1]
+    if (prev && prev.text === l.text && prev.stream === l.stream) prev.repeats++
+    else out.push({ ...l, repeats: 1 })
+  }
+  return out
+}
+
 function clock(at: number): string {
   return new Date(at).toLocaleTimeString(undefined, { hour12: false })
 }
@@ -34,6 +61,18 @@ export function VpnLogDrawer({
   onClose
 }: VpnLogDrawerProps): React.JSX.Element {
   const [lines, setLines] = useState<VpnLogLine[]>([])
+  const [copied, setCopied] = useState(false)
+
+  /** The whole log as text, timestamps included, in the order it is read. */
+  const copyAll = (): void => {
+    window.opsmaxx?.clipboard?.write(
+      collapse(lines)
+        .map((l) => `${clock(l.at)} ${l.stream} ${l.text}${l.repeats > 1 ? ` (x${l.repeats})` : ''}`)
+        .join('\n')
+    )
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1600)
+  }
   const scroller = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
 
@@ -94,6 +133,15 @@ export function VpnLogDrawer({
             Showing the last {MAX_LINES} lines.
           </span>
           <span className="spacer" />
+          {/* Because the thing people come here for is usually one line — an
+              authorisation URL, a peer address, an error to paste into a
+              search — and until now the view offered no way to get any of it
+              out. Text selection is enabled too; this covers the whole log,
+              which selection by hand does badly across 500 wrapped rows. */}
+          <button className="btn" disabled={lines.length === 0} onClick={copyAll}>
+            {copied ? <Check size={13} /> : <Copy size={13} />}
+            {copied ? 'Copied' : 'Copy all'}
+          </button>
           <button className="btn" onClick={() => setLines([])}>
             Clear view
           </button>
@@ -115,11 +163,16 @@ export function VpnLogDrawer({
         {lines.length === 0 ? (
           <div className="log-line faint">No output yet.</div>
         ) : (
-          lines.map((l, i) => (
+          collapse(lines).map((l, i) => (
             <div key={`${l.at}-${i}`} className={clsx('log-line', STREAM_CLASS[l.stream])}>
               <span className="ts">{clock(l.at)}</span>
               <span className="lvl">{l.stream}</span>
-              <span>{l.text}</span>
+              <span className="log-text selectable">{l.text}</span>
+              {/* A count rather than N identical rows. An engine that reprints
+                  the same reminder every five seconds otherwise buries every
+                  other line in the log under it — which is what the one line
+                  worth reading was buried under. */}
+              {l.repeats > 1 && <span className="log-repeat">×{l.repeats}</span>}
             </div>
           ))
         )}

@@ -54,7 +54,7 @@ const KIND_SUBTITLE: Record<VpnProfile['spec']['kind'], string> = {
   wireguard: 'WireGuard',
   openvpn: 'OpenVPN',
   frp: 'frp reverse proxy',
-  tailscale: 'Tailscale — this machine’s own client',
+  tailscale: 'Tailscale — a node of its own on your tailnet',
   ngrok: 'ngrok — public URL for a local port'
 }
 

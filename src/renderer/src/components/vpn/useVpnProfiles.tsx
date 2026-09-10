@@ -68,7 +68,7 @@ function subtitle(profile: VpnProfile): string {
     // No endpoint to name: the tailnet is a mesh and the daemon owns the
     // connection. What is worth saying is that this app is attached to
     // something it does not run.
-    return 'Tailscale · this machine’s own client'
+    return 'Tailscale · a node of its own on your tailnet'
   }
   return `frp · ${frpSummary(spec)}`
 }

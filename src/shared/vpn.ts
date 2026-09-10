@@ -583,6 +583,21 @@ export interface VpnStatus {
   listeners?: VpnBoundListener[]
   stats?: VpnStats
   restarts: number
+  /**
+   * Where to go to authorise this node, while it is waiting to be authorised.
+   *
+   * Its own field rather than a sentence inside `error`, because it is the one
+   * thing on the screen a person has to ACT on and a URL buried in a paragraph
+   * cannot be clicked, copied or opened. It reached the user only as log
+   * output before this — wrapped across two lines by the log viewer, in a
+   * message the engine reprinted every five seconds — so completing the login
+   * was, in practice, not possible from inside the app.
+   *
+   * Absent whenever the node is not waiting on a login, and cleared as soon as
+   * it stops waiting: an authorisation link that outlives its state is an
+   * invitation to authorise something twice.
+   */
+  authUrl?: string
 }
 
 export interface VpnResult {

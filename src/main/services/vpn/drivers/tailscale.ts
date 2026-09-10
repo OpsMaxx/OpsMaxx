@@ -186,9 +186,6 @@ export const tailscaleDriver: VpnDriver<TailscaleSpec> = {
       for (const h of reply.health ?? []) ctx.log(`health: ${h}`, 'ctl')
 
       if (mapped.state === 'authenticating' && reply.authUrl) {
-        // The one actionable thing to offer. It goes in the status error, which
-        // the profile card already renders — not through `askUser`, which
-        // raises a CREDENTIAL prompt and is the wrong shape entirely.
         ctx.log(`authorise this node: ${reply.authUrl}`, 'app')
       }
 
@@ -198,11 +195,13 @@ export const tailscaleDriver: VpnDriver<TailscaleSpec> = {
         state: mapped.state,
         since: Date.now(),
         restarts: 0,
-        error:
-          mapped.state === 'authenticating' && reply.authUrl
-            ? `${mapped.error} Open ${reply.authUrl} to authorise it.`
-            : mapped.error,
-        errorCode: mapped.code
+        error: mapped.error,
+        errorCode: mapped.code,
+        // Carried as a field, not spliced into the error sentence. The card
+        // turns it into a button; a URL inside a paragraph cannot be clicked.
+        ...(mapped.state === 'authenticating' && reply.authUrl
+          ? { authUrl: reply.authUrl }
+          : {})
       }
 
       const entry: Live = {
@@ -224,8 +223,38 @@ export const tailscaleDriver: VpnDriver<TailscaleSpec> = {
             })
             const now = stateFor(next.backendState)
             if (profile.spec.showPeers === true) current.peers = next.peers
-            if (current.status.state !== now.state) {
-              current.status = { ...current.status, state: now.state, since: Date.now() }
+
+            /**
+             * The link and the reason are re-read every poll, not only when the
+             * state changes.
+             *
+             * This used to carry the first reply's `error` forward untouched
+             * for the life of the tunnel, and never set `authUrl` at all after
+             * the initial `ts.up`. A node that came up before its login
+             * completed therefore kept whatever it said at second zero — so a
+             * node that had since produced a login URL still showed none, and a
+             * node that had finished authorising still showed the old
+             * complaint. The engine goes on printing its own reminder every
+             * five seconds either way, which is what the screen looked like:
+             * an unusable link, repeated, next to a state that had stopped
+             * agreeing with it.
+             */
+            const nextAuthUrl = now.state === 'authenticating' ? next.authUrl : undefined
+            const changed =
+              current.status.state !== now.state ||
+              current.status.error !== now.error ||
+              current.status.authUrl !== nextAuthUrl
+            if (changed) {
+              current.status = {
+                ...current.status,
+                state: now.state,
+                error: now.error,
+                errorCode: now.code,
+                // Cleared the moment the node stops waiting. An authorisation
+                // link that outlives its state invites authorising twice.
+                authUrl: nextAuthUrl,
+                since: current.status.state !== now.state ? Date.now() : current.status.since
+              }
               ctx.emit(current.status)
             }
           } catch (e) {

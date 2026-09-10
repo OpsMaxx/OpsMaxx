@@ -703,12 +703,40 @@ export async function acquire(
 async function vpnDial(
   cfg: SshHop & { serverId?: string; hops?: SshHop[]; vpnProfileId?: string; serverName?: string }
 ): Promise<{ cfg: SshHop & { serverId?: string; hops?: SshHop[] }; release: () => void } | null> {
-  const { vpnOpenForward, vpnStart } = await import('./vpn/manager')
+  const { vpnOpenForward, vpnStart, vpnStatus } = await import('./vpn/manager')
   const vpnId = cfg.vpnProfileId as string
 
   const started = await vpnStart(vpnId)
   if (!started.ok) {
     throw new Error(started.error ?? 'The VPN for this server could not be started.')
+  }
+
+  /**
+   * Started is not the same as carrying traffic.
+   *
+   * A Tailscale node that has not been authorised yet starts perfectly well —
+   * the process is up, the engine is running, `vpnStart` reports success — and
+   * routes nothing at all, because it is not on the tailnet. Forwarding
+   * through it then produced a connection that sat there until the SSH
+   * handshake deadline and failed with "Timed out", which says nothing about
+   * the node, the tailnet or the authorisation waiting to be done. The user
+   * sees a server that will not connect and a VPN that claims to be up.
+   *
+   * So the state is checked before anything is dialled, and the refusal names
+   * the actual reason and where to fix it.
+   */
+  const vs = vpnStatus(vpnId)
+  if (vs && vs.state !== 'connected') {
+    if (vs.state === 'authenticating') {
+      throw new Error(
+        `${cfg.serverName ?? cfg.host} is reached through a VPN that has not been authorised yet. ` +
+          'Open VPN and authorise the node — nothing can route through it until you do.'
+      )
+    }
+    throw new Error(
+      `${cfg.serverName ?? cfg.host} is reached through a VPN that is not connected ` +
+        `(${vs.state}). ${vs.error ?? 'Open VPN to see why.'}`
+    )
   }
 
   const first = cfg.hops?.[0] ?? cfg

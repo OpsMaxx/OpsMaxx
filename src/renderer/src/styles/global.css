@@ -1713,7 +1713,11 @@ details[open] > .disclosure-head .chev {
 }
 .log-line .lvl {
   flex: none;
-  width: 44px;
+  /* Wide enough for "stderr", which is the longest of them. At 44px it wrapped
+     to "stder / r" and took the message down a line with it — visible in every
+     screenshot of a log this app has ever produced. */
+  width: 52px;
+  white-space: nowrap;
   font-weight: 700;
 }
 .log-line.info .lvl {
@@ -4926,4 +4930,69 @@ details[open] > .disclosure-head .chev {
     width: 100%;
     opacity: 0.5;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   A Tailscale node waiting to be authorised.
+
+   The link is the only action the screen is asking for, so it gets a control
+   rather than a sentence. It reached the user as engine log output before —
+   wrapped across two lines, unselectable, inside a message reprinted every
+   five seconds — so the login could not actually be completed from the app.
+   --------------------------------------------------------------------------- */
+.vpn-authorise {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--warn);
+  border-radius: var(--r-md);
+  background: var(--warn-soft);
+}
+.vpn-authorise-say {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+.vpn-authorise-say svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--warn);
+}
+/* One line that scrolls rather than wrapping: a URL broken across two lines is
+   one nobody can copy by hand either. */
+.vpn-authorise-url {
+  display: block;
+  padding: var(--sp-2);
+  border-radius: var(--r-sm);
+  background: var(--bg-card);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow-x: auto;
+}
+.vpn-authorise-actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+/* Log output is text somebody needs to get out of the app — an auth URL, a
+   peer address, an error to search for. The app suppresses selection globally
+   for its chrome, which took this with it. */
+.log-line .log-text {
+  min-width: 0;
+}
+.log-repeat {
+  flex: none;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  /* Sits on the same line as the log text it counts, so it matches it rather
+     than dropping to the label size — a count read as "480" wants digits that
+     are actually legible. */
+  font-size: var(--fs-sm);
+  font-weight: 700;
 }
