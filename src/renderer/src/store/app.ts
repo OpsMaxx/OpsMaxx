@@ -207,6 +207,17 @@ export interface AppSettings {
    */
   driftWatches: DriftWatchProposal[]
   vaultAutoBiometricPrompt: boolean
+  /**
+   * Close the pane when a shell exits cleanly, rather than showing the
+   * session-ended card.
+   *
+   * On by default, matching every terminal emulator: `exit` is how somebody
+   * says they are finished, and answering it with a panel to dismiss makes the
+   * ordinary end of a session a two-step one. A shell that DIED — a non-zero
+   * status, a dropped connection — still keeps the card, because that is the
+   * one moment the reason matters.
+   */
+  closeTabOnShellExit: boolean
   // Tightens row heights and paddings across the app.
   compactDensity: boolean
   // Command used to open remote files. Empty means the OS default handler.
@@ -288,6 +299,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   accessWriteEnabled: false,
   driftWatches: [],
   vaultAutoBiometricPrompt: true,
+  closeTabOnShellExit: true,
   compactDensity: false,
   externalEditorCommand: 'code',
   openFilesExternally: false,

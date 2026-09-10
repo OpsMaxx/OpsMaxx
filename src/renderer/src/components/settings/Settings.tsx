@@ -732,6 +732,12 @@ export function Settings(): React.JSX.Element {
             <div className="settings-section">
               <h2>Terminal</h2>
               <div className="sub">Font, cursor and scrollback behaviour.</div>
+              <SettingSwitch
+                label="Close the pane when the shell exits"
+                desc="Typing exit ends the session, so the pane goes with it — the same as every other terminal. A shell that stopped for a reason keeps its pane and says why, whatever this is set to."
+                checked={settings.closeTabOnShellExit !== false}
+                onChange={(v) => setSettings({ closeTabOnShellExit: v })}
+              />
               <div className="setting-row">
                 <div className="s-info">
                   <div className="s-title">Font family</div>

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Pencil, RotateCw, Terminal as TerminalIcon, X } from 'lucide-react'
 import { credentialNote, type CredentialShape } from '../../../../shared/credentialShape'
-import { classifyConnectionError } from '../../lib/connectionError'
 import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import { TerminalSearch } from './TerminalSearch'
 import { PasteConfirm } from './PasteConfirm'
@@ -13,7 +12,7 @@ import {
   setupTerminalUX,
   useTerminalSession
 } from '../../hooks/useTerminalSession'
-import { adviseOnError } from '../../lib/connectionError'
+import { adviseOnError, classifyConnectionError } from '../../lib/connectionError'
 import { clsx } from '../../lib/format'
 import type { TerminalTransport } from '../../lib/transport'
 import type { Server } from '../../types'
@@ -292,6 +291,31 @@ function RealTerminal({
     (text, lines) => setPending({ text, lines }),
     tabId
   )
+
+  /**
+   * A shell that exited cleanly closes what held it.
+   *
+   * `exit` is how somebody says they are finished, and answering it with a
+   * card that has to be dismissed makes the ordinary end of a session into a
+   * two-step one. Every terminal emulator closes on a clean exit; this one
+   * left a panel saying the session had closed, which the user could already
+   * see, over a terminal they had deliberately ended.
+   *
+   * ONLY on a clean exit. `classifyConnectionError` tells `shell exited` from
+   * `shell exited with 3` and from every genuine failure, and those keep the
+   * card — a pane that vanished when a connection dropped would take the
+   * reason with it, which is the one moment the reason matters most.
+   *
+   * Off makes the card the answer for every ending, for anyone who wants the
+   * scrollback to survive the shell.
+   */
+  const closeOnExit = useApp((s) => s.settings.closeTabOnShellExit !== false)
+  useEffect(() => {
+    if (!dead || !onClose || !closeOnExit) return
+    if (classifyConnectionError(dead) !== 'exited') return
+    onClose()
+  }, [dead, onClose, closeOnExit])
+
   return (
     <div
       className="terminal-wrap"
