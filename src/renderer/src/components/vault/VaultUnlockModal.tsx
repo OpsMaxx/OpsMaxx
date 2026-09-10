@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Eye, EyeOff, Fingerprint, Lock, ShieldCheck } from 'lucide-react'
 import { Modal } from '../common/Modal'
+import { useApp } from '../../store/app'
 import { useVault } from '../../store/vault'
 import { useVaultPrompt } from '../../store/vaultPrompt'
 import { VAULT_MIN_PASSWORD } from '../../../../shared/vault'
@@ -57,6 +58,14 @@ export function VaultUnlockModal(): React.JSX.Element | null {
   const bioKind = useVault((s) => s.bioKind)
   const refreshBiometrics = useVault((s) => s.refreshBiometrics)
   const unlockWithBiometrics = useVault((s) => s.unlockWithBiometrics)
+  /**
+   * The operator's own switch, shared with the Vault screen.
+   *
+   * One setting for both, because "ask for Touch ID when the vault is locked"
+   * is a single preference and a person who turned it off did not mean "except
+   * in dialogs". Defaults on.
+   */
+  const autoPrompt = useApp((st) => st.settings.vaultAutoBiometricPrompt)
 
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -127,7 +136,9 @@ export function VaultUnlockModal(): React.JSX.Element | null {
    * prompt is too, and making them click a second button to reach it is a step
    * that carries no decision.
    *
-   * Two limits keep the original concern intact. It fires ONCE per opening —
+   * Three limits keep the original concern intact. It honours the operator's
+   * own switch — the same one the Vault screen reads, so the preference means
+   * the same thing in both places. It fires ONCE per opening —
    * `asked` is never reset while the dialog stays up — so a refusal is final
    * and the reader falls back to the password field rather than being asked
    * again. And it fires only where biometrics are both available and
@@ -141,12 +152,12 @@ export function VaultUnlockModal(): React.JSX.Element | null {
     }
     // `canUseBio` is false until refreshBiometrics() has answered, so this
     // effect runs again when it flips. The ref is what makes that idempotent.
-    if (!canUseBio || busy || asked.current) return
+    if (!autoPrompt || !canUseBio || busy || asked.current) return
     asked.current = true
     void unlockWithBiometrics().then((ok) => {
       if (ok) close(true)
     })
-  }, [open, canUseBio, busy, unlockWithBiometrics, close])
+  }, [open, autoPrompt, canUseBio, busy, unlockWithBiometrics, close])
 
   if (!open) return null
 

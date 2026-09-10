@@ -4,6 +4,7 @@ import { render, screen, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
 import { VaultUnlockModal } from '../src/renderer/src/components/vault/VaultUnlockModal'
+import { useApp } from '../src/renderer/src/store/app'
 import { useVault } from '../src/renderer/src/store/vault'
 import { useVaultPrompt } from '../src/renderer/src/store/vaultPrompt'
 
@@ -86,6 +87,31 @@ describe('the unlock dialog', () => {
     expect(bioUnlock).toHaveBeenCalledTimes(1)
     // And the button is still there to try again deliberately.
     expect(screen.getByRole('button', { name: /unlock with touch id/i })).toBeTruthy()
+  })
+
+  it('honours the operator switch that already governs the Vault screen', async () => {
+    // One preference for both surfaces. Somebody who turned "ask for Touch ID"
+    // off did not mean "except in dialogs", and a second, invisible rule for
+    // the dialog is how a setting stops meaning what it says.
+    const bioUnlock = vi.fn(async () => ({ ok: true }))
+    useApp.setState({
+      settings: { ...useApp.getState().settings, vaultAutoBiometricPrompt: false }
+    })
+    stubBridge({
+      vault: {
+        status: vi.fn(async () => ({ exists: true, unlocked: false })),
+        bioSupport: vi.fn(async () => ({ available: true, kind: 'touch-id' })),
+        bioEnabled: vi.fn(async () => true),
+        bioUnlock,
+        list: vi.fn(async () => ({ ok: true, entries: [] }))
+      }
+    })
+
+    render(<VaultUnlockModal />)
+    opened()
+    // The button is still offered; only the automatic prompt is withheld.
+    expect(await screen.findByRole('button', { name: /unlock with touch id/i })).toBeTruthy()
+    expect(bioUnlock).not.toHaveBeenCalled()
   })
 
   it('does not raise it where biometrics are not enrolled', async () => {
