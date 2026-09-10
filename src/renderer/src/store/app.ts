@@ -1424,9 +1424,20 @@ export const useApp = create<AppState>((set, get) => ({
     set((s) => ({
       tabs: s.tabs.map((t) => {
         if (t.id !== id) return t
+        /**
+         * A remote desktop has no views to switch between — it is one surface,
+         * and TabPane returns RdpView before any of this is reached.
+         *
+         * A LOCAL tab used to be refused `monitor` here as well, which was the
+         * store-level half of "Monitor stays SSH-only". The other halves — the
+         * view union, the viewbar and the pane — have all been opened up now
+         * that macOS and Windows have collectors of their own, and this was
+         * missed: the button rendered, the click reached this, and the state
+         * was returned unchanged. A control that is drawn, is not disabled,
+         * and does nothing.
+         */
         if (t.kind === 'rdp') return t
-        if (t.kind === 'ssh') return { ...t, view }
-        return view === 'monitor' ? t : { ...t, view }
+        return { ...t, view }
       })
     })),
 

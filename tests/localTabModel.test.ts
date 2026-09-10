@@ -290,17 +290,32 @@ describe('local tab views', () => {
   })
 
   /**
-   * Monitor is still refused, and refused HERE rather than only hidden in the
-   * viewbar. LocalTab.view has no 'monitor' member, and MonitorView and
-   * MonitorStrip both take a non-optional Server — a write that got past the
-   * UI would put a tab in a shape nothing can render. The collector behind
-   * them reads /proc and Linux `df` semantics too, so off Linux it would draw
-   * numbers that look right and are not.
+   * Monitor used to be refused here, and this test pinned that refusal.
+   *
+   * The premise was that the collector read /proc and Linux `df` semantics, so
+   * off Linux it would draw numbers that looked right and were not — a volume
+   * at 40% capacity read as 3.7% full. There are collectors written for macOS
+   * and Windows now, so the premise is gone.
+   *
+   * The reason this test is worth reading rather than deleting: when the view
+   * union, the viewbar and the pane were opened up, this guard was missed. It
+   * went on returning the tab unchanged, so the Monitor button rendered, was
+   * not disabled, and did nothing when clicked — and this test went on passing
+   * the whole time, because it asserted precisely the bug.
    */
-  it('refuses to move a local tab to the monitor view', () => {
+  it('lets a local tab show its monitor', () => {
     useApp.getState().openLocal(zsh)
     const id = useApp.getState().tabs[0].id
     useApp.getState().setTabView(id, 'monitor')
+    expect(useApp.getState().tabs[0].view).toBe('monitor')
+  })
+
+  it('lets a local tab come back from the monitor view', () => {
+    // Both directions, because a one-way switch is its own kind of stuck.
+    useApp.getState().openLocal(zsh)
+    const id = useApp.getState().tabs[0].id
+    useApp.getState().setTabView(id, 'monitor')
+    useApp.getState().setTabView(id, 'terminal')
     expect(useApp.getState().tabs[0].view).toBe('terminal')
   })
 
