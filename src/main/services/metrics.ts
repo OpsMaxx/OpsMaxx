@@ -239,6 +239,11 @@ export interface CpuSnap {
   total: number
   idle: number
   /**
+   * When this snapshot was taken, so a percentage can refuse to be computed
+   * over a window too short to mean anything. See MIN_CPU_WINDOW_MS.
+   */
+  at?: number
+  /**
    * The same two counters per core, index 0 = cpu0.
    *
    * Held on the snapshot rather than recomputed because a per-core percentage
@@ -248,12 +253,43 @@ export interface CpuSnap {
   cores?: { total: number; idle: number }[]
 }
 
+/**
+ * The ten counters on a /proc/stat cpu line, as a total and an idle.
+ *
+ * Only the first EIGHT are summed: user nice system idle iowait irq softirq
+ * steal. The ninth and tenth — guest and guest_nice — are not additional time.
+ * The kernel already counts guest inside user and guest_nice inside nice, so
+ * adding them again inflates the denominator and quietly understates every
+ * percentage on a host that runs virtual machines.
+ */
 function cpuTotals(line: string): CpuSnap {
   const n = line.trim().split(/\s+/).slice(1).map(Number)
-  const total = n.reduce((a, b) => a + b, 0)
+  const total = n.slice(0, 8).reduce((a, b) => a + (b || 0), 0)
   const idle = (n[3] || 0) + (n[4] || 0) // idle + iowait
   return { total, idle }
 }
+
+/**
+ * The shortest gap between two /proc/stat readings that can produce a number
+ * worth believing.
+ *
+ * CPU here is a delta against the PREVIOUS poll, and nothing owned the spacing
+ * of those polls. The monitor strip, the monitor tab, the fleet card and the
+ * background sweep all sample the same host on their own timers, and a cached
+ * result only covers 1.5 seconds — so two real samples routinely landed a few
+ * hundred milliseconds apart. Over 200ms on a small VM the whole delta is a
+ * couple of dozen jiffies, and the largest single consumer inside that window
+ * is the measurement itself: sshd waking, the shell forking, two greps and a
+ * df. The sampler was reading its own cost and reporting it as the host's.
+ *
+ * That is what "CPU 96.9 of 80" on a box averaging under 7% was. It is also
+ * why the readings swung between 1% and 97% between neighbouring samples: the
+ * shorter the accidental window, the more of it the probe occupied.
+ *
+ * Two seconds puts the probe's own tens of milliseconds under about two points
+ * of error, and every caller polls far slower than that anyway.
+ */
+export const MIN_CPU_WINDOW_MS = 2000
 
 function cpuPct(a: CpuSnap, b: CpuSnap): number {
   const dTotal = b.total - a.total
@@ -300,12 +336,17 @@ export function sumNetwork(
 // the one to diff the next poll against.
 export function parseMetrics(
   text: string,
-  prev: CpuSnap | null
+  prev: CpuSnap | null,
+  now: number = Date.now()
 ): { data: HostMetrics; snap: CpuSnap | null } {
-  return parse(text, prev)
+  return parse(text, prev, now)
 }
 
-function parse(text: string, prev: CpuSnap | null): { data: HostMetrics; snap: CpuSnap | null } {
+function parse(
+  text: string,
+  prev: CpuSnap | null,
+  now: number = Date.now()
+): { data: HostMetrics; snap: CpuSnap | null } {
   // /proc/stat opens with the aggregate `cpu` line and then one `cpuN` line per
   // core. With the in-command sleep the whole set arrives twice, so a new block
   // begins wherever an aggregate line appears.
@@ -317,9 +358,26 @@ function parse(text: string, prev: CpuSnap | null): { data: HostMetrics; snap: C
       blocks[blocks.length - 1].cores.push(cpuTotals(line))
     }
   }
-  const snaps = blocks.map((b) => ({ ...b.agg, cores: b.cores }))
+  const snaps = blocks.map((b) => ({ ...b.agg, cores: b.cores, at: now }))
   const latest = snaps.length ? snaps[snaps.length - 1] : null
-  const base = snaps.length >= 2 ? snaps[0] : prev
+  /**
+   * Two readings in one command carry their own window — the `sleep` between
+   * them — so they are self-contained. Otherwise the base is the previous
+   * poll, and the previous poll may have been moments ago.
+   */
+  const inCommand = snaps.length >= 2
+  const base = inCommand ? snaps[0] : prev
+
+  /**
+   * Whether the two readings are far enough apart to divide.
+   *
+   * An in-command pair always is; it slept on purpose. A cross-poll pair is
+   * only trustworthy once MIN_CPU_WINDOW_MS has passed, and an older snapshot
+   * with no timestamp — written by a build before this rule — is treated as
+   * long enough rather than throwing away a reading on an upgrade.
+   */
+  const wideEnough =
+    inCommand || base === null || base.at === undefined || now - base.at >= MIN_CPU_WINDOW_MS
   // Null, not zero, when there is nothing to diff.
   //
   // 19a's rule, and the two metrics that never had it. `parse()` never fails
@@ -329,7 +387,7 @@ function parse(text: string, prev: CpuSnap | null): { data: HostMetrics; snap: C
   // arriving at the alert path posts an all-clear for a host that is still
   // pegged. `disk`, `inode` and `load` each already emit null out of this same
   // function for exactly this reason.
-  const cpu = base && latest ? cpuPct(base, latest) : null
+  const cpu = base && latest && wideEnough ? cpuPct(base, latest) : null
 
   /**
    * Per core, over the same window as the aggregate.
@@ -341,7 +399,7 @@ function parse(text: string, prev: CpuSnap | null): { data: HostMetrics; snap: C
    * makes an idle machine look on fire.
    */
   const cpuCores =
-    base?.cores && latest?.cores && base.cores.length === latest.cores.length
+    wideEnough && base?.cores && latest?.cores && base.cores.length === latest.cores.length
       ? latest.cores.map((c, i) => cpuPct((base.cores as CpuSnap[])[i], c))
       : null
 
@@ -499,8 +557,24 @@ async function sample(key: string, cfg: SshConnectConfig, allowPrompt = true): P
     const client = await ensure(key, cfg, allowPrompt)
     const prev = cpuState.get(key) ?? null
     const out = await exec(client, prev ? CMD : CMD_FIRST)
-    const { data, snap } = parse(out, prev)
-    if (snap) cpuState.set(key, snap)
+    const now = Date.now()
+    const { data, snap } = parse(out, prev, now)
+    /**
+     * The base only moves once it has been used.
+     *
+     * Replacing it on every poll is what made the window equal to the gap
+     * between two arbitrary timers — four watchers on one host, so a real
+     * sample could land 200ms after the last one and divide by almost
+     * nothing. Holding the base until MIN_CPU_WINDOW_MS has passed makes the
+     * window grow to at least that instead of shrinking to whatever the
+     * schedulers happened to do, and the reading in between is null rather
+     * than a number nobody should act on.
+     */
+    if (snap) {
+      const keep =
+        prev !== null && prev.at !== undefined && now - prev.at < MIN_CPU_WINDOW_MS
+      if (!keep) cpuState.set(key, snap)
+    }
     const result: MetricsResult = { ok: true, data }
     recent.set(key, { at: Date.now(), result })
     return result

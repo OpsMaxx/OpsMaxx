@@ -1,7 +1,13 @@
 import { platform } from 'node:process'
 import type { MetricsResult } from '../../shared/ssh'
 import { localExec } from './localExec'
-import { METRICS_CMD, METRICS_CMD_FIRST, parseMetrics, type CpuSnap } from './metrics'
+import {
+  METRICS_CMD,
+  METRICS_CMD_FIRST,
+  MIN_CPU_WINDOW_MS,
+  parseMetrics,
+  type CpuSnap
+} from './metrics'
 
 /**
  * The metrics collector, pointed at this machine.
@@ -86,8 +92,15 @@ async function run(key: string): Promise<MetricsResult> {
   // reads and the last one decides the status, so a machine without `ss` exits
   // non-zero having answered everything else. The parser reports each absent
   // section on its own.
-  const { data, snap } = parseMetrics(`${r.stdout}${r.stderr}`, prev)
-  if (snap) cpuState.set(key, snap)
+  const now = Date.now()
+  const { data, snap } = parseMetrics(`${r.stdout}${r.stderr}`, prev, now)
+  // The base holds until it has spanned a window worth dividing — the same
+  // rule the remote sampler follows, and for the same reason: several watchers
+  // poll this machine on their own timers, and a delta over 200ms is mostly
+  // the collector's own cost.
+  if (snap && !(prev !== null && prev.at !== undefined && now - prev.at < MIN_CPU_WINDOW_MS)) {
+    cpuState.set(key, snap)
+  }
   return { ok: true, data }
 }
 
