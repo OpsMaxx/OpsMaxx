@@ -42,6 +42,21 @@ interface TabStripProps {
   onReorder: (id: string, toIndex: number) => void
   /** Optional: a strip with no per-tab menu simply does not offer one. */
   onContextMenu?: (id: string, x: number, y: number) => void
+  /**
+   * Optional: a strip that cannot be renamed simply does not offer it.
+   *
+   * Absent means double-click does nothing and no editor is ever mounted, so
+   * a caller that has no notion of a custom title is unaffected.
+   */
+  onRename?: (id: string, title: string) => void
+  /**
+   * Start editing this tab's title, from outside — the context menu's
+   * "Rename". A nonce rather than an id alone, for the reason every other
+   * request-shaped prop in this app carries one: asking twice for the same
+   * tab is a thing people do, and the second ask must not look like the
+   * first and be swallowed.
+   */
+  renameRequest?: { id: string; nonce: number }
   /** Named for a screen reader: "Session tabs", "Database tabs". */
   label: string
   /** Trailing controls — the new-tab button and anything beside it. */
@@ -55,6 +70,8 @@ export function TabStrip({
   onClose,
   onReorder,
   onContextMenu,
+  onRename,
+  renameRequest,
   label,
   children
 }: TabStripProps): React.JSX.Element {
@@ -67,6 +84,26 @@ export function TabStrip({
   const [dropGap, setDropGap] = useState<number | null>(null)
   const [overflowing, setOverflowing] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  /** The tab being renamed, and the text so far. Null means nobody is. */
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null)
+  const [honoured, setHonoured] = useState(0)
+
+  // Opened from the context menu. Reset during render on a new nonce rather
+  // than in an effect, so the input is mounted in the same commit the menu
+  // item was clicked in and there is no frame showing the old title.
+  if (renameRequest && renameRequest.nonce !== honoured) {
+    setHonoured(renameRequest.nonce)
+    const target = items.find((t) => t.id === renameRequest.id)
+    if (target && onRename) setEditing({ id: target.id, text: target.title })
+  }
+
+  const commit = (): void => {
+    if (!editing) return
+    // The store refuses an empty name, so cancelling by clearing the box and
+    // pressing Enter keeps the old title rather than producing a blank tab.
+    onRename?.(editing.id, editing.text)
+    setEditing(null)
+  }
 
   /**
    * Keep the active tab on screen.
@@ -218,6 +255,16 @@ export function TabStrip({
                   e.dataTransfer.setData('text/plain', t.id)
                 }}
                 onClick={() => onSelect(t.id)}
+                onDoubleClick={
+                  onRename &&
+                  ((e) => {
+                    // The close `×` is inside this button; a double-click that
+                    // lands on it must not open an editor for a tab that is
+                    // about to go.
+                    if ((e.target as HTMLElement).closest('.close')) return
+                    setEditing({ id: t.id, text: t.title })
+                  })
+                }
                 onAuxClick={(e) => {
                   // Middle-click closes, as everywhere else. preventDefault
                   // stops the autoscroll cursor appearing over the strip.
@@ -236,7 +283,47 @@ export function TabStrip({
               >
                 {t.status}
                 {t.icon}
-                <span className="title">{t.title}</span>
+                {editing?.id === t.id ? (
+                  /**
+                   * Edited in place rather than in a dialog.
+                   *
+                   * A tab's name is read in the strip, so it should be typed
+                   * there — a modal for one short string puts the thing being
+                   * renamed behind the box renaming it.
+                   *
+                   * `stopPropagation` on the pointer and key handlers because
+                   * this input sits INSIDE the tab button and inside the
+                   * tablist's arrow-key navigation: without it, clicking to
+                   * position the caret selects the tab, and pressing Left
+                   * moves to the previous tab instead of moving the caret.
+                   */
+                  <input
+                    className="tab-rename"
+                    aria-label={`Rename ${t.title}`}
+                    value={editing.text}
+                    autoFocus
+                    draggable={false}
+                    onDragStart={(e) => e.preventDefault()}
+                    onChange={(e) => setEditing({ id: t.id, text: e.target.value })}
+                    onClick={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    // Committing on blur is what makes clicking away mean
+                    // "keep it", which is what people expect of an inline
+                    // rename and what avoids losing a name to a stray click.
+                    onBlur={commit}
+                    onKeyDown={(e) => {
+                      e.stopPropagation()
+                      if (e.key === 'Enter') commit()
+                      // Escape abandons the edit. Blur would otherwise fire
+                      // straight after and commit what Escape just rejected,
+                      // so the state is cleared before the input is unmounted.
+                      else if (e.key === 'Escape') setEditing(null)
+                    }}
+                  />
+                ) : (
+                  <span className="title">{t.title}</span>
+                )}
                 <span
                   // A span, not a button: a button inside a button is invalid
                   // HTML, and browsers recover from it by breaking one of them.

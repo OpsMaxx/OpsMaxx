@@ -492,6 +492,14 @@ interface AppState {
   openTab: (tab: NewTab) => void
   closeTab: (id: string) => void
   duplicateTab: (id: string) => void
+  /**
+   * Give a tab a name of the user's choosing.
+   *
+   * Nothing rewrites `title` after a tab is created, so a rename simply
+   * stands — no "was renamed" flag is needed to protect it, and adding one
+   * would be state nothing reads.
+   */
+  renameTab: (id: string, title: string) => void
   closeOtherTabs: (id: string) => void
   closeTabsToLeft: (id: string) => void
   closeTabsToRight: (id: string) => void
@@ -1209,6 +1217,18 @@ export const useApp = create<AppState>((set, get) => ({
   // its view and working directory. The session itself is not shared: an SSH
   // tab dials its own shell over the pooled connection, and a local tab spawns
   // its own pty.
+  renameTab: (id, title) =>
+    set((s) => {
+      const next = title.trim()
+      // An empty name is a cancel, not a request for a nameless tab: a tab
+      // with a blank label is unreachable in the strip and unidentifiable in
+      // the overflow menu. Capped because the strip ellipsises at a fixed
+      // width and the tooltip is what carries the rest — a title long enough
+      // to be its own paragraph helps nobody and bloats persisted state.
+      if (next === '' || next.length > 120) return {}
+      return { tabs: s.tabs.map((t) => (t.id === id ? { ...t, title: next } : t)) }
+    }),
+
   duplicateTab: (id) =>
     set((s) => {
       const src = s.tabs.find((t) => t.id === id)

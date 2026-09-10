@@ -3,6 +3,7 @@ import {
   X,
   Plus,
   Copy,
+  Pencil,
   ArrowLeftToLine,
   ArrowRightToLine,
   Terminal as TerminalIcon,
@@ -306,6 +307,7 @@ export function WorkspacePanel(): React.JSX.Element {
   const newSession = useApp((s) => s.newSession)
   const openLocalById = useApp((s) => s.openLocalById)
   const duplicateTab = useApp((s) => s.duplicateTab)
+  const renameTab = useApp((s) => s.renameTab)
   const closeOtherTabs = useApp((s) => s.closeOtherTabs)
   const closeTabsToLeft = useApp((s) => s.closeTabsToLeft)
   const closeTabsToRight = useApp((s) => s.closeTabsToRight)
@@ -317,6 +319,8 @@ export function WorkspacePanel(): React.JSX.Element {
   const toggleSplit = useApp((s) => s.toggleSplit)
   const splitPane = useApp((s) => s.splitPane)
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string } | null>(null)
+  // Which tab the context menu asked to rename. The strip owns the editor.
+  const [renaming, setRenaming] = useState<{ id: string; nonce: number } | null>(null)
 
   const server = active?.kind === 'ssh' ? servers.find((s) => s.id === active.serverId) : undefined
   const filesOnly = server?.sftpOnly === true
@@ -345,6 +349,13 @@ export function WorkspacePanel(): React.JSX.Element {
   const tabMenuEntries = (tabId: string): MenuEntry[] => {
     const idx = tabs.findIndex((t) => t.id === tabId)
     return [
+      {
+        label: 'Rename…',
+        icon: <Pencil size={14} />,
+        // The strip owns the editor; this only asks for it. A nonce, because
+        // asking twice for the same tab must be two events.
+        onClick: () => setRenaming({ id: tabId, nonce: Date.now() })
+      },
       { label: 'Duplicate Tab', icon: <Copy size={14} />, onClick: () => duplicateTab(tabId) },
       { separator: true, label: '' },
       { label: 'Close', icon: <X size={14} />, onClick: () => closeTab(tabId) },
@@ -397,6 +408,8 @@ export function WorkspacePanel(): React.JSX.Element {
         onClose={closeTab}
         onReorder={moveTab}
         onContextMenu={(tabId, x, y) => setTabMenu({ x, y, tabId })}
+        onRename={renameTab}
+        renameRequest={renaming ?? undefined}
       >
         {/* A split button: the plus repeats whatever the current tab is, the
             caret opens the list of shells on this machine. */}

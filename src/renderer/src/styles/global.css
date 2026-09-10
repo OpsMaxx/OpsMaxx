@@ -4996,3 +4996,21 @@ details[open] > .disclosure-head .chev {
   font-size: var(--fs-sm);
   font-weight: 700;
 }
+
+/* The tab title, while it is being renamed in place.
+   Sized to the space the title already occupied so the strip does not jump
+   when an editor opens, and stripped of the usual input chrome so the tab
+   still reads as a tab rather than as a form that appeared inside one. */
+.tab-rename {
+  flex: 1;
+  min-width: 60px;
+  max-width: 180px;
+  padding: 0 2px;
+  background: var(--bg-input);
+  border: 1px solid var(--accent-ink);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+  user-select: text;
+}
