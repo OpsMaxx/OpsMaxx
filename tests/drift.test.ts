@@ -300,15 +300,26 @@ describe('parsing what a server sent back', () => {
 
 interface FakeHost {
   root: string
-  collect: (watches: DriftWatch[], cap?: number) => string
+  collect: (watches: DriftWatch[], cap?: number, sudo?: boolean) => string
 }
 
 function fakeHost(): FakeHost {
   const root = mkdtempSync(join(tmpdir(), 'sp-drift-'))
   return {
     root,
-    collect: (watches, cap) => {
-      const cmd = buildDriftCommand({ watches, cap })
+    /**
+     * Escalation OFF unless a case asks for it.
+     *
+     * These cases are about what the collector says when it CANNOT read a
+     * file, and that question only has an answer while the reader is
+     * unprivileged. With escalation on, whether a 0700 directory denies
+     * anything depends on whether the account running the tests happens to
+     * have passwordless sudo — which a developer laptop usually does not and a
+     * GitHub runner always does. That difference turned CI red while every
+     * local run stayed green, which is the worst shape a test can have.
+     */
+    collect: (watches, cap, sudo = false) => {
+      const cmd = buildDriftCommand({ watches, cap, sudo })
         // Every path in the catalogue starts /etc, so redirecting that prefix
         // puts the whole read inside the tree.
         .replaceAll("'/etc", `'${root}/etc`)

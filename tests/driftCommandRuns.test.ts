@@ -31,8 +31,17 @@ const watch = (path: string): DriftWatch => ({
   note: 'a temporary file, for this test only'
 })
 
+/**
+ * Escalation OFF: these cases are about what the collector says when it cannot
+ * read a file, and that only has a stable answer while the reader is
+ * unprivileged. With it on, the verdict depends on whether the account running
+ * the tests has passwordless sudo — which a laptop usually does not and a
+ * GitHub runner always does. The escalated path has its own case below.
+ */
 const run = (path: string): string =>
-  execFileSync('sh', ['-c', buildDriftCommand({ watches: [watch(path)] })], { encoding: 'utf8' })
+  execFileSync('sh', ['-c', buildDriftCommand({ watches: [watch(path)], sudo: false })], {
+    encoding: 'utf8'
+  })
 
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), 'opsmaxx-drift-'))
@@ -87,5 +96,55 @@ describe('what it says about a file it cannot read', () => {
 
   it('says absent when the file really is not there', () => {
     expect(run(join(dir, 'ok', 'nothing-here'))).toMatch(/F w absent/)
+  })
+})
+
+describe('the escalated read, with a sudo that behaves like the real one', () => {
+  /**
+   * A stub, not the machine's own sudo.
+   *
+   * Whether the real one works decides the verdict, and it differs by machine:
+   * a GitHub runner grants the `runner` account passwordless sudo, a laptop
+   * usually does not. Testing against it means the same code passes in one
+   * place and fails in the other — which is exactly what happened, and it took
+   * eight releases to notice because the green run was the local one.
+   *
+   * This stub answers `-n true` and executes what follows, so the branch is
+   * exercised identically everywhere.
+   */
+  const withStubSudo = (path: string, real: boolean): string => {
+    const bin = join(dir, real ? 'bin-yes' : 'bin-no')
+    mkdirSync(bin, { recursive: true })
+    writeFileSync(
+      join(bin, 'sudo'),
+      real
+        ? '#!/bin/sh\n[ "$1" = "-n" ] && shift\nexec "$@"\n'
+        : '#!/bin/sh\nexit 1\n'
+    )
+    chmodSync(join(bin, 'sudo'), 0o755)
+    const cmd = buildDriftCommand({ watches: [watch(path)], sudo: true })
+    return execFileSync('sh', ['-c', cmd], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` }
+    })
+  }
+
+  it('reads a file the account cannot, when sudo is available', () => {
+    // The whole point of the feature: /etc/ssh/sshd_config is mode 600 on a
+    // hardened host, and the panel reported "could not be read" for most of a
+    // fleet because of it.
+    const out = withStubSudo(join(dir, 'noread', 'f'), true)
+    expect(out).toMatch(/F w ok /)
+  })
+
+  it('still says denied when sudo refuses', () => {
+    // `sudo -n` never prompts: it works because the host already granted
+    // passwordless sudo, or it fails instantly and the answer is what it
+    // always was.
+    expect(withStubSudo(join(dir, 'noread', 'f'), false)).toMatch(/F w denied/)
+  })
+
+  it('does not invent a file that is not there, even as root', () => {
+    expect(withStubSudo(join(dir, 'ok', 'nothing-here'), true)).toMatch(/F w absent/)
   })
 })
