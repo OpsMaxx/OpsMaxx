@@ -4651,3 +4651,10 @@ details[open] > .disclosure-head .chev {
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+
+/* What OpsMaxx offered, under an authentication failure. Muted against the
+   hint above it: the hint is what to do, this is what happened. */
+.td-credential {
+  color: var(--text-faint);
+  max-width: 60ch;
+}

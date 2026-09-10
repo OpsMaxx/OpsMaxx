@@ -254,6 +254,7 @@ import {
 import { isLocalTarget, LOCAL_TARGET } from '../shared/execTarget'
 import type { HttpRequestSpec } from '../shared/httpClient'
 import type { HttpCheck } from '../shared/httpMonitor'
+import type { CredentialShape } from '../shared/credentialShape'
 import type {
   FrpTokenResult,
   VpnKeygenResult,
@@ -309,6 +310,7 @@ import {
   isVaultLockedError,
   resolveDbSecrets,
   resolveChainSecrets,
+  credentialShapeForServer,
   resolveVaultField,
   type SecretBlob
 } from './services/credentialResolver'
@@ -901,6 +903,21 @@ ipcMain.handle('ssh:connect', (e, cfg: SshConnectConfig & { serverId?: string })
 ipcMain.handle('ssh:test', (_e, cfg: SshConnectConfig & { serverId?: string }) =>
   sshTest(withVpnTransport(resolveChainSecrets(cfg)))
 )
+/**
+ * What credential a server has, with none of its value.
+ *
+ * For the failure card. "All configured authentication methods failed" is the
+ * server's sentence and reads identically whether a key was rejected or none
+ * was ever stored — which is how a missing credential gets reported as the
+ * key mechanism being broken.
+ *
+ * Safe to expose: a shape and, for a key, the PATH, which the connection
+ * editor already displays. No password, passphrase or key contents.
+ */
+ipcMain.handle('ssh:credential-shape', (_e, serverId: string): CredentialShape => {
+  if (typeof serverId !== 'string' || serverId === '') return { kind: 'none' }
+  return credentialShapeForServer(serverId)
+})
 ipcMain.handle('ssh:pool-list', () => poolList())
 ipcMain.handle('ssh:pool-close', (_e, key: string) => poolClose(key))
 ipcMain.handle('ssh:pool-idle', (_e, minutes: number) => setPoolIdle(minutes))

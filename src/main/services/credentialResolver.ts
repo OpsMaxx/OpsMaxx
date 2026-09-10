@@ -1,4 +1,5 @@
 import { getSecret } from './secrets'
+import type { CredentialShape } from '../../shared/credentialShape'
 import { vaultList, vaultStatus } from './vault'
 import { VpnError } from './vpn/errors'
 import type { SshHop } from '../../shared/ssh'
@@ -139,6 +140,48 @@ export function resolveChainSecrets<T extends SshHop & { serverId?: string; hops
 // command/file output returned to an AI agent — never returned to a caller
 // directly.
 import { envSecretRefsForServer } from './envSecretRegistry'
+
+/**
+ * What credential a server has, with none of its value.
+ *
+ * Exists so a failed connection can say whether the app offered anything at
+ * all. "All configured authentication methods failed" is the SERVER's
+ * sentence, and it reads the same whether a key was rejected or no credential
+ * was ever stored — which is how a missing credential gets reported as "the
+ * private key mechanism is not working".
+ *
+ * Returns a shape, never a value: `keyPath` is already on screen in the
+ * connection editor, and nothing else here could identify a secret.
+ */
+export function credentialShapeForServer(serverId: string): CredentialShape {
+  const raw = getSecret(serverId)
+  if (!raw) return { kind: 'none' }
+  let blob: SecretBlob | null = null
+  try {
+    blob = JSON.parse(raw) as SecretBlob
+  } catch {
+    // A corrupt blob is the same as no stored credential, which is what the
+    // resolver does with it too.
+    return { kind: 'none' }
+  }
+  if (!blob) return { kind: 'none' }
+
+  if (blob.vaultEntryId) {
+    let locked = false
+    try {
+      // Asking whether it resolves is the only way to know, and a locked
+      // vault is the answer worth reporting rather than an error to swallow.
+      vaultEntry(blob.vaultEntryId)
+    } catch (e) {
+      locked = isVaultLockedError(e)
+    }
+    return { kind: 'vault', vaultLocked: locked }
+  }
+  if (blob.agentSocket) return { kind: 'agent' }
+  if (blob.keyPath) return { kind: 'key', keyPath: blob.keyPath }
+  if (blob.password) return { kind: 'password' }
+  return { kind: 'none' }
+}
 
 export function knownSecretValuesForServer(serverId: string): string[] {
   const raw = getSecret(serverId)

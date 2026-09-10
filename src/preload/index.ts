@@ -5,6 +5,7 @@ import type { UnitDraft, UserUnitsReading } from '../shared/userUnits'
 import type { BackupAlarm } from '../shared/backup'
 import type { HttpRequestSpec, HttpResult } from '../shared/httpClient'
 import type { CheckResult, HttpCheck } from '../shared/httpMonitor'
+import type { CredentialShape } from '../shared/credentialShape'
 import type { LocalTarget } from '../shared/execTarget'
 import type {
   SshConnectConfig,
@@ -312,6 +313,11 @@ const api = {
       ipcRenderer.on('ssh:prompt', h)
       return () => ipcRenderer.removeListener('ssh:prompt', h)
     },
+    /** What credential a server has, with none of its value. For the
+     *  failure card: the server's "all methods failed" reads the same whether
+     *  a key was rejected or none was ever stored. */
+    credentialShape: (serverId: string): Promise<CredentialShape> =>
+      ipcRenderer.invoke('ssh:credential-shape', serverId),
     poolList: (): Promise<{ key: string; host: string; username: string; sessions: number }[]> =>
       ipcRenderer.invoke('ssh:pool-list'),
     poolClose: (key: string): Promise<void> => ipcRenderer.invoke('ssh:pool-close', key),

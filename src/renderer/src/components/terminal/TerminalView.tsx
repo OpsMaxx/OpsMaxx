@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Pencil, RotateCw, Terminal as TerminalIcon, X } from 'lucide-react'
+import { credentialNote, type CredentialShape } from '../../../../shared/credentialShape'
+import { classifyConnectionError } from '../../lib/connectionError'
 import { TerminalSearch } from './TerminalSearch'
 import { PasteConfirm } from './PasteConfirm'
 import { EmptyState } from '../common/EmptyState'
@@ -132,7 +134,38 @@ function DeadSession({
 }): React.JSX.Element {
   const openServerEditor = useApp((s) => s.openServerEditor)
   const advice = adviseOnError(dead)
+  const fault = classifyConnectionError(dead)
   const serverId = transport.serverId
+
+  /**
+   * What OpsMaxx actually offered, for an authentication failure.
+   *
+   * "All configured authentication methods failed" is the SERVER's sentence,
+   * and it reads identically whether a key was rejected or no credential was
+   * ever stored. The app knows which, and not saying so is how a missing
+   * credential gets reported as "the private key mechanism is not working".
+   *
+   * Asked for only on an auth failure, because on any other kind there is
+   * nothing to add and it would be a pointless round trip.
+   */
+  const [credential, setCredential] = useState<CredentialShape | null>(null)
+  useEffect(() => {
+    if (fault !== 'auth' || !serverId) {
+      setCredential(null)
+      return
+    }
+    let live = true
+    void window.opsmaxx?.ssh
+      ?.credentialShape?.(serverId)
+      .then((s) => {
+        if (live) setCredential(s ?? null)
+      })
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [fault, serverId])
+  const note = credentialNote(credential)
 
   return (
     <div className="term-dead">
@@ -145,6 +178,8 @@ function DeadSession({
         <div className="td-sub">{transport.subtitle}</div>
         <div className="td-raw mono">{dead}</div>
         {advice.hint && <div className="td-hint">{advice.hint}</div>}
+        {/* What we offered, which the server's own message cannot tell them. */}
+        {note && <div className="td-hint td-credential">{note}</div>}
 
         <div className="td-actions">
           {/* Offered only when it can work. A Reconnect on a rejected
