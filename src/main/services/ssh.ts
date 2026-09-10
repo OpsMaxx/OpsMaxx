@@ -40,6 +40,20 @@ export function setSshPrompter(p: Prompter): void {
   prompter = p
 }
 
+/**
+ * A previously saved answer for a hop, or null.
+ *
+ * Separate from `prompter` because an unattended connection may USE a stored
+ * answer — it is not a guess and needs nobody — while it must never raise a
+ * dialog. Folding the two together is what left the background sampler
+ * prompting, and then submitting an empty answer when nobody replied.
+ */
+export type StoredKbAnswer = (hop: SshHop, prompts: KeyboardPrompt[]) => string | null
+let storedKbAnswer: StoredKbAnswer | null = null
+export function setStoredKbAnswer(f: StoredKbAnswer): void {
+  storedKbAnswer = f
+}
+
 function send(wc: WebContents, channel: string, ...args: unknown[]): void {
   if (!wc.isDestroyed()) wc.send(channel, ...args)
 }
@@ -315,6 +329,49 @@ async function connectClient(
           finish([hop.password])
           return
         }
+
+        /**
+         * An unattended connection must not ask, and must not guess.
+         *
+         * `allowPrompt` is false for the fleet sampler and every other
+         * background caller — the comments at those call sites already say
+         * "this is the unattended caller" — but this handler ignored it and
+         * prompted anyway. Two things followed, and the second is the serious
+         * one:
+         *
+         *  1. A verification-code dialog appeared out of a background sweep,
+         *     attached to nothing the user had done.
+         *  2. Unanswered, it resolved to `finish([])` — a wrong answer. Every
+         *     sweep interval spent another failed authentication against the
+         *     host, and enough of those trip MaxAuthTries, fail2ban or an
+         *     account lockout. The user's own INTERACTIVE connections then
+         *     fail too, with "All configured authentication methods failed",
+         *     which reads as a broken credential and is really a server that
+         *     has stopped listening to this client.
+         *
+         * That is why turning off background checks clears it, and why the
+         * same host answers `ssh` from a terminal at the same moment.
+         *
+         * A stored answer is still used: it is not a guess and needs nobody.
+         * Otherwise the connection ends here rather than submitting an empty
+         * answer, so a background sweep costs no failed authentication at all.
+         */
+        if (!allowPrompt) {
+          const stored = storedKbAnswer?.(hop, prompts)
+          if (stored) {
+            finish([stored])
+            return
+          }
+          clearDeadline()
+          client.end()
+          reject(
+            new Error(
+              `${hop.username}@${hop.host} asks for a second factor, which a background check cannot answer. Connect to it once from a terminal tab to authenticate, or turn off background checking for it.`
+            )
+          )
+          return
+        }
+
         if (!prompter) {
           finish([])
           return

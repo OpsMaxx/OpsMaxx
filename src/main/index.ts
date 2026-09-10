@@ -13,6 +13,7 @@ import {
   sshClose,
   sshDisposeAll,
   setSshPrompter,
+  setStoredKbAnswer,
   setPoolIdle,
   poolList,
   poolClose,
@@ -866,6 +867,27 @@ ipcMain.on(
     resolve(answers)
   }
 )
+
+/**
+ * A saved answer for a second factor, usable without anybody present.
+ *
+ * Registered separately from the prompter so an UNATTENDED connection can use
+ * one without being able to raise a dialog. The background sampler could
+ * previously do neither safely: it prompted, and when nobody answered it
+ * submitted an empty answer, spending a failed authentication against the
+ * host on every sweep.
+ */
+setStoredKbAnswer((hop, prompts) => {
+  const serverId = (hop as { serverId?: string }).serverId
+  if (!serverId || prompts.length !== 1) return null
+  const raw = getSecret(serverId)
+  if (!raw) return null
+  try {
+    return (JSON.parse(raw) as SecretBlob).kbAnswer ?? null
+  } catch {
+    return null
+  }
+})
 
 setSshPrompter((req: KeyboardRequest) => {
   // A previously saved answer skips the dialog entirely.
