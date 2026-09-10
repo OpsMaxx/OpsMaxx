@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Eye, EyeOff, Fingerprint, Lock, ShieldCheck } from 'lucide-react'
 import { Modal } from '../common/Modal'
 import { useVault } from '../../store/vault'
@@ -104,17 +104,51 @@ export function VaultUnlockModal(): React.JSX.Element | null {
     void refresh()
   }, [open, refreshBiometrics, refresh])
 
-  // Same as the main gate: the prompt is not fired automatically. See the note
-  // there — an unbidden biometric prompt teaches the reflex that makes prompts
-  // phishable, and this one is a gate rather than a cryptographic step.
+  // Declared before the auto-prompt effect below, which resolves the dialog on
+  // a successful biometric unlock.
+  const close = useCallback(
+    (ok: boolean): void => {
+      setPassword('')
+      setConfirm('')
+      finish(ok)
+    },
+    [finish]
+  )
+
+  /**
+   * Raise Touch ID / Windows Hello as soon as the dialog opens.
+   *
+   * This used to wait for a click, on the reasoning that an unbidden biometric
+   * prompt trains the reflex that makes such prompts phishable. That reasoning
+   * holds for a prompt that appears out of nowhere — and none of these do.
+   * Every path that opens this dialog is downstream of something the user just
+   * did: connecting to a server, opening a database, reading a log, pressing
+   * Check now. The dialog is the answer to their click, so the biometric
+   * prompt is too, and making them click a second button to reach it is a step
+   * that carries no decision.
+   *
+   * Two limits keep the original concern intact. It fires ONCE per opening —
+   * `asked` is never reset while the dialog stays up — so a refusal is final
+   * and the reader falls back to the password field rather than being asked
+   * again. And it fires only where biometrics are both available and
+   * deliberately enrolled for this vault, which is a thing the user turned on.
+   */
+  const asked = useRef(false)
+  useEffect(() => {
+    if (!open) {
+      asked.current = false
+      return
+    }
+    // `canUseBio` is false until refreshBiometrics() has answered, so this
+    // effect runs again when it flips. The ref is what makes that idempotent.
+    if (!canUseBio || busy || asked.current) return
+    asked.current = true
+    void unlockWithBiometrics().then((ok) => {
+      if (ok) close(true)
+    })
+  }, [open, canUseBio, busy, unlockWithBiometrics, close])
 
   if (!open) return null
-
-  const close = (ok: boolean): void => {
-    setPassword('')
-    setConfirm('')
-    finish(ok)
-  }
 
   const submit = async (): Promise<void> => {
     if (!ready) return

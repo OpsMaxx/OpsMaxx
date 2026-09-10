@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useApp, useWorkspaceServers } from '../../store/app'
 import { useFleet } from '../../store/fleet'
 import { useFleetStatus } from '../../store/fleetStatus'
+import { useVault } from '../../store/vault'
 import {
   checkCertificateAlert,
   checkErrorRateAlert,
@@ -610,9 +611,33 @@ export function FleetWatcher(): null {
     }
     read()
     const t = setInterval(read, 10_000)
+
+    /**
+     * And immediately whenever the vault opens or closes.
+     *
+     * The ten-second poll alone is what made unlocking feel broken: main
+     * resumes the sampler the instant the vault opens and `status()` reports
+     * it truthfully from that moment, but nothing in the renderer asked again
+     * for up to ten seconds. So every panel went on showing "the vault is
+     * locked" with an Unlock button under it, after a successful unlock — the
+     * reader has no way to tell that from an unlock that silently failed, and
+     * pressing the button again is the natural next move.
+     *
+     * Subscribing to the flag rather than calling this from the unlock paths
+     * covers all of them at once: the modal, the Vault screen, Settings, and a
+     * lock that happens on its own when the idle timer expires.
+     */
+    let last = useVault.getState().unlocked
+    const unsubscribe = useVault.subscribe((v) => {
+      if (v.unlocked === last) return
+      last = v.unlocked
+      read()
+    })
+
     return () => {
       live = false
       clearInterval(t)
+      unsubscribe()
     }
   }, [])
 
