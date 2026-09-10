@@ -96,6 +96,42 @@ export function sshDir(): string {
   return join(homedir(), '.ssh')
 }
 
+/**
+ * The identities OpenSSH tries when a connection names no key, in its order.
+ *
+ * From ssh_config(5)'s IdentityFile default. Order matters: it is the one a
+ * user's `ssh host` already follows, so following it is what makes OpsMaxx
+ * pick the same key their terminal picks.
+ */
+export const DEFAULT_IDENTITIES = ['id_ed25519', 'id_ecdsa', 'id_ecdsa_sk', 'id_ed25519_sk', 'id_rsa', 'id_dsa'] as const
+
+/**
+ * The first default identity that exists, or null.
+ *
+ * OpenSSH with no `IdentityFile` does not fail — it tries these in turn. Doing
+ * nothing instead is what made an empty key field mean "authenticate with
+ * nothing", and the server then refused every method: reported as "the
+ * private key mechanism is not working anymore", against a field whose grey
+ * placeholder already said `~/.ssh/id_ed25519`.
+ *
+ * First match rather than all of them, because ssh2 takes ONE key per
+ * connection. That covers the ordinary case — one key, the one `ssh` would
+ * also have chosen — and the caller names the file it used so a mismatch is
+ * diagnosable rather than silent.
+ */
+export function defaultIdentityPath(): string | null {
+  const dir = sshDir()
+  for (const name of DEFAULT_IDENTITIES) {
+    const path = join(dir, name)
+    try {
+      if (statSync(path).isFile()) return path
+    } catch {
+      // Absent or unreadable is simply "not this one", exactly as ssh treats it.
+    }
+  }
+  return null
+}
+
 export function listDefaultKeys(): DetectedKey[] {
   const dir = sshDir()
   if (!existsSync(dir)) return []

@@ -7,7 +7,7 @@ import { WebContents } from 'electron'
 import type { SshCloseInfo, SshConnectConfig, SshHop, SshStatus, SshStatusPhase } from '../../shared/ssh'
 import { agentForHop } from '../../shared/sshAgent'
 import { verifyHostKey } from './knownhosts'
-import { isEncryptedPrivateKey } from './sshKeys'
+import { isEncryptedPrivateKey, defaultIdentityPath } from './sshKeys'
 
 interface Session {
   conn: PooledConnection | null
@@ -53,12 +53,41 @@ function status(wc: WebContents, sessionId: string, phase: SshStatusPhase, extra
 // key material up front and fail with something actionable instead.
 function loadPrivateKey(hop: SshHop): string {
   if (hop.privateKey) return hop.privateKey
+  /**
+   * No key named: use the default identities, exactly as `ssh` does.
+   *
+   * This used to throw. That made an empty key field mean "authenticate with
+   * nothing", where every other SSH client treats it as "try the usual
+   * identities" — and the field's own grey placeholder already said
+   * `~/.ssh/id_ed25519`, so the form was describing the behaviour a user
+   * expected and the code was doing the opposite. The server then refused
+   * every method, which reads as a broken key rather than as a key never
+   * sent, and was reported that way.
+   *
+   * The file used is named in any failure below, so picking a different key
+   * from the one `ssh` would have picked is visible rather than silent.
+   */
   if (!hop.keyPath) {
-    throw new Error(
-      `No private key is configured for ${hop.username}@${hop.host}. Edit the server and select a key file, or switch it to password/agent authentication.`
-    )
+    const fallback = defaultIdentityPath()
+    if (!fallback) {
+      throw new Error(
+        `No private key is configured for ${hop.username}@${hop.host}, and no default key was found in ~/.ssh. Edit the server and select a key file, or switch it to password/agent authentication.`
+      )
+    }
+    return readKeyFile(fallback, hop)
   }
-  const path = hop.keyPath.replace(/^"(.*)"$/, '$1').trim()
+  return readKeyFile(hop.keyPath.replace(/^"(.*)"$/, '$1').trim(), hop)
+}
+
+/**
+ * Read and sanity-check one key file.
+ *
+ * Split out so a key chosen by the user and one found by the default-identity
+ * search get identical treatment — the .ppk, public-key and passphrase
+ * messages are the most useful things this file says, and a fallback path
+ * that skipped them would fail with ssh2's generic error instead.
+ */
+function readKeyFile(path: string, hop: SshHop): string {
   if (!existsSync(path)) {
     throw new Error(`Private key not found: ${path}`)
   }
@@ -129,17 +158,54 @@ function authFor(hop: SshHop): Partial<ConnectConfig> {
 // algorithm on by default, which holds a small keystroke packet back waiting
 // for more data — up to ~40ms per character round trip. OpenSSH sets
 // TCP_NODELAY for exactly this reason; ssh2 does not.
+/**
+ * How long to wait for the TCP connection itself.
+ *
+ * This is what makes an unreachable host fail quickly, and it used to be
+ * `readyTimeout` doing the job by proxy — which is why that could not be
+ * raised for a handshake that has to wait on a person. Separating them lets
+ * each be what it actually is: a network deadline here, a human one below.
+ */
+const TCP_CONNECT_MS = 15000
+
 function tcpSocket(host: string, port: number): Promise<net.Socket> {
   return new Promise((resolve, reject) => {
     const socket = net.connect({ host, port })
     socket.setNoDelay(true)
+    socket.setTimeout(TCP_CONNECT_MS, () => {
+      socket.destroy()
+      reject(
+        new Error(
+          `Timed out connecting to ${host}:${port} after ${TCP_CONNECT_MS / 1000}s. Nothing answered on that address and port.`
+        )
+      )
+    })
     socket.once('connect', () => {
       socket.removeListener('error', reject)
+      // The deadline was for CONNECTING. An established session is allowed to
+      // sit idle — a terminal waiting on a person types nothing for minutes.
+      socket.setTimeout(0)
       resolve(socket)
     })
     socket.once('error', reject)
   })
 }
+
+/**
+ * The handshake deadlines.
+ *
+ * Two, because a handshake has two very different phases. Before any
+ * challenge, a server that has accepted TCP and then says nothing is broken
+ * and should fail fast. After one, the connection is waiting on a HUMAN
+ * reading a code off their phone, and the only correct deadline is longer
+ * than the dialog they are answering.
+ */
+const HANDSHAKE_QUIET_MS = 20000
+/** Comfortably past the prompt's own two-minute limit, so the dialog always
+ *  closes before the connection does — whichever way the user goes. */
+const HANDSHAKE_HUMAN_MS = 135000
+/** ssh2's own timer, purely so a bug in ours cannot hang a connection. */
+const HANDSHAKE_BACKSTOP_MS = 150000
 
 async function connectClient(
   hop: SshHop,
@@ -151,25 +217,53 @@ async function connectClient(
   const transport = sock ?? (await tcpSocket(hop.host, hop.port || 22))
   return new Promise((resolve, reject) => {
     const client = new Client()
+
+    /**
+     * Our own handshake deadline, so it can be extended when a person is asked
+     * something. ssh2's `readyTimeout` is armed at connect and cannot be
+     * reset, which is why it could never be both short for a dead server and
+     * long for a verification code.
+     */
+    let deadline: ReturnType<typeof setTimeout> | null = null
+    const clearDeadline = (): void => {
+      if (deadline) clearTimeout(deadline)
+      deadline = null
+    }
+    const armDeadline = (ms: number, why: string): void => {
+      clearDeadline()
+      deadline = setTimeout(() => {
+        client.end()
+        reject(new Error(why))
+      }, ms)
+      if (typeof deadline.unref === 'function') deadline.unref()
+    }
+    armDeadline(
+      HANDSHAKE_QUIET_MS,
+      `Timed out during the SSH handshake with ${hop.username}@${hop.host} after ${HANDSHAKE_QUIET_MS / 1000}s. The host accepted the connection but did not finish authenticating.`
+    )
+
     const config: ConnectConfig = {
       host: hop.host,
       port: hop.port || 22,
       username: hop.username,
       /**
-       * Longer for an agent, because an agent can require a human.
+       * A backstop only. The real deadline is `armHandshakeDeadline` below.
        *
-       * Bitwarden, 1Password and KeePassXC all support asking the user to
-       * approve each signature, and that approval is a desktop prompt the
-       * person has to notice and click. Against a 20s handshake deadline the
-       * connection dies while the dialog is still open, and it dies as
-       * "Timed out" — which reads as a network fault and sends someone to
-       * check the host rather than their own screen.
+       * This used to be `agent ? 90000 : 20000`, on the reasoning that "for a
+       * password or a key there is nothing to approve". That premise is false
+       * wherever a server sets `AuthenticationMethods publickey,keyboard-
+       * interactive`: the key is accepted and THEN a person is asked for a
+       * verification code from their phone. Twenty seconds is not enough for
+       * that, so the handshake died while the dialog was still open — and the
+       * prompt itself waits two minutes, so the two deadlines disagreed by a
+       * factor of six.
        *
-       * Only the agent path pays the longer wait: for a password or a key
-       * there is nothing to approve, and a genuinely unreachable host should
-       * still fail quickly.
+       * It reached the user as "All configured authentication methods
+       * failed", which reads as a rejected credential and sends somebody to
+       * check their key. Reported exactly that way: "the private key
+       * mechanism is not working anymore".
        */
-      readyTimeout: hop.auth === 'agent' ? 90000 : 20000,
+      readyTimeout: HANDSHAKE_BACKSTOP_MS,
       keepaliveInterval: 15000,
       // Required for the second factor after a public key is accepted.
       tryKeyboard: true,
@@ -182,7 +276,10 @@ async function connectClient(
       // opened through the previous hop.
       sock: transport as never
     }
-    client.on('ready', () => resolve(client))
+    client.on('ready', () => {
+      clearDeadline()
+      resolve(client)
+    })
     // ssh2's typings for this event are narrower than its runtime signature.
     ;(client as unknown as { on: (e: string, cb: (...a: never[]) => void) => void }).on(
       'keyboard-interactive',
@@ -193,6 +290,24 @@ async function connectClient(
         prompts: KeyboardPrompt[],
         finish: (answers: string[]) => void
       ) => {
+        /**
+         * A person is now involved, so the clock changes.
+         *
+         * This is the whole fix: the server has accepted the key and is
+         * asking for a second factor, which means somebody has to read a code
+         * off their phone. Twenty seconds killed that mid-dialog and reported
+         * it as an authentication failure.
+         *
+         * Extended before the answering path is chosen, because the saved-
+         * answer and password shortcuts below both still have to complete
+         * against a deadline, and a stored answer resolving instantly is not
+         * a reason to leave the short one armed.
+         */
+        armDeadline(
+          HANDSHAKE_HUMAN_MS,
+          `Timed out waiting for the second factor for ${hop.username}@${hop.host}. The challenge was not answered in time.`
+        )
+
         // A single hidden prompt on a password-auth server is the password
         // itself; anything else is a real challenge for the user.
         const single = prompts.length === 1 && !prompts[0].echo
@@ -216,7 +331,10 @@ async function connectClient(
           .catch(() => finish([]))
       }) as never
     )
-    client.on('error', (err) => reject(err))
+    client.on('error', (err) => {
+      clearDeadline()
+      reject(err)
+    })
     client.connect(config)
   })
 }

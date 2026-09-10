@@ -66,13 +66,6 @@ function missingField(f: {
   editing: boolean
   /** RDP only: there is no SSH credential to demand. */
   rdpOnly: boolean
-  /**
-   * Whether this connection already has a credential saved.
-   *
-   * Undefined while it is still being read: treated as "yes" so the form does
-   * not flash a demand for a key that is in fact stored.
-   */
-  hasStoredCredential: boolean
 }): { field: string; why: string } | null {
   if (!f.name.trim()) return { field: 'name', why: 'Give this connection a name.' }
   if (!f.host.trim()) return { field: 'host', why: 'Enter the server address.' }
@@ -92,24 +85,20 @@ function missingField(f: {
   // The vault entry supplies the credential, so the field below is empty on
   // purpose and must not be reported as missing.
   if (f.usingVault) return null
+  // Editing keeps whatever was stored: a blank box means "unchanged", not
+  // "cleared", which is what its own placeholder says.
+  if (f.editing) return null
   /**
-   * Editing keeps whatever was stored — but only if something WAS.
+   * An empty key box is legal, and means what it means in `ssh`.
    *
-   * This used to return unconditionally, and that is how a connection could
-   * be saved with Private Key selected and no key anywhere: the field is
-   * blank either way, "unchanged" and "there is nothing to change" look
-   * identical, and nothing downstream objects. `secret` is only built when
-   * `keyPath` is non-empty, so the save wrote no credential and the server
-   * then refused every method — reported as "the private key mechanism is
-   * not working anymore", against a form that looked correctly filled in.
+   * OpenSSH with no `IdentityFile` does not refuse — it tries the default
+   * identities, `~/.ssh/id_ed25519` first. Demanding one here would make
+   * OpsMaxx stricter than the tool it is standing in for, over a field whose
+   * own grey placeholder already reads `~/.ssh/id_ed25519`.
    *
-   * With a credential stored, a blank box still means unchanged. With none,
-   * the requirement is exactly a new connection's.
+   * The connection resolves the default at dial time and names the file it
+   * used in any failure, so this is a fallback rather than a guess.
    */
-  if (f.editing && f.hasStoredCredential) return null
-  if (f.auth === 'key' && !f.keyPath.trim()) {
-    return { field: 'keyPath', why: 'Choose the private key to authenticate with.' }
-  }
   if (f.auth === 'password' && !f.password) {
     return { field: 'password', why: 'Enter the password, or switch to a key or the agent.' }
   }
@@ -175,7 +164,6 @@ export function AddServerModal(): React.JSX.Element {
       live = false
     }
   }, [editId])
-  const hasStoredCredential = stored === null || stored.kind !== 'none'
 
   const [rdpUsername, setRdpUsername] = useState(existing?.rdp?.username ?? '')
   const [rdpPassword, setRdpPassword] = useState('')
@@ -213,8 +201,7 @@ export function AddServerModal(): React.JSX.Element {
     password,
     usingVault,
     editing: !!editId,
-    rdpOnly: speaks === 'rdp',
-    hasStoredCredential
+    rdpOnly: speaks === 'rdp'
   })
   const valid = missing === null
 
@@ -595,13 +582,10 @@ export function AddServerModal(): React.JSX.Element {
             <input
               className="input"
               placeholder={
-                editId && stored?.kind === 'key'
-                  ? stored.keyPath
-                    ? `Using ${stored.keyPath} — leave blank to keep it`
-                    : 'Using the stored key — leave blank to keep it'
-                  : '~/.ssh/id_ed25519'
+                editId && stored?.kind === 'key' && stored.keyPath
+                  ? `Using ${stored.keyPath} — leave blank to keep it`
+                  : '~/.ssh/id_ed25519 — leave empty to use your default key'
               }
-              aria-invalid={editId !== null && !hasStoredCredential && !keyPath.trim()}
               value={keyPath}
               onChange={(e) => setKeyPath(e.target.value)}
             />
@@ -629,17 +613,8 @@ export function AddServerModal(): React.JSX.Element {
             </div>
           )}
           <span className="field-hint">
-            {editId && stored?.kind === 'none' ? (
-              // The reported failure, stated in the one place that can fix it:
-              // "All configured authentication methods failed" is what a
-              // server says when the app offered nothing at all.
-              <b>
-                No key is saved for this connection, so it authenticates with nothing. Choose one
-                above.
-              </b>
-            ) : (
-              'Key path and passphrase are stored in OS secure storage, never in plaintext.'
-            )}
+            {'Key path and passphrase are stored in OS secure storage, never in plaintext. ' +
+              'Leave the path empty to use your default key, the same one `ssh` would pick.'}
           </span>
           <input
             className="input"
