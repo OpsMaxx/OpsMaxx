@@ -11,6 +11,7 @@ import { CheckNowButton } from './CheckNowButton'
 import { openKeyRevoke } from '../../store/nav'
 import { useApp } from '../../store/app'
 import { bridgeHas } from '../../lib/bridge'
+import { collectNow } from '../../lib/collectNow'
 import { clsx, duration } from '../../lib/format'
 import {
   serviceAccountsWithKeys,
@@ -214,11 +215,9 @@ export function AccessPanel({
   const refresh = async (): Promise<void> => {
     setBusy(true)
     try {
-      // A sweep first, so a server added since the last one is collected rather
-      // than reported as never checked, then a read of what main now holds.
-      if (bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'sampleNow')) {
-        await window.opsmaxx?.fleet?.sampleNow()
-      }
+      // Collect, not just sweep: the key and access probe keeps its own hourly
+      // clock, so a plain sweep re-read metrics and skipped this entirely.
+      await collectNow()
       await load()
     } finally {
       setBusy(false)

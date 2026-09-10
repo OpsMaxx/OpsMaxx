@@ -4869,3 +4869,61 @@ details[open] > .disclosure-head .chev {
   background: var(--accent-soft);
   border-color: var(--accent-ink);
 }
+
+/* ---------------------------------------------------------------------------
+   "Check now", while it is running.
+
+   A sweep asks servers one at a time on purpose, and an unreachable host costs
+   a 45-second timeout before the next is tried — so this can legitimately run
+   for minutes. A spinner alone cannot say how much is left, which is what made
+   the click feel like nothing had happened.
+   --------------------------------------------------------------------------- */
+.check-now-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.check-now-bar {
+  flex: none;
+  width: 120px;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+.check-now-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: var(--r-pill);
+  background: var(--accent-ink);
+  transition: width 0.25s ease;
+}
+/* Only while waiting on a sweep that started before this click: how long that
+   has left is genuinely unknowable from here, and a determinate bar would be
+   inventing a number. */
+.check-now-fill.indeterminate {
+  width: 40%;
+  animation: check-now-slide 1.1s ease-in-out infinite;
+}
+@keyframes check-now-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+/* The line beside the bar names the host being waited on, so it is read
+   rather than glanced at. */
+.check-now-progress .check-now-said {
+  color: var(--text-muted);
+}
+@media (prefers-reduced-motion: reduce) {
+  .check-now-fill.indeterminate {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
+}

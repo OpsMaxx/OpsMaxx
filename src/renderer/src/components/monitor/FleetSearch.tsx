@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Search, X, Server as ServerIcon, Boxes, Network } from 'lucide-react'
 import { useFleet } from '../../store/fleet'
-import { bridgeHas } from '../../lib/bridge'
+import { collectNow } from '../../lib/collectNow'
 import { searchFleet, coverageSentence, matchKey, type FleetMatch } from '../../lib/fleetSearch'
 import { duration } from '../../lib/format'
 import type { Server } from '../../types'
@@ -77,9 +77,9 @@ export function FleetSearch({
   const sweepNow = async (): Promise<void> => {
     setSweeping(true)
     try {
-      if (bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'sampleNow')) {
-        await window.opsmaxx?.fleet?.sampleNow()
-      }
+      // Collect, not just sweep: this panel searches what the hourly probes
+      // wrote, and a plain sweep does not run them.
+      await collectNow()
     } finally {
       setSweeping(false)
     }

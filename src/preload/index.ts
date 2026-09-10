@@ -36,7 +36,8 @@ import type {
 import type { HostFacts } from '../shared/hostFacts'
 import type { HostPosture } from '../shared/posture'
 import type { FleetSampleEvent, FleetSamplerConfig, FleetSamplerStatus,
-  FleetCollectResult
+  FleetCollectResult,
+  FleetSweepProgress
 } from '../shared/fleet'
 import type { BroadcastHostResult, BroadcastProgress, BroadcastRequest } from '../shared/broadcast'
 import type {
@@ -1047,6 +1048,17 @@ const api = {
       const h = (_e: IpcRendererEvent, event: FleetSampleEvent): void => cb(event)
       ipcRenderer.on('fleet:sample', h)
       return () => ipcRenderer.removeListener('fleet:sample', h)
+    },
+    /**
+     * How far the running sweep has got. Separate from `onSample` because it
+     * fires BEFORE each server is asked rather than after it answers — which
+     * is the difference between naming the host a check is waiting on and
+     * naming the one it has already finished with.
+     */
+    onProgress: (cb: (p: FleetSweepProgress) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, p: FleetSweepProgress): void => cb(p)
+      ipcRenderer.on('fleet:progress', h)
+      return () => ipcRenderer.removeListener('fleet:progress', h)
     }
   },
   db: {

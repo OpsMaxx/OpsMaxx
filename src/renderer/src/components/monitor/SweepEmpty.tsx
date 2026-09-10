@@ -3,6 +3,7 @@ import { useApp } from '../../store/app'
 import { useFleetStatus, sweepBlock } from '../../store/fleetStatus'
 import { openSettings } from '../../store/nav'
 import { UnlockVaultButton } from '../common/UnlockVaultButton'
+import { SweepProgress } from './SweepProgress'
 
 /**
  * The empty state for a panel that shows what the background sweep collected.
@@ -79,9 +80,16 @@ export function SweepEmpty({
           </button>
         )}
         {block.action === 'check-now' && (
-          <button className="btn primary sm" disabled={busy} onClick={onCheckNow}>
-            <RefreshCw size={13} className={busy ? 'spin' : undefined} /> Check now
-          </button>
+          <>
+            <button className="btn primary sm" disabled={busy} onClick={onCheckNow}>
+              <RefreshCw size={13} className={busy ? 'spin' : undefined} />
+              {busy ? 'Checking…' : 'Check now'}
+            </button>
+            {/* The empty state is where waiting is hardest to read: there is no
+                table to watch for a change, so a spinning icon alone leaves the
+                reader with a blank panel and no idea anything is happening. */}
+            <SweepProgress active={busy} label={subject} />
+          </>
         )}
       </div>
     </div>

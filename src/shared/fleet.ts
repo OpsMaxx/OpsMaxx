@@ -49,6 +49,37 @@ export interface FleetSamplerConfig {
  * one that collected everything must not look alike — which is the bug this
  * type was added for. `reason` is present only when nothing was swept.
  */
+/**
+ * How far a sweep has got, while it is still going.
+ *
+ * A sweep is SEQUENTIAL — fifteen servers behind two bastions are asked one at
+ * a time, on purpose — and a host that has gone away costs a 45-second timeout
+ * before the next one is even tried. So "Check now" can legitimately run for
+ * minutes, and a spinner that says only "working" is indistinguishable from a
+ * button that did nothing, which is the bug it was meant to fix.
+ *
+ * `done` counts servers finished, answered or not: this measures the sweep's
+ * progress through the estate, not its success. What answered is reported
+ * separately, at the end, by FleetCollectResult.
+ */
+export interface FleetSweepProgress {
+  /** Servers finished so far. */
+  done: number
+  /** Servers in this sweep. Zero while waiting for an earlier sweep to end. */
+  total: number
+  /**
+   * The one being asked right now, so the line can name it. Null while
+   * waiting for an in-flight sweep, and at the end.
+   */
+  serverId: string | null
+  /**
+   * `waiting` — a sweep started before this request is still running, and it
+   * has to finish first. Its own phase because it is the part that looks most
+   * like nothing happening: it can last a whole sweep before this one begins.
+   */
+  phase: 'waiting' | 'sweeping' | 'done'
+}
+
 export interface FleetCollectResult {
   swept: boolean
   reason?: 'disabled' | 'no-targets'

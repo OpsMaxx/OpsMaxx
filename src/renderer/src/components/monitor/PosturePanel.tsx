@@ -1,6 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { RefreshCw, ShieldAlert, ShieldQuestion } from 'lucide-react'
 import { bridgeHas } from '../../lib/bridge'
+import { collectNow } from '../../lib/collectNow'
+import { SweepProgress } from './SweepProgress'
 import { clsx, duration } from '../../lib/format'
 import {
   CERT_EXPIRY_DAYS,
@@ -574,11 +576,10 @@ export function PosturePanel({
   const refresh = async (): Promise<void> => {
     setBusy(true)
     try {
-      // A sweep first, so a server added since the last one is collected rather
-      // than reported as never checked, then a read of what main now holds.
-      if (bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'sampleNow')) {
-        await window.opsmaxx?.fleet?.sampleNow()
-      }
+      // Collect, not just sweep: this probe keeps its own hourly clock, and a
+      // plain sweep does not clear it — so pressing this re-read metrics and
+      // skipped posture entirely. See lib/collectNow.
+      await collectNow()
       await load()
     } finally {
       setBusy(false)
@@ -642,14 +643,18 @@ export function PosturePanel({
   const failed = rows.filter((r): r is typeof r & { error: string } => typeof r.error === 'string')
 
   const checkNow = (primary: boolean): React.JSX.Element => (
-    <button
-      className={primary ? 'btn primary sm' : 'btn ghost sm'}
-      disabled={busy}
-      onClick={() => void refresh()}
-      title="Sweeps the estate now and re-reads what has already been collected. Posture is re-collected at most once an hour per server. Nothing is changed by this: no firewall is enabled, no SELinux mode is set and no configuration is written."
-    >
-      <RefreshCw size={13} className={clsx(busy && 'spin')} /> Check now
-    </button>
+    <div className="check-now">
+      <button
+        className={primary ? 'btn primary sm' : 'btn ghost sm'}
+        disabled={busy}
+        onClick={() => void refresh()}
+        title="Collects posture from every server now, ignoring the hourly clock. Nothing is changed by this: no firewall is enabled, no SELinux mode is set and no configuration is written."
+      >
+        <RefreshCw size={13} className={clsx(busy && 'spin')} />
+        {busy ? 'Checking…' : 'Check now'}
+      </button>
+      <SweepProgress active={busy} label="Collecting security posture" />
+    </div>
   )
 
   return (

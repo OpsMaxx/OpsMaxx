@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, Boxes, ShieldQuestion } from 'lucide-react'
 import { useFleet } from '../../store/fleet'
 import { bridgeHas } from '../../lib/bridge'
+import { collectNow } from '../../lib/collectNow'
 import { clsx } from '../../lib/format'
 import { CheckNowButton } from './CheckNowButton'
 import {
@@ -169,11 +170,10 @@ export function InventoryPanel({
   const check = async (): Promise<void> => {
     setBusy(true)
     try {
-      // A sweep now, so a host whose facts have never been collected gets them
-      // without waiting for the background interval.
-      if (bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'sampleNow')) {
-        await window.opsmaxx?.fleet?.sampleNow()
-      }
+      // Collect, not just sweep: facts sit behind an hourly clock that a plain
+      // sweep does not clear, so this used to skip the very probe the table
+      // shows. See lib/collectNow.
+      await collectNow()
       // And a read of what main already holds, which is the part that fills the
       // table immediately: the sampler has been collecting facts since its
       // first sweep whether or not this panel was ever open.

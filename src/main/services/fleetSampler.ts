@@ -4,7 +4,8 @@ import type {
   FleetSamplerConfig,
   FleetSamplerStatus,
   FleetTarget,
-  FleetCollectResult
+  FleetCollectResult,
+  FleetSweepProgress
 } from '../../shared/fleet'
 import type { HostAccess } from '../../shared/access'
 import type { HostFacts } from '../../shared/hostFacts'
@@ -349,6 +350,20 @@ export interface FleetSamplerDeps {
   // it — see settings/connectionRetention.ts.
   release: (key: string) => void
   emit: (event: FleetSampleEvent) => void
+  /**
+   * How far the current sweep has got, reported as it goes.
+   *
+   * Optional, like every other probe on this interface: a sampler built
+   * without it behaves exactly as it did before, which is what keeps the
+   * existing tests valid rather than making each declare a reporter it does
+   * not use.
+   *
+   * It exists because the sweep is deliberately SEQUENTIAL and a host that has
+   * gone away costs a 45-second timeout. Without this the only honest thing a
+   * "Check now" button could show for the next two minutes was an indefinite
+   * spinner, which is what "it feels like nothing happened" describes.
+   */
+  progress?: (p: FleetSweepProgress) => void
   // Reports whether credentials can currently be resolved at all. When they
   // cannot, sweeping every target would produce one failure per server per
   // interval, forever, plus an audit entry each — so the loop parks instead.
@@ -877,7 +892,13 @@ export class FleetSampler {
      * would report a collection that did not happen. Waiting costs one sweep's
      * latency and makes the answer true.
      */
-    if (this.inFlight) await this.inFlight
+    // The part that looks most like nothing happening. A sweep that started
+    // before this click can run for minutes, and this request waits it out
+    // before its own begins — so say so rather than showing an idle button.
+    if (this.inFlight) {
+      this.report({ done: 0, total: 0, serverId: null, phase: 'waiting' })
+      await this.inFlight
+    }
     await this.sweep('requested')
 
     /**
@@ -1285,6 +1306,16 @@ export class FleetSampler {
     }
   }
 
+  /** Never lets a reporter's own failure end a sweep. */
+  private report(p: FleetSweepProgress): void {
+    try {
+      this.deps.progress?.(p)
+    } catch {
+      // A window that has gone away mid-sweep is the normal case here, and it
+      // is not a reason to stop collecting.
+    }
+  }
+
   private async sweep(reason: FleetSampleReason): Promise<void> {
     // One sweep at a time. A requested sweep arriving mid-sweep is dropped
     // rather than queued: it would double the load to answer a question the
@@ -1326,11 +1357,19 @@ export class FleetSampler {
       // once, which is a load spike on exactly the machines an operator cannot
       // afford to wobble. A sweep is not latency-sensitive; it is allowed to
       // take a while.
+      const total = this.cfg.targets.length
+      let swept = 0
       for (const t of this.cfg.targets) {
         if (gen !== this.generation || this.disposed) return
         // Re-checked inside the loop: an auto-lock partway through a sweep
         // should stop it, not produce a failure for every remaining server.
         if (!this.deps.vaultUnlocked()) break
+
+        // Before the ask, not after: this host is where the next 45 seconds
+        // are about to go, and naming it while it is being waited on is the
+        // whole point. Reporting it afterwards would name the one already
+        // finished and leave the slow one anonymous.
+        this.report({ done: swept, total, serverId: t.serverId, phase: 'sweeping' })
 
         try {
           const res = await this.deps.sample(fleetKey(t.serverId), t.cfg)
@@ -1517,10 +1556,19 @@ export class FleetSampler {
           if (wasReachable !== false) writes.push({ serverId: t.serverId, at, error: message })
           this.deps.emit({ serverId: t.serverId, reason, at, error: message })
         }
+        // Counted in both directions. This measures progress THROUGH the
+        // estate, not success: a host that refused is one fewer left to wait
+        // for, and a bar that stalled on every unreachable server would be
+        // wrong exactly when it is most needed.
+        swept++
       }
       this.lastSweepAt = this.now
       this.lastSweepMs = this.lastSweepAt - started
     } finally {
+      // In the finally for the reason persist() is: a sweep cut short by a
+      // reconfigure, a lock or a disposal must still take the indicator down,
+      // or a panel is left showing a bar for a sweep that stopped.
+      this.report({ done: 0, total: 0, serverId: null, phase: 'done' })
       // In the finally, so a sweep cut short by a reconfigure still persists
       // what it did learn. Inside its own try, because a store that will not
       // write is a degraded feature and never a broken sweep.

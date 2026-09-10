@@ -1650,6 +1650,9 @@ const fleetSampler = new FleetSampler({
   emit: (event) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('fleet:sample', event)
   },
+  progress: (p) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('fleet:progress', p)
+  },
   // A vault that does not exist is not a locked vault: those installs keep
   // their credentials in the OS keychain or inline, and sampling works fine.
   // Only an existing-but-locked vault means every resolve would throw.

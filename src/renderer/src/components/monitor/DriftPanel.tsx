@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FileDiff, Info, Pin, RefreshCw } from 'lucide-react'
 import { bridgeHas } from '../../lib/bridge'
+import { collectNow } from '../../lib/collectNow'
+import { SweepProgress } from './SweepProgress'
 import { useApp } from '../../store/app'
 import {
   checkDriftWatch,
@@ -247,9 +249,10 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   const refresh = async (): Promise<void> => {
     setBusy(true)
     try {
-      if (bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'sampleNow')) {
-        await window.opsmaxx?.fleet?.sampleNow()
-      }
+      // Collect, not just sweep: this probe keeps its own hourly clock, and a
+      // plain sweep does not clear it — so pressing this re-read metrics and
+      // skipped drift entirely. See lib/collectNow.
+      await collectNow()
       await load()
     } finally {
       setBusy(false)
@@ -325,14 +328,18 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
           <button className="btn ghost sm" onClick={() => setAdding((a) => !a)}>
             {adding ? 'Cancel' : 'Watch a file'}
           </button>
-          <button
-            className="btn ghost sm"
-            disabled={busy}
-            onClick={() => void refresh()}
-            title="Sweeps the estate now and re-reads what has already been collected. Watched files are re-read at most once an hour per server. Nothing is written to any server by this."
-          >
-            <RefreshCw size={13} className={clsx(busy && 'spin')} /> Check now
-          </button>
+          <div className="check-now">
+            <button
+              className="btn ghost sm"
+              disabled={busy}
+              onClick={() => void refresh()}
+              title="Re-reads every watched file now, ignoring the hourly clock. Nothing is written to any server by this."
+            >
+              <RefreshCw size={13} className={clsx(busy && 'spin')} />
+              {busy ? 'Checking…' : 'Check now'}
+            </button>
+            <SweepProgress active={busy} label="Re-reading watched files" />
+          </div>
         </>
       }
     >

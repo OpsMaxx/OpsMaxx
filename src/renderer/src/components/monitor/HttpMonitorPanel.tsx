@@ -221,10 +221,13 @@ export function HttpMonitorPanel(): React.JSX.Element {
                   <button
                     className="btn sm"
                     disabled={running.has(check.id)}
-                    title="Check now"
+                    title={running.has(check.id) ? 'Checking…' : 'Check now'}
                     onClick={() => void runCheck(check)}
                   >
-                    <RefreshCw size={12} />
+                    {/* It span for nothing before: the class was never applied,
+                        so a check that takes a whole timeout showed only a
+                        greyed-out button. */}
+                    <RefreshCw size={12} className={running.has(check.id) ? 'spin' : undefined} />
                   </button>
                   <button className="btn sm" title="Stop watching" onClick={() => remove(check.id)}>
                     <Trash2 size={12} />

@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { RefreshCw, Check, AlertTriangle } from 'lucide-react'
 import { clsx } from '../../lib/format'
+import { SweepProgress } from './SweepProgress'
 
 /**
  * "Check now", and a statement of what it did.
@@ -47,6 +48,7 @@ export function CheckNowButton({
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' })
   const working = phase.kind === 'working'
 
+
   const run = useCallback(async (): Promise<void> => {
     setPhase({ kind: 'working' })
     const bridge = window.opsmaxx?.fleet
@@ -54,7 +56,7 @@ export function CheckNowButton({
     // while the process keeps the preload it booted with, so a method added
     // this session is undefined for the rest of it.
     if (!bridge || typeof bridge.collectNow !== 'function') {
-      setPhase({
+        setPhase({
         kind: 'refused',
         message: 'Restart OpsMaxx to use this — the window is newer than the process behind it.'
       })
@@ -63,7 +65,7 @@ export function CheckNowButton({
     try {
       const r = await bridge.collectNow(serverIds ? [...serverIds] : undefined)
       if (!r?.swept) {
-        setPhase({
+            setPhase({
           kind: 'refused',
           message:
             r?.reason === 'disabled'
@@ -73,14 +75,14 @@ export function CheckNowButton({
         return
       }
       await onCollected?.()
-      setPhase({
+        setPhase({
         kind: 'done',
         servers: r.servers,
         answered: r.answered ?? r.servers,
         at: Date.now()
       })
     } catch (e) {
-      setPhase({
+        setPhase({
         kind: 'refused',
         message: e instanceof Error ? e.message : 'The check could not be run.'
       })
@@ -98,6 +100,22 @@ export function CheckNowButton({
         <RefreshCw size={13} className={clsx(working && 'spin')} />
         {working ? 'Checking…' : 'Check now'}
       </button>
+
+      {/**
+       * What it is doing, while it is doing it.
+       *
+       * The reason this is a BAR and not only a spinner: the sweep is
+       * sequential by design, and a host that has gone away costs a 45-second
+       * timeout before the next is tried, so a five-server estate with two
+       * dead hosts runs for a minute and a half. A spinner says "working" for
+       * all of it and cannot say how much is left, which is the report this
+       * was built from — a click that felt like nothing happened.
+       *
+       * Determinate as soon as the sweep starts, indeterminate only while
+       * waiting for an earlier one to finish, because that is genuinely
+       * unknowable from here.
+       */}
+      <SweepProgress active={working} label={`Collecting ${collects}`} />
 
       {/**
        * The result, in words.
@@ -151,3 +169,4 @@ export function CheckNowButton({
     </div>
   )
 }
+

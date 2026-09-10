@@ -5,6 +5,7 @@ import { AlertTriangle, Ban, RefreshCw, ShieldQuestion, Wrench } from 'lucide-re
 import { useFleet } from '../../store/fleet'
 import { useApp } from '../../store/app'
 import { bridgeHas } from '../../lib/bridge'
+import { collectNow } from '../../lib/collectNow'
 import { SweepEmpty } from './SweepEmpty'
 import { clsx } from '../../lib/format'
 import { sshHopsFor, sshTargetFor } from '../../lib/ssh'
@@ -336,9 +337,9 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   const check = async (): Promise<void> => {
     setBusy(true)
     try {
-      if (bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'sampleNow')) {
-        await window.opsmaxx?.fleet?.sampleNow()
-      }
+      // Collect, not just sweep — pending updates come from the facts probe,
+      // which sits behind an hourly clock a plain sweep leaves alone.
+      await collectNow()
       if (!bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'facts')) return
       await Promise.all(
         servers.map(async (s) => {
