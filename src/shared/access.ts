@@ -2554,6 +2554,14 @@ export interface AccessChangeTarget {
   access: HostAccess
   /** Which account on that host. */
   user: string
+  /**
+   * Run the change as this account instead of as the connecting one.
+   *
+   * Set only where the two differ — see `escalatedFor`. Absent is the ordinary
+   * case and the ordinary command: the connecting account editing its own
+   * file, with no `sudo` in the text at all.
+   */
+  escalateAs?: string
 }
 
 /** A refusal. Never a warning and never overridable: every one of these is a
@@ -2565,6 +2573,12 @@ export interface AccessBlock {
   kind:
     /** Rule 1, exactly: the key asked for is the key this session is on. */
     | 'is-session-key'
+    /**
+     * The selection would need two different commands — some hosts can be
+     * edited directly and others only by escalating — and one job carries one
+     * approved command text. See planAccessChange.
+     */
+    | 'mixed-escalation'
     /** Rule 1, conservatively: the host will not say which key this session is
      *  on, and this revoke targets the account the session runs as. */
     | 'session-key-unknown'
@@ -2810,11 +2824,47 @@ export function planAccessChange(req: AccessChangeRequest): AccessChangePlan {
     }
   }
 
+  /**
+   * One job, one command, so the escalation decision has to be unanimous.
+   *
+   * A selection where some hosts are edited directly and others only by
+   * escalating needs two command texts, and `verifyApproval` compares one. The
+   * odd ones out are BLOCKED rather than silently split into a second job: a
+   * revocation that quietly covered fewer hosts than the operator selected is
+   * the failure this whole feature is shaped around refusing.
+   */
+  const escalateAs = perHost.length > 0 ? (perHost[0].t.escalateAs ?? null) : null
+  const agreed: typeof perHost = []
+  for (const h of perHost) {
+    const mine = h.t.escalateAs ?? null
+    if (mine !== escalateAs) {
+      blocks.push({
+        serverId: h.t.serverId,
+        serverName: h.t.serverName,
+        user: h.t.user,
+        kind: 'mixed-escalation',
+        reason: mine
+          ? `${h.t.user}@${h.t.serverName} can only be changed by escalating, and the rest of this selection does not need to. One confirmation covers one command, so run this host on its own.`
+          : `${h.t.user}@${h.t.serverName} can be changed directly, and the rest of this selection needs to escalate. One confirmation covers one command, so run this host on its own.`
+      })
+      continue
+    }
+    agreed.push(h)
+  }
+  perHost.length = 0
+  perHost.push(...agreed)
+
   for (const h of perHost) {
     targets.push({ serverId: h.t.serverId, serverName: h.t.serverName })
     disarm.push({
       serverId: h.t.serverId,
-      command: accessDisarmCommand(h.path, token)
+      // The marker lives in the edited account's own ~/.ssh, so the
+      // confirmation has to reach it as that account too. A disarm that ran as
+      // the connecting user would write the marker into the wrong home and the
+      // watchdog would roll a committed change back.
+      command: escalateAs
+        ? escalatedFor(escalateAs, accessDisarmCommand(h.path, token))
+        : accessDisarmCommand(h.path, token)
     })
   }
 
@@ -2827,7 +2877,7 @@ export function planAccessChange(req: AccessChangeRequest): AccessChangePlan {
   let write: AccessStagedWrite | null = null
   if (perHost.length > 0) {
     const first = perHost[0]
-    const command =
+    const inner =
       req.kind === 'revoke'
         ? buildRevokeKeyCommand({
             path: first.path,
@@ -2836,13 +2886,19 @@ export function planAccessChange(req: AccessChangeRequest): AccessChangePlan {
             rollbackSeconds: req.rollbackSeconds
           })
         : buildAddKeyCommand({ path: first.path, line: first.blob, token, rollbackSeconds: req.rollbackSeconds })
+    // Unchanged when the connecting account owns the file, which is every
+    // ordinary change: `escalatedFor` is not reached and the text contains no
+    // `sudo` at all.
+    const command = escalateAs ? escalatedFor(escalateAs, inner) : inner
     commands.push(command)
     write = {
       command,
       title:
         req.kind === 'revoke'
-          ? `Stage revocation of ${key.slice(0, 22)}… from ${first.t.user}`
-          : `Stage a new key for ${first.t.user}`
+          ? `Stage revocation of ${key.slice(0, 22)}… from ${first.t.user}${
+              escalateAs ? ' (as that account, via sudo)' : ''
+            }`
+          : `Stage a new key for ${first.t.user}${escalateAs ? ' (as that account, via sudo)' : ''}`
     }
   }
 
@@ -3264,6 +3320,72 @@ export function accessVerifyCommand(token: string): string {
  * `src/` mentions it, and that the caller cannot reach a pooled connection.
  */
 export const ACCESS_COMMITTED_PREFIX = 'COMMITTED: '
+
+/**
+ * A string as one POSIX shell word, quoted.
+ *
+ * The only escape a single-quoted shell word needs: end the quote, an escaped
+ * quote, reopen. Nothing else inside `'...'` has meaning to the shell, which
+ * is exactly why the wrapper below uses it and not double quotes.
+ */
+export function shQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+/**
+ * The same staged change, run as the account whose file it edits.
+ *
+ * ── Why this exists ────────────────────────────────────────────────────────
+ *
+ * Every command this file builds resolves `$HOME/.ssh/authorized_keys`, which
+ * is what lets ONE approved command text cover a whole selection — and which
+ * also means it can only ever edit the connecting account's file. Revoking a
+ * key from `raymon` while connected as `usecqa` was therefore refused, on a
+ * host where `usecqa` plainly has passwordless sudo and the read half had
+ * already used it to inventory raymon's keys in the first place.
+ *
+ * That refusal is the right default and the wrong only answer. Revoking a
+ * compromised key across an estate is exactly the case where credentials for
+ * every individual account are what you do not have.
+ *
+ * ── Why `-u <user>` and not root ───────────────────────────────────────────
+ *
+ * The obvious build is `sudo -n` in front of each file operation, writing as
+ * root. That version has to get ownership and mode right by hand on every path
+ * it touches — the new file, the backup, the lock directory, the marker — and
+ * an authorized_keys left owned by root is one sshd refuses to read, so a
+ * mistake there locks the account out in the name of a revocation.
+ *
+ * Running the WHOLE script as the target account gets all of that for free.
+ * The file is written by its owner, the backup and the lock and the marker
+ * land in that account's own `~/.ssh` owned by that account, and the watchdog
+ * runs as the account too. Not one line of the staged write changes, so the
+ * reasoning and the tests behind it carry over intact — `-H` sets HOME, and
+ * the script has always resolved everything from HOME.
+ *
+ * It is also the smaller privilege: the ability to act as one named user,
+ * rather than as root, for the duration of one script.
+ *
+ * ── What it costs ──────────────────────────────────────────────────────────
+ *
+ * The sudo log. An escalated write is one nobody reading that log can tell
+ * apart from an attacker with the same access, which is why this is reached
+ * only when the ordinary path cannot serve the change at all, and why it is
+ * behind the same operator switch as every other write here.
+ *
+ * And one approved command text now covers one ACCOUNT rather than any
+ * account, because the username is in it. The plan refuses a selection that
+ * would need two.
+ */
+export function escalatedFor(user: string, command: string): string {
+  // The username reaches a shell command, so it is checked against the same
+  // shape the collector validates accounts with — not sanitised, refused. A
+  // name that does not match is a name this app will not act on anywhere.
+  if (!USER_RE.test(user)) {
+    throw new Error('refusing to build an escalated change for an unvalidated account name')
+  }
+  return `sudo -n -H -u ${user} sh -c ${shQuote(command)}`
+}
 
 export function accessDisarmCommand(path: string, token: string): string {
   if (!TOKEN_RE.test(token)) throw new Error('refusing to build a confirmation for an unvalidated token')

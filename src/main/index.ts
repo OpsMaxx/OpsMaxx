@@ -1934,16 +1934,36 @@ function deriveAccessPlan(
        * app failing to notice. It is a decision, not a limitation, and a
        * refusal that hides which one it is invites working around it.
        */
+      /**
+       * Whether this account can act as the target one.
+       *
+       * `keysUsedSudo` is set by the READ half when it had to escalate to see
+       * that file at all, so it is a fact already in hand rather than a new
+       * probe: passwordless sudo works here, on this host, for this account.
+       *
+       * Where it does, the change runs as the target account — see
+       * `escalatedFor` for why as that account and not as root. Where it does
+       * not, this is the same refusal it has always been, and it now says
+       * which of the two it is: a refusal that hides whether it is a limit or
+       * a policy invites working around it.
+       */
       const escalatable =
         held.access.accounts.find((a) => a.user === t.user)?.keysUsedSudo === true
-      const because = escalatable
-        ? `${held.access.collectedAs} does have passwordless sudo on ${t.serverName} — it escalated to READ ${t.user}'s keys. OpsMaxx still will not WRITE another account's file: an escalated write is one nobody reading the sudo log can tell apart from an attacker with the same access, so it is refused rather than forced.`
-        : `${held.access.collectedAs} cannot write ${t.user}'s file, and did not have the sudo rights to read it as root either.`
-      refusals.push({
+      if (!escalatable) {
+        refusals.push({
+          serverId: t.serverId,
+          serverName: t.serverName,
+          user: t.user,
+          reason: `the change would run as ${held.access.collectedAs} on ${t.serverName} and can only edit that account's own authorized_keys, not ${t.user}'s. ${held.access.collectedAs} does not have the passwordless sudo needed to act as ${t.user} either — the key inventory for that account was read without escalating. Connect as ${t.user} to change ${t.user}'s keys.`
+        })
+        continue
+      }
+      targets.push({
         serverId: t.serverId,
         serverName: t.serverName,
+        access: held.access,
         user: t.user,
-        reason: `the change would run as ${held.access.collectedAs} on ${t.serverName} and can only edit that account's own authorized_keys, not ${t.user}'s. ${because} Connect as ${t.user} to change ${t.user}'s keys.`
+        escalateAs: t.user
       })
       continue
     }
