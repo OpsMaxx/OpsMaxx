@@ -30,6 +30,8 @@ import {
 } from '../../../../shared/jobs'
 import type { Server } from '../../types'
 import { NoteWhy, PanelShell } from './PanelShell'
+import { isVaultLocked, withoutVaultMarker } from '../../lib/withVaultUnlock'
+import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import type { OnDemandTarget } from '../../../../shared/ssh'
 
 // Patch and update management — roadmap item 17, renderer half.
@@ -826,7 +828,24 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 <td>{r.serverName}</td>
                 <td>{r.state}</td>
                 <td className="muted">{r.outcome ? JOB_OUTCOME_LABEL[r.outcome] : ''}</td>
-                <td className="muted">{r.error ?? ''}</td>
+                {/* A live row's `error` is a NOTE about the current state, and
+                    a locked vault is one the reader can clear in a press — so
+                    the unlock rides beside the sentence naming it rather than
+                    sending somebody off to find the vault. The marker is
+                    stripped: it exists so renderers can recognise this without
+                    matching English, and is not for reading. */}
+                <td className="muted">
+                  {isVaultLocked(r.error) ? (
+                    <span className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+                      <span className="grow">{withoutVaultMarker(r.error ?? '')}</span>
+                      <UnlockVaultButton
+                        reason={`Polling ${r.serverName} needs the credential in your vault.`}
+                      />
+                    </span>
+                  ) : (
+                    (r.error ?? '')
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

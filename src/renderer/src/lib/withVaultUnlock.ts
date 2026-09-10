@@ -25,6 +25,17 @@ const hasMarker = (v: unknown): boolean => typeof v === 'string' && v.includes(V
  * hand-roll the prompt, or — more often — silently did nothing and left the
  * user reading advice with no way to act on it.
  */
+/**
+ * The same text with the marker taken off, for showing to a person.
+ *
+ * The marker is how every renderer recognises a locked vault without matching
+ * an English sentence. It is not something a user should ever read, so
+ * anything that displays a tagged message strips it first.
+ */
+export function withoutVaultMarker(text: string): string {
+  return text.replace(new RegExp(`${VAULT_LOCKED}:?\\s*`, 'g'), '')
+}
+
 export function isVaultLocked(err: unknown): boolean {
   return scan(err, 0)
 }

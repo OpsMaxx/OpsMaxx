@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Pencil, RotateCw, Terminal as TerminalIcon, X } from 'lucide-react'
 import { credentialNote, type CredentialShape } from '../../../../shared/credentialShape'
 import { classifyConnectionError } from '../../lib/connectionError'
+import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import { TerminalSearch } from './TerminalSearch'
 import { PasteConfirm } from './PasteConfirm'
 import { EmptyState } from '../common/EmptyState'
@@ -180,6 +181,21 @@ function DeadSession({
         {advice.hint && <div className="td-hint">{advice.hint}</div>}
         {/* What we offered, which the server's own message cannot tell them. */}
         {note && <div className="td-hint td-credential">{note}</div>}
+        {/* And where the answer is "unlock the vault", the unlock is here.
+            This note used to end with "Unlock it and try again" and offer no
+            way to — the exact dead end this sweep is about. Reconnect is
+            offered with it, because unlocking is only useful if the thing you
+            were trying to do can then happen. */}
+        {credential?.kind === 'vault' && credential.vaultLocked === true && (
+          <div className="td-actions">
+            <UnlockVaultButton
+              className="btn primary"
+              reason={`${transport.subtitle} signs in with a credential from your vault.`}
+              onUnlocked={onReconnect}
+              label="Unlock and reconnect"
+            />
+          </div>
+        )}
 
         <div className="td-actions">
           {/* Offered only when it can work. A Reconnect on a rejected

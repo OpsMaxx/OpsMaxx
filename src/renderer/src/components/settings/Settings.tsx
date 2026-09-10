@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { AutoStartSettings, AutoStartState } from '../../../../shared/autostart'
 import { ACCESS_WRITE_OPT_IN_NOTE } from '../../../../shared/access'
+import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import {
   Sliders,
   Palette,
@@ -382,8 +383,13 @@ function FleetSamplerLine(): React.JSX.Element | null {
 
   if (status.idleReason === 'vault-locked') {
     return (
-      <div className="s-desc warn">
-        Paused — the vault is locked. Unlock it to resume checking.
+      // The unlock is attached to the sentence that names it. Telling somebody
+      // to go and unlock the vault means: find the vault, work out what a
+      // vault is, unlock it, come back — for a state this screen can resolve
+      // in one press, with Touch ID where the machine has it.
+      <div className="panel-note is-watch">
+        <span className="grow">Paused — the vault is locked, so nothing is being checked.</span>
+        <UnlockVaultButton reason="Background checking needs the credentials in your vault." />
       </div>
     )
   }

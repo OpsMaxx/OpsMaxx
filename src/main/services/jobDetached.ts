@@ -1,3 +1,4 @@
+import { VAULT_LOCKED } from './credentialResolver'
 import type { JobExecRequest, JobExecResult, JobExecutor } from './jobRunner'
 import type { JobDetachedHandle, JobHostCapability, JobHostCapabilityReport } from '../../shared/jobs'
 import {
@@ -431,8 +432,22 @@ export function detachedJobExecutor(deps: DetachedDeps): DetachedExecutor {
       // data point and a parked JOB loses nothing at all, because the byte
       // offset makes the next poll pick up exactly where this one would have.
       if (deps.vaultUnlocked && !deps.vaultUnlocked()) {
-        say('detached', 'Paused: the vault is locked, so this server cannot be polled. The job is ' +
-          'still running on it and polling resumes when the vault is unlocked.')
+        /**
+         * Carries the marker, so the screen can offer the unlock.
+         *
+         * This note is prose about a state the reader can fix in one press,
+         * and it reached the panel as a plain string — so the row said "the
+         * vault is locked" and offered nothing, which means: find the vault,
+         * work out what a vault is, unlock it, come back. `isVaultLocked`
+         * matches on the marker rather than on wording, so tagging it here is
+         * what lets every renderer attach an unlock without any of them
+         * pattern-matching an English sentence.
+         */
+        say(
+          'detached',
+          `${VAULT_LOCKED}: Paused — the vault is locked, so this server cannot be polled. ` +
+            'The job is still running on it and polling resumes when the vault is unlocked.'
+        )
         await sleep(parkMs)
         continue
       }
