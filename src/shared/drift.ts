@@ -63,6 +63,8 @@
 // same way src/shared/docker.ts states its refusal to ship `docker system
 // prune`.
 
+import { SUDO_PROBE } from './docker'
+
 // ---------------------------------------------------------------------------
 // Statuses
 // ---------------------------------------------------------------------------
@@ -570,12 +572,27 @@ export const DRIFT_PREVIEW_CHARS = 4_000
  * `set -e`, every read conditional, every path a literal from DRIFT_WATCHES,
  * and nothing the host says is ever interpolated into a follow-up command.
  *
- * NO SUDO, anywhere, at build time rather than guarded at runtime — so "this
- * command contains no sudo" is a property a reader can check and a test does.
- * Every watched path is world-readable on a stock install; a host where one is
- * not answers `denied`, which is a true statement about what this account can
- * see and is a great deal better than teaching a background sweep to read
- * configuration files as root once an hour.
+ * SUDO IS OPT-IN AND OFF BY DEFAULT, and when it is off the word does not
+ * appear in the built command at all — omitted at build time rather than
+ * guarded at runtime, so "this command contains no sudo" stays a property a
+ * reader can check and a test does.
+ *
+ * It exists because the assumption this file was written on does not hold. The
+ * claim was that every watched path is world-readable on a stock install, so a
+ * `denied` is a true statement about a rare host. On a hardened or RHEL-family
+ * estate `/etc/ssh/sshd_config` is mode 600, and the panel then reports "could
+ * not be read" for most of the fleet — which is true, and useless: the one
+ * comparison an operator most wants is the one they cannot get.
+ *
+ * The escalation is a READ, and the same read the access collector already
+ * makes under `sudo -n` for the same reason. `sudo -n` never prompts: it works
+ * because this account already has passwordless sudo, a decision made on that
+ * host, or it fails instantly and the answer is `denied` exactly as before. It
+ * cannot hang an exec waiting for a tty.
+ *
+ * Retried ONLY on a path this account could not read. A file it can read is
+ * read as itself, so switching this on does not turn the ordinary sweep into a
+ * root sweep — it changes only the cases that were failing.
  *
  * CONTENT IS BASE64. The alternative is dumping file text between markers,
  * which is fine in cron.ts and is not fine here: a watched file is exactly the
@@ -584,41 +601,93 @@ export const DRIFT_PREVIEW_CHARS = 4_000
  * terminator, and every content line is prefixed anyway, so file content cannot
  * forge a record tag or a marker.
  */
-export function buildDriftCommand(opts: { watches?: DriftWatch[]; cap?: number } = {}): string {
+export function buildDriftCommand(
+  opts: { watches?: DriftWatch[]; cap?: number; sudo?: boolean } = {}
+): string {
   const watches = opts.watches ?? DRIFT_WATCHES
   const cap = opts.cap ?? DRIFT_READ_CAP
+  // Off unless asked for, which is the opposite of the access collector's
+  // default and deliberate: that one is useless without escalation, this one
+  // works on a stock host and only needs it on a hardened one.
+  const sudo = opts.sudo === true
   const parts: string[] = [
     'SP_B64=""; for c in base64 /usr/bin/base64 /bin/base64; do ' +
       'command -v "$c" >/dev/null 2>&1 && SP_B64="$c" && break; done',
     `SP_CAP=${cap}`,
+    ...(sudo ? [`SP_SUDO=0`, `[ "$(${SUDO_PROBE})" = SP_SUDO_OK ] && SP_SUDO=1`] : []),
     `printf '%s\\n' '${DRIFT_MARKER}'`
   ]
   for (const w of watches) {
     // `${p%/*}` rather than dirname: one fewer binary to depend on, and every
     // path here is absolute so the expansion always yields the parent.
     const dir = w.path.replace(/\/[^/]*$/, '') || '/'
-    parts.push(
-      [
-        // Traversal FIRST. `[ -e ]` on a path inside a directory this account
-        // cannot traverse returns false, which is indistinguishable from the
-        // file not being there — and reporting `absent` for a permission bit
-        // is the single most likely way this feature could lie. access.ts
-        // learned this the same way.
-        `if [ ! -x '${dir}' ]; then printf 'F %s denied -\\n' '${w.id}';`,
-        `elif [ ! -e '${w.path}' ]; then printf 'F %s absent -\\n' '${w.id}';`,
-        `elif [ ! -f '${w.path}' ]; then printf 'F %s unsupported -\\n' '${w.id}';`,
-        `elif [ ! -r '${w.path}' ]; then printf 'F %s denied -\\n' '${w.id}';`,
-        `elif [ -z "$SP_B64" ]; then printf 'F %s no-tool -\\n' '${w.id}';`,
-        `else SP_N=$(wc -c < '${w.path}' 2>/dev/null | tr -d ' '); [ -n "$SP_N" ] || SP_N=0;`,
-        `if [ "$SP_N" -gt "$SP_CAP" ]; then printf 'F %s partial %s\\n' '${w.id}' "$SP_N";`,
-        `else printf 'F %s ok %s\\n' '${w.id}' "$SP_N";`,
-        `"$SP_B64" < '${w.path}' 2>/dev/null | sed 's/^/D /';`,
-        // The closing record. A content block with no `X` behind it was cut
-        // off in transit, and the parser refuses it rather than hashing a
-        // fragment.
-        `printf 'X %s\\n' '${w.id}'; fi; fi`
-      ].join(' ')
-    )
+    /**
+     * Read first, classify the failure afterwards.
+     *
+     * The original order tested the reasons a read might fail before trying
+     * it, which is right when there is one way to read and wrong once there
+     * are two: with escalation on, a 0700 `/etc/ssh` makes `[ -e ]` false for
+     * a file that is plainly there and plainly readable as root, so a
+     * traversal-first order reports `absent` for it — the single most likely
+     * way this feature could lie, and the exact trap the old comment was
+     * written about.
+     *
+     * So: try as this account, then as root, and only then work out what kind
+     * of "no" it was. Every classification below runs on a path neither read
+     * could open, where the old reasoning applies unchanged.
+     */
+    const readAsSelf = [
+      `if [ -f '${w.path}' ] && [ -r '${w.path}' ]; then`,
+      `if [ -z "$SP_B64" ]; then printf 'F %s no-tool -\\n' '${w.id}';`,
+      `else SP_N=$(wc -c < '${w.path}' 2>/dev/null | tr -d ' '); [ -n "$SP_N" ] || SP_N=0;`,
+      `if [ "$SP_N" -gt "$SP_CAP" ]; then printf 'F %s partial %s\\n' '${w.id}' "$SP_N";`,
+      `else printf 'F %s ok %s\\n' '${w.id}' "$SP_N";`,
+      `"$SP_B64" < '${w.path}' 2>/dev/null | sed 's/^/D /';`,
+      // The closing record. A content block with no `X` behind it was cut off
+      // in transit, and the parser refuses it rather than hashing a fragment.
+      `printf 'X %s\\n' '${w.id}'; fi; fi;`
+    ].join(' ')
+
+    /**
+     * The same read as root, for this watch, only where the one above could
+     * not be done.
+     *
+     * `sudo -n test -f` gates it, so a sudo that is not permitted falls
+     * straight through to the classification below and answers exactly what it
+     * always answered. Size and content both come from the escalated side once
+     * it is taken: sizing as the connecting account and reading as root is how
+     * a partial gets reported as complete.
+     */
+    const readAsRoot = sudo
+      ? [
+          `elif [ "$SP_SUDO" = 1 ] && sudo -n test -f '${w.path}' 2>/dev/null; then`,
+          `if [ -z "$SP_B64" ]; then printf 'F %s no-tool -\\n' '${w.id}';`,
+          `else SP_N=$(sudo -n wc -c < '${w.path}' 2>/dev/null | tr -d ' '); [ -n "$SP_N" ] || SP_N=0;`,
+          `if [ "$SP_N" -gt "$SP_CAP" ]; then printf 'F %s partial %s\\n' '${w.id}' "$SP_N";`,
+          `else printf 'F %s ok %s\\n' '${w.id}' "$SP_N";`,
+          `sudo -n cat '${w.path}' 2>/dev/null | "$SP_B64" | sed 's/^/D /';`,
+          `printf 'X %s\\n' '${w.id}'; fi; fi;`
+        ].join(' ')
+      : ''
+
+    /**
+     * Why it could not be read, for a path neither read could open.
+     *
+     * Traversal FIRST. `[ -e ]` on a path inside a directory this account
+     * cannot traverse returns false, which is indistinguishable from the file
+     * not being there — and reporting `absent` for a permission bit is the
+     * single most likely way this feature could lie. access.ts learned this
+     * the same way.
+     */
+    const classify = [
+      `elif [ ! -x '${dir}' ]; then printf 'F %s denied -\\n' '${w.id}';`,
+      `elif [ ! -e '${w.path}' ]; then printf 'F %s absent -\\n' '${w.id}';`,
+      `elif [ ! -f '${w.path}' ]; then printf 'F %s unsupported -\\n' '${w.id}';`,
+      `else printf 'F %s denied -\\n' '${w.id}'; fi`
+    ].join(' ')
+
+    parts.push([readAsSelf, readAsRoot, classify].filter(Boolean).join(' '))
+
   }
   // Printed from a shell literal that nothing read from a file ever touched, so
   // its presence really does mean the script reached the end.
