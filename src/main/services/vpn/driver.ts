@@ -80,6 +80,25 @@ export interface VpnDriver<S extends VpnSpec = VpnSpec> {
   /** Graceful by default: control channel first, then signals. `force` skips
    *  straight to a kill. */
   stop(id: string, opts?: { force?: boolean }): Promise<void>
+  /**
+   * Give up on a start that is still running, without waiting for it.
+   *
+   * Called OUTSIDE the per-profile queue, which is why it is separate from
+   * `stop`. The queue's ordering guarantee is load-bearing — see `enqueue`,
+   * E50 — so a cancel must not jump it; what it does instead is make the
+   * in-flight start finish promptly, and the stop already queued behind it
+   * then runs in order.
+   *
+   * Without this, Cancel was queued behind a start that can legitimately block
+   * for a minute — a Tailscale node waits for its backend to reach a settled
+   * state — so the button did nothing at all for as long as that took, which
+   * is exactly the window somebody presses it in.
+   *
+   * Optional, synchronous, and never throws: a driver with no long start has
+   * nothing to abort, and a cancel that fails must still leave the stop behind
+   * it to run.
+   */
+  abortStart?(id: string): void
 
   status(id: string): VpnStatus | null
 

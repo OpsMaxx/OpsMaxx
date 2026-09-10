@@ -1,4 +1,3 @@
-import { join } from 'node:path'
 import type {
   TailscaleSpec,
   VpnEngineInfo,
@@ -13,6 +12,7 @@ import type { VpnDriver, VpnDriverContext } from '../driver'
 import { VpnError } from '../errors'
 import { resolveBundled } from '../binaries'
 import { openNetdSession, type NetdSession } from '../netdSession'
+import { createStateDir } from '../runDir'
 
 /**
  * Tailscale, running inside the bundled sidecar.
@@ -61,6 +61,16 @@ interface Live {
 }
 
 const live = new Map<string, Live>()
+
+/**
+ * Sessions belonging to a start that has not finished.
+ *
+ * `live` is only populated once `ts.up` has returned, and `ts.up` is precisely
+ * the call that blocks — a node waits for its backend to settle, which on an
+ * unreachable network is the full timeout. So Cancel had nothing to reach and
+ * sat behind the start for a minute. This is what it reaches instead.
+ */
+const starting = new Map<string, NetdSession>()
 let engine: VpnEngineInfo | null = null
 
 /** A device list is not a per-second fact. */
@@ -154,6 +164,10 @@ export const tailscaleDriver: VpnDriver<TailscaleSpec> = {
     let session: NetdSession
     try {
       session = await openNetdSession(profile.id, ctx, 'tailscale')
+      // Reachable before `ts.up` returns, which is the whole point: that call
+      // is what Cancel needs to interrupt, and it can block for as long as the
+      // node takes to settle. Cleared in the `finally` below.
+      starting.set(profile.id, session)
     } catch (e) {
       return {
         ok: false,
@@ -164,20 +178,26 @@ export const tailscaleDriver: VpnDriver<TailscaleSpec> = {
 
     try {
       /**
-       * The node's identity lives beside the run directory, keyed by profile.
+       * The node's identity, in the durable root.
        *
-       * NOT inside the run directory, which is swept per run — a node whose key
-       * is deleted between starts comes back as a NEW device every time, and
-       * fills the tailnet's admin console with duplicates of itself.
+       * It used to be `join(ctx.runDir, '..', ...)` — a SIBLING of the run
+       * directories, which put it inside `vpn-run`. That root is emptied at
+       * startup by `sweepRunDirs([])`, with an empty keep list, on every
+       * launch. So the key that makes this node the same device next time was
+       * deleted on every launch: the node registered afresh, the admin console
+       * filled with `opsmaxx`, `opsmaxx-1`, and the authorisation had to be
+       * done again each restart. The comment above this line said it must not
+       * be inside the run directory and it was not — it was one level up, in
+       * the directory that gets emptied.
        */
-      const stateDir = join(ctx.runDir, '..', `tailscale-${profile.id}`)
+      const stateDir = await createStateDir(`tailscale-${profile.id}`)
 
       const reply = await session.send<TsStatusReply>('ts.up', {
         tunnelId: profile.id,
         hostname: profile.spec.hostname,
         stateDir,
-        // An auth key, when the user supplied one through the vault. Absent is
-        // the normal path: the node reports an auth URL instead.
+        // An auth key, when the user supplied one through the vault. Absent
+        // is the normal path: the node reports an auth URL instead.
         authKey: ctx.secrets.token,
         timeoutMs: 60_000
       })
@@ -282,6 +302,12 @@ export const tailscaleDriver: VpnDriver<TailscaleSpec> = {
         error: e instanceof Error ? e.message : 'The Tailscale node could not start.',
         errorCode: e instanceof VpnError ? e.code : 'engine-failed'
       }
+    } finally {
+      // Whichever way it went — settled, timed out, refused, or interrupted by
+      // `abortStart` — this start is no longer the one a cancel should reach.
+      // In a `finally` rather than on each path because a stale entry here
+      // would send `ts.down` down a session that has moved on.
+      starting.delete(profile.id)
     }
   },
 
@@ -291,6 +317,24 @@ export const tailscaleDriver: VpnDriver<TailscaleSpec> = {
    * Unambiguous in a way the attach-based version never was: nothing else on
    * the machine is using it, because nothing else knows it exists.
    */
+  /**
+   * Interrupt a start that is still waiting for the node to settle.
+   *
+   * `ts.down` on the same session, sent while `ts.up` is still outstanding.
+   * The sidecar registers the node BEFORE it waits, and `ts.down` cancels that
+   * node's context — so the wait ends, `ts.up` returns, and the stop already
+   * queued behind it runs in order. The NDJSON channel multiplexes by request
+   * id, so a second call on a busy session is ordinary rather than exotic.
+   *
+   * Fire and forget, and never throws: a cancel that cannot reach the sidecar
+   * still has a stop queued behind it, and that is the part that must happen.
+   */
+  abortStart(id: string): void {
+    const session = starting.get(id)
+    if (!session || !session.alive()) return
+    void session.send('ts.down', { tunnelId: id }).catch(() => undefined)
+  },
+
   async stop(id: string): Promise<void> {
     const entry = live.get(id)
     if (!entry) return

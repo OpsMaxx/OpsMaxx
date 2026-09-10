@@ -403,6 +403,28 @@ async function doStart(profile: VpnProfile): Promise<VpnStartResult> {
 // ---------------------------------------------------------------------- stop
 
 export function vpnStop(id: string, opts?: { force?: boolean }): Promise<VpnResult> {
+  /**
+   * Tell an in-flight start to give up, BEFORE queueing behind it.
+   *
+   * The queue is what stops a start and a stop running alongside each other,
+   * and that guarantee is not negotiable (see `enqueue`). So this does not
+   * jump the queue — it shortens what the queue is waiting for. The stop still
+   * runs after the start, in order; the start just stops taking a minute.
+   *
+   * Only on `force`, which is what the Cancel button sends. An ordinary stop
+   * has no reason to interrupt anything.
+   */
+  if (opts?.force) {
+    const profile = live.get(id)?.profile ?? vpnProfile(id)
+    if (profile) {
+      try {
+        driverFor(profile.spec.kind).abortStart?.(id)
+      } catch {
+        // A cancel that cannot reach the engine still has a stop queued behind
+        // it, and that is the part that must happen.
+      }
+    }
+  }
   return enqueue(id, async () => {
     const profile = live.get(id)?.profile ?? vpnProfile(id)
     if (!profile) {

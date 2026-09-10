@@ -1898,6 +1898,14 @@ export const useApp = create<AppState>((set, get) => ({
         prev.state === status.state &&
         prev.restarts === status.restarts &&
         prev.error === status.error &&
+        // The authorisation link is DISPLAYED, so it belongs in the comparison
+        // that decides whether anything moved. Leaving it out dropped two
+        // updates that matter and look like the feature is stuck: a link
+        // arriving while the state is still `authenticating` never reached the
+        // card at all, and a re-auth — which mints a NEW url — left the card
+        // showing the old one, which is a dead link under a message that never
+        // goes away.
+        prev.authUrl === status.authUrl &&
         prev.stats?.sampledAt === status.stats?.sampledAt
       ) {
         return s
