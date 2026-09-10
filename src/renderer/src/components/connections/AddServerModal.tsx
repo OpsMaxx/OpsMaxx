@@ -3,6 +3,7 @@ import { KeyRound, Lock, UserCheck, FileBadge, FolderOpen, ChevronRight } from '
 import { Modal } from '../common/Modal'
 import { useApp } from '../../store/app'
 import { rdpSecretId } from '../../../../shared/rdp'
+import type { CredentialShape } from '../../../../shared/credentialShape'
 import { RouteHops } from './RouteHops'
 import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
@@ -65,6 +66,13 @@ function missingField(f: {
   editing: boolean
   /** RDP only: there is no SSH credential to demand. */
   rdpOnly: boolean
+  /**
+   * Whether this connection already has a credential saved.
+   *
+   * Undefined while it is still being read: treated as "yes" so the form does
+   * not flash a demand for a key that is in fact stored.
+   */
+  hasStoredCredential: boolean
 }): { field: string; why: string } | null {
   if (!f.name.trim()) return { field: 'name', why: 'Give this connection a name.' }
   if (!f.host.trim()) return { field: 'host', why: 'Enter the server address.' }
@@ -84,9 +92,21 @@ function missingField(f: {
   // The vault entry supplies the credential, so the field below is empty on
   // purpose and must not be reported as missing.
   if (f.usingVault) return null
-  // Editing keeps whatever was stored: a blank box means "unchanged", not
-  // "cleared", which is what its own placeholder says.
-  if (f.editing) return null
+  /**
+   * Editing keeps whatever was stored — but only if something WAS.
+   *
+   * This used to return unconditionally, and that is how a connection could
+   * be saved with Private Key selected and no key anywhere: the field is
+   * blank either way, "unchanged" and "there is nothing to change" look
+   * identical, and nothing downstream objects. `secret` is only built when
+   * `keyPath` is non-empty, so the save wrote no credential and the server
+   * then refused every method — reported as "the private key mechanism is
+   * not working anymore", against a form that looked correctly filled in.
+   *
+   * With a credential stored, a blank box still means unchanged. With none,
+   * the requirement is exactly a new connection's.
+   */
+  if (f.editing && f.hasStoredCredential) return null
   if (f.auth === 'key' && !f.keyPath.trim()) {
     return { field: 'keyPath', why: 'Choose the private key to authenticate with.' }
   }
@@ -133,6 +153,30 @@ export function AddServerModal(): React.JSX.Element {
   const [speaks, setSpeaks] = useState<'ssh' | 'ssh+rdp' | 'rdp'>(
     existing?.rdpOnly === true ? 'rdp' : existing?.rdp ? 'ssh+rdp' : 'ssh'
   )
+  /**
+   * What is already saved against this connection, so the form can tell
+   * "leave blank to keep it" apart from "there is nothing here".
+   *
+   * `null` while unread. Treated as "a credential exists" until the answer
+   * arrives, so opening the editor on a perfectly good connection does not
+   * flash a demand for a key it already has.
+   */
+  const [stored, setStored] = useState<CredentialShape | null>(null)
+  useEffect(() => {
+    if (!editId) return
+    let live = true
+    void window.opsmaxx?.ssh
+      ?.credentialShape?.(editId)
+      .then((sh) => {
+        if (live) setStored(sh ?? null)
+      })
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [editId])
+  const hasStoredCredential = stored === null || stored.kind !== 'none'
+
   const [rdpUsername, setRdpUsername] = useState(existing?.rdp?.username ?? '')
   const [rdpPassword, setRdpPassword] = useState('')
   const [rdpPort, setRdpPort] = useState(String(existing?.rdp?.port ?? 3389))
@@ -169,7 +213,8 @@ export function AddServerModal(): React.JSX.Element {
     password,
     usingVault,
     editing: !!editId,
-    rdpOnly: speaks === 'rdp'
+    rdpOnly: speaks === 'rdp',
+    hasStoredCredential
   })
   const valid = missing === null
 
@@ -539,9 +584,24 @@ export function AddServerModal(): React.JSX.Element {
         <div className="field">
           <label className="field-label">Private key</label>
           <div className="input-group">
+            {/**
+             * The placeholder carries the STATE, because an empty box meant
+             * two opposite things and looked the same in both: "a key is
+             * stored, leave this blank to keep it" and "no key is saved at
+             * all". A connection in the second state saved happily and then
+             * failed every authentication method, which is not something the
+             * form gave anybody a way to see.
+             */}
             <input
               className="input"
-              placeholder="~/.ssh/id_ed25519"
+              placeholder={
+                editId && stored?.kind === 'key'
+                  ? stored.keyPath
+                    ? `Using ${stored.keyPath} — leave blank to keep it`
+                    : 'Using the stored key — leave blank to keep it'
+                  : '~/.ssh/id_ed25519'
+              }
+              aria-invalid={editId !== null && !hasStoredCredential && !keyPath.trim()}
               value={keyPath}
               onChange={(e) => setKeyPath(e.target.value)}
             />
@@ -568,7 +628,19 @@ export function AddServerModal(): React.JSX.Element {
               </div>
             </div>
           )}
-          <span className="field-hint">Key path and passphrase are stored in OS secure storage, never in plaintext.</span>
+          <span className="field-hint">
+            {editId && stored?.kind === 'none' ? (
+              // The reported failure, stated in the one place that can fix it:
+              // "All configured authentication methods failed" is what a
+              // server says when the app offered nothing at all.
+              <b>
+                No key is saved for this connection, so it authenticates with nothing. Choose one
+                above.
+              </b>
+            ) : (
+              'Key path and passphrase are stored in OS secure storage, never in plaintext.'
+            )}
+          </span>
           <input
             className="input"
             type="password"
