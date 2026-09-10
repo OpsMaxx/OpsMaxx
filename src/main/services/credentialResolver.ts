@@ -175,7 +175,7 @@ export function credentialShapeForServer(serverId: string): CredentialShape {
     } catch (e) {
       locked = isVaultLockedError(e)
     }
-    return { kind: 'vault', vaultLocked: locked }
+    return { kind: 'vault', vaultLocked: locked, vaultEntryId: blob.vaultEntryId }
   }
   if (blob.agentSocket) return { kind: 'agent' }
   if (blob.keyPath) return { kind: 'key', keyPath: blob.keyPath }

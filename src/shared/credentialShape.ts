@@ -32,6 +32,17 @@ export interface CredentialShape {
   keyPath?: string
   /** True when the vault holds it and the vault is currently locked. */
   vaultLocked?: boolean
+  /**
+   * Which vault entry, for `vault` only.
+   *
+   * An id, not a value — the same id the editor's credential list already
+   * shows and the same one it writes back, so it discloses nothing the form
+   * does not already have. It is here because without it the editor could not
+   * SELECT the credential a connection already uses: the dropdown opened on
+   * "Enter a new one…" for a server with a perfectly good saved credential,
+   * which reads as a form that has forgotten its own state.
+   */
+  vaultEntryId?: string
 }
 
 /**

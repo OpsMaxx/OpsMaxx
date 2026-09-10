@@ -105,6 +105,24 @@ function missingField(f: {
   return null
 }
 
+/** What the private-key box says about a credential that already exists. */
+function credentialPlaceholder(editId: string | null | undefined, stored: CredentialShape | null): string {
+  const fresh = '~/.ssh/id_ed25519 — leave empty to use your default key'
+  if (!editId || !stored) return fresh
+  switch (stored.kind) {
+    case 'key':
+      return stored.keyPath ? `Using ${stored.keyPath} — leave blank to keep it` : fresh
+    case 'vault':
+      return 'Using the saved credential above — leave blank to keep it'
+    case 'password':
+      return 'A password is saved for this connection — leave blank to keep it'
+    case 'agent':
+      return 'Your SSH agent holds the key — leave blank to keep using it'
+    default:
+      return fresh
+  }
+}
+
 export function AddServerModal(): React.JSX.Element {
   const setModal = useApp((s) => s.setModal)
   const setActivity = useApp((s) => s.setActivity)
@@ -157,7 +175,28 @@ export function AddServerModal(): React.JSX.Element {
     void window.opsmaxx?.ssh
       ?.credentialShape?.(editId)
       .then((sh) => {
-        if (live) setStored(sh ?? null)
+        if (!live) return
+        setStored(sh ?? null)
+        /**
+         * Select the credential this connection already uses.
+         *
+         * Without this the dropdown opened on "Enter a new one…" for a server
+         * with a perfectly good saved credential — which reads as a form that
+         * has forgotten its own state, and invites retyping something that was
+         * never lost. Nothing WAS lost: a blank box on save means "keep what
+         * is stored", and the save path only writes when something was typed.
+         * It looked like loss, which for a credential is bad enough.
+         *
+         * Set only when the answer names an entry, so it cannot clear a
+         * choice the user made while the read was in flight.
+         */
+        if (sh?.kind === 'vault' && sh.vaultEntryId) {
+          const entry = sh.vaultEntryId
+          // Functional, and only over the untouched initial value: this read is
+          // async and somebody can pick a different credential before it lands.
+          // Overwriting then is the form fighting the person using it.
+          setVaultEntryId((cur) => (cur === '' ? entry : cur))
+        }
       })
       .catch(() => undefined)
     return () => {
@@ -581,11 +620,17 @@ export function AddServerModal(): React.JSX.Element {
              */}
             <input
               className="input"
-              placeholder={
-                editId && stored?.kind === 'key' && stored.keyPath
-                  ? `Using ${stored.keyPath} — leave blank to keep it`
-                  : '~/.ssh/id_ed25519 — leave empty to use your default key'
-              }
+              /**
+               * What is actually stored, in the box that would replace it.
+               *
+               * Only the `key` case was covered, so a connection whose
+               * credential lives in the vault — or in the keychain as a
+               * password, or as an agent socket — showed the same empty box a
+               * brand new connection shows. That is the same sentence for
+               * "nothing is configured" and "something is, elsewhere", which
+               * is what this placeholder exists to tell apart.
+               */
+              placeholder={credentialPlaceholder(editId, stored)}
               value={keyPath}
               onChange={(e) => setKeyPath(e.target.value)}
             />
