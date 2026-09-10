@@ -114,8 +114,64 @@ export function stateFor(backend: string | undefined): {
   }
 }
 
+/**
+ * A loopback listener whose connections are carried by the node.
+ *
+ * ── Why this has to exist ──────────────────────────────────────────────────
+ *
+ * tsnet is a USERSPACE node. It installs no route on this machine and no
+ * resolver entry, so nothing outside the sidecar process can reach the tailnet
+ * through it: `100.64.0.0/10` is not routed here and a MagicDNS name does not
+ * resolve here.
+ *
+ * Without this method the driver had no `openForward`, so `vpnOpenForward`
+ * threw `unsupported` and `vpnDial` took its "system mode routes for real, so
+ * there is nothing to forward" branch — which is true of WireGuard and OpenVPN
+ * in system mode and is exactly wrong here. A server marked "reach through
+ * Tailscale" was then dialled straight from the host OS, where the MagicDNS
+ * name gave `getaddrinfo ENOTFOUND` and the 100.x address had no route. The
+ * transport silently did not exist behind a UI that offered it.
+ *
+ * The sidecar dials through `srv.Dial`, which resolves on the tailnet's own
+ * DNS and carries the connection over the node — so both a MagicDNS name and a
+ * 100.x address work, and they work whether or not this machine also runs a
+ * Tailscale client of its own.
+ */
+async function openForward(
+  id: string,
+  host: string,
+  port: number
+): Promise<{ port: number; close: () => void }> {
+  const entry = live.get(id)
+  if (!entry || !entry.session.alive()) {
+    throw new VpnError('internal', 'That Tailscale node is not running.')
+  }
+
+  const res = await entry.session.send<{ forwardId: string; listenPort: number }>(
+    'ts.forward.open',
+    { tunnelId: id, host, port }
+  )
+
+  let closed = false
+  return {
+    port: res.listenPort,
+    close: (): void => {
+      if (closed) return
+      closed = true
+      // Fire and forget: a forward whose node already went down is not an
+      // error, and closing one is often what happens on the way out of a
+      // failed connection.
+      void entry.session
+        .send('ts.forward.close', { forwardId: res.forwardId })
+        .catch(() => undefined)
+    }
+  }
+}
+
 export const tailscaleDriver: VpnDriver<TailscaleSpec> = {
   kind: 'tailscale',
+
+  openForward,
 
   validateConfig(spec: TailscaleSpec): VpnValidation {
     const issues: VpnValidationIssue[] = []

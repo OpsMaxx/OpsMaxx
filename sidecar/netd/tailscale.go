@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -53,6 +56,10 @@ type tsNode struct {
 	// console every time the app restarts.
 	stateDir  string
 	ephemeral bool
+
+	// Local listeners this node is serving, by forward id. Closed on down().
+	mu       sync.Mutex
+	forwards map[string]net.Listener
 }
 
 type tsState struct {
@@ -174,7 +181,14 @@ func (s *Server) tsUp(req *Request) (interface{}, error) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	node := &tsNode{id: p.TunnelID, srv: srv, cancel: cancel, stateDir: stateDir, ephemeral: p.Ephemeral}
+	node := &tsNode{
+		id:       p.TunnelID,
+		srv:      srv,
+		cancel:   cancel,
+		stateDir: stateDir,
+		ephemeral: p.Ephemeral,
+		forwards:  map[string]net.Listener{},
+	}
 
 	timeout := time.Duration(p.TimeoutMs) * time.Millisecond
 	if timeout <= 0 {
@@ -295,6 +309,114 @@ func (s *Server) tsStatus(req *Request) (interface{}, error) {
 	return tsStatusFrom(st), nil
 }
 
+/**
+ * A local listener whose connections are dialled THROUGH this node.
+ *
+ * The reason this exists at all: tsnet is a userspace node. It installs no
+ * routes on the host and no resolver, so nothing outside this process can
+ * reach the tailnet through it — `100.64.0.0/10` is not routed and a MagicDNS
+ * name is not resolvable. The app was relying on `vpnDial`'s "system mode
+ * routes for real, so there is nothing to forward" fallback, which is true of
+ * WireGuard and OpenVPN in system mode and is exactly wrong here: a server
+ * marked "reach through Tailscale" was dialled straight from the host, where
+ * the name gave ENOTFOUND and the address had no route.
+ *
+ * `srv.Dial` is the whole fix. It resolves through the tailnet's own DNS and
+ * carries the connection over the node, so both a MagicDNS name and a 100.x
+ * address work — and they work whether or not the machine also runs a
+ * Tailscale client of its own.
+ */
+func (s *Server) tsForwardOpen(req *Request) (interface{}, error) {
+	var p ForwardOpenParams
+	if err := decodeParams(req, &p); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(p.Host) == "" || p.Port <= 0 || p.Port > 65535 {
+		return nil, codedf(ErrConfigInvalid, "a forward needs a host and a port in 1-65535")
+	}
+
+	s.ts.mu.Lock()
+	node := s.ts.nodes[p.TunnelID]
+	s.ts.mu.Unlock()
+	if node == nil {
+		return nil, codedf(ErrEngineStopped, "no Tailscale node %q is running", p.TunnelID)
+	}
+
+	bindHost := strings.TrimSpace(p.BindHost)
+	if bindHost == "" {
+		// An ephemeral forward has no business being reachable from the LAN.
+		bindHost = "127.0.0.1"
+	}
+	ln, err := bindLocal(bindHost, p.BindPort)
+	if err != nil {
+		return nil, err
+	}
+	actual := ln.Addr().(*net.TCPAddr).Port
+	id := "tsfwd-" + strconv.FormatUint(s.forwardN.Add(1), 10)
+
+	node.mu.Lock()
+	node.forwards[id] = ln
+	node.mu.Unlock()
+
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				// A closed listener is tsForwardClose or down(), not a fault.
+				if errors.Is(err, net.ErrClosed) {
+					return
+				}
+				s.out.Log("warn", p.TunnelID, "forward accept: "+redact(err.Error()))
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				// Dialled through the NODE, which is what makes MagicDNS and
+				// the 100.x address resolvable at all.
+				up, err := node.srv.Dial(context.Background(), "tcp", hostPort(p.Host, p.Port))
+				if err != nil {
+					s.out.Log("warn", p.TunnelID,
+						"forward to "+hostPort(p.Host, p.Port)+": "+redact(err.Error()))
+					return
+				}
+				defer up.Close()
+				relay(context.Background(), c, up)
+			}(c)
+		}
+	}()
+
+	return &ForwardOpenResult{ForwardID: id, BindHost: bindHost, ListenPort: actual}, nil
+}
+
+func (s *Server) tsForwardClose(req *Request) (interface{}, error) {
+	var p ForwardCloseParams
+	if err := decodeParams(req, &p); err != nil {
+		return nil, err
+	}
+	s.ts.mu.Lock()
+	nodes := make([]*tsNode, 0, len(s.ts.nodes))
+	for _, n := range s.ts.nodes {
+		nodes = append(nodes, n)
+	}
+	s.ts.mu.Unlock()
+	// Closing the listener stops NEW connections; ones already relaying end on
+	// their own or when the node goes down. That is what "close the forward"
+	// means to the caller, and it matches the WireGuard side exactly.
+	for _, n := range nodes {
+		n.mu.Lock()
+		ln, ok := n.forwards[p.ForwardID]
+		delete(n.forwards, p.ForwardID)
+		n.mu.Unlock()
+		if ok {
+			_ = ln.Close()
+			break
+		}
+	}
+	// A forward whose node already went down is not an error: ts.down closed
+	// it, and the caller catching up is the normal ordering.
+	return map[string]string{"forwardId": p.ForwardID}, nil
+}
+
 func (s *Server) tsDown(req *Request) (interface{}, error) {
 	var p TSDownParams
 	if err := decodeParams(req, &p); err != nil {
@@ -307,6 +429,14 @@ func (s *Server) tsDown(req *Request) (interface{}, error) {
 		return map[string]bool{"stopped": true}, nil
 	}
 	node.cancel()
+	// The listeners first: a forward outliving its node would accept
+	// connections it can no longer dial anywhere.
+	node.mu.Lock()
+	for id, ln := range node.forwards {
+		_ = ln.Close()
+		delete(node.forwards, id)
+	}
+	node.mu.Unlock()
 	if err := node.srv.Close(); err != nil {
 		return nil, wrapCoded(ErrEngineFailed, err, "the Tailscale node did not stop cleanly")
 	}

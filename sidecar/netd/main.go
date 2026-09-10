@@ -357,6 +357,10 @@ func (s *Server) dispatch(req *Request) {
 		s.handle(req, s.tsUp)
 	case "ts.status":
 		s.handle(req, s.tsStatus)
+	case "ts.forward.open":
+		s.handle(req, s.tsForwardOpen)
+	case "ts.forward.close":
+		s.handle(req, s.tsForwardClose)
 	case "ts.down":
 		s.handle(req, s.tsDown)
 	case "ngrok.up":
