@@ -1,8 +1,11 @@
+import { useState } from 'react'
 import { Globe, Pencil, Plus, ServerCog, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { useApp, useWorkspaceApiCollections, useWorkspaceServers } from '../../store/app'
 import { clsx } from '../../lib/format'
 import { ApiClientPane } from './ApiClientPane'
 import { EndpointEditor } from './EndpointEditor'
+import { RequestPane } from './RequestPane'
+import type { ApiCollection } from '../../types'
 
 /**
  * The HTTP client.
@@ -26,19 +29,55 @@ export function HttpView(): React.JSX.Element {
   return (
     <div className="main">
       <HttpToolbar collectionId={active.id} />
-      {/* Above the client, and only for a collection with no description:
-          these ARE the operations the client will show, so defining them is
-          the step before using it rather than a setting somewhere else. */}
-      <EndpointEditor collection={active} />
-      {/* Keyed so switching collections builds a fresh client rather than
-          trying to retarget a live one. Endpoints are part of that key: the
-          document is built from them, and the client holds it after mount, so
-          adding a path has to rebuild rather than be ignored. */}
-      <ApiClientPane
-        key={`${active.id}:${(active.endpoints ?? []).map((e) => `${e.method}${e.path}`).join(',')}`}
-        collection={active}
-      />
+      {/* Keyed on the collection so switching one resets what is selected
+          and what was typed into it, rather than showing the previous
+          collection's request against this one's base URL. */}
+      <CollectionBody key={active.id} collection={active} />
     </div>
+  )
+}
+
+/**
+ * Which client a collection gets.
+ *
+ * A collection with an imported description keeps the OpenAPI reader: it has
+ * a real document, with schemas and examples this app does not attempt to
+ * reproduce, and rendering that is what the reader is good at.
+ *
+ * A collection WITHOUT one gets the request pane. There is no document to
+ * read — the reader was being handed a synthetic one built from the paths
+ * below, and it showed them in its list and then refused to open any of them,
+ * leaving "Select an operation to view details" with no Send button anywhere
+ * on the screen. Writing requests is a smaller thing to own outright than a
+ * document reader that has to be persuaded to act like a request builder.
+ */
+function CollectionBody({ collection }: { collection: ApiCollection }): React.JSX.Element {
+  const endpoints = collection.endpoints ?? []
+  const [picked, setPicked] = useState<string | null>(null)
+
+  if (collection.specUrl || collection.specPath) {
+    return (
+      <ApiClientPane
+        key={`${collection.id}:${collection.specUrl ?? ''}:${collection.specPath ?? ''}`}
+        collection={collection}
+      />
+    )
+  }
+
+  // The first one, until something else is picked: a collection with paths in
+  // it should open on one, and one that has none opens on a blank request
+  // rather than on nothing at all.
+  const selected = endpoints.find((e) => e.id === picked) ?? endpoints[0] ?? null
+
+  return (
+    <>
+      <EndpointEditor
+        collection={collection}
+        selectedId={selected?.id ?? null}
+        onSelect={setPicked}
+      />
+      <RequestPane collection={collection} endpoint={selected} />
+    </>
   )
 }
 
@@ -62,7 +101,6 @@ function HttpToolbar({ collectionId }: { collectionId: string }): React.JSX.Elem
   const servers = useWorkspaceServers()
   const update = useApp((s) => s.updateApiCollection)
   const setActive = useApp((s) => s.setActiveApiCollection)
-  const setModal = useApp((s) => s.setModal)
   const openApiEditor = useApp((s) => s.openApiEditor)
   const collection = collections.find((c) => c.id === collectionId)
   if (!collection) return <div className="viewbar" />
@@ -103,9 +141,28 @@ function HttpToolbar({ collectionId }: { collectionId: string }): React.JSX.Elem
       >
         <Pencil size={14} />
       </button>
-      <button className="icon-btn" title="Add an API" onClick={() => setModal('add-api')}>
-        <Plus size={15} />
-      </button>
+      {/**
+       * Two plus buttons did the same thing.
+       *
+       * This one and the sidebar's both opened "Add an API", so the control
+       * beside the API SELECTOR — where a person is looking at one API and
+       * wants another request in it — added a whole second API instead. The
+       * affordance that was missing had a button pointing at the wrong thing.
+       *
+       * The sidebar keeps "new API", which is what a list of APIs should
+       * offer. This one adds a request to the one on screen, and is absent
+       * where that cannot mean anything: a collection with an imported
+       * description takes its operations from the description.
+       */}
+      {!collection.specUrl && !collection.specPath && (
+        <button
+          className="icon-btn"
+          title={`Add a request to ${collection.name}`}
+          onClick={() => useApp.getState().requestApiEndpointFocus(collection.id)}
+        >
+          <Plus size={15} />
+        </button>
+      )}
 
       <label className="http-via">
         <span className="http-via-label">

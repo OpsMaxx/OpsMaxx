@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { API_METHODS, type ApiCollection, type ApiEndpoint, type ApiMethod } from '../../types'
 import { useApp } from '../../store/app'
@@ -36,14 +36,34 @@ function normalisePath(raw: string): string | null {
 }
 
 export function EndpointEditor({
-  collection
+  collection,
+  selectedId,
+  onSelect
 }: {
   collection: ApiCollection
+  /** Which endpoint the request pane below is showing. */
+  selectedId: string | null
+  onSelect: (id: string) => void
 }): React.JSX.Element | null {
   const update = useApp((s) => s.updateApiCollection)
   const [method, setMethod] = useState<ApiMethod>('get')
   const [path, setPath] = useState('')
   const [summary, setSummary] = useState('')
+  const pathRef = useRef<HTMLInputElement>(null)
+
+  /**
+   * The toolbar's plus lands the cursor here.
+   *
+   * Watched on the nonce so pressing it twice is two events — a boolean
+   * already true would give this nothing to react to, and the second press
+   * would appear to do nothing.
+   */
+  const focusRequest = useApp((s) => s.apiEndpointFocus)
+  useEffect(() => {
+    if (!focusRequest || focusRequest.collectionId !== collection.id) return
+    pathRef.current?.focus()
+    pathRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [focusRequest, collection.id])
 
   /**
    * Only for a collection that has no description.
@@ -71,6 +91,10 @@ export function EndpointEditor({
       ...(summary.trim() ? { summary: summary.trim() } : {})
     }
     update(collection.id, { endpoints: [...endpoints, next] })
+    // Land on it. Adding a path and then having to find it in the list to
+    // send it is the half-finished version of this — the reported bug was
+    // that adding a request only ever added a row.
+    onSelect(next.id)
     setPath('')
     setSummary('')
   }
@@ -85,8 +109,8 @@ export function EndpointEditor({
         <span className="ui-section-title">Endpoints</span>
         <span className="faint">
           {endpoints.length === 0
-            ? 'Add a path to send a request to it.'
-            : `${endpoints.length} defined`}
+            ? 'Add a path, or send the blank request below.'
+            : `${endpoints.length} defined — pick one to load it below`}
         </span>
       </div>
 
@@ -104,6 +128,7 @@ export function EndpointEditor({
           ))}
         </select>
         <input
+          ref={pathRef}
           className="input sm"
           placeholder="/v1/users"
           aria-label="Path"
@@ -141,10 +166,20 @@ export function EndpointEditor({
       {endpoints.length > 0 && (
         <ul className="endpoints-list">
           {endpoints.map((e) => (
-            <li key={e.id} className="endpoints-row">
-              <span className={clsx('method-tag', `m-${e.method}`)}>{e.method.toUpperCase()}</span>
-              <span className="mono selectable endpoints-path">{e.path}</span>
-              <span className="faint endpoints-summary">{e.summary ?? ''}</span>
+            <li key={e.id} className={clsx('endpoints-row', selectedId === e.id && 'selected')}>
+              {/* The row loads the request. A list you can only delete from
+                  is the one that was here, and clicking it did nothing. */}
+              <button
+                className="endpoints-pick"
+                aria-current={selectedId === e.id}
+                onClick={() => onSelect(e.id)}
+              >
+                <span className={clsx('method-tag', `m-${e.method}`)}>
+                  {e.method.toUpperCase()}
+                </span>
+                <span className="mono endpoints-path">{e.path}</span>
+                <span className="faint endpoints-summary">{e.summary ?? ''}</span>
+              </button>
               <button
                 className="btn ghost sm"
                 title={`Remove ${e.method.toUpperCase()} ${e.path}`}

@@ -92,19 +92,33 @@ export function AddApiModal(): React.JSX.Element {
       onClose={() => setModal(null)}
       confirm={{ label: editing ? 'Save' : 'Add', onClick: create, disabled: !valid }}
     >
+      {/**
+       * "Start empty", not "Single request".
+       *
+       * The label described what this used to build — one synthetic path off
+       * the base URL — and stopped being true once a collection could define
+       * its own endpoints. Somebody looking for a blank project read "single
+       * request" as "this is not that" and concluded the app could not make
+       * one, which is exactly what was reported.
+       */}
       <div className="segment modal-segment">
         <button
           className={clsx('seg-btn', source === 'blank' && 'active')}
           onClick={() => setSource('blank')}
         >
-          Single request
+          Start empty
         </button>
         <button
           className={clsx('seg-btn', source === 'spec' && 'active')}
           onClick={() => setSource('spec')}
         >
-          From OpenAPI
+          Import OpenAPI
         </button>
+      </div>
+      <div className="field-hint" style={{ marginBottom: 'var(--sp-3)' }}>
+        {source === 'blank'
+          ? 'A base URL to send to, and requests you add yourself.'
+          : 'Reads a description and lists every operation it declares.'}
       </div>
 
       <Field label="Name" required>

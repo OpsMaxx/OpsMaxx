@@ -381,6 +381,14 @@ interface AppState {
    */
   findRequest: { paneId: string; nonce: number } | null
   /**
+   * A request to focus the endpoint editor for one API.
+   *
+   * A nonce for the reason findRequest carries one: pressing the toolbar's
+   * plus twice has to be two events, and a boolean already true gives a
+   * component nothing to react to.
+   */
+  apiEndpointFocus: { collectionId: string; nonce: number } | null
+  /**
    * Recently closed tabs, oldest first, for reopening.
    *
    * Not persisted, like `tabs` itself: reopening is an undo for the mistake
@@ -492,6 +500,8 @@ interface AppState {
   /** Open Find in one terminal pane. The toolbar's magnifier, and anything
    *  else that wants to reach the search bar without a keyboard. */
   requestTerminalFind: (paneId: string) => void
+  /** Put the cursor in the endpoint editor for one API. The toolbar's plus. */
+  requestApiEndpointFocus: (collectionId: string) => void
   cycleTab: (dir: 1 | -1) => void
   /** Drag-to-reorder. `toIndex` is a position among the VISIBLE tabs. */
   moveTab: (id: string, toIndex: number) => void
@@ -887,6 +897,7 @@ export const useApp = create<AppState>((set, get) => ({
   tabs: [],
   activeTabId: null,
   findRequest: null,
+  apiEndpointFocus: null,
   closedTabs: [],
   tabSession: {},
   tabCwd: {},
@@ -1315,6 +1326,11 @@ export const useApp = create<AppState>((set, get) => ({
       const tabs = s.tabs.map((t) => (t.workspaceId === tab.workspaceId ? queue.shift()! : t))
       return { tabs }
     }),
+
+  requestApiEndpointFocus: (collectionId) =>
+    set((s) => ({
+      apiEndpointFocus: { collectionId, nonce: (s.apiEndpointFocus?.nonce ?? 0) + 1 }
+    })),
 
   requestTerminalFind: (paneId) =>
     set((s) => ({

@@ -4696,3 +4696,176 @@ details[open] > .disclosure-head .chev {
   margin: 1px 0;
   opacity: 0.85;
 }
+
+/* ---------------------------------------------------------------------------
+   The request pane.
+
+   Three bands down a column: what is being sent, what it carries, what came
+   back. The response takes the room that is left and scrolls on its own, so
+   the method and the Send button never leave the screen while a long body is
+   being read.
+   --------------------------------------------------------------------------- */
+.req-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  min-height: 0;
+  flex: 1;
+}
+.req-bar {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+/* The method stays narrow and carries its own colour, so the row reads as
+   "POST somewhere" before any of it is actually read. */
+.req-method {
+  flex: none;
+  width: 104px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+.req-method.m-get {
+  color: var(--accent-ink);
+}
+.req-method.m-post {
+  color: var(--ok);
+}
+.req-method.m-put,
+.req-method.m-patch {
+  color: var(--warn);
+}
+.req-method.m-delete {
+  color: var(--danger);
+}
+.req-path {
+  flex: 1;
+  min-width: 0;
+}
+.req-send {
+  flex: none;
+}
+/* The resolved URL. Selectable because copying it into curl is the first
+   thing anyone does when a request behaves differently in two places. */
+.req-url {
+  /* Read as a string, character by character — a wrong port or a doubled
+     slash has to be visible in it — so it stays on the body scale rather
+     than dropping to the label size. */
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  overflow-x: auto;
+  white-space: nowrap;
+  background: var(--bg-card);
+}
+.req-blocked {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--danger);
+}
+.req-tabs {
+  align-self: flex-start;
+}
+.req-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.req-body {
+  width: 100%;
+  min-height: 120px;
+}
+.kv-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  align-items: flex-start;
+}
+.kv-empty {
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-sm);
+}
+/* Sentences, not labels: these explain why a control behaves the way it
+   does, and are read rather than recognised. */
+.req-note {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+}
+/* Name and value share the row evenly: a header value is usually longer than
+   its name, but a token is unreadable at any width, so neither wins. */
+.kv-row {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  width: 100%;
+}
+.kv-row .input {
+  flex: 1;
+  min-width: 0;
+}
+.kv-add {
+  flex: none;
+}
+/* The response owns the remaining height and scrolls inside itself. */
+.req-response {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-height: 0;
+  flex: 1;
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border-subtle);
+}
+.req-response-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.req-response-error {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+.req-response-body {
+  margin: 0;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--sp-2);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  white-space: pre;
+  user-select: text;
+}
+
+/* An endpoint row loads the request below it, so the whole row is the
+   control rather than a label with a delete button beside it. */
+.endpoints-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1;
+  min-width: 0;
+  padding: var(--sp-1) var(--sp-2);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.endpoints-pick:hover {
+  background: var(--bg-hover);
+}
+.endpoints-row.selected .endpoints-pick {
+  background: var(--accent-soft);
+  border-color: var(--accent-ink);
+}
