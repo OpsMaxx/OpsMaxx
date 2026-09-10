@@ -8,6 +8,17 @@
 // string into a toast and leaving the reader to interpret it.
 
 export type ConnectionFault =
+  /**
+   * Not a fault at all: the shell ended, which is what `exit` does.
+   *
+   * It is in this union because the dead-session card asks this classifier
+   * what happened, and every unrecognised string fell through to `unknown` —
+   * whose whole job is to admit it cannot explain a FAILURE. So typing `exit`
+   * produced "OpsMaxx could not tell what went wrong from what the server
+   * said." over a session that had done exactly what it was told, which reads
+   * as a bug in the app rather than a shell closing.
+   */
+  | 'exited'
   | 'host-key'
   | 'port-in-use'
   | 'passphrase'
@@ -22,6 +33,13 @@ export type ConnectionFault =
 // "Permission denied (publickey)" is a rejected credential, not a filesystem
 // refusal, and has to be tested before the bare permission pattern.
 const PATTERNS: [ConnectionFault, RegExp][] = [
+  // A clean exit, and only a clean one. `transport.ts` writes "shell exited"
+  // for status 0 and "shell exited with N" for anything else, so the negative
+  // lookahead is the whole difference: a shell that died on an error stays a
+  // failure and keeps its Edit button. Matching the "session closed" wrapper
+  // instead would have swallowed both, which is the mistake this narrow
+  // pattern exists to avoid.
+  ['exited', /\bshell exited\b(?! with)/i],
   ['host-key', /host key|host verification|hostkey|fingerprint/i],
   ['port-in-use', /EADDRINUSE|already in use/i],
   ['passphrase', /passphrase|encrypted private key/i],
@@ -144,6 +162,13 @@ const ADVICE: Record<ConnectionFault, FaultAdvice> = {
   // NOT a cause sentence. Inventing one for text we did not recognise is how
   // four different problems came to share a single wrong explanation in the
   // first place — the raw text underneath is the honest thing to show.
+  exited: {
+    // Says what happened, and does not imply anybody did anything wrong.
+    cause: 'The shell exited.',
+    retry: true,
+    // There is nothing to correct in a connection that worked.
+    edit: false
+  },
   unknown: {
     cause: 'OpsMaxx could not tell what went wrong from what the server said.',
     retry: true,

@@ -55,6 +55,28 @@ export function PaneGrid({ tabId, tp }: { tabId: string; tp: TabPanes }): React.
 
   const single = tp.panes.length < 2
 
+  /**
+   * What "close" means, decided when it is CLICKED rather than when the card
+   * was drawn.
+   *
+   * `closePane` refuses to remove the last pane on purpose — closing the only
+   * pane of a tab is a tab close, and the store will not do one when asked for
+   * the other. So a dismiss built from a render-time pane count silently did
+   * nothing whenever that count had since dropped to one: the sibling was
+   * closed by its own `×`, by its session ending, or by a re-orient, and the
+   * button that was drawn saying "Close pane" went on calling `closePane` on
+   * what was now the last pane. A no-op, no error, nothing on screen — which
+   * is exactly how it was reported.
+   *
+   * Reading the store at click time costs nothing and removes the window
+   * entirely: whichever container the pane is in now is the one that goes.
+   */
+  const dismiss = (paneId: string) => (): void => {
+    const now = useApp.getState().panes[tabId]
+    if (now && now.panes.length > 1) closePane(tabId, paneId)
+    else closeTab(tabId)
+  }
+
   return (
     <div className="splits" style={{ flexDirection: tp.direction === 'h' ? 'column' : 'row' }}>
       {tp.panes.map((p) => (
@@ -91,7 +113,7 @@ export function PaneGrid({ tabId, tp }: { tabId: string; tp: TabPanes }): React.
               }}
               onClick={(e) => {
                 e.stopPropagation()
-                closePane(tabId, p.id)
+                dismiss(p.id)()
               }}
             >
               <X size={13} />
@@ -103,7 +125,7 @@ export function PaneGrid({ tabId, tp }: { tabId: string; tp: TabPanes }): React.
           <PaneBody
             pane={p}
             resolve={resolve}
-            onClose={() => (single ? closeTab(tabId) : closePane(tabId, p.id))}
+            onClose={dismiss(p.id)}
             closeLabel={single ? 'Close tab' : 'Close pane'}
           />
         </div>
