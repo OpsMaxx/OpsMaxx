@@ -51,6 +51,7 @@ export function MonitorView({
 }): React.JSX.Element {
   const m = useServerMetrics(server, visible && server.status !== 'offline')
   const real = server.demo === false
+  const local = server.id === LOCAL_ID
 
   /**
    * Interfaces and resolvers, asked for once when the panel becomes visible.
@@ -219,101 +220,17 @@ export function MonitorView({
     </div>
   )
 
-  if (real && m.loading) {
-    return (
-      <div className="content">
-        <div className="empty" style={{ height: 260 }}>
-          <Loader2 size={22} className="spin" />
-          <p>Collecting live metrics from {server.host}…</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (real && m.error) {
-    return (
-      <div className="content">
-        <div className="empty" style={{ height: 260 }}>
-          <div className="empty-icon" style={{ color: 'var(--danger)' }}>
-            <AlertTriangle size={22} />
-          </div>
-          <h3>Metrics unavailable</h3>
-          <p className="mono">{m.error}</p>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="content">
-      {real && (
-        <div className="row" style={{ marginBottom: 12 }}>
-          <span className="chip ok">live</span>
-          <span className="muted" style={{ fontSize: 12 }}>
-            polling every 2s over SSH
-          </span>
-        </div>
-      )}
-      <div className="monitor" style={{ marginBottom: 16 }}>
-        <Metric
-            label="CPU"
-            icon={<Cpu size={13} />}
-            value={m.cpu}
-            history={m.cpuHistory}
-            cores={m.host?.cpuCores ?? null}
-          />
-        <Metric label="Memory" icon={<MemoryStick size={13} />} value={m.ram} history={m.ramHistory} />
-        <Metric label="Disk" icon={<HardDrive size={13} />} value={m.disk} history={m.diskHistory} />
-        <div className="metric-card">
-          <div className="m-head">
-            <span>Network</span>
-          </div>
-          <div className="row" style={{ justifyContent: 'space-between' }}>
-            <div className="col" style={{ gap: 2 }}>
-              <span className="muted" style={{ fontSize: 11 }}>
-                <ArrowDown size={11} /> Download
-              </span>
-              <b className="mono">{rate(m.rx)}</b>
-            </div>
-            <div className="col" style={{ gap: 2 }}>
-              <span className="muted" style={{ fontSize: 11 }}>
-                <ArrowUp size={11} /> Upload
-              </span>
-              <b className="mono">{rate(m.tx)}</b>
-            </div>
-          </div>
-          <Sparkline data={m.rxHistory} color="var(--info)" height={40} />
-        </div>
-      </div>
-
-      {/* Every other filesystem, because the cards above are the root one and
-          a server's full disk is very often not root. A media box with `/` at
-          57% and `/data` at 95% showed nothing but the 57 — the number that
-          says everything is fine. Percentages are df's own, taken from its
-          Capacity column rather than recomputed. */}
-      {mounts.length > 0 && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div className="sidebar-title" style={{ marginBottom: 12 }}>
-            Filesystems
-          </div>
-          <div className="col" style={{ gap: 6 }}>
-            {mounts.map((mt) => (
-              <div className="row" key={mt.mount} style={{ alignItems: 'center', gap: 'var(--sp-3)' }}>
-                <span className="mono ellipsis" style={{ flex: 1, minWidth: 0 }} title={mt.device}>
-                  {mt.mount}
-                </span>
-                <span className="faint" style={{ fontSize: 11 }}>
-                  {bytes(mt.usedKb * 1024)} of {bytes(mt.totalKb * 1024)}
-                </span>
-                <span className={clsx('chip', mt.usedPercent >= 90 && 'danger', mt.usedPercent >= 75 && mt.usedPercent < 90 && 'warn')}>
-                  {mt.usedPercent}%
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
+  /**
+   * What was read ABOUT the host rather than sampled from it.
+   *
+   * Held in a variable because it is rendered from two places. These reads do
+   * not come from the metrics poll and do not fail with it, so hiding them
+   * behind a metrics error would throw away an answer that arrived — and on
+   * this machine, where the fleet overview's local card used to show exactly
+   * these two things unconditionally, it would be a straight loss.
+   */
+  const hostReads = (
+    <>
       {/* Interfaces, their addresses and the resolvers. The panel is a quick
           server overview, and "which address is this box on, and who resolves
           its names" is the part an administrator otherwise opens a shell for. */}
@@ -458,6 +375,108 @@ export function MonitorView({
           </div>
         </div>
       )}
+    </>
+  )
+
+  if (real && m.loading) {
+    return (
+      <div className="content">
+        <div className="empty" style={{ height: 260 }}>
+          <Loader2 size={22} className="spin" />
+          <p>Collecting live metrics from {local ? 'this machine' : server.host}…</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (real && m.error) {
+    return (
+      <div className="content">
+        <div className="empty" style={{ height: 260 }}>
+          <div className="empty-icon" style={{ color: 'var(--danger)' }}>
+            <AlertTriangle size={22} />
+          </div>
+          <h3>Metrics unavailable</h3>
+          <p className="mono">{m.error}</p>
+        </div>
+        {hostReads}
+      </div>
+    )
+  }
+
+  return (
+    <div className="content">
+      {real && (
+        <div className="row" style={{ marginBottom: 12 }}>
+          <span className="chip ok">live</span>
+          <span className="muted" style={{ fontSize: 12 }}>
+            {/* This machine is not reached over SSH, and saying so would be a
+                small lie in the one place the panel explains itself. */}
+            {local ? 'polling every 2s on this machine' : 'polling every 2s over SSH'}
+          </span>
+        </div>
+      )}
+      <div className="monitor" style={{ marginBottom: 16 }}>
+        <Metric
+            label="CPU"
+            icon={<Cpu size={13} />}
+            value={m.cpu}
+            history={m.cpuHistory}
+            cores={m.host?.cpuCores ?? null}
+          />
+        <Metric label="Memory" icon={<MemoryStick size={13} />} value={m.ram} history={m.ramHistory} />
+        <Metric label="Disk" icon={<HardDrive size={13} />} value={m.disk} history={m.diskHistory} />
+        <div className="metric-card">
+          <div className="m-head">
+            <span>Network</span>
+          </div>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <div className="col" style={{ gap: 2 }}>
+              <span className="muted" style={{ fontSize: 11 }}>
+                <ArrowDown size={11} /> Download
+              </span>
+              <b className="mono">{rate(m.rx)}</b>
+            </div>
+            <div className="col" style={{ gap: 2 }}>
+              <span className="muted" style={{ fontSize: 11 }}>
+                <ArrowUp size={11} /> Upload
+              </span>
+              <b className="mono">{rate(m.tx)}</b>
+            </div>
+          </div>
+          <Sparkline data={m.rxHistory} color="var(--info)" height={40} />
+        </div>
+      </div>
+
+      {/* Every other filesystem, because the cards above are the root one and
+          a server's full disk is very often not root. A media box with `/` at
+          57% and `/data` at 95% showed nothing but the 57 — the number that
+          says everything is fine. Percentages are df's own, taken from its
+          Capacity column rather than recomputed. */}
+      {mounts.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="sidebar-title" style={{ marginBottom: 12 }}>
+            Filesystems
+          </div>
+          <div className="col" style={{ gap: 6 }}>
+            {mounts.map((mt) => (
+              <div className="row" key={mt.mount} style={{ alignItems: 'center', gap: 'var(--sp-3)' }}>
+                <span className="mono ellipsis" style={{ flex: 1, minWidth: 0 }} title={mt.device}>
+                  {mt.mount}
+                </span>
+                <span className="faint" style={{ fontSize: 11 }}>
+                  {bytes(mt.usedKb * 1024)} of {bytes(mt.totalKb * 1024)}
+                </span>
+                <span className={clsx('chip', mt.usedPercent >= 90 && 'danger', mt.usedPercent >= 75 && mt.usedPercent < 90 && 'warn')}>
+                  {mt.usedPercent}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {hostReads}
 
       <div className="card">
         <div className="sidebar-title" style={{ marginBottom: 12 }}>
