@@ -183,7 +183,10 @@ describe('what damping must not touch', () => {
     // processor after five minutes. Ten minutes of a disk over the line, at its
     // own six-hour window, is one message either way — so this is checked on
     // CPU, where the window is a minute and ten repeats are expected.
-    for (let i = 0; i < 10; i++) {
+    // Eleven samples for ten repeats: the first one only starts the pending
+    // period (see DWELL_MS), and nothing is said until a second reading two
+    // minutes later confirms the processor is still pegged.
+    for (let i = 0; i < 11; i++) {
       vi.setSystemTime(T0 + i * 2 * MINUTE)
       alerts.checkResourceAlerts('s2', 'db-1', { cpu: 95, ram: 0, disk: null, inode: null, load: null })
     }

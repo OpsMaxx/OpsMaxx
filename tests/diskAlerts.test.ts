@@ -64,6 +64,13 @@ function cpuSample(cpu: number): void {
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
+/**
+ * A gauge alert waits out a pending period before anything is said — see
+ * DWELL_MS. Disk does not (it is monotone; there is no transient to filter),
+ * which is why the disk cases in this file are untouched and only the CPU and
+ * memory ones sustain.
+ */
+const DWELL = 2 * MINUTE + 1000
 
 beforeEach(() => {
   shown.length = 0
@@ -153,6 +160,8 @@ describe('what a disk alert actually says', () => {
 
   it('still calls memory memory, and CPU CPU', () => {
     alerts.checkResourceAlerts('s2', 'web-2', { cpu: 95, ram: 96, disk: null, inode: null, load: null })
+    vi.advanceTimersByTime(DWELL)
+    alerts.checkResourceAlerts('s2', 'web-2', { cpu: 95, ram: 96, disk: null, inode: null, load: null })
     expect(raises().map((p) => p.kind).sort()).toEqual(['cpu', 'memory'])
     expect(raises().find((p) => p.kind === 'memory')?.summary).toBe(
       'web-2: Memory at 96% (threshold 80%)'
@@ -178,6 +187,8 @@ describe('how often a disk alert repeats', () => {
   })
 
   it('leaves CPU and memory on the one-minute window', () => {
+    alerts.checkResourceAlerts('s2', 'web-2', { cpu: 95, ram: 10, disk: null, inode: null, load: null })
+    vi.advanceTimersByTime(DWELL)
     alerts.checkResourceAlerts('s2', 'web-2', { cpu: 95, ram: 10, disk: null, inode: null, load: null })
     expect(raises().length).toBe(1)
 
@@ -298,16 +309,23 @@ describe('a flapping CPU', () => {
     expect(posted.length).toBeLessThan(30)
   })
 
-  it('does not treat one climbing spike as four separate incidents', () => {
+  it('says nothing at all about one climbing spike', () => {
     // 80 → 86 → 92 → 99 over six seconds is one CPU spike. Each step clears
     // the five-point escalation bar, so an escalation bypass with no floor
-    // under it turns a single event into a notification per sample.
+    // under it turned a single event into a notification per sample; MIN_GAP
+    // then brought that down to one.
+    //
+    // It is now none, which is the honest answer: six seconds over the line is
+    // not an incident, and the pending period is what says so. The chip still
+    // follows the reading — it states what is true now — so nothing is hidden,
+    // it is simply not announced.
     for (const v of [80, 86, 92, 99]) {
       cpuSample(v)
       vi.advanceTimersByTime(2_000)
     }
-    expect(shown.length).toBe(1)
-    expect(raises().length).toBe(1)
+    expect(shown.length).toBe(0)
+    expect(raises().length).toBe(0)
+    expect(chips()).toEqual(['cpu'])
   })
 })
 

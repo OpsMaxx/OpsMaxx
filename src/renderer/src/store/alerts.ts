@@ -145,6 +145,63 @@ const REPEAT: Record<NumericAlertKind, number> = {
 // is a clear line below zero, which no reading can ever reach, so a load alert
 // would raise once and never resolve. Half a runnable thread per core is the
 // same proportion of the line that five points is for a percentage.
+/**
+ * How long a numeric reading has to STAY over the line before anything is said
+ * about it — the pending period, in the Prometheus sense of `for:`.
+ *
+ * Hysteresis and the repeat window between them already stop a value that
+ * oscillates around the threshold from being announced repeatedly. Neither
+ * stops the case they were not built for: a single sample over the line
+ * announcing an incident that was over before it was reported. Reported as CPU
+ * raising and clearing at 83–97% on a host averaging under 7%, and although the
+ * measurement behind those numbers was itself broken, the alert path would have
+ * announced a real two-second spike exactly the same way.
+ *
+ * The distinction is what the metric IS, not how alarming it sounds:
+ *
+ *   cpu, ram, load   Instantaneous gauges. A compile, a backup, a log rotation
+ *                    takes one to 100% for a few seconds on a machine that is
+ *                    otherwise idle, and that is not an incident. These wait.
+ *   disk, inode      Monotone. A filesystem does not empty itself between two
+ *                    samples, so there is no transient to filter — and delaying
+ *                    a full-disk warning to prove it is still full is a delay
+ *                    that buys nothing and costs the thing it warns about.
+ *   cert expiry      Changes once a day.
+ *   error-rate       Already counted over a sixty-minute window. A pending
+ *                    period on top of it would be a window on a window.
+ *
+ * Two minutes: long enough that nothing a build or a cron job does survives it,
+ * short enough that a host genuinely pegged is announced while it still matters.
+ */
+export const DWELL_MS: Record<NumericAlertKind, number> = {
+  cpu: 120_000,
+  ram: 120_000,
+  load: 120_000,
+  disk: 0,
+  inode: 0,
+  'cert-expiry': 0,
+  'vpn-cert-expiry': 0,
+  'error-rate': 0
+}
+
+/**
+ * And at least this many readings inside that period.
+ *
+ * Time alone is not evidence. One sample over the line, then silence for five
+ * minutes — the host went away, the vault locked, the sweep was reconfigured —
+ * then one more sample over the line, would satisfy an elapsed-time test and
+ * assert five minutes of sustained load nobody observed.
+ *
+ * Deliberately NOT paired with a maximum gap between samples. A gap rule sounds
+ * stricter and fails in the worse direction: the sampler's interval is
+ * user-configurable, so any fixed tolerance becomes "this kind never alerts on
+ * my estate" for somebody, and silence is the one failure this feature cannot
+ * report about itself. What these two conditions together claim is exactly what
+ * is true and no more — every reading taken in this period was over the line,
+ * and there were at least two of them.
+ */
+export const DWELL_MIN_SAMPLES = 2
+
 const RECOVER_MARGIN: Record<NumericAlertKind, number> = {
   cpu: 5,
   ram: 5,
@@ -542,6 +599,61 @@ const STATE_HOLD_MAX_MS = 6 * 60 * 60 * 1000
  *  state path reads it: the numeric kinds are told `over: false` on every
  *  sample and so cannot get stuck this way. */
 const conditionSeen = new Map<string, number>()
+
+/**
+ * The pending period's own memory, per server+metric.
+ *
+ * `since` is when the CURRENT unbroken run of over-the-line readings began;
+ * `samples` counts them. A reading below the line deletes the entry outright,
+ * which is what makes "unbroken" true rather than approximately true.
+ *
+ * IN MEMORY, deliberately, and for the reason the chip is: it is a claim about
+ * a stretch of time we were watching. A restart means we stopped watching, so
+ * the run starts again at the first sample afterwards. Persisting it would let
+ * an app launch inherit two minutes of "sustained" it did not observe — which
+ * is the exact thing DWELL_MIN_SAMPLES exists to refuse.
+ */
+const breach = new Map<string, { since: number; samples: number }>()
+
+/**
+ * And the mirror, for the all-clear.
+ *
+ * Resolving on the first reading below the line is the same defect pointing the
+ * other way: a pegged host that dips for one sample posts "resolved", then has
+ * to earn a whole new pending period to say it is still pegged — so the log
+ * fills with Raised/Cleared pairs describing one continuous incident. The
+ * recovery has to hold for as long as the breach did.
+ */
+const recovered = new Map<string, { since: number; samples: number }>()
+
+/**
+ * Whether a run of readings has lasted long enough, and been watched closely
+ * enough, to be worth announcing. Kinds with no pending period always pass.
+ */
+function dwellMet(
+  runs: Map<string, { since: number; samples: number }>,
+  k: string,
+  kind: NumericAlertKind,
+  now: number
+): boolean {
+  const need = DWELL_MS[kind]
+  if (need === 0) return true
+  const run = runs.get(k)
+  if (!run) return false
+  return now - run.since >= need && run.samples >= DWELL_MIN_SAMPLES
+}
+
+/** Extends the current run, or starts one. */
+function noteRun(
+  runs: Map<string, { since: number; samples: number }>,
+  k: string,
+  now: number
+): void {
+  const run = runs.get(k)
+  if (run) run.samples++
+  else runs.set(k, { since: now, samples: 1 })
+}
+
 
 /** Whether a held state kind has gone unobserved for long enough to stop
  *  counting as held. Unheld keys are not stale — they are simply not held. */
@@ -1019,6 +1131,13 @@ function evaluate(
       })
     }
 
+    // The run of over-the-line readings is broken, whatever else happens: that
+    // is what makes the pending period a claim about an UNBROKEN stretch.
+    // Before the hydration gate, because it is bookkeeping about what was
+    // observed rather than a decision about what to say.
+    breach.delete(k)
+    noteRun(recovered, k, now)
+
     // Nothing is said until the durable log has been read back. A resolve
     // decided against an empty `announced` is a resolve for an alarm we cannot
     // yet know whether we hold. One sample later the answer is on hand.
@@ -1041,6 +1160,16 @@ function evaluate(
     // so the endpoint's view is one raise, then silence, then whichever of a
     // repeat or an all-clear is true when the damp ends.
     if (isQuiet(k, now)) return
+
+    // The recovery has to hold for as long as the breach did. One sample below
+    // the line on a host that is still pegged would otherwise post "resolved",
+    // and the next sample would start earning a fresh raise — one continuous
+    // incident written down as a column of Raised/Cleared pairs.
+    //
+    // Returning here leaves `announced` standing on purpose: the alarm IS
+    // still outstanding, so a value that goes back over the line finds the
+    // repeat window in force rather than a clean slate.
+    if (!dwellMet(recovered, k, kind, now)) return
 
     // The all-clear, once, and only if the endpoint is holding an alarm from
     // us. Without this gate a host crossing the line repeatedly without ever
@@ -1120,6 +1249,22 @@ function evaluate(
   // that decides this is on disk and has not been read yet. The chip is already
   // up, which is the part that must not wait.
   if (!hydrated) return
+
+  /**
+   * The pending period.
+   *
+   * The chip above has already followed this sample, and deliberately: it
+   * states what is true NOW, and one reading over the line is true now. What
+   * waits is the TALKING — the durable log, the notification, the webhook —
+   * which asserts an incident, and one sample is not one.
+   *
+   * That split is the same one hysteresis already makes in this function, for
+   * the same reason: a display that lags the reading and a statement that
+   * outruns it are both lies, and only one of them is fixed by waiting.
+   */
+  recovered.delete(k)
+  noteRun(breach, k, now)
+  if (!dwellMet(breach, k, kind, now)) return
 
   // The crossing counter, which runs whether or not anything is said. See the
   // damping rule above for why it is read off the condition rather than off the
@@ -1724,6 +1869,15 @@ onServerForgotten((serverId) => {
   for (const k of [...raiseTimes.keys()]) {
     if (k.startsWith(`${serverId}:`)) raiseTimes.delete(k)
   }
+  // And the pending-period runs. A re-added server sharing an id would
+  // otherwise inherit a partly-served waiting period, and announce on its
+  // first reading something it has not sustained.
+  for (const k of [...breach.keys()]) {
+    if (k.startsWith(`${serverId}:`)) breach.delete(k)
+  }
+  for (const k of [...recovered.keys()]) {
+    if (k.startsWith(`${serverId}:`)) recovered.delete(k)
+  }
   for (const k of [...dampedUntil.keys()]) {
     if (k.startsWith(`${serverId}:`)) dampedUntil.delete(k)
   }
@@ -1774,6 +1928,10 @@ useApp.subscribe((s, prev) => {
     dampedUntil.clear()
     conditionHeld.clear()
     conditionSeen.clear()
+    // The pending-period runs, for the reason the rest of this goes: they are
+    // observations of a fleet nobody is watching any more.
+    breach.clear()
+    recovered.clear()
     // The snoozes and acknowledgements too. They are decisions about a
     // conversation the user has just ended, and a snooze surviving the switch
     // would silence the first alert after it is turned back on.
@@ -2052,6 +2210,8 @@ export function resetAlertsForTests(): void {
   acknowledged.clear()
   conditionHeld.clear()
   conditionSeen.clear()
+  breach.clear()
+  recovered.clear()
   seenEvents.clear()
   failedUnits.clear()
   hydrated = true

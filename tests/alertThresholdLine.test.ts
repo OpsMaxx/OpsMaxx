@@ -58,6 +58,22 @@ const T0 = new Date('2026-01-01T00:00:00Z').getTime()
 const sample = (cpu: number): void =>
   alerts.checkResourceAlerts('s1', 'web-1', { cpu, ram: null, disk: null, inode: null, load: null })
 
+/**
+ * A gauge alert is only announced once the reading has HELD — two samples
+ * spanning the pending period (see DWELL_MS). What is on trial in this file is
+ * the line a sample is judged against, not that rule, so these sustain the
+ * reading and read the result. tests/alertDwell.test.ts pins the rule itself.
+ *
+ * Returns the clock it left behind, so a test can carry on from it.
+ */
+const DWELL = 2 * 60_000 + 1000
+const sustain = (cpu: number, from: number): number => {
+  sample(cpu)
+  vi.setSystemTime(from + DWELL)
+  sample(cpu)
+  return from + DWELL
+}
+
 beforeEach(() => {
   shown.length = 0
   posted.length = 0
@@ -88,7 +104,7 @@ describe('a server held to a line its owner typed', () => {
   })
 
   it('raises at the number in the box, and says that number', () => {
-    sample(50)
+    sustain(50, T0)
     expect(raises()).toHaveLength(1)
     expect(raises()[0].value).toBe(50)
     expect(raises()[0].threshold).toBe(50)
@@ -100,14 +116,18 @@ describe('a server held to a line its owner typed', () => {
   })
 
   it('keeps the chip only while the reading is over that line', () => {
-    sample(60)
+    const t = sustain(60, T0)
     expect(alerts.useAlerts.getState().active['s1:cpu']).toBeDefined()
-    vi.setSystemTime(T0 + MINUTE)
+    vi.setSystemTime(t + MINUTE)
     // 48 is under the line and inside the old five-point dead band, which is
     // where a chip used to be stranded: on display, pointing at a screen that
-    // said the host was fine.
+    // said the host was fine. The CHIP goes on the first reading below the
+    // line — it states what is true now — while the all-clear waits out the
+    // same pending period the raise did.
     sample(48)
     expect(alerts.useAlerts.getState().active['s1:cpu']).toBeUndefined()
+    vi.setSystemTime(t + MINUTE + DWELL)
+    sample(48)
     expect(resolves()).toHaveLength(1)
     expect(resolves()[0].summary).toBe('web-1: CPU back below 50%')
   })
@@ -116,12 +136,12 @@ describe('a server held to a line its owner typed', () => {
     // The recovery margin has not gone anywhere; it governs the talking. 48 is
     // off the line but not five points below it, so stepping back over does
     // not read as a new incident and MIN_GAP still has to elapse.
-    sample(60)
+    const t = sustain(60, T0)
     expect(raises()).toHaveLength(1)
     for (let i = 1; i <= 10; i++) {
-      vi.setSystemTime(T0 + i * 2000)
+      vi.setSystemTime(t + i * 2000)
       sample(48)
-      vi.setSystemTime(T0 + i * 2000 + 1000)
+      vi.setSystemTime(t + i * 2000 + 1000)
       sample(52)
     }
     expect(raises()).toHaveLength(1)
@@ -129,9 +149,9 @@ describe('a server held to a line its owner typed', () => {
 
   it('holds the workspace default to its own number too', () => {
     app.useApp.getState().setSettings({ resourceAlertThresholds: {} })
-    sample(76)
+    sustain(76, T0)
     expect(raises()).toHaveLength(0)
-    sample(80)
+    sustain(80, T0 + DWELL)
     expect(raises()).toHaveLength(1)
     expect(raises()[0].threshold).toBe(80)
   })

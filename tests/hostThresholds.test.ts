@@ -89,6 +89,19 @@ describe('the line a sample is actually judged against', () => {
   const sample = (id: string, name: string, cpu: number): void =>
     alerts.checkResourceAlerts(id, name, { cpu, ram: 0, disk: null, inode: null, load: null })
 
+  /**
+   * A gauge alert is announced only once the reading has HELD for the pending
+   * period (see DWELL_MS). This file is about WHICH LINE a sample is judged
+   * against, so it sustains the reading and reads the verdict;
+   * tests/alertDwell.test.ts pins the pending period itself.
+   */
+  const DWELL = 2 * 60_000 + 1000
+  const sustain = (id: string, name: string, cpu: number): void => {
+    sample(id, name, cpu)
+    vi.advanceTimersByTime(DWELL)
+    sample(id, name, cpu)
+  }
+
   it('holds two servers to two different lines in the same sweep', () => {
     app.useApp.getState().setSettings({ resourceAlertThresholds: { build: 95 } })
     // 88% on both.
@@ -99,8 +112,8 @@ describe('the line a sample is actually judged against', () => {
     // under the other. The five-point recovery margin is still there; it
     // decides when a later crossing counts as a new incident, not where the
     // line is. See checkResourceAlerts.
-    sample('db', 'orders-primary', 88)
-    sample('build', 'ci-runner', 88)
+    sustain('db', 'orders-primary', 88)
+    sustain('build', 'ci-runner', 88)
     expect(raises()).toHaveLength(1)
     expect(raises()[0].server).toBe('orders-primary')
     expect(raises()[0].threshold).toBe(80)
@@ -108,7 +121,7 @@ describe('the line a sample is actually judged against', () => {
 
   it('puts the server’s own number in the sentence a person reads', () => {
     app.useApp.getState().setSettings({ resourceAlertThresholds: { build: 95 } })
-    sample('build', 'ci-runner', 97)
+    sustain('build', 'ci-runner', 97)
     expect(raises()).toHaveLength(1)
     expect(raises()[0].threshold).toBe(95)
     expect(raises()[0].summary).toContain('threshold 95%')
@@ -119,10 +132,11 @@ describe('the line a sample is actually judged against', () => {
 
   it('recovers against the server’s own line, not the default', () => {
     app.useApp.getState().setSettings({ resourceAlertThresholds: { build: 95 } })
-    sample('build', 'ci-runner', 97)
+    sustain('build', 'ci-runner', 97)
     expect(raises()).toHaveLength(1)
     // 88 is over the workspace default of 80 and under this host's line of 95.
-    // The chip has to follow the host's line, not the default's.
+    // The chip has to follow the host's line, not the default's — and it drops
+    // on the first reading below it, because the chip states what is true now.
     sample('build', 'ci-runner', 88)
     expect(alerts.useAlerts.getState().active['build:cpu']).toBeUndefined()
   })
@@ -130,7 +144,7 @@ describe('the line a sample is actually judged against', () => {
   it('applies a clamped override rather than the raw one', () => {
     app.useApp.getState().setSettings({ resourceAlertThresholds: { s1: 0 } })
     // Nothing at all is happening on this host.
-    sample('s1', 'web-1', 5)
+    sustain('s1', 'web-1', 5)
     // A raw 0 would raise here, forever. The clamp is what stops it.
     expect(raises()).toHaveLength(0)
   })

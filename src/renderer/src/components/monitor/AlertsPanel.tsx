@@ -12,6 +12,8 @@ import {
   hostThreshold,
   acknowledgeAlert,
   chipValue,
+  DWELL_MS,
+  DWELL_MIN_SAMPLES,
   openMaintenanceWindow,
   readRunbook,
   saveRunbookNote,
@@ -599,6 +601,10 @@ export function AlertsPanel(): React.JSX.Element {
   const live = useMemo(() => activeMaintenance(outstanding, now), [outstanding, now])
   const coverage = alertCoverage(samplerStatus?.running, samplingEnabled)
   const chip = COVERAGE_CHIP[coverage]
+  // From the table that enforces it, so the sentence cannot drift from the
+  // behaviour it describes.
+  const dwellMinutes = Math.round(DWELL_MS.cpu / 60_000)
+
   const openRunbookFor = (kind: StoreAlertKind, hostId: string): void => {
     setRunbook({ kind, hostId })
     setRunbookOpen(true)
@@ -831,6 +837,23 @@ export function AlertsPanel(): React.JSX.Element {
             <b>Database verdicts are not listed under Outstanding and cannot be snoozed:</b> they
             are occurrences rather than conditions, so there is no repeat to stop. Every one is in
             the history below.
+          </div>
+
+          {/* The pending period, said out loud.
+              A rule that silently delays alerts is indistinguishable from one
+              that has broken, and the person most likely to notice the delay is
+              the one about to file a bug about it. The numbers come from the
+              table that enforces them, so the sentence cannot drift from the
+              behaviour. */}
+          <div className="s-desc" data-testid="alert-dwell">
+            <b>CPU, memory and load have to stay over the line for {dwellMinutes} minutes</b> —
+            and be read at least {DWELL_MIN_SAMPLES} times in that period — before anything is
+            said. A compile or a log rotation takes a host to 100% for a few seconds, and that is
+            not an incident. The status-bar chip still follows every reading, so nothing is
+            hidden; the all-clear waits the same {dwellMinutes} minutes, so one quiet sample on a
+            host that is still busy does not close an alert that is still true. Disk, inodes and
+            certificates have no wait: they do not move between two samples, and delaying them
+            would buy nothing.
           </div>
 
           {/* The two actions on a card, in the words their own tooltips use.

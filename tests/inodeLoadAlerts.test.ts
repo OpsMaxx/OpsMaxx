@@ -69,6 +69,12 @@ function sample(over: { inode?: number | null; load?: number | null }): void {
 }
 
 const MINUTE = 60_000
+/**
+ * Load is an instantaneous gauge, so it waits out a pending period before
+ * anything is said (see DWELL_MS); inodes are monotone and do not. That is why
+ * only the load cases below sustain the reading.
+ */
+const DWELL = 2 * MINUTE + 1000
 
 beforeEach(() => {
   shown.length = 0
@@ -128,13 +134,18 @@ describe('inode exhaustion', () => {
 describe('load average', () => {
   it('raises at two runnable threads per core and reports per-core, not percent', () => {
     sample({ load: 3.2 })
+    vi.advanceTimersByTime(DWELL)
+    sample({ load: 3.2 })
     expect(raises().length).toBe(1)
     expect(raises()[0].kind).toBe('load')
     expect(raises()[0].value).toBe(3.2)
     expect(raises()[0].threshold).toBe(2)
     expect(raises()[0].summary).toBe('web-1: Load average at 3.2 per core (threshold 2 per core)')
     expect(shown[0].title).toBe('web-1: Load at 3.2 per core')
-    expect(shown[0].body).toBe('Load average has been at or above 2 per core.')
+    // "for 2 min" is the pending period stated back: the alert is announced
+    // only once the reading has held, and the sentence now says how long it
+    // held rather than implying a single sample.
+    expect(shown[0].body).toBe('Load average has been at or above 2 per core for 2 min.')
   })
 
   it('recovers, and says so in per-core terms', () => {
@@ -143,8 +154,14 @@ describe('load average', () => {
     // otherwise would be a test that passes against the bug it names. It is a
     // proof that the sentence a person reads is in the unit the number is in.
     sample({ load: 3 })
+    vi.advanceTimersByTime(DWELL)
+    sample({ load: 3 })
     expect(raises().length).toBe(1)
+    // And the recovery holds for the same period before the all-clear, so one
+    // quiet sample on a still-loaded host cannot post one.
     vi.advanceTimersByTime(MINUTE)
+    sample({ load: 1.2 })
+    vi.advanceTimersByTime(DWELL)
     sample({ load: 1.2 })
     expect(resolves().length).toBe(1)
     expect(resolves()[0].summary).toBe('web-1: Load average back below 2 per core')
@@ -157,10 +174,18 @@ describe('load average', () => {
     // goes with it — a chip that lingered while the endpoint had been told the
     // host recovered is the contradiction that fix was written to end.
     sample({ load: 3 })
+    vi.advanceTimersByTime(DWELL)
+    sample({ load: 3 })
     expect(chips()).toEqual(['load'])
     vi.advanceTimersByTime(MINUTE)
+    // The chip goes on the FIRST reading below the line — it states what is
+    // true now — while the all-clear waits out the pending period, so the two
+    // no longer land in the same sample. Neither contradicts the other: the
+    // chip is gone, and the endpoint is told once the recovery has held.
     sample({ load: 1.8 })
     expect(chips()).toEqual([])
+    vi.advanceTimersByTime(DWELL)
+    sample({ load: 1.8 })
     expect(resolves().length).toBe(1)
     expect(resolves()[0].value).toBe(1.8)
   })
@@ -175,6 +200,8 @@ describe('a metric that could not be measured', () => {
   })
 
   it('never resolves an alert that is already up', () => {
+    sample({ inode: 95, load: 4 })
+    vi.advanceTimersByTime(DWELL)
     sample({ inode: 95, load: 4 })
     expect(raises().length).toBe(2)
     vi.advanceTimersByTime(MINUTE)

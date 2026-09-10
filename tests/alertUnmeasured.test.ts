@@ -62,6 +62,13 @@ const chips = (): string[] =>
     .sort()
 
 const MINUTE = 60_000
+/**
+ * A gauge alert now needs a SUSTAINED breach before anything is said: two
+ * readings spanning the pending period (see DWELL_MS). These tests are about
+ * unmeasurable readings rather than about that rule, so they sustain and carry
+ * on — tests/alertDwell.test.ts is where the rule itself is pinned.
+ */
+const DWELL = 2 * 60_000 + 1000
 const T0 = new Date('2026-01-01T00:00:00Z').getTime()
 
 /** One sample. Only cpu and ram vary; everything else is honestly absent. */
@@ -86,13 +93,15 @@ afterEach(() => {
 describe('a CPU and a memory reading that could not be taken', () => {
   it('does not post an all-clear for a server that is still pegged', () => {
     sample(95, 95)
+    vi.setSystemTime(T0 + DWELL)
+    sample(95, 95)
     expect(raises()).toHaveLength(2)
     expect(chips()).toEqual(['cpu', 'ram'])
 
     // The next sweep reached the host but the probe came back with nothing —
     // no procfs, no grep, a compound exec cut off mid-stream. That is not a
     // host that recovered.
-    vi.setSystemTime(T0 + MINUTE)
+    vi.setSystemTime(T0 + DWELL + MINUTE)
     sample(null, null)
     expect(resolves()).toHaveLength(0)
     expect(chips()).toEqual(['cpu', 'ram'])
@@ -104,10 +113,12 @@ describe('a CPU and a memory reading that could not be taken', () => {
     // five that trip a flap damp — and a host whose probe is flaky gets damped
     // for being pegged.
     sample(95, 95)
+    vi.setSystemTime(T0 + DWELL)
+    sample(95, 95)
     for (let i = 1; i <= 6; i++) {
-      vi.setSystemTime(T0 + i * 2 * MINUTE)
+      vi.setSystemTime(T0 + DWELL + i * 4 * MINUTE)
       sample(null, null)
-      vi.setSystemTime(T0 + i * 2 * MINUTE + MINUTE)
+      vi.setSystemTime(T0 + DWELL + i * 4 * MINUTE + 2 * MINUTE)
       sample(95, 95)
     }
     // Every raise after the first is the ordinary repeat, and none of them is
@@ -120,7 +131,13 @@ describe('a CPU and a memory reading that could not be taken', () => {
     // Paired with the negatives above, so they cannot pass by the whole path
     // going silent.
     sample(95, 95)
-    vi.setSystemTime(T0 + MINUTE)
+    vi.setSystemTime(T0 + DWELL)
+    sample(95, 95)
+    // And the recovery has to hold for as long as the breach did, or a host
+    // that dips for one sample posts an all-clear it has not earned.
+    vi.setSystemTime(T0 + DWELL + MINUTE)
+    sample(10, 10)
+    vi.setSystemTime(T0 + 2 * DWELL + MINUTE)
     sample(10, 10)
     expect(resolves()).toHaveLength(2)
     expect(chips()).toEqual([])
@@ -129,6 +146,8 @@ describe('a CPU and a memory reading that could not be taken', () => {
   it('raises on one metric while the other is unmeasurable', () => {
     // Null is per metric, not per sample. A host whose memory could not be
     // read is still a host whose CPU is pegged.
+    sample(95, null)
+    vi.setSystemTime(T0 + DWELL)
     sample(95, null)
     expect(raises()).toHaveLength(1)
     expect(chips()).toEqual(['cpu'])
