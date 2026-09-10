@@ -71,6 +71,26 @@ export function shortDate(ts: number): string {
  * operator cannot tell whether to come back in an hour or whether this host
  * will never produce a forecast. Every branch here says what would change it.
  */
+/**
+ * Where the breaks come from, said once.
+ *
+ * Every refusal above this line told the operator what was MISSING and none of
+ * them said what produces it, which on this panel is the only question worth
+ * answering: a run of samples breaks because OpsMaxx stopped collecting, and
+ * OpsMaxx collects only while it is running. A laptop shut overnight is an
+ * eleven-hour break, and eleven-hour breaks are why a host with three hundred
+ * samples can still have no forecast — the fit runs on one unbroken run, not
+ * on the total.
+ *
+ * "Only 8 samples; 12 are needed" is true and leaves a reader to conclude the
+ * feature is broken, which is how it was reported. This is the sentence that
+ * turns it into something to do.
+ */
+const WHY_BREAKS =
+  'Samples are only collected while OpsMaxx is running with background checking on, so quitting it ' +
+  'breaks the run — leave it running (Settings can start it at login, in the background) and the ' +
+  'window fills on its own.'
+
 export function refusalText(
   f: Forecast & { ok: false },
   metric: CapacityMetric,
@@ -84,9 +104,9 @@ export function refusalText(
     case 'stale':
       return `No samples for ${span(Date.now() - f.to)}. Nothing to forecast from until this server reports again.`
     case 'too-few-points':
-      return `Only ${f.points} sample${f.points === 1 ? '' : 's'} since the last break in the data; ${FORECAST_MIN_POINTS} are needed.`
+      return `Only ${f.points} sample${f.points === 1 ? '' : 's'} since the last break in the data; ${FORECAST_MIN_POINTS} are needed over at least ${span(FORECAST_MIN_WINDOW_MS)}. ${WHY_BREAKS}`
     case 'window-too-short':
-      return `Only ${held} of unbroken data. A rate needs at least ${span(FORECAST_MIN_WINDOW_MS)}, so that one backup or one build is not the whole trend.`
+      return `Only ${held} of unbroken data. A rate needs at least ${span(FORECAST_MIN_WINDOW_MS)}, so that one backup or one build is not the whole trend. ${WHY_BREAKS}`
     case 'already-past':
       return `Already at or over ${threshold}%. There is nothing left to predict.`
     case 'flat':

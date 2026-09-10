@@ -1922,11 +1922,28 @@ function deriveAccessPlan(
       continue
     }
     if (held.access.collectedAs !== t.user) {
+      /**
+       * Whether the connecting account COULD have done it, which is a
+       * different question from whether this will.
+       *
+       * The read half escalates: `keysUsedSudo` is set when this account had
+       * to `sudo -n` to read that file at all, so it is a fact already in hand
+       * that passwordless sudo works here. Saying so matters because the old
+       * refusal — "connect as raymon" — reads as a limitation of the
+       * connection, and on a host where sudo plainly works that looks like the
+       * app failing to notice. It is a decision, not a limitation, and a
+       * refusal that hides which one it is invites working around it.
+       */
+      const escalatable =
+        held.access.accounts.find((a) => a.user === t.user)?.keysUsedSudo === true
+      const because = escalatable
+        ? `${held.access.collectedAs} does have passwordless sudo on ${t.serverName} — it escalated to READ ${t.user}'s keys. OpsMaxx still will not WRITE another account's file: an escalated write is one nobody reading the sudo log can tell apart from an attacker with the same access, so it is refused rather than forced.`
+        : `${held.access.collectedAs} cannot write ${t.user}'s file, and did not have the sudo rights to read it as root either.`
       refusals.push({
         serverId: t.serverId,
         serverName: t.serverName,
         user: t.user,
-        reason: `the change would run as ${held.access.collectedAs} on ${t.serverName} and can only edit that account's own authorized_keys, not ${t.user}'s. Connect as ${t.user} to change ${t.user}'s keys.`
+        reason: `the change would run as ${held.access.collectedAs} on ${t.serverName} and can only edit that account's own authorized_keys, not ${t.user}'s. ${because} Connect as ${t.user} to change ${t.user}'s keys.`
       })
       continue
     }
