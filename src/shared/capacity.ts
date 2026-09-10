@@ -244,6 +244,30 @@ export const FORECAST_HORIZON_DAYS = 90
  *  gap on a fleet sampled every ten. */
 export const GAP_FACTOR = 3
 
+/**
+ * And no gap shorter than this breaks a run, whatever the spacing says.
+ *
+ * GAP_FACTOR alone is a ratio, and at full resolution the ratio is brutal: the
+ * sampler's default interval is two minutes, so a SIX MINUTE silence started a
+ * new run. A laptop asleep for ten minutes, a sweep that skipped a host, a
+ * reconfigure — each of them severed a series that had not actually gone
+ * anywhere, and the forecast then ran on whatever came after the most recent
+ * severance. That is why a host with thirty samples across a day reported
+ * "only 8 samples since the last break in the data": the breaks were minutes
+ * long and there were several of them.
+ *
+ * Two hours, because that is the granularity of the coarser tier this same
+ * store keeps. Below it a gap is not distinguishable from a sample the store
+ * would have averaged away on its own, so treating one as a discontinuity
+ * claims a precision the data does not have.
+ *
+ * It changes nothing at hourly resolution — three times an hour is already
+ * more than two — so the case this rule exists for is untouched: a host
+ * unreachable for two days still breaks its series, and a forecast still never
+ * runs across an outage.
+ */
+export const GAP_MIN_MS = 2 * HOUR_MS
+
 /** Fallbacks for the typical spacing when there are too few intervals to take
  *  a median of. */
 const NOMINAL_SPACING: Record<'full' | 'hourly', number> = {
@@ -308,7 +332,10 @@ export function runs(points: TrendPoint[]): TrendPoint[][] {
     // The coarser of the two ends decides. Crossing from an hourly mean into
     // full resolution, an hour of daylight between them is normal.
     const expected = Math.max(typical[a.res], typical[b.res])
-    if (b.ts - a.ts > GAP_FACTOR * expected) out.push([b])
+    // The ratio, floored. See GAP_MIN_MS: at a two-minute cadence the ratio
+    // alone made six minutes of silence a discontinuity.
+    const breaks = Math.max(GAP_FACTOR * expected, GAP_MIN_MS)
+    if (b.ts - a.ts > breaks) out.push([b])
     else out[out.length - 1].push(b)
   }
   return out
