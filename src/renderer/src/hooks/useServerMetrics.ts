@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { LOCAL_ID, LOCAL_TARGET } from '../../../shared/execTarget'
 import type { Server } from '../types'
 import { sshHopsFor } from '../lib/ssh'
 import { checkResourceAlerts } from '../store/alerts'
@@ -83,7 +84,20 @@ export function useServerMetrics(server: Server, active: boolean): LiveMetrics {
         hops: sshHopsFor(server)
       }
       const poll = async (): Promise<void> => {
-        const res = await window.opsmaxx?.metrics.sample(server.id, cfg)
+        /**
+         * This machine sends the marker, not a connection config.
+         *
+         * `isLocalTarget` in main is what decides between the SSH collector
+         * and the local one, and it is deliberately exact — a config that
+         * merely carries a `local` field must not be mistaken for it, because
+         * the difference decides whether a command runs here or on somebody's
+         * production host. So the marker is sent as itself rather than mixed
+         * into the config above.
+         */
+        const res = await window.opsmaxx?.metrics.sample(
+          server.id,
+          server.id === LOCAL_ID ? (LOCAL_TARGET as unknown as typeof cfg) : cfg
+        )
         if (!alive) return
         const s = ref.current
         if (res?.ok && res.data) {

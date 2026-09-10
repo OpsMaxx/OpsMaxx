@@ -36,6 +36,7 @@ import { LocalShellMenu } from '../terminal/LocalShellMenu'
 import { TabStrip } from './TabStrip'
 import { PaneGrid } from './PaneGrid'
 import { MonitorView } from './MonitorView'
+import { LOCAL_ID, LOCAL_NAME } from '../../../../shared/execTarget'
 import { MonitorStrip } from './MonitorStrip'
 import { SftpView } from './SftpView'
 import { RdpView } from '../rdp/RdpView'
@@ -82,17 +83,29 @@ function TabPane({
     minHeight: 0
   })
 
-  // A local tab still has no server and must never be handed one — that is
-  // what the tab union exists to prevent. Monitor and the docked strip both
-  // take a non-optional `Server`, so they stay SSH-only; Files does not any
-  // more, because main serves this machine's half from node:fs behind the same
-  // channel, so SftpView takes `server?: Server` and absent means here.
+  /**
+   * A local tab still has no server and must never be handed one out of the
+   * store — that is what the tab union exists to prevent, and what the note at
+   * the top of shared/execTarget.ts is about: a row in `servers` is persisted
+   * and mirrored into the MCP data cache, so writing one there would hand an
+   * agent local execution with nobody having added a tool for it.
+   *
+   * `localHost` is not that. It is built during render, handed to one
+   * component and thrown away, and `useServerMetrics` recognises its id and
+   * sends the local marker instead of a connection config. Nothing persists
+   * it and nothing else can see it.
+   */
   if (tab.kind === 'local') {
     return (
       <>
         <div style={paneStyle('terminal')}>
           <Terminals tab={tab} tp={tp} />
         </div>
+        {visited.has('monitor') && (
+          <div style={paneStyle('monitor')}>
+            <MonitorView server={localHost} visible={active && tab.view === 'monitor'} />
+          </div>
+        )}
         {visited.has('files') && (
           <div style={paneStyle('files')}>
             <SftpView tabId={tab.id} />
@@ -139,6 +152,32 @@ function TabPane({
     </>
   )
 }
+
+/**
+ * This machine, in the shape the monitor pane takes.
+ *
+ * A module constant rather than a row: it is never written anywhere, and the
+ * fields below exist only because `MonitorView` and `useServerMetrics` are
+ * typed against `Server`. `demo: false` is what marks it as a real target, and
+ * `id` is what the metrics hook matches to send the local marker.
+ */
+const localHost = {
+  id: LOCAL_ID,
+  workspaceId: '',
+  folderId: null,
+  name: LOCAL_NAME,
+  host: 'localhost',
+  port: 0,
+  username: '',
+  auth: 'key',
+  status: 'online',
+  tags: [],
+  favorite: false,
+  os: 'linux',
+  route: [],
+  vpnProfileId: null,
+  demo: false
+} as unknown as Server
 
 // The terminal half of a tab: its panes, or — for a tab that somehow has none —
 // the single-pane rendering this file had before panes existed.
@@ -435,17 +474,14 @@ export function WorkspacePanel(): React.JSX.Element {
           the case the old condition was actually covering. */}
       {active && (active.kind === 'local' || server) && (
         <div className="viewbar">
-          {/* A local tab gets Terminal and Files, not Monitor: the monitor
-              views take a non-optional Server, and the collector behind them
-              reads /proc and Linux `df` semantics — on a Mac or a Windows box
-              it would draw numbers that look right and are not. */}
+          {/* A local tab now gets all three. Monitor was excluded because the
+              collector read /proc and Linux `df`; there are now collectors
+              written for macOS and Windows instead of borrowed from Linux. */}
           {/* Terminal and Monitor both run commands, which a files-only
               account cannot do. Offering them and letting them fail is the
               behaviour this flag exists to remove. */}
           <div className="segment">
-            {VIEWS.filter((v) =>
-              filesOnly ? v.id === 'files' : active.kind === 'ssh' || v.id !== 'monitor'
-            ).map((v) => (
+            {VIEWS.filter((v) => (filesOnly ? v.id === 'files' : true)).map((v) => (
               <button
                 key={v.id}
                 className={clsx('seg-btn', active.view === v.id && 'active')}

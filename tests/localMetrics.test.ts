@@ -13,27 +13,52 @@ import { METRICS_CMD, METRICS_CMD_FIRST, parseMetrics } from '../src/main/servic
  * refuses to run where its assumptions do not hold.
  */
 
-describe('the platform gate', () => {
-  it.runIf(platform !== 'linux')('refuses rather than reporting wrong numbers', async () => {
-    const r = await localMetricsSample('test-key')
-    expect(r.ok).toBe(false)
-    if (r.ok) return
-    // Names the reason, because "unavailable" alone reads as a bug.
-    expect(r.error).toMatch(/\/proc/)
-    expect(r.error).toMatch(/look right and are not/)
-  })
+describe('every platform has a collector now', () => {
+  /**
+   * This used to be a gate: off Linux the sampler refused, because pointing
+   * the procfs collector at a Mac reported a volume at 40% capacity as 3.7%
+   * full — a plausible wrong number, which is worse than an absent one.
+   *
+   * The answer was never to keep refusing; it was to write the collectors
+   * those platforms need. macOS reads `top`, `vm_stat`, `sysctl`, `df` and
+   * `netstat`; Windows runs one PowerShell query through the POSIX shell every
+   * other local read on Windows already uses. Each reports null where its
+   * platform has no equivalent quantity — no load average on Windows, no inode
+   * exhaustion on either — rather than approximating one.
+   */
+  it.runIf(platform === 'darwin' || platform === 'linux')(
+    'collects on this machine',
+    async () => {
+      const r = await localMetricsSample('test-key')
+      expect(r.ok).toBe(true)
+      if (!r.ok || !r.data) return
+      // The numbers a monitor is for. Null is allowed — it means "not
+      // measured" — but the shape has to be there.
+      expect(r.data.cores).toBeGreaterThan(0)
+      expect(r.data.memTotal).toBeGreaterThan(0)
+      expect(r.data.hostname).not.toBe('')
+    }
+  )
 
-  it.runIf(platform === 'linux')('collects on the platform it was written for', async () => {
-    const r = await localMetricsSample('test-key-linux')
+  it.runIf(platform === 'darwin')('reports a believable disk figure on APFS', async () => {
+    // The number that made the old gate necessary. `df` reports the whole
+    // container as the total, so used-over-total read 3.7% on a volume at 40%.
+    const r = await localMetricsSample('test-key-disk')
     expect(r.ok).toBe(true)
+    if (!r.ok || !r.data) return
+    expect(r.data.diskPct).not.toBeNull()
+    expect(r.data.diskPct as number).toBeGreaterThan(1)
   })
 })
 
 describe('what the local sampler runs', () => {
-  it('uses the same script and parser as the SSH path', () => {
+  it('uses the same script and parser as the SSH path, on Linux', () => {
     const src = readFileSync(join(__dirname, '..', 'src/main/services/localMetrics.ts'), 'utf8')
-    // A second collector would be a second thing that can disagree with the
-    // parser, and the parser is where every "absent is null, not zero" rule is.
+    // Still the rule where it applies: a second LINUX collector would be a
+    // second thing that can disagree with the parser, and the parser is where
+    // every "absent is null, not zero" rule lives. The macOS and Windows
+    // collectors are not second copies of it — they read different sources
+    // because their platforms have different ones.
     expect(src).toMatch(/METRICS_CMD_FIRST/)
     expect(src).toMatch(/parseMetrics\(/)
     expect(src).not.toMatch(/\/proc\/stat/)

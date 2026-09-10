@@ -51,3 +51,23 @@ export function isLocalTarget(target: unknown): target is LocalTarget {
 export function targetLabel(target: unknown, serverName: string | undefined): string {
   return isLocalTarget(target) ? 'this machine' : (serverName ?? 'the server')
 }
+
+/**
+ * The id a transient, never-persisted stand-in for this machine carries.
+ *
+ * Panels that list the estate and this machine side by side need SOME handle
+ * for the local row — Drift and Posture each invented their own — and the
+ * monitor pane needs one to key its polling on. This is that handle, in one
+ * place.
+ *
+ * It is emphatically NOT a Server. Nothing bearing this id may be written into
+ * the `servers` store: that store is persisted and mirrored into the MCP data
+ * cache, so a row there becomes agent-addressable the moment it is saved. See
+ * the note at the top of this file. A value built during render, handed to one
+ * component and thrown away is a different thing entirely, and is what this is
+ * for.
+ */
+export const LOCAL_ID = 'local'
+
+/** What this machine is called on screen, wherever it appears beside servers. */
+export const LOCAL_NAME = 'This machine'

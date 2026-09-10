@@ -12,6 +12,7 @@ import {
   type ListeningPortsInfo,
   type ProtoFilter
 } from '../../../../shared/listeningPorts'
+import { LOCAL_ID, LOCAL_TARGET } from '../../../../shared/execTarget'
 import type { Server } from '../../types'
 
 function level(v: number): string {
@@ -24,6 +25,20 @@ function uptimeLabel(sec: number): string {
   const m = Math.floor((sec % 3600) / 60)
   return `${d}d ${h}h ${m}m`
 }
+
+/**
+ * Where these reads should run.
+ *
+ * The same distinction `useServerMetrics` makes, and it has to be made here
+ * too: the network and listening-socket reads take a connection config, and
+ * this machine is not reached by connecting to it. `isLocalTarget` in main is
+ * deliberately exact, so the marker is sent as itself rather than mixed into
+ * an SSH target that would otherwise name a host called `localhost`.
+ */
+const execTargetFor = (server: Server): ReturnType<typeof sshTargetFor> =>
+  server.id === LOCAL_ID
+    ? (LOCAL_TARGET as unknown as ReturnType<typeof sshTargetFor>)
+    : sshTargetFor(server)
 
 export function MonitorView({
   server,
@@ -48,7 +63,7 @@ export function MonitorView({
     if (!visible || !real) return
     let live = true
     void window.opsmaxx?.fleet
-      ?.network?.(sshTargetFor(server))
+      ?.network?.(execTargetFor(server))
       .then((r) => {
         if (live) setNet(r)
       })
@@ -78,7 +93,7 @@ export function MonitorView({
     if (!visible || !real) return
     let live = true
     void window.opsmaxx?.fleet
-      ?.listeningPorts?.(sshTargetFor(server))
+      ?.listeningPorts?.(execTargetFor(server))
       .then((r) => {
         if (live) setPorts(r)
       })

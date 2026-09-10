@@ -382,19 +382,23 @@ export interface LocalTab extends TabBase {
   // Where the shell was started, when the user asked for somewhere specific.
   cwd?: string
   /**
-   * Terminal and Files. Monitor stays SSH-only.
+   * Terminal, Files and Monitor — the same three an SSH tab has.
    *
    * Files earned its place because main serves this machine's half from
    * node:fs behind the same channel and the same result shape, so the view
    * needs no server — it takes `server?: Server` and absent means here.
    *
-   * Monitor does not, and the reason is not that it is harder: MonitorStrip
-   * and MonitorView both take a non-optional Server, and the collector behind
-   * them reads /proc and Linux `df` semantics, so on anything but a Linux
-   * workstation it would draw numbers that look right and are not. See
-   * services/localMetrics.ts.
+   * Monitor was excluded for a real reason and no longer is. The collector
+   * read /proc and Linux `df` semantics, so on a Mac or a Windows box it drew
+   * numbers that looked right and were not — a volume at 40% capacity read as
+   * 3.7% full, and `df -iP` printed the block columns again so the inode
+   * figure was the disk figure wearing a different label. There are now
+   * collectors written for those platforms rather than borrowed from Linux,
+   * and each reports null where its platform has no equivalent quantity
+   * instead of approximating one. See shared/localMetricsDarwin.ts and
+   * shared/localMetricsWindows.ts.
    */
-  view: 'terminal' | 'files'
+  view: 'terminal' | 'files' | 'monitor'
 }
 
 /**

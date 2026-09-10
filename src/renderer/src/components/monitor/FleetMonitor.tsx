@@ -19,7 +19,6 @@ import { AlertsPanel } from './AlertsPanel'
 import { useAlerts } from '../../store/alerts'
 import { FleetHealth } from './FleetHealth'
 import { summariseFleetHealth } from '../../../../shared/hostHealth'
-import { LocalHostCard } from './LocalHostCard'
 import { FleetKpis } from './FleetKpis'
 import { HttpMonitorPanel } from './HttpMonitorPanel'
 import { NetToolsPanel } from './NetToolsPanel'
@@ -694,15 +693,19 @@ export function FleetMonitor(): React.JSX.Element {
         </div>
 
         {/**
-         * This machine, LAST.
+         * This machine is NOT here any more.
          *
-         * It used to sit second, directly under fleet health, where its
-         * listening-ports table — twenty-odd rows of monospace — took most of
-         * the viewport and pushed the estate's own servers below the fold. It
-         * is local detail on a screen about the fleet, so it goes after the
-         * fleet, and its table opens on demand rather than on arrival.
+         * It sat at the bottom of a screen about the estate, carrying the one
+         * thing about the local box that could be collected off Linux — its
+         * network and its listening sockets — and nothing else. Half a monitor
+         * in the wrong place: an overview of the fleet is not where somebody
+         * looks for their own laptop's ports, and the card could not grow into
+         * a monitor because the metrics behind one did not exist off Linux.
+         *
+         * They do now, so this machine has the same Monitor tab a server has,
+         * on the local terminal where the rest of this machine already lives.
+         * See LocalTab's `view` and shared/localMetricsDarwin.ts.
          */}
-        <LocalHostCard />
       </div>
     </div>
 

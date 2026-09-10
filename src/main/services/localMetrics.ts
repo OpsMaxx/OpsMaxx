@@ -8,6 +8,8 @@ import {
   parseMetrics,
   type CpuSnap
 } from './metrics'
+import { DARWIN_METRICS_CMD, parseDarwinMetrics } from '../../shared/localMetricsDarwin'
+import { WINDOWS_METRICS_CMD, parseWindowsMetrics } from '../../shared/localMetricsWindows'
 
 /**
  * The metrics collector, pointed at this machine.
@@ -64,14 +66,6 @@ const cpuState = new Map<string, CpuSnap>()
 const inflight = new Map<string, Promise<MetricsResult>>()
 
 export function localMetricsSample(key: string): Promise<MetricsResult> {
-  if (platform !== 'linux') {
-    return Promise.resolve({
-      ok: false,
-      error:
-        `Live metrics are collected from /proc and from Linux \`df\` output, which ${platform === 'darwin' ? 'macOS' : 'this platform'} does not provide. ` +
-        'Reading them here would report numbers that look right and are not.'
-    })
-  }
   const running = inflight.get(key)
   if (running) return running
   const p = run(key).finally(() => inflight.delete(key))
@@ -80,6 +74,47 @@ export function localMetricsSample(key: string): Promise<MetricsResult> {
 }
 
 async function run(key: string): Promise<MetricsResult> {
+  if (platform === 'darwin') return runDarwin()
+  if (platform === 'win32') return runWindows()
+  return runLinux(key)
+}
+
+/**
+ * macOS, from `top`, `vm_stat`, `sysctl`, `df` and `netstat`.
+ *
+ * No CPU snapshot is kept: `top -l 2` computes the delta itself, so there is
+ * nothing here to diff against a previous poll.
+ */
+async function runDarwin(): Promise<MetricsResult> {
+  const r = await localExec(DARWIN_METRICS_CMD, 20_000)
+  if (!r.ok && !r.stdout) {
+    return { ok: false, error: r.error ?? r.stderr.split('\n')[0] ?? 'the collector did not run' }
+  }
+  return { ok: true, data: parseDarwinMetrics(`${r.stdout}${r.stderr}`) }
+}
+
+/**
+ * Windows, through the POSIX shell every other local read on Windows already
+ * goes through, which then runs PowerShell. See localMetricsWindows.ts.
+ */
+async function runWindows(): Promise<MetricsResult> {
+  const r = await localExec(WINDOWS_METRICS_CMD, 30_000)
+  if (!r.ok && !r.stdout) {
+    return { ok: false, error: r.error ?? r.stderr.split('\n')[0] ?? 'the collector did not run' }
+  }
+  const data = parseWindowsMetrics(`${r.stdout}`)
+  // An object that parsed to nothing at all is a failed read, not a machine
+  // with no memory and no disk. Reported as a failure so the panel says so.
+  if (data.memTotal === 0 && data.diskTotal === 0 && data.cores === 0) {
+    return {
+      ok: false,
+      error: r.stderr.split('\n').find((l) => l.trim() !== '') ?? 'the collector returned nothing'
+    }
+  }
+  return { ok: true, data }
+}
+
+async function runLinux(key: string): Promise<MetricsResult> {
   const prev = cpuState.get(key) ?? null
   // The first poll has nothing to diff against, so it pays for an in-command
   // sleep; every later one diffs against the poll before it, which is both
