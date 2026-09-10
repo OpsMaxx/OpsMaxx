@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useApp } from '../store/app'
-import { COMMANDS_BY_ID, comboFrom, resolveBindings, type Scope } from '../lib/shortcuts'
+import { COMMANDS_BY_ID, comboFrom, isMac, resolveBindings, type Scope } from '../lib/shortcuts'
 import type { Workspace } from '../types'
 
 type Store = ReturnType<typeof useApp.getState>
@@ -108,10 +108,40 @@ function splitActive(s: Store, dir: 'h' | 'v'): boolean {
   return true
 }
 
-// Whether a command bound in `scope` should fire for a key event seen in
-// `where`. 'global' fires everywhere; the other two only in their own context.
-function scopeApplies(scope: Scope, where: 'app' | 'terminal'): boolean {
-  return scope === 'global' || scope === where
+/**
+ * Whether a command bound in `scope` should fire for a key event seen in
+ * `where`. 'global' fires everywhere; the other two only in their own context.
+ *
+ * The exception is the Command key on macOS, and it exists because
+ * `comboFrom` folds Ctrl and Cmd into ONE token. That fold is right for
+ * storage — a binding written `Ctrl+T` should mean the platform's own app
+ * modifier — and it costs the app the ability to tell the two apart at the
+ * moment it matters most: inside a terminal.
+ *
+ * Refusing app bindings there is what keeps Ctrl+W, Ctrl+K and Ctrl+L reaching
+ * the shell, and that is correct for the CONTROL key on every platform. Cmd is
+ * not a shell modifier on macOS — no readline binding uses it, and every Mac
+ * terminal opens a tab on Cmd+T — so refusing it stole a shortcut from the app
+ * without giving anything to the shell. Cmd+T did nothing at all, because the
+ * terminal always has focus.
+ */
+function scopeApplies(
+  scope: Scope,
+  where: 'app' | 'terminal',
+  appModifier = false
+): boolean {
+  if (scope === 'global' || scope === where) return true
+  return scope === 'app' && where === 'terminal' && appModifier
+}
+
+/**
+ * True when this event used a modifier the shell has no claim on.
+ *
+ * macOS only, and Command only. On Windows and Linux the app modifier IS
+ * Control, so there is no key here that a terminal is not entitled to.
+ */
+function usedAppModifier(e: KeyboardEvent): boolean {
+  return isMac() && e.metaKey && !e.ctrlKey
 }
 
 // Runs whatever the user has bound to this key event, if anything.
@@ -131,7 +161,7 @@ export function runShortcut(
   for (const [id, keys] of bindings) {
     if (keys !== combo) continue
     const cmd = COMMANDS_BY_ID.get(id)
-    if (!cmd || !scopeApplies(cmd.scope, where)) continue
+    if (!cmd || !scopeApplies(cmd.scope, where, usedAppModifier(e))) continue
     if (RUNNERS[id]?.(s, term)) return true
   }
 

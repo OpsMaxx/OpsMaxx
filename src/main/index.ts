@@ -1594,7 +1594,24 @@ const fleetSampler = new FleetSampler({
   // a background inventory probe must never be what raises a host-key trust
   // dialog the user cannot connect to anything they just did.
   // The inventory, on the facts probe's own clock and only after it succeeded.
-  samplePackages: async (_key, cfg, manager) => hostFactsReader.packages(cfg, manager),
+  /**
+   * Wrapped, like every other probe beside it — and it was the one that was
+   * not.
+   *
+   * `targetExecQuiet` passes its config through unresolved, so a probe that
+   * does not wrap has neither credentials nor a VPN. This one appeared to work
+   * anyway, because it runs immediately after the facts probe and `sshExec`
+   * found that probe's POOLED connection.
+   *
+   * Except on a host reached through a VPN. The pool key carries
+   * `|vpn:<profile>` — the transport is part of a connection's identity — so
+   * the facts probe pooled under one key and this looked under another, missed,
+   * and dialled an address nothing routes. The package manager then read as
+   * unidentified, and Patch and updates said it "has not identified a package
+   * manager on this server" about hosts it had never reached.
+   */
+  samplePackages: async (_key, cfg, manager) =>
+    hostFactsReader.packages(preparedSshTarget(cfg as SshConnectConfig), manager),
   sampleFacts: async (_key, cfg) => {
     const probe = await hostFactsReader.read(preparedSshTarget(cfg as SshConnectConfig))
     return probe.ok ? { ok: true, facts: probe.facts } : { ok: false, error: `${probe.reason}: ${probe.detail}` }
