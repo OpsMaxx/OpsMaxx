@@ -232,7 +232,8 @@ describe('inline shell in the release job does not keep growing', () => {
     'Scan installers with ClamAV': 25,
     'Build release notes': 145,
     'Publish release notes': 75,
-    'Rebuild opsmaxx.dev': 15
+    'Rebuild opsmaxx.dev': 15,
+    'Tell the Homebrew tap': 20
   }
 
   it.each(Object.entries(CEILING))('%s stays within its ceiling', (name, max) => {

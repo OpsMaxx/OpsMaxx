@@ -21,7 +21,7 @@ Shipping a version touches more than this repo. Pushing a `v*` tag starts it:
 |---|---|---|
 | Installers, scans, notes | `.github/workflows/release.yml` | **Yes** — on tag push |
 | opsmaxx.dev download links | `OpsMaxx/opsmaxx.dev` | **Yes** — deploy hook, then daily cron |
-| Homebrew cask | `OpsMaxx/homebrew-tap` | **Yes** — daily, reads the release notes |
+| Homebrew cask | `OpsMaxx/homebrew-tap` | **Yes** — dispatch on release, then daily cron |
 | winget manifest | `packaging/winget/` here | **No** — hand-written PR each version |
 | `@opsmaxx/mcp` on npm | `OpsMaxx/opsmaxx-mcp` | **No** — but only when the bridge changes |
 | MCP registry entry | `OpsMaxx/opsmaxx-mcp` `server.json` | **No** — follows an npm publish |
@@ -35,9 +35,20 @@ installer, VirusTotal on `.exe` and `.dmg` **only** — Linux artifacts are not
 VirusTotal-scanned, so do not claim they are), publishes the notes with a SHA-256 table,
 then pings the Cloudflare Pages deploy hook.
 
-That last step is skipped for prereleases, and it never fails the run — the release is
-already public by then, and the site has a daily rebuild as a backstop. It needs the
-`CF_PAGES_DEPLOY_HOOK` secret on this repo.
+then tells the Homebrew tap and the site to update.
+
+Both notifications are skipped for prereleases and neither can fail the run — the release
+is already public by then, and both surfaces have a daily cron as a backstop. They need
+`CF_PAGES_DEPLOY_HOOK` and `TAP_DISPATCH_TOKEN` on this repo.
+
+`TAP_DISPATCH_TOKEN` has to be a token that can reach **the other repository**:
+`github.token` is scoped to this one and a cross-repo `repository_dispatch` with it
+returns 404. Without the secret the cask still updates, just on its own schedule — which
+is the state that made this worth wiring. The tap has carried the
+`repository_dispatch: [opsmaxx-release]` trigger since it was written and nothing ever
+sent it, so `brew install` could hand someone a build up to a day old with no hint a
+newer one existed. Seven releases went out in one evening and the cask sat four versions
+behind the whole time.
 
 ### The site reads releases at build time
 

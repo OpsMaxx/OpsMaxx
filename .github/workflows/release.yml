@@ -838,3 +838,37 @@ jobs:
           else
             echo "::warning::Could not reach the Cloudflare Pages deploy hook. opsmaxx.dev will pick $TAG up on its next scheduled rebuild."
           fi
+
+      # The Homebrew cask, told rather than left to notice.
+      #
+      # The tap has carried a `repository_dispatch: [opsmaxx-release]` trigger
+      # since it was written, and nothing ever sent it — so the cask moved only
+      # on its own daily cron. That is up to 24 hours of `brew install` handing
+      # someone an older build with no hint a newer one exists, and it showed:
+      # seven releases went out inside one evening and the cask sat four
+      # versions behind the whole time.
+      #
+      # Needs a token that can reach the OTHER repository — `github.token` is
+      # scoped to this one. Without the secret this warns and the daily cron
+      # still catches up, exactly as the Pages hook above degrades.
+      - name: Tell the Homebrew tap
+        if: ${{ !contains(github.ref_name, '-') }}
+        continue-on-error: true
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_DISPATCH_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::warning::TAP_DISPATCH_TOKEN is not set. The cask will pick $TAG up on its next daily run."
+            exit 0
+          fi
+
+          if curl -fsS -X POST \
+            -H "Authorization: Bearer $TAP_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/OpsMaxx/homebrew-tap/dispatches \
+            -d '{"event_type":"opsmaxx-release"}' -o /dev/null; then
+            echo "Asked the tap to bump to $TAG."
+          else
+            echo "::warning::Could not reach the tap. The cask will pick $TAG up on its next daily run."
+          fi
