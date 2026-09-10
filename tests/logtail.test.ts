@@ -133,7 +133,7 @@ describe('what the fan-out paths ask of an unknown server', () => {
   it('refuses to prompt from broadcast, log tailing and cron', () => {
     const main = read('src/main/index.ts')
     // Each fan-out call passes allowPrompt explicitly false.
-    expect(main).toMatch(/sshExec\(resolveChainSecrets\(cfg as SshConnectConfig\), command, timeoutMs, false\)/)
+    expect(main).toMatch(/sshExec\(preparedSshTarget\(cfg as SshConnectConfig\), command, timeoutMs, false\)/)
     expect(main).toMatch(/sshExecStream\([\s\S]{0,120}handlers,\s*false\s*\)/)
     // Cron's collect reaches sshExec through `targetExecQuiet` now — the same
     // dispatch the local target uses — so the property is asserted where it
@@ -167,7 +167,7 @@ describe('what the fan-out paths ask of an unknown server', () => {
       main.indexOf('const targetExec ='),
       main.indexOf('const targetExecQuiet =')
     )
-    expect(targetExecBlock).toMatch(/sshExec\(resolveChainSecrets\(cfg as SshConnectConfig\), command, timeoutMs\)/)
+    expect(targetExecBlock).toMatch(/sshExec\(preparedSshTarget\(cfg as SshConnectConfig\), command, timeoutMs\)/)
     expect(targetExecBlock).not.toMatch(/timeoutMs,\s*false/)
   })
 

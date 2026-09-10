@@ -231,7 +231,7 @@ import {
 import type { InspectStartOptions } from '../shared/inspect'
 import { storeFrpToken } from './services/vpn/frpSetup'
 import { toVpnResult } from './services/vpn/errors'
-import { withVpnTransport, withVpnTransportDb } from './services/vpn/transport'
+import { preparedSshTarget, withVpnTransportDb } from './services/vpn/transport'
 import { httpRequest } from './services/httpClient'
 import { ServiceCheckRunner } from './services/serviceChecks'
 import { setStartupPrefs, shouldStartHidden, startupPrefs } from './services/startupPrefs'
@@ -310,7 +310,6 @@ import type { SshConnectConfig } from '../shared/ssh'
 import {
   isVaultLockedError,
   resolveDbSecrets,
-  resolveChainSecrets,
   credentialShapeForServer,
   resolveVaultField,
   type SecretBlob
@@ -917,13 +916,13 @@ setSshPrompter((req: KeyboardRequest) => {
 
 
 ipcMain.handle('ssh:connect', (e, cfg: SshConnectConfig & { serverId?: string }) =>
-  sshConnect(e.sender, withVpnTransport(resolveChainSecrets(cfg)))
+  sshConnect(e.sender, preparedSshTarget(cfg))
 )
-// Dials and hangs up. Goes through the same resolveChainSecrets/withVpnTransport
+// Dials and hangs up. Goes through the same preparedSshTarget
 // pipeline as a real connect, because a test that skipped either would pass on
 // a profile whose credential or transport is the thing that is wrong.
 ipcMain.handle('ssh:test', (_e, cfg: SshConnectConfig & { serverId?: string }) =>
-  sshTest(withVpnTransport(resolveChainSecrets(cfg)))
+  sshTest(preparedSshTarget(cfg))
 )
 /**
  * What credential a server has, with none of its value.
@@ -1012,7 +1011,7 @@ ipcMain.on('local:close', (e, id: unknown) => {
 // The renderer names the server the same credential-free way the terminal
 // does; secrets are merged here, through the same pipeline as ssh:connect.
 ipcMain.handle('http:request', (_e, spec: HttpRequestSpec) =>
-  httpRequest(spec, { prepare: (target) => withVpnTransport(resolveChainSecrets(target)) })
+  httpRequest(spec, { prepare: (target) => preparedSshTarget(target) })
 )
 
 /**
@@ -1033,7 +1032,7 @@ ipcMain.handle(
     spec: HttpRequestSpec
   ): Promise<{ ok: true; status: number; durationMs: number } | { ok: false; error: string }> => {
     const r = await httpRequest(spec, {
-      prepare: (target) => withVpnTransport(resolveChainSecrets(target))
+      prepare: (target) => preparedSshTarget(target)
     })
     return r.ok
       ? { ok: true, status: r.status, durationMs: r.durationMs }
@@ -1060,7 +1059,7 @@ const serviceChecks = new ServiceCheckRunner({
         insecureTls: check.insecureTls,
         timeoutMs: check.timeoutMs
       } as HttpRequestSpec,
-      { prepare: (target) => withVpnTransport(resolveChainSecrets(target)) }
+      { prepare: (target) => preparedSshTarget(target) }
     )
     return r.ok
       ? { ok: true as const, status: r.status, durationMs: r.durationMs }
@@ -1118,7 +1117,7 @@ ipcMain.handle('sftp:connect', (_e, key: string, cfg: SshConnectConfig & { serve
     if (!isLocalTerminalEnabled()) return { ok: false, error: LOCAL_TARGET_OFF }
     return localFilesConnect(key)
   }
-  return sftpConnect(key, withVpnTransport(resolveChainSecrets(cfg)))
+  return sftpConnect(key, preparedSshTarget(cfg))
 })
 ipcMain.handle('sftp:list', (_e, key: string, path: string) =>
   isLocalFileSession(key) ? localFilesList(path) : sftpList(key, path)
@@ -1162,7 +1161,7 @@ ipcMain.handle('metrics:sample', (_e, key: string, cfg: SshConnectConfig & { ser
     if (!isLocalTerminalEnabled()) return Promise.resolve({ ok: false, error: LOCAL_TARGET_OFF })
     return localMetricsSample(key)
   }
-  return metricsSample(key, resolveChainSecrets(cfg))
+  return metricsSample(key, preparedSshTarget(cfg))
 })
 ipcMain.handle('metrics:disconnect', (_e, key: string) => {
   // There is no connection to hand back for this machine, only the CPU
@@ -1423,7 +1422,7 @@ const targetExec = (
 ): ReturnType<typeof sshExec> =>
   isLocalTarget(cfg)
     ? localExecGated(command, timeoutMs)
-    : sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs)
+    : sshExec(preparedSshTarget(cfg as SshConnectConfig), command, timeoutMs)
 
 /**
  * The same dispatch for the readers that fan out.
@@ -1455,7 +1454,7 @@ const hostFactsReader = new HostFactsReader({ exec: targetExecQuiet })
  *
  * targetExecQuiet passes its config through unresolved and says so: its
  * callers resolve their own secrets. The sampler's injected probes do exactly
- * that — every one of them wraps in resolveChainSecrets. The four IPC handlers
+ * that — every one of them wraps in preparedSshTarget. The four IPC handlers
  * below did not, and what they are handed comes from the RENDERER, where a
  * stored password is a placeholder and a jump chain is a list of server ids.
  *
@@ -1474,7 +1473,7 @@ const hostFactsReader = new HostFactsReader({ exec: targetExecQuiet })
  * a server.
  */
 const onDemandTarget = (cfg: unknown): unknown =>
-  isLocalTarget(cfg) ? cfg : withVpnTransport(resolveChainSecrets(cfg as SshConnectConfig))
+  isLocalTarget(cfg) ? cfg : preparedSshTarget(cfg as SshConnectConfig)
 
 // Whether the key and access probe may run — roadmap item 23.
 //
@@ -1587,7 +1586,7 @@ const fleetSampler = new FleetSampler({
   // allowPrompt: false — this is the unattended caller. A never-connected
   // server is refused with an error the fleet UI can show, rather than raising
   // a host-key trust dialog the user cannot connect to any action they took.
-  sample: (key, cfg) => metricsSample(key, resolveChainSecrets(cfg as SshConnectConfig), false),
+  sample: (key, cfg) => metricsSample(key, preparedSshTarget(cfg as SshConnectConfig), false),
   // The hourly half — roadmap item C. Injected exactly like `sample`, so the
   // sampler's tests never touch SSH.
   //
@@ -1597,7 +1596,7 @@ const fleetSampler = new FleetSampler({
   // The inventory, on the facts probe's own clock and only after it succeeded.
   samplePackages: async (_key, cfg, manager) => hostFactsReader.packages(cfg, manager),
   sampleFacts: async (_key, cfg) => {
-    const probe = await hostFactsReader.read(resolveChainSecrets(cfg as SshConnectConfig))
+    const probe = await hostFactsReader.read(preparedSshTarget(cfg as SshConnectConfig))
     return probe.ok ? { ok: true, facts: probe.facts } : { ok: false, error: `${probe.reason}: ${probe.detail}` }
   },
   // The key and access half — roadmap item 23. Injected like `sampleFacts`, and
@@ -1611,7 +1610,7 @@ const fleetSampler = new FleetSampler({
     // server, so the id comes back out rather than the gate being widened to
     // the estate.
     const serverId = key.startsWith('fleet:') ? key.slice('fleet:'.length) : key
-    const probe = await accessReader.read(resolveChainSecrets(cfg as SshConnectConfig), {
+    const probe = await accessReader.read(preparedSshTarget(cfg as SshConnectConfig), {
       sudoers: sudoersReadGranted(groupForServer(serverId))
     })
     return probe.ok ? { ok: true, access: probe.access } : { ok: false, error: `${probe.reason}: ${probe.detail}` }
@@ -1632,7 +1631,7 @@ const fleetSampler = new FleetSampler({
     // so the id is taken back out rather than the gate being widened to the
     // whole estate. fleetKey() is the only thing that writes that prefix.
     const serverId = key.startsWith('fleet:') ? key.slice('fleet:'.length) : key
-    const probe = await postureReader.read(resolveChainSecrets(cfg as SshConnectConfig), {
+    const probe = await postureReader.read(preparedSshTarget(cfg as SshConnectConfig), {
       firewallRules: firewallRulesGranted(groupForServer(serverId))
     })
     return probe.ok ? { ok: true, posture: probe.posture } : { ok: false, error: `${probe.reason}: ${probe.detail}` }
@@ -1643,7 +1642,7 @@ const fleetSampler = new FleetSampler({
   // substitute.
   driftEnabled: () => driftModuleOn,
   sampleDrift: async (_key, cfg, ctx) => {
-    const probe = await driftReader.read(resolveChainSecrets(cfg as SshConnectConfig), ctx)
+    const probe = await driftReader.read(preparedSshTarget(cfg as SshConnectConfig), ctx)
     return probe.ok ? { ok: true, drift: probe.drift } : { ok: false, error: `${probe.reason}: ${probe.detail}` }
   },
   release: (key) => metricsDisconnect(key),
@@ -1892,7 +1891,7 @@ ipcMain.handle('fleet:drift-local', (_e, ctx: unknown) =>
 const accessCommitter = new AccessCommitter({
   // The ONLY thing in this app that opens a connection which cannot be the one
   // that wrote the file. See sshOpenFresh and rule 2.
-  openFresh: (cfg) => sshOpenFresh(resolveChainSecrets(cfg as SshConnectConfig))
+  openFresh: (cfg) => sshOpenFresh(preparedSshTarget(cfg as SshConnectConfig))
 })
 
 /** How long one host's staged write is given. Longer than a read probe: it
@@ -2103,7 +2102,7 @@ ipcMain.handle('access:run', async (_e, req: AccessRunRequest): Promise<AccessRu
     }
 
     const staged = await sshExec(
-      resolveChainSecrets(t.cfg as SshConnectConfig),
+      preparedSshTarget(t.cfg as SshConnectConfig),
       command,
       ACCESS_STAGE_TIMEOUT_MS,
       // allowPrompt false. A key change must never be what raises a host-key
@@ -2182,7 +2181,7 @@ const broadcast = new BroadcastRunner({
     // allowPrompt false: a fan-out across fifteen hosts with unknown keys would
     // raise fifteen stacked trust dialogs, and a stack of identical modals is
     // not a decision anyone can reason about. Such a host fails with a reason.
-    const r = await sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs, false)
+    const r = await sshExec(preparedSshTarget(cfg as SshConnectConfig), command, timeoutMs, false)
     return { ok: r.ok, code: r.code, stdout: r.stdout, stderr: r.stderr, error: r.error, truncated: r.truncated }
   },
   emit: (progress: BroadcastProgress) => {
@@ -2289,7 +2288,7 @@ function opsmaxxInstanceId(): string {
 // budget and made a 3 MB upgrade read back as complete.
 const attachedExec = attachedJobExecutor({
   stream: (cfg, command, handlers, allowPrompt) =>
-    sshExecStream(resolveChainSecrets(cfg as SshConnectConfig), command, handlers, allowPrompt)
+    sshExecStream(preparedSshTarget(cfg as SshConnectConfig), command, handlers, allowPrompt)
 })
 
 /**
@@ -2309,7 +2308,7 @@ const detachedExec = detachedJobExecutor({
   // allowPrompt false, for broadcast's reason: a fan-out across hosts with
   // unknown keys would raise a stack of identical trust dialogs.
   run: async (cfg, command, timeoutMs) => {
-    const r = await sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs, false)
+    const r = await sshExec(preparedSshTarget(cfg as SshConnectConfig), command, timeoutMs, false)
     return { ok: r.ok, code: r.code, stdout: r.stdout, stderr: r.stderr, error: r.error }
   },
   instanceId: opsmaxxInstanceId(),
@@ -2468,7 +2467,7 @@ async function gateNodesFor(serverIds: string[]): Promise<Map<string, GateNode>>
       if (cfg === undefined) return { serverId, read: null }
       try {
         const r = await sshExec(
-          resolveChainSecrets(cfg as unknown as SshConnectConfig),
+          preparedSshTarget(cfg as unknown as SshConnectConfig),
           buildGateNodeCommand(),
           GATE_NODE_TIMEOUT_MS
         )
@@ -2644,7 +2643,7 @@ ipcMain.handle('jobs:capabilities', () => [...jobCapabilities.values()])
 const logTailer = new LogTailer({
   execStream: (cfg, command, handlers) =>
     // Same reason as broadcast: several hosts at once, no stacked dialogs.
-    sshExecStream(resolveChainSecrets(cfg as SshConnectConfig), command, handlers, false),
+    sshExecStream(preparedSshTarget(cfg as SshConnectConfig), command, handlers, false),
   emitLine: (line: LogLine) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('logtail:line', line)
   },
@@ -2671,14 +2670,14 @@ ipcMain.handle('logtail:stop', (_e, tailId: string) => {
 ipcMain.handle('logtail:units', (_e, cfg: unknown) =>
   logTailer.listUnits(
     (c, command, timeoutMs) =>
-      sshExec(resolveChainSecrets(c as SshConnectConfig), command, timeoutMs, false),
+      sshExec(preparedSshTarget(c as SshConnectConfig), command, timeoutMs, false),
     cfg
   )
 )
 ipcMain.handle('logtail:logfiles', (_e, cfg: unknown) =>
   logTailer.listLogFiles(
     (c, command, timeoutMs) =>
-      sshExec(resolveChainSecrets(c as SshConnectConfig), command, timeoutMs, false),
+      sshExec(preparedSshTarget(c as SshConnectConfig), command, timeoutMs, false),
     cfg
   )
 )
@@ -2853,7 +2852,7 @@ ipcMain.handle(
     sudo: boolean
   ): Promise<{ ok: boolean; output: string; error?: string }> => {
     const r = await sshExec(
-      resolveChainSecrets(cfg as SshConnectConfig),
+      preparedSshTarget(cfg as SshConnectConfig),
       buildDockerLogsCommand(ref, safeLines, false, { ...logOpts, sudo }),
       20_000
     )
@@ -3100,7 +3099,7 @@ ipcMain.handle(
     for (const t of targets) {
       try {
         const r = await sshExec(
-          resolveChainSecrets(t.cfg as SshConnectConfig),
+          preparedSshTarget(t.cfg as SshConnectConfig),
           command,
           20_000,
           false
@@ -3151,7 +3150,7 @@ ipcMain.handle(
     try {
       const token = randomBytes(8).toString('hex').slice(0, 16)
       const r = await sshExec(
-        resolveChainSecrets(target.cfg as SshConnectConfig),
+        preparedSshTarget(target.cfg as SshConnectConfig),
         buildUnitWriteCommand(d, token),
         30_000,
         false
@@ -3234,7 +3233,7 @@ const cronEditDeps = {
   exec: (cfg: unknown, command: string, timeoutMs: number) =>
     isLocalTarget(cfg)
       ? localExecGated(command, timeoutMs)
-      : sshExec(resolveChainSecrets(cfg as SshConnectConfig), command, timeoutMs, false),
+      : sshExec(preparedSshTarget(cfg as SshConnectConfig), command, timeoutMs, false),
   recordApproval: recordJobApproval
 }
 
@@ -4224,7 +4223,7 @@ ipcMain.handle('knownhosts:forget', (_e, id: string) => knownHostForget(id))
 
 // ---- Tunnels ----
 ipcMain.handle('tunnel:start', (e, cfg: TunnelConfig, ssh: TunnelSshConfig) =>
-  tunnelStart(e.sender, cfg, resolveChainSecrets(ssh))
+  tunnelStart(e.sender, cfg, preparedSshTarget(ssh))
 )
 ipcMain.handle('tunnel:stop', (_e, id: string) => tunnelStop(id))
 ipcMain.handle('tunnel:list', () => tunnelList())

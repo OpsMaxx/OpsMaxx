@@ -40,10 +40,22 @@ export function VpnTransportSelect({
   const vpnStatuses = useApp((s) => s.vpnStatuses)
   const setVpnStatus = useApp((s) => s.setVpnStatus)
 
-  // frp is an inbound-exposure tool: it publishes a local port on a remote
-  // server. Nothing dials *out* through it, so listing it here — even greyed —
-  // would suggest a thing it cannot do.
-  const usable = profiles.filter((p) => p.spec.kind !== 'frp')
+  /**
+   * Inbound-exposure tools are not transports.
+   *
+   * frp and ngrok both publish a LOCAL port outward — frp to a remote frps,
+   * ngrok to its edge. Nothing dials out through either, so listing one here,
+   * even greyed, suggests a thing it cannot do.
+   *
+   * ngrok was missing from this filter, and the way it failed is worth
+   * knowing because it is quieter than a broken connection: picking it set
+   * `vpnProfileId`, `vpnDial` asked the driver for a forward, the driver has
+   * none, and the `unsupported` branch dialled the server directly. So the
+   * connection WORKED and the app said it was going via ngrok when it was
+   * not — a false statement about where traffic goes, on the screen whose
+   * whole job is saying where traffic goes.
+   */
+  const usable = profiles.filter((p) => p.spec.kind !== 'frp' && p.spec.kind !== 'ngrok')
 
   // The status map is only filled while the VPN pane is mounted, and this form
   // can be opened without ever going there. Without this reconcile the chip

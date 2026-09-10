@@ -48,6 +48,9 @@ const DRIVERS = join(__dirname, '..', 'src/main/services/vpn/drivers')
  */
 const MUST_FORWARD = ['tailscale.ts', 'wireguard.ts']
 const ROUTES_INSTEAD = ['openvpn.ts']
+/** Inbound exposure. Nothing dials out through these, so they must not be
+ *  offerable as a server's transport at all — see the picker's own filter. */
+const NOT_A_TRANSPORT = ['frp.ts', 'ngrok.ts']
 
 const declaresForward = (file: string): boolean => {
   const src = readFileSync(join(DRIVERS, file), 'utf8')
@@ -70,6 +73,23 @@ describe('a transport reaches its network by routing or by forwarding', () => {
     // fallback and start sending system-mode traffic through a loopback hop it
     // does not need.
     expect(ROUTES_INSTEAD.filter(declaresForward)).toEqual([])
+  })
+})
+
+describe('an inbound-exposure tool is never offered as a transport', () => {
+  const PICKER = readFileSync(
+    join(__dirname, '..', 'src/renderer/src/components/vpn/VpnTransportSelect.tsx'),
+    'utf8'
+  )
+
+  it('filters both of them out of the picker', () => {
+    // ngrok was missing from this filter, and it failed quietly rather than
+    // loudly: picking it set `vpnProfileId`, the driver had no forward, and
+    // the `unsupported` branch dialled directly — so the connection worked
+    // and the app said it went via ngrok when it did not.
+    for (const kind of NOT_A_TRANSPORT.map((f) => f.replace('.ts', ''))) {
+      expect(PICKER, `${kind} can still be picked as a transport`).toContain(`!== '${kind}'`)
+    }
   })
 })
 
