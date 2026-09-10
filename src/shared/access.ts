@@ -2456,6 +2456,31 @@ export const ACCESS_WRITE_DISABLED_SUMMARY =
   'Changing authorized keys is not enabled in this build. Reading is unaffected \u2014 nothing on ' +
   'this screen writes to any server.'
 
+/**
+ * What to say when the only thing stopping a revocation is the operator's own
+ * switch, which is the usual case and was being reported as the wrong one.
+ *
+ * The summary above says "not enabled in this build", and while
+ * ACCESS_WRITE_ENABLED is a real ceiling it is not the gate that actually
+ * fires: `canWrite` is `(ACCESS_WRITE_ENABLED || optIn) && bridge`, so an
+ * operator who has not turned the switch on was told the build had decided it
+ * for them. That is a dead end presented as a fact, and it is why the screen
+ * reads as broken rather than as switched off — there is nothing in the
+ * sentence to act on, and it is not even true.
+ *
+ * Naming the switch is also the honest version: this is off because nobody has
+ * turned it on, which is a different statement from "this release cannot do
+ * it", on a repo where such claims get checked.
+ */
+export const ACCESS_WRITE_OFF_SUMMARY =
+  'Revoking keys is switched off. Turn on \u201cAllow adding and revoking keys on servers\u201d in ' +
+  'Settings to use it. Nothing on this screen writes to any server until you do.'
+
+/** The bridge is a fact about this install, not a decision anybody made. */
+export const ACCESS_WRITE_STALE_BRIDGE =
+  'Restart OpsMaxx to revoke keys \u2014 this window is newer than the process behind it. Reading ' +
+  'is unaffected.'
+
 export const ACCESS_WRITE_DISABLED_REASON =
   'Changing authorized keys is not enabled in this build. The safety net behind it — the server ' +
   'restoring its own previous file if nothing confirms the change — is not yet dependable, and a ' +

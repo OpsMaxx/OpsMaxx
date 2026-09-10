@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { KeyRound, ShieldAlert } from 'lucide-react'
+import { KeyRound, ShieldAlert, Settings2 } from 'lucide-react'
 import { bridgeHas } from '../../lib/bridge'
 import { clsx } from '../../lib/format'
 import { sshHopsFor } from '../../lib/ssh'
 import { useApp } from '../../store/app'
 import { openMonitor, openSettings, useNav } from '../../store/nav'
+import { CheckNowButton } from '../monitor/CheckNowButton'
 import {
   ACCESS_WRITE_DISABLED_REASON,
   ACCESS_WRITE_DISABLED_SUMMARY,
+  ACCESS_WRITE_OFF_SUMMARY,
+  ACCESS_WRITE_OPT_IN_NOTE,
+  ACCESS_WRITE_STALE_BRIDGE,
   ACCESS_WRITE_ENABLED,
   ACCESS_WRITE_SCOPE,
   type AccessChangePreview,
@@ -121,9 +125,31 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
   // decision about this release, the SETTING is the operator's, the bridge is a
   // fact about this install. Main enforces the first two again in both
   // handlers, so this is the honest UI and not the boundary.
-  const canWrite =
-    (ACCESS_WRITE_ENABLED || writeOptIn) &&
-    bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'accessPlan')
+  const hasBridge = bridgeHas(
+    window.opsmaxx?.fleet as Record<string, unknown> | undefined,
+    'accessPlan'
+  )
+  const canWrite = (ACCESS_WRITE_ENABLED || writeOptIn) && hasBridge
+
+  /**
+   * WHICH gate is shut, because they are shut for different reasons and only
+   * one of them is the reader's to open.
+   *
+   * This panel used to say "not enabled in this build" for all three. That is
+   * a dead end stated as a fact, and in the common case it was not even true:
+   * `ACCESS_WRITE_ENABLED` is a ceiling the opt-in rises above, so an operator
+   * who had simply never turned the switch on was told the release had decided
+   * it for them — with no switch named and nothing to act on. That is the
+   * difference between a screen that is off and a screen that is broken, and
+   * it was reported as the second.
+   */
+  const gate: 'open' | 'opt-in' | 'bridge' | 'build' = canWrite
+    ? 'open'
+    : !hasBridge
+      ? 'bridge'
+      : ACCESS_WRITE_ENABLED
+        ? 'build'
+        : 'opt-in'
 
   /** Every host that did not produce a reading. Not a footnote: a key missing
    *  from this list may still be on those hosts, so "revoked from the fleet" is
@@ -276,23 +302,51 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
           change has been made to it.
         </p>
       }
+      /* Collecting from here, rather than sending the reader to another screen
+         to do it. This panel acts on what the hourly key sweep has read, and a
+         server it has not reached yet simply does not appear — so an estate
+         with one host collected showed one host's keys and no way at all to
+         get the other four, which reads as a screen that does not work. */
+      actions={<CheckNowButton collects="keys and access" onCollected={load} />}
     >
 
       {/* Said once, before a target is chosen — because the point of saying it
           is that nobody plans around a capability this does not have. Both
           halves matter: that the write half is off, and what it will and will
           not be able to do when it is back. */}
-      {!canWrite && (
+      {gate !== 'open' && (
         <div className="panel-note is-unknown" data-testid="write-gated">
-          {/* Folded behind NoteWhy — the same primitive PatchPanel already
-              uses — because the reasoning outweighed the data: seven hundred
-              characters of justification sat above the keys this screen
-              exists to show. What stays visible carries both operative facts,
-              that the write half is off and that nothing here writes
-              anywhere, so a reader who never expands it is not misled. */}
-          <ShieldAlert size={12} /> <b>{ACCESS_WRITE_DISABLED_SUMMARY}</b>
+          <ShieldAlert size={12} />{' '}
+          <b>
+            {gate === 'bridge'
+              ? ACCESS_WRITE_STALE_BRIDGE
+              : gate === 'build'
+                ? ACCESS_WRITE_DISABLED_SUMMARY
+                : ACCESS_WRITE_OFF_SUMMARY}
+          </b>
+          {/* The switch, where the refusal is. Sending somebody to hunt for a
+              setting they were not told the name of is what made this read as
+              a dead end. */}
+          {gate === 'opt-in' && (
+            <button className="btn ghost sm revoke-gate-fix" onClick={() => openSettings('security')}>
+              <Settings2 size={13} /> Open the setting
+            </button>
+          )}
+          {/* Folded, because the reasoning outweighed the data: seven hundred
+              characters of justification sat above the keys this screen exists
+              to show. What stays visible carries both operative facts — the
+              write half is off, and nothing here writes anywhere — so a reader
+              who never expands it is not misled.
+
+              The reasoning is picked to match the gate, for the reason the
+              summary is. Showing the build's justification to somebody whose
+              own switch is off repeats the false claim one fold further down,
+              where it is harder to catch. What that reader needs is the thing
+              that is genuinely unproven — the dead-man's switch has not been
+              watched firing on a real RHEL 9 host with KillUserProcesses=yes —
+              because that is what they are accepting by turning it on. */}
           <NoteWhy summary="Why it is off, and what it will be able to do">
-            <p>{ACCESS_WRITE_DISABLED_REASON}</p>
+            <p>{gate === 'opt-in' ? ACCESS_WRITE_OPT_IN_NOTE : ACCESS_WRITE_DISABLED_REASON}</p>
             <p>{ACCESS_WRITE_SCOPE}</p>
           </NoteWhy>
         </div>
@@ -327,6 +381,7 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
               {unchecked.length === 1 ? ' was' : 's were'} not read, so this key may also be on{' '}
               {unchecked.length === 1 ? 'it' : 'them'}: {unchecked.join(', ')}. Revoking here removes
               it from the accounts listed below and from nowhere else.
+              <CheckNowButton collects="keys and access" onCollected={load} />
             </div>
           )}
 
@@ -521,7 +576,21 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
                 data-testid="revoke-plan"
                 disabled={!canWrite || running || chosen === null}
                 onClick={() => chosen && void plan(chosen.fingerprint)}
-                title="Shows exactly what would run on which servers. Nothing is written until you confirm it, and nothing becomes permanent until a second, independent session has proved the server still lets OpsMaxx in."
+                /* Why it is greyed out, on the control that is greyed out. A
+                   disabled button whose reason lives in a paragraph at the top
+                   of the screen is one the reader concludes is broken — which
+                   is what happened here. */
+                title={
+                  gate === 'opt-in'
+                    ? 'Revoking keys is switched off. Turn it on in Settings → Security.'
+                    : gate === 'bridge'
+                      ? 'Restart OpsMaxx to revoke keys — this window is newer than the process behind it.'
+                      : gate === 'build'
+                        ? 'Changing authorized keys is not enabled in this build.'
+                        : chosen === null
+                          ? 'Choose a key from the table above.'
+                          : 'Shows exactly what would run on which servers. Nothing is written until you confirm it, and nothing becomes permanent until a second, independent session has proved the server still lets OpsMaxx in.'
+                }
               >
                 Plan the revocation
               </button>

@@ -302,7 +302,12 @@ describe('revoking a key, now that it lives in Operations', () => {
     render(<KeyRevokePanel servers={[SERVER]} />)
 
     const note = await screen.findByTestId('write-gated')
-    expect(note.textContent).toMatch(/not enabled in this build/i)
+    // Names the gate that is actually shut. This used to assert "not enabled
+    // in this build", which was the wrong reason: the build constant is a
+    // ceiling the operator's own switch rises above, so the reader was told a
+    // decision had been made for them that had not been.
+    expect(note.textContent).toMatch(/switched off/i)
+    expect(note.textContent).not.toMatch(/not enabled in this build/i)
     expect((await screen.findByTestId('revoke-plan')).hasAttribute('disabled')).toBe(true)
   })
 

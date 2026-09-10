@@ -718,18 +718,6 @@ export function Settings(): React.JSX.Element {
               </div>
               <AutoStartSetting />
               <SettingSwitch
-                label="Allow adding and revoking keys on servers"
-                desc={ACCESS_WRITE_OPT_IN_NOTE}
-                checked={settings.accessWriteEnabled}
-                onChange={(v) => setSettings({ accessWriteEnabled: v })}
-              />
-              <SettingSwitch
-                label="Ask for Touch ID when the vault is locked"
-                desc="When you open the Vault and it is locked, raise the fingerprint prompt without waiting for a click. Cancel it and the master password field is right there. Does nothing unless you have already set up biometric unlock."
-                checked={settings.vaultAutoBiometricPrompt}
-                onChange={(v) => setSettings({ vaultAutoBiometricPrompt: v })}
-              />
-              <SettingSwitch
                 label="Compact density"
                 desc="Tighter rows and padding across trees, lists and the docked monitor. Font sizes are unchanged."
                 checked={settings.compactDensity}
@@ -1117,6 +1105,12 @@ export function Settings(): React.JSX.Element {
                   <option value={0}>Never</option>
                 </select>
               </div>
+              <SettingSwitch
+                label="Ask for Touch ID when the vault is locked"
+                desc="Whenever the vault has to be unlocked — opening the Vault, or anything that needs a stored credential — raise the fingerprint prompt without waiting for a click. Cancel it and the master password field is right there. Does nothing unless you have already set up biometric unlock."
+                checked={settings.vaultAutoBiometricPrompt}
+                onChange={(v) => setSettings({ vaultAutoBiometricPrompt: v })}
+              />
             </div>
           )}
 
@@ -1124,6 +1118,17 @@ export function Settings(): React.JSX.Element {
             <div className="settings-section">
               <h2>Security</h2>
               <div className="sub">Credential storage and workspace locking.</div>
+              {/* Filed here rather than under Appearance, where it was. This
+                  grants permission to rewrite authorized_keys on servers, and
+                  a reader looking for it went to Security, found nothing, and
+                  concluded the feature did not exist — which is exactly what
+                  the screen that refuses without naming it also told them. */}
+              <SettingSwitch
+                label="Allow adding and revoking keys on servers"
+                desc={ACCESS_WRITE_OPT_IN_NOTE}
+                checked={settings.accessWriteEnabled}
+                onChange={(v) => setSettings({ accessWriteEnabled: v })}
+              />
               <KnownHosts />
               <Toggle label="Store credentials in OS keychain" desc="Use the platform secure store — never plaintext." initial />
               <Toggle label="Auto-lock workspaces" desc="Lock password-protected workspaces after inactivity." initial />
