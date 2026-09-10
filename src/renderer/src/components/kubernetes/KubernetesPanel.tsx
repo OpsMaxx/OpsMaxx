@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
   Boxes,
@@ -222,7 +222,26 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   const [serverId, setServerId] = useState('')
   const [context, setContext] = useState('')
   const [namespace, setNamespace] = useState('')
+
   const [probe, setProbe] = useState<K8sProbe | null>(null)
+  /**
+   * A namespace the cluster does not have falls back to all namespaces.
+   *
+   * The belt to the braces above. Clearing the selection when the host or the
+   * context changes covers the paths this panel controls; this covers the rest
+   * — a namespace deleted on the cluster since it was picked, a kubeconfig
+   * edited underneath us, a restored selection from a previous session.
+   *
+   * `<select>` with a value matching no option renders BLANK rather than
+   * failing, so without this the control shows nothing at all while the reads
+   * underneath it stay scoped to a namespace that is gone. Falling back to
+   * "all namespaces" is the one choice that is always valid and always
+   * truthful about what is being shown.
+   */
+  useEffect(() => {
+    if (!probe?.ok || namespace === '') return
+    if (!probe.namespaces.includes(namespace)) setNamespace('')
+  }, [probe, namespace])
   const [loading, setLoading] = useState(false)
   const [logs, setLogs] = useState<{ pod: string; output: string } | null>(null)
   const [filter, setFilter] = useState('')
@@ -816,6 +835,21 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
             setDiag(null)
             setOverview(null)
             setUsage(null)
+            /**
+             * The CHOICES made against the old host go too.
+             *
+             * Clearing the probe alone left `context` and `namespace` holding
+             * names from the previous cluster. The namespace select is hidden
+             * while the probe is null, so the stale value was invisible — and
+             * then the next read was silently scoped to a namespace that
+             * belongs to a different cluster and usually does not exist on
+             * this one. The pane showed pods from the all-namespaces read
+             * beside a dropdown naming a namespace nothing here has, which is
+             * what "the dropdown does not refresh" looks like from outside.
+             */
+            setContext('')
+            setNamespace('')
+            setResources(null)
           }}
         >
           {/* First, and present even with no servers: a local kubeconfig is
@@ -845,7 +879,12 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
               setContext(e.target.value)
               setOverview(null)
               setUsage(null)
-              void load(e.target.value)
+              // Same reasoning as the host select: a namespace belongs to the
+              // context it was chosen in. Two contexts on one kubeconfig are
+              // routinely two different clusters.
+              setNamespace('')
+              setResources(null)
+              void load(e.target.value, '')
             }}
           >
             {contextChoices.map((c) => (
