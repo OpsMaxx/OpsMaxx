@@ -6,6 +6,23 @@ export type SshAuth = 'password' | 'key' | 'agent'
 export interface SshHop {
   host: string
   port: number
+  /**
+   * The identity this hop's HOST KEY is remembered under, when `host:port` is
+   * not it.
+   *
+   * A hop routed through a VPN or a tunnel is rewritten to dial
+   * `127.0.0.1:<a freshly allocated port>`, and the known-hosts entry used to
+   * be keyed on that. A port that is different on every connection is an
+   * identity that can never match twice, so a server behind Tailscale asked to
+   * be trusted again every single time -- and each yes wrote a useless entry
+   * for `127.0.0.1:<port>`, which is not merely noise: a later, unrelated
+   * service on that port would inherit the trust.
+   *
+   * The fingerprint check is unchanged. This only says which name the answer is
+   * filed under, and the right name is the server the user chose, not the
+   * loopback address the transport happens to be using this minute.
+   */
+  hostKeyId?: string
   username: string
   auth: SshAuth
   password?: string

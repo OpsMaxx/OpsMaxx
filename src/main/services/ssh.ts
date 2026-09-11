@@ -283,7 +283,7 @@ async function connectClient(
       tryKeyboard: true,
       // Trust-on-first-use: unknown hosts prompt, changed keys are refused.
       hostVerifier: ((key: Buffer, cb: (ok: boolean) => void) => {
-        void verifyHostKey(hop.host, hop.port || 22, key, allowPrompt).then(cb)
+        void verifyHostKey(hop.host, hop.port || 22, key, allowPrompt, hop.hostKeyId).then(cb)
       }) as never,
       ...authFor(hop),
       // A pre-established socket: our own TCP connection, or the channel
@@ -461,7 +461,15 @@ async function openChainOverVpn(
   }
 
   const local = fwd
-  const rewritten: SshHop = { ...first, host: '127.0.0.1', port: local.port }
+  // Same rewrite, same reason to carry the real identity with it: this is the
+  // other route a VPN-forwarded hop takes, and a host key filed under a
+  // loopback port is filed under nothing.
+  const rewritten: SshHop = {
+    ...first,
+    host: '127.0.0.1',
+    port: local.port,
+    hostKeyId: first.hostKeyId ?? `${first.host}:${first.port || 22}`
+  }
   const next = cfg.hops?.length
     ? { ...cfg, hops: [rewritten, ...cfg.hops.slice(1)] }
     : { ...cfg, ...rewritten }
@@ -761,6 +769,11 @@ async function vpnDial(
     ...first,
     host: '127.0.0.1',
     port: fwd.port,
+    // The host key still belongs to the server, not to the loopback port this
+    // connection happens to be using. Without this the entry is written under
+    // an address that is different every time, so the server is a stranger on
+    // every connect.
+    hostKeyId: first.hostKeyId ?? `${first.host}:${first.port || 22}`,
     poolTag: `fwd:${vpnId}:${fwd.port}`
   } as SshHop
   return {

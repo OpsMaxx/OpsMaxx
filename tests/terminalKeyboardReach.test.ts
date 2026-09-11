@@ -17,12 +17,25 @@ const src = (p: string): string => readFileSync(fileURLToPath(new URL(p, import.
 describe('the active pane holds the keyboard', () => {
   const view = src('../src/renderer/src/components/terminal/TerminalView.tsx')
 
+  it('waits for the pane to be genuinely visible, not merely marked visible', () => {
+    // The first attempt at this asked on the next animation frame and did not
+    // work. A background tab is hidden by `display: none` on an ancestor,
+    // `focus()` inside a hidden subtree is silently a no-op, and a rAF callback
+    // runs BEFORE that frame's style and layout pass -- so the pane React had
+    // just marked visible frequently still was not. The call succeeded, changed
+    // nothing, and reported nothing, which is exactly why switching tabs still
+    // left the cursor dead until you clicked inside.
+    expect(view).toMatch(/new IntersectionObserver/)
+    expect(view).toMatch(/e\.isIntersecting/)
+  })
+
   it('focuses the terminal when its pane becomes active', () => {
     // The rule lives in the component that owns the xterm instance, so it
     // covers every route to a pane at once rather than being repeated in each
     // shortcut runner -- where the next runner added would forget it.
     expect(view).toMatch(/isActivePane/)
-    expect(view).toMatch(/requestAnimationFrame\(\(\) => termRef\.current\?\.focus\(\)\)/)
+    expect(view).toMatch(/requestAnimationFrame\(take\)/)
+    expect(view).toMatch(/termRef\.current\?\.focus\(\)/)
   })
 
   it('does not let a background tab steal typing', () => {

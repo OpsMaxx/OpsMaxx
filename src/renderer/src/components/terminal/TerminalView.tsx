@@ -339,11 +339,39 @@ function RealTerminal({
   })
   useEffect(() => {
     if (!isActivePane || dead) return
-    // After paint: xterm cannot take focus before its textarea is in the
-    // document, and a freshly opened tab mounts in the same commit.
-    const id = requestAnimationFrame(() => termRef.current?.focus())
-    return () => cancelAnimationFrame(id)
-  }, [isActivePane, dead, termRef])
+    const host = hostRef.current
+    if (!host) return
+
+    /**
+     * Focus when the pane is ACTUALLY VISIBLE, not when it was told to be.
+     *
+     * The first version of this asked on the next animation frame and did not
+     * work, which is worth writing down: a background tab is hidden by
+     * `display: none` on an ancestor, `focus()` on an element inside a hidden
+     * subtree is silently a no-op, and a requestAnimationFrame callback runs
+     * BEFORE the style and layout pass for that frame -- so at the moment it
+     * fired, the pane React had just marked visible frequently still was not.
+     * The call succeeded, changed nothing, and reported nothing, which is why
+     * switching tabs still left the cursor dead until you clicked.
+     *
+     * An IntersectionObserver fires after layout, when the element is visible
+     * as a fact rather than as an intention. The frame attempt stays because it
+     * wins outright in the common case where the pane was already on screen.
+     */
+    const take = (): void => {
+      if (!useApp.getState().tabs.length) return
+      termRef.current?.focus()
+    }
+    const id = requestAnimationFrame(take)
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) take()
+    })
+    io.observe(host)
+    return () => {
+      cancelAnimationFrame(id)
+      io.disconnect()
+    }
+  }, [isActivePane, dead, termRef, hostRef])
 
   /**
    * A shell that exited cleanly closes what held it.

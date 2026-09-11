@@ -61,9 +61,14 @@ export function verifyHostKey(
   // a CHANGED key still refuses loudly regardless — an unattended caller only
   // loses the ability to establish trust for the first time, which is exactly
   // the decision that needs a person present.
-  allowPrompt = true
+  allowPrompt = true,
+  /**
+   * What to file this key under, when the dialled address is not the server's
+   * identity — see SshHop.hostKeyId.
+   */
+  identity?: string
 ): Promise<boolean> {
-  const id = `${host}:${port || 22}`
+  const id = identity ?? `${host}:${port || 22}`
   const fp = fingerprint(key)
   const map = read()
   const known = map[id]
