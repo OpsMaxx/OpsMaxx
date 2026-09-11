@@ -40,7 +40,7 @@
 
 # Run a command, and treat failure as possibly transient.
 #
-# Three attempts, backing off 5s then 10s. The output of the command is never
+# Four attempts, backing off 5s, 15s then 45s. The output of the command is never
 # captured or silenced: on the final attempt the underlying error is the only
 # thing that explains what went wrong, and a retry that swallows what it
 # retried is untriageable.
@@ -57,15 +57,58 @@ retry_network() {
   local delay=5
   while :; do
     "$@" && return 0
-    if [ "$attempt" -ge 3 ]; then
-      echo "==> $what failed three times; giving up" >&2
+    if [ "$attempt" -ge 4 ]; then
+      echo "==> $what failed four times; giving up" >&2
       return 1
     fi
-    echo "==> $what failed (attempt $attempt of 3); retrying in ${delay}s" >&2
+    echo "==> $what failed (attempt $attempt of 4); retrying in ${delay}s" >&2
     sleep "$delay"
     attempt=$((attempt + 1))
-    delay=$((delay * 2))
+    # Tripling rather than doubling, and one more attempt.
+    #
+    # 5s then 10s spans fifteen seconds, and a release died inside that window:
+    # the Windows runner could not reach a certificate revocation server, and
+    # all three attempts fell within the same outage. The point of a retry is to
+    # outlast a wobble somewhere else, and fifteen seconds is not long enough to
+    # outlast anything. Sixty-five seconds is, and costs nothing on a build that
+    # is not failing.
+    delay=$((delay * 3))
   done
+}
+
+# curl flags that only make sense on Windows, and only with schannel.
+#
+# A release build failed with
+#
+#   curl: (35) schannel: CRYPT_E_REVOCATION_OFFLINE (0x80092013)
+#     - The revocation function was unable to check revocation because the
+#       revocation server was offline
+#
+# which is not a bad certificate. It is curl refusing to proceed because it
+# could not ASK whether the certificate was revoked. On GitHub's Windows
+# runners that responder is unreachable often enough to lose a release to it,
+# and no amount of retrying helps while it is down.
+#
+# `--ssl-revoke-best-effort` softens exactly that one check: schannel still
+# validates the chain and still refuses a certificate it can confirm is
+# revoked; it stops treating "could not reach the responder" as a failure.
+#
+# Defensible here specifically because every artefact these scripts download is
+# pinned and verified by SHA-256 on every run, including from a cached copy --
+# see fetch-wintun.sh. TLS is how the bytes arrive; the hash is what decides
+# whether they are the right bytes, and that check does not depend on a
+# revocation server being up.
+#
+# Empty everywhere else. The flag exists only in schannel builds of curl and is
+# rejected outright by one built against OpenSSL, so it must never be added on
+# macOS or Linux.
+curl_tls_flags() {
+  case "${OS:-}${OSTYPE:-}" in
+    *Windows_NT*|*msys*|*cygwin*|*win32*) ;;
+    *) return 0 ;;
+  esac
+  curl --version 2>/dev/null | grep -qi schannel || return 0
+  printf '%s' '--ssl-revoke-best-effort'
 }
 
 # A shallow clone of one tag, safe to retry.

@@ -70,7 +70,10 @@ mkdir -p "$WORK" "$LIC_ROOT"
 ZIP="$WORK/wintun-${WINTUN_VERSION}.zip"
 if [ ! -f "$ZIP" ]; then
   echo "==> fetching wintun ${WINTUN_VERSION}"
-  retry_network "fetching wintun ${WINTUN_VERSION}" curl -fsSL -o "$ZIP.part" "$WINTUN_URL"
+  # See curl_tls_flags: empty except on Windows, where a revocation server
+  # being briefly offline used to fail the whole release.
+  retry_network "fetching wintun ${WINTUN_VERSION}" \
+    curl -fsSL $(curl_tls_flags) -o "$ZIP.part" "$WINTUN_URL"
   mv "$ZIP.part" "$ZIP"
 fi
 
