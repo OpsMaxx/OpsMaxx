@@ -293,6 +293,42 @@ function RealTerminal({
   )
 
   /**
+   * Take the keyboard when this pane becomes the active one.
+   *
+   * Every tab and pane shortcut in the app was half a shortcut without this.
+   * Ctrl+T, Ctrl+Tab, Ctrl+1..9, Ctrl+\ and reopen-closed-tab all moved the
+   * selection and left the keyboard nowhere: `.focus()` was called after a
+   * paste and after closing the find bar, and in no other place in the
+   * renderer. So every one of them ended with the user reaching for the mouse
+   * to click into the terminal they had just navigated to, which is the one
+   * thing a terminal's keyboard shortcuts exist to avoid.
+   *
+   * It lives here rather than in PaneGrid or in each runner because this is the
+   * component that owns the xterm instance, and because "the active pane holds
+   * the keyboard" is one rule -- a focus call in every caller would be the same
+   * rule written eight times, and the ninth caller would forget.
+   *
+   * Only when the pane is genuinely on screen: a pane in a background tab that
+   * grabbed focus would steal typing from the tab the user is actually in.
+   */
+  const isActivePane = useApp((s) => {
+    if (!tabId) return false
+    const holder = Object.entries(s.panes).find(([, tp]) =>
+      tp.panes.some((p) => p.id === tabId)
+    )
+    if (!holder) return false
+    const [holdingTabId, tp] = holder
+    return holdingTabId === s.activeTabId && tp.activePaneId === tabId
+  })
+  useEffect(() => {
+    if (!isActivePane || dead) return
+    // After paint: xterm cannot take focus before its textarea is in the
+    // document, and a freshly opened tab mounts in the same commit.
+    const id = requestAnimationFrame(() => termRef.current?.focus())
+    return () => cancelAnimationFrame(id)
+  }, [isActivePane, dead, termRef])
+
+  /**
    * A shell that exited cleanly closes what held it.
    *
    * `exit` is how somebody says they are finished, and answering it with a

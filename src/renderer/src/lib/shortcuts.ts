@@ -164,7 +164,21 @@ export const COMMANDS: Command[] = [
     name: 'Find in Terminal (alternate)',
     group: 'Terminal',
     scope: 'terminal',
-    keys: 'Ctrl+F'
+    /**
+     * macOS only, because Cmd folds into Ctrl here.
+     *
+     * On macOS this binding is Cmd+F, which conflicts with nothing and is what
+     * every Mac app uses to search. Off macOS the same stored combo is a real
+     * Ctrl+F -- readline's `forward-char`, and page-forward in `less` and `vim`
+     * -- and this is a `terminal`-scope binding, so it was intercepted before
+     * xterm ever saw it. Moving the cursor right in a shell prompt opened a
+     * find bar instead.
+     *
+     * Unbound rather than rebound: Ctrl+Shift+F already does this on every
+     * platform, so there is nothing to replace, and a user who wants their own
+     * alias can set one in Settings > Keyboard Shortcuts.
+     */
+    keys: isMac() ? 'Ctrl+F' : ''
   }
 ]
 
