@@ -16,6 +16,7 @@ import { toast } from '../../store/toast'
 import { ContextMenu, MenuEntry } from '../connections/ContextMenu'
 import { openDatabaseEditor } from '../../store/dbEditor'
 import type { DatabaseConn, DbKind, Folder } from '../../types'
+import { EmptyState } from '../common/EmptyState'
 
 // A tooltip is a display surface like any other. `d.host` may be a whole
 // connection string on a record saved before the parser was fixed, so it goes
@@ -217,9 +218,11 @@ export function DatabaseSidebar(): React.JSX.Element {
       {rootDbs.map(dbRow)}
 
       {databases.length === 0 && folders.length === 0 && (
-        <div className="faint" style={{ padding: '8px 10px', fontSize: 12 }}>
-          No database connections yet.
-        </div>
+        <EmptyState
+          compact
+          title="No database connections"
+          message="Add one to browse schemas, run queries and read the server's own status."
+        />
       )}
 
       {ctx && (

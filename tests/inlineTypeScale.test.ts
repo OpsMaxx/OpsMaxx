@@ -22,7 +22,7 @@ const ROOT = fileURLToPath(new URL('../src/renderer/src', import.meta.url))
  * To remove one: use a class, or `fontSize: 'var(--fs-xs)'` where the value has
  * to stay inline. Then lower CEILING.
  */
-const CEILING = 234
+const CEILING = 229
 
 /** Sizes the scale does not contain at all. These may never come back. */
 const BELOW_SCALE = /fontSize: (?:[0-9]|10)\b/

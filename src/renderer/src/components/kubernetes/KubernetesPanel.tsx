@@ -70,6 +70,7 @@ import {
 import { approvalFor, type CommandApproval } from '../../../../shared/broadcast'
 import type { Server } from '../../types'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
+import { EmptyState } from '../common/EmptyState'
 
 // Pods on a cluster reachable from a server, and what you do about them.
 //
@@ -778,7 +779,17 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
 
   const workloadRows = (r: K8sRead<K8sWorkload>, label: string): React.JSX.Element => {
     if (!r.ok) return <Denied read={r} what={label} />
-    if (r.items.length === 0) return <div className="faint" style={{ fontSize: 12 }}>No {label.toLowerCase()}.</div>
+    // The compact variant, not a bare grey sentence: Kubernetes is a flagship
+    // surface and it had the barest empty states in the app, so a cluster with
+    // nothing in a section looked identical to one that had failed to load it.
+    if (r.items.length === 0)
+      return (
+        <EmptyState
+          compact
+          title={`No ${label.toLowerCase()}`}
+          message={`This namespace has no ${label.toLowerCase()}. Switch namespace, or clear the filter.`}
+        />
+      )
     return (
       <>
         {r.items.map((w) => (
@@ -1216,7 +1227,11 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                   {!overview.nodes.ok ? (
                     <Denied read={overview.nodes} what="Nodes" />
                   ) : overview.nodes.items.length === 0 ? (
-                    <div className="faint" style={{ fontSize: 12 }}>No nodes.</div>
+                    <EmptyState
+                      compact
+                      title="No nodes"
+                      message="The cluster reported no nodes. Check the selected context."
+                    />
                   ) : (
                     overview.nodes.items.map((n) => (
                       <div key={n.name} className="cron-row">
@@ -1411,7 +1426,11 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                   {!resources.pvcs.ok ? (
                     <Denied read={resources.pvcs} what="PersistentVolumeClaims" />
                   ) : resources.pvcs.items.length === 0 ? (
-                    <div className="faint" style={{ fontSize: 12 }}>No claims.</div>
+                    <EmptyState
+                      compact
+                      title="No claims"
+                      message="No persistent volume claims in this namespace."
+                    />
                   ) : (
                     resources.pvcs.items.map((v) => (
                       <div key={`${v.namespace}/${v.name}`} className="cron-row">
@@ -1436,7 +1455,11 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                   {!resources.ingresses.ok ? (
                     <Denied read={resources.ingresses} what="Ingresses" />
                   ) : resources.ingresses.items.length === 0 ? (
-                    <div className="faint" style={{ fontSize: 12 }}>No ingresses.</div>
+                    <EmptyState
+                      compact
+                      title="No ingresses"
+                      message="Nothing in this namespace is exposed through an ingress."
+                    />
                   ) : (
                     resources.ingresses.items.map((i) => (
                       <div key={`${i.namespace}/${i.name}`} className="cron-row">

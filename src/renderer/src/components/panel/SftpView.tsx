@@ -29,6 +29,7 @@ import { openSettings } from '../../store/nav'
 import type { Server } from '../../types'
 import type { SftpEntry, SftpProgress, SftpResult, SshAuth } from '../../../../shared/ssh'
 import { bridgeOn } from '../../lib/bridge'
+import { EmptyState } from '../common/EmptyState'
 
 const asAuth = (a: string): SshAuth => (a === 'password' || a === 'agent' ? a : 'key')
 
@@ -769,8 +770,20 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
             ))}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={4} className="faint" style={{ padding: 20, textAlign: 'center' }}>
-                  Empty directory
+                {/* Inside a table cell, so the compact variant: same three
+                    parts as every other empty state, no glyph tile. It also
+                    now distinguishes a directory with nothing in it from a
+                    filter that matched nothing, which read identically. */}
+                <td colSpan={4} style={{ padding: 0 }}>
+                  <EmptyState
+                    compact
+                    title={query ? 'Nothing matches' : 'Empty directory'}
+                    message={
+                      query
+                        ? `No file or folder here matches "${query}".`
+                        : 'There is nothing in this directory.'
+                    }
+                  />
                 </td>
               </tr>
             )}
