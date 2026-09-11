@@ -22,6 +22,7 @@ import { rdpSecretId } from '../../../../shared/rdp'
 import { clsx } from '../../lib/format'
 import { toast } from '../../store/toast'
 import { ContextMenu, MenuEntry } from './ContextMenu'
+import { Modal } from '../common/Modal'
 import type { Server } from '../../types'
 
 interface Ctx {
@@ -127,6 +128,16 @@ export function ConnectionTree(): React.JSX.Element {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [ctx, setCtx] = useState<Ctx | null>(null)
   const [folderCtx, setFolderCtx] = useState<{ x: number; y: number; id: string } | null>(null)
+  /**
+   * The server waiting to be deleted.
+   *
+   * Deleting one took a single click of a menu item and removed three things:
+   * the server, its credential from the OS keychain, and the desktop password
+   * stored under its own id. None of that comes back, and nothing anywhere said
+   * so -- the only feedback was a toast reading "<name> deleted", after the
+   * fact. Elsewhere in this app removing a container makes you type its name.
+   */
+  const [pendingDelete, setPendingDelete] = useState<Server | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropFolder, setDropFolder] = useState<string | null>(null)
@@ -220,15 +231,7 @@ export function ConnectionTree(): React.JSX.Element {
       label: 'Delete',
       icon: <Trash2 size={14} />,
       danger: true,
-      onClick: () => {
-        deleteServer(s.id)
-        void window.opsmaxx?.secrets.delete(s.id)
-        // The desktop's password lives under its own id, so deleting the
-        // server's alone would leave it behind in the OS keychain — a
-        // credential for a machine the app no longer knows about.
-        void window.opsmaxx?.secrets.delete(rdpSecretId(s.id))
-        toast(`${s.name} deleted`)
-      }
+      onClick: () => setPendingDelete(s)
     }
   ]
 
@@ -448,6 +451,40 @@ export function ConnectionTree(): React.JSX.Element {
           entries={folderMenu(folderCtx.id, folders.find((f) => f.id === folderCtx.id)?.name ?? '')}
           onClose={() => setFolderCtx(null)}
         />
+      )}
+      {pendingDelete && (
+        <Modal
+          title={`Delete ${pendingDelete.name}?`}
+          onClose={() => setPendingDelete(null)}
+          confirm={{
+            label: 'Delete',
+            destructive: true,
+            onClick: () => {
+              const s = pendingDelete
+              setPendingDelete(null)
+              deleteServer(s.id)
+              void window.opsmaxx?.secrets.delete(s.id)
+              // The desktop's password lives under its own id, so deleting the
+              // server's alone would leave it behind in the OS keychain — a
+              // credential for a machine the app no longer knows about.
+              void window.opsmaxx?.secrets.delete(rdpSecretId(s.id))
+              toast(`${s.name} deleted`)
+            }
+          }}
+        >
+          {/* Naming what else goes, because that is the part nobody expects:
+              the entry disappearing from a list reads as reversible, and the
+              credential it takes with it is not. */}
+          <p className="s-desc">
+            This removes the connection and its saved credential from the OS credential store,
+            including any saved desktop password. Neither can be recovered from OpsMaxx
+            afterwards.
+          </p>
+          <p className="s-desc">
+            Nothing on {pendingDelete.host || 'the server'} itself is touched — no key is revoked
+            and no session is ended.
+          </p>
+        </Modal>
       )}
     </>
   )

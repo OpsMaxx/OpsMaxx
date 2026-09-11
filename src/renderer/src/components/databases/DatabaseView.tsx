@@ -24,6 +24,8 @@ import { KIND_COLOR, KIND_SHORT } from './DatabaseSidebar'
 import { sshHopFor } from '../../lib/ssh'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import { classifyConnectionError, errorText } from '../../lib/connectionError'
+import { Modal } from '../common/Modal'
+import { queryConfirmation, queryRisk, type QueryConfirmation } from '../../../../shared/queryRisk'
 import { openDatabaseCreator, openDatabaseEditor } from '../../store/dbEditor'
 import { openSettings } from '../../store/nav'
 import { supportsDbOps, type DbVerdictLevel } from '../../../../shared/dbOps'
@@ -234,7 +236,7 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
     ? allDbs.filter((d) => d.toLowerCase().includes(dbName.trim().toLowerCase()))
     : allDbs
 
-  const run = useCallback(async () => {
+  const execute = useCallback(async () => {
     if (!query.trim()) return
     setRunning(true)
     let r: DbQueryResult | undefined
@@ -248,10 +250,38 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
     setRunning(false)
   }, [query, conn.phase, cfgWith, dbName, unlocked])
 
+  /**
+   * What the editor is waiting to be told before it runs.
+   *
+   * The gate lives in `run`, not on the button, because Ctrl+Enter is the other
+   * way in and was the one people actually used. `DROP TABLE users` went
+   * straight to the server from a keystroke while `docker rm` in this same app
+   * demanded a typed phrase -- the most destructive control in the product had
+   * the least in front of it.
+   */
+  const [pendingRun, setPendingRun] = useState<QueryConfirmation | null>(null)
+  const [phrase, setPhrase] = useState('')
+
+  const run = useCallback((): void => {
+    if (!query.trim()) return
+    const ask = queryConfirmation(query)
+    if (ask.kind === 'none') {
+      void execute()
+      return
+    }
+    setPhrase('')
+    setPendingRun(ask)
+  }, [query, execute])
+
+  const confirmRun = (): void => {
+    setPendingRun(null)
+    void execute()
+  }
+
   const onKey = (e: React.KeyboardEvent): void => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault()
-      void run()
+      run()
     }
   }
 
@@ -471,7 +501,7 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
               }
             />
             <div className="row" style={{ marginTop: 8 }}>
-              <button className="btn primary sm" disabled={running} onClick={() => void run()}>
+              <button className="btn primary sm" disabled={running} onClick={run}>
                 {running ? <Loader2 size={13} className="spin" /> : <Play size={13} />} Run
                 <span className="kbd" style={{ marginLeft: 6 }}>
                   Ctrl ⏎
@@ -497,6 +527,54 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
           )}
         </div>
       </div>
+
+      {pendingRun && (
+        <Modal
+          title={pendingRun.kind === 'type-to-confirm' ? 'This cannot be undone' : 'Run this query?'}
+          subtitle={`${db.name}${dbName ? ` · ${dbName}` : ''}`}
+          onClose={() => setPendingRun(null)}
+          confirm={{
+            label: 'Run',
+            destructive: pendingRun.kind === 'type-to-confirm',
+            disabled:
+              pendingRun.kind === 'type-to-confirm' && phrase.trim() !== pendingRun.phrase,
+            onClick: confirmRun
+          }}
+        >
+          {/* The statement itself, not a description of it. The accident this
+              catches is usually that the query on screen is not the query the
+              user thinks is on screen. */}
+          <pre className="code-block selectable" style={{ maxHeight: 180, overflow: 'auto' }}>
+            {query.trim()}
+          </pre>
+          {pendingRun.kind === 'type-to-confirm' ? (
+            <>
+              <p className="s-desc">
+                {queryRisk(query) === 'destructive' && pendingRun.phrase !== 'RUN'
+                  ? `This destroys ${pendingRun.phrase} and everything in it. There is no undo and no backup taken.`
+                  : 'This is irreversible. There is no undo and no backup taken.'}
+              </p>
+              <label className="s-desc" htmlFor="db-confirm-phrase">
+                Type <b>{pendingRun.phrase}</b> to confirm.
+              </label>
+              <input
+                id="db-confirm-phrase"
+                className="input"
+                autoFocus
+                autoComplete="off"
+                spellCheck={false}
+                value={phrase}
+                onChange={(e) => setPhrase(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && phrase.trim() === pendingRun.phrase) confirmRun()
+                }}
+              />
+            </>
+          ) : (
+            <p className="s-desc">This writes to the database.</p>
+          )}
+        </Modal>
+      )}
     </div>
   )
 }
