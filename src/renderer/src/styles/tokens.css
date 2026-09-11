@@ -14,6 +14,19 @@
   --bg-input: #1a2130;
   --bg-terminal: #0b0e14;
   --bg-hover: #212a3a;
+  /* The brand mark's gradient end and its ink. Hardcoded here rather than in
+     global.css so the light theme can restate them -- which is the whole
+     reason they are tokens and not hexes in a rule. */
+  --brand-grad-end: #1a8fbf;
+  /* Text on a filled --danger, and the knob on a switch. Both were literal
+     #fff: correct on the dark theme by construction and on the light one only
+     by luck, which is not the same as being chosen. */
+  --danger-ink: #ffffff;
+  --switch-knob: #ffffff;
+  --brand-ink: #04141a;
+  /* The log viewer's row hover. A white overlay reads as nothing on a white
+     ground, so each theme names its own. */
+  --row-hover-veil: rgba(255, 255, 255, 0.03);
   --bg-active: #263149;
   --bg-scrim: rgba(6, 9, 14, 0.62);
 
@@ -190,6 +203,11 @@
   --bg-input: #ffffff;
   --bg-terminal: #f7f9fc;
   --bg-hover: #e6eaf1;
+  --brand-grad-end: #0d6f94;
+  --danger-ink: #ffffff;
+  --switch-knob: #ffffff;
+  --brand-ink: #f3f8fa;
+  --row-hover-veil: rgba(13, 17, 23, 0.045);
   --bg-active: #dbe6f6;
   --bg-scrim: rgba(30, 41, 59, 0.28);
 

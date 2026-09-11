@@ -133,8 +133,8 @@ button {
   border-radius: var(--r-sm);
   display: grid;
   place-items: center;
-  background: linear-gradient(135deg, var(--accent), #1a8fbf);
-  color: #04141a;
+  background: linear-gradient(135deg, var(--accent), var(--brand-grad-end));
+  color: var(--brand-ink);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
 }
 .brand-name {
@@ -194,7 +194,7 @@ button {
 }
 .win-btn.close:hover {
   background: var(--danger);
-  color: #fff;
+  color: var(--danger-ink);
 }
 
 /* Workspace switcher trigger */
@@ -1001,7 +1001,7 @@ button {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--switch-knob);
   transition: transform 0.15s;
 }
 .switch.on::after {
@@ -1306,11 +1306,47 @@ details[open] > .disclosure-head .chev {
 .content-header .spacer {
   flex: 1;
 }
+
+/* ---------------------------------------------------------------------------
+   The three containers the app is built from, responding to the mouse.
+
+   Between them `.card`, `.metric-card` and `.list-row` carry most of what is on
+   screen, and none of them had a hover state -- which is the whole reason the
+   app read as a screenshot rather than as software. There were also six
+   focus-visible rules in the entire stylesheet, so tabbing through it was
+   invisible.
+
+   A border shift and nothing else. These are surfaces, not buttons: lifting
+   them with a shadow would claim every card is clickable, and most are not. The
+   rule is only that the thing under the pointer acknowledges the pointer.
+   --------------------------------------------------------------------------- */
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   padding: var(--sp-4);
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+.card:hover,
+.metric-card:hover,
+.list-row:hover {
+  border-color: var(--border-strong);
+}
+/* Anything genuinely interactive gets the stronger signal: the ground shifts
+   too, and the keyboard gets the same treatment the mouse does. */
+.card[role='button']:hover,
+.list-row[role='button']:hover,
+.list-row.clickable:hover,
+.card.clickable:hover {
+  background: var(--bg-hover);
+}
+.card:focus-visible,
+.metric-card:focus-visible,
+.list-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
 }
 .card-grid {
   display: grid;
@@ -1448,6 +1484,7 @@ details[open] > .disclosure-head .chev {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   padding: var(--sp-4);
+  transition: border-color 120ms ease;
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
@@ -1577,6 +1614,9 @@ details[open] > .disclosure-head .chev {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
 }
 .list-row + .list-row {
   margin-top: var(--sp-2);
@@ -1710,7 +1750,9 @@ details[open] > .disclosure-head .chev {
   word-break: break-word;
 }
 .log-line:hover {
-  background: rgba(255, 255, 255, 0.03);
+  /* Was a white veil, which is invisible on the light theme's white ground --
+     the busiest surface in the app had no hover at all for half its users. */
+  background: var(--row-hover-veil);
 }
 .log-line .ts {
   color: var(--text-faint);
@@ -5187,4 +5229,12 @@ details[open] > .disclosure-head .chev {
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .metric-card,
+  .list-row {
+    transition: none;
+  }
 }
