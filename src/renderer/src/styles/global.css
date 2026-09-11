@@ -1588,6 +1588,11 @@ details[open] > .disclosure-head .chev {
   font-size: var(--fs-sm);
   color: var(--text-muted);
 }
+/* A tunnel whose listener is up but whose target refuses. Not the error colour:
+   the tunnel is not in an error state and the next connection may succeed. */
+.list-row .r-sub.warn {
+  color: var(--warn);
+}
 .list-row .spacer {
   flex: 1;
 }

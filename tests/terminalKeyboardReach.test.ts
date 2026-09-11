@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { COMMANDS, resolveBindings } from '../src/renderer/src/lib/shortcuts'
+import { COMMANDS, isMac, resolveBindings } from '../src/renderer/src/lib/shortcuts'
 
 const src = (p: string): string => readFileSync(fileURLToPath(new URL(p, import.meta.url)), 'utf8')
 
@@ -34,13 +34,17 @@ describe('the active pane holds the keyboard', () => {
 })
 
 describe('keys the shell needs', () => {
-  it('leaves Ctrl+F to readline off macOS', () => {
-    // Cmd folds into Ctrl in this keymap, so one stored combo is Cmd+F on a Mac
-    // and a real Ctrl+F everywhere else -- readline's forward-char, and
-    // page-forward in less and vim. This is a terminal-scope binding, so it was
-    // intercepted before xterm saw it.
-    const bound = resolveBindings({})
-    expect(bound['term-find-alt'] ?? '').toBe('')
+  it('leaves Ctrl+F to readline off macOS, and keeps Cmd+F on it', () => {
+    // Cmd folds into Ctrl in this keymap, so ONE stored combo is Cmd+F on a Mac
+    // -- harmless, and what every Mac app does -- and a real Ctrl+F everywhere
+    // else: readline's forward-char, and page-forward in less and vim. It is a
+    // terminal-scope binding, so it was intercepted before xterm saw it, and
+    // moving the cursor right at a prompt opened a find bar.
+    //
+    // Asserted against the running platform rather than a fixed value, because
+    // the binding is deliberately not the same on both.
+    const bound = resolveBindings({}).get('term-find-alt') ?? ''
+    expect(bound).toBe(isMac() ? 'Ctrl+F' : '')
   })
 
   it('still offers a find binding that collides with nothing', () => {

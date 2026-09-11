@@ -30,6 +30,20 @@ export interface TunnelStatus {
   connections: number
   // Actual bound port — differs from the request when 0 was passed.
   listenPort?: number
+  /**
+   * Why the last connection through this tunnel did not reach the target.
+   *
+   * A tunnel is `active` when its LISTENER binds, which is a different claim
+   * from "traffic gets through" -- the target can refuse every connection while
+   * the local port stays happily open. Those failures used to be swallowed by a
+   * bare `.catch(() => socket.destroy())`: a green tunnel, a connection count
+   * stuck at zero, and nothing anywhere saying why. The state stays `active`,
+   * because the listener really is up and turning it into an error would be a
+   * different untruth; this carries the part the user cannot otherwise see.
+   */
+  lastForwardError?: string
+  /** How many connections have failed that way since the tunnel started. */
+  forwardFailures?: number
 }
 
 export interface TunnelResult {

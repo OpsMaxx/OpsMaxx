@@ -273,6 +273,20 @@ export function TunnelManager(): React.JSX.Element {
                 {server ? ` · via ${server.name}` : ' · no server'}
                 {on && st.connections > 0 ? ` · ${st.connections} open` : ''}
               </div>
+              {/* Listening is not the same claim as reaching. A tunnel goes
+                  `active` when its local listener binds, and the target can
+                  refuse every connection after that -- which used to show as a
+                  green dot, a connection count of zero, and no explanation
+                  anywhere. The dot stays green because the listener really is
+                  up; this says what is happening behind it. */}
+              {on && st.forwardFailures ? (
+                <div className="r-sub warn">
+                  {st.forwardFailures === 1
+                    ? '1 connection could not reach the target'
+                    : `${st.forwardFailures} connections could not reach the target`}
+                  {st.lastForwardError ? ` — ${st.lastForwardError}` : ''}
+                </div>
+              ) : null}
             </div>
             <span className="spacer" />
             <div className="r-stat mono" style={{ alignItems: 'center' }}>

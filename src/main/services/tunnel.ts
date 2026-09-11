@@ -18,6 +18,8 @@ interface Active {
   error?: string
   connections: number
   listenPort?: number
+  lastForwardError?: string
+  forwardFailures: number
   wc: WebContents | null
 }
 
@@ -33,9 +35,27 @@ function emit(t: Active): void {
     state: t.state,
     error: t.error,
     connections: t.connections,
-    listenPort: t.listenPort
+    listenPort: t.listenPort,
+    lastForwardError: t.lastForwardError,
+    forwardFailures: t.forwardFailures || undefined
   }
   t.wc.send(`tunnel:status:${t.cfg.id}`, status)
+}
+
+/**
+ * A connection reached the listener and could not reach the target.
+ *
+ * Not an error state: the listener is bound and the next connection may well
+ * succeed, so flipping the tunnel to `error` would be its own untruth and would
+ * race with a stop that is already under way. What was wrong before was that
+ * this said nothing at all -- the `.catch(() => socket.destroy())` sites
+ * sites dropped the reason on the floor, leaving a green tunnel with a
+ * connection count of zero and no way to find out why.
+ */
+function forwardFailed(t: Active, err: unknown): void {
+  t.forwardFailures++
+  t.lastForwardError = err instanceof Error ? err.message : String(err)
+  emit(t)
 }
 
 function setState(t: Active, state: TunnelState, error?: string): void {
@@ -207,6 +227,7 @@ export async function tunnelStart(
     sockets: new Set(),
     state: 'starting',
     connections: 0,
+    forwardFailures: 0,
     wc
   }
   tunnels.set(cfg.id, t)
@@ -240,7 +261,10 @@ export async function tunnelStart(
         const stream = accept() as unknown as NodeJS.ReadWriteStream
         const socket = net.connect(cfg.targetPort, cfg.targetHost)
         socket.on('connect', () => bind(t, socket, stream))
-        socket.on('error', () => (stream as unknown as { end: () => void }).end())
+        socket.on('error', (err) => {
+          forwardFailed(t, err)
+          ;(stream as unknown as { end: () => void }).end()
+        })
       })
       t.listenPort = port
       setState(t, 'active')
@@ -249,12 +273,18 @@ export async function tunnelStart(
 
     const server = net.createServer((socket) => {
       if (cfg.kind === 'socks') {
-        handleSocks(t, client, socket).catch(() => socket.destroy())
+        handleSocks(t, client, socket).catch((err) => {
+          forwardFailed(t, err)
+          socket.destroy()
+        })
         return
       }
       forward(client, socket.remoteAddress ?? '127.0.0.1', socket.remotePort ?? 0, cfg.targetHost, cfg.targetPort)
         .then((stream) => bind(t, socket, stream))
-        .catch(() => socket.destroy())
+        .catch((err) => {
+          forwardFailed(t, err)
+          socket.destroy()
+        })
     })
     t.server = server
     t.listenPort = await listen(server, cfg.listenHost, cfg.listenPort)
@@ -289,6 +319,9 @@ export async function tunnelStop(id: string, keepError = false): Promise<void> {
     }
   }
   t.connections = 0
+  // A fresh run reports its own failures, not the previous run's.
+  t.forwardFailures = 0
+  t.lastForwardError = undefined
   if (!keepError) setState(t, 'stopped')
   else emit(t)
 }
@@ -296,7 +329,15 @@ export async function tunnelStop(id: string, keepError = false): Promise<void> {
 export function tunnelStatus(id: string): TunnelStatus | null {
   const t = tunnels.get(id)
   if (!t) return null
-  return { id, state: t.state, error: t.error, connections: t.connections, listenPort: t.listenPort }
+  return {
+    id,
+    state: t.state,
+    error: t.error,
+    connections: t.connections,
+    listenPort: t.listenPort,
+    lastForwardError: t.lastForwardError,
+    forwardFailures: t.forwardFailures || undefined
+  }
 }
 
 export function tunnelList(): TunnelStatus[] {
@@ -332,7 +373,20 @@ export async function openEphemeralForward(
         socket.on('error', kill)
         stream.on('error', kill)
       })
-      .catch(() => socket.destroy())
+      .catch((err) => {
+        // No Active tunnel here and so no status to emit: this forward is owned
+        // by whoever asked for it (a database connection reaching a host only
+        // routable from the SSH server), and its lifetime ends with theirs.
+        // What the caller sees without this is a reset socket and a generic
+        // client-side "connection closed", with the actual reason -- refused,
+        // no route, wrong port -- discarded here. Logged rather than swallowed,
+        // so it is at least answerable.
+        console.error(
+          `[tunnel] ephemeral forward to ${targetHost}:${targetPort} failed:`,
+          err instanceof Error ? err.message : err
+        )
+        socket.destroy()
+      })
   })
 
   const port = await listen(server, '127.0.0.1', 0)
