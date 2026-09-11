@@ -284,12 +284,29 @@ function RealTerminal({
     setFinding(true)
   }, [findRequest, tabId])
   const [pending, setPending] = useState<{ text: string; lines: number } | null>(null)
+  /**
+   * Restored from the last run and not yet dialled.
+   *
+   * Read from the tab that owns this pane rather than passed down, because a
+   * split pane's id is not its tab's id -- `tabId` here is the PANE id, which
+   * is what `findRequest` matches on above.
+   */
+  const dormant = useApp((s) => {
+    if (!tabId) return false
+    const owner = Object.entries(s.panes).find(([, tp]) =>
+      tp.panes.some((p) => p.id === tabId)
+    )?.[0]
+    return !!s.tabs.find((t) => t.id === (owner ?? tabId))?.dormant
+  })
+  const wakeTab = useApp((s) => s.wakeTab)
+
   const { termRef, searchRef, dead, reconnect } = useTerminalSession(
     transport,
     hostRef,
     () => setFinding(true),
     (text, lines) => setPending({ text, lines }),
-    tabId
+    tabId,
+    dormant
   )
 
   /**
@@ -367,7 +384,18 @@ function RealTerminal({
         <DeadSession
           dead={dead}
           transport={transport}
-          onReconnect={reconnect}
+          onReconnect={() => {
+            // Clear the flag first: the tab is awake from here on, so a later
+            // drop shows an ordinary reconnect rather than claiming again that
+            // it was restored.
+            if (dormant && tabId) {
+              const owner = Object.entries(useApp.getState().panes).find(([, tp]) =>
+                tp.panes.some((p) => p.id === tabId)
+              )?.[0]
+              wakeTab(owner ?? tabId)
+            }
+            reconnect()
+          }}
           onClose={onClose}
           closeLabel={closeLabel}
         />

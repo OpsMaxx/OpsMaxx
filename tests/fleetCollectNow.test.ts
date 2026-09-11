@@ -158,3 +158,55 @@ describe('collecting on demand', () => {
     expect(new Set(h.factsCalls).size).toBe(2)
   })
 })
+
+describe('what "answered" counts', () => {
+  it('ignores an id this sampler has no target for', async () => {
+    // A server in another workspace, or one deleted since the window rendered.
+    // It was counted in `servers` -- and then, if it happened to be in the
+    // reachability map seeded from stored history at startup, counted in
+    // `answered` as well: reported as having replied to a question it was
+    // never asked.
+    const { sampler } = harness({ targets: [target('a')] })
+    const r = await sampler.collectNow(['a', 'ghost'])
+    expect(r.servers).toBe(1)
+    expect(r.answered).toBe(1)
+  })
+
+  it('sweeps nothing when every requested id is unknown', async () => {
+    const { sampler } = harness({ targets: [target('a')] })
+    const r = await sampler.collectNow(['ghost'])
+    expect(r.swept).toBe(false)
+    expect(r.servers).toBe(0)
+  })
+
+  it('counts a reply from this run, not a verdict carried in from the last one', async () => {
+    // `reachable` is seeded at startup from stored events so an outage already
+    // reported is not raised twice. That verdict is about the PREVIOUS process,
+    // and `answered` used to read it -- so a host that had not been spoken to
+    // could still be counted. `answeredAt` records when a host actually replied
+    // to this sampler, and the count compares against the moment the request's
+    // own sweep began.
+    const { sampler } = harness({ targets: [target('a')], failSample: true })
+    const seeded = sampler as unknown as {
+      reachable: Map<string, boolean>
+      answeredAt: Map<string, number>
+    }
+    seeded.reachable.set('a', true)
+    // The shape the seeding actually leaves behind: a reachability verdict with
+    // no reply time beside it, because no reply happened in this process.
+    expect(seeded.answeredAt.has('a')).toBe(false)
+
+    const r = await sampler.collectNow(['a'])
+    expect(r.swept).toBe(true)
+    expect(r.servers).toBe(1)
+    // The host refused this time, so nothing answered -- whatever the seeded
+    // verdict said.
+    expect(r.answered).toBe(0)
+  })
+
+  it('counts a host that did answer', async () => {
+    const { sampler } = harness({ targets: [target('a'), target('b')] })
+    const r = await sampler.collectNow()
+    expect(r.answered).toBe(2)
+  })
+})

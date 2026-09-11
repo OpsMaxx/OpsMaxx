@@ -17,6 +17,7 @@ import type {
   VpnErrorCode,
   VpnKind,
   VpnProfile,
+  VpnStatus,
   VpnResult,
   VpnStartResult
 } from '../../types'
@@ -47,6 +48,19 @@ function ungatedProxies(profile: VpnProfile): FrpProxy[] {
   return profile.spec.kind === 'frp'
     ? profile.spec.proxies.filter((p) => !p.acknowledgedExposure)
     : []
+}
+
+/**
+ * Every public address this profile is currently serving.
+ *
+ * ngrok assigns a fresh hostname on every run unless the profile reserved a
+ * domain, so the URL exists nowhere else -- not in the saved profile, not on a
+ * command line, not in a file. It reached the status bus but only ever rendered
+ * inside the expanded card, which is one click too far for the one string the
+ * whole feature exists to produce.
+ */
+function publicUrls(status: VpnStatus | undefined): string[] {
+  return (status?.stats?.endpoints ?? []).map((e) => e.publicUrl).filter(Boolean)
 }
 
 function subtitle(profile: VpnProfile): string {
@@ -573,6 +587,35 @@ export function useVpnProfiles(): VpnProfiles {
               <div className="r-sub" style={ELLIPSIS} title={sub}>
                 {sub}
               </div>
+              {/* The reason, on the row that shows the state.
+                  A badge reading "Error" with the cause one expand away is a
+                  state the user cannot act on: it names a problem and withholds
+                  the only part that would let them fix it. The card behind the
+                  chevron has carried `status.error` all along, which is exactly
+                  the wrong place for it -- nobody expands a row to find out why
+                  something they can already see is broken. */}
+              {status?.error && !running && (
+                <div
+                  className="r-sub warn selectable"
+                  style={ELLIPSIS}
+                  title={
+                    status.errorCode
+                      ? `${status.error} (${status.errorCode})`
+                      : status.error
+                  }
+                >
+                  {status.error}
+                </div>
+              )}
+              {/* And the URL, on the row, for the same reason in reverse: it is
+                  the entire point of an ngrok or frp profile, it is assigned
+                  fresh on every run, and it existed only inside the expanded
+                  card. */}
+              {running && publicUrls(status).length > 0 && (
+                <div className="r-sub mono selectable" style={ELLIPSIS}>
+                  {publicUrls(status).join('  ')}
+                </div>
+              )}
             </div>
           </button>
           <span className="spacer" />

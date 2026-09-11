@@ -9,6 +9,7 @@ import { useVpnProfiles } from './useVpnProfiles'
 import { FrpPublishDialog } from './FrpPublishDialog'
 import { FrpTunnelSetup } from './FrpTunnelSetup'
 import { NgrokSetup } from './NgrokSetup'
+import { PublicUrlWizard } from './PublicUrlWizard'
 import { isReverseProxyKind } from '../../../../shared/vpn'
 
 function blankFrpProfile(workspaceId: string): VpnProfile {
@@ -48,6 +49,11 @@ export function FrpManager(): React.JSX.Element {
   // ngrok is configured rather than imported, so it needs its own way in —
   // there is no file to drop. See NgrokSetup.
   const [addingNgrok, setAddingNgrok] = useState(false)
+  // Which provider, asked before anything is published. The button used to mean
+  // frp and only frp, so an install whose ngrok profile was the configured one
+  // got frp's readiness gaps -- an answer about a tunnel server it had
+  // deliberately not set up.
+  const [choosing, setChoosing] = useState<{ port: number } | null>(null)
 
   const readiness = frpPublishReadiness(profiles)
   const wanted = /^\d+$/.test(port.trim()) ? Number(port.trim()) : 0
@@ -70,12 +76,8 @@ export function FrpManager(): React.JSX.Element {
       toast('Enter the port your service is listening on.', 'error')
       return
     }
-    if (!readiness.ready) {
-      setGaps(readiness.gaps)
-      return
-    }
     setGaps(null)
-    setPublishing({ port: wanted })
+    setChoosing({ port: wanted })
   }
 
   // Everything already published through the tunnel host, with the address it
@@ -217,6 +219,28 @@ export function FrpManager(): React.JSX.Element {
             // for. The setup was an interruption, not the task.
             if (portOk) setPublishing({ port: wanted })
           }}
+        />
+      )}
+
+      {choosing && (
+        <PublicUrlWizard
+          localPort={choosing.port}
+          frpReady={readiness.ready}
+          frpGap={readiness.ready ? null : (readiness.gaps[0]?.message ?? null)}
+          onPickFrp={() => {
+            setChoosing(null)
+            setPublishing({ port: choosing.port })
+          }}
+          onSetUpFrp={() => {
+            setChoosing(null)
+            setGaps(readiness.ready ? null : readiness.gaps)
+            setSettingUp(true)
+          }}
+          onAddNgrok={() => {
+            setChoosing(null)
+            setAddingNgrok(true)
+          }}
+          onClose={() => setChoosing(null)}
         />
       )}
 

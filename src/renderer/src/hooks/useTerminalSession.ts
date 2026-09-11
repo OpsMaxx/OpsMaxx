@@ -259,7 +259,17 @@ export function useTerminalSession(
   hostRef: React.RefObject<HTMLDivElement | null>,
   onFind: () => void,
   onConfirmPaste: (text: string, lines: number) => void,
-  tabId?: string
+  tabId?: string,
+  /**
+   * Restored from the last run: do not dial until the user asks.
+   *
+   * The connect effect below runs on mount, and every tab in the app is mounted
+   * at once -- background tabs are hidden, not unmounted. Restoring a window of
+   * eight tabs would therefore open eight authenticated sessions because the
+   * app launched. `reconnect` is the way out, and it is the same control a
+   * dropped connection already offers.
+   */
+  dormant?: boolean
 ): {
   termRef: React.RefObject<Terminal | null>
   searchRef: React.RefObject<SearchAddon | null>
@@ -300,7 +310,9 @@ export function useTerminalSession(
   // Why the session ended, or null while it is alive. A closed session used to
   // leave a terminal that could not be typed into and could not be brought
   // back — the only way out was closing the tab and opening the server again.
-  const [dead, setDead] = useState<string | null>(null)
+  const [dead, setDead] = useState<string | null>(
+    dormant ? 'Restored from your last session — not connected yet.' : null
+  )
   // Bumped to rebuild the session. The effect already tears everything down on
   // cleanup, so a reconnect is the same code path as the first connect.
   const [generation, setGeneration] = useState(0)
@@ -453,6 +465,9 @@ export function useTerminalSession(
   useEffect(() => {
     const term = termRef.current
     if (!term) return
+    // A restored tab waits. `generation` is what lifts it: pressing Reconnect
+    // bumps it, which is the same code path as a first connect.
+    if (dormant && generation === 0) return
     // crypto.randomUUID rather than Math.random: this id is what incoming
     // events are matched against to decide whether they belong to the live
     // session or a torn-down one, so a collision routes another session's

@@ -24,6 +24,11 @@ interface Persisted {
   // Absent in saves written before external service checks existed.
   httpChecks?: unknown
   settings: unknown
+  // Absent in saves written before the window was restored across restarts.
+  tabs?: unknown
+  activeTabId?: unknown
+  panes?: unknown
+  tabCwd?: unknown
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -178,7 +183,15 @@ async function hydrate(): Promise<void> {
     // checked above.
     const activeChanged = state.activeWorkspaceId !== prev.activeWorkspaceId
 
-    if (dataChanged || activeChanged || state.settings !== prev.settings) {
+    // The window layout is remembered too, and like the active workspace it is
+    // not stored DATA -- it does not mark a backup stale.
+    const windowChanged =
+      state.tabs !== prev.tabs ||
+      state.activeTabId !== prev.activeTabId ||
+      state.panes !== prev.panes ||
+      state.tabCwd !== prev.tabCwd
+
+    if (dataChanged || activeChanged || windowChanged || state.settings !== prev.settings) {
       if (timer) clearTimeout(timer)
       timer = setTimeout(save, 400)
     }
@@ -200,7 +213,24 @@ function save(): Promise<void> {
       databases: s.databases,
       apiCollections: s.apiCollections,
       httpChecks: s.httpChecks,
-      settings: s.settings
+      settings: s.settings,
+      /**
+       * The window as the user left it.
+       *
+       * Warp, iTerm2 and tmux all restore; this opened an empty window every
+       * time, so the first minute of every session was rebuilding a layout the
+       * app had just thrown away.
+       *
+       * Tabs, their pane layout and which one was in front. NOT `tabSession`:
+       * those are shell ids belonging to a process that has exited, and a
+       * restored id would either match nothing or, worse, match something new.
+       * `tabCwd` travels because a local shell reopening where it was is the
+       * point of remembering it at all.
+       */
+      tabs: s.tabs,
+      activeTabId: s.activeTabId,
+      panes: s.panes,
+      tabCwd: s.tabCwd
     }) ?? Promise.resolve()
   )
 }

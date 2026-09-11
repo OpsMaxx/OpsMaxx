@@ -567,6 +567,17 @@ export class FleetSampler {
   // question that turns a permanent failure into one event instead of one per
   // sweep forever. Bounded by the same target list.
   private reachable = new Map<string, boolean>()
+  /**
+   * When each host last answered THIS process, as opposed to ever.
+   *
+   * `reachable` is seeded at startup from stored events, so it carries a
+   * verdict about the last run. That is right for alert suppression -- the
+   * reason it is seeded -- and wrong for "how many answered just now", which
+   * counted hosts this process had never spoken to. Separate map, because the
+   * two questions are genuinely different and merging them is what produced a
+   * button that reported a collection that had not happened.
+   */
+  private answeredAt = new Map<string, number>()
   // When each server's host facts are next due, per target and NOT on a timer
   // of its own. The sweep checks this inline; see the note on deps.sampleFacts.
   //
@@ -744,6 +755,7 @@ export class FleetSampler {
       // must not keep answering MCP questions from a sample nobody can refresh.
       this.samples.delete(id)
       this.reachable.delete(id)
+      this.answeredAt.delete(id)
       this.factsDueAt.delete(id)
       this.accessDueAt.delete(id)
       this.postureDueAt.delete(id)
@@ -872,10 +884,17 @@ export class FleetSampler {
     if (!this.cfg.enabled) return { swept: false, reason: 'disabled', servers: 0 }
     if (this.cfg.targets.length === 0) return { swept: false, reason: 'no-targets', servers: 0 }
 
+    // Only ids this sampler actually has a target for. A caller naming a server
+    // outside the target set -- one in another workspace, or one deleted since
+    // the window rendered -- was counted in `servers` and then, if it happened
+    // to be in the seeded `reachable` map, counted in `answered` too: reported
+    // as having replied to a question it was never asked.
+    const known = new Set(this.cfg.targets.map((t) => t.serverId))
     const ids =
       serverIds && serverIds.length > 0
-        ? new Set(serverIds)
-        : new Set(this.cfg.targets.map((t) => t.serverId))
+        ? new Set([...serverIds].filter((id) => known.has(id)))
+        : known
+    if (ids.size === 0) return { swept: false, reason: 'no-targets', servers: 0 }
     for (const id of ids) {
       this.factsDueAt.delete(id)
       this.accessDueAt.delete(id)
@@ -899,6 +918,9 @@ export class FleetSampler {
       this.report({ done: 0, total: 0, serverId: null, phase: 'waiting' })
       await this.inFlight
     }
+    // After the wait, not before: a reply that arrived during the sweep this
+    // request queued behind belongs to that sweep, not to this one.
+    const startedAt = this.now
     await this.sweep('requested')
 
     /**
@@ -910,7 +932,10 @@ export class FleetSampler {
      * did nothing, and harder to catch because it looks like success.
      */
     let answered = 0
-    for (const id of ids) if (this.reachable.get(id) === true) answered++
+    for (const id of ids) {
+      const at = this.answeredAt.get(id)
+      if (at !== undefined && at >= startedAt) answered++
+    }
     return { swept: true, servers: ids.size, answered }
   }
 
@@ -1389,6 +1414,7 @@ export class FleetSampler {
             const host = res.data as HostMetrics
             this.remember(t.serverId, { host, at })
             this.reachable.set(t.serverId, true)
+            this.answeredAt.set(t.serverId, this.now)
             const write: PendingWrite = {
               serverId: t.serverId,
               at,

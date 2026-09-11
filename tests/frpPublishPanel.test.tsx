@@ -79,11 +79,20 @@ beforeEach(() => {
   })
 })
 
+/**
+ * Type a port and ask for a URL, choosing frp when asked which provider.
+ *
+ * "Get a public URL" used to mean frp and only frp, so an install whose ngrok
+ * profile was the configured one got frp's readiness gaps -- an answer about a
+ * tunnel server it had deliberately not set up. The button asks now, and these
+ * tests are about what happens once frp is the answer.
+ */
 async function askForAUrl(port: string): Promise<ReturnType<typeof userEvent.setup>> {
   const user = userEvent.setup()
   render(<FrpManager />)
   await user.type(screen.getByLabelText('Local port'), port)
   await user.click(screen.getByRole('button', { name: /Get a public URL/ }))
+  await user.click(screen.getByRole('button', { name: /Your own frp server/ }))
   return user
 }
 
@@ -221,10 +230,11 @@ describe('the guided setup happens once', () => {
     ).toBeTruthy()
     expect(tokens.map((t) => t.token)).toEqual(['sekrit-token'])
 
-    // And it does not come back. Asking for a second URL goes straight to the
-    // publish dialog, with no offer to set anything up.
+    // And it does not come back. Asking for a second URL and choosing frp again
+    // goes straight to the publish dialog, with no offer to set anything up.
     await user.click(screen.getByRole('button', { name: /^Cancel$/ }))
     await user.click(screen.getByRole('button', { name: /Get a public URL/ }))
+    await user.click(screen.getByRole('button', { name: /Your own frp server/ }))
     expect(await screen.findByRole('button', { name: /Publish/ })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Set up a tunnel server/ })).toBe(null)
     expect(document.body.textContent).not.toContain('OpsMaxx does not serve public addresses')

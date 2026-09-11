@@ -332,6 +332,22 @@ interface TabBase {
   // does not show another workspace's sessions.
   workspaceId: UUID
   title: string
+  /**
+   * Restored from the last run and not yet reconnected.
+   *
+   * Every tab is MOUNTED at once -- background tabs are hidden with
+   * `display: none` rather than unmounted, so that switching workspaces does
+   * not kill their sessions. That makes restoring the tab strip and dialling
+   * the estate the same act unless something stops it, and dialling eight
+   * servers because the app launched is not a thing the app may decide: it can
+   * mean eight vault prompts, eight 2FA pushes, and eight authenticated
+   * sessions the user did not ask for on a machine that may not be theirs.
+   *
+   * So a restored tab comes back as itself -- name, kind, view, pane layout --
+   * and connects when the user says so. The session panel already has the
+   * control for that, because a dropped connection needed it first.
+   */
+  dormant?: boolean
 }
 
 // A tab backed by a saved server. `serverId` is non-null here on purpose: it

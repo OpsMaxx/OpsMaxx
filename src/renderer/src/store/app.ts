@@ -545,6 +545,8 @@ interface AppState {
   // Ctrl+W already do.
   closePane: (tabId: string, paneId: string) => void
   setActivePane: (tabId: string, paneId: string) => void
+  /** A restored tab, connecting for the first time this run. */
+  wakeTab: (tabId: string) => void
   // The pre-pane split contract, kept so the two viewbar buttons and Ctrl+\ need
   // no new concepts. See the implementation for the full truth table.
   toggleSplit: (tabId: string, dir: SplitDirection) => void
@@ -611,6 +613,10 @@ interface AppState {
       Pick<
         AppState,
         | 'workspaces'
+        | 'tabs'
+        | 'activeTabId'
+        | 'panes'
+        | 'tabCwd'
         | 'folders'
         | 'servers'
         | 'vpns'
@@ -1520,6 +1526,11 @@ export const useApp = create<AppState>((set, get) => ({
       }
     }),
 
+  wakeTab: (tabId) =>
+    set((s) => ({
+      tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, dormant: undefined } : t))
+    })),
+
   setActivePane: (tabId, paneId) =>
     set((s) => {
       const tp = s.panes[tabId]
@@ -2063,10 +2074,58 @@ export const useApp = create<AppState>((set, get) => ({
 
   // Older saves predate folder kinds and database folders — normalise on load
   // so existing folders stay with connections and databases start at root.
-  replaceAll: (data) =>
-    set((s) => ({
+  replaceAll: (data) => {
+    /**
+     * The window as it was left, minus anything that no longer exists.
+     *
+     * A tab pointing at a deleted server or a deleted workspace is a tab that
+     * can only render "Session unavailable", so it is dropped here rather than
+     * restored into a dead end. Every survivor comes back DORMANT: tabs are all
+     * mounted at once, so restoring them and dialling the estate would be the
+     * same act, and an app that opens eight authenticated sessions because it
+     * launched has made a decision that is not its to make.
+     */
+    return set((s) => {
+      const restoredTabs = (() => {
+        if (!data.tabs) return null
+        const workspaces = new Set((data.workspaces ?? s.workspaces).map((w) => w.id))
+        const servers = new Set((data.servers ?? s.servers).map((sv) => sv.id))
+        return data.tabs
+          // `kind` discriminates a union that gained `local` and `rdp` after
+          // the original SSH-only tab, and tabs have never been in the saved
+          // blob before now -- so every array read here was written by a build
+          // that has the union. The default is here anyway, because a blob is a
+          // file on disk that things other than this app can write, and an
+          // undefined discriminant would reach a switch that handles three
+          // cases and silently match none. tests/localTabModel.test.ts asked
+          // for exactly this on the day tabs became persisted.
+          .map((t) => ({ ...t, kind: t.kind ?? 'ssh' }) as typeof t)
+          .filter(
+            (t) =>
+              workspaces.has(t.workspaceId) &&
+              (t.kind === 'local' || servers.has(t.serverId))
+          )
+      })()
+      return {
       ...s,
       ...data,
+      ...(restoredTabs
+        ? {
+            tabs: restoredTabs.map((t) => ({ ...t, dormant: true })),
+            // Pinned to a tab that survived the filter above.
+            activeTabId: restoredTabs.some((t) => t.id === data.activeTabId)
+              ? data.activeTabId
+              : (restoredTabs[0]?.id ?? null),
+            panes: Object.fromEntries(
+              Object.entries(data.panes ?? {}).filter(([id]) =>
+                restoredTabs.some((t) => t.id === id)
+              )
+            ),
+            // Never restored: these are shell ids belonging to a process that
+            // has exited. A stale one matches nothing, or matches something new.
+            tabSession: {}
+          }
+        : {}),
       // The saved active workspace is restored here rather than left at the
       // seed default, and pinned to a workspace that actually exists.
       activeWorkspaceId: resolveWorkspaceId(
@@ -2113,7 +2172,9 @@ export const useApp = create<AppState>((set, get) => ({
         serverId: t.serverId ?? null
       })),
       settings: { ...DEFAULT_SETTINGS, ...(data.settings ?? {}) }
-    }))
+      }
+    })
+  },
 }))
 
 // Derived collection hooks. These selectors return freshly-filtered arrays, so

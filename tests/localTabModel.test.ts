@@ -398,13 +398,24 @@ describe('localShells slice', () => {
 })
 
 describe('persistence', () => {
-  // Finding: `Tab` is not in the persisted set, so the union needs no
-  // migration. Asserted rather than assumed — a later change that adds tabs to
-  // the blob has to come back through here and write the `kind` default.
   const persistSrc = readFileSync(resolve(__dirname, '../src/renderer/src/store/persist.ts'), 'utf8')
+  const storeSrc = readFileSync(resolve(__dirname, '../src/renderer/src/store/app.ts'), 'utf8')
 
-  it('does not persist tabs', () => {
-    expect(persistSrc).not.toMatch(/\btabs\b/)
+  // Tabs ARE persisted now -- the window is restored across restarts. This
+  // assertion used to read "does not persist tabs", and the note beside it said
+  // a later change that added them to the blob had to come back here and write
+  // the `kind` default. This is that change, and this is that default.
+  it('defaults the tab kind when reading tabs back', () => {
+    expect(persistSrc).toMatch(/\btabs\b/)
+    expect(storeSrc).toMatch(/kind: t\.kind \?\? 'ssh'/)
+  })
+
+  it('does not persist live shell ids', () => {
+    // `tabSession` holds shell ids belonging to a process that has exited. A
+    // restored one matches nothing, or matches something new.
+    // The saved payload, not the file -- the comment beside the save says why
+    // tabSession is left out, and that sentence is worth keeping.
+    expect(persistSrc).not.toMatch(/tabSession:\s*s\./)
   })
 
   it('does not persist the discovered shell list', () => {
