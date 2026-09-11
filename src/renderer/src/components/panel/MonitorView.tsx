@@ -155,7 +155,7 @@ export function MonitorView({
           // Says WHICH filesystem. The headline has always been the root one —
           // every stored sample means that — and on a host whose data volume
           // is the full one, an unlabelled "57%" reads as the whole machine.
-          'Used disk (/)',
+          `Used disk (${m.host.diskRoot ?? '/'})`,
           `${bytes(m.host.diskUsed)}${m.host.diskPct === null ? '' : ` (${m.host.diskPct.toFixed(0)}%)`}`
         ],
         ['Server / IP', server.host]

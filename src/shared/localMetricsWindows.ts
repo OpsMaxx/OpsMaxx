@@ -55,6 +55,10 @@ export const WINDOWS_PS_SCRIPT = [
   '  cpu = $cpu',
   '  memTotalKb = $os.TotalVisibleMemorySize',
   '  memFreeKb = $os.FreePhysicalMemory',
+  // Which volume the disk numbers are FOR. The view used to label them "/",
+  // which is not a path Windows has -- and the figure beside it was the system
+  // drive's all along, so the number was right and only its name was wrong.
+  '  diskRoot = $sys',
   '  diskTotal = $ld.Size',
   '  diskFree = $ld.FreeSpace',
   '  netRx = $rx',
@@ -80,6 +84,7 @@ interface WindowsRaw {
   cpu?: number | null
   memTotalKb?: number | null
   memFreeKb?: number | null
+  diskRoot?: string | null
   diskTotal?: number | null
   diskFree?: number | null
   netRx?: number | null
@@ -150,6 +155,9 @@ export function parseWindowsMetrics(text: string, now: number = Date.now()): Hos
     // NTFS has an MFT rather than a fixed inode table, and nothing reports a
     // comparable exhaustion figure.
     inodePct: null,
+    // `C:` as PowerShell reports it, so the view names the volume it measured
+    // rather than assuming a POSIX root.
+    diskRoot: typeof r?.diskRoot === 'string' && r.diskRoot ? r.diskRoot : 'C:',
     mounts: [],
     // No load average on Windows. Null, never zero: zero is a specific claim
     // about an idle machine.

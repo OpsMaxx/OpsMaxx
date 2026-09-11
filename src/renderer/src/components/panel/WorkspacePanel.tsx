@@ -161,6 +161,22 @@ function TabPane({
  * typed against `Server`. `demo: false` is what marks it as a real target, and
  * `id` is what the metrics hook matches to send the local marker.
  */
+/**
+ * What to call the machine this window is running on.
+ *
+ * `navigator.userAgent` rather than `navigator.platform`, which is deprecated
+ * and frozen in several browsers. Electron's renderer is Chromium, so the
+ * strings here are the ones it actually produces; anything unrecognised falls
+ * through to a name rather than to a guess about which OS it is.
+ */
+function localPlatformName(): string {
+  const ua = typeof navigator === 'undefined' ? '' : navigator.userAgent
+  if (/Windows/i.test(ua)) return 'windows'
+  if (/Mac OS X|Macintosh/i.test(ua)) return 'macos'
+  if (/Linux|X11/i.test(ua)) return 'linux'
+  return 'this machine'
+}
+
 const localHost = {
   id: LOCAL_ID,
   workspaceId: '',
@@ -173,7 +189,15 @@ const localHost = {
   status: 'online',
   tags: [],
   favorite: false,
-  os: 'linux',
+  // THE PLATFORM THIS IS ACTUALLY RUNNING ON.
+  //
+  // Hardcoded 'linux' until now, which was right by accident on one of the
+  // three platforms and a flat lie on the other two: the Monitor tab of a local
+  // shell on Windows 11 said "OS: linux" directly above a kernel line reading
+  // "Microsoft Windows 11 Pro". Read from the renderer's own navigator rather
+  // than asked over IPC, because this object is a module-level constant and a
+  // promise cannot be one.
+  os: localPlatformName(),
   route: [],
   vpnProfileId: null,
   demo: false

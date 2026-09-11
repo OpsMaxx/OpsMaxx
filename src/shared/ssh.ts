@@ -169,6 +169,15 @@ export interface HostMetrics {
   diskUsed: number
   diskTotal: number
   /**
+   * Which filesystem the three figures above are for.
+   *
+   * Absent means `/`, which is what every POSIX collector measures and what the
+   * view assumed for everybody. Windows has no `/`: its collector reads
+   * `$env:SystemDrive`, so the numbers were the system drive's all along and
+   * the label beside them said a path that machine does not have.
+   */
+  diskRoot?: string
+  /**
    * Inode usage of `/` as a percentage, or null.
    *
    * A filesystem can be 40% full and completely unwritable because it has run
