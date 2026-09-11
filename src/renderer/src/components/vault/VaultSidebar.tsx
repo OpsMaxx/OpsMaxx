@@ -71,7 +71,7 @@ export function VaultSidebar(): React.JSX.Element {
           >
             {KIND_ICON[e.kind]}
             {isSharedVaultEntry(e) && (
-              <span className="faint" style={{ fontSize: 10 }} title="Visible in every workspace">
+              <span className="faint" style={{ fontSize: 'var(--fs-xs)' }} title="Visible in every workspace">
                 shared
               </span>
             )}

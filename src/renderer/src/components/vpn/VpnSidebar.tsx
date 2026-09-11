@@ -53,7 +53,7 @@ export function VpnSidebar(): React.JSX.Element {
           <HealthDot health={vpnHealth(status)} />
           <span className="label">{p.name}</span>
           <span className="spacer" />
-          <span className="faint" style={{ fontSize: 10, textTransform: 'uppercase' }}>
+          <span className="faint" style={{ fontSize: 'var(--fs-xs)', textTransform: 'uppercase' }}>
             {KIND_TAG[p.spec.kind]}
           </span>
         </div>

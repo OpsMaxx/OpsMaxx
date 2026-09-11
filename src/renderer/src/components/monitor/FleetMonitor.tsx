@@ -3,6 +3,7 @@ import {
   Activity,
   ChevronDown,
   ChevronRight,
+  Download,
   FolderPlus,
   Plus,
   Trash2,
@@ -242,6 +243,7 @@ function GroupSection({
 export function FleetMonitor(): React.JSX.Element {
   const servers = useWorkspaceServers()
   const openServerTab = useApp((s) => s.openServer)
+  const setModal = useApp((s) => s.setModal)
   // A disabled module is one more branch, not a new mechanism — the same way
   // the activity bar and viewbar already hide what does not apply.
   const modules = useApp((s) => s.settings.modules)
@@ -402,6 +404,20 @@ export function FleetMonitor(): React.JSX.Element {
             rail === 'operations'
               ? 'Add a server before running commands or installing updates across the estate.'
               : 'Add a server to start streaming live CPU, memory, disk and network metrics.'
+          }
+          /* An empty state that only says "this is empty" is a dead end, and
+             this one sits behind an activity-bar icon somebody just pressed --
+             the first thing many new installs look at. The Connections panel
+             already offers both routes in; there is no reason this cannot. */
+          action={
+            <div className="row" style={{ gap: 8, justifyContent: 'center' }}>
+              <button className="btn" onClick={() => setModal('import-ssh')}>
+                <Download size={15} /> Import from ~/.ssh/config
+              </button>
+              <button className="btn primary" onClick={() => setModal('add-server')}>
+                <Plus size={15} /> Add Server
+              </button>
+            </div>
           }
         />
       </div>

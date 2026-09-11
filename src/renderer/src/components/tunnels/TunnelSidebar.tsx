@@ -18,7 +18,7 @@ export function TunnelSidebar(): React.JSX.Element {
           <span className={clsx('status-dot', t.status === 'active' ? 'online' : 'offline')} />
           <span className="label">{t.name}</span>
           <span className="spacer" />
-          <span className="faint" style={{ fontSize: 10, textTransform: 'uppercase' }}>
+          <span className="faint" style={{ fontSize: 'var(--fs-xs)', textTransform: 'uppercase' }}>
             {t.kind}
           </span>
         </div>

@@ -109,7 +109,7 @@ export function DatabaseSidebar(): React.JSX.Element {
     >
       <span
         className="mono"
-        style={{ fontSize: 9, fontWeight: 700, color: KIND_COLOR[d.kind], width: 26, flex: 'none' }}
+        style={{ fontSize: 'var(--fs-xs)', fontWeight: 700, color: KIND_COLOR[d.kind], width: 26, flex: 'none' }}
       >
         {KIND_SHORT[d.kind]}
       </span>

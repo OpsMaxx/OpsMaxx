@@ -117,7 +117,7 @@ function Card({ answer, children }: { answer: DbAnswer<unknown>; children?: Reac
               {answer.detail}
             </div>
           )}
-          <div className="faint" style={{ fontSize: 10, marginTop: 6, opacity: 0.7 }}>
+          <div className="faint" style={{ fontSize: 'var(--fs-xs)', marginTop: 6 }}>
             {DB_QUESTION_WHY[answer.id]}
           </div>
           {children}

@@ -76,13 +76,13 @@ export function MonitorStrip({
         {m.error ? (
           <span className="ms-err">{m.error}</span>
         ) : (
-          <span className="faint" style={{ fontSize: 10 }}>
+          <span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>
             {m.loading ? 'sampling…' : 'live · every 2s'}
           </span>
         )}
         <span className="spacer" />
         {m.host && (
-          <span className="faint mono" style={{ fontSize: 10 }}>
+          <span className="faint mono" style={{ fontSize: 'var(--fs-xs)' }}>
             {m.host.hostname} · {m.host.cores} vCPU
           </span>
         )}
