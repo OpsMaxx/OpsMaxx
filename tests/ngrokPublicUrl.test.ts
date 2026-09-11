@@ -64,8 +64,14 @@ function context(emitted: Partial<VpnStatus>[]): VpnDriverContext {
 
 describe('a started ngrok tunnel', () => {
   it('publishes the URL on the status the card reads', async () => {
+    // The WIRE shape, which is what the sidecar actually sends: `url`, not
+    // `publicUrl`. This stub used to use the domain shape -- the one shape the
+    // sidecar never sends -- so the test passed while every real endpoint
+    // arrived with publicUrl: undefined. A stub is only as right as the
+    // contract it was written from; tests/ngrokWireShape.test.ts now reads that
+    // contract out of the Go source rather than out of memory.
     send.mockResolvedValueOnce({
-      endpoints: [{ name: 'web', publicUrl: PUBLIC_URL, localAddr: '127.0.0.1:3000' }]
+      endpoints: [{ name: 'web', url: PUBLIC_URL, proto: 'http', localAddr: '127.0.0.1:3000' }]
     })
     const emitted: Partial<VpnStatus>[] = []
 

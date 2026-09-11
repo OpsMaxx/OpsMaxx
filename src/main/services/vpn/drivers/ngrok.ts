@@ -36,6 +36,34 @@ import { openNetdSession, type NetdSession } from '../netdSession'
  * profile, which can arrive from a restored backup.
  */
 
+/**
+ * One endpoint EXACTLY as the sidecar sends it.
+ *
+ * Separate from `NgrokEndpoint`, which is the app's own shape, because the two
+ * disagree and reading the reply as the domain type made that disagreement
+ * invisible: the sidecar's field is `url` (see `NgrokEndpointResult` in
+ * sidecar/netd/ngrok.go) and the domain field is `publicUrl`, so every endpoint
+ * arrived with `publicUrl: undefined`. The status carried an endpoint list with
+ * no addresses in it, the log line read "published web at undefined", and the
+ * card rendered an empty span -- a tunnel that was genuinely up and would not
+ * say where.
+ *
+ * It survived a test because the test stubbed the reply in the DOMAIN shape,
+ * which is the one shape the sidecar never sends. tests/ngrokWireShape.test.ts
+ * now reads the Go struct's json tags directly, so the two cannot drift again
+ * without something going red.
+ */
+interface NgrokEndpointWire {
+  name: string
+  url: string
+  proto: string
+  localAddr?: string
+}
+
+function fromWire(e: NgrokEndpointWire): NgrokEndpoint {
+  return { name: e.name, publicUrl: e.url, proto: e.proto, localAddr: e.localAddr }
+}
+
 const NAME_OK = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 /** A hostname, or `host:port` for a reserved TCP address. */
 const DOMAIN_OK = /^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(:\d{1,5})?$/
@@ -212,7 +240,7 @@ export const ngrokDriver: VpnDriver<NgrokSpec> = {
     }
 
     try {
-      const reply = await session.send<{ endpoints: NgrokEndpoint[] }>(
+      const reply = await session.send<{ endpoints: NgrokEndpointWire[] }>(
         'ngrok.up',
         {
           tunnelId: profile.id,
@@ -230,7 +258,8 @@ export const ngrokDriver: VpnDriver<NgrokSpec> = {
         75_000
       )
 
-      for (const e of reply.endpoints) ctx.log(`published ${e.name} at ${e.publicUrl}`, 'app')
+      const endpoints = reply.endpoints.map(fromWire)
+      for (const e of endpoints) ctx.log(`published ${e.name} at ${e.publicUrl}`, 'app')
 
       // The public URLs ride along with the status that announces the
       // connection. `stats()` is only polled on a wake nudge, so a card that
@@ -246,11 +275,11 @@ export const ngrokDriver: VpnDriver<NgrokSpec> = {
         stats: {
           rxBytes: 0,
           txBytes: 0,
-          endpoints: reply.endpoints,
+          endpoints,
           sampledAt: Date.now()
         }
       }
-      live.set(profile.id, { status, session, endpoints: reply.endpoints })
+      live.set(profile.id, { status, session, endpoints })
       ctx.emit(status)
       return { ok: true, listeners: listenersFor(spec) }
     } catch (e) {
