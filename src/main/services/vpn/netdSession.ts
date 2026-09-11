@@ -217,9 +217,23 @@ export async function openNetdSession(
 
   handle.onExit((e) => {
     closed = true
-    settleAll(
-      new VpnError('engine-stopped', `The sidecar stopped (${e.code ?? e.signal ?? 'unknown'}).`)
-    )
+    const why = `The sidecar stopped (${e.code ?? e.signal ?? 'unknown'}).`
+    settleAll(new VpnError('engine-stopped', why))
+    /**
+     * Tell the driver, not just the calls that were in flight.
+     *
+     * Rejecting the pending requests was the whole of this, which is fine for
+     * anyone mid-call and useless to everyone else: a profile whose start had
+     * already returned kept its Live entry and went on reporting Connected for
+     * a process that no longer existed. For ngrok that is a green card over a
+     * public address answering "the endpoint is offline", with nothing anywhere
+     * saying the engine had gone.
+     *
+     * Synthetic rather than from the sidecar, necessarily -- a process that has
+     * exited cannot send anything, and this is precisely the case its own
+     * events cannot cover.
+     */
+    for (const h of eventHandlers) h('sidecar.exit', { reason: why })
   })
 
   return {

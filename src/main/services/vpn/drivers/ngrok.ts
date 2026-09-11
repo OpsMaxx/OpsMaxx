@@ -288,13 +288,19 @@ export const ngrokDriver: VpnDriver<NgrokSpec> = {
       // resolved secrets, and `hasLiveVpnDependents` would go on saying this
       // profile was up. See the note on VpnDriverContext.dropped.
       session.onEvent((event, data) => {
-        if (event !== 'ngrok.endpoint.down') return
-        const d = data as { name?: string; error?: string } | undefined
+        // Two ways this tunnel stops being real, and the card was honest about
+        // neither: one endpoint stops serving, or the engine holding all of
+        // them goes away. The second cannot announce itself -- a process that
+        // has exited sends nothing -- so netdSession synthesises it.
+        if (event !== 'ngrok.endpoint.down' && event !== 'sidecar.exit') return
         if (live.get(profile.id)?.session !== session) return
+        const d = data as { name?: string; error?: string; reason?: string } | undefined
         live.delete(profile.id)
         void session.close()
         ctx.dropped(
-          `ngrok stopped serving ${d?.name ?? 'an endpoint'}${d?.error ? `: ${d.error}` : ''}`,
+          event === 'sidecar.exit'
+            ? (d?.reason ?? 'The network sidecar stopped, so the public address is gone.')
+            : `ngrok stopped serving ${d?.name ?? 'an endpoint'}${d?.error ? `: ${d.error}` : ''}`,
           'engine-failed'
         )
       })
