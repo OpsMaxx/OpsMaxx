@@ -6,6 +6,7 @@ import {
   COMMANDS,
   COMMANDS_BY_ID,
   comboFrom,
+  defaultKeys,
   displayCombo,
   findConflicts,
   resolveBindings
@@ -169,7 +170,7 @@ export function ShortcutManager(): React.JSX.Element {
                 {overridden && (
                   <button
                     className="icon-btn"
-                    title={`Restore default (${cmd.keys})`}
+                    title={`Restore default (${displayCombo(defaultKeys(cmd)).join(' ')})`}
                     onClick={() => setShortcut(id, null)}
                   >
                     <RotateCcw size={12} />

@@ -142,11 +142,24 @@ function scopeApplies(
 /**
  * True when this event used a modifier the shell has no claim on.
  *
- * macOS only, and Command only. On Windows and Linux the app modifier IS
- * Control, so there is no key here that a terminal is not entitled to.
+ * On macOS that is Command, and only Command: no readline binding uses it and
+ * every Mac terminal opens a tab on Cmd+T.
+ *
+ * Off macOS the app modifier IS Control, and Control belongs to the shell --
+ * which was the right conclusion and the wrong stopping point. It left Windows
+ * and Linux with five working keys out of thirty-three, because the terminal
+ * always has focus, so New Tab, Close Tab, Go to Tab N and Split never fired at
+ * all. Their own terminals solved this years ago: Windows Terminal and GNOME
+ * Terminal both put tab management on Ctrl+Shift and tab digits on Alt, neither
+ * of which readline claims. The defaults in `shortcuts.ts` follow them.
+ *
+ * Saying yes here does not hand the key to the app -- `runShortcut` only claims
+ * a combo that an actual binding matches, so Alt+B and Alt+F still reach the
+ * shell as word motions. It only says the app is ALLOWED to have bound it.
  */
 function usedAppModifier(e: KeyboardEvent): boolean {
-  return isMac() && e.metaKey && !e.ctrlKey
+  if (isMac()) return e.metaKey && !e.ctrlKey
+  return (e.ctrlKey && e.shiftKey) || (e.altKey && !e.ctrlKey)
 }
 
 // Runs whatever the user has bound to this key event, if anything.

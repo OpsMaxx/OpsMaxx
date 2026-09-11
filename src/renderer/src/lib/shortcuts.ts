@@ -19,6 +19,23 @@ export interface Command {
   //   terminal – only inside a terminal (clipboard, find).
   scope: Scope
   keys: string
+  /**
+   * The binding off macOS, where it differs.
+   *
+   * `comboFrom` folds Cmd into Ctrl so one stored binding means "the platform's
+   * app modifier" -- which is right on a Mac, where Cmd is the app modifier and
+   * no shell wants it. On Windows and Linux the app modifier IS Control, and
+   * Control belongs to the shell: Ctrl+W, Ctrl+L, Ctrl+K and Ctrl+1..9 are all
+   * keys a terminal is entitled to, so `scopeApplies` refuses app bindings
+   * there. Correct, and it left those users with five working keys out of
+   * thirty-three, because the terminal always has focus.
+   *
+   * The answer their own terminals already use: Ctrl+Shift for actions and Alt
+   * for tab digits -- what Windows Terminal and GNOME Terminal bind, and what
+   * readline does not claim. Only where it differs; a command whose binding is
+   * already Shift-qualified needs nothing here.
+   */
+  winKeys?: string
   // Bindings the app computes rather than matches — shown for reference, not
   // rebindable.
   fixed?: boolean
@@ -36,7 +53,7 @@ export const COMMANDS: Command[] = [
     keys: 'Ctrl+Shift+P',
     hint: 'Ctrl+K is kill-line in a shell, so terminals need a second binding.'
   },
-  { id: 'settings', name: 'Open Settings', group: 'General', scope: 'app', keys: 'Ctrl+,' },
+  { id: 'settings', name: 'Open Settings', group: 'General', scope: 'app', keys: 'Ctrl+,', winKeys: 'Ctrl+Shift+,' },
   { id: 'toggle-sidebar', name: 'Toggle Sidebar', group: 'General', scope: 'app', keys: 'Ctrl+B' },
   {
     id: 'toggle-sidebar-global',
@@ -47,18 +64,21 @@ export const COMMANDS: Command[] = [
     hint: 'Ctrl+B is backward-char and the tmux prefix, so terminals need a second binding.'
   },
 
-  { id: 'new-server', name: 'New Server', group: 'Tabs', scope: 'app', keys: 'Ctrl+N' },
-  { id: 'new-terminal', name: 'New Terminal', group: 'Tabs', scope: 'app', keys: 'Ctrl+T' },
+  { id: 'new-server', name: 'New Server', group: 'Tabs', scope: 'app', keys: 'Ctrl+N', winKeys: 'Alt+N' },
+  { id: 'new-terminal', name: 'New Terminal', group: 'Tabs', scope: 'app', keys: 'Ctrl+T', winKeys: 'Ctrl+Shift+T' },
   {
     id: 'new-local-terminal',
     name: 'New Local Terminal',
     group: 'Tabs',
     scope: 'app',
     keys: 'Ctrl+Shift+T',
+    // Ctrl+Shift+T is New Tab on Windows and Linux -- what both their terminals
+    // bind -- so the local shell moves aside there rather than taking it.
+    winKeys: 'Alt+Shift+T',
     hint: 'Opens a shell on this machine, not on a server.'
   },
   { id: 'duplicate-tab', name: 'Duplicate Tab', group: 'Tabs', scope: 'app', keys: 'Ctrl+Shift+D' },
-  { id: 'close-tab', name: 'Close Tab', group: 'Tabs', scope: 'app', keys: 'Ctrl+W' },
+  { id: 'close-tab', name: 'Close Tab', group: 'Tabs', scope: 'app', keys: 'Ctrl+W', winKeys: 'Ctrl+Shift+W' },
   { id: 'next-tab', name: 'Next Tab', group: 'Tabs', scope: 'global', keys: 'Ctrl+Tab' },
   { id: 'prev-tab', name: 'Previous Tab', group: 'Tabs', scope: 'global', keys: 'Ctrl+Shift+Tab' },
   /**
@@ -76,7 +96,7 @@ export const COMMANDS: Command[] = [
     keys: 'Ctrl+Shift+Z',
     hint: 'Reconnects a fresh session on the same target; scrollback is not restored.'
   },
-  { id: 'split-v', name: 'Split Right', group: 'Tabs', scope: 'app', keys: 'Ctrl+\\' },
+  { id: 'split-v', name: 'Split Right', group: 'Tabs', scope: 'app', keys: 'Ctrl+\\', winKeys: 'Alt+\\' },
   { id: 'split-h', name: 'Split Down', group: 'Tabs', scope: 'app', keys: 'Ctrl+Shift+\\' },
 
   /**
@@ -86,20 +106,21 @@ export const COMMANDS: Command[] = [
    * settings pane's source of truth and a generated block cannot be read by
    * someone scanning for a key they think is taken.
    */
-  { id: 'select-tab-1', name: 'Go to Tab 1', group: 'Tabs', scope: 'app', keys: 'Ctrl+1' },
-  { id: 'select-tab-2', name: 'Go to Tab 2', group: 'Tabs', scope: 'app', keys: 'Ctrl+2' },
-  { id: 'select-tab-3', name: 'Go to Tab 3', group: 'Tabs', scope: 'app', keys: 'Ctrl+3' },
-  { id: 'select-tab-4', name: 'Go to Tab 4', group: 'Tabs', scope: 'app', keys: 'Ctrl+4' },
-  { id: 'select-tab-5', name: 'Go to Tab 5', group: 'Tabs', scope: 'app', keys: 'Ctrl+5' },
-  { id: 'select-tab-6', name: 'Go to Tab 6', group: 'Tabs', scope: 'app', keys: 'Ctrl+6' },
-  { id: 'select-tab-7', name: 'Go to Tab 7', group: 'Tabs', scope: 'app', keys: 'Ctrl+7' },
-  { id: 'select-tab-8', name: 'Go to Tab 8', group: 'Tabs', scope: 'app', keys: 'Ctrl+8' },
+  { id: 'select-tab-1', name: 'Go to Tab 1', group: 'Tabs', scope: 'app', keys: 'Ctrl+1', winKeys: 'Alt+1' },
+  { id: 'select-tab-2', name: 'Go to Tab 2', group: 'Tabs', scope: 'app', keys: 'Ctrl+2', winKeys: 'Alt+2' },
+  { id: 'select-tab-3', name: 'Go to Tab 3', group: 'Tabs', scope: 'app', keys: 'Ctrl+3', winKeys: 'Alt+3' },
+  { id: 'select-tab-4', name: 'Go to Tab 4', group: 'Tabs', scope: 'app', keys: 'Ctrl+4', winKeys: 'Alt+4' },
+  { id: 'select-tab-5', name: 'Go to Tab 5', group: 'Tabs', scope: 'app', keys: 'Ctrl+5', winKeys: 'Alt+5' },
+  { id: 'select-tab-6', name: 'Go to Tab 6', group: 'Tabs', scope: 'app', keys: 'Ctrl+6', winKeys: 'Alt+6' },
+  { id: 'select-tab-7', name: 'Go to Tab 7', group: 'Tabs', scope: 'app', keys: 'Ctrl+7', winKeys: 'Alt+7' },
+  { id: 'select-tab-8', name: 'Go to Tab 8', group: 'Tabs', scope: 'app', keys: 'Ctrl+8', winKeys: 'Alt+8' },
   {
     id: 'select-tab-last',
     name: 'Go to Last Tab',
     group: 'Tabs',
     scope: 'app',
     keys: 'Ctrl+9',
+    winKeys: 'Alt+9',
     hint: 'The last tab, whatever the count — the same as every browser.'
   },
 
@@ -125,11 +146,12 @@ export const COMMANDS: Command[] = [
     group: 'Workspaces',
     scope: 'app',
     keys: 'Ctrl+L',
+    winKeys: 'Ctrl+Shift+L',
     hint: 'Only for workspaces that have a password set.'
   },
 
   { id: 'open-files', name: 'Open Files', group: 'Views', scope: 'global', keys: 'Ctrl+Shift+E' },
-  { id: 'open-monitor', name: 'Open Fleet Monitor', group: 'Views', scope: 'app', keys: 'Ctrl+M' },
+  { id: 'open-monitor', name: 'Open Fleet Monitor', group: 'Views', scope: 'app', keys: 'Ctrl+M', winKeys: 'Ctrl+Shift+M' },
   { id: 'zoom-in', name: 'Zoom In', group: 'Views', scope: 'global', keys: 'Ctrl+=' },
   {
     id: 'zoom-in-alt',
@@ -257,11 +279,24 @@ export function isMac(): boolean {
 
 // Effective binding for every command: built-in defaults with the user's
 // overrides applied. An override of '' means the user unbound it.
+/**
+ * What this command is bound to out of the box, on THIS platform.
+ *
+ * Anything showing a default -- the restore-default control, a cheat sheet --
+ * has to ask for it rather than read `keys`, which is the macOS default and
+ * would name a key that does nothing on the machine it is printed on.
+ */
+export function defaultKeys(c: Command): string {
+  return isMac() ? c.keys : (c.winKeys ?? c.keys)
+}
+
 export function resolveBindings(overrides: Record<string, string>): Map<string, string> {
   const out = new Map<string, string>()
   for (const c of COMMANDS) {
     if (c.fixed) continue
-    const keys = overrides[c.id] ?? c.keys
+    // The platform default first, then the user's override on top. A rebinding
+    // is a rebinding on whatever machine it was made; only the DEFAULT differs.
+    const keys = overrides[c.id] ?? defaultKeys(c)
     if (keys) out.set(c.id, keys)
   }
   return out
