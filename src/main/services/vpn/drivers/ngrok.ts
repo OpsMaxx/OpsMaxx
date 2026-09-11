@@ -232,12 +232,23 @@ export const ngrokDriver: VpnDriver<NgrokSpec> = {
 
       for (const e of reply.endpoints) ctx.log(`published ${e.name} at ${e.publicUrl}`, 'app')
 
+      // The public URLs ride along with the status that announces the
+      // connection. `stats()` is only polled on a wake nudge, so a card that
+      // waited for one would sit there saying "connected" and nothing else --
+      // and the URL, assigned fresh on every run without a reserved domain, is
+      // the whole reason the user started the tunnel.
       const status: VpnStatus = {
         id: profile.id,
         kind: 'ngrok',
         state: 'connected',
         since: Date.now(),
-        restarts: 0
+        restarts: 0,
+        stats: {
+          rxBytes: 0,
+          txBytes: 0,
+          endpoints: reply.endpoints,
+          sampledAt: Date.now()
+        }
       }
       live.set(profile.id, { status, session, endpoints: reply.endpoints })
       ctx.emit(status)
