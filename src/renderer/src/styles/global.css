@@ -740,13 +740,100 @@ button {
   flex-direction: column;
   overflow: hidden;
 }
+/* ---------------------------------------------------------------------------
+   The database workbench.
+
+   Three panes that share one window: a schema column, a query editor and its
+   results. Two of those boundaries used to be fixed -- a 220px column and a
+   110px textarea -- which on a maximised window put a query too long to read
+   in a small box under a screenful of nothing. They are dividers now, and the
+   sizes live in settings so an arrangement survives a restart.
+   --------------------------------------------------------------------------- */
 .db-schema {
+  /* Width comes from the divider; this is the floor if it is ever absent. */
   width: 220px;
   flex: none;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border-subtle);
   background: var(--bg-sidebar);
+}
+.db-schema-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-3) var(--sp-1);
+}
+/* How many objects there are, beside their name rather than counted by eye. */
+.db-count {
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.db-filter {
+  margin: 0 var(--sp-3) var(--sp-2);
+  height: 26px;
+  font-size: var(--fs-sm);
+}
+/* A long table name is a name, not a paragraph: one line, clipped, with the
+   whole of it in the title attribute. */
+.db-schema .tree-row .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-editor {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  min-height: 0;
+}
+.db-editor .textarea {
+  min-height: 0;
+}
+
+/* Results own whatever is left, and centre what little they have to say when
+   that is nothing -- an empty state pinned to the top-left of a very wide pane
+   reads as a rendering fault rather than as an answer. */
+.db-results {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+.db-results > .empty {
+  margin: auto;
+}
+
+/* A divider between stacked panes. The vertical one already exists as
+   `.resizer`, which is absolutely positioned against a relative parent; this
+   one sits in the flow, so it needs its own height rather than a negative
+   offset. */
+.resizer-h {
+  flex: none;
+  height: 6px;
+  margin: -3px 0;
+  cursor: row-resize;
+  z-index: 5;
+}
+.resizer-h:hover,
+.resizer-h.dragging {
+  background: linear-gradient(180deg, transparent 40%, var(--accent-border) 50%, transparent 60%);
+}
+/* The schema divider sits in the flow between two panes rather than hanging off
+   the edge of one, so it does not want `.resizer`'s absolute placement. */
+.resizer.static {
+  position: static;
+  flex: none;
+  width: 6px;
+  margin: 0 -3px;
+  height: auto;
+  align-self: stretch;
 }
 
 /* ============================= Status bar ============================= */

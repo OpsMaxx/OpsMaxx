@@ -220,6 +220,10 @@ export interface AppSettings {
   closeTabOnShellExit: boolean
   // Tightens row heights and paddings across the app.
   compactDensity: boolean
+  /** Width of the database view's schema column. */
+  dbSchemaWidth: number
+  /** Height of the database view's query editor. */
+  dbEditorHeight: number
   // Command used to open remote files. Empty means the OS default handler.
   externalEditorCommand: string
   // Double-clicking a file opens it externally rather than in the inline editor.
@@ -301,6 +305,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   vaultAutoBiometricPrompt: true,
   closeTabOnShellExit: true,
   compactDensity: false,
+  // The database workbench's two dividers. In settings rather than in the
+  // component so a layout somebody arranged survives a restart -- the sidebar's
+  // own width does not, and having to redo it every launch is exactly the
+  // small friction that makes a workbench feel disposable.
+  dbSchemaWidth: 220,
+  dbEditorHeight: 160,
   externalEditorCommand: 'code',
   openFilesExternally: false,
   localTerminalEnabled: true,

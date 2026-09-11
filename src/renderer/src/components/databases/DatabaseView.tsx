@@ -17,6 +17,8 @@ import {
 import { useApp, useWorkspaceServers } from '../../store/app'
 import { TabStrip } from '../panel/TabStrip'
 import { useClickOutside } from '../../hooks/useClickOutside'
+import { useDragSize } from '../../hooks/useDragSize'
+import { clsx } from '../../lib/format'
 import { DbShell } from './DbShell'
 import { DbOpsPanel } from './DbOpsPanel'
 import { toast } from '../../store/toast'
@@ -234,12 +236,33 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
     void loadInfo(dbn)
   }
 
+  const settings = useApp((st) => st.settings)
+  const setSettings = useApp((st) => st.setSettings)
   const allDbs = info?.databases ?? []
 
   // What this engine calls the things in the left column, in one place rather
   // than as a conditional at each of the three sites that needed it.
   const objectWord = db.kind === 'redis' ? 'Keyspace' : db.kind === 'mongodb' ? 'Collections' : 'Tables'
   const objects = info?.tables ?? []
+  const [objectFilter, setObjectFilter] = useState('')
+  const shownObjects = objectFilter.trim()
+    ? objects.filter((t) => t.toLowerCase().includes(objectFilter.trim().toLowerCase()))
+    : objects
+
+  // Both dividers, persisted through settings so an arrangement survives a
+  // restart. Clamped: a column dragged to nothing is a column the user cannot
+  // get back.
+  const schema = useDragSize(settings.dbSchemaWidth, {
+    min: 150,
+    max: 520,
+    onCommit: (dbSchemaWidth) => setSettings({ dbSchemaWidth })
+  })
+  const editor = useDragSize(settings.dbEditorHeight, {
+    min: 80,
+    max: 600,
+    axis: 'y',
+    onCommit: (dbEditorHeight) => setSettings({ dbEditorHeight })
+  })
   const emptyHint =
     db.kind === 'mongodb'
       ? dbName
@@ -467,10 +490,23 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
       )}
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        <div className="db-schema">
-          <div className="sidebar-title" style={{ padding: '10px 12px 6px' }}>
-            {objectWord}
+        <div className="db-schema" style={{ width: schema.size }}>
+          <div className="db-schema-head">
+            <span className="sidebar-title">{objectWord}</span>
+            {objects.length > 0 && <span className="db-count">{objects.length}</span>}
           </div>
+          {/* A filter, once the list is longer than a glance. A schema column
+              that needs scrolling and cannot be searched is a list you read
+              rather than a list you use. */}
+          {objects.length > 12 && (
+            <input
+              className="input db-filter"
+              placeholder={`Filter ${objectWord.toLowerCase()}…`}
+              value={objectFilter}
+              spellCheck={false}
+              onChange={(e) => setObjectFilter(e.target.value)}
+            />
+          )}
           <div style={{ overflowY: 'auto', flex: 1 }}>
             {/* Four states, and only two of them used to be drawn.
                 While `info` was null -- connecting, or a load that failed --
@@ -492,16 +528,30 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
               </div>
             ) : objects.length === 0 ? (
               <EmptyState compact title={`No ${objectWord.toLowerCase()}`} message={emptyHint} />
+            ) : shownObjects.length === 0 ? (
+              <EmptyState
+                compact
+                title="Nothing matches"
+                message={`No ${objectWord.toLowerCase()} here match “${objectFilter}”.`}
+              />
             ) : (
-              objects.map((t) => (
+              shownObjects.map((t) => (
                 <div key={t} className="tree-row" onClick={() => insertTable(t)}>
                   <Table2 size={13} className="faint" />
-                  <span className="label">{t}</span>
+                  <span className="label" title={t}>
+                    {t}
+                  </span>
                 </div>
               ))
             )}
           </div>
         </div>
+        <div
+          className={clsx('resizer static', schema.dragging && 'dragging')}
+          onMouseDown={schema.onMouseDown}
+          role="separator"
+          aria-label="Resize the schema column"
+        />
 
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
           {mode === 'ops' && hasOps ? (
@@ -516,10 +566,10 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
             />
           ) : (
             <>
-          <div style={{ padding: 12, borderBottom: '1px solid var(--border-subtle)' }}>
+          <div className="db-editor" style={{ height: editor.size }}>
             <textarea
               className="textarea"
-              style={{ minHeight: 110, width: '100%' }}
+              style={{ flex: 1, width: '100%', resize: 'none' }}
               value={query}
               spellCheck={false}
               onChange={(e) => setQuery(e.target.value)}
@@ -552,7 +602,18 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
             </div>
           </div>
 
-          <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          {/* The editor and the results share the height between them, and the
+              user decides how. It was a fixed 110px textarea above a results
+              pane that took everything else -- so on a maximised window a query
+              too long to read sat in a small box under a screenful of nothing. */}
+          <div
+            className={clsx('resizer-h', editor.dragging && 'dragging')}
+            onMouseDown={editor.onMouseDown}
+            role="separator"
+            aria-label="Resize the query editor"
+          />
+
+          <div className="db-results">
             <Results result={result} phase={conn.phase} where={formatDbAddress(db.host, db.port)} />
           </div>
             </>
