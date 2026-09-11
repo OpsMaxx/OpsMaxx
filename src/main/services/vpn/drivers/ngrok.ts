@@ -280,6 +280,25 @@ export const ngrokDriver: VpnDriver<NgrokSpec> = {
         }
       }
       live.set(profile.id, { status, session, endpoints })
+
+      // An endpoint that stops serving without being asked to.
+      //
+      // `dropped` rather than `emit`, because emitting only updates the status
+      // bus: the manager would still hold the Live entry, its session and its
+      // resolved secrets, and `hasLiveVpnDependents` would go on saying this
+      // profile was up. See the note on VpnDriverContext.dropped.
+      session.onEvent((event, data) => {
+        if (event !== 'ngrok.endpoint.down') return
+        const d = data as { name?: string; error?: string } | undefined
+        if (live.get(profile.id)?.session !== session) return
+        live.delete(profile.id)
+        void session.close()
+        ctx.dropped(
+          `ngrok stopped serving ${d?.name ?? 'an endpoint'}${d?.error ? `: ${d.error}` : ''}`,
+          'engine-failed'
+        )
+      })
+
       ctx.emit(status)
       return { ok: true, listeners: listenersFor(spec) }
     } catch (e) {

@@ -20,8 +20,13 @@ import { describe, expect, it, vi } from 'vitest'
 const send = vi.fn()
 const close = vi.fn(async () => undefined)
 
+// `onEvent` is part of the session contract now: the driver subscribes so an
+// endpoint that stops serving can report itself instead of leaving the card
+// green over a dead tunnel.
+const onEvent = vi.fn()
+
 vi.mock('../src/main/services/vpn/netdSession', () => ({
-  openNetdSession: async () => ({ send, close })
+  openNetdSession: async () => ({ send, close, onEvent, alive: () => true })
 }))
 
 import { ngrokDriver } from '../src/main/services/vpn/drivers/ngrok'
@@ -83,5 +88,12 @@ describe('a started ngrok tunnel', () => {
     // The assertion that matters: not that the driver knows the URL, but that
     // it said so where the card is looking.
     expect(connected?.stats?.endpoints?.[0]?.publicUrl).toBe(PUBLIC_URL)
+  })
+
+  it('subscribes to the sidecar so a dead endpoint reports itself', () => {
+    // The other half of "it says connected but nothing works": the start call's
+    // answer stays true in this process long after it has stopped being true in
+    // the world, and a request/response channel cannot carry the correction.
+    expect(onEvent).toHaveBeenCalled()
   })
 })

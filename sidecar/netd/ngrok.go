@@ -91,6 +91,13 @@ type NgrokEndpointResult struct {
 	LocalAddr string `json:"localAddr"`
 }
 
+// One endpoint that has stopped serving without being asked to.
+type NgrokEndpointDown struct {
+	TunnelID string `json:"tunnelId"`
+	Name     string `json:"name"`
+	Error    string `json:"error"`
+}
+
 type NgrokUpResult struct {
 	Endpoints []NgrokEndpointResult `json:"endpoints"`
 }
@@ -142,16 +149,41 @@ func (s *Server) ngrokUp(req *Request) (interface{}, error) {
 	if timeout <= 0 {
 		timeout = 45 * time.Second
 	}
+	// THE CONTEXT HANDED TO Connect AND Listen IS THE SESSION'S LIFETIME, NOT A
+	// DEADLINE FOR THE CALL.
+	//
+	// ngrok-go's session loop closes the whole session the moment that context
+	// is done (internal/legacy/session.go: `case <-ctx.Done(): ... sess.Close()`),
+	// and closing the session takes every endpoint on it offline at the edge.
+	//
+	// This used to pass a `context.WithTimeout(ctx, timeout)` with a
+	// `defer startCancel()`, so the cancel fired the instant ngrokUp RETURNED --
+	// which is to say immediately after the endpoints were published. The tunnel
+	// came up, the URL came back, this process went on believing it was
+	// connected, and the public address answered ERR_NGROK_3200: "the endpoint is
+	// offline". It had been offline since roughly a microsecond after it opened.
+	//
+	// So the start deadline is a watchdog over the long-lived ctx instead. A
+	// start that hangs past `timeout` gets cancelled exactly as before; a start
+	// that succeeds leaves the context alive for as long as the tunnel is meant
+	// to run, which is until ngrokDown or process exit.
 	ctx, cancel := context.WithCancel(context.Background())
-	startCtx, startCancel := context.WithTimeout(ctx, timeout)
-	defer startCancel()
+	started := make(chan struct{})
+	go func() {
+		select {
+		case <-started:
+		case <-time.After(timeout):
+			cancel()
+		}
+	}()
+	defer close(started)
 
 	agent, err := ngrok.NewAgent(ngrok.WithAuthtoken(p.Authtoken))
 	if err != nil {
 		cancel()
 		return nil, wrapCoded(ErrConfigInvalid, err, "the ngrok authtoken was not accepted")
 	}
-	if err := agent.Connect(startCtx); err != nil {
+	if err := agent.Connect(ctx); err != nil {
 		cancel()
 		return nil, wrapCoded(ErrEngineFailed, err, "could not reach ngrok")
 	}
@@ -169,7 +201,7 @@ func (s *Server) ngrokUp(req *Request) (interface{}, error) {
 			opts = append(opts, ngrok.WithURL(e.Proto+"://"))
 		}
 
-		ln, err := agent.Listen(startCtx, opts...)
+		ln, err := agent.Listen(ctx, opts...)
 		if err != nil {
 			// Everything opened so far comes down: a half-published tunnel is
 			// worse than a failed one, because the caller believes it failed.
@@ -224,7 +256,18 @@ func (s *Server) ngrokServe(ctx context.Context, tunnelID string, f *ngrokForwar
 		conn, err := f.ln.Accept()
 		if err != nil {
 			if ctx.Err() == nil {
+				// Unexpected: the tunnel was not asked to stop, and this
+				// endpoint has stopped accepting anyway. Logged AND announced,
+				// because a line in a drawer is not a state change -- the app
+				// went on showing "Connected" over an endpoint the edge was
+				// already answering ERR_NGROK_3200 for, and the only way it
+				// could have known is if something told it.
 				s.out.Log("warn", tunnelID, fmt.Sprintf("endpoint %s stopped accepting: %v", f.name, err))
+				s.out.Emit("ngrok.endpoint.down", &NgrokEndpointDown{
+					TunnelID: tunnelID,
+					Name:     f.name,
+					Error:    err.Error(),
+				})
 			}
 			return
 		}

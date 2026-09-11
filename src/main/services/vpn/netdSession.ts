@@ -69,6 +69,16 @@ export interface NetdSession {
   close(): Promise<void>
   /** True until close() or an exit. */
   alive(): boolean
+  /**
+   * Subscribe to the sidecar's own events, other than `log`.
+   *
+   * Added for the one thing a request/response channel cannot carry: the engine
+   * reporting that something it had already told you was up has since gone
+   * down. Without it a driver's only source of truth is what the start call
+   * returned, which stays true in its memory long after it has stopped being
+   * true in the world.
+   */
+  onEvent(handler: (event: string, data: unknown) => void): void
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000
@@ -95,6 +105,7 @@ export async function openNetdSession(
   // Captured once: the resolver flattens every literal into `all`, and the
   // scrub below is the last thing standing between a credential and a screen.
   const secrets = [...ctx.secrets.all]
+  const eventHandlers: ((event: string, data: unknown) => void)[] = []
 
   const pending = new Map<string, Pending>()
   let seq = 0
@@ -128,10 +139,11 @@ export async function openNetdSession(
     }
 
     if (frame.event) {
-      // `log` carries {level, tunnelId, msg}; anything else is a state event
-      // the caller does not subscribe to here.
+      // `log` carries {level, tunnelId, msg} and goes to the drawer; everything
+      // else goes to whoever subscribed.
       const d = frame.data as { level?: string; msg?: string } | undefined
       if (frame.event === 'log' && d?.msg) ctx.log(scrubSecrets(d.msg, secrets), 'ctl')
+      else for (const h of eventHandlers) h(frame.event, frame.data)
       return
     }
 
@@ -212,6 +224,9 @@ export async function openNetdSession(
 
   return {
     alive: () => !closed,
+    onEvent(handler) {
+      eventHandlers.push(handler)
+    },
     send<T>(method: string, params?: unknown, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
       if (closed) {
         return Promise.reject(new VpnError('engine-stopped', 'The sidecar is not running.'))
