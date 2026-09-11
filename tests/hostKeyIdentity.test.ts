@@ -24,7 +24,10 @@ const KNOWN = src('../src/main/services/knownhosts.ts')
 /** Every place a hop is rewritten onto the loopback forward. */
 function loopbackRewrites(text: string): string[] {
   const out: string[] = []
-  const re = /host: '127\.0\.0\.1',([\s\S]{0,400}?)\n\s*\}/g
+  // Generous, because these blocks carry long explanatory comments: a window
+  // too small silently stops finding the rewrites and the assertions below
+  // become vacuous rather than failing.
+  const re = /host: '127\.0\.0\.1',([\s\S]{0,2000}?)\n\s*\}/g
   let m: RegExpExecArray | null
   while ((m = re.exec(text))) out.push(m[0])
   return out

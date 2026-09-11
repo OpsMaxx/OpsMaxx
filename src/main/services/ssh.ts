@@ -595,9 +595,15 @@ function hopKey(
   //
   // `poolTag` covers the sharper case: a hop dialled through a VPN forward has
   // had its host and port rewritten to an ephemeral loopback port, but a hop
-  // with a serverId keys on that id alone — so the next run would reuse a
-  // connection pointing at a forward that has since been closed. The tag
-  // carries the forward's identity into the key.
+  // with a serverId keys on that id alone — so without a tag, a direct
+  // connection and a tunnelled one to the same server would share a key.
+  //
+  // It names the VPN and NOT the forward's port. A port that changes on every
+  // call is an identity that never repeats, and a key that never repeats is a
+  // pool that never hits: see vpnDial, where that cost every VPN-routed command
+  // its own full authentication. The forward cannot go stale under a live
+  // connection because the connection owns it -- `vpnRelease` closes it when
+  // the connection is destroyed, not when an acquire ends.
   const via = hop.vpnProfileId ? `|vpn:${hop.vpnProfileId}` : ''
   const tag = hop.poolTag ? `|${hop.poolTag}` : ''
   return parentKey ? `${parentKey}>${self}${via}${tag}` : `${self}${via}${tag}`
@@ -803,7 +809,25 @@ async function vpnDial(
     // an address that is different every time, so the server is a stranger on
     // every connect.
     hostKeyId: first.hostKeyId ?? `${first.host}:${first.port || 22}`,
-    poolTag: `fwd:${vpnId}:${fwd.port}`
+    // The VPN, NOT the forward's port.
+    //
+    // This used to be `fwd:${vpnId}:${fwd.port}`, and that port is freshly
+    // allocated on every call -- so the pool key was different every time and
+    // could never match. For any server reached over a VPN the pool therefore
+    // never hit ONCE: every command opened a new forward, a new TCP connection
+    // and a full new SSH authentication, while the previous connection sat in
+    // the pool under its now-unreachable key until the idle timer reaped it
+    // fifteen minutes later. A dozen commands in a row meant a dozen live
+    // authenticated sessions to one host, which is what exhausts MaxSessions
+    // and produces "Channel open failure: open failed".
+    //
+    // Dropping the port is safe because the forward's lifetime is already tied
+    // to the CONNECTION rather than to the acquire: `conn.vpnRelease` closes it
+    // when the connection is destroyed, and a pool hit releases the redundant
+    // one it just opened. The comment on hopKey feared reusing a connection
+    // whose forward had closed; that cannot happen, because the forward outlives
+    // exactly as long as the connection holding it does.
+    poolTag: `fwd:${vpnId}`
   } as SshHop
   return {
     cfg: cfg.hops?.length
