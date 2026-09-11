@@ -34,6 +34,9 @@ import { EmptyState } from '../common/EmptyState'
 import type { DatabaseConn, DbKind, Server } from '../../types'
 import type { DbConnectConfig, DbInfo, DbQueryResult, DbTestResult } from '../../../../shared/db'
 
+/** Where the connection has got to. Named because Results reads it too. */
+type ConnPhase = 'idle' | 'connecting' | 'ok' | 'error'
+
 const DEFAULT_QUERY: Record<DbKind, string> = {
   postgres: 'SELECT * FROM information_schema.tables LIMIT 20;',
   mysql: 'SHOW TABLES;',
@@ -118,7 +121,7 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
   // `message` is the sentence a person reads; `detail` is the driver's own text,
   // kept beside it so nothing is lost when the sentence is the short version.
   const [conn, setConn] = useState<{
-    phase: 'idle' | 'connecting' | 'ok' | 'error'
+    phase: ConnPhase
     message?: string
     detail?: string
   }>({ phase: 'idle' })
@@ -232,6 +235,19 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
   }
 
   const allDbs = info?.databases ?? []
+
+  // What this engine calls the things in the left column, in one place rather
+  // than as a conditional at each of the three sites that needed it.
+  const objectWord = db.kind === 'redis' ? 'Keyspace' : db.kind === 'mongodb' ? 'Collections' : 'Tables'
+  const objects = info?.tables ?? []
+  const emptyHint =
+    db.kind === 'mongodb'
+      ? dbName
+        ? `${dbName} has no collections yet.`
+        : 'Pick a database above to see its collections.'
+      : db.kind === 'redis'
+        ? 'This Redis instance has no keys.'
+        : 'This database has no tables yet.'
   const shownDbs = typed
     ? allDbs.filter((d) => d.toLowerCase().includes(dbName.trim().toLowerCase()))
     : allDbs
@@ -453,20 +469,36 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <div className="db-schema">
           <div className="sidebar-title" style={{ padding: '10px 12px 6px' }}>
-            {db.kind === 'redis' ? 'Keyspace' : db.kind === 'mongodb' ? 'Collections' : 'Tables'}
+            {objectWord}
           </div>
           <div style={{ overflowY: 'auto', flex: 1 }}>
-            {conn.phase === 'error' && (
-              <div className="faint" style={{ padding: 12, fontSize: 12 }}>Not connected, so nothing can be listed.</div>
-            )}
-            {(info?.tables ?? []).map((t) => (
-              <div key={t} className="tree-row" onClick={() => insertTable(t)}>
-                <Table2 size={13} className="faint" />
-                <span className="label">{t}</span>
+            {/* Four states, and only two of them used to be drawn.
+                While `info` was null -- connecting, or a load that failed --
+                this rendered NOTHING: a heading with a blank column under it,
+                which looks exactly like a database that has no collections in
+                it. A MongoDB connection to an unreachable host sat like that
+                for thirty seconds, and the only thing on screen saying
+                otherwise was a 14px spinner in the toolbar. */}
+            {conn.phase === 'error' ? (
+              <EmptyState
+                compact
+                title="Not connected"
+                message="Nothing can be listed until the connection works."
+              />
+            ) : conn.phase === 'connecting' || (!info && !objects.length) ? (
+              <div className="row faint" style={{ gap: 8, padding: 12 }}>
+                <Loader2 size={13} className="spin" />
+                <span>Loading…</span>
               </div>
-            ))}
-            {info && (info.tables?.length ?? 0) === 0 && (
-              <div className="faint" style={{ padding: 12, fontSize: 12 }}>No objects</div>
+            ) : objects.length === 0 ? (
+              <EmptyState compact title={`No ${objectWord.toLowerCase()}`} message={emptyHint} />
+            ) : (
+              objects.map((t) => (
+                <div key={t} className="tree-row" onClick={() => insertTable(t)}>
+                  <Table2 size={13} className="faint" />
+                  <span className="label">{t}</span>
+                </div>
+              ))
             )}
           </div>
         </div>
@@ -521,7 +553,7 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
           </div>
 
           <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-            <Results result={result} />
+            <Results result={result} phase={conn.phase} where={formatDbAddress(db.host, db.port)} />
           </div>
             </>
           )}
@@ -579,7 +611,39 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
   )
 }
 
-function Results({ result }: { result: DbQueryResult | null }): React.JSX.Element {
+function Results({
+  result,
+  phase,
+  where
+}: {
+  result: DbQueryResult | null
+  phase: ConnPhase
+  where: string
+}): React.JSX.Element {
+  // Connecting is not "no results yet".
+  //
+  // The empty state below tells the user to write a query and press Run, which
+  // is wrong advice while the connection is still being made and worse advice
+  // when it has failed: it invites an action against a server that is not
+  // there, and says nothing about the only thing actually happening. The whole
+  // window read as an empty database rather than a pending connection.
+  if (!result && phase === 'connecting') {
+    return (
+      <div className="row faint" style={{ gap: 8, padding: 16, alignItems: 'center' }}>
+        <Loader2 size={14} className="spin" />
+        <span>Connecting to {where}…</span>
+      </div>
+    )
+  }
+  if (!result && phase === 'error') {
+    return (
+      <EmptyState
+        compact
+        title="Not connected"
+        message="Fix the connection above, then run a query. Nothing has been sent to the server."
+      />
+    )
+  }
   if (!result) {
     // The fourth empty-state grammar in the app, and the barest: a single grey
     // sentence with no container, no title and no action, in the slot where a

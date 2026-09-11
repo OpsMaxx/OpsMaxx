@@ -36,6 +36,16 @@ const DEFAULT_PORT: Record<DbKind, number> = {
   redis: 6379
 }
 
+/**
+ * How long to wait for a database to answer before calling it unreachable.
+ *
+ * Long enough for a busy server on a slow link, short enough that somebody
+ * watching the window learns something. The number matters most for MongoDB,
+ * whose driver otherwise waits thirty seconds to select a server and gives no
+ * indication it is doing so.
+ */
+const DB_CONNECT_TIMEOUT_MS = 10_000
+
 // Open the SSH forward (when configured) and hand the driver a config pointed
 // at the local end of it.
 async function build(cfg: DbConnectConfig): Promise<Conn> {
@@ -237,7 +247,15 @@ async function buildDriver(cfg: DbConnectConfig): Promise<Conn> {
       const { MongoClient } = await import('mongodb')
       const auth = username ? `${encodeURIComponent(username)}:${encodeURIComponent(password ?? '')}@` : ''
       const url = uri || `mongodb://${auth}${host}:${port}/${database || 'admin'}`
-      const c = new MongoClient(url)
+      // Bounded, because the driver's own defaults are not bounded in any sense
+      // a person waiting at a screen would recognise: serverSelectionTimeoutMS
+      // defaults to THIRTY SECONDS, and against an unreachable host the whole
+      // window sat on a spinner for all of it with no other sign of life. Every
+      // other driver here brings a timeout of its own; this one had to be told.
+      const c = new MongoClient(url, {
+        serverSelectionTimeoutMS: DB_CONNECT_TIMEOUT_MS,
+        connectTimeoutMS: DB_CONNECT_TIMEOUT_MS
+      })
       await c.connect()
       return { kind, client: c, close: () => c.close() }
     }
