@@ -18,7 +18,7 @@ import {
   DatabaseBackup, Compass, Lock, LockOpen, Blocks } from 'lucide-react'
 import { useApp } from '../../store/app'
 import type { ThemeMode } from '../../store/app'
-import { useNav } from '../../store/nav'
+import { useNav, SETTINGS_SECTIONS, SETTINGS_SECTION_LABELS } from '../../store/nav'
 import type { SettingsSection } from '../../store/nav'
 import { useVault } from '../../store/vault'
 import { useVaultPrompt } from '../../store/vaultPrompt'
@@ -42,22 +42,27 @@ import { toast } from '../../store/toast'
 // so a page added here without being added there — and therefore unreachable
 // from any `openSettings(...)` button — fails the build, and a page added to
 // the union without a label here fails it too.
-const SECTION_META: Record<SettingsSection, { label: string; icon: React.JSX.Element }> = {
-  general: { label: 'General', icon: <Sliders size={16} /> },
-  appearance: { label: 'Appearance', icon: <Palette size={16} /> },
-  terminal: { label: 'Terminal', icon: <TerminalSquare size={16} /> },
-  connections: { label: 'Connections', icon: <Server size={16} /> },
-  ssh: { label: 'SSH', icon: <KeyRound size={16} /> },
-  security: { label: 'Security', icon: <Shield size={16} /> },
-  sftp: { label: 'SFTP', icon: <FolderCog size={16} /> },
-  monitoring: { label: 'Monitoring', icon: <Activity size={16} /> },
-  modules: { label: 'Modules', icon: <Blocks size={16} /> },
-  editor: { label: 'Editor', icon: <Code2 size={16} /> },
-  shortcuts: { label: 'Keyboard Shortcuts', icon: <Keyboard size={16} /> },
-  backup: { label: 'Backup & Restore', icon: <DatabaseBackup size={16} /> },
-  notifications: { label: 'Notifications', icon: <Bell size={16} /> },
-  advanced: { label: 'Advanced', icon: <Wrench size={16} /> }
+const SECTION_ICONS: Record<SettingsSection, React.JSX.Element> = {
+  general: <Sliders size={16} />,
+  appearance: <Palette size={16} />,
+  terminal: <TerminalSquare size={16} />,
+  connections: <Server size={16} />,
+  ssh: <KeyRound size={16} />,
+  security: <Shield size={16} />,
+  sftp: <FolderCog size={16} />,
+  monitoring: <Activity size={16} />,
+  modules: <Blocks size={16} />,
+  editor: <Code2 size={16} />,
+  shortcuts: <Keyboard size={16} />,
+  backup: <DatabaseBackup size={16} />,
+  notifications: <Bell size={16} />,
+  advanced: <Wrench size={16} />
 }
+
+// The label comes from nav.ts, which is where the palette reads it too.
+const SECTION_META = Object.fromEntries(
+  SETTINGS_SECTIONS.map((id) => [id, { label: SETTINGS_SECTION_LABELS[id], icon: SECTION_ICONS[id] }])
+) as Record<SettingsSection, { label: string; icon: React.JSX.Element }>
 
 const SECTIONS: SettingsSection[] = [
   'general',

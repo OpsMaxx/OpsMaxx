@@ -27,6 +27,33 @@ export type SettingsSection =
   | 'notifications'
   | 'advanced'
 
+/**
+ * What each page of Settings is called.
+ *
+ * Beside the type rather than inside the Settings component, because the
+ * command palette lists these pages too and a second copy of fourteen strings
+ * is fourteen chances for the two lists to disagree about what a page is named.
+ */
+export const SETTINGS_SECTION_LABELS: Record<SettingsSection, string> = {
+  general: 'General',
+  appearance: 'Appearance',
+  terminal: 'Terminal',
+  connections: 'Connections',
+  ssh: 'SSH',
+  security: 'Security',
+  sftp: 'SFTP',
+  monitoring: 'Monitoring',
+  modules: 'Modules',
+  editor: 'Editor',
+  shortcuts: 'Keyboard Shortcuts',
+  backup: 'Backup & Restore',
+  notifications: 'Notifications',
+  advanced: 'Advanced'
+}
+
+/** Every page, in the order Settings lists them. */
+export const SETTINGS_SECTIONS = Object.keys(SETTINGS_SECTION_LABELS) as SettingsSection[]
+
 /** Which panel of the Fleet Monitor is showing. `overview` and `alerts` are
  *  fixed; the rest are whichever optional modules are enabled.
  *

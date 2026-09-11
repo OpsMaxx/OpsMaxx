@@ -15,7 +15,14 @@ import { clsx } from '../../lib/format'
 import { openMonitor, openOperations, useNav } from '../../store/nav'
 import type { ActivityView } from '../../types'
 
-const items: { id: ActivityView; icon: React.ReactNode; label: string }[] = [
+/**
+ * The app's top-level destinations.
+ *
+ * Exported because the command palette lists them too, and a palette built from
+ * its own private copy is how six of these ended up unreachable from Ctrl+K
+ * while the walkthrough claimed it reached every action in the app.
+ */
+export const ACTIVITY_ITEMS: { id: ActivityView; icon: React.ReactNode; label: string }[] = [
   { id: 'connections', icon: <Server size={20} />, label: 'Connections' },
   { id: 'databases', icon: <Database size={20} />, label: 'Databases' },
   { id: 'tunnels', icon: <Network size={20} />, label: 'Tunnels & VPN' },
@@ -24,6 +31,8 @@ const items: { id: ActivityView; icon: React.ReactNode; label: string }[] = [
   { id: 'vault', icon: <KeyRound size={20} />, label: 'Vault' },
   { id: 'ai', icon: <Bot size={20} />, label: 'AI & MCP' }
 ]
+
+const items = ACTIVITY_ITEMS
 
 export function ActivityBar(): React.JSX.Element {
   const activity = useApp((s) => s.activity)

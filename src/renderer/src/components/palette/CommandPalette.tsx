@@ -14,7 +14,16 @@ import {
 } from 'lucide-react'
 import { useApp } from '../../store/app'
 import { useClickOutside } from '../../hooks/useClickOutside'
-import { openMonitor } from '../../store/nav'
+import {
+  SETTINGS_SECTIONS,
+  SETTINGS_SECTION_LABELS,
+  openMonitor,
+  openOperations,
+  openSettings
+} from '../../store/nav'
+import { ACTIVITY_ITEMS } from '../layout/ActivityBar'
+import { MODULES, isOperateModule, moduleEnabled } from '../../../../shared/modules'
+import { fuzzyScore } from '../../lib/fuzzy'
 
 interface Cmd {
   id: string
@@ -135,15 +144,64 @@ export function CommandPalette(): React.JSX.Element {
       },
       { id: 'a-set', group: 'Settings', title: 'Open Settings', icon: <Settings size={16} />, run: () => store.setActivity('settings') }
     ]
-    return [...actions, ...list]
+
+    /**
+     * Everywhere the app can go.
+     *
+     * Built from the same registries the chrome is built from -- the activity
+     * bar's own list, the module registry, the settings section list -- rather
+     * than from a hand-kept copy. The hand-kept copy is why Databases, Vault,
+     * the HTTP client, AI & MCP, Operations, twenty monitor modules and
+     * fourteen settings pages were all unreachable from Ctrl+K while the
+     * walkthrough said it "reaches every server, workspace, tunnel and action
+     * in the app".
+     */
+    const destinations: Cmd[] = ACTIVITY_ITEMS.map((a) => ({
+      id: `go-${a.id}`,
+      group: 'Go to',
+      title: a.label,
+      icon: a.icon,
+      run: () => (a.id === 'monitor' ? openMonitor('overview') : store.setActivity(a.id))
+    }))
+
+    // Only the modules this install has switched on. Listing the rest would be
+    // advertising through a control that cannot deliver them -- Settings >
+    // Modules is where a module is turned on, and it says so.
+    const modules: Cmd[] = MODULES.filter((m) => moduleEnabled(store.settings.modules, m.id)).map(
+      (m) => ({
+        id: `mod-${m.id}`,
+        group: isOperateModule(m.id) ? 'Operations' : 'Monitoring',
+        title: m.label,
+        icon: <Activity size={16} />,
+        run: () =>
+          isOperateModule(m.id) ? openOperations(m.id as never) : openMonitor(m.id as never)
+      })
+    )
+
+    const settingsPages: Cmd[] = SETTINGS_SECTIONS.map((id) => ({
+      id: `set-${id}`,
+      group: 'Settings',
+      title: SETTINGS_SECTION_LABELS[id],
+      sub: 'Settings',
+      icon: <Settings size={16} />,
+      run: () => openSettings(id)
+    }))
+
+    return [...actions, ...destinations, ...modules, ...settingsPages, ...list]
   }, [store])
 
   const filtered = useMemo(() => {
-    const query = q.trim().toLowerCase()
+    const query = q.trim()
     if (!query) return commands
-    return commands.filter(
-      (c) => c.title.toLowerCase().includes(query) || c.sub?.toLowerCase().includes(query) || c.group.toLowerCase().includes(query)
-    )
+    // Scored rather than filtered, so "kbs" finds Keyboard Shortcuts and the
+    // best match is the one under the cursor when you press Enter. A palette
+    // matched with `includes` makes you type the beginning of a word you would
+    // have to already know.
+    return commands
+      .map((c) => ({ c, score: fuzzyScore(query, `${c.title} ${c.sub ?? ''} ${c.group}`) }))
+      .filter((r) => r.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map((r) => r.c)
   }, [q, commands])
 
   useEffect(() => setIdx(0), [q])
