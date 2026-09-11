@@ -330,6 +330,19 @@ export interface ApprovalRequest {
   /** The access group named on the session. */
   sessionGroupName?: string
   /**
+   * WHY approval was needed at all, as the policy engine put it.
+   *
+   * Distinct from `riskReason`, which describes the ACTION -- "the command runs
+   * as root". This describes the RULE: "Ask Before Commands: terminal = ask".
+   * Without it an operator who has set a session's ceiling to Full Access and
+   * is still being asked on every command has no way to find out which of the
+   * two layers said no. The ceiling is a cap, the workspace or server
+   * assignment is the grant, and the effective answer is the more restrictive
+   * of the two -- a model the approval card was in the best position to explain
+   * and was the one place not explaining it.
+   */
+  policyReason?: string
+  /**
    * Audited actions this session took before this one — EXACT, or absent.
    *
    * Absent whenever main could not count them exactly (unreadable log, a

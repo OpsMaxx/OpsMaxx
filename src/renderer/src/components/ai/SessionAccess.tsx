@@ -34,12 +34,31 @@ export function SessionAccess({
   const [open, setOpen] = useState(false)
   const [rows, setRows] = useState<Explanation[] | null>(null)
 
+  // Fetched whether or not the table is open.
+  //
+  // It used to load only on expand, which meant the one fact that explains the
+  // whole permission model -- that the ceiling is a CAP and the workspace or
+  // server assignment is the GRANT -- was available exclusively to someone who
+  // had already guessed there was something to look at. The reported symptom is
+  // always the same: "I set the ceiling to Full Access and it still asks on
+  // every command", or denies. It is a local call against data already in
+  // memory, so there is nothing to save by waiting.
   useEffect(() => {
-    if (!open) return
     void window.opsmaxx?.aiMcp
       .explainAccess?.(session.id, null)
       .then((r) => setRows((r as Explanation[] | null) ?? []))
-  }, [open, session.id, session.groupId])
+  }, [session.id, session.groupId])
+
+  /**
+   * Capabilities the assignment holds BELOW the ceiling.
+   *
+   * `decidedBy: 'scope'` is precisely "the workspace's or server's own access
+   * group was the narrower of the two", which is the case the ceiling control
+   * cannot express and the user cannot see.
+   */
+  const narrowed = (rows ?? []).filter(
+    (r) => r.decidedBy === 'scope' && r.decision !== 'allow' && r.fromSession !== r.decision
+  )
 
   const changeGroup = async (groupId: string): Promise<void> => {
     const group = groups.find((g) => g.id === groupId) ?? null
@@ -87,6 +106,22 @@ export function SessionAccess({
           {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Effective access
         </button>
       </div>
+
+      {/* The sentence that answers "but I granted Full Access".
+          Raising the ceiling cannot widen what an assignment allows, and until
+          this line existed the screen showed only the half the user had just
+          changed. */}
+      {!open && narrowed.length > 0 && (
+        <div className="s-desc warn" style={{ marginTop: 6, lineHeight: 1.5 }}>
+          Narrower than this ceiling:{' '}
+          {narrowed.map((r) => `${r.label} = ${VERDICT[r.decision]}`).join(', ')}. That is set by the
+          access group assigned to the workspace, not by this session — raising the ceiling cannot
+          widen it.{' '}
+          <button className="linklike" onClick={() => openAi('groups')}>
+            Change the assignment
+          </button>
+        </div>
+      )}
 
       {open && (
         <div style={{ marginTop: 8 }}>

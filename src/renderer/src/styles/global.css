@@ -5238,3 +5238,26 @@ details[open] > .disclosure-head .chev {
     transition: none;
   }
 }
+
+/* A sentence that ends in the fix. Inline in running text, so it is a link and
+   not a button: a control the width of its own words, on the baseline. */
+.linklike {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  /* --accent-ink, not --accent: this is the accent used AS TEXT on a --bg-*
+     surface, which is the distinction the two tokens exist to keep. */
+  color: var(--accent-ink);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.linklike:hover {
+  color: var(--accent-hover);
+}
+.linklike:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}

@@ -480,6 +480,9 @@ async function gate(
       // request entirely instead of turning it into a zero.
       sessionStartedAt: ctx.session.createdAt,
       sessionGroupName: ctx.session.groupName,
+      // The rule that produced this `ask`, which gate() has had in hand all
+      // along and dropped on the floor.
+      policyReason: check.reason,
       actionsThisSession: countSessionActions(ctx.session.id) ?? undefined
     })
     if (decision !== 'approved') {

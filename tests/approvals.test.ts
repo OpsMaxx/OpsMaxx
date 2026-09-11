@@ -22,6 +22,8 @@ function req(overrides: Partial<Parameters<typeof requestApproval>[0]> = {}) {
     serverName: 'Nginx Server Prod',
     capability: 'sudo',
     action: 'sudo systemctl restart nginx',
+    // The RULE that required approval, as distinct from what the action is.
+    policyReason: 'Sudo Access: sudo = ask',
     risk: 'high',
     riskReason: 'the command runs as root, through sudo',
     ...overrides

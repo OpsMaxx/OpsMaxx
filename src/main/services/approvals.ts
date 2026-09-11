@@ -60,6 +60,17 @@ export interface CreateApprovalInput {
    * it grades what it grades: the compiler asks, at the site that knows.
    */
   riskReason: string
+  /**
+   * The RULE that required approval, as the policy engine phrased it.
+   *
+   * Required for the same reason `riskReason` is: the gate knows it, and every
+   * other place that could show it would be re-deriving main's rules by hand.
+   * `riskReason` says what the ACTION is; this says which layer said ask --
+   * "Ask Before Commands: terminal = ask" -- which is the question an operator
+   * actually has when they have set a session's ceiling to Full Access and are
+   * still being prompted on every command.
+   */
+  policyReason: string
   /** The MCP tool the agent called. */
   toolName?: string
   /**

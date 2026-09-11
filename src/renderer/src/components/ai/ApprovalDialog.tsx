@@ -242,6 +242,26 @@ export function ApprovalDialog({
           >
             <div style={{ color: toneText, fontWeight: 700, fontSize: 12, letterSpacing: 0.3 }}>{risk.label}</div>
             <div style={{ color: 'var(--text)', fontSize: 12, marginTop: 4, lineHeight: 1.5 }}>{risk.sentence}</div>
+            {/* WHICH RULE ASKED, not what the action is.
+                An operator who has set a session's ceiling to Full Access and is
+                still being prompted on every command has no way to find out
+                which of the two layers said no -- the ceiling is a cap, the
+                workspace or server assignment is the grant, and the effective
+                answer is the more restrictive of the two. The policy engine
+                names the rule in one sentence and the card was the one place
+                not showing it. */}
+            {request.policyReason && (
+              <div
+                style={{
+                  color: 'var(--text-muted)',
+                  fontSize: 'var(--fs-caption)',
+                  marginTop: 6,
+                  lineHeight: 1.5
+                }}
+              >
+                Rule: {request.policyReason}
+              </div>
+            )}
           </div>
 
           {/* 2. Consequence FIRST, in plain English. */}
