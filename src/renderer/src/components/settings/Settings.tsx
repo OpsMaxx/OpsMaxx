@@ -19,6 +19,7 @@ import {
 import { useApp } from '../../store/app'
 import type { ThemeMode } from '../../store/app'
 import { useNav, SETTINGS_SECTIONS, SETTINGS_SECTION_LABELS } from '../../store/nav'
+import { isLoopbackHostKeyId } from '../../../../shared/ssh'
 import type { SettingsSection } from '../../store/nav'
 import { useVault } from '../../store/vault'
 import { useVaultPrompt } from '../../store/vaultPrompt'
@@ -451,6 +452,10 @@ function KnownHosts(): React.JSX.Element {
   }
   useEffect(load, [])
 
+  // Listed below as well, so the button never removes anything the user cannot
+  // already see and check first.
+  const stale = hosts.filter((h) => isLoopbackHostKeyId(h.id))
+
   return (
     <div style={{ marginBottom: 18 }}>
       <div className="setting-row">
@@ -466,6 +471,46 @@ function KnownHosts(): React.JSX.Element {
           Refresh
         </button>
       </div>
+
+      {/* Wreckage from the bug fixed in 0.36.2, and the reason this control
+          exists: a user who connected through a tunnel a dozen times has a
+          dozen of these and, before now, no way to remove them but one at a
+          time -- without knowing which ones were junk. */}
+      {stale.length > 0 && (
+        <div className="setting-row">
+          <div className="s-info">
+            <div className="s-title warn">
+              {stale.length === 1
+                ? '1 entry is saved against a loopback address'
+                : `${stale.length} entries are saved against loopback addresses`}
+            </div>
+            <div className="s-desc">
+              Before 0.36.2, a server reached through a VPN or tunnel had its host key saved under
+              the temporary local address the connection borrowed — a different one every time. That
+              is why those servers kept asking to be trusted again. The entries name no particular
+              machine, so an unrelated local service on the same port would inherit the trust.
+              <br />
+              If you deliberately trust an SSH server running on this machine, its entry looks the
+              same — remove that one individually instead.
+            </div>
+          </div>
+          <button
+            className="btn sm danger"
+            onClick={async () => {
+              for (const h of stale) await window.opsmaxx?.knownHosts.forget(h.id)
+              toast(
+                stale.length === 1
+                  ? 'Removed 1 stale entry.'
+                  : `Removed ${stale.length} stale entries.`,
+                'ok'
+              )
+              load()
+            }}
+          >
+            Remove {stale.length === 1 ? 'it' : `all ${stale.length}`}
+          </button>
+        </div>
+      )}
       {hosts.map((h) => (
         <div className="setting-row" key={h.id}>
           <div className="s-info">

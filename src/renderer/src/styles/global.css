@@ -5261,3 +5261,10 @@ details[open] > .disclosure-head .chev {
   outline-offset: 2px;
   border-radius: var(--r-sm);
 }
+
+/* A settings row reporting something that needs attention rather than
+   describing a control. Colour only: the row keeps its shape, because it is
+   still a setting and not an alert. */
+.setting-row .s-title.warn {
+  color: var(--warn);
+}

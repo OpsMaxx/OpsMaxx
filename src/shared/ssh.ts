@@ -278,3 +278,32 @@ export interface MetricsResult {
 export type OnDemandTarget =
   | { local: true }
   | (SshHop & { serverId?: string; hops?: SshHop[]; vpnProfileId?: string; serverName?: string })
+
+/**
+ * A trusted-host entry whose identity is a loopback address.
+ *
+ * These are wreckage from a bug, not something a normal connection produces.
+ * Until 0.36.2 a hop routed through a VPN or tunnel was rewritten to dial
+ * `127.0.0.1:<a freshly allocated port>` and its host key was filed under THAT,
+ * so every connection to such a server asked to trust it again and left another
+ * entry behind. A user who went through it a dozen times has a dozen of them.
+ *
+ * They are worse than clutter. `127.0.0.1:51234` names no particular machine,
+ * so a later and entirely unrelated local service that happens to land on that
+ * port inherits the trust.
+ *
+ * NOT automatically deleted, and that is deliberate: somebody who genuinely runs
+ * sshd on this machine and connects to `127.0.0.1:22` has a legitimate entry of
+ * exactly this shape. The app can say which entries look stale and why; which
+ * of them to remove is the user's call.
+ */
+export function isLoopbackHostKeyId(id: string): boolean {
+  const host = id.replace(/:\d+$/, '')
+  return (
+    host === '127.0.0.1' ||
+    host === 'localhost' ||
+    host === '[::1]' ||
+    host === '::1' ||
+    /^127\.\d+\.\d+\.\d+$/.test(host)
+  )
+}
