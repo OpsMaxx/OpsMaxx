@@ -256,6 +256,10 @@ async function connectClient(
       `Timed out during the SSH handshake with ${hop.username}@${hop.host} after ${HANDSHAKE_QUIET_MS / 1000}s. The host accepted the connection but did not finish authenticating.`
     )
 
+    // Set by the host verifier below when WE hung up, so the error handler can
+    // tell that apart from the host going away.
+    let refusedHostKey = false
+
     const config: ConnectConfig = {
       host: hop.host,
       port: hop.port || 22,
@@ -283,7 +287,15 @@ async function connectClient(
       tryKeyboard: true,
       // Trust-on-first-use: unknown hosts prompt, changed keys are refused.
       hostVerifier: ((key: Buffer, cb: (ok: boolean) => void) => {
-        void verifyHostKey(hop.host, hop.port || 22, key, allowPrompt, hop.hostKeyId).then(cb)
+        void verifyHostKey(hop.host, hop.port || 22, key, allowPrompt, hop.hostKeyId).then((ok) => {
+          // Remember that WE refused, so the error below can say so. ssh2's
+          // own message for this is "Host denied (verification failed)", which
+          // is true and tells the user nothing they can act on -- and reaching
+          // the fleet monitor it became "did not answer the last check", which
+          // is not even true: the host answered, and we hung up on it.
+          if (!ok) refusedHostKey = true
+          cb(ok)
+        })
       }) as never,
       ...authFor(hop),
       // A pre-established socket: our own TCP connection, or the channel
@@ -390,6 +402,23 @@ async function connectClient(
     )
     client.on('error', (err) => {
       clearDeadline()
+      // An unattended caller cannot establish trust for the first time -- that
+      // decision needs a person -- so a background sweep against a server the
+      // user has only ever reached interactively fails here, silently and
+      // forever. Saying which of the two it is turns "unreachable" into
+      // something the user can finish in one action.
+      if (refusedHostKey) {
+        reject(
+          new Error(
+            allowPrompt
+              ? `The host key for ${hop.hostKeyId ?? `${hop.host}:${hop.port || 22}`} was not accepted.`
+              : `OpsMaxx has no trusted host key for ${hop.hostKeyId ?? `${hop.host}:${hop.port || 22}`}, ` +
+                'and a background check is not allowed to ask for one. Open a terminal to this server ' +
+                'once and confirm its fingerprint; checks will run on their own after that.'
+          )
+        )
+        return
+      }
       reject(err)
     })
     client.connect(config)

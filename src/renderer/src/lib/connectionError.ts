@@ -40,7 +40,10 @@ const PATTERNS: [ConnectionFault, RegExp][] = [
   // instead would have swallowed both, which is the mistake this narrow
   // pattern exists to avoid.
   ['exited', /\bshell exited\b(?! with)/i],
-  ['host-key', /host key|host verification|hostkey|fingerprint/i],
+  // `Host denied (verification failed)` is ssh2's own wording when our verifier
+  // refuses, and it matched none of the patterns beside it -- so the one error
+  // the user can actually finish in a single action was classified as generic.
+  ['host-key', /host key|host verification|hostkey|fingerprint|host denied|no trusted host key/i],
   ['port-in-use', /EADDRINUSE|already in use/i],
   ['passphrase', /passphrase|encrypted private key/i],
   ['key-missing', /(ENOENT|no such file|cannot (open|read))[^]*(key|\.pem|id_)/i],
