@@ -211,14 +211,13 @@ export const MODULES: ModuleDef[] = [
     label: 'Capacity trends',
     detail:
       'How full a server is getting and when it runs out — "this disk fills in eleven days" — drawn from the samples the monitor already writes. It stores nothing of its own, schedules nothing and evaluates nothing in the background: every line is derived on demand from history that exists whether or not this is on. A forecast is never stated without the window it was drawn from, and a gap where a server was unreachable is left as a hole in the line rather than drawn across.',
-    // OFF for a fresh install too, and this one is the cheapest module in the
-    // list — it reads the local history store and opens no connection at all.
-    //
-    // Off anyway, for the reason `backfillModules` exists: an upgrade is not
-    // consent, and a fresh install that arrived with nine tabs already open
-    // would be the bloat this registry was built to avoid. Nothing here argues
-    // that a module has to be dangerous to be optional.
-    defaultEnabled: false
+    // ON for a fresh install. This is the cheapest module in the list: it reads
+    // the local history store, opens no connection, schedules nothing and
+    // evaluates nothing in the background. It was off for symmetry with its
+    // neighbours rather than for a reason of its own, and symmetry is not a
+    // reason to hide a panel that costs nothing and answers "when does this
+    // disk fill".
+    defaultEnabled: true
   },
   {
     id: 'changeLog',
@@ -396,7 +395,13 @@ export const MODULES: ModuleDef[] = [
     label: 'Docker',
     detail:
       'List containers on a server, read their logs, and open a shell inside a running one. Uses the docker binary already on the server — a container shell is arbitrary code execution there.',
-    defaultEnabled: false
+    // ON for a fresh install. Listing and log-reading start nothing; the panel
+    // is inert until it is opened. The container shell is real power, but it is
+    // the same power the terminal tab beside it already grants on the same
+    // credential — gating the panel does not withhold it, it only hides that
+    // Docker is supported at all. The setup step asks about containers anyway,
+    // so an install that says no turns this straight back off.
+    defaultEnabled: true
   },
   {
     id: 'kubernetes',
@@ -404,7 +409,10 @@ export const MODULES: ModuleDef[] = [
     label: 'Kubernetes',
     detail:
       'List contexts, namespaces and pods and read pod logs, using the kubectl already on the server. Reading only: it never switches your context, never execs into a pod, and never applies or deletes anything.',
-    defaultEnabled: false
+    // ON for a fresh install, and of the three flipped it is the easiest call:
+    // it never execs, never applies and never deletes, so the worst an unwanted
+    // one does is occupy a tab.
+    defaultEnabled: true
   }
 ]
 

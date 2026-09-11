@@ -18,8 +18,13 @@ import { useOnboarding } from '../src/renderer/src/store/onboarding'
 // not on the display.
 
 beforeEach(() => {
-  useOnboarding.setState({ seenTips: [], open: false })
-  useApp.setState({ activity: 'monitor' } as never)
+  useOnboarding.setState({ seenTips: [], open: false, setupOpen: false })
+  // A server, because every tip describes something you do WITH one and the
+  // card now declines to speak to an empty install -- the workspaces tip, which
+  // is about isolating clients and sharing vault entries, used to fire the
+  // instant the walkthrough ended on an app with nothing in it. These tests are
+  // about which RAIL a tip belongs to, so they need the app past that gate.
+  useApp.setState({ activity: 'monitor', servers: [{ id: 's1', name: 'Web01' }] } as never)
   useNav.setState({ fleetRail: 'monitor' })
 })
 
@@ -54,5 +59,24 @@ describe('a tip belongs to a rail, not just to a view', () => {
     useNav.setState({ fleetRail: 'operations' })
     render(<FeatureTipCard />)
     expect(screen.queryByText(/The vault is where credentials live/)).not.toBeNull()
+  })
+})
+
+describe('a tip needs something to be about', () => {
+  it('says nothing to an install with no servers', () => {
+    // The workspaces card -- multi-client isolation, shared vault entries --
+    // fired the moment the walkthrough finished, on `connections`, with zero
+    // servers configured. Staging a tip behind the view it explains is not
+    // enough when the view itself is empty.
+    useApp.setState({ activity: 'connections', servers: [] } as never)
+    render(<FeatureTipCard />)
+    expect(screen.queryByText(/[Ww]orkspace/)).toBeNull()
+  })
+
+  it('stays quiet while the setup questions are still on screen', () => {
+    useApp.setState({ servers: [{ id: 's1', name: 'Web01' }] } as never)
+    useOnboarding.setState({ setupOpen: true })
+    render(<FeatureTipCard />)
+    expect(screen.queryByText(/Monitoring, including what is broken/)).toBeNull()
   })
 })

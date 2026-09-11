@@ -22,6 +22,7 @@ import { AgentServerWatcher } from './components/ai/AgentServerWatcher'
 import { FleetWatcher } from './components/monitor/FleetWatcher'
 import { VaultUnlockModal } from './components/vault/VaultUnlockModal'
 import { OnboardingTour } from './components/onboarding/OnboardingTour'
+import { SetupCard } from './components/onboarding/SetupCard'
 import { FeatureTipCard } from './components/onboarding/FeatureTipCard'
 import { CliPairingBanner } from './components/ai/CliPairingBanner'
 import { CommandPalette } from './components/palette/CommandPalette'
@@ -119,6 +120,7 @@ export default function App(): React.JSX.Element {
       <AgentServerWatcher />
       <FleetWatcher />
       <VaultUnlockModal />
+      <SetupCard />
       <OnboardingTour />
       <FeatureTipCard />
       <CliPairingBanner />

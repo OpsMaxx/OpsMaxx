@@ -34,6 +34,14 @@ export function FeatureTipCard(): React.JSX.Element | null {
   // Operations, explaining a screen they were not looking at.
   const fleetRail = useNav((s) => s.fleetRail)
   const tourOpen = useOnboarding((s) => s.open)
+  const setupOpen = useOnboarding((s) => s.setupOpen)
+  // Every tip describes something you do WITH a server: isolating clients into
+  // workspaces, keeping their credentials in the vault, watching their metrics,
+  // tunnelling to them. An install with none has nothing any of them is about,
+  // and the workspaces card -- multi-client isolation, shared vault entries --
+  // fired the instant the walkthrough ended, to an empty app. Staging a tip
+  // behind the view it explains is not enough when the view itself is empty.
+  const hasServer = useApp((s) => s.servers.length > 0)
   const seenTips = useOnboarding((s) => s.seenTips)
   const markTipSeen = useOnboarding((s) => s.markTipSeen)
 
@@ -45,7 +53,7 @@ export function FeatureTipCard(): React.JSX.Element | null {
   useEffect(() => {
     // Never while the walkthrough itself is open: two cards explaining the same
     // screen at once is worse than either alone.
-    if (tourOpen) {
+    if (tourOpen || setupOpen || !hasServer) {
       setShownId(null)
       return
     }
@@ -62,7 +70,7 @@ export function FeatureTipCard(): React.JSX.Element | null {
         (!onSharedView || fleetRail === 'monitor')
     )
     setShownId(tip?.id ?? null)
-  }, [activity, fleetRail, seenTips, tourOpen])
+  }, [activity, fleetRail, seenTips, tourOpen, setupOpen, hasServer])
 
   if (!shownId) return null
   const tip = FEATURE_TIPS.find((t) => t.id === shownId)

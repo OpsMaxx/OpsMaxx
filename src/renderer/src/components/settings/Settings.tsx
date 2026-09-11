@@ -1136,16 +1136,24 @@ export function Settings(): React.JSX.Element {
                 onChange={(v) => setSettings({ accessWriteEnabled: v })}
               />
               <KnownHosts />
-              <Toggle label="Store credentials in OS keychain" desc="Use the platform secure store — never plaintext." initial />
-              <Toggle label="Auto-lock workspaces" desc="Lock password-protected workspaces after inactivity." initial />
+              {/* Credential storage is not a choice, so it is not a switch.
+                  A switch here read as a guarantee the user could withdraw --
+                  and the three rows that used to sit below this one (keychain,
+                  auto-lock, confirm-destructive) were all painted: they held
+                  their state in a local `useState` and persisted nothing. A
+                  security control that cannot be turned off is worse than
+                  absent, because the user believes they turned it off. */}
               <div className="setting-row">
                 <div className="s-info">
-                  <div className="s-title">Auto-lock timeout</div>
-                  <div className="s-desc">Minutes of inactivity before locking.</div>
+                  <div className="s-title">Credential storage</div>
+                  <div className="s-desc">
+                    Passwords and key passphrases go to the vault, or to this platform's secure
+                    store when no vault is set up. Neither path writes plaintext to disk, and
+                    there is no setting that changes it.
+                  </div>
                 </div>
-                <input className="input" style={{ width: 80 }} defaultValue="15" />
+                <span className="pill ok">Always on</span>
               </div>
-              <Toggle label="Confirm destructive commands" desc="Require confirmation for rm, systemctl stop, etc." initial />
             </div>
           )}
 
@@ -1177,8 +1185,6 @@ export function Settings(): React.JSX.Element {
             <div className="settings-section">
               <h2>{SECTION_META[section].label}</h2>
               <div className="sub">Configure {section} preferences for this workspace.</div>
-              <Toggle label={`Enable ${section} features`} desc="Turn this subsystem on." initial />
-              <Toggle label="Sync across workspaces" desc="Share these settings between workspaces." />
               <div className="setting-row">
                 <div className="s-info">
                   <div className="s-title">Reset {section}</div>

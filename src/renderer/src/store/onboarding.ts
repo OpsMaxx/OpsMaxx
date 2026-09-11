@@ -8,6 +8,11 @@ const SEEN_KEY = 'opsmaxx.onboarding.seen'
 // Which deferred tips have been shown. Same reasoning as SEEN_KEY: a UI
 // preference about this installation, not data about the servers in it.
 const TIPS_KEY = 'opsmaxx.onboarding.tips'
+// Whether the setup questions have been answered. Separate from SEEN_KEY on
+// purpose: an install that has answered them but skipped the walkthrough must
+// not be asked again, and an install upgrading from a build that predates this
+// card has seen the tour but has never been asked.
+const SETUP_KEY = 'opsmaxx.onboarding.setup'
 
 function readTips(): string[] {
   try {
@@ -24,6 +29,8 @@ function readTips(): string[] {
 interface OnboardingState {
   open: boolean
   step: number
+  /** The module questions, which run before the walkthrough. */
+  setupOpen: boolean
   /**
    * Whether this run is a replay from Settings.
    *
@@ -38,6 +45,8 @@ interface OnboardingState {
   tipFor: (view: string) => string | null
   markTipSeen: (id: string) => void
   start: () => void
+  /** Records the answers as asked and hands off to the walkthrough. */
+  finishSetup: () => void
   next: () => void
   back: () => void
   goTo: (i: number) => void
@@ -50,6 +59,7 @@ interface OnboardingState {
 export const useOnboarding = create<OnboardingState>((set, get) => ({
   open: false,
   step: 0,
+  setupOpen: false,
   full: false,
   seenTips: readTips(),
 
@@ -73,7 +83,30 @@ export const useOnboarding = create<OnboardingState>((set, get) => ({
   },
 
   // From Settings: the whole walkthrough, because that is what was asked for.
-  start: () => set({ open: true, step: 0, full: true }),
+  // It does not re-ask the setup questions — Settings › Modules is where those
+  // live once they have been answered, and a walkthrough that reopened a modal
+  // over the app it is describing would be the opposite of what the tour is.
+  start: () => set({ open: true, step: 0, full: true, setupOpen: false }),
+
+  finishSetup: () => {
+    try {
+      localStorage.setItem(SETUP_KEY, '1')
+    } catch {
+      /* see readTips: worst case the questions are asked once more */
+    }
+    // Straight into the walkthrough, which now has something to walk through --
+    // unless this install has already seen it. An existing install upgrading
+    // into this card has never been asked the questions but has long since been
+    // walked through the app, and replaying the tour at it would read as a
+    // regression rather than a welcome.
+    let seen = false
+    try {
+      seen = localStorage.getItem(SEEN_KEY) === '1'
+    } catch {
+      seen = false
+    }
+    set({ setupOpen: false, open: !seen, step: 0, full: false })
+  },
   next: () => set({ step: get().step + 1 }),
   back: () => set({ step: Math.max(0, get().step - 1) }),
   goTo: (i) => set({ step: Math.max(0, i) }),
@@ -91,10 +124,19 @@ export const useOnboarding = create<OnboardingState>((set, get) => ({
 
   openIfFirstRun: () => {
     let seen = false
+    let askedSetup = false
     try {
       seen = localStorage.getItem(SEEN_KEY) === '1'
+      askedSetup = localStorage.getItem(SETUP_KEY) === '1'
     } catch {
       seen = false
+      askedSetup = false
+    }
+    // The questions come first and the walkthrough follows them, so a first run
+    // opens only the card; `finishSetup` opens the tour behind it.
+    if (!askedSetup) {
+      set({ setupOpen: true, open: false, step: 0, full: false })
+      return
     }
     // First run gets the short version; the rest arrives as tips.
     if (!seen) set({ open: true, step: 0, full: false })

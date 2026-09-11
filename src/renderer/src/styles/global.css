@@ -5014,3 +5014,154 @@ details[open] > .disclosure-head .chev {
   outline: none;
   user-select: text;
 }
+
+/* ---------------------------------------------------------------------------
+   First-run setup card.
+
+   The only modal in the first-run path. Everything else offered to a new
+   install -- the walkthrough, the SSH-config import, the feature tips -- sits
+   beside the app rather than over it, because it describes something the user
+   can see. This one asks a question, so it takes the screen and gives it back.
+   --------------------------------------------------------------------------- */
+
+.setup-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-6);
+  background: var(--bg-scrim);
+  backdrop-filter: blur(2px);
+}
+
+.setup-card {
+  width: min(620px, 100%);
+  max-height: calc(100vh - var(--sp-8) * 2);
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.setup-head {
+  padding: var(--sp-6) var(--sp-6) var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.setup-head h1 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.setup-head p {
+  margin: 0;
+  font-size: var(--fs-body);
+  color: var(--text-muted);
+  max-width: 58ch;
+}
+
+.setup-questions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-6);
+}
+
+/* A row, not a checkbox with a label beside it: the whole thing is the target,
+   which is the difference between three easy answers and three small ones. */
+.setup-q {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start;
+  width: 100%;
+  text-align: left;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+.setup-q:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+.setup-q:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.setup-q.on {
+  border-color: var(--accent);
+  background: var(--bg-active);
+}
+
+.setup-tick {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-input);
+  color: var(--text-inverse);
+}
+.setup-tick.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.setup-q-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.setup-q-title {
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  color: var(--text);
+}
+.setup-q-detail {
+  font-size: var(--fs-body);
+  color: var(--text-muted);
+}
+/* The cost is stated whether or not it flatters the answer, and it is the one
+   line that stays legible when the row is not selected -- an honest tool does
+   not grey out the drawback of the thing it is recommending. */
+.setup-q-cost {
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+}
+
+.setup-foot {
+  display: flex;
+  gap: var(--sp-4);
+  align-items: center;
+  padding: var(--sp-4) var(--sp-6) var(--sp-6);
+  border-top: 1px solid var(--border-subtle);
+}
+.setup-hint {
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+  max-width: 46ch;
+}
+.setup-foot .btn {
+  margin-left: auto;
+  flex: 0 0 auto;
+  gap: var(--sp-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-q {
+    transition: none;
+  }
+}

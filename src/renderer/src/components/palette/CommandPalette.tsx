@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { useApp } from '../../store/app'
 import { useClickOutside } from '../../hooks/useClickOutside'
+import { openMonitor } from '../../store/nav'
 
 interface Cmd {
   id: string
@@ -119,7 +120,7 @@ export function CommandPalette(): React.JSX.Element {
         : []),
       { id: 'a-add', group: 'Actions', title: 'Add Server', icon: <Plus size={16} />, run: () => store.setModal('add-server') },
       { id: 'a-ws', group: 'Actions', title: 'New Workspace', icon: <Plus size={16} />, run: () => store.setModal('workspaces') },
-      { id: 'a-mon', group: 'Actions', title: 'Open Fleet Monitor', icon: <Activity size={16} />, run: () => store.setActivity('monitor') },
+      { id: 'a-mon', group: 'Actions', title: 'Open Fleet Monitor', icon: <Activity size={16} />, run: () => openMonitor('overview') },
       { id: 'a-term', group: 'Actions', title: 'Open Connections', icon: <TerminalIcon size={16} />, run: () => store.setActivity('connections') },
       {
         id: 'a-import',

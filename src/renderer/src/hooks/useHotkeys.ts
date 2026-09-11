@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useApp } from '../store/app'
 import { COMMANDS_BY_ID, comboFrom, isMac, resolveBindings, type Scope } from '../lib/shortcuts'
+import { openMonitor } from '../store/nav'
 import type { Workspace } from '../types'
 
 type Store = ReturnType<typeof useApp.getState>
@@ -85,7 +86,11 @@ const RUNNERS: Record<string, (s: Store, term?: TerminalActions) => boolean> = {
     const tab = s.activeTab()
     return tab?.kind === 'ssh' ? (s.setTabView(tab.id, 'files'), true) : false
   },
-  'open-monitor': (s) => (s.setActivity('monitor'), true),
+  // Through openMonitor, not setActivity: Monitoring and Operations share one
+  // activity and are told apart by `fleetRail`, so setting the activity alone
+  // reopens whichever rail was last used -- "Open Fleet Monitor" landing on
+  // Operations.
+  'open-monitor': () => (openMonitor('overview'), true),
   'zoom-in': (s) => (s.zoomTerminal(1), true),
   'zoom-in-alt': (s) => (s.zoomTerminal(1), true),
   'zoom-out': (s) => (s.zoomTerminal(-1), true),

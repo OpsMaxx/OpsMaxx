@@ -11,13 +11,47 @@ beforeEach(() => {
     setItem: (k: string, v: string) => void store.set(k, v),
     removeItem: (k: string) => void store.delete(k)
   })
-  useOnboarding.setState({ open: false, step: 0 })
+  useOnboarding.setState({ open: false, step: 0, setupOpen: false })
 })
 
 describe('when the walkthrough appears', () => {
-  it('opens on a first run', () => {
+  it('opens on a first run, behind the setup questions', () => {
+    // A first run asks which modules the user wants BEFORE walking them
+    // through the app, because the walkthrough of an install with fifteen of
+    // twenty modules off is a walkthrough of an empty app. The card opens
+    // first and hands over.
     useOnboarding.getState().openIfFirstRun()
+    expect(useOnboarding.getState().setupOpen).toBe(true)
+    expect(useOnboarding.getState().open).toBe(false)
+
+    useOnboarding.getState().finishSetup()
+    expect(useOnboarding.getState().setupOpen).toBe(false)
     expect(useOnboarding.getState().open).toBe(true)
+  })
+
+  it('does not replay the walkthrough at an install that has already seen it', () => {
+    // An existing install upgrading into the setup card has never been asked
+    // the questions but has long since been walked through the app. Answering
+    // them must not read as a regression to the tour.
+    useOnboarding.getState().openIfFirstRun()
+    useOnboarding.getState().finishSetup()
+    useOnboarding.getState().finish()
+
+    store.delete('opsmaxx.onboarding.setup')
+    useOnboarding.getState().openIfFirstRun()
+    expect(useOnboarding.getState().setupOpen).toBe(true)
+
+    useOnboarding.getState().finishSetup()
+    expect(useOnboarding.getState().open).toBe(false)
+  })
+
+  it('does not ask the setup questions twice', () => {
+    useOnboarding.getState().openIfFirstRun()
+    useOnboarding.getState().finishSetup()
+    useOnboarding.setState({ open: false, setupOpen: false })
+
+    useOnboarding.getState().openIfFirstRun()
+    expect(useOnboarding.getState().setupOpen).toBe(false)
   })
 
   it('does not reappear once it has been finished', () => {
@@ -57,6 +91,10 @@ describe('when the walkthrough appears', () => {
       }
     })
     expect(() => useOnboarding.getState().openIfFirstRun()).not.toThrow()
+    // The setup card, which is what a first run opens now. Unreadable storage
+    // reads as "never asked", so the harmless direction is preserved.
+    expect(useOnboarding.getState().setupOpen).toBe(true)
+    expect(() => useOnboarding.getState().finishSetup()).not.toThrow()
     expect(useOnboarding.getState().open).toBe(true)
     expect(() => useOnboarding.getState().finish()).not.toThrow()
   })
