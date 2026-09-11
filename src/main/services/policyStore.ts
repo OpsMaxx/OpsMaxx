@@ -267,7 +267,7 @@ function seed(): PolicyState {
   // Stamped at the latest generation: defaultFilePolicies() already contains
   // every seeded pattern, so a fresh install has nothing to backfill.
   return {
-    version: 1,
+    version: ASSIGNMENTS_CLEARED_VERSION,
     groups: defaultGroups(),
     assignments: [],
     serverMeta: [],
@@ -464,13 +464,54 @@ function read(): PolicyState {
     if (existsSync(FILE)) {
       const parsed = JSON.parse(readFileSync(FILE, 'utf8')) as PolicyState
       if (parsed && Array.isArray(parsed.groups)) {
-        return backfillFilePolicies(backfillCapabilities(backfillGroups(parsed)))
+        return dropLegacyAssignments(
+          backfillFilePolicies(backfillCapabilities(backfillGroups(parsed)))
+        )
       }
     }
   } catch {
     /* fall through to a fresh seed rather than crash on a corrupt file */
   }
   return seed()
+}
+
+/**
+ * The one-time clear-out that came with making the session's group the grant.
+ *
+ * An assignment used to be a PREREQUISITE: the grant came from the access group
+ * assigned to a server's workspace, and a target without one was denied. The
+ * session's own group could only ever narrow that, which is why setting a
+ * session to Full Access changed nothing and the app went on asking -- or
+ * denying -- with no way to see which layer had decided.
+ *
+ * The session's group grants now, and an assignment is an optional restriction
+ * kept for the case it is actually good at: holding one particular box below
+ * what an agent's group would otherwise allow. Every assignment written under
+ * the old rules was made to mean the opposite thing, so carrying them forward
+ * would silently turn every one of them into a cap the user never asked for --
+ * exactly the pain that prompted this change.
+ *
+ * So they are cleared, once, on the user's explicit instruction, and the
+ * version stamp records that it happened. THIS WIDENS WHAT AN AI SESSION CAN
+ * REACH: a target that was denied for having no assignment is now governed by
+ * the session's group. That is the intended effect and it was chosen knowingly;
+ * it is called out here because a future reader will find this function and
+ * need to know it was not an accident.
+ *
+ * Restrictions are not lost silently either -- what was cleared is recorded so
+ * the UI can tell the user which targets used to carry one.
+ */
+const ASSIGNMENTS_CLEARED_VERSION = 2
+
+function dropLegacyAssignments(state: PolicyState): PolicyState {
+  if ((state.version ?? 1) >= ASSIGNMENTS_CLEARED_VERSION) return state
+  const cleared = state.assignments.filter((a) => a.groupId)
+  return {
+    ...state,
+    version: ASSIGNMENTS_CLEARED_VERSION,
+    assignments: [],
+    clearedAssignments: cleared.length > 0 ? cleared : undefined
+  }
 }
 
 function write(state: PolicyState): void {

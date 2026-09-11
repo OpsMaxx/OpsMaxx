@@ -11,6 +11,8 @@ const SESSIONS_FILE = join(app.getPath('userData'), 'opsmaxx-mcp-sessions.json')
 const SESSIONS_TMP = `${SESSIONS_FILE}.tmp`
 
 function defaultConfig(): McpGlobalConfig {
+  // No defaultSessionGroupId: absent resolves to the most restrictive group,
+  // which is what a default that nobody has chosen should be.
   return { enabled: false, port: DEFAULT_MCP_PORT, defaultSessionTtlMinutes: 60, approvalTimeoutSeconds: 120 }
 }
 

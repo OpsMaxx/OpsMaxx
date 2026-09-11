@@ -114,7 +114,11 @@ describe('add_server', () => {
     setAssignment({ level: 'workspace', workspaceId: 'ws-prod' }, null)
     const c = await clientFor('grp-full')
     try {
-      expect(await call(c, { name: 'New Box', host: '10.0.0.9' })).toContain('No AI access')
+      // An explicit No AI Access still shuts the target, and must: under the
+      // new model a MISSING assignment means "no restriction, the session's
+      // group applies", so the two cases that used to collapse into one null
+      // are now genuinely different and only this one denies.
+      expect(await call(c, { name: 'New Box', host: '10.0.0.9' })).toContain('No AI Access')
       expect(received).toHaveLength(0)
     } finally {
       await c.close()
@@ -210,18 +214,19 @@ describe('add_server', () => {
     }
   })
 
-  it('names the session ceiling, not just the group, when that is what refused', async () => {
-    // The loop this exists to break: the workspace allows it, the session does
-    // not, and the message said only "Read Only: manageServers = deny" — which
-    // reads as a settings problem, so you change the setting, retry, and get
-    // the identical message back.
+  it('refuses on the session\u2019s own group, and names it', async () => {
+    // Rewritten for the model change. There is no "ceiling" any more: the
+    // session's group IS the grant, so when it refuses, that is simply the
+    // group refusing and the message says which group. A permissive assignment
+    // on the workspace does not lift it -- a restriction narrows and never
+    // widens, which is what stops a per-server setting from quietly promoting a
+    // deliberately limited agent.
     setAssignment({ level: 'workspace', workspaceId: 'ws-prod' }, 'grp-full')
     const c = await clientFor('grp-read-only')
     try {
       const out = await call(c, { name: 'Ceiling Test', host: '10.0.0.11' })
-      expect(out).toContain("this AI session's own ceiling")
-      expect(out).toContain('Active Sessions')
-      expect(out).toContain('Full Access')
+      expect(out).toContain('Denied')
+      expect(out).toContain('manageServers = deny')
       expect(received).toHaveLength(0)
     } finally {
       await c.close()

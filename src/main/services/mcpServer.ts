@@ -28,6 +28,7 @@ import {
 import { resolveServerByName, formatAmbiguity, type ServerMatch } from './serverResolver'
 import {
   resolveGroupId,
+  resolveRestriction,
   evaluateCapability,
   evaluateCommand,
   evaluateFilePath,
@@ -186,41 +187,75 @@ function sessionGroupFor(session: McpAgentSession): AccessGroup | null {
   return session.groupId ? getGroup(session.groupId) : null
 }
 
-// Combine the scope's decision with the session's ceiling, and when the ceiling
-// is what refused, say so.
-//
-// Both sides report only a group name, so "Denied: Read Only: manageServers =
-// deny" is indistinguishable whether it came from the workspace assignment or
-// from the session. The two are changed in different places and only one of
-// them can be changed at all once a client is connected: a session copies its
-// group in at creation and never re-reads it, so editing access groups in
-// Settings cannot affect a connection that already exists. Without that spelt
-// out the obvious move is to go and change the setting, retry, and get the same
-// message back.
-function withCeiling(scope: Decision, session: Decision | null, scopeLabel: string): Decision {
-  if (!session) return scope
-  const winner = mostRestrictive(scope, session)
-  // mostRestrictive prefers its first argument on a tie, so this is only the
-  // session when the session is strictly the narrower of the two.
-  if (winner !== session) return winner
+
+/**
+ * THE SESSION'S ACCESS GROUP IS THE GRANT.
+ *
+ * It used to be only a ceiling: the grant came from an access group assigned to
+ * the server's workspace, and a target with no assignment was denied outright.
+ * So the knob the user actually turns -- the group chosen when creating the
+ * session -- could only ever take access away, and setting it to Full Access
+ * changed nothing at all. The reports were "even after giving full access it
+ * keeps asking for permission" and "Denied: Sudo is denied for this access
+ * group" on a session that read Full Access, and both were the model working as
+ * designed while being impossible to see.
+ *
+ * Now: the session's group decides. An assignment on the server or its
+ * workspace is an OPTIONAL RESTRICTION -- set one to hold a particular box
+ * below what the agent's group would otherwise allow, and it still wins, so a
+ * production server can be locked down and no session can talk its way past it.
+ * Absent, which is the normal case, the session's group applies as written.
+ *
+ * One knob unless you deliberately add an exception.
+ */
+const NO_AI_ACCESS: Decision = {
+  decision: 'deny',
+  reason: 'This target is set to No AI Access.'
+}
+
+/**
+ * The grant, and the restriction if one was deliberately set.
+ *
+ * `shut` is the case that is NOT the same as having no assignment: somebody
+ * chose No AI Access for this target, and no session's group may talk past it.
+ */
+function resolveGroups(
+  session: McpAgentSession,
+  serverId: string
+): { grant: AccessGroup | null; restriction: AccessGroup | null; shut: boolean } {
+  const server = getCachedServer(serverId)
+  const found = server
+    ? resolveRestriction(listAssignments(), serverId, server.workspaceId)
+    : ({ kind: 'none' } as const)
   return {
-    decision: session.decision,
+    grant: sessionGroupFor(session),
+    restriction: found.kind === 'group' ? getGroup(found.groupId) : null,
+    shut: found.kind === 'no-ai-access'
+  }
+}
+
+function withRestriction(grant: Decision, restriction: Decision | null, label: string): Decision {
+  if (!restriction) return grant
+  const winner = mostRestrictive(grant, restriction)
+  // mostRestrictive prefers its first argument on a tie, so this is only the
+  // restriction when the restriction is strictly the narrower of the two.
+  if (winner !== restriction) return winner
+  return {
+    decision: restriction.decision,
     reason:
-      `${session.reason} — that is this AI session's own ceiling, fixed when the session was ` +
-      `created, while ${scopeLabel} allows it. Changing access groups in Settings cannot affect a ` +
-      `connection that already exists. Revoke this session under AI & MCP -> Active Sessions, ` +
-      `create a new one with a higher access group, and reconnect the client.`
+      `${restriction.reason} — ${label} is held below what this AI session's own access group ` +
+      `allows. Remove or widen that assignment under AI & MCP -> Access Groups to lift it.`
   }
 }
 
 function effectiveCapability(session: McpAgentSession, serverId: string, capability: AiCapability): Decision {
-  const serverGroup = serverGroupFor(serverId)
-  if (!serverGroup) return { decision: 'deny', reason: 'No AI access is assigned to this server.' }
-  const sessionGroup = sessionGroupFor(session)
-  return withCeiling(
-    evaluateCapability(serverGroup, capability),
-    sessionGroup ? evaluateCapability(sessionGroup, capability) : null,
-    `the server's own access group ("${serverGroup.name}")`
+  const { grant, restriction, shut } = resolveGroups(session, serverId)
+  if (shut) return NO_AI_ACCESS
+  if (!grant) return { decision: 'deny', reason: 'This AI session has no access group.' }
+  return withRestriction(
+    evaluateCapability(grant, capability),
+    restriction ? evaluateCapability(restriction, capability) : null,
+    `the server's own access group ("${restriction?.name}")`
   )
 }
 
@@ -233,25 +268,26 @@ function effectiveWorkspaceCapability(
   workspaceId: string,
   capability: AiCapability
 ): Decision {
-  const groupId = resolveGroupId(listAssignments(), '', workspaceId)
-  const workspaceGroup = groupId ? getGroup(groupId) : null
-  if (!workspaceGroup) return { decision: 'deny', reason: 'No AI access is assigned to this workspace.' }
-  const sessionGroup = sessionGroupFor(session)
-  return withCeiling(
-    evaluateCapability(workspaceGroup, capability),
-    sessionGroup ? evaluateCapability(sessionGroup, capability) : null,
-    `the workspace's access group ("${workspaceGroup.name}")`
+  const grant = sessionGroupFor(session)
+  if (!grant) return { decision: 'deny', reason: 'This AI session has no access group.' }
+  const found = resolveRestriction(listAssignments(), '', workspaceId)
+  if (found.kind === 'no-ai-access') return NO_AI_ACCESS
+  const restriction = found.kind === 'group' ? getGroup(found.groupId) : null
+  return withRestriction(
+    evaluateCapability(grant, capability),
+    restriction ? evaluateCapability(restriction, capability) : null,
+    `the workspace's access group ("${restriction?.name}")`
   )
 }
 
 function effectiveCommand(session: McpAgentSession, serverId: string, command: string): Decision {
-  const serverGroup = serverGroupFor(serverId)
-  if (!serverGroup) return { decision: 'deny', reason: 'No AI access is assigned to this server.' }
-  const sessionGroup = sessionGroupFor(session)
-  return withCeiling(
-    evaluateCommand(serverGroup, command),
-    sessionGroup ? evaluateCommand(sessionGroup, command) : null,
-    `the server's own access group ("${serverGroup.name}")`
+  const { grant, restriction, shut } = resolveGroups(session, serverId)
+  if (shut) return NO_AI_ACCESS
+  if (!grant) return { decision: 'deny', reason: 'This AI session has no access group.' }
+  return withRestriction(
+    evaluateCommand(grant, command),
+    restriction ? evaluateCommand(restriction, command) : null,
+    `the server's own access group ("${restriction?.name}")`
   )
 }
 
@@ -261,18 +297,18 @@ function effectiveCommand(session: McpAgentSession, serverId: string, command: s
 // changed nothing — a permission that is displayed but not enforced is worse
 // than one that does not exist, because the user believes they have set it.
 function effectiveFilePath(session: McpAgentSession, serverId: string, path: string, mode: 'read' | 'write'): Decision {
-  const serverGroup = serverGroupFor(serverId)
-  if (!serverGroup) return { decision: 'deny', reason: 'No AI access is assigned to this server.' }
+  const { grant, restriction, shut } = resolveGroups(session, serverId)
+  if (shut) return NO_AI_ACCESS
+  if (!grant) return { decision: 'deny', reason: 'This AI session has no access group.' }
   const transport: AiCapability = mode === 'read' ? 'sftpDownload' : 'sftpUpload'
-  const sessionGroup = sessionGroupFor(session)
 
   const forGroup = (g: AccessGroup): Decision =>
     mostRestrictive(evaluateFilePath(g, path, mode), evaluateCapability(g, transport))
 
-  return withCeiling(
-    forGroup(serverGroup),
-    sessionGroup ? forGroup(sessionGroup) : null,
-    `the server's own access group ("${serverGroup.name}")`
+  return withRestriction(
+    forGroup(grant),
+    restriction ? forGroup(restriction) : null,
+    `the server's own access group ("${restriction?.name}")`
   )
 }
 
@@ -432,6 +468,39 @@ function countSessionActions(sessionId: string): number | null {
   }
 }
 
+/**
+ * Approvals already granted in this session, remembered.
+ *
+ * Keyed session + server + capability. Approving one `execute_command` on
+ * Scanner01 stops the app asking again for terminal commands on Scanner01 for
+ * the rest of that session -- and asks afresh for `sudo`, which is a different
+ * capability and deliberately not covered by having said yes to `df`.
+ *
+ * Why per server rather than session-wide: a person approving an action is
+ * looking at a server name while they do it, and carrying that consent to a
+ * machine they were not looking at is a different grant from the one they gave.
+ *
+ * In memory only, so it dies with the process as well as with the session.
+ * Never a substitute for the policy itself: a `deny` is still a deny, and this
+ * is only consulted for an `ask` that a human has already answered once.
+ */
+const sessionElevations = new Set<string>()
+
+const elevationKey = (sessionId: string, serverId: string, capability: string): string =>
+  `${sessionId}\u0000${serverId}\u0000${capability}`
+
+/** Forget what a session was allowed the moment it stops existing. */
+export function clearSessionElevations(sessionId: string): void {
+  for (const key of sessionElevations) {
+    if (key.startsWith(`${sessionId}\u0000`)) sessionElevations.delete(key)
+  }
+}
+
+/** Stop all AI access: nothing carried from an earlier approval survives it. */
+export function clearAllSessionElevations(): void {
+  sessionElevations.clear()
+}
+
 async function gate(
   ctx: AuditContext,
   check: { decision: 'allow' | 'ask' | 'deny'; reason: string },
@@ -459,6 +528,29 @@ async function gate(
     if (!ctx.serverId || !ctx.serverName || !ctx.capability || !ctx.workspaceId || !ctx.workspaceName) {
       return { ok: false, result: errorText('Denied: this action requires approval but has no server context.') }
     }
+    // Already answered for this capability on this server, in this session.
+    //
+    // Only reached for an `ask`. A `deny` returns above and is never softened
+    // by anything here -- an elevation lifts a question, never a refusal.
+    const key = elevationKey(ctx.session.id, ctx.serverId, ctx.capability)
+    if (sessionElevations.has(key)) {
+      recordAudit({
+        agentName: ctx.session.agentName,
+        sessionId: ctx.session.id,
+        workspaceId: ctx.workspaceId,
+        workspaceName: ctx.workspaceName,
+        serverId: ctx.serverId,
+        serverName: ctx.serverName,
+        action: ctx.action,
+        capability: ctx.capability,
+        // Recorded as what it is: allowed on the strength of an approval given
+        // earlier in this session, not an action nobody approved. The audit log
+        // is the only place that distinction survives.
+        approval: 'approved-earlier',
+        result: 'success'
+      })
+      return { ok: true }
+    }
     if (extra) await noteAwaitingApproval(extra, ctx.action, ctx.serverName)
     const decision = await requestApproval({
       sessionId: ctx.session.id,
@@ -485,6 +577,7 @@ async function gate(
       policyReason: check.reason,
       actionsThisSession: countSessionActions(ctx.session.id) ?? undefined
     })
+    if (decision === 'approved') sessionElevations.add(key)
     if (decision !== 'approved') {
       recordAudit({
         agentName: ctx.session.agentName,
@@ -1633,11 +1726,14 @@ function buildServer(): McpServer {
 
       const scopeGroupId = resolveGroupId(listAssignments(), '', db.workspaceId)
       const scopeGroup = scopeGroupId ? getGroup(scopeGroupId) : null
-      const check = withCeiling(
-        evaluateDatabaseStatement(scopeGroup, statement),
-        sessionGroupFor(session) ? evaluateDatabaseStatement(sessionGroupFor(session), statement) : null,
-        `the workspace's access group ("${scopeGroup?.name ?? 'none'}")`
-      )
+      const dbGrant = sessionGroupFor(session)
+      const check = dbGrant
+        ? withRestriction(
+            evaluateDatabaseStatement(dbGrant, statement),
+            scopeGroup ? evaluateDatabaseStatement(scopeGroup, statement) : null,
+            `the workspace's access group ("${scopeGroup?.name}")`
+          )
+        : { decision: 'deny' as const, reason: 'This AI session has no access group.' }
 
       const ctx: AuditContext = {
         session,
@@ -1754,11 +1850,13 @@ function buildServer(): McpServer {
             ? evaluateCapability(g, 'sshTunnel')
             : { decision: 'deny', reason: 'No AI access is assigned to this workspace.' }
 
-      const check = withCeiling(
-        evaluate(scopeGroup),
-        sessionGroup ? evaluate(sessionGroup) : null,
-        `the workspace's access group ("${scopeGroup?.name ?? 'none'}")`
-      )
+      const check = sessionGroup
+        ? withRestriction(
+            evaluate(sessionGroup),
+            scopeGroup ? evaluate(scopeGroup) : null,
+            `the workspace's access group ("${scopeGroup?.name}")`
+          )
+        : { decision: 'deny' as const, reason: 'This AI session has no access group.' }
 
       const ctx: AuditContext = {
         session,
@@ -1915,11 +2013,13 @@ function buildServer(): McpServer {
               'close one. This is not a permission that can be raised — ask the user to do it in ' +
               'OpsMaxx themselves.'
           }
-        : withCeiling(
-            evaluate(scopeGroup),
-            sessionGroup ? evaluate(sessionGroup) : null,
-            `the workspace's access group ("${scopeGroup?.name ?? 'none'}")`
-          )
+        : sessionGroup
+          ? withRestriction(
+              evaluate(sessionGroup),
+              scopeGroup ? evaluate(scopeGroup) : null,
+              `the workspace's access group ("${scopeGroup?.name}")`
+            )
+          : { decision: 'deny' as const, reason: 'This AI session has no access group.' }
 
       const ctx: AuditContext = {
         session,
@@ -3326,22 +3426,33 @@ export function explainSessionAccess(sessionId: string, serverId: string | null)
       })()
 
   return AI_CAPABILITIES.map(({ id, label }) => {
-    const scope = scopeGroup
-      ? evaluateCapability(scopeGroup, id)
-      : { decision: 'deny' as const, reason: 'No access group is assigned.' }
-    const sess = sessionGroup ? evaluateCapability(sessionGroup, id) : null
+    // `fromSession` is now the GRANT and `fromScope` the optional restriction,
+    // which is the reverse of the roles these two fields were named for. The
+    // names stay because the renderer's columns read "Workspace" and "Session"
+    // and both still describe where the value came from; what changed is which
+    // of them decides when there is no assignment at all -- then there is no
+    // restriction, and the session's own group is the answer rather than a
+    // denial.
+    const sess = sessionGroup
+      ? evaluateCapability(sessionGroup, id)
+      : { decision: 'deny' as const, reason: 'This AI session has no access group.' }
+    const scope = scopeGroup ? evaluateCapability(scopeGroup, id) : null
     const combined = serverId
       ? effectiveCapability(session, serverId, id)
-      : withCeiling(scope, sess, 'the workspace')
+      : withRestriction(sess, scope, 'the workspace')
     return {
       capability: id,
       label,
       decision: combined.decision,
       reason: combined.reason,
-      fromScope: scope.decision,
-      fromSession: sess ? sess.decision : null,
+      fromScope: scope ? scope.decision : sess.decision,
+      fromSession: sess.decision,
       decidedBy:
-        !sess || sess.decision === scope.decision ? 'both' : combined.decision === sess.decision ? 'session' : 'scope'
+        !scope || scope.decision === sess.decision
+          ? 'both'
+          : combined.decision === scope.decision
+            ? 'scope'
+            : 'session'
     }
   })
 }

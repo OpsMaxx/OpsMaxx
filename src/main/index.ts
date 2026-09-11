@@ -413,7 +413,9 @@ import {
   setCapacityReader,
   setFleetReader,
   setBackupReader,
-  setAlertReader
+  setAlertReader,
+  clearSessionElevations,
+  clearAllSessionElevations
 } from './services/mcpServer'
 
 const isDev = !app.isPackaged
@@ -4545,8 +4547,18 @@ ipcMain.handle('aiMcp:status', () => mcpServerStatus())
 // ---- AI & MCP: agent sessions ----
 ipcMain.handle('aiMcp:createSession', (_e, input: CreateSessionInput) => createSession(input))
 ipcMain.handle('aiMcp:listSessions', () => listSessions())
-ipcMain.handle('aiMcp:revokeSession', (_e, id: string) => revokeSession(id))
-ipcMain.handle('aiMcp:deleteSession', (_e, id: string) => deleteSession(id))
+// Approvals carried within a session die with it. A revoked session cannot
+// authenticate, so a stale entry could never be consulted -- this is hygiene
+// rather than a guard, and it keeps the set from growing for the life of the
+// process.
+ipcMain.handle('aiMcp:revokeSession', (_e, id: string) => {
+  clearSessionElevations(id)
+  return revokeSession(id)
+})
+ipcMain.handle('aiMcp:deleteSession', (_e, id: string) => {
+  clearSessionElevations(id)
+  return deleteSession(id)
+})
 ipcMain.handle('aiMcp:setSessionGroup', (_e, id: string, groupId: string | null, groupName: string) =>
   setSessionGroup(id, groupId, groupName)
 )
@@ -4555,6 +4567,7 @@ ipcMain.handle('aiMcp:explainAccess', (_e, sessionId: string, serverId: string |
 )
 ipcMain.handle('aiMcp:killAllSessions', () => {
   const count = killAllSessions()
+  clearAllSessionElevations()
   const denied = denyAllPending()
   return { revoked: count, denied }
 })

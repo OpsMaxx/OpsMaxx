@@ -89,7 +89,7 @@ export function SessionAccess({
   return (
     <div style={{ width: '100%' }}>
       <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 6 }}>
-        <span className="s-desc">Ceiling</span>
+        <span className="s-desc">Access group</span>
         <select
           className="input"
           style={{ maxWidth: 180 }}
@@ -113,10 +113,10 @@ export function SessionAccess({
           changed. */}
       {!open && narrowed.length > 0 && (
         <div className="s-desc warn" style={{ marginTop: 6, lineHeight: 1.5 }}>
-          Narrower than this ceiling:{' '}
+          Held below this group:{' '}
           {narrowed.map((r) => `${r.label} = ${VERDICT[r.decision]}`).join(', ')}. That is set by the
-          access group assigned to the workspace, not by this session — raising the ceiling cannot
-          widen it.{' '}
+          access group assigned to that target, which is an optional restriction set separately from
+          this session.{' '}
           <button className="linklike" onClick={() => openAi('groups')}>
             Change the assignment
           </button>

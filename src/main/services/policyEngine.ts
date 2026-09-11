@@ -9,6 +9,33 @@ export interface Decision {
 
 // Server-specific assignment overrides the workspace default; a workspace
 // with no assignment at all defaults to No AI Access (null groupId).
+/**
+ * Whether a target carries a deliberate assignment, and to what.
+ *
+ * `resolveGroupId` collapses two different facts into `null`: "nobody has set
+ * anything here" and "somebody set this to No AI Access". Under the old model
+ * both denied, so the collapse was harmless. Under the new one the first means
+ * "no restriction, the session's group applies" and the second means "this
+ * target is off limits" -- and treating an explicit No AI Access as no
+ * restriction would silently unlock every target a user had deliberately shut.
+ */
+export type Restriction =
+  | { kind: 'none' }
+  | { kind: 'no-ai-access' }
+  | { kind: 'group'; groupId: string }
+
+export function resolveRestriction(
+  assignments: PolicyAssignment[],
+  serverId: string,
+  workspaceId: string
+): Restriction {
+  const found =
+    assignments.find((a) => a.scope.level === 'server' && a.scope.serverId === serverId) ??
+    assignments.find((a) => a.scope.level === 'workspace' && a.scope.workspaceId === workspaceId)
+  if (!found) return { kind: 'none' }
+  return found.groupId ? { kind: 'group', groupId: found.groupId } : { kind: 'no-ai-access' }
+}
+
 export function resolveGroupId(
   assignments: PolicyAssignment[],
   serverId: string,

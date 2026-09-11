@@ -69,10 +69,17 @@ function fillAssignmentGaps(groupId: string | null): void {
   }
 }
 
-function newSession(agentName: string, groupId: string | null, groupName: string): string {
+function newSession(
+  agentName: string,
+  groupId: string | null,
+  groupName: string,
+  // Defaults to every workspace, which is what these tests want; pass [] to
+  // build a session scoped to nothing.
+  workspaces?: { id: string; name: string }[]
+): string {
   const { token } = createSession({
     agentName,
-    workspaces: listCachedWorkspaces().map((w) => ({ id: w.id, name: w.name })),
+    workspaces: workspaces ?? listCachedWorkspaces().map((w) => ({ id: w.id, name: w.name })),
     groupId,
     groupName,
     ttlMinutes: null
@@ -97,12 +104,29 @@ async function callText(client: Client, name: string): Promise<string> {
 warnIfUnbuilt()
 
 describe('connect flow', () => {
-  it('a session created without any assignment cannot see a server', async () => {
-    // The pre-button state: policy seeded, assignments empty. This is the
-    // failure the Connect buttons exist to prevent — the agent connects fine
-    // and then sees nothing.
+  it('a session with no assignment anywhere sees the servers its own group allows', async () => {
+    // INVERTED, deliberately. This used to assert that an agent with no
+    // assignment saw nothing -- which was the whole complaint: the knob the
+    // user turns is the session's access group, and it could only ever take
+    // access away. The session's group is the grant now, so an estate with no
+    // assignments at all is governed by it.
     expect(listAssignments()).toHaveLength(0)
     const token = newSession('Unassigned', 'grp-read-only', 'Read Only')
+    const client = await httpClient(token)
+    try {
+      expect(await callText(client, 'list_servers')).toContain('Nginx Server Prod')
+    } finally {
+      await client.close()
+    }
+  })
+
+  it('a session still sees nothing outside its own workspaces', async () => {
+    // The boundary that did NOT move, and the one that matters most now that a
+    // missing assignment no longer denies: a session is scoped to the
+    // workspaces chosen when it was created, and no access group can widen
+    // that. Without this, "the session's group grants" would mean a Full Access
+    // session reached the whole estate.
+    const token = newSession('Elsewhere', 'grp-full', 'Full Access', [])
     const client = await httpClient(token)
     try {
       expect(await callText(client, 'list_servers')).not.toContain('Nginx Server Prod')

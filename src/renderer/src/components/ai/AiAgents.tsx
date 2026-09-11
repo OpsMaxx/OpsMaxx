@@ -33,7 +33,11 @@ function CreateSessionForm({
 }): React.JSX.Element {
   const [agentName, setAgentName] = useState('Claude Code')
   const [workspaceIds, setWorkspaceIds] = useState<string[]>(workspaces[0] ? [workspaces[0].id] : [])
-  const [groupId, setGroupId] = useState(groups[0]?.id ?? '')
+  // The configured default, falling back to the first group only when no
+  // default has been chosen. `groups[0]` alone made the most permissive group
+  // in the list the default for every new agent on some installs, purely
+  // because of where it sat in the array.
+  const [groupId, setGroupId] = useState('')
   const [ttl, setTtl] = useState(60)
   const [issued, setIssued] = useState<{ token: string; port: number | null } | null>(null)
   // Re-hidden whenever a new session is issued, so revealing one token does not
@@ -50,7 +54,12 @@ function CreateSessionForm({
     if (workspaceIds.length === 0 && workspaces.length > 0) setWorkspaceIds([workspaces[0].id])
   }, [workspaces, workspaceIds])
   useEffect(() => {
-    if (!groupId && groups.length > 0) setGroupId(groups[0].id)
+    if (groupId || groups.length === 0) return
+    void window.opsmaxx?.aiMcp.getConfig?.().then((cfg) => {
+      const wanted = (cfg as { defaultSessionGroupId?: string } | null)?.defaultSessionGroupId
+      const found = wanted ? groups.find((g) => g.id === wanted) : null
+      setGroupId((found ?? groups[0]).id)
+    })
   }, [groups, groupId])
 
   const toggleWorkspace = (id: string): void => {
@@ -217,9 +226,11 @@ function CreateSessionForm({
       </div>
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">Access group ceiling</div>
+          <div className="s-title">Access group</div>
           <div className="s-desc">
-            The most this session can ever do, regardless of what a server is separately assigned to.
+            What this agent may do on the servers in those workspaces. This is the grant — there is
+            nothing else to set. A server can still be held below it individually, and the session
+            says so when one is.
           </div>
         </div>
         <select className="input" value={groupId} onChange={(e) => setGroupId(e.target.value)}>

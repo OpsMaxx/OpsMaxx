@@ -237,6 +237,15 @@ export interface McpGlobalConfig {
   port: number
   defaultSessionTtlMinutes: number
   approvalTimeoutSeconds: number
+  /**
+   * The access group a new agent session starts on.
+   *
+   * The session's group is the grant, so this is the single most consequential
+   * default in the AI feature and it gets to be a setting rather than a
+   * hardcoded first-in-the-list. Absent means the most restrictive group that
+   * exists, which is the right way to be wrong.
+   */
+  defaultSessionGroupId?: string
 }
 
 export interface WorkspaceRef {
@@ -353,7 +362,15 @@ export interface ApprovalRequest {
   actionsThisSession?: number
 }
 
-export type AuditApproval = 'not-required' | 'approved' | 'denied' | 'timeout'
+/**
+ * `approved-earlier` is an action allowed on the strength of an approval the
+ * user gave earlier in the same session, for the same capability on the same
+ * server. It is deliberately not folded into `approved`: the audit log is the
+ * only place the difference between "a human looked at this one" and "a human
+ * looked at one like it" survives, and that is exactly the question an audit is
+ * for.
+ */
+export type AuditApproval = 'not-required' | 'approved' | 'approved-earlier' | 'denied' | 'timeout'
 export type AuditResult = 'success' | 'error' | 'denied'
 
 export interface AuditEntry {
@@ -374,9 +391,23 @@ export interface AuditEntry {
 }
 
 export interface PolicyState {
-  version: 1
+  /**
+   * 1 — assignments were the grant, and the session's group only capped it.
+   * 2 — the session's group grants, and an assignment is an optional
+   *     restriction. Reaching 2 clears every assignment written under rule 1,
+   *     because each of them was made to mean the opposite thing.
+   */
+  version: 1 | 2
   groups: AccessGroup[]
   assignments: PolicyAssignment[]
+  /**
+   * What the version-2 migration removed, kept so the user can be told.
+   *
+   * Clearing an assignment WIDENS what an AI session can reach, so the app does
+   * not get to do it quietly: this is what lets the UI name the targets that
+   * used to carry a restriction and offer to put it back.
+   */
+  clearedAssignments?: PolicyAssignment[]
   serverMeta: ServerAiMeta[]
   // Highest seeded-file-policy generation this file has been brought up to.
   // Absent on every file written before the generation counter existed, which
