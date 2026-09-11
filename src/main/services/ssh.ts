@@ -823,6 +823,37 @@ export function setPoolIdle(minutes: number): void {
   idleMs = minutes < 0 ? Infinity : minutes * 60_000
 }
 
+/**
+ * A refused CHANNEL, as opposed to a command that ran and failed.
+ *
+ * sshd answers `Channel open failure: open failed` when it will not open
+ * another channel on an existing connection -- most often because MaxSessions
+ * (10 by default) is already used up, sometimes because the connection is
+ * half-dead and only the server knows yet. Either way it is a fact about the
+ * CONNECTION, and this app was reporting it as a fact about the command: the
+ * exec came back as an ordinary failure and the connection went straight back
+ * into the pool, so the next command drew the same bad connection and failed
+ * identically.
+ *
+ * An agent firing commands in quick succession hits this and then keeps hitting
+ * it: four failures in eighteen seconds against one host, with commands before
+ * and after succeeding on the same host.
+ */
+export function isChannelOpenFailure(message: string | undefined): boolean {
+  if (!message) return false
+  return /channel open failure|open failed|administratively prohibited/i.test(message)
+}
+
+/**
+ * Take a connection out of the pool so nothing else is handed it.
+ *
+ * The caller still has to `release()` its own reference; this only stops the
+ * NEXT caller inheriting a connection already known to be bad.
+ */
+export function invalidate(conn: PooledConnection): void {
+  if (pool.get(conn.key) === conn) pool.delete(conn.key)
+}
+
 export function release(conn: PooledConnection): void {
   conn.refs--
   if (conn.refs > 0) return
@@ -1051,7 +1082,39 @@ export async function sshExec(
       timeoutMs,
       `Timed out after ${timeoutMs}ms connecting`
     )
-    return await execOn(conn.client, command, timeoutMs)
+    const first = await execOn(conn.client, command, timeoutMs)
+    if (!isChannelOpenFailure(first.error)) return first
+
+    /**
+     * Retried exactly once, on a connection that is definitely new.
+     *
+     * SAFE TO RETRY, and only because of what this specific error means: the
+     * channel was never opened, so the command did not run. A retry after a
+     * failure that might have executed would be how an agent installs a package
+     * twice; this one cannot have.
+     *
+     * The bad connection leaves the pool first, so the fresh `acquire` cannot
+     * be handed it back.
+     */
+    invalidate(conn)
+    release(conn)
+    conn = await withDeadline(
+      acquire(cfg, undefined, allowPrompt),
+      timeoutMs,
+      `Timed out after ${timeoutMs}ms connecting`
+    )
+    const second = await execOn(conn.client, command, timeoutMs)
+    if (!isChannelOpenFailure(second.error)) return second
+    // Twice on a connection that was new the second time is the server's
+    // answer, not a stale socket. Say which, because "open failed" on its own
+    // sends people to look at the network.
+    return {
+      ...second,
+      error:
+        `${second.error} — the server refused to open another session channel, twice, the second ` +
+        'time on a brand new connection. That usually means its MaxSessions limit is reached: ' +
+        'other sessions on this host have to end, or sshd needs a higher MaxSessions.'
+    }
   } catch (err) {
     return {
       ok: false,
