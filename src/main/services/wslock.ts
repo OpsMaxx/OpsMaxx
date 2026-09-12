@@ -1,7 +1,9 @@
 import { app } from 'electron'
 import { join } from 'node:path'
-import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
+import { WS_MIN_PASSWORD } from '../../shared/workspace'
+import { atomicWriteFileSync } from './atomicWrite'
 
 // Per-workspace passwords. Only a scrypt verifier is stored — never the
 // password itself, and never anything reversible.
@@ -10,8 +12,13 @@ import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 // workspace's servers/databases on disk; those still live in the normal data
 // file. Use the Vault for secrets that must be encrypted at rest.
 
+// The minimum length enforced below is WS_MIN_PASSWORD, in shared/workspace.ts
+// — shared rather than declared here because the renderer's form enforces the
+// same rule, and the two hand-kept copies of the number were exactly the drift
+// the vault's shared constant was introduced to end. The reasoning for the
+// value, including why it is not the vault's 12, is in that file.
+
 const FILE = join(app.getPath('userData'), 'opsmaxx-wslocks.json')
-const TMP = `${FILE}.tmp`
 const KDF = { N: 32768, r: 8, p: 1, keylen: 32, maxmem: 96 * 1024 * 1024 }
 
 interface Lock {
@@ -38,8 +45,7 @@ function read(): LockMap {
 }
 
 function write(map: LockMap): void {
-  writeFileSync(TMP, JSON.stringify(map), { mode: 0o600 })
-  renameSync(TMP, FILE)
+  atomicWriteFileSync(FILE, JSON.stringify(map))
 }
 
 export function wsLockIds(): string[] {
@@ -63,7 +69,11 @@ export async function wsLockSet(
   password: string,
   current?: string
 ): Promise<{ ok: boolean; error?: string }> {
-  if (password.length < 6) return { ok: false, error: 'Password must be at least 6 characters.' }
+  if (password.length < WS_MIN_PASSWORD)
+    return {
+      ok: false,
+      error: `Password must be at least ${WS_MIN_PASSWORD} characters.`
+    }
   const map = read()
   if (map[id] && !(await wsLockVerify(id, current ?? ''))) {
     return { ok: false, error: 'Current password is incorrect.' }

@@ -1,8 +1,9 @@
 import { app } from 'electron'
 import { join } from 'node:path'
-import { existsSync, readFileSync, appendFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import type { JobApprovalEntry } from '../../shared/jobs'
+import { appendLogLine } from './logAppend'
 import { redactOutput } from './secretRedaction'
 
 // A record of what a human was asked before a job or a broadcast ran, and what
@@ -38,9 +39,11 @@ import { redactOutput } from './secretRedaction'
 // time. That test says "move the helper, not this assertion", and it is right.
 //
 // Same discipline as both of its siblings: append-only JSON lines, never
-// rewritten in place so a crash mid-write corrupts at most the last line, 0600,
-// and every free-text field redacted before it is written rather than before it
-// is displayed.
+// rewritten in place so a crash mid-write corrupts at most the last line, 0600
+// on every append rather than only on creation and through no symlink (that is
+// logAppend.ts, shared with the siblings because the gap was), and every
+// free-text field redacted before it is written rather than before it is
+// displayed.
 //
 // WHAT IS NEVER RECORDED HERE: a job's OUTPUT. That lives in the history store
 // under its own 30-day retention, capped and redacted there. This file answers
@@ -79,7 +82,7 @@ export function recordJobApproval(
     ...(entry.reason === undefined ? {} : { reason: redactOutput(entry.reason) })
   }
   try {
-    appendFileSync(FILE, `${JSON.stringify(full)}\n`, { mode: 0o600 })
+    appendLogLine(FILE, `${JSON.stringify(full)}\n`)
   } catch (err) {
     // A log that cannot be written must not take the job down with it — the
     // refusal that produced this row has already happened either way, and the

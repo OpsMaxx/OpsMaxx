@@ -1,7 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   DISABLE_ENV,
   loadHistory,
@@ -9,7 +17,11 @@ import {
   type HistoryStore
 } from '../src/main/services/history'
 import { JobRunner, type JobExecResult } from '../src/main/services/jobRunner'
-import { recordJobApproval, listJobApprovals } from '../src/main/services/approvalLog'
+import {
+  recordJobApproval,
+  listJobApprovals,
+  APPROVAL_LOG_PATH
+} from '../src/main/services/approvalLog'
 import type {
   CommandApproval,
   JobApprovalEntry,
@@ -676,6 +688,52 @@ describe('the approval log', () => {
         'title'
       ].sort()
     )
+  })
+
+  // The file itself, not the rows. `appendFileSync(FILE, line, { mode: 0o600 })`
+  // applied the mode only when it CREATED the file and followed a symlink at a
+  // fixed, guessable path — so a log restored from a backup stayed readable by
+  // every account on the machine, and a link pre-created here sent every
+  // authorised command and host somewhere else. logAppend.ts is the shared fix;
+  // these two are this writer's half of it.
+  describe.skipIf(process.platform === 'win32')('the file the rows land in', () => {
+    const decision = (jobId: string): Parameters<typeof recordJobApproval>[0] => ({
+      surface: 'job',
+      event: 'granted',
+      jobId,
+      title: 'Estate upgrade',
+      risk: 'ordinary',
+      confirmation: 'confirm',
+      phrase: null,
+      confirmedAt: AT,
+      hosts: ['web-1'],
+      commands: ['systemctl restart nginx']
+    })
+
+    it('tightens a log that already existed at 0666', () => {
+      recordJobApproval(decision('mode-1'))
+      chmodSync(APPROVAL_LOG_PATH, 0o666)
+      recordJobApproval(decision('mode-2'))
+      expect(statSync(APPROVAL_LOG_PATH).mode & 0o777).toBe(0o600)
+      expect(listJobApprovals(5).some((e) => e.jobId === 'mode-2')).toBe(true)
+    })
+
+    it('refuses a symlink at the log path without failing the job', () => {
+      // The refusal this row records has already happened, and the check does
+      // not depend on the record of it — so a missing row is the cheap outcome
+      // and a row written through somebody else's link is not.
+      const elsewhere = join(dirname(APPROVAL_LOG_PATH), 'approvals-somewhere-else.jsonl')
+      rmSync(APPROVAL_LOG_PATH, { force: true })
+      writeFileSync(elsewhere, 'not ours\n')
+      symlinkSync(elsewhere, APPROVAL_LOG_PATH)
+      try {
+        expect(() => recordJobApproval(decision('link-1'))).not.toThrow()
+        expect(readFileSync(elsewhere, 'utf8')).toBe('not ours\n')
+      } finally {
+        rmSync(APPROVAL_LOG_PATH, { force: true })
+        rmSync(elsewhere, { force: true })
+      }
+    })
   })
 
   it('gets the raw command from the runner, so redaction has exactly one home', async () => {

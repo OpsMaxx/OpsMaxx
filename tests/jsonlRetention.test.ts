@@ -63,9 +63,81 @@ describe('what survives, and what must not be thrown away', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// The fourth log spells the field differently, and that made its retention a
+// complete no-op.
+// ---------------------------------------------------------------------------
+//
+// `CredProxyCall` (src/shared/credproxy.ts) carries **`at`**, not `timestamp`.
+// The other three — AuditEntry, LocalSessionEntry, JobApprovalEntry — all carry
+// `timestamp`, so reading only that field looked right and was right for three
+// files out of four.
+//
+// For the fourth it returned null for every row, which rule 1 reads as
+// "unreadable: keep". So the 365-day horizon never fired on the ONE file that
+// grows per forwarded REQUEST rather than per approval, and only the
+// 50,000-line cap ever bit. The absence of a test with a row of this shape is
+// the whole reason that shipped.
+const credLine = (agoDays: number, id = 'c'): string =>
+  JSON.stringify({
+    id,
+    at: new Date(NOW - agoDays * DAY).toISOString(),
+    method: 'GET',
+    origin: 'https://api.example.com',
+    path: '/v1/models',
+    ruleId: 'r1',
+    ruleName: 'Example',
+    outcome: 'forwarded',
+    status: 200,
+    ms: 12
+  })
+
+describe('a credential-proxy row, which dates itself with `at`', () => {
+  it('ages out past the horizon like every other row', () => {
+    const lines = [credLine(400, 'old'), credLine(370, 'older'), credLine(1, 'recent')]
+    const { kept, dropped } = retainedLines(lines, { now: NOW, minKeep: 0 })
+    expect(dropped).toBe(2)
+    expect(kept).toEqual([credLine(1, 'recent')])
+  })
+
+  it('reads its timestamp rather than reporting it unreadable', () => {
+    expect(timestampOf(credLine(0))).toBe(NOW)
+  })
+
+  it('mixes with `timestamp` rows in one file without either being misread', () => {
+    // Not a case the app produces — one file, one writer — but the two spellings
+    // share one function, and a fix that read `at` INSTEAD of `timestamp` would
+    // break the three logs while fixing the fourth.
+    const lines = [line(400, 'ts-old'), credLine(400, 'at-old'), line(1, 'ts-new'), credLine(1)]
+    const { kept, dropped } = retainedLines(lines, { now: NOW, minKeep: 0 })
+    expect(dropped).toBe(2)
+    expect(kept).toEqual([line(1, 'ts-new'), credLine(1)])
+  })
+})
+
 describe('reading the timestamp', () => {
   it('reads an ISO string, which is what all three logs write', () => {
     expect(timestampOf(line(0))).toBe(NOW)
+  })
+
+  // The next two are PRECONDITIONS on the merged reader, not coverage of the
+  // `at` bug, and saying so is the point: both also pass against the old
+  // timestamp-only reader, which returned null for every `at` row. The three
+  // cases in the credproxy block above are what fail on that revert.
+  //
+  // They are still worth keeping: they pin the shape of the merged reader
+  // against a DIFFERENT wrong version — one that reads `at` first, or reads it
+  // without the string guard. `Date.parse(String(12345))` is not NaN and not
+  // 1970 either -- it is the year 12345 -- so a reader that skipped the guard
+  // would read that row as permanently inside the horizon.
+  it('ignores an `at` that is not a string rather than returning NaN', () => {
+    expect(timestampOf('{"at": 12345}')).toBeNull()
+    expect(timestampOf('{"at": "nope"}')).toBeNull()
+  })
+
+  it('prefers `timestamp` when a row somehow carries both', () => {
+    const row = JSON.stringify({ timestamp: new Date(NOW).toISOString(), at: 'not a date' })
+    expect(timestampOf(row)).toBe(NOW)
   })
 
   it('returns null rather than NaN for a value it cannot use', () => {

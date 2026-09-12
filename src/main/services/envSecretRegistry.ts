@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { join } from 'node:path'
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { atomicWriteFileSync } from './atomicWrite'
 
 // Which vault entries have been written into a host's `.env`, so that the value
 // is redacted out of anything that host later prints.
@@ -30,7 +31,6 @@ export interface EnvSecretRef {
 }
 
 const FILE = (): string => join(app.getPath('userData'), 'opsmaxx-env-secrets.json')
-const TMP = (): string => `${FILE()}.tmp`
 
 let cache: EnvSecretRef[] | null = null
 
@@ -83,8 +83,7 @@ export function registerEnvSecret(ref: EnvSecretRef): void {
   if (already) return
   const next = [...all, ref]
   try {
-    writeFileSync(TMP(), JSON.stringify(next), { mode: 0o600 })
-    renameSync(TMP(), FILE())
+    atomicWriteFileSync(FILE(), JSON.stringify(next))
     cache = next
   } catch {
     // The write is what makes this survive a restart. If it failed, the

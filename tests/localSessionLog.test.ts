@@ -1,6 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { readFileSync, existsSync, rmSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import {
+  chmodSync,
+  existsSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
+import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import { recordLocalSession, listLocalSessions } from '../src/main/services/localSessionLog'
 
@@ -65,10 +73,40 @@ describe('recording', () => {
     expect(second.startsWith(first)).toBe(true)
   })
 
-  it('creates the file 0600', () => {
+  it.skipIf(process.platform === 'win32')('creates the file 0600', () => {
     recordLocalSession({ ...base, event: 'started' })
     // It names which shells a person runs and when they are at the machine.
     expect(statSync(FILE).mode & 0o077).toBe(0)
+  })
+
+  it.skipIf(process.platform === 'win32')('tightens a file that already existed at 0666', () => {
+    // THE CASE THAT WAS ACTUALLY AT RISK, and the one the test above cannot
+    // reach: `appendFileSync`'s `mode` is applied when the file is CREATED, so
+    // asserting the mode of a file this test just created was green in the only
+    // situation that was never in question. A log that predates the mode
+    // argument, came out of a backup, or was pre-created by anything else
+    // running as this user kept its permissions for life.
+    recordLocalSession({ ...base, event: 'started' })
+    chmodSync(FILE, 0o666)
+    recordLocalSession({ ...base, event: 'exited', exitCode: 0 })
+    expect(statSync(FILE).mode & 0o777).toBe(0o600)
+    expect(listLocalSessions().map((e) => e.event)).toEqual(['exited', 'started'])
+  })
+
+  it.skipIf(process.platform === 'win32')('refuses a symlink at the log path', () => {
+    // The other half of the same gap: the append flag follows a symlink, and
+    // this path is fixed. A refusal costs a row; following the link would hand
+    // somebody else every shell path and cwd on this machine.
+    const elsewhere = join(dirname(FILE), 'sessions-somewhere-else.jsonl')
+    writeFileSync(elsewhere, 'not ours\n')
+    symlinkSync(elsewhere, FILE)
+    try {
+      expect(() => recordLocalSession({ ...base, event: 'started' })).not.toThrow()
+      expect(readFileSync(elsewhere, 'utf8')).toBe('not ours\n')
+    } finally {
+      rmSync(FILE, { force: true })
+      rmSync(elsewhere, { force: true })
+    }
   })
 })
 

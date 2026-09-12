@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { join } from 'node:path'
-import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { atomicWriteFileSync } from './atomicWrite'
 
 /**
  * Whether a login launch opens a window, decided by us rather than by macOS.
@@ -25,7 +26,6 @@ import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
  */
 
 const FILE = join(app.getPath('userData'), 'opsmaxx-startup.json')
-const TMP = `${FILE}.tmp`
 
 export interface StartupPrefs {
   /** Launch at login without putting a window on screen. */
@@ -60,8 +60,7 @@ export function startupPrefs(): StartupPrefs {
 export function setStartupPrefs(next: StartupPrefs): StartupPrefs {
   const value: StartupPrefs = { openAsHidden: next.openAsHidden === true }
   try {
-    writeFileSync(TMP, JSON.stringify(value), { mode: 0o600 })
-    renameSync(TMP, FILE)
+    atomicWriteFileSync(FILE, JSON.stringify(value))
   } catch {
     // Losing the preference is survivable; failing to launch is not.
   }

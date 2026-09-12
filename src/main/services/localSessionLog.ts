@@ -1,7 +1,8 @@
 import { app } from 'electron'
 import { join } from 'node:path'
-import { existsSync, readFileSync, appendFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
+import { appendLogLine } from './logAppend'
 
 // A record of which shells ran on this machine, and when.
 //
@@ -45,7 +46,10 @@ export interface LocalSessionEntry {
 const uid = (): string => `local-${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`
 
 // Append-only JSON lines, 0600, same discipline as the AI audit log: never
-// rewritten in place, so a crash mid-write corrupts at most the last line.
+// rewritten in place, so a crash mid-write corrupts at most the last line. The
+// 0600 is enforced on every append and not only on creation, and the append
+// refuses a symlink — logAppend.ts carries why both of those are the file's
+// problem and not the mode argument's.
 export function recordLocalSession(
   entry: Omit<LocalSessionEntry, 'id' | 'timestamp'>
 ): LocalSessionEntry {
@@ -55,7 +59,7 @@ export function recordLocalSession(
     ...entry
   }
   try {
-    appendFileSync(FILE, `${JSON.stringify(full)}\n`, { mode: 0o600 })
+    appendLogLine(FILE, `${JSON.stringify(full)}\n`)
   } catch (err) {
     // A log that cannot be written must not take the terminal down with it.
     console.error('[local-session] failed to append entry:', err)

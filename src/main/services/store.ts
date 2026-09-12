@@ -1,12 +1,12 @@
 import { app } from 'electron'
 import { join } from 'node:path'
-import { readFileSync, writeFileSync, existsSync, renameSync, copyFileSync } from 'node:fs'
+import { readFileSync, existsSync, copyFileSync } from 'node:fs'
+import { atomicWriteFileSync } from './atomicWrite'
 
 // Non-secret application data (workspaces, folders, servers, vpns, tunnels).
 // Secrets live separately in secrets.ts. This is a plain JSON snapshot the
 // renderer owns; main only reads and writes the blob.
 const FILE = join(app.getPath('userData'), 'opsmaxx-data.json')
-const TMP = `${FILE}.tmp`
 const BAK = `${FILE}.bak`
 
 export function loadData(): unknown | null {
@@ -39,8 +39,7 @@ export function saveData(data: unknown): void {
         /* a missing backup must not stop the save */
       }
     }
-    writeFileSync(TMP, json, { mode: 0o600 })
-    renameSync(TMP, FILE)
+    atomicWriteFileSync(FILE, json)
   } catch (err) {
     console.error('[store] save failed:', err)
   }

@@ -1,7 +1,8 @@
 import { app } from 'electron'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, renameSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { atomicWriteFileSync } from './atomicWrite'
 
 // Writes MCP client configuration on the user's behalf, so connecting an agent
 // is a button rather than a hand-edited JSON file with a 130-character absolute
@@ -122,7 +123,14 @@ export function writeClaudeDesktopConfigTo(file: string, token: string, port: nu
     }
     backedUpTo = `${file}.opsmaxx-backup`
     try {
-      copyFileSync(file, backedUpTo)
+      // The same helper, for the same two reasons, as the real write below — a
+      // copy of a token-bearing config is as sensitive as the config. `mode` on
+      // copyFileSync is not a thing: it takes the source's mode on some
+      // platforms only, NEVER narrows a file already sitting at the
+      // destination, and follows a symlink planted there. This path is as
+      // predictable as the temp path was. `raw` is the bytes just read, so
+      // nothing is read twice.
+      atomicWriteFileSync(backedUpTo, raw, 0o600, `${backedUpTo}.opsmaxx-tmp`)
     } catch {
       // A backup is a courtesy, not a precondition — the merge below preserves
       // every key it did not write, so failing to copy is not worth aborting for.
@@ -142,9 +150,23 @@ export function writeClaudeDesktopConfigTo(file: string, token: string, port: nu
 
   try {
     mkdirSync(dirname(file), { recursive: true })
-    const tmp = `${file}.opsmaxx-tmp`
-    writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
-    renameSync(tmp, file)
+    // 0600, where this went out with no mode at all and took the umask — so the
+    // bearer token this writes was world-readable on a default install. These two
+    // writers are the reason the helper takes a mode: of everything that calls
+    // `atomicWriteFileSync`, they are the only ones that land OUTSIDE userData
+    // (`~/.config`, `~/.codex`, `~/Library/Application Support/Claude`), where the
+    // 0700 directory that covers every other caller does not reach. The agent that
+    // reads it back runs as this same user, so narrowing the mode costs it
+    // nothing.
+    //
+    // Not the only bytes the app ever puts outside userData — backup.ts writes the
+    // `.spbackup` archive wherever a save dialog sent it, and a transient 0600
+    // dump config under `tmpdir()`. Both are different in the way that matters
+    // here: one is a path the user chose in that moment and the other is deleted
+    // in a `finally`, whereas these two are long-lived files this app places in
+    // somebody else's config directory on its own initiative and then leaves
+    // there.
+    atomicWriteFileSync(file, `${JSON.stringify(next, null, 2)}\n`, 0o600, `${file}.opsmaxx-tmp`)
   } catch (err) {
     return { ok: false, path: file, error: `Could not write ${file}: ${(err as Error).message}` }
   }
@@ -191,7 +213,9 @@ export function writeCodexConfigTo(file: string, token: string, port: number): W
     }
     backedUpTo = `${file}.opsmaxx-backup`
     try {
-      copyFileSync(file, backedUpTo)
+      // Same reasoning as writeClaudeDesktopConfigTo above, and the block this
+      // file is a backup of carries the token either way.
+      atomicWriteFileSync(backedUpTo, existing, 0o600, `${backedUpTo}.opsmaxx-tmp`)
     } catch {
       backedUpTo = undefined
     }
@@ -208,9 +232,9 @@ export function writeCodexConfigTo(file: string, token: string, port: number): W
 
   try {
     mkdirSync(dirname(file), { recursive: true })
-    const tmp = `${file}.opsmaxx-tmp`
-    writeFileSync(tmp, next, 'utf8')
-    renameSync(tmp, file)
+    // Same reasoning as writeClaudeDesktopConfigTo above: outside userData, and
+    // the block it splices in carries the token.
+    atomicWriteFileSync(file, next, 0o600, `${file}.opsmaxx-tmp`)
   } catch (err) {
     return { ok: false, path: file, error: `Could not write ${file}: ${(err as Error).message}` }
   }

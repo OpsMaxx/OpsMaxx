@@ -1,18 +1,19 @@
 import { app } from 'electron'
 import { join } from 'node:path'
-import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
+import { existsSync, readFileSync, unlinkSync } from 'node:fs'
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto'
 import type { McpAgentSession, McpGlobalConfig, WorkspaceRef } from '../../shared/mcp'
 import { DEFAULT_MCP_PORT } from '../../shared/mcp'
+import { atomicWriteFileSync } from './atomicWrite'
 
 const CONFIG_FILE = join(app.getPath('userData'), 'opsmaxx-mcp-config.json')
-const CONFIG_TMP = `${CONFIG_FILE}.tmp`
 const SESSIONS_FILE = join(app.getPath('userData'), 'opsmaxx-mcp-sessions.json')
-const SESSIONS_TMP = `${SESSIONS_FILE}.tmp`
 
 function defaultConfig(): McpGlobalConfig {
-  // No defaultSessionGroupId: absent resolves to the most restrictive group,
-  // which is what a default that nobody has chosen should be.
+  // No defaultSessionGroupId. Absent does NOT mean "the most restrictive group"
+  // — see resolveDefaultSessionGroup() in shared/mcp.ts, which is the only way
+  // this field is read. It resolves to no group at all, which fails closed at
+  // every consumer, and a flow with its own considered default passes one in.
   return { enabled: false, port: DEFAULT_MCP_PORT, defaultSessionTtlMinutes: 60, approvalTimeoutSeconds: 120 }
 }
 
@@ -35,8 +36,7 @@ function loadConfig(): McpGlobalConfig {
 
 function writeConfig(next: McpGlobalConfig): void {
   config = next
-  writeFileSync(CONFIG_TMP, JSON.stringify(next), { mode: 0o600 })
-  renameSync(CONFIG_TMP, CONFIG_FILE)
+  atomicWriteFileSync(CONFIG_FILE, JSON.stringify(next))
 }
 
 export function getMcpConfig(): McpGlobalConfig {
@@ -97,8 +97,7 @@ function loadSessions(): McpAgentSession[] {
 }
 
 function writeSessions(): void {
-  writeFileSync(SESSIONS_TMP, JSON.stringify(sessions ?? []), { mode: 0o600 })
-  renameSync(SESSIONS_TMP, SESSIONS_FILE)
+  atomicWriteFileSync(SESSIONS_FILE, JSON.stringify(sessions ?? []))
 }
 
 function hashToken(raw: string): string {

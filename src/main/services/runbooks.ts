@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { join } from 'node:path'
-import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, unlinkSync } from 'node:fs'
 import {
   RUNBOOK_LOOKBACK_DAYS,
   RUNBOOK_OCCURRENCES,
@@ -18,6 +18,7 @@ import {
 } from '../../shared/runbooks'
 import { ALERT_HISTORY_KIND, sanitiseStoredAlert, type StoreAlertKind } from '../../shared/webhook'
 import type { JobHostOutcome } from '../../shared/jobs'
+import { atomicWriteFileSync } from './atomicWrite'
 import { DISABLE_ENV, type HistoryStore } from './history'
 import { redactOutput } from './secretRedaction'
 
@@ -147,12 +148,18 @@ function readNotes(deps: RunbookDeps): NotesRead {
 }
 
 function writeNotes(deps: RunbookDeps, notes: Map<string, RunbookNote>): boolean {
-  const path = notesPath(deps)
-  const tmp = `${path}.tmp`
   const body: NotesFile = { v: NOTES_VERSION, notes: [...notes.values()] }
   try {
-    writeFileSync(tmp, JSON.stringify(body), { mode: 0o600 })
-    renameSync(tmp, path)
+    // Temp-then-rename at 0600 through atomicWrite.ts, which is the one place
+    // that spells out why the temp path is created and never adopted. This was a
+    // hand-rolled copy of that sequence and it had drifted by a word: its
+    // `rmSync` lacked `recursive`, so a DIRECTORY planted at `${path}.tmp` threw
+    // EISDIR — caught below, logged, and `false` returned — which meant notes
+    // never saved again for the life of the install, silently.
+    //
+    // Defaults on both optional arguments: 0600, and the same `.tmp` suffix this
+    // file already used.
+    atomicWriteFileSync(notesPath(deps), JSON.stringify(body))
     return true
   } catch (err) {
     console.error('[runbooks] note save failed:', err)

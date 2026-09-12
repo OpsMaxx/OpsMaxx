@@ -1,15 +1,15 @@
 import { app, dialog } from 'electron'
 import { join } from 'node:path'
-import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { readOpenSshKnownHosts, lookupInKnownHosts, canonicalHostname } from './opensshKnownHosts'
+import { atomicWriteFileSync } from './atomicWrite'
 
 // Trust-on-first-use host key checking. Without this, ssh2 accepts any host
 // key presented, so a machine-in-the-middle on the path to a server can
 // capture the session and any credentials sent over it.
 
 const FILE = join(app.getPath('userData'), 'opsmaxx-known-hosts.json')
-const TMP = `${FILE}.tmp`
 
 export interface KnownHost {
   id: string // "host:port"
@@ -29,8 +29,7 @@ function read(): HostMap {
 }
 
 function write(map: HostMap): void {
-  writeFileSync(TMP, JSON.stringify(map, null, 2), { mode: 0o600 })
-  renameSync(TMP, FILE)
+  atomicWriteFileSync(FILE, JSON.stringify(map, null, 2))
 }
 
 // OpenSSH-style fingerprint: base64 SHA-256 of the raw key, padding stripped.

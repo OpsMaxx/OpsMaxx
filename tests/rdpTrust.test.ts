@@ -1,4 +1,14 @@
-import { readFileSync, rmSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { app, dialog } from 'electron'
@@ -14,6 +24,7 @@ const { verifyRdpCertificate, certFingerprint, trustedRdpCertList, forgetRdpCert
 )
 
 const STORE = join(app.getPath('userData'), 'opsmaxx-rdp-certs.json')
+const VICTIM = join(app.getPath('userData'), 'rdp-trust-victim.txt')
 
 const CERT_A = Buffer.from('certificate-alpha')
 const CERT_B = Buffer.from('certificate-bravo')
@@ -37,12 +48,20 @@ function answerWith(buttonIndex: number): typeof ask {
 
 beforeEach(() => {
   rmSync(STORE, { force: true })
+  // `recursive` because one of the cases below plants a DIRECTORY here, and a
+  // teardown that throws EISDIR would fail every later test in the file.
+  rmSync(`${STORE}.tmp`, { force: true, recursive: true })
+  rmSync(VICTIM, { force: true })
   vi.restoreAllMocks()
   ask = spyOnDialog()
 })
 
 afterEach(() => {
   rmSync(STORE, { force: true })
+  // `recursive` because one of the cases below plants a DIRECTORY here, and a
+  // teardown that throws EISDIR would fail every later test in the file.
+  rmSync(`${STORE}.tmp`, { force: true, recursive: true })
+  rmSync(VICTIM, { force: true })
 })
 
 describe('first contact with a host', () => {
@@ -142,5 +161,58 @@ describe('the fingerprint', () => {
   it('is a SHA-256 in the same shape as the SSH host key fingerprints', async () => {
     expect(certFingerprint(CERT_A)).toMatch(/^SHA256:[A-Za-z0-9+/]+$/)
     expect(certFingerprint(CERT_A)).not.toBe(certFingerprint(CERT_B))
+  })
+})
+
+// This file IS the trust store, and `${STORE}.tmp` is a predictable path. The
+// same gap jsonlPrune.ts was fixed for: whatever is already sitting there
+// decides the mode and the destination of the write the rename then installs as
+// the pin list.
+describe('the temp file the store is written through', () => {
+  it('does not adopt a wide file someone left at the temp path', async () => {
+    // chmodSync, not a `mode` on the write: writeFileSync's mode is masked by
+    // the umask, so 0o666 would not actually produce a world-writable file.
+    writeFileSync(`${STORE}.tmp`, 'left behind by a crashed run')
+    chmodSync(`${STORE}.tmp`, 0o666)
+
+    answerWith(0)
+    await expect(verifyRdpCertificate('win-01', 3389, CERT_A)).resolves.toBe(true)
+
+    // The pin landed, and it landed at 0600 rather than inheriting 0666.
+    expect(JSON.parse(readFileSync(STORE, 'utf8'))['win-01:3389'].fingerprint).toBe(
+      certFingerprint(CERT_A)
+    )
+    expect(statSync(STORE).mode & 0o077).toBe(0)
+    expect(existsSync(`${STORE}.tmp`)).toBe(false)
+  })
+
+  it('leaves a planted DIRECTORY at the temp path no way to stop the pin', async () => {
+    // `rmSync(dir, { force: true })` without `recursive` throws EISDIR. This
+    // writer swallows nothing, but a directory here would have meant no host
+    // could ever be trusted again — and the prompt would still have said yes.
+    mkdirSync(join(`${STORE}.tmp`, 'deep'), { recursive: true })
+
+    answerWith(0)
+    await expect(verifyRdpCertificate('win-01', 3389, CERT_A)).resolves.toBe(true)
+
+    expect(JSON.parse(readFileSync(STORE, 'utf8'))['win-01:3389'].fingerprint).toBe(
+      certFingerprint(CERT_A)
+    )
+    expect(existsSync(`${STORE}.tmp`)).toBe(false)
+  })
+
+  it('writes nothing through a symlink left at the temp path', async () => {
+    writeFileSync(VICTIM, 'do not touch')
+    symlinkSync(VICTIM, `${STORE}.tmp`)
+
+    answerWith(0)
+    await verifyRdpCertificate('win-01', 3389, CERT_A)
+
+    expect(readFileSync(VICTIM, 'utf8')).toBe('do not touch')
+    expect(existsSync(`${STORE}.tmp`)).toBe(false)
+    expect(lstatSync(STORE).isSymbolicLink()).toBe(false)
+    expect(JSON.parse(readFileSync(STORE, 'utf8'))['win-01:3389'].fingerprint).toBe(
+      certFingerprint(CERT_A)
+    )
   })
 })

@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { timingSafeEqual } from 'node:crypto'
 import {
   credProxyTokenState,
@@ -22,7 +22,9 @@ import type {
   CredProxyRule,
   CredProxyStatus
 } from '../../shared/credproxy'
+import { appendLogLine } from './logAppend'
 import { redactOutput } from './secretRedaction'
+import { atomicWriteFileSync } from './atomicWrite'
 
 // The API credential proxy — roadmap item 7, main-process half.
 //
@@ -697,20 +699,41 @@ export function readCredProxyFile(path: string): unknown {
  *  half-written rule file is a rule file that has lost a destination. */
 export function writeCredProxyFile(path: string, file: CredProxyFile): void {
   try {
-    writeFileSync(`${path}.tmp`, JSON.stringify(file), { mode: 0o600 })
-    renameSync(`${path}.tmp`, path)
+    atomicWriteFileSync(path, JSON.stringify(file))
   } catch (err) {
     console.error('[credproxy] rule file save failed:', err)
   }
 }
 
+/**
+ * The audit log's BASENAME, not its path, and the difference is deliberate.
+ *
+ * auditLog.ts, localSessionLog.ts and approvalLog.ts each export a resolved
+ * `*_PATH` built from `app.getPath('userData')`. This module cannot: it imports
+ * no electron at all -- tests/credProxyWiring.test.ts asserts that by reading
+ * the source, because the one module in the app that talks to third-party hosts
+ * must not have the keychain or the vault inside its reach. main owns the
+ * directory and joins it on.
+ *
+ * Exported for the same reason the siblings export theirs: retention prunes
+ * THIS file and a "delete everything" removes THIS file, rather than a second
+ * copy of the name that one of the three places will eventually get wrong.
+ */
+export const CRED_PROXY_AUDIT_FILE = 'opsmaxx-credproxy-audit.jsonl'
+
 /** Append-only JSON lines, the same shape auditLog.ts uses and for the same
  *  reason: a crash mid-write can corrupt at most the last line. Rows are
  *  already redacted by the time they arrive here — see `redactThenCap` — and
- *  they never carried a body, a header or a query string in the first place. */
+ *  they never carried a body, a header or a query string in the first place.
+ *
+ *  Through `appendLogLine`, like all three siblings: 0600 on every append and
+ *  not only on the one that creates the file, and never through a symlink. This
+ *  file says which credential went to which host, which makes it the one of the
+ *  four that most rewards being readable or redirected. logAppend.ts imports no
+ *  electron either, so the rule this module is held to still holds. */
 export function appendCredProxyAudit(path: string, call: CredProxyCall): void {
   try {
-    appendFileSync(path, `${JSON.stringify(call)}\n`, { mode: 0o600 })
+    appendLogLine(path, `${JSON.stringify(call)}\n`)
   } catch (err) {
     console.error('[credproxy] failed to append an audit row:', err)
   }

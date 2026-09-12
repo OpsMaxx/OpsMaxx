@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { join } from 'node:path'
-import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
+import { existsSync, readFileSync, unlinkSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { AI_CAPABILITIES } from '../../shared/mcp'
 import type {
@@ -10,12 +10,12 @@ import type {
   PolicyState,
   ServerAiMeta
 } from '../../shared/mcp'
+import { atomicWriteFileSync } from './atomicWrite'
 
 // Access groups, server/workspace assignments and AI aliases. Same
 // temp-then-rename write pattern as store.ts/vault.ts/knownhosts.ts. No
 // secrets live in this file — credentials never enter the AI policy layer.
 const FILE = join(app.getPath('userData'), 'opsmaxx-ai-policy.json')
-const TMP = `${FILE}.tmp`
 
 const uid = (p: string): string => `${p}-${randomBytes(6).toString('hex')}`
 
@@ -533,8 +533,7 @@ function dropLegacyAssignments(state: PolicyState): PolicyState {
 }
 
 function write(state: PolicyState): void {
-  writeFileSync(TMP, JSON.stringify(state), { mode: 0o600 })
-  renameSync(TMP, FILE)
+  atomicWriteFileSync(FILE, JSON.stringify(state))
 }
 
 let cache: PolicyState | null = null

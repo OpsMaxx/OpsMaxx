@@ -1,7 +1,8 @@
 import { app, dialog } from 'electron'
 import { join } from 'node:path'
-import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { atomicWriteFileSync } from './atomicWrite'
 
 // Trust-on-first-use for RDP server certificates, and the answer to the
 // question `rejectUnauthorized: false` raises.
@@ -22,7 +23,6 @@ import { createHash } from 'node:crypto'
 // with no certificate check at all.
 
 const FILE = join(app.getPath('userData'), 'opsmaxx-rdp-certs.json')
-const TMP = `${FILE}.tmp`
 
 export interface TrustedRdpCert {
   /** "host:port" — the RDP host, never the bastion it was reached through. */
@@ -44,9 +44,15 @@ function read(): CertMap {
 
 function write(map: CertMap): void {
   // Via a temporary file, so an interrupted write cannot leave a half-written
-  // trust store that reads as "nothing is trusted".
-  writeFileSync(TMP, JSON.stringify(map, null, 2))
-  renameSync(TMP, FILE)
+  // trust store that reads as "nothing is trusted". This file IS the trust
+  // store, so the temp path is created and never adopted — whatever is already
+  // sitting at the predictable `${FILE}.tmp` would otherwise have chosen both
+  // the mode and the destination of the pin list the rename then installs.
+  // atomicWrite.ts is the one place that spells that out; this was a hand-rolled
+  // copy of it that had drifted by a word (`recursive` on the rmSync).
+  //
+  // Defaults on both of the helper's optional arguments: 0600, and `.tmp`.
+  atomicWriteFileSync(FILE, JSON.stringify(map, null, 2))
 }
 
 /** SHA-256 of the DER, formatted like the SSH fingerprints shown elsewhere. */

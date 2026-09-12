@@ -1,5 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  chmodSync,
+  lstatSync,
+  statSync,
+  symlinkSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -186,4 +196,72 @@ describe('writing the codex config', () => {
     expect(writeCodexConfigTo(nested, 'tok', 5177).ok).toBe(true)
     expect(readFileSync(nested, 'utf8')).toContain('[mcp_servers.opsmaxx]')
   })
+})
+
+// Both writers back the file up at `${file}.opsmaxx-backup` — a fully
+// predictable path — one line above a write that is narrowed to 0600 because the
+// token is in it. A copy of a token-bearing config is as sensitive as the
+// config, and `copyFileSync` offered no mode control: it takes the source's mode
+// on some platforms only, never narrows a file already at the destination, and
+// follows a symlink planted there.
+describe('the backup copy', () => {
+  const modeOf = (f: string): number => statSync(f).mode & 0o777
+  const backupOf = (f: string): string => `${f}.opsmaxx-backup`
+
+  const writers = [
+    {
+      name: 'claude desktop',
+      path: (): string => file,
+      body: `${JSON.stringify({ mcpServers: { burp: { command: 'python' } } }, null, 2)}\n`,
+      write: (f: string): { ok: boolean } => writeClaudeDesktopConfigTo(f, 'tok', 5177)
+    },
+    {
+      name: 'codex',
+      path: (): string => join(dir, 'config.toml'),
+      body: 'model = "gpt-5"\n',
+      write: (f: string): { ok: boolean } => writeCodexConfigTo(f, 'tok', 5177)
+    }
+  ]
+
+  for (const w of writers) {
+    it.skipIf(process.platform === 'win32')(`${w.name}: writes the backup 0600`, () => {
+      const f = w.path()
+      writeFileSync(f, w.body)
+      expect(w.write(f).ok).toBe(true)
+      // Usable as a backup — the bytes that were there — and not readable by
+      // anyone else on the machine.
+      expect(readFileSync(backupOf(f), 'utf8')).toBe(w.body)
+      expect(modeOf(backupOf(f))).toBe(0o600)
+    })
+
+    it.skipIf(process.platform === 'win32')(
+      `${w.name}: narrows a backup an earlier run left wide`,
+      () => {
+        const f = w.path()
+        writeFileSync(f, w.body)
+        // An explicit chmod, not `{ mode }` on the write: the umask masks that,
+        // so the precondition would not actually be wide and the assertion
+        // below would pass against the unfixed code.
+        writeFileSync(backupOf(f), 'stale')
+        chmodSync(backupOf(f), 0o644)
+
+        expect(w.write(f).ok).toBe(true)
+        expect(modeOf(backupOf(f))).toBe(0o600)
+        expect(readFileSync(backupOf(f), 'utf8')).toBe(w.body)
+      }
+    )
+
+    it(`${w.name}: does not write through a symlink at the backup path`, () => {
+      const f = w.path()
+      writeFileSync(f, w.body)
+      const victim = join(dir, `victim-${w.name.replace(/\s/g, '-')}`)
+      writeFileSync(victim, 'not ours')
+      symlinkSync(victim, backupOf(f))
+
+      expect(w.write(f).ok).toBe(true)
+      expect(readFileSync(victim, 'utf8')).toBe('not ours')
+      expect(lstatSync(backupOf(f)).isSymbolicLink()).toBe(false)
+      expect(readFileSync(backupOf(f), 'utf8')).toBe(w.body)
+    })
+  }
 })

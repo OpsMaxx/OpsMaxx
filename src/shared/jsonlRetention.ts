@@ -1,5 +1,5 @@
 /**
- * How long the three append-only JSON-lines logs keep a line.
+ * How long the four append-only JSON-lines logs keep a line.
  *
  * `auditLog`, `approvalLog` and `localSessionLog` had no horizon at all: they
  * grew for as long as the app was used. In practice that is slow -- one line
@@ -7,6 +7,12 @@
  * bounded, and "it will be fine" is not a retention policy. The history store
  * has had a horizon per event kind since item 32; these are the files that were
  * left out of it.
+ *
+ * The credential proxy's audit log is the fourth, and it was left out of THIS
+ * in turn -- see the prune list in main/index.ts. It is also the one the "slow"
+ * argument above does not cover: a row per forwarded REQUEST rather than per
+ * approval, so an agent looping against an API writes them as fast as it can
+ * send. The count bound below is what actually holds it.
  *
  * A YEAR, deliberately generous. These answer "who did what, and who approved
  * it", which is a question asked long after the fact -- during an incident
@@ -66,10 +72,27 @@ export function retainedLines(
   return { kept, dropped: lines.length - kept.length }
 }
 
-/** The `timestamp` an entry was written with, or null if it cannot be read. */
+/**
+ * When an entry was written, or null if that cannot be read.
+ *
+ * TWO FIELD NAMES, BECAUSE THE FOUR LOGS DO NOT AGREE. `AuditEntry`
+ * (shared/mcp.ts), `LocalSessionEntry` (main/services/localSessionLog.ts) and
+ * `JobApprovalEntry` (shared/jobs.ts) all write `timestamp`. `CredProxyCall`
+ * (shared/credproxy.ts) writes **`at`**, and it was the fourth log added to the
+ * prune sweep.
+ *
+ * Reading only `timestamp` therefore returned null for every credproxy row,
+ * which rule 1 above correctly reads as "unreadable: keep" — so the 365-day
+ * horizon silently never fired on the one file that grows per forwarded REQUEST
+ * rather than per approval, and only the 50,000-line cap ever bit it. A
+ * retention policy that is a no-op on its fastest-growing input is not a
+ * retention policy. Those two are the only spellings in the app; a third log
+ * with a third name is a third line here, not a new mechanism.
+ */
 export function timestampOf(line: string): number | null {
   try {
-    const v = (JSON.parse(line) as { timestamp?: unknown }).timestamp
+    const row = JSON.parse(line) as { timestamp?: unknown; at?: unknown }
+    const v = typeof row.timestamp === 'string' ? row.timestamp : row.at
     if (typeof v !== 'string') return null
     const ms = Date.parse(v)
     return Number.isFinite(ms) ? ms : null

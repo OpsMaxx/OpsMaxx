@@ -1,8 +1,9 @@
 import { app } from 'electron'
 import { join } from 'node:path'
-import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
+import { existsSync, readFileSync, unlinkSync } from 'node:fs'
 import { DEFAULT_UPDATE_PREFS } from '../../shared/updater'
 import type { CheckIntervalHours, UpdateChannel, UpdatePrefs } from '../../shared/updater'
+import { atomicWriteFileSync } from './atomicWrite'
 
 // Every other user-facing setting lives in the one zustand blob the renderer
 // owns and writes through store.ts. These cannot: the updater runs in main and
@@ -12,7 +13,6 @@ import type { CheckIntervalHours, UpdateChannel, UpdatePrefs } from '../../share
 // renderer would mean the launch check is no longer a launch check. So the
 // updater keeps its own small file, written and read entirely in main.
 const FILE = join(app.getPath('userData'), 'update-prefs.json')
-const TMP = `${FILE}.tmp`
 
 const CHANNELS: UpdateChannel[] = ['stable', 'beta']
 const INTERVALS: CheckIntervalHours[] = [0, 6, 24]
@@ -61,8 +61,7 @@ function read(): UpdatePrefs {
 // user four toggles, so the extra write per save is not worth it.
 function write(prefs: UpdatePrefs): void {
   try {
-    writeFileSync(TMP, JSON.stringify(prefs), { mode: 0o600 })
-    renameSync(TMP, FILE)
+    atomicWriteFileSync(FILE, JSON.stringify(prefs))
   } catch (err) {
     console.error('[updater] prefs save failed:', err)
   }

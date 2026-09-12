@@ -3,16 +3,15 @@ import { EyeOff, Eye, Trash2, Plus, Lock, LockOpen, Check } from 'lucide-react'
 import { Modal } from '../common/Modal'
 import { useApp } from '../../store/app'
 import { rdpSecretId } from '../../../../shared/rdp'
+// The one value wslock.ts enforces in main, imported rather than copied, so the
+// form can refuse a short password itself instead of round-tripping to be told.
+import { WS_MIN_PASSWORD } from '../../../../shared/workspace'
 import { toast } from '../../store/toast'
 import { colorVar } from '../layout/WorkspaceSwitcher'
 import { clsx } from '../../lib/format'
 import type { WorkspaceColor } from '../../types'
 
 const COLORS: WorkspaceColor[] = ['green', 'purple', 'blue', 'orange', 'red', 'cyan', 'pink']
-
-// Matches what the main process enforces in wslock.ts. Kept in step so the
-// form can refuse a short password itself instead of round-tripping to be told.
-const MIN_WS_PASSWORD = 6
 
 export function WorkspaceManager(): React.JSX.Element {
   const setModal = useApp((s) => s.setModal)
@@ -40,8 +39,8 @@ export function WorkspaceManager(): React.JSX.Element {
   // Checked by the form rather than announced afterwards: a rule the form can
   // enforce before the click is not an error, and an error toast for one is a
   // telling-off with nothing to act on.
-  const passwordTooShort = withPassword && newPassword.length > 0 && newPassword.length < MIN_WS_PASSWORD
-  const canCreate = name.trim().length > 0 && (!withPassword || newPassword.length >= MIN_WS_PASSWORD)
+  const passwordTooShort = withPassword && newPassword.length > 0 && newPassword.length < WS_MIN_PASSWORD
+  const canCreate = name.trim().length > 0 && (!withPassword || newPassword.length >= WS_MIN_PASSWORD)
 
   const create = async (): Promise<void> => {
     const wname = name.trim()
@@ -235,7 +234,7 @@ export function WorkspaceManager(): React.JSX.Element {
               canCreate
                 ? 'Create this workspace'
                 : withPassword && name.trim()
-                  ? `Enter a password of at least ${MIN_WS_PASSWORD} characters first`
+                  ? `Enter a password of at least ${WS_MIN_PASSWORD} characters first`
                   : 'Give the workspace a name first'
             }
           >
@@ -271,14 +270,14 @@ export function WorkspaceManager(): React.JSX.Element {
             <input
               className="input"
               type="password"
-              placeholder={`Workspace password (min ${MIN_WS_PASSWORD} characters)`}
+              placeholder={`Workspace password (min ${WS_MIN_PASSWORD} characters)`}
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && void create()}
             />
             {passwordTooShort && (
               <div className="s-desc" style={{ color: 'var(--danger)' }}>
-                Use at least {MIN_WS_PASSWORD} characters.
+                Use at least {WS_MIN_PASSWORD} characters.
               </div>
             )}
             <div className="faint" style={{ fontSize: 11 }}>
@@ -332,7 +331,7 @@ function PasswordForm({
   const [error, setError] = useState<string | null>(null)
   const currentRef = useRef<HTMLInputElement>(null)
 
-  const canSave = !busy && next.length >= MIN_WS_PASSWORD && (!hasPassword || current.length > 0)
+  const canSave = !busy && next.length >= WS_MIN_PASSWORD && (!hasPassword || current.length > 0)
 
   // Only the current password can be wrong in a way the user can correct on the
   // spot, so that is where the cursor goes back to.
@@ -395,8 +394,8 @@ function PasswordForm({
           type="password"
           placeholder={
             hasPassword
-              ? `New password (min ${MIN_WS_PASSWORD})`
-              : `Password (min ${MIN_WS_PASSWORD})`
+              ? `New password (min ${WS_MIN_PASSWORD})`
+              : `Password (min ${WS_MIN_PASSWORD})`
           }
           value={next}
           onChange={(e) => {
@@ -413,7 +412,7 @@ function PasswordForm({
               ? undefined
               : hasPassword && !current
                 ? 'Enter the current password first'
-                : `New password must be at least ${MIN_WS_PASSWORD} characters`
+                : `New password must be at least ${WS_MIN_PASSWORD} characters`
           }
           onClick={() => void save()}
         >

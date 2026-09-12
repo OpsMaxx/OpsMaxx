@@ -1,10 +1,18 @@
 import { app, safeStorage } from 'electron'
 import { join } from 'node:path'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { secretsAvailable } from './secretsBackend'
 
 // Credentials are encrypted with the OS secure store (safeStorage) and the
 // ciphertext is persisted as base64. Plaintext never touches disk. If the OS
 // keychain is unavailable we refuse to persist rather than store plaintext.
+//
+// `secretsAvailable()` is that last check, and it lives in secretsBackend.ts
+// rather than here. The diagnostics payload needs to report it and may not
+// import this module — `exportSecrets()` below returns every credential in
+// plaintext — so the predicate sits on the other side of that line and this
+// file calls it. One implementation, imported twice, instead of two copies
+// free to drift apart.
 const FILE = join(app.getPath('userData'), 'opsmaxx-secrets.json')
 
 type SecretMap = Record<string, string> // id -> base64 ciphertext
@@ -22,12 +30,12 @@ function write(map: SecretMap): void {
   writeFileSync(FILE, JSON.stringify(map), { mode: 0o600 })
 }
 
-export function secretsAvailable(): boolean {
-  return safeStorage.isEncryptionAvailable()
-}
+// Re-exported so every existing caller (`secrets:available`, inspect.ts) keeps
+// importing it from the module it has always imported it from.
+export { secretsAvailable }
 
 export function setSecret(id: string, value: string): boolean {
-  if (!safeStorage.isEncryptionAvailable()) return false
+  if (!secretsAvailable()) return false
   const map = read()
   map[id] = safeStorage.encryptString(value).toString('base64')
   write(map)
@@ -60,7 +68,7 @@ export function exportSecrets(): Record<string, string> {
 
 // Re-seal credentials with this machine's keychain during a restore.
 export function importSecrets(plain: Record<string, string>): boolean {
-  if (!safeStorage.isEncryptionAvailable()) return false
+  if (!secretsAvailable()) return false
   const map = read()
   for (const [id, value] of Object.entries(plain)) {
     map[id] = safeStorage.encryptString(value).toString('base64')

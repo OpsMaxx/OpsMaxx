@@ -11,14 +11,45 @@ const PLACEHOLDER = '[REDACTED]'
 
 const PATTERN_RULES: { regex: RegExp; replace: (m: string[]) => string }[] = [
   // FOO_PASSWORD=bar / FOO_TOKEN=bar / FOO_SECRET=bar style env assignments.
+  //
+  // The name class takes `-` as well as `_` because the HTTP header spelling is
+  // the hyphenated one: `X-Api-Key:` is the same secret as `API_KEY=` and was
+  // walking straight through. (`X-Auth-Token:` always matched, via the bare
+  // `TOKEN` alternative — the gap was only the `API_KEY` family, whose
+  // alternatives all spelled the separator `_`.)
   {
-    regex: /\b([A-Za-z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY|APIKEY|PRIVATE_KEY)[A-Za-z0-9_]*)\s*[:=]\s*("[^"\n]*"|'[^'\n]*'|\S+)/gi,
+    regex: /\b([A-Za-z0-9_-]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API[_-]?KEY|PRIVATE[_-]?KEY)[A-Za-z0-9_-]*)\s*[:=]\s*("[^"\n]*"|'[^'\n]*'|\S+)/gi,
     replace: (m) => `${m[1]}=${PLACEHOLDER}`
   },
-  // Full PEM private key blocks.
+  // PEM private key blocks — terminated, or cut off.
+  //
+  // Three things the old `BEGIN [^-]*PRIVATE KEY-----…END` form got wrong, each
+  // of which left a key body in the log as prose:
+  //
+  //  * `[^-]*` cannot cross a hyphen, so `RSA-PSS PRIVATE KEY` matched nothing.
+  //    The label is now `[A-Z0-9]+(?:[ -][A-Z0-9]+)*`, which deliberately still
+  //    cannot contain a `-----` run — so it can never swallow an intervening
+  //    `-----END CERTIFICATE-----` and redact the log between two blocks.
+  //  * PGP armour ends `PRIVATE KEY BLOCK-----`, never with `KEY` adjacent to
+  //    the dashes, hence the optional ` BLOCK`.
+  //  * Requiring the END marker meant any cut between the two markers — a cap, a
+  //    drained pipe, a killed process — turned the whole body back into plain
+  //    text. So the END is one branch and end-of-text is the other: an
+  //    unterminated block is redacted to the end, because there is no way to
+  //    know where the key stopped. A log that prints a BEGIN line and nothing
+  //    else loses its tail, which is the right side to err on for a private key.
+  //
+  // The unterminated branch must NOT write an END marker of its own, and that
+  // is load-bearing rather than cosmetic: output from a redacted-as-it-grows
+  // buffer gets redacted again when the next chunk lands, and a synthetic END
+  // would close the block in front of the rest of the key body still arriving.
   {
-    regex: /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g,
-    replace: () => `-----BEGIN PRIVATE KEY-----\n${PLACEHOLDER}\n-----END PRIVATE KEY-----`
+    regex:
+      /-----BEGIN (?:[A-Z0-9]+(?:[ -][A-Z0-9]+)* )?PRIVATE KEY( BLOCK)?-----[\s\S]*?(?:-----END (?:[A-Z0-9]+(?:[ -][A-Z0-9]+)* )?PRIVATE KEY( BLOCK)?-----|$)/g,
+    replace: (m) =>
+      m[0].includes('-----END ')
+        ? `-----BEGIN PRIVATE KEY-----\n${PLACEHOLDER}\n-----END PRIVATE KEY-----`
+        : `-----BEGIN PRIVATE KEY-----\n${PLACEHOLDER}`
   },
   // Bearer/API tokens in headers or CLI flags.
   {
@@ -27,6 +58,49 @@ const PATTERN_RULES: { regex: RegExp; replace: (m: string[]) => string }[] = [
   },
   // AWS access key ids.
   { regex: /\bAKIA[0-9A-Z]{16}\b/g, replace: () => PLACEHOLDER },
+  // The matching AWS *secret* access key, which the rule above never covered:
+  // 40 base64 characters with no prefix to anchor on.
+  //
+  // Shape alone, so the six lookarounds below are the whole of what keeps it off
+  // ordinary output. They do two separate jobs, and it is worth knowing which is
+  // which before editing either:
+  //
+  //  * ISOLATION — the leading negative LOOKBEHIND, plus the negative lookahead
+  //    nested inside the length check. Nothing base64 on either side, so the rule
+  //    cannot bite a 40-char window inside a longer blob or inside a 44-char
+  //    WireGuard key.
+  //  * MIXING — the three character-class lookaheads, one each for lower, upper
+  //    and digit. That is what excludes the 40-character strings a real log is
+  //    full of: git object ids and sha1 digests are single-case hex.
+  //
+  // So: one lookbehind and five lookaheads (four of them positive, the nested
+  // one negative). Count them in the literal rather than trusting this sentence —
+  // dropping the wrong one silently widens the rule onto every commit hash in
+  // the output, and the tests would still pass.
+  {
+    regex:
+      /(?<![A-Za-z0-9+/=])(?=[A-Za-z0-9+/]{40}(?![A-Za-z0-9+/=]))(?=[A-Za-z0-9+/]*[a-z])(?=[A-Za-z0-9+/]*[A-Z])(?=[A-Za-z0-9+/]*[0-9])[A-Za-z0-9+/]{40}/g,
+    replace: () => PLACEHOLDER
+  },
+  // Vendor-prefixed tokens. The prefix is the whole tell: these are issued
+  // strings that carry their own namespace, so there is no key name to match on
+  // and no false-positive risk worth the name — nothing else in a log begins
+  // `xoxb-` or `glpat-`.
+  {
+    regex: /\b(?:xox[baprs]-|glpat-|ghp_|gho_|ghu_|ghs_|ghr_|sk-)[A-Za-z0-9_-]{10,}/g,
+    replace: () => PLACEHOLDER
+  },
+  // mysql's glued password flag. `-p` takes its value attached — `-pS3cret`,
+  // not `-p S3cret` — so there is no key name for the assignment rule to see,
+  // and the whole argv of the client is in `ps`.
+  //
+  // Anchored on the client name rather than on `-p` alone: a bare `\s-p\S+`
+  // eats `find . -print` and `tar -pxf`, and a rule that destroys diagnostics
+  // is worse than the gap it closes.
+  {
+    regex: /\b((?:mysql|mysqldump|mysqladmin|mariadb|mariadb-dump)\b[^\n]*?\s)-p\S+/gi,
+    replace: (m) => `${m[1]}-p${PLACEHOLDER}`
+  },
   // Postgres/MySQL/Mongo style connection URIs with an embedded password.
   {
     regex: /\b([a-z][a-z0-9+.-]*:\/\/[^:/\s]+:)([^@/\s]+)(@)/gi,
@@ -76,6 +150,22 @@ const PATTERN_RULES: { regex: RegExp; replace: (m: string[]) => string }[] = [
   // expression, and the whole of it is the secret.
   {
     regex: /^(\s*(?:auth\.)?(?:token|secretKey|password)\s*=\s*).+$/gim,
+    replace: (m) => `${m[1]}${PLACEHOLDER}`
+  },
+  // OpenVPN quoting back the config line it could not parse:
+  //
+  //   Options error: Unrecognized option or missing parameter(s) in [STDIN]:7: …
+  //
+  // and the `…` is that line of the config, verbatim. A bare value with no key
+  // name in front of it has no shape for any rule here to recognise — which is
+  // exactly what an inline credential on its own line looks like — and the
+  // config reaches openvpn on stdin (`ElevationRequest.stdin`) precisely so it
+  // never has to touch disk, credentials and all.
+  //
+  // So the echo goes and the diagnosis stays: which line of the config openvpn
+  // choked on is the useful half, and it is before the colon.
+  {
+    regex: /(\[STDIN\]:\d+:\s*)\S.*/g,
     replace: (m) => `${m[1]}${PLACEHOLDER}`
   },
   // OpenVPN management-channel command echo. `--management-query-passwords`

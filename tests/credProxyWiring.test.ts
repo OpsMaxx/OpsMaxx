@@ -150,4 +150,17 @@ describe('the service holds no key material of its own', () => {
       expect(service, forbidden).not.toContain(forbidden)
     }
   })
+
+  it('brings no electron in behind the one helper it does import', () => {
+    // The rule above is about this file's own text, and the audit append is now
+    // shared with the three siblings that DO resolve userData for themselves.
+    // The helper has to stay the half that does not: an electron import there
+    // would put the keychain back inside this module's reach while every
+    // assertion above still passed.
+    expect(read('src/main/services/logAppend.ts')).not.toContain("from 'electron'")
+    // The rule-file write is shared the same way the audit append is, with the
+    // twelve siblings that DO resolve userData for themselves, so the same
+    // condition applies to it for the same reason.
+    expect(read('src/main/services/atomicWrite.ts')).not.toContain("from 'electron'")
+  })
 })

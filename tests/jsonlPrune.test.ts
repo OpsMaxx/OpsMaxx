@@ -1,5 +1,15 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, statSync } from 'node:fs'
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+  statSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pruneJsonl } from '../src/main/services/jsonlPrune'
@@ -64,6 +74,92 @@ describe('pruning a log on disk', () => {
 
   it('is a no-op on a file that is not there', () => {
     expect(pruneJsonl(join(dir, 'absent.jsonl'), NOW)).toBeNull()
+  })
+
+  it('writes nothing through a symlink someone left at the temp path', () => {
+    // `${file}.pruning` is predictable, so anything running as this user can put
+    // a symlink there first. writeFileSync FOLLOWS one and truncates the far
+    // end, which would turn a prune of an audit log into a write of that log
+    // over a file of the attacker's choosing — and `mode: 0o600` does not help,
+    // because a mode is only applied when a file is created.
+    const victim = join(dir, 'victim.txt')
+    writeFileSync(victim, 'do not touch')
+    symlinkSync(victim, `${file}.pruning`)
+    writeFileSync(file, [line(500, 'old'), ...recentFiller()].join('\n') + '\n')
+
+    expect(pruneJsonl(file, NOW)).toBe(1)
+
+    expect(readFileSync(victim, 'utf8')).toBe('do not touch')
+    expect(existsSync(`${file}.pruning`)).toBe(false)
+    // And the prune itself still happened, via a file it created exclusively.
+    expect(readFileSync(file, 'utf8').split('\n').filter(Boolean)).toEqual(recentFiller())
+  })
+
+  it('does not follow a dangling symlink at the temp path either', () => {
+    // existsSync stats THROUGH a link, so a dangling one reads as absent: an
+    // existsSync-guarded unlink would skip it and then create the target it
+    // points at. The log still has to get pruned, and the link has to go.
+    const target = join(dir, 'not-there-yet.txt')
+    symlinkSync(target, `${file}.pruning`)
+    writeFileSync(file, [line(500, 'old'), ...recentFiller()].join('\n') + '\n')
+
+    expect(pruneJsonl(file, NOW)).toBe(1)
+
+    expect(existsSync(target)).toBe(false)
+    expect(existsSync(`${file}.pruning`)).toBe(false)
+  })
+
+  it('prunes despite a temp file a crashed run left behind', () => {
+    // The flip side of refusing an existing path: a .pruning file from a process
+    // that died mid-rename must not wedge retention for this log forever.
+    writeFileSync(`${file}.pruning`, 'half a log from last time')
+    writeFileSync(file, [line(500, 'old'), ...recentFiller()].join('\n') + '\n')
+
+    expect(pruneJsonl(file, NOW)).toBe(1)
+    expect(existsSync(`${file}.pruning`)).toBe(false)
+    expect(lstatSync(file).isSymbolicLink()).toBe(false)
+  })
+
+  it('still prunes when a DIRECTORY is sitting at the temp path', () => {
+    // `rmSync(tmp, { force: true })` without `recursive` throws EISDIR on a
+    // directory, and the catch turns that into "could not prune" — for this log,
+    // for every sweep, for the life of the install. One planted directory and
+    // retention for that file is off permanently. Same-uid precondition, so this
+    // is hardening rather than a hole, but it is one word.
+    mkdirSync(`${file}.pruning`)
+    writeFileSync(join(`${file}.pruning`, 'decoy'), 'in the way')
+    writeFileSync(file, [line(500, 'old'), ...recentFiller()].join('\n') + '\n')
+
+    expect(pruneJsonl(file, NOW)).toBe(1)
+    expect(existsSync(`${file}.pruning`)).toBe(false)
+    expect(readFileSync(file, 'utf8').split('\n').filter(Boolean)).toEqual(recentFiller())
+  })
+
+  it('refuses a symlink at the LOG path, the way appendLogLine does', () => {
+    // The two modules used to answer the same question differently:
+    // appendLogLine refuses a link at a log path, while this read THROUGH one
+    // and renamed over it. So a link planted at an audit log meant every append
+    // was refused — zero rows, quietly — and then the next daily sweep copied
+    // the link TARGET's contents into the real log, which is how the plant
+    // became the history.
+    const victim = join(dir, 'someone-elses.jsonl')
+    writeFileSync(victim, [line(500, 'theirs'), ...recentFiller()].join('\n') + '\n')
+    symlinkSync(victim, file)
+
+    expect(pruneJsonl(file, NOW)).toBeNull()
+    // Untouched: not pruned, not replaced by a real file, and still a link.
+    expect(readFileSync(victim, 'utf8').split('\n').filter(Boolean)).toHaveLength(FILLER + 1)
+    expect(lstatSync(file).isSymbolicLink()).toBe(true)
+  })
+
+  it('refuses a DANGLING symlink at the log path rather than calling it absent', () => {
+    // existsSync stats THROUGH a link, so an existsSync-first guard reports a
+    // dangling one as "no file here" and returns the quiet no-op that hides it.
+    const absent = join(dir, 'not-there.jsonl')
+    symlinkSync(absent, file)
+    expect(pruneJsonl(file, NOW)).toBeNull()
+    expect(existsSync(absent)).toBe(false)
+    expect(lstatSync(file).isSymbolicLink()).toBe(true)
   })
 
   it('keeps the mode private after rewriting', () => {

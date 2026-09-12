@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import {
   MAX_PROCESSES,
   PROCESS_BACKOFF,
@@ -24,6 +24,7 @@ import type {
 } from '../../shared/processes'
 import { Supervisor } from './vpn/supervisor'
 import type { SupervisedSpec, SupervisorExit, SupervisorHandle } from './vpn/supervisor'
+import { atomicWriteFileSync } from './atomicWrite'
 
 // The main-process half of roadmap item 1 — pm2-style supervision of the
 // user's own long-lived local processes.
@@ -460,8 +461,7 @@ export function readProcessFile(path: string): unknown {
  */
 export function writeProcessFile(path: string, file: ProcessesFile): void {
   try {
-    writeFileSync(`${path}.tmp`, JSON.stringify(file), { mode: 0o600 })
-    renameSync(`${path}.tmp`, path)
+    atomicWriteFileSync(path, JSON.stringify(file))
   } catch (err) {
     console.error('[processes] save failed:', err)
   }

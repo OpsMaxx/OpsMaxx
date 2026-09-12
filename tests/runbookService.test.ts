@@ -1,6 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import type { JobHostOutcome } from '../src/shared/jobs'
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -134,6 +145,50 @@ describe('a note', () => {
     saveRunbookNote(deps(), 'disk', null, 'anything')
     const mode = statSync(join(dir, 'opsmaxx-runbooks.json')).mode & 0o777
     expect(mode).toBe(0o600)
+  })
+
+  // `opsmaxx-runbooks.json.tmp` is a predictable path, and the `mode` on a write
+  // is applied only when the file is CREATED — the same gap jsonlPrune.ts was
+  // fixed for. So the temp path has to be created here, never adopted.
+  it('does not adopt a wide temp file a previous run left behind', () => {
+    const tmp = join(dir, 'opsmaxx-runbooks.json.tmp')
+    writeFileSync(tmp, 'half a notes file')
+    // chmodSync, not `{ mode: 0o666 }` on the write: a creation mode is masked
+    // by the umask, so the precondition would not actually be wide.
+    chmodSync(tmp, 0o666)
+
+    expect(saveRunbookNote(deps(), 'disk', 'web-1', 'check /var/log').ok).toBe(true)
+
+    expect(statSync(join(dir, 'opsmaxx-runbooks.json')).mode & 0o777).toBe(0o600)
+    expect(readRunbook(deps(), 'disk', 'web-1').hostNote?.text).toBe('check /var/log')
+    expect(existsSync(tmp)).toBe(false)
+  })
+
+  it('leaves a planted DIRECTORY at the temp path no way to stop notes saving', () => {
+    // `rmSync(dir, { force: true })` without `recursive` throws EISDIR, and this
+    // writer SWALLOWS — `console.error`, `return false`. So a directory here
+    // stopped every note saving for the life of the install, silently.
+    const tmp = join(dir, 'opsmaxx-runbooks.json.tmp')
+    mkdirSync(join(tmp, 'deep'), { recursive: true })
+
+    expect(saveRunbookNote(deps(), 'disk', 'web-1', 'check /var/log').ok).toBe(true)
+
+    expect(readRunbook(deps(), 'disk', 'web-1').hostNote?.text).toBe('check /var/log')
+    expect(statSync(join(dir, 'opsmaxx-runbooks.json')).mode & 0o777).toBe(0o600)
+    expect(existsSync(tmp)).toBe(false)
+  })
+
+  it('writes nothing through a symlink left at the temp path', () => {
+    const victim = join(dir, 'victim.txt')
+    writeFileSync(victim, 'do not touch')
+    symlinkSync(victim, join(dir, 'opsmaxx-runbooks.json.tmp'))
+
+    expect(saveRunbookNote(deps(), 'disk', 'web-1', 'check /var/log').ok).toBe(true)
+
+    expect(readFileSync(victim, 'utf8')).toBe('do not touch')
+    expect(existsSync(join(dir, 'opsmaxx-runbooks.json.tmp'))).toBe(false)
+    expect(lstatSync(join(dir, 'opsmaxx-runbooks.json')).isSymbolicLink()).toBe(false)
+    expect(readRunbook(deps(), 'disk', 'web-1').hostNote?.text).toBe('check /var/log')
   })
 
   it('keeps the fleet-wide note and the per-server note apart', () => {

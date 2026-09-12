@@ -1,8 +1,21 @@
 import { app } from 'electron'
 import { join } from 'node:path'
-import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs'
+import { existsSync, readFileSync, unlinkSync } from 'node:fs'
+import { atomicWriteFileSync } from './atomicWrite'
 import { randomBytes, scrypt, createCipheriv, createDecipheriv } from 'node:crypto'
 import type { VaultEntry, VaultListResult, VaultResult, VaultStatus } from '../../shared/vault'
+import { VAULT_MIN_PASSWORD } from '../../shared/vault'
+
+// The floor is imported, not restated. Main is the real enforcement boundary —
+// the renderer's own check only covers the UI, and any other caller of the
+// vault IPC reaches these functions directly — so a second literal here would
+// be the one that silently decides how weak a master password may be. It was
+// 8 while the shared constant said 12, which is exactly the drift that comment
+// warns about.
+//
+// Only creating and changing a password are checked. Unlocking deliberately is
+// not: a vault sealed under an older, lower floor must keep opening, and a
+// length check on that path would lock its owner out of their own secrets.
 
 // The vault is encrypted with AES-256-GCM under a key derived from the user's
 // master password via scrypt. The password is never stored — a wrong password
@@ -16,7 +29,6 @@ import type { VaultEntry, VaultListResult, VaultResult, VaultStatus } from '../.
 // rather than claim main-process confinement it does not have.
 
 const FILE = join(app.getPath('userData'), 'opsmaxx-vault.json')
-const TMP = `${FILE}.tmp`
 
 // 128 * N * r = 32 MiB of work per derivation; maxmem must exceed that.
 //
@@ -89,8 +101,7 @@ function writeEncrypted(entries: VaultEntry[], k: Buffer, s: Buffer): void {
     tag: cipher.getAuthTag().toString('base64'),
     data: data.toString('base64')
   }
-  writeFileSync(TMP, JSON.stringify(file), { mode: 0o600 })
-  renameSync(TMP, FILE)
+  atomicWriteFileSync(FILE, JSON.stringify(file))
 }
 
 function decrypt(file: VaultFile, k: Buffer): VaultEntry[] {
@@ -106,7 +117,8 @@ export function vaultStatus(): VaultStatus {
 
 export async function vaultCreate(password: string): Promise<VaultResult> {
   if (existsSync(FILE)) return { ok: false, error: 'A vault already exists on this machine.' }
-  if (password.length < 8) return { ok: false, error: 'Master password must be at least 8 characters.' }
+  if (password.length < VAULT_MIN_PASSWORD)
+    return { ok: false, error: `Master password must be at least ${VAULT_MIN_PASSWORD} characters.` }
   try {
     const s = randomBytes(16)
     const k = await derive(password, s)
@@ -243,7 +255,8 @@ export function vaultSave(entries: VaultEntry[]): VaultResult {
 }
 
 export async function vaultChangePassword(current: string, next: string): Promise<VaultResult> {
-  if (next.length < 8) return { ok: false, error: 'Master password must be at least 8 characters.' }
+  if (next.length < VAULT_MIN_PASSWORD)
+    return { ok: false, error: `Master password must be at least ${VAULT_MIN_PASSWORD} characters.` }
   const file = readFile()
   if (!file) return { ok: false, error: 'No vault has been created yet.' }
   try {

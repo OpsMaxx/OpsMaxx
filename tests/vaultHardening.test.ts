@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { randomBytes, scryptSync, createCipheriv } from 'node:crypto'
 import { app } from 'electron'
 import {
   vaultCreate,
@@ -9,9 +10,11 @@ import {
   vaultList,
   vaultStatus,
   vaultSave,
+  vaultChangePassword,
   setVaultAutoLock,
   vaultDestroy
 } from '../src/main/services/vault'
+import { VAULT_MIN_PASSWORD } from '../src/shared/vault'
 
 const FILE = join(app.getPath('userData'), 'opsmaxx-vault.json')
 const read = (): Record<string, unknown> => JSON.parse(readFileSync(FILE, 'utf8'))
@@ -59,6 +62,51 @@ describe('scrypt work factor', () => {
     writeFileSync(FILE, JSON.stringify(file))
     expect((await vaultUnlock('a-long-enough-password')).ok).toBe(true)
     expect(read().kdf).toEqual({ N: 32768, r: 8, p: 3 })
+  })
+})
+
+describe('master password floor', () => {
+  const short = 'x'.repeat(VAULT_MIN_PASSWORD - 1)
+  const long = 'x'.repeat(VAULT_MIN_PASSWORD)
+
+  it('refuses to create a vault below the shared floor', async () => {
+    // Main is the enforcement boundary, not the renderer: any other caller of
+    // the vault IPC lands here, and a password accepted here encrypts the
+    // user's secrets irreversibly.
+    expect((await vaultCreate(short)).ok).toBe(false)
+    expect((await vaultCreate(long)).ok).toBe(true)
+  })
+
+  it('refuses to change to a password below the floor', async () => {
+    await vaultCreate(long)
+    expect((await vaultChangePassword(long, short)).ok).toBe(false)
+    expect((await vaultChangePassword(long, `${long}y`)).ok).toBe(true)
+  })
+
+  it('still unlocks a vault sealed under the old, lower floor', async () => {
+    // Written by hand because the app can no longer produce one — the point is
+    // an existing user whose vault predates the raised floor. Locking them out
+    // of their own secrets would be worse than the weak password was.
+    const oldPassword = 'short123' // 8 chars, what the old floor allowed
+    const s = randomBytes(16)
+    const k = scryptSync(oldPassword, s, 32, { N: 32768, r: 8, p: 3, maxmem: 96 * 1024 * 1024 })
+    const iv = randomBytes(12)
+    const cipher = createCipheriv('aes-256-gcm', k, iv)
+    const data = Buffer.concat([cipher.update(JSON.stringify([]), 'utf8'), cipher.final()])
+    writeFileSync(
+      FILE,
+      JSON.stringify({
+        version: 1,
+        salt: s.toString('base64'),
+        kdf: { N: 32768, r: 8, p: 3 },
+        iv: iv.toString('base64'),
+        tag: cipher.getAuthTag().toString('base64'),
+        data: data.toString('base64')
+      })
+    )
+
+    expect(oldPassword.length).toBeLessThan(VAULT_MIN_PASSWORD)
+    expect((await vaultUnlock(oldPassword)).ok).toBe(true)
   })
 })
 
