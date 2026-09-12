@@ -36,6 +36,12 @@ describe('the palette is built from the registries, not from a copy', () => {
   it('lists every settings page', () => {
     expect(palette).toMatch(/SETTINGS_SECTIONS\.map/)
   })
+
+  it('lists every page of AI & MCP', () => {
+    // The panel's own private label list is what this replaces; see
+    // tests/paletteAiPages.test.tsx for where each entry actually lands.
+    expect(palette).toMatch(/AI_SECTIONS\.map/)
+  })
 })
 
 describe('fuzzy matching', () => {

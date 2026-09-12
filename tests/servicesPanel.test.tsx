@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
+import { useNav } from '../src/renderer/src/store/nav'
+import { useApp } from '../src/renderer/src/store/app'
 import { ServicesPanel } from '../src/renderer/src/components/monitor/ServicesPanel'
 import { UnitInstallPanel } from '../src/renderer/src/components/operations/UnitInstallPanel'
 import type { Server } from '../src/renderer/src/types'
@@ -72,6 +74,12 @@ describe('the services panel', () => {
     await userEvent.click(await screen.findByRole('button', { name: /Read services/ }))
 
     expect(await screen.findByText(/does not expose server services/)).toBeTruthy()
+    // What this test has always been named for. The missing-preload path sets
+    // the row list to `[]` to leave the loading state, and the empty state used
+    // to hang off THAT — so a workspace full of servers was told it had none,
+    // and told to add one, on the one failure that has nothing to do with how
+    // many servers there are.
+    expect(screen.queryByText(/No servers to ask/)).toBeNull()
   })
 
   it('offers nothing to press when the workspace has no servers', async () => {
@@ -80,6 +88,35 @@ describe('the services panel', () => {
     expect(
       ((await screen.findByRole('button', { name: /Read services/ })) as HTMLButtonElement).disabled
     ).toBe(true)
+    // ...and does not then tell the operator to press it. The read button is
+    // disabled with no servers, so "Press Read services" is an instruction to
+    // press a control that cannot be pressed.
+    expect(screen.queryByText(/Nothing read yet/)).toBeNull()
+    expect(screen.getByText(/No servers to ask/)).toBeTruthy()
+  })
+
+  it('does not send anyone to Settings to find out which servers are in the workspace', async () => {
+    // `servers` is the ACTIVE WORKSPACE's servers, so "which are in it" is a
+    // question about workspace membership. Settings › Modules switches optional
+    // subsystems on and off and has no server list anywhere on it, and there is
+    // no settings page for membership at all — so no `openSettings(...)` target
+    // could have been right. The empty state therefore points at something the
+    // operator can SEE (the workspace picker in the title bar) and offers no
+    // button of its own.
+    stubBridge({ services: { collect: vi.fn() } } as never)
+    const before = useNav.getState().settingsSection
+    render(<ServicesPanel servers={[]} />)
+
+    expect(await screen.findByText(/workspace/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Settings/i })).toBeNull()
+    // The shell's ⓘ and the read button are the whole of this state. Anything
+    // else here is a button to a page that cannot answer the question.
+    expect(
+      screen.getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim())
+    ).toEqual(['About Server services', 'Read services'])
+    // Nothing has navigated: the destination is a place, not a click.
+    expect(useNav.getState().settingsSection).toBe(before)
+    expect(useApp.getState().activity).not.toBe('settings')
   })
 })
 

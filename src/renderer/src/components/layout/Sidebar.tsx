@@ -10,7 +10,7 @@ import { DatabaseSidebar } from '../databases/DatabaseSidebar'
 import { ApiSidebar } from '../http/ApiSidebar'
 import { VaultSidebar } from '../vault/VaultSidebar'
 import { useVault } from '../../store/vault'
-import { useNav } from '../../store/nav'
+import { openTunnels, useNav } from '../../store/nav'
 
 const titles: Record<string, string> = {
   connections: 'Connections',
@@ -89,7 +89,11 @@ export function Sidebar(): React.JSX.Element | null {
             </button>
           )}
           {activity === 'tunnels' && (
-            <button className="icon-btn" title="New tunnel">
+            <button
+              className="icon-btn"
+              title="New tunnel"
+              onClick={() => openTunnels({ kind: 'create' })}
+            >
               <Network size={15} />
             </button>
           )}

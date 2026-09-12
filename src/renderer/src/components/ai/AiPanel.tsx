@@ -7,19 +7,23 @@ import { AiApprovals } from './AiApprovals'
 import { AiAuditLog } from './AiAuditLog'
 import { AiSecurity } from './AiSecurity'
 import { ConnectAgent } from './ConnectAgent'
-import { useNav } from '../../store/nav'
+import { useNav, AI_SECTIONS, AI_SECTION_LABELS } from '../../store/nav'
 import type { AiSection } from '../../store/nav'
 import type { McpAgentSession, ApprovalRequest } from '../../../../shared/mcp'
 
-const SECTIONS: { id: AiSection; label: string; icon: React.JSX.Element }[] = [
-  { id: 'overview', label: 'Overview', icon: <LayoutDashboard size={16} /> },
-  { id: 'agents', label: 'AI Agents', icon: <Users size={16} /> },
-  { id: 'groups', label: 'Access Groups', icon: <ShieldCheck size={16} /> },
-  { id: 'sessions', label: 'Active Sessions', icon: <Radio size={16} /> },
-  { id: 'approvals', label: 'Approvals', icon: <CircleCheck size={16} /> },
-  { id: 'audit', label: 'Audit Log', icon: <ScrollText size={16} /> },
-  { id: 'security', label: 'Security', icon: <Lock size={16} /> }
-]
+// Keyed by the nav store's union, so a page added there without an icon here
+// fails the build. The labels come from nav.ts, which is where the command
+// palette reads them too — a second copy of them here is how these seven pages
+// were nameable in the panel and unreachable from Ctrl+K.
+const SECTION_ICONS: Record<AiSection, React.JSX.Element> = {
+  overview: <LayoutDashboard size={16} />,
+  agents: <Users size={16} />,
+  groups: <ShieldCheck size={16} />,
+  sessions: <Radio size={16} />,
+  approvals: <CircleCheck size={16} />,
+  audit: <ScrollText size={16} />,
+  security: <Lock size={16} />
+}
 
 function Overview(): React.JSX.Element {
   const [sessions, setSessions] = useState<McpAgentSession[]>([])
@@ -94,14 +98,14 @@ export function AiPanel(): React.JSX.Element {
     <div className="main">
       <div className="settings">
         <nav className="settings-nav">
-          {SECTIONS.map((s) => (
+          {AI_SECTIONS.map((id) => (
             <button
-              key={s.id}
-              className={clsx('nav-item', section === s.id && 'active')}
-              onClick={() => setSection(s.id)}
+              key={id}
+              className={clsx('nav-item', section === id && 'active')}
+              onClick={() => setSection(id)}
             >
-              {s.icon}
-              {s.label}
+              {SECTION_ICONS[id]}
+              {AI_SECTION_LABELS[id]}
             </button>
           ))}
         </nav>

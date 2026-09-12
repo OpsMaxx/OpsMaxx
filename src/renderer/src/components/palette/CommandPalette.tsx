@@ -9,17 +9,22 @@ import {
   Copy,
   Terminal as TerminalIcon,
   Activity,
+  Bot,
   Download,
   CornerDownLeft
 } from 'lucide-react'
 import { useApp } from '../../store/app'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import {
+  AI_SECTIONS,
+  AI_SECTION_LABELS,
   SETTINGS_SECTIONS,
   SETTINGS_SECTION_LABELS,
+  openAi,
   openMonitor,
   openOperations,
-  openSettings
+  openSettings,
+  openTunnels
 } from '../../store/nav'
 import { ACTIVITY_ITEMS } from '../layout/ActivityBar'
 import { MODULES, isOperateModule, moduleEnabled } from '../../../../shared/modules'
@@ -107,7 +112,10 @@ export function CommandPalette(): React.JSX.Element {
           title: t.name,
           sub: `${t.listen} → ${t.target}`,
           icon: <Network size={16} />,
-          run: () => store.setActivity('tunnels')
+          // The entry is titled with this tunnel's name, so it has to land on
+          // this tunnel. Opening the page and leaving the user to find it again
+          // in the list is what a row named after one thing must not do.
+          run: () => openTunnels({ kind: 'select', tunnelId: t.id })
         })
       )
 
@@ -178,6 +186,18 @@ export function CommandPalette(): React.JSX.Element {
       })
     )
 
+    // Every page of AI & MCP, not just the destination. Without this the
+    // palette reached the panel and left you on whichever page it was last on,
+    // and Approvals and Active Sessions had no pointer anywhere in the app.
+    const aiPages: Cmd[] = AI_SECTIONS.map((id) => ({
+      id: `ai-${id}`,
+      group: 'AI & MCP',
+      title: AI_SECTION_LABELS[id],
+      sub: 'AI & MCP',
+      icon: <Bot size={16} />,
+      run: () => openAi(id)
+    }))
+
     const settingsPages: Cmd[] = SETTINGS_SECTIONS.map((id) => ({
       id: `set-${id}`,
       group: 'Settings',
@@ -187,7 +207,7 @@ export function CommandPalette(): React.JSX.Element {
       run: () => openSettings(id)
     }))
 
-    return [...actions, ...destinations, ...modules, ...settingsPages, ...list]
+    return [...actions, ...destinations, ...modules, ...aiPages, ...settingsPages, ...list]
   }, [store])
 
   const filtered = useMemo(() => {

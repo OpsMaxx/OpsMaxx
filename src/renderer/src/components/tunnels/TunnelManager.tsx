@@ -11,7 +11,7 @@ import type { TunnelStatus } from '../../../../shared/tunnel'
 import { sshHopFor } from '../../lib/ssh'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import { classifyConnectionError, errorText } from '../../lib/connectionError'
-import { openSettings } from '../../store/nav'
+import { openSettings, useNav } from '../../store/nav'
 import type { Server, Tunnel, TunnelKind } from '../../types'
 import { bridgeHas } from '../../lib/bridge'
 
@@ -152,6 +152,23 @@ export function TunnelManager(): React.JSX.Element {
     )
     return () => offs.forEach((off) => off?.())
   }, [tunnelIds, setTunnelStatus])
+
+  // Somebody sent the user here to make a tunnel, or to change one they named.
+  //
+  // Cleared whether or not it could be honoured — a `select` for a tunnel that
+  // has since been deleted must not sit in the store waiting to open a form the
+  // next time anyone opens Tunnels for an unrelated reason.
+  const intent = useNav((s) => s.tunnelIntent)
+  const clearTunnelIntent = useNav((s) => s.clearTunnelIntent)
+  useEffect(() => {
+    if (!intent) return
+    if (intent.kind === 'create') setCreating(true)
+    else {
+      const t = tunnels.find((x) => x.id === intent.tunnelId)
+      if (t) setEditing(t)
+    }
+    clearTunnelIntent()
+  }, [intent, tunnels, clearTunnelIntent])
 
   // Reconcile with what is actually running (e.g. after a view remount).
   useEffect(() => {

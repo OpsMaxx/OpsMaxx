@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { Plus, RefreshCw, ServerCog } from 'lucide-react'
 import { clsx } from '../../lib/format'
-import { openSettings, openUnitInstall } from '../../store/nav'
+import { openUnitInstall } from '../../store/nav'
 import { summariseUserUnits, type UserUnitsReading } from '../../../../shared/userUnits'
 import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
@@ -165,7 +165,40 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
         onRetry={() => void read()}
       />
 
-      {loading && rows === null ? (
+      {servers.length === 0 ? (
+        // FIRST IN THE CHAIN, AND KEYED ON `servers` RATHER THAN ON `rows`.
+        //
+        // This used to hang off `rows.length === 0`, which is a different
+        // sentence entirely. The read button is disabled with no servers, so
+        // nothing can ever produce an empty row list that way; the only path
+        // that actually reached it was the missing-preload branch above, which
+        // sets `rows` to `[]` to leave the loading state. A workspace with
+        // fifteen servers was therefore told it had none and told to add one,
+        // on the one failure that has nothing to do with servers at all — and
+        // the state was unreachable when it was true. Keyed on the prop it is
+        // describing, it says only what it knows.
+        //
+        // NO BUTTON, DELIBERATELY. It offered "open Settings" →
+        // `openSettings('modules')` to "check which are in it". `servers` is
+        // the ACTIVE WORKSPACE's servers, so that is a question about workspace
+        // membership, and Modules is the page that switches optional subsystems
+        // on and off — it has no server list on it. Nor does any other page of
+        // Settings, and `SettingsSection` has no workspace entry to point at,
+        // so there was no correct argument to pass. The workspace picker in the
+        // title bar is where membership is actually visible, and it is not
+        // something this panel can open — the switcher is a menu owned by its
+        // own click-outside. So it is named as a place, the way the workspace
+        // manager names the Vault in the left sidebar. Wayfinding to something
+        // on screen beats a button that lands somewhere with no answer on it.
+        <div className="panel-empty">
+          <p className="panel-empty-title">No servers to ask.</p>
+          <p className="panel-empty-body">
+            A server belongs to one workspace, and this panel only asks the active one&rsquo;s. Add a
+            server to this workspace, or switch to the workspace yours are in from the picker beside
+            the app name in the title bar.
+          </p>
+        </div>
+      ) : loading && rows === null ? (
         // A progress state of its own. Previously the panel kept saying
         // "Nothing read yet. Press Read services" while the read it is
         // describing was already running behind a disabled button — an
@@ -184,14 +217,6 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
           <p className="panel-empty-title">Nothing read yet.</p>
           <p className="panel-empty-body">
             Press <b>Read services</b> to ask each server what it is supervising for you.
-          </p>
-        </div>
-      ) : rows.length === 0 ? (
-        <div className="panel-empty">
-          <p className="panel-empty-title">No servers to ask.</p>
-          <p className="panel-empty-body">
-            Add a server to this workspace, or <button className="btn ghost sm" onClick={() => openSettings('modules')}>open Settings</button> to
-            check which are in it.
           </p>
         </div>
       ) : (

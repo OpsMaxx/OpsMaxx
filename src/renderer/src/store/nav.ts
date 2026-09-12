@@ -11,6 +11,28 @@ import type { LogPriority } from '../../../shared/logtail'
 
 export type AiSection = 'overview' | 'agents' | 'groups' | 'sessions' | 'approvals' | 'audit' | 'security'
 
+/**
+ * What each page of AI & MCP is called.
+ *
+ * Keyed by the union rather than a self-describing list, for the reason
+ * `SECTION_ICONS` in Settings.tsx is: a page added to `AiSection` with no label
+ * here is a compile error rather than a page nothing can point at. It lived as
+ * a private list inside AiPanel, which is how all seven of these stayed out of
+ * the command palette — the palette reads this, and so does the panel.
+ */
+export const AI_SECTION_LABELS: Record<AiSection, string> = {
+  overview: 'Overview',
+  agents: 'AI Agents',
+  groups: 'Access Groups',
+  sessions: 'Active Sessions',
+  approvals: 'Approvals',
+  audit: 'Audit Log',
+  security: 'Security'
+}
+
+/** Every page, in the order AI & MCP lists them. */
+export const AI_SECTIONS = Object.keys(AI_SECTION_LABELS) as AiSection[]
+
 export type SettingsSection =
   | 'general'
   | 'appearance'
@@ -185,6 +207,26 @@ export type OperationsJump =
     }
   | { kind: 'unit-install'; serverId: string; nonce: number }
 
+/**
+ * Arriving on Tunnels with something to do there.
+ *
+ * `creating` and `editing` were local `useState` inside TunnelManager, so
+ * nothing outside the panel could name a tunnel or ask for the form — which is
+ * why the sidebar's "New tunnel" button had no handler to give it (there was
+ * nothing to call) and why every palette entry under "Tunnels" was titled with
+ * a tunnel's own name and then opened the page without selecting it.
+ *
+ * Modelled on `aiGroupId` rather than on the `nonce` jumps above: it is
+ * consumed and CLEARED by the panel that honours it, so a second visit to
+ * Tunnels by any other route does not re-open a form the user has finished
+ * with. Clearing is also why no nonce is needed — the field is back to `null`
+ * before the same intent can be asked for again, so asking twice is a real
+ * change and is honoured twice. A `kind` union rather than two fields, the
+ * shape `OperationsJump` uses, because one panel consumes both and would have
+ * to check which was set either way.
+ */
+export type TunnelIntent = { kind: 'create' } | { kind: 'select'; tunnelId: string }
+
 interface NavState {
   aiSection: AiSection
   /** An access group the Access Groups page should open on, set by whoever
@@ -211,11 +253,14 @@ interface NavState {
   /** Consumed by whichever Operations panel the `kind` names; see
    *  OperationsJump. */
   operationsJump: OperationsJump | null
+  /** Consumed and cleared by TunnelManager; see TunnelIntent. */
+  tunnelIntent: TunnelIntent | null
   setAiSection: (s: AiSection) => void
   setSettingsSection: (s: SettingsSection) => void
   setMonitorTab: (t: MonitorTab) => void
   setOperationsTab: (t: OperationsTab) => void
   clearAiGroup: () => void
+  clearTunnelIntent: () => void
 }
 
 export const useNav = create<NavState>((set) => ({
@@ -231,11 +276,13 @@ export const useNav = create<NavState>((set) => ({
   logTailJump: null,
   jobComposerJump: null,
   operationsJump: null,
+  tunnelIntent: null,
   setAiSection: (s) => set({ aiSection: s, aiGroupId: null }),
   setSettingsSection: (s) => set({ settingsSection: s }),
   setMonitorTab: (t) => set({ monitorTab: t }),
   setOperationsTab: (t) => set({ operationsTab: t }),
-  clearAiGroup: () => set({ aiGroupId: null })
+  clearAiGroup: () => set({ aiGroupId: null }),
+  clearTunnelIntent: () => set({ tunnelIntent: null })
 }))
 
 /** Open a page of AI & MCP, optionally on a particular access group. */
@@ -378,6 +425,22 @@ export function openUnitInstall(serverId: string): void {
     operationsJump: { kind: 'unit-install', serverId, nonce: nextNonce() }
   })
   useApp.getState().setActivity('monitor')
+}
+
+/**
+ * Open Tunnels, optionally with something already in hand.
+ *
+ * The tab is set as well as the activity, for the reason `openMonitor` routes
+ * an operate module: Tunnels, VPN, reverse proxies and Traffic share one
+ * destination and TunnelManager only renders on the first of them, so an intent
+ * delivered while the user was last on VPN would sit on a panel that is not on
+ * screen — a pointer that opens the wrong page, which is worse than no pointer.
+ */
+export function openTunnels(intent?: TunnelIntent): void {
+  useNav.setState({ tunnelIntent: intent ?? null })
+  const app = useApp.getState()
+  app.setTunnelsTab('tunnels')
+  app.setActivity('tunnels')
 }
 
 /** Open a page of Settings. */

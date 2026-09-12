@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useApp } from '../src/renderer/src/store/app'
-import { openAi, openSettings, useNav } from '../src/renderer/src/store/nav'
+import { openAi, openSettings, openTunnels, useNav } from '../src/renderer/src/store/nav'
 
 // A button on an error message is only worth having if it lands on the page
 // that resolves the error. Both panels used to hold their current page in local
@@ -40,5 +40,39 @@ describe('openSettings', () => {
     openSettings('security')
     expect(useApp.getState().activity).toBe('settings')
     expect(useNav.getState().settingsSection).toBe('security')
+  })
+})
+
+// The same rule one destination further along. "New tunnel" in the sidebar had
+// no handler at all and the palette's tunnel rows opened the page without
+// selecting the tunnel they were named after, because TunnelManager held
+// `creating` and `editing` in local state and there was nothing to call.
+describe('openTunnels', () => {
+  it('opens Tunnels with the creation form asked for', () => {
+    useNav.setState({ tunnelIntent: null })
+    openTunnels({ kind: 'create' })
+    expect(useApp.getState().activity).toBe('tunnels')
+    expect(useNav.getState().tunnelIntent).toEqual({ kind: 'create' })
+  })
+
+  it('names the tunnel to select', () => {
+    useNav.setState({ tunnelIntent: null })
+    openTunnels({ kind: 'select', tunnelId: 't-db' })
+    expect(useNav.getState().tunnelIntent).toEqual({ kind: 'select', tunnelId: 't-db' })
+  })
+
+  it('lands on the tab that renders the tunnel list', () => {
+    // Four panels share this destination and only the first holds tunnels, so
+    // an intent delivered while the user was last on VPN would sit on a panel
+    // that is not on screen.
+    useApp.setState({ tunnelsTab: 'vpn' })
+    openTunnels({ kind: 'select', tunnelId: 't-db' })
+    expect(useApp.getState().tunnelsTab).toBe('tunnels')
+  })
+
+  it('carries nothing when it is only a destination', () => {
+    useNav.setState({ tunnelIntent: { kind: 'create' } })
+    openTunnels()
+    expect(useNav.getState().tunnelIntent).toBeNull()
   })
 })
