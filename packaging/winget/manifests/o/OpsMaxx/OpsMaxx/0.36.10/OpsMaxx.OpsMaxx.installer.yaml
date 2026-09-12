@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+PackageIdentifier: OpsMaxx.OpsMaxx
+PackageVersion: 0.36.10
+InstallerType: nullsoft
+Scope: user
+InstallModes:
+  - interactive
+  - silent
+  - silentWithProgress
+UpgradeBehavior: install
+ReleaseDate: "2026-09-12"
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/OpsMaxx/OpsMaxx/releases/download/v0.36.10/OpsMaxx-0.36.10-setup.exe
+    InstallerSha256: AFDE2DEE754FDDEBDE9FEC994B70A6AFFEE2616FF58D6CE939DB63341F148073
+ManifestType: installer
+ManifestVersion: 1.6.0
