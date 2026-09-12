@@ -6,6 +6,7 @@ import {
   VpnError,
   classifyEngineLine,
   describeVpnError,
+  firstOutputLine,
   isVpnError,
   toVpnResult
 } from '../src/main/services/vpn/errors'
@@ -24,6 +25,10 @@ const ALL_CODES: VpnErrorCode[] = [
   'cert-expired',
   'handshake-timeout',
   'dns-failure',
+  // The opposite direction to 'dns-failure', and the pair is easy to mix up: a
+  // name this app could not resolve, versus a resolver that would not take the
+  // settings this app gave it.
+  'dns-not-applied',
   'port-in-use',
   'permission-denied',
   'elevation-declined',
@@ -87,6 +92,17 @@ describe('describeVpnError', () => {
     const text = describeVpnError('already-running')
     expect(text).toBe('This tunnel is already running.')
     expect(text).not.toMatch(/ {2}/)
+  })
+
+  it('gives a DNS change the resolver refused a sentence of its own', () => {
+    // The coverage tests above already fail on a code with no entry in either
+    // map. This one is about the pair: 'dns-not-applied' must not read like
+    // 'dns-failure', because one sends the user to their own DNS settings and
+    // the other is about ours, on this machine, not sticking.
+    const text = describeVpnError('dns-not-applied', 'The resolver is using 10.0.0.1 and not 10.8.0.1.')
+    expect(text).toContain('The resolver is using 10.0.0.1')
+    expect(text).toContain('Open the log')
+    expect(text).not.toBe(describeVpnError('dns-failure'))
   })
 })
 
@@ -176,5 +192,22 @@ describe('classifyEngineLine', () => {
       const code = classifyEngineLine(line)
       expect(code && VPN_ERROR_MESSAGE[code]).toBeTruthy()
     }
+  })
+})
+
+describe('firstOutputLine', () => {
+  it('prefers stderr, takes one line, and ignores trailing noise', () => {
+    expect(firstOutputLine({ stderr: 'RTNETLINK answers: No such process\n', stdout: '' }, 'fb')).toBe(
+      'RTNETLINK answers: No such process'
+    )
+    expect(firstOutputLine({ stdout: 'first\nsecond\n' }, 'fb')).toBe('first')
+  })
+
+  it('falls back when the command said nothing, and when nothing was heard', () => {
+    // The two cases that used to reach the user as a sentence ending at its
+    // colon: an empty string is not nullish, so `??` never fired.
+    expect(firstOutputLine({ stdout: '', stderr: '' }, 'ip exited 2')).toBe('ip exited 2')
+    expect(firstOutputLine({}, 'ip exited 2')).toBe('ip exited 2')
+    expect(firstOutputLine({ stderr: '   \n\n' }, 'ip exited 2')).toBe('ip exited 2')
   })
 })

@@ -26,6 +26,7 @@ import type { ResolvedVpnSecrets, VpnDriverContext } from '../src/main/services/
 import {
   applySystemNetworking,
   createMonotonicClock,
+  elevatedNetContext,
   handshakeAgeSec,
   parseNetdVersion,
   stateFromHandshakeAge,
@@ -1133,6 +1134,46 @@ describe('system mode', () => {
     // payload, so a DNS backend that needs one reports `unsupported` rather
     // than running a command that silently does nothing.
     expect(applied[0].ctx.supportsStdin).toBe(false)
+  })
+
+  it('gives applyNetState a sink for a DNS change it could not verify', async () => {
+    // `applyNetState` keeps a change whose read-back failed rather than tearing
+    // a probably-working tunnel down over its own blindness — so this is the one
+    // thing standing between that decision and a silent unverified apply, which
+    // is the bug verify() was added to kill.
+    const { ctx, logs } = makeCtx()
+    await applySystemNetworking(makeProfile(makeSpec({ mode: 'system', dns: ['10.7.0.2'] })), ctx, 'run-1', {
+      platform: 'linux',
+      elevator: elevator(),
+      routeManager: { conflicts: async () => [] },
+      applyNet: async (_plan, _netCtx, opts) => {
+        opts?.onNote?.('The name resolution policy table could not be read: Access is denied.')
+        return { version: 1, runId: 'run-1', platform: 'linux', interfaceName: 'x', appliedAt: 0, bootAt: 0 } as NetStateFile
+      }
+    })
+
+    // The same log ring the ipv6-leak warning uses, for the same kind of fact:
+    // the tunnel is up and staying up, and there is one thing worth knowing.
+    expect(logs).toContain('The name resolution policy table could not be read: Access is denied.')
+  })
+
+  it('hands a Linux privileged command its own stderr back', async () => {
+    // pkexec and sudo fork the command, so its output really is ours; macOS and
+    // Windows cannot see it and leave the field absent. Without this, a failed
+    // route or DNS command reached the user as a sentence ending at its colon.
+    const { ctx } = makeCtx()
+    const netCtx = elevatedNetContext('run-1', ctx.runDir, elevator({
+      run: async () => ({
+        pid: 1,
+        wait: async () => ({ code: 2, declined: false, stderr: 'RTNETLINK answers: Operation not permitted' }),
+        kill: async () => undefined
+      })
+    }), 'because')
+
+    expect(await netCtx.runPrivileged('ip', ['route', 'add'])).toEqual({
+      code: 2,
+      stderr: 'RTNETLINK answers: Operation not permitted'
+    })
   })
 
   it('turns a dismissed prompt into elevation-declined, with no retry', async () => {

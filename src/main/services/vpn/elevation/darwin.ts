@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import type { ChildProcess } from 'node:child_process'
 import { VpnError } from '../errors'
+import { captureStderr } from './stderrCapture'
 import type {
   ElevatedProcess,
   ElevationExit,
@@ -128,6 +129,48 @@ export function buildOsascriptArgs(req: ElevationRequest): string[] {
   return ['-e', script]
 }
 
+/** osascript's own framing around an AppleScript error. The two numbers are
+ *  character offsets into the script we generated, which is noise to everyone;
+ *  what follows them is the error's message. Optional because the offsets are
+ *  the one part of the shape not worth depending on. */
+const OSASCRIPT_FRAMING = /^\s*(?:\d+:\d+:\s*)?(?:execution|syntax) error:\s*/
+
+/** What the failed command complained about, as far as this route can know it.
+ *
+ *  `do shell script` raises an AppleScript error whose message is the command's
+ *  stderr — or, when stderr was empty, a generic sentence of AppleScript's own.
+ *  osascript prints that as `0:117: execution error: <message> (<status>)`,
+ *  joining a multi-line stderr with CR, because CR is AppleScript's line
+ *  separator and not a character anything downstream splits on.
+ *
+ *  Measured on Darwin 24.6 for `do shell script` WITHOUT `with administrator
+ *  privileges`: a command writing `route: writing to routing socket: File
+ *  exists` to stderr and exiting 68 arrives as exactly
+ *  `0:117: execution error: route: writing to routing socket: File exists (68)`.
+ *  With stderr empty and the same exit, the message is instead `The command
+ *  exited with a non-zero status.` — so a message that is not that sentence is
+ *  the command's own words.
+ *
+ *  NOT measured, and deliberately not depended on: the same thing *with*
+ *  administrator privileges, which is the only form this elevator uses. That
+ *  variant cannot be run without the authentication dialog, so it cannot be
+ *  exercised non-interactively, and the security framework starts the command
+ *  outside our session — the message may well be AppleScript's generic sentence
+ *  rather than the command's. This is therefore wired up to make a failure
+ *  *readable*, and nothing decides anything from its content. The one decision
+ *  that used to hang off it — whether a retried `route add` collided with its
+ *  own earlier route — is taken from the route table instead, in
+ *  `routing/darwin.ts`.
+ *
+ *  The trailing `(N)` is left in the text for the same reason. If the message
+ *  turns out to be the generic sentence, that number is the only fact in it,
+ *  and dropping it would make this worse than the `route exited 1` fallback it
+ *  displaces. */
+function commandComplaint(stderr: string): string | undefined {
+  const text = stderr.replace(OSASCRIPT_FRAMING, '').replace(/\r/g, '\n').trim()
+  return text || undefined
+}
+
 /** What osascript's stderr says about a non-zero exit.
  *
  *  `do shell script` raises an AppleScript error whose number is the shell
@@ -139,8 +182,9 @@ export function parseOsascriptFailure(stderr: string): ElevationExit {
   if (/User cancell?ed/i.test(stderr)) return { code: null, declined: true }
   const match = /\((-?\d+)\)\s*$/m.exec(stderr.trim())
   const number = match ? Number(match[1]) : null
+  // A decline is the dialog talking, not the command, so it carries no stderr.
   if (number === USER_CANCELLED) return { code: null, declined: true }
-  return { code: number, declined: false }
+  return { code: number, declined: false, stderr: commandComplaint(stderr) }
 }
 
 export function createDarwinElevator(): Elevator {
@@ -188,10 +232,15 @@ const child = spawn(OSASCRIPT, buildOsascriptArgs(req), {
 }
 
 function adopt(child: ChildProcess): ElevatedProcess {
-  let stderr = ''
-  child.stderr?.on('data', (chunk: Buffer | string) => {
-    if (stderr.length < STDERR_CAP) stderr += String(chunk)
-  })
+  // The same accumulator Linux uses, and now for the same reason as well: this
+  // route does surface the text, so it has to be redacted before it is capped,
+  // not after. A privileged command echoing its own arguments back is the
+  // ordinary case, and `do shell script` puts the command line in the argv of
+  // osascript itself. The other two reasons have always applied here — the old
+  // `length < cap` test ran before the append, so one oversized chunk stored all
+  // of it, and `String(chunk)` mangled any UTF-8 sequence a pipe split in half,
+  // which on a localised macOS is the error message we are trying to read.
+  const stderr = captureStderr(child, STDERR_CAP)
 
   let settled: Promise<ElevationExit> | null = null
   const wait = (): Promise<ElevationExit> => {
@@ -204,8 +253,11 @@ function adopt(child: ChildProcess): ElevatedProcess {
       // can actually be classified.
       child.once('close', (code: number | null) => {
         if (code === 0) return resolve({ code: 0, declined: false })
-        const parsed = parseOsascriptFailure(stderr)
-        resolve(parsed.code === null && !parsed.declined ? { code, declined: false } : parsed)
+        const parsed = parseOsascriptFailure(stderr())
+        // No `(N)` in the text means the exit status never made it through the
+        // AppleScript error, so osascript's own is the best available — but
+        // whatever it did say is still worth keeping.
+        resolve(parsed.code === null && !parsed.declined ? { ...parsed, code } : parsed)
       })
     })
     return settled

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -40,6 +40,33 @@ import {
   writeNetState
 } from '../src/main/services/vpn/netstate'
 import type { NetApplyContext, NetStateFile, PrivilegedResult } from '../src/main/services/vpn/netstate'
+import { parseResolvConf } from '../src/main/services/vpn/dns/linux'
+import { buildQueryScript } from '../src/main/services/vpn/dns/win32'
+import { runTag } from '../src/main/services/vpn/dns/index'
+
+// Not exported from win32.ts — it is that module's private invocation, and the
+// point of spelling it out here is that the fixture key has to match what the
+// manager really runs, character for character.
+const PS_ARGS = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command']
+
+// applyNetState reads the resolver back after a DNS apply, and the privileged
+// channel in these tests is a recorder that changes nothing — so the resolver
+// still reports whatever this host was already using. Planning exactly those
+// servers keeps the ordering tests below about ordering, without pretending a
+// change landed that never did. (No resolvectl fixture is registered, so the
+// Linux manager takes its resolv.conf branch on every host, including one
+// without the file at all.)
+function hostResolvers(): string[] {
+  try {
+    return parseResolvConf(readFileSync('/etc/resolv.conf', 'utf8')).servers
+  } catch {
+    return []
+  }
+}
+
+// RFC 5737 reserves this range, so no host's resolver is ever really using it —
+// which is what makes a plan naming it impossible to verify on any machine.
+const UNREACHED_DNS = '192.0.2.53'
 
 let root: string
 let runDir: string
@@ -128,7 +155,7 @@ describe('apply ordering', () => {
       {
         interfaceName: 'wg0',
         routes: [{ destination: '10.8.0.0/24', interfaceName: 'wg0' }],
-        dns: { servers: ['10.8.0.1'], searchDomains: [], interfaceName: 'wg0' }
+        dns: { servers: hostResolvers(), searchDomains: [], interfaceName: 'wg0' }
       },
       rec.ctx,
       { platform: 'linux', root }
@@ -139,7 +166,7 @@ describe('apply ordering', () => {
     expect(rec.calls.every((c) => c.snapshotOnDisk)).toBe(true)
     expect(state.routes?.planned).toEqual([{ destination: '10.8.0.0/24', interfaceName: 'wg0' }])
     expect(state.dns?.runId).toBe('run-1')
-    expect(state.dns?.planned?.servers).toEqual(['10.8.0.1'])
+    expect(state.dns?.planned?.servers).toEqual(hostResolvers())
     expect(await readNetState('run-1', root)).toEqual(JSON.parse(JSON.stringify(state)))
   })
 
@@ -149,7 +176,7 @@ describe('apply ordering', () => {
       {
         interfaceName: 'wg0',
         routes: [{ destination: '10.8.0.0/24', interfaceName: 'wg0' }],
-        dns: { servers: ['10.8.0.1'], searchDomains: [], interfaceName: 'wg0' }
+        dns: { servers: hostResolvers(), searchDomains: [], interfaceName: 'wg0' }
       },
       rec.ctx,
       { platform: 'linux', root }
@@ -181,6 +208,82 @@ describe('apply ordering', () => {
     // The snapshot stays on disk: a rollback that itself failed is exactly
     // what the startup pass is for.
     expect(existsSync(netStatePath('run-1', root))).toBe(true)
+  })
+
+  it('refuses a DNS change the resolver never picked up', async () => {
+    // The whole reason verify() exists: every DNS command here exits 0 whether
+    // or not the resolver took the change, so this recorder's cheerful exit 0
+    // is exactly what a silently ignored apply looks like from in here.
+    const rec = recorder()
+    await expect(
+      applyNetState(
+        {
+          interfaceName: 'wg0',
+          dns: { servers: [UNREACHED_DNS], searchDomains: [], interfaceName: 'wg0' }
+        },
+        rec.ctx,
+        { platform: 'linux', root }
+      )
+    ).rejects.toMatchObject({
+      name: 'VpnError',
+      // Its own code, not 'internal' and certainly not 'dns-failure' — that one
+      // means a name could not be looked up and would send the reader to check
+      // their own DNS settings when it is ours that did not stick.
+      code: 'dns-not-applied',
+      detail: expect.stringContaining('did not take effect')
+    })
+    // And it is rolled back rather than left half-applied.
+    expect(['install', 'ln']).toContain(rec.calls[rec.calls.length - 1].cmd)
+  })
+
+  // win32 rather than linux for the two cases below: every command the NRPT
+  // manager runs is a fixture here, including the read-back, so "the resolver
+  // says the old servers" and "the read-back could not be performed" can be
+  // staged exactly rather than inferred from whatever this host's resolver
+  // happens to be doing.
+  const NRPT_QUERY = `powershell.exe ${[...PS_ARGS, buildQueryScript(runTag('run-1'))].join(' ')}`
+  const nrptPlan = {
+    interfaceName: 'OpsMaxx wg',
+    dns: { servers: ['10.8.0.1'], searchDomains: [], interfaceName: 'OpsMaxx wg' }
+  }
+
+  it('rolls back when the read-back shows the old servers still in force', async () => {
+    const rec = recorder()
+    // A rule is there and it is ours — it just points at the resolver the
+    // machine was already using. This is the leak the check exists to catch.
+    h.replies.set(NRPT_QUERY, { code: 0, stdout: '{"Namespace":".","NameServers":["192.0.2.1"]}' })
+
+    await expect(applyNetState(nrptPlan, rec.ctx, { platform: 'win32', root })).rejects.toMatchObject({
+      name: 'VpnError',
+      code: 'dns-not-applied'
+    })
+    // Two privileged calls: the add, then the rollback's remove.
+    expect(rec.calls).toHaveLength(2)
+    expect(rec.calls[1].args.join(' ')).toContain('Remove-DnsClientNrptRule')
+  })
+
+  it('keeps a change it could not read back, and says so instead of rolling it back', async () => {
+    const rec = recorder()
+    const notes: string[] = []
+    // The read-back itself failed. The rule was added and probably works; all
+    // that happened is that we cannot see it. Tearing the tunnel down here would
+    // be worse than the silent success verify() replaced.
+    h.replies.set(NRPT_QUERY, { code: 1, stderr: 'Access is denied.' })
+
+    const state = await applyNetState(nrptPlan, rec.ctx, {
+      platform: 'win32',
+      root,
+      onNote: (m) => notes.push(m)
+    })
+
+    // The apply stands: the snapshot came back and nothing was reverted.
+    expect(state.dns).toBeDefined()
+    expect(rec.calls).toHaveLength(1)
+    expect(rec.calls[0].args.join(' ')).toContain('Add-DnsClientNrptRule')
+    // And it is not silent. A condition we decided not to fail on and then
+    // never mentioned is the original bug in a new place.
+    expect(notes).toHaveLength(1)
+    expect(notes[0]).toContain('Access is denied.')
   })
 
   it('reverts idempotently', async () => {

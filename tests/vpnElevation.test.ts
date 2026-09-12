@@ -257,7 +257,67 @@ describe('macos', () => {
     await flush()
     rec.child.exit(1)
 
-    expect(await waiting).toEqual({ code: 2, declined: false })
+    expect(await waiting).toEqual({
+      code: 2,
+      declined: false,
+      stderr: 'Options error: cannot open config (2)'
+    })
+  })
+
+  it('hands the failed command complaint back instead of swallowing it', async () => {
+    // The whole point of capturing this: what a privileged `route add` said is
+    // the only thing anyone has to go on, and it used to die inside the elevator
+    // so the user got "Could not add route …:" with nothing after the colon.
+    const proc = await elevatorForPlatform('darwin').run(req())
+    const waiting = proc.wait()
+    const rec = lastSpawn()
+    rec.child.stderr.write(
+      '0:117: execution error: route: writing to routing socket: File exists (68)\n'
+    )
+    await flush()
+    rec.child.exit(1)
+
+    expect(await waiting).toEqual({
+      code: 68,
+      declined: false,
+      // The script offsets are gone — they are character positions in a script
+      // we generated — and the exit status is not, because when AppleScript
+      // substitutes its own generic message that number is the only fact left.
+      stderr: 'route: writing to routing socket: File exists (68)'
+    })
+  })
+
+  it('splits a CR-joined complaint into lines a reader can use', async () => {
+    // CR is AppleScript's line separator, so a multi-line stderr arrives as one
+    // line joined with \r — which `firstOutputLine` does not split on, leaving
+    // the whole thing to be shown as the "one line worth showing a person".
+    const proc = await elevatorForPlatform('darwin').run(req())
+    const waiting = proc.wait()
+    const rec = lastSpawn()
+    rec.child.stderr.write(
+      '0:117: execution error: route: warning: route has 2 entries\rroute: writing to routing socket: File exists (68)\n'
+    )
+    await flush()
+    rec.child.exit(1)
+
+    expect((await waiting).stderr).toBe(
+      'route: warning: route has 2 entries\nroute: writing to routing socket: File exists (68)'
+    )
+  })
+
+  it('redacts what the privileged command printed before handing it on', async () => {
+    const proc = await elevatorForPlatform('darwin').run(req())
+    const waiting = proc.wait()
+    const rec = lastSpawn()
+    rec.child.stderr.write(
+      '0:117: execution error: route: -----BEGIN OPENSSH PRIVATE KEY-----\rb3BlbnNzaC1rZXktdjEAAAAA\r-----END OPENSSH PRIVATE KEY----- (1)\n'
+    )
+    await flush()
+    rec.child.exit(1)
+
+    const text = (await waiting).stderr ?? ''
+    expect(text).not.toContain('b3BlbnNzaC1rZXktdjEAAAAA')
+    expect(text).toContain('[REDACTED')
   })
 
   it('resolves cleanly on success', async () => {
@@ -271,8 +331,16 @@ describe('macos', () => {
   it('classifies stderr directly', () => {
     expect(parseOsascriptFailure('… (-128)')).toEqual({ code: null, declined: true })
     expect(parseOsascriptFailure('User cancelled.')).toEqual({ code: null, declined: true })
-    expect(parseOsascriptFailure('boom (7)')).toEqual({ code: 7, declined: false })
-    expect(parseOsascriptFailure('nothing useful')).toEqual({ code: null, declined: false })
+    expect(parseOsascriptFailure('boom (7)')).toEqual({ code: 7, declined: false, stderr: 'boom (7)' })
+    expect(parseOsascriptFailure('nothing useful')).toEqual({
+      code: null,
+      declined: false,
+      stderr: 'nothing useful'
+    })
+    // Nothing said at all stays absent rather than becoming an empty string:
+    // `firstOutputLine` has to be able to tell "it was silent" from "we could
+    // not hear it", and only one of those has a fallback worth printing.
+    expect(parseOsascriptFailure('  \n ')).toEqual({ code: null, declined: false })
   })
 
   it('refuses an environment variable name it cannot quote', () => {
@@ -411,7 +479,143 @@ describe('linux', () => {
     await flush()
     rec.child.exit(1)
 
-    expect(await waiting).toEqual({ code: 1, declined: false })
+    // The complaint comes back with the status. pkexec and sudo fork the
+    // command, so its stderr really is ours — and this was already buffered for
+    // the decline test above, it simply had no way out. Without it,
+    // `Could not add route 10.8.0.0/24 on wg0:` reached the user with nothing
+    // after the colon.
+    expect(await waiting).toEqual({
+      code: 1,
+      declined: false,
+      stderr: 'Options error: unrecognized option'
+    })
+  })
+
+  it('keeps a silent failure silent rather than reporting an empty complaint', async () => {
+    hoisted.files.add(TUN_DEVICE)
+    hoisted.files.add('/usr/bin/pkexec')
+
+    const proc = await elevatorForPlatform('linux').run(req())
+    const waiting = proc.wait()
+    lastSpawn().child.exit(2)
+
+    // Absent, not ''. `firstOutputLine` reads an empty string as "it said
+    // nothing" and falls through to naming the command — which is the whole
+    // distinction the optional field carries.
+    expect(await waiting).toEqual({ code: 2, declined: false })
+  })
+
+  it('redacts what the privileged command printed before handing it on', async () => {
+    hoisted.files.add(TUN_DEVICE)
+    hoisted.files.add('/usr/bin/pkexec')
+
+    const proc = await elevatorForPlatform('linux').run(req())
+    const waiting = proc.wait()
+    const rec = lastSpawn()
+    // Redacted at the producer so no consumer has to remember to: a privileged
+    // command echoing its own arguments back is the ordinary case here.
+    rec.child.stderr.write('failed with password=hunter2correcthorse\n')
+    await flush()
+    rec.child.exit(1)
+
+    const exit = await waiting
+    expect(exit.stderr).not.toContain('hunter2correcthorse')
+  })
+
+  // The cap and the redaction have to happen in that order, and these three
+  // tests are the three ways the old accumulator got it wrong. It read
+  //
+  //   if (stderr.length < STDERR_CAP) stderr += String(chunk)
+  //
+  // and redacted once at the end.
+  const STDERR_CAP = 8 * 1024
+
+  /** A deterministic PEM body of 64-character base64 lines — the shape no
+   *  pattern can recognise on its own, so only the block rules can remove it. */
+  const keyBody = (lines: number): string =>
+    Array.from({ length: lines }, (_, i) =>
+      // 53 is odd, so no two lines carry the same bytes — a repeating body would
+      // let a truncated buffer still contain every distinct line.
+      Buffer.from(Array.from({ length: 48 }, (_, j) => (i * 53 + j * 7) % 256)).toString('base64')
+    ).join('\n')
+
+  const write = async (child: FakeChild, text: string, chunk = 4096): Promise<void> => {
+    const buf = Buffer.from(text)
+    for (let i = 0; i < buf.length; i += chunk) {
+      child.stderr.write(buf.subarray(i, i + chunk))
+      await flush()
+    }
+  }
+
+  it('redacts a private key that arrives after the cap is already full', async () => {
+    // Measured against the old accumulator: 5.4 KiB of openvpn chatter followed
+    // by this key, delivered in 4 KiB chunks, left 42 of these 52 lines in the
+    // buffer in plain text. The cut landed between the two PEM markers, so the
+    // private-key pattern matched nothing and the body was stored as prose.
+    hoisted.files.add(TUN_DEVICE)
+    hoisted.files.add('/usr/bin/pkexec')
+
+    const chatter =
+      Array.from(
+        { length: 44 },
+        (_, i) =>
+          `Thu Sep 11 10:00:${String(i % 60).padStart(2, '0')} 2026 OpenVPN 2.5.9 x86_64-pc-linux-gnu [SSL (OpenSSL)] [LZO] [LZ4] [EPOLL] built on Jan 1 2026 line ${i}`
+      ).join('\n') + '\n'
+    const body = keyBody(52)
+
+    const proc = await elevatorForPlatform('linux').run(req())
+    const waiting = proc.wait()
+    const rec = lastSpawn()
+    await write(rec.child, `${chatter}-----BEGIN OPENSSH PRIVATE KEY-----\n${body}\n`)
+    rec.child.exit(1)
+
+    const exit = await waiting
+    const out = exit.stderr ?? ''
+    expect(Buffer.byteLength(chatter) + body.length).toBeGreaterThan(STDERR_CAP)
+    const survivors = body.split('\n').filter((line) => out.includes(line))
+    expect(survivors.slice(0, 3), `${survivors.length} key lines survived redaction`).toEqual([])
+    // …and the diagnosis still arrives, which is the only reason the field
+    // exists at all.
+    expect(out).toContain('OpenVPN 2.5.9')
+    expect(out).toContain('[REDACTED]')
+  })
+
+  it('caps a single oversized chunk, which the old length test let straight through', async () => {
+    // The test ran before the append, so it was never a cap: one 64 KiB chunk
+    // arriving on an empty buffer passed `0 < 8192` and stored all 64 KiB.
+    hoisted.files.add(TUN_DEVICE)
+    hoisted.files.add('/usr/bin/pkexec')
+
+    const proc = await elevatorForPlatform('linux').run(req())
+    const waiting = proc.wait()
+    const rec = lastSpawn()
+    rec.child.stderr.write(Buffer.alloc(64 * 1024, 0x41))
+    await flush()
+    rec.child.exit(1)
+
+    expect((await waiting).stderr).toHaveLength(STDERR_CAP)
+  })
+
+  it('does not mangle a multi-byte character split across a chunk boundary', async () => {
+    // `String(chunk)` decoded each half on its own, so a UTF-8 sequence the pipe
+    // happened to split became two replacement characters — in a path, a
+    // hostname, or the localised error text this field exists to carry.
+    hoisted.files.add(TUN_DEVICE)
+    hoisted.files.add('/usr/bin/pkexec')
+
+    const proc = await elevatorForPlatform('linux').run(req())
+    const waiting = proc.wait()
+    const rec = lastSpawn()
+    const message = Buffer.from('réseau indisponible — route non trouvée\n')
+    rec.child.stderr.write(message.subarray(0, 2))
+    await flush()
+    rec.child.stderr.write(message.subarray(2))
+    await flush()
+    rec.child.exit(1)
+
+    const out = (await waiting).stderr ?? ''
+    expect(out).toBe('réseau indisponible — route non trouvée')
+    expect(out).not.toContain('�')
   })
 
   it('names /dev/net/tun when the device is missing (E06)', async () => {

@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { chmod, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { networkInterfaces, uptime } from 'node:os'
 import { join } from 'node:path'
+import { VpnError } from './errors'
 import { runIdSegment, vpnRunRoot } from './runDir'
 import type { DnsSnapshot, DnsSpec } from './dns/index'
 import type { RouteSnapshot, RouteSpec } from './routing/index'
@@ -29,8 +30,37 @@ const BOOT_TOLERANCE_MS = 30_000
 
 export interface PrivilegedResult {
   code: number
-  stdout: string
-  stderr: string
+  /** Both are absent — not empty — when the channel cannot see that stream at
+   *  all, and which of the two happens is PER PLATFORM rather than universal.
+   *  The distinction is load-bearing either way: an empty string reads as "it
+   *  said nothing", which is a different fact from "we could not hear it", and
+   *  `firstOutputLine` is what turns the second case into a message (the command
+   *  and its exit status) instead of a sentence that stops at its colon.
+   *
+   *  `stdout` is absent on EVERY route. No elevator populates it — see
+   *  `elevatedNetContext` in drivers/wireguard.ts, which returns code and stderr
+   *  and nothing else. These commands put their complaints on stderr and nothing
+   *  here wants their output, so this is "never captured", not "not capturable". */
+  stdout?: string
+  /** `stderr` arrives on Linux and macOS, and only Windows is left out.
+   *
+   *  Linux: pkexec and sudo FORK the command, so its pipes are ours and the text
+   *  is the command's own — verified, and the routing manager classifies on it.
+   *
+   *  macOS: `do shell script` raises an AppleScript error carrying the exit
+   *  status and a message, and that reaches osascript's own stderr. Whether the
+   *  message is the command's stderr or AppleScript's generic stand-in is
+   *  UNVERIFIED under the `with administrator privileges` form this elevator
+   *  uses — that form cannot be run without the authentication dialog, so it
+   *  could not be measured. So it is here to be READ and nothing branches on its
+   *  content; `parseOsascriptFailure` in elevation/darwin.ts has the measurement
+   *  and its limits.
+   *
+   *  Windows: absent, always. ShellExecute gives the elevated process no handles
+   *  to redirect, so there is nothing to capture, and the appliers that need to
+   *  know whether a route was already there read the route table instead of
+   *  waiting for a sentence that never comes. */
+  stderr?: string
 }
 
 export interface PrivilegedOptions {
@@ -196,6 +226,17 @@ export interface NetStateOptions {
   platform?: NodeJS.Platform
   root?: string
   now?: number
+  /** Something went not-quite-right and the apply stands anyway. One sentence,
+   *  already written for a person.
+   *
+   *  Only a DNS read-back that could not be taken reaches this today, and it has
+   *  to reach *something*: a condition we decided not to fail on and then did not
+   *  mention is the silent success `verify()` was added to kill, moved one level
+   *  up. This module has no logger of its own — it is handed a privileged channel
+   *  and nothing else — so the driver supplies the sink, which is the same
+   *  `ctx.log(…, 'app')` the ipv6-leak warning already uses. Absent in the
+   *  restore pass, which reports through `RestoreReport` instead. */
+  onNote?: (message: string) => void
 }
 
 /** Snapshot, persist, then change — in that order, and never any other.
@@ -239,7 +280,39 @@ export async function applyNetState(
 
   try {
     if (state.routes && plan.routes) await route.routeManagerFor(platform).apply(plan.routes, ctx)
-    if (state.dns && plan.dns) await dns.dnsManagerFor(platform).apply(plan.dns, ctx)
+    if (state.dns && plan.dns) {
+      // One manager for both calls, not two: win32 recognises its own NRPT
+      // rules by the tag it applied them under, and it learns that from the
+      // context `apply` was handed.
+      const manager = dns.dnsManagerFor(platform)
+      await manager.apply(plan.dns, ctx)
+      // A DNS command exiting 0 is not evidence the resolver took the change,
+      // so it is read back — and the answer has three values, because rolling
+      // back on the wrong two of them each breaks something different.
+      //
+      //   failed  — the resolver was read and it is still using the old servers.
+      //             Rolled back: a tunnel whose queries go to the old server is
+      //             the leak nobody notices, and calling it connected is what
+      //             makes it one.
+      //   skipped — the read itself did not happen. NOT rolled back. The tunnel
+      //             is probably fine and we simply cannot see; tearing it down
+      //             on our own blindness is a worse bug than the silent success
+      //             this check replaced. It is still said out loud, because an
+      //             unverified apply that reports nothing is that same bug
+      //             wearing a different hat.
+      const check = await manager.verify(plan.dns)
+      if (check.status === 'failed') throw new VpnError('dns-not-applied', check.reason)
+      // Unconditional: `reason` is required on the `skipped` variant of
+      // `DnsVerification`, so there is no longer a shape that keeps the change
+      // and says nothing. The `||` covers the one thing the type cannot —
+      // a reason that is present but empty.
+      if (check.status === 'skipped') {
+        opts.onNote?.(
+          check.reason ||
+            'The DNS change could not be read back, so it was kept without being confirmed.'
+        )
+      }
+    }
   } catch (e) {
     await revertNetState(state, ctx, opts).catch(() => {})
     throw e

@@ -40,6 +40,7 @@ import {
   claimsDefault,
   detectIpv6Leak,
   expandDefaultRoutes,
+  isDefaultRoute,
   maskToPrefix,
   normalizeCidr,
   routeManagerFor
@@ -101,6 +102,13 @@ destination: default
     gateway: fe80::1%en0
   interface: en0
       flags: <UP,GATEWAY,DONE,STATIC>
+`
+
+const DARWIN_OURS = `   route to: 10.8.0.0
+destination: 10.8.0.0
+       mask: 255.255.255.0
+  interface: utun4
+      flags: <UP,DONE,STATIC>
 `
 
 const DARWIN_CLAIMED = `   route to: 10.8.0.0
@@ -165,6 +173,10 @@ No       System    256  10.8.0.0/24                31  OtherVPN
 No       System    256  127.0.0.0/8                 1  Loopback Pseudo-Interface 1
 `
 
+// The same table after our own add landed: the prefix is on index 24, which is
+// what a retried add collides with.
+const WIN_SHOW_ROUTE_V4_OURS = WIN_SHOW_ROUTE_V4.replace('31  OtherVPN', '24  OpsMaxx Tunnel')
+
 const WIN_SHOW_ROUTE_V6 = `
 Publish  Type      Met  Prefix                    Idx  Gateway/Interface Name
 -------  --------  ---  ------------------------  ---  ------------------------
@@ -207,6 +219,50 @@ describe('routing helpers', () => {
     expect(normalizeCidr('10.8.0.1')).toBe('10.8.0.1/32')
     expect(normalizeCidr('default')).toBe('0.0.0.0/0')
     expect(normalizeCidr('default', 'inet6')).toBe('::/0')
+  })
+
+  it('masks host bits off a prefix, in both families', () => {
+    // `AllowedIPs = 10.8.0.1/24` is how the profile's Address field gets pasted,
+    // and no route table anywhere prints it back that way — it prints the network
+    // address. Comparing the two spellings is what decides whether a failed
+    // privileged add was a retry landing on our own leftover route or a real
+    // failure, so they have to reduce to the same string.
+    expect(normalizeCidr('10.8.0.1/24')).toBe('10.8.0.0/24')
+    expect(normalizeCidr('192.168.1.50/24')).toBe('192.168.1.0/24')
+    // Not on an octet boundary, where string surgery would go wrong.
+    expect(normalizeCidr('172.16.5.9/12')).toBe('172.16.0.0/12')
+    expect(normalizeCidr('fd00::2/64')).toBe('fd00::/64')
+  })
+
+  it('canonicalises IPv6 to one spelling', () => {
+    expect(normalizeCidr('fd00:0:0:0::/64')).toBe('fd00::/64')
+    expect(normalizeCidr('2001:0DB8:0000::/32')).toBe('2001:db8::/32')
+    expect(normalizeCidr('fd00::1')).toBe('fd00::1/128')
+  })
+
+  it('leaves an already-canonical prefix exactly as it is', () => {
+    for (const c of ['10.8.0.0/24', 'fd00::/64', '0.0.0.0/0', '::/0', '0.0.0.0/1', '8000::/1', '::1/128']) {
+      expect(normalizeCidr(c)).toBe(c)
+    }
+  })
+
+  it('never throws on input it cannot parse', () => {
+    // A malformed AllowedIPs must not be the reason a connect dies, so junk
+    // degrades to itself rather than to an exception — or, worse, to a prefix
+    // that means something. `10.0.0.1/` must not become a default route.
+    expect(normalizeCidr('not-a-cidr')).toBe('not-a-cidr')
+    expect(normalizeCidr('')).toBe('')
+    expect(normalizeCidr('10.0.0.1/99')).toBe('10.0.0.1/99')
+    expect(normalizeCidr('10.0.0.1/-1')).toBe('10.0.0.1/-1')
+    expect(normalizeCidr('10.0.0.1/')).toBe('10.0.0.1/')
+    // A zone id is scope, not an address; two scopes are not one route.
+    expect(normalizeCidr('fe80::1%eth0')).toBe('fe80::1%eth0')
+  })
+
+  it('treats a /0 as the default route however it was written', () => {
+    expect(normalizeCidr('10.8.0.1/0')).toBe('0.0.0.0/0')
+    expect(normalizeCidr('fd00::2/0')).toBe('::/0')
+    expect(isDefaultRoute('10.8.0.1/0')).toBe(true)
   })
 
   it('reads a dotted netmask back as a prefix length and rejects a discontiguous one', () => {
@@ -382,6 +438,69 @@ describe('darwin routes', () => {
     ).resolves.toBeUndefined()
   })
 
+  it('still sees `File exists` when something else printed first', async () => {
+    const rec = recorder()
+    // The idempotency test above passes on a one-line stderr whichever way the
+    // match is written. This is the one that does not: a retried add whose
+    // "already there" line arrives behind any other output must still be a
+    // retry, because treating it as a failure tears down a working tunnel.
+    rec.result = {
+      code: 1,
+      stdout: '',
+      stderr: 'route: warning: route has 2 entries\nroute: writing to routing socket: File exists'
+    }
+    await expect(
+      mgr().apply([{ destination: '10.8.0.0/24', interfaceName: 'utun4' }], rec.ctx)
+    ).resolves.toBeUndefined()
+  })
+
+  it('treats a route already live on our own interface as a retry, with no output at all', async () => {
+    // The case the `File exists` match cannot reach. `route` runs under
+    // `osascript … with administrator privileges`, so whether the command's own
+    // complaint ever arrives is not something this platform guarantees — and a
+    // retry that finds its own route already installed must not roll back a
+    // tunnel that is working.
+    const rec = recorder()
+    rec.result = { code: 1 }
+    reply('route -n get 10.8.0.0/24', DARWIN_OURS)
+    await expect(
+      mgr().apply([{ destination: '10.8.0.0/24', interfaceName: 'utun4' }], rec.ctx)
+    ).resolves.toBeUndefined()
+  })
+
+  it('counts a covering route of ours, which is what the /1 halves look like', async () => {
+    // `route -n get` is a lookup, so both halves of a full tunnel answer
+    // `destination: default` and cannot be matched by prefix. What matters is
+    // that the destination leaves over our interface, and it does.
+    const rec = recorder()
+    rec.result = { code: 1 }
+    reply('route -n get 0.0.0.0/1', DARWIN_DEFAULT_V4.replace('en0', 'utun4'))
+    reply('route -n get 128.0.0.0/1', DARWIN_DEFAULT_V4.replace('en0', 'utun4'))
+    await expect(
+      mgr().apply([{ destination: '0.0.0.0/0', interfaceName: 'utun4' }], rec.ctx)
+    ).resolves.toBeUndefined()
+  })
+
+  it('still refuses when the prefix is held by somebody else', async () => {
+    const rec = recorder()
+    rec.result = { code: 1 }
+    reply('route -n get 10.8.0.0/24', DARWIN_CLAIMED)
+    await expect(
+      mgr().apply([{ destination: '10.8.0.0/24', interfaceName: 'utun4' }], rec.ctx)
+    ).rejects.toMatchObject({ code: 'internal' })
+  })
+
+  it('names route and its exit code when no output came back', async () => {
+    const rec = recorder()
+    rec.result = { code: 2 }
+    await expect(
+      mgr().apply([{ destination: '10.8.0.0/24', interfaceName: 'utun4' }], rec.ctx)
+    ).rejects.toMatchObject({
+      code: 'internal',
+      detail: 'Could not add route 10.8.0.0/24 on utun4: route exited 2'
+    })
+  })
+
   it('names the interface already holding a prefix (E15)', async () => {
     darwinDefaults()
     reply('route -n get 10.8.0.0/24', DARWIN_CLAIMED)
@@ -506,6 +625,47 @@ describe('linux routes', () => {
     await expect(mgr().revert(snapshot, rec.ctx)).resolves.toBeUndefined()
   })
 
+  it('classifies the cause even when a warning printed before it', async () => {
+    const rec = recorder()
+    // Linux is the only platform whose elevator hands the command's own output
+    // back, and `sudo` likes to complain about /etc/hosts before the command
+    // even runs. Classifying only the first line reads the warning, finds
+    // nothing, and shows the user an unrelated sudo note under "Something went
+    // wrong inside" instead of "The network is unreachable".
+    rec.result = {
+      code: 2,
+      stdout: '',
+      stderr: 'sudo: unable to resolve host box\nRTNETLINK answers: Network is unreachable'
+    }
+    const err = await mgr()
+      .apply([{ destination: '10.8.0.0/24', interfaceName: 'wg0' }], rec.ctx)
+      .then(
+        () => null,
+        (e: unknown) => e as VpnError
+      )
+    expect(err?.code).toBe('network-unreachable')
+    // The sentence still shows one line, and it is still the first one: which
+    // line to show and what the failure was are different questions.
+    expect(err?.detail).toBe('Could not add route 10.8.0.0/24 on wg0: sudo: unable to resolve host box')
+  })
+
+  it('names ip and its exit code when the privileged channel saw no output', async () => {
+    const rec = recorder()
+    // Where every elevated command actually is: it is not our child, so nothing
+    // it printed reaches us. Reported as `stdout: ''` this message used to end
+    // at its colon, because an empty string is not nullish and `??` never fired.
+    rec.result = { code: 2 }
+    const err = await mgr()
+      .apply([{ destination: '10.8.0.0/24', interfaceName: 'wg0' }], rec.ctx)
+      .then(
+        () => null,
+        (e: unknown) => e as VpnError
+      )
+    expect(err?.detail).toBe('Could not add route 10.8.0.0/24 on wg0: ip exited 2')
+    expect(err?.detail).not.toMatch(/:\s*$/)
+    expect(err?.code).toBe('internal')
+  })
+
   it('finds a prefix another interface already holds, and the IPv6 leak', async () => {
     linuxTable()
     const conflicts = await mgr().conflicts([
@@ -614,6 +774,81 @@ describe('win32 routes', () => {
     ])
   })
 
+  it('names netsh and its exit code when no output came back', async () => {
+    winReads()
+    const rec = recorder()
+    rec.result = { code: 1 }
+    await expect(
+      mgr().apply([{ destination: '10.8.0.0/24', interfaceName: 'OpsMaxx Tunnel' }], rec.ctx)
+    ).rejects.toMatchObject({
+      code: 'internal',
+      detail: 'Could not add route 10.8.0.0/24 on OpsMaxx Tunnel: netsh exited 1'
+    })
+  })
+
+  it('treats a route netsh says already exists as a retry, first line or not', async () => {
+    winReads()
+    const rec = recorder()
+    // netsh prefixes its own banner line before the clash, so the line that
+    // makes this harmless is never the first one. A retried add landing on its
+    // own earlier route must not tear the tunnel down.
+    rec.result = {
+      code: 1,
+      stdout: '',
+      stderr: 'Configuration of the route failed.\nThe object already exists.'
+    }
+    await expect(
+      mgr().apply([{ destination: '10.8.0.0/24', interfaceName: 'OpsMaxx Tunnel' }], rec.ctx)
+    ).resolves.toBeUndefined()
+  })
+
+  it('treats a prefix already on our own index as a retry, with no output at all', async () => {
+    // The only case that happens on a real Windows. `Start-Process -Verb RunAs`
+    // goes through ShellExecute, which has no handles to redirect, so netsh's
+    // complaint never reaches this process and the `already exists` match above
+    // has nothing to read. The route table is what says the add collided with
+    // our own earlier route, and a retry must not roll the tunnel back.
+    winReads()
+    reply('netsh interface ipv4 show route', WIN_SHOW_ROUTE_V4_OURS)
+    const rec = recorder()
+    rec.result = { code: 1 }
+    await expect(
+      mgr().apply([{ destination: '10.8.0.0/24', interfaceName: 'OpsMaxx Tunnel' }], rec.ctx)
+    ).resolves.toBeUndefined()
+  })
+
+  it('treats a retry as a retry when AllowedIPs carried host bits', async () => {
+    // The user-facing bug. `AllowedIPs = 10.8.0.1/24` connects once, a hard kill
+    // leaves the route behind on our own index, and the reconnect's privileged
+    // add fails with nothing to read. The table says 10.8.0.0/24, the spec said
+    // 10.8.0.1/24, and before they were masked to the same prefix this threw and
+    // rolled a working tunnel back — leaving the user unable to reconnect without
+    // a reboot or a hand-run `netsh delete route`.
+    winReads()
+    reply('netsh interface ipv4 show route', WIN_SHOW_ROUTE_V4_OURS)
+    const rec = recorder()
+    rec.result = { code: 1 }
+    await expect(
+      mgr().apply([{ destination: '10.8.0.1/24', interfaceName: 'OpsMaxx Tunnel' }], rec.ctx)
+    ).resolves.toBeUndefined()
+    // And the add itself asked for the masked prefix, so the route that lands is
+    // the one the table will print back.
+    expect(argv(rec)).toEqual([
+      ['interface', 'ipv4', 'add', 'route', 'prefix=10.8.0.0/24', 'interface=24', 'store=active']
+    ])
+  })
+
+  it('does not read another adapter holding the prefix as our own retry', async () => {
+    // Same silence, different table: 10.8.0.0/24 is on index 31. Continuing here
+    // would report a tunnel as routed when its traffic goes somewhere else.
+    winReads()
+    const rec = recorder()
+    rec.result = { code: 1 }
+    await expect(
+      mgr().apply([{ destination: '10.8.0.0/24', interfaceName: 'OpsMaxx Tunnel' }], rec.ctx)
+    ).rejects.toMatchObject({ code: 'internal' })
+  })
+
   it('refuses to guess when the interface name resolves to no index', async () => {
     winReads()
     const rec = recorder()
@@ -668,5 +903,20 @@ describe('win32 routes', () => {
     expect(claimed).toHaveLength(1)
     expect(claimed[0].existing.interfaceIndex).toBe(31)
     expect(claimed[0].message).toContain('interface 31')
+  })
+
+  it('sees the same conflict when AllowedIPs carried host bits', async () => {
+    // The other half of the normalisation blind spot, and it failed OPEN: this
+    // prefix is held by another adapter either way, but spelled with host bits it
+    // compared equal to nothing and the refusal never fired. The message names the
+    // prefix that would actually be installed.
+    winReads()
+    const conflicts = await mgr().conflicts([
+      { destination: '10.8.0.1/24', interfaceName: 'OpsMaxx Tunnel' }
+    ])
+    const claimed = conflicts.filter((c) => c.kind === 'prefix-claimed')
+    expect(claimed).toHaveLength(1)
+    expect(claimed[0].destination).toBe('10.8.0.0/24')
+    expect(claimed[0].existing.interfaceIndex).toBe(31)
   })
 })

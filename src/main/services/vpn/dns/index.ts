@@ -1,3 +1,4 @@
+import type { VpnCheckStatus } from '../../../../shared/vpn'
 import { VpnError } from '../errors'
 import type { NetApplyContext } from '../netstate'
 import { DarwinDnsManager } from './darwin'
@@ -11,7 +12,17 @@ import { Win32DnsManager } from './win32'
 // longest after a crash — an NRPT rule and a rewritten /etc/resolv.conf both
 // survive a reboot — and it is the change most likely to fail silently, since
 // every one of these commands exits 0 whether or not the resolver actually
-// picked the change up. Hence `verify()`.
+// picked the change up. Hence `verify()`, which `applyNetState` calls before it
+// lets an apply count as done — a change the resolver demonstrably did not take
+// is rolled back there.
+//
+// `verify()` therefore has to be honest about what it does not know, and that is
+// why it answers with three words rather than a boolean. Reading the resolver
+// back is itself a command that can fail — an NRPT table PowerShell will not
+// enumerate, a `scutil` that is not there, output that does not parse — and a
+// read we could not perform says NOTHING about whether the change landed. Failing
+// closed on it tears down a tunnel that is very likely working, which is a worse
+// bug than the silent success this check replaced.
 
 export interface DnsSpec {
   servers: string[]
@@ -43,11 +54,28 @@ export interface DnsSnapshot {
   planned?: DnsSpec
 }
 
-export interface DnsVerification {
-  ok: boolean
-  actual: string[]
-  reason?: string
-}
+/**
+ * What a read-back of the resolver established.
+ *
+ * `VpnCheckStatus` rather than a new vocabulary, and for the reason that type
+ * already documents: `skipped` is not a soft `ok`. Here it means the resolver
+ * state could not be read at all, so there is no finding either way —
+ * `applyNetState` keeps the change and says so out loud instead of rolling back
+ * on the strength of a question it never got an answer to.
+ *
+ *   ok      — every requested server is in force.
+ *   failed  — the resolver was read and it is still using something else.
+ *   skipped — the read failed. Always carries a `reason`; `actual` is empty,
+ *             which is the absence of a reading and not a reading of zero.
+ *
+ * "Always carries a `reason`" is a union member rather than a sentence, because
+ * a `skipped` with no reason is an apply that was kept and never mentioned —
+ * the silent success `verify()` exists to kill, one level up. `VpnCheckStatus`
+ * is still the vocabulary; only the shape per value is pinned down.
+ */
+export type DnsVerification =
+  | { status: Exclude<VpnCheckStatus, 'skipped'>; actual: string[]; reason?: string }
+  | { status: 'skipped'; actual: string[]; reason: string }
 
 export interface DnsManager {
   snapshot(): Promise<DnsSnapshot>
@@ -126,15 +154,47 @@ export function isSplitDns(spec: DnsSpec): boolean {
   return Array.isArray(spec.splitDomains) && spec.splitDomains.length > 0
 }
 
+/** One spelling per address, for comparison only.
+ *
+ *  A profile may name `2001:0db8:0000:0000:0000:0000:0000:0001` while
+ *  `resolvectl` reports the same server as `2001:db8::1`, and a textual compare
+ *  calls that requested server missing — which is a `failed` verification and a
+ *  rolled-back tunnel that was working. `isDnsServer` deliberately does not
+ *  normalise (it is a gate on what may reach a command line, not a parser), so
+ *  the normalising happens here instead.
+ *
+ *  The URL parser already implements RFC 5952 compression correctly, so no IPv6
+ *  parser is written here: `new URL('http://[2001:0DB8::0001]').hostname` is
+ *  `[2001:db8::1]`. A zone index (`fe80::1%5`) is dropped before comparing and
+ *  kept in whatever is displayed. An IPv4 address, a hostname, or a string that
+ *  is not an address at all comes back lowercased and otherwise untouched —
+ *  including one the parser rejects, because throwing out of here would turn a
+ *  malformed reading into a crash instead of a finding. */
+function canonicalServer(s: string): string {
+  const t = s.trim().toLowerCase()
+  if (!t.includes(':')) return t
+  const addr = t.split('%')[0]
+  try {
+    return new URL(`http://[${addr}]`).hostname.replace(/^\[|\]$/g, '')
+  } catch {
+    return t
+  }
+}
+
 /** The servers a spec asked for, compared against what the resolver actually
  *  reports. Order is not required — resolvers reorder freely — but every
- *  requested server has to be there. */
+ *  requested server has to be there.
+ *
+ *  Only ever `ok` or `failed`: this is handed a reading that was already taken,
+ *  so "could not read it" is a judgement its callers make before calling, never
+ *  one it can reach from the list it was given. An empty `actual` here is a
+ *  resolver that really reports no servers. */
 export function verificationFor(spec: DnsSpec, actual: string[]): DnsVerification {
-  const have = new Set(actual.map((s) => s.trim().toLowerCase()))
-  const missing = spec.servers.filter((s) => !have.has(s.trim().toLowerCase()))
-  if (missing.length === 0) return { ok: true, actual }
+  const have = new Set(actual.map(canonicalServer))
+  const missing = spec.servers.filter((s) => !have.has(canonicalServer(s)))
+  if (missing.length === 0) return { status: 'ok', actual }
   return {
-    ok: false,
+    status: 'failed',
     actual,
     reason:
       actual.length === 0

@@ -1608,7 +1608,26 @@ export function elevatedNetContext(
       // A dismissed prompt is the user answering the question, not a fault,
       // and never a reason to try again on their behalf (E04).
       if (exit.declined) throw new VpnError('elevation-declined')
-      return { code: exit.code ?? -1, stdout: '', stderr: '' }
+      // `stderr` only where the elevator could hear it, and absent rather than
+      // empty everywhere else. Reporting `''` claimed the command was silent,
+      // which is how "Could not add route …:" reached users with nothing after
+      // the colon; omitted, `firstOutputLine` falls back to naming the command
+      // and its exit status.
+      //
+      // Which platforms can hear it: Linux forks the command through pkexec or
+      // sudo, so its pipes are ours. macOS gets AppleScript's report of the
+      // failure, which carries the command's exit status and a message that is
+      // its stderr on the non-admin form of `do shell script` — the admin form
+      // is unverified, so the text is for reading and nothing branches on it
+      // (see `parseOsascriptFailure`). Windows hears nothing at all: the
+      // elevated process is started by ShellExecute, which has no handles to
+      // redirect, so this is undefined on every Windows run and the route
+      // appliers confirm an "already exists" collision from the route table
+      // instead of from a sentence.
+      //
+      // stdout stays absent on every platform: these commands put their errors
+      // on stderr, and nothing here needs their output.
+      return { code: exit.code ?? -1, stderr: exit.stderr }
     }
   }
 }
@@ -1714,7 +1733,17 @@ export async function applySystemNetworking(
       : undefined
 
   const apply = deps.applyNet ?? applyNetState
-  const state = await apply({ interfaceName, routes, dns }, netCtx, { platform, root: deps.netStateRoot })
+  const state = await apply({ interfaceName, routes, dns }, netCtx, {
+    platform,
+    root: deps.netStateRoot,
+    // Same sink as the ipv6-leak warnings above, for the same kind of fact: the
+    // tunnel is up and staying up, and there is one thing about it the user
+    // would want to know. A DNS read-back that could not be taken goes here
+    // rather than into the error path, because it is not a failure — but an
+    // apply nobody could verify and nobody was told about is exactly the silent
+    // success verify() exists to prevent.
+    onNote: (message) => ctx.log(message, 'app')
+  })
   return { state, ctx: netCtx, warnings }
 }
 

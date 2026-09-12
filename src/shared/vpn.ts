@@ -485,6 +485,12 @@ export type VpnErrorCode =
   | 'cert-expired'
   | 'handshake-timeout'
   | 'dns-failure'
+  // The tunnel's own DNS change was read back and is NOT in force: the command
+  // exited 0, the resolver is still answering from the old servers. Deliberately
+  // not `dns-failure`, which is the opposite direction — that one is a name this
+  // app could not look up, and sending someone to "check your DNS settings" when
+  // the problem is that OUR settings did not stick points at the wrong machine.
+  | 'dns-not-applied'
   | 'port-in-use'
   | 'permission-denied'
   | 'elevation-declined'

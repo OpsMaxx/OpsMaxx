@@ -1,7 +1,8 @@
-import { classifyEngineLine, VpnError } from '../errors'
+import { classifyEngineLine, firstOutputLine, VpnError } from '../errors'
 import { readCommand } from '../netstate'
 import type { NetApplyContext } from '../netstate'
 import {
+  commandOutput,
   detectIpv6Leak,
   expandDefaultRoutes,
   familyOf,
@@ -92,15 +93,41 @@ export class DarwinRouteManager implements RouteManager {
     for (const r of expandDefaultRoutes(routes)) {
       const res = await ctx.runPrivileged(ROUTE, addArgs(r))
       if (res.code === 0) continue
-      const text = `${res.stderr}\n${res.stdout}`
+      const output = commandOutput(res)
+      const detail = firstOutputLine(res, `route exited ${res.code}`)
       // Re-applying an identical route is how a retry looks, and it is not a
-      // failure worth tearing the tunnel down for.
-      if (/file exists/i.test(text)) continue
+      // failure worth tearing the tunnel down for. Tested against both streams,
+      // not against the one line shown to the user — see `commandOutput`.
+      if (/file exists/i.test(output)) continue
+      // …and then from the table, because that text is not guaranteed to arrive.
+      // `route` runs under `osascript … with administrator privileges`, and what
+      // comes back is AppleScript's report of the failure; whether its message is
+      // the command's own stderr under the admin variant is unverified (see
+      // `parseOsascriptFailure`). The match above is the cheap path, this is the
+      // one that holds when there is nothing to match.
+      if (await this.alreadyOurs(r)) continue
       throw new VpnError(
-        classifyEngineLine(text) ?? 'internal',
-        `Could not add route ${r.destination} on ${r.interfaceName}: ${text.trim().split(/\r?\n/)[0] ?? `route exited ${res.code}`}`
+        classifyEngineLine(output) ?? 'internal',
+        `Could not add route ${r.destination} on ${r.interfaceName}: ${detail}`
       )
     }
+  }
+
+  /** Does this destination already leave over our own interface?
+   *
+   *  The question a failed `route add` actually needs answered. `route -n get`
+   *  is a lookup rather than a table dump — it reports the route that would be
+   *  taken — which is what makes this work for the `/1` halves of a full tunnel,
+   *  where the table prints `destination: default` for both and the prefix
+   *  cannot be matched literally.
+   *
+   *  A broader route of ours covering the prefix counts as a yes, and is meant
+   *  to: the point of the route that would not add is that this destination goes
+   *  through the tunnel, and it does. An unprivileged read, so it raises no
+   *  second password prompt, and `readCommand` never throws. */
+  private async alreadyOurs(r: RouteSpec): Promise<boolean> {
+    const entry = await routeGet(r.destination, familyOf(r.destination))
+    return entry?.interfaceName === r.interfaceName
   }
 
   async revert(snapshot: RouteSnapshot, ctx?: NetApplyContext): Promise<void> {

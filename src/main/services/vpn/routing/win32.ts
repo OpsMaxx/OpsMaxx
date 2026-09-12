@@ -1,7 +1,8 @@
-import { classifyEngineLine, VpnError } from '../errors'
+import { classifyEngineLine, firstOutputLine, VpnError } from '../errors'
 import { readCommand } from '../netstate'
 import type { NetApplyContext } from '../netstate'
 import {
+  commandOutput,
   detectIpv6Leak,
   detectPrefixConflicts,
   expandDefaultRoutes,
@@ -145,6 +146,30 @@ function deleteArgs(r: RouteSpec, index: number): string[] {
   return args
 }
 
+/** Is this exact prefix already routed on this interface index?
+ *
+ *  What a failed `add route` has to be judged on here, because the two cheaper
+ *  answers are both unavailable on Windows. The command said nothing we can hear
+ *  (ShellExecute gives the elevated process no pipes), and its exit status does
+ *  not separate "already there" from anything else — netsh returns 1 for every
+ *  failure in this context, so reading a collision out of the code would be a
+ *  guess dressed as a check.
+ *
+ *  `netsh … show route` is unprivileged, so this raises no second UAC prompt,
+ *  and `parseNetshShowRoute` reads the rows positionally — which is also why
+ *  this keeps working on a Windows that does not print "The object already
+ *  exists." in English. Exact prefixes, unlike macOS: netsh prints `0.0.0.0/1`
+ *  as `0.0.0.0/1`. */
+async function routeExistsOn(r: RouteSpec, index: number): Promise<boolean> {
+  const res = await readCommand(NETSH, ['interface', contextFor(r.destination), 'show', 'route'])
+  if (res.code !== 0) return false
+  const family = familyOf(r.destination)
+  const want = normalizeCidr(r.destination, family)
+  return parseNetshShowRoute(res.stdout, family).some(
+    (e) => e.destination === want && e.interfaceIndex === index
+  )
+}
+
 export class Win32RouteManager implements RouteManager {
   private lastCtx: NetApplyContext | null = null
 
@@ -190,13 +215,26 @@ export class Win32RouteManager implements RouteManager {
       }
       const res = await ctx.runPrivileged(NETSH, addArgs(r, index))
       if (res.code === 0) continue
-      const text = `${res.stderr}\n${res.stdout}`
+      const output = commandOutput(res)
+      const detail = firstOutputLine(res, `netsh exited ${res.code}`)
       // netsh reports an identical existing route as an object clash; a retry
-      // landing on its own earlier route is not a failure.
-      if (/already exists|object already exists/i.test(text)) continue
+      // landing on its own earlier route is not a failure. Tested against both
+      // streams rather than the displayed line — see `commandOutput`.
+      //
+      // KNOWN LIMIT: in production this match never fires, and cannot. The
+      // elevated netsh is started by `Start-Process -Verb RunAs`, i.e. through
+      // ShellExecute, which has no handles to redirect — so `res.stderr` is
+      // undefined on every real Windows run and there is nothing to test. It is
+      // kept because the check below is a second command and this is free when
+      // output does exist: a caller that supplies it (the tests, and any future
+      // elevation route that can hear the command — a helper service, a netd
+      // sidecar) gets the answer without a round trip. The line that decides this
+      // on a real machine is the next one.
+      if (/already exists|object already exists/i.test(output)) continue
+      if (await routeExistsOn(r, index)) continue
       throw new VpnError(
-        classifyEngineLine(text) ?? 'internal',
-        `Could not add route ${r.destination} on ${r.interfaceName}: ${text.trim().split(/\r?\n/)[0] ?? `netsh exited ${res.code}`}`
+        classifyEngineLine(output) ?? 'internal',
+        `Could not add route ${r.destination} on ${r.interfaceName}: ${detail}`
       )
     }
   }

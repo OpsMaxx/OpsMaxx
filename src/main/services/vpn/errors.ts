@@ -40,6 +40,8 @@ export const VPN_ERROR_MESSAGE: Record<VpnErrorCode, string> = {
   'cert-expired': 'The client certificate is outside its validity period.',
   'handshake-timeout': 'No response from the server.',
   'dns-failure': 'The server address could not be resolved.',
+  'dns-not-applied':
+    'The tunnel connected but the system resolver never took its DNS settings, so the tunnel was stopped.',
   'port-in-use': 'The local port is already in use.',
   'permission-denied': 'Permission was denied.',
   'elevation-declined': 'The administrator prompt was dismissed, so the tunnel did not start.',
@@ -90,6 +92,10 @@ export const VPN_ERROR_HINT: Record<VpnErrorCode, string> = {
   'handshake-timeout':
     'Check the endpoint address and port, and whether you need to sign in to this network first.',
   'dns-failure': 'Check the server address and your DNS settings.',
+  // Not "check your DNS settings": the detail already names which servers the
+  // resolver is using instead, and the thing that would actually explain why it
+  // ignored them is the resolver daemon's own complaint, which is in the log.
+  'dns-not-applied': 'Open the log to see what the resolver reported.',
   'port-in-use': 'Choose another port, or leave it as 0 to pick one automatically.',
   'permission-denied': 'Try again and approve the administrator prompt.',
   'elevation-declined': 'Start it again and approve the prompt.',
@@ -162,4 +168,22 @@ const STDERR_RULES: { re: RegExp; code: VpnErrorCode }[] = [
 export function classifyEngineLine(line: string): VpnErrorCode | null {
   for (const r of STDERR_RULES) if (r.re.test(line)) return r.code
   return null
+}
+
+/** The one line of a failed command's output worth showing the user, or
+ *  `fallback` when it said nothing at all.
+ *
+ *  There are two ways to get nothing. A command can fail silently, and a
+ *  privileged command's output may never reach this process in the first place
+ *  — the elevation helpers start it detached (the macOS security framework) or
+ *  through a launcher with no pipes (ShellExecute), so `stdout` and `stderr`
+ *  come back undefined. Both used to leave an empty string, which `??` does not
+ *  treat as missing: the sentence ended at its colon and named neither the
+ *  command nor its exit status. Hence one helper rather than a `??` per site. */
+export function firstOutputLine(
+  res: { stdout?: string; stderr?: string },
+  fallback: string
+): string {
+  const text = `${res.stderr ?? ''}\n${res.stdout ?? ''}`.trim()
+  return text.split(/\r?\n/)[0].trim() || fallback
 }

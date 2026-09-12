@@ -1,7 +1,8 @@
-import { classifyEngineLine, VpnError } from '../errors'
+import { classifyEngineLine, firstOutputLine, VpnError } from '../errors'
 import { readCommand } from '../netstate'
 import type { NetApplyContext } from '../netstate'
 import {
+  commandOutput,
   detectIpv6Leak,
   detectPrefixConflicts,
   expandDefaultRoutes,
@@ -98,10 +99,24 @@ export class LinuxRouteManager implements RouteManager {
     for (const r of expandDefaultRoutes(routes)) {
       const res = await ctx.runPrivileged(IP, replaceArgs(r))
       if (res.code === 0) continue
-      const text = `${res.stderr}\n${res.stdout}`
+      const detail = firstOutputLine(res, `ip exited ${res.code}`)
+      // Linux is the one platform whose elevator hands back text VERIFIED to be
+      // the command's own stderr, which is what makes classifying on it safe
+      // here. macOS reaches its route manager with a `stderr` too now, but not on
+      // the same footing: `do shell script … with administrator privileges`
+      // cannot be run without the authentication dialog, so nobody has measured
+      // whether osascript passes the command's stderr through or substitutes
+      // AppleScript's own generic sentence — so over there the text is for
+      // reading and routing/darwin.ts takes its "already there" decision from the
+      // route table instead (the measurement and its gap are written out above
+      // `parseOsascriptFailure` in elevation/darwin.ts).
+      //
+      // Here it often arrives behind a sudo warning, so both streams are
+      // classified and the cause decides the code; the first line is still what
+      // is shown.
       throw new VpnError(
-        classifyEngineLine(text) ?? 'internal',
-        `Could not add route ${r.destination} on ${r.interfaceName}: ${text.trim().split(/\r?\n/)[0] ?? `ip exited ${res.code}`}`
+        classifyEngineLine(commandOutput(res)) ?? 'internal',
+        `Could not add route ${r.destination} on ${r.interfaceName}: ${detail}`
       )
     }
   }

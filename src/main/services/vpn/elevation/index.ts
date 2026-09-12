@@ -63,6 +63,53 @@ export interface ElevationExit {
   // code to report, and inventing one would make a decline look like a crash.
   code: number | null
   declined: boolean
+  // What the elevated command complained about, on the routes where we can hear
+  // it at all — Linux and macOS. pkexec and sudo fork the command, so its pipes
+  // are ours. osascript hands the command to the macOS security framework, which
+  // starts it detached, but `do shell script` still raises an AppleScript error
+  // carrying the exit status and a message, and that error text reaches
+  // osascript's own stderr; whether the message is the command's stderr or
+  // AppleScript's generic stand-in under the *administrator* form is unverified,
+  // so on that platform this is for reading and nothing branches on its content
+  // (the long version is above `parseOsascriptFailure`).
+  //
+  // Windows is the one route where this stays absent: ShellExecute gives the
+  // elevated process no handles to redirect, so there is nothing to capture, and
+  // the callers that need to know whether a route was already there read the
+  // route table rather than waiting for a sentence that never comes.
+  //
+  // Every consumer treats it as optional, the same way `PrivilegedResult.stdout`
+  // is optional, and for the same reason: absent means "we could not hear it",
+  // which is not the same fact as an empty string's "it said nothing".
+  //
+  // No new capture is introduced by this field on either platform — both
+  // elevators have always buffered stderr, capped, because both need it to
+  // classify a failure (a cancelled sudo askpass; an AppleScript -128). It
+  // simply had no way out, so a route command reporting exactly why it failed
+  // died inside the elevator and the user got a sentence that stopped at its
+  // colon.
+  //
+  // Already through `redactOutput` where it is set, at every size: the elevator
+  // redacts each chunk as it arrives and caps what it keeps afterwards, so there
+  // is no length at which raw text reaches this field. The order is the whole
+  // point and it was once the other way round — a cap applied first can cut the
+  // END marker off a PEM block, and the private-key pattern then matches nothing
+  // while the body stays as prose. A key that is truncated anyway now fails
+  // closed (see `stderrCapture`). This is privileged command output, and a
+  // privileged command echoing its arguments back is the ordinary case, not the
+  // exotic one.
+  //
+  // KNOWN LIMIT, and the reason this is "redacted" rather than "safe": the
+  // elevator has no secret list (rule 3), so this is the pattern layer only. A
+  // value with no recognisable shape and no key name in front of it — a bare
+  // credential on its own line — is not something a pattern can catch. A
+  // consumer that holds the resolved secrets for the profile should still pass
+  // them through its own `redactOutput` before this text is stored or shown;
+  // the supervisor already does that for the engine's own output.
+  //
+  // Present only on a genuine command failure — a declined prompt's stderr is
+  // the authentication dialog talking, not the command.
+  stderr?: string
 }
 
 export interface ElevatedProcess {

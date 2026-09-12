@@ -1,4 +1,4 @@
-import { VpnError } from '../errors'
+import { firstOutputLine, VpnError } from '../errors'
 import { readCommand } from '../netstate'
 import type { NetApplyContext } from '../netstate'
 import { assertDnsSpec, isSplitDns, runTag, verificationFor } from './index'
@@ -61,9 +61,21 @@ export function buildRemoveScript(tag: string): string {
   ].join('; ')
 }
 
+/** `Stop`, unlike the remove script above, and that difference is the whole
+ *  point. `verify()` has to be able to tell "the table says no rule" from "the
+ *  table could not be read", and under `SilentlyContinue` a `Get-
+ *  DnsClientNrptRule` that fails outright — group policy denying the read, a
+ *  broken CIM repository, the DnsClient module absent — has its error record
+ *  swallowed: powershell exits 0 with nothing on either stream, which is
+ *  indistinguishable from a table that really holds no matching rule, and
+ *  `verify()` then reports `failed` and rolls a working tunnel back. With
+ *  `Stop` a cmdlet failure is terminating, so the exit code is non-zero and the
+ *  error record reaches stderr, which is the `skipped` branch. Zero matching
+ *  rules is not an error and still exits 0 with empty output — the real
+ *  negative survives. */
 export function buildQueryScript(tag: string): string {
   return [
-    '$ErrorActionPreference=' + psQuote('SilentlyContinue'),
+    '$ErrorActionPreference=' + psQuote('Stop'),
     `Get-DnsClientNrptRule | Where-Object { $_.Comment -eq ${psQuote(tag)} } | Select-Object Namespace,NameServers | ConvertTo-Json -Compress -Depth 3`
   ].join('; ')
 }
@@ -131,10 +143,9 @@ export class Win32DnsManager implements DnsManager {
     const tag = runTag(ctx.runId)
     const res = await ctx.runPrivileged(POWERSHELL, [...PS_ARGS, buildAddScript(spec, tag)])
     if (res.code !== 0) {
-      const first = `${res.stderr}\n${res.stdout}`.trim().split(/\r?\n/)[0]
       throw new VpnError(
         'internal',
-        `Could not add the DNS rule for ${spec.interfaceName}: ${first || `powershell exited ${res.code}`}`
+        `Could not add the DNS rule for ${spec.interfaceName}: ${firstOutputLine(res, `powershell exited ${res.code}`)}`
       )
     }
   }
@@ -154,13 +165,32 @@ export class Win32DnsManager implements DnsManager {
     // reports, so reading that would report failure on a working tunnel.
     const tag = runTag(this.lastCtx?.runId ?? '')
     const res = await readCommand(POWERSHELL, [...PS_ARGS, buildQueryScript(tag)])
+    // An NRPT table we cannot enumerate is the case this whole tri-state exists
+    // for. Group policy can deny the read, and PowerShell itself can be blocked
+    // by an execution policy or a broken WMI repository — none of which is
+    // evidence that `Add-DnsClientNrptRule`, which exited 0, did nothing.
     if (res.code !== 0) {
-      return { ok: false, actual: [], reason: 'The name resolution policy table could not be read.' }
+      return {
+        status: 'skipped',
+        actual: [],
+        reason: `The name resolution policy table could not be read: ${res.stderr.trim().split(/\r?\n/)[0] || `powershell exited ${res.code}`}`
+      }
     }
     const rules = parseNrptJson(res.stdout)
+    // `parseNrptJson` answers `[]` to both "no rules" and "that was not JSON",
+    // and only the first is a finding. An empty pipeline through
+    // `ConvertTo-Json` prints nothing at all, so output we got but could not
+    // parse is a read we did not really perform.
+    if (rules.length === 0 && res.stdout.trim()) {
+      return {
+        status: 'skipped',
+        actual: [],
+        reason: 'The name resolution policy table could not be read: its output did not parse.'
+      }
+    }
     if (rules.length === 0) {
       return {
-        ok: false,
+        status: 'failed',
         actual: [],
         reason: `No name resolution rule tagged ${tag} is present, so the DNS change did not take effect.`
       }
@@ -171,7 +201,7 @@ export class Win32DnsManager implements DnsManager {
     const actual = [...new Set(rules.flatMap((r) => r.nameServers))]
     if (missing.length > 0) {
       return {
-        ok: false,
+        status: 'failed',
         actual,
         reason: `No rule covers ${missing.join(', ')}, so those names still resolve outside the tunnel.`
       }

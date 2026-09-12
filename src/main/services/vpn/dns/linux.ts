@@ -1,9 +1,9 @@
 import { lstat, readFile, readlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { VpnError } from '../errors'
+import { firstOutputLine, VpnError } from '../errors'
 import { readCommand } from '../netstate'
-import type { NetApplyContext } from '../netstate'
+import type { NetApplyContext, PrivilegedResult } from '../netstate'
 import { assertDnsSpec, isSplitDns, verificationFor } from './index'
 import type { DnsManager, DnsSnapshot, DnsSpec, DnsVerification } from './index'
 
@@ -39,15 +39,29 @@ export interface LinuxDnsOptions {
  *            DNS Domain: ~corp.example
  *
  *  Long server lists wrap onto continuation lines that carry no label, so a
- *  labelled line opens a list and unlabelled indented lines extend it. */
+ *  labelled line opens a list and unlabelled indented lines extend it.
+ *
+ *  A wrapped line is recognised by where it starts, not by what it contains.
+ *  resolvectl right-aligns its labels and pads continuations out to the column
+ *  the value started in, and an IPv6 hextet made only of the letters a-f
+ *  (`dead::beef`, `cafe::1`) matches the label pattern perfectly — key `dead`,
+ *  value `:beef`. Read as a label it dropped that server AND stopped the list,
+ *  so the rest of a wrapped set vanished too; with `verify()` now rolling back
+ *  on a missing server, that cosmetic parse miss became a tunnel teardown. */
 export function parseResolvectlStatus(text: string): { servers: string[]; domains: string[] } {
   const servers: string[] = []
   const domains: string[] = []
   let collecting: 'servers' | 'domains' | null = null
+  // The column the open list's values start in. Only consulted while
+  // `collecting`, so its initial value never decides anything.
+  let valueColumn = 0
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trimEnd()
-    const kv = /^\s*([A-Za-z][A-Za-z ]*?)\s*:\s*(.*)$/.exec(line)
+    const indent = line.length - line.trimStart().length
+    const wrapped = collecting !== null && line.trim() !== '' && indent >= valueColumn
+    const kv = wrapped ? null : /^\s*([A-Za-z][A-Za-z ]*?)\s*:\s*(.*)$/.exec(line)
     if (kv) {
+      valueColumn = kv[2] ? line.length - kv[2].length : line.indexOf(':') + 2
       const key = kv[1].trim().toLowerCase()
       const rest = kv[2].trim().split(/\s+/).filter(Boolean)
       if (key === 'dns servers' || key === 'current dns server') {
@@ -123,7 +137,16 @@ export class LinuxDnsManager implements DnsManager {
     this.resolvConfPath = opts.resolvConfPath ?? RESOLV_CONF
   }
 
-  private async readResolvConf(): Promise<{ content: string; symlinkTarget: string | null }> {
+  /** `read` distinguishes an empty resolv.conf from one that could not be
+   *  opened, which the content alone cannot: both are `''`. Snapshot and
+   *  backend detection are happy either way — they want whatever is there — but
+   *  `verify()` has to tell "the file says nothing" (a real negative result)
+   *  from "we never saw the file" (no result at all). */
+  private async readResolvConf(): Promise<{
+    content: string
+    symlinkTarget: string | null
+    read: boolean
+  }> {
     let symlinkTarget: string | null = null
     try {
       if ((await lstat(this.resolvConfPath)).isSymbolicLink()) {
@@ -133,12 +156,14 @@ export class LinuxDnsManager implements DnsManager {
       symlinkTarget = null
     }
     let content = ''
+    let read = true
     try {
       content = await readFile(this.resolvConfPath, 'utf8')
     } catch {
       content = ''
+      read = false
     }
-    return { content, symlinkTarget }
+    return { content, symlinkTarget, read }
   }
 
   /** E11's detection, in the order that gets the awkward hosts right:
@@ -169,8 +194,10 @@ export class LinuxDnsManager implements DnsManager {
       previous,
       backend,
       // Kept on both branches: if resolved is stopped while we are up, the
-      // revert falls back to the file and needs its original contents.
-      resolvConf: file
+      // revert falls back to the file and needs its original contents. Spelled
+      // out field by field so `read` — which is about this read, not about the
+      // machine — never lands in the snapshot a later launch replays.
+      resolvConf: { content: file.content, symlinkTarget: file.symlinkTarget }
     }
   }
 
@@ -180,10 +207,10 @@ export class LinuxDnsManager implements DnsManager {
     const backend = await this.detectBackend()
     if (backend === 'resolvectl') {
       const dns = await ctx.runPrivileged(RESOLVECTL, ['dns', spec.interfaceName, ...spec.servers])
-      if (dns.code !== 0) throw failed(spec, dns.stderr || dns.stdout, dns.code)
+      if (dns.code !== 0) throw failed(spec, RESOLVECTL, dns)
       const domains = domainArgs(spec)
       const dom = await ctx.runPrivileged(RESOLVECTL, ['domain', spec.interfaceName, ...domains])
-      if (dom.code !== 0) throw failed(spec, dom.stderr || dom.stdout, dom.code)
+      if (dom.code !== 0) throw failed(spec, RESOLVECTL, dom)
       return
     }
     // No stdin is assumed: the file is staged in the run directory, which is
@@ -194,7 +221,7 @@ export class LinuxDnsManager implements DnsManager {
     // `install` unlinks the destination first, so a resolv.conf that is a
     // symlink to somewhere else is replaced rather than written through.
     const res = await ctx.runPrivileged(INSTALL, ['-m', '0644', staged, this.resolvConfPath])
-    if (res.code !== 0) throw failed(spec, res.stderr || res.stdout, res.code)
+    if (res.code !== 0) throw failed(spec, INSTALL, res)
   }
 
   async revert(snapshot: DnsSnapshot, ctx?: NetApplyContext): Promise<void> {
@@ -227,32 +254,50 @@ export class LinuxDnsManager implements DnsManager {
     const backend = await this.detectBackend()
     if (backend === 'resolvectl') {
       const res = await readCommand(RESOLVECTL, ['status', spec.interfaceName])
+      // The command failing is not the same fact as the link having no servers.
+      // A link with no DNS configured prints fine and parses to zero servers —
+      // that is the `failed` below. This is resolvectl not answering at all, and
+      // the previous wording ("reports nothing … did not take effect") read a
+      // broken query as a broken tunnel and rolled a working one back.
       if (res.code !== 0) {
         return {
-          ok: false,
+          status: 'skipped',
           actual: [],
-          reason: `systemd-resolved reports nothing for ${spec.interfaceName}, so the DNS change did not take effect.`
+          reason: `systemd-resolved could not be asked about ${spec.interfaceName}: ${res.stderr.trim().split(/\r?\n/)[0] || `${RESOLVECTL} exited ${res.code}`}`
         }
       }
       const parsed = parseResolvectlStatus(res.stdout)
       const check = verificationFor(spec, parsed.servers)
-      if (!check.ok || !isSplitDns(spec)) return check
+      if (check.status !== 'ok' || !isSplitDns(spec)) return check
       const want = (spec.splitDomains ?? []).map((d) => `~${d.replace(/^\./, '')}`.toLowerCase())
       const have = parsed.domains.map((d) => d.toLowerCase())
       const missing = want.filter((d) => !have.includes(d))
       if (missing.length === 0) return check
       return {
-        ok: false,
+        status: 'failed',
         actual: parsed.servers,
         reason: `${spec.interfaceName} is not scoped to ${missing.join(', ')}, so the split DNS rule did not take effect.`
       }
     }
-    const { content } = await this.readResolvConf()
+    const { content, read } = await this.readResolvConf()
+    // On this branch the file IS the configuration, so an unopenable file is an
+    // unreadable resolver state and not an empty one. `install` had already
+    // reported success by the time we got here; nothing about a failed read says
+    // it lied.
+    if (!read) {
+      return {
+        status: 'skipped',
+        actual: [],
+        reason: `${this.resolvConfPath} could not be read, so the DNS change could not be confirmed either way.`
+      }
+    }
     return verificationFor(spec, parseResolvConf(content).servers)
   }
 }
 
-function failed(spec: DnsSpec, text: string, code: number): VpnError {
-  const first = text.trim().split(/\r?\n/)[0]
-  return new VpnError('internal', `Could not set DNS for ${spec.interfaceName}: ${first || `command exited ${code}`}`)
+function failed(spec: DnsSpec, cmd: string, res: PrivilegedResult): VpnError {
+  return new VpnError(
+    'internal',
+    `Could not set DNS for ${spec.interfaceName}: ${firstOutputLine(res, `${cmd} exited ${res.code}`)}`
+  )
 }

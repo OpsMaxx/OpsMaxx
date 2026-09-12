@@ -1,4 +1,4 @@
-import { VpnError } from '../errors'
+import { firstOutputLine, VpnError } from '../errors'
 import { readCommand } from '../netstate'
 import type { NetApplyContext } from '../netstate'
 import { assertDnsSpec, isSplitDns, runTag, verificationFor } from './index'
@@ -159,7 +159,7 @@ export class DarwinDnsManager implements DnsManager {
     if (res.code !== 0) {
       throw new VpnError(
         'internal',
-        `Could not set DNS for ${spec.interfaceName}: ${`${res.stderr}\n${res.stdout}`.trim().split(/\r?\n/)[0] ?? `scutil exited ${res.code}`}`
+        `Could not set DNS for ${spec.interfaceName}: ${firstOutputLine(res, `scutil exited ${res.code}`)}`
       )
     }
   }
@@ -176,10 +176,28 @@ export class DarwinDnsManager implements DnsManager {
 
   async verify(spec: DnsSpec): Promise<DnsVerification> {
     const res = await readCommand(SCUTIL, ['--dns'])
+    // `skipped`, not `failed`: scutil refusing to run tells us nothing about
+    // mDNSResponder's state, and a tunnel is not worth tearing down over our
+    // own inability to look.
     if (res.code !== 0) {
-      return { ok: false, actual: [], reason: 'The resolver configuration could not be read.' }
+      return {
+        status: 'skipped',
+        actual: [],
+        reason: `The resolver configuration could not be read: ${res.stderr.trim().split(/\r?\n/)[0] || `scutil exited ${res.code}`}`
+      }
     }
     const resolvers = parseScutilDns(res.stdout)
+    // A Mac that resolves anything at all has resolvers here, so zero of them is
+    // this parser failing on an output shape it does not know — not a finding
+    // about the tunnel. Separated from the `wanted.length === 0` test below,
+    // which runs on a reading that DID parse and is a real negative result.
+    if (resolvers.length === 0) {
+      return {
+        status: 'skipped',
+        actual: [],
+        reason: 'scutil reported no resolvers at all, so its output could not be read.'
+      }
+    }
     const split = isSplitDns(spec)
     const wanted = split
       ? resolvers.filter((r) =>
@@ -191,7 +209,7 @@ export class DarwinDnsManager implements DnsManager {
     const actual = [...new Set(wanted.flatMap((r) => r.nameservers))]
     if (split && wanted.length === 0) {
       return {
-        ok: false,
+        status: 'failed',
         actual: [],
         reason: `No resolver is scoped to ${(spec.splitDomains ?? []).join(', ')}, so the split DNS rule did not take effect.`
       }

@@ -1,3 +1,5 @@
+import { isIPv4, isIPv6 } from 'node:net'
+
 import { VpnError } from '../errors'
 import type { NetApplyContext } from '../netstate'
 import { DarwinRouteManager } from './darwin'
@@ -84,18 +86,126 @@ export function routeManagerFor(platform: NodeJS.Platform = process.platform): R
 // here while this module imports their classes, and only function
 // declarations are initialised early enough for that cycle to be safe.
 
+/** Everything a failed command said, for matching against.
+ *
+ *  Paired with `firstOutputLine`, which answers a different question: that one
+ *  picks the single line worth showing a person, and this one is what a matcher
+ *  has to look at. The two are not interchangeable.
+ *
+ *  Matching the first line alone breaks two ways, and both end with a working
+ *  tunnel torn down. A leading warning hides the cause — `sudo: unable to
+ *  resolve host box` arrives before `RTNETLINK answers: Network is
+ *  unreachable`, so `classifyEngineLine` sees only the warning, finds nothing,
+ *  and the specific code degrades to `internal`. And where the privileged
+ *  channel carries no output at all, the first line IS the fallback sentence, so
+ *  `file exists` and `object already exists` — the lines that make a retried add
+ *  harmless — can never match anything.
+ *
+ *  That second case is not hypothetical and is not fixed by matching more text:
+ *  on Windows the elevated command is started through ShellExecute, which has no
+ *  handles to redirect, so there is never any output here. Both route appliers
+ *  therefore confirm an "already exists" collision against the route table as
+ *  well, and that — not this — is what keeps a retry from tearing down a working
+ *  tunnel. Matching the whole output is what makes this worth anything on the
+ *  platforms that do talk. */
+export function commandOutput(res: { stdout?: string; stderr?: string }): string {
+  return `${res.stderr ?? ''}\n${res.stdout ?? ''}`
+}
+
 export function familyOf(destination: string): 'inet' | 'inet6' {
   return destination.includes(':') ? 'inet6' : 'inet'
 }
 
-/** Comparable form. Handles `default`, a bare address with no prefix, and the
- *  mixed case Windows and macOS print. */
+/** A dotted quad masked down to the network address for `bits`. Integer
+ *  arithmetic rather than string surgery, because a prefix length that does not
+ *  land on an octet boundary (/12, /1) cannot be done any other way. */
+function maskIpv4(addr: string, bits: number): string {
+  const n = addr.split('.').reduce((acc, o) => acc * 256 + Number(o), 0)
+  // `<< 32` is `<< 0` in JavaScript — the shift count is taken mod 32 — so /0
+  // cannot share the expression with every other length.
+  const masked = bits === 0 ? 0 : (n & (0xffffffff << (32 - bits))) >>> 0
+  return [masked >>> 24, (masked >>> 16) & 255, (masked >>> 8) & 255, masked & 255].join('.')
+}
+
+/** RFC 5952 form, or null when the parser would not have it. The URL parser is
+ *  the canonicaliser already shipping in the platform: it lowercases, drops
+ *  leading zeroes and compresses the longest run of zero groups, which is the
+ *  whole of 5952. Same trick `canonicalServer` uses for DNS servers. */
+function canonicalIpv6(addr: string): string | null {
+  try {
+    return new URL(`http://[${addr}]`).hostname.replace(/^\[|\]$/g, '')
+  } catch {
+    return null
+  }
+}
+
+/** The eight groups of an IPv6 address with `::` expanded. */
+function groupsOf(addr: string): number[] | null {
+  const [head, tail, extra] = addr.split('::')
+  if (extra !== undefined) return null
+  const lead = head ? head.split(':') : []
+  const trail = tail ? tail.split(':') : []
+  const gap = 8 - lead.length - trail.length
+  if (tail === undefined ? gap !== 0 : gap < 0) return null
+  const parts = [...lead, ...(tail === undefined ? [] : Array(gap).fill('0')), ...trail]
+  const out = parts.map((p) => parseInt(p, 16))
+  return out.some((n) => !Number.isInteger(n)) ? null : out
+}
+
+function maskIpv6(addr: string, bits: number): string | null {
+  const groups = groupsOf(addr)
+  if (!groups) return null
+  const masked = groups.map((g, i) => {
+    const keep = Math.min(Math.max(bits - i * 16, 0), 16)
+    return keep === 0 ? 0 : g & ((0xffff << (16 - keep)) & 0xffff)
+  })
+  // Recompressed by the same parser, so the output of this function and the
+  // output of canonicalising an already-masked address are the same string.
+  return canonicalIpv6(masked.map((n) => n.toString(16)).join(':'))
+}
+
+/** Comparable form: the network address for the prefix, lowercased, with IPv6
+ *  in RFC 5952 form. Handles `default` and a bare address with no prefix.
+ *
+ *  The masking is not cosmetic. `AllowedIPs` is copy-pasted from a profile's
+ *  Address field often enough that `10.8.0.1/24` is the common spelling of
+ *  `10.8.0.0/24`, and the OS route table only ever prints the network address —
+ *  so without it the spec and the table never compare equal, and `routeExistsOn`
+ *  reads a retry landing on our own leftover route as a real failure and rolls
+ *  a working tunnel back. Windows has no command output to fall back on, so
+ *  that comparison is the only judge there.
+ *
+ *  IPv6 is masked as well, for the same reason and no other: a dual-stack
+ *  profile's v6 half is pasted from the same field, so `fd00::2/64` arrives by
+ *  exactly the route `10.8.0.1/24` does. Doing one family and not the other
+ *  would be a function whose contract nobody can hold in their head.
+ *
+ *  Never throws. Anything this cannot do arithmetic on — a route-type keyword,
+ *  a hostname, junk — comes back lowercased and otherwise untouched, because a
+ *  malformed `AllowedIPs` must not be the reason a connect dies. */
 export function normalizeCidr(destination: string, family?: 'inet' | 'inet6'): string {
   const t = destination.trim().toLowerCase()
   if (!t) return ''
   if (t === 'default') return (family ?? 'inet') === 'inet6' ? '::/0' : '0.0.0.0/0'
-  if (t.includes('/')) return t
-  return `${t}/${familyOf(t) === 'inet6' ? 128 : 32}`
+  const slash = t.lastIndexOf('/')
+  const addr = slash === -1 ? t : t.slice(0, slash)
+  const suffix = slash === -1 ? '' : t.slice(slash + 1)
+  // Digits only: `Number('')` is 0, and a trailing slash turning into a default
+  // route would be the worst possible way to be lenient.
+  if (slash !== -1 && !/^\d+$/.test(suffix)) return t
+  if (isIPv4(addr)) {
+    const bits = slash === -1 ? 32 : Number(suffix)
+    return bits > 32 ? t : `${maskIpv4(addr, bits)}/${bits}`
+  }
+  // A zone id is scope, not an address: two differently scoped routes are not
+  // the same route, and dropping it to canonicalise would merge them.
+  if (isIPv6(addr) && !addr.includes('%')) {
+    const bits = slash === -1 ? 128 : Number(suffix)
+    if (bits > 128) return t
+    const net = maskIpv6(addr, bits)
+    if (net !== null) return `${net}/${bits}`
+  }
+  return t
 }
 
 export function isDefaultRoute(destination: string): boolean {

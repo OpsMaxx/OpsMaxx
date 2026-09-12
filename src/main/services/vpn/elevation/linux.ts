@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import type { ChildProcess } from 'node:child_process'
+import { redactOutput } from '../../secretRedaction'
+import { captureStderr } from './stderrCapture'
 import { VpnError } from '../errors'
 import type {
   ElevatedProcess,
@@ -204,10 +206,9 @@ async function runLinux(req: ElevationRequest): Promise<ElevatedProcess> {
 }
 
 function adopt(child: ChildProcess, method: 'pkexec' | 'sudo' | 'none'): ElevatedProcess {
-  let stderr = ''
-  child.stderr?.on('data', (chunk: Buffer | string) => {
-    if (stderr.length < STDERR_CAP) stderr += String(chunk)
-  })
+  // Redacted as it accumulates, then capped — never the other way round. See
+  // captureStderr: the reverse order stores a truncated private key as prose.
+  const stderr = captureStderr(child, STDERR_CAP)
 
   let settled: Promise<ElevationExit> | null = null
   const wait = (): Promise<ElevationExit> => {
@@ -218,7 +219,7 @@ function adopt(child: ChildProcess, method: 'pkexec' | 'sudo' | 'none'): Elevate
       })
       // 'close' so stderr is complete before a sudo exit is classified.
       child.once('close', (code: number | null) => {
-        resolve(classifyExit(method, code, stderr))
+        resolve(classifyExit(method, code, stderr()))
       })
     })
     return settled
@@ -246,5 +247,18 @@ export function classifyExit(
   // 127 stays a plain non-zero exit here; elevationErrorCode() reads it as
   // `unsupported`, because "pkexec is gone" is not something the user declined.
   if (method === 'sudo' && SUDO_DECLINED.test(stderr)) return { code: null, declined: true }
-  return { code, declined: false }
+  // The command genuinely failed, so what it said is the only useful thing
+  // anyone has. Redacted here rather than at the consumer: one call site is
+  // auditable, and a field that is redacted by construction cannot be forwarded
+  // unredacted by a caller who did not know it had to. `redactOutput` with no
+  // secret list still applies its patterns, which is the right expectation for
+  // this module — it deliberately has no secret parameter (rule 3 above).
+  //
+  // Text arriving from `captureStderr` has already been through this, which is
+  // where the guarantee actually comes from — redaction has to happen before
+  // the cap, and the cap is upstream. The pass is kept because this function is
+  // exported and called directly with raw text, and because redaction is
+  // idempotent: a second pass over `[REDACTED]` finds nothing to do.
+  const text = redactOutput(stderr).trim()
+  return text ? { code, declined: false, stderr: text } : { code, declined: false }
 }
