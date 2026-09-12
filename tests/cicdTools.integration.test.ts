@@ -20,7 +20,7 @@ const provider: { op: string; args: unknown[] }[] = []
 // The agent-run ledger, kept apart from `provider` on purpose: recording what
 // was started is bookkeeping, not a call to the CI server, and the
 // one-pipeline-per-call assertion counts provider calls.
-let ledger: { op: string; args: unknown[] }[] = []
+const ledger: { op: string; args: unknown[] }[] = []
 
 let pipelines: CicdPipeline[] = []
 let runs: CicdRun[] = []
