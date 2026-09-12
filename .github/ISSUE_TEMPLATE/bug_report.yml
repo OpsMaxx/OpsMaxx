@@ -5,7 +5,20 @@ body:
   - type: markdown
     attributes:
       value: |
-        Please redact hostnames, usernames, IPs and key material from anything you paste.
+        The version and your operating system are the only two things we really need from
+        you. Everything below them helps, and none of it is worth abandoning the report over.
+
+        **Settings → Advanced → Copy diagnostics** puts a short block of text on your
+        clipboard describing this install — versions, platform, which features are switched
+        on. It holds nothing secret to begin with: versions, counts and on/off states are all
+        there is in it, not the result of a filter. Pasting that block saves a round of
+        questions.
+
+        Anything you paste **by hand** — terminal output, a log, a config file — should have
+        hostnames, usernames, IPs and key material taken out first. If a log is long, attach
+        it as a **file** rather than pasting it: an attachment is inert, while pasted text is
+        rendered as Markdown and read by automation, and output captured from a remote server
+        is whatever that server chose to print.
   - type: input
     id: version
     attributes:
@@ -25,6 +38,16 @@ body:
       description: What you did, what you expected, what happened instead.
     validations: { required: true }
   - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot or screen recording
+      description: |
+        Optional, and worth more than it looks — drag an image or a short video straight into
+        this box. For anything about how something *looks* — a control in the wrong place, text
+        cut off, a panel that renders empty, "this is not what I expected to see" — the picture
+        is the report, and describing it in words usually costs both of us a round of questions.
+        Crop or blur whatever you would rather not publish.
+  - type: textarea
     id: error
     attributes:
       label: Exact error text
@@ -39,4 +62,7 @@ body:
         - label: Two-factor or keyboard-interactive authentication
         - label: An SSH tunnel
         - label: A database connection
+        - label: A VPN profile — WireGuard or OpenVPN
+        - label: The local terminal — a shell on this machine rather than over SSH
+        - label: The AI & MCP bridge, the `opsmaxx` CLI, or an AI agent session
         - label: The vault or a backup

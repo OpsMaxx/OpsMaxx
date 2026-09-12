@@ -14,6 +14,7 @@ import type {
   CicdTriggerResult
 } from '../shared/cicd'
 import type { CredentialShape } from '../shared/credentialShape'
+import type { DiagnosticsCrash } from '../shared/diagnostics'
 import type { LocalTarget } from '../shared/execTarget'
 import type {
   SshConnectConfig,
@@ -294,6 +295,20 @@ const api = {
   clipboard: {
     read: (): string => clipboard.readText(),
     write: (text: string): void => clipboard.writeText(text)
+  },
+  /**
+   * The text for a bug report: versions, counts and booleans about THIS
+   * installation, assembled in main. No names, no addresses, no paths, no
+   * credentials, and no file written anywhere — so it is handed back in full for
+   * the user to read before they post it, and `clipboard.write` above is how it
+   * gets copied.
+   *
+   * `crash` is only passed from the error boundary, which is the one caller that
+   * knows something main never saw.
+   */
+  diagnostics: {
+    text: (crash?: DiagnosticsCrash | null): Promise<string> =>
+      ipcRenderer.invoke('diagnostics:text', crash ?? null)
   },
   ssh: {
     connect: (cfg: SshConnectConfig & { serverId?: string }): Promise<void> =>

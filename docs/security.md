@@ -1,6 +1,6 @@
 # Security
 
-How credentials are stored, what is never written to disk, and how to report a vulnerability.
+How credentials are stored, how they are kept out of plaintext on disk, and how to report a vulnerability.
 
 [← Back to the README](../README.md)
 

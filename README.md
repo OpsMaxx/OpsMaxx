@@ -112,7 +112,7 @@ Already keep hosts in `~/.ssh/config`? Import them instead of retyping — `Prox
 | **[Databases](docs/databases.md)** | Five engines, direct or through a bastion |
 | **[Tunnels and VPN](docs/tunnels.md)** | Forwards, SOCKS5, WireGuard, OpenVPN and frp |
 | **[Vault and settings](docs/vault.md)** | The secrets store, backups, and the settings worth knowing |
-| **[Security](docs/security.md)** | How credentials are stored and what is never written to disk |
+| **[Security](docs/security.md)** | How credentials are stored and kept out of plaintext on disk |
 | **[FAQ](docs/faq.md)** | The questions that come up most |
 
 ## Security

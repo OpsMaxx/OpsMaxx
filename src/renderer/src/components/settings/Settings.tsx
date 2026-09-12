@@ -25,7 +25,7 @@ import { useVault } from '../../store/vault'
 import { useVaultPrompt } from '../../store/vaultPrompt'
 import { clsx, duration } from '../../lib/format'
 import { JOB_DETACHED_SETTING_NOTE } from '../../../../shared/jobs'
-import { bridgeOn } from '../../lib/bridge'
+import { bridgeOn, bridgeHas } from '../../lib/bridge'
 import { ShortcutManager } from './ShortcutManager'
 import { BackupPanel } from './BackupPanel'
 import { UpdatePanel } from './UpdatePanel'
@@ -268,7 +268,14 @@ const SETTING_INDEX: SettingEntry[] = [
   // Backup
   { section: 'backup', title: 'Backup & Restore', desc: 'Export an encrypted copy of everything, or restore from one.', aliases: 'export import archive restore snapshot' },
   // Modules
-  { section: 'modules', title: 'Modules', desc: 'Which subsystems are switched on for this workspace.', aliases: 'features enable disable subsystem' }
+  { section: 'modules', title: 'Modules', desc: 'Which subsystems are switched on for this workspace.', aliases: 'features enable disable subsystem' },
+  // Advanced
+  {
+    section: 'advanced',
+    title: 'Copy diagnostics',
+    desc: 'Versions, inventory counts and which features are switched on, as text to paste into a report.',
+    aliases: 'bug report diagnostics support logs crash troubleshoot issue version paste'
+  }
 ]
 
 /**
@@ -611,6 +618,79 @@ function Toggle({ label, desc, initial = false }: { label: string; desc: string;
       </div>
       <span className={clsx('switch', on && 'on')} onClick={() => setOn((v) => !v)} />
     </div>
+  )
+}
+
+/**
+ * What to paste into a bug report.
+ *
+ * The text is assembled in main (services/diagnostics.ts) and shown here in
+ * full, because there is nothing in it to withhold: versions, inventory COUNTS,
+ * and feature state as on/off. No server, workspace or database names, no
+ * hostnames or addresses, no usernames, no paths, nothing from the vault, and no
+ * output from any remote host. That is what makes a preview the right control —
+ * the user reads exactly what they are about to post, rather than trusting a
+ * promise about a file they cannot see.
+ *
+ * This panel passes no crash block, so that list is exact here. The crash screen
+ * does pass one, and an error message it did not author can carry a hostname no
+ * redaction rule can recognise — so it shows its own preview for the same
+ * reason, and says what the cleaning does and does not cover.
+ *
+ * Nothing is written to disk, and there is deliberately no Save button: a
+ * persistent copy of this would be a file with its own permissions, lifetime and
+ * retention questions, in exchange for a paragraph of text the clipboard already
+ * carries.
+ */
+function DiagnosticsPanel(): React.JSX.Element {
+  const [text, setText] = useState<string | null>(null)
+
+  useEffect(() => {
+    const api = window.opsmaxx?.diagnostics
+    if (!bridgeHas(api as Record<string, unknown> | undefined, 'text')) return
+    let live = true
+    void api
+      ?.text()
+      .then((t) => {
+        if (live) setText(t)
+      })
+      .catch(() => {
+        /* nothing to show; the Copy button stays disabled */
+      })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  return (
+    <>
+      <div className="setting-row">
+        <div className="s-info">
+          <div className="s-title">Copy diagnostics</div>
+          <div className="s-desc">
+            Your app version and update channel, this platform and its Electron, Chrome and Node
+            versions, how many servers, workspaces, databases, tunnels and VPN profiles exist, which
+            optional modules are on, and whether each configurable feature is switched on and
+            actually set up. Counts and on/off states only — no names, hostnames, addresses,
+            usernames, paths or credentials, and nothing read from any server. The crash screen
+            copies this same report with the error text added, which is worth a glance before
+            posting. Nothing is saved to disk.
+          </div>
+        </div>
+        <button
+          className="btn sm"
+          disabled={text === null}
+          onClick={() => {
+            if (text === null) return
+            window.opsmaxx?.clipboard.write(text)
+            toast('Diagnostics copied.')
+          }}
+        >
+          Copy
+        </button>
+      </div>
+      <pre className="paste-preview">{text ?? 'Collecting…'}</pre>
+    </>
   )
 }
 
@@ -1221,6 +1301,21 @@ export function Settings(): React.JSX.Element {
             </div>
           )}
 
+          {section === 'advanced' && (
+            <div className="settings-section">
+              <h2>Diagnostics</h2>
+              <div className="sub">What to include when you report a problem.</div>
+              <DiagnosticsPanel />
+            </div>
+          )}
+
+          {/* The pages that render real content, and therefore must not also get
+              the "Reset <section>" placeholder below.
+
+              `modules` was missing from this list while rendering a full panel
+              above, so that page showed its modules AND a stray Reset row whose
+              button toasts "nothing to reset". `advanced` joins it now that it
+              has content of its own. */}
           {![
             'general',
             'appearance',
@@ -1230,7 +1325,9 @@ export function Settings(): React.JSX.Element {
             'editor',
             'backup',
             'ssh',
-            'monitoring'
+            'monitoring',
+            'modules',
+            'advanced'
           ].includes(section) && (
             <div className="settings-section">
               <h2>{SECTION_META[section].label}</h2>

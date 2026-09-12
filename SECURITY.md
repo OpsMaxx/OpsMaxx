@@ -21,6 +21,18 @@ You can expect an acknowledgement within a few days. We will keep you updated
 while a fix is prepared, and credit you in the release notes unless you would
 rather stay anonymous.
 
+### If you have already posted something publicly
+
+Deleting a GitHub comment does not un-publish it. Edits keep an edit history,
+the original has already gone out in notification emails, and anything public
+for a few minutes may have been indexed or mirrored. So if you pasted a log, a
+diagnostics block or a screenshot and then spotted a credential in it:
+
+1. **Rotate that credential.** This is the part that actually fixes it.
+2. Then tell the maintainer, so the content can be taken down as well.
+
+In that order. The takedown is housekeeping; the rotation is the remedy.
+
 ## Supported versions
 
 Fixes land on the latest release. There is no long-term support branch yet.
@@ -29,19 +41,43 @@ Fixes land on the latest release. There is no long-term support branch yet.
 
 Knowing the design may help you assess a finding.
 
+This covers what OpsMaxx writes that bears on a credential, a trust decision,
+or a record of what was done. It is **not** a complete directory listing:
+preference files (window layout, shortcuts, startup choices, update settings)
+are left out, and so are the run directories that hold only pid files and
+sockets for the life of a process. `src/main/services/backup.ts` carries the
+complete list, file by file, with the reasoning for each inclusion and
+exclusion.
+
 | Data | Storage | Protection |
 |---|---|---|
-| SSH passwords, key paths, key passphrases | `opsmaxx-secrets.json` | Electron `safeStorage` — DPAPI / Keychain / libsecret. Machine and user bound. |
+| SSH passwords, key paths, key passphrases; credential-proxy token values; **the traffic inspector's CA private key** | `opsmaxx-secrets.json` | Electron `safeStorage` — DPAPI / Keychain / libsecret. Machine and user bound, with one Linux exception: the backend is whichever password store the desktop session offers, and `basic_text` is Electron's name for *no system keyring was recognised*. There `safeStorage` reports no encryption available, and the app refuses to persist rather than store in the clear — so on such a desktop a credential does not survive a restart and has to be entered again; the diagnostics payload names the store as `secretStoreBackend`, beside `secretStore.available`. This is the only file of `safeStorage`-sealed **credentials** — not the only thing the app seals, because the biometric unlock key two rows down is the vault's derived key under the same `safeStorage`, and not everything it persists is sealed at all, because the MCP client configs further down this table hold a live bearer token in plaintext. What is in here includes the root CA the traffic inspector mints: that key can impersonate any site to a machine that trusts the certificate, and it is only ever written sealed — if the OS store is unavailable it is kept in memory for the session and a new authority is minted next launch rather than written in plaintext. |
 | Vault entries | `opsmaxx-vault.json` | AES-256-GCM, key from the master password via scrypt (N=32768). Password never stored. Decrypted entries are sent to the renderer while the vault is open, so they live in the renderer's memory too — not only in the main process. |
 | Biometric unlock key (opt-in, off by default) | main-process memory, or `opsmaxx-vault-bio.json` | The vault's **derived key**, wrapped with Electron `safeStorage`. By default this is held in memory only and dies with the process, so nothing is written to disk. The file exists only if you explicitly choose to keep biometric unlock across restarts. |
 | Workspace passwords | `opsmaxx-wslocks.json` | scrypt verifier with a random salt, compared with `timingSafeEqual`. Not reversible. |
 | Trusted SSH host keys | `opsmaxx-known-hosts.json` | SHA-256 fingerprints, plaintext (not secret). |
+| Trusted RDP server certificates | `opsmaxx-rdp-certs.json` | SHA-256 fingerprints, plaintext (not secret). Trust-on-first-use, and a changed pin is refused — the same policy as SSH host keys, because RDP servers are self-signed by default. |
+| Which vault entries were written into a host's `.env` | `opsmaxx-env-secrets.json` | **References only** — a server id and a vault entry id, both non-secret. No value is stored. It is resolved out of the vault at redaction time, so a locked vault redacts nothing rather than a plaintext copy being kept on disk to make an output filter nicer. |
+| Credential-proxy rules and token records | `opsmaxx-credproxy.json` | Plaintext. A rule names a vault entry rather than carrying a credential, and token **records** are stored while the token values are sealed with `safeStorage` into `opsmaxx-secrets.json` (one row up) keyed by id — so the file can be read, backed up and diffed without yielding a credential. |
+| Credential-proxy call log | `opsmaxx-credproxy-audit.jsonl` | Plaintext, append-only, `0600`. Refusal and error text is redacted **before** being capped, never after: capping first can cut the end marker off a PEM block, after which the private-key pattern matches nothing and the body is stored as prose. |
+| Job and broadcast approvals | `opsmaxx-job-approvals.jsonl` | Plaintext, append-only, `0600`. What a human was asked before a job ran and what they answered. Titles, hosts and command text go through the same secret redaction at the writer. **Never a job's output.** Kept separate from the AI audit log so that every row in that file is an agent's. |
+| Metrics, job output and fleet inventory | `opsmaxx-history.db` | Plaintext SQLite, `0600`, under its own retention. Job output is redacted and capped by the caller before it reaches the store. It holds an inventory of every host, unit and open port in the estate, which is why it is not left readable to other accounts on a shared machine. |
 | Backups | user-chosen `.spbackup` file | AES-256-GCM under a passphrase you supply. Credentials are unsealed from the keychain and re-encrypted so the file is portable. |
 | Servers, folders, workspaces | `opsmaxx-data.json` | Plaintext. Contains no credentials. |
 | AI/MCP agent sessions | `opsmaxx-mcp-sessions.json` | Only a SHA-256 hash and a 4-character preview of the bearer token is stored — never the raw token. |
-| AI/MCP audit log | `opsmaxx-ai-audit.jsonl` | Plaintext, append-only. Free-text fields are passed through the same secret-redaction as command output before being written, so it should never contain a credential. |
+| AI/MCP audit log | `opsmaxx-ai-audit.jsonl` | Plaintext, append-only, `0600`. Free-text fields are passed through the same secret-redaction as command output before being written, so it should never contain a credential. |
 | Local terminal sessions | `opsmaxx-local-sessions.jsonl` | Plaintext, append-only, `0600`. One entry when a local shell starts and one when it exits — shell label, resolved path, pid, working directory, exit status. **Never keystrokes and never output.** Kept separate from the AI audit log, which answers a different question. |
 | AI/MCP access-group policy | `opsmaxx-ai-policy.json` | Plaintext. Contains no credentials — capability rules and file-path patterns only. |
+| Runbook notes attached to alerts | `opsmaxx-runbooks.json` | Plaintext, `0600`. Free text a person wrote about their own estate, so it names hosts and whatever else they chose to type. Unlike every log above it is **not** passed through secret redaction — a note is authored, not captured, and silently editing what someone wrote is worse than storing it — so a credential pasted into a note is stored verbatim. Control and bidi characters are stripped and the text is capped at 4000 characters; nothing else is changed. No retention: a note is kept until deleted, which is the point of keeping it outside the history store. |
+| Automation rules | `opsmaxx-rules.json` | Plaintext, `0600`. Trigger conditions, the command each rule runs, pinned server ids, and the approval records for rules that required one. |
+| Managed long-running processes | `opsmaxx-processes.json` | Plaintext, `0600`. Command lines, the hosts they run on, and the vault entry ids resolved at start time. No credential value. |
+| Where backups go | `opsmaxx-backup-targets.json` | Plaintext, `0600`. Schedules plus the endpoint, bucket and remote path of every destination, and the vault entry ids that unlock them — **references only**, no credential value. It is still a map of where copies of this estate's secrets are kept. |
+| MCP bridge settings | `opsmaxx-mcp-config.json` | Plaintext, `0600`. Whether the bridge is enabled, its port, session lifetime, and which access group a new agent session starts on. No credential — but it is the configuration that decides what an agent is granted. |
+| The bridge entry written into an agent's own MCP config, and the `.opsmaxx-backup` copy taken before each write | `claude_desktop_config.json` under `~/Library/Application Support/Claude`, `~/.config/Claude` or `%APPDATA%\Claude`; `~/.codex/config.toml` | **A live bearer token, in plaintext**, `0600` — the backup copy too. Plaintext because the agent that launches the bridge has to read the token to present it; it is a session token, minted for named workspaces and a single access group, and not a credential for any host. These are the only files the app writes **outside its own data directory**, so the `0700` on that directory does not cover them and the mode is set on each file instead. The entry is merged into what was already there, and a config that cannot be parsed is left untouched rather than replaced. |
+| Remote files opened in your own editor | `external-edit/` | **Plaintext file contents** pulled down from hosts in the estate, under a hash of the remote path. Whatever you opened is on local disk until it is cleaned up. |
+| Captured HTTP bodies | `inspect-capture/` | Plaintext request and response bodies spilled to disk by the traffic inspector. Cleared on every inspector start, so usually empty — but a session that was interrupted leaves its bodies, and bodies routinely carry bearer tokens and session cookies. |
+| The traffic inspector's CA **certificate** and the system proxy settings it replaced | `inspect/` | The certificate is written `0644` **deliberately** — it is the half meant to be handed out, and it is the one you install into your OS trust store, so confirm its fingerprint before you do. The private key is **not** here; it is sealed into `opsmaxx-secrets.json` (above). `system-proxy-backup.json`, `0600`, records your proxy settings as they were before capture so they can be put back. |
+| VPN engine state | `vpn-state/` | Durable, `0700`. Holds engine **key material** — a tsnet node's private key is what makes it the same device on the tailnet next launch, so unlike the run directories this one is meant to outlive the process and nothing sweeps it. |
 
 ### SSH host keys
 

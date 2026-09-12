@@ -73,6 +73,28 @@ there needs to preserve.
    truncate a user's data. See `main/services/vault.ts`.
 5. **Build SSH hop lists with `sshHopsFor()`** in `renderer/src/lib/ssh.ts`.
    Hand-rolling that mapping is how hops end up with no credentials.
+6. **Anything the app produces for a user to send outward goes through
+   `redactOutput()`** in `main/services/secretRedaction.ts` — a log line, an
+   audit entry, captured command output, anything destined for a clipboard or an
+   issue. Redact at the writer, not at the display, so the stored copy is
+   already clean.
+
+   The **diagnostics block** shows both halves of this. Its own fields need no
+   pass: every one is a version string, a count or a boolean, so there is
+   nothing in the type for `redactOutput()` to act on. Its crash fields are the
+   opposite — an `Error` the app did not write, so `main/services/diagnostics.ts`
+   runs each through `redactOutput()` and only then caps it, and
+   `scrubPaths()` cuts file paths to basenames on top of that. Redact before
+   capping, never after: a cap can cut the END marker off a PEM block, and the
+   private-key pattern then matches nothing.
+
+   That split is also the rule for extending it. A field whose value the app
+   composes itself belongs in `Diagnostics` as it is; a field carrying text from
+   somewhere else needs a pass, and needs to say so. Neither removes the
+   reader's job — `redactOutput()` has no hostname rule, so a crash message can
+   still name a host, which is why the crash screen shows the text before it
+   copies anything. The comment at the top of `shared/diagnostics.ts` is the
+   long version.
 
 ### Things worth knowing
 
@@ -114,10 +136,23 @@ A good report includes:
 - OS and version
 - What you did, what you expected, what happened
 - The exact error text, if there is one
-- Whether it involves a jump host, two-factor auth or a tunnel — those paths
-  have the most moving parts
+- Whether it involves a jump host, two-factor auth, a tunnel, a VPN profile,
+  the local terminal or the AI & MCP bridge — those paths have the most moving
+  parts
+- A screenshot or a short recording, for anything about how something looks.
+  Six of this project's fixes were diagnosed from a picture of the running app
+  and could not have been from prose
 
-Please **redact hostnames, usernames, keys and IPs** before pasting logs.
+The easy way to supply the first two: **Settings → Advanced → Copy diagnostics**
+puts a block of text on your clipboard — versions, platform, which features are
+on. It holds nothing secret to begin with: it is versions, counts and on/off
+states by construction, not a filter run over something larger. Paste that.
+
+Anything you paste **by hand** still needs **hostnames, usernames, keys and IPs
+taken out** first. Attach a long log as a file rather than pasting it: an
+attachment is inert, while pasted text renders as Markdown and is read by
+automation, and output captured from a remote host is whatever that host chose
+to print.
 
 ## Suggesting features
 

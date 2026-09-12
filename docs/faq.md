@@ -69,8 +69,36 @@ and encrypted backups add AES-256-GCM with scrypt key derivation on top of that.
 
 ### Does OpsMaxx send any data anywhere?
 
-No. There is no account, no telemetry, no analytics and no update ping. Every connection it
-makes is one you configured.
+No account, no telemetry, no analytics. Nothing about you, your estate or how you use the app
+is collected or sent anywhere.
+
+One connection you did not configure: OpsMaxx checks for a new release on launch and every six
+hours after that, and downloads one it finds. That is on by default. It fetches release metadata
+from this project's GitHub releases — so GitHub sees what any HTTP request shows it, your IP
+address and the app's user agent — and it carries no identifier and nothing from your estate.
+Turn it off under
+**Settings → General → Automatic updates** with "Check for updates automatically"; the
+**Check for updates** button is then the only thing that reaches out.
+
+Every other connection is one you configured.
+
+### What is in "Copy diagnostics"?
+
+Facts about the installation itself: your app version and update channel, whether this is a
+packaged or portable build, this platform with its Electron, Chrome and Node versions, which
+password store the OS offered, how many workspaces, servers, databases, tunnels and VPN
+profiles exist, which optional modules are on, and whether each configurable feature is both
+switched on and actually set up. Counts, version strings and on/off states — no names out of
+your estate. No hostnames, addresses, usernames, file paths or credentials, and nothing read
+from any server: that is the shape of what it collects, not a filter applied afterwards.
+
+On the crash screen it also carries that crash's message and stack, and those are different in
+kind — they are text the app did not write, so they get filtered rather than shaped. Secrets
+are stripped and every path is cut to its last segment, but an error that failed to reach a
+host usually names it, and no pattern can reliably tell a hostname from any other word. So the
+crash screen shows you the whole report before it copies anything: read it first, and once you
+have pasted it, delete any line you would rather not post. It is not sent anywhere and nothing
+is written to disk — the button puts the text on your clipboard, and you decide where it goes.
 
 ### Does it work offline?
 

@@ -3,7 +3,7 @@
 import './portable'
 import { app, shell, BrowserWindow, ipcMain, nativeTheme, dialog, session, Menu, Notification, powerMonitor } from 'electron'
 import { join } from 'node:path'
-import { readFileSync, existsSync, writeFileSync, renameSync } from 'node:fs'
+import { readFileSync, existsSync, writeFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { randomBytes, randomUUID } from 'node:crypto'
 import {
@@ -23,6 +23,7 @@ import {
   sshTest
 } from './services/ssh'
 import type { KeyboardRequest } from './services/ssh'
+import { atomicWriteFileSync } from './services/atomicWrite'
 import {
   localConnect,
   localWrite,
@@ -56,6 +57,8 @@ import { HostFactsReader } from './services/hostFacts'
 import { FleetSampler, fleetCached, setActiveFleetSampler } from './services/fleetSampler'
 import type { AutoStartSettings, AutoStartState } from '../shared/autostart'
 import { pruneJsonl } from './services/jsonlPrune'
+import { diagnosticsText } from './services/diagnostics'
+import type { DiagnosticsCrash } from '../shared/diagnostics'
 import { AUDIT_LOG_PATH } from './services/auditLog'
 import { LOCAL_SESSION_LOG_PATH } from './services/localSessionLog'
 import { APPROVAL_LOG_PATH } from './services/approvalLog'
@@ -319,6 +322,7 @@ import {
 import { registerEnvSecret } from './services/envSecretRegistry'
 import {
   CredProxy,
+  CRED_PROXY_AUDIT_FILE,
   appendCredProxyAudit,
   readCredProxyFile,
   writeCredProxyFile,
@@ -1394,12 +1398,24 @@ function startHistory(): void {
       } catch (err) {
         console.error('[history] retention pass failed:', err)
       }
-      // The three append-only logs, on the same cadence and deliberately not on
+      // The four append-only logs, on the same cadence and deliberately not on
       // a second timer of their own. They are not in the store and so were not
       // covered by the horizon above -- they simply grew, for as long as the
       // app was used. Pruning here rather than on write keeps the append path
       // O(1), which is what makes these files cheap enough to be honest in.
-      for (const f of [AUDIT_LOG_PATH, LOCAL_SESSION_LOG_PATH, APPROVAL_LOG_PATH]) {
+      //
+      // The credential proxy's log was the one left out, and it is the one that
+      // grows fastest: a row per forwarded REQUEST, not per approval or per
+      // agent call, and the listener auto-resumes at launch for anyone who
+      // enabled it. Its path is joined here rather than imported resolved
+      // because credProxy.ts deliberately imports no electron -- see the note
+      // on CRED_PROXY_AUDIT_FILE.
+      for (const f of [
+        AUDIT_LOG_PATH,
+        LOCAL_SESSION_LOG_PATH,
+        APPROVAL_LOG_PATH,
+        join(app.getPath('userData'), CRED_PROXY_AUDIT_FILE)
+      ]) {
         const dropped = pruneJsonl(f)
         if (dropped !== null) console.log(`[retention] ${f}: dropped ${dropped} lines`)
       }
@@ -1447,8 +1463,19 @@ function closeHistoryNow(): void {
     clearInterval(historyRetain)
     historyRetain = null
   }
-  historyStore?.close()
-  historyStore = null
+  // `finally`, because a close that throws is the ONE case where dropping the
+  // reference matters most. deleteAllData already catches a throwing close and
+  // carries on; with a bare statement sequence the assignment was skipped, so
+  // the module kept both the reference and the open handle. On POSIX the unlink
+  // that follows then succeeds, nothing lands in `failed`, and deleteAllData
+  // reports ok:true while a live sqlite connection is still attached to the
+  // unlinked inode — and anything that reopens the WAL or shm by path recreates
+  // files in userData after a "delete everything".
+  try {
+    historyStore?.close()
+  } finally {
+    historyStore = null
+  }
 }
 
 // ---- Fleet sampling ----
@@ -2671,11 +2698,11 @@ const ruleEngine = new RuleEngine({
   },
   write: (file: RulesFile) => {
     try {
-      // Temp-then-rename at 0600, matching store.ts/vault.ts/policyStore.ts.
       // This file holds approval records: a torn write is a rule whose
-      // authorisation half-survived.
-      writeFileSync(`${RULES_PATH}.tmp`, JSON.stringify(file), { mode: 0o600 })
-      renameSync(`${RULES_PATH}.tmp`, RULES_PATH)
+      // authorisation half-survived, so it goes out temp-then-rename at 0600
+      // like every other state file. See services/atomicWrite.ts for why the
+      // temp file is claimed exclusively rather than just written.
+      atomicWriteFileSync(RULES_PATH, JSON.stringify(file))
     } catch (err) {
       console.error('[rules] save failed:', err)
     }
@@ -3467,7 +3494,7 @@ function credProxyTokenList(): CredProxyToken[] {
 
 const credProxy = ((): CredProxy => {
   const rulesPath = credProxyRulesPath
-  const auditPath = join(app.getPath('userData'), 'opsmaxx-credproxy-audit.jsonl')
+  const auditPath = join(app.getPath('userData'), CRED_PROXY_AUDIT_FILE)
   return new CredProxy(
     {
       now: () => Date.now(),
@@ -4568,6 +4595,25 @@ ipcMain.handle('secrets:available', () => secretsAvailable())
 ipcMain.handle('secrets:set', (_e, id: string, value: string) => setSecret(id, value))
 ipcMain.handle('secrets:delete', (_e, id: string) => deleteSecret(id))
 
+// ---- Diagnostics ----
+//
+// One handler returning a string, and deliberately nothing else: no save dialog,
+// no file, no remote read. The payload is local facts only — versions, inventory
+// counts, feature state as booleans — so it is handed back in full and the
+// renderer shows the user exactly what they are about to paste. The field list
+// and the reasoning are in src/shared/diagnostics.ts.
+//
+// The two probes are passed in rather than imported, because
+// services/diagnostics.ts may not reach webhookAlerts.ts (it reads its URL
+// through secrets.ts, whose exportSecrets returns every credential in plaintext)
+// or mcpServer.ts. tests/diagnosticsImports.test.ts walks that closure.
+ipcMain.handle('diagnostics:text', (_e, crash?: DiagnosticsCrash | null) =>
+  diagnosticsText(
+    { webhook: webhookStatus(), aiBridgeRunning: mcpServerStatus().running },
+    crash ?? null
+  )
+)
+
 // ---- Data persistence ----
 ipcMain.handle('data:load', () => loadData())
 ipcMain.handle('data:save', (_e, data: unknown) => {
@@ -4833,10 +4879,12 @@ app.on('before-quit', (e) => {
   ]).finally(() => app.exit(0))
 })
 
-// Safety net: never let a stray async error (e.g. a failed child_process
-// spawn) crash the main process with a fatal dialog.
-process.on('uncaughtException', (err) => console.error('[uncaughtException]', err))
-process.on('unhandledRejection', (reason) => console.error('[unhandledRejection]', reason))
+// The safety net that used to be here — never let a stray async error (e.g. a
+// failed child_process spawn) crash the main process with a fatal dialog — now
+// lives in ./portable, which is imported on the first line of this file.
+// Registering it here meant it was installed after every service module had
+// already been evaluated, so a crash during that evaluation was caught by
+// nothing at all. See the note there.
 
 // The window is frameless, so no menu bar is drawn — but an application menu
 // still has to exist for the clipboard accelerators (Ctrl/Cmd+C, V, X, A) to
