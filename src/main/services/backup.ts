@@ -12,8 +12,11 @@ import {
 import { tmpdir } from 'node:os'
 import { randomBytes, scrypt, createCipheriv, createDecipheriv } from 'node:crypto'
 import { spawn } from 'node:child_process'
+import { atomicWriteFileSync } from './atomicWrite'
 import { exportSecrets, importSecrets } from './secrets'
 import { removeHistoryFiles } from './history'
+import { CRED_PROXY_AUDIT_FILE } from './credProxy'
+import { RULES_FILE } from '../../shared/rules'
 import { openTarget, sha256, type BackupTarget, type TargetDeps } from './backupTargets'
 import { vaultList, vaultStatus } from './vault'
 import {
@@ -83,11 +86,13 @@ function readJson(name: string): unknown | null {
   return null
 }
 
+// Through the shared helper, not its own temp-then-rename: four of the five
+// files this writes are the vault, the workspace locks, the host-key pins and
+// the server list — the very files vault.ts, wslock.ts, knownhosts.ts and
+// store.ts were hardened for. A restore written the old way handed back both
+// gaps on all four, so the hardening lasted until the user restored a backup.
 function writeJson(name: string, value: unknown): void {
-  const p = userFile(name)
-  const tmp = `${p}.tmp`
-  writeFileSync(tmp, JSON.stringify(value), { mode: 0o600 })
-  renameSync(tmp, p)
+  atomicWriteFileSync(userFile(name), JSON.stringify(value))
 }
 
 function summarise(payload: BackupPayload): BackupSummary {
@@ -232,8 +237,25 @@ export async function backupImport(
   path: string,
   closeHistory?: () => void
 ): Promise<BackupResult> {
+  // Decryption gets its own try, so that only a decryption failure is reported
+  // as one. Everything after it is a WRITE, and a write that failed used to be
+  // surfaced as "check the passphrase" — which sends the user to rotate a
+  // passphrase that was fine, while the real cause (a temp path that could not
+  // be cleared, a full disk, a read-only userData) goes unmentioned.
+  let payload: BackupPayload
   try {
-    const payload = await decryptFile(path, password)
+    payload = await decryptFile(path, password)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return {
+      ok: false,
+      error: message.includes('OpsMaxx backup')
+        ? message
+        : 'Could not decrypt the backup — check the passphrase.'
+    }
+  }
+
+  try {
     const summary = summarise(payload)
 
     if (payload.data !== null) writeJson('opsmaxx-data.json', payload.data)
@@ -265,12 +287,13 @@ export async function backupImport(
     }
     return { ok: true, path, summary }
   } catch (err) {
+    // The bundle decrypted, so the passphrase is not the problem. Say where it
+    // stopped instead: by here some files may hold the restored contents and
+    // the rest the previous ones, and that is the thing the user has to know.
     const message = err instanceof Error ? err.message : String(err)
     return {
       ok: false,
-      error: message.includes('OpsMaxx backup')
-        ? message
-        : 'Could not decrypt the backup — check the passphrase.'
+      error: `The backup decrypted, but restoring it failed partway through (${message}), so some settings may be the restored ones and some the previous ones.`
     }
   }
 }
@@ -290,18 +313,49 @@ export function relaunchApp(): void {
 // re-point this machine at somebody else's bucket.
 export const TARGETS_FILE = 'opsmaxx-backup-targets.json'
 
-// Every JSON file OpsMaxx writes to userData — connections, credentials,
-// vault, workspace locks, trusted host keys, and the AI/MCP bridge's own
-// config, sessions, access-group policy and audit log. Deliberately exhaustive:
-// leaving one behind after a "delete everything" is worse than deleting one
-// that never existed, which unlinkSync's own try/catch already tolerates.
+// Every file OpsMaxx writes to userData that says anything about this user or
+// their estate — connections, credentials, vault, workspace locks, trusted SSH
+// and RDP host keys, the AI/MCP bridge's own config, sessions, access-group
+// policy, the four append-only logs of what was run and who said yes, the
+// credential proxy's rules and the env variables they feed, the biometric vault
+// key, the automation rules, the runbook notes, the managed process command
+// lines, and where backups go. Twenty files, and the reason each is here is
+// written beside it. Deliberately exhaustive: leaving one behind after a "delete
+// everything" is worse than deleting one that never existed, which the removal's
+// own `force: true` makes a no-op.
+//
+// It is exhaustive against a DIRECTORY LISTING rather than against memory —
+// `grep -rn "getPath('userData')" src/main/` is the check, and
+// tests/backup.test.ts pins the result so a new file fails the build rather
+// than quietly surviving a wipe. It had drifted by ELEVEN of the twenty entries
+// below: three of the four append-only logs (the AI audit log was the one
+// already here) and eight of the state files were written by the app and absent
+// from this list. Each of the eleven carries its own comment where it sits, so
+// the count can be rechecked by reading down rather than taken on faith.
+//
+// Three files the app writes are deliberately NOT in it, because they are
+// SETTINGS rather than data and deleting them changes behaviour without
+// deleting anything about anybody:
+//
+//   * `update-prefs.json` — updater channel, interval, auto-install. Naming no
+//     host and no credential, and a wipe that silently moved a beta user back
+//     to stable would be a functional change made by a privacy action.
+//   * `opsmaxx-startup.json` — one boolean, `openAsHidden`. Same argument.
+//   * `instance-id` — a random per-install id, no estate information in it, and
+//     detached jobs ALREADY RUNNING on remote hosts are matched to this install
+//     by it (see `foreign` in shared/jobs.ts). Minting a new one would orphan
+//     every one of them on machines this delete has no business reaching.
 //
 // The history database is NOT in this list because it is not one file: it is
 // the database, two journal sidecars, a .bak and any number of timestamped
 // corrupt copies. history.ts owns that list — see removeHistoryFiles — because
 // a second copy of those suffixes over here is exactly how the database came to
 // be missing from a delete that called itself exhaustive.
-const ALL_DATA_FILES = [
+//
+// The DIRECTORIES the app writes are ALL_DATA_DIRS, below, and are argued about
+// there. They are a separate list only because a directory has to be removed
+// recursively; the wipe walks both.
+export const ALL_DATA_FILES = [
   'opsmaxx-data.json',
   'opsmaxx-secrets.json',
   'opsmaxx-vault.json',
@@ -311,6 +365,37 @@ const ALL_DATA_FILES = [
   'opsmaxx-mcp-sessions.json',
   'opsmaxx-ai-policy.json',
   'opsmaxx-ai-audit.jsonl',
+  // The other three append-only logs, all three of which this list predated.
+  // What they hold is the argument: local shells with their paths and cwds,
+  // every approval with the hostnames and commands it authorised, and every
+  // credential the proxy forwarded and to whom. A "delete everything" that
+  // leaves a year of "who did what, and who approved it" behind has deleted the
+  // connections and kept the record of using them.
+  'opsmaxx-local-sessions.jsonl',
+  'opsmaxx-job-approvals.jsonl',
+  CRED_PROXY_AUDIT_FILE,
+  // The proxy's rules: the third-party endpoints this machine forwards to and
+  // the vault entry ids that unlock them, plus the token records. No secret
+  // value is in it — those are in the keychain — and it is still a map of which
+  // API credential this user holds for which service.
+  'opsmaxx-credproxy.json',
+  // Which environment variables were registered as secret-bearing, and what
+  // they point at.
+  'opsmaxx-env-secrets.json',
+  // The vault's derived key, wrapped by safeStorage, for biometric unlock. The
+  // single worst omission on this list: deleting opsmaxx-vault.json and leaving
+  // this behind leaves an on-disk key for a vault the user was told was gone.
+  'opsmaxx-vault-bio.json',
+  // Trusted RDP host certificates — hostnames and fingerprints, the same kind
+  // of thing as opsmaxx-known-hosts.json two lines up.
+  'opsmaxx-rdp-certs.json',
+  // Automation rules and runbook notes: commands, pinned server ids, and
+  // whatever the user wrote down about their own estate.
+  RULES_FILE,
+  'opsmaxx-runbooks.json',
+  // Managed long-running processes: command lines, hosts and the vault entries
+  // they resolve at start time.
+  'opsmaxx-processes.json',
   // Where backups go, how often, and which vault entries unlock the
   // destinations. No credential is in it — see backupTargets.ts — but the
   // endpoints, buckets and remote paths of every place this estate's secrets
@@ -319,31 +404,129 @@ const ALL_DATA_FILES = [
   TARGETS_FILE
 ]
 
-// The renderer only calls this once a fresh backup exists (`!backupDirty`),
-// so this function itself does not re-check that — it only guards against
-// leaving a partially-deleted mess if one file fails to unlink.
+// Every DIRECTORY OpsMaxx creates under userData that holds anything about this
+// user or their estate. Same standard as the file list, same check — the joins
+// against `app.getPath('userData')` across src/main/ — and tests/backup.test.ts
+// pins it the same way.
+//
+// It was a paragraph of excuses before it was a list. "Delete everything"
+// walked the twenty files above and not one directory, so the traffic inspector's
+// ROOT CA CERTIFICATE survived the button whose entire job is to leave nothing
+// behind — the very certificate the user was walked through installing into
+// their OS trust store, left on disk by a wipe, with the record of the system
+// proxy settings it replaced beside it. (Not its private key: that is sealed
+// into `opsmaxx-secrets.json` by setSecret, which is on the file list above, or
+// held in main-process memory when the OS keychain refused to seal it. See
+// inspect.ts.) Nor did `external-edit/` go, and that is whole remote file
+// contents in plain text.
+export const ALL_DATA_DIRS = [
+  // The inspector's certificate authority, public half: the CERTIFICATE — the
+  // one the user may have installed into the OS trust store, so a wipe that
+  // leaves it behind leaves the artefact that matching trust decision points at
+  // — plus `system-proxy-backup.json`, which records the system proxy settings
+  // as they were before the inspector changed them and therefore names whatever
+  // proxy this machine was pointed at. The CA's private key is NOT in here; it
+  // never touches disk unsealed.
+  'inspect',
+  // Remote files pulled down to be opened in the user's own editor: whole file
+  // contents from hosts in the estate, in plain text, under a hash of the
+  // remote path.
+  'external-edit',
+  // Captured HTTP bodies. Cleared on every inspector start, so usually empty —
+  // but "usually" is not the standard this function works to, and the session
+  // interrupted by the delete is exactly the one whose bodies are still there.
+  'inspect-capture',
+  // The tsnet node's durable identity, which is a PRIVATE KEY, kept outside the
+  // run root precisely so the startup sweep cannot reach it (see vpnStateRoot in
+  // vpn/runDir.ts). Nothing else ever deletes it: alone among the directories
+  // here, it survives forever on its own.
+  'vpn-state'
+]
+
+// Three directories the app writes are deliberately NOT in that list —
+// `inspect-run`, `process-run` and the VPN run root (`vpn-run`, see vpnRunRoot)
+// — and the argument is the same for all three.
+//
+// They hold pid files and control sockets, and they hold them ONLY while a
+// process is alive; when nothing is running they are empty or absent and
+// deleting them achieves nothing. So the only case where deleting one does
+// anything is the case where a process is running — and there the pid file is
+// the sole remaining handle on it. `relaunchApp()` exits with `app.exit(0)`,
+// which stops nothing on the way out, so the inspector sidecar or a live tunnel
+// is orphaned BY this delete; `reapOrphans()` on the next launch finds and kills
+// it by that pid file, and `sweepRunDirs([])` empties the root seconds later
+// anyway. Remove the directory and the orphan cannot be killed at all: a tunnel
+// still holding the user's routes and DNS, or a proxy still decrypting their
+// TLS, with the UI that could have stopped it now knowing nothing about it. A
+// generated engine config in a live run directory does carry key material, and
+// that is the price — it is derived from a file this wipe does remove, and the
+// relaunch sweeps it.
+//
+// The fix that would let them be wiped is to STOP all three first, the way
+// `closeHistory` is handed in for the database. That is index.ts's call, not
+// this file's.
+//
+// Not here either: the shell-integration files (`.zshrc`, `bash-init.sh`,
+// `fish/`), which are a compile-time constant snippet naming no host and no
+// user, rewritten on demand; and Chromium's own directories, which are not ours,
+// are open in the running process, and hold nothing from the renderer but which
+// banners have been dismissed.
+
+// The renderer only calls this once a fresh backup exists (`!backupDirty`), so
+// this function itself does not re-check that.
+//
+// Every removal stands alone and the failures are collected rather than thrown.
+// One `try` around the whole loop is what this had, and the list is an order of
+// declaration, not of priority: a single path that would not go — EPERM on a
+// directory handed to `unlinkSync`, EBUSY on an open handle — abandoned every
+// path after it, so the longer the list grew the more a "delete everything"
+// could leave behind. It still reports the failure, because the only thing worse
+// than a partial wipe is a partial wipe reported as a complete one.
 //
 // `closeHistory` is not optional in practice, only in signature: relaunchApp()
 // uses app.exit(0), which does NOT emit 'before-quit', so the teardown that
 // closes the store never runs on this path. The store has to be closed here or
-// the unlink below hits an open handle — EBUSY on Windows — and the app
+// the removal below hits an open handle — EBUSY on Windows — and the app
 // relaunches on a database it just told the user was deleted.
 export function deleteAllData(closeHistory?: () => void): BackupResult {
+  const failed: string[] = []
+  const step = (what: string, run: () => void): void => {
+    try {
+      run()
+    } catch (err) {
+      failed.push(`${what} (${err instanceof Error ? err.message : String(err)})`)
+    }
+  }
+
+  // Logged, never added to `failed`, so `ok: false` keeps meaning "something is
+  // still on disk". It is not a path, and the renderer's wording names the
+  // failures as things that are "still there"; worse, a close that throws made
+  // `ok: false` permanent — the relaunch is skipped, every path is already gone,
+  // and "Try again" re-runs with `force: true` turning each removal into a
+  // no-op, so only this step fails again and the user can never reach the
+  // success toast or the restart. Its failure is also redundant here: it matters
+  // only because the unlink below then hits the open handle, and that step
+  // reports itself.
   try {
     closeHistory?.()
-    for (const name of ALL_DATA_FILES) {
-      const p = userFile(name)
-      if (existsSync(p)) unlinkSync(p)
-    }
-    // The database holds every hostname, kernel version, systemd unit and
-    // listening port in the estate, for ninety days. history.ts chmods it 0600
-    // because it is sensitive; a "delete all data" that leaves it behind and
-    // then goes on appending to it is that same judgement made backwards.
-    removeHistoryFiles(app.getPath('userData'))
-    return { ok: true }
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    console.error('[backup] could not close the history store before deleting it:', err)
   }
+  // `recursive` so a directory goes, `force` so an absent path is not a failure
+  // — which most of these are on most machines, and why no existsSync is needed.
+  for (const name of [...ALL_DATA_FILES, ...ALL_DATA_DIRS]) {
+    step(name, () => rmSync(userFile(name), { recursive: true, force: true }))
+  }
+  // The database holds every hostname, kernel version, systemd unit and
+  // listening port in the estate, for ninety days. history.ts chmods it 0600
+  // because it is sensitive; a "delete all data" that leaves it behind and
+  // then goes on appending to it is that same judgement made backwards.
+  step('the history database', () => removeHistoryFiles(app.getPath('userData')))
+
+  if (failed.length > 0) {
+    return { ok: false, error: `Some of it could not be deleted: ${failed.join('; ')}` }
+  }
+  return { ok: true }
 }
 
 // ---------------------------------------------------------------------------

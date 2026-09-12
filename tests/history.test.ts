@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -14,6 +22,7 @@ import {
   eventRetentionDays,
   historyBytes,
   loadHistory,
+  removeHistoryFiles,
   resetHistoryModuleForTests,
   steadyStateRows,
   CAPACITY_METRIC_IDS_FOR_TESTS,
@@ -1573,5 +1582,52 @@ describe('a database as a history subject', () => {
     expect(METRICS.indexOf('dbBytes')).toBe(METRICS.length - 1)
     expect(METRICS.indexOf('cpu')).toBe(0)
     expect(METRICS.indexOf('inodePct')).toBe(8)
+  })
+})
+
+describe('removeHistoryFiles', () => {
+  // Everything the store can leave behind, with the main database FIRST — which
+  // is the order historyFiles() returns and the reason one throw used to matter
+  // so much. On Windows a still-open handle makes exactly that first path EBUSY.
+  const sidecars = (): string[] => {
+    const base = join(dir, HISTORY_FILE)
+    return [`${base}-wal`, `${base}-shm`, `${base}.bak`, `${base}.bak.tmp`, `${base}.corrupt-1700000000000`]
+  }
+
+  it('removes every file the store can leave behind', () => {
+    const base = join(dir, HISTORY_FILE)
+    for (const f of [base, ...sidecars()]) writeFileSync(f, 'srv-prod-01 nginx.service :443')
+
+    removeHistoryFiles(dir)
+
+    expect(readdirSync(dir).filter((f) => f.startsWith(HISTORY_FILE))).toEqual([])
+  })
+
+  it('removes the rest of the list when one path will not go, and names the one that did not', () => {
+    // A directory handed to the non-recursive rmSync throws EISDIR, which is the
+    // same shape as the EBUSY an open handle gives the real database — and it is
+    // the FIRST path in the list, so under the old single `try` around the whole
+    // loop nothing after it was even attempted. Every one of those sidecars holds
+    // the same hostnames, units and ports as the database itself.
+    const base = join(dir, HISTORY_FILE)
+    mkdirSync(base, { recursive: true })
+    writeFileSync(join(base, 'not-a-database'), 'x')
+    for (const f of sidecars()) writeFileSync(f, 'srv-prod-01 nginx.service :443')
+
+    let thrown: unknown
+    try {
+      removeHistoryFiles(dir)
+    } catch (err) {
+      thrown = err
+    }
+
+    // The part that matters: the rest of the list went anyway.
+    expect(sidecars().filter(existsSync)).toEqual([])
+    // And the failure names the one path that did not.
+    expect((thrown as Error)?.message).toMatch(
+      new RegExp(`could not be removed: ${HISTORY_FILE.replace('.', '\\.')} \\(`)
+    )
+    expect(existsSync(base)).toBe(true)
+    rmSync(base, { recursive: true, force: true })
   })
 })

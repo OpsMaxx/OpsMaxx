@@ -129,9 +129,11 @@ export function BackupPanel(): React.JSX.Element {
     if (failed(r)) {
       setError({
         where: 'delete',
-        // Deletion walks a list of files, so a failure can land half way
-        // through. Saying "nothing was deleted" would be a guess.
-        text: `Deleting stopped part of the way through: ${r?.error ?? 'a file could not be removed.'} Some data may already be gone — run it again to finish, or restore the backup above.`,
+        // deleteAllData isolates each step: it does not stop at the first
+        // failure, it continues and reports which paths it could not remove.
+        // So the wording names what is LEFT rather than claiming it gave up
+        // part of the way through.
+        text: `The rest was deleted, but some of it is still there. ${r?.error ?? 'A file could not be removed.'} Run it again to finish, or restore the backup above.`,
         actions: [{ label: 'Try again', run: () => void runDeleteAll() }]
       })
       return

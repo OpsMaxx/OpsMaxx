@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { chmodSync, copyFileSync, existsSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import type {
   JobDetachedHandle,
@@ -2581,8 +2581,28 @@ export function historyFiles(dir: string): string[] {
   return files
 }
 
-/** Remove all of them. The caller must have closed the store first: unlinking
- *  an open database is EBUSY on Windows. */
+/**
+ * Remove all of them. The caller must have closed the store first: unlinking
+ * an open database is EBUSY on Windows.
+ *
+ * Every removal stands alone, for the same reason deleteAllData's `step` helper
+ * exists: one throw used to abandon every path after it, and the main database
+ * is FIRST in the list — so on Windows, where a still-open handle makes exactly
+ * that file EBUSY, the WAL, the shm, the .bak, the .bak.tmp and every
+ * timestamped corrupt copy were not even attempted. All of those hold the same
+ * inventory as the database.
+ *
+ * Throws once, at the end, naming each path that would not go — so the `step`
+ * that wraps this in deleteAllData reports all of them rather than the first.
+ */
 export function removeHistoryFiles(dir: string): void {
-  for (const f of historyFiles(dir)) rmSync(f, { force: true })
+  const failed: string[] = []
+  for (const f of historyFiles(dir)) {
+    try {
+      rmSync(f, { force: true })
+    } catch (err) {
+      failed.push(`${basename(f)} (${err instanceof Error ? err.message : String(err)})`)
+    }
+  }
+  if (failed.length > 0) throw new Error(`could not be removed: ${failed.join('; ')}`)
 }
