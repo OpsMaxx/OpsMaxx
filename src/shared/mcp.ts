@@ -260,10 +260,76 @@ export interface McpGlobalConfig {
    *
    * The session's group is the grant, so this is the single most consequential
    * default in the AI feature and it gets to be a setting rather than a
-   * hardcoded first-in-the-list. Absent means the most restrictive group that
-   * exists, which is the right way to be wrong.
+   * hardcoded first-in-the-list. Absent means no group at all for a caller that
+   * offers no fallback — read resolveDefaultSessionGroup() below for why that,
+   * and not "the narrowest group that exists", is the most restrictive answer
+   * available. A caller may pass a `fallbackGroupId` for the case where nothing
+   * is configured, and ConnectAgent.tsx does (Read & Write); what no caller may
+   * do is substitute a group for a configured default, or for one that was
+   * configured and has since been deleted.
+   *
+   * resolveDefaultSessionGroup() is how this field is read, everywhere.
    */
   defaultSessionGroupId?: string
+}
+
+/**
+ * Which access group a newly minted session starts on.
+ *
+ * Three paths mint sessions: CLI pairing (no picker in front of it at all), the
+ * Connect-an-agent buttons, and the New AI agent session form. Each of them used
+ * to answer this on its own — `listGroups()[0]`, `groups[0]`, a hardcoded id —
+ * so the same install could hand one agent Full Access and another nothing,
+ * decided by array order rather than by anyone. Hence one function, in shared/,
+ * pure: no electron and no fs, so main and the renderer run the same code rather
+ * than two copies of a rule.
+ *
+ * They do not all answer it identically, and `fallbackGroupId` is how they are
+ * allowed not to. The rule they share is that a CONFIGURED default is honoured
+ * and never substituted; where they differ is the unconfigured case, which
+ * ConnectAgent.tsx answers with Read & Write (`grp-read-write`) because the user
+ * is in front of that flow choosing to connect an agent, while CLI pairing and
+ * the session form answer it with null. tests/defaultSessionGroup.test.tsx pins
+ * that divergence, so it is a decision rather than a drift.
+ *
+ * `null` is returned whenever the setting does not name a group that exists, and
+ * it is not a cosmetic fallback. The session's group is the GRANT, so a null
+ * group fails closed at every consumer: resolveGroups()/sessionGroupFor() in
+ * mcpServer.ts hand null to effectiveCapability, effectiveCommand,
+ * effectiveFilePath and effectiveWorkspaceCapability, each of which denies
+ * before looking at anything else ("This AI session has no access group"), and
+ * every evaluate* in policyEngine.ts independently denies on a null group too.
+ * The agent connects, is refused on every call, and the user lifts it under
+ * AI & MCP → AI Agents having been told which group they are granting.
+ *
+ * Deliberately NOT "the most restrictive group that exists", which this
+ * setting's own doc comment used to promise. Restrictiveness over 28
+ * capabilities plus per-path file rules is a partial order, not a ranking: a
+ * group that allows reads and refuses the terminal and one that does the reverse
+ * are incomparable, so any "narrowest group" has to break ties — and the only
+ * tiebreak on offer is position in the list, which is the exact bug this
+ * function exists to delete. No group is at least as restrictive as any group
+ * that could have been picked, and proving that takes no ranking code.
+ *
+ * `fallbackGroupId` is for a flow with its own considered default (ConnectAgent)
+ * and is consulted ONLY when nothing is configured. A default that was
+ * configured and has since been deleted still resolves to null: the user did
+ * choose, their choice is gone, and no other group gets to stand in for it.
+ */
+export function resolveDefaultSessionGroup(
+  config: Pick<McpGlobalConfig, 'defaultSessionGroupId'> | null | undefined,
+  groups: AccessGroup[],
+  fallbackGroupId?: string
+): { id: string | null; name: string } {
+  // Trimmed, and `||` rather than `??`, because an empty or whitespace-only id
+  // IS nothing configured. `??` accepted `''` as a configured choice, which then
+  // matched no group, so the answer was null with `fallbackGroupId` never
+  // consulted — the deleted-default case, reached by a config that names nothing
+  // at all. No UI writes the field today; a hand-edited or IPC-patched config
+  // does, and this function is the single authority for the grant.
+  const wanted = config?.defaultSessionGroupId?.trim() || fallbackGroupId
+  const found = wanted ? groups.find((g) => g.id === wanted) : undefined
+  return found ? { id: found.id, name: found.name } : { id: null, name: 'No AI Access' }
 }
 
 export interface WorkspaceRef {

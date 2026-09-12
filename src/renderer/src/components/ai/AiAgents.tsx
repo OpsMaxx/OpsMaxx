@@ -6,6 +6,7 @@ import { useApp } from '../../store/app'
 import { openAi } from '../../store/nav'
 import { SessionAccess } from './SessionAccess'
 import type { McpAgentSession, AccessGroup } from '../../../../shared/mcp'
+import { resolveDefaultSessionGroup } from '../../../../shared/mcp'
 import { maskToken } from '../../../../shared/tokenDisplay'
 
 interface WorkspaceOpt {
@@ -69,11 +70,13 @@ function CreateSessionForm({
 }): React.JSX.Element {
   const [agentName, setAgentName] = useState('Claude Code')
   const [workspaceIds, setWorkspaceIds] = useState<string[]>(workspaces[0] ? [workspaces[0].id] : [])
-  // The configured default, falling back to the first group only when no
-  // default has been chosen. `groups[0]` alone made the most permissive group
-  // in the list the default for every new agent on some installs, purely
-  // because of where it sat in the array.
-  const [groupId, setGroupId] = useState('')
+  // Whatever resolveDefaultSessionGroup() says, preselected in the picker below
+  // so the grant is on screen before Create is pressed. `null` means "not
+  // resolved yet" and `''` means "resolved to No AI Access" — two states that a
+  // single empty string cannot tell apart, which matters because No AI Access is
+  // now a legitimate resolved answer and has to stop the effect below from
+  // asking again on every 5-second poll of `groups`.
+  const [groupId, setGroupId] = useState<string | null>(null)
   const [ttl, setTtl] = useState(60)
   const [issued, setIssued] = useState<{ token: string; port: number | null } | null>(null)
   // Re-hidden whenever a new session is issued, so revealing one token does not
@@ -89,13 +92,32 @@ function CreateSessionForm({
   useEffect(() => {
     if (workspaceIds.length === 0 && workspaces.length > 0) setWorkspaceIds([workspaces[0].id])
   }, [workspaces, workspaceIds])
+  // The group is the grant, so the only thing allowed to choose it for the user
+  // is the setting that exists for that decision. It used to fall back to
+  // `groups[0]`, which made the most permissive group in the list the default
+  // for every new agent on some installs, purely because of where it sat in the
+  // array — a picker in front of it makes that milder than it was at pairing
+  // time, not different in kind. No fallback group is passed here either: with
+  // nothing configured this preselects No AI Access, and a user who wants more
+  // says which, in the control right next to it.
+  //
+  // `prev ?? …`, not a bare set, for the reason ConnectAgent.tsx uses the same
+  // form: `groups` is refetched every 5 seconds into a NEW array, so this effect
+  // re-runs on every poll until it settles, and a resolve that lands while
+  // `getConfig()` was in flight would otherwise overwrite a group the user had
+  // already picked in the control — silently, and usually downwards, to the
+  // configured default or to No AI Access. Create then mints the session on a
+  // grant nobody chose. Settling in the `.catch` too is what ends the loop: a
+  // rejected getConfig used to leave `groupId` null forever, so every poll fired
+  // a fresh IPC call and a fresh unhandled rejection for the life of the page.
+  // No AI Access is the right thing to settle on when the config cannot be read
+  // — it fails closed, and the picker next to it says so.
   useEffect(() => {
-    if (groupId || groups.length === 0) return
-    void window.opsmaxx?.aiMcp.getConfig?.().then((cfg) => {
-      const wanted = (cfg as { defaultSessionGroupId?: string } | null)?.defaultSessionGroupId
-      const found = wanted ? groups.find((g) => g.id === wanted) : null
-      setGroupId((found ?? groups[0]).id)
-    })
+    if (groupId !== null || groups.length === 0) return
+    void window.opsmaxx?.aiMcp
+      .getConfig?.()
+      .then((cfg) => setGroupId((prev) => prev ?? (resolveDefaultSessionGroup(cfg, groups).id ?? '')))
+      .catch(() => setGroupId((prev) => prev ?? ''))
   }, [groups, groupId])
 
   const toggleWorkspace = (id: string): void => {
@@ -269,7 +291,25 @@ function CreateSessionForm({
             says so when one is.
           </div>
         </div>
-        <select className="input" value={groupId} onChange={(e) => setGroupId(e.target.value)}>
+        <select
+          className="input"
+          data-testid="new-session-group"
+          value={groupId ?? ''}
+          onChange={(e) => setGroupId(e.target.value)}
+        >
+          {/* Present as an option because it is a real resolved answer, not
+              only a user's choice: with no default configured the picker lands
+              here, and a <select> whose value matches no option renders blank —
+              which reads as "the first group", the very thing this is not.
+              FIRST for the same reason, and that position is load-bearing: React
+              sets `selected` per option, so a value matching none leaves the
+              browser's selectedness reset to pick option ZERO. `groupId` can stop
+              matching at any moment — `groups` is refetched every 5 seconds and an
+              admin can delete the picked group mid-form — and this is what makes
+              that land on the same answer `create()` then submits, rather than on
+              whatever group happened to be listed first.
+              defaultSessionGroup.test.tsx pins it; move this line and it goes red. */}
+          <option value="">No AI Access</option>
           {groups.map((g) => (
             <option key={g.id} value={g.id}>
               {g.name}

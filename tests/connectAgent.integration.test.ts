@@ -10,8 +10,9 @@ import { hasBuiltCli, warnIfUnbuilt } from './fixtures/builtCli'
 import { refreshMcpDataCache, listCachedWorkspaces } from '../src/main/services/mcpDataCache'
 import { setAssignment, listAssignments, listGroups, resetPolicyCacheForTests } from '../src/main/services/policyStore'
 import { setMcpConfig, createSession, resetMcpAuthForTests } from '../src/main/services/mcpAuth'
-import { startMcpServer, stopMcpServer } from '../src/main/services/mcpServer'
+import { startMcpServer, stopMcpServer, explainSessionAccess } from '../src/main/services/mcpServer'
 import { writeClaudeDesktopConfigTo, writeCodexConfigTo, claudeCodeCommand } from '../src/main/services/clientConfig'
+import { resolveDefaultSessionGroup } from '../src/shared/mcp'
 
 // Exercises exactly what the "Connect Claude Code" / "Connect Claude Desktop"
 // buttons do, end to end: gap-fill the workspace assignments, mint a session,
@@ -232,5 +233,81 @@ describe('connect flow', () => {
     } finally {
       await client.close()
     }
+  })
+})
+
+// Which group the Connect buttons land on, and what that group actually permits.
+//
+// The picker is preselected before anyone looks at it and the session it mints
+// never expires, so the preselected value IS the grant in the common case. It
+// used to fall through to `list[0]` — whichever group sat first in the policy
+// file — when neither the configured default nor Read & Write could be found.
+describe('the connect flow resolves its access group from the configured default', () => {
+  beforeAll(() => {
+    // The tests above leave assignments behind, including a deliberate No AI
+    // Access on ws-dev. An assignment is a restriction that caps the session's
+    // group, so leaving one in place would hide what is being measured here:
+    // the grant the resolved group gives on its own.
+    resetPolicyCacheForTests()
+    expect(listAssignments()).toHaveLength(0)
+  })
+
+  // ConnectAgent.tsx's preselect, called with exactly the arguments it passes —
+  // including its own deliberate Read & Write fallback.
+  const preselect = (
+    defaultSessionGroupId?: string
+  ): { id: string | null; name: string } =>
+    resolveDefaultSessionGroup({ defaultSessionGroupId }, listGroups(), 'grp-read-write')
+
+  // The effective answer, from the same code the tools call — not the group's
+  // name, which is the thing that was reassuring and wrong.
+  function decisions(agentName: string, resolved: { id: string | null; name: string }): Map<string, string> {
+    const { session } = createSession({
+      agentName,
+      workspaces: listCachedWorkspaces().map((w) => ({ id: w.id, name: w.name })),
+      groupId: resolved.id,
+      groupName: resolved.name,
+      ttlMinutes: null
+    })
+    const explained = explainSessionAccess(session.id, 's1')
+    expect(explained).not.toBeNull()
+    return new Map((explained ?? []).map((c) => [c.capability, c.decision]))
+  }
+
+  it('prefers a configured default over its own Read & Write fallback', () => {
+    const resolved = preselect('grp-read-only')
+    expect(resolved.id).toBe('grp-read-only')
+    const effective = decisions('Configured default', resolved)
+    // Read Only really is in force: reads go through, writes do not. Asserting
+    // only `groupId` would pass just as well if the grant were ignored.
+    expect(effective.get('readFiles')).toBe('allow')
+    expect(effective.get('writeFiles')).toBe('deny')
+  })
+
+  it('falls back to Read & Write when nothing is configured, and nothing wider', () => {
+    const resolved = preselect(undefined)
+    expect(resolved.id).toBe('grp-read-write')
+    const effective = decisions('No default configured', resolved)
+    // The flow's deliberate choice, and the reason it is defensible: every
+    // mutating capability in it still stops for an approval.
+    expect(effective.get('readFiles')).toBe('allow')
+    expect(effective.get('writeFiles')).toBe('ask')
+    expect(effective.get('sudo')).toBe('deny')
+  })
+
+  it('does not fall back to whichever group is first in the list', () => {
+    const groups = listGroups()
+    expect(groups.length).toBeGreaterThan(1)
+    expect(groups[0].id).not.toBe('grp-read-write')
+    expect(preselect(undefined).id).not.toBe(groups[0].id)
+  })
+
+  it('gives no access at all when the configured default has been deleted', () => {
+    // The user did choose, and their choice is gone — so this flow's fallback
+    // does not get to stand in for it either.
+    const resolved = preselect('grp-deleted-by-the-user')
+    expect(resolved.id).toBeNull()
+    expect(resolved.name).toBe('No AI Access')
+    expect(new Set(decisions('Stale default', resolved).values())).toEqual(new Set(['deny']))
   })
 })

@@ -1,9 +1,10 @@
 import { EventEmitter } from 'node:events'
 import { randomBytes, randomInt } from 'node:crypto'
 import type { CliPairingRequest } from '../../shared/mcp'
+import { resolveDefaultSessionGroup } from '../../shared/mcp'
 import { listCachedWorkspaces } from './mcpDataCache'
 import { listGroups } from './policyStore'
-import { createSession } from './mcpAuth'
+import { createSession, getMcpConfig } from './mcpAuth'
 
 // Bootstraps a session for the `opsmaxx claude|codex|run` CLI launcher
 // without weakening the existing consent model: the code is only ever shown
@@ -99,7 +100,21 @@ export function confirmCliPairing(
 
   const workspaces = listCachedWorkspaces()
   if (workspaces.length === 0) return { ok: false, error: 'No workspace exists in OpsMaxx yet — create one first.' }
-  const group = listGroups()[0]
+  // The session's group is the grant, and there is no group picker at pairing
+  // time, so `defaultSessionGroupId` — the setting that exists for exactly this
+  // decision — is the only thing allowed to choose it. It used to be
+  // `listGroups()[0]`, which handed a paired CLI whichever group happened to
+  // sit first in the file: anywhere between Full Access and nothing, decided by
+  // array order rather than by anyone.
+  //
+  // No fallback group is passed, and this is the path with the strongest claim
+  // to one: nobody sees a picker before the agent is live. Unset, or pointing at
+  // a group since deleted, resolves to no group at all — the most restrictive
+  // outcome there is, and it fails closed rather than merely reading as
+  // restrictive (see resolveDefaultSessionGroup). The paired agent gets an
+  // honest denial the user can lift under AI & MCP → AI Agents instead of access
+  // nobody chose.
+  const group = resolveDefaultSessionGroup(getMcpConfig(), listGroups())
 
   // There's no workspace picker at pairing time, so a CLI-paired session is
   // granted every workspace that exists right now — narrower access still
@@ -107,8 +122,8 @@ export function confirmCliPairing(
   const { session, token } = createSession({
     agentName: p.agentName,
     workspaces: workspaces.map((w) => ({ id: w.id, name: w.name })),
-    groupId: group?.id ?? null,
-    groupName: group?.name ?? 'No AI Access',
+    groupId: group.id,
+    groupName: group.name,
     ttlMinutes: TTL_MINUTES
   })
 

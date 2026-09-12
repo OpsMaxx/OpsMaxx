@@ -5,10 +5,16 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 import { refreshMcpDataCache } from '../src/main/services/mcpDataCache'
-import { setAssignment, resetPolicyCacheForTests } from '../src/main/services/policyStore'
-import { setMcpConfig, resetMcpAuthForTests } from '../src/main/services/mcpAuth'
-import { startMcpServer, stopMcpServer } from '../src/main/services/mcpServer'
-import { onCliPairingEvent, type CliPairingEvent } from '../src/main/services/cliPairing'
+import { setAssignment, listGroups, resetPolicyCacheForTests } from '../src/main/services/policyStore'
+import { setMcpConfig, listSessions, resetMcpAuthForTests } from '../src/main/services/mcpAuth'
+import { startMcpServer, stopMcpServer, explainSessionAccess } from '../src/main/services/mcpServer'
+import {
+  onCliPairingEvent,
+  startCliPairing,
+  confirmCliPairing,
+  type CliPairingEvent
+} from '../src/main/services/cliPairing'
+import type { McpAgentSession } from '../src/shared/mcp'
 
 // Exercises the whole `opsmaxx claude|codex|run` launcher path against the
 // real HTTP server: /pair/start never leaks the code (only an in-process
@@ -111,3 +117,72 @@ async function connectViaBridge(token: string): Promise<Client> {
   await client.connect(transport)
   return client
 }
+
+// The group a paired session lands on is the whole grant, and pairing is the
+// one path with no picker in front of it — so the configured default is the
+// only thing that may decide, and its absence has to mean denied rather than
+// whichever group sits first in the policy file.
+describe('CLI pairing resolves the session group from the configured default', () => {
+  beforeAll(() => {
+    resetMcpAuthForTests()
+    resetPolicyCacheForTests()
+    refreshMcpDataCache(sampleData)
+    setMcpConfig({ enabled: true, port: PORT + 1 })
+  })
+
+  function pair(agentName: string): McpAgentSession {
+    let code = ''
+    const off = onCliPairingEvent((e: CliPairingEvent) => {
+      if (e.type === 'created') code = e.request.code
+    })
+    const { pairingId } = startCliPairing(agentName)
+    off()
+    const result = confirmCliPairing(pairingId, code)
+    expect(result.ok).toBe(true)
+    const session = listSessions().find((s) => s.agentName === agentName)
+    expect(session).toBeDefined()
+    return session as McpAgentSession
+  }
+
+  // What "most restrictive" has to mean in practice: not a reassuring group
+  // name, but every capability actually refused by the same code the tools call.
+  function decisions(session: McpAgentSession): string[] {
+    const explained = explainSessionAccess(session.id, 's1')
+    expect(explained).not.toBeNull()
+    return (explained ?? []).map((c) => c.decision)
+  }
+
+  it('assigns the group named by defaultSessionGroupId', () => {
+    setMcpConfig({ defaultSessionGroupId: 'grp-read-only' })
+    const session = pair('Default group honoured')
+    expect(session.groupId).toBe('grp-read-only')
+    expect(session.groupName).toBe(listGroups().find((g) => g.id === 'grp-read-only')?.name)
+    // Not denied across the board — the grant really is in force.
+    expect(decisions(session)).toContain('allow')
+  })
+
+  it('falls back to no access at all when no default is configured', () => {
+    setMcpConfig({ defaultSessionGroupId: undefined })
+    const session = pair('No default configured')
+    expect(session.groupId).toBeNull()
+    // The actual effective permission, not the label: null groupId must fail
+    // closed in every gate, or the fallback is cosmetic.
+    expect(new Set(decisions(session))).toEqual(new Set(['deny']))
+  })
+
+  it('does not pick an arbitrary group when several exist', () => {
+    setMcpConfig({ defaultSessionGroupId: undefined })
+    const groups = listGroups()
+    expect(groups.length).toBeGreaterThan(1)
+    const session = pair('Several groups exist')
+    expect(session.groupId).not.toBe(groups[0].id)
+    expect(session.groupId).toBeNull()
+  })
+
+  it('falls back to no access when the configured default no longer exists', () => {
+    setMcpConfig({ defaultSessionGroupId: 'grp-deleted-by-the-user' })
+    const session = pair('Stale default')
+    expect(session.groupId).toBeNull()
+    expect(new Set(decisions(session))).toEqual(new Set(['deny']))
+  })
+})

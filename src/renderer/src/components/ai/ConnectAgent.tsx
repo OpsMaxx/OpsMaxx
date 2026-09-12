@@ -5,6 +5,7 @@ import type { ToastAction } from '../../store/toast'
 import { useApp } from '../../store/app'
 import { openAi, openSettings } from '../../store/nav'
 import type { AccessGroup } from '../../../../shared/mcp'
+import { resolveDefaultSessionGroup } from '../../../../shared/mcp'
 import { containsBearerToken, maskBearerTokens } from '../../../../shared/tokenDisplay'
 
 type Target = 'claude-code' | 'claude-desktop' | 'codex'
@@ -55,7 +56,10 @@ const TARGETS: { id: Target; label: string; agentName: string; icon: React.JSX.E
 // empty policy.
 export function ConnectAgent({ onConnected }: { onConnected?: () => void }): React.JSX.Element {
   const [groups, setGroups] = useState<AccessGroup[]>([])
-  const [groupId, setGroupId] = useState('')
+  // `null` until resolved, `''` once resolved to No AI Access — see the same
+  // distinction in AiAgents.tsx. Without it a resolved No AI Access is
+  // indistinguishable from "still loading" and gets overwritten.
+  const [groupId, setGroupId] = useState<string | null>(null)
   const [busy, setBusy] = useState<Target | null>(null)
   const [ready, setReady] = useState<Ready | null>(null)
   const [error, setError] = useState<{ text: string; action?: ToastAction } | null>(null)
@@ -64,19 +68,30 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
   const [revealed, setRevealed] = useState(false)
 
   useEffect(() => {
-    void window.opsmaxx?.aiPolicy.listGroups().then((g) => {
-      const list = g ?? []
-      setGroups(list)
-      // Read & Write rather than Read Only, because a session's group is fixed
-      // for its whole life and Read Only cannot add a server however the
-      // workspace is later configured — so the one-click path could never use
-      // add_server, and the only symptom was a denial that pointed at settings
-      // which do not affect an existing connection. Nothing here is granted
-      // silently: every mutating capability in Read & Write is ASK, so writes,
-      // uploads, tunnels and adding a server each still raise an approval
-      // prompt. The picker is right there for anyone who wants narrower.
-      setGroupId((prev) => prev || list.find((x) => x.id === 'grp-read-write')?.id || list[0]?.id || '')
-    })
+    void Promise.all([window.opsmaxx?.aiPolicy.listGroups(), window.opsmaxx?.aiMcp.getConfig?.()]).then(
+      ([g, cfg]) => {
+        const list = g ?? []
+        setGroups(list)
+        // A configured `defaultSessionGroupId` wins, because it is the setting
+        // that exists for this exact decision and the user set it deliberately.
+        // Read & Write is this flow's own considered default for when nothing is
+        // configured, and it stays: a session's group is fixed for its whole
+        // life and Read Only cannot add a server however the workspace is later
+        // configured — so the one-click path could never use add_server, and the
+        // only symptom was a denial that pointed at settings which do not affect
+        // an existing connection. Nothing here is granted silently: every
+        // mutating capability in Read & Write is ASK, so writes, uploads,
+        // tunnels and adding a server each still raise an approval prompt. The
+        // picker is right there for anyone who wants narrower.
+        //
+        // `list[0]` is gone. It was the one fallback nobody chose — not this
+        // flow and not the user — and it resolved to whichever group sat first
+        // in the policy file. A configured default that has since been deleted
+        // does not reach Read & Write either: resolveDefaultSessionGroup()
+        // consults the fallback only when nothing is configured at all.
+        setGroupId((prev) => prev ?? resolveDefaultSessionGroup(cfg, list, 'grp-read-write').id ?? '')
+      }
+    )
   }, [])
 
   const connect = async (target: Target, agentName: string): Promise<void> => {
@@ -201,7 +216,16 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
             again.
           </div>
         </div>
-        <select className="input" value={groupId} onChange={(e) => setGroupId(e.target.value)}>
+        <select
+          className="input"
+          data-testid="connect-group"
+          value={groupId ?? ''}
+          onChange={(e) => setGroupId(e.target.value)}
+        >
+          {/* A real resolved answer, so it is on the list: a <select> whose
+              value matches no option renders blank, which reads as the first
+              group rather than as no access. */}
+          <option value="">No AI Access</option>
           {groups.map((g) => (
             <option key={g.id} value={g.id}>
               {g.name}
