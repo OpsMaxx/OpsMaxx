@@ -38,6 +38,8 @@ export type ModuleId =
   | 'changeLog'
   | 'drift'
   | 'processes'
+  | 'cicd'
+  | 'cicdTrigger'
 
 /**
  * Which of the two destinations a module belongs to.
@@ -404,6 +406,67 @@ export const MODULES: ModuleDef[] = [
     defaultEnabled: true
   },
   {
+    id: 'cicd',
+    surface: 'read',
+    label: 'CI/CD',
+    detail:
+      'Connect a Jenkins, GitLab or GitHub Actions account and read what it did: pipelines, run history, and the log of the step that failed, beside the server the run changed. Read-only, and nothing on this tab starts, re-runs or cancels anything — that is a separate module on the Operations side.',
+    // OFF by default, and the reason is not the one the other read modules
+    // give. Every module above reads a machine the user administers, over a
+    // connection they already opened. Enabling this POLLS A THIRD PARTY'S API
+    // ON A TIMER — github.com, a GitLab instance, a Jenkins controller — using
+    // a long-lived token the user hands over, and keeps doing it in the
+    // background whether or not the tab is on screen. Traffic leaves the
+    // machine to somebody else's service; that is a thing to switch on rather
+    // than discover in an access log.
+    //
+    // The second half is what it RENDERS. Build output is written by whoever
+    // opened the merge request, so this is the first panel in the app whose
+    // text comes from a stranger rather than from a host the user owns.
+    defaultEnabled: false
+  },
+
+  // ---------------------------------------------------------------------------
+  // `cicdTrigger` — WRITTEN, TESTED, AND DELIBERATELY NOT REGISTERED IN PHASE 1
+  // ---------------------------------------------------------------------------
+  //
+  // The operate half of the CI/CD module exists in full: the three adapters
+  // have trigger/cancel/rerun, `wiring.ts` dispatches them, `mcpServer.ts` has
+  // the three tools behind `evaluateCiTrigger` and a per-call approval, and the
+  // run workbench has the buttons. All of it is tested.
+  //
+  // It is not in this list because phase 1 has not yet been run against a real
+  // CI server, and the trigger half is the half where being wrong starts a
+  // production deploy. Read-only finds the unknown-unknowns first; this goes in
+  // when it has.
+  //
+  // Registering it again is this block becoming an entry again — no other
+  // change. Everything it needs is already built and already guarded:
+  //   - `OperateModuleId` / `OPERATE_MODULE_IDS` below
+  //   - `tests/monitorSurfaces.test.ts`, which pins the operate list exactly
+  //   - `docs/plans/cicd-phase-2.md`
+  // {
+  // id: 
+  // surface: 'operate',
+  // label: 'Start a build',
+  // detail:
+  // 'Start, re-run and cancel builds on a CI server OpsMaxx does not administer. What runs is the pipeline definition already in that repository — not anything composed here — so it can deploy, migrate or restart whatever that file says. Once a run has started OpsMaxx cannot stop it: cancelling is a request to a third party that may already have finished.',
+  // // `operate` rather than `read`, and the contract on ModuleSurface does not
+  // // settle it: what this writes to is a third party's API, not an estate
+  // // host, and the surface field is worded about servers. The split is taken
+  // // for the reason `access` → `keyRevoke` was taken — this rail names tabs by
+  // // CONSEQUENCE, not by mechanism, and the consequence here is that a deploy
+  // // goes out. Reading a pipeline and firing one are not the same decision,
+  // // so they are not the same toggle.
+  // //
+  // // OFF by default, like every operate module, and this one has the weakest
+  // // undo in the registry: patch and broadcast at least act through a
+  // // connection OpsMaxx holds and can drop. This hands the verb to somebody
+  // // else's scheduler and then has no say in it.
+  // defaultEnabled: false
+  // },
+
+  {
     id: 'kubernetes',
     surface: 'read',
     label: 'Kubernetes',
@@ -430,13 +493,18 @@ export const MODULES: ModuleDef[] = [
  * two agree. Adding an `operate` module then fails a test rather than quietly
  * producing a tab that exists in one half of the app and not the other.
  */
-export type OperateModuleId = Extract<ModuleId, 'broadcast' | 'patch' | 'jobs' | 'keyRevoke'>
+export type OperateModuleId = Extract<
+  ModuleId,
+  'broadcast' | 'patch' | 'jobs' | 'keyRevoke'
+>
 
 export const OPERATE_MODULE_IDS: readonly OperateModuleId[] = [
   'broadcast',
   'patch',
   'jobs',
   'keyRevoke'
+  // 'cicdTrigger' — phase 2. See the block above the MODULES entry it belongs
+  // to; this line and the union above go back together with that one.
 ]
 
 /** Whether this module's destination is Operations rather than Monitoring. */

@@ -24,6 +24,7 @@ export interface BackupContentState {
   databases: readonly unknown[]
   tunnels: readonly unknown[]
   vpns: readonly unknown[]
+  cicdConnections: readonly unknown[]
 }
 
 export function hasBackupContent(s: BackupContentState): boolean {
@@ -32,7 +33,14 @@ export function hasBackupContent(s: BackupContentState): boolean {
     s.databases.length > 0 ||
     s.tunnels.length > 0 ||
     s.vpns.length > 0 ||
-    s.folders.length > 0
+    s.folders.length > 0 ||
+    // A CI connection is user data a backup carries, so a user whose only data
+    // is CI connections must not be told there is nothing to back up.
+    // TODO: `httpChecks` is persisted and is NOT in this list, so that user is
+    // told exactly that today. Left alone deliberately — it is a separate fix
+    // with its own test — but it is the same bug and this is the only place
+    // that records it.
+    s.cicdConnections.length > 0
   ) {
     return true
   }

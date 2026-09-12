@@ -10,6 +10,7 @@ const state = (over: Partial<BackupContentState> = {}): BackupContentState => ({
   databases: [],
   tunnels: [],
   vpns: [],
+  cicdConnections: [],
   ...over
 })
 
@@ -37,9 +38,12 @@ describe('a workspace the app made for itself is not user data', () => {
 })
 
 describe('anything the user created counts', () => {
-  it.each(['servers', 'databases', 'tunnels', 'vpns', 'folders'] as const)('counts %s', (key) => {
-    expect(hasBackupContent(state({ [key]: [{}] }))).toBe(true)
-  })
+  it.each(['servers', 'databases', 'tunnels', 'vpns', 'folders', 'cicdConnections'] as const)(
+    'counts %s',
+    (key) => {
+      expect(hasBackupContent(state({ [key]: [{}] }))).toBe(true)
+    }
+  )
 
   // The test is about CONTENT, not about "is this the first run" — a user who
   // deletes their last server is back in the same state and should get the same

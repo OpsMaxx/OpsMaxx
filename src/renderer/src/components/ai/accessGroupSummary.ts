@@ -43,6 +43,10 @@ const PHRASING: Record<AiCapability, Phrasing> = {
   sudo: { verb: 'use sudo', gerund: 'using sudo' },
   containers: { verb: 'list containers and read their logs', gerund: 'reading containers' },
   containerControl: { verb: 'start and stop containers', gerund: 'controlling containers' },
+  ciRead: { verb: 'read CI pipelines and build output', gerund: 'reading CI pipelines and build output' },
+  // No internal comma: these phrases are joined into a comma list, and one
+  // that contains its own commas cannot be told apart from its neighbours.
+  ciTrigger: { verb: 'start and cancel CI pipelines', gerund: 'starting and cancelling CI pipelines' },
   fleetRead: { verb: 'read across the fleet', gerund: 'reading across the fleet' },
   backupRead: { verb: 'see backup health', gerund: 'reading backup health' },
   serverMetrics: { verb: 'read server metrics', gerund: 'reading server metrics' },
@@ -80,7 +84,7 @@ const PHRASING: Record<AiCapability, Phrasing> = {
 // vpnControl decides which network every later session travels over. They are
 // listed first inside whichever clause they land in, so a summary can never
 // bury "can use sudo" behind six mundane capabilities.
-export const ELEVATED_CAPABILITIES: AiCapability[] = ['sudo', 'manageServers', 'vpnControl']
+export const ELEVATED_CAPABILITIES: AiCapability[] = ['sudo', 'manageServers', 'vpnControl', 'ciTrigger']
 
 // The two capabilities a path rule can override. `evaluateFilePath` maps
 // mode -> capability exactly this way.

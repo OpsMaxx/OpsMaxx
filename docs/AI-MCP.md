@@ -47,7 +47,7 @@ another MCP client. For the short pitch and the security summary, see the
 
 ## The MCP server
 
-`src/main/services/mcpServer.ts` registers **15 tools**:
+`src/main/services/mcpServer.ts` registers **15 core tools**, plus the CI/CD set below:
 
 | Tool | Capability gating it | What it returns |
 |---|---|---|
@@ -66,6 +66,14 @@ another MCP client. For the short pitch and the security summary, see the
 | `set_tunnel` | `sshTunnel`, always ASK to start | Confirmation, with the bound port |
 | `list_vpns` | `vpnControl` | Names, engine, mode and state — **never an endpoint, key or listener address** |
 | `set_vpn` | `vpnControl`, always ASK to start; **frp refused outright** | Confirmation, with a listener count |
+| `list_ci_connections` | `ciRead` | Connection names and providers — **never a base URL or API token** |
+| `list_pipelines` | `ciRead` | Pipelines on one connection, with their opaque `ref` and whether each can be started. Capped |
+| `list_runs` | `ciRead` | Recent runs of one pipeline, newest first, capped. Fenced as untrusted |
+| `get_run` | `ciRead` | One run: status, timing, per-step outcomes. Fenced as untrusted |
+| `get_run_logs` | `ciRead` | Build output, redacted, tailed, and fenced as untrusted |
+| `trigger_run` | `ciTrigger`, **always ASK, never cached** | What the provider returned — a run, a queue item, or an honest "requested" |
+| `cancel_run` | `ciTrigger`, **always ASK, never cached** | That the provider accepted the request, not that the run stopped |
+| `rerun_run` | `ciTrigger`, **always ASK, never cached** | A new attempt of the same run — **GitHub only**; Jenkins and GitLab refuse and say to start a new run |
 
 Each tool carries a `title`, an MCP annotation set (`readOnlyHint`, `destructiveHint`,
 `openWorldHint`) and a description of every parameter, and the server sends `instructions` on
@@ -123,6 +131,49 @@ shells, and it applies to stopping as well as starting.
 frp's per-proxy status table. It never reports an endpoint, a key, or a listener's bind address —
 the cached shape it reads from does not contain them at all (`CachedVpn`, `mcpDataCache.ts`), so a
 future template string cannot leak one by accident.
+
+### CI/CD
+
+Eight tools reach Jenkins, GitLab and GitHub Actions. They are the only tools on this bridge
+annotated `openWorldHint: true` besides `execute_command` and `query_database`, and the reason is
+narrower than "they use the network": every other tool acts on something OpsMaxx holds a record
+for, while these act on a third party the user does not administer, running a pipeline definition
+OpsMaxx has never read.
+
+**Connections are a second name space.** `connectionName` comes from `list_ci_connections` and a
+server name does not resolve there. The cached shape the bridge reads from (`CachedCicdConnection`,
+`mcpDataCache.ts`) carries the id, the workspace, the name, the provider and whether it is enabled
+— **not the base URL and not the vault reference**, so neither can leak through a template string.
+Main resolves the name to a real record and merges the token at request time.
+
+**There is no tool that creates, edits or deletes a CI connection**, the same decision as
+`set_vpn` and for a sharper reason: an agent that could add one would choose the base URL it points
+at, and could then ask the user to paste a token into it.
+
+**`trigger_run`, `cancel_run` and `rerun_run` are always ASK and never cached.** `evaluateCiTrigger`
+(`policyEngine.ts`) upgrades `allow` to `ask` before `gate()` runs, and `gate()` excludes
+`ciTrigger` from `sessionElevations` in both directions. Every run is its own approval. One
+pipeline per call, so a mistake costs one pipeline rather than a fleet.
+
+`trigger_run`, `cancel_run` and `rerun_run` call `cicd/wiring` — the same functions the panel's
+own buttons call. The difference between the two callers is entirely the gate: a second copy of the
+provider switch inside the bridge would be a second place for Jenkins' queue semantics to be wrong.
+
+**Everything a provider reports comes back fenced.** Not just logs: a run's title is a pull-request
+title, its actor a username, its branch a branch name, all written by whoever opened the change and
+all arriving through `readOnlyHint` tools with no prompt. Each field goes through
+`remoteText`/`remoteName`, and the result as a whole is wrapped in a block whose opening and
+closing markers carry a random per-call nonce, with the stated rule that anything claiming to close
+the block without that nonce is part of the data. `hostReportedBlock` is not used here: it is
+unfenced prose, sound only for the single 200-character lines its other callers hand it, and a
+10,000-line log can forge it.
+
+`get_run_logs` returns the **tail** by default, capped, and says how much it withheld. That bounds
+context cost, not risk — the last lines of a failing build are exactly what an attacker's step
+prints before exiting non-zero. The body goes through `redactOutput` with the connection's own API
+token as a known secret, which is close to free and worth very little: that token never reaches a
+runner, so a job leaking `$CI_JOB_TOKEN` is leaking the *platform's* credential, which OpsMaxx has
+never seen and cannot enumerate. Only the pattern layer applies, and it is not exhaustive.
 
 ### `add_server`
 

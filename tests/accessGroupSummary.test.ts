@@ -38,6 +38,11 @@ function allowAll(overrides: Partial<AiCapabilityPolicy> = {}): AiCapabilityPoli
     firewallRules: 'deny',
     // Item 36b. Seeded denied on every group, exactly like firewallRules.
     sudoersRead: 'deny',
+    // The CI/CD module. Seeded denied on every group: build output is written
+    // by whoever opened the merge request, and a trigger starts work on
+    // infrastructure OpsMaxx does not administer.
+    ciRead: 'deny',
+    ciTrigger: 'deny',
     manageServers: 'deny',
     vpnControl: 'deny',
     ...overrides
@@ -85,9 +90,9 @@ describe('summariseAccessGroup — built-in groups', () => {
     expect(s.sentence).toBe(
       'Can see server details, run commands, read files, download files, query databases, read server metrics, ' +
         'list containers and read their logs, start and stop containers, see backup health, and read across the fleet without asking. ' +
-        'Cannot use sudo, add servers to the workspace, start and stop VPNs, and list reverse proxies, write files, upload files, open SSH tunnels, read the server inventory and its pending security updates, collect this server’s firewall rule list, or collect this server’s sudoers rules.'
+        'Cannot use sudo, add servers to the workspace, start and stop VPNs, and list reverse proxies, start and cancel CI pipelines, write files, upload files, open SSH tunnels, read the server inventory and its pending security updates, collect this server’s firewall rule list, collect this server’s sudoers rules, or read CI pipelines and build output.'
     )
-    expect(s.counts).toEqual({ allow: 10, ask: 0, deny: 9 })
+    expect(s.counts).toEqual({ allow: 10, ask: 0, deny: 11 })
     expect(s.elevated).toEqual([])
   })
 
@@ -111,7 +116,7 @@ describe('summariseAccessGroup — built-in groups', () => {
       'Asks you first before adding servers to the workspace, starting and stopping VPNs, and listing reverse proxies, writing files, uploading files, and opening SSH tunnels.'
     )
     expect(s.clauses[2]).toBe(
-      'Cannot use sudo, read the server inventory and its pending security updates, collect this server’s firewall rule list, or collect this server’s sudoers rules.'
+      'Cannot use sudo, start and cancel CI pipelines, read the server inventory and its pending security updates, collect this server’s firewall rule list, collect this server’s sudoers rules, or read CI pipelines and build output.'
     )
     expect(s.elevated).toEqual([])
   })
@@ -135,11 +140,11 @@ describe('summariseAccessGroup — built-in groups', () => {
     // including this one, because a count of unpatched security updates is a
     // vulnerability report rather than a health check — see AI_CAPABILITIES.
     expect(s.clauses[2]).toBe(
-      'Cannot read the server inventory and its pending security updates, collect this server’s firewall rule list, or collect this server’s sudoers rules.'
+      'Cannot start and cancel CI pipelines, read the server inventory and its pending security updates, collect this server’s firewall rule list, collect this server’s sudoers rules, or read CI pipelines and build output.'
     )
     // Asking is not granting: nothing here happens without a human.
     expect(s.elevated).toEqual([])
-    expect(s.counts).toEqual({ allow: 10, ask: 6, deny: 3 })
+    expect(s.counts).toEqual({ allow: 10, ask: 6, deny: 5 })
   })
 
   it('Full Access still gates the three dangerous capabilities behind a prompt', () => {
@@ -181,14 +186,14 @@ describe('summariseAccessGroup — edge cases', () => {
   it('says so plainly when everything is denied', () => {
     const s = summariseAccessGroup(group(everything('deny')))
     expect(s.sentence).toBe('Allows nothing — every AI request against the server is refused.')
-    expect(s.counts).toEqual({ allow: 0, ask: 0, deny: 19 })
+    expect(s.counts).toEqual({ allow: 0, ask: 0, deny: 21 })
     expect(s.elevated).toEqual([])
   })
 
   it('names the dangerous capabilities when everything is allowed', () => {
     const s = summariseAccessGroup(group(everything('allow')))
     expect(s.sentence).toBe(
-      'Can do everything without asking — including using sudo, adding servers to the workspace, and starting and stopping VPNs, and listing reverse proxies.'
+      'Can do everything without asking — including using sudo, adding servers to the workspace, starting and stopping VPNs, and listing reverse proxies, and starting and cancelling CI pipelines.'
     )
     expect(s.elevated).toEqual(ELEVATED_CAPABILITIES)
   })
@@ -212,7 +217,7 @@ describe('summariseAccessGroup — edge cases', () => {
 
   it('orders every allowed dangerous capability ahead of the mundane ones', () => {
     const s = summariseAccessGroup(
-      group(allowAll({ manageServers: 'allow', vpnControl: 'allow', writeFiles: 'ask' }))
+      group(allowAll({ manageServers: 'allow', vpnControl: 'allow', ciTrigger: 'allow', writeFiles: 'ask' }))
     )
     expect(
       s.clauses[0].startsWith('Can use sudo, add servers to the workspace, start and stop VPNs, and list reverse proxies,')
@@ -317,6 +322,8 @@ const FW = 'collect this server’s firewall rule list'
 // flat "Cannot" clause. Sudoers says who can become root; the firewall rules
 // say what the server is exposed on.
 const SU = 'collect this server’s sudoers rules'
+const CIR = 'read CI pipelines and build output'
+const CIT = 'start and cancel CI pipelines'
 
 describe('summariseAccessGroup — path rules outrank the capability', () => {
   it('does not claim a group cannot read files when a rule allows a path', () => {
@@ -329,7 +336,7 @@ describe('summariseAccessGroup — path rules outrank the capability', () => {
     expect(s.overriddenByPath).toEqual(['readFiles'])
     // and it is not left sitting in the flat "Cannot" list as an absolute
     expect(s.clauses).toContain(
-      `Cannot add servers to the workspace, start and stop VPNs, and list reverse proxies, ${HF}, ${FW}, or ${SU}.`
+      `Cannot add servers to the workspace, start and stop VPNs, and list reverse proxies, ${CIT}, ${HF}, ${FW}, ${SU}, or ${CIR}.`
     )
   })
 
@@ -373,7 +380,7 @@ describe('summariseAccessGroup — path rules outrank the capability', () => {
     // no longer last in that clause — hostFacts and firewallRules are denied on
     // every seeded group and sort after it — so the assertion names the item
     // rather than the sentence ending.
-    expect(s.sentence).toContain('read files, ' + HF + ', ' + FW + ', or ' + SU + '.')
+    expect(s.sentence).toContain('read files, ' + HF + ', ' + FW + ', ' + SU + ', or ' + CIR + '.')
   })
 
   it('treats an explicit null on a rule the way evaluateFilePath does', () => {
@@ -396,12 +403,12 @@ describe('summariseAccessGroup — path rules outrank the capability', () => {
     )
     expect(s.clauses).toEqual([
       'Can see server details, run commands, download files, query databases, read server metrics, list containers and read their logs, start and stop containers, see backup health, and read across the fleet without asking.',
-      `Cannot use sudo, add servers to the workspace, start and stop VPNs, and list reverse proxies, upload files, open SSH tunnels, ${HF}, ${FW}, or ${SU}.`,
+      `Cannot use sudo, add servers to the workspace, start and stop VPNs, and list reverse proxies, ${CIT}, upload files, open SSH tunnels, ${HF}, ${FW}, ${SU}, or ${CIR}.`,
       'Can read files without asking — except 19 path rules that block it.',
       'Cannot write files — except 2 path rules that ask you first.'
     ])
     // The grid still shows what the grid shows; the rules qualify it.
-    expect(s.counts).toEqual({ allow: 10, ask: 0, deny: 9 })
+    expect(s.counts).toEqual({ allow: 10, ask: 0, deny: 11 })
     expect(s.overriddenByPath).toEqual(['readFiles', 'writeFiles'])
   })
 
@@ -420,7 +427,7 @@ describe('summariseAccessGroup — path rules outrank the capability', () => {
       group(everything('allow'), [{ id: '1', pattern: '/etc/shadow', read: 'deny', write: 'deny' }])
     )
     expect(s.clauses[0]).toBe(
-      'Can do everything without asking except the file paths below — including using sudo, adding servers to the workspace, and starting and stopping VPNs, and listing reverse proxies.'
+      'Can do everything without asking except the file paths below — including using sudo, adding servers to the workspace, starting and stopping VPNs, and listing reverse proxies, and starting and cancelling CI pipelines.'
     )
     expect(s.elevated).toEqual(ELEVATED_CAPABILITIES)
   })

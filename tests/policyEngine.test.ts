@@ -22,6 +22,8 @@ function group(overrides: Partial<AccessGroup['capabilities']> = {}, filePolicie
       writeFiles: 'deny',
       containers: 'allow',
       containerControl: 'allow',
+  ciRead: 'deny',
+  ciTrigger: 'deny',
       fleetRead: 'allow',
       backupRead: 'allow',
       sftpDownload: 'allow',

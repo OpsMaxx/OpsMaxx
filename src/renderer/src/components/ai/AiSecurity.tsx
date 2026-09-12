@@ -5,6 +5,42 @@ import { toast } from '../../store/toast'
 import { openAi } from '../../store/nav'
 import type { McpGlobalConfig } from '../../../../shared/mcp'
 
+
+/**
+ * What the kill switch cannot stop, in the operator's words.
+ *
+ * The confirm above already argues that a count is what makes the dialog
+ * honest rather than a speed bump. A build an agent started is the part of the
+ * answer the switch has no power over, so it is the part most worth saying
+ * before somebody commits — an operator at 2am has no other way to learn a
+ * deploy is in flight. `list_runs` is the agent's tool, not a notification.
+ */
+async function buildsClause(): Promise<string> {
+  try {
+    const runs = (await window.opsmaxx?.cicd?.agentRuns?.()) ?? []
+    if (runs.length === 0) return ''
+    const lines = runs
+      .slice(0, 5)
+      .map((r) => {
+        const what = r.run ? `${r.pipeline} ${r.run}` : r.pipeline
+        // "not reported" rather than "running": a provider that returned no run
+        // id has told us nothing since, and guessing would be the one claim
+        // nobody checked.
+        const how = r.state === 'unknown' ? 'state not reported' : r.state
+        return `  • ${what} on ${r.connectionName} (${how})`
+      })
+      .join('\n')
+    const more = runs.length > 5 ? `\n  • …and ${runs.length - 5} more` : ''
+    return (
+      `\n\nThis does NOT stop ${runs.length} build(s) an agent started:\n${lines}${more}` +
+      '\nStop those on the run in CI/CD, or in the provider.'
+    )
+  } catch {
+    // The dialog must open even if this cannot be answered.
+    return ''
+  }
+}
+
 function copy(text: string): void {
   navigator.clipboard.writeText(text)
   toast('Copied')
@@ -77,10 +113,12 @@ export function AiSecurity(): React.JSX.Element {
     // session and deny 0 pending requests" tells them whether they are stopping
     // an incident or clicking a button that does nothing.
     const live = liveCount
+    const builds = await buildsClause()
     const ok = window.confirm(
-      live === null
+      (live === null
         ? 'Stop all AI access?\n\nOpsMaxx could not read how many sessions are active, so it cannot say what this will revoke. It will revoke every one of them.'
-        : `Stop all AI access?\n\nThis revokes ${live.sessions} active session(s) and denies ${live.pending} waiting request(s). Agents will have to be reconnected by hand.`
+        : `Stop all AI access?\n\nThis revokes ${live.sessions} active session(s) and denies ${live.pending} waiting request(s). Agents will have to be reconnected by hand.`) +
+        builds
     )
     if (!ok) return
     const result = await window.opsmaxx?.aiMcp.killAllSessions()
@@ -93,7 +131,7 @@ export function AiSecurity(): React.JSX.Element {
       return
     }
     toast(
-      `Stopped every agent: ${result.revoked} session(s) revoked, ${result.denied} waiting request(s) denied.`,
+      `Stopped every agent: ${result.revoked} session(s) revoked, ${result.denied} waiting request(s) denied. A build an agent already started is not stopped by this — stop those on the run in CI/CD.`,
       'ok'
     )
   }

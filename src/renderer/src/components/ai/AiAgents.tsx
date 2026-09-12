@@ -13,6 +13,42 @@ interface WorkspaceOpt {
   name: string
 }
 
+
+/**
+ * What the kill switch cannot stop, in the operator's words.
+ *
+ * The confirm above already argues that a count is what makes the dialog
+ * honest rather than a speed bump. A build an agent started is the part of the
+ * answer the switch has no power over, so it is the part most worth saying
+ * before somebody commits — an operator at 2am has no other way to learn a
+ * deploy is in flight. `list_runs` is the agent's tool, not a notification.
+ */
+async function buildsClause(): Promise<string> {
+  try {
+    const runs = (await window.opsmaxx?.cicd?.agentRuns?.()) ?? []
+    if (runs.length === 0) return ''
+    const lines = runs
+      .slice(0, 5)
+      .map((r) => {
+        const what = r.run ? `${r.pipeline} ${r.run}` : r.pipeline
+        // "not reported" rather than "running": a provider that returned no run
+        // id has told us nothing since, and guessing would be the one claim
+        // nobody checked.
+        const how = r.state === 'unknown' ? 'state not reported' : r.state
+        return `  • ${what} on ${r.connectionName} (${how})`
+      })
+      .join('\n')
+    const more = runs.length > 5 ? `\n  • …and ${runs.length - 5} more` : ''
+    return (
+      `\n\nThis does NOT stop ${runs.length} build(s) an agent started:\n${lines}${more}` +
+      '\nStop those on the run in CI/CD, or in the provider.'
+    )
+  } catch {
+    // The dialog must open even if this cannot be answered.
+    return ''
+  }
+}
+
 function fmtTime(iso: string | null): string {
   if (!iso) return 'Never'
   return new Date(iso).toLocaleString()
@@ -289,6 +325,9 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
   }
 
   const killAll = async (): Promise<void> => {
+    // Read BEFORE the revocation, so the ledger is reported as it stood when
+    // the operator pressed the button rather than after anything raced it.
+    const builds = await buildsClause()
     const result = await window.opsmaxx?.aiMcp.killAllSessions()
     load()
     if (!result) {
@@ -301,7 +340,10 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
       return
     }
     toast(
-      `Stopped every agent: ${result.revoked} session(s) revoked, ${result.denied} waiting request(s) denied.`,
+      `Stopped every agent: ${result.revoked} session(s) revoked, ${result.denied} waiting request(s) denied.` +
+        (builds === ''
+          ? ' No build an agent started is still in flight.'
+          : builds.replace(/^\n\n/, ' ')),
       'ok'
     )
   }

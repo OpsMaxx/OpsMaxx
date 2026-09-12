@@ -655,3 +655,29 @@ export function evaluateVpnControl(
   }
   return cap
 }
+
+// Starting a build is the same shape of act as starting a VPN, one step
+// further out. A VPN changes which network the user's own sessions travel
+// over; a run starts work on a third party's infrastructure, running a
+// definition OpsMaxx has never read, and OpsMaxx cannot stop it once the
+// provider has accepted it -- STOP ALL AI ACCESS does not reach a build
+// already running.
+//
+// So 'allow' is not a state this capability can be in at the moment it
+// matters. An operator may set ciTrigger to allow on any group, or run a Full
+// Access session; both arrive here and both come out as 'ask'. That is
+// deliberate and matches the VPN rule stated in docs/AI-SECURITY.md: there is
+// no configuration in which a build starts silently at an agent's request.
+export function evaluateCiTrigger(group: AccessGroup | null): Decision {
+  if (!group) return { decision: 'deny', reason: 'No AI access is assigned to this workspace.' }
+  const cap = evaluateCapability(group, 'ciTrigger')
+  if (cap.decision === 'deny') return { decision: 'deny', reason: 'CI/CD control is denied for this access group.' }
+  return cap.decision === 'allow'
+    ? {
+        decision: 'ask',
+        reason:
+          'Starting a build runs whatever that pipeline says, on infrastructure OpsMaxx cannot ' +
+          'inspect and cannot stop once it has begun, so it always requires approval.'
+      }
+    : cap
+}

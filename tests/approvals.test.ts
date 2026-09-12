@@ -8,8 +8,7 @@ import {
   onApprovalEvent,
   EXTENSION_CEILING_SECONDS,
   EXTENSION_MAX_PER_CALL_SECONDS,
-  type ApprovalEvent
-} from '../src/main/services/approvals'
+  type ApprovalEvent, resetApprovalVolumeForTests } from '../src/main/services/approvals'
 import { setMcpConfig, resetMcpAuthForTests } from '../src/main/services/mcpAuth'
 
 function req(overrides: Partial<Parameters<typeof requestApproval>[0]> = {}) {
@@ -30,8 +29,16 @@ function req(overrides: Partial<Parameters<typeof requestApproval>[0]> = {}) {
   })
 }
 
+// The volume guard carries state across tests: a denial starts a cooldown on
+// its (session, capability, server) triple, and these tests reuse one triple.
+// File-level so it covers every describe, including those with no hook.
+beforeEach(() => {
+  resetApprovalVolumeForTests()
+})
+
 describe('human approval', () => {
   beforeEach(() => {
+    resetApprovalVolumeForTests()
     resetMcpAuthForTests()
     setMcpConfig({ approvalTimeoutSeconds: 60 })
   })
@@ -93,6 +100,7 @@ describe('the intent an agent sends with a request', () => {
 
 describe('giving the operator more time', () => {
   beforeEach(() => {
+    resetApprovalVolumeForTests()
     vi.useFakeTimers()
   })
   afterEach(() => {

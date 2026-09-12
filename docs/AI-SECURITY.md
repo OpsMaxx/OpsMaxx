@@ -212,6 +212,88 @@ What this does *not* do is make a granted `vpnControl` safe. If you approve a st
 reading it, you have moved your traffic, and the audit entry — `Start VPN "office" (wireguard,
 userspace, 2 listeners)` — will record that you meant to.
 
+## `ciRead` and `ciTrigger`: the kill switch does not reach a build
+
+Read this before setting either to anything other than `deny`. They are seeded `deny` on every
+built-in group, including Full Access, and a group saved before this version backfills to `deny`
+— an upgrade grants neither.
+
+**`ciRead` returns text a stranger wrote.** Container logs are written by software the user chose
+to deploy. A CI job log is written by whoever opened the pull request: anyone who can push a branch
+can put any sentence into the output of a build, and `list_runs` and `get_run` are cheaper still —
+a run's title is a PR title, its actor a username, its branch a branch name, and all three reach
+the model through a read-only tool with no approval prompt, before anybody asks for a log.
+
+The defence is provenance, not filtering. Every provider-supplied string goes through
+`remoteText`/`remoteName`, and every CI result is wrapped in a fenced block whose opening and
+closing markers carry a random per-call nonce, with the rule stated inside it that a closer without
+that nonce is part of the data. An attacker writes their log before the call happens and cannot
+know a value drawn afterwards. What this does **not** do is make the text safe: "ignore your
+instructions" survives any character filter, which is why OpsMaxx marks authorship rather than
+claiming to sanitise. `redactOutput` runs over the body and is pattern-based and not exhaustive —
+assume a build log may still contain a credential.
+
+**`ciTrigger` is always ASK, and one approval never covers the next call.** Two rules, and neither
+is a preference:
+
+- `evaluateCiTrigger` (`policyEngine.ts`) upgrades `allow` to `ask` unconditionally, exactly as
+  `evaluateVpnControl` does for VPNs. There is no configuration — no access group, not Full Access
+  — in which a build starts silently at an agent's request.
+- `ciTrigger` is excluded from `sessionElevations` in both directions: it never reads an elevation
+  and never writes one. For `container_action`, carrying one approval across a session costs one
+  more service on a host the user administers. For a build it is an unbounded remote-execution
+  loop — one approval buying every pipeline on that CI server for the rest of the session, driven
+  by an agent whose next move is shaped by log text a stranger wrote.
+
+The two rules are layered because the elevation exclusion lives in `gate()`'s `ask` branch, and an
+`allow` decision never reaches that branch at all. Without the upgrade, the exclusion defends a
+path that is never taken.
+
+**And the honest limit: STOP ALL AI ACCESS cannot stop a build the provider has already accepted.**
+A dispatched pipeline runs on infrastructure this app cannot reach. `denyAllPending()` resolves
+approval requests still waiting and `clearAllSessionElevations()` empties a cache; neither touches
+a third party.
+
+That is less unusual than it sounds, and the rest of this app is not as different as an earlier
+draft of this section claimed. A VPN the agent started stays up after the switch; a container it
+started keeps running; an `execute_command` already in flight is not aborted, because revoking a
+session ends the MCP session and not the SSH one. In each case the answer is the same: the human
+keeps a lever the agent does not, in the panel for that subsystem.
+
+CI is the same shape. **`cancel_run` is a `ciTrigger` tool, so the switch does take away the
+AGENT's cancel** — that much is real, and it is why the agent must never be the only thing that can
+stop a run. It is not the only thing: the run detail in the CI/CD panel has a **Stop this run**
+button wired straight to the provider, and it is not gated by the AI policy, because it is not the
+AI doing it. After the switch is pulled, stopping a run is the operator's to do — from that button,
+or in the provider's own UI.
+
+**The switch now says what it cannot stop.** It keeps a list of the runs agents started this
+session and names them — in the confirmation before you press it, and in the result afterwards:
+
+    This does NOT stop 2 build(s) an agent started:
+      • deploy-prod #4821 on platform-jenkins (running)
+      • nightly-e2e on ci-lab (state not reported)
+    Stop those on the run in CI/CD, or in the provider.
+
+"state not reported" is not a hedge. Jenkins answers a trigger with a queue item and GitHub
+Enterprise answers `204` with no body, so for those there is no run id and nothing has been able to
+check on it since. Printing "running" there would be the one claim nobody made.
+
+The list holds only this session, in memory, and drops a run once the poller sees it finish or a
+cancel is accepted for it. It does **not** cancel anything: auto-cancelling on the panic button
+would be a destructive, unapproved action taken on your behalf, and a pipeline stopped half-way has
+done some of its work and not the rest.
+
+**Composition.** `ciRead` + `ciTrigger` is a closed loop — log text shapes the next tool call, and
+the next tool call produces more log text — and that pair is the reason per-call approval is not
+negotiable. `ciTrigger` plus any file-write capability on an estate host is a deployment path; a
+job could always deploy, but the agent now holds both halves.
+
+**No tool creates, edits or deletes a CI connection.** No `add_ci_connection`, no
+`edit_ci_connection`, and this is asserted by a test rather than left to reviewer memory — an agent
+that could author one would choose the base URL it points at, and could then ask the user to paste
+a token into it.
+
 ## What this does not claim
 
 This design **reduces** the ways an AI integration can go wrong; it does not make the integration

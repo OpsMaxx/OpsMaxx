@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
@@ -6,7 +6,7 @@ import { refreshMcpDataCache } from '../src/main/services/mcpDataCache'
 import { setAssignment, resetPolicyCacheForTests } from '../src/main/services/policyStore'
 import { setMcpConfig, createSession, resetMcpAuthForTests } from '../src/main/services/mcpAuth'
 import { startMcpServer, stopMcpServer } from '../src/main/services/mcpServer'
-import { onApprovalEvent, respondToApproval, listPendingApprovals } from '../src/main/services/approvals'
+import { onApprovalEvent, respondToApproval, listPendingApprovals, resetApprovalVolumeForTests } from '../src/main/services/approvals'
 
 // An ASK-tier tool call blocks until a human answers it in the app. Before
 // this, the agent got no output whatsoever for the whole approval timeout and
@@ -44,6 +44,12 @@ async function connectedClient(): Promise<Client> {
 }
 
 describe('a pending approval is visible to the agent', () => {
+  // The volume guard refuses a repeat of the same (session, capability, server)
+  // inside the deny cooldown, and these tests all reuse one triple.
+  beforeEach(() => {
+    resetApprovalVolumeForTests()
+  })
+
   beforeAll(async () => {
     resetMcpAuthForTests()
     resetPolicyCacheForTests()

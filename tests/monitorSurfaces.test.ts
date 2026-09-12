@@ -45,6 +45,17 @@ describe('the read/operate split', () => {
     // inside the Access panel. Moving it here did not add a way to change a
     // server; it stopped one being reachable from a destination that promises
     // it cannot.
+    //
+    // `cicdTrigger` WOULD be the fifth, and it is deliberately absent in phase
+    // 1. It is built and tested; it is not registered because the CI module has
+    // not yet been run against a real CI server, and the trigger half is the
+    // half where being wrong starts a production deploy. When it returns, the
+    // argument for putting it on THIS rail is: it does not change a server
+    // directly — it asks a CI provider to run a pipeline, and what that
+    // pipeline then does to the estate is somebody else's file. The `surface`
+    // field is worded about servers, so it does not settle it; the rail's
+    // naming rule does. Every tab here is named by CONSEQUENCE, and the
+    // consequence of pressing the button is that a deploy goes out.
     expect(modulesOnSurface('operate').map((m) => m.id).sort()).toEqual([
       'broadcast',
       'jobs',
@@ -81,7 +92,10 @@ describe('the read/operate split', () => {
         'services',
         'processes',
         'docker',
-        'kubernetes'
+        'kubernetes',
+        // Reads a third party rather than a host, and still `read`: the panel
+        // lists pipelines and fetches logs. Firing one is `cicdTrigger`, above.
+        'cicd'
       ].sort()
     )
   })
@@ -118,7 +132,7 @@ describe('isOperateModule', () => {
     const id: ModuleId = 'patch'
     if (isOperateModule(id)) {
       // Compiles only because the guard narrowed `id` to OperateModuleId.
-      const narrowed: 'broadcast' | 'patch' | 'jobs' | 'keyRevoke' = id
+      const narrowed: 'broadcast' | 'patch' | 'jobs' | 'keyRevoke' | 'cicdTrigger' = id
       expect(narrowed).toBe('patch')
     }
   })

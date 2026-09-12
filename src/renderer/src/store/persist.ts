@@ -23,6 +23,9 @@ interface Persisted {
   apiCollections?: unknown
   // Absent in saves written before external service checks existed.
   httpChecks?: unknown
+  // Absent in saves written before the CI/CD module existed. The records carry
+  // a `vaultEntryId` and never a token — see shared/cicd.ts.
+  cicdConnections?: unknown
   settings: unknown
   // Absent in saves written before the window was restored across restarts.
   tabs?: unknown
@@ -142,7 +145,8 @@ async function hydrate(): Promise<void> {
       state.tunnels !== prev.tunnels ||
       state.databases !== prev.databases ||
       state.apiCollections !== prev.apiCollections ||
-      state.httpChecks !== prev.httpChecks
+      state.httpChecks !== prev.httpChecks ||
+      state.cicdConnections !== prev.cicdConnections
 
     const serversContentChanged =
       serversRefChanged &&
@@ -163,7 +167,12 @@ async function hydrate(): Promise<void> {
       state.apiCollections !== prev.apiCollections ||
       // Checks are stored data a backup carries, so adding one has to mark the
       // last backup stale like adding a server does.
-      state.httpChecks !== prev.httpChecks
+      state.httpChecks !== prev.httpChecks ||
+      // And so are CI connections. Stored data that saves to disk but does NOT
+      // mark the backup stale is a silent data-loss path: the user restores a
+      // backup the status bar told them was current and their connections are
+      // not in it.
+      state.cicdConnections !== prev.cicdConnections
 
     // Any change to stored data invalidates the last backup. Guarded on the
     // current flag so this cannot loop: writing settings re-enters with
@@ -213,6 +222,7 @@ function save(): Promise<void> {
       databases: s.databases,
       apiCollections: s.apiCollections,
       httpChecks: s.httpChecks,
+      cicdConnections: s.cicdConnections,
       settings: s.settings,
       /**
        * The window as the user left it.

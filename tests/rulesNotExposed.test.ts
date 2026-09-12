@@ -279,7 +279,41 @@ describe('the AI permission model has no word for a rule', () => {
   //
   // Anything else matching the pattern is the conversation this file exists to
   // force. Adding a second entry means having it.
-  const REVIEWED_NON_AUTOMATION = ['firewallRules']
+  //
+  // `ciTrigger` is the second entry, and here is that conversation.
+  //
+  // It matches on the bare word `trigger` — the `\b` above binds only to
+  // `rule` — and unlike `firewallRules` it is not a false positive: starting a
+  // build is exactly what it grants. It is exempted on the one property this
+  // guard actually protects, which it satisfies more strictly than any other
+  // capability in the grid: IT LEAVES NO CONSENT RECORD BEHIND. `allow` is
+  // unrepresentable for it (policyEngine.evaluateCiTrigger upgrades allow to
+  // ask unconditionally, the evaluateVpnControl precedent), and it is excluded
+  // from gate()'s sessionElevations cache, so there is no value of any setting
+  // at which a second build starts on the strength of the first approval.
+  // Every run is its own ask. That is the opposite of the thing above — a
+  // consent that outlives the ask — and it was built that way deliberately.
+  //
+  // What it does NOT grant, and what keeps it off the automation list: no tool
+  // creates, edits or schedules a pipeline, and none authors a CI connection.
+  // An agent can start work a human already defined, one call at a time, and
+  // cannot arrange for anything to happen later.
+  //
+  // The honest caveat, recorded rather than argued away: the kill switch does
+  // not reach a build the provider has already accepted. STOP ALL AI ACCESS
+  // resolves pending approvals and clears elevations; it cannot cancel a run
+  // on infrastructure OpsMaxx does not administer, and it takes away the
+  // AGENT's cancel along with everything else.
+  //
+  // What makes that acceptable rather than merely admitted is the other half,
+  // which is the same answer `vpnControl` and `containerControl` already give:
+  // the human keeps a lever the agent does not. The run detail in the CI/CD
+  // panel has a Stop button wired straight to the provider, ungated by the AI
+  // policy because it is not the AI acting. An effect that outlives the app's
+  // control is allowed here only because it leaves no standing consent AND the
+  // operator retains an equal lever; remove either and this exemption should
+  // go with it.
+  const REVIEWED_NON_AUTOMATION = ['firewallRules', 'ciTrigger']
 
   it('grants no capability naming a rule, a trigger or an automation', () => {
     expect(AI_CAPABILITIES.length, 'AI_CAPABILITIES is empty — nothing was checked').toBeGreaterThan(0)
@@ -301,7 +335,7 @@ describe('the AI permission model has no word for a rule', () => {
     // An exemption list is a hole in a guard, so it is asserted rather than
     // trusted: every entry must still exist, and nothing may be added to it
     // without this expectation being edited in the same diff.
-    expect(REVIEWED_NON_AUTOMATION).toEqual(['firewallRules'])
+    expect(REVIEWED_NON_AUTOMATION).toEqual(['firewallRules', 'ciTrigger'])
     for (const id of REVIEWED_NON_AUTOMATION) {
       expect(
         AI_CAPABILITIES.map((c) => c.id),

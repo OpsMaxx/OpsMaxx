@@ -16,6 +16,8 @@ import { JobsPanel } from '../monitor/JobsPanel'
 import { KeyRevokePanel } from './KeyRevokePanel'
 import { CronEditPanel } from './CronEditPanel'
 import { UnitInstallPanel } from './UnitInstallPanel'
+// import { CicdTriggerPanel } from '../cicd/CicdTriggerPanel' — phase 2, with
+// the module entry and the card below.
 import type { Server } from '../../types'
 
 // Operations — the half of the fleet destination that CHANGES servers.
@@ -54,6 +56,9 @@ const CONSEQUENCE: Record<OperateModuleId, string> = {
   patch: 'Installs packages in waves, and restarts hosts that ask for it.',
   jobs: 'Makes servers run things: once as a job, on a schedule, or as a service that survives you.',
   keyRevoke: 'Removes one SSH key from every account across the estate that trusts it.'
+  // cicdTrigger: 'Starts a build on a CI server OpsMaxx does not administer, and
+  //   cannot stop once it runs.' — phase 2, with its MODULES entry. TypeScript
+  //   enforces this list against OperateModuleId, so it comes back when that does.
 }
 
 /**
@@ -285,6 +290,11 @@ export function OperationsView({
           <KeyRevokePanel servers={servers} />
         </div>
       )}
+      {/* The CI/CD trigger card is phase 2. `CicdTriggerPanel` is built and
+          tested; it is not mounted because `cicdTrigger` is not a registered
+          module yet, and `moduleEnabled` would not typecheck against an id the
+          registry does not have. Restoring it is this block and the MODULES
+          entry it names. */}
 
       {/* Some operate modules on and others off: say so here rather than
           leaving the person to guess that patching lives behind a setting. The

@@ -150,7 +150,29 @@ const ALLOWED_TOOLS = [
   // only read here that is — because the same information about every host at
   // once sorts an estate into the machines that are behind and the ones that
   // are not.
-  'fleet_drift'
+  'fleet_drift',
+  // CI/CD. Eight tools, and the one thing this file cares about is durability:
+  // a triggered run OUTLIVES the request that started it, on infrastructure
+  // OpsMaxx cannot reach. That is the job-surface objection exactly — and it is
+  // answered differently rather than dodged, because the alternative was an
+  // agent that could read a failing build and never do anything about it.
+  //
+  // What makes it admissible is that none of the three write tools starts
+  // anything OpsMaxx schedules, repeats or fans out: one pipeline per call, a
+  // fresh approval for every single call (ciTrigger is excluded from
+  // sessionElevations, and evaluateCiTrigger makes `allow` unreachable), and no
+  // tool that creates a connection to point somewhere new. The durability gap
+  // that remains is documented rather than hidden: STOP ALL AI ACCESS cannot
+  // stop a build the provider has already accepted, and docs/AI-SECURITY.md
+  // says so in those words.
+  'list_ci_connections',
+  'list_pipelines',
+  'list_runs',
+  'get_run',
+  'get_run_logs',
+  'trigger_run',
+  'cancel_run',
+  'rerun_run'
 ]
 
 // A hint, not the gate — the whitelist above has already failed by the time
@@ -670,7 +692,14 @@ describe('the AI permission model has no word for a job', () => {
     'fleetRead',
     'backupRead',
     'manageServers',
-    'vpnControl'
+    'vpnControl',
+    // The CI/CD module. Reviewed and added deliberately: `ciRead` returns build
+    // output, which is written by whoever opened the merge request and is the
+    // most attacker-authored text this bridge returns. `ciTrigger` starts work
+    // on infrastructure OpsMaxx does not administer — always ASK, never cached
+    // as an elevation, one pipeline per call.
+    'ciRead',
+    'ciTrigger'
   ]
 
   it('grants no capability naming a job or a fan-out', () => {

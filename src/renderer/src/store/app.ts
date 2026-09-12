@@ -35,6 +35,7 @@ import type {
 } from '../types'
 import type { LocalShell } from '../../../shared/local'
 import type { HttpCheck } from '../../../shared/httpMonitor'
+import type { CicdConnection } from '../../../shared/cicd'
 import type { TerminalScheme } from '../../../shared/terminalTheme'
 import { bridgeHas } from '../lib/bridge'
 
@@ -224,6 +225,18 @@ export interface AppSettings {
   dbSchemaWidth: number
   /** Height of the database view's query editor. */
   dbEditorHeight: number
+  /**
+   * The CI/CD run workbench's two dividers.
+   *
+   * Optional, and absence reads as the component's default, for the reason
+   * `shellIntegration` states a few lines down: settings are persisted
+   * wholesale and merged saved-over-default, so a value that ever shipped as a
+   * default is written into every install's data file and permanently
+   * outranks a later change. Only a divider somebody actually dragged is
+   * stored.
+   */
+  cicdStepsWidth?: number
+  cicdDetailHeight?: number
   // Command used to open remote files. Empty means the OS default handler.
   externalEditorCommand: string
   // Double-clicking a file opens it externally rather than in the inline editor.
@@ -374,6 +387,15 @@ interface AppState {
   apiCollections: ApiCollection[]
   /** External service checks. See shared/httpMonitor.ts. */
   httpChecks: HttpCheck[]
+  /**
+   * Saved CI/CD accounts. See shared/cicd.ts.
+   *
+   * Workspace-scoped like the rest, and the only slice here that points at the
+   * vault: `vaultEntryId` is a reference, never a token. Everything that puts a
+   * connection into this array goes through `normalizeCicd` below, because this
+   * array is written verbatim into `opsmaxx-data.json`.
+   */
+  cicdConnections: CicdConnection[]
 
   // navigation
   activeWorkspaceId: string
@@ -616,6 +638,14 @@ interface AppState {
   setVpnProfiles: (profiles: VpnProfile[]) => void
   upsertVpnProfile: (profile: VpnProfile) => void
   setHttpChecks: (checks: HttpCheck[]) => void
+  upsertCicdConnection: (connection: CicdConnection) => void
+  setCicdConnections: (connections: CicdConnection[]) => void
+  /**
+   * Separate from `setCicdConnections` only because the caller has an id and
+   * not a list. Both release the vault entries of whatever they removed —
+   * a bulk set that shortens the list is a delete too.
+   */
+  deleteCicdConnection: (id: string) => void
   removeVpnProfile: (id: string) => void
   setVpnStatus: (id: string, status: VpnStatus) => void
   replaceAll: (
@@ -634,6 +664,7 @@ interface AppState {
         | 'databases'
         | 'apiCollections'
         | 'httpChecks'
+        | 'cicdConnections'
         | 'settings'
         | 'activeWorkspaceId'
         | 'monitorGroups'
@@ -893,6 +924,68 @@ function releaseVpnSecrets(profiles: VpnProfile[]): void {
   }
 }
 
+// The providers `shared/cicd.ts` has an adapter for. Hardcoded because
+// `CicdProvider` is a type and erases at runtime, and shared/cicd.ts is not
+// ours to add a runtime list to; tests/cicdStore.test.ts pins the two together.
+const CICD_PROVIDERS = new Set<string>(['jenkins', 'gitlab', 'github'])
+
+/**
+ * Everything a connection is allowed to be, and nothing else.
+ *
+ * Every path a connection enters the store by runs through this — `replaceAll`
+ * on restore and `setCicdConnections` at runtime — because the array is written
+ * verbatim into `opsmaxx-data.json`, which `SECURITY.md:40` documents as
+ * plaintext containing NO credentials. Field-by-field rather than
+ * `{ ...c, enabled }`, so a record that somehow arrived carrying a literal
+ * token (a hand-edited file, a form that kept the field, a future adapter)
+ * cannot carry it through to disk. The object literal is typed
+ * `CicdConnection`, so a required field added later fails the build here rather
+ * than silently stops being saved.
+ */
+function normalizeCicd(c: CicdConnection): CicdConnection {
+  return {
+    id: c.id,
+    workspaceId: c.workspaceId,
+    name: c.name,
+    provider: c.provider,
+    baseUrl: c.baseUrl,
+    username: c.username,
+    // A pointer, never a token. See shared/cicd.ts.
+    vaultEntryId: c.vaultEntryId,
+    // Absent in a save written before a route could be anything but direct.
+    route: c.route ?? { kind: 'direct' },
+    caPem: c.caPem,
+    insecureTls: c.insecureTls === true,
+    // An unrecognised `provider` is a record written by a NEWER version, or a
+    // hand-edited file. Both answers the easy way are wrong: dropping it
+    // silently destroys a connection the user made and hides the downgrade,
+    // and keeping it live hands an unknown string to adapter lookups that have
+    // exactly three branches. So it is kept and forced OFF — visible in the
+    // list, editable, deletable, and correct again the moment the newer
+    // version is reinstalled, but never dialled in the meantime. That is the
+    // same call `shared/cicd.ts` makes for an unreadable status: `unknown` is
+    // neither green nor red.
+    enabled: c.enabled === true && CICD_PROVIDERS.has(c.provider)
+  }
+}
+
+// Releases the vault entries a set of doomed connections owned. Same contract
+// as releaseVpnSecrets above, including the fire-and-forget: the row is already
+// gone from the slice, and a failed release leaves an unreferenced vault entry
+// rather than a broken UI.
+function releaseCicdSecrets(connections: CicdConnection[]): void {
+  if (typeof window === 'undefined') return
+  // The `cicd` preload namespace arrives with the main-process half of this
+  // module. Until it does — and under `electron-vite dev`, where the renderer
+  // reloads ahead of the preload bundle — this is a no-op, not a crash.
+  const ns = (window.opsmaxx as unknown as { cicd?: Record<string, unknown> } | undefined)?.cicd
+  if (!bridgeHas(ns, 'deleteSecrets')) return
+  const deleteSecrets = ns!.deleteSecrets as (vaultEntryId: string) => Promise<void>
+  for (const c of connections) {
+    if (c.vaultEntryId) void deleteSecrets(c.vaultEntryId)
+  }
+}
+
 // Clears `vpnProfileId` on every row pointing at a profile that is going away.
 // Main already reads a dangling reference as "connect directly" rather than
 // failing, so a leftover pointer breaks nothing — but it is a lie the saved
@@ -920,6 +1013,7 @@ export const useApp = create<AppState>((set, get) => ({
   databases: [],
   apiCollections: [],
   httpChecks: [],
+  cicdConnections: [],
 
   activeDatabaseId: null,
   openDatabaseIds: [],
@@ -1674,6 +1768,10 @@ export const useApp = create<AppState>((set, get) => ({
       // The profiles go with the workspace, but their vault entries do not go by
       // themselves — release them for the same reason removeVpnProfile does.
       releaseVpnSecrets(s.vpns.filter((v) => v.workspaceId === id))
+      // Same for CI tokens. A connection deleted through the cascade never
+      // passes deleteCicdConnection, so without this line every token in the
+      // workspace is orphaned in the vault with nothing left pointing at it.
+      releaseCicdSecrets(s.cicdConnections.filter((c) => c.workspaceId === id))
       // Tabs go with their workspace whatever backs them — a local tab has no
       // server to cascade from, so filtering on doomedServers alone would leave
       // it stranded in a workspace that no longer exists, unreachable from the
@@ -1693,6 +1791,7 @@ export const useApp = create<AppState>((set, get) => ({
         tunnels: s.tunnels.filter((t) => t.workspaceId !== id),
         apiCollections: s.apiCollections.filter((c) => c.workspaceId !== id),
       httpChecks: s.httpChecks.filter((c) => c.workspaceId !== id),
+        cicdConnections: s.cicdConnections.filter((c) => c.workspaceId !== id),
         tabs: keptTabs,
         // Asked of the surviving list rather than of the doomed one: the old
         // form only cleared the active tab when a *server* took it, so an
@@ -1903,6 +2002,50 @@ export const useApp = create<AppState>((set, get) => ({
   setVpnProfiles: (profiles) => set({ vpns: profiles }),
 
   setHttpChecks: (checks) => set({ httpChecks: checks }),
+
+  // Not `set({ cicdConnections })`, which is all setHttpChecks needs to be.
+  // Two things make this slice different: the records reach disk, so they are
+  // normalised on the way in, and a bulk set that drops a row IS a delete — the
+  // only difference from deleteCicdConnection is that the caller happened to
+  // hold a list. Releasing in one place keeps a vault entry from outliving the
+  // last thing pointing at it.
+  setCicdConnections: (connections) =>
+    set((s) => {
+      const kept = new Set(connections.map((c) => c.id))
+      releaseCicdSecrets(s.cicdConnections.filter((c) => !kept.has(c.id)))
+      return { cicdConnections: connections.map(normalizeCicd) }
+    }),
+
+  // Add or replace ONE connection, leaving every other row alone.
+  //
+  // This exists because the panel does not hold the whole list: it renders the
+  // ACTIVE workspace's connections, so a panel that saved by handing
+  // `setCicdConnections` its own view would tell the store that every
+  // connection in every other workspace had been deleted — and
+  // `releaseCicdSecrets` above would then drop their vault entries too.
+  // Irreversible, and silent. A screen that owns part of a collection needs a
+  // verb that edits part of it.
+  upsertCicdConnection: (connection) =>
+    set((s) => {
+      const next = normalizeCicd(connection)
+      const exists = s.cicdConnections.some((c) => c.id === next.id)
+      return {
+        cicdConnections: exists
+          ? s.cicdConnections.map((c) => (c.id === next.id ? next : c))
+          : [...s.cicdConnections, next]
+      }
+    }),
+
+  deleteCicdConnection: (id) =>
+    set((s) => {
+      const doomed = s.cicdConnections.find((c) => c.id === id)
+      // Returning the state object unchanged makes an unknown id a true no-op:
+      // zustand skips notifying subscribers, so persist.ts does not report a
+      // backup as stale over a delete that removed nothing.
+      if (!doomed) return s
+      releaseCicdSecrets([doomed])
+      return { cicdConnections: s.cicdConnections.filter((c) => c.id !== id) }
+    }),
 
   upsertVpnProfile: (profile) =>
     set((s) => ({
@@ -2162,6 +2305,11 @@ export const useApp = create<AppState>((set, get) => ({
         viaServerId: c.viaServerId ?? null,
         insecureTls: c.insecureTls === true
       })),
+      // Saves written before this module have no key at all, which is not the
+      // same as an empty list — `?? s.cicdConnections` keeps the distinction the
+      // way the keys above it do. See normalizeCicd for what an older save, or
+      // an unrecognised `provider`, does.
+      cicdConnections: (data.cicdConnections ?? s.cicdConnections ?? []).map(normalizeCicd),
       databases: (data.databases ?? s.databases).map((d) => ({
         ...d,
         folderId: d.folderId ?? null,

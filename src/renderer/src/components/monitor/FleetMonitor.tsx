@@ -47,6 +47,7 @@ import { splitTabStrip } from './tabStrip'
 import { DockerPanel } from '../docker/DockerPanel'
 import { KubernetesPanel } from '../kubernetes/KubernetesPanel'
 import { ProcessesPanel } from '../processes/ProcessesPanel'
+import { CicdPanel } from '../cicd/CicdPanel'
 
 /**
  * How many tabs may stand in the strip at once, Overview and Alerts included.
@@ -656,6 +657,11 @@ export function FleetMonitor(): React.JSX.Element {
       {moduleEnabled(modules, 'kubernetes') && (
         <div style={show('kubernetes')}>
           <KubernetesPanel servers={servers} />
+        </div>
+      )}
+      {moduleEnabled(modules, 'cicd') && (
+        <div style={show('cicd')}>
+          <CicdPanel />
         </div>
       )}
 

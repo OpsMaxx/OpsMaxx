@@ -103,8 +103,23 @@ describe('tool metadata', () => {
     // contents OpsMaxx does not model; everything else operates on things
     // it already knows about. A new tool appearing here should be a decision,
     // not a default — hence the exact list.
+    //
+    // The CI/CD tools are the strongest case on the bridge: they reach a third
+    // party the user does not administer at all, whose pipeline definitions
+    // OpsMaxx has never read and whose behaviour it cannot predict or stop.
     const open = tools.filter((t) => t.annotations?.openWorldHint).map((t) => t.name).sort()
-    expect(open).toEqual(['execute_command', 'query_database'])
+    expect(open).toEqual([
+      'cancel_run',
+      'execute_command',
+      'get_run',
+      'get_run_logs',
+      'list_ci_connections',
+      'list_pipelines',
+      'list_runs',
+      'query_database',
+      'rerun_run',
+      'trigger_run'
+    ])
   })
 
   it('does not let a tunnel tool claim an open world', () => {

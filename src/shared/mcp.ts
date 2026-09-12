@@ -27,6 +27,8 @@ export type AiCapability =
   | 'containerControl'
   | 'fleetRead'
   | 'backupRead'
+  | 'ciRead'
+  | 'ciTrigger'
 
 // `detail` is the consent surface, and it is not decoration. A user reading this
 // grid is deciding what an agent may do, and the only thing they have to decide
@@ -187,6 +189,22 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
     label: 'Fleet: read across many servers at once',
     detail:
       'Answers questions over everything already collected rather than one host at a time — the inventory, search across it, drift, alerts and the running process list. One call can return data from every server in the workspace, so the reach is the workspace and not the server this is set on.'
+  },
+  // The first two capabilities in this grid that are not about a server the
+  // user administers at all. A CI connection is a base URL and a token for
+  // somebody else's build infrastructure, so neither of these is bounded by
+  // anything OpsMaxx can see, and both are seeded DENY on every built-in group.
+  {
+    id: 'ciRead',
+    label: 'CI/CD: pipelines, runs and build output',
+    detail:
+      'Lists the CI connections, the pipelines on them and their recent runs, and reads the output a run produced. The output is the part to weigh, the same way container logs are: a build prints whatever its steps echo — access tokens, deploy keys, the contents of a test fixture — and this returns it as the runner recorded it. It is also written by whoever opened the merge request that ran it, so it is the least trustworthy text the bridge can hand an agent.'
+  },
+  {
+    id: 'ciTrigger',
+    label: 'CI/CD: start, cancel and re-run pipelines',
+    detail:
+      'Starts a pipeline run on the CI server, cancels one, or re-runs it. What that run then does is defined on the provider and not here: OpsMaxx cannot read the pipeline definition before it starts, and cannot see what it deploys or where. Stopping AI access takes away the agent\'s cancel along with everything else, so a run already accepted is then yours to stop — from the Stop button on that run in CI/CD, or in the provider. Starting a run is always asked for, on every group, including one raised to allow.'
   }
 ]
 

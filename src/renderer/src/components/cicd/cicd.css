@@ -1,0 +1,260 @@
+/* ---------------------------------------------------------------------------
+   CI/CD
+
+   Its own file rather than another block at the end of global.css: this is one
+   module's layout and nothing outside components/cicd/ reads any of it.
+
+   Every colour here is a token. The four status roles — ok / watch / alarm /
+   unknown — are `docs/design/panel-audit.md`'s, and NOTHING in this file paints
+   a status: `.state-dot` and `.state-ok|watch|alarm|unknown` already carry the
+   shape and the colour, and a second definition is how the two drift apart.
+   --------------------------------------------------------------------------- */
+
+.cicd-status {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 2px;
+  font-size: var(--fs-identifier);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.cicd-seg-hint {
+  margin-bottom: var(--sp-3);
+}
+
+/* ---- Connect modal -------------------------------------------------------- */
+
+.cicd-scopes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin: var(--sp-3) 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-card);
+}
+.cicd-scope-list {
+  margin: 0;
+  padding-left: var(--sp-4);
+  font-size: var(--fs-md);
+  color: var(--text);
+}
+.cicd-scope-list li + li {
+  margin-top: var(--sp-1);
+}
+.cicd-scopes .mono.ellipsis {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: bottom;
+  font-size: var(--fs-identifier);
+}
+
+.cicd-check {
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0;
+}
+
+/* ---- Landing view --------------------------------------------------------- */
+
+.cicd-filters {
+  gap: var(--sp-2);
+  align-items: center;
+  margin-bottom: var(--sp-2);
+}
+.cicd-filters .input {
+  flex: 1;
+  min-width: 0;
+}
+.cicd-filters select.input {
+  flex: none;
+  width: auto;
+}
+
+.cicd-freshness {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+.cicd-fresh-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.cicd-fresh-row > .row {
+  gap: var(--sp-2);
+  align-items: baseline;
+}
+
+.cicd-rows {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.cicd-bucket {
+  margin: var(--sp-3) 0 var(--sp-1);
+}
+.cicd-bucket:first-child {
+  margin-top: 0;
+}
+
+.cicd-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-width: 0;
+  padding: var(--sp-2);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: none;
+  color: var(--text);
+  font-size: var(--fs-md);
+  text-align: left;
+}
+button.cicd-row {
+  cursor: pointer;
+}
+button.cicd-row:hover {
+  background: var(--bg-hover, var(--bg-card));
+}
+/* A row the last poll did not refresh. Quieted, never hidden and never
+   recoloured into a failure: it is the last good answer, ageing. */
+.cicd-row.is-stale {
+  opacity: 0.72;
+}
+.cicd-row-label,
+.cicd-row-age {
+  flex: none;
+  font-size: var(--fs-identifier);
+}
+
+/* ---- Run workbench -------------------------------------------------------- */
+
+.cicd-workbench {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  /* Tall enough that the three panes are a workbench rather than three
+     slivers, and it grows with the window from there. */
+  min-height: 420px;
+}
+.cicd-workbench-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border);
+}
+.cicd-workbench-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.cicd-steps {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  min-width: 0;
+  overflow-y: auto;
+}
+.cicd-pane-label {
+  padding: var(--sp-2) 0;
+}
+.cicd-pane-note {
+  padding: 0 0 var(--sp-2);
+}
+.cicd-step-list {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.cicd-step {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-width: 0;
+  padding: var(--sp-1) var(--sp-2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text);
+  font-size: var(--fs-md);
+  text-align: left;
+}
+button.cicd-step {
+  cursor: pointer;
+}
+.cicd-step.active {
+  background: var(--bg-card);
+}
+
+.cicd-log-column {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.cicd-log {
+  display: flex;
+  flex-direction: column;
+  /* The pane that takes the slack. A stack trace too long to read must not sit
+     in a fixed box — the whole reason this view is a workbench. */
+  flex: 1;
+  min-height: 0;
+}
+.cicd-log-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+}
+.cicd-log-body {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: var(--sp-2);
+  overflow: auto;
+  font-size: var(--fs-identifier);
+  line-height: 1.45;
+  white-space: pre;
+  background: var(--bg-card);
+  border-radius: var(--r-sm);
+}
+
+.cicd-detail {
+  flex: none;
+  min-height: 0;
+  overflow-y: auto;
+}
+.cicd-detail-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--sp-1) var(--sp-3);
+  margin: 0;
+  font-size: var(--fs-md);
+}
+.cicd-detail-grid dt {
+  color: var(--text-muted);
+}
+.cicd-detail-grid dd {
+  margin: 0;
+  min-width: 0;
+}
+
+/* ---- Trigger surface ------------------------------------------------------ */
+
+.cicd-trigger {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}

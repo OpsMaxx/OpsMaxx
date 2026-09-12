@@ -10,6 +10,7 @@ import type { SshAuth, SshHop } from '../../shared/ssh'
 import type { DbKind } from '../../shared/db'
 import type { TunnelKind } from '../../shared/tunnel'
 import type { VpnKind, VpnMode } from '../../shared/vpn'
+import type { CicdProvider } from '../../shared/cicd'
 import type { RdpSettings } from '../../shared/rdp'
 
 export type CachedHop = SshHop & { serverId?: string }
@@ -98,12 +99,29 @@ export interface CachedVpn {
   autoStart: boolean
 }
 
+// A CI/CD connection as the bridge is allowed to see it, and CachedVpn's rule
+// applied to a second subject: the bridge may know that a connection exists,
+// what it is called and which provider answers it. It may NOT know the base
+// URL or the vault reference, so neither is parsed into this shape at all
+// rather than parsed and then remembered not to print. The tools address a
+// connection by the name the user gave it, exactly as they address a server,
+// and main resolves that to a real record with a credential somewhere the
+// bridge cannot reach.
+export interface CachedCicdConnection {
+  id: string
+  workspaceId: string
+  name: string
+  provider: CicdProvider
+  enabled: boolean
+}
+
 interface DataShape {
   workspaces?: unknown
   servers?: unknown
   databases?: unknown
   tunnels?: unknown
   vpns?: unknown
+  cicdConnections?: unknown
 }
 
 function isSshAuth(v: unknown): v is SshAuth {
@@ -241,6 +259,29 @@ function parseVpns(raw: unknown): CachedVpn[] {
     })
 }
 
+function isCicdProvider(v: unknown): v is CicdProvider {
+  return v === 'jenkins' || v === 'gitlab' || v === 'github'
+}
+
+function parseCicdConnections(raw: unknown): CachedCicdConnection[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter(isRecord)
+    .filter((c) => typeof c.id === 'string' && typeof c.workspaceId === 'string')
+    // A connection whose provider is not one of the three is dropped rather
+    // than defaulted. Defaulting would invent a provider for a record written
+    // by a newer version of the app, and the bridge would then address it with
+    // the wrong adapter.
+    .filter((c) => isCicdProvider(c.provider))
+    .map((c) => ({
+      id: c.id as string,
+      workspaceId: c.workspaceId as string,
+      name: asString(c.name, c.id as string),
+      provider: c.provider as CicdProvider,
+      enabled: c.enabled !== false
+    }))
+}
+
 function parseTunnels(raw: unknown): CachedTunnel[] {
   if (!Array.isArray(raw)) return []
   return raw
@@ -284,6 +325,7 @@ let servers: CachedServer[] = []
 let databases: CachedDatabase[] = []
 let tunnels: CachedTunnel[] = []
 let vpns: CachedVpn[] = []
+let cicdConnections: CachedCicdConnection[] = []
 
 export function refreshMcpDataCache(data?: unknown): void {
   const raw = (data ?? loadData()) as DataShape | null
@@ -292,6 +334,7 @@ export function refreshMcpDataCache(data?: unknown): void {
   databases = parseDatabases(raw?.databases)
   tunnels = parseTunnels(raw?.tunnels)
   vpns = parseVpns(raw?.vpns)
+  cicdConnections = parseCicdConnections(raw?.cicdConnections)
 }
 
 // Same scoping rule as servers: a session only ever sees what is inside the
@@ -324,6 +367,18 @@ export function listCachedVpns(workspaceId?: string | string[]): CachedVpn[] {
 
 export function getCachedVpn(id: string): CachedVpn | null {
   return vpns.find((v) => v.id === id) ?? null
+}
+
+// Same scoping rule as everything else here: a session sees only what is
+// inside the workspace(s) it was granted.
+export function listCachedCicdConnections(workspaceId?: string | string[]): CachedCicdConnection[] {
+  if (!workspaceId) return cicdConnections
+  const ids = Array.isArray(workspaceId) ? workspaceId : [workspaceId]
+  return cicdConnections.filter((c) => ids.includes(c.workspaceId))
+}
+
+export function getCachedCicdConnection(id: string): CachedCicdConnection | null {
+  return cicdConnections.find((c) => c.id === id) ?? null
 }
 
 export function listCachedWorkspaces(): CachedWorkspace[] {

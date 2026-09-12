@@ -66,6 +66,22 @@ export const SETUP_QUESTIONS: SetupQuestion[] = [
     cost: 'This is the half of the app that writes to your servers.',
     modules: ['broadcast', 'patch', 'jobs'],
     preselected: false
+  },
+  {
+    id: 'cicd',
+    question: 'Do your servers get changed by a pipeline?',
+    detail:
+      'Connect Jenkins, GitLab CI or GitHub Actions and read pipelines, run history and failed-step logs next to the server the run changed.',
+    // Two costs, because there are two and hiding either would flatter the
+    // answer: the traffic leaves the machine, and the token is long-lived.
+    cost: 'This one talks to a service outside your estate, on a timer, with a token you paste in.',
+    // `cicd` only. `cicdTrigger` is a module this card deliberately cannot
+    // reach, for the reason `keyRevoke` cannot: "do you use CI" is a question
+    // about what you have, and starting builds on infrastructure OpsMaxx does
+    // not administer is a decision about what you do. One tick should not
+    // answer both.
+    modules: ['cicd'],
+    preselected: false
   }
 ]
 

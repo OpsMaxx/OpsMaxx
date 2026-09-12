@@ -5,6 +5,14 @@ import type { UnitDraft, UserUnitsReading } from '../shared/userUnits'
 import type { BackupAlarm } from '../shared/backup'
 import type { HttpRequestSpec, HttpResult } from '../shared/httpClient'
 import type { CheckResult, HttpCheck } from '../shared/httpMonitor'
+import type {
+  AgentRunReport,
+  CicdConnection,
+  CicdLogChunk,
+  CicdPanelState,
+  CicdParam,
+  CicdTriggerResult
+} from '../shared/cicd'
 import type { CredentialShape } from '../shared/credentialShape'
 import type { LocalTarget } from '../shared/execTarget'
 import type {
@@ -407,6 +415,66 @@ const api = {
    * the workspace) and main owns the RUNNING of it, so this bridge is: here is
    * the list, tell me what happened.
    */
+  // ---- CI/CD ----
+  //
+  // The renderer owns the connection records and hands them to main; main owns
+  // the token and never hands it back. `verify` is the one call that carries a
+  // secret in this direction, because at that moment there is no vault entry
+  // yet — the user has typed a token and wants to know if it works.
+  cicd: {
+    // No arguments. This tells main the SAVED connections changed; main
+    // re-reads the file and discovers each account's pipelines itself. The
+    // renderer never names a vault entry or a destination — a renderer that
+    // could would be naming which credential goes to which host.
+    configure: (): Promise<void> => ipcRenderer.invoke('cicd:configure'),
+    snapshot: (): Promise<CicdPanelState[]> => ipcRenderer.invoke('cicd:snapshot'),
+    agentRuns: (): Promise<AgentRunReport[]> => ipcRenderer.invoke('cicd:agentRuns'),
+    refresh: (connectionId?: string): Promise<void> =>
+      ipcRenderer.invoke('cicd:refresh', connectionId),
+    getRun: (
+      connectionId: string,
+      pipelineRef: string,
+      runId: string,
+      attempt?: number
+    ): Promise<{ run: unknown; steps: unknown[] }> =>
+      ipcRenderer.invoke('cicd:getRun', connectionId, pipelineRef, runId, attempt),
+    createSecret: (label: string, token: string): Promise<string> =>
+      ipcRenderer.invoke('cicd:createSecret', label, token),
+    verify: (
+      connection: CicdConnection,
+      secret: string
+    ): Promise<
+      { ok: true; identity: string; scopes?: string[]; expiresAt?: number } | { ok: false; error: string }
+    > => ipcRenderer.invoke('cicd:verify', connection, secret),
+    listParams: (connectionId: string, pipelineRef: string): Promise<CicdParam[]> =>
+      ipcRenderer.invoke('cicd:listParams', connectionId, pipelineRef),
+    getLog: (
+      connectionId: string,
+      pipelineRef: string,
+      runId: string,
+      stepName?: string,
+      cursor?: string
+    ): Promise<CicdLogChunk> =>
+      ipcRenderer.invoke('cicd:getLog', connectionId, pipelineRef, runId, stepName, cursor),
+    trigger: (
+      connectionId: string,
+      pipelineRef: string,
+      ref: string,
+      params?: Record<string, string>
+    ): Promise<CicdTriggerResult> =>
+      ipcRenderer.invoke('cicd:trigger', connectionId, pipelineRef, ref, params),
+    cancel: (connectionId: string, pipelineRef: string, runId: string): Promise<CicdTriggerResult> =>
+      ipcRenderer.invoke('cicd:cancel', connectionId, pipelineRef, runId),
+    rerun: (connectionId: string, pipelineRef: string, runId: string): Promise<CicdTriggerResult> =>
+      ipcRenderer.invoke('cicd:rerun', connectionId, pipelineRef, runId),
+    deleteSecrets: (vaultEntryId: string): Promise<void> =>
+      ipcRenderer.invoke('cicd:deleteSecrets', vaultEntryId),
+    onState: (cb: (event: CicdPanelState) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, event: CicdPanelState): void => cb(event)
+      ipcRenderer.on('cicd:state', h)
+      return () => ipcRenderer.removeListener('cicd:state', h)
+    }
+  },
   serviceChecks: {
     set: (checks: HttpCheck[]): Promise<void> => ipcRenderer.invoke('serviceChecks:set', checks),
     history: (): Promise<Record<string, CheckResult[]>> =>

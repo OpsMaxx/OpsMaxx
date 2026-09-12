@@ -234,6 +234,8 @@ import { toVpnResult } from './services/vpn/errors'
 import { preparedSshTarget, withVpnTransportDb } from './services/vpn/transport'
 import { httpRequest } from './services/httpClient'
 import { ServiceCheckRunner } from './services/serviceChecks'
+import * as cicd from './services/cicd/wiring'
+import type { CicdConnection } from '../shared/cicd'
 import { setStartupPrefs, shouldStartHidden, startupPrefs } from './services/startupPrefs'
 import { localExec, type LocalExecResult } from './services/localExec'
 import { setShellIntegrationRoot } from './services/shellIntegrationFiles'
@@ -1094,6 +1096,92 @@ const serviceChecks = new ServiceCheckRunner({
 ipcMain.handle('serviceChecks:set', (_e, checks: HttpCheck[]) => {
   serviceChecks.configure(Array.isArray(checks) ? checks : [])
 })
+
+// ---- CI/CD ----
+//
+// Main holds no connection list of its own: the renderer owns the records and
+// hands them over here, exactly as it does for service checks. What main adds
+// is the half the renderer must never have — the token, which is merged from
+// the vault at request time and never crosses back.
+//
+// Poll results go to EVERY window, not the one that asked. A pipeline that
+// started failing is a fact about the estate, not about whichever window
+// happened to open the panel.
+// A SIGNAL, not a payload: it says the saved connections changed, and main
+// re-reads the file. The renderer does not get to name a vault entry or a
+// destination — see the header of services/cicd/wiring.ts.
+ipcMain.handle('cicd:configure', () => {
+  cicd.configure((event) => {
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('cicd:state', event)
+  })
+})
+
+ipcMain.handle('cicd:snapshot', () => cicd.snapshot())
+
+// What an agent started that may still be going. Read by the kill switch so it
+// can say what it cannot stop, BEFORE the operator commits to pressing it.
+ipcMain.handle('cicd:agentRuns', () => cicd.agentRunsInFlight())
+
+// The panel's one primary action. Clears any backoff as well as the interval:
+// a person pressing Refresh on a failing connection wants a fresh answer, not
+// the penalty preserved.
+ipcMain.handle('cicd:refresh', (_e, connectionId?: string) => cicd.refresh(connectionId))
+
+ipcMain.handle(
+  'cicd:getRun',
+  (_e, connectionId: string, pipelineRef: string, runId: string, attempt?: number) =>
+    cicd.getRun(connectionId, pipelineRef, runId, attempt)
+)
+
+// The token crosses to main exactly once, here, and what goes back is an id.
+ipcMain.handle('cicd:createSecret', (_e, label: string, token: string) =>
+  cicd.createSecret(label, token)
+)
+
+ipcMain.handle('cicd:listParams', (_e, connectionId: string, pipelineRef: string) =>
+  cicd.listParams(connectionId, pipelineRef)
+)
+
+// The three writes. Each returns the provider's own answer verbatim, including
+// the case where it will not say what it started — a Jenkins queue item, or a
+// GHES dispatch that answers 204. The renderer renders that honestly rather
+// than being handed a run number that does not exist yet.
+ipcMain.handle(
+  'cicd:trigger',
+  (_e, connectionId: string, pipelineRef: string, ref: string, params?: Record<string, string>) =>
+    cicd.triggerRun(connectionId, pipelineRef, ref, params)
+)
+
+ipcMain.handle('cicd:rerun', (_e, connectionId: string, pipelineRef: string, runId: string) =>
+  cicd.rerunRun(connectionId, pipelineRef, runId)
+)
+
+ipcMain.handle('cicd:cancel', (_e, connectionId: string, pipelineRef: string, runId: string) =>
+  cicd.cancelRun(connectionId, pipelineRef, runId)
+)
+
+// Dials a connection the user has typed but not saved. The secret arrives as a
+// parameter because there is no vault entry yet, and nothing is written by
+// this call — that is the Verify button's whole contract.
+ipcMain.handle('cicd:verify', (_e, connection: CicdConnection, secret: string) =>
+  cicd.verify(connection, secret)
+)
+
+ipcMain.handle(
+  'cicd:getLog',
+  (
+    _e,
+    connectionId: string,
+    pipelineRef: string,
+    runId: string,
+    stepName?: string,
+    cursor?: string
+  ) => cicd.getLog(connectionId, pipelineRef, runId, stepName, cursor)
+)
+
+// Called when a connection or its workspace is deleted. Without it the vault
+// keeps an entry nothing references, forever.
+ipcMain.handle('cicd:deleteSecrets', (_e, vaultEntryId: string) => cicd.deleteSecrets(vaultEntryId))
 
 // What a panel that has just mounted needs in order to draw a chart rather
 // than an empty row while it waits for the next interval.
@@ -4509,6 +4597,10 @@ ipcMain.handle('data:save', (_e, data: unknown) => {
   // renderer on every tool call, so its cache is refreshed right after the
   // write that would otherwise make it stale.
   refreshMcpDataCache(data)
+  // Same file, same reason. The CI/CD module reads its connections from disk
+  // rather than from IPC (see services/cicd/wiring.ts), so the write that just
+  // changed them is where it has to look again.
+  cicd.reload(data)
 })
 
 // ---- AI & MCP: access groups ----
@@ -4696,6 +4788,11 @@ app.on('before-quit', (e) => {
   // Before the store closes: a check that lands afterwards would try to record
   // a transition into a store that is already folding its WAL back.
   serviceChecks.dispose()
+  // NOT for the reason above — the CI poller touches no store; its history is
+  // an in-memory map. It is disposed here because the timer must stop before
+  // the process tears down, and an in-flight poll's result is dropped by the
+  // poller's own disposed guard rather than landing on freed state.
+  cicd.dispose()
   if (historyRetain) clearInterval(historyRetain)
   const sweepDeadline = new Promise<void>((resolve) => setTimeout(resolve, HISTORY_LAST_SWEEP_MS))
   const historyClosed = Promise.race([lastSweep, sweepDeadline]).then(() => historyStore?.close())
@@ -4817,6 +4914,11 @@ app.whenReady().then(() => {
   // Primed once at launch so the MCP bridge can resolve server/workspace
   // names even before the renderer's first data:save call.
   refreshMcpDataCache()
+  // And the CI connections, for the same reason one line up: an agent can call
+  // a ci_* tool before any window has opened the CI tab, and an empty list
+  // there reads to the agent as "this user has no CI connections" rather than
+  // as "the app has not finished starting".
+  cicd.reload()
   // Same reasoning for the local terminal's kill switch: the renderer may open a
   // shell before its first data:save, so main reads the persisted setting itself
   // rather than starting from a default it would later have to correct.

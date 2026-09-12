@@ -82,6 +82,20 @@ function allowAll(overrides: Partial<AccessGroup['capabilities']> = {}): AccessG
     // is granted by the helper — each group opts in below, and none of them
     // opts in at 'allow'.
     vpnControl: 'deny',
+    // The CI pair, denied here and opted into by NO group below — the same
+    // shape as hostFacts and firewallRules above, and for the same mechanical
+    // reason: backfillCapabilities hands a built-in group whatever a FRESH
+    // install would have given it, so seeding either of these at 'ask' on the
+    // permissive groups would quietly grant it to every upgraded install.
+    // Seeding 'deny' everywhere is the only way "an upgrade grants nothing"
+    // is actually true.
+    //
+    // The substantive reason is that neither is bounded by a host the user
+    // administers. ciRead returns build output written by whoever opened the
+    // merge request; ciTrigger starts work on infrastructure OpsMaxx cannot
+    // inspect and cannot stop once the provider has accepted it.
+    ciRead: 'deny',
+    ciTrigger: 'deny',
     ...overrides
   }
 }
@@ -200,7 +214,11 @@ function defaultGroups(): AccessGroup[] {
         hostFacts: 'deny',
         firewallRules: 'deny',
         manageServers: 'deny',
-        vpnControl: 'deny'
+        vpnControl: 'deny',
+        // Denied here as on every other seeded group. Build output is not a
+        // read of this server at all, and starting a run is not "looking".
+        ciRead: 'deny',
+        ciTrigger: 'deny'
       },
       filePolicies: defaultFilePolicies()
     },

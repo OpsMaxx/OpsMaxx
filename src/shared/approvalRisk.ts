@@ -522,6 +522,28 @@ export function describeConsequence(s: ApprovalSubject): Consequence {
         text: `Lets the agent see that ${host} exists and read what it is permitted to do there. No hostname, username or key is disclosed.`,
         known: true
       }
+    // The host IS named here, unlike vpnControl and manageServers above. A VPN
+    // profile's name adds nothing to "your traffic moves"; which CI server a
+    // build starts on is most of the blast radius, because that is the estate
+    // it can reach and the credentials it runs with.
+    //
+    // What this sentence must not do is describe the pipeline. OpsMaxx has
+    // never read it and has no way to: naming a deploy, an environment or a
+    // target here would be a guess printed in the one place an operator is
+    // entitled to trust. So it names what is certain -- something starts, we
+    // cannot see what, and we cannot stop it.
+    case 'ciTrigger':
+      return {
+        text: /^cancel\b/i.test(action)
+          ? `Cancels a run on ${host}. A pipeline stopped part-way has finished some of its steps and not the rest, and OpsMaxx cannot tell you which — a half-applied deploy is not the same as one that never ran.`
+          : `Starts a run on ${host}. It executes whatever that pipeline's definition says, with whatever credentials the CI server holds — OpsMaxx has not read the definition and cannot tell you what it deploys or where. Once the provider accepts the run, no agent permission can stop it: STOP ALL AI ACCESS takes away the agent's cancel along with everything else, and stopping the run is then yours to do — from this run in CI/CD, or in the provider.`,
+        known: true
+      }
+    case 'ciRead':
+      return {
+        text: `Reads pipeline state and build output from ${host} and hands it to the agent. Nothing on the CI server changes. The output is written by whoever opened the change that ran it, so it is text a stranger wrote arriving in the agent's context.`,
+        known: true
+      }
     default:
       return { text: NO_CONSEQUENCE_TEXT, known: false }
   }

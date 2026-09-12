@@ -757,7 +757,10 @@ export interface VpnLogLine {
 
 // ------------------------------------------------------------- dependents
 
-export type VpnDependentKind = 'server' | 'database' | 'tunnel' | 'session'
+// `cicd` is a CI/CD request routed through this profile. It is only ever live:
+// nothing stores a CI connection here, so it appears at dial time and goes
+// when the request does.
+export type VpnDependentKind = 'server' | 'database' | 'tunnel' | 'session' | 'cicd'
 
 export interface VpnDependent {
   kind: VpnDependentKind

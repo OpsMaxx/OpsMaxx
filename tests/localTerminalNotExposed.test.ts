@@ -122,7 +122,21 @@ const ALLOWED_TOOLS = [
   // only read here that is — because the same information about every host at
   // once sorts an estate into the machines that are behind and the ones that
   // are not.
-  'fleet_drift'
+  'fleet_drift',
+  // CI/CD. Reaches a third party over HTTPS through `httpRequest`, which is the
+  // same transport the service checks use and reaches no shell anywhere — not
+  // on this machine, and not on a configured server either. The runs it starts
+  // execute on the provider's own runners, under the provider's own
+  // credentials; nothing here spawns a local process, and `makeCicdHttp` is the
+  // only thing between these tools and the network.
+  'list_ci_connections',
+  'list_pipelines',
+  'list_runs',
+  'get_run',
+  'get_run_logs',
+  'trigger_run',
+  'cancel_run',
+  'rerun_run'
 ]
 
 // A hint, not the gate. Anything this regex matches is by construction absent
@@ -471,7 +485,14 @@ describe('the AI permission model has no word for a local shell', () => {
     'fleetRead',
     'backupRead',
     'manageServers',
-    'vpnControl'
+    'vpnControl',
+    // The CI/CD module. Reviewed and added deliberately: `ciRead` returns build
+    // output, which is written by whoever opened the merge request and is the
+    // most attacker-authored text this bridge returns. `ciTrigger` starts work
+    // on infrastructure OpsMaxx does not administer — always ASK, never cached
+    // as an elevation, one pipeline per call.
+    'ciRead',
+    'ciTrigger'
   ]
 
   it('grants no capability naming a local shell', () => {

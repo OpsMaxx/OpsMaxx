@@ -219,6 +219,32 @@ const MODULE_FILES: Record<string, string[]> = {
     'src/renderer/src/components/processes/ProcessesPanel.tsx'
   ],
   docker: ['src/shared/imageScan.ts', 'src/shared/docker.ts', 'src/main/services/docker.ts', 'src/renderer/src/components/docker/DockerPanel.tsx'],
+  // CI/CD, and this entry covers LESS than the ones above it. Say what it
+  // leaves out, and do not read the passing test as more than it is.
+  //
+  // `src/main/services/cicd/{jenkins,gitlab,github}.ts` are deliberately NOT
+  // listed. Each adapter is handed a merged credential and the main half that
+  // merges it must import `services/credentialResolver`, which is on
+  // MODULE_FORBIDDEN_IMPORTS — so listing them would fail the walk for doing
+  // the one thing they exist to do. The precedent is the same one `inventory`
+  // uses for hostFacts and `patch`/`jobs` use for the job engine, but the
+  // consequence here is sharper and worth stating plainly: the closure walk
+  // below is checking the renderer half, which was never going to touch the
+  // vault, and says NOTHING about the file that holds the token. What keeps
+  // the PAT out of the renderer is that it is written that way — a reference
+  // on the connection record, resolved in main — and that a reviewer checks
+  // it. Not this test.
+  //
+  // The renderer half (src/renderer/src/components/cicd/) does not exist yet:
+  // both modules currently mount a placeholder inline at their guard. When the
+  // panels land they belong on these two lists, and the list that actually
+  // matters is `cicd`'s.
+  cicd: ['src/shared/cicd.ts'],
+  // No files of its own yet. It shares the shared contract with `cicd` and
+  // adds the trigger controls in a later wave; listed so the coverage
+  // assertion below stays true of the registry rather than of this list.
+  // cicdTrigger: phase 2 — see src/shared/modules.ts. MODULE_FILES is asserted
+  // to match the registry exactly, so this comes back when the entry does.
   kubernetes: [
     'src/shared/kubernetes.ts',
     'src/shared/k8sSkew.ts',

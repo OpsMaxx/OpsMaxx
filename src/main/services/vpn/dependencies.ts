@@ -14,9 +14,11 @@ import {
 //     with `vpnProfileId` set. Deleting a profile with any of these strands
 //     them, so a delete is blocked until they are detached.
 //   * "what is *using it right now*" — live SSH sessions, open database
-//     connections and running tunnels that were dialled through it. Stopping a
-//     profile with any of these disconnects a human mid-keystroke, so a stop
-//     needs a confirmation that names the count.
+//     connections, running tunnels and in-flight CI/CD requests (`kind: 'cicd'`,
+//     registered by httpClient's `via: 'vpn'` route) that were dialled through
+//     it. Stopping a profile with any of these disconnects a human
+//     mid-keystroke, so a stop needs a confirmation that names the count.
+//     `cicd` has no stored half below: a CI connection is not persisted here.
 //
 // The second set is registered at dial time rather than derived, because a
 // live session outlives the definition it came from: the user can edit a
