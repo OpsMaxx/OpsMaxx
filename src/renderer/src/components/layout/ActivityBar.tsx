@@ -103,11 +103,25 @@ export function ActivityBar(): React.JSX.Element {
       <div className="activity-spacer" />
       <button
         className={clsx('activity-btn', activity === 'settings' && 'active')}
-        title={backupDirty ? 'Settings — backup out of date' : 'Settings'}
+        // The dot's meaning lives on the button, not on the dot. Every control
+        // in this rail says what it is through `title` and nothing else, and a
+        // `title` covers its descendants — so hovering the dot answers "what is
+        // this red thing" without the dot needing a tooltip of its own, and a
+        // screen reader gets the same sentence as the button's name rather than
+        // an unnamed decoration next to a button called "Settings". A bare dot
+        // reads equally as "update available" or "something is broken"; naming
+        // the export is the whole fix. It does NOT promise to open Backup &
+        // Restore — this button opens Settings where it left off, and the
+        // status-bar chip is the one that lands on the page.
+        title={
+          backupDirty
+            ? 'Settings — backup out of date: stored connections have changed since the last export'
+            : 'Settings'
+        }
         onClick={() => setActivity('settings')}
       >
         <Settings size={20} />
-        {backupDirty && <span className="activity-badge" />}
+        {backupDirty && <span className="activity-badge" aria-hidden />}
       </button>
     </div>
   )

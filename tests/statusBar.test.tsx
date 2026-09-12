@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { stubBridge } from './setup/renderer'
 import { StatusBar } from '../src/renderer/src/components/layout/StatusBar'
+import { ActivityBar } from '../src/renderer/src/components/layout/ActivityBar'
 import { useAlerts } from '../src/renderer/src/store/alerts'
 import { useApp } from '../src/renderer/src/store/app'
 import { useFleetStatus } from '../src/renderer/src/store/fleetStatus'
+import { useNav } from '../src/renderer/src/store/nav'
 
 // The status bar, rendered — the third component in this suite and the one that
 // is here to show the harness is not shaped around DockerPanel.
@@ -95,5 +97,54 @@ describe('StatusBar', () => {
     render(<StatusBar />)
 
     expect(screen.getByRole('button', { name: /Checks paused/ })).toBeTruthy()
+  })
+
+  // The chip's tooltip has always named its destination. Its click did not go
+  // there: `setActivity('settings')` opens Settings on whichever page was last
+  // shown, so pressing "Backup out of date" while Appearance was the last page
+  // landed on Appearance. A pointer that opens the wrong page teaches the user
+  // the button is broken.
+  it('lands on Backup & Restore, not on whatever Settings page was last open', () => {
+    stubBridge({})
+    useNav.setState({ settingsSection: 'appearance' })
+    useApp.getState().setSettings({ backupDirty: true })
+
+    render(<StatusBar />)
+    fireEvent.click(screen.getByRole('button', { name: /Backup out of date/ }))
+
+    expect(useApp.getState().activity).toBe('settings')
+    expect(useNav.getState().settingsSection).toBe('backup')
+  })
+})
+
+// Same signal, second surface. `settings.backupDirty` also raises a dot on the
+// activity bar's Settings button, and a bare dot on a button called "Settings"
+// is indistinguishable from "an update is available" or "something is broken".
+// Tested here rather than in a file of its own because the two halves of one
+// bug are easier to keep honest side by side.
+describe('ActivityBar', () => {
+  const settingsBtn = (): HTMLElement => screen.getByRole('button', { name: /^Settings/ })
+
+  it('says what the badge means when the backup is stale', () => {
+    stubBridge({})
+    useApp.getState().setSettings({ backupDirty: true })
+
+    render(<ActivityBar />)
+
+    // Accessible name, not just a hover: the dot itself is decoration, so the
+    // meaning has to be reachable on the button.
+    expect(settingsBtn().getAttribute('title')).toContain('backup out of date')
+    expect(settingsBtn().getAttribute('title')).toContain('since the last export')
+    expect(settingsBtn().querySelector('.activity-badge')?.getAttribute('aria-hidden')).toBe('true')
+  })
+
+  it('says nothing extra when the backup is current', () => {
+    stubBridge({})
+    useApp.getState().setSettings({ backupDirty: false })
+
+    render(<ActivityBar />)
+
+    expect(settingsBtn().getAttribute('title')).toBe('Settings')
+    expect(settingsBtn().querySelector('.activity-badge')).toBeNull()
   })
 })

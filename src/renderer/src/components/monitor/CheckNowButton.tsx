@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
-import { RefreshCw, Check, AlertTriangle } from 'lucide-react'
+import { RefreshCw, Check, AlertTriangle, Settings2 } from 'lucide-react'
 import { clsx } from '../../lib/format'
+import { openSettings } from '../../store/nav'
 import { SweepProgress } from './SweepProgress'
 
 /**
@@ -24,7 +25,10 @@ type Phase =
   | { kind: 'idle' }
   | { kind: 'working' }
   | { kind: 'done'; servers: number; answered: number; at: number }
-  | { kind: 'refused'; message: string }
+  // `fix` is the control that resolves the refusal, when one exists. A
+  // refusal whose whole content is "go and turn something on" is a research
+  // task unless the thing that turns it on is on screen next to it.
+  | { kind: 'refused'; message: string; fix?: 'monitoring-settings' }
 
 interface CheckNowButtonProps {
   /** Which servers to collect. Empty or omitted means the whole estate. */
@@ -65,13 +69,20 @@ export function CheckNowButton({
     try {
       const r = await bridge.collectNow(serverIds ? [...serverIds] : undefined)
       if (!r?.swept) {
-            setPhase({
-          kind: 'refused',
-          message:
-            r?.reason === 'disabled'
-              ? 'Fleet sampling is switched off, so nothing was collected. Turn it on in Settings.'
-              : 'No servers are being sampled in this workspace, so there was nothing to collect.'
-        })
+        setPhase(
+          r?.reason === 'disabled'
+            ? {
+                kind: 'refused',
+                message:
+                  'Fleet sampling is switched off, so nothing was collected. Turn it on in Settings → Monitoring.',
+                fix: 'monitoring-settings'
+              }
+            : {
+                kind: 'refused',
+                message:
+                  'No servers are being sampled in this workspace, so there was nothing to collect.'
+              }
+        )
         return
       }
       await onCollected?.()
@@ -165,6 +176,22 @@ export function CheckNowButton({
             </>
           )}
         </span>
+      )}
+
+      {/**
+       * The switch the sentence above names.
+       *
+       * Background checking ships OFF, so "Fleet sampling is switched off" is
+       * the answer most people get the first time they press Check now — on
+       * Inventory, Access and Posture alike. Naming the page and not opening
+       * it leaves them to find Settings, then find Monitoring inside it, then
+       * come back and remember what they were doing. Same shape as
+       * FleetHealth: the prose says where, the button goes there.
+       */}
+      {phase.kind === 'refused' && phase.fix === 'monitoring-settings' && (
+        <button className="btn ghost sm" onClick={() => openSettings('monitoring')}>
+          <Settings2 size={13} /> Open Monitoring settings
+        </button>
       )}
     </div>
   )

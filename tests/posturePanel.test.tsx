@@ -28,7 +28,7 @@ import type { Server } from '../src/renderer/src/types'
 //     and "nothing weak" is what counting them produces. It is a clean bill
 //     of health for a configuration nobody read.
 
-function server(id: string, name: string): Server {
+function server(id: string, name: string, status: Server['status'] = 'online'): Server {
   return {
     id,
     workspaceId: 'ws-default',
@@ -38,7 +38,7 @@ function server(id: string, name: string): Server {
     port: 22,
     username: 'ops',
     auth: 'key',
-    status: 'online',
+    status,
     tags: [],
     favorite: false,
     os: 'linux',
@@ -72,11 +72,25 @@ function mount(held: Record<string, Held>, servers: Server[]): void {
   render(<PosturePanel servers={servers} />)
 }
 
-/** The text of one cell, found by the row's host name and the column id rather
- *  than by position — the columns move, the meaning does not. */
-const cell = (host: string, col: string): string =>
+/** One cell, found by the row's host name and the column id rather than by
+ *  position — the columns move, the meaning does not. */
+const cellEl = (host: string, col: string): HTMLElement =>
   screen.getByText((_, el) => el?.getAttribute('data-host') === host && el?.getAttribute('data-col') === col)
-    .textContent ?? ''
+
+const cell = (host: string, col: string): string => cellEl(host, col).textContent ?? ''
+
+/** Whether that cell is on the table at all. A host with no reading has no
+ *  per-check cells: it has one sentence instead. */
+const hasCell = (host: string, col: string): boolean =>
+  screen.queryByText(
+    (_, el) => el?.getAttribute('data-host') === host && el?.getAttribute('data-col') === col
+  ) !== null
+
+/** How a cell is DRAWN, which is the part a reader takes in before any of the
+ *  words. `inv-na` is the italic, dotted-underlined treatment for a gap and
+ *  `loud` is the amber one; a real answer wears neither. */
+const look = (host: string, col: string): string =>
+  cellEl(host, col).querySelector('span')?.className ?? ''
 
 describe('a check that could not run is never shown as a check that passed', () => {
   it('shows a refused firewall as not permitted, never as a rule count', async () => {
@@ -96,7 +110,7 @@ describe('a check that could not run is never shown as a check that passed', () 
       },
       [server('a', 'web-1')]
     )
-    await waitFor(() => expect(cell('web-1', 'firewall')).toBe('not permitted'))
+    await waitFor(() => expect(cell('web-1', 'firewall')).toBe('asked, refused'))
     // The three spellings a naive table produces, none of which may appear.
     expect(cell('web-1', 'firewall')).not.toMatch(/\b0\b/)
     expect(cell('web-1', 'firewall')).not.toBe('—')
@@ -118,7 +132,7 @@ describe('a check that could not run is never shown as a check that passed', () 
       },
       [server('a', 'web-1')]
     )
-    await waitFor(() => expect(cell('web-1', 'firewall')).toBe('cannot be answered'))
+    await waitFor(() => expect(cell('web-1', 'firewall')).toBe('this server cannot answer'))
   })
 
   it('shows an unread sshd config as unknown, NEVER as "nothing weak"', async () => {
@@ -139,7 +153,7 @@ describe('a check that could not run is never shown as a check that passed', () 
       },
       [server('a', 'web-1')]
     )
-    await waitFor(() => expect(cell('web-1', 'sshd')).toBe('not permitted'))
+    await waitFor(() => expect(cell('web-1', 'sshd')).toBe('asked, refused'))
     expect(cell('web-1', 'sshd')).not.toMatch(/nothing weak|hardened|ok/i)
   })
 
@@ -225,9 +239,143 @@ describe('a check that could not run is never shown as a check that passed', () 
     )
     await waitFor(() => expect(cell('web-1', 'firewall')).toContain('3 rules'))
     // The host nobody has looked at is on the table saying so, not missing from
-    // it and not sharing web-1's reading.
-    expect(cell('web-2', 'firewall')).toBe('not collected')
-    expect(cell('web-2', 'sshd')).toBe('not collected')
+    // it and not sharing web-1's reading. It says it ONCE, as a row: seven
+    // copies of the same phrase read as seven problems.
+    expect(hasCell('web-2', 'firewall')).toBe(false)
+    expect(hasCell('web-2', 'sshd')).toBe(false)
+    expect(cell('web-2', 'not-read')).toContain('Not checked yet')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Telling the four kinds of nothing apart
+//
+// Every test above is about a gap not reading as a pass. These are about gaps
+// not reading as EACH OTHER, which is the complaint that produced them: a
+// column of identical italic phrases where one host was merely unswept, one
+// check had been refused by the kernel, and one answer was a genuine "we
+// looked, there are none". A reader cannot act on any of those without first
+// being able to tell which is which.
+// ---------------------------------------------------------------------------
+
+describe('a reader can tell the kinds of nothing apart', () => {
+  const READ = [
+    'V fw-tool ufw',
+    'V fw-active active',
+    'V fw-rules 3',
+    'V fw-backend-status ok',
+    POSTURE_STATUS_MARKER,
+    'firewall ok - ufw status verbose'
+  ]
+
+  it('says an offline host is offline once, not as seven failed checks', async () => {
+    mount({ a: { posture: collected(READ) } }, [
+      server('a', 'web-1'),
+      server('b', 'web-2', 'offline')
+    ])
+    await waitFor(() => expect(cell('web-1', 'firewall')).toContain('3 rules'))
+
+    const row = cellEl('web-2', 'not-read')
+    expect(row.getAttribute('data-row-state')).toBe('offline')
+    expect(row.textContent).toContain('Offline')
+    // ONE statement. Not one per column.
+    for (const col of ['firewall', 'mac', 'sshd', 'failed', 'updates', 'oom', 'certs']) {
+      expect(hasCell('web-2', col), col).toBe(false)
+    }
+    // Still not a pass, and still not the operator's fault.
+    expect(row.textContent).toContain('None of them passed')
+    expect(row.textContent).not.toMatch(/Settings|refused|not collected/)
+  })
+
+  it('tells a host nobody has asked yet from a check that was asked and refused', async () => {
+    // The pair the old wording flattened: both were the same italic amber
+    // phrase, so a screen where nothing had happened yet looked exactly like a
+    // screen where everything had been refused.
+    mount(
+      {
+        a: {
+          posture: collected([
+            POSTURE_STATUS_MARKER,
+            'firewall denied - ufw status needs root on this server'
+          ])
+        }
+      },
+      [server('a', 'web-1'), server('b', 'web-2')]
+    )
+    await waitFor(() => expect(cell('web-1', 'firewall')).toBe('asked, refused'))
+    // Asked and could not read: the loud treatment, which is the one that
+    // means an operator can usually do something about it.
+    expect(look('web-1', 'firewall')).toContain('loud')
+
+    const pending = cellEl('web-2', 'not-read')
+    expect(pending.getAttribute('data-row-state')).toBe('pending')
+    expect(pending.textContent).toContain('Not checked yet')
+    expect(pending.textContent).not.toMatch(/refused|not permitted|failed/)
+    // Not drawn as a problem, because it is not one yet.
+    expect(pending.querySelector('.panel-note')?.className).toContain('is-unknown')
+  })
+
+  it('draws a real answer differently from a check that could not run', async () => {
+    // "none found" is an ANSWER: every directory was read and holds nothing.
+    // It must not wear the gap treatment that "asked, refused" does, or the
+    // panel has said nothing by saying everything.
+    mount(
+      {
+        a: {
+          posture: collected([
+            'V cert-searched 1',
+            'V cert-refused 0',
+            POSTURE_STATUS_MARKER,
+            'certificates ok - read every directory',
+            'oom-kills denied - dmesg is installed and the kernel refused it'
+          ])
+        }
+      },
+      [server('a', 'web-1')]
+    )
+    await waitFor(() => expect(cell('web-1', 'certs')).toBe('none found'))
+    expect(look('web-1', 'certs')).not.toContain('inv-na')
+    expect(cell('web-1', 'oom')).toBe('asked, refused')
+    expect(look('web-1', 'oom')).toContain('inv-na')
+    expect(look('web-1', 'oom')).toContain('loud')
+  })
+
+  it('says a probe that fell over fell over, rather than that nobody looked', async () => {
+    mount(
+      { a: { posture: collected(READ) }, b: { error: 'ssh: connect: connection refused' } },
+      [server('a', 'web-1'), server('b', 'web-2')]
+    )
+    await waitFor(() => expect(cell('web-1', 'firewall')).toContain('3 rules'))
+    const row = cellEl('web-2', 'not-read')
+    expect(row.getAttribute('data-row-state')).toBe('failed')
+    expect(row.textContent).toContain('probe failed')
+    expect(row.textContent).not.toContain('Not checked yet')
+  })
+
+  it('keeps a real security-update count on a host with no posture reading', async () => {
+    // The one number here that does not come from the posture sweep. Collapsing
+    // the row must not swallow an answer somebody did get.
+    mount(
+      {
+        a: { posture: collected(READ) },
+        b: {
+          facts: parseHostFacts(
+            [
+              'V pkg apt',
+              'V security 4',
+              '===OPSMAXX-FACTS===',
+              'package-manager ok -',
+              'security-updates ok - apt-check'
+            ].join('\n'),
+            NOW
+          )
+        }
+      },
+      [server('a', 'web-1'), server('b', 'web-2', 'offline')]
+    )
+    await waitFor(() =>
+      expect(cell('web-2', 'not-read')).toContain('4 pending security updates')
+    )
   })
 })
 
@@ -262,7 +410,7 @@ describe('the security update count comes from the inventory probe', () => {
       },
       [server('a', 'web-1')]
     )
-    await waitFor(() => expect(cell('web-1', 'updates')).toBe('cannot be answered'))
+    await waitFor(() => expect(cell('web-1', 'updates')).toBe('this server cannot answer'))
   })
 
   it('shows a real zero as a real zero', async () => {
@@ -289,7 +437,7 @@ describe('the security update count comes from the inventory probe', () => {
 
   it('shows a server with no inventory at all as unknown rather than zero', async () => {
     mount({ a: { posture: posture() } }, [server('a', 'web-1')])
-    await waitFor(() => expect(cell('web-1', 'updates')).toBe('unknown'))
+    await waitFor(() => expect(cell('web-1', 'updates')).toBe('asked, no answer'))
   })
 })
 
@@ -460,7 +608,7 @@ describe('the OOM cell never turns an unread kernel log into a quiet server', ()
       },
       [server('a', 'web-1')]
     )
-    await waitFor(() => expect(cell('web-1', 'oom')).toBe('not permitted'))
+    await waitFor(() => expect(cell('web-1', 'oom')).toBe('asked, refused'))
     // The spellings a naive table produces, none of which may appear.
     expect(cell('web-1', 'oom')).not.toMatch(/\bnone\b/i)
     expect(cell('web-1', 'oom')).not.toMatch(/\b0\b/)

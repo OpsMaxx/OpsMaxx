@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   ChevronDown,
@@ -42,6 +42,7 @@ import {
   type ModuleId
 } from '../../../../shared/modules'
 import { openSettings, useNav } from '../../store/nav'
+import { useClickOutside } from '../../hooks/useClickOutside'
 import { OperationsView } from '../operations/OperationsView'
 import { splitTabStrip } from './tabStrip'
 import { DockerPanel } from '../docker/DockerPanel'
@@ -277,6 +278,33 @@ export function FleetMonitor(): React.JSX.Element {
   const rail = useNav((s) => s.fleetRail)
   const [moreOpen, setMoreOpen] = useState(false)
   const [offOpen, setOffOpen] = useState(false)
+  // Dismissal for both popovers, on the app's existing hook — the same one the
+  // workspace switcher, the context menu, the command palette and every modal
+  // use. It listens on `mousedown` and on Escape.
+  //
+  // The ref goes on the HOST, which contains the trigger as well as the menu.
+  // That is what makes clicking the trigger while it is open still close it:
+  // the press is inside, so the outside handler stays quiet and the button's
+  // own onClick does the toggle. A ref on the menu alone would have the
+  // outside handler close it on the way down and the toggle reopen it on the
+  // way up, and the button would look dead.
+  const moreHost = useRef<HTMLDivElement>(null)
+  const moreBtn = useRef<HTMLButtonElement>(null)
+  const offHost = useRef<HTMLDivElement>(null)
+  const offBtn = useRef<HTMLButtonElement>(null)
+  useClickOutside(moreHost, () => setMoreOpen(false), moreOpen)
+  useClickOutside(offHost, () => setOffOpen(false), offOpen)
+  // Escape also hands focus back to the trigger, which the hook cannot do for
+  // us: it closes on Escape from anywhere, and moving focus when the keystroke
+  // came from somewhere else would be a worse bug than leaving it. Here the
+  // key arrived inside the popover, so the trigger is where focus belongs.
+  const dismissOnEscape =
+    (close: () => void, trigger: React.RefObject<HTMLButtonElement | null>) =>
+    (e: React.KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      close()
+      trigger.current?.focus()
+    }
   // Item 43. Held in nav for the same reason the tab is: the failed-unit list
   // that sets it is several components away from the panel that consumes it.
   const logTailJump = useNav((s) => s.logTailJump)
@@ -483,8 +511,13 @@ export function FleetMonitor(): React.JSX.Element {
           <span className="grow" />
 
           {stripped.rest.length > 0 && (
-            <div className="mon-pop-host">
+            <div
+              className="mon-pop-host"
+              ref={moreHost}
+              onKeyDown={dismissOnEscape(() => setMoreOpen(false), moreBtn)}
+            >
               <button
+                ref={moreBtn}
                 className={clsx('seg-btn', moreOpen && 'active')}
                 aria-expanded={moreOpen}
                 onClick={() => {
@@ -522,8 +555,13 @@ export function FleetMonitor(): React.JSX.Element {
               strip, with each module's own one-line `detail`, and it disappears
               entirely once everything is on. */}
           {offTabs.length > 0 && (
-            <div className="mon-pop-host">
+            <div
+              className="mon-pop-host"
+              ref={offHost}
+              onKeyDown={dismissOnEscape(() => setOffOpen(false), offBtn)}
+            >
               <button
+                ref={offBtn}
                 className={clsx('seg-btn', offOpen && 'active')}
                 title={`${offTabs.length} more monitoring modules are available and switched off`}
                 aria-expanded={offOpen}

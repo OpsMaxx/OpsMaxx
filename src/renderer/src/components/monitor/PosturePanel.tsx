@@ -73,25 +73,48 @@ interface Cell {
   text: string
   /** Null means this is a real value. Anything else is a gap, and `text` is
    *  the words for it. */
-  gap: PostureStatus | 'never' | null
+  gap: PostureStatus | null
   help: string
   /** Louder than the rest: something was read and it is bad. */
   bad?: boolean
 }
 
+// THREE TIERS, AND A READER HAS TO BE ABLE TO TELL THEM APART AT A GLANCE.
+//
+// Every gap used to wear the same italic phrase, and "not collected" — a host
+// nobody has swept yet — was drawn in the same amber as "not permitted". So a
+// screen where nothing had happened yet looked exactly like a screen where
+// seven checks had been refused, and both looked like the operator had
+// forgotten to configure something. The tiers now are:
+//
+//   we asked and got an answer    upright body text (`none found` is one of
+//                                 these; it is an ANSWER, not a shrug)
+//   we asked and could not read   italic, amber — denied and unknown
+//   the host has nothing to ask   italic, faint — absent, no-tool, unsupported
+//
+// The fourth state — nobody has asked yet — is no longer a cell at all. It is
+// a whole-row sentence, because it is one fact about the host and not seven
+// findings about its checks. See `NotReadRow`.
+//
+// None of this softens the rule at the top of the file: not one of the three
+// tiers renders as a pass.
+
 /** `denied` and `unknown` are the two an operator can usually do something
  *  about, so they are the ones drawn loudly. `absent`, `no-tool` and
  *  `unsupported` are facts about the host rather than gaps in the reading. */
-const loudGap = (gap: Cell['gap']): boolean => gap === 'denied' || gap === 'unknown' || gap === 'never'
+const loudGap = (gap: Cell['gap']): boolean => gap === 'denied' || gap === 'unknown'
 
+// Each of these says what HAPPENED, not just that something is missing. "asked,
+// refused" cannot be misread as "nobody looked", and "this server cannot
+// answer" cannot be misread as "you have not set this up".
 const gapWords: Record<PostureStatus, string> = {
   ok: 'read',
   partial: 'partly read',
   absent: 'not on this server',
-  denied: 'not permitted',
-  'no-tool': 'no tool for it',
-  unsupported: 'cannot be answered',
-  unknown: 'unknown'
+  denied: 'asked, refused',
+  'no-tool': 'no tool installed',
+  unsupported: 'this server cannot answer',
+  unknown: 'asked, no answer'
 }
 
 function gapCell(status: PostureStatus, detail?: string): Cell {
@@ -100,12 +123,6 @@ function gapCell(status: PostureStatus, detail?: string): Cell {
     gap: status,
     help: detail ? `${POSTURE_STATUS_HELP[status]} — ${detail}` : POSTURE_STATUS_HELP[status]
   }
-}
-
-const NEVER: Cell = {
-  text: 'not collected',
-  gap: 'never',
-  help: 'The background sweep has not read this server yet. That is not a finding about the server — it is the absence of one. Press Check now, and make sure background checking is on in Settings.'
 }
 
 function firewallCell(posture: HostPosture): Cell {
@@ -337,7 +354,7 @@ function updatesCell(facts: HostFacts | null): Cell {
   const r = securityUpdateReading(facts)
   if (r.count === null) {
     return {
-      text: r.status === 'unsupported' ? 'cannot be answered' : gapWords[r.status === 'stale-metadata' ? 'ok' : r.status],
+      text: gapWords[r.status === 'stale-metadata' ? 'ok' : r.status],
       gap: r.status === 'stale-metadata' ? null : (r.status as PostureStatus),
       help: `${FACT_STATUS_HELP[r.status]}${r.detail ? ` — ${r.detail}` : ''}`
     }
@@ -499,6 +516,82 @@ const COLUMNS: { id: string; label: string; help: string }[] = [
 ]
 
 /**
+ * A host with no reading at all, said ONCE.
+ *
+ * Seven cells of "not collected" is seven statements where there is only one
+ * fact, and an operator reading a row of them counts seven problems — the
+ * screenshot that started this had one offline server drawn as seven separate
+ * failures. So the whole row collapses into the reason, and the reason is one
+ * of exactly three, where there used to be one sentence for all three:
+ *
+ *   offline   nobody could reach the server. Not a security finding at all.
+ *   failed    the probe reached it and fell over. The reason is above the table.
+ *   pending   nothing has asked yet. The ONLY one where Settings is relevant,
+ *             and the only one that must not be drawn as a problem.
+ *
+ * `offline` is decided by the server's own connection status rather than by the
+ * absence of a reading, which is what makes it separable from `pending` at all.
+ * A host that IS reachable and simply has not been swept says so, and nothing
+ * in that sentence suggests the operator forgot to configure something.
+ *
+ * What does NOT change: none of the three is a pass. Each says the checks did
+ * not run, in the words of the tier above.
+ */
+type NotRead = 'offline' | 'failed' | 'pending'
+
+const NOT_READ: Record<NotRead, { tone: string; lead: string; words: string }> = {
+  offline: {
+    tone: 'is-unknown',
+    lead: 'Offline — nothing was read from this server.',
+    words:
+      'That is one server nobody could reach, not a row of checks that failed on it. None of them passed either: this row is empty because the server did not answer, and it says nothing about how the server is configured. It will be read on the first sweep after it comes back.'
+  },
+  failed: {
+    tone: 'is-alarm',
+    lead: 'The posture probe failed here, so nothing was read.',
+    words:
+      'One probe failed; the checks in this row never ran, and none of them is clear. The reason the probe gave is above this table.'
+  },
+  pending: {
+    tone: 'is-unknown',
+    lead: 'Not checked yet.',
+    words:
+      'This server is reachable and the background sweep has not got to it. There is nothing here yet — that is the absence of a finding rather than a finding, and nothing on this server is waiting to be configured. Press Check now to read it straight away; if it stays empty, background checking may be switched off in Settings.'
+  }
+}
+
+function NotReadRow({
+  state,
+  host,
+  securityUpdates
+}: {
+  state: NotRead
+  host: string
+  /** Item C's count, which comes from the Inventory probe and therefore
+   *  survives a posture reading that never happened. A real answer must not be
+   *  swallowed by the collapse — it is the one number this row can still
+   *  honestly show. */
+  securityUpdates: number | null
+}): React.JSX.Element {
+  const n = NOT_READ[state]
+  return (
+    <td colSpan={COLUMNS.length} data-host={host} data-col="not-read" data-row-state={state}>
+      <div className={`panel-note ${n.tone}`}>
+        <b>{n.lead}</b> {n.words}
+        {securityUpdates !== null && (
+          <>
+            {' '}
+            Its last inventory counted {securityUpdates} pending security update
+            {securityUpdates === 1 ? '' : 's'} — that one number is the Inventory probe&rsquo;s, read
+            at some earlier point, and it is not a posture reading.
+          </>
+        )}
+      </div>
+    </td>
+  )
+}
+
+/**
  * This machine, alongside the estate.
  *
  * A sentinel id, never a row in `servers` — that list is persisted and mirrored
@@ -589,12 +682,15 @@ export function PosturePanel({
   /** The estate, then this machine — last, so the fleet reads first. */
   const hosts = useMemo(
     () => [
-      ...servers.map((s) => ({ id: s.id, name: s.name })),
+      // `online` comes from the connection status the rest of the app already
+      // keeps, not from whether a reading arrived — that is the whole
+      // difference between "we could not reach it" and "we have not asked".
+      ...servers.map((s) => ({ id: s.id, name: s.name, online: s.status === 'online' })),
       // Only when the channel is actually wired. A build without it would
       // otherwise show a row that can never be filled, which reads as a host
       // that has never been collected rather than as a missing feature.
       ...(bridgeHas(window.opsmaxx?.fleet as Record<string, unknown> | undefined, 'postureLocal')
-        ? [{ id: LOCAL_ID, name: LOCAL_NAME }]
+        ? [{ id: LOCAL_ID, name: LOCAL_NAME, online: true }]
         : [])
     ],
     [servers]
@@ -605,35 +701,44 @@ export function PosturePanel({
       hosts.map((s) => {
         const e = entries[s.id]
         const posture = e?.posture ?? null
-        return {
+        const base = {
           serverId: s.id,
           serverName: s.name,
-          posture,
-          at: e?.at,
-          // An error only explains an ABSENCE. With a posture in hand the last
-          // good collection is what the row shows, with its own age on it, and
-          // the failure is reported above the table rather than by blanking a
-          // host we still know things about.
-          error: posture ? null : (e?.error ?? null),
-          cells: posture
-            ? {
-                firewall: firewallCell(posture),
-                mac: macCell(posture),
-                sshd: sshdCell(posture),
-                failed: failedCell(posture),
-                updates: updatesCell(facts[s.id] ?? null),
-                oom: oomCell(posture),
-                certs: certCell(posture)
-              }
-            : {
-                firewall: NEVER,
-                mac: NEVER,
-                sshd: NEVER,
-                failed: NEVER,
-                updates: updatesCell(facts[s.id] ?? null),
-                oom: NEVER,
-                certs: NEVER
-              }
+          online: s.online,
+          at: e?.at
+        }
+        if (posture) {
+          return {
+            ...base,
+            posture,
+            // An error only explains an ABSENCE. With a posture in hand the
+            // last good collection is what the row shows, with its own age on
+            // it, and the failure is reported above the table rather than by
+            // blanking a host we still know things about.
+            error: null as string | null,
+            notRead: null,
+            securityUpdates: null,
+            cells: {
+              firewall: firewallCell(posture),
+              mac: macCell(posture),
+              sshd: sshdCell(posture),
+              failed: failedCell(posture),
+              updates: updatesCell(facts[s.id] ?? null),
+              oom: oomCell(posture),
+              certs: certCell(posture)
+            }
+          }
+        }
+        return {
+          ...base,
+          posture: null,
+          error: e?.error ?? null,
+          // The order matters: a probe that failed says so even on a server the
+          // fleet already believes is offline, because "it fell over" is more
+          // specific than "it was not there".
+          notRead: (e?.error ? 'failed' : s.online ? 'pending' : 'offline') as NotRead,
+          securityUpdates: securityUpdateReading(facts[s.id] ?? null).count,
+          cells: null
         }
       }),
     [hosts, entries, facts]
@@ -641,6 +746,7 @@ export function PosturePanel({
 
   const summary = useMemo(() => summarisePosture(rows.map((r) => ({ posture: r.posture }))), [rows])
   const failed = rows.filter((r): r is typeof r & { error: string } => typeof r.error === 'string')
+  const notRead = rows.filter((r) => r.cells === null).length
 
   const checkNow = (primary: boolean): React.JSX.Element => (
     <div className="check-now">
@@ -749,6 +855,19 @@ export function PosturePanel({
               {summary.firewallUnknown + summary.sshdUnknown === 1 ? '' : 's'} across this estate could
               not run, and a check that could not run is not a check that passed. Those servers are not
               in the counts above and they are not clear.
+              {/* Not all of those checks are the same kind of gap, and this is
+                  the sentence that keeps them apart: a server nobody could read
+                  contributes every one of its checks to that number, and the
+                  remedy below is not its remedy. */}
+              {notRead > 0 && (
+                <>
+                  {' '}
+                  {notRead} host{notRead === 1 ? '' : 's'} here{' '}
+                  {notRead === 1 ? 'was' : 'were'} not read at all — every check on{' '}
+                  {notRead === 1 ? 'it' : 'them'} is in that number, and{' '}
+                  {notRead === 1 ? 'its row says' : 'their rows say'} why.
+                </>
+              )}
               <NoteWhy summary="How to close them">
                 Most of these close with passwordless sudo for the account OpsMaxx connects as,
                 which lets the probe read a ruleset and ask sshd for its effective configuration.
@@ -782,7 +901,11 @@ export function PosturePanel({
                   // the expanded sshd detail below is the second row.
                   <Fragment key={r.serverId}>
                     <tr
-                      title={r.at === undefined ? 'Never collected.' : `Read ${duration(r.at)} ago.`}
+                      // No title at all when there is nothing to date. "Never
+                      // collected." on hover is the same flattening this change
+                      // exists to undo, and the row now says which of the three
+                      // reasons it is, in full, without hovering.
+                      title={r.at === undefined ? undefined : `Read ${duration(r.at)} ago.`}
                     >
                       <td data-host={r.serverName} data-col="host">
                         {/* This machine has no server tab to open, so its name
@@ -794,6 +917,20 @@ export function PosturePanel({
                           </button>
                         ) : (
                           <span>{r.serverName}</span>
+                        )}
+                        {/* A reading from a server that has since gone offline
+                            is still a reading, and it is also older than the
+                            row's age tooltip suggests it is current. The row
+                            with no reading at all says this in its own words
+                            instead — see NotReadRow. */}
+                        {r.cells !== null && !r.online && (
+                          <span
+                            className="inv-na"
+                            title="This server is offline now. Everything in this row was read before it stopped answering."
+                          >
+                            {' '}
+                            offline
+                          </span>
                         )}
                         {r.posture?.sshd && (
                           <button
@@ -818,14 +955,22 @@ export function PosturePanel({
                           </button>
                         )}
                       </td>
-                      {COLUMNS.map((c) => (
-                        <CellView
-                          key={c.id}
-                          cell={r.cells[c.id as keyof typeof r.cells]}
+                      {r.cells === null ? (
+                        <NotReadRow
+                          state={r.notRead}
                           host={r.serverName}
-                          col={c.id}
+                          securityUpdates={r.securityUpdates}
                         />
-                      ))}
+                      ) : (
+                        COLUMNS.map((c) => (
+                          <CellView
+                            key={c.id}
+                            cell={r.cells[c.id as keyof typeof r.cells]}
+                            host={r.serverName}
+                            col={c.id}
+                          />
+                        ))
+                      )}
                     </tr>
                     {openRules === r.serverId && r.posture && (
                       <tr>

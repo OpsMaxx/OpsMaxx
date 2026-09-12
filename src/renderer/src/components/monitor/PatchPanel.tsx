@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { sortBySeverity, type SecurityListProbe } from '../../../../shared/securityUpdates'
 import { kernelReport, type KernelReport, type KernelStatus } from '../../../../shared/kernelStatus'
-import { AlertTriangle, Ban, RefreshCw, ShieldQuestion, Wrench } from 'lucide-react'
+import { AlertTriangle, Ban, RefreshCw, Settings2, ShieldQuestion, Wrench } from 'lucide-react'
 import { useFleet } from '../../store/fleet'
 import { useApp } from '../../store/app'
+import { openSettings } from '../../store/nav'
 import { bridgeHas } from '../../lib/bridge'
 import { collectNow } from '../../lib/collectNow'
 import { SweepEmpty } from './SweepEmpty'
@@ -711,11 +712,24 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
               run halted. A disabled control with no explanation is indistinguishable
               from a broken one. */}
           {!gateUsable && (
-            <div className="panel-note is-unknown" data-testid="patch-gate-unavailable">
-              <AlertTriangle size={12} /> The wave gate is unavailable. {GATE_SAMPLER_NOTE} Until it
-              is on, the waves below roll on one after another with nothing checking the estate in
-              between — run them in small waves and watch, or turn the sampler on first.
-            </div>
+            <>
+              <div className="panel-note is-unknown" data-testid="patch-gate-unavailable">
+                <AlertTriangle size={12} /> The wave gate is unavailable. {GATE_SAMPLER_NOTE} Until
+                it is on, the waves below roll on one after another with nothing checking the estate
+                in between — run them in small waves and watch, or turn the sampler on first.
+              </div>
+              {/* "turn the sampler on first" is advice the reader then has to
+                  act on by hand, in a screen they are mid-way through
+                  configuring a patch run on. The switch is two levels down in
+                  Settings, so it goes here — same shape as FleetHealth. */}
+              <button
+                className="btn ghost sm"
+                data-testid="patch-gate-open-settings"
+                onClick={() => openSettings('monitoring')}
+              >
+                <Settings2 size={13} /> Open Monitoring settings
+              </button>
+            </>
           )}
 
           <div className="panel-stats">

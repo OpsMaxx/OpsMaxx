@@ -914,7 +914,9 @@ function DemoSftp(): React.JSX.Element {
           ))}
         </div>
         <span className="chip warn">demo</span>
-        <button className="btn sm">
+        {/* The only control in this pane that used to fail silently, in a pane
+            whose entire design is "nothing works here, and it says so". */}
+        <button className="btn sm" onClick={() => notReal('Upload')}>
           <Upload size={13} /> Upload
         </button>
       </div>

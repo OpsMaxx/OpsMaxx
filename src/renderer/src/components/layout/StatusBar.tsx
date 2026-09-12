@@ -58,7 +58,6 @@ export function StatusBar(): React.JSX.Element {
   const tabs = useApp((s) => s.tabs)
   const backupDirty = useApp((s) => s.settings.backupDirty)
   const alerts = useAlerts((s) => s.active)
-  const setActivity = useApp((s) => s.setActivity)
   // Whether the thing that raises those alerts is actually running. An alert
   // count of zero means nothing if nobody is checking.
   const samplerStatus = useFleetStatus((s) => s.status)
@@ -144,7 +143,11 @@ export function StatusBar(): React.JSX.Element {
         <button
           className="item backup-warn"
           title="Stored connections have changed since the last export. Click to open Backup & Restore."
-          onClick={() => setActivity('settings')}
+          // The page, not just the activity. `setActivity('settings')` opened
+          // Settings on whatever section was last selected, so the one chip
+          // whose tooltip names its destination was the one that did not go
+          // there. Same `openSettings` the sampler chip above uses.
+          onClick={() => openSettings('backup')}
         >
           <AlertTriangle size={12} />
           <span>Backup out of date</span>

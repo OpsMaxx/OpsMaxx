@@ -6,6 +6,7 @@ import { stubBridge } from './setup/renderer'
 import { PatchPanel } from '../src/renderer/src/components/monitor/PatchPanel'
 import { useFleet } from '../src/renderer/src/store/fleet'
 import { useApp } from '../src/renderer/src/store/app'
+import { useNav } from '../src/renderer/src/store/nav'
 import {
   FACT_SOURCE_IDS,
   FACT_SOURCE_LABEL,
@@ -254,6 +255,25 @@ describe('the health gate and the sampler it needs', () => {
     const note = screen.getByTestId('patch-gate-unavailable')
     expect(note.textContent).toContain('Check servers in the background')
     expect(note.textContent).toContain('Settings')
+  })
+
+  // Naming the switch is half of it. The note says "Settings → Monitoring" and
+  // then leaves the reader to find both, mid-way through configuring a patch
+  // run — so the note carries the control that gets there.
+  it('opens Monitoring settings from the note, not just names the page', async () => {
+    useApp.setState({ activity: 'monitor' })
+    useNav.setState({ settingsSection: 'appearance' })
+    setSampling(false)
+    seedFacts({ a: facts({ pendingUpdates: 2 }) })
+    render(<PatchPanel servers={[server('a', 'web-1')]} />)
+    const user = userEvent.setup()
+    await user.click(screen.getByLabelText('Select web-1'))
+
+    await user.click(screen.getByTestId('patch-gate-open-settings'))
+    expect(useApp.getState().activity).toBe('settings')
+    // The page, not just the panel: Settings on Appearance is one page short
+    // of the switch and is the same dead end.
+    expect(useNav.getState().settingsSection).toBe('monitoring')
   })
 
   it('offers the gate, on by default, once the sampler is running', async () => {
