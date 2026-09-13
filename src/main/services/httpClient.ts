@@ -1,9 +1,7 @@
-import net from 'node:net'
 import { remoteText } from '../../shared/remoteText'
-import tls from 'node:tls'
 import http from 'node:http'
 import zlib from 'node:zlib'
-import type { Duplex, Transform } from 'node:stream'
+import type { Transform } from 'node:stream'
 import {
   DECODABLE_ENCODINGS,
   MAX_REDIRECT_HOPS,
@@ -21,7 +19,7 @@ import {
   type HttpResult,
   type HttpSshTarget
 } from '../../shared/httpClient'
-import { acquire, release, type PooledConnection } from './ssh'
+import { asSocket, closeDial, dial, startTls, type DialResult } from './netTransport'
 
 /**
  * Executes the HTTP client's requests.
@@ -40,160 +38,6 @@ import { acquire, release, type PooledConnection } from './ssh'
  * relaxations with them; nothing that was granted to the host the user named
  * follows a Location to a host the far end named.
  */
-
-/**
- * ssh2's channel is a Duplex, and Node's HTTP client expects a net.Socket. The
- * missing pieces are all connection-management no-ops on a stream that is
- * already multiplexed inside an SSH connection: there is no Nagle to disable
- * and no event loop handle to ref. Without them the request throws on the
- * first `setNoDelay` rather than sending anything.
- */
-function asSocket(stream: Duplex): net.Socket {
-  const shim = stream as unknown as net.Socket & Record<string, unknown>
-  if (typeof shim.setNoDelay !== 'function') shim.setNoDelay = () => shim
-  if (typeof shim.setKeepAlive !== 'function') shim.setKeepAlive = () => shim
-  if (typeof shim.ref !== 'function') shim.ref = () => shim
-  if (typeof shim.unref !== 'function') shim.unref = () => shim
-  // http.ClientRequest sets its own timeout on the socket. A channel has none,
-  // so the request-level timer below is what actually enforces it.
-  if (typeof shim.setTimeout !== 'function') shim.setTimeout = () => shim
-  return shim
-}
-
-function tcpConnect(host: string, port: number, timeoutMs: number): Promise<net.Socket> {
-  return new Promise((resolve, reject) => {
-    const socket = net.connect({ host, port })
-    const fail = (err: Error): void => {
-      socket.destroy()
-      reject(err)
-    }
-    socket.setTimeout(timeoutMs, () => fail(new Error(`Timed out connecting to ${host}:${port}`)))
-    socket.once('connect', () => {
-      socket.setTimeout(0)
-      socket.removeListener('error', fail)
-      resolve(socket)
-    })
-    socket.once('error', fail)
-  })
-}
-
-/**
- * A direct-tcpip channel from the server to the request's host and port. The
- * server resolves the hostname, which is the whole point: `localhost` is the
- * server's loopback, and a private name resolves in the server's network.
- */
-function forwardOut(conn: PooledConnection, host: string, port: number): Promise<Duplex> {
-  return new Promise((resolve, reject) => {
-    conn.client.forwardOut('127.0.0.1', 0, host, port, (err, stream) =>
-      err ? reject(err) : resolve(stream as unknown as Duplex)
-    )
-  })
-}
-
-/** TLS on top of an already-open transport, so every `via` mode shares it. */
-function startTls(
-  socket: Duplex,
-  servername: string,
-  insecure: boolean,
-  timeoutMs: number,
-  caPem?: string
-): Promise<tls.TLSSocket> {
-  return new Promise((resolve, reject) => {
-    const secure = tls.connect({
-      socket: asSocket(socket),
-      // SNI. Omitted for an IP literal, which is not a valid SNI value and
-      // makes some servers abort the handshake outright.
-      ...(net.isIP(servername) ? {} : { servername }),
-      // A private CA for this request only. Node replaces the root store when
-      // `ca` is set, so the system roots go back in alongside it — a company CA
-      // for the internal Jenkins must not stop the same session reaching
-      // github.com. Verification stays on either way: this is the opposite of
-      // `insecureTls`, not a softer spelling of it.
-      ...(caPem ? { ca: [caPem, ...tls.rootCertificates] } : {}),
-      rejectUnauthorized: !insecure
-    })
-    const timer = setTimeout(() => {
-      secure.destroy()
-      reject(new Error('Timed out during the TLS handshake'))
-    }, timeoutMs)
-    secure.once('secureConnect', () => {
-      clearTimeout(timer)
-      resolve(secure)
-    })
-    secure.once('error', (err) => {
-      clearTimeout(timer)
-      reject(err)
-    })
-  })
-}
-
-/**
- * A TCP connection that has actually gone through a VPN profile.
- *
- * This is the third copy of `vpnStart` → `vpnOpenForward` →
- * `unsupported`-means-system-mode → `registerVpnConsumer` (`db.ts:104-160` and
- * `ssh.ts:459-490` are the other two), and three copies is where the pattern is
- * usually worth a shared helper. Extracting it means refactoring two working
- * subsystems, so it is not done here — but writing the third copy without
- * saying so is how the fourth gets written.
- *
- * Both imports are dynamic, as in the existing callers: the VPN manager pulls
- * in the whole driver set, and a request that never touches a VPN should not
- * pay for it.
- */
-async function vpnConnect(
-  vpnProfileId: string,
-  host: string,
-  port: number,
-  timeoutMs: number
-): Promise<{ socket: net.Socket; close: () => void }> {
-  const { vpnOpenForward, vpnStart } = await import('./vpn/manager')
-
-  // First, and before anything can time out downstream. A profile that failed
-  // to come up has a real reason, and an ETIMEDOUT twenty seconds later hides
-  // it behind something that looks like a broken CI server.
-  const started = await vpnStart(vpnProfileId)
-  if (!started.ok) {
-    throw new Error(started.error ?? 'The VPN for this request could not be started.')
-  }
-
-  const consumer = { kind: 'cicd' as const, id: `${host}:${port}`, name: host }
-  let fwd: { port: number; close: () => void } | null = null
-  try {
-    fwd = await vpnOpenForward(vpnProfileId, host, port, consumer)
-  } catch (err) {
-    // System mode has a real route and nothing to forward through. Anything
-    // else is a genuine failure.
-    if ((err as { code?: string }).code !== 'unsupported') throw err
-  }
-
-  if (!fwd) {
-    // Still register: stopping the profile would cut this request, and the
-    // confirmation has to be able to say so.
-    const { registerVpnConsumer } = await import('./vpn/dependencies')
-    const release = registerVpnConsumer(vpnProfileId, consumer)
-    try {
-      return {
-        socket: await tcpConnect(host, port, timeoutMs),
-        close: release
-      }
-    } catch (err) {
-      release()
-      throw err
-    }
-  }
-
-  const local = fwd
-  try {
-    return {
-      socket: await tcpConnect('127.0.0.1', local.port, timeoutMs),
-      close: local.close
-    }
-  } catch (err) {
-    local.close()
-    throw err
-  }
-}
 
 // --------------------------------------------------------------- decoding
 
@@ -409,30 +253,20 @@ async function sendOnce(
   const timeoutMs = clampTimeout(spec.timeoutMs)
   const { method, headers } = hop
 
-  let conn: PooledConnection | null = null
-  let transport: Duplex | null = null
-  let closeVpn: (() => void) | null = null
+  let dialled: DialResult | null = null
 
   try {
-    if (spec.via.kind === 'server') {
-      conn = await acquire(ctx.prepare(spec.via.server))
-      transport = await forwardOut(conn, target.hostname, target.port)
-    } else if (spec.via.kind === 'vpn') {
-      const dialled = await vpnConnect(
-        spec.via.vpnProfileId,
-        target.hostname,
-        target.port,
-        timeoutMs
-      )
-      transport = dialled.socket
-      closeVpn = dialled.close
-    } else {
-      transport = await tcpConnect(target.hostname, target.port, timeoutMs)
-    }
+    dialled = await dial(spec.via, target.hostname, target.port, timeoutMs, (t) => ctx.prepare(t))
 
     const socket = target.tls
-      ? await startTls(transport, target.hostname, spec.insecureTls === true, timeoutMs, spec.caPem)
-      : asSocket(transport)
+      ? await startTls(
+          dialled.transport,
+          target.hostname,
+          spec.insecureTls === true,
+          timeoutMs,
+          spec.caPem
+        )
+      : asSocket(dialled.transport)
 
     return await new Promise<HttpResult>((resolve) => {
       const started = Date.now()
@@ -564,20 +398,10 @@ async function sendOnce(
   } catch (err) {
     return { ok: false, error: messageOf(err), code: codeOf(err) }
   } finally {
-    // The channel belongs to this request; the pooled SSH connection does not.
-    try {
-      transport?.destroy()
-    } catch {
-      /* a transport that never opened has nothing to close */
-    }
-    if (conn) release(conn)
-    // Same rule for a VPN forward: it was opened for this request, including
-    // the one that failed, and a listener per attempt would leak.
-    try {
-      closeVpn?.()
-    } catch {
-      /* already closed with the tunnel */
-    }
+    // The channel belongs to this request; the pooled SSH connection does not,
+    // and a VPN forward opened for this request — including the one that
+    // failed — is a listener per attempt if nobody closes it.
+    if (dialled) closeDial(dialled)
   }
 }
 

@@ -1,7 +1,21 @@
+import { useState } from 'react'
 import { Globe, Pencil, Plus, ServerCog, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { useApp, useWorkspaceApiCollections, useWorkspaceServers } from '../../store/app'
 import { clsx } from '../../lib/format'
 import { ScalarClient } from './ScalarClient'
+import { WsConsole } from './WsConsole'
+import { GraphQlConsole } from './GraphQlConsole'
+import type { ApiCollection } from '../../types'
+
+/**
+ * What the pane is being used for.
+ *
+ * Three protocols rather than three screens: they share the collection, its
+ * route and its certificate setting, and somebody testing an API moves between
+ * them constantly. Splitting them across activities would mean re-choosing the
+ * API and the route each time.
+ */
+type Mode = 'rest' | 'ws' | 'graphql'
 
 /**
  * The HTTP client.
@@ -22,16 +36,48 @@ export function HttpView(): React.JSX.Element {
 
   if (!active) return <EmptyState onAdd={() => setModal('add-api')} />
 
+  return <HttpBody collections={collections} active={active} />
+}
+
+function HttpBody({
+  collections,
+  active
+}: {
+  collections: readonly ApiCollection[]
+  active: ApiCollection
+}): React.JSX.Element {
+  const [mode, setMode] = useState<Mode>('rest')
+
   return (
     <div className="main">
-      <HttpToolbar collectionId={active.id} />
-      {/* Deliberately NOT keyed.
-          It used to be keyed on the collection, so switching one tore the
-          client down and built another — which is exactly how a half-written
-          request disappeared. The client now holds every collection as a
-          document in one workspace and switches between them internally, so
-          a draft survives switching away and back. */}
-      <ScalarClient collections={collections} activeId={active.id} />
+      <HttpToolbar collectionId={active.id} mode={mode} onMode={setMode} />
+      {/*
+        All three stay MOUNTED, and the inactive ones are hidden rather than
+        removed.
+
+        The REST client is the expensive one — an embedded API client holding
+        every collection — but the argument is the same for all three: none of
+        what is typed into them is saved anywhere until it is sent, and a live
+        WebSocket does not survive being unmounted at all. Switching protocol
+        to check something and coming back has to return you to what you were
+        doing.
+
+        Deliberately not keyed on the collection either. It used to be, which
+        is exactly how a half-written request disappeared when somebody
+        switched API.
+      */}
+      <div className={clsx('http-mode', mode !== 'rest' && 'hidden')} aria-hidden={mode !== 'rest'}>
+        <ScalarClient collections={collections} activeId={active.id} />
+      </div>
+      <div className={clsx('http-mode', mode !== 'ws' && 'hidden')} aria-hidden={mode !== 'ws'}>
+        <WsConsole collection={active} />
+      </div>
+      <div
+        className={clsx('http-mode', mode !== 'graphql' && 'hidden')}
+        aria-hidden={mode !== 'graphql'}
+      >
+        <GraphQlConsole collection={active} />
+      </div>
     </div>
   )
 }
@@ -51,7 +97,15 @@ export function HttpView(): React.JSX.Element {
  * change `viaServerId` and `insecureTls`; the name, the base URL and the spec
  * were fixed at creation, so a typo meant deleting the API and retyping it.
  */
-function HttpToolbar({ collectionId }: { collectionId: string }): React.JSX.Element {
+function HttpToolbar({
+  collectionId,
+  mode,
+  onMode
+}: {
+  collectionId: string
+  mode: Mode
+  onMode: (mode: Mode) => void
+}): React.JSX.Element {
   const collections = useWorkspaceApiCollections()
   const servers = useWorkspaceServers()
   const update = useApp((s) => s.updateApiCollection)
@@ -148,6 +202,25 @@ function HttpToolbar({ collectionId }: { collectionId: string }): React.JSX.Elem
           Hostnames resolve on {viaServer.name}, so <code>localhost</code> is its own loopback.
         </span>
       )}
+
+      <div className="segment http-modes">
+        {(
+          [
+            ['rest', 'REST'],
+            ['ws', 'WebSocket'],
+            ['graphql', 'GraphQL']
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            className={clsx('seg-btn', mode === id && 'active')}
+            aria-pressed={mode === id}
+            onClick={() => onMode(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       <div className="spacer" />
 

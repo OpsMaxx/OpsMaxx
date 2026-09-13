@@ -1,7 +1,7 @@
 // Must come first: redirects userData for portable builds before any
 // service module resolves its file paths.
 import './portable'
-import { app, shell, BrowserWindow, ipcMain, nativeTheme, dialog, session, Menu, Notification, powerMonitor } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, nativeTheme, dialog, session, Menu, Notification, powerMonitor, webContents } from 'electron'
 import { join } from 'node:path'
 import { readFileSync, existsSync, writeFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -241,6 +241,7 @@ import { storeFrpToken } from './services/vpn/frpSetup'
 import { toVpnResult } from './services/vpn/errors'
 import { preparedSshTarget, withVpnTransportDb } from './services/vpn/transport'
 import { httpRequest } from './services/httpClient'
+import { wsClose, wsCloseForOwner, wsOpen, wsSend } from './services/wsClient'
 import { ServiceCheckRunner } from './services/serviceChecks'
 import * as cicd from './services/cicd/wiring'
 import type { CicdConnection } from '../shared/cicd'
@@ -264,6 +265,7 @@ import {
 } from './services/localFiles'
 import { isLocalTarget, LOCAL_TARGET } from '../shared/execTarget'
 import type { HttpRequestSpec } from '../shared/httpClient'
+import type { WsOpenResult, WsOpenSpec, WsSendResult } from '../shared/httpSocket'
 import type { HttpCheck } from '../shared/httpMonitor'
 import type { CredentialShape } from '../shared/credentialShape'
 import type {
@@ -1130,6 +1132,46 @@ ipcMain.handle(
       : { ok: false, error: r.error }
   }
 )
+
+// ---- WebSocket client ----
+//
+// Sockets are opened in main for the reasons requests are — a private
+// certificate, an SSH or VPN route, no CORS — plus one only WebSockets have:
+// the browser cannot set handshake headers at all, so a browser-based client
+// has to put credentials in the query string, where they land in access logs.
+// Node can send a real `Authorization` header, so this does.
+ipcMain.handle('ws:open', (e, spec: WsOpenSpec): Promise<WsOpenResult> =>
+  wsOpen(spec, e.sender.id, {
+    prepare: (target) => preparedSshTarget(target as Parameters<typeof preparedSshTarget>[0]),
+    emit: (ownerId, id, event) => {
+      const target = webContents.fromId(ownerId)
+      if (target && !target.isDestroyed()) target.send(`ws:event:${id}`, event)
+    }
+  })
+)
+
+ipcMain.handle('ws:send', (_e, id: unknown, data: unknown): WsSendResult => {
+  if (typeof id !== 'string') return { ok: false, error: 'That socket is not open.' }
+  if (typeof data !== 'string' && !(data instanceof ArrayBuffer)) {
+    return { ok: false, error: 'A frame is either text or bytes.' }
+  }
+  return wsSend(id, data)
+})
+
+ipcMain.handle('ws:close', (_e, id: unknown, code?: unknown, reason?: unknown) => {
+  if (typeof id !== 'string') return
+  wsClose(
+    id,
+    typeof code === 'number' ? code : undefined,
+    typeof reason === 'string' ? reason : undefined
+  )
+})
+
+// A reloaded renderer would otherwise strand one SSH channel per socket it
+// had open, for the life of the app.
+app.on('web-contents-created', (_e, contents) => {
+  contents.once('destroyed', () => wsCloseForOwner(contents.id))
+})
 
 /**
  * Service checks run HERE, not in the panel that shows them.

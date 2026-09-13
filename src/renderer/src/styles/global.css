@@ -5612,3 +5612,166 @@ details[open] > .disclosure-head .chev {
 .setting-row .s-title.warn {
   color: var(--warn);
 }
+
+/* ---------------------------------------------------------------------------
+   HTTP client: the three protocol panes.
+
+   REST, WebSocket and GraphQL all stay mounted and are hidden rather than
+   removed, so each needs to fill the pane when it is the visible one and take
+   no space when it is not. `display: none` on the hidden ones is what stops a
+   live WebSocket console competing for height with the API client.
+*/
+.http-mode {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.http-mode.hidden {
+  display: none;
+}
+
+/* The protocol switch sits inside the toolbar, before the spacer, so it reads
+   as part of "what am I pointing at this API with" rather than as navigation. */
+.http-modes {
+  margin-left: var(--sp-2);
+}
+
+/* ---- WebSocket console ---- */
+
+.ws-log {
+  flex: 1;
+  min-height: 120px;
+  overflow: auto;
+  padding: var(--sp-2);
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ws-frame {
+  display: grid;
+  /* Direction and time are fixed so the bodies line up and can be scanned
+     down; the body takes whatever is left. */
+  grid-template-columns: 16px 68px 1fr;
+  gap: var(--sp-2);
+  align-items: start;
+  padding: 2px var(--sp-1);
+  border-radius: var(--r-sm);
+}
+.ws-frame-dir {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: 2px;
+}
+.ws-incoming .ws-frame-dir {
+  color: var(--ok);
+}
+.ws-outgoing .ws-frame-dir {
+  /* --accent-ink, not --accent: the fill token is tuned against the white
+     label sitting ON it and fails contrast as text on a light surface. */
+  color: var(--accent-ink);
+}
+.ws-frame-time {
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+.ws-frame-body {
+  /* A frame is arbitrary text, including one very long line of JSON. Wrapping
+     beats a horizontal scrollbar per row. */
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-width: 0;
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.ws-send {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-end;
+  padding: var(--sp-2);
+  border-top: 1px solid var(--border);
+}
+.ws-send .textarea {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+}
+
+/* ---- GraphQL console ---- */
+
+.gql-editors {
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-2);
+  min-height: 0;
+}
+.gql-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+/* The query is the thing being written; variables are usually a few lines. */
+.gql-editor:first-child {
+  flex: 2;
+}
+.gql-editor:last-child {
+  flex: 1;
+}
+.gql-editor .textarea {
+  width: 100%;
+  resize: vertical;
+}
+@media (max-width: 900px) {
+  /* Side by side stops being readable well before the window gets small. */
+  .gql-editors {
+    flex-direction: column;
+  }
+}
+
+.gql-result {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* Errors above the data, and styled as errors. A GraphQL failure arrives with
+   HTTP 200, so this is the only thing on screen saying the query did not
+   work. */
+.gql-errors {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+.gql-error-message {
+  color: var(--danger);
+}
+.gql-schema {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.gql-type > summary {
+  cursor: pointer;
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  padding: 2px 0;
+}
+.gql-fields {
+  margin: 0;
+  padding: 0 0 var(--sp-2) var(--sp-4);
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
