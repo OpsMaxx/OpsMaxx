@@ -49,7 +49,7 @@ import {
   evaluateDatabaseStatement,
   evaluateTunnelOpen,
   evaluateTunnelDefine,
-  evaluateServerRemove,
+  evaluateServerWrite,
   evaluateVpnControl,
   evaluateCiTrigger,
   isVpnKindRefusedForAi,
@@ -348,6 +348,33 @@ function serversBehind(serverId: string): { names: string[]; unmatchedHops: numb
     frontier = next
   }
   return { names: all.filter((s) => found.has(s.id)).map((s) => s.name), unmatchedHops: unmatched }
+}
+
+/**
+ * May this session change or delete THIS saved connection?
+ *
+ * Shaped like `effectiveCapability` -- the session's group is the grant, the
+ * server's own assignment narrows it -- but evaluated through
+ * `evaluateServerWrite`, so an `allow` on `manageServers` becomes an `ask`
+ * rather than a silent write. See the note on that function: the capability's
+ * plain reading is "may add servers", and neither rewriting nor deleting an
+ * existing one is covered by it.
+ */
+function serverWriteCheck(
+  session: McpAgentSession,
+  server: CachedServer,
+  act: 'change' | 'delete'
+): Decision {
+  const sessionGroup = sessionGroupFor(session)
+  const found = resolveRestriction(listAssignments(), server.id, server.workspaceId)
+  if (found.kind === 'no-ai-access') return NO_AI_ACCESS
+  if (!sessionGroup) return { decision: 'deny', reason: 'This AI session has no access group.' }
+  const scopeGroup = found.kind === 'group' ? getGroup(found.groupId) : null
+  return withRestriction(
+    evaluateServerWrite(sessionGroup, act),
+    scopeGroup ? evaluateServerWrite(scopeGroup, act) : null,
+    `the server's own access group ("${scopeGroup?.name}")`
+  )
 }
 
 /** The jump chain as the audit entry and the approval dialog should read it.
@@ -3070,7 +3097,14 @@ function buildServer(): McpServer {
         action: `Change server "${target.name}" (${changes.join(', ')})`,
         capability: 'manageServers'
       }
-      const check = effectiveWorkspaceCapability(session, target.workspaceId, 'manageServers')
+      // Never silent, whatever the group says. Repointing a connection is the
+      // quietest dangerous thing on this bridge: deleting "Prod DB" is loud and
+      // the next call fails, while changing where it points keeps the name, the
+      // stored credential and the sidebar entry, and every later use of it --
+      // by this agent, another agent, or the person clicking it -- goes
+      // somewhere new. `manageServers` set to ALLOW means "add servers without
+      // asking me" and cannot carry that.
+      const check = serverWriteCheck(session, target, 'change')
       const gated = await gate(
         ctx,
         check,
@@ -3159,21 +3193,9 @@ function buildServer(): McpServer {
         capability: 'manageServers'
       }
 
-      // evaluateServerRemove, not the plain capability: an `allow` meant "add
-      // without asking me" and cannot be read as consent to delete.
-      const sessionGroup = sessionGroupFor(session)
-      const found = resolveRestriction(listAssignments(), target.id, target.workspaceId)
-      const scopeGroup = found.kind === 'group' ? getGroup(found.groupId) : null
-      const check =
-        found.kind === 'no-ai-access'
-          ? NO_AI_ACCESS
-          : sessionGroup
-            ? withRestriction(
-                evaluateServerRemove(sessionGroup),
-                scopeGroup ? evaluateServerRemove(scopeGroup) : null,
-                `the server's own access group ("${scopeGroup?.name}")`
-              )
-            : { decision: 'deny' as const, reason: 'This AI session has no access group.' }
+      // Not the plain capability: an `allow` meant "add without asking me" and
+      // cannot be read as consent to delete.
+      const check = serverWriteCheck(session, target, 'delete')
 
       const gated = await gate(
         ctx,

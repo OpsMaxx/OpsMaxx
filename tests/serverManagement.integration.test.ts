@@ -20,7 +20,7 @@ vi.mock('../src/main/services/ssh', () => ({
 }))
 
 const { refreshMcpDataCache } = await import('../src/main/services/mcpDataCache')
-const { setAssignment, resetPolicyCacheForTests } = await import('../src/main/services/policyStore')
+const { setAssignment, saveGroup, getGroup, resetPolicyCacheForTests } = await import('../src/main/services/policyStore')
 const { setMcpConfig, createSession, resetMcpAuthForTests } = await import('../src/main/services/mcpAuth')
 const { startMcpServer, stopMcpServer } = await import('../src/main/services/mcpServer')
 const { onApprovalEvent, respondToApproval } = await import('../src/main/services/approvals')
@@ -82,6 +82,23 @@ beforeEach(() => {
   tested.length = 0
   setAssignment({ level: 'workspace', workspaceId: 'ws' }, 'grp-full')
 })
+
+// An administrator who raised manageServers to ALLOW by hand. No built-in group
+// is shaped this way -- they all seed it at ASK -- so the only way to exercise
+// the rule that an allow is still not silent is to build one.
+const ALLOW_GROUP = 'grp-manage-allow'
+
+function useAllowGroup(): void {
+  const full = getGroup('grp-full')!
+  saveGroup({
+    ...full,
+    id: ALLOW_GROUP,
+    name: 'Manage Allow',
+    builtIn: false,
+    capabilities: { ...full.capabilities, manageServers: 'allow' }
+  })
+  setAssignment({ level: 'workspace', workspaceId: 'ws' }, ALLOW_GROUP)
+}
 
 async function clientFor(groupId: string): Promise<Client> {
   const { token } = createSession({
@@ -302,6 +319,97 @@ describe('update_server', () => {
       expect(req.patch.password).toBeUndefined()
     } finally {
       a.stop()
+      await c.close()
+    }
+  })
+
+  it('asks even when manageServers is raised to ALLOW', async () => {
+    // The gap this closes, and it is only visible on a group an administrator
+    // raised by hand: every built-in that grants manageServers seeds it at ASK,
+    // so Full Access already prompted and proved nothing.
+    //
+    // `allow` meant "add servers without asking me", and update_server read it
+    // as consent to rewrite the ones already saved -- silently. Repointing is
+    // the quieter half of the danger: deleting "Prod DB" is loud and the next
+    // call fails, while changing where it points keeps the name, the stored
+    // credential and the sidebar entry, and every later use of it goes
+    // somewhere new.
+    useAllowGroup()
+    const a = autoRespond('approved')
+    const c = await clientFor(ALLOW_GROUP)
+    try {
+      await call(c, 'update_server', { serverName: 'Scanner01', host: '10.99.99.99' })
+      expect(a.count()).toBe(1)
+      expect(written).toHaveLength(1)
+      const entry = listAudit().find((e) => e.action.startsWith('Change server'))
+      expect(entry?.approval).toBe('approved')
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  it('is not written at all when the user declines on an ALLOW group', async () => {
+    useAllowGroup()
+    const a = autoRespond('denied')
+    const c = await clientFor(ALLOW_GROUP)
+    try {
+      const out = await call(c, 'update_server', { serverName: 'Scanner01', host: '10.99.99.99' })
+      expect(out).toContain('Denied')
+      expect(written).toHaveLength(0)
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  it('asks even on Full Access, which seeds manageServers at ask', async () => {
+    setAssignment({ level: 'workspace', workspaceId: 'ws' }, 'grp-full')
+    const a = autoRespond('approved')
+    const c = await clientFor('grp-full')
+    try {
+      await call(c, 'update_server', { serverName: 'Scanner01', host: '10.99.99.99' })
+      expect(a.count()).toBe(1)
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  it('asks again for a second change in the same session', async () => {
+    const a = autoRespond('approved')
+    const c = await clientFor('grp-full')
+    try {
+      await call(c, 'update_server', { serverName: 'Scanner01', port: 2201 })
+      await call(c, 'update_server', { serverName: 'Scanner01', port: 2202 })
+      expect(a.count()).toBe(2)
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  it('does not change anything when the user declines', async () => {
+    const a = autoRespond('denied')
+    const c = await clientFor('grp-full')
+    try {
+      const out = await call(c, 'update_server', { serverName: 'Scanner01', host: '10.99.99.99' })
+      expect(out).toContain('Denied')
+      expect(written).toHaveLength(0)
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  it('is denied outright under Read Only', async () => {
+    setAssignment({ level: 'workspace', workspaceId: 'ws' }, 'grp-read-only')
+    const c = await clientFor('grp-read-only')
+    try {
+      const out = await call(c, 'update_server', { serverName: 'Scanner01', port: 2222 })
+      expect(out).toContain('Denied')
+      expect(written).toHaveLength(0)
+    } finally {
       await c.close()
     }
   })

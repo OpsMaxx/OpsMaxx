@@ -635,25 +635,39 @@ export function evaluateTunnelDefine(group: AccessGroup | null): Decision {
     : tunnel
 }
 
-// Deleting a saved connection rides `manageServers`, the capability that until
-// now only added them.
+// Changing or deleting a saved connection rides `manageServers`, the capability
+// that until recently only added them.
 //
 // That widening is the reason this exists. A group an administrator set to
 // ALLOW meant "add servers without asking me"; it cannot be read as consent to
-// delete them, and an upgrade must never turn the first into the second in
-// silence. So an `allow` is upgraded to `ask` here -- the same treatment
-// `evaluateTunnelOpen` and `evaluateVpnControl` give the acts that are bigger
-// than the capability's plain reading.
+// rewrite or delete the ones already there, and an upgrade must never turn the
+// first into the second in silence. So an `allow` is upgraded to `ask` here --
+// the same treatment `evaluateTunnelOpen` and `evaluateVpnControl` give the
+// acts that are bigger than the capability's plain reading.
 //
-// gate() carries the second half: remove_server is marked per-call, so one
-// approval authorises one deletion and never the next.
-export function evaluateServerRemove(group: AccessGroup | null): Decision {
+// CHANGING IS IN HERE, NOT JUST DELETING, and the first cut of this had only
+// deleting. Rewriting a connection is the sharper of the two: deleting "Prod
+// DB" is loud and the next call fails, while repointing it is silent and every
+// later call -- from this agent, another agent, or the person at the keyboard
+// clicking the name in the sidebar -- goes to the new host with the old
+// credential. A capability whose plain reading is "may add servers" cannot
+// carry that unasked.
+//
+// gate() carries the second half: both tools are marked per-call, so one
+// approval authorises one write and never the next.
+export function evaluateServerWrite(group: AccessGroup | null, act: 'change' | 'delete'): Decision {
   if (!group) return { decision: 'deny', reason: 'No AI access is assigned to this workspace.' }
   const manage = evaluateCapability(group, 'manageServers')
   if (manage.decision === 'deny')
     return { decision: 'deny', reason: 'Managing servers is denied for this access group.' }
   return manage.decision === 'allow'
-    ? { decision: 'ask', reason: 'Deleting a saved connection always requires approval.' }
+    ? {
+        decision: 'ask',
+        reason:
+          act === 'delete'
+            ? 'Deleting a saved connection always requires approval.'
+            : 'Changing a saved connection always requires approval.'
+      }
     : manage
 }
 

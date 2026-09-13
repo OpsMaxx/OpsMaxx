@@ -169,8 +169,10 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
     detail:
       'Adds a server to the workspace, changes a saved one — including where it points, which ' +
       'account it uses and which other saved server it jumps through — and removes one. It does ' +
-      'not grant any access to the servers it manages. Removing always asks, and one approval ' +
-      'removes one server: an allow here is not a standing permission to delete.'
+      'not grant any access to the servers it manages. Adding is the only part this setting can ' +
+      'make silent: changing and removing an existing connection always ask, and one approval is ' +
+      'one change. Setting this to allow is not a standing permission to repoint or delete what ' +
+      'is already saved.'
   },
   {
     id: 'vpnControl',

@@ -72,7 +72,7 @@ whitelist, so a new tool cannot appear on the bridge without a diff somebody rea
 | `list_vpns` | `vpnControl` | Names, engine, mode and state — **never an endpoint, key or listener address** |
 | `set_vpn` | `vpnControl`, always ASK to start; **frp refused outright** | Confirmation, with a listener count |
 | `add_server` | `manageServers`, resolved on the **workspace**, **never cached** | The name the new connection was saved under. `jumpHosts` names existing servers to reach it through, so a bastion-only host can be onboarded without disclosing one; `verify: true` dials it once and reports whether it came up rather than reporting a dead entry as added |
-| `update_server` | `manageServers`, **never cached** | Which fields changed. Only what you pass is touched — a port change does not disturb the stored credential |
+| `update_server` | `manageServers`, **always ASK even on ALLOW**, **never cached** | Which fields changed. Only what you pass is touched — a port change does not disturb the stored credential |
 | `remove_server` | `manageServers`, **always ASK even on ALLOW**, **never cached** | That the connection and its stored credential are gone. The approval names what the removal takes with it when the server is another server's jump host |
 | `test_connection` | `viewServer` | Whether the connection came up, and the *category* of failure if not — never a hostname, port or username, and never the driver's own text, which contains the address |
 | `list_containers` | `containers` | Containers on one server: image, state, the runtime's own status line, published ports and compose project. It says when it fell back to root, and distinguishes "not in a project" from "the runtime could not say" |
@@ -218,10 +218,16 @@ one-way ratchet: an agent that wrote a wrong entry could not correct or withdraw
 mistake became manual cleanup and the rational move was to stop using `add_server` at all. Two
 consequences of closing that are deliberate and are not left to the capability's plain reading:
 
-- **Removing always asks**, on every group, including one raised to ALLOW
-  (`evaluateServerRemove`, `policyEngine.ts`). An administrator who set this to ALLOW meant "add
-  servers without asking me"; that cannot be read as consent to delete them, and an upgrade must
-  not turn the first into the second in silence.
+- **Changing and removing always ask**, on every group, including one raised to ALLOW
+  (`evaluateServerWrite`, `policyEngine.ts`). An administrator who set this to ALLOW meant "add
+  servers without asking me"; that cannot be read as consent to repoint or delete the ones
+  already there, and an upgrade must not turn the first into the second in silence. Adding is
+  the only part of this capability an ALLOW can make silent.
+
+  Changing is in that rule and not only deleting, because it is the quieter of the two.
+  Deleting `Prod DB` is loud and the next call that names it fails; repointing it keeps the
+  name, the stored credential and the sidebar entry, and every later use — by this agent,
+  another agent, or the person clicking it — goes to the new host.
 - **One approval is one write.** `add_server`, `update_server` and `remove_server` are all marked
   per-call, so an approval authorises the call in front of the user and never the next one.
   Without that, `add_server` — which has no server id yet and so shares one elevation key across
