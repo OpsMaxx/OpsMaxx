@@ -7,6 +7,23 @@
 // creating an unrecoverable secret.
 export const VAULT_MIN_PASSWORD = 12
 
+/**
+ * The token that marks a failure as "the vault is shut" rather than anything
+ * else, so a renderer can offer an unlock without matching an English sentence.
+ *
+ * It lives here, in the shared vocabulary, because three layers need it and two
+ * of them cannot reach the third. It began in main/services/credentialResolver,
+ * which `main/services/vault` cannot import without a cycle now that the vault
+ * itself has a refusal to tag — and the renderer's copy in
+ * renderer/src/lib/withVaultUnlock.ts was a second literal of the same string,
+ * which is exactly the drift the VAULT_MIN_PASSWORD comment above warns about.
+ *
+ * Electron serialises a rejected IPC handler into a plain Error whose message
+ * is prefixed with "Error invoking remote method ...", so a class name does not
+ * survive the trip. A stable token inside the message does.
+ */
+export const VAULT_LOCKED = 'OPSMAXX_VAULT_LOCKED'
+
 // A free-form key/value pair on a vault entry. `secret` fields are masked in
 // the UI until revealed.
 export interface VaultField {
@@ -57,11 +74,51 @@ export interface VaultEntry {
   updatedAt: string
 }
 
+/**
+ * How open the vault is, in three stages rather than two.
+ *
+ * The two-stage version conflated things that need separating. A single
+ * `unlocked` boolean had to answer both "may this person see the entry list"
+ * and "can a background sweep resolve a credential", and those have different
+ * right answers fifteen minutes after somebody walked away from the keyboard.
+ * Answering them together is what made the idle timeout stop monitoring, CI
+ * polling, scheduled backups and reconnects along with hiding the entries.
+ *
+ *   locked   nothing. The derived key is zeroed and the entries are gone.
+ *   secured  the key and the decrypted entries are in MAIN, so credentials
+ *            still resolve and nothing background pauses — but the renderer
+ *            holds no plaintext and the UI asks for the master password again
+ *            before showing, copying or editing anything.
+ *   open     as secured, plus the renderer has the entries.
+ *
+ * What `secured` gives up is stated precisely in SECURITY.md, and it is very
+ * little: the hardened runtime, not this flag, is what defends the key in main
+ * memory against a process running as the same user, and every other credential
+ * this app stores has always sat at that same level in opsmaxx-secrets.json.
+ * What it protects is the half an idle timer can actually protect — the
+ * decrypted entries in the renderer, which renderer-side script injection
+ * reaches, and the entry list on an unattended screen.
+ */
+export type VaultStage = 'locked' | 'secured' | 'open'
+
 export interface VaultStatus {
   // Whether a vault file exists yet — false means the user still has to choose
   // a master password.
   exists: boolean
+  /**
+   * The key is in main-process memory and credentials resolve.
+   *
+   * TRUE IN BOTH `open` AND `secured`, which is the whole point of the split: a
+   * background sweep does not care whether a person is at the keyboard, and the
+   * dozen or so `!s.exists || s.unlocked` gates across main are all asking that
+   * question rather than the viewing one. They keep their line and become
+   * correct for free.
+   *
+   * Anything that is about to put plaintext in front of a person must read
+   * `stage === 'open'` instead.
+   */
   unlocked: boolean
+  stage: VaultStage
   entryCount: number
 }
 

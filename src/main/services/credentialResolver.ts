@@ -1,8 +1,9 @@
 import { getSecret } from './secrets'
 import type { CredentialShape } from '../../shared/credentialShape'
-import { vaultList, vaultStatus } from './vault'
+import { vaultEntriesForResolve, vaultStatus } from './vault'
 import { VpnError } from './vpn/errors'
 import type { SshHop } from '../../shared/ssh'
+import { VAULT_LOCKED } from '../../shared/vault'
 import type { VaultEntry } from '../../shared/vault'
 import type { VpnProfile, VpnSecretField, VpnSecretRef, VpnSpec } from '../../shared/vpn'
 import type { ResolvedVpnSecrets } from './vpn/driver'
@@ -35,11 +36,12 @@ export type CredentialSource = 'vault' | 'keychain' | 'inline' | 'none'
 // Why a connection has no usable credential, when it names a vault entry it
 // cannot read. Surfaced so the failure says "unlock the vault" rather than
 // ssh2's "All configured authentication methods failed".
-// A marker the renderer can recognise across the IPC boundary. Electron
-// serialises a rejected handler into a plain Error whose message is prefixed
-// with "Error invoking remote method ...", so the class and its name do not
-// survive the trip — a stable token inside the message does.
-export const VAULT_LOCKED = 'OPSMAXX_VAULT_LOCKED'
+//
+// The marker itself moved to shared/vault.ts, because main/services/vault now
+// has refusals of its own to tag and cannot import this module without a cycle.
+// Re-exported here so every existing importer keeps importing it from the
+// module it has always imported it from.
+export { VAULT_LOCKED }
 
 export class VaultLockedError extends Error {
   // The subject is a parameter only so a VPN profile does not have to describe
@@ -57,10 +59,16 @@ export function isVaultLockedError(e: unknown): e is VaultLockedError {
   return e instanceof VaultLockedError || (e instanceof Error && e.message.includes(VAULT_LOCKED))
 }
 
+// `vaultEntriesForResolve`, never `vaultList`: this is the unattended read, and
+// `vaultList` resets the idle timer. Resolving a credential on a background
+// sweep is not a person using their vault, and treating it as one is what made
+// the timeout measure uptime instead of idleness. It also works while the vault
+// is `secured`, which is what keeps monitoring, CI polling, scheduled backups
+// and reconnects running after the screen has been cleared.
 function vaultEntry(id: string): VaultEntry | null {
-  const status = vaultStatus()
-  if (!status.exists || !status.unlocked) throw new VaultLockedError()
-  return vaultList().entries?.find((e) => e.id === id) ?? null
+  const entries = vaultEntriesForResolve()
+  if (!entries) throw new VaultLockedError()
+  return entries.find((e) => e.id === id) ?? null
 }
 
 // Copies a vault entry's material onto a connection. The entry is the single
@@ -109,6 +117,31 @@ export function resolveSecrets<T extends SshHop & { serverId?: string }>(cfg: T)
     }
   }
   return cfg
+}
+
+/**
+ * Whether this record's credential can be read right now.
+ *
+ * Per-record, because the boolean it replaces was per-APP: three background
+ * services gated on a global `vaultStatus().unlocked`, so a server whose
+ * password lives in the OS keychain stopped being sampled because some OTHER
+ * server happened to reference a vault entry. The vault is where a credential
+ * should live, so the old gate punished the recommended choice hardest — moving
+ * a credential into the vault was how you stopped its server being checked.
+ *
+ * Takes an id, not a server: a database connection's blob lives in the same
+ * keychain under its own id and carries `vaultEntryId` in the same slot, which
+ * is all `credentialSourceFor` reads.
+ *
+ * A vault that does not exist is not a locked vault — those installs keep their
+ * credentials in the OS keychain or inline and everything works. And `unlocked`
+ * is true while `secured`, which is the point of the stage: a sweep does not
+ * care whether a person is at the keyboard.
+ */
+export function credentialResolvable(id: string): boolean {
+  const status = vaultStatus()
+  if (!status.exists || status.unlocked) return true
+  return credentialSourceFor(id).source !== 'vault'
 }
 
 // Which store a server's credential actually comes from, for the UI to show
@@ -344,12 +377,12 @@ export const VPN_VAULT_SLOT: Record<VpnSecretField, 'privateKey' | 'password' | 
 }
 
 function vpnVaultEntries(): Map<string, VaultEntry> {
-  const status = vaultStatus()
-  if (!status.exists || !status.unlocked) {
+  const entries = vaultEntriesForResolve()
+  if (!entries) {
     throw new VaultLockedError('this VPN profile authenticates with a vault credential')
   }
   const byId = new Map<string, VaultEntry>()
-  for (const e of vaultList().entries ?? []) byId.set(e.id, e)
+  for (const e of entries) byId.set(e.id, e)
   return byId
 }
 

@@ -16,6 +16,10 @@ import type { FleetSamplerStatus } from '../src/shared/fleet'
 const status = (over: Partial<FleetSamplerStatus> = {}): FleetSamplerStatus => ({
   running: true,
   targetCount: 2,
+  // Nothing blocked unless a case says so. The partial-block cases below set
+  // it; every other case is about a state that has nothing to do with the
+  // vault and should keep reading as it did.
+  vaultBlockedCount: 0,
   ...over
 })
 

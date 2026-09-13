@@ -67,7 +67,7 @@ function harness(over: { withFacts?: boolean; factsIntervalMs?: number } = {}): 
         }),
     release: () => undefined,
     emit: (e) => events.push(e),
-    vaultUnlocked: () => true,
+    credentialReady: () => true,
     history: () => ({
       transaction: <T,>(fn: () => T): T => fn(),
       recordSamples: () => undefined,

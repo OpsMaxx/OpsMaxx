@@ -23,6 +23,9 @@ interface Harness {
   calls: string[]
   released: string[]
   setUnlocked: (v: boolean) => void
+  /** Make one server's credential unreadable, as a locked vault does to a
+   *  server that references an entry in it. */
+  block: (id: string) => void
   /** Make the next sample (only the next) report a failure. */
   failNext: (error: string) => void
   resolveAll: () => void
@@ -33,6 +36,10 @@ function harness(over: { slow?: boolean } = {}): Harness {
   const calls: string[] = []
   const released: string[] = []
   let unlocked = true
+  // Per-server blocking, for the case the boolean above cannot express: some
+  // targets reference the vault and some keep their credential in the OS
+  // keychain, and only the first group is stopped by a locked vault.
+  const blocked = new Set<string>()
   let failWith: string | null = null
   const pending: (() => void)[] = []
 
@@ -49,7 +56,7 @@ function harness(over: { slow?: boolean } = {}): Harness {
     },
     release: (k) => released.push(k),
     emit: (e) => events.push(e),
-    vaultUnlocked: () => unlocked
+    credentialReady: (serverId) => unlocked && !blocked.has(serverId)
   })
 
   return {
@@ -60,6 +67,7 @@ function harness(over: { slow?: boolean } = {}): Harness {
     setUnlocked: (v) => {
       unlocked = v
     },
+    block: (id: string) => blocked.add(id),
     failNext: (error) => {
       failWith = error
     },
@@ -158,6 +166,43 @@ describe('running and not running', () => {
     expect(h.sampler.status()).toMatchObject({ running: false, idleReason: 'vault-locked' })
   })
 
+  it('samples the servers it still can when only some are vault-backed', async () => {
+    // The defect this replaces: the gate was per-APP, so one server
+    // referencing a locked vault stopped every OTHER server being sampled —
+    // including the ones whose password sits in the OS keychain and would have
+    // resolved perfectly well. The vault is where a credential belongs, so the
+    // old rule punished the recommended choice hardest: moving a credential
+    // into the vault was how you stopped its neighbours being checked.
+    const h = harness()
+    h.block('a')
+    h.sampler.configure({ enabled: true, intervalMs: 60_000, targets: [target('a'), target('b')] })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(h.calls).toEqual(['fleet:b'])
+    // Skipped, never attempted: no failure and no audit entry per interval,
+    // which is the posture the whole-sweep park was protecting.
+    expect(h.events.some((e) => e.error)).toBe(false)
+    expect(h.sampler.status()).toMatchObject({ running: true, vaultBlockedCount: 1 })
+    // And NOT 'vault-locked' — that now means every target, which is what the
+    // status bar renders as "Checks paused".
+    expect(h.sampler.status().idleReason).toBeUndefined()
+    h.sampler.dispose()
+  })
+
+  it('reports vault-locked only when every target is blocked', async () => {
+    const h = harness()
+    h.block('a')
+    h.block('b')
+    h.sampler.configure({ enabled: true, intervalMs: 60_000, targets: [target('a'), target('b')] })
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+    expect(h.calls).toEqual([])
+    expect(h.sampler.status()).toMatchObject({
+      running: false,
+      idleReason: 'vault-locked',
+      vaultBlockedCount: 2
+    })
+  })
+
   it('resumes when the vault is unlocked and it is reconfigured', async () => {
     const h = harness()
     h.setUnlocked(false)
@@ -233,7 +278,7 @@ describe('sweep behaviour', () => {
       },
       release: () => {},
       emit: (e) => events.push(e),
-      vaultUnlocked: () => true
+      credentialReady: () => true
     })
     sampler.configure({
       enabled: true,
@@ -258,7 +303,7 @@ describe('sweep behaviour', () => {
       sample: async () => ({ ok: false, error: 'permission denied' }),
       release: () => {},
       emit: (e) => events.push(e),
-      vaultUnlocked: () => true
+      credentialReady: () => true
     })
     sampler.configure({ enabled: true, intervalMs: 60_000, targets: [target('a')] })
     await vi.advanceTimersByTimeAsync(0)

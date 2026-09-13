@@ -306,7 +306,10 @@ const SETTING_INDEX: SettingEntry[] = [
     aliases: 'detached nohup background jobs apt dpkg'
   },
   // Security
-  { section: 'security', title: 'Lock after inactivity', desc: 'How long the vault stays unlocked without use.', aliases: 'vault auto lock timeout idle' },
+  // `title` must match the rendered `.s-title` verbatim — the contract at the
+  // top of this list. `lock` stays in the aliases: it is what people will
+  // search for, and it is still what the control eventually leads to.
+  { section: 'security', title: 'Secure after inactivity', desc: 'How long the vault stays on screen without use.', aliases: 'vault auto lock secure timeout idle' },
   { section: 'security', title: 'Trusted SSH host keys', desc: 'The host keys this machine has accepted.', aliases: 'known hosts fingerprint host key mismatch' },
   { section: 'security', title: 'Store credentials in OS keychain', desc: 'Use the platform secure store — never plaintext.', aliases: 'keychain secrets password storage' },
   { section: 'security', title: 'Auto-lock workspaces', desc: 'Lock password-protected workspaces after inactivity.', aliases: 'workspace lock idle' },
@@ -1292,11 +1295,14 @@ export function Settings(): React.JSX.Element {
               <VaultState />
               <div className="setting-row">
                 <div className="s-info">
-                  <div className="s-title">Lock after inactivity</div>
+                  <div className="s-title">Secure after inactivity</div>
                   <div className="s-desc">
-                    While the vault is unlocked its key is in memory and its entries are on screen.
-                    Locking clears both. The timer counts vault inactivity, not time since you
-                    started the app.
+                    Clears the vault from this screen and asks for your master password before
+                    showing it again. Nothing else stops — connections, background checks,
+                    pipeline polling and scheduled backups keep using the credentials in it. The
+                    vault locks completely when you quit or your machine sleeps. The timer counts
+                    vault inactivity, not time since you started the app, and background work does
+                    not postpone it.
                   </div>
                 </div>
                 <select

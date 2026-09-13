@@ -176,13 +176,16 @@ import {
   vaultCreate,
   vaultUnlock,
   vaultLock,
+  vaultSecure,
   vaultList,
+  vaultEntriesForResolve,
   vaultSave,
   vaultChangePassword,
   vaultDestroy,
   vaultDispose
 } from './services/vault'
-import type { VaultEntry } from '../shared/vault'
+import type { VaultEntry, VaultResult } from '../shared/vault'
+import { VAULT_LOCKED } from '../shared/vault'
 import { wsLockIds, wsLockSet, wsLockVerify, wsLockRemove, wsLockDelete } from './services/wslock'
 import { tunnelStart, tunnelStop, tunnelList, tunnelDisposeAll } from './services/tunnel'
 import { rdpMintTicket, stopRdpRelay } from './services/rdpRelay'
@@ -316,6 +319,7 @@ import type { SshConnectConfig } from '../shared/ssh'
 import {
   isVaultLockedError,
   resolveDbSecrets,
+  credentialResolvable,
   credentialShapeForServer,
   resolveVaultField,
   type SecretBlob
@@ -1813,13 +1817,11 @@ const fleetSampler = new FleetSampler({
   progress: (p) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('fleet:progress', p)
   },
-  // A vault that does not exist is not a locked vault: those installs keep
-  // their credentials in the OS keychain or inline, and sampling works fine.
-  // Only an existing-but-locked vault means every resolve would throw.
-  vaultUnlocked: () => {
-    const s = vaultStatus()
-    return !s.exists || s.unlocked
-  },
+  // Per SERVER, not per app. `credentialResolvable` carries the reasoning: a
+  // vault that does not exist is not a locked one, `unlocked` stays true while
+  // the vault is merely secured, and a server whose password is in the OS
+  // keychain is sampleable whatever the vault is doing.
+  credentialReady: (serverId) => credentialResolvable(serverId),
   // Resolved per sweep, not captured: this sampler is constructed at module
   // scope and the store opens asynchronously after it. Until then — and
   // forever, on a machine where history is off — this returns null and the
@@ -1860,13 +1862,10 @@ const dbSampler = new DbSampler({
   record: (connectionId, at, bytes) => {
     historyStore?.recordSamples(databaseSubject(connectionId), at, { dbBytes: bytes })
   },
-  // The same reading the fleet sampler takes, and for the same reason: a vault
-  // that does not exist is not a locked one -- those users keep credentials in
-  // the OS keychain or inline and sampling works fine.
-  vaultUnlocked: () => {
-    const st = vaultStatus()
-    return !st.exists || st.unlocked
-  }
+  // The same reading the fleet sampler takes, and for the same reason -- per
+  // record, so a database whose password is in the OS keychain is not stopped
+  // by some other record referencing a shut vault.
+  credentialReady: (id) => credentialResolvable(id)
 })
 
 ipcMain.handle('db:sampler-configure', (_e, cfg: DbSamplerConfig) => {
@@ -2475,14 +2474,11 @@ const detachedExec = detachedJobExecutor({
   instanceId: opsmaxxInstanceId(),
   attached: attachedExec,
   enabled: () => jobsDetachedEnabled,
-  // A vault that does not exist is not a locked vault — fleetSampler's rule,
-  // and the same one-liner. What differs is the consequence: a parked SAMPLE
-  // loses a data point, while a parked POLL loses nothing at all, because the
-  // byte cursor makes the next one pick up exactly where this would have.
-  vaultUnlocked: () => {
-    const st = vaultStatus()
-    return !st.exists || st.unlocked
-  },
+  // fleetSampler's rule, per server. What differs is the consequence: a parked
+  // SAMPLE loses a data point, while a parked POLL loses nothing at all,
+  // because the byte cursor makes the next one pick up exactly where this
+  // would have.
+  credentialReady: (serverId) => credentialResolvable(serverId),
   onCapability: (report) => {
     jobCapabilities.set(report.serverId, report)
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -3203,11 +3199,23 @@ ipcMain.handle(
  * downstream can decide to include a little more.
  */
 ipcMain.handle('vault-index:list', (): VaultIndexResult => {
-  const r = vaultList()
-  if (!r.ok || !r.entries) return { ok: false, error: r.error ?? 'The vault is locked.' }
-  // `toVaultDescriptor` rather than an inline literal: see its own comment,
-  // an inline one here type-checked with `password` added to it.
-  return { ok: true, entries: r.entries.map(toVaultDescriptor) }
+  /**
+   * `vaultEntriesForResolve`, so a credential PICKER keeps working while the
+   * vault is secured.
+   *
+   * That is what stops the Add Server modal quietly collapsing to the keychain
+   * path fifteen minutes after the last vault click — which was a direct cause
+   * of credentials not ending up in the vault in the first place. Safe by
+   * construction rather than by care: this handler only ever emits
+   * `toVaultDescriptor`, and shared/vaultIndex.ts explains why its explicit
+   * return type makes adding a secret to that projection a compile error.
+   *
+   * It also does not reset the idle timer, which is right: picking from a list
+   * of names is not reading the vault.
+   */
+  const entries = vaultEntriesForResolve()
+  if (!entries) return { ok: false, error: `${VAULT_LOCKED}: the vault is locked.` }
+  return { ok: true, entries: entries.map(toVaultDescriptor) }
 })
 
 ipcMain.handle(
@@ -4555,30 +4563,60 @@ ipcMain.handle('vault:create', (_e, password: string) => vaultCreate(password))
 //
 // `resume()` is idempotent, so each path calls it without coordinating.
 const resumeChecksAfterUnlock = (r: { ok: boolean }): { ok: boolean } => {
-  if (r.ok) fleetSampler.resume()
+  if (r.ok) {
+    fleetSampler.resume()
+    // The db sampler has had a `resume()` since it was written and nothing has
+    // ever called it — the one line above was doing the work for both. Same
+    // idempotence, so no coordination.
+    dbSampler.resume()
+  }
   return r
 }
 
 ipcMain.handle('vault:unlock', async (_e, password: string) =>
   resumeChecksAfterUnlock(await vaultUnlock(password))
 )
-// Auto-lock needs the renderer told, or the UI keeps showing an unlocked vault
-// it can no longer read. The biometric session key goes with it.
-setVaultAutoLock(15, () => {
+
+const notifyRenderer = (channel: string, payload?: unknown): void => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
+}
+
+/**
+ * Stage 2, from every path that reaches it.
+ *
+ * Three things have to happen together and the auto path used to do two of
+ * them: the session-scoped biometric key must not outlive the key it reopens,
+ * and neither may a half-finished VPN edit, which is holding certificates and
+ * keys out of a profile in memory and was readable only because the vault was
+ * open. `forgetVpnEdits()` was on the manual handler and not on the automatic
+ * one, so an idle timeout left that material behind.
+ */
+const lockVaultFully = (): VaultResult => {
   forgetSessionKey()
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('vault:auto-locked')
+  forgetVpnEdits()
+  const r = vaultLock()
+  notifyRenderer('vault:auto-locked')
+  return r
+}
+
+/**
+ * Stage 1, on the idle timer.
+ *
+ * The renderer has to be told, or it goes on holding decrypted entries — which
+ * is the only thing this stage removes, so an unheard message makes it
+ * ceremonial.
+ *
+ * The biometric session key is deliberately KEPT. It unwraps a key that is
+ * still in memory, so forgetting it protects nothing and turns a one-press
+ * re-auth back into typing the master password. It goes on the full lock above,
+ * where the key it reopens is actually gone.
+ */
+setVaultAutoLock(15, () => {
+  vaultSecure()
+  notifyRenderer('vault:secured')
 })
 
-ipcMain.handle('vault:lock', () => {
-  // A session-scoped biometric key must not outlive the unlocked state, or
-  // "lock" would not mean locked.
-  forgetSessionKey()
-  // Nor may a half-finished VPN edit: it is holding the certificates and keys
-  // out of a profile, in memory, and they were readable only because the vault
-  // was open. Same rule, one line down.
-  forgetVpnEdits()
-  return vaultLock()
-})
+ipcMain.handle('vault:lock', () => lockVaultFully())
 ipcMain.handle('vault:list', () => vaultList())
 ipcMain.handle('vault:save', (_e, entries: VaultEntry[]) => vaultSave(entries))
 // The stored biometric key was derived from the old password and cannot open
@@ -5050,6 +5088,28 @@ syncDriftWatches(loadData())
   // cheaper than either.
   powerMonitor.on('resume', () => vpnHandleWake())
   powerMonitor.on('unlock-screen', () => vpnHandleWake())
+
+  /**
+   * The two vault stages, mapped onto what the machine is actually doing.
+   *
+   * A locked SCREEN means the person stepped away, so the entries come off the
+   * screen and nothing else changes — monitoring, CI polling and scheduled
+   * backups carry on, which is the whole reason stage 1 exists. Hard-locking
+   * here would be worse than the idle timeout it replaces: macOS fires
+   * `lock-screen` for the screensaver, so a two-minute coffee would stop the
+   * estate being checked.
+   *
+   * SUSPEND is different in kind. The machine is off, nothing is being polled
+   * anyway, and a key sitting in the memory of a laptop that is about to be
+   * carried out of the building is the case a hard lock is actually for.
+   */
+  powerMonitor.on('lock-screen', () => {
+    vaultSecure()
+    notifyRenderer('vault:secured')
+  })
+  powerMonitor.on('suspend', () => {
+    lockVaultFully()
+  })
 
   // Children a previous run left behind. Identity — exe path AND start time —
   // is verified before anything is signalled, because a pid on its own says

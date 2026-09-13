@@ -364,10 +364,19 @@ export interface FleetSamplerDeps {
    * spinner, which is what "it feels like nothing happened" describes.
    */
   progress?: (p: FleetSweepProgress) => void
-  // Reports whether credentials can currently be resolved at all. When they
-  // cannot, sweeping every target would produce one failure per server per
-  // interval, forever, plus an audit entry each — so the loop parks instead.
-  vaultUnlocked: () => boolean
+  /**
+   * Whether THIS server's credential can be resolved right now.
+   *
+   * Per-target, replacing a per-app boolean. Sweeping a target whose credential
+   * cannot be read produces one failure per interval forever, plus an audit
+   * entry each, so it is skipped rather than attempted — but the old version
+   * asked the question about the whole app, so one server referencing a locked
+   * vault stopped every OTHER server being sampled, including the ones whose
+   * password sits in the OS keychain and would have resolved fine. The vault is
+   * where a credential belongs, which made the old gate punish the recommended
+   * choice hardest.
+   */
+  credentialReady: (serverId: string) => boolean
   /**
    * The durable store, resolved per sweep rather than captured once.
    *
@@ -767,7 +776,19 @@ export class FleetSampler {
   }
 
   private shouldRun(): boolean {
-    return this.cfg.enabled && this.cfg.targets.length > 0 && this.deps.vaultUnlocked()
+    // `some`, not `every`: one sampleable target is a reason to sweep. The
+    // blocked ones are skipped inside the loop.
+    return (
+      this.cfg.enabled &&
+      this.cfg.targets.length > 0 &&
+      this.cfg.targets.some((t) => this.deps.credentialReady(t.serverId))
+    )
+  }
+
+  /** Targets that cannot be sampled because their credential is in a vault
+   *  that is shut. 0 whenever the vault is open, absent, or unreferenced. */
+  private blockedCount(): number {
+    return this.cfg.targets.reduce((n, t) => (this.deps.credentialReady(t.serverId) ? n : n + 1), 0)
   }
 
   /** What this sampler last learned about one server. */
@@ -805,14 +826,21 @@ export class FleetSampler {
   }
 
   status(): FleetSamplerStatus {
+    const blocked = this.blockedCount()
     const base = {
       targetCount: this.cfg.targets.length,
+      vaultBlockedCount: blocked,
       lastSweepAt: this.lastSweepAt,
       lastSweepMs: this.lastSweepMs
     }
     if (!this.cfg.enabled) return { running: false, idleReason: 'disabled', ...base }
     if (this.cfg.targets.length === 0) return { running: false, idleReason: 'no-targets', ...base }
-    if (!this.deps.vaultUnlocked()) return { running: false, idleReason: 'vault-locked', ...base }
+    // `vault-locked` now means what it says: EVERY target is blocked. It used
+    // to mean "the vault is shut", which the status bar rendered as "Checks
+    // paused" even when most of the estate was still perfectly sampleable.
+    if (blocked === this.cfg.targets.length) {
+      return { running: false, idleReason: 'vault-locked', ...base }
+    }
     // Derived from the loop, not from the config. status() used to say
     // `running: true` whenever the settings said so, which is exactly what let
     // a stalled sampler go unnoticed -- the settings screen affirmed it was
@@ -1386,9 +1414,18 @@ export class FleetSampler {
       let swept = 0
       for (const t of this.cfg.targets) {
         if (gen !== this.generation || this.disposed) return
-        // Re-checked inside the loop: an auto-lock partway through a sweep
-        // should stop it, not produce a failure for every remaining server.
-        if (!this.deps.vaultUnlocked()) break
+        // Re-checked inside the loop, because the vault can shut partway
+        // through a sweep. `continue`, not `break`: this skips the one target
+        // whose credential cannot be read and carries on with the rest, which
+        // is the difference between a monitoring tool that stops monitoring
+        // and one that reports on everything it still can. Skipped and never
+        // attempted, so the "no failure, no audit entry per interval" posture
+        // this loop is written around is unchanged — it now applies to the
+        // target rather than to the sweep.
+        if (!this.deps.credentialReady(t.serverId)) {
+          swept++
+          continue
+        }
 
         // Before the ask, not after: this host is where the next 45 seconds
         // are about to go, and naming it while it is being waited on is the

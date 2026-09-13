@@ -111,4 +111,37 @@ describe('a locked vault always comes with a way to unlock it', () => {
     const patch = readFileSync('src/renderer/src/components/monitor/PatchPanel.tsx', 'utf8')
     expect(patch).toContain('withoutVaultMarker(')
   })
+
+  /**
+   * Three paths that named a locked vault and offered nothing, each because it
+   * threw or printed something `isVaultLocked` could not recognise.
+   *
+   * They are pinned by their mechanism rather than their wording, because the
+   * wording is the thing that keeps changing and the mechanism is what the
+   * invariant actually rests on.
+   */
+  it('throws a recognisable error for an S3 backup destination', () => {
+    // This threw a bare `Error`, which carries no marker — so the destination
+    // row showed a sentence about a locked vault with nothing to press.
+    const src = readFileSync('src/main/services/backupTargets.ts', 'utf8')
+    expect(src).toContain('VaultLockedError')
+  })
+
+  it('offers the unlock on a CI connection instead of a retry', () => {
+    // The poller's error string carried the marker all the way from
+    // `cicd/service.ts`, and the panel printed it at the user beside a "Retry"
+    // button that could not succeed until something happened elsewhere.
+    const panel = readFileSync('src/renderer/src/components/cicd/CicdPanel.tsx', 'utf8')
+    expect(panel).toContain('isVaultLocked(')
+    expect(panel).toContain('UnlockVaultButton')
+  })
+
+  it('translates the marker for an agent, which cannot press anything', () => {
+    // An agent has no unlock path, deliberately. The marker reached the model
+    // as a literal prefix on an error it could do nothing with, which is how a
+    // model ends up inventing a way to "unlock" something.
+    const mcp = readFileSync('src/main/services/mcpServer.ts', 'utf8')
+    expect(mcp).toContain('VAULT_LOCKED')
+    expect(mcp).toContain('Ask the person running OpsMaxx to unlock the vault')
+  })
 })

@@ -129,15 +129,27 @@ export interface FleetSampleEvent {
 export type FleetSamplerIdleReason =
   | 'disabled'
   | 'no-targets'
-  // Credentials cannot be resolved, so sampling would fail on every target.
-  // Degrading to "not sampling" is deliberate: retrying into a locked vault
-  // produces an error loop and an audit entry per attempt.
+  // EVERY target's credential is in a vault that is shut, so sampling would
+  // fail on all of them. Degrading to "not sampling" is deliberate: retrying
+  // into a locked vault produces an error loop and an audit entry per attempt.
+  //
+  // "Every", not "the vault is locked", and the distinction is the point: a
+  // partially blocked sweep still runs and reports `vaultBlockedCount` instead.
   | 'vault-locked'
 
 export interface FleetSamplerStatus {
   running: boolean
   idleReason?: FleetSamplerIdleReason
   targetCount: number
+  /**
+   * Targets skipped because their credential is in a vault that is shut.
+   * 0 when the vault is open, absent, or referenced by none of them.
+   *
+   * A count and not a list of ids: what the status bar needs to know is "some,
+   * not all", and a list of server ids on a status object is a list that ends
+   * up rendered somewhere it was not designed for.
+   */
+  vaultBlockedCount: number
   // When the last sweep finished, or undefined if none has.
   lastSweepAt?: number
   // How long the last sweep took end to end, which is what tells a user

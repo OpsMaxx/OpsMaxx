@@ -448,6 +448,14 @@ export async function createSecret(label: string, token: string): Promise<string
   if (!token) throw new Error('No token was supplied.')
   const listed = vaultList()
   if (!listed.ok || !listed.entries) {
+    // `vaultList`'s own refusal, marker and all, rather than a sentence of our
+    // own. This used to throw a bare Error, so the connect modal printed "the
+    // vault is locked" and offered nothing to press — `isVaultLocked` matches
+    // on the marker, not on wording.
+    //
+    // A vault WRITE genuinely needs the vault fully open, unlike a resolve:
+    // saving a token is a person doing something, and `vaultList` is the read
+    // path that says so.
     throw new Error(listed.error ?? 'The vault is locked. Unlock it to save this connection.')
   }
   const now = new Date().toISOString()

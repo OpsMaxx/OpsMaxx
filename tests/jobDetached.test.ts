@@ -1102,7 +1102,7 @@ describe('when the vault is locked', () => {
     // cursor makes the next one pick up exactly where this would have.
     const host = new FakeHost()
     let unlocked = true
-    const h = harness(host, { vaultUnlocked: () => unlocked, parkMs: 10_000 })
+    const h = harness(host, { credentialReady: () => unlocked, parkMs: 10_000 })
     const { req, states } = request()
     const p = h.exec(req)
     await h.flush()

@@ -52,7 +52,7 @@ exclusion.
 | Data | Storage | Protection |
 |---|---|---|
 | SSH passwords, key paths, key passphrases; credential-proxy token values; **the traffic inspector's CA private key** | `opsmaxx-secrets.json` | Electron `safeStorage` — DPAPI / Keychain / libsecret. Machine and user bound, with one Linux exception: the backend is whichever password store the desktop session offers, and `basic_text` is Electron's name for *no system keyring was recognised*. There `safeStorage` reports no encryption available, and the app refuses to persist rather than store in the clear — so on such a desktop a credential does not survive a restart and has to be entered again; the diagnostics payload names the store as `secretStoreBackend`, beside `secretStore.available`. This is the only file of `safeStorage`-sealed **credentials** — not the only thing the app seals, because the biometric unlock key two rows down is the vault's derived key under the same `safeStorage`, and not everything it persists is sealed at all, because the MCP client configs further down this table hold a live bearer token in plaintext. What is in here includes the root CA the traffic inspector mints: that key can impersonate any site to a machine that trusts the certificate, and it is only ever written sealed — if the OS store is unavailable it is kept in memory for the session and a new authority is minted next launch rather than written in plaintext. |
-| Vault entries | `opsmaxx-vault.json` | AES-256-GCM, key from the master password via scrypt (N=32768). Password never stored. Decrypted entries are sent to the renderer while the vault is open, so they live in the renderer's memory too — not only in the main process. |
+| Vault entries | `opsmaxx-vault.json` | AES-256-GCM, key from the master password via scrypt (N=32768). Password never stored. Decrypted entries are sent to the renderer while the vault is **open**, so they live in the renderer's memory too — not only in the main process. The idle timer moves the vault to **secured**, which drops that renderer copy and keeps the key and entries in main so unattended work can still resolve a credential; **locked** is the state where the key is zeroed and nothing resolves. *Why the vault has two shut stages* below is the argument for that split. |
 | Biometric unlock key (opt-in, off by default) | main-process memory, or `opsmaxx-vault-bio.json` | The vault's **derived key**, wrapped with Electron `safeStorage`. By default this is held in memory only and dies with the process, so nothing is written to disk. The file exists only if you explicitly choose to keep biometric unlock across restarts. |
 | Workspace passwords | `opsmaxx-wslocks.json` | scrypt verifier with a random salt, compared with `timingSafeEqual`. Not reversible. |
 | Trusted SSH host keys | `opsmaxx-known-hosts.json` | SHA-256 fingerprints, plaintext (not secret). |
@@ -122,6 +122,50 @@ Library validation is disabled by entitlement, because `asarUnpack` keeps the
 ssh2 and cpu-features native binaries outside the archive deliberately. That
 gives back one of the three protections the hardened runtime provides and keeps
 the two that defend an unlocked vault.
+
+### Why the vault has two shut stages
+
+The vault used to have one: unlocked, or locked. Fifteen minutes of inactivity zeroed the
+key — and with it stopped background checking, pipeline polling, scheduled backups and
+every reconnect, because all of those resolve a credential through the same path. A
+monitoring tool stopped monitoring because nobody had clicked anything.
+
+It is worth being precise about what that bought, because the answer is: less than it
+looks, and in the common case nothing at all.
+
+**The idle timer never defended main-process memory, and this file already says so.**
+*Process hardening* above states that the hardened runtime is what stops a process
+running as the same user reading an unlocked vault key out of memory, and that "no amount
+of encryption at rest or biometric gating prevents that". Zeroing a key fifteen minutes
+after the last click does not change that sentence. It changes whether the app works.
+
+**What an idle timer can remove is the renderer's copy** — a real exposure, admitted in
+the table above: the decrypted entries are sent to the renderer, so renderer-side script
+injection reaches vault plaintext. That is now what the timer removes, and it removes it
+*app-wide*. Previously the listener that dropped those entries was mounted only inside
+the Vault screen, so on every other screen — which is almost always — the "lock" left
+every password and private key in the renderer's memory. The new arrangement protects
+strictly more than the old one did, not less.
+
+**Keeping the key for unattended work is the protection level the rest of the app already
+has.** `opsmaxx-secrets.json` holds SSH passwords, key paths and key passphrases under
+`safeStorage` alone, readable by anything running as you — deliberately, so a connection
+can be made with no human present. *What biometric unlock actually protects* below makes
+exactly this argument for the biometric key: enabling it "moves the vault down to the
+protection the rest of the app already has, rather than opening a new category of risk."
+A vault credential that has to keep a sweep alive is the same requirement.
+
+**What is given up, plainly.** Between `secured` and `locked` an attacker who can inject
+into the main process finds a live key where the old design might, sometimes, have found
+none. The defence is the hardened runtime — the same defence the previous fifteen minutes
+rested on — and the window is bounded by sleep, by quit, and by an explicit lock.
+
+**Screen lock secures; suspend locks.** A locked screen means you stepped away, so the
+entries come off it and nothing else changes. Suspend means the machine is off, nothing
+is being polled anyway, and a key in the memory of a laptop about to be carried out of
+the building is the case a hard lock is actually for. On macOS `lock-screen` fires for
+the screensaver, so hard-locking there would reproduce the original defect through a
+different door.
 
 ### Workspaces and the vault
 

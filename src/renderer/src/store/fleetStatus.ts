@@ -25,7 +25,7 @@ export const useFleetStatus = create<FleetStatusState>((set) => ({
   setStatus: (status) => set({ status })
 }))
 
-export type SamplerWarningKind = 'vault-locked' | 'no-targets' | 'stalled'
+export type SamplerWarningKind = 'vault-locked' | 'vault-partial' | 'no-targets' | 'stalled'
 
 export interface SamplerWarning {
   kind: SamplerWarningKind
@@ -39,7 +39,19 @@ const WARNINGS: Record<SamplerWarningKind, Omit<SamplerWarning, 'kind'>> = {
   'vault-locked': {
     label: 'Checks paused',
     detail:
-      'Background checking is paused because the vault is locked, so no alerts can be raised. ' +
+      'Every server being checked authenticates with a credential in the vault, and the vault ' +
+      'is locked — so nothing is being checked and no alerts can be raised.' +
+      '\n\nClick to unlock.'
+  },
+  // The partial case, which used to be reported as the total one. A vault with
+  // one credential in it made the chip say every check had stopped, when in
+  // fact one server had. Saying "paused" about an estate that is still being
+  // watched is the same class of wrong as silence about one that is not.
+  'vault-partial': {
+    label: 'Some checks paused',
+    detail:
+      'Some servers are not being checked: their credential is in the vault, and the vault is ' +
+      'locked. Everything else is still being checked and can still raise an alert.' +
       '\n\nClick to unlock.'
   },
   'no-targets': {
@@ -74,6 +86,9 @@ export function samplerWarning(
   if (!enabled || !status) return null
   if (status.idleReason === 'disabled') return null
   if (status.idleReason === 'vault-locked') return { kind: 'vault-locked', ...WARNINGS['vault-locked'] }
+  // Deliberately NOT gated on `!status.running`: a sweep that is running and
+  // skipping four hosts is precisely the case this exists for.
+  if (status.vaultBlockedCount > 0) return { kind: 'vault-partial', ...WARNINGS['vault-partial'] }
   if (status.idleReason === 'no-targets') return { kind: 'no-targets', ...WARNINGS['no-targets'] }
   // Enabled, targets present, vault open, and still not looping.
   if (!status.running) return { kind: 'stalled', ...WARNINGS.stalled }
@@ -100,7 +115,13 @@ export function samplerWarning(
 // sampler has published `idleReason` all along. This turns it into the answer.
 // ---------------------------------------------------------------------------
 
-export type SweepBlockKind = 'vault-locked' | 'checks-off' | 'no-targets' | 'stalled' | 'not-yet'
+export type SweepBlockKind =
+  | 'vault-locked'
+  | 'vault-partial'
+  | 'checks-off'
+  | 'no-targets'
+  | 'stalled'
+  | 'not-yet'
 
 export interface SweepBlock {
   kind: SweepBlockKind
@@ -174,6 +195,22 @@ export function sweepBlock(status: FleetSamplerStatus | null, enabled: boolean):
       reason: 'Background checking is on, but nothing is scheduled.',
       fix: 'Turn it off and on again in Monitoring settings to restart it.',
       action: 'open-settings'
+    }
+  }
+  if (status.vaultBlockedCount > 0) {
+    /**
+     * Ceiling, stated: this does not know whether THIS panel's hosts are among
+     * the blocked ones. `sweepBlock` is pure and takes no server ids, and
+     * threading them through six panels to sharpen one sentence is not worth
+     * it. So it says "some", which is true, rather than "nothing has been
+     * collected for these hosts yet", which in this state is a guess that
+     * sends the reader to press a button that will not help.
+     */
+    return {
+      kind: 'vault-partial',
+      reason: 'Some servers are not being checked: their credential is in the vault, and it is locked.',
+      fix: 'Unlock the vault. The rest of the estate is still being checked.',
+      action: 'unlock-vault'
     }
   }
   return {

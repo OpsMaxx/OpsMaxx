@@ -7,7 +7,9 @@ import {
   vaultCreate,
   vaultUnlock,
   vaultLock,
+  vaultSecure,
   vaultList,
+  vaultEntriesForResolve,
   vaultStatus,
   vaultSave,
   vaultChangePassword,
@@ -110,17 +112,27 @@ describe('master password floor', () => {
   })
 })
 
-describe('idle auto-lock', () => {
-  it('locks the vault after the idle period', async () => {
+describe('idle auto-secure', () => {
+  it('secures the vault after the idle period, and does not lock it', async () => {
     vi.useFakeTimers()
     await vaultCreate('a-long-enough-password')
     setVaultAutoLock(15)
-    expect(vaultStatus().unlocked).toBe(true)
+    expect(vaultStatus().stage).toBe('open')
 
     vi.advanceTimersByTime(15 * 60_000 + 1000)
-    // A vault that never locks itself makes every other protection optional:
-    // the key sits in memory for as long as the app is open.
-    expect(vaultStatus().unlocked).toBe(false)
+
+    // A vault that never shuts itself makes every other protection optional:
+    // the decrypted entries sit in the renderer for as long as the app is open.
+    // So the entries go, and the screen asks for the password again.
+    expect(vaultStatus().stage).toBe('secured')
+    expect(vaultList().ok).toBe(false)
+
+    // But the key stays, so everything unattended keeps working. Locking
+    // outright is what stopped monitoring, CI polling, scheduled backups and
+    // every reconnect because nobody had clicked anything for a quarter of an
+    // hour — the whole defect this stage exists to remove.
+    expect(vaultStatus().unlocked).toBe(true)
+    expect(vaultEntriesForResolve()).not.toBeNull()
   })
 
   it('is postponed by using the vault', async () => {
@@ -131,19 +143,36 @@ describe('idle auto-lock', () => {
     vi.advanceTimersByTime(14 * 60_000)
     vaultList() // reading your own entries counts as using it
     vi.advanceTimersByTime(14 * 60_000)
-    expect(vaultStatus().unlocked).toBe(true)
+    expect(vaultStatus().stage).toBe('open')
 
     vi.advanceTimersByTime(2 * 60_000)
-    expect(vaultStatus().unlocked).toBe(false)
+    expect(vaultStatus().stage).toBe('secured')
   })
 
-  it('calls back on auto-lock so the UI and the biometric key can follow', async () => {
+  it('is NOT postponed by a background credential resolve', async () => {
     vi.useFakeTimers()
-    const onLock = vi.fn()
     await vaultCreate('a-long-enough-password')
-    setVaultAutoLock(1, onLock)
+    setVaultAutoLock(15)
+
+    // The defect, stated as a test. `vaultList` used to be the read path for
+    // both the IPC handler and every background consumer, so a monitoring
+    // sweep resolving a credential every couple of minutes postponed the
+    // human-idle timer indefinitely: on an estate that sampled, the vault
+    // never secured itself and the protection was not real.
+    vi.advanceTimersByTime(14 * 60_000)
+    expect(vaultEntriesForResolve()).not.toBeNull()
+    vi.advanceTimersByTime(2 * 60_000)
+
+    expect(vaultStatus().stage).toBe('secured')
+  })
+
+  it('calls back on auto-secure so the UI can drop its copy of the entries', async () => {
+    vi.useFakeTimers()
+    const onSecure = vi.fn()
+    await vaultCreate('a-long-enough-password')
+    setVaultAutoLock(1, onSecure)
     vi.advanceTimersByTime(61_000)
-    expect(onLock).toHaveBeenCalledOnce()
+    expect(onSecure).toHaveBeenCalledOnce()
   })
 
   it('can be turned off entirely', async () => {
@@ -151,16 +180,63 @@ describe('idle auto-lock', () => {
     await vaultCreate('a-long-enough-password')
     setVaultAutoLock(0)
     vi.advanceTimersByTime(24 * 60 * 60_000)
-    expect(vaultStatus().unlocked).toBe(true)
+    expect(vaultStatus().stage).toBe('open')
   })
 
   it('does not fire after a manual lock', async () => {
     vi.useFakeTimers()
-    const onLock = vi.fn()
+    const onSecure = vi.fn()
     await vaultCreate('a-long-enough-password')
-    setVaultAutoLock(1, onLock)
+    setVaultAutoLock(1, onSecure)
     vaultLock()
     vi.advanceTimersByTime(61_000)
-    expect(onLock).not.toHaveBeenCalled()
+    expect(onSecure).not.toHaveBeenCalled()
+  })
+
+  it('does not fire again once secured', async () => {
+    vi.useFakeTimers()
+    const onSecure = vi.fn()
+    await vaultCreate('a-long-enough-password')
+    setVaultAutoLock(1, onSecure)
+    vi.advanceTimersByTime(61_000)
+    vi.advanceTimersByTime(10 * 60_000)
+    // Nothing re-arms it: `touchVaultActivity` only arms while the stage is
+    // `open`, so a secured vault is not sitting on a timer with nothing left
+    // to take away.
+    expect(onSecure).toHaveBeenCalledOnce()
+  })
+})
+
+describe('the two read paths', () => {
+  it('refuses the IPC read while secured and allows the resolve read', async () => {
+    vi.useFakeTimers()
+    await vaultCreate('a-long-enough-password')
+    setVaultAutoLock(1)
+    vi.advanceTimersByTime(61_000)
+
+    const listed = vaultList()
+    expect(listed.ok).toBe(false)
+    // Tagged, so the screen that asked offers an unlock rather than printing a
+    // sentence the user has to act on by hand.
+    expect(listed.error).toContain('OPSMAXX_VAULT_LOCKED')
+    expect(vaultEntriesForResolve()).not.toBeNull()
+  })
+
+  it('refuses both once fully locked', async () => {
+    await vaultCreate('a-long-enough-password')
+    vaultLock()
+    expect(vaultList().ok).toBe(false)
+    expect(vaultEntriesForResolve()).toBeNull()
+    expect(vaultStatus().unlocked).toBe(false)
+  })
+
+  it('secures without a key does nothing', async () => {
+    await vaultCreate('a-long-enough-password')
+    vaultLock()
+    vaultSecure()
+    // `secured` means "the key is here and the screen is not". With no key
+    // there is no such state, and reporting one would tell every background
+    // gate that credentials resolve when they do not.
+    expect(vaultStatus().stage).toBe('locked')
   })
 })

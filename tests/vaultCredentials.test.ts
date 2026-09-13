@@ -18,7 +18,18 @@ vi.mock('../src/main/services/secrets', () => ({
 }))
 
 vi.mock('../src/main/services/vault', () => ({
-  vaultStatus: () => ({ exists: vaultExists, unlocked: vaultUnlocked, entryCount: vaultEntries.length }),
+  vaultStatus: () => ({
+    exists: vaultExists,
+    unlocked: vaultUnlocked,
+    stage: vaultUnlocked ? 'open' : 'locked',
+    entryCount: vaultEntries.length
+  }),
+  // The resolver reads through `vaultEntriesForResolve`, not `vaultList`: the
+  // second resets the human-idle timer, and a background sweep resolving a
+  // credential is not a person using their vault. `null` is how the service
+  // says there is no key, which is what the resolver turns into its own
+  // VaultLockedError with its own subject.
+  vaultEntriesForResolve: () => (vaultUnlocked ? vaultEntries : null),
   vaultList: () => ({ ok: true, entries: vaultEntries })
 }))
 

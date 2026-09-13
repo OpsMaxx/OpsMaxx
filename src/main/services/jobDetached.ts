@@ -100,12 +100,16 @@ export interface DetachedDeps {
   /**
    * Whether credentials can be resolved at all right now.
    *
-   * A locked vault must PARK the poll loop, the way fleetSampler parks its
-   * sweep — not error out. Erroring would end a job that is still running
-   * perfectly well on fifteen hosts, and would do it because of something local
-   * and temporary. See the park branch in `poll`.
+   * A credential that cannot be read must PARK the poll loop, the way
+   * fleetSampler skips a blocked target — not error out. Erroring would end a
+   * job that is still running perfectly well on fifteen hosts, and would do it
+   * because of something local and temporary. See the park branch in `poll`.
+   *
+   * Per server, not per app: a job on a host whose credential sits in the OS
+   * keychain has no reason to park because some other host references a vault
+   * that is shut.
    */
-  vaultUnlocked?: () => boolean
+  credentialReady?: (serverId: string) => boolean
   now?: () => number
   /** Injected so the test suite advances time rather than sleeping through it. */
   sleep?: (ms: number) => Promise<void>
@@ -431,7 +435,7 @@ export function detachedJobExecutor(deps: DetachedDeps): DetachedExecutor {
       // is fleetSampler's rule; the difference is that a parked SAMPLE loses a
       // data point and a parked JOB loses nothing at all, because the byte
       // offset makes the next poll pick up exactly where this one would have.
-      if (deps.vaultUnlocked && !deps.vaultUnlocked()) {
+      if (deps.credentialReady && !deps.credentialReady(req.serverId)) {
         /**
          * Carries the marker, so the screen can offer the unlock.
          *
@@ -445,8 +449,9 @@ export function detachedJobExecutor(deps: DetachedDeps): DetachedExecutor {
          */
         say(
           'detached',
-          `${VAULT_LOCKED}: Paused — the vault is locked, so this server cannot be polled. ` +
-            'The job is still running on it and polling resumes when the vault is unlocked.'
+          `${VAULT_LOCKED}: Paused — this server's credential is in the vault, and the vault ` +
+            'is locked, so it cannot be polled. The job is still running on it and polling ' +
+            'resumes when the vault is unlocked.'
         )
         await sleep(parkMs)
         continue

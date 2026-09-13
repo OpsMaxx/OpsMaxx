@@ -4,6 +4,8 @@ import { Field, Modal } from '../common/Modal'
 import { useApp, useWorkspaceServers } from '../../store/app'
 import { toast } from '../../store/toast'
 import { useVault } from '../../store/vault'
+import type { VaultEntryDescriptor, VaultIndexResult } from '../../../../shared/vaultIndex'
+import { useVaultPrompt } from '../../store/vaultPrompt'
 import { clsx } from '../../lib/format'
 import { KIND_COLOR } from './DatabaseSidebar'
 import { VpnTransportSelect } from '../vpn/VpnTransportSelect'
@@ -70,9 +72,45 @@ export function AddDatabaseModal(): React.JSX.Element {
    * excluded because a private key cannot authenticate a database.
    */
   const usableEntries = vaultEntries.filter((e) => !!e.password && !e.privateKey)
+  /**
+   * The same list as NAMES, for when the vault is secured.
+   *
+   * `vaultEntries` is empty unless the vault is fully open, so this picker
+   * disappeared fifteen minutes after the last vault click and the modal
+   * quietly became keychain-only — the user was never shown the choice, so the
+   * password went somewhere they did not pick. Descriptors carry no value and
+   * resolve while secured, so the option survives. AddServerModal takes the
+   * same approach and its comment carries the reasoning about why the username
+   * is missing from this half.
+   */
+  const [descriptors, setDescriptors] = useState<VaultEntryDescriptor[] | null>(null)
+  useEffect(() => {
+    let live = true
+    void (window.opsmaxx?.vaultIndex as { list?: () => Promise<VaultIndexResult> } | undefined)
+      ?.list?.()
+      .then((r) => {
+        if (live) setDescriptors(r?.ok ? r.entries : null)
+      })
+      .catch(() => {
+        if (live) setDescriptors(null)
+      })
+    return () => {
+      live = false
+    }
+  }, [vaultUnlocked])
+
+  const options: { id: string; name: string; sub: string }[] = vaultUnlocked
+    ? usableEntries.map((e) => ({ id: e.id, name: e.name, sub: e.username }))
+    : (descriptors ?? [])
+        .filter((d) => d.has.password && !d.has.privateKey)
+        .map((d) => ({ id: d.id, name: d.name, sub: '' }))
+
   // '' means "type a new one"; anything else is a vault entry id.
   const [vaultEntryId, setVaultEntryId] = useState('')
-  const usingVault = vaultUnlocked && vaultEntryId !== ''
+  const [saveToVault, setSaveToVault] = useState(true)
+  // No `vaultUnlocked &&`: a reference is valid whatever the vault is doing,
+  // and resolution at connect time already prompts when it cannot read it.
+  const usingVault = vaultEntryId !== ''
   const [vpnProfileId, setVpnProfileId] = useState<UUID | null>(existing?.vpnProfileId ?? null)
 
   // Whoever opened the dialog owns the target; leaving it set would make the
@@ -145,15 +183,41 @@ export function AddDatabaseModal(): React.JSX.Element {
      * machine — the OS keychain is machine-local and no backup can carry it,
      * while the vault travels inside the encrypted bundle.
      */
-    const secret = useUri
+    let secret: { uri: string } | { password: string } | { vaultEntryId: string } | null = useUri
       ? uri.trim()
-        ? { uri: uri.trim() }
+        ? // The URI shape stays on the keychain for now. A connection string is
+          // not a `login` entry's shape — the password is inside it — so making
+          // it vault-backed means a slot that means "the whole URI" and a
+          // matching read in `resolveDbSecrets`. Worth doing; not smuggled in
+          // here, where it would be a resolver change hiding inside a modal.
+          { uri: uri.trim() }
         : null
       : usingVault
         ? { vaultEntryId }
         : password
           ? { password }
           : null
+
+    // A typed password goes into the vault unless the user said otherwise, the
+    // same default Add Server has. Falling back to the keychain beats losing
+    // what was just typed, which is why this reassigns rather than refuses.
+    if (!useUri && !usingVault && password && saveToVault) {
+      if (!vaultUnlocked) {
+        await useVaultPrompt
+          .getState()
+          .request('Saving this password into the vault needs your master password.')
+      }
+      const entryId = await useVault.getState().createEntry('login', {
+        name: `${fields.name}${username.trim() ? ` (${username.trim()})` : ''}`,
+        username: username.trim(),
+        password,
+        tags: ['database']
+      })
+      if (entryId) secret = { vaultEntryId: entryId }
+      else
+        toast('The vault would not take this password, so it was kept on this device only.', 'error')
+    }
+
     if (secret) await storeSecret(id, secret, fields.name)
     toast(`${fields.name} ${editId ? 'updated' : 'added'}`, 'ok')
     setModal(null)
@@ -275,7 +339,7 @@ export function AddDatabaseModal(): React.JSX.Element {
               <label className="field-label">Username</label>
               <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} />
             </div>
-            {vaultUnlocked && usableEntries.length > 0 && (
+            {options.length > 0 && (
               <div className="field">
                 <label className="field-label">Credential</label>
                 <select
@@ -284,10 +348,10 @@ export function AddDatabaseModal(): React.JSX.Element {
                   onChange={(e) => setVaultEntryId(e.target.value)}
                 >
                   <option value="">Enter a new one…</option>
-                  {usableEntries.map((e) => (
+                  {options.map((e) => (
                     <option key={e.id} value={e.id}>
                       {e.name}
-                      {e.username ? ` — ${e.username}` : ''}
+                      {e.sub ? ` — ${e.sub}` : ''}
                     </option>
                   ))}
                 </select>
@@ -316,6 +380,19 @@ export function AddDatabaseModal(): React.JSX.Element {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
+              {/* Ticked by default, matching Add Server. A database password
+                  kept only in the OS keychain is the one credential class that
+                  could not be a single record — the same password used by three
+                  connections was three copies rotated in three places — and it
+                  is machine-local, so no backup carries it. */}
+              <label className="field-hint row" style={{ gap: 6, cursor: 'pointer', marginTop: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={saveToVault}
+                  onChange={(e) => setSaveToVault(e.target.checked)}
+                />
+                Save this to the vault as a reusable credential
+              </label>
             </div>
             )}
           </div>
