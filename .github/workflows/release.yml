@@ -494,8 +494,10 @@ jobs:
           $defs = $status.AntivirusSignatureVersion
           $age = [int]((Get-Date) - $status.AntivirusSignatureLastUpdated).TotalDays
           Write-Host "definitions $defs, $age day(s) old, cloud $cloud"
-          # ponytail: 7 days is pinned to the weekly runner-image rebuild. Drop
-          # it if a release ever passes on definitions that turn out to be stale.
+          # 7 days is pinned to the weekly runner-image rebuild, which is the
+          # oldest the shipped definitions should ever be. It is a ceiling, not
+          # a measurement: tighten it if a release ever passes on definitions
+          # that turn out to have been stale.
           if ($age -gt 7) {
             Write-Error "Defender definitions are $age days old ($defs); this scan would not mean anything"
             exit 1
