@@ -93,14 +93,32 @@ import { HostFactsReader } from './hostFacts'
 import type { FactSourceId, HostFacts } from '../../shared/hostFacts'
 import { FACT_STATUS_HELP, SECURITY_COUNT_SUPPORT, factSource } from '../../shared/hostFacts'
 import { AI_CAPABILITIES } from '../../shared/mcp'
+import { VAULT_LOCKED } from '../../shared/vault'
 import type { AccessGroup, AiCapability, McpAgentSession } from '../../shared/mcp'
 
 function text(s: string): CallToolResult {
   return { content: [{ type: 'text', text: s }] }
 }
 
+/**
+ * A tool error, with the locked-vault marker taken off and translated.
+ *
+ * `VAULT_LOCKED` is an internal token addressed at a RENDERER, which recognises
+ * it and attaches an unlock button. An agent has neither: it cannot press the
+ * button, it cannot see the dialog, and it has no path to the master password —
+ * deliberately, and that is not changing. So the marker reached the model as a
+ * literal `OPSMAXX_VAULT_LOCKED:` prefix on an error it could do nothing with,
+ * which is how a model ends up inventing a way to "unlock" something.
+ *
+ * What it can do is tell the operator, so that is what the text now says.
+ */
 function errorText(s: string): CallToolResult {
-  return { content: [{ type: 'text', text: s }], isError: true }
+  const vaultShut = s.includes(VAULT_LOCKED)
+  const text = vaultShut
+    ? `${s.replaceAll(new RegExp(`${VAULT_LOCKED}:?\\s*`, 'g'), '')} ` +
+      'Ask the person running OpsMaxx to unlock the vault; there is no way to do it from here.'
+    : s
+  return { content: [{ type: 'text', text }], isError: true }
 }
 
 // Creating a session in OpsMaxx does not reconfigure the client: the token

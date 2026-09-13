@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useApp } from '../../store/app'
+import { useVault } from '../../store/vault'
 import { toast } from '../../store/toast'
 import { bridgeOn } from '../../lib/bridge'
 
@@ -40,13 +41,40 @@ export function AgentServerWatcher(): null {
 
           // Same shape AddServerModal writes: credentials go to OS secure
           // storage keyed by server id, never into the connection list itself.
-          const secret =
+          let secret: { password?: string; keyPath?: string; passphrase?: string; vaultEntryId?: string } | null =
             req.auth === 'password'
               ? { password: req.password }
               : req.auth === 'key'
                 ? { keyPath: req.keyPath, passphrase: req.passphrase || undefined }
                 : null
-          if (secret && (secret.password || secret.keyPath)) {
+
+          /**
+           * Into the vault when it is already open, and NEVER a prompt.
+           *
+           * The same preference the two Add dialogs apply, for the same reason:
+           * a credential in the vault is one record, reusable and rotated in
+           * one place, and it travels inside an encrypted backup where a
+           * keychain copy cannot. But this path has no person in it — raising a
+           * master-password dialog because an agent did something unattended is
+           * the original bug wearing a new hat. So it takes the vault when the
+           * vault is there for the taking and the keychain otherwise, and the
+           * toast below says which, because "where did my credential go" should
+           * not need a support thread.
+           */
+          let intoVault = false
+          if (req.auth === 'password' && req.password && useVault.getState().stage === 'open') {
+            const entryId = await useVault.getState().createEntry('login', {
+              name: `${req.name} (${req.username})`,
+              username: req.username,
+              password: req.password,
+              tags: ['server', 'agent']
+            })
+            if (entryId) {
+              secret = { vaultEntryId: entryId }
+              intoVault = true
+            }
+          }
+          if (secret && (secret.password || secret.keyPath || secret.vaultEntryId)) {
             const ok = await window.opsmaxx?.secrets.set(serverId, JSON.stringify(secret))
             if (ok === false) {
               // The server row is useless without the credential the agent
@@ -69,10 +97,19 @@ export function AgentServerWatcher(): null {
             }
           }
 
-          toast(`An AI agent added the server ${req.name}.`, 'ok', {
-            label: 'Show it',
-            run: () => useApp.getState().setActivity('connections')
-          })
+          // Says which store the credential landed in. The two are not
+          // interchangeable — a vault entry is reusable and travels in a
+          // backup, a keychain copy is neither — so leaving it unsaid is
+          // leaving the reader to find out later and wonder.
+          toast(
+            `An AI agent added the server ${req.name}.` +
+              (intoVault ? ' Its credential was saved in the vault.' : ''),
+            'ok',
+            {
+              label: 'Show it',
+              run: () => useApp.getState().setActivity('connections')
+            }
+          )
           api?.replyCreateServer?.(id, { ok: true, serverId })
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err)

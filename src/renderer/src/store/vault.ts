@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { useApp } from './app'
-import type { VaultEntry, VaultField, VaultKind } from '../../../shared/vault'
+import { bridgeOn } from '../lib/bridge'
+import { toast } from './toast'
+import type { VaultEntry, VaultField, VaultKind, VaultStage } from '../../../shared/vault'
 
 let seq = 0
 const uid = (p: string): string => `${p}-${Date.now().toString(36)}-${seq++}`
@@ -42,7 +44,21 @@ interface VaultState {
    * "your vault is gone". Nobody knows yet is not the same as there isn't one.
    */
   exists: boolean | null
+  /**
+   * Whether the entries are READABLE here — which is `stage === 'open'`, and
+   * deliberately not main's `unlocked`.
+   *
+   * Main's flag is true while the vault is secured too, because a background
+   * sweep resolving a credential does not need a person. In the renderer that
+   * distinction does not exist: either the plaintext is in this store or it is
+   * not, and while secured it must not be. Every consumer of this flag
+   * (`Sidebar`, `AddServerModal`, `AddDatabaseModal`, `BackupDestinations`,
+   * `NgrokSetup`, `Settings`) is asking the viewing question, so they all keep
+   * reading it unchanged.
+   */
   unlocked: boolean
+  /** The full state, for the views that distinguish "secured" from "locked". */
+  stage: VaultStage
   entries: VaultEntry[]
   selectedId: string | null
   query: string
@@ -82,6 +98,7 @@ interface VaultState {
 export const useVault = create<VaultState>((set, get) => ({
   exists: null,
   unlocked: false,
+  stage: 'locked',
   entries: [],
   selectedId: null,
   query: '',
@@ -123,7 +140,7 @@ export const useVault = create<VaultState>((set, get) => ({
       await get().refreshBiometrics()
       return false
     }
-    set({ unlocked: true })
+    set({ unlocked: true, stage: 'open' })
     await get().refresh()
     return true
   },
@@ -140,10 +157,17 @@ export const useVault = create<VaultState>((set, get) => ({
   refresh: async () => {
     const st = await window.opsmaxx?.vault.status()
     if (!st) return
-    set({ exists: st.exists, unlocked: st.unlocked })
-    if (st.unlocked) {
+    // `stage === 'open'`, not `st.unlocked`. Listing while secured is refused in
+    // main anyway, so asking would only produce a failure to ignore -- and an
+    // `unlocked: true` here would light up every picker and sidebar as though
+    // the entries were in hand.
+    const open = st.stage === 'open'
+    set({ exists: st.exists, unlocked: open, stage: st.stage })
+    if (open) {
       const r = await window.opsmaxx?.vault.list()
       if (r?.ok && r.entries) set({ entries: r.entries })
+    } else {
+      set({ entries: [], selectedId: null })
     }
   },
 
@@ -155,7 +179,7 @@ export const useVault = create<VaultState>((set, get) => ({
       set({ error: r?.error ?? 'Could not create the vault.' })
       return false
     }
-    set({ exists: true, unlocked: true, entries: [] })
+    set({ exists: true, unlocked: true, stage: 'open', entries: [] })
     return true
   },
 
@@ -167,14 +191,14 @@ export const useVault = create<VaultState>((set, get) => ({
       set({ error: r?.error ?? 'Could not unlock the vault.' })
       return false
     }
-    set({ unlocked: true })
+    set({ unlocked: true, stage: 'open' })
     await get().refresh()
     return true
   },
 
   lock: async () => {
     await window.opsmaxx?.vault.lock()
-    set({ unlocked: false, entries: [], selectedId: null, query: '', error: null })
+    set({ unlocked: false, stage: 'locked', entries: [], selectedId: null, query: '', error: null })
   },
 
   changePassword: async (current, next) => {
@@ -209,6 +233,25 @@ export const useVault = create<VaultState>((set, get) => ({
   },
 
   createEntry: async (kind, patch) => {
+    /**
+     * Refused unless the vault is fully open, and refused BEFORE anything is
+     * built.
+     *
+     * Every mutator here works by appending to `get().entries` and saving the
+     * whole list back. While the vault is secured that list is empty — the
+     * plaintext was dropped on purpose — so a write from this state would
+     * persist a vault containing one entry and nothing else. `vaultSave` in
+     * main refuses it, which is the backstop that makes this safe rather than
+     * merely tidy, but the renderer would still be left holding that
+     * one-element list as though it were the vault.
+     *
+     * So callers ask for an unlock first; this is the guard that makes
+     * forgetting to a no-op instead of a data loss.
+     */
+    if (get().stage !== 'open') {
+      set({ error: 'The vault is locked. Unlock it to save a credential.' })
+      return null
+    }
     const e = { ...newEntry(kind, useApp.getState().activeWorkspaceId), ...patch }
     const entries = [...get().entries, e]
     set({ entries })
@@ -241,4 +284,48 @@ async function persist(
 ): Promise<void> {
   const r = await window.opsmaxx?.vault.save(entries)
   if (!r?.ok) set({ error: r?.error ?? 'Could not save the vault.' })
+}
+
+/**
+ * Drop renderer-held plaintext when main secures or locks the vault.
+ *
+ * This lived in VaultView (its own `vault.onAutoLocked` effect) and was
+ * therefore wired only while the Vault screen was mounted — which is almost
+ * never. Everywhere else, "the vault locked" zeroed a key in main and left
+ * every decrypted entry, passwords and private keys included, sitting in this
+ * store with `unlocked: true`. Dropping this copy is the stated reason the
+ * timeout drops entries at all, and it is the one exposure an idle timer can
+ * actually remove, so the single subscription that mattered was the one scoped
+ * to a view.
+ *
+ * Both events do the same thing to the data and say different things about it.
+ * Secured is a screen being cleared and nothing else stopping; locked is
+ * everything stopping until someone types a password. A user who reads the
+ * first as the second goes looking for what broke.
+ *
+ * Idempotent, so the caller does not have to coordinate.
+ */
+let watching = false
+export function startVaultLockWatch(): () => void {
+  if (watching) return () => {}
+  watching = true
+
+  const clear = (stage: VaultStage): void => {
+    useVault.setState({ unlocked: false, stage, entries: [], selectedId: null, query: '' })
+  }
+
+  const offSecured = bridgeOn('vault.onSecured', window.opsmaxx?.vault?.onSecured, () => {
+    clear('secured')
+    toast('Vault secured after inactivity — connections and checks keep running', 'info')
+  })
+  const offLocked = bridgeOn('vault.onAutoLocked', window.opsmaxx?.vault?.onAutoLocked, () => {
+    clear('locked')
+    toast('Vault locked — enter your master password to open it again', 'info')
+  })
+
+  return () => {
+    offSecured()
+    offLocked()
+    watching = false
+  }
 }

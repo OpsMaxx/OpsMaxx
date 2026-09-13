@@ -44,7 +44,11 @@ export type DbSizeProbe = (target: DbSampleTarget) => Promise<number | null>
 export interface DbSamplerDeps {
   probe: DbSizeProbe
   record: (connectionId: string, at: number, bytes: number) => void
-  vaultUnlocked: () => boolean
+  /** Whether THIS connection's credential can be resolved right now. Per
+   *  record, for the reason fleetSampler's own dep spells out: a database whose
+   *  password is in the OS keychain must not stop being sized because some
+   *  other record references a vault that is shut. */
+  credentialReady: (connectionId: string) => boolean
   now?: () => number
   setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>
   clearTimer?: (t: ReturnType<typeof setTimeout>) => void
@@ -72,6 +76,8 @@ export interface DbSamplerStatus {
   running: boolean
   idleReason?: DbSamplerIdle
   targetCount: number
+  /** Targets skipped because their credential is in a vault that is shut. */
+  vaultBlockedCount: number
   lastSweepAt: number | null
   /** How many targets produced a number on the last sweep. Not the same as the
    *  target count: a refused read writes nothing and says so here. */
@@ -107,19 +113,33 @@ export class DbSampler {
       !this.disposed &&
       this.cfg.enabled &&
       this.cfg.targets.length > 0 &&
-      this.deps.vaultUnlocked()
+      // `some`: one sampleable target is a reason to sweep. The blocked ones
+      // are skipped inside the loop.
+      this.cfg.targets.some((t) => this.deps.credentialReady(t.connectionId))
+    )
+  }
+
+  private blockedCount(): number {
+    return this.cfg.targets.reduce(
+      (n, t) => (this.deps.credentialReady(t.connectionId) ? n : n + 1),
+      0
     )
   }
 
   status(): DbSamplerStatus {
+    const blocked = this.blockedCount()
     const base = {
       targetCount: this.cfg.targets.length,
+      vaultBlockedCount: blocked,
       lastSweepAt: this.lastSweepAt,
       lastRecorded: this.lastRecorded
     }
     if (!this.cfg.enabled) return { running: false, idleReason: 'disabled', ...base }
     if (this.cfg.targets.length === 0) return { running: false, idleReason: 'no-targets', ...base }
-    if (!this.deps.vaultUnlocked()) return { running: false, idleReason: 'vault-locked', ...base }
+    // `vault-locked` means EVERY target is blocked, matching fleetSampler.
+    if (blocked === this.cfg.targets.length) {
+      return { running: false, idleReason: 'vault-locked', ...base }
+    }
     // Derived from the loop rather than from the config, the same correction
     // `fleetSampler.status()` documents: settings that say "on" beside a
     // sampler that stalled hours ago is exactly how a stall goes unnoticed.
@@ -180,6 +200,10 @@ export class DbSampler {
     try {
       for (const t of this.cfg.targets) {
         if (gen !== this.generation || this.disposed) return
+        // Skipped, not attempted: a target whose credential cannot be read
+        // would fail on every sweep forever. Per target rather than per sweep,
+        // so the rest of the estate is still sized.
+        if (!this.deps.credentialReady(t.connectionId)) continue
         try {
           const bytes = await this.deps.probe(t)
           // Null is "nothing that may be recorded" -- a capped MySQL total, a

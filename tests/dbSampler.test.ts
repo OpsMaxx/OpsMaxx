@@ -34,7 +34,7 @@ function harness(over: Partial<DbSamplerDeps> = {}): {
       return 1024
     },
     record: (id, _at, bytes) => recorded.push({ id, bytes }),
-    vaultUnlocked: () => unlocked,
+    credentialReady: () => unlocked,
     now: () => T0,
     setTimer: (fn, ms) => {
       queued = fn

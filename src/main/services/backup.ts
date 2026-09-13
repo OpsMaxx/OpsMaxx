@@ -18,7 +18,7 @@ import { removeHistoryFiles } from './history'
 import { CRED_PROXY_AUDIT_FILE } from './credProxy'
 import { RULES_FILE } from '../../shared/rules'
 import { openTarget, sha256, type BackupTarget, type TargetDeps } from './backupTargets'
-import { vaultList, vaultStatus } from './vault'
+import { vaultEntriesForResolve, vaultStatus } from './vault'
 import {
   backupObjectName,
   backupObjectTime,
@@ -1165,8 +1165,13 @@ export function scheduledPassphrase(dest: BackupDestination): { password?: strin
   }
   const status = vaultStatus()
   if (!status.exists) return { skipped: 'The passphrase lives in the vault, and there is no vault on this machine.' }
-  if (!status.unlocked) return { skipped: 'The passphrase lives in the vault, and the vault is locked.' }
-  const entry = vaultList().entries?.find((e) => e.id === dest.passphraseVaultEntryId)
+  // `vaultEntriesForResolve`, so a scheduled run keeps working while the vault
+  // is merely secured. An unattended backup is the clearest case there is for
+  // the stage existing: the timeout that used to stop it fires precisely
+  // because nobody is at the keyboard, which is when a schedule runs.
+  const entries = vaultEntriesForResolve()
+  if (!entries) return { skipped: 'The passphrase lives in the vault, and the vault is locked.' }
+  const entry = entries.find((e) => e.id === dest.passphraseVaultEntryId)
   if (!entry) return { skipped: 'The vault entry holding the passphrase no longer exists.' }
   if (!entry.password) return { skipped: `Vault entry “${entry.name}” has no secret to use as a passphrase.` }
   if (entry.password.length < MIN_PASSPHRASE) {

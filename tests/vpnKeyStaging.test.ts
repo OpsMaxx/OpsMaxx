@@ -30,7 +30,11 @@ vi.mock('../src/main/services/secrets', () => ({
 }))
 
 vi.mock('../src/main/services/vault', () => ({
-  vaultStatus: () => ({ exists: true, unlocked: vaultUnlocked, entryCount: vaultEntries.length }),
+  vaultStatus: () => ({ exists: true, unlocked: vaultUnlocked, stage: vaultUnlocked ? 'open' : 'locked', entryCount: vaultEntries.length }),
+  // The resolve path reads through `vaultEntriesForResolve`, which does not
+  // reset the human-idle timer and keeps working while the vault is secured.
+  // `null` is how the service says there is no key at all.
+  vaultEntriesForResolve: () => (vaultUnlocked ? vaultEntries : null),
   vaultList: () =>
     vaultUnlocked ? { ok: true, entries: vaultEntries } : { ok: false, error: 'Vault is locked.' },
   vaultSave: (entries: VaultEntry[]) => {

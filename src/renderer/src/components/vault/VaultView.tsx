@@ -17,7 +17,6 @@ import { useVault, newField } from '../../store/vault'
 import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
 import { useApp } from '../../store/app'
-import { bridgeOn } from '../../lib/bridge'
 import {
   VAULT_MIN_PASSWORD,
   VAULT_KIND_LABEL,
@@ -55,20 +54,11 @@ export function VaultView(): React.JSX.Element {
     void refresh()
   }, [refresh])
 
-  // Main locked the vault on an idle timeout. Drop the decrypted entries the
-  // renderer is holding — leaving them would make the lock cosmetic, since the
-  // plaintext lives here too.
-  useEffect(
-    () =>
-      bridgeOn('vault.onAutoLocked', window.opsmaxx?.vault?.onAutoLocked, () => {
-        useVault.setState({ unlocked: false, entries: [], selectedId: null })
-        // The unlock field is on screen the moment this fires — this view is
-        // the only thing that listens — so the message points at it rather
-        // than opening a second way to do the same thing.
-        toast('Vault locked after inactivity — enter your master password to open it again')
-      }),
-    []
-  )
+  // The idle-timeout listener that used to live here moved to
+  // `startVaultLockWatch` in store/vault.ts, mounted once at app level. It was
+  // only ever wired while this view was on screen, so everywhere else the
+  // "lock" left every decrypted entry in the store. A view is the wrong scope
+  // for a rule about the whole renderer's memory.
 
   // `null` is "main has not answered yet", and it must not fall through to the
   // create screen. status() reaches safeStorage, which on macOS blocks on a
@@ -134,6 +124,7 @@ function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
   const error = useVault((s) => s.error)
   const clearError = useVault((s) => s.clearError)
   const busy = useVault((s) => s.busy)
+  const stage = useVault((s) => s.stage)
 
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -175,6 +166,12 @@ function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
   }, [canUseBio, autoPrompt, busy, unlockWithBiometrics])
 
   const creating = mode === 'create'
+  // Secured and locked both land on this gate and both want the master
+  // password, but they are not the same news. Locked means everything that
+  // needs a vault credential has stopped; secured means only this screen has.
+  // Telling someone their estate stopped being checked when it did not is the
+  // kind of wrong that sends them looking for a fault.
+  const secured = !creating && stage === 'secured'
   const mismatch = creating && confirm.length > 0 && password !== confirm
   const canSubmit =
     password.length >= (creating ? MIN_PASSWORD : 1) && !mismatch && (!creating || confirm.length > 0)
@@ -201,11 +198,13 @@ function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
     <div className="main vault-gate">
       <div className="vault-gate-card">
         <div className="vault-gate-icon">{creating ? <ShieldCheck size={26} /> : <Lock size={26} />}</div>
-        <h2>{creating ? 'Create your vault' : 'Vault locked'}</h2>
+        <h2>{creating ? 'Create your vault' : secured ? 'Vault secured' : 'Vault locked'}</h2>
         <p className="faint">
           {creating
             ? 'The vault keeps passwords, SSH keys and other secrets encrypted on this machine, so OpsMaxx can use them without you retyping them. Pick a master password to protect it — it is never stored anywhere, so if you lose it the contents cannot be recovered.'
-            : 'Enter the master password you chose for this vault. It stays open until you lock it, quit OpsMaxx, or leave it idle long enough to lock itself.'}
+            : secured
+              ? 'The entries were cleared from this screen after a spell of inactivity. Nothing else stopped — your connections, background checks and scheduled work are still running on the credentials in here. Enter your master password to look at them again.'
+              : 'Enter the master password you chose for this vault. It stays open until you lock it, quit OpsMaxx, or your machine goes to sleep.'}
         </p>
 
         {canUseBio && (

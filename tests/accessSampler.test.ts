@@ -117,7 +117,7 @@ function harness(over: { withAccess?: boolean; gated?: boolean } = {}): Harness 
     ...(over.gated ? { accessEnabled: (): boolean => enabled } : {}),
     release: () => undefined,
     emit: () => undefined,
-    vaultUnlocked: () => true,
+    credentialReady: () => true,
     history: () => ({
       transaction: <T,>(fn: () => T): T => fn(),
       recordSamples: () => undefined,

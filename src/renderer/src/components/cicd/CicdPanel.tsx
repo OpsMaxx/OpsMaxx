@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Activity } from 'lucide-react'
 import { PanelShell } from '../monitor/PanelShell'
 import { EmptyState } from '../common/EmptyState'
+import { UnlockVaultButton } from '../common/UnlockVaultButton'
+import { isVaultLocked } from '../../lib/withVaultUnlock'
 import { clsx, duration } from '../../lib/format'
 import { remoteText } from '../../../../shared/remoteText'
 import { useApp } from '../../store/app'
@@ -392,6 +394,14 @@ function Freshness({
         const stale = isStale(s?.readAt, every, now)
         const limited = isRateLimited(s)
         const expired = s?.error !== undefined && /401|unauthor|expired|invalid token/i.test(s.error)
+        // A locked vault is not a CI failure, and it has a button rather than a
+        // retry. The poller's error string already carries the marker all the
+        // way from `cicd/service.ts resolveSecret`, and this panel was printing
+        // it — so the row read `OPSMAXX_VAULT_LOCKED: …` at the user and
+        // offered "Retry", which cannot succeed until something else happens
+        // somewhere else. Checked BEFORE `expired`: a marker-carrying message
+        // that happens to contain the word "token" is still a locked vault.
+        const vaultShut = isVaultLocked(s?.error)
         return (
           <div key={c.id} className="cicd-fresh-row">
             <div className="row">
@@ -411,7 +421,15 @@ function Freshness({
               )}
             </div>
 
-            {expired ? (
+            {vaultShut ? (
+              <div className="panel-note is-alarm">
+                <span className="grow">
+                  {c.name} authenticates with a credential in the vault, and the vault is locked.
+                  The runs below are the last ones read and are not being refreshed.
+                </span>
+                <UnlockVaultButton reason={`Unlocking resumes reading pipelines from ${c.name}.`} />
+              </div>
+            ) : expired ? (
               <div className="panel-note is-alarm">
                 <span className="grow">
                   {c.name} refused the token. It has expired or been revoked — the runs below are

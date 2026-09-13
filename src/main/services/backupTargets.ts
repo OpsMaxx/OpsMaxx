@@ -3,8 +3,8 @@ import { readFile, writeFile, readdir, stat, unlink, rename, mkdir } from 'node:
 import { join } from 'node:path'
 import type { SFTPWrapper } from 'ssh2'
 import { acquire, release, type PooledConnection } from './ssh'
-import { resolveChainSecrets, resolveDbSecrets } from './credentialResolver'
-import { vaultList, vaultStatus } from './vault'
+import { resolveChainSecrets, resolveDbSecrets, VaultLockedError } from './credentialResolver'
+import { vaultEntriesForResolve, vaultStatus } from './vault'
 import { loadData } from './store'
 import type {
   BackupDestination,
@@ -598,10 +598,16 @@ export function s3Credentials(dest: S3BackupDestination): S3Credentials {
   if (!status.exists) {
     throw new Error('This destination authenticates with a vault entry, and there is no vault on this machine.')
   }
-  if (!status.unlocked) {
-    throw new Error('This destination authenticates with a vault entry, and the vault is locked.')
+  // A `VaultLockedError`, not a plain one. This threw a bare Error, which
+  // carries no marker, so `isVaultLocked` in the renderer could not recognise
+  // it and the S3 destination row showed a sentence naming a locked vault with
+  // no way to unlock it — the one thing tests/vaultLockedOffersUnlock.test.ts
+  // exists to forbid. BackupDestinations.tsx already imports the button.
+  const entries = vaultEntriesForResolve()
+  if (!entries) {
+    throw new VaultLockedError('this backup destination authenticates with a vault credential')
   }
-  const entry: VaultEntry | undefined = vaultList().entries?.find((e) => e.id === dest.vaultEntryId)
+  const entry: VaultEntry | undefined = entries.find((e) => e.id === dest.vaultEntryId)
   if (!entry) {
     throw new Error('The vault entry holding this destination’s access key no longer exists.')
   }

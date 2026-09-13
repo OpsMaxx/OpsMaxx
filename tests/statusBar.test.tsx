@@ -91,7 +91,8 @@ describe('StatusBar', () => {
     useFleetStatus.getState().setStatus({
       running: false,
       idleReason: 'vault-locked',
-      targetCount: 3
+      targetCount: 3,
+      vaultBlockedCount: 3
     })
 
     render(<StatusBar />)

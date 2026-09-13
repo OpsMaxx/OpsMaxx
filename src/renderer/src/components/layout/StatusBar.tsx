@@ -126,7 +126,10 @@ export function StatusBar(): React.JSX.Element {
           className="item resource-alert"
           title={warning.detail}
           onClick={() => {
-            if (warning.kind === 'vault-locked') {
+            // Every vault-shaped warning unlocks from the chip, partial ones
+            // included: the fix is the same dialog whether one server is
+            // blocked or all of them.
+            if (warning.kind.startsWith('vault')) {
               void useVaultPrompt
                 .getState()
                 .request('Unlocking resumes background checking, so alerts can be raised again.')

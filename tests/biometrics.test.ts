@@ -41,7 +41,11 @@ vi.mock('electron', async () => {
 })
 
 vi.mock('../src/main/services/vault', () => ({
-  vaultStatus: () => ({ exists: true, unlocked, entryCount: 0 }),
+  // `stage` follows `unlocked` here because these tests are about biometrics,
+  // not about the two lock stages — every case that sets `unlocked` means "the
+  // vault is fully open". The secured stage has its own coverage in
+  // tests/vaultTwoStage.test.ts, including that it refuses to hand out the key.
+  vaultStatus: () => ({ exists: true, unlocked, stage: unlocked ? 'open' : 'locked', entryCount: 0 }),
   vaultExportKey: () => exported,
   vaultUnlockWithKey: () => unlockWithKeyResult
 }))

@@ -3,8 +3,8 @@ import { join } from 'node:path'
 import { existsSync, readFileSync, unlinkSync } from 'node:fs'
 import { atomicWriteFileSync } from './atomicWrite'
 import { randomBytes, scrypt, createCipheriv, createDecipheriv } from 'node:crypto'
-import type { VaultEntry, VaultListResult, VaultResult, VaultStatus } from '../../shared/vault'
-import { VAULT_MIN_PASSWORD } from '../../shared/vault'
+import type { VaultEntry, VaultListResult, VaultResult, VaultStage, VaultStatus } from '../../shared/vault'
+import { VAULT_LOCKED, VAULT_MIN_PASSWORD } from '../../shared/vault'
 
 // The floor is imported, not restated. Main is the real enforcement boundary —
 // the renderer's own check only covers the UI, and any other caller of the
@@ -63,6 +63,24 @@ let key: Buffer | null = null
 let salt: Buffer | null = null
 let cache: VaultEntry[] | null = null
 
+/**
+ * Which of the three stages the vault is in. See VaultStage in shared/vault.ts.
+ *
+ * THE ASYMMETRY BELOW IS THE WHOLE SECURITY ARGUMENT, so it is written out
+ * rather than left to be inferred from the assignments:
+ *
+ *   main keeps plaintext in every stage but `locked`.
+ *   the renderer keeps it only in `open`.
+ *
+ * That is what lets a sweep resolve a credential at 3am while the entry list
+ * is not sitting decrypted in a window somebody walked away from. Anything
+ * that reverses the reading — a viewing path that checks `key !== null`, a
+ * resolve path that demands `stage === 'open'` — breaks one half or the other,
+ * so the two read paths below are deliberately separate functions rather than
+ * one function with a flag.
+ */
+let stage: VaultStage = 'locked'
+
 function derive(password: string, s: Buffer, params: KdfParams = KDF): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     scrypt(password, s, KDF.keylen, { N: params.N, r: params.r, p: params.p, maxmem: KDF.maxmem }, (err, dk) =>
@@ -112,7 +130,7 @@ function decrypt(file: VaultFile, k: Buffer): VaultEntry[] {
 }
 
 export function vaultStatus(): VaultStatus {
-  return { exists: existsSync(FILE), unlocked: key !== null, entryCount: cache?.length ?? 0 }
+  return { exists: existsSync(FILE), unlocked: key !== null, stage, entryCount: cache?.length ?? 0 }
 }
 
 export async function vaultCreate(password: string): Promise<VaultResult> {
@@ -126,6 +144,8 @@ export async function vaultCreate(password: string): Promise<VaultResult> {
     key = k
     salt = s
     cache = []
+    stage = 'open'
+    touchVaultActivity()
     return { ok: true }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -151,6 +171,7 @@ export async function vaultUnlock(password: string): Promise<VaultResult> {
         writeEncrypted(cache, upgraded, s)
         key = upgraded
         salt = s
+        stage = 'open'
         touchVaultActivity()
         return { ok: true }
       } catch {
@@ -160,12 +181,14 @@ export async function vaultUnlock(password: string): Promise<VaultResult> {
 
     key = k
     salt = s
+    stage = 'open'
     touchVaultActivity()
     return { ok: true }
   } catch {
     key = null
     salt = null
     cache = null
+    stage = 'locked'
     return { ok: false, error: 'Incorrect master password.' }
   }
 }
@@ -191,6 +214,7 @@ export function vaultUnlockWithKey(k: Buffer, s: Buffer): VaultResult {
     key = Buffer.from(k)
     salt = Buffer.from(s)
     cache = entries
+    stage = 'open'
     touchVaultActivity()
     return { ok: true }
   } catch {
@@ -198,20 +222,30 @@ export function vaultUnlockWithKey(k: Buffer, s: Buffer): VaultResult {
   }
 }
 
-// Idle auto-lock.
+// Idle auto-secure.
 //
-// A vault that never locks itself makes every other protection here optional:
-// the key sits in memory and the decrypted entries sit in the renderer for as
-// long as the app is open, which on a workstation is days. The timer is reset
-// by vault activity, not by general app use — reading your own entries is what
-// counts as using the vault.
+// A vault that never shuts itself makes every other protection here optional:
+// the decrypted entries sit in the renderer for as long as the app is open,
+// which on a workstation is days.
+//
+// The timer moves the vault to `secured`, NOT to `locked`, and the difference
+// is the whole point. Locking outright stopped monitoring, CI polling,
+// scheduled backups and every reconnect along with hiding the entries, so a
+// monitoring tool stopped monitoring because nobody had clicked anything for a
+// quarter of an hour. Securing removes the exposure a timer can actually remove
+// — the renderer's plaintext copy — and leaves the key where unattended work
+// can still reach it. shared/vault.ts VaultStage states what that gives up.
+//
+// The timer measures A PERSON. It is reset by `vaultList`, which is the IPC
+// read, and deliberately NOT by `vaultEntriesForResolve`, which is the
+// background one — see the comment on that function.
 let idleTimer: ReturnType<typeof setTimeout> | null = null
 let idleMinutes = 15
-let onAutoLock: (() => void) | null = null
+let onAutoSecure: (() => void) | null = null
 
-export function setVaultAutoLock(minutes: number, onLock?: () => void): void {
+export function setVaultAutoLock(minutes: number, onSecure?: () => void): void {
   idleMinutes = minutes
-  if (onLock) onAutoLock = onLock
+  if (onSecure) onAutoSecure = onSecure
   touchVaultActivity()
 }
 
@@ -219,11 +253,32 @@ export function touchVaultActivity(): void {
   if (idleTimer) clearTimeout(idleTimer)
   idleTimer = null
   // 0 disables it, for anyone who would rather decide for themselves.
-  if (idleMinutes <= 0 || !key) return
+  // Only armed while the vault is actually open: a timer counting down against
+  // a vault that is already secured has nothing left to take away, and one
+  // armed against no key at all was what `vaultList` used to do by touching
+  // before it checked.
+  if (idleMinutes <= 0 || stage !== 'open') return
   idleTimer = setTimeout(() => {
-    vaultLock()
-    onAutoLock?.()
+    vaultSecure()
+    onAutoSecure?.()
   }, idleMinutes * 60_000)
+}
+
+/**
+ * Stage 1: take the vault off the screen without taking it away from the app.
+ *
+ * Keeps `key`, `salt` AND `cache` — resolution has to come from somewhere and
+ * `cache` is it. What must be dropped is the RENDERER's copy, which is not
+ * this module's to drop: main sends `vault:secured` and the renderer's store
+ * clears itself. If that message is ever lost, this stage protects nothing,
+ * which is why the renderer subscribes once at app level rather than from
+ * whichever view happens to be mounted.
+ */
+export function vaultSecure(): VaultResult {
+  if (idleTimer) clearTimeout(idleTimer)
+  idleTimer = null
+  if (key) stage = 'secured'
+  return { ok: true }
 }
 
 export function vaultLock(): VaultResult {
@@ -233,17 +288,57 @@ export function vaultLock(): VaultResult {
   key = null
   salt = null
   cache = null
+  stage = 'locked'
   return { ok: true }
 }
 
+/**
+ * The human read, over IPC. Refuses unless the vault is fully open.
+ *
+ * The guard comes BEFORE the touch. It used to come after, which armed an idle
+ * timer on a call that had just been refused.
+ *
+ * The refusal carries VAULT_LOCKED so the renderer offers an unlock rather than
+ * printing a sentence the user has to act on by hand — the invariant
+ * tests/vaultLockedOffersUnlock.test.ts enforces.
+ */
 export function vaultList(): VaultListResult {
+  if (stage !== 'open' || !key || !cache) {
+    return { ok: false, error: `${VAULT_LOCKED}: the vault is locked.` }
+  }
   touchVaultActivity()
-  if (!key || !cache) return { ok: false, error: 'Vault is locked.' }
   return { ok: true, entries: cache }
 }
 
+/**
+ * The resolve read. Does NOT touch the idle timer, and works while `secured`.
+ *
+ * Separate from `vaultList` because the idle timer measures a person and
+ * `vaultList` was the read path for both. A monitoring sweep resolving a
+ * credential every couple of minutes postponed the human-idle lock for as long
+ * as the app ran — so on an estate that sampled, the vault never locked and the
+ * protection was not real; on one that did not, because pooled SSH connections
+ * get reused without re-resolving, it locked and every background consumer
+ * stopped at once. Both halves of that were this one line.
+ *
+ * Returns null rather than a result object so each caller raises its own
+ * VaultLockedError with its own subject — a VPN profile should not have to
+ * describe itself as a server.
+ *
+ * tests/vaultReadPaths.test.ts is what keeps a new background consumer from
+ * reaching for `vaultList` instead: a type cannot say "IPC handlers only".
+ */
+export function vaultEntriesForResolve(): VaultEntry[] | null {
+  return key && cache ? cache : null
+}
+
 export function vaultSave(entries: VaultEntry[]): VaultResult {
-  if (!key || !salt) return { ok: false, error: 'Vault is locked.' }
+  // A write is always a person, so it needs the vault fully open — and the
+  // marker, so the modal that was saving offers the unlock instead of a dead
+  // sentence.
+  if (stage !== 'open' || !key || !salt) {
+    return { ok: false, error: `${VAULT_LOCKED}: the vault is locked.` }
+  }
   touchVaultActivity()
   try {
     writeEncrypted(entries, key, salt)
@@ -268,6 +363,8 @@ export async function vaultChangePassword(current: string, next: string): Promis
     key = k
     salt = s
     cache = entries
+    stage = 'open'
+    touchVaultActivity()
     return { ok: true }
   } catch {
     return { ok: false, error: 'Incorrect current password.' }

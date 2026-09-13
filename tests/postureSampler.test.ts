@@ -94,7 +94,7 @@ function harness(over: { withPosture?: boolean; gated?: boolean } = {}): Harness
     ...(over.gated ? { postureEnabled: (): boolean => enabled } : {}),
     release: () => undefined,
     emit: () => undefined,
-    vaultUnlocked: () => true,
+    credentialReady: () => true,
     history: () => ({
       transaction: <T,>(fn: () => T): T => fn(),
       recordSamples: () => undefined,

@@ -50,7 +50,7 @@ function harness(over: { enabledGate?: boolean; hostname?: string } = {}): Harne
     },
     release: () => undefined,
     emit: () => undefined,
-    vaultUnlocked: () => true,
+    credentialReady: () => true,
     history: () => ({
       transaction: <T,>(fn: () => T): T => fn(),
       recordSamples: () => undefined,
@@ -211,7 +211,7 @@ describe('the drift probe in the sweep', () => {
       sample: async () => ({ ok: true, data: { hostname: 'h', services: null, listeners: null } }),
       release: () => undefined,
       emit: () => undefined,
-      vaultUnlocked: () => true
+      credentialReady: () => true
     })
     sampler.configure({ enabled: true, intervalMs: 120_000, targets: [target('a')] })
     await sampler.sampleNow()

@@ -43,7 +43,7 @@ function harness(
     },
     release: () => undefined,
     emit: () => undefined,
-    vaultUnlocked: () => true,
+    credentialReady: () => true,
     history: () => ({
       transaction: <T,>(fn: () => T): T => fn(),
       recordSamples: () => undefined,

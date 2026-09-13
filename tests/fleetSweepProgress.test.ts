@@ -42,7 +42,7 @@ function harness(over: { targets?: FleetTarget[]; failOn?: string[] } = {}): {
     release: () => undefined,
     emit: () => undefined,
     progress: (p: FleetSweepProgress) => seen.push({ ...p }),
-    vaultUnlocked: () => true
+    credentialReady: () => true
   } as never)
 
   sampler.configure({
@@ -102,7 +102,7 @@ describe('sweep progress', () => {
       release: () => undefined,
       emit: () => undefined,
       progress: (p: FleetSweepProgress) => seen.push({ ...p }),
-      vaultUnlocked: () => unlocked
+      credentialReady: () => unlocked
     } as never)
     sampler.configure({
       enabled: true,
@@ -121,7 +121,7 @@ describe('sweep progress', () => {
       sample: async () => ({ ok: true, data: { hostname: 'h', services: null, listeners: null } }),
       release: () => undefined,
       emit: () => undefined,
-      vaultUnlocked: () => true
+      credentialReady: () => true
     } as never)
     sampler.configure({ enabled: true, intervalMs: 120_000, targets: [target('a')] })
     await expect(sampler.collectNow()).resolves.toMatchObject({ swept: true })
@@ -141,7 +141,7 @@ describe('sweep progress', () => {
       progress: () => {
         throw new Error('window destroyed')
       },
-      vaultUnlocked: () => true
+      credentialReady: () => true
     } as never)
     sampler.configure({
       enabled: true,

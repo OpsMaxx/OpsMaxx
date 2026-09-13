@@ -117,7 +117,7 @@ describe('a sweep against a real store', () => {
       sample: async (key) => sample(key),
       release: () => undefined,
       emit: () => undefined,
-      vaultUnlocked: () => true,
+      credentialReady: () => true,
       history: () => store,
       now: () => 1_700_000_000_000
     })
@@ -250,7 +250,7 @@ describe('the store never breaks a sweep', () => {
       },
       release: () => undefined,
       emit: () => undefined,
-      vaultUnlocked: () => true,
+      credentialReady: () => true,
       history,
       now: () => 1000
     })
@@ -352,7 +352,7 @@ describe('the store never stops the sampler', () => {
       },
       release: () => undefined,
       emit: () => undefined,
-      vaultUnlocked: () => true,
+      credentialReady: () => true,
       history: () => {
         throw new Error('history resolver blew up')
       },
@@ -379,7 +379,7 @@ describe('the store never stops the sampler', () => {
       sample: async () => (ok ? { ok: true, data: metrics() } : { ok: false, error: 'timeout' }),
       release: () => undefined,
       emit: () => undefined,
-      vaultUnlocked: () => true,
+      credentialReady: () => true,
       history: () => store,
       now: () => 1000
     })
@@ -408,7 +408,7 @@ describe('the store never stops the sampler', () => {
       },
       release: () => undefined,
       emit: () => undefined,
-      vaultUnlocked: () => true,
+      credentialReady: () => true,
       history: () => store,
       now: () => 1000
     })
@@ -432,7 +432,7 @@ describe('the store never stops the sampler', () => {
       sample: async () => ({ ok: true, data: metrics() }),
       release: () => undefined,
       emit: () => undefined,
-      vaultUnlocked: () => true,
+      credentialReady: () => true,
       history: () => store,
       now: () => 1_700_000_000_000
     })

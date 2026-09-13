@@ -1455,6 +1455,21 @@ const api = {
       ipcRenderer.on('vault:auto-locked', h)
       return () => ipcRenderer.removeListener('vault:auto-locked', h)
     },
+    /**
+     * The idle timeout, which now SECURES rather than locks.
+     *
+     * A separate channel rather than a payload on the one above, because the
+     * renderer does the same thing on both — drop every decrypted entry — and
+     * says something different about it. "Locked" is a thing the user must
+     * undo before anything works again; "secured" is a thing they only notice
+     * if they wanted to look at the vault. One channel with a flag would have
+     * made every existing subscriber's ignorance of the flag look deliberate.
+     */
+    onSecured: (cb: () => void): (() => void) => {
+      const h = (): void => cb()
+      ipcRenderer.on('vault:secured', h)
+      return () => ipcRenderer.removeListener('vault:secured', h)
+    },
     bioDisable: (): Promise<VaultResult> => ipcRenderer.invoke('vault:bio-disable'),
     bioUnlock: (): Promise<VaultResult> => ipcRenderer.invoke('vault:bio-unlock')
   },

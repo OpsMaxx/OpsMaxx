@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useApp } from './store/app'
 import { clsx } from './lib/format'
 import { initPersistence } from './store/persist'
+import { startVaultLockWatch } from './store/vault'
 import { useHotkeys } from './hooks/useHotkeys'
 import { TitleBar } from './components/layout/TitleBar'
 import { ActivityBar } from './components/layout/ActivityBar'
@@ -72,6 +73,11 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     void initPersistence()
   }, [])
+
+  // App level, not inside the Vault view. Whatever is on screen when the vault
+  // secures or locks, the decrypted entries this renderer is holding have to
+  // go — see startVaultLockWatch for what leaving them behind meant.
+  useEffect(() => startVaultLockWatch(), [])
 
   // Density is a root attribute so it can tighten every surface from CSS
   // rather than threading a prop through every component.

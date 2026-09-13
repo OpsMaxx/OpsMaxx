@@ -135,7 +135,12 @@ export function forgetSessionKey(): void {
 export function enableBiometricUnlock(scope: BiometricScope = 'session'): VaultResult {
   const support = biometricSupport()
   if (!support.available) return { ok: false, error: support.reason ?? 'Biometric unlock is unavailable.' }
-  if (!vaultStatus().unlocked) return { ok: false, error: 'Unlock the vault first.' }
+  // `stage`, not `unlocked`. `unlocked` is true while the vault is secured —
+  // deliberately, so background work keeps resolving — but enabling biometric
+  // unlock hands out the derived key, and that is a decision a person makes
+  // with the vault open in front of them, not something that should stay
+  // available on a screen that has been cleared for inactivity.
+  if (vaultStatus().stage !== 'open') return { ok: false, error: 'Unlock the vault first.' }
 
   const exported = vaultExportKey()
   if (!exported) return { ok: false, error: 'Unlock the vault first.' }

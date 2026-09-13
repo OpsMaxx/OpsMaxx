@@ -8,6 +8,9 @@ import { RouteHops } from './RouteHops'
 import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
 import { useVault } from '../../store/vault'
+import { UnlockVaultButton } from '../common/UnlockVaultButton'
+import { useVaultPrompt } from '../../store/vaultPrompt'
+import type { VaultEntryDescriptor, VaultIndexResult } from '../../../../shared/vaultIndex'
 import { VpnTransportSelect } from '../vpn/VpnTransportSelect'
 import { adviseOnError } from '../../lib/connectionError'
 import type { AuthMethod, Hop, UUID } from '../../types'
@@ -225,12 +228,70 @@ export function AddServerModal(): React.JSX.Element {
   const vaultEntries = useVault((s) => s.entries)
   const createVaultEntry = useVault((s) => s.createEntry)
 
-  // A credential is only offered for the method it can actually satisfy: a
-  // password entry cannot authenticate a key connection, and vice versa.
-  const usableEntries = vaultEntries.filter((e) =>
-    auth === 'key' ? !!e.privateKey : auth === 'password' ? !!e.password && !e.privateKey : false
-  )
-  const usingVault = vaultUnlocked && vaultEntryId !== ''
+  /**
+   * The credential list, as NAMES — `vaultIndex`, not `useVault.entries`.
+   *
+   * Two reasons, and the second is the whole point of this change. The first is
+   * that a picker never needed the values: `VaultEntryDescriptor` says which
+   * slots are filled without saying what is in them, which is what
+   * shared/vaultIndex.ts exists for.
+   *
+   * The second: `useVault.entries` is empty whenever the vault is not fully
+   * open, so this modal silently collapsed to the keychain-only path fifteen
+   * minutes after the last vault click. The user was never told the vault
+   * option existed, so the credential went to the keychain — a direct cause of
+   * "not every credential ends up in the vault". Descriptors resolve while the
+   * vault is secured, so the choice is on screen whenever it can be honoured.
+   */
+  const [descriptors, setDescriptors] = useState<VaultEntryDescriptor[] | null>(null)
+  useEffect(() => {
+    let live = true
+    void (window.opsmaxx?.vaultIndex as { list?: () => Promise<VaultIndexResult> } | undefined)
+      ?.list?.()
+      .then((r) => {
+        if (live) setDescriptors(r?.ok ? r.entries : null)
+      })
+      .catch(() => {
+        if (live) setDescriptors(null)
+      })
+    return () => {
+      live = false
+    }
+    // Re-read on an unlock: the picker was showing the locked fallback and the
+    // entries are readable now.
+  }, [vaultUnlocked])
+
+  /**
+   * The two sources, collapsed into what the picker actually renders.
+   *
+   * The full entries win while the vault is open, because a descriptor
+   * deliberately carries no username VALUE — shared/vaultIndex.ts states that
+   * what is on it is everything it may ever carry, and `credentialResolver`
+   * treats an account name as a disclosure worth redacting. Widening that
+   * projection to prettify a dropdown is the trade this refuses to make.
+   *
+   * So: names and usernames when they are in hand, names alone when they are
+   * not. The option to reuse a saved credential is present either way, which is
+   * the property that matters.
+   */
+  const options: { id: string; name: string; sub: string }[] = vaultUnlocked
+    ? vaultEntries
+        .filter((e) =>
+          auth === 'key' ? !!e.privateKey : auth === 'password' ? !!e.password && !e.privateKey : false
+        )
+        .map((e) => ({ id: e.id, name: e.name, sub: e.username }))
+    : (descriptors ?? [])
+        .filter((d) =>
+          auth === 'key' ? d.has.privateKey : auth === 'password' ? d.has.password && !d.has.privateKey : false
+        )
+        .map((d) => ({ id: d.id, name: d.name, sub: '' }))
+  const usableEntries = options
+  // No `vaultUnlocked &&`. A REFERENCE is valid whatever the vault is doing —
+  // resolution happens at connect time and already prompts through
+  // `withVaultUnlock` when it cannot. Requiring the vault to be open here meant
+  // a server that was already referencing an entry silently reverted to the
+  // "type a new one" branch on an edit.
+  const usingVault = vaultEntryId !== ''
 
   const missing = missingField({
     name,
@@ -364,8 +425,28 @@ export function AddServerModal(): React.JSX.Element {
     if (usingVault) {
       secret = { vaultEntryId }
     } else if (auth === 'password' && password) {
-      secret = saveToVault && vaultUnlocked ? null : { password }
+      // `saveToVault` alone. It used to be `saveToVault && vaultUnlocked`, so a
+      // secured vault silently wrote the credential to the keychain with the
+      // box still ticked — the user asked for the vault and got something else,
+      // and was told nothing. A vault WRITE does need it open, so the prompt
+      // below is how it gets opened rather than a reason to give up.
+      secret = saveToVault ? null : { password }
       if (!secret) {
+        // Asked BEFORE the write, not retried after it.
+        //
+        // `withVaultUnlock` is the usual machinery, but it recognises a failure
+        // by its marker and `createVaultEntry` answers with `null` — the id it
+        // could not produce — so there is nothing for it to match on. Asking
+        // first is also the honest order: a vault that is shut cannot be
+        // written to, so this is a precondition rather than a failure to
+        // recover from. A declined prompt falls through to the keychain below,
+        // which is the same outcome as a refused write and loses nothing the
+        // user typed.
+        if (!vaultUnlocked) {
+          await useVaultPrompt
+            .getState()
+            .request('Saving this credential into the vault needs your master password.')
+        }
         const entryId = await createVaultEntry('login', {
           name: `${fields.name} (${fields.username})`,
           username: fields.username,
@@ -552,7 +633,7 @@ export function AddServerModal(): React.JSX.Element {
         )}
       </div>
 
-      {auth !== 'agent' && vaultUnlocked && usableEntries.length > 0 && (
+      {auth !== 'agent' && usableEntries.length > 0 && (
         <div className="field">
           <label className="field-label">Credential</label>
           <select className="input" value={vaultEntryId} onChange={(e) => setVaultEntryId(e.target.value)}>
@@ -560,7 +641,7 @@ export function AddServerModal(): React.JSX.Element {
             {usableEntries.map((e) => (
               <option key={e.id} value={e.id}>
                 {e.name}
-                {e.username ? ` — ${e.username}` : ''}
+                {e.sub ? ` — ${e.sub}` : ''}
               </option>
             ))}
           </select>
@@ -572,12 +653,29 @@ export function AddServerModal(): React.JSX.Element {
         </div>
       )}
 
-      {auth !== 'agent' && vaultUnlocked && usableEntries.length === 0 && (
+      {auth !== 'agent' && descriptors !== null && usableEntries.length === 0 && (
         <div className="field">
           <span className="field-hint">
             No saved {auth === 'key' ? 'SSH key' : 'login'} in the vault yet — type one below and it
             will be saved there.
           </span>
+        </div>
+      )}
+
+      {/* The vault is fully locked, so the names could not be read. Say so and
+          offer the unlock, rather than hiding the option: a modal that quietly
+          drops to keychain-only is how a credential ends up somewhere the user
+          did not choose, and they never find out the choice existed. */}
+      {auth !== 'agent' && descriptors === null && (
+        <div className="field">
+          <label className="field-label">Credential</label>
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+            <span className="field-hint grow">
+              The vault is locked, so saved credentials cannot be listed. Unlock it to reuse one
+              instead of typing it again.
+            </span>
+            <UnlockVaultButton reason="Pick a credential you have already saved instead of typing it again." />
+          </div>
         </div>
       )}
 
