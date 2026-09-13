@@ -1,4 +1,6 @@
 import type { HttpVia } from '../../../shared/httpClient'
+import { resolveSecrets, resolveUrl, type SecretLookup } from '../../../shared/apiSecrets'
+import { useVault } from '../store/vault'
 
 /**
  * A `fetch`-shaped function backed by OpsMaxx's main process.
@@ -26,6 +28,27 @@ export interface HttpTransportOptions {
  * failed, so it reports it in its own chrome instead.
  */
 export type TransportReporter = (error: string | null) => void
+
+/**
+ * The vault, as the transport sees it: one question and one lookup.
+ *
+ * Read at SEND time from the live store rather than captured when the
+ * transport is built. The transport outlives an unlock — it is created once
+ * with the client and used for the rest of the session — so a snapshot taken
+ * at construction would report the vault locked forever, or, worse, keep
+ * serving values from a vault that has since re-locked.
+ */
+function liveVault(): SecretLookup {
+  const state = useVault.getState()
+  return {
+    unlocked: state.unlocked,
+    read: ({ entryId, field }) => {
+      const entry = state.entries.find((e) => e.id === entryId)
+      if (!entry) return null
+      return field === 'username' ? entry.username : entry.password
+    }
+  }
+}
 
 /**
  * How many redirects a `RequestInit.redirect` mode asks for.
@@ -62,10 +85,36 @@ export function createHttpTransport(
         ? undefined
         : await request.arrayBuffer()
 
+    /**
+     * Vault-backed values, substituted here and nowhere earlier.
+     *
+     * This is the last point before the request leaves the renderer, which is
+     * exactly where a credential should enter it: the API client's document
+     * holds a `vault:` reference, so a secret is never in the workspace, never
+     * in what gets persisted, and never in a backup.
+     *
+     * A locked vault throws, and the throw is a TypeError by the time it
+     * reaches the client — the same shape a transport failure has — so it
+     * surfaces in OpsMaxx's own error banner with an unlock offered, rather
+     * than sending `Authorization: Bearer ` and collecting a 401 that looks
+     * like a wrong password.
+     */
+    const vault = liveVault()
+    let url: string
+    let headers: Record<string, string>
+    try {
+      url = resolveUrl(request.url, vault)
+      headers = resolveSecrets(Object.fromEntries(request.headers.entries()), vault)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      report?.(message)
+      throw new TypeError(message)
+    }
+
     const result = await window.opsmaxx.http.request({
-      url: request.url,
+      url,
       method: request.method,
-      headers: Object.fromEntries(request.headers.entries()),
+      headers,
       body,
       via,
       insecureTls,
@@ -112,8 +161,10 @@ export function createHttpTransport(
 
     // The client reads `response.url` and passes it to `new URL(...)`. A
     // Response built by hand has an empty url, which throws there and loses the
-    // result after a successful round trip, so the real one is put back.
-    Object.defineProperty(response, 'url', { value: request.url })
+    // result after a successful round trip, so the real one is put back —
+    // the RESOLVED one, because a `vault:` token left in it would both fail to
+    // parse and put the reference somewhere it does not belong.
+    Object.defineProperty(response, 'url', { value: url })
     return response
   }
 }

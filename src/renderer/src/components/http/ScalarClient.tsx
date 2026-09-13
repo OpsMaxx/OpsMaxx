@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Loader2, X } from 'lucide-react'
 import { useApp } from '../../store/app'
 import { sshTargetFor } from '../../lib/ssh'
@@ -9,6 +9,12 @@ import type { OpenApiDocument } from '@scalar/workspace-store/schemas/v3.1/stric
 import type { SidebarState } from '@scalar/sidebar'
 import type { ApiCollection } from '../../types'
 import { documentForCollection, firstOperationOf } from '../../../../shared/apiCollectionImport'
+import {
+  fromSnapshot,
+  isSnapshot,
+  toSnapshot,
+  type WorkspaceLike
+} from '../../../../shared/apiWorkspaceSnapshot'
 
 /**
  * The API client, for every collection at once.
@@ -52,6 +58,8 @@ import { documentForCollection, firstOperationOf } from '../../../../shared/apiC
 interface Engine {
   /** Make sure every live collection has a document, and no dead one does. */
   sync: (collections: readonly ApiCollection[]) => Promise<void>
+  /** Everything worth keeping, for the store to persist. */
+  snapshot: () => unknown
   /** Show this collection, restoring wherever the user last was inside it. */
   select: (collectionId: string) => void
   /** Add a request to a collection and land on it. */
@@ -140,6 +148,31 @@ export function ScalarClient({
 
   const reportRef = useRef((message: string | null) => setTransportError(message))
 
+  /**
+   * Persisting what the user has done, on a long trailing debounce.
+   *
+   * Two seconds rather than the store's own 400 ms, because the cost here is
+   * different in kind: this serialises every document in the workspace, and it
+   * is driven by a bus that fires on every keystroke inside the client. The
+   * store's debounce then batches the result again on the way to disk.
+   */
+  // Both read only refs and the store's own getState, so neither needs to be
+  // rebuilt between renders — and a stable identity is what lets the mount
+  // effect below keep an honest empty dependency list.
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cancelSave = useCallback((): void => {
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = null
+  }, [])
+  const scheduleSave = useCallback((): void => {
+    cancelSave()
+    saveTimer.current = setTimeout(() => {
+      saveTimer.current = null
+      const snapshot = engineRef.current?.snapshot()
+      if (snapshot) useApp.getState().setApiWorkspace(snapshot)
+    }, 2000)
+  }, [cancelSave])
+
   // Mounted ONCE. Not keyed, not re-run: everything that used to be a
   // dependency here is now handled by `sync` and `select` below.
   useEffect(() => {
@@ -149,7 +182,13 @@ export function ScalarClient({
 
     void (async () => {
       try {
-        const engine = await createEngine(el, optionsRef, reportRef)
+        const engine = await createEngine(
+          el,
+          optionsRef,
+          reportRef,
+          useApp.getState().apiWorkspace,
+          () => scheduleSave()
+        )
         // React 19 re-invokes effects in development. Without this, the second
         // invocation leaks an entire Vue app and its event bus behind the
         // first — and with no key to force a remount, nothing would ever
@@ -173,14 +212,18 @@ export function ScalarClient({
 
     return () => {
       disposed = true
+      // Before the unmount, or a pending save fires against a torn-down store
+      // and writes an empty workspace over a live one.
+      cancelSave()
       engineRef.current?.unmount()
       engineRef.current = null
     }
     // Mounted once by design: the collections and the selection are carried
     // in by `sync` and `select` instead of by a dependency list. Nothing in
-    // this effect's body reads a prop directly, which is why the empty list is
-    // honest rather than suppressed.
-  }, [])
+    // this effect's body reads a prop directly, and the two callbacks it does
+    // close over are stable — which is why this list is honest rather than
+    // suppressed.
+  }, [cancelSave, scheduleSave])
 
   // What the mount effect should converge on once it finishes building. It
   // cannot read props directly: it runs after an await, by which time the
@@ -273,7 +316,9 @@ export function ScalarClient({
 async function createEngine(
   el: HTMLElement,
   optionsRef: { current: HttpTransportOptions },
-  reportRef: { current: (message: string | null) => void }
+  reportRef: { current: (message: string | null) => void },
+  restore: unknown,
+  onChanged: () => void
 ): Promise<Engine> {
   const [
     { Operation },
@@ -301,6 +346,33 @@ async function createEngine(
   const workspaceStore = createWorkspaceStore()
   const eventBus = createWorkspaceEventBus()
   const mutators = generateClientMutators(workspaceStore)
+
+  /** What each slug was built from, so an unchanged collection is not rebuilt. */
+  const sources = new Map<string, string>()
+
+  /**
+   * Last session's workspace, before anything is added to this one.
+   *
+   * `sourceKeys` comes back with it, and that is the load-bearing half: it
+   * tells `sync` below that these documents are already current, so a restored
+   * document is not immediately overwritten by one rebuilt from its
+   * collection — which would discard every edit the snapshot exists to keep.
+   */
+  if (isSnapshot(restore)) {
+    workspaceStore.loadWorkspace(
+      fromSnapshot(restore) as Parameters<typeof workspaceStore.loadWorkspace>[0]
+    )
+    for (const [slug, key] of Object.entries(restore.sourceKeys)) sources.set(slug, key)
+  }
+
+  // Every change inside the client — a header typed, an environment edited, a
+  // cookie set — arrives here. The debounce lives in the caller, because this
+  // fires per keystroke.
+  //
+  // The unsubscribe is kept and called on unmount: the bus outlives the Vue
+  // app, so a dropped listener would go on serialising a workspace for a
+  // client that is gone.
+  const stopListening = eventBus.onAny(() => onChanged())
   const transport = createHttpTransport(
     () => optionsRef.current,
     (message) => reportRef.current(message)
@@ -315,8 +387,6 @@ async function createEngine(
   // re-render of this wrapper.
   const sidebarState = shallowRef<SidebarState<TraversedEntry> | null>(null)
 
-  /** What each slug was built from, so an unchanged collection is not rebuilt. */
-  const sources = new Map<string, string>()
   /** Where the user was inside each collection, so switching back returns there. */
   const lastPlace = new Map<string, { path: string; method: HttpMethodName }>()
   const sidebars = new Map<string, SidebarState<TraversedEntry>>()
@@ -520,11 +590,36 @@ async function createEngine(
     select(collectionId)
   }
 
+  /**
+   * A document whose content can be fetched again.
+   *
+   * Used only to decide what to shed when the snapshot is too big: a document
+   * built from a `specUrl` or `specPath` is re-read on open anyway, so losing
+   * it costs a fetch. A hand-written one exists only in the snapshot.
+   */
+  const rebuildable = (slug: string): boolean => {
+    const key = sources.get(slug)
+    if (key === undefined) return false
+    const source = JSON.parse(key) as { specUrl?: string | null; specPath?: string | null }
+    return Boolean(source.specUrl || source.specPath)
+  }
+
+  const snapshot = (): unknown =>
+    toSnapshot(
+      workspaceStore.exportWorkspace() as WorkspaceLike,
+      Object.fromEntries(sources),
+      rebuildable
+    )
+
   return {
     sync,
+    snapshot,
     select,
     addRequest,
-    unmount: () => app.unmount()
+    unmount: () => {
+      stopListening()
+      app.unmount()
+    }
   }
 }
 
