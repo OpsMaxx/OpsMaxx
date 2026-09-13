@@ -20,7 +20,38 @@ import { toast } from '../store/toast'
 export const ISSUES_URL = 'https://github.com/OpsMaxx/OpsMaxx/issues/new/choose'
 
 /**
- * Copy the diagnostics, open the issue form, say so. One click.
+ * Write the block to the user's downloads folder as a plain text file.
+ *
+ * The same blob-and-anchor the access review export uses, rather than
+ * `dialog.saveJson`: that channel filters the picker to `.json` and asks for a
+ * path, and this payload is neither JSON nor worth a second decision on a path
+ * whose whole point is one press. `.txt` because `formatDiagnostics` writes
+ * `key: value` lines under `[section]` headings — nothing that renders as
+ * anything else.
+ *
+ * Returns whether the file was written, because every step here can fail in a
+ * way the caller must not inherit: `createObjectURL` is absent in some embedded
+ * webviews, and a click on a synthetic anchor is a no-op wherever downloads are
+ * turned off. Neither is a reason to withhold the clipboard copy or the form,
+ * so a failure is a `false` and a different sentence, never a thrown error.
+ */
+function saveDiagnosticsFile(text: string): boolean {
+  try {
+    const blob = new Blob([text], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `opsmaxx-diagnostics-${new Date().toISOString().slice(0, 10)}.txt`
+    a.click()
+    URL.revokeObjectURL(url)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Save the diagnostics, copy them, open the issue form, say so. One click.
  *
  * Reporting a bug used to be seven steps across two applications, and the first
  * of them was knowing to look in Settings > Advanced. That is a path only
@@ -66,7 +97,18 @@ export async function reportBug(): Promise<void> {
     return
   }
 
+  // The file first, then the clipboard, then the form — the order the user
+  // needs them in. The download has to have started before the browser tab
+  // takes the focus, and both copies are made because the issue template asks
+  // for this block pasted inline while an attachment is the inert way to carry
+  // a long one. Whichever the reporter reaches for, it is already there.
+  const saved = saveDiagnosticsFile(text)
   window.opsmaxx?.clipboard.write(text)
   window.open(ISSUES_URL, '_blank', 'noopener,noreferrer')
-  toast('Diagnostics copied to your clipboard. Paste them into the issue form that just opened.', 'ok')
+  toast(
+    saved
+      ? 'Diagnostics saved to your downloads and copied to your clipboard. Attach the file or paste the text into the issue form that just opened.'
+      : 'Diagnostics copied to your clipboard. Paste them into the issue form that just opened.',
+    'ok'
+  )
 }

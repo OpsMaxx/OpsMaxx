@@ -221,7 +221,7 @@ export function ActivityBar(): React.JSX.Element {
           view here for the rail to be showing. */}
       <button
         className="activity-btn"
-        title="Report a bug — copies your diagnostics and opens the issue form"
+        title="Report a bug — saves and copies your diagnostics and opens the issue form"
         onClick={() => void reportBug()}
       >
         <Bug size={20} />

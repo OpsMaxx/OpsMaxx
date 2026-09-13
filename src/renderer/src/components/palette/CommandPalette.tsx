@@ -154,13 +154,13 @@ export function CommandPalette(): React.JSX.Element {
       },
       // The same one click as the rail's bug button, for the half of this
       // audience that reaches for Ctrl+K before it reaches for a mouse. Both
-      // call the one function, so neither can drift into copying without
-      // opening or opening without copying.
+      // call the one function, so neither can drift into saving or copying
+      // without opening, or opening without either.
       {
         id: 'a-bug',
         group: 'Actions',
         title: 'Report a bug',
-        sub: 'Copies your diagnostics and opens the issue form',
+        sub: 'Saves and copies your diagnostics and opens the issue form',
         icon: <Bug size={16} />,
         run: () => void reportBug()
       },
