@@ -505,3 +505,62 @@ describe('the Go toolchain CI installs', () => {
     }
   })
 })
+
+/*
+ * The Defender step is the only gate that runs on the platform its output is
+ * about, and it has twice reported a clean scan of files it never opened:
+ * `-Include` skipped the installers, then `-Filter` skipped everything that is
+ * not a .exe. Neither was visible in a green build — the step passed, and the
+ * release notes published "no threats found" on its behalf.
+ *
+ * The ratchet above covers the release job only, and this step lives in the
+ * build job, so nothing else in this file looks at it. These four assertions
+ * are the properties that were broken, held in place so the next edit has to
+ * be deliberate about them.
+ */
+describe('the Defender gate scans what it claims to', () => {
+  const defender = steps(wf.jobs.build).find((s) => (s.name ?? '').includes('Defender'))
+  const run = defender?.run ?? ''
+  // The step quotes both old broken forms in its own comments, explaining why
+  // they were wrong. Assert against the code, or the explanation trips the
+  // check that exists because of it.
+  const code = run
+    .split('\n')
+    .filter((l) => !/^\s*#/.test(l))
+    .join('\n')
+
+  it('is there at all', () => {
+    expect(defender, 'no Defender step in the build job').toBeTruthy()
+  })
+
+  it('scans more than .exe', () => {
+    // conpty.dll is half of the pair electron-builder.yml excludes *because*
+    // of this gate, wintun.dll is a driver, and the .node files are native
+    // bindings. All three shipped unscanned.
+    for (const ext of ['.exe', '.dll', '.node']) {
+      expect(code, `Defender does not scan ${ext}`).toContain(`'${ext}'`)
+    }
+  })
+
+  it('selects files without a PowerShell glob', () => {
+    // -Include and -Filter are the two bugs. Both are wrong in different
+    // directions, so the listing is a plain -Recurse plus an explicit set.
+    expect(code).not.toMatch(/-(Include|Filter)\b/)
+    expect(code).toContain('$exts -contains $_.Extension')
+  })
+
+  it('treats an unclassified MpCmdRun exit as a failure, not a pass', () => {
+    // Only `-eq 2` used to count. Every other non-zero — a file it could not
+    // read, an engine that fell over — was published as "no threats found".
+    expect(code).toMatch(/default\s*\{[^}]*\$bad = 1/)
+  })
+
+  it('establishes and records which definitions it used', () => {
+    // `-SignatureUpdate | Out-Null` swallowed the exit code, so no run ever
+    // showed that the scan was made with current signatures.
+    expect(code).not.toContain('-SignatureUpdate | Out-Null')
+    expect(code).toMatch(/-SignatureUpdate\n\s*if \(\$LASTEXITCODE/)
+    expect(code).toContain('AntivirusSignatureVersion')
+    expect(code).toContain('AntivirusSignatureLastUpdated')
+  })
+})

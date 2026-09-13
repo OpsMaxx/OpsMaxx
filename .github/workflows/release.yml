@@ -407,23 +407,114 @@ jobs:
       # installers we just produced costs nothing and catches a problem before
       # anything is published rather than after someone downloads it.
       #
-      # `-Filter`, not `-Include`. With `-Include` and a plain directory path,
-      # PowerShell does not match that directory's own children even under
-      # `-Recurse` — so this step scanned the two nested .exe files inside
-      # win-unpacked and silently skipped every installer in release\, which are
-      # the files it is named for and the only ones anybody downloads. It had
-      # never scanned one.
+      # This step exists to say something true about the bytes people download,
+      # and it has now been wrong twice about which bytes it even looked at:
+      #
+      #   * `-Include` with a plain directory path does not match that
+      #     directory's own children, even under `-Recurse`. So it scanned the
+      #     nested .exe files inside win-unpacked and skipped every installer in
+      #     release\ — the files it is named for and the only ones anybody
+      #     downloads. It had never scanned one.
+      #   * `-Filter` fixed that, but takes exactly ONE pattern. The trade
+      #     bought the installers at the cost of every binary that is not a
+      #     .exe: conpty.dll, wintun.dll and every .node prebuild went
+      #     unscanned — and conpty.dll is half of the pair electron-builder.yml
+      #     names this very gate as the reason for excluding.
+      #
+      # Both are the same mistake: letting PowerShell's two different, both
+      # surprising, glob semantics decide what a security gate looks at. So
+      # there is no glob here now — one recursive listing, one explicit
+      # extension set, and a floor under the count, so that a third variant of
+      # this bug fails the build instead of reporting a clean scan of almost
+      # nothing.
       - name: Scan installers with Microsoft Defender
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          $mp = "$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          # The MpCmdRun.exe in Program Files is a stub that forwards to
+          # whichever engine is actually installed. The Platform directory holds
+          # the real one, and on a serviced runner the two are different builds.
+          $mp = Get-ChildItem "$env:ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe" -ErrorAction SilentlyContinue |
+                Sort-Object { $_.Directory.LastWriteTime } |
+                Select-Object -Last 1 -ExpandProperty FullName
+          if (-not $mp) { $mp = "$env:ProgramFiles\Windows Defender\MpCmdRun.exe" }
           if (-not (Test-Path $mp)) {
             Write-Warning "Defender not present on this runner"
             "not available on this runner" | Out-File -Encoding utf8 release/_defender.txt
             exit 0
           }
-          & $mp -SignatureUpdate | Out-Null
+          Write-Host "engine: $mp"
+
+          # Scan the way a user's machine scans. A bare local scan is a
+          # signature lookup; an endpoint also asks the cloud, and the cloud is
+          # where the ML verdicts come from — the `!ml` and `!rfn` family names
+          # that get unsigned Electron installers quarantined, including the
+          # Trojan:Win32/Kepavll!rfn this project already hit on frpc. Without
+          # these settings CI can pass a build that endpoint Defender blocks,
+          # which is exactly what happened.
+          #
+          # SendSafeSamples lets Microsoft receive sample bytes. It is the
+          # default consent level, it withholds anything Defender believes may
+          # carry personal data, and these files are public downloads minutes
+          # later anyway — block-at-first-sight is much weaker without it.
+          #
+          # PUA detection is AuditMode, not Enabled, and BlockAtFirstSeen is
+          # left alone: both are real-time-protection blocking knobs, and this
+          # step wants detection, not remediation. Enabling them lets RTP
+          # quarantine frpc.exe or an installer out of release\ between the
+          # build and the upload, which would surface as `if-no-files-found:
+          # error` on a step that has nothing to do with Defender. The scan
+          # below already passes -DisableRemediation for the same reason.
+          #
+          # CloudBlockLevel High does raise RTP's aggressiveness as a side
+          # effect. That is the one knob worth the risk: it is what makes the
+          # on-demand scan ask the cloud at all.
+          #
+          # Tamper protection can refuse the whole call, so this warns instead
+          # of failing and the marker records which mode the scan really ran in.
+          $cloud = 'High'
+          try {
+            Set-MpPreference -MAPSReporting Advanced -SubmitSamplesConsent SendSafeSamples `
+                             -CloudBlockLevel High -CloudExtendedTimeout 50 `
+                             -PUAProtection AuditMode -ErrorAction Stop
+          } catch {
+            $cloud = 'runner default'
+            Write-Warning "could not raise Defender's cloud settings: $_"
+          }
+
+          # `-SignatureUpdate | Out-Null` hid both the output and the exit code,
+          # so nothing here ever established that the scan below runs against
+          # current definitions. On the 0.40.1 run it returned in 2.5 seconds,
+          # which is not a definition download. The version goes in the marker
+          # because the release notes make a public claim out of this step, and
+          # the ClamAV row beside it already names its own signature build.
+          & $mp -SignatureUpdate
+          if ($LASTEXITCODE -ne 0) { Write-Warning "signature update exited $LASTEXITCODE" }
+          $status = Get-MpComputerStatus
+          $defs = $status.AntivirusSignatureVersion
+          $age = [int]((Get-Date) - $status.AntivirusSignatureLastUpdated).TotalDays
+          Write-Host "definitions $defs, $age day(s) old, cloud $cloud"
+          # ponytail: 7 days is pinned to the weekly runner-image rebuild. Drop
+          # it if a release ever passes on definitions that turn out to be stale.
+          if ($age -gt 7) {
+            Write-Error "Defender definitions are $age days old ($defs); this scan would not mean anything"
+            exit 1
+          }
+
+          # Every executable format that ships on Windows, not just the two
+          # installers. wintun.dll is a driver, the .node files are native
+          # bindings, and conpty.dll is the thing the exclusion in
+          # electron-builder.yml exists to keep out — none of them were ever
+          # looked at.
+          $exts = '.exe', '.dll', '.node', '.sys', '.msi'
+          $files = @(Get-ChildItem -Path release -Recurse -File | Where-Object { $exts -contains $_.Extension })
+          Write-Host "$($files.Count) binaries under release\"
+          # The floor neither glob bug had. It also catches real-time protection
+          # quarantining a file out from under this step before it is listed.
+          if ($files.Count -lt 10) {
+            Write-Error "only $($files.Count) binaries found under release\ — the listing is wrong, not the tree"
+            exit 1
+          }
 
           # The one exemption, and it is a single file identified by the hash
           # this run recorded for it — not a literal pasted in here, because
@@ -443,23 +534,40 @@ jobs:
           $frpcSha = $manifest.binaries.'win32-x64/frpc.exe'.sha256
           $notes = @()
           $bad = 0
-          Get-ChildItem -Path release -Filter *.exe -Recurse -File | ForEach-Object {
-            Write-Host "Scanning $($_.FullName)"
-            & $mp -Scan -ScanType 3 -File $_.FullName -DisableRemediation
-            # 0 = no threat, 2 = threat found
-            if ($LASTEXITCODE -eq 2) {
-              $sha = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
-              if ($sha -eq $frpcSha) {
-                Write-Warning "Defender flagged frpc.exe; exempt, matches the manifest hash $sha"
-                $notes += "frpc.exe: flagged by Defender, exempt (built from pinned frp source, hash $sha matches this build's manifest)"
-              } else {
-                Write-Error "Defender flagged $($_.Name)"
+          foreach ($f in $files) {
+            Write-Host "Scanning $($f.FullName)"
+            # Keep the output: when this fires, the threat name is the one fact
+            # worth having, and it used to go to the log unattached to anything.
+            $out = & $mp -Scan -ScanType 3 -File $f.FullName -DisableRemediation 2>&1
+            $code = $LASTEXITCODE
+            $out | Write-Host
+            switch ($code) {
+              0 { }
+              2 {
+                $sha = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+                if ($sha -eq $frpcSha) {
+                  Write-Warning "Defender flagged frpc.exe; exempt, matches the manifest hash $sha"
+                  $notes += "frpc.exe flagged, exempt (built from pinned frp source, hash $sha matches this build's manifest)"
+                } else {
+                  Write-Error "Defender flagged $($f.FullName)"
+                  $bad = 1
+                }
+              }
+              # A scan that did not complete is not a scan that found nothing.
+              # Anything other than 0 or 2 used to fall past the check and be
+              # published as "no threats found".
+              default {
+                Write-Error "Defender could not scan $($f.FullName) (MpCmdRun exited $code)"
                 $bad = 1
               }
             }
           }
           if ($bad -eq 0) {
-            $line = if ($notes.Count -gt 0) { $notes -join "`n" } else { "no threats found" }
+            # One line, deliberately: the release job reads this back through
+            # `tr -d '\r\n'`, so a newline here runs two sentences together in
+            # the published table.
+            $how = "defs $defs, $($files.Count) files, cloud $cloud"
+            $line = if ($notes.Count -gt 0) { ($notes -join '; ') + " ($how)" } else { "no threats found ($how)" }
             $line | Out-File -Encoding utf8 release/_defender.txt
           }
           exit $bad
