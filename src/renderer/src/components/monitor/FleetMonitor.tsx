@@ -36,12 +36,14 @@ import { RulesPanel } from './RulesPanel'
 import { ChangeLogPanel } from './ChangeLogPanel'
 import {
   isOperateModule,
+  isPromotedModule,
   moduleEnabled,
   modulesOnSurface,
   type ModuleDef,
   type ModuleId
 } from '../../../../shared/modules'
 import { openSettings, useNav } from '../../store/nav'
+import { useArmedRules } from '../../hooks/useArmedRules'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { OperationsView } from '../operations/OperationsView'
 import { splitTabStrip } from './tabStrip'
@@ -315,25 +317,69 @@ export function FleetMonitor(): React.JSX.Element {
   // Only the READ half. The modules that change servers moved to Operations —
   // see ModuleSurface in src/shared/modules.ts for why, and OperationsView for
   // what they moved into.
+  //
+  // TWO LISTS, and the difference between them is load-bearing. `enabledRead` is
+  // every read module that is on; `tabs` is the subset the STRIP draws. A
+  // promoted module (Docker, Kubernetes, CI/CD, local processes) is reached from
+  // the activity bar instead, but it is still a `monitorTab` whose panel is
+  // mounted in this very tree — see PROMOTED_MODULE_IDS for why it is not a
+  // destination of its own. So the guard and the panel mounts below must work
+  // off `enabledRead`; only the strip works off `tabs`.
+  //
+  // Collapsing these back into one list is the mistake to avoid: it would make
+  // `activeTab` fall back to Overview the moment somebody pressed Docker on the
+  // rail, because Docker is deliberately not in the strip any more.
+  //
+  // `rules` is the one module that can be in this list while switched OFF. The
+  // module toggle hides panels; it does not stop the rule engine, which sweeps
+  // in main and reads no module state. Hiding the tab while rules were still
+  // firing removed the only list of what is armed and the only control that
+  // disarms it — so when anything is armed, the tab stays whatever the switch
+  // says. Switching the module off still hides it once nothing is armed, which
+  // is the case the switch was for.
+  const rulesArmed = useArmedRules()
+  const enabledRead = useMemo<ModuleDef[]>(
+    () =>
+      modulesOnSurface('read').filter(
+        (m) => moduleEnabled(modules, m.id) || (m.id === 'rules' && rulesArmed)
+      ),
+    [modules, rulesArmed]
+  )
   const tabs = useMemo<ModuleDef[]>(
-    () => modulesOnSurface('read').filter((m) => moduleEnabled(modules, m.id)),
-    [modules]
+    () => enabledRead.filter((m) => !isPromotedModule(m.id)),
+    [enabledRead]
   )
   // The read modules a person has NOT switched on, so the strip can say they
   // exist. Nothing in Monitoring used to: ten of the thirteen read modules ship
   // off, and a user who never opened Settings never learned the product had
   // them.
+  //
+  // A promoted module that is off stays in HERE on purpose. Its rail icon is
+  // hidden while it is off, so this popover is the only thing left that says
+  // Docker or CI/CD exist at all — dropping them would make promotion cost a
+  // user the ability to discover them.
   const offTabs = useMemo<ModuleDef[]>(
-    () => modulesOnSurface('read').filter((m) => !moduleEnabled(modules, m.id)),
-    [modules]
+    () =>
+      modulesOnSurface('read').filter(
+        // Not `rules` while it is armed: it is on screen, so listing it under
+        // "switched off and available" would be the strip disagreeing with
+        // itself about a tab the reader can see.
+        (m) => !moduleEnabled(modules, m.id) && !(m.id === 'rules' && rulesArmed)
+      ),
+    [modules, rulesArmed]
   )
 
   // A module switched off while its tab is open would otherwise leave the page
   // blank with no way back. `isOperateModule` is the new half of the same
   // guard: an `operate` id can still reach `monitorTab` through a persisted
   // store written before the split, and its panel is not mounted here any more.
+  //
+  // `enabledRead` rather than `tabs`, for the reason given above: a promoted tab
+  // is legitimately active even though it never appears in the strip.
   const activeTab =
-    tab === 'overview' || tab === 'alerts' || (!isOperateModule(tab) && tabs.some((t) => t.id === tab))
+    tab === 'overview' ||
+    tab === 'alerts' ||
+    (!isOperateModule(tab) && enabledRead.some((t) => t.id === tab))
       ? tab
       : 'overview'
   const show = (id: 'overview' | 'alerts' | ModuleId): React.CSSProperties | undefined =>
@@ -353,6 +399,18 @@ export function FleetMonitor(): React.JSX.Element {
   // buttons are fixed. That leaves six module slots. The rule that makes an
   // overflow survivable — the selected tab is always in the strip — is in
   // splitTabStrip, where it can be stated without mounting this component.
+  //
+  // Six is no longer a number the default install has to squeeze past. Eight read
+  // modules used to ship on and the strip held six, so two arrived behind `More`
+  // on a machine nobody had configured -- and the two were Docker and Kubernetes,
+  // which is what made promotion worth doing rather than the ceiling worth
+  // raising. With those two on the rail the default set is exactly six, so
+  // `stripped.rest` is empty and the overflow control is not rendered at all.
+  //
+  // `activeTab` may be a promoted id that is not in `tabs`. splitTabStrip handles
+  // that as its "selection that is not in the list" case: no promotion, no
+  // eviction, and no tab highlighted in the strip -- which is right, because the
+  // highlighted destination is on the rail.
   const stripped = useMemo(
     () => splitTabStrip(tabs, activeTab, MAX_STRIP_TABS - 2),
     [tabs, activeTab]
@@ -668,9 +726,9 @@ export function FleetMonitor(): React.JSX.Element {
           <ServicesPanel servers={servers} />
         </div>
       )}
-      {moduleEnabled(modules, 'rules') && (
+      {(moduleEnabled(modules, 'rules') || rulesArmed) && (
         <div style={show('rules')}>
-          <RulesPanel servers={servers} />
+          <RulesPanel servers={servers} moduleOff={!moduleEnabled(modules, 'rules')} />
         </div>
       )}
       {moduleEnabled(modules, 'changeLog') && (

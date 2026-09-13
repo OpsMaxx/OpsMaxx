@@ -4,7 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
 import { RulesPanel } from '../src/renderer/src/components/monitor/RulesPanel'
-import { jobApprovalFor } from '../src/shared/jobs'
+import { jobApprovalFor, verifyJobApproval } from '../src/shared/jobs'
 import type { JobSpec, JobTargetRef } from '../src/shared/jobs'
 import type { RuleDraftWire, RuleView } from '../src/shared/rules'
 import type { Server } from '../src/renderer/src/types'
@@ -68,6 +68,8 @@ function jobRuleView(over: Partial<RuleView> = {}): RuleView {
     },
     limit: { maxFirings: 1, windowMs: 3_600_000 },
     armedAt: T0,
+    // Recorded on the rule rather than inside the approval — see Rule.unattendedAt.
+    unattendedAt: T0,
     status: { ruleId: 'r1', fired: [], suppressed: 0 },
     verdict: { ok: true },
     ...over
@@ -222,6 +224,96 @@ describe('writing a job rule', () => {
     // those could arm a rule into the past.
     expect('armedAt' in draft).toBe(false)
     expect('id' in draft).toBe(false)
+  })
+
+  // ---------------------------------------------------------------------------
+  // THE SEAM THAT LET A BUG SHIP
+  // ---------------------------------------------------------------------------
+  //
+  // The suites used to meet nowhere. The engine tests verify approval records but
+  // only ever over an ordinary command on two hosts, which yields
+  // `{kind:'confirm'}` and never reaches the phrase comparison. The panel test
+  // below writes a destructive rule but asserts only what the dialog SAYS and
+  // never clicks Create. So nothing exercised "mint a record for a risky rule,
+  // then verify it the way a firing does" — and in that gap, every destructive
+  // rule, and every rule past TYPE_ABOVE_HOSTS servers, minted a record that
+  // contradicted itself and refused forever.
+  //
+  // These two cross it: drive the real dialog, take the draft it produces, and
+  // check the record against the same verification the engine runs.
+  it('demands the job’s own word as well, and records the one the plan asked for', async () => {
+    const user = userEvent.setup()
+    const h = mount([])
+    await user.click(await screen.findByRole('button', { name: /New rule/ }))
+    await user.type(screen.getByPlaceholderText('Vacuum the journal'), 'clean the cache')
+    await user.click(screen.getByLabelText('Run a job'))
+    await user.type(
+      screen.getByPlaceholderText('journalctl --vacuum-size=200M'),
+      'rm -rf /var/cache/*'
+    )
+    await user.click(screen.getByLabelText('alpha'))
+
+    // Two ceremonies, two boxes: the job's own door and the standing one.
+    await user.type(screen.getByLabelText('Type RUN to confirm the job'), 'RUN')
+    await user.type(screen.getByLabelText('Type UNATTENDED to confirm'), 'UNATTENDED')
+    await user.click(screen.getByRole('button', { name: /Create rule/ }))
+
+    expect(h.create).toHaveBeenCalledTimes(1)
+    const draft = h.create.mock.calls[0][0]
+    // The gate crosses the boundary as an assertion main can refuse on.
+    expect(draft.unattended, 'the ceremony was not asserted to main').toBe(true)
+    const action = draft.action as { type: 'job'; approval: { phrase: unknown } }
+    // The record carries the word THIS PLAN demanded — the idiom every other
+    // approval producer uses — not the rule ceremony's word.
+    expect(action.approval.phrase).toBe('RUN')
+  })
+
+  it('mints a record for a destructive rule that actually verifies', async () => {
+    // The assertion that would have caught the original bug: not what the record
+    // contains, but whether it survives the check a firing puts it through.
+    const user = userEvent.setup()
+    const h = mount([])
+    await user.click(await screen.findByRole('button', { name: /New rule/ }))
+    await user.type(screen.getByPlaceholderText('Vacuum the journal'), 'clean the cache')
+    await user.click(screen.getByLabelText('Run a job'))
+    await user.type(
+      screen.getByPlaceholderText('journalctl --vacuum-size=200M'),
+      'rm -rf /var/cache/*'
+    )
+    await user.click(screen.getByLabelText('alpha'))
+    await user.type(screen.getByLabelText('Type RUN to confirm the job'), 'RUN')
+    await user.type(screen.getByLabelText('Type UNATTENDED to confirm'), 'UNATTENDED')
+    await user.click(screen.getByRole('button', { name: /Create rule/ }))
+
+    const action = h.create.mock.calls[0][0].action as {
+      spec: JobSpec
+      targets: JobTargetRef[]
+      approval: unknown
+    }
+    const verdict = verifyJobApproval(action.approval, action.spec, action.targets)
+    expect(verdict.ok, `a rule written through the dialog cannot fire: ${JSON.stringify(verdict)}`).toBe(
+      true
+    )
+  })
+
+  it('will not create a risky rule on the standing word alone', async () => {
+    // Typing UNATTENDED and nothing else used to be the whole ceremony, and it
+    // produced the unverifiable record. It now leaves the button disabled.
+    const user = userEvent.setup()
+    mount([])
+    await user.click(await screen.findByRole('button', { name: /New rule/ }))
+    await user.type(screen.getByPlaceholderText('Vacuum the journal'), 'clean the cache')
+    await user.click(screen.getByLabelText('Run a job'))
+    await user.type(
+      screen.getByPlaceholderText('journalctl --vacuum-size=200M'),
+      'rm -rf /var/cache/*'
+    )
+    await user.click(screen.getByLabelText('alpha'))
+    await user.type(screen.getByLabelText('Type UNATTENDED to confirm'), 'UNATTENDED')
+    expect(
+      (screen.getByRole('button', { name: /Create rule/ }) as HTMLButtonElement).disabled,
+      'a destructive rule was creatable without the job’s own word'
+    ).toBe(true)
   })
 
   it('states the blast radius while the rule is being written', async () => {

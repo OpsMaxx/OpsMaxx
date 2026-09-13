@@ -652,6 +652,7 @@ interface AppState {
     data: Partial<
       Pick<
         AppState,
+        | 'theme'
         | 'workspaces'
         | 'tabs'
         | 'activeTabId'
@@ -2279,6 +2280,16 @@ export const useApp = create<AppState>((set, get) => ({
             tabSession: {}
           }
         : {}),
+      // Narrowed rather than trusted, for the same reason the `kind` default
+      // above is: a blob is a file on disk that things other than this app can
+      // write. An unrecognised value would reach App.tsx's `apply()`, which
+      // treats anything that is not 'dark' or 'system' as light -- so a corrupt
+      // field would silently mean light mode rather than falling back to the
+      // store's own default.
+      theme:
+        data.theme === 'dark' || data.theme === 'light' || data.theme === 'system'
+          ? data.theme
+          : s.theme,
       // The saved active workspace is restored here rather than left at the
       // seed default, and pinned to a workspace that actually exists.
       activeWorkspaceId: resolveWorkspaceId(

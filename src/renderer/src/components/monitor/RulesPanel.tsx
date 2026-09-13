@@ -193,7 +193,14 @@ function RuleCard({
   )
 }
 
-export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Element {
+export function RulesPanel({
+  servers,
+  moduleOff = false
+}: {
+  servers: Server[]
+  /** True when this panel is only on screen because a rule is still armed. */
+  moduleOff?: boolean
+}): React.JSX.Element {
   // `null` until the read comes back, NOT `[]`.
   //
   // An empty array means "there are no rules", and this screen says that out
@@ -239,6 +246,10 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   const [commands, setCommands] = useState('')
   const [targetIds, setTargetIds] = useState<string[]>([])
   const [phrase, setPhrase] = useState('')
+  // The word the JOB's own plan demands, typed separately from the rule's.
+  // Two ceremonies, two boxes — see `planPhrase` below for why they cannot be
+  // one.
+  const [jobPhrase, setJobPhrase] = useState('')
 
   const refresh = useCallback(async (): Promise<void> => {
     const list = bridge()?.list
@@ -297,8 +308,36 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   const confirmation = ruleCreationConfirmation(actionType)
   const needsPhrase = confirmation.kind === 'type-to-confirm'
   const phraseOk = !needsPhrase || phrase.trim() === RULE_UNATTENDED_PHRASE
+
+  /**
+   * The word THIS JOB would demand as a one-off, or null when it demands none.
+   *
+   * TWO CEREMONIES, AND THEY ARE NOT INTERCHANGEABLE.
+   *
+   * `approval.phrase` means one thing everywhere else in the app: the word the
+   * human typed to satisfy THIS PLAN's confirmation. Every other caller mints it
+   * as `plan.confirmation.kind === 'type-to-confirm' ? typed : null` — broadcast,
+   * jobs, patch, compose, docker. This panel used to put the rule's own word
+   * there instead, and `verifyApproval` compares that field against the phrase a
+   * fresh `planJob` demands: so the moment a rule was destructive, or reached
+   * past TYPE_ABOVE_HOSTS servers, its record contradicted itself and the rule
+   * refused every firing, forever, with "this needed the word RUN typed" — said
+   * to somebody who typed exactly what this dialog asked for.
+   *
+   * So the job's word is collected as itself and stored as itself, and the rule's
+   * word stays what it always was: the gate on writing a standing authorisation,
+   * recorded on the RULE rather than in the approval. Folding either into the
+   * other is what broke it.
+   *
+   * The result is strictly stronger than the one-shot door rather than equal to
+   * it: a destructive rule asks for everything the same job would ask for, and
+   * then asks whether you meant it to keep happening.
+   */
+  const planPhrase =
+    plan !== null && plan.confirmation.kind === 'type-to-confirm' ? plan.confirmation.phrase : null
+  const jobPhraseOk = planPhrase === null || jobPhrase.trim() === planPhrase
   const jobIncomplete = actionType === 'job' && (spec.steps.length === 0 || targets.length === 0)
-  const canCreate = name.trim() !== '' && !jobIncomplete && phraseOk
+  const canCreate = name.trim() !== '' && !jobIncomplete && phraseOk && jobPhraseOk
 
   const reset = (): void => {
     setOpen(false)
@@ -309,6 +348,7 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
     setCommands('')
     setTargetIds([])
     setPhrase('')
+    setJobPhrase('')
     setActionType('notify')
   }
 
@@ -331,7 +371,15 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
             // planJob over the same pair on every firing and refuses if the two
             // disagree — the same door a job goes through, taken for the same
             // reason.
-            approval: jobApprovalFor(spec, targets, { phrase: phrase.trim() || null, confirmedAt })
+            // The idiom every other approval producer uses: the phrase recorded
+            // is the one THIS PLAN asked for, or null when it asked for none.
+            // The rule's own `UNATTENDED` word is not an approval phrase and
+            // does not go in here — it is asserted below and recorded on the
+            // rule by main.
+            approval: jobApprovalFor(spec, targets, {
+              phrase: planPhrase === null ? null : jobPhrase.trim(),
+              confirmedAt
+            })
           }
         : { type: 'notify' }
 
@@ -345,7 +393,11 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
           : {})
       },
       limit: { maxFirings, windowMs },
-      action
+      action,
+      // The escalated gate, asserted across the boundary rather than left as a
+      // fact about this component's state. `RuleEngine.create` refuses a job
+      // rule without it — see the note on `RuleDraftWire.unattended`.
+      ...(actionType === 'job' ? { unattended: true } : {})
     }
     try {
       const created = await fn(draft)
@@ -396,6 +448,22 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
         </button>
       }
     >
+      {/* Why this tab is here when the module switch says it should not be.
+          The engine sweeps in main and does not read the module state, so
+          hiding this panel would have hidden the only list of what is armed and
+          the only control that disarms it, while the rules kept running. Shown
+          only in that combination — switched off, and something still armed —
+          so an ordinary install never sees it. */}
+      {moduleOff && (
+        <div className="row state-warn" style={{ gap: 6 }}>
+          <AlertTriangle size={14} />
+          <span>
+            Rules is switched off in Settings, but the rules below are still armed and still
+            run. Switching the module off hides this panel; it does not disarm anything.
+            Disarm each rule here, or leave them running deliberately.
+          </span>
+        </div>
+      )}
 
       {error !== null && (
         <div className="row state-alarm" style={{ gap: 6 }}>
@@ -564,6 +632,24 @@ export function RulesPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                     </div>
                   ))}
                 </div>
+              )}
+
+              {/* The job's own door, shown only when this job would demand it as
+                  a one-off. Two boxes rather than one because they are two
+                  different agreements: this one is "yes, run that command on
+                  those servers", the one below is "yes, keep doing it without
+                  me". Collapsing them is what broke the record — see
+                  `planPhrase`. */}
+              {planPhrase !== null && (
+                <label className="col" style={{ gap: 4 }}>
+                  Run as a one-off, this job would need confirming by typing{' '}
+                  <b>{planPhrase}</b>. It needs that here too.
+                  <input
+                    value={jobPhrase}
+                    aria-label={`Type ${planPhrase} to confirm the job`}
+                    onChange={(e) => setJobPhrase(e.target.value)}
+                  />
+                </label>
               )}
 
               <label className="col" style={{ gap: 4 }}>

@@ -254,10 +254,32 @@ export const MODULES: ModuleDef[] = [
     // `defaultEnabled: false` extends that to a new one, so no install has ever
     // had an unattended execution path appear without somebody choosing it.
     //
-    // What the toggle gates is the PANEL and the sweep, not the rules
-    // themselves \u2014 a rule that exists stays on disk with its approval record
-    // intact, so switching the module off and on again does not silently
-    // re-arm anything. Disarming is per rule, on the rule.
+    // What the toggle gates is THE PANEL, AND ONLY THE PANEL.
+    //
+    // This used to say "the PANEL and the sweep". The sweep half was never true:
+    // `ruleEngine.start()` runs unconditionally in `whenReady`, `runSweep` reads
+    // no module state, and nothing between it and `sshExec` does either — main
+    // keeps flags for `access`, `posture`, `changeLog` and `drift` and has never
+    // had one for this. So an install that switched Rules off kept running its
+    // rules, on the sentence above's own authority.
+    //
+    // Not fixed by gating the sweep, which was the obvious repair and is the
+    // wrong one: it would make this toggle a master arm/disarm switch, so
+    // flipping it back on would re-arm every rule at once without anyone
+    // touching a rule — exactly what the next paragraph exists to prevent. The
+    // module system is a UI-visibility mechanism (see the note on the Docker
+    // handlers in main: "the module toggle hides the UI … removes the panel, not
+    // the channel"), and per-rule `enabled` is the consent mechanism. Making the
+    // visibility switch silently rewrite durable consent would confuse the two.
+    //
+    // So the claim is narrowed to what is true, and the panel is kept reachable
+    // while any rule is still armed — see FleetMonitor. A switch may hide a
+    // feature; it may not hide the only controls for something that is still
+    // acting on your servers.
+    //
+    // A rule that exists stays on disk with its approval record intact, so
+    // switching the module off and on again does not silently re-arm anything.
+    // Disarming is per rule, on the rule.
     defaultEnabled: false
   },
   {
@@ -516,6 +538,109 @@ export function isOperateModule(id: ModuleId): id is OperateModuleId {
 export function modulesOnSurface(surface: ModuleSurface): ModuleDef[] {
   return MODULES.filter((m) => m.surface === surface)
 }
+
+/**
+ * Read modules that get their own button in the activity bar.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THESE FOUR, AND WHY NOT BY SIZE
+ * ---------------------------------------------------------------------------
+ *
+ * Monitoring is generated from `modulesOnSurface('read')` with a ceiling of six
+ * module slots, so the seventh enabled module onwards lands behind `More`. Eight
+ * read modules ship on, which put Docker and Kubernetes — both
+ * `defaultEnabled: true`, and two of the largest subsystems here — inside a
+ * dropdown on a default install.
+ *
+ * Raising the ceiling was the other candidate and it loses for the reason the
+ * ceiling exists: eight is as many buttons as the row holds, which is a fact
+ * about the window rather than an opinion about the estate.
+ *
+ * The test is NOT size. `access` is five thousand lines and `posture` four and a
+ * half, and neither belongs on the rail. It is:
+ *
+ *   IS THIS A DIFFERENT SUBJECT, OR ANOTHER FACT ABOUT THE SAME SUBJECT?
+ *
+ * Monitoring's subject is the estate and how it is doing. Inventory is what the
+ * servers are, posture is how exposed they are, drift is how they differ,
+ * capacity is when they fill up, cron is what they run, logTail is what they
+ * log. One subject, many facts — which is a real destination, and stays one.
+ *
+ * These four are different subjects wearing a Monitoring tab:
+ *
+ *  - `docker` is about CONTAINERS. A container is not a server, and the panel
+ *    carries compose projects, disk reclaim, image scanning, health logs and an
+ *    engine upgrade — five child panels, not one table.
+ *  - `kubernetes` is about A CLUSTER, across fourteen analysis modules, and has
+ *    its own four-way strip inside the panel already.
+ *  - `cicd` is about PIPELINES ON A SERVICE OPSMAXX DOES NOT ADMINISTER. It is
+ *    the only module whose data does not come from the estate at all.
+ *  - `processes` is about PROGRAMS ON THIS MACHINE. See below; it is the one
+ *    that was already a known bug.
+ *
+ * `processes` is the clearest case and the argument is not ours. The local
+ * machine's card used to sit on the fleet overview and was REMOVED, because it
+ * was "half a monitor on a screen about the estate" — tests/localMonitorTab
+ * .test.ts says so and pins where its contents went instead. `processes` never
+ * touches a server (src/shared/processes.ts: "THE REMOTE HALF IS NOT HERE, AND
+ * IT IS NOT 'NOT YET'") and sat in a rail whose own tooltip is "reading the
+ * estate". Same mistake, one module later.
+ *
+ * Considered and left in the strip: `logTail`, which is the most-pointed-at
+ * panel in the app — but "what my servers are logging" is estate monitoring,
+ * and being pointed at is an argument for deep links, which already work.
+ * `rules` stays in the strip too, and its surface is deliberately NOT
+ * relitigated here: tests/monitorSurfaces.test.ts already states the position —
+ * "the rule's panel configures and the runner executes elsewhere under its own
+ * approval record" — and names the remedy if that ever has to change, which is
+ * the panel rather than the classification. It fails the frequency test for a
+ * rail slot regardless: a rule is configured once and then left alone.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT THIS DOES NOT DO
+ * ---------------------------------------------------------------------------
+ *
+ * It does not move a panel or add an `ActivityView`. A promoted module is still
+ * a `monitorTab` rendered inside FleetMonitor's single mounted tree, reached
+ * with `openMonitor(id)` — the same trick the Monitoring/Operations pair already
+ * uses, and for the same reason: LogTailPanel stops its remote command on
+ * unmount and BroadcastPanel holds a live run, so nothing here may unmount that
+ * tree.
+ *
+ * No icons live here. This file is imported by main, which has no React in it.
+ * ActivityBar owns the icon per id and a test pins the two lists to each other.
+ */
+export const PROMOTED_MODULE_IDS: readonly ModuleId[] = [
+  'docker',
+  'kubernetes',
+  'cicd',
+  'processes'
+]
+
+/**
+ * Whether this module is reached from the activity bar instead of the strip.
+ *
+ * `read` only, and asserted in tests rather than trusted: an `operate` module
+ * promoted here would get a rail button that routes through `openMonitor` into
+ * `openOperations`, landing on a rail whose strip is built from a different
+ * list — a button that opens somewhere other than where it says.
+ */
+export function isPromotedModule(id: ModuleId): boolean {
+  return PROMOTED_MODULE_IDS.includes(id)
+}
+
+/**
+ * The read modules that still belong to the Monitoring tab strip.
+ *
+ * The strip's own source of truth, so the ceiling arithmetic and the overflow
+ * rule keep operating on one list. Removing the four promoted ids leaves exactly
+ * six enabled on a default install, which is the number of slots — so a fresh
+ * install has no overflow control at all rather than a tidier one.
+ */
+export function stripModules(): ModuleDef[] {
+  return modulesOnSurface('read').filter((m) => !isPromotedModule(m.id))
+}
+
 
 export type ModuleState = Partial<Record<ModuleId, boolean>>
 

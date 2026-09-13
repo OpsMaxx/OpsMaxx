@@ -160,6 +160,10 @@ const jobRule = (over: { spec?: JobSpec; targets?: JobTargetRef[] } = {}): RuleD
   name: 'vacuum the journal',
   trigger: { kind: 'disk', event: 'raised' },
   limit: { maxFirings: 1, windowMs: HOUR },
+  // The escalated gate, asserted the way the panel asserts it. `create` refuses
+  // a job rule without it — the claim has to be made rather than assumed, so a
+  // fixture has to make it too. See tests/ruleApprovalRisk.test.ts.
+  unattended: true,
   action: {
     type: 'job',
     spec: over.spec ?? SPEC,
@@ -618,5 +622,90 @@ describe('the engine with nothing under it', () => {
     const r = await h.engine.sweep()
     expect(r.skipped).toBe(1)
     expect(h.log.written.filter((w) => w.kind === RULE_EVENT_SKIPPED)).toHaveLength(1)
+  })
+})
+
+describe('a sweep that does not finish', () => {
+  // THE BUG: A JOB COULD RUN TWICE.
+  //
+  // `fire()` updates the rate-limit ledger in memory, and both it and the
+  // watermark used to reach disk once, after the whole row loop. Anything that
+  // ended the sweep in between lost both — so the next start re-read the same
+  // alert row, matched the same rule, and found a ledger with no memory of the
+  // firing. The job ran a second time, unattended, on the same hosts.
+  //
+  // The window is real rather than theoretical: closing the window calls
+  // `jobRunner.disposeAll()` BEFORE `ruleEngine.stop()`, so a firing in flight
+  // has its remaining hosts dropped mid-run and then replays on next launch.
+  //
+  // Interrupted here by making the store throw while it writes the suppression
+  // row — which happens after the firing and before the old single persist.
+  // Any abort in that window would do; this one needs no timers and no mocks of
+  // the engine's own internals.
+  function interrupted() {
+    const h = harness()
+    const real = h.log.store.recordEvent
+    let armed = false
+    h.deps.store = {
+      readEvents: h.log.store.readEvents,
+      recordEvent: (kind: string, hostId: string | null, payload?: unknown, at?: number) => {
+        if (armed && kind === RULE_EVENT_SUPPRESSED) throw new Error('store died mid-sweep')
+        real(kind, hostId, payload, at)
+      }
+    }
+    return { h, arm: () => (armed = true), disarm: () => (armed = false) }
+  }
+
+  it('does not run the job again after an interrupted sweep', async () => {
+    const { h, arm, disarm } = interrupted()
+    const engine = new RuleEngine(h.deps)
+    engine.create(jobRule())
+
+    h.tick(1000)
+    // Two rows: the first fires, the second is suppressed by the rate limit —
+    // which is what makes the engine write the suppression row that now throws.
+    h.log.raise({ at: h.at() })
+    h.log.raise({ at: h.at() + 1 })
+    h.tick(2000)
+
+    arm()
+    await expect(engine.sweep()).rejects.toThrow('store died mid-sweep')
+    expect(h.launched, 'the first firing should have run once').toHaveLength(1)
+
+    // The crash. Everything the engine knew is now only what reached the file.
+    // The store comes back healthy, as it would on a fresh launch.
+    disarm()
+    const after = h.restart()
+    h.tick(1000)
+    await after.sweep()
+
+    expect(
+      h.launched,
+      'the job ran again after a restart — the firing was not committed'
+    ).toHaveLength(1)
+  })
+
+  it('remembers the rate limit it spent, not just the events it read', async () => {
+    // The half that matters when the watermark alone would not save it: a rule
+    // whose window still has room must not get that room back by crashing.
+    const { h, arm } = interrupted()
+    const engine = new RuleEngine(h.deps)
+    engine.create(jobRule())
+
+    h.tick(1000)
+    h.log.raise({ at: h.at() })
+    h.log.raise({ at: h.at() + 1 })
+    h.tick(2000)
+    arm()
+    await expect(engine.sweep()).rejects.toThrow()
+
+    const file = h.file()
+    expect(file, 'nothing was written before the crash').not.toBeNull()
+    const status = (file!.status as { ruleId: string; fired?: number[] }[])[0]
+    expect(status, 'the ledger never reached disk').toBeTruthy()
+    expect(
+      (status.fired ?? []).length,
+      'the firing was not recorded in the rate-limit ledger'
+    ).toBe(1)
   })
 })

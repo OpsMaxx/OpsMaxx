@@ -1,9 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { ArrowLeft, ArrowRight, Check, Compass } from 'lucide-react'
 import { useOnboarding } from '../../store/onboarding'
 import { useApp } from '../../store/app'
 import { clsx } from '../../lib/format'
-import { FULL_WALKTHROUGH, TOUR_STEPS } from './tourSteps'
+import { TOUR_STEPS, walkthroughFor } from './tourSteps'
 
 // A first-run walkthrough, mounted once at the app root.
 //
@@ -22,12 +22,22 @@ export function OnboardingTour(): React.JSX.Element | null {
   const full = useOnboarding((s) => s.full)
   const setActivity = useApp((s) => s.setActivity)
 
-  // A first run gets the two steps that matter; the six that used to sit
-  // between them arrive as tips when the user opens the view each describes.
-  // Somebody who reopens this from Settings asked for the walkthrough, so they
-  // get all of it — deferring six of eight to triggers they have already passed
-  // would hand them two panels and nothing else.
-  const steps = full ? FULL_WALKTHROUGH : TOUR_STEPS
+  // A first run gets the two steps that matter; the rest arrive as tips when the
+  // user opens the view each describes. Somebody who reopens this from Settings
+  // asked for the walkthrough, so they get all of it — deferring the tips to
+  // triggers they have already passed would hand them two panels and nothing else.
+  //
+  // ADAPTED TO WHAT THIS INSTALL HAS. "All of it" cannot honestly include panels
+  // about modules the user switched off during setup: the walkthrough would be
+  // describing screens they cannot reach, which spends its credibility on features
+  // that are not there and teaches the reader that the rest may not be either.
+  // `walkthroughFor` drops those; the first and last steps are never about a
+  // module, so it still opens on adding a server and still ends on the palette.
+  const modules = useApp((s) => s.settings.modules)
+  const steps = useMemo(
+    () => (full ? walkthroughFor(modules) : TOUR_STEPS),
+    [full, modules]
+  )
 
   useEffect(() => {
     openIfFirstRun()

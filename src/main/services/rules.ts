@@ -209,6 +209,19 @@ export class RuleEngine {
    */
   create(draft: RuleDraftWire): RuleView | null {
     this.load()
+    // A job rule must come with the escalated gate having been put in front of
+    // somebody, and must SAY SO.
+    //
+    // Not a security check — main cannot see what was typed into a renderer, and
+    // a caller determined to lie sends `true`. What it stops is the claim being
+    // made by silence. The gate used to live entirely in the creation dialog's
+    // own state, so every other route to this channel skipped it and nothing
+    // downstream could tell the difference afterwards. Now the assertion has to
+    // be written down by whoever creates the rule, and it is recorded against
+    // the rule for as long as the rule exists.
+    //
+    // `notify` carries no authority and asks for no ceremony, so it is exempt.
+    if (draft.action.type === 'job' && draft.unattended !== true) return null
     const rule: Rule = {
       id: this.deps.newId(),
       name: draft.name.slice(0, 120),
@@ -221,7 +234,11 @@ export class RuleEngine {
       filter: draft.filter ?? {},
       action: draft.action,
       limit: clampRuleLimit(draft.limit),
-      armedAt: this.deps.now()
+      armedAt: this.deps.now(),
+      // MAIN's clock, for the reason `armedAt` above is: a caller that could
+      // write its own timestamp could claim a ceremony at a moment of its
+      // choosing. Zero for a notify rule, which has no ceremony to record.
+      unattendedAt: draft.action.type === 'job' ? this.deps.now() : 0
     }
     // Round-tripped through the same whitelist the file is read back through,
     // so a rule that could not survive a restart cannot be created either.
@@ -372,16 +389,56 @@ export class RuleEngine {
     }
 
     const suppressedThisSweep = new Map<string, number>()
-    for (const { row } of rows) {
+    for (const { row, cursor } of rows) {
+      // Did anything actually ACT on this row? Drives the write below.
+      let acted = false
       for (const rule of this.rules) {
         if (!ruleMatches(rule, row)) continue
         const outcome = await this.fire(rule, row, now)
-        if (outcome === 'fired') result.fired++
-        else if (outcome === 'refused') result.refused++
-        else {
+        if (outcome === 'fired') {
+          result.fired++
+          acted = true
+        } else if (outcome === 'refused') {
+          result.refused++
+          acted = true
+        } else {
           result.suppressed++
           suppressedThisSweep.set(rule.id, (suppressedThisSweep.get(rule.id) ?? 0) + 1)
         }
+      }
+
+      // ---- commit the firing before doing anything else ---------------------
+      //
+      // THE BUG THIS CLOSES: A JOB COULD RUN TWICE.
+      //
+      // `fire()` updates the rate-limit ledger (`status.fired`, `lastFiredAt`)
+      // in memory only, and both it and the watermark used to reach disk once,
+      // after this whole loop. So the window between a rule running a job and
+      // the sweep finishing was unprotected: anything that ended the process or
+      // the sweep in between lost BOTH records, and the next start re-read the
+      // same alert rows, matched the same rule, and found a ledger with no
+      // memory of the earlier firing. The job ran again.
+      //
+      // That window is not hypothetical. Closing the window disposes the job
+      // executor BEFORE it stops this engine (see createWindow's `destroyed`
+      // handler in main), so a firing in flight has its remaining hosts dropped
+      // mid-run — and then the whole thing replays on next launch. The
+      // rate limit is what is supposed to make a rule's blast radius knowable
+      // when it is written, and a ledger that does not survive the firing it is
+      // counting cannot do that.
+      //
+      // Written per ROW rather than per firing, and only when something acted:
+      // a sweep may read up to RULE_SWEEP_MAX_EVENTS rows and almost none of
+      // them fire, so writing every row would be two thousand disk writes for a
+      // quiet estate. Firings are rate-limited and therefore few. Advancing the
+      // watermark to this row at the same time is what makes the pair atomic —
+      // they go into one `persist()`, so the ledger can never be ahead of the
+      // watermark or behind it.
+      //
+      // Rows are sorted oldest-first above, so this only ever moves forward.
+      if (acted) {
+        this.watermark = { ts: cursor.ts, id: cursor.id }
+        this.persist()
       }
     }
 

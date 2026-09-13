@@ -34,7 +34,54 @@ import { SshSessions } from './SshSessions'
 import { WebhookAlertSettings } from './WebhookAlertSettings'
 import { CredProxyPanel } from './CredProxyPanel'
 import { alertCoverageText } from './alertCoverage'
-import { MODULES, moduleEnabled } from '../../../../shared/modules'
+import { MODULES, isPromotedModule, moduleEnabled, type ModuleDef } from '../../../../shared/modules'
+
+/**
+ * How the Modules page is divided.
+ *
+ * Three groups, and every module lands in exactly one -- asserted in
+ * tests/settingsModuleGroups.test.ts, because a module that matched no group would
+ * simply not render and would look like it had been removed from the product.
+ *
+ * The division is `surface` plus promotion, both of which already exist and are
+ * already tested. Nothing new is invented here on purpose: a grouping this page
+ * made up for itself would be a second opinion about what a module is, and the
+ * first-run card would then be free to have a third.
+ */
+const MODULE_GROUPS: { id: string; label: string; detail: string; match: (m: ModuleDef) => boolean }[] =
+  [
+    {
+      id: 'promoted',
+      label: 'Main features',
+      detail:
+        'These have their own icon in the sidebar on the left. Switching one off here removes its icon as well as its panel.',
+      match: (m) => isPromotedModule(m.id)
+    },
+    {
+      id: 'read',
+      label: 'Reading your estate',
+      // NOT "none of these can change a server", which is what this said first
+      // and which is false. That sentence is the registry's CONTRACT for the
+      // `read` surface, and repeating it here turned a design invariant into a
+      // security claim shown to the user at the moment they decide — directly
+      // above the Rules switch, which is the one member that does not satisfy
+      // it. A rule runs a job on hosts, unattended (see the `rules` entry in
+      // shared/modules.ts, and tests/monitorSurfaces.test.ts for why it is
+      // nonetheless filed here). Naming the exception is the whole fix: a group
+      // label may describe the group, but it may not make a promise on behalf of
+      // a member that breaks it.
+      detail:
+        'Panels under Monitoring. These read the estate rather than changing it — except Rules, which can run a job you approved in advance, on the servers you picked, while nobody is watching.',
+      match: (m) => m.surface === 'read' && !isPromotedModule(m.id)
+    },
+    {
+      id: 'operate',
+      label: 'Changing your estate',
+      detail:
+        'Panels under Operations. These exist to write to servers: running commands across the fleet, installing updates, removing access. Every one ships off.',
+      match: (m) => m.surface === 'operate'
+    }
+  ]
 import { TERMINAL_SCHEMES, parseTerminalScheme } from '../../../../shared/terminalTheme'
 import { useFleetStatus } from '../../store/fleetStatus'
 import { toast } from '../../store/toast'
@@ -1057,22 +1104,46 @@ export function Settings(): React.JSX.Element {
                 A module added by an update stays off on an existing install until you enable it
                 here.
               </p>
-              {MODULES.map((m) => (
-                <div className="setting-row" key={m.id}>
-                  <div className="s-info">
-                    <div className="s-title">{m.label}</div>
-                    <div className="s-desc">{m.detail}</div>
+              {/* Grouped by what a module DOES to a server, which is the one
+                  division this registry already commits to: `surface` is
+                  load-bearing, and "nothing on a read surface may write to a
+                  server" is the contract it exists to hold. Twenty-one switches in
+                  one undifferentiated list made the two halves look like the same
+                  kind of decision, and they are not — one adds a panel, the other
+                  adds a way to change somebody's infrastructure.
+                  A third group is broken out first: the four modules that have
+                  their own icon in the activity bar, because switching one off here
+                  makes a rail icon disappear, which is a bigger visible change than
+                  any other row on this page and should not be buried among them. */}
+              {MODULE_GROUPS.map((g) => {
+                const rows = MODULES.filter(g.match)
+                if (rows.length === 0) return null
+                return (
+                  <div key={g.id} className="settings-group">
+                    <h3 className="settings-group-title">{g.label}</h3>
+                    <p className="muted settings-group-detail">{g.detail}</p>
+                    {rows.map((m) => (
+                      <div className="setting-row" key={m.id}>
+                        <div className="s-info">
+                          <div className="s-title">{m.label}</div>
+                          <div className="s-desc">{m.detail}</div>
+                        </div>
+                        <span
+                          className={clsx('switch', moduleEnabled(settings.modules, m.id) && 'on')}
+                          onClick={() =>
+                            setSettings({
+                              modules: {
+                                ...settings.modules,
+                                [m.id]: !moduleEnabled(settings.modules, m.id)
+                              }
+                            })
+                          }
+                        />
+                      </div>
+                    ))}
                   </div>
-                  <span
-                    className={clsx('switch', moduleEnabled(settings.modules, m.id) && 'on')}
-                    onClick={() =>
-                      setSettings({
-                        modules: { ...settings.modules, [m.id]: !moduleEnabled(settings.modules, m.id) }
-                      })
-                    }
-                  />
-                </div>
-              ))}
+                )
+              })}
             </>
           )}
 

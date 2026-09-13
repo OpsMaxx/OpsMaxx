@@ -1,4 +1,5 @@
 import type { ActivityView } from '../../types'
+import { moduleEnabled, type ModuleId, type ModuleState } from '../../../../shared/modules'
 
 export interface TourStep {
   id: string
@@ -73,6 +74,29 @@ export const TOUR_STEPS: TourStep[] = [
  */
 export interface FeatureTip extends TourStep {
   view: ActivityView
+  /**
+   * The module this tip is about, where it is about one.
+   *
+   * A tip for a module the user switched off is a tip about a screen they cannot
+   * reach, and showing it is worse than saying nothing: the walkthrough spends its
+   * credibility describing a feature that is not there, which teaches the reader
+   * that the rest of it may not be there either.
+   *
+   * Absent means the tip is about the app rather than about a module -- workspaces,
+   * the vault, the AI bridge -- and is always eligible.
+   */
+  module?: ModuleId
+  /**
+   * Which Monitoring tab this tip belongs to, for the tips whose `view` is
+   * `monitor`.
+   *
+   * Monitoring, Operations and the four promoted modules all share one
+   * ActivityView, so `view` alone cannot tell them apart -- the same problem
+   * FeatureTipCard already solved for `fleetRail`. A tip with a `tab` fires only
+   * when that tab is the one on screen; one without fires on the Monitoring rail
+   * generally.
+   */
+  tab?: ModuleId
 }
 
 export const FEATURE_TIPS: FeatureTip[] = [
@@ -114,8 +138,75 @@ export const FEATURE_TIPS: FeatureTip[] = [
     view: 'ai',
     title: 'AI agents, without handing over credentials',
     body: 'Claude Code, Claude Desktop and Codex can run commands and read files through OpsMaxx, but never see a password, key, hostname or username. You choose per capability what is allowed, asked about or refused, and every action lands in the audit log.'
+  },
+
+  // The promoted modules, which had no tips at all.
+  //
+  // They were tabs in a strip nobody was introduced to; now they are icons in the
+  // rail, which is more discoverable and no more self-explanatory. Each of these
+  // carries a `module`, so it is never shown to somebody who switched the module
+  // off, and a `tab`, so it fires on its own destination rather than anywhere on
+  // the shared Monitoring ActivityView.
+  {
+    id: 'tip-docker',
+    view: 'monitor',
+    module: 'docker',
+    tab: 'docker',
+    title: 'Containers, on whichever server they are on',
+    body: 'Every container on a server with its logs and a shell inside it, grouped by compose project, using the docker binary already there. The disk view itemises what is reclaimable and removes only what you tick — nothing is pruned wholesale. A shell inside a container is arbitrary code execution on that host, which is the same power the terminal tab already grants on the same credential.'
+  },
+  {
+    id: 'tip-kubernetes',
+    view: 'monitor',
+    module: 'kubernetes',
+    tab: 'kubernetes',
+    title: 'Clusters, read through the kubectl already on the server',
+    body: 'Contexts, namespaces, pods and their logs, plus nodes, workloads and what is actually requesting your capacity. Reading only: it never switches your context, never execs into a pod, and never applies or deletes anything — so there is nothing here that can change a cluster.'
+  },
+  {
+    id: 'tip-cicd',
+    view: 'monitor',
+    module: 'cicd',
+    tab: 'cicd',
+    title: 'Pipelines, beside the servers they change',
+    body: 'Connect Jenkins, GitLab CI or GitHub Actions and read what it did — run history and the log of the step that failed — next to the server the run changed. This is the one tab that talks to a service outside your estate, on a timer, with a token you paste in. Nothing here starts, re-runs or cancels a build.'
+  },
+  {
+    id: 'tip-processes',
+    view: 'monitor',
+    module: 'processes',
+    tab: 'processes',
+    title: 'Long-lived programs on this machine',
+    body: 'A dev server, a worker, a script that should outlive the terminal that started it — with restart policies, backoff, crash-loop detection and a log ring, from the supervisor that already keeps VPN engines alive. Nothing here runs on a remote server and nothing starts by itself: the only thing that starts a process is you pressing Start.'
   }
 ]
+
+/**
+ * The tips a given module state can actually justify showing.
+ *
+ * Filtered here rather than in the arrays above, and that is deliberate: `TOUR_STEPS`,
+ * `FEATURE_TIPS` and `FULL_WALKTHROUGH` are the COMPLETE lists and stay that way
+ * — tests/onboardingTour.test.ts pins `FULL_WALKTHROUGH` to exactly their union, on
+ * the argument that a replay from Settings is somebody asking for the whole thing.
+ * Adaptation is a question about one install at one moment, so it belongs at the
+ * point of use.
+ */
+export function tipsFor(modules: ModuleState | undefined): FeatureTip[] {
+  return FEATURE_TIPS.filter((t) => !t.module || moduleEnabled(modules, t.module))
+}
+
+/**
+ * The walkthrough, adapted to what this install actually has.
+ *
+ * Used by the replay from Settings. Somebody who asks for the walkthrough wants
+ * all of it, which is why `FULL_WALKTHROUGH` exists — but "all of it" cannot
+ * honestly include four panels about modules they have switched off. The first and
+ * last steps are never about a module, so the shape is preserved: it still opens on
+ * adding a server and still ends on the command palette.
+ */
+export function walkthroughFor(modules: ModuleState | undefined): TourStep[] {
+  return [TOUR_STEPS[0], ...tipsFor(modules), TOUR_STEPS[1]]
+}
 
 /**
  * Everything, in the order it used to be shown.

@@ -325,6 +325,34 @@ export interface Rule {
    * and would make disabling a rule the most dangerous button on the panel.
    */
   armedAt: number
+  /**
+   * When a human typed `UNATTENDED` for this rule, or 0 for a rule written
+   * before the ceremony was recorded at all.
+   *
+   * The escalated gate used to exist ONLY as a boolean inside the creation
+   * dialog (`phraseOk` in RulesPanel): `RuleEngine.create` validated no part of
+   * it, `sanitiseRule` carried the approval through untouched, and nothing
+   * downstream could tell a rule that went through the ceremony from one that
+   * did not. "A human typed the word" was a claim the renderer made about
+   * itself, and any other caller of the bridge simply skipped it.
+   *
+   * Recording it here is what makes it survive the IPC boundary and the file.
+   * It is NOT in the `CommandApproval` — see the note on
+   * `ruleCreationConfirmation` for why putting it there breaks the record
+   * against its own re-derivation, which is the bug this field was added
+   * alongside fixing.
+   *
+   * MAIN sets it, from main's clock, for the reason `armedAt` and `enabled` are
+   * also main's to set: a caller that could write its own timestamp could claim
+   * a ceremony that never happened, at a moment of its choosing.
+   *
+   * Zero means "not recorded", which is every rule written before this existed.
+   * That is a legacy marker rather than a refusal: those rules are already
+   * refused by `verifyRuleAction` for the phrase mismatch they carry, and a
+   * second refusal on the same rule for a second reason would say less, not
+   * more.
+   */
+  unattendedAt: number
 }
 
 /** Why a rule stopped being able to act, kept beside it so the panel can say
@@ -394,7 +422,56 @@ export function ruleJobPlan(pinned: { spec: JobSpec; targets: JobTargetRef[] }):
  */
 export function verifyRuleAction(rule: Rule): ApprovalVerdict {
   if (rule.action.type !== 'job') return { ok: true }
-  return verifyJobApproval(rule.action.approval, rule.action.spec, rule.action.targets)
+  const verdict = verifyJobApproval(rule.action.approval, rule.action.spec, rule.action.targets)
+  if (verdict.ok) return verdict
+  // A rule written before the mint was fixed says something true but useless.
+  //
+  // Those records carry the word `UNATTENDED` in `approval.phrase` — the rule
+  // ceremony's word — where `verifyApproval` expects the word the job's own plan
+  // demands. So every destructive rule, and every rule over TYPE_ABOVE_HOSTS
+  // servers, refuses with "this needed the word RUN typed, and the record has a
+  // different one", to a person who typed exactly what the dialog asked them
+  // for. That sentence is correct about the record and incomprehensible about
+  // what happened.
+  //
+  // The record is NOT rewritten to make it pass. Re-minting it here would
+  // fabricate a `RUN` nobody typed, inside a record that is kept and written to
+  // the approval log — the same dishonesty as the original bug, introduced
+  // deliberately and harder to find. The rule stays refused; only the sentence
+  // changes, and it names the one action that actually resolves it.
+  if (isLegacyRulePhrase(rule)) {
+    return {
+      ok: false,
+      reason:
+        'this rule was created before a fix to how rule approvals were recorded, so its ' +
+        'approval can no longer be checked. Nothing has run on it. Delete it and create it ' +
+        'again to arm it.'
+    }
+  }
+  return verdict
+}
+
+/**
+ * Whether a refusal is the pre-fix mint rather than real drift.
+ *
+ * Matched STRUCTURALLY — the stored word is the rule ceremony's, and the plan
+ * this record was minted over demands a different one — rather than by reading
+ * `verdict.reason`. A string match would break silently the first time somebody
+ * improved the wording in broadcast.ts, and would also swallow a genuine
+ * mismatch that happened to be phrased the same way.
+ *
+ * Narrow on purpose: an edited command, a grown target list or a risk that got
+ * stricter are all real drift on a rule that was minted correctly, and each
+ * must keep its own refusal. Only the exact pre-fix shape is re-worded.
+ */
+function isLegacyRulePhrase(rule: Rule): boolean {
+  if (rule.action.type !== 'job') return false
+  const approval = rule.action.approval as { phrase?: unknown; confirmation?: unknown } | null
+  if (!approval || approval.phrase !== RULE_UNATTENDED_PHRASE) return false
+  const confirmation = approval.confirmation as { kind?: unknown; phrase?: unknown } | null
+  return (
+    confirmation?.kind === 'type-to-confirm' && confirmation.phrase !== RULE_UNATTENDED_PHRASE
+  )
 }
 
 /**
@@ -560,7 +637,12 @@ export function sanitiseRule(raw: unknown): Rule | null {
     filter,
     action,
     limit: clampRuleLimit(r.limit as Partial<RuleLimit> | undefined),
-    armedAt
+    armedAt,
+    // Absent reads as 0 — "written before the ceremony was recorded" — rather
+    // than as now. Defaulting it to the read time would manufacture the exact
+    // claim this field exists to stop being manufactured.
+    unattendedAt:
+      typeof r.unattendedAt === 'number' && Number.isFinite(r.unattendedAt) ? r.unattendedAt : 0
   }
 }
 
@@ -608,6 +690,20 @@ export interface RuleDraftWire {
   filter?: RuleFilter
   limit?: Partial<RuleLimit>
   action: RuleAction
+  /**
+   * That the caller put the `UNATTENDED` gate in front of a human.
+   *
+   * A BOOLEAN, not a timestamp and not the typed word: main cannot check what
+   * somebody typed into a renderer, so asking for the word back would be
+   * theatre — a caller that wanted to lie would type the right string. What
+   * this buys is that the claim now has to be MADE, explicitly, by whoever
+   * creates a job rule, and is then recorded against the rule for as long as it
+   * exists. `RuleEngine.create` refuses a job rule without it.
+   *
+   * Required for `job` actions and meaningless for `notify`, which carries no
+   * authority and asks for no ceremony.
+   */
+  unattended?: boolean
 }
 
 /**
