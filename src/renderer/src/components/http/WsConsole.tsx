@@ -4,7 +4,8 @@ import { useApp } from '../../store/app'
 import { sshTargetFor } from '../../lib/ssh'
 import { clsx } from '../../lib/format'
 import { bridgeHas } from '../../lib/bridge'
-import { resolveSecrets, resolveUrl } from '../../../../shared/apiSecrets'
+import { VAULT_LOCKED_MESSAGE, resolveSecrets, resolveUrl } from '../../../../shared/apiSecrets'
+import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import { useVault } from '../../store/vault'
 import type { HttpVia } from '../../../../shared/httpClient'
 import type { WsEvent, WsFrame } from '../../../../shared/httpSocket'
@@ -292,7 +293,19 @@ export function WsConsole({ collection }: { collection: ApiCollection }): React.
 }
 
 function StatusLine({ state }: { state: State }): React.JSX.Element | null {
-  if (state.kind === 'failed') return <p className="req-blocked">{state.error}</p>
+  if (state.kind === 'failed') {
+    return (
+      <p className="req-blocked">
+        {state.error}
+        {/* The fix beside the reason. Telling somebody to unlock the vault and
+            try again means: find the vault, work out what one is, unlock it,
+            come back. */}
+        {state.error === VAULT_LOCKED_MESSAGE && (
+          <UnlockVaultButton reason="Opening this WebSocket" />
+        )}
+      </p>
+    )
+  }
   if (state.kind === 'closed') {
     return (
       <p className="req-note">

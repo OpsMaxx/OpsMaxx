@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, KeyRound, Layers, Lock, Plus, Trash2 } from 
 import { clsx } from '../../lib/format'
 import { useVault } from '../../store/vault'
 import { isVaultReference, parseVaultReference, vaultReference } from '../../../../shared/apiSecrets'
+import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import type { EnvVariable, EnvironmentsView } from './ScalarClient'
 
 /**
@@ -218,7 +219,6 @@ function VariableRow({
             of the reference is that one is not.
           */}
           {entry ? entry.name : <span className="warn">that vault entry no longer exists</span>}
-          {!unlocked && entry && <span className="faint"> — vault locked</span>}
         </span>
       ) : (
         <input
@@ -226,6 +226,18 @@ function VariableRow({
           aria-label="Variable value"
           value={variable.value}
           onChange={(e) => onChange({ ...variable, value: e.target.value })}
+        />
+      )}
+
+      {/* Naming the state without offering the fix is the thing
+          tests/vaultLockedOffersUnlock.test.ts exists to stop: "unlock the
+          vault and try again" means find the vault, work out what one is,
+          unlock it, come back. */}
+      {secret && !unlocked && (
+        <UnlockVaultButton
+          className="btn ghost sm"
+          label="Vault locked"
+          reason={`Reading ${variable.name || 'a value'} for this request`}
         />
       )}
 

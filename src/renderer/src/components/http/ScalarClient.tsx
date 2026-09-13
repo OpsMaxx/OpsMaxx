@@ -10,6 +10,8 @@ import type { SidebarState } from '@scalar/sidebar'
 import type { ApiCollection } from '../../types'
 import { documentForCollection, firstOperationOf } from '../../../../shared/apiCollectionImport'
 import { EnvironmentBar } from './EnvironmentBar'
+import { VAULT_LOCKED_MESSAGE } from '../../../../shared/apiSecrets'
+import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import {
   fromSnapshot,
   isSnapshot,
@@ -856,6 +858,8 @@ function TransportError({
           Skip the check for this API
         </button>
       )}
+      {/* The other failure this screen can fix in a click. */}
+      {message === VAULT_LOCKED_MESSAGE && <UnlockVaultButton reason="Sending this request" />}
       <button className="icon-btn" title="Dismiss" onClick={onDismiss}>
         <X size={14} />
       </button>

@@ -4,7 +4,8 @@ import { useApp } from '../../store/app'
 import { sshTargetFor } from '../../lib/ssh'
 import { clsx } from '../../lib/format'
 import { bridgeHas } from '../../lib/bridge'
-import { resolveSecrets, resolveUrl } from '../../../../shared/apiSecrets'
+import { VAULT_LOCKED_MESSAGE, resolveSecrets, resolveUrl } from '../../../../shared/apiSecrets'
+import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import { useVault } from '../../store/vault'
 import {
   INTROSPECTION_QUERY,
@@ -297,7 +298,16 @@ function Result({
 }
 
 function ResponseBody({ phase }: { phase: Phase }): React.JSX.Element | null {
-  if (phase.kind === 'failed') return <p className="req-response-error">{phase.error}</p>
+  if (phase.kind === 'failed') {
+    return (
+      <p className="req-response-error">
+        {phase.error}
+        {phase.error === VAULT_LOCKED_MESSAGE && (
+          <UnlockVaultButton reason="Running this GraphQL query" />
+        )}
+      </p>
+    )
+  }
   if (phase.kind !== 'done') return null
   if (phase.parseError) return <p className="req-response-error">{phase.parseError}</p>
 
