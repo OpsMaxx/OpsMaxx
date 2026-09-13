@@ -415,6 +415,20 @@ export function FleetMonitor(): React.JSX.Element {
     () => splitTabStrip(tabs, activeTab, MAX_STRIP_TABS - 2),
     [tabs, activeTab]
   )
+
+  /**
+   * The promoted module currently on screen, or null for Monitoring proper.
+   *
+   * Looked up from `enabledRead` rather than the registry, so a module switched
+   * off cannot produce a header for a panel that is not mounted.
+   */
+  const promoted = useMemo(
+    () =>
+      activeTab !== 'overview' && activeTab !== 'alerts' && isPromotedModule(activeTab)
+        ? (enabledRead.find((m) => m.id === activeTab) ?? null)
+        : null,
+    [activeTab, enabledRead]
+  )
   const groups = useWorkspaceMonitorGroups()
   const hosts = useFleet((s) => s.hosts)
   // For the overview's KPI band: an unreachable host is a state the band has
@@ -522,6 +536,34 @@ export function FleetMonitor(): React.JSX.Element {
           tabs you were in, on a page whose whole job is to be several different
           pages. A tab strip you cannot see is a tab strip you cannot use. */}
       <div className="monitor-sticky">
+        {/**
+         * A promoted module gets its OWN header, and none of Monitoring's.
+         *
+         * Docker, Kubernetes, CI/CD and local processes were carved out onto
+         * the activity bar as destinations in their own right, but their panels
+         * are still mounted in this tree — so they kept inheriting the chrome
+         * around it: a page called "Monitoring", a subtitle counting servers,
+         * a "New group" button that makes a monitor group, and a tab strip
+         * whose tabs are somewhere else. Pressing Docker landed you on a page
+         * that said it was something else and offered eight ways to leave.
+         *
+         * Worse than untidy for two of them. "5 of 5 servers online" is not a
+         * fact about local processes, which run on THIS machine and say so, and
+         * it is not a fact about CI/CD, which talks to Jenkins and GitLab and
+         * may have no server in it at all.
+         *
+         * The panels stay mounted here — see PROMOTED_MODULE_IDS for why they
+         * are not routes of their own — so this is a header swap, not a move.
+         */}
+        {promoted ? (
+          <div className="content-header">
+            <div>
+              <h1 className="ui-page-title">{promoted.label}</h1>
+              <div className="sub ui-note">{promoted.detail}</div>
+            </div>
+          </div>
+        ) : (
+          <>
         <div className="content-header">
           <div>
             <h1 className="ui-page-title">Monitoring</h1>
@@ -656,6 +698,8 @@ export function FleetMonitor(): React.JSX.Element {
             </div>
           )}
         </div>
+          </>
+        )}
       </div>
 
       {/* Mounted always and hidden with the rest, for the reason written at

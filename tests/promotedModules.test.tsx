@@ -240,3 +240,70 @@ describe('the rail buttons', () => {
     for (const id of PROMOTED_MODULE_IDS) expect(head, id).not.toContain(`'${id}'`)
   })
 })
+
+describe('a promoted module gets its own page, not Monitoring\'s', () => {
+  /**
+   * Defect 5, and the one a person sees first.
+   *
+   * The panels are mounted inside FleetMonitor's tree on purpose (defect 1
+   * above), so they inherited the chrome wrapped around it: a page titled
+   * "Monitoring", a subtitle counting servers, a "New group" button that makes
+   * a MONITOR group, and a tab strip whose every tab is somewhere else.
+   * Pressing Docker on the rail landed you somewhere that said it was
+   * something else and offered eight ways to leave.
+   *
+   * Two of the four make the subtitle wrong rather than merely irrelevant:
+   * local processes run on THIS machine and say so, and CI/CD talks to Jenkins
+   * and GitLab and may have no server in it at all — so "5 of 5 servers online"
+   * is a claim about neither.
+   *
+   * Asserted against the SOURCE rather than by mounting FleetMonitor, which
+   * needs the whole fleet store, every panel and a bridge. What has to stay
+   * true is structural: the header is behind the promoted check, and the
+   * Monitoring chrome is behind its negation.
+   */
+  const FM = readFileSync(
+    join(__dirname, '../src/renderer/src/components/monitor/FleetMonitor.tsx'),
+    'utf8'
+  )
+
+  it('decides from the module registry, not a hand-copied list', () => {
+    // A fifth promoted module must get this for free. A literal list here
+    // would be a second place to add it, and the one nobody remembers.
+    expect(FM).toContain('isPromotedModule(activeTab)')
+  })
+
+  it('renders the module label and detail as the page title', () => {
+    expect(FM).toMatch(/\{promoted\.label\}/)
+    expect(FM).toMatch(/\{promoted\.detail\}/)
+  })
+
+  it('only offers a header for a module that is actually mounted', () => {
+    // Looked up in `enabledRead`: a module switched off renders no panel, and a
+    // header over an empty page is worse than the inherited one.
+    expect(FM).toMatch(/enabledRead\.find\(\(m\) => m\.id === activeTab\)/)
+  })
+
+  it('puts the Monitoring title, the group button and the strip behind it', () => {
+    // The three pieces that made the page claim to be something else. If the
+    // ternary is ever flattened, this is what notices.
+    const idx = FM.indexOf('promoted ? (')
+    expect(idx, 'the promoted header branch is gone').toBeGreaterThan(-1)
+    const after = FM.slice(idx)
+    for (const chrome of ['ui-page-title">Monitoring', 'New group', 'monitor-tabs monitor-strip']) {
+      expect(after, `${chrome} escaped the promoted branch`).toContain(chrome)
+      expect(
+        after.indexOf(chrome),
+        `${chrome} renders before the promoted check`
+      ).toBeGreaterThan(after.indexOf(') : ('))
+    }
+  })
+
+  it('still mounts every promoted panel in the same tree', () => {
+    // The header swap must not have turned any of them into a route: that is
+    // defect 1, and it kills a running log tail.
+    for (const id of PROMOTED_MODULE_IDS) {
+      expect(FM, `${id} is no longer mounted in FleetMonitor`).toContain(`show('${id}')`)
+    }
+  })
+})
