@@ -800,6 +800,24 @@ func TestStoppingEndsFlowsThatAreStillOpen(t *testing.T) {
 	}
 }
 
+// A response that arrives after the inspector was stopped must not attach its
+// recorder to a flow that has already ended: nothing would ever close it, and
+// its spill file would stay charged to the budget for the rest of the run.
+// The race detector only catches the timing half of this intermittently, so
+// the refusal itself is asserted directly.
+func TestAResponseArrivingAfterTheEndIsRefused(t *testing.T) {
+	ins, _, _ := newTestInspector(t, nil)
+	rec := &flowRec{id: "f1"}
+
+	if !rec.setRes(ins.newRecorder(rec.id, "response")) {
+		t.Fatal("a live flow should accept its response recorder")
+	}
+	ins.finish(rec, 200, "200 OK", nil, "", nil)
+	if rec.setRes(ins.newRecorder(rec.id, "response")) {
+		t.Fatal("a finished flow accepted a recorder nothing will ever close")
+	}
+}
+
 func TestCloseIsIdempotent(t *testing.T) {
 	ins, _, _ := newTestInspector(t, nil)
 	ins.close()

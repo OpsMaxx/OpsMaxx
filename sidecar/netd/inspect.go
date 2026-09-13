@@ -428,17 +428,37 @@ type spillFile struct {
 
 // flowRec is the mutable half of one exchange, alive between begin and end.
 type flowRec struct {
-	id  string
+	id string
+	// Written before the record is published into ins.live, and never after,
+	// so it needs no guard: nothing else can reach the record yet.
 	req *bodyRecorder
+	// Guards res, upgraded and done. The response handler fills these in on
+	// goproxy's goroutine while close() may be finishing the same flow from
+	// another. A one-shot alone is not enough — it serialises the emit, not
+	// the fields the emit reads.
+	mu  sync.Mutex
 	res *bodyRecorder
-	// Guards the one-shot end: a failed round trip and a closed body can race
-	// to finish the same flow, and two FlowEnds for one FlowBegin is worse
-	// than none.
-	once sync.Once
+	// The one-shot end: a failed round trip, a closed body and a shutdown can
+	// all race to finish the same flow, and two FlowEnds for one FlowBegin is
+	// worse than none.
+	done bool
 	// The exchange became something other than HTTP — a WebSocket. Reported
 	// so the parent can say "frames are not recorded" rather than showing an
 	// empty body and letting the user conclude the request failed.
 	upgraded bool
+}
+
+// setRes hands the flow its response recorder, and refuses once the flow has
+// ended. A stop can finish a flow while its response handler is still running,
+// and a recorder attached after that point would never be closed.
+func (rec *flowRec) setRes(r *bodyRecorder) bool {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if rec.done {
+		return false
+	}
+	rec.res = r
+	return true
 }
 
 func (s *Server) inspectStart(req *Request) (interface{}, error) {
@@ -1121,63 +1141,81 @@ func (ins *Inspector) onResponse(resp *http.Response, ctx *goproxy.ProxyCtx) *ht
 		ins.finish(rec, status, statusText, headers, ctype, nil)
 		return resp
 	}
-	rec.res = ins.newRecorder(rec.id, "response")
+	res := ins.newRecorder(rec.id, "response")
 	// The flow ends when the body is closed, not when the headers arrive.
 	// That is what makes a server-sent-event stream show up as one long-lived
 	// row rather than a row that claims to be finished while bytes are still
 	// arriving.
-	rec.res.onClose = func() {
+	res.onClose = func() {
 		ins.finish(rec, status, statusText, headers, ctype, nil)
 	}
-	resp.Body = rec.res.wrap(resp.Body)
+	if !rec.setRes(res) {
+		// The inspector was stopped while this response was in flight. Its
+		// FlowEnd has already gone out, so release the recorder here rather
+		// than leaving its spill file charged to the budget forever.
+		res.close()
+		return resp
+	}
+	resp.Body = res.wrap(resp.Body)
 	return resp
 }
 
 // finishUpgrade closes out an exchange that stopped being HTTP. The headers
 // are the whole record: the handshake is visible, the frames after it are not.
 func (ins *Inspector) finishUpgrade(rec *flowRec, status int, statusText string, headers []Header, ctype string) {
+	rec.mu.Lock()
 	rec.upgraded = true
+	rec.mu.Unlock()
 	ins.finish(rec, status, statusText, headers, ctype, nil)
 }
 
 // finish emits exactly one FlowEnd and releases everything the flow held.
 func (ins *Inspector) finish(rec *flowRec, status int, statusText string, headers []Header, ctype string, cause error) {
-	rec.once.Do(func() {
-		ins.mu.Lock()
-		delete(ins.live, rec.id)
-		ins.mu.Unlock()
+	// Claim the end and read the racing fields in the same critical section,
+	// so the winner sees a consistent record and every later caller returns.
+	rec.mu.Lock()
+	if rec.done {
+		rec.mu.Unlock()
+		return
+	}
+	rec.done = true
+	res, upgraded := rec.res, rec.upgraded
+	rec.mu.Unlock()
 
-		end := &FlowEnd{
-			FlowID:     rec.id,
-			EndedAt:    time.Now().UnixMilli(),
-			Status:     status,
-			StatusText: statusText,
-			Headers:    headers,
-			// Content-Type is duplicated out of the header list because every
-			// consumer needs it to choose a viewer, and none of them should
-			// have to scan a header array to find it.
-			ContentType: ctype,
-		}
-		end.Upgraded = rec.upgraded
-		if cause != nil {
-			end.Error = redact(cause.Error())
-		}
-		if rec.req != nil {
-			rec.req.close()
-			end.ReqBodySize = rec.req.seen
-			end.ReqPreviewBase64 = rec.req.previewBase64()
-			end.ReqSpilled = rec.req.spilled
-			end.ReqTruncated = rec.req.truncated
-		}
-		if rec.res != nil {
-			rec.res.close()
-			end.ResBodySize = rec.res.seen
-			end.ResPreviewBase64 = rec.res.previewBase64()
-			end.ResSpilled = rec.res.spilled
-			end.ResTruncated = rec.res.truncated
-		}
-		ins.out.Emit("inspect.flow.end", end)
-	})
+	ins.mu.Lock()
+	delete(ins.live, rec.id)
+	ins.mu.Unlock()
+
+	end := &FlowEnd{
+		FlowID:     rec.id,
+		EndedAt:    time.Now().UnixMilli(),
+		Status:     status,
+		StatusText: statusText,
+		Headers:    headers,
+		// Content-Type is duplicated out of the header list because every
+		// consumer needs it to choose a viewer, and none of them should
+		// have to scan a header array to find it.
+		ContentType: ctype,
+	}
+	end.Upgraded = upgraded
+	if cause != nil {
+		end.Error = redact(cause.Error())
+	}
+	if rec.req != nil {
+		rec.req.close()
+		end.ReqBodySize = rec.req.seen
+		end.ReqPreviewBase64 = rec.req.previewBase64()
+		end.ReqSpilled = rec.req.spilled
+		end.ReqTruncated = rec.req.truncated
+	}
+	if res != nil {
+		res.close()
+		end.ResBodySize = res.seen
+		end.ResPreviewBase64 = res.previewBase64()
+		end.ResSpilled = res.spilled
+		end.ResTruncated = res.truncated
+	}
+	ins.out.Emit("inspect.flow.end", end)
 }
 
 // ------------------------------------------------------------------ pinning
