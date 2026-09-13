@@ -1512,6 +1512,19 @@ const api = {
     deleteSession: (id: string): Promise<boolean> => ipcRenderer.invoke('aiMcp:deleteSession', id),
     setSessionGroup: (id: string, groupId: string | null, groupName: string): Promise<McpAgentSession | null> =>
       ipcRenderer.invoke('aiMcp:setSessionGroup', id, groupId, groupName),
+    // A client waiting on the OAuth flow. It holds nothing but what is needed to
+    // decide: who is asking, and where the browser will be sent back to. The
+    // PKCE challenge and the code stay in main.
+    listAuthorizations: (): Promise<
+      { id: string; clientName: string; redirectUri: string; createdAt: number }[]
+    > => ipcRenderer.invoke('aiMcp:listAuthorizations'),
+    approveAuthorization: (
+      consentId: string,
+      grant: { groupId: string; groupName: string; workspaces: { id: string; name: string }[] }
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke('aiMcp:approveAuthorization', consentId, grant),
+    denyAuthorization: (consentId: string): Promise<{ ok: true }> =>
+      ipcRenderer.invoke('aiMcp:denyAuthorization', consentId),
     explainAccess: (
       sessionId: string,
       serverId: string | null
