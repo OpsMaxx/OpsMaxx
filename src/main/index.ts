@@ -17,6 +17,7 @@ import {
   setPoolIdle,
   poolList,
   poolClose,
+  poolEvictServer,
   sshExec,
   sshExecStream,
   sshOpenFresh,
@@ -949,6 +950,12 @@ ipcMain.handle('ssh:credential-shape', (_e, serverId: string): CredentialShape =
 })
 ipcMain.handle('ssh:pool-list', () => poolList())
 ipcMain.handle('ssh:pool-close', (_e, key: string) => poolClose(key))
+// Drops the shared connection to one server from the pool without closing it,
+// so the next connect authenticates afresh and every other pane riding on it
+// keeps running. What a recovering session calls before each attempt.
+ipcMain.handle('ssh:pool-evict', (_e, serverId: string) =>
+  typeof serverId === 'string' && serverId !== '' ? poolEvictServer(serverId) : 0
+)
 ipcMain.handle('ssh:pool-idle', (_e, minutes: number) => setPoolIdle(minutes))
 ipcMain.on('ssh:write', (_e, id: string, data: string) => sshWrite(id, data))
 ipcMain.on('ssh:resize', (_e, id: string, cols: number, rows: number) => sshResize(id, cols, rows))

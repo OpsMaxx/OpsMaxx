@@ -5,6 +5,11 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
 import { useApp } from '../store/app'
 import { runShortcut } from './useHotkeys'
+import {
+  evictPooledConnection,
+  useSessionRecovery,
+  type RecoveryState
+} from './useSessionRecovery'
 import { useResolvedTheme } from './useResolvedTheme'
 import { resolveScheme, type TerminalScheme } from '../../../shared/terminalTheme'
 import { parseOsc133 } from '../../../shared/shellIntegration'
@@ -275,6 +280,9 @@ export function useTerminalSession(
   searchRef: React.RefObject<SearchAddon | null>
   dead: string | null
   reconnect: () => void
+  /** The automatic recovery run, when one is under way. */
+  recovery: RecoveryState
+  cancelRecovery: () => void
 } {
   const setTabSession = useApp((s) => s.setTabSession)
   const setTabCwd = useApp((s) => s.setTabCwd)
@@ -316,6 +324,11 @@ export function useTerminalSession(
   // Bumped to rebuild the session. The effect already tears everything down on
   // cleanup, so a reconnect is the same code path as the first connect.
   const [generation, setGeneration] = useState(0)
+  // This session reached `ready`. The unambiguous success signal, and the only
+  // one there is: `dead` going null happens the moment an attempt is STARTED,
+  // so automatic recovery cannot tell a working session from an in-flight one
+  // without it.
+  const [online, setOnline] = useState(false)
 
   // The terminal is built once per transport. Rebuilding it on a reconnect
   // would throw away the scrollback, so it deliberately outlives the session.
@@ -476,6 +489,7 @@ export function useTerminalSession(
     // nothing here.
     const sessionId = `sess-${transport.key}-${crypto.randomUUID()}`
     sessionRef.current = sessionId
+    setOnline(false)
 
     if (generation > 0) term.writeln('')
     term.writeln('\x1b[38;5;80mOpsMaxx\x1b[0m')
@@ -497,10 +511,12 @@ export function useTerminalSession(
         if (s.line) term.writeln(s.line)
       } else if (s.phase === 'ready') {
         transport.onLifecycle?.('online')
+        setOnline(true)
         if (tabId) setTabSession(tabId, sessionId)
       } else {
         term.writeln(`\r\n\x1b[31mConnection failed: ${s.message ?? 'unknown error'}\x1b[0m`)
         transport.onLifecycle?.('offline')
+        setOnline(false)
         setDead(s.message ?? 'Connection failed')
       }
     })
@@ -508,12 +524,14 @@ export function useTerminalSession(
       term.writeln(`\r\n\x1b[90m[session closed${why ? ` · ${why}` : ''}]\x1b[0m`)
       term.writeln('\x1b[90mPress Enter to reconnect in this tab.\x1b[0m')
       transport.onLifecycle?.('offline')
+      setOnline(false)
       setDead(why ? `Session closed · ${why}` : 'Session closed')
     })
 
     transport.onLifecycle?.('connecting')
     void transport.connect(sessionId, term.cols, term.rows).catch((err) => {
       transport.onLifecycle?.('offline')
+      setOnline(false)
       setDead(`Session closed · ${err instanceof Error ? err.message : String(err)}`)
     })
 
@@ -556,10 +574,40 @@ export function useTerminalSession(
     term.options.theme = themeFromCss(terminalScheme, customSchemes) as never
   }, [resolvedTheme, terminalScheme, customSchemes])
 
-  const reconnect = useCallback(() => {
-    setDead(null)
-    setGeneration((g) => g + 1)
-  }, [])
+  /**
+   * Dial again, on a connection that is nobody's leftovers.
+   *
+   * The pool is a ControlMaster, so without the eviction this reuses the very
+   * socket the session dropped on. That is right when a channel closed under a
+   * healthy connection and wrong in every case worth recovering from — after a
+   * reboot the pooled entry is a corpse that TCP has not noticed yet, and
+   * handing it to the retry makes a server that is already back look like one
+   * that is still down.
+   *
+   * Every reconnect goes through here, the user's Reconnect button included,
+   * rather than only the automatic path: pressing Reconnect on a dead session
+   * has exactly the same problem, and one place to fix it beats two.
+   */
+  const dial = useCallback(() => {
+    void evictPooledConnection(transport.serverId).finally(() => {
+      setDead(null)
+      setGeneration((g) => g + 1)
+    })
+  }, [transport.serverId])
 
-  return { termRef, searchRef, dead, reconnect }
+  const { recovery, cancelRecovery } = useSessionRecovery(dead, online, dial, transport.serverId)
+
+  /**
+   * The manual reconnect, which TAKES OVER from the loop rather than racing it.
+   *
+   * Cancelling here rather than at the button means every caller gets it — the
+   * failure card, the vault-unlock button, the restored-tab wake — and none of
+   * them has to remember that a countdown might be running underneath.
+   */
+  const reconnect = useCallback(() => {
+    cancelRecovery()
+    dial()
+  }, [cancelRecovery, dial])
+
+  return { termRef, searchRef, dead, reconnect, recovery, cancelRecovery }
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Pencil, RotateCw, Terminal as TerminalIcon, X } from 'lucide-react'
+import { RECOVERY_BUDGET_MS, type RecoveryState } from '../../hooks/useSessionRecovery'
 import { credentialNote, type CredentialShape } from '../../../../shared/credentialShape'
 import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import { TerminalSearch } from './TerminalSearch'
@@ -119,15 +120,55 @@ function DemoTerminal({ server }: { server: Server }): React.JSX.Element {
 //
 // The classifier in lib/connectionError.ts already knew the difference. This is
 // the surface finally asking it.
+/**
+ * What the app is doing while it carries a session across a reboot.
+ *
+ * Deliberately NOT phrased as "waiting for the server to come back". Nothing
+ * here knows that it is coming back — the app cannot see the command that was
+ * typed (see the note in useSessionRecovery) and a rebooting host and a dead
+ * one are the same silence. So it says what it is doing and what it will do
+ * next, which is true either way, and the reason the session ended stays on the
+ * card underneath it.
+ */
+function Recovering({
+  transport,
+  recovery,
+  onCancel
+}: {
+  transport: TerminalTransport
+  recovery: RecoveryState
+  onCancel: () => void
+}): React.JSX.Element {
+  return (
+    <>
+      <div className="td-title">Reconnecting to {transport.title}</div>
+      <div className="td-hint">
+        {recovery.nextInSec > 0
+          ? `Attempt ${recovery.attempt} in ${recovery.nextInSec}s`
+          : `Attempt ${recovery.attempt} — connecting…`}
+      </div>
+      <div className="td-actions">
+        <button className="btn" onClick={onCancel}>
+          <X size={14} /> Stop trying
+        </button>
+      </div>
+    </>
+  )
+}
+
 function DeadSession({
   dead,
   transport,
+  recovery,
+  onCancelRecovery,
   onReconnect,
   onClose,
   closeLabel
 }: {
   dead: string
   transport: TerminalTransport
+  recovery: RecoveryState
+  onCancelRecovery: () => void
   onReconnect: () => void
   onClose?: () => void
   closeLabel?: string
@@ -167,6 +208,22 @@ function DeadSession({
   }, [fault, serverId])
   const note = credentialNote(credential)
 
+  // While a recovery run is going, the card is about the run: the cause
+  // sentence is still true but it is not the news, and the buttons underneath
+  // would be three ways to interrupt something already in progress. The reason
+  // the session ended stays visible below.
+  if (recovery.active) {
+    return (
+      <div className="term-dead">
+        <div className="td-box">
+          <Recovering transport={transport} recovery={recovery} onCancel={onCancelRecovery} />
+          <div className="td-sub">{transport.subtitle}</div>
+          <div className="td-raw mono">{dead}</div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="term-dead">
       <div className="td-box">
@@ -177,6 +234,15 @@ function DeadSession({
         <div className="td-title">{advice.cause}</div>
         <div className="td-sub">{transport.subtitle}</div>
         <div className="td-raw mono">{dead}</div>
+        {/* Said plainly, and without pretending the host is gone for good: all
+            we know is that we stopped. The Reconnect button below still works,
+            which is the point of saying so rather than silently going quiet. */}
+        {recovery.exhausted && (
+          <div className="td-hint">
+            {`Tried to reconnect for ${Math.round(RECOVERY_BUDGET_MS / 60_000)} minutes and stopped. `}
+            Reconnect is still here whenever you want it.
+          </div>
+        )}
         {advice.hint && <div className="td-hint">{advice.hint}</div>}
         {/* What we offered, which the server's own message cannot tell them. */}
         {note && <div className="td-hint td-credential">{note}</div>}
@@ -236,13 +302,16 @@ function DeadSession({
           )}
         </div>
 
-        {/* Only where it is true. Reconnecting reuses a pooled connection, which
-            is worth knowing when the failure was transport-level and actively
-            misleading when it was not. */}
+        {/* This used to promise the opposite: "Reconnecting reuses the pooled
+            connection when one is still open." That was the app describing an
+            optimisation as a feature, and after a reboot it described the bug —
+            the pooled socket is the one the server took down, and reusing it is
+            how a host that is already back reports itself as still gone.
+            Reconnect now drops it first, on every path. */}
         {advice.retry && (
           <div className="td-hint">
-            The scrollback above is kept. Reconnecting reuses the pooled connection when one is
-            still open.
+            The scrollback above is kept. Reconnecting drops the shared connection first, so it
+            never dials on a socket the server may have taken with it.
           </div>
         )}
       </div>
@@ -300,7 +369,7 @@ function RealTerminal({
   })
   const wakeTab = useApp((s) => s.wakeTab)
 
-  const { termRef, searchRef, dead, reconnect } = useTerminalSession(
+  const { termRef, searchRef, dead, reconnect, recovery, cancelRecovery } = useTerminalSession(
     transport,
     hostRef,
     () => setFinding(true),
@@ -406,12 +475,25 @@ function RealTerminal({
         e.preventDefault()
         zoom(e.deltaY < 0 ? 1 : -1)
       }}
+      /* Somebody at the keyboard outranks the countdown. Reaching for the
+         terminal while it is waiting to dial means they have their own plan —
+         reading the scrollback, closing the tab, fixing the server — and a
+         reconnect firing underneath that is the app arguing with its user.
+         Tab and the bare modifiers are excluded: moving focus between the
+         card's own buttons is not a decision about the session. */
+      onKeyDown={(e) => {
+        if (!recovery.active) return
+        if (['Tab', 'Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return
+        cancelRecovery()
+      }}
     >
       <div className="xterm-host" ref={hostRef} />
       {dead && (
         <DeadSession
           dead={dead}
           transport={transport}
+          recovery={recovery}
+          onCancelRecovery={cancelRecovery}
           onReconnect={() => {
             // Clear the flag first: the tab is awake from here on, so a later
             // drop shows an ordinary reconnect rather than claiming again that

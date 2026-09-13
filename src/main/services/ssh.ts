@@ -878,6 +878,50 @@ export function invalidate(conn: PooledConnection): void {
   if (pool.get(conn.key) === conn) pool.delete(conn.key)
 }
 
+/**
+ * Is this pool key the connection to `serverId` itself, rather than a bastion
+ * it was reached through?
+ *
+ * A chained key is `parent>self`, and the hop that owns the socket is the last
+ * segment. `hopKey` writes a server's own segment as `srv:<id>`, optionally
+ * followed by `|vpn:…` and `|<poolTag>` — so an exact match or that same id
+ * followed by a `|` is the connection, and `srv:<bastion>>srv:<id>` matches on
+ * its last segment exactly as a direct connection does.
+ */
+function keyOwnsServer(key: string, serverId: string): boolean {
+  const self = key.split('>').pop() ?? ''
+  return self === `srv:${serverId}` || self.startsWith(`srv:${serverId}|`)
+}
+
+/**
+ * Stop handing out the shared connection to a server, WITHOUT closing it.
+ *
+ * For a session recovering itself across a reboot. The pool is a
+ * ControlMaster, so the reconnect after a drop is normally handed the very
+ * socket the drop happened on — which is right when a channel closed under a
+ * healthy connection and exactly wrong when the machine went away with it. A
+ * server that closed cleanly self-evicts through the client's own `close`
+ * event; one that was reset, fenced or powered off does not, and its entry sits
+ * in the pool looking usable for as long as TCP takes to notice.
+ *
+ * NOT `poolClose`, and the difference is the whole reason this exists:
+ * `poolClose` destroys the connection, which cuts every other terminal pane,
+ * the SFTP browser and the metrics sampler riding on it — see the note on
+ * `sshOpenFresh`, which refuses it for the same reason. Evicting only removes
+ * it from the map: sessions already holding a reference keep theirs and it is
+ * destroyed when the last of them lets go, while the next `acquire` misses and
+ * authenticates afresh.
+ */
+export function poolEvictServer(serverId: string): number {
+  let evicted = 0
+  for (const [key] of [...pool]) {
+    if (!keyOwnsServer(key, serverId)) continue
+    pool.delete(key)
+    evicted++
+  }
+  return evicted
+}
+
 export function release(conn: PooledConnection): void {
   conn.refs--
   if (conn.refs > 0) return

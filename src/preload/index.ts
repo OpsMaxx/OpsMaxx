@@ -345,6 +345,10 @@ const api = {
     poolList: (): Promise<{ key: string; host: string; username: string; sessions: number }[]> =>
       ipcRenderer.invoke('ssh:pool-list'),
     poolClose: (key: string): Promise<void> => ipcRenderer.invoke('ssh:pool-close', key),
+    /** Forget the shared connection to a server without closing it, so the
+     *  next connect authenticates afresh and other panes on it survive. */
+    poolEvict: (serverId: string): Promise<number> =>
+      ipcRenderer.invoke('ssh:pool-evict', serverId),
     defaultKeys: (): Promise<
       { path: string; fileName: string; algorithm: string | null; encrypted: boolean }[]
     > => ipcRenderer.invoke('ssh:defaultKeys'),
