@@ -22,6 +22,7 @@ import {
   accessVerifyCommand,
   buildAccessCommand,
   describeAccessOutcome,
+  escalatedFor,
   judgeAccessVerification,
   parseAccessCollection
 } from '../../shared/access'
@@ -233,6 +234,20 @@ export interface AccessCommitRequest {
    *  the verifying session having authenticated after this. */
   stagedAt: number
   rollbackSeconds?: number
+  /**
+   * The account the staged write ran as, when it was not the connecting one.
+   *
+   * IT HAS TO BE CARRIED, not re-derived. Everything this confirmation does
+   * resolves `$HOME/.ssh` on the host, and the backup and the marker are in
+   * the home of whichever account the staged write ran as. Escalated, that is
+   * the target account; the connecting account's home holds neither, and a
+   * check run there reports the change missing and the host reverts a
+   * revocation that worked. Re-deriving the decision here would be a second
+   * copy of it, free to disagree with the one the write was built from --
+   * `planAccessChange` makes it once, for a selection it has already refused
+   * to let disagree with itself, and passes it on.
+   */
+  escalateAs?: string
 }
 
 export class AccessCommitter {
@@ -275,9 +290,15 @@ export class AccessCommitter {
       openError = e instanceof Error ? e.message : String(e)
     }
 
+    // Both commands go through the same wrapper the staged write used, or
+    // neither means anything: the backup they look for and the marker they
+    // write live in the home of the account that ran the write.
+    const asStaged = (command: string): string =>
+      req.escalateAs ? escalatedFor(req.escalateAs, command) : command
+
     try {
       const verify = session
-        ? await this.run(session, accessVerifyCommand(req.token))
+        ? await this.run(session, asStaged(accessVerifyCommand(req.token)))
         : null
 
       const verdict = judgeAccessVerification({
@@ -302,7 +323,7 @@ export class AccessCommitter {
       let reason = verdict.reason
 
       if (verdict.commit && session) {
-        const disarm = await this.run(session, accessDisarmCommand(req.keyPath, req.token))
+        const disarm = await this.run(session, asStaged(accessDisarmCommand(req.keyPath, req.token)))
         if (!disarm.ok || disarm.code !== 0 || !disarm.stdout.includes(ACCESS_COMMITTED_PREFIX)) {
           // Verified and then not confirmed. The change was fine; the sentence
           // that reaches the operator has to say so, because the host is about

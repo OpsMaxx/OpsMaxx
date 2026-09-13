@@ -2642,6 +2642,18 @@ export interface AccessChangePlan {
   token: string
   /** Seconds the host will wait before restoring itself. */
   rollbackSeconds: number
+  /**
+   * The account the write runs as, or null when it runs as the connecting one.
+   *
+   * Decided ONCE, here, for a selection this function has already refused to
+   * let disagree with itself -- see `mixed-escalation` above. It is on the plan
+   * because the confirmation needs it too: the backup and the marker live in
+   * the home of whichever account the write ran as, so a check that resolved
+   * `$HOME` any other way looks in the wrong place and reports the change
+   * missing. Carried rather than re-derived, so there is one decision and not
+   * two that can drift apart.
+   */
+  escalateAs: string | null
 }
 
 /** Used where a line is being validated rather than identified. */
@@ -2912,7 +2924,8 @@ export function planAccessChange(req: AccessChangeRequest): AccessChangePlan {
     blocks,
     disarm,
     token,
-    rollbackSeconds: req.rollbackSeconds ?? ACCESS_ROLLBACK_SECONDS
+    rollbackSeconds: req.rollbackSeconds ?? ACCESS_ROLLBACK_SECONDS,
+    escalateAs
   }
 }
 

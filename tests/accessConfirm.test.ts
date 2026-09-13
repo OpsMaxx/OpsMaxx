@@ -11,6 +11,7 @@ import {
   accessVerifyCommand,
   buildRevokeKeyCommand,
   describeAccessOutcome,
+  escalatedFor,
   judgeAccessVerification,
   type AccessCommitEvidence
 } from '../src/shared/access'
@@ -237,6 +238,64 @@ describe('the three outcomes read as three different things', () => {
   })
 })
 
+describe('a change staged as another account', () => {
+  // The bug this covers shipped and reached an operator. The staged write
+  // escalated -- `sudo -n -H -u raymon` -- so the backup and the marker landed
+  // in /home/raymon/.ssh. The confirmation did not, so both commands resolved
+  // `$HOME` as the CONNECTING account, looked in the wrong home, and found
+  // nothing. The check reported "no staged change with this token is waiting
+  // here", the change was judged rejected, and the host put the old file back
+  // on a revocation that had worked perfectly.
+  //
+  // Sudo was never the problem, which is what made it hard to read: the same
+  // passwordless sudo that wrote the file is right there in the sudo log.
+
+  const escalated = (): { c: AccessCommitter; f: Fake } => {
+    const f = session()
+    return { c: new AccessCommitter({ openFresh: async () => f, now: () => STAGED_AT + 2_000 }), f }
+  }
+
+  it('runs the check as the account whose file was staged', async () => {
+    const { c, f } = escalated()
+    await c.confirm({}, req({ user: 'raymon', escalateAs: 'raymon' }))
+
+    // Not "contains sudo": the whole script has to be inside the wrapper, or
+    // the parts outside it run as the wrong user.
+    expect(f.ran[0].startsWith("sudo -n -H -u raymon sh -c '")).toBe(true)
+    expect(f.ran[0]).toContain('.opsmaxx-')
+  })
+
+  it('writes the confirmation marker as that account too', async () => {
+    // The marker's only job is to exist where the watchdog is looking. Written
+    // into the connecting account's home it disarms nothing, and the host
+    // rolls back a change that passed its check -- which is the failure the
+    // plan builder already warns about in the comment above its own disarm.
+    const { c, f } = escalated()
+    const r = await c.confirm({}, req({ user: 'raymon', escalateAs: 'raymon' }))
+
+    expect(r.outcome).toBe('committed')
+    expect(f.ran).toHaveLength(2)
+    expect(f.ran[1].startsWith("sudo -n -H -u raymon sh -c '")).toBe(true)
+    expect(f.ran[1]).toContain('SP_M=')
+  })
+
+  it('leaves the ordinary change with no sudo in it at all', async () => {
+    // The default path must not acquire an escalation nobody asked for.
+    const { c, f } = escalated()
+    await c.confirm({}, req())
+
+    expect(f.ran).toHaveLength(2)
+    for (const command of f.ran) expect(command).not.toMatch(/\bsudo\b/)
+  })
+
+  it('refuses an account name it cannot vouch for rather than quoting it', async () => {
+    // Same rule as every other place this name reaches a shell. A committer
+    // that sanitised instead would be the one place in the feature that did.
+    const { c } = escalated()
+    await expect(c.confirm({}, req({ escalateAs: 'ray;mon' }))).rejects.toThrow()
+  })
+})
+
 describe('the judgement itself', () => {
   const evidence = (over: Partial<AccessCommitEvidence> = {}): AccessCommitEvidence => ({
     session: {
@@ -327,6 +386,40 @@ function fakeHome(lines: string[]): Host {
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+describe.skipIf(process.platform === 'win32')('the wrong home, run for real', () => {
+  it('cannot find a change staged in another account and says exactly that', async () => {
+    // The reported failure, reproduced without needing sudo: two homes stand
+    // in for the two accounts, and the only thing that differs between the
+    // staged write and the check is which HOME the script resolves.
+    const staged = fakeHome([`ssh-ed25519 ${A} alice@laptop`, `ssh-ed25519 ${B} bob@desktop`, ''])
+    const connecting = fakeHome([`ssh-ed25519 ${B} bob@desktop`, ''])
+    staged.run(buildRevokeKeyCommand({ path: staged.file, blob: A, token: 'w1', rollbackSeconds: 2 }))
+
+    const wrong = connecting.run(accessVerifyCommand('w1'))
+    expect(wrong.code).toBe(3)
+    expect(wrong.out).toContain('no staged change with this token is waiting here')
+
+    // And the same check against the home the change was actually staged in
+    // passes, so what failed is the account the script ran as and nothing else.
+    const right = staged.run(accessVerifyCommand('w1'))
+    expect(right.code).toBe(0)
+    expect(right.out).toContain(`${ACCESS_VERIFIED_PREFIX}w1`)
+    await sleep(3000)
+  })
+
+  it('keeps the whole verification inside the escalation wrapper', () => {
+    // `sh -n` over the wrapped text: if the quoting were wrong the script
+    // would not parse, and a half-wrapped command would run its tail as the
+    // connecting account.
+    expect(() =>
+      execFileSync('sh', ['-n'], { input: escalatedFor('raymon', accessVerifyCommand('w2')) })
+    ).not.toThrow()
+    expect(() =>
+      execFileSync('sh', ['-n'], { input: escalatedFor('raymon', accessDisarmCommand('/home/raymon/.ssh/authorized_keys', 'w2')) })
+    ).not.toThrow()
+  })
+})
 
 describe.skipIf(process.platform === 'win32')('the confirmation, run for real', () => {
   it('finds the staged change and then makes it permanent', async () => {

@@ -141,6 +141,7 @@ describe('a change against the connecting account', () => {
   it('is exactly what it always was, with no sudo in it', () => {
     // The ordinary path must not acquire an escalation it did not ask for.
     const p = plan([target(host({ self: 'root' }), 'ops')])
+    expect(p.escalateAs).toBeNull()
     expect(p.write?.command).toBeDefined()
     expect(p.write!.command).not.toMatch(/\bsudo\b/)
     expect(p.disarm.every((d) => !/\bsudo\b/.test(d.command))).toBe(true)
@@ -150,6 +151,13 @@ describe('a change against the connecting account', () => {
 describe('a change against another account', () => {
   const escalated = (): ReturnType<typeof planAccessChange> =>
     plan([target(host({ self: 'root', user: 'raymon' }), 'raymon', 'raymon')])
+
+  it('says on the plan which account it escalated to', () => {
+    // The confirmation half needs this and must not work it out again. The
+    // backup and the marker are in raymon's home because the write ran as
+    // raymon, and a second derivation of that is a second thing to get wrong.
+    expect(escalated().escalateAs).toBe('raymon')
+  })
 
   it('runs the staged write as that account', () => {
     const p = escalated()

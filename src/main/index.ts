@@ -2340,7 +2340,11 @@ ipcMain.handle('access:run', async (_e, req: AccessRunRequest): Promise<AccessRu
         token: plan.token,
         keyPath: account.keyPath,
         stagedAt,
-        rollbackSeconds: plan.rollbackSeconds ?? ACCESS_ROLLBACK_SECONDS
+        rollbackSeconds: plan.rollbackSeconds ?? ACCESS_ROLLBACK_SECONDS,
+        // The same decision the staged write was built from, carried rather
+        // than made again. Escalated, the backup and the marker are in the
+        // target account's home and the confirmation has to go there too.
+        ...(plan.escalateAs ? { escalateAs: plan.escalateAs } : {})
       })
     )
   }
