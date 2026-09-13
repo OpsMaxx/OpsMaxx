@@ -165,7 +165,7 @@ build, so a release that exists at all has passed both.
 
 | Scanner | What it is | Runs on | Gates the release |
 |---|---|---|---|
-| **Microsoft Defender** | The engine that ships with Windows — the same one that will scan the installer on your own machine | The Windows build runner, on the `.exe` files it just produced | **Yes** |
+| **Microsoft Defender** | The engine that ships with Windows — the same one that will scan the installer on your own machine | The Windows build runner, over every executable it just produced — both installers, and the `.dll` and `.node` files inside them — with cloud-delivered protection on, so it sees what your machine sees | **Yes** |
 | **ClamAV** | The open-source engine, with signatures refreshed at build time | The Linux release job, across every artifact | **Yes** |
 | **[VirusTotal](https://www.virustotal.com)** | Aggregates **70+ commercial engines** in one report | Every installer — `.exe`, `.dmg`, `.AppImage`, `.deb` — when an API key is configured | No |
 

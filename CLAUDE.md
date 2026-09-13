@@ -30,10 +30,12 @@ So a routine release is: **tag, then open the winget PR.** Everything else lands
 
 ### What the release workflow does
 
-Builds all three platforms, scans (ClamAV over every artifact, Defender on the Windows
-installer, VirusTotal on `.exe`, `.dmg`, `.AppImage` and `.deb` — see the `files:` list on
-the VirusTotal step in the workflow before repeating any narrower claim), publishes the
-notes with a SHA-256 table, then pings the Cloudflare Pages deploy hook.
+Builds all three platforms, scans (ClamAV over every artifact, Defender over every
+executable the Windows build produced — `.exe`, `.dll` and `.node`, not just the
+installers — VirusTotal on `.exe`, `.dmg`, `.AppImage` and `.deb` — see the `files:` list
+on the VirusTotal step and the `$exts` list on the Defender step in the workflow before
+repeating any narrower claim), publishes the notes with a SHA-256 table, then pings the
+Cloudflare Pages deploy hook.
 
 then tells the Homebrew tap and the site to update.
 
