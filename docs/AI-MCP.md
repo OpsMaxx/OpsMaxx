@@ -211,8 +211,10 @@ Descriptions are written to route an agent to the narrowest tool that does the j
 
 - The server's `instructions` state that servers are addressed by friendly name, that
   `list_servers` must be called first, that credentials are never visible, and which capabilities
-  do not exist at all (tunnels, port forwarding, databases) so an agent does not shell out to
-  reach them.
+  do not exist at all (running jobs, defining rules, a shell on the OpsMaxx machine itself,
+  reading the vault, restoring a backup) so an agent does not shell out to reach them. Tunnels
+  and databases are NOT in that list — `list_tunnels`, `set_tunnel`, `list_databases` and
+  `query_database` are all registered, and the instructions used to claim otherwise.
 - `execute_command` names its four alternatives; `read_file`, `list_files` and
   `get_server_metrics` each say why they are preferable.
 - Every `serverName` parameter points back at `list_servers`, because a hostname or IP will not

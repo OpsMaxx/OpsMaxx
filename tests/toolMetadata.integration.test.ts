@@ -59,10 +59,30 @@ describe('server instructions', () => {
     expect(instructions).toMatch(/never see hostnames/i)
   })
 
-  it('name the unsupported areas so the agent does not shell out to reach them', () => {
+  // This assertion used to require the OPPOSITE, and so pinned the bug in place:
+  // the instructions claimed tunnels, port forwarding and databases did not exist
+  // while list_tunnels, set_tunnel, list_databases and query_database were all
+  // registered and allowed. The agent was being told to refuse work it was
+  // permitted to do, and the test guarded that.
+  it('never claims a registered tool is unavailable', () => {
     const instructions = client.getInstructions() ?? ''
-    for (const missing of ['tunnels', 'port forwarding', 'database']) {
-      expect(instructions.toLowerCase()).toContain(missing)
+    const index = instructions.indexOf('Not available')
+    expect(index).toBeGreaterThan(-1)
+    const notAvailable = instructions.slice(index).toLowerCase()
+    const claims: [string, string][] = [
+      ['tunnel', 'list_tunnels'],
+      ['port forwarding', 'set_tunnel'],
+      ['database', 'list_databases']
+    ]
+    for (const [topic, tool] of claims) {
+      if (tools.some((t) => t.name === tool)) expect(notAvailable).not.toContain(topic)
+    }
+  })
+
+  it('names the areas that genuinely have no tool, so the agent does not shell out to reach them', () => {
+    const instructions = (client.getInstructions() ?? '').toLowerCase()
+    for (const missing of ['vault', 'restoring a backup', 'add_ci_connection']) {
+      expect(instructions).toContain(missing)
     }
   })
 })

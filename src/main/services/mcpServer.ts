@@ -1,6 +1,7 @@
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, statSync } from 'node:fs'
+import { app } from 'electron'
 import { z } from 'zod'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -719,6 +720,8 @@ Addressing
   they are different lists of different things.
 - You never see a CI connection's base URL, API token or username, and cannot ask for them.
   OpsMaxx resolves the name and authenticates against the provider on your behalf.
+- Saved databases are a THIRD name space, addressed by the friendly name list_databases
+  returns. You never see a host, port or credential for one.
 
 Choosing a tool
 - Prefer the specific tool over execute_command: read_file over \`cat\`, list_files over \`ls\`,
@@ -742,8 +745,11 @@ Permissions
   effective permissions for a given server.
 
 Not available
-- No SSH tunnels, port forwarding, database queries, or file upload/download beyond
-  read_file/write_file. Do not attempt these through execute_command; say they are unsupported.
+- No file upload or download beyond read_file/write_file. Do not attempt a transfer through
+  execute_command; say it is unsupported.
+- Running jobs, defining rules, a shell on the OpsMaxx machine itself, reading the vault, and
+  restoring a backup are not on this bridge at any permission setting. describe_capabilities
+  says the same, and is the authority on what this session may actually do.
 - No tool creates, edits or deletes a CI/CD connection. You cannot change where one points, what
   credential it uses, or add one of your own — a human does that in OpsMaxx. There is no
   add_ci_connection to look for.
@@ -1373,17 +1379,25 @@ function vpnSummary(v: CachedVpn): string {
   return parts.join(', ')
 }
 
+// `name` is the protocol identifier and stays a slug; `title` is what a client
+// actually shows a person, and without it they render the slug. The version was
+// hardcoded at 1.0.0 while the app shipped 0.36.x, so every client displayed and
+// logged a version that matched no release.
 function buildServer(): McpServer {
-  const server = new McpServer({ name: 'opsmaxx', version: '1.0.0' }, { instructions: INSTRUCTIONS })
+  const server = new McpServer(
+    { name: 'opsmaxx', title: 'OpsMaxx', version: app.getVersion() },
+    { instructions: INSTRUCTIONS }
+  )
 
   server.registerTool(
     'list_workspaces',
     {
       title: 'List workspaces',
       description:
-        "Lists the workspace(s) this AI session is scoped to. A workspace is a group of servers. " +
-        "This never reveals a workspace outside the session's grant. Useful when a tool asks which " +
-        'workspace to act on; otherwise start with list_servers.',
+        'Lists the WORKSPACES this session is scoped to, by name — not the servers in them. A ' +
+        "workspace is a group of servers. This never reveals a workspace outside the session's " +
+        'grant. Use it when a tool asks which workspace to act on (add_server does); to find a ' +
+        'server to act on, call list_servers instead.',
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false }
     },
     async (extra) => {
