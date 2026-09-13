@@ -309,6 +309,7 @@ const SETTING_INDEX: SettingEntry[] = [
   // `title` must match the rendered `.s-title` verbatim — the contract at the
   // top of this list. `lock` stays in the aliases: it is what people will
   // search for, and it is still what the control eventually leads to.
+  { section: 'monitoring', title: 'Record how large each database is', desc: 'Hourly database size samples, for growth charts.', aliases: 'database size sampler growth disk history' },
   { section: 'security', title: 'Secure after inactivity', desc: 'How long the vault stays on screen without use.', aliases: 'vault auto lock secure timeout idle' },
   { section: 'security', title: 'Trusted SSH host keys', desc: 'The host keys this machine has accepted.', aliases: 'known hosts fingerprint host key mismatch' },
   { section: 'security', title: 'Store credentials in OS keychain', desc: 'Use the platform secure store — never plaintext.', aliases: 'keychain secrets password storage' },
@@ -1250,6 +1251,12 @@ export function Settings(): React.JSX.Element {
                   ))}
                 </div>
               </div>
+              <SettingSwitch
+                label="Record how large each database is"
+                desc="Once an hour, ask each stored database connection for its size and keep the number, so growth can be charted and a disk filling up has a cause beside it. Off by default: unlike a server check, this opens a CONNECTION on the database itself."
+                checked={settings.dbSizeSamplingEnabled}
+                onChange={(v) => setSettings({ dbSizeSamplingEnabled: v })}
+              />
               <WebhookAlertSettings />
               <SettingSwitch
                 label="Show monitor under the terminal"

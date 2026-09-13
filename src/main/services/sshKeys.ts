@@ -165,3 +165,62 @@ export function listDefaultKeys(): DetectedKey[] {
     n === 'id_ed25519' ? 0 : n === 'id_ecdsa' ? 1 : n === 'id_rsa' ? 2 : n === 'id_dsa' ? 3 : 4
   return keys.sort((a, b) => rank(a.fileName) - rank(b.fileName) || a.fileName.localeCompare(b.fileName))
 }
+
+/**
+ * The PEM body of a private key, for putting the MATERIAL in the vault instead
+ * of a path to it.
+ *
+ * `shared/vault.ts` states the problem this closes: a key stored as a `keyPath`
+ * is "the one credential OpsMaxx never actually held — not in the OS keychain,
+ * not in the encrypted vault, just a filename pointing at plaintext on disk,
+ * which also does not travel with an encrypted backup."
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS NOT AN ARBITRARY FILE READ
+ * ---------------------------------------------------------------------------
+ *
+ * It would be very easy to make it one, and a renderer-supplied path handed to
+ * `readFileSync` is exactly that: a way to ask main to read anything the user
+ * can, and hand the bytes back. Two things stop it.
+ *
+ * MAIN ONLY READS A PATH MAIN ITSELF PRODUCED. The two callers are the native
+ * file dialog — where the person chose the file in an OS window and the path
+ * never passed through the renderer — and `listDefaultKeys()`, which is main's
+ * own scan of `~/.ssh`. `keyMaterialFor` re-derives the path from a bare
+ * FILE NAME inside that directory rather than accepting one, so a caller
+ * cannot walk out of it however the name is spelled.
+ *
+ * AND IT MUST LOOK LIKE A PRIVATE KEY. The same `PRIVATE_HEADER` that decides
+ * what `listDefaultKeys` will offer, so nothing is readable here that is not
+ * already listable there, plus a size ceiling: the largest realistic private
+ * key is a few kilobytes, and a cap means a caller cannot use this to pull a
+ * large file into memory even if it happens to start with the right line.
+ */
+const MAX_KEY_BYTES = 64 * 1024
+
+export function readKeyMaterialAt(path: string): string | null {
+  try {
+    const st = statSync(path)
+    if (!st.isFile() || st.size > MAX_KEY_BYTES) return null
+  } catch {
+    return null
+  }
+  if (!PRIVATE_HEADER.test(readPrefix(path, 256))) return null
+  try {
+    return readFileSync(path, 'utf8')
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The same, addressed by a file name inside `~/.ssh` rather than by a path.
+ *
+ * The name is checked against `listDefaultKeys()` — main's own scan — so the
+ * set of readable files is exactly the set already offered on screen, and a
+ * name carrying a separator or a `..` matches nothing in it.
+ */
+export function keyMaterialFor(fileName: string): string | null {
+  const found = listDefaultKeys().find((k) => k.fileName === fileName)
+  return found ? readKeyMaterialAt(found.path) : null
+}

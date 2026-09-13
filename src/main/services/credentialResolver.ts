@@ -150,9 +150,16 @@ export function credentialSourceFor(serverId: string): { source: CredentialSourc
   const raw = getSecret(serverId)
   if (!raw) return { source: 'none' }
   try {
-    const blob = JSON.parse(raw) as SecretBlob
-    if (blob.vaultEntryId) return { source: 'vault', vaultEntryId: blob.vaultEntryId }
-    if (blob.password || blob.keyPath || blob.passphrase) return { source: 'keychain' }
+    // `vaultUriEntryId` is the database URI shape, which lives in the same
+    // keychain blob under its own id. It has to be recognised HERE as well as
+    // in the resolver, because this is what `credentialResolvable` reads to
+    // decide whether a target can be sampled — miss it and a URI-backed
+    // database is sampled into a VaultLockedError every interval instead of
+    // being skipped.
+    const blob = JSON.parse(raw) as SecretBlob & { vaultUriEntryId?: string; uri?: string }
+    const vaultEntryId = blob.vaultEntryId ?? blob.vaultUriEntryId
+    if (vaultEntryId) return { source: 'vault', vaultEntryId }
+    if (blob.password || blob.keyPath || blob.passphrase || blob.uri) return { source: 'keychain' }
     return { source: 'none' }
   } catch {
     return { source: 'none' }
@@ -306,7 +313,12 @@ export function resolveDbSecrets<T extends { id: string; password?: string; uri?
     const raw = getSecret(cfg.id)
     if (raw) {
       try {
-        const b = JSON.parse(raw) as { password?: string; uri?: string; vaultEntryId?: string }
+        const b = JSON.parse(raw) as {
+          password?: string
+          uri?: string
+          vaultEntryId?: string
+          vaultUriEntryId?: string
+        }
         /**
          * A vault reference wins, exactly as it does for a server.
          *
@@ -328,6 +340,28 @@ export function resolveDbSecrets<T extends { id: string; password?: string; uri?
         if (b.vaultEntryId) {
           const entry = vaultEntry(b.vaultEntryId)
           if (entry?.password) cfg.password = entry.password
+        }
+        /**
+         * The URI shape, which is the same credential in one string.
+         *
+         * A SEPARATE field rather than a `slot` discriminator on the one
+         * above, because the two are not alternatives to each other in the way
+         * a discriminator implies: a record has a password or a URI, and the
+         * blob has always said which by which field is present. A second id
+         * keeps that, and leaves every blob written before this untouched.
+         *
+         * `key` is the kind these reference, not `login`. A connection string
+         * is one opaque secret with a label — `{ url, secret }` — which is
+         * exactly what the API-key kind is, and unlike `login` it has no
+         * username slot to sit empty and invite someone to fill it in.
+         *
+         * This was the last credential class the vault could not hold: a URI
+         * carries its own password inside it, so a connection kept this way was
+         * machine-local and un-rotatable however much of the rest moved.
+         */
+        if (b.vaultUriEntryId) {
+          const entry = vaultEntry(b.vaultUriEntryId)
+          if (entry?.password) cfg.uri = entry.password
         }
         // `||` and not `??`: the renderer sends '' for "unchanged", and `??`
         // treats an empty string as a real value — which dropped the stored

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useApp, useWorkspaceServers } from '../../store/app'
+import { dbConnectConfig } from '../../lib/dbConfig'
 import { useFleet } from '../../store/fleet'
 import { useFleetStatus } from '../../store/fleetStatus'
 import { useVault } from '../../store/vault'
@@ -81,6 +82,12 @@ export function FleetWatcher(): null {
   checksRef.current = useApp((s) => s.httpChecks)
   const enabled = useApp((s) => s.settings.fleetSamplingEnabled)
   const intervalMs = useApp((s) => s.settings.fleetSamplingIntervalMs)
+  const dbSamplingEnabled = useApp((s) => s.settings.dbSizeSamplingEnabled)
+  // The whole list, not the active workspace's. The sampler runs in main and
+  // does not change what it is doing because somebody switched tabs — a size
+  // series with a hole in it wherever the operator was looking elsewhere would
+  // be worse than no series.
+  const databases = useApp((s) => s.databases)
   const webhookEnabled = useApp((s) => s.settings.webhookAlertsEnabled)
   const webhookOnResolved = useApp((s) => s.settings.webhookNotifyOnResolved)
   const report = useFleet((s) => s.report)
@@ -274,6 +281,33 @@ export function FleetWatcher(): null {
   useEffect(() => {
     void window.opsmaxx?.fleet?.configure({ enabled, intervalMs, targets })
   }, [enabled, intervalMs, targets])
+
+  /**
+   * The database size sampler, on the same principle and from the same place.
+   *
+   * It had handlers in main and no bridge and no caller, so it never ran: the
+   * size series were empty on every install and nothing reported that the
+   * thing writing them was not switched on. The renderer owns the connection
+   * list, so it is the only thing that can say what to sample.
+   *
+   * Sent even when the feature is off. `enabled: false` is a desired state
+   * like any other and is what stops a sampler that was running — leaving it
+   * unsent would make turning the setting off do nothing until a restart.
+   *
+   * Interval is not configurable. Main floors it at an hour anyway, and a
+   * database's size is not a quantity that rewards asking more often.
+   */
+  useEffect(() => {
+    const db = window.opsmaxx?.db as { samplerConfigure?: (c: unknown) => Promise<unknown> } | undefined
+    if (typeof db?.samplerConfigure !== 'function') return
+    void db.samplerConfigure({
+      enabled: dbSamplingEnabled,
+      intervalMs: 3600_000,
+      targets: dbSamplingEnabled
+        ? databases.map((d) => ({ connectionId: d.id, cfg: dbConnectConfig(d, servers) }))
+        : []
+    })
+  }, [dbSamplingEnabled, databases, servers])
 
   // A job step that failed.
   //

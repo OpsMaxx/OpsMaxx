@@ -305,9 +305,47 @@ export function AddServerModal(): React.JSX.Element {
   })
   const valid = missing === null
 
+  /**
+   * The key's PEM body, when we could read it, for the file currently in
+   * `keyPath`.
+   *
+   * Held beside the path rather than instead of it: the path is what the field
+   * shows and what an edit keeps meaning, while the material is what gets
+   * SAVED when the vault takes it. Cleared whenever the path changes, so a
+   * stale body can never be written against a different file.
+   */
+  const [keyMaterial, setKeyMaterial] = useState<string | null>(null)
+
+  const chooseKey = (path: string, material: string | null): void => {
+    setKeyPath(path)
+    setKeyMaterial(material)
+  }
+
   const pickKey = async (): Promise<void> => {
+    // `openKeyMaterial`, so the file is read in main against the path the OS
+    // dialog just returned — the person picked it in a native window, which is
+    // the whole of the authorisation. A null body means they picked something
+    // that is not a private key, and the path is kept exactly as before.
+    const picked = await window.opsmaxx?.dialog.openKeyMaterial?.()
+    if (picked) {
+      chooseKey(picked.path, picked.material)
+      return
+    }
+    // Older preload without the method. The path still works; it just cannot
+    // become a vault record.
     const p = await window.opsmaxx?.dialog.openKey()
-    if (p) setKeyPath(p)
+    if (p) chooseKey(p, null)
+  }
+
+  const pickFoundKey = async (fileName: string, path: string): Promise<void> => {
+    chooseKey(path, null)
+    const material = await window.opsmaxx?.ssh.keyMaterial?.(fileName)
+    // Only if the path is still the one we asked about. The read is a round
+    // trip and the user can click a second chip inside it.
+    setKeyPath((current) => {
+      if (current === path) setKeyMaterial(material ?? null)
+      return current
+    })
   }
 
   // ~/.ssh is hidden and OpenSSH keys have no extension, so the file picker is
@@ -464,6 +502,44 @@ export function AddServerModal(): React.JSX.Element {
       }
     } else if (auth === 'key' && keyPath.trim()) {
       secret = { keyPath: keyPath.trim(), passphrase: passphrase || undefined }
+
+      /**
+       * The key's MATERIAL into the vault, not a path to it.
+       *
+       * `shared/vault.ts` names this as the worst of the lot: a `keyPath` is
+       * "the one credential OpsMaxx never actually held — not in the OS
+       * keychain, not in the encrypted vault, just a filename pointing at
+       * plaintext on disk", and the one thing an encrypted backup could not
+       * carry to another machine. An `sshkey` entry holds the PEM and the
+       * passphrase together, and `applyVaultEntry` already knows how to put
+       * both on a connection.
+       *
+       * Only when the material was actually read — a key the picker could not
+       * make sense of, or an older preload with no `openKeyMaterial`, keeps
+       * the path. Falling back beats refusing to save the server.
+       */
+      if (keyMaterial && saveToVault) {
+        if (!vaultUnlocked) {
+          await useVaultPrompt
+            .getState()
+            .request('Saving this key into the vault needs your master password.')
+        }
+        const entryId = await createVaultEntry('sshkey', {
+          name: `${fields.name} (${fields.username})`,
+          username: fields.username,
+          privateKey: keyMaterial,
+          // On an `sshkey` entry the secret slot IS the key passphrase — one
+          // slot whose label changes with the kind, per VAULT_KIND_FIELDS.
+          password: passphrase || '',
+          tags: ['server']
+        })
+        if (entryId) secret = { vaultEntryId: entryId }
+        else
+          toast('The vault would not take this key, so the path was kept on this device only.', 'error', {
+            label: 'Open vault',
+            run: () => setActivity('vault')
+          })
+      }
     } else if (auth === 'agent' && agentSocket.trim()) {
       // A socket path is not a credential, but it rides in the same per-server
       // blob because that is where the auth method's details live.
@@ -744,7 +820,7 @@ export function AddServerModal(): React.JSX.Element {
                   <button
                     key={k.path}
                     className={clsx('btn', 'sm', keyPath === k.path && 'active')}
-                    onClick={() => setKeyPath(k.path)}
+                    onClick={() => void pickFoundKey(k.fileName, k.path)}
                     title={k.path}
                   >
                     <KeyRound size={12} /> {k.fileName}
@@ -755,10 +831,21 @@ export function AddServerModal(): React.JSX.Element {
               </div>
             </div>
           )}
-          <span className="field-hint">
-            {'Key path and passphrase are stored in OS secure storage, never in plaintext. ' +
-              'Leave the path empty to use your default key, the same one `ssh` would pick.'}
-          </span>
+          {keyMaterial ? (
+            <label className="field-hint row" style={{ gap: 6, cursor: 'pointer', marginTop: 6 }}>
+              <input
+                type="checkbox"
+                checked={saveToVault}
+                onChange={(e) => setSaveToVault(e.target.checked)}
+              />
+              Save the key itself to the vault, so it travels with a backup
+            </label>
+          ) : (
+            <span className="field-hint">
+              {'Key path and passphrase are stored in OS secure storage, never in plaintext. ' +
+                'Leave the path empty to use your default key, the same one `ssh` would pick.'}
+            </span>
+          )}
           <input
             className="input"
             type="password"
