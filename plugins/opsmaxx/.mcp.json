@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "opsmaxx": {
+      "command": "npx",
+      "args": ["-y", "@opsmaxx/mcp"],
+      "env": {
+        "OPSMAXX_MCP_PORT": "${OPSMAXX_MCP_PORT:-5177}"
+      }
+    }
+  }
+}

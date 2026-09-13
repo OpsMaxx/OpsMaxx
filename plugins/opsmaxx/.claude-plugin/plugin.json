@@ -1,0 +1,7 @@
+{
+  "name": "opsmaxx",
+  "description": "Work on your own servers through the OpsMaxx desktop app: scoped per capability, approved in the app, audited.",
+  "homepage": "https://opsmaxx.dev",
+  "repository": "https://github.com/OpsMaxx/OpsMaxx",
+  "license": "MIT"
+}

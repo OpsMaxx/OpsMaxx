@@ -1,0 +1,16 @@
+{
+  "name": "opsmaxx",
+  "owner": {
+    "name": "OpsMaxx contributors",
+    "url": "https://opsmaxx.dev"
+  },
+  "plugins": [
+    {
+      "name": "opsmaxx",
+      "source": "./plugins/opsmaxx",
+      "description": "Work on your own servers through the OpsMaxx desktop app: scoped per capability, approved in the app, audited.",
+      "category": "devops",
+      "tags": ["ssh", "servers", "containers", "ci", "infrastructure"]
+    }
+  ]
+}
