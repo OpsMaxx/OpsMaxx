@@ -686,6 +686,75 @@ describe('lifecycle', () => {
     await expect(mgr.vpnInit()).resolves.toBeUndefined()
   })
 
+  /**
+   * An autostart the vault blocked has to be retried when the vault opens.
+   *
+   * The vault is routinely SHUT at launch — the key dies with the process and
+   * the master password has not been typed yet — so for a profile whose key
+   * lives in the vault this was not an edge case, it was every cold start. It
+   * failed silently and nothing ever asked again, so the tunnel simply never
+   * came up and the only record was a line in a console nobody reads.
+   *
+   * Silent because `vpnStart` reports a locked vault by RESOLVING
+   * `{ ok: false, errorCode: 'vault-locked' }`, not by throwing, so the
+   * `.catch` the autostart loop had never ran.
+   */
+  it('retries an autostart the vault blocked, once the vault is open', async () => {
+    vaultLocked = true
+    profiles = [wgProfile({ autoStart: true })]
+    await mgr.vpnInit()
+    // `void`-fired inside vpnInit, so the failure lands a tick later.
+    await vi.waitFor(() => expect(mgr.vpnStatus('v1')?.state).toBe('error'))
+    // The driver was never reached, so nothing started unprotected.
+    expect(events).toEqual([])
+
+    vaultLocked = false
+    mgr.vpnRetryVaultBlockedAutostarts()
+    await vi.waitFor(() => expect(mgr.vpnStatus('v1')?.state).toBe('connected'))
+  })
+
+  it('does not retry an autostart that failed for any other reason', async () => {
+    // Unlocking the vault does not fix a bad config or a missing engine, and
+    // retrying on every unlock would be a start attempt, an error event and a
+    // log line each time, forever.
+    behaviour.start = async () => {
+      throw new Error('nope')
+    }
+    profiles = [wgProfile({ autoStart: true })]
+    await mgr.vpnInit()
+
+    const before = supervisorCalls.length
+    mgr.vpnRetryVaultBlockedAutostarts()
+    expect(supervisorCalls).toHaveLength(before)
+  })
+
+  it('keeps the profile queued if the vault is still shut on retry', async () => {
+    vaultLocked = true
+    profiles = [wgProfile({ autoStart: true })]
+    await mgr.vpnInit()
+    // Waited for, so the profile is genuinely on the queue before the retry.
+    // Without this the retry can run against an empty set, return early, and
+    // the assertion below would pass on the ORIGINAL failure instead.
+    await vi.waitFor(() => expect(mgr.vpnStatus('v1')?.errorCode).toBe('vault-locked'))
+
+    // A retry that hits the same wall must stay queued, or the second unlock
+    // in a session would find nothing to do.
+    mgr.vpnRetryVaultBlockedAutostarts()
+    await vi.waitFor(() => expect(supervisorCalls.filter((c) => c === 'reapOrphans')).toHaveLength(1))
+
+    vaultLocked = false
+    mgr.vpnRetryVaultBlockedAutostarts()
+    await vi.waitFor(() => expect(mgr.vpnStatus('v1')?.state).toBe('connected'))
+  })
+
+  it('does nothing when no autostart was blocked', () => {
+    // The ordinary case, which is every install that keeps no VPN key in the
+    // vault. It must not be a start attempt.
+    const before = supervisorCalls.length
+    mgr.vpnRetryVaultBlockedAutostarts()
+    expect(supervisorCalls).toHaveLength(before)
+  })
+
   it('runs init once', async () => {
     await mgr.vpnInit()
     await mgr.vpnInit()

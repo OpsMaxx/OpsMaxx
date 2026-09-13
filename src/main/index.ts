@@ -205,6 +205,7 @@ import {
   vpnProbe,
   vpnProfiles,
   vpnReload,
+  vpnRetryVaultBlockedAutostarts,
   vpnSetCadence,
   vpnStart,
   vpnStop,
@@ -4569,6 +4570,11 @@ const resumeChecksAfterUnlock = (r: { ok: boolean }): { ok: boolean } => {
     // ever called it — the one line above was doing the work for both. Same
     // idempotence, so no coordination.
     dbSampler.resume()
+    // And the third one with the same shape: a VPN profile set to auto-start
+    // whose key is in the vault failed at launch, because the vault is
+    // routinely shut at launch, and nothing ever retried it. Only the ones a
+    // locked vault stopped — a broken config is not something unlocking fixes.
+    vpnRetryVaultBlockedAutostarts()
   }
   return r
 }
