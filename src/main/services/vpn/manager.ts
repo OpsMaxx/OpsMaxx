@@ -750,7 +750,56 @@ export async function vpnInit(): Promise<void> {
     if (!p.autoStart) continue
     // Auto-start is best effort: one profile that cannot come up must not stop
     // the app from finishing its startup.
-    void vpnStart(p.id).catch((e) => console.error(`[vpn] autostart ${p.name} failed:`, e))
+    //
+    // The RESULT is inspected, not just the rejection. `vpnStart` reports a
+    // locked vault by resolving `{ ok: false, errorCode: 'vault-locked' }` —
+    // see the resolveVpnSecrets branch — so a `.catch` alone never saw it, and
+    // a profile whose key is in the vault failed here and was never heard from
+    // again. The vault is routinely shut at launch, so for those profiles that
+    // was every cold start.
+    void vpnStart(p.id)
+      .then((r) => {
+        if (r.errorCode === 'vault-locked') vaultBlockedAutostarts.add(p.id)
+      })
+      .catch((e) => console.error(`[vpn] autostart ${p.name} failed:`, e))
+  }
+}
+
+/**
+ * Auto-start profiles that could not start because the vault was shut.
+ *
+ * Only those. A profile with a bad config or a missing engine fails for a
+ * reason unlocking cannot fix, and retrying it on every unlock would be a
+ * pointless start attempt, an error event and a log line each time.
+ */
+const vaultBlockedAutostarts = new Set<string>()
+
+/**
+ * Retry the auto-starts a locked vault prevented, now that it is open.
+ *
+ * Called from the unlock path in main, beside the samplers' `resume()`. Those
+ * had the same defect and only one of them had ever been wired: something
+ * stops because a credential cannot be read, and nothing tells it the
+ * credential came back.
+ *
+ * Idempotent and safe to call when nothing is waiting — the set is empty in
+ * the ordinary case, which is every install that does not keep a VPN key in
+ * the vault.
+ */
+export function vpnRetryVaultBlockedAutostarts(): void {
+  if (vaultBlockedAutostarts.size === 0) return
+  for (const id of [...vaultBlockedAutostarts]) {
+    // Dropped from the set before the attempt, not after. A retry that fails
+    // for a NEW reason must not stay queued against every future unlock, and
+    // one that fails on the vault again re-adds itself below.
+    vaultBlockedAutostarts.delete(id)
+    const profile = vpnProfile(id)
+    if (!profile?.autoStart) continue
+    void vpnStart(id)
+      .then((r) => {
+        if (r.errorCode === 'vault-locked') vaultBlockedAutostarts.add(id)
+      })
+      .catch((e) => console.error(`[vpn] autostart retry ${profile.name} failed:`, e))
   }
 }
 
