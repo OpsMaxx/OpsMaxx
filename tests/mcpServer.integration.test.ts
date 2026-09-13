@@ -323,4 +323,96 @@ describe('MCP server (integration)', () => {
       await client.close()
     })
   })
+
+  // The bridge used to mint an mcp-session-id and hold the transport in a Map,
+  // which nothing read and which stopMcpServer() cleared -- so toggling AI
+  // access, or restarting the app, broke every connected client until it was
+  // restarted too. These pin the stateless replacement.
+  describe('stateless transport', () => {
+    const post = async (body: unknown, headers: Record<string, string> = {}): Promise<Response> =>
+      fetch(`http://127.0.0.1:${PORT}/mcp`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+          authorization: `Bearer ${token}`,
+          ...headers
+        },
+        body: JSON.stringify(body)
+      })
+
+    it('hands back no session id to hold on to', async () => {
+      const res = await post({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-06-18',
+          capabilities: {},
+          clientInfo: { name: 'probe', version: '1' }
+        }
+      })
+      expect(res.status).toBe(200)
+      expect(res.headers.get('mcp-session-id')).toBeNull()
+      await res.text()
+    })
+
+    it('answers a tool call that never initialized and carries no session', async () => {
+      // The case that matters: a client that connected before the app restarted
+      // sends its next call into a process that has never heard of it.
+      const res = await post({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'list_servers', arguments: {} }
+      })
+      expect(res.status).toBe(200)
+      const body = await res.text()
+      expect(body).toContain('Nginx Server Prod')
+      expect(body).not.toContain('No valid MCP session')
+    })
+
+    it('serves a client that was connected before the bridge was restarted', async () => {
+      // Toggling AI access off and on is what used to strand every client: the
+      // transports Map was cleared and their session id stopped resolving. The
+      // request below carries no session and is made on a new connection,
+      // because restarting the listener drops the old socket either way -- what
+      // is being pinned is that the RETRY now works instead of failing forever.
+      const client = await connectedClient(token)
+      expect((await client.listTools()).tools.length).toBeGreaterThan(0)
+      await client.close()
+
+      await stopMcpServer()
+      expect((await startMcpServer()).ok).toBe(true)
+
+      // Restarting the listener kills the pooled keep-alive socket, and undici
+      // only discovers that by using it -- so the first request after a restart
+      // fails at the transport layer with ECONNRESET no matter what the server
+      // does. A real client reconnects and retries; this flushes the pool the
+      // same way. What is being pinned is the protocol answer after a restart,
+      // not socket bookkeeping, and before this change the retry failed too.
+      await post({ jsonrpc: '2.0', id: 3, method: 'tools/list' }).catch(() => undefined)
+
+      const res = await post({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: { name: 'list_servers', arguments: {} }
+      })
+      expect(res.status).toBe(200)
+      const body = await res.text()
+      expect(body).toContain('Nginx Server Prod')
+      expect(body).not.toContain('No valid MCP session')
+    })
+
+    it('turns away a method that only a long-lived session could use', async () => {
+      const res = await fetch(`http://127.0.0.1:${PORT}/mcp`, {
+        method: 'GET',
+        headers: { accept: 'text/event-stream', authorization: `Bearer ${token}` }
+      })
+      expect(res.status).toBe(405)
+      await res.text()
+    })
+  })
+
 })

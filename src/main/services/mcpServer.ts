@@ -5,7 +5,6 @@ import { app } from 'electron'
 import { z } from 'zod'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { HostMetrics } from '../../shared/ssh'
 import { formatBytes } from '../../shared/bytesForecast'
@@ -4245,7 +4244,6 @@ function auditBase(ctx: AuditContext): {
 }
 
 let httpServer: HttpServer | null = null
-const transports = new Map<string, StreamableHTTPServerTransport>()
 
 function readBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -4383,33 +4381,39 @@ export async function startMcpServer(): Promise<{ ok: boolean; error?: string }>
           return
         }
 
+        // STATELESS. One transport and one McpServer per request, no session id,
+        // nothing kept between calls.
+        //
+        // The server used to mint an `mcp-session-id` and hold the transport in a
+        // Map. Nothing ever read that state: every tool authenticates per request
+        // off the Authorization header (authenticateExtra), and an approval
+        // elevation is keyed on the OpsMaxx session id, not this one. All the Map
+        // bought was a way to fail -- stopMcpServer() cleared it, so toggling AI
+        // access off and on, or restarting the app, turned every connected
+        // client's next call into "No valid MCP session" until that client was
+        // restarted. Now an old client just keeps working.
+        //
+        // Progress notifications are unaffected: noteAwaitingApproval sends them
+        // during a call, on that request's own stream. Nothing is ever sent
+        // outside a call, which is the only thing a long-lived session would buy.
+        if (req.method !== 'POST') {
+          // No standalone SSE stream and no session to delete.
+          res.writeHead(405, { allow: 'POST', 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'This MCP endpoint is stateless; use POST.' }))
+          return
+        }
+
         try {
-          const sessionId = req.headers['mcp-session-id'] as string | undefined
-          let transport = sessionId ? transports.get(sessionId) : undefined
-
-          if (!transport) {
-            const body = req.method === 'POST' ? await readBody(req) : undefined
-            if (req.method === 'POST' && isInitializeRequest(body)) {
-              transport = new StreamableHTTPServerTransport({
-                sessionIdGenerator: () => randomUUID(),
-                onsessioninitialized: (sid) => {
-                  if (transport) transports.set(sid, transport)
-                }
-              })
-              transport.onclose = () => {
-                if (transport?.sessionId) transports.delete(transport.sessionId)
-              }
-              const mcp = buildServer()
-              await mcp.connect(transport)
-              await transport.handleRequest(req, res, body)
-              return
-            }
-            res.writeHead(400, { 'content-type': 'application/json' })
-            res.end(JSON.stringify({ error: 'No valid MCP session. Send an initialize request first.' }))
-            return
-          }
-
-          await transport.handleRequest(req, res)
+          const body = await readBody(req)
+          const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })
+          const mcp = buildServer()
+          // Both are per-request, so neither may outlive the response.
+          res.on('close', () => {
+            void transport.close()
+            void mcp.close()
+          })
+          await mcp.connect(transport)
+          await transport.handleRequest(req, res, body)
         } catch (err) {
           console.error('[mcp] request handling failed:', err)
           if (!res.headersSent) res.writeHead(500).end()
@@ -4432,14 +4436,8 @@ export async function startMcpServer(): Promise<{ ok: boolean; error?: string }>
 }
 
 export async function stopMcpServer(): Promise<void> {
-  for (const transport of transports.values()) {
-    try {
-      await transport.close()
-    } catch {
-      /* ignore */
-    }
-  }
-  transports.clear()
+  // Nothing to tear down per client: transports are per-request and already
+  // closed with their response.
   const server = httpServer
   httpServer = null
   if (!server) return
