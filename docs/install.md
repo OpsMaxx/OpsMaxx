@@ -159,20 +159,21 @@ chmod +x OpsMaxx-*.AppImage
 
 ### Antivirus scan
 
-Every release is scanned automatically as part of the build, by three independent
-scanners, before anything is published:
+Every release is scanned automatically as part of the build, before anything is
+published. **Two of the three scanners gate it**: a detection from either fails the
+build, so a release that exists at all has passed both.
 
-| Scanner | What it is | Runs on |
-|---|---|---|
-| **Microsoft Defender** | The engine that ships with Windows — the same one that will scan the installer on your own machine | The Windows build runner, on the `.exe` files it just produced |
-| **ClamAV** | The open-source engine, with signatures refreshed at build time | The Linux release job, across every artifact |
-| **[VirusTotal](https://www.virustotal.com)** | Aggregates **70+ commercial engines** in one report | The release job, with a per-file report linked in the notes |
+| Scanner | What it is | Runs on | Gates the release |
+|---|---|---|---|
+| **Microsoft Defender** | The engine that ships with Windows — the same one that will scan the installer on your own machine | The Windows build runner, on the `.exe` files it just produced | **Yes** |
+| **ClamAV** | The open-source engine, with signatures refreshed at build time | The Linux release job, across every artifact | **Yes** |
+| **[VirusTotal](https://www.virustotal.com)** | Aggregates **70+ commercial engines** in one report | Every installer — `.exe`, `.dmg`, `.AppImage`, `.deb` — when an API key is configured | No |
 
-A detection from Defender or ClamAV **fails the build**, so a release that exists at all
-has passed both. The results — and the VirusTotal links for each file — are printed in
-every release's notes.
-
-If you would rather check for yourself rather than trust a link in a README, you can:
+VirusTotal reports rather than gates, deliberately: it needs an API key and a
+third-party service, and neither being unavailable should be able to stop a release —
+or stop someone cutting one from a fork. Each release's notes say plainly whether that
+scan ran, and link the report for every file when it did. If the notes say *not run for
+this release*, the two gating scanners still passed, and you can run the check yourself:
 
 - **Look the file up by its hash.** Every release lists a SHA-256 per asset. Paste it
   into [virustotal.com](https://www.virustotal.com) — searching by hash proves the report
