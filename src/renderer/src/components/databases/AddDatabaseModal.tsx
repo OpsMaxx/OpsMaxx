@@ -105,12 +105,26 @@ export function AddDatabaseModal(): React.JSX.Element {
         .filter((d) => d.has.password && !d.has.privateKey)
         .map((d) => ({ id: d.id, name: d.name, sub: '' }))
 
+  // Connection strings live in `key` entries, so they are a different list from
+  // the passwords above — offering a database password where a whole URI is
+  // wanted would produce a connection that fails for a reason nothing explains.
+  const uriOptions: { id: string; name: string }[] = vaultUnlocked
+    ? vaultEntries.filter((e) => e.kind === 'key' && !!e.password).map((e) => ({ id: e.id, name: e.name }))
+    : (descriptors ?? [])
+        .filter((d) => d.kind === 'key' && d.has.password)
+        .map((d) => ({ id: d.id, name: d.name }))
+
   // '' means "type a new one"; anything else is a vault entry id.
   const [vaultEntryId, setVaultEntryId] = useState('')
+  // The URI shape's reference, kept apart from the password one above. A record
+  // has one or the other, never both, and the blob has always said which by
+  // which field is present — so a second id rather than a slot discriminator.
+  const [vaultUriEntryId, setVaultUriEntryId] = useState('')
   const [saveToVault, setSaveToVault] = useState(true)
   // No `vaultUnlocked &&`: a reference is valid whatever the vault is doing,
   // and resolution at connect time already prompts when it cannot read it.
   const usingVault = vaultEntryId !== ''
+  const usingVaultUri = vaultUriEntryId !== ''
   const [vpnProfileId, setVpnProfileId] = useState<UUID | null>(existing?.vpnProfileId ?? null)
 
   // Whoever opened the dialog owns the target; leaving it set would make the
@@ -141,7 +155,7 @@ export function AddDatabaseModal(): React.JSX.Element {
   // this app and then works.
   const storeSecret = async (
     id: string,
-    secret: { uri: string } | { password: string } | { vaultEntryId: string },
+    secret: { uri: string } | { password: string } | { vaultEntryId: string } | { vaultUriEntryId: string },
     label: string
   ): Promise<void> => {
     const ok = await window.opsmaxx?.secrets.set(id, JSON.stringify(secret))
@@ -183,39 +197,62 @@ export function AddDatabaseModal(): React.JSX.Element {
      * machine — the OS keychain is machine-local and no backup can carry it,
      * while the vault travels inside the encrypted bundle.
      */
-    let secret: { uri: string } | { password: string } | { vaultEntryId: string } | null = useUri
-      ? uri.trim()
-        ? // The URI shape stays on the keychain for now. A connection string is
-          // not a `login` entry's shape — the password is inside it — so making
-          // it vault-backed means a slot that means "the whole URI" and a
-          // matching read in `resolveDbSecrets`. Worth doing; not smuggled in
-          // here, where it would be a resolver change hiding inside a modal.
-          { uri: uri.trim() }
-        : null
+    let secret:
+      | { uri: string }
+      | { password: string }
+      | { vaultEntryId: string }
+      | { vaultUriEntryId: string }
+      | null = useUri
+      ? usingVaultUri
+        ? { vaultUriEntryId }
+        : uri.trim()
+          ? { uri: uri.trim() }
+          : null
       : usingVault
         ? { vaultEntryId }
         : password
           ? { password }
           : null
 
-    // A typed password goes into the vault unless the user said otherwise, the
-    // same default Add Server has. Falling back to the keychain beats losing
-    // what was just typed, which is why this reassigns rather than refuses.
-    if (!useUri && !usingVault && password && saveToVault) {
+    /**
+     * A typed credential goes into the vault unless the user said otherwise,
+     * the same default Add Server has.
+     *
+     * Both shapes, because both are credentials: a password, and a connection
+     * string that has a password inside it. The URI half is why this is worth
+     * the extra branch — it was the last class the vault could not hold, so a
+     * connection saved that way stayed on one machine however much of the rest
+     * of the estate moved.
+     *
+     * Falling back to the keychain beats losing what was just typed, which is
+     * why this reassigns rather than refuses.
+     */
+    const typedSomething = useUri ? !usingVaultUri && !!uri.trim() : !usingVault && !!password
+    if (typedSomething && saveToVault) {
       if (!vaultUnlocked) {
         await useVaultPrompt
           .getState()
-          .request('Saving this password into the vault needs your master password.')
+          .request('Saving this credential into the vault needs your master password.')
       }
-      const entryId = await useVault.getState().createEntry('login', {
-        name: `${fields.name}${username.trim() ? ` (${username.trim()})` : ''}`,
-        username: username.trim(),
-        password,
-        tags: ['database']
-      })
-      if (entryId) secret = { vaultEntryId: entryId }
+      const label = `${fields.name}${!useUri && username.trim() ? ` (${username.trim()})` : ''}`
+      const entryId = useUri
+        ? await useVault.getState().createEntry('key', {
+            // `key`, not `login`: one opaque secret with a label, which is what
+            // a connection string is. `login` would leave a username slot empty
+            // beside a string that already contains one.
+            name: label,
+            password: uri.trim(),
+            tags: ['database', 'connection-string']
+          })
+        : await useVault.getState().createEntry('login', {
+            name: label,
+            username: username.trim(),
+            password,
+            tags: ['database']
+          })
+      if (entryId) secret = useUri ? { vaultUriEntryId: entryId } : { vaultEntryId: entryId }
       else
-        toast('The vault would not take this password, so it was kept on this device only.', 'error')
+        toast('The vault would not take this credential, so it was kept on this device only.', 'error')
     }
 
     if (secret) await storeSecret(id, secret, fields.name)
@@ -307,6 +344,48 @@ export function AddDatabaseModal(): React.JSX.Element {
               onBlur={touch('uri')}
             />
           </Field>
+
+          {/* The URI shape's own credential row.
+              A connection string carries its password inside it, so until now
+              it was the one credential class that had to stay on this machine:
+              the OS keychain is machine-local, no backup carries it, and the
+              same string used by three connections was three copies. It
+              references a `key` entry — url plus one opaque secret, which is
+              exactly a connection string's shape. */}
+          {uriOptions.length > 0 && (
+            <div className="field">
+              <label className="field-label">Connection string</label>
+              <select
+                className="input"
+                value={vaultUriEntryId}
+                onChange={(e) => setVaultUriEntryId(e.target.value)}
+              >
+                <option value="">Enter a new one…</option>
+                {uriOptions.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                  </option>
+                ))}
+              </select>
+              <span className="field-hint">
+                {usingVaultUri
+                  ? 'This connection will reference the vault entry. Change the string there and every connection using it follows — and it travels with an encrypted backup, which a string kept only on this device cannot.'
+                  : 'Reuse a connection string you have already saved, or type a new one above.'}
+              </span>
+            </div>
+          )}
+
+          {!usingVaultUri && (
+            <label className="field-hint row" style={{ gap: 6, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={saveToVault}
+                onChange={(e) => setSaveToVault(e.target.checked)}
+              />
+              Save this connection string to the vault as a reusable credential
+            </label>
+          )}
+
           {kind === 'mongodb' && (
             <div className="field">
               <label className="field-label">Database (optional — overrides the URI default)</label>

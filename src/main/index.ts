@@ -403,7 +403,7 @@ import {
 import { onCliPairingEvent, cancelCliPairing } from './services/cliPairing'
 import { claudeCodeCommand, writeClaudeDesktopConfig, writeCodexConfig } from './services/clientConfig'
 import { setAgentServerCreator, type AgentServerRequest, type AgentServerResult } from './services/agentServerCreate'
-import { listDefaultKeys, sshDir } from './services/sshKeys'
+import { keyMaterialFor, listDefaultKeys, readKeyMaterialAt, sshDir } from './services/sshKeys'
 import { setVaultAutoLock } from './services/vault'
 import {
   biometricSupport,
@@ -805,6 +805,50 @@ ipcMain.handle('dialog:openKey', async () => {
   })
   return result.canceled ? null : result.filePaths[0] ?? null
 })
+
+/**
+ * The same picker, returning the key's MATERIAL as well as its path.
+ *
+ * So a key can go into the vault as a record rather than as a filename. A
+ * `keyPath` is the one credential this app never actually held — see the
+ * comment on `VaultEntry.privateKey` — and it is the one thing an encrypted
+ * backup could not carry to another machine.
+ *
+ * The read happens HERE, against the path the OS dialog just returned, and
+ * that is the whole of the authorisation: the person picked the file in a
+ * native window and the path never passed through the renderer, so this is not
+ * a way to ask main to read an arbitrary file. `readKeyMaterialAt` adds the
+ * other half — it must look like a private key and fit in a key-sized budget.
+ *
+ * `material: null` with a path is a real answer, not a failure: the user
+ * picked something that is not a private key, and the caller falls back to
+ * storing the path exactly as it always did.
+ */
+ipcMain.handle('dialog:openKeyMaterial', async (): Promise<{ path: string; material: string | null } | null> => {
+  if (!mainWindow) return null
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select private key',
+    defaultPath: sshDir(),
+    properties: ['openFile', 'showHiddenFiles'],
+    filters: [
+      { name: 'All files', extensions: ['*'] },
+      { name: 'Private keys', extensions: ['pem', 'key', 'ppk'] }
+    ]
+  })
+  const path = result.canceled ? null : result.filePaths[0] ?? null
+  return path ? { path, material: readKeyMaterialAt(path) } : null
+})
+
+/**
+ * The material of one of the keys `ssh:defaultKeys` already listed.
+ *
+ * Addressed by FILE NAME, never by path: `keyMaterialFor` resolves it against
+ * main's own scan of `~/.ssh`, so the set of readable files is exactly the set
+ * already on screen and a name carrying a separator matches nothing.
+ */
+ipcMain.handle('ssh:keyMaterial', (_e, fileName: unknown) =>
+  typeof fileName === 'string' ? keyMaterialFor(fileName) : null
+)
 
 // Save/open a small JSON document the renderer owns (keyboard shortcuts
 // today). The renderer serialises it — main only picks the path and moves the

@@ -271,6 +271,12 @@ const api = {
   },
   dialog: {
     openKey: (): Promise<string | null> => ipcRenderer.invoke('dialog:openKey'),
+    /** The same picker, plus the key's PEM body when the file is one — so a key
+     *  can be stored in the vault as material rather than as a path to
+     *  plaintext on disk. `material: null` means the user picked something that
+     *  is not a private key, and the caller keeps the path. */
+    openKeyMaterial: (): Promise<{ path: string; material: string | null } | null> =>
+      ipcRenderer.invoke('dialog:openKeyMaterial'),
     openUpload: (): Promise<string[] | null> => ipcRenderer.invoke('dialog:openUpload'),
     saveJson: (suggestedName: string, contents: string): Promise<boolean> =>
       ipcRenderer.invoke('dialog:saveJson', suggestedName, contents),
@@ -352,6 +358,11 @@ const api = {
     defaultKeys: (): Promise<
       { path: string; fileName: string; algorithm: string | null; encrypted: boolean }[]
     > => ipcRenderer.invoke('ssh:defaultKeys'),
+    /** One listed key's PEM body, by FILE NAME — main resolves it against its
+     *  own scan of ~/.ssh, so nothing is readable here that is not already
+     *  listed by `defaultKeys` above. */
+    keyMaterial: (fileName: string): Promise<string | null> =>
+      ipcRenderer.invoke('ssh:keyMaterial', fileName),
     setPoolIdle: (minutes: number): Promise<void> => ipcRenderer.invoke('ssh:pool-idle', minutes),
     replyPrompt: (id: string, answers: string[], remember?: boolean, serverId?: string): void =>
       ipcRenderer.send('ssh:prompt-reply', id, answers, remember, serverId),
@@ -1158,7 +1169,24 @@ const api = {
     close: (id: string): Promise<void> => ipcRenderer.invoke('db:close', id),
     // Read-only operational answers for PostgreSQL and MySQL/MariaDB. There is
     // no write counterpart and there is not meant to be one.
-    ops: (cfg: DbConnectConfig): Promise<DbOpsReport> => ipcRenderer.invoke('db:ops', cfg)
+    ops: (cfg: DbConnectConfig): Promise<DbOpsReport> => ipcRenderer.invoke('db:ops', cfg),
+    /**
+     * The size sampler's desired state, and what it is doing.
+     *
+     * These handlers have existed in main since the sampler was written and
+     * had no bridge and no caller, so the sampler never ran at all — every
+     * database size series was empty and nothing said why. The renderer owns
+     * the connection list, so it is the only thing that can say what to sample.
+     *
+     * `targets` carry a resolved config and NO credential: main looks one up by
+     * the record's id, which is what keeps every password on that side.
+     */
+    samplerConfigure: (cfg: {
+      enabled: boolean
+      targets: { connectionId: string; cfg: DbConnectConfig }[]
+      intervalMs: number
+    }): Promise<unknown> => ipcRenderer.invoke('db:sampler-configure', cfg),
+    samplerStatus: (): Promise<unknown> => ipcRenderer.invoke('db:sampler-status')
   },
   notify: {
     show: (title: string, body: string): Promise<boolean> =>

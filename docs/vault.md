@@ -9,7 +9,11 @@ The encrypted secrets vault, what a backup contains, and the settings worth know
 ## Vault
 
 
-An encrypted store for the credentials that do not belong to a single server — cloud logins, API keys, database URLs, licence keys.
+An encrypted store for credentials: the ones that do not belong to a single server — cloud
+logins, API keys, licence keys — and the ones that do. A server's password, **an SSH key's
+material**, a database password and **a whole database connection string** can all be one
+vault record, referenced by every connection that uses it, changed in one place when it
+rotates, and carried inside an encrypted backup to another machine.
 
 - **AES-256-GCM**, with the key derived from your master password using **scrypt**
 - The master password is **never stored**; a wrong one fails the authentication tag
@@ -17,6 +21,21 @@ An encrypted store for the credentials that do not belong to a single server —
 - **Search matches every field**, so you can find an entry by hostname or username, not just its title
 
 > There is **no recovery** if the master password is lost. That is the point.
+
+### What can live in it
+
+| Credential | Notes |
+|---|---|
+| Server password | Saved to the vault by default when you add a server |
+| **SSH private key** | The **key itself**, not a path to it — so it travels with a backup, which a filename never could. Pick a key and Add Server offers to store it |
+| Server key passphrase | Held on the same `sshkey` entry as the key |
+| Database password | Saved to the vault by default |
+| **Database connection string** | The whole URI, which carries its own password inside it |
+| CI/CD API token, VPN and tunnel secrets, S3 backup keys, the scheduled-backup passphrase | Vault-only; these were never anywhere else |
+
+The OS keychain is still the fallback — for anything you choose not to put in the vault,
+and for the few things that cannot be vault-backed because they are needed before anyone
+has typed a master password.
 
 ### Secured, and locked
 

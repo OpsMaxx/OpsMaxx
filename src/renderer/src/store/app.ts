@@ -113,6 +113,15 @@ export interface AppSettings {
   // never locks makes every other protection on it optional, so the default is
   // deliberately short rather than off.
   vaultAutoLockMinutes: number
+  /**
+   * Record how large each database is, once an hour.
+   *
+   * OFF by default, and that is the important part: a metrics sweep is an exec
+   * channel on a server this app already has open, while this takes a
+   * CONNECTION on somebody's database — which is a different thing to start
+   * doing to a production box without being asked.
+   */
+  dbSizeSamplingEnabled: boolean
   // Terminal font size in pixels, adjusted with Ctrl +/- and Ctrl+wheel.
   terminalFontSize: number
   // Host metrics docked under the terminal.
@@ -303,6 +312,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   switchHiddenWorkspaces: false,
   sshMasterIdleMinutes: 15,
   vaultAutoLockMinutes: 15,
+  dbSizeSamplingEnabled: false,
   terminalFontSize: 13,
   showMonitorStrip: true,
   resourceAlertsEnabled: true,

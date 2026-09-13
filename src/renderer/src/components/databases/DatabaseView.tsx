@@ -23,7 +23,6 @@ import { DbShell } from './DbShell'
 import { DbOpsPanel } from './DbOpsPanel'
 import { toast } from '../../store/toast'
 import { KIND_COLOR, KIND_SHORT } from './DatabaseSidebar'
-import { sshHopFor } from '../../lib/ssh'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import { classifyConnectionError, errorText } from '../../lib/connectionError'
 import { Modal } from '../common/Modal'
@@ -31,6 +30,7 @@ import { queryConfirmation, queryRisk, type QueryConfirmation } from '../../../.
 import { openDatabaseCreator, openDatabaseEditor } from '../../store/dbEditor'
 import { openSettings } from '../../store/nav'
 import { supportsDbOps, type DbVerdictLevel } from '../../../../shared/dbOps'
+import { dbConnectConfig } from '../../lib/dbConfig'
 import { formatDbAddress } from '../../../../shared/dbAddress'
 import { EmptyState } from '../common/EmptyState'
 import type { DatabaseConn, DbKind, Server } from '../../types'
@@ -54,19 +54,9 @@ const KIND_LABEL: Record<DbKind, string> = {
   redis: 'Redis'
 }
 
-function cfgOf(db: DatabaseConn, servers: Server[]): DbConnectConfig {
-  const jump = db.sshServerId ? servers.find((s) => s.id === db.sshServerId) : undefined
-  return {
-    id: db.id,
-    kind: db.kind,
-    host: db.host,
-    port: db.port,
-    username: db.username,
-    database: db.database,
-    ssl: db.ssl,
-    ssh: jump ? sshHopFor(jump) : undefined
-  }
-}
+// Moved to lib/dbConfig.ts when the size sampler needed the same shape. One
+// builder, so a jump host cannot be remembered here and forgotten there.
+const cfgOf = dbConnectConfig
 
 // One sentence for a connection failure, picked from what the driver said.
 // The driver's own words stay on screen underneath; this is the part that says
