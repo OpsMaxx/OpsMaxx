@@ -26,7 +26,7 @@ const src = (p: string): string =>
 
 const MODAL = src('AddApiModal.tsx')
 const VIEW = src('HttpView.tsx')
-const EDITOR = src('EndpointEditor.tsx')
+const CLIENT = src('ScalarClient.tsx')
 
 describe('creating an API', () => {
   /**
@@ -72,9 +72,16 @@ describe('the two plus buttons', () => {
     expect(VIEW).toMatch(/!collection\.specUrl && !collection\.specPath/)
   })
 
-  it('lands the cursor in the path field', () => {
-    expect(EDITOR).toContain('apiEndpointFocus')
-    expect(EDITOR).toContain('pathRef.current?.focus()')
+  /**
+   * It used to focus a path field in a separate endpoint editor, which wrote
+   * `{method, path}` into OpsMaxx's own record. That editor is gone: the
+   * document is the source of truth now, so the request is created IN it and
+   * therefore appears in the operation tree rather than in a list beside one.
+   */
+  it('creates the request in the document and lands on it', () => {
+    expect(CLIENT).toContain('apiEndpointFocus')
+    expect(CLIENT).toContain('addRequest(')
+    expect(CLIENT).toContain('createOperation(')
   })
 
   // The nonce, for the reason the terminal's find carries one: pressing twice
@@ -85,5 +92,7 @@ describe('the two plus buttons', () => {
       'utf8'
     )
     expect(store).toMatch(/apiEndpointFocus: \{ collectionId, nonce:/)
+    // And the consumer has to compare it, not just read it.
+    expect(CLIENT).toContain('lastFocusNonce')
   })
 })

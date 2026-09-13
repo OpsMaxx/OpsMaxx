@@ -2,12 +2,15 @@ import net from 'node:net'
 import { remoteText } from '../../shared/remoteText'
 import tls from 'node:tls'
 import http from 'node:http'
-import type { Duplex } from 'node:stream'
+import zlib from 'node:zlib'
+import type { Duplex, Transform } from 'node:stream'
 import {
+  DECODABLE_ENCODINGS,
   MAX_REDIRECT_HOPS,
   MAX_RESPONSE_BYTES,
   REDIRECT_STATUSES,
   clampTimeout,
+  contentEncodings,
   isPinnedOrigin,
   methodAllowsBody,
   parseTarget,
@@ -192,6 +195,138 @@ async function vpnConnect(
   }
 }
 
+// --------------------------------------------------------------- decoding
+
+/**
+ * A decompressor for one content coding, or null for one we cannot undo.
+ *
+ * `deflate` has two spellings in the wild. The RFC says zlib-wrapped, and some
+ * servers (IIS historically, and a few reverse proxies since) send raw deflate
+ * with no header at all. `deflate-raw` is not a real coding name — it is the
+ * internal token `decodeContent` retries with when the wrapped decoder rejects
+ * the stream, so both spellings work without guessing from the first byte.
+ */
+function decoderFor(coding: string): Transform | null {
+  switch (coding) {
+    case 'gzip':
+    case 'x-gzip':
+      return zlib.createGunzip()
+    case 'deflate':
+      return zlib.createInflate()
+    case 'deflate-raw':
+      return zlib.createInflateRaw()
+    case 'br':
+      return zlib.createBrotliDecompress()
+    // Added to Node after this app's floor, so it is probed rather than
+    // assumed. A build without it treats zstd as undecodable, which is the
+    // same outcome as any other coding we do not implement.
+    case 'zstd': {
+      const make = (zlib as unknown as { createZstdDecompress?: () => Transform })
+        .createZstdDecompress
+      return typeof make === 'function' ? make() : null
+    }
+    default:
+      return null
+  }
+}
+
+/**
+ * Undo one coding, stopping at `limit` bytes.
+ *
+ * The limit is enforced DURING decompression rather than after, which is the
+ * whole point: a few hundred kilobytes of gzip can expand to gigabytes, and a
+ * decoder that allocates the full output before anyone checks its size has
+ * already taken main's heap with it. Streaming means the cap is a counter, and
+ * hitting it destroys the decoder mid-flight.
+ */
+function inflateOnce(
+  input: Buffer<ArrayBuffer>,
+  coding: string,
+  limit: number
+): Promise<{ out: Buffer<ArrayBuffer>; truncated: boolean }> {
+  return new Promise((resolve, reject) => {
+    const stream = decoderFor(coding)
+    if (!stream) {
+      reject(new Error(`No decoder for ${coding}`))
+      return
+    }
+    const chunks: Buffer<ArrayBuffer>[] = []
+    let size = 0
+    let stopped = false
+
+    stream.on('data', (chunk: Buffer<ArrayBuffer>) => {
+      if (stopped) return
+      if (size + chunk.length > limit) {
+        chunks.push(chunk.subarray(0, limit - size))
+        stopped = true
+        // Resolve before destroying: destroy emits an error on some streams,
+        // and the handler below must not turn a successful truncation into a
+        // failed request.
+        resolve({ out: Buffer.concat(chunks), truncated: true })
+        stream.destroy()
+        return
+      }
+      chunks.push(chunk)
+      size += chunk.length
+    })
+    stream.on('end', () => {
+      if (!stopped) resolve({ out: Buffer.concat(chunks), truncated: false })
+    })
+    stream.on('error', (err) => {
+      if (!stopped) reject(err)
+    })
+    stream.end(input)
+  })
+}
+
+/**
+ * The body as the server meant it, with `Content-Encoding` undone.
+ *
+ * Three rules, each of which is a bug if it goes the other way:
+ *
+ *   - Codings are undone in REVERSE. The header lists them in the order they
+ *     were applied, so `gzip, br` is brotli over gzip and decoding left to
+ *     right produces garbage on the first step.
+ *   - A coding we cannot undo returns the ORIGINAL bytes with no `decodedFrom`.
+ *     Half-decoded output that claims to be decoded is worse than compressed
+ *     output that says so.
+ *   - A decoder that rejects the stream does the same. The common case is a
+ *     server sending raw deflate under the wrapped name, which is retried once;
+ *     anything else is a body we should hand over untouched rather than
+ *     failing a request that genuinely succeeded.
+ */
+async function decodeContent(
+  body: Buffer<ArrayBuffer>,
+  encodings: string[],
+  limit: number
+): Promise<{ body: Buffer<ArrayBuffer>; truncated: boolean; decodedFrom?: string }> {
+  if (encodings.length === 0) return { body, truncated: false }
+  if (encodings.some((c) => !DECODABLE_ENCODINGS.has(c))) return { body, truncated: false }
+
+  let out = body
+  let truncated = false
+  for (const coding of [...encodings].reverse()) {
+    try {
+      const step = await inflateOnce(out, coding, limit)
+      out = step.out
+      truncated = step.truncated
+    } catch {
+      if (coding !== 'deflate') return { body, truncated: false }
+      try {
+        const step = await inflateOnce(out, 'deflate-raw', limit)
+        out = step.out
+        truncated = step.truncated
+      } catch {
+        return { body, truncated: false }
+      }
+    }
+    // A body cut short is not a valid input to the next decoder, so stop here
+    // and report what we have rather than feeding it a fragment.
+    if (truncated) break
+  }
+  return { body: out, truncated, decodedFrom: encodings.join(', ') }
+}
+
 /** Node attaches a `code` to transport errors; surfacing it lets the UI explain the failure. */
 function codeOf(err: unknown): string | undefined {
   const code = (err as NodeJS.ErrnoException | undefined)?.code
@@ -341,6 +476,29 @@ async function sendOnce(
           agent
         },
         (res) => {
+          // A stream is not a response, and this client buffers.
+          //
+          // `text/event-stream` never ends on its own, so buffering one means
+          // sitting on the socket until the request timeout and then reporting
+          // ETIMEDOUT — a Send button that appears to hang, for a request the
+          // server answered instantly. Refusing immediately is the honest
+          // version of the same limitation, and it names the limitation rather
+          // than looking like a broken endpoint.
+          //
+          // Streaming properly needs a chunked IPC channel of its own. When
+          // that exists, this guard is what it replaces.
+          const contentType = String(res.headers['content-type'] ?? '')
+          if (/^\s*text\/event-stream\b/i.test(contentType)) {
+            res.destroy()
+            finish({
+              ok: false,
+              error:
+                'This endpoint answers with a server-sent event stream, which OpsMaxx cannot display yet — the response is read in full before it is shown, and a stream has no end to wait for.',
+              code: 'ESTREAMUNSUPPORTED'
+            })
+            return
+          }
+
           const chunks: Buffer[] = []
           let size = 0
           let truncated = false
@@ -358,22 +516,38 @@ async function sendOnce(
             size += chunk.length
           })
 
+          // `end` and `close` both land here (see below), and decoding is
+          // async — so without this the second one starts a second decode of
+          // the same buffer while the first is still running.
+          let finishing = false
           const done = (): void => {
-            const body = Buffer.concat(chunks)
-            finish({
-              ok: true,
-              status: res.statusCode ?? 0,
-              statusText: res.statusMessage ?? '',
-              headers: Object.fromEntries(
-                Object.entries(res.headers).map(([k, v]) => [
-                  k,
-                  Array.isArray(v) ? v.join(', ') : String(v ?? '')
-                ])
-              ),
-              body: body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
-              durationMs: Date.now() - started,
-              truncated
-            })
+            if (finishing) return
+            finishing = true
+
+            const headerPairs = Object.entries(res.headers).map(
+              ([k, v]) => [k, Array.isArray(v) ? v.join(', ') : String(v ?? '')] as const
+            )
+            // Taken from the raw array BEFORE the join above. This is the one
+            // header that cannot be put back together afterwards.
+            const setCookie = res.headers['set-cookie']
+
+            const raw = Buffer.concat(chunks)
+            void decodeContent(raw, contentEncodings(Object.fromEntries(headerPairs)), MAX_RESPONSE_BYTES)
+              .then(({ body, truncated: expandedPastCap, decodedFrom }) => {
+                finish({
+                  ok: true,
+                  status: res.statusCode ?? 0,
+                  statusText: res.statusMessage ?? '',
+                  headers: Object.fromEntries(headerPairs),
+                  ...(setCookie && setCookie.length > 0 ? { setCookie } : {}),
+                  body: body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
+                  durationMs: Date.now() - started,
+                  // Either end can cut the body short: the socket read, or the
+                  // decoder expanding past the cap.
+                  truncated: truncated || expandedPastCap,
+                  ...(decodedFrom ? { decodedFrom } : {})
+                })
+              })
           }
           res.on('end', done)
           // A capped body destroys the stream, which ends it via `close`
