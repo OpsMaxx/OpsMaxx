@@ -4,6 +4,7 @@ import { clsx } from '../../lib/format'
 import { AiAgents } from './AiAgents'
 import { AiAccessGroups } from './AiAccessGroups'
 import { AiApprovals } from './AiApprovals'
+import { AiAuthorizations } from './AiAuthorizations'
 import { AiAuditLog } from './AiAuditLog'
 import { AiSecurity } from './AiSecurity'
 import { ConnectAgent } from './ConnectAgent'
@@ -114,7 +115,16 @@ export function AiPanel(): React.JSX.Element {
           {section === 'agents' && <AiAgents />}
           {section === 'groups' && <AiAccessGroups />}
           {section === 'sessions' && <AiAgents sessionsOnly />}
-          {section === 'approvals' && <AiApprovals />}
+          {/* Both are "something is blocked on your decision", so they share a
+              page rather than hiding one behind a nav item nobody opens. An
+              authorization request expires in minutes; a tab of its own is how
+              it would time out unseen. */}
+          {section === 'approvals' && (
+            <>
+              <AiAuthorizations />
+              <AiApprovals />
+            </>
+          )}
           {section === 'audit' && <AiAuditLog />}
           {section === 'security' && <AiSecurity />}
         </div>

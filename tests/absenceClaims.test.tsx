@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { stubBridge } from './setup/renderer'
 import { AiApprovals } from '../src/renderer/src/components/ai/AiApprovals'
+import { AiAuthorizations } from '../src/renderer/src/components/ai/AiAuthorizations'
 import { ProcessesPanel } from '../src/renderer/src/components/processes/ProcessesPanel'
 import { CredProxyPanel } from '../src/renderer/src/components/settings/CredProxyPanel'
 
@@ -49,6 +50,45 @@ describe('the approvals list, which is the one someone acts on', () => {
 
     expect(await screen.findByText(/could not be read/)).toBeTruthy()
     expect(screen.queryByText('Nothing waiting on you right now.')).toBeNull()
+  })
+})
+
+describe('the authorization list, where the absence is a client that is blocked', () => {
+  // Same shape as the approvals list above, and the same cost if it lies: a
+  // client sitting on /authorize is waiting on a human, and this screen is the
+  // only place that human can answer.
+  const policy = { listWorkspaces: async () => [], listGroups: async () => [] }
+
+  it('does not say nobody is waiting before it has asked', async () => {
+    stubBridge({
+      aiMcp: { listAuthorizations: () => new Promise(() => {}) },
+      aiPolicy: policy
+    } as never)
+    render(<AiAuthorizations />)
+
+    expect(await screen.findByText(/Checking for anything waiting/)).toBeTruthy()
+    expect(screen.queryByText('No client is waiting to be authorized.')).toBeNull()
+  })
+
+  it('says it once the read comes back empty', async () => {
+    stubBridge({ aiMcp: { listAuthorizations: async () => [] }, aiPolicy: policy } as never)
+    render(<AiAuthorizations />)
+    expect(await screen.findByText('No client is waiting to be authorized.')).toBeTruthy()
+  })
+
+  it('does not turn a failed read into an empty one', async () => {
+    stubBridge({
+      aiMcp: {
+        listAuthorizations: async () => {
+          throw new Error('bridge is down')
+        }
+      },
+      aiPolicy: policy
+    } as never)
+    render(<AiAuthorizations />)
+
+    expect(await screen.findByText(/could not be read/)).toBeTruthy()
+    expect(screen.queryByText('No client is waiting to be authorized.')).toBeNull()
   })
 })
 
