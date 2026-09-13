@@ -31,9 +31,14 @@ including what this design does **not** claim.
 ![OpsMaxx's AI & MCP overview screen](images/ai-mcp-overview.png)
 
 The **never receives** list above is enforced by an **access group** — a per-capability
-ALLOW/ASK/DENY policy, not a single yes/no switch. Four built-in groups ship with OpsMaxx
-(Read Only, Read & Write, Sudo Access, Full Access); create as many custom ones as you want, and
-override individual file paths on top of the blanket read/write setting:
+ALLOW/ASK/DENY policy, not a single yes/no switch. Five built-in groups ship with OpsMaxx, in this
+order: **Read Only** (view, read files, metrics — nothing else), **Commands, no writes**,
+**Read & Write**, **Sudo Access** and **Full Access**. The second one used to be the one called
+*Read Only*, while it left `terminal` at ALLOW — so the most conservative-sounding option, and the
+first card a cautious person picks, granted unattended arbitrary shell. It was renamed to say what
+it does and a genuinely read-only tier was added above it; the rename moved nobody's permissions.
+Create as many custom groups as you want, and override individual file paths on top of the blanket
+read/write setting:
 
 <p align="center">
 <img src="images/ai-access-groups.png" alt="Access group capabilities: each one ALLOW/ASK/DENY" width="49%" />

@@ -35,7 +35,10 @@ Everything OpsMaxx does, what it replaces, and the shapes of work it was built f
 | **Rebindable shortcuts** | Every shortcut is remappable per context, with conflict detection and export/import |
 | **AI & MCP** | Let Claude Code, Claude Desktop, Codex and other MCP clients operate your servers — scoped by access group, with human approval on sensitive actions |
 
-Fleet operations — <kbd>Ctrl</kbd>+<kbd>M</kbd>, and each one **off until you turn it on**:
+Fleet operations — <kbd>Ctrl</kbd>+<kbd>M</kbd>. Most of these are optional **modules** in
+*Settings → Modules*. Eight ship on, and every one of the eight only reads; **everything that
+writes — patching, running a command everywhere, jobs, revoking a key — is off until you turn it
+on**, and an upgrade never switches a module on for an install that did not already have it:
 
 | | |
 |---|---|
@@ -47,7 +50,7 @@ Fleet operations — <kbd>Ctrl</kbd>+<kbd>M</kbd>, and each one **off until you 
 | **Docker** | Containers, images and volumes with honest per-item sizes, and reclaim by id against exactly what the preview showed — never a blind `prune` |
 | **Compose** | Read a project's services, their state and their drift from the file on disk |
 | **Kubernetes** | Workloads, cordon, drain and exec — drain refuses seven ways and treats a read that did not answer as a refusal in itself |
-| **Databases, operated** | Replication lag, slow queries, table sizes and connection counts for PostgreSQL, MySQL/MariaDB, MongoDB and Redis |
+| **Databases, operated** | Replication lag, slow queries, table sizes and connection counts for PostgreSQL, MySQL/MariaDB, SQL Server, MongoDB and Redis — every engine the client speaks |
 | **Backups** | Scheduled dumps to a local path or S3-compatible storage, with restore **verified by restoring**, not by checking a file exists |
 | **Security posture** | SSH config, sudo rules, listening ports and firewall state as they actually are on the server |
 | **Firewall rules** | The rules themselves rather than a count of them — off by default, behind its own consent, never stored, and unreadable by an agent at any setting |
@@ -56,6 +59,7 @@ Fleet operations — <kbd>Ctrl</kbd>+<kbd>M</kbd>, and each one **off until you 
 | **Rules** | "When this fires, run that" — with the run needing the same approval it would need by hand |
 | **Cron** | Read and edit crontabs, planned against the server and written through approval |
 | **Runbooks** | On an alert, what was run the last three times it fired on that server |
+| **CI/CD** | Jenkins, GitLab and GitHub Actions pipelines, run history and the log of the step that failed, beside the server the run changed. Read-only: nothing on the tab starts, re-runs or cancels a build. Off by default for a reason the other read modules do not have — enabling it polls a third party's API on a timer with a long-lived token you hand over, and what it renders is written by whoever opened the merge request |
 | **Change log** | Who approved what, when, and what it did |
 | **Access & keys** | Which key opens which server, and whose it is |
 | **Supervised processes** | Keep local processes running, with nothing auto-starting: what survives a restart is the list, not a running command |
@@ -71,7 +75,9 @@ Fleet operations — <kbd>Ctrl</kbd>+<kbd>M</kbd>, and each one **off until you 
 - **Database investigation** — an agent with `databaseAccess` allowed can query a database that is
   only reachable through an SSH tunnel, the same way a human session would reach it.
 - **Log investigation** — a `Read Only` or purpose-built "Logs Only" access group lets an agent
-  search and summarise logs across a fleet without any path to modify anything.
+  read and summarise a log on a named server without any path to modify anything. Not across a
+  fleet: `Read Only` denies `fleetRead`, and no tool on the bridge tails or searches logs
+  estate-wide in one call.
 - **Controlled production changes** — set the capability that matters to ASK; a config edit or a
   restart waits for your explicit approval instead of running unattended.
 - **AI-assisted DevOps generally** — the same terminal, SFTP, database and monitoring tools you use

@@ -20,7 +20,7 @@ Every engine gets an **interactive shell** alongside the query editor:
 
 **Databases over a VPN:** pick a WireGuard or OpenVPN profile in the *Network* field and the tunnel is brought up before the connection is attempted. A bastion and a VPN can both be set — the VPN is the outer transport, and the bastion is reached through it.
 
-**Operating a database, not just querying it.** Beside the client there is a read of how the server itself is doing: replication lag, slow queries, table and index sizes, connection counts against the ceiling, and the locks and long transactions behind them. It covers **PostgreSQL, MySQL/MariaDB, MongoDB and Redis**; SQL Server has the client but not this, and the app says so rather than showing an empty panel.
+**Operating a database, not just querying it.** Beside the client there is a read of how the server itself is doing: replication lag, slow queries, table and index sizes, connection counts against the ceiling, and the locks and long transactions behind them. It covers **PostgreSQL, MySQL/MariaDB, SQL Server, MongoDB and Redis** — every engine OpsMaxx can connect to, so there is no engine left that gets the client and a note instead of the panel.
 
 A replica reporting zero lag is not the same as a replica that is healthy — a stopped one says zero too — so the read distinguishes "caught up" from "not replicating", which is the distinction a real dead replica taught it to make.
 

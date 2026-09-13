@@ -43,6 +43,7 @@ A red **Backup out of date** indicator appears whenever your connections change,
 | **Security** | Credential storage, workspace locking, and the list of **trusted SSH host keys** with a Forget button |
 | **SFTP** | File transfer preferences |
 | **Monitoring** | **Alerts** (on by default — the master switch for CPU, memory, failed units and webhooks), the threshold, **checking servers in the background** and how often, **webhook delivery**, and the monitor strip |
+| **Modules** | The optional fleet modules, one switch each — eight of the twenty-one are on for a fresh install and everything that writes is off. See [Monitoring and fleet operations](monitoring.md) |
 | **Editor** | Built-in file editor |
 | **Keyboard Shortcuts** | **Rebind any shortcut**, clear it, reset to defaults, export/import, and whether <kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>9</kbd> includes hidden workspaces |
 | **Backup & Restore** | Encrypted export and import |

@@ -31,13 +31,18 @@ you have not opened has nothing to show.
 The same <kbd>Ctrl</kbd>+<kbd>M</kbd> view carries the work that is about the estate rather than
 one server: inventory, patching, broadcast, log tailing, search, Docker, Compose, Kubernetes,
 database operations, backups, posture, firewall rules, drift, capacity, rules, cron, runbooks,
-the change log, access and keys.
+CI/CD, the change log, access and keys.
 
-Twelve of these are **modules**, in *Settings → Modules*, and all but one ship **off**. Nothing is
-collected for a module you have not enabled, and one you never enable costs you nothing — no screen,
-no SSH traffic, no rows in the store. That is what "we do not ship bloatware" had to mean in
-practice rather than as a claim. The exception is *Scheduled jobs*, which is on by default because
-reading a crontab changes nothing; editing one still goes through approval like any other write.
+Most of these are **modules** — the registry holds twenty-one, one switch each in
+*Settings → Modules* — and **eight** of them ship on: fleet-wide search, capacity trends, service
+checks, network tools, live log tailing, scheduled jobs, Docker and Kubernetes. Every one of the
+eight only reads — reading a crontab changes nothing, which is why *Scheduled jobs* is among them;
+editing one still goes through approval like any other write.
+**Everything on the Operations side ships off**: patching, running a command everywhere, jobs and
+revoking a key are all things you switch on deliberately, and an upgrade never switches a module on
+for an install that did not already have it. Nothing is collected for a module you have not enabled,
+and one you never enable costs you nothing — no screen, no SSH traffic, no rows in the store. That
+is what "we do not ship bloatware" had to mean in practice rather than as a claim.
 
 Three rules hold across all of them, and they are the reason this is not just a dashboard:
 

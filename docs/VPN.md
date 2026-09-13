@@ -23,10 +23,19 @@ OpsMaxx's default for WireGuard is different:
 | Administrator rights | **none** | prompt on every connect |
 | Network interface | none — the TCP/IP stack runs inside OpsMaxx | a real `utun`/`wg`/Wintun device |
 | Your routing table | untouched | modified |
-| Your DNS | untouched | replaced while connected |
+| Your DNS | untouched | replaced while connected, and the replacement is read back |
 | What goes through it | only what you point at it | whatever the routes say — but **not** a full tunnel; see below |
 | If OpsMaxx is killed | nothing to clean up | routes and DNS restored on next launch |
 | Available for | WireGuard, everywhere | WireGuard on Linux and Windows. macOS is refused; OpenVPN is always system-mode |
+
+**A DNS change that cannot be confirmed fails the connect.** In system mode the
+new resolver is read back after it is applied, and a read that comes back
+*wrong* aborts the connection and reverts every route and rule already applied —
+a tunnel whose DNS still points at your old resolver is the leak nobody notices,
+and calling it connected is what makes it one. A read that could not happen at
+all is different: the change is kept and the connect proceeds, with a note
+saying it went unconfirmed. Tearing a tunnel down over our own blindness would
+be the worse bug.
 
 In userspace mode the tunnel appears as **local listeners**: a SOCKS5 proxy on
 `127.0.0.1`, and/or specific forwarded ports. Your browser and the rest of your
@@ -44,7 +53,7 @@ internal service — is better served by the default.
 
 ### What system mode does not do yet
 
-Two limits, stated plainly because each of them is a refusal you will meet
+Three limits, stated plainly because each of them is a refusal you will meet
 rather than a bug you will hit:
 
 - **A full tunnel (`AllowedIPs = 0.0.0.0/0` or `::/0`) is refused in system
@@ -61,14 +70,23 @@ rather than a bug you will hit:
 - **macOS system mode is blocked.** It needs a privileged helper, which needs an
   Apple Developer ID this project does not have. Userspace WireGuard works
   fully on macOS and needs no permission at all.
+- **A prefix another interface already routes is refused.** If the profile wants
+  `10.0.0.0/8` and something on this machine already routes it, OpsMaxx names
+  the interface and the gateway and stops, rather than adding a second route for
+  the same destination. Two VPNs claiming one prefix is a coin toss decided by
+  metric order, and the loser is whichever one you actually needed. This is the
+  limit you are most likely to meet — a corporate VPN, a Docker bridge or a
+  second profile is usually enough. Narrow the profile's `AllowedIPs`, or drop
+  the other tunnel first. A v4-only tunnel that leaves IPv6 outside it is only
+  **warned** about, not refused: running one is a legitimate thing to do.
 
-Windows system mode used to be a third limit, and is not one any more:
+Windows system mode used to be a further limit, and is not one any more:
 `wintun.dll` now ships with OpsMaxx, so nothing has to be installed for it.
 The DLL is proprietary — the one component in OpsMaxx that is not open
 source — and [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md) says so
 plainly along with what that does and does not permit.
 
-Neither limit affects the default. Userspace WireGuard runs on all three
+None of the three affects the default. Userspace WireGuard runs on all three
 platforms with no administrator rights and no driver.
 
 ---

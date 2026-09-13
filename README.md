@@ -49,7 +49,7 @@ OpsMaxx is a **free and open-source alternative to MobaXterm, PuTTY, Termius, Se
 Most terminal tools do one thing. A typical DevOps task needs four: open a shell through a jump host, tail a file, poke a database that is only reachable from inside the network, and look up a credential. OpsMaxx puts those in one place, keeps them organised per project, and stores every secret in your operating system's keychain rather than a plaintext config file.
 
 - **No lock-in** — connections import from your existing `~/.ssh/config`
-- **No account** — nothing is uploaded, nothing phones home
+- **No account** — nothing about you or your estate is uploaded; the one connection OpsMaxx makes on its own is the update check, on by default and switchable off
 - **No cost** — MIT licensed, free forever, contributions welcome
 - **No exposed credentials, even to AI** — Claude Code, Claude Desktop and Codex can run commands and read files through it, but never see a password, private key, IP or username — see [AI Agent Access](docs/ai-agents.md)
 
@@ -67,6 +67,7 @@ Most terminal tools do one thing. A typical DevOps task needs four: open a shell
 | **Tunnels & VPN** | Local, remote and SOCKS5 forwards; userspace WireGuard with no administrator rights; OpenVPN, frp, and **Tailscale and ngrok embedded** — no client to install |
 | **Databases** | PostgreSQL, MySQL, SQL Server, MongoDB and Redis, direct or through a bastion |
 | **Containers** | Docker and Kubernetes on a server or on this machine — containers, images, logs and a shell inside one |
+| **CI/CD** | Jenkins, GitLab and GitHub Actions read beside the server a run changed — pipelines, run history, and the log of the step that failed. Reading only, and off until you turn it on: enabling it polls somebody else's API on a timer with a token you supply |
 | **Vault** | AES-256-GCM secrets store, with credentials in your OS keychain rather than a config file |
 | **AI agent gateway** | Claude Code, Claude Desktop and Codex can work through it without ever seeing a password, key, IP or username |
 

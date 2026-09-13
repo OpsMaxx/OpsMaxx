@@ -47,7 +47,9 @@ another MCP client. For the short pitch and the security summary, see the
 
 ## The MCP server
 
-`src/main/services/mcpServer.ts` registers **15 core tools**, plus the CI/CD set below:
+`src/main/services/mcpServer.ts` registers **36 tools** — 28 core, plus the 8-tool CI/CD set at
+the end of the table. `tests/localTerminalNotExposed.test.ts` holds the same 36 as a reviewed
+whitelist, so a new tool cannot appear on the bridge without a diff somebody reads.
 
 | Tool | Capability gating it | What it returns |
 |---|---|---|
@@ -58,14 +60,27 @@ another MCP client. For the short pitch and the security summary, see the
 | `read_file` | `readFiles` + `sftpDownload` (+ file path rules) | File contents, redacted |
 | `write_file` | `writeFiles` + `sftpUpload` (+ file path rules) | Bytes written |
 | `list_files` | `readFiles` + `sftpDownload` (+ file path rules) | Directory listing |
-| `get_server_metrics` | `serverMetrics` | CPU/memory/disk/uptime |
-| `add_server` | `manageServers`, resolved on the **workspace** | The name the new connection was saved under |
+| `get_capacity_trends` | `serverMetrics` | Where CPU, memory, disk and inodes are heading, from history already stored — it opens no connection and answers for an offline server. "Not enough data" and "the samples are stale" come back as reasons, not numbers |
+| `get_server_metrics` | `serverMetrics` | CPU/memory/disk/uptime — and every failed systemd unit and listening port with its owning process, which is a service and port inventory as much as a capacity read |
+| `get_host_facts` | `hostFacts` | Distribution, architecture, CPU model, virtualisation, package manager, pending updates and how many are security updates, and whether a reboot is owed. Its own capability rather than a widening of metrics, because it is a patch-status report. It never refreshes a package cache. A count reported as NOT AVAILABLE is not zero |
 | `list_databases` | `viewServer` | Friendly names and engines, never a hostname or credential |
 | `query_database` | `databaseAccess` for reads; `+ writeFiles` and always ASK for anything that writes | Rows, capped |
 | `list_tunnels` | `sshTunnel` | Configured tunnels and whether each is running |
 | `set_tunnel` | `sshTunnel`, always ASK to start | Confirmation, with the bound port |
 | `list_vpns` | `vpnControl` | Names, engine, mode and state — **never an endpoint, key or listener address** |
 | `set_vpn` | `vpnControl`, always ASK to start; **frp refused outright** | Confirmation, with a listener count |
+| `add_server` | `manageServers`, resolved on the **workspace** | The name the new connection was saved under |
+| `list_containers` | `containers` | Containers on one server: image, state, the runtime's own status line, published ports and compose project. It says when it fell back to root, and distinguishes "not in a project" from "the runtime could not say" |
+| `container_logs` | `containers`, weighed higher at the prompt than the list | The last lines a container wrote. **It never follows** — a stream would outlive the approval that authorised it, and the stop-all-AI-access switch works by resolving requests still pending |
+| `fleet_inventory` | `fleetRead`, resolved on the **workspace** | One row per server from what the sampler already collected, each stamped with when. Drift is deliberately absent from it |
+| `container_action` | `containerControl`, graded **high** at the prompt | **The one tool on the bridge that changes the state of a running service.** Starts, stops or restarts exactly one container per call — there is no shape in which one approval acts on a host's worth of them. Starting is graded no lower than stopping: an agent starting a container begins serving traffic nobody asked for |
+| `backup_status` | `backupRead`, resolved on the **workspace** | Every backup destination and how late each is against its own schedule. Destinations and kinds, never their credentials. It cannot run a backup or restore one at any setting |
+| `describe_capabilities` | — **the one tool that is not gated** | What this session may do on a server, with the sentence the user was shown when they granted it, plus what is absent by design. Gating "what am I allowed to do" is how an agent discovers the boundary by tripping over it |
+| `list_alerts` | `fleetRead`, resolved on the **workspace** | Alerts already raised, newest first. It says what *happened*; it does not rank hosts by exposure |
+| `compose_status` | `containers` | The same container read, grouped by compose project and service. A container the runtime could not attribute is listed as ungrouped, never guessed at |
+| `list_images` | `containers` | Images present, with dangling layers marked as dangling rather than named `<none>`. What exists, not what it costs — there is no disk-usage tool here at any setting |
+| `get_config_drift` | `fleetRead`, checked per server | Whether **one** named server's watched files still match their baseline. Secret-shaped text is redacted before the comparison, so a changed password is reported as a change without disclosing either value |
+| `fleet_drift` | `fleetRead`, resolved on the **workspace**, graded **high** | The fleet-wide form, and a heavier disclosure: read as an attacker would, "which hosts have fallen behind" is a ranked list of the weakest machines. An unsampled host is reported as unknown, never as clean |
 | `list_ci_connections` | `ciRead` | Connection names and providers — **never a base URL or API token** |
 | `list_pipelines` | `ciRead` | Pipelines on one connection, with their opaque `ref` and whether each can be started. Capped |
 | `list_runs` | `ciRead` | Recent runs of one pipeline, newest first, capped. Fenced as untrusted |
@@ -259,16 +274,46 @@ has to be created by hand under **AI & MCP → AI Agents**.
 
 ![Access group capabilities, file path rules, and workspace/server assignment](images/ai-access-groups.png)
 
-An access group (`AccessGroup`, `shared/mcp.ts`) is a policy across **12 capabilities**
+An access group (`AccessGroup`, `shared/mcp.ts`) is a policy across **21 capabilities**
 (`AI_CAPABILITIES`): view server, execute terminal commands, read files, write files, SFTP
 download, SFTP upload, SSH tunnels, database access, sudo/privilege escalation, server metrics,
-add servers to the workspace, VPN & reverse proxies. Each is independently `allow`, `ask` or
-`deny`.
+host facts & pending security updates, firewall rules, sudoers, add servers to the workspace,
+VPN & reverse proxies, containers, container control, fleet reads, backup status, CI/CD reads and
+CI/CD triggers. Each is independently `allow`, `ask` or `deny`.
 
-Four built-in groups ship with OpsMaxx (`policyStore.ts`) — **Read Only**, **Read & Write**,
-**Sudo Access**, **Full Access** — and every field on them, including capabilities, is editable.
-They cannot be deleted (so an assignment referencing one never dangles), but there is no
-hard-coded three-tier model underneath; create as many custom groups as you want.
+Two of them gate no tool at all. **Firewall rules** and **sudoers** are the addresses a host
+accepts traffic on and the accounts that can become root on it — between them, the shortest
+description of how to take the machine — so no MCP tool exposes either at any setting. What
+`allow` grants there is OpsMaxx's own hourly collection, for a person to read in Security posture
+and in Keys and access. Anything short of `allow` and they are never asked for: the sweep is
+unattended, so there is nobody at the screen an `ask` could interrupt.
+
+Five built-in groups ship with OpsMaxx (`policyStore.ts`), in this order:
+
+| Group | What it grants |
+|---|---|
+| **Read Only** (`grp-observer`) | View server, read files, SFTP download and server metrics. Everything else is `deny` — no terminal, no database access, no container reads and no fleet reads. Container logs are whatever the application wrote to stdout, and a fleet read spans the whole workspace rather than the server it is set on; this is the tier meant to be handed out and then not thought about |
+| **Commands, no writes** (`grp-read-only`) | Runs commands, queries databases, reads and controls containers, reads the fleet. What is `deny` here is file writes, SFTP upload, SSH tunnels and sudo — "no writes" means no *file* writes, and a group that runs arbitrary commands is not a read-only one |
+| **Read & Write** (`grp-read-write`) | The above plus writes, SFTP upload, SSH tunnels, adding servers and VPN control — each at `ask`. Sudo is `deny` |
+| **Sudo Access** (`grp-sudo`) | Read & Write with sudo raised from `deny` to `ask` |
+| **Full Access** (`grp-full`) | The widest seeded group, and still not everything: sudo, adding servers and VPN control stay at `ask` — the brief is explicit that root must never be granted silently — and the five below are `deny` here too |
+
+**"Read Only" was renamed, and the group under that name today is a different one.** The group now
+called *Commands, no writes* used to be called *Read Only* while leaving `terminal` at `allow` — so
+the most conservative-sounding option in the list, and the first card a cautious person lands on,
+granted an agent unattended arbitrary shell. The fix was to add the genuinely read-only tier above
+it and rename the old one to say what it does; the rename matches on the exact stale string and
+never touches `capabilities`, so an existing assignment keeps precisely the grant it already had.
+
+Five capabilities are seeded `deny` on **every** built-in group and opted into by none: host facts,
+firewall rules, sudoers, CI read and CI trigger. That is mechanical as well as substantive —
+`backfillCapabilities` gives a built-in group whatever a fresh install would have given it, so
+seeding any of them at `ask` on the permissive groups would quietly hand it to every upgraded
+install.
+
+Every field on a built-in group, capabilities included, is editable. They cannot be deleted (so an
+assignment referencing one never dangles), but there is no hard-coded five-tier model underneath;
+create as many custom groups as you want.
 
 **Two layers always win over policy, no exceptions:**
 

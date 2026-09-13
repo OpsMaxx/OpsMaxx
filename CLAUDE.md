@@ -31,9 +31,9 @@ So a routine release is: **tag, then open the winget PR.** Everything else lands
 ### What the release workflow does
 
 Builds all three platforms, scans (ClamAV over every artifact, Defender on the Windows
-installer, VirusTotal on `.exe` and `.dmg` **only** — Linux artifacts are not
-VirusTotal-scanned, so do not claim they are), publishes the notes with a SHA-256 table,
-then pings the Cloudflare Pages deploy hook.
+installer, VirusTotal on `.exe`, `.dmg`, `.AppImage` and `.deb` — see the `files:` list on
+the VirusTotal step in the workflow before repeating any narrower claim), publishes the
+notes with a SHA-256 table, then pings the Cloudflare Pages deploy hook.
 
 then tells the Homebrew tap and the site to update.
 
@@ -98,6 +98,8 @@ ask the resolver rather than assume a relative path.
 This repo is public and the audience checks things. Two claims that were wrong on the site
 and had to be corrected: "sudo is refused" (only escalation *shells* — `sudo -i`, `su`,
 `sudo bash` — are refused; `sudo -n` is used for privileged reads and is on by default),
-and "every release is scanned by 70+ engines" (VirusTotal covers `.exe` and `.dmg` only).
+and "every release is scanned by 70+ engines" (VirusTotal is a `continue-on-error` step that
+only runs when `VT_API_KEY` is set, so a release can exist without it; ClamAV and Defender are
+the two that can fail the build).
 
 Verify against `src/`, not the README, before repeating a security claim.

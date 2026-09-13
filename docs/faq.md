@@ -47,7 +47,8 @@ right-click paste in the PuTTY style. It also imports the servers you already ha
 
 Yes. The functional difference is sync: Termius syncs your servers through its cloud on a
 paid plan, while OpsMaxx keeps everything local and moves it between machines with a
-passphrase-encrypted backup file. Nothing is uploaded and nothing phones home.
+passphrase-encrypted backup file. Nothing about your servers is uploaded anywhere; the one
+connection OpsMaxx makes on its own is the update check, described below.
 
 ### Does OpsMaxx support jump hosts and bastions?
 
@@ -60,6 +61,19 @@ key. `ProxyJump` entries in `~/.ssh/config` are imported as jump hosts automatic
 PostgreSQL, MySQL, SQL Server, MongoDB and Redis — each with a table/collection browser, a
 query editor and an interactive shell. Any of them can be reached through an SSH tunnel, so a
 database that is only routable from inside the network still works.
+
+### Can it show me my CI/CD builds?
+
+Yes, as a read. Connect a Jenkins, GitLab or GitHub Actions account and the **CI/CD** tab in the
+fleet view (<kbd>Ctrl</kbd>+<kbd>M</kbd>) shows pipelines, run history and the log of the step that
+failed, beside the server the run changed. Nothing on the tab starts, re-runs or cancels a build.
+
+It is **off until you enable it** in *Settings → Modules*, and the reason is not the one the other
+read-only modules give. Every other module reads a machine you administer over a connection you
+already opened; this one polls a third party's API on a timer with a long-lived token you hand
+over, and keeps doing it whether or not the tab is on screen. Build output is also the first text
+in the app written by whoever opened the merge request rather than by a host you own, so it is
+treated as untrusted wherever it is shown or handed to an agent.
 
 ### How are my passwords and SSH keys stored?
 

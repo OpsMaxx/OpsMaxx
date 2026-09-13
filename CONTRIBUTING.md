@@ -7,7 +7,7 @@ and code are all welcome, and you do not need to be an Electron expert to help.
 
 ```bash
 git clone https://github.com/OpsMaxx/OpsMaxx.git
-cd opsmaxx
+cd OpsMaxx
 npm install
 npm run dev
 ```
@@ -22,8 +22,9 @@ npm run build        # must succeed — must run before `test`, see note below
 npm run test         # must pass
 ```
 
-> The AI/MCP test suite (`tests/`) spawns the compiled CLI at `out/cli/index.js`, so `build` has
-> to run before `test` — CI enforces the same order.
+> A few integration tests spawn the compiled CLI at `out/cli/index.js` as a real MCP server, and
+> that is a build artifact — so `build` has to run before `test` or they skip, saying so. CI
+> enforces the same order.
 
 Build installers on the platform you are targeting — a Windows installer has to
 be built on Windows.
@@ -53,7 +54,8 @@ src/
   shared/       Types and pure functions used by more than one process
   cli/          The `opsmaxx` CLI launcher (pairing, bridge, per-client registration),
                 compiled separately to out/cli/ and wrapped by bin/opsmaxx.{cmd,sh}
-tests/          vitest suite — currently covers the AI/MCP services end to end
+tests/          vitest suite — ~386 files across the whole app, not just the AI/MCP
+                bridge. Assume your change needs one
 ```
 
 Working on the AI/MCP bridge specifically? [docs/AI-MCP.md](docs/AI-MCP.md) covers its
@@ -162,11 +164,14 @@ lists what is already planned, and the roadmap is kept there.
 
 ## Where help is most needed
 
-- **Tests.** `tests/` covers the AI/MCP services end to end, but the rest of the app has no
-  coverage yet. The parsers in `shared/sshconfig.ts` and `main/services/relaxed-json.ts` and the
-  crypto in `main/services/` are pure and easy to cover.
-- **Replacing placeholder UI.** Several Settings controls hold local state and
-  do nothing; they are tracked as issues.
+- **Tests.** The suite is broad — 448 files — so the useful contribution is
+  usually a case nobody thought of rather than a first test for a bare module:
+  the input that lands in the wrong branch, the platform that answers
+  differently, the failure that currently reads as a success.
+- **Replacing placeholder UI.** Three Settings pages — Connections, SFTP and
+  Notifications — still fall through to a generic "Reset this section" row whose
+  button toasts that there is nothing to reset. Each wants the real controls its
+  page name promises.
 - **Accessibility.** Keyboard navigation and screen-reader labels.
 - **Documentation and translations.**
 

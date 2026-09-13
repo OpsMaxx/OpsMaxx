@@ -207,7 +207,7 @@ stable identity. A denial is an ordinary permission error, not a crash.
 **No AI agent can reach any of this.** The local terminal is deliberately absent
 from the MCP bridge and the `opsmaxx` CLI — not gated behind a capability or
 an approval, absent — and a test fails the build if that changes. See the *Local
-terminal* section of [SECURITY.md](SECURITY.md) for why, and what a local shell
+terminal* section of [SECURITY.md](../SECURITY.md) for why, and what a local shell
 can read.
 
 ## Command palette

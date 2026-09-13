@@ -15,7 +15,7 @@ How credentials are stored, how they are kept out of plaintext on disk, and how 
 - Shell input is **parsed, never evaluated** — no `eval` on anything you type
 - The renderer runs with `contextIsolation` on and `nodeIntegration` off, behind a strict Content-Security-Policy
 
-Found a vulnerability? Please read [SECURITY.md](SECURITY.md) — do not open a public issue.
+Found a vulnerability? Please read [SECURITY.md](../SECURITY.md) — do not open a public issue.
 
 ---
 
