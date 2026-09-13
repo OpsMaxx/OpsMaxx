@@ -9,6 +9,7 @@ import type { OpenApiDocument } from '@scalar/workspace-store/schemas/v3.1/stric
 import type { SidebarState } from '@scalar/sidebar'
 import type { ApiCollection } from '../../types'
 import { documentForCollection, firstOperationOf } from '../../../../shared/apiCollectionImport'
+import { EnvironmentBar } from './EnvironmentBar'
 import {
   fromSnapshot,
   isSnapshot,
@@ -64,7 +65,41 @@ interface Engine {
   select: (collectionId: string) => void
   /** Add a request to a collection and land on it. */
   addRequest: (collectionId: string) => void
+  /** The environments and their variables, as the panel shows them. */
+  environments: () => EnvironmentsView
+  /** Which environment requests interpolate from. */
+  setActiveEnvironment: (name: string) => void
+  createEnvironment: (name: string) => void
+  deleteEnvironment: (name: string) => void
+  /** `index` absent adds; present replaces that row. */
+  setVariable: (environmentName: string, variable: EnvVariable, index?: number) => void
+  deleteVariable: (environmentName: string, index: number) => void
   unmount: () => void
+}
+
+/** One environment variable, flattened out of the client's two spellings. */
+export interface EnvVariable {
+  name: string
+  value: string
+}
+
+export interface EnvironmentsView {
+  names: string[]
+  active: string
+  variables: EnvVariable[]
+}
+
+/**
+ * The client stores a variable's value as either a string or an object with a
+ * `default`. Both are legal and both turn up, so reading goes through one
+ * place rather than every call site guessing.
+ */
+function valueOf(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value && typeof value === 'object' && 'default' in value) {
+    return String((value as { default: unknown }).default ?? '')
+  }
+  return ''
 }
 
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'] as const
@@ -115,6 +150,14 @@ export function ScalarClient({
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [transportError, setTransportError] = useState<string | null>(null)
+  /**
+   * The environments, mirrored into React so the panel can render them.
+   *
+   * The workspace store is Vue-reactive and this side is not, so the mirror is
+   * refreshed explicitly — after any mutation here, and on any change coming
+   * from inside the client (a variable edited in one of its own inputs).
+   */
+  const [envs, setEnvs] = useState<EnvironmentsView>({ names: [], active: '', variables: [] })
   const theme = useResolvedTheme()
 
   const servers = useApp((s) => s.servers)
@@ -164,6 +207,11 @@ export function ScalarClient({
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = null
   }, [])
+  const refreshEnvs = useCallback((): void => {
+    const engine = engineRef.current
+    if (engine) setEnvs(engine.environments())
+  }, [])
+
   const scheduleSave = useCallback((): void => {
     cancelSave()
     saveTimer.current = setTimeout(() => {
@@ -187,7 +235,10 @@ export function ScalarClient({
           optionsRef,
           reportRef,
           useApp.getState().apiWorkspace,
-          () => scheduleSave()
+          () => {
+            scheduleSave()
+            refreshEnvs()
+          }
         )
         // React 19 re-invokes effects in development. Without this, the second
         // invocation leaks an entire Vue app and its event bus behind the
@@ -201,6 +252,7 @@ export function ScalarClient({
         await engine.sync(collectionsRef.current)
         const wanted = activeRef.current
         if (wanted) engine.select(wanted)
+        setEnvs(engine.environments())
         setLoading(false)
       } catch (err) {
         if (!disposed) {
@@ -223,7 +275,7 @@ export function ScalarClient({
     // this effect's body reads a prop directly, and the two callbacks it does
     // close over are stable — which is why this list is honest rather than
     // suppressed.
-  }, [cancelSave, scheduleSave])
+  }, [cancelSave, scheduleSave, refreshEnvs])
 
   // What the mount effect should converge on once it finishes building. It
   // cannot read props directly: it runs after an await, by which time the
@@ -294,6 +346,31 @@ export function ScalarClient({
           <Loader2 size={22} className="spin" />
           <p>Loading the API client…</p>
         </div>
+      )}
+      {!loading && (
+        <EnvironmentBar
+          view={envs}
+          onActivate={(name) => {
+            engineRef.current?.setActiveEnvironment(name)
+            refreshEnvs()
+          }}
+          onCreate={(name) => {
+            engineRef.current?.createEnvironment(name)
+            refreshEnvs()
+          }}
+          onDelete={(name) => {
+            engineRef.current?.deleteEnvironment(name)
+            refreshEnvs()
+          }}
+          onSetVariable={(variable, index) => {
+            engineRef.current?.setVariable(envs.active, variable, index)
+            refreshEnvs()
+          }}
+          onDeleteVariable={(index) => {
+            engineRef.current?.deleteVariable(envs.active, index)
+            refreshEnvs()
+          }}
+        />
       )}
       <div
         ref={hostRef}
@@ -604,6 +681,74 @@ async function createEngine(
     return Boolean(source.specUrl || source.specPath)
   }
 
+  // ---- environments -------------------------------------------------------
+  //
+  // Held on the WORKSPACE rather than on a document, which is the same choice
+  // Postman makes: an environment names a deployment ("staging"), and the
+  // point of one is that every collection pointed at that deployment shares
+  // it. Per-document environments exist in the client too, and would mean
+  // retyping the same base URL and token once per API.
+
+  const workspaceMeta = (): Record<string, unknown> =>
+    workspaceStore.workspace as unknown as Record<string, unknown>
+
+  const environmentsRaw = (): Record<string, { variables?: { name: string; value: unknown }[] }> =>
+    (workspaceMeta()['x-scalar-environments'] as Record<
+      string,
+      { variables?: { name: string; value: unknown }[] }
+    >) ?? {}
+
+  const environments = (): EnvironmentsView => {
+    const all = environmentsRaw()
+    const names = Object.keys(all)
+    const active = String(workspaceMeta()['x-scalar-active-environment'] ?? '')
+    // An active environment that has been deleted falls back to the first
+    // rather than leaving the panel pointed at nothing.
+    const resolved = names.includes(active) ? active : (names[0] ?? '')
+    return {
+      names,
+      active: resolved,
+      variables: (all[resolved]?.variables ?? []).map((v) => ({
+        name: v.name,
+        value: valueOf(v.value)
+      }))
+    }
+  }
+
+  const setActiveEnvironment = (name: string): void => {
+    workspaceStore.update('x-scalar-active-environment', name)
+    onChanged()
+  }
+
+  const createEnvironment = (name: string): void => {
+    mutators.workspace().environment.upsertEnvironment({
+      environmentName: name,
+      // A colour is required by the schema and means nothing to OpsMaxx, which
+      // themes its own chrome. The client uses it to tint its own controls.
+      payload: { color: '#8ab4f8', variables: [] }
+    })
+    setActiveEnvironment(name)
+  }
+
+  const deleteEnvironment = (name: string): void => {
+    mutators.workspace().environment.deleteEnvironment({ environmentName: name })
+    onChanged()
+  }
+
+  const setVariable = (environmentName: string, variable: EnvVariable, index?: number): void => {
+    mutators.workspace().environment.upsertEnvironmentVariable({
+      environmentName,
+      variable: { name: variable.name, value: variable.value },
+      ...(index === undefined ? {} : { index })
+    })
+    onChanged()
+  }
+
+  const deleteVariable = (environmentName: string, index: number): void => {
+    mutators.workspace().environment.deleteEnvironmentVariable({ environmentName, index })
+    onChanged()
+  }
+
   const snapshot = (): unknown =>
     toSnapshot(
       workspaceStore.exportWorkspace() as WorkspaceLike,
@@ -616,6 +761,12 @@ async function createEngine(
     snapshot,
     select,
     addRequest,
+    environments,
+    setActiveEnvironment,
+    createEnvironment,
+    deleteEnvironment,
+    setVariable,
+    deleteVariable,
     unmount: () => {
       stopListening()
       app.unmount()
