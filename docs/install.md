@@ -85,29 +85,23 @@ same missing-certificate cause. This happens on the first run only.
 <details>
 <summary><b>macOS — "Apple could not verify OpsMaxx is free of malware"</b></summary>
 
-Gatekeeper refuses to open the app, because the build has not been notarized — Apple has
-not been asked to scan it, which requires the paid developer account above. The wording
-varies a little between macOS versions; older ones say *"cannot be opened because the
-developer cannot be verified"*.
-
-- **macOS 15 Sequoia and later** — open **System Settings → Privacy & Security**, scroll
-  down to the message naming OpsMaxx, and click **Open Anyway**. Sequoia removed the
-  older right-click shortcut, so this is the only way through in the interface.
-- **macOS 14 and earlier** — **right-click** (or Control-click) the app → **Open** →
-  **Open** in the dialog.
-
-Either way this is the first launch only; afterwards the app opens normally.
-
-If you would rather do it from the Terminal, this clears the quarantine flag macOS attaches
-to anything downloaded through a browser:
+**You should not see this from 0.30.1 onward.** Those builds are signed with an Apple
+Developer ID, notarized, and have the ticket stapled in, so Gatekeeper clears them without
+asking anything — offline included. If this message does appear, the build predates 0.30.1
+or the download did not finish. Check which you have:
 
 ```bash
-/usr/bin/xattr -cr /Applications/OpsMaxx.app
+spctl -a -vvv /Applications/OpsMaxx.app
 ```
 
-The `/usr/bin/` prefix is deliberate. If you have installed `xattr` through Homebrew or
-`pip`, that copy comes earlier on your `PATH` and does not accept `-r` — it prints a usage
-message and clears nothing, which looks exactly like the command having failed to help.
+`source=Notarized Developer ID` means the app is fine and something else is wrong. Anything
+else means the copy on disk is not one of ours — download it again from the
+[releases page](https://github.com/OpsMaxx/OpsMaxx/releases/latest) and check its SHA-256
+against the release notes rather than clicking past the warning.
+
+On a pre-0.30.1 build the way through was **System Settings → Privacy & Security → Open
+Anyway** on macOS 15 and later, or **right-click → Open → Open** on macOS 14 and earlier.
+Upgrading is the better answer.
 
 </details>
 

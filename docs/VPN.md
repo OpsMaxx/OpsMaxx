@@ -67,9 +67,10 @@ rather than a bug you will hit:
   Split routes (`10.0.0.0/8`, `192.168.0.0/16`, and so on) work normally.
   **Userspace mode is unaffected** — `0.0.0.0/0` there is harmless, because
   nothing is routed system-wide in the first place.
-- **macOS system mode is blocked.** It needs a privileged helper, which needs an
-  Apple Developer ID this project does not have. Userspace WireGuard works
-  fully on macOS and needs no permission at all.
+- **macOS system mode is blocked.** Creating a system network interface needs a
+  privileged helper, and no signed helper has been built — a separate artefact
+  from the app bundle, which is itself signed with a Developer ID and notarized.
+  Userspace WireGuard works fully on macOS and needs no permission at all.
 - **A prefix another interface already routes is refused.** If the profile wants
   `10.0.0.0/8` and something on this machine already routes it, OpsMaxx names
   the interface and the gateway and stops, rather than adding a second route for
