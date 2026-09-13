@@ -3,7 +3,7 @@ import { Compass, X } from 'lucide-react'
 import { useOnboarding } from '../../store/onboarding'
 import { useNav } from '../../store/nav'
 import { useApp } from '../../store/app'
-import { FEATURE_TIPS } from './tourSteps'
+import { tipsFor } from './tourSteps'
 
 // The six tour steps that used to be shown before the user had done anything,
 // arriving instead the first time they open the view each one is about.
@@ -33,6 +33,12 @@ export function FeatureTipCard(): React.JSX.Element | null {
   // tip keyed on it fired the monitoring card while the user was standing in
   // Operations, explaining a screen they were not looking at.
   const fleetRail = useNav((s) => s.fleetRail)
+  // Which Monitoring tab is showing. Needed for the same reason `fleetRail` is,
+  // one level further down: the four promoted modules (Docker, Kubernetes, CI/CD,
+  // local processes) have their own activity-bar buttons but still share
+  // `activity === 'monitor'`, so a tip keyed on the view alone would fire the
+  // Docker card at somebody standing in Kubernetes.
+  const monitorTab = useNav((s) => s.monitorTab)
   const tourOpen = useOnboarding((s) => s.open)
   const setupOpen = useOnboarding((s) => s.setupOpen)
   // Every tip describes something you do WITH a server: isolating clients into
@@ -43,6 +49,9 @@ export function FeatureTipCard(): React.JSX.Element | null {
   // behind the view it explains is not enough when the view itself is empty.
   const hasServer = useApp((s) => s.servers.length > 0)
   const seenTips = useOnboarding((s) => s.seenTips)
+  // A tip about a module the user switched off describes a screen they cannot
+  // reach. `tipsFor` drops those rather than showing them with an apology.
+  const modules = useApp((s) => s.settings.modules)
   const markTipSeen = useOnboarding((s) => s.markTipSeen)
 
   // Held locally as well as in the store so the card can be shown for the view
@@ -61,19 +70,29 @@ export function FeatureTipCard(): React.JSX.Element | null {
     // view matches AND, where the view is shared, the rail matches too" rather
     // than as a special case for one id, so a second tip on either rail cannot
     // reintroduce this.
+    //
+    // The third clause is the same rule one level further down. Six tips now share
+    // `view: 'monitor'` — one for the Monitoring rail generally and one for each
+    // promoted module — so matching the view and the rail is no longer enough to
+    // identify a destination. A tip WITH a `tab` fires only on that tab; a tip
+    // WITHOUT one fires only when the visible tab is not some other tip's, so the
+    // general Monitoring card does not appear over the Docker panel.
     const onSharedView = activity === 'monitor'
     const seen = new Set(seenTips)
-    const tip = FEATURE_TIPS.find(
+    const eligible = tipsFor(modules)
+    const claimedTabs = new Set(eligible.map((t) => t.tab).filter(Boolean))
+    const tip = eligible.find(
       (t) =>
         t.view === activity &&
         !seen.has(t.id) &&
-        (!onSharedView || fleetRail === 'monitor')
+        (!onSharedView || fleetRail === 'monitor') &&
+        (!onSharedView || (t.tab ? t.tab === monitorTab : !claimedTabs.has(monitorTab as never)))
     )
     setShownId(tip?.id ?? null)
-  }, [activity, fleetRail, seenTips, tourOpen, setupOpen, hasServer])
+  }, [activity, fleetRail, monitorTab, modules, seenTips, tourOpen, setupOpen, hasServer])
 
   if (!shownId) return null
-  const tip = FEATURE_TIPS.find((t) => t.id === shownId)
+  const tip = tipsFor(modules).find((t) => t.id === shownId)
   if (!tip) return null
 
   const dismiss = (): void => {

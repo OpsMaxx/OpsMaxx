@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useOnboarding } from '../src/renderer/src/store/onboarding'
-import { FULL_WALKTHROUGH, TOUR_STEPS } from '../src/renderer/src/components/onboarding/tourSteps'
+import {
+  FEATURE_TIPS,
+  FULL_WALKTHROUGH,
+  TOUR_STEPS,
+  walkthroughFor
+} from '../src/renderer/src/components/onboarding/tourSteps'
+import { defaultModuleState } from '../src/shared/modules'
 
 const store = new Map<string, string>()
 
@@ -146,9 +152,52 @@ describe('the steps themselves', () => {
 
   it('stays short enough that people finish it', () => {
     // A tour people skip teaches nothing, and eight panels before the user has
-    // done anything is a tour people skip. Two is the whole first run.
+    // done anything is a tour people skip. Two is the whole first run, and THIS is
+    // the assertion that ratchet was really about — it is unchanged and must stay.
     expect(TOUR_STEPS.length).toBeLessThanOrEqual(2)
-    expect(FULL_WALKTHROUGH.length).toBeLessThanOrEqual(9)
+  })
+
+  // The replay's ceiling, restated.
+  //
+  // It used to be `FULL_WALKTHROUGH.length <= 9`, written when the replay and the
+  // catalogue were the same list. They are not any more: `FULL_WALKTHROUGH` is the
+  // complete set — pinned as such by tests/onboardingTour.test.ts, because a replay
+  // from Settings is somebody asking for everything — while what a person actually
+  // SEES is `walkthroughFor(modules)`, filtered to the modules that install has.
+  //
+  // So a bare count over the catalogue had stopped measuring the thing the ratchet
+  // cared about. Four panels were added for Docker, Kubernetes, CI/CD and local
+  // processes, and on a default install two of those four are switched off and
+  // never shown. Asserting the catalogue would have counted panels nobody is
+  // offered; asserting the adapted list counts panels somebody has to click
+  // through, which is what "short enough that people finish it" meant.
+  //
+  // The second assertion is the one that keeps this honest as the product grows: a
+  // panel may only be added to the replay by being EARNED — every step past the
+  // original eight has to name a module, so it can be filtered out again for
+  // somebody who does not have it. A step with no module is a step shown to
+  // everybody forever, and those are capped at the eight that were already there.
+  it('shows no more of the replay than the install has earned', () => {
+    const seen = walkthroughFor(defaultModuleState())
+    expect(seen.length, seen.map((x) => x.id).join(', ')).toBeLessThanOrEqual(10)
+
+    const unconditional = FULL_WALKTHROUGH.filter(
+      (step) => !FEATURE_TIPS.some((t) => t.id === step.id && t.module)
+    )
+    expect(unconditional.length, unconditional.map((x) => x.id).join(', ')).toBeLessThanOrEqual(8)
+  })
+
+  it('never walks somebody through a module they switched off', () => {
+    // The point of adapting it at all. A panel about a disabled module describes a
+    // screen the reader cannot reach, which spends the walkthrough's credibility on
+    // a feature that is not there.
+    const off = walkthroughFor({})
+    for (const id of ['tip-docker', 'tip-kubernetes', 'tip-cicd', 'tip-processes']) {
+      expect(off.map((x) => x.id), id).not.toContain(id)
+    }
+    // And it still has its shape: opens on adding a server, ends on the palette.
+    expect(off[0].id).toBe(TOUR_STEPS[0].id)
+    expect(off[off.length - 1].id).toBe(TOUR_STEPS[1].id)
   })
 
   it('has unique ids, since they key the progress dots', () => {

@@ -70,6 +70,9 @@ function rule(over: Partial<Rule> = {}): Rule {
     action: { type: 'notify' },
     limit: { maxFirings: 1, windowMs: HOUR },
     armedAt: T0,
+    // Zero is what a stored rule with no recorded ceremony reads back as, which
+    // is every rule written before the field existed. See Rule.unattendedAt.
+    unattendedAt: 0,
     ...over
   }
 }

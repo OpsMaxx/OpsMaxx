@@ -234,11 +234,23 @@ button {
   padding: var(--sp-3) 0;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border-subtle);
+  /* Both needed for `.activity-scroll` to ever scroll: without them this column
+     grows past the viewport, the overflow is clipped by `.app-body` instead, and
+     the buttons pinned to the bottom are the ones that disappear. */
+  min-height: 0;
+  overflow: hidden;
 }
 .activity-btn {
   position: relative;
   width: 40px;
   height: 40px;
+  /* A flex item shrinks below its stated height by default, so in a cramped
+     column these silently compressed to 30px instead of the container
+     scrolling -- twelve squashed icons rather than ten correct ones and a
+     scroll. The height above is a hit target as much as a look: 40px is the
+     smallest comfortable pointer target, and a `height` that any ancestor may
+     overrule is not a hit target at all. */
+  flex: none;
   display: grid;
   place-items: center;
   border-radius: var(--r-md);
@@ -263,8 +275,29 @@ button {
   border-radius: var(--r-pill);
   background: var(--accent);
 }
-.activity-spacer {
+/* The scrolling middle of the rail: every destination, between the sidebar
+   toggle and the two fixed controls at the bottom.
+   `flex: 1` so it takes the slack (it replaces the old `.activity-spacer`, whose
+   only job was to push Settings down), and `min-height: 0` because a flex child
+   will not shrink below its content without it -- which is exactly the failure
+   this is fixing, since the overflow then lands outside `.app-body`'s clip and
+   the bottom buttons vanish.
+   The scrollbar is hidden rather than styled: the rail is 52px wide and a visible
+   gutter inside it would eat a quarter of the icon column. Scrolling still works
+   by wheel, trackpad and keyboard, and on a window tall enough for every icon
+   there is nothing to scroll. */
+.activity-scroll {
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-1);
+  scrollbar-width: none;
+}
+.activity-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 /* ============================= Sidebar ============================= */
@@ -5171,7 +5204,10 @@ details[open] > .disclosure-head .chev {
 }
 
 .setup-card {
-  width: min(620px, 100%);
+  /* Wider than the 620px it was. The persona row wants four cards side by side
+     above ~700px, and the preference rows put a label and its options on one
+     line; at 620 both wrapped and the card read as a list of wrapped things. */
+  width: min(720px, 100%);
   max-height: calc(100vh - var(--sp-8) * 2);
   overflow-y: auto;
   background: var(--bg-panel);
@@ -5297,6 +5333,226 @@ details[open] > .disclosure-head .chev {
 
 @media (prefers-reduced-motion: reduce) {
   .setup-q {
+    transition: none;
+  }
+}
+
+/* The Modules page's three groups. A heading and one line of why, so the two
+   halves of the registry stop looking like the same kind of decision. */
+.settings-group {
+  margin-bottom: var(--sp-5);
+}
+.settings-group-title {
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text);
+}
+.settings-group-detail {
+  margin: 0 0 var(--sp-3);
+  max-width: 68ch;
+}
+
+/* ---------------------------------------------------------------------------
+   The first-run card's three sections: who you are, what you want, how it
+   behaves. One screen, with the preferences collapsed -- see SetupCard.tsx for
+   why that is progressive disclosure rather than a wizard in disguise.
+   --------------------------------------------------------------------------- */
+
+.setup-section-label {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text);
+}
+/* The hint sits on the same line as the label and must never compete with it:
+   it is the answer to "do I have to?", which is worth saying and not worth
+   reading twice. */
+.setup-section-hint {
+  font-weight: 400;
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+}
+
+.setup-personas {
+  padding: var(--sp-4) var(--sp-6) 0;
+}
+/* Auto-fit rather than four fixed columns: at phone width these become one
+   column without a media query, and at 720 they are four. */
+.setup-persona-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--sp-2);
+}
+.setup-persona {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  padding: var(--sp-3);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+.setup-persona:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+.setup-persona:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.setup-persona.on {
+  border-color: var(--accent);
+  background: var(--bg-active);
+}
+.setup-persona-title {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text);
+}
+.setup-persona-detail {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.setup-prefs {
+  padding: 0 var(--sp-6) var(--sp-2);
+}
+
+.setup-group {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-card);
+  margin-bottom: var(--sp-2);
+}
+.setup-group-head {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: baseline;
+  padding: var(--sp-3) var(--sp-4);
+  cursor: pointer;
+  /* The default triangle is replaced by nothing on purpose: the row already has
+     a value on its right, and a marker plus a value plus a title is three
+     things competing for the same line. The open state is legible from the
+     content appearing. */
+  list-style: none;
+}
+.setup-group-head::-webkit-details-marker {
+  display: none;
+}
+.setup-group-head:hover {
+  background: var(--bg-hover);
+}
+.setup-group-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.setup-group-title {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text);
+}
+/* What the group is currently set to, so the card is readable with everything
+   shut. Pushed right and quiet: it is a state, not a control. */
+.setup-group-value {
+  margin-left: auto;
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+  text-align: right;
+}
+.setup-group-detail {
+  margin: 0;
+  padding: 0 var(--sp-4) var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  max-width: 62ch;
+}
+
+.setup-pref {
+  display: flex;
+  gap: var(--sp-4);
+  align-items: flex-start;
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+}
+.setup-pref-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 260px;
+}
+.setup-pref-title {
+  font-size: var(--fs-body);
+  color: var(--text);
+}
+.setup-pref-detail {
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+}
+
+/* A segmented control rather than real radio dots: the options are short, and
+   two or three side by side are compared in one movement where a stack of dots
+   is read one at a time. `role="radiogroup"` carries the semantics that the
+   appearance drops. */
+.setup-pref-opts {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+  padding: 2px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  flex-wrap: wrap;
+}
+.setup-opt {
+  padding: 5px var(--sp-3);
+  border: 0;
+  border-radius: calc(var(--r-md) - 3px);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.setup-opt:hover {
+  color: var(--text);
+}
+.setup-opt:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.setup-opt.on {
+  background: var(--accent);
+  color: var(--text-inverse);
+}
+
+.setup-pref-select {
+  flex: 0 0 auto;
+  padding: 5px var(--sp-2);
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-persona {
     transition: none;
   }
 }

@@ -505,6 +505,25 @@ function appIcon(): string | undefined {
 }
 
 function createWindow(): void {
+  // Re-arm the rule engine, because closing the window disarmed it.
+  //
+  // `ruleEngine.stop()` runs from `webContents.on('destroyed')` below, and on
+  // macOS `window-all-closed` does not quit — so ⌘W leaves the app running with
+  // its sweep timer cleared, and `app.on('activate')` rebuilds the window
+  // WITHOUT restarting the engine. Every armed rule was then silently dead for
+  // the rest of that app run while the panel still read "Enabled": the one thing
+  // RulesPanel is careful never to do is claim something runs when it does not.
+  //
+  // The incoherence this fixes is worth naming. `start()` is called before
+  // `createWindow()` in `whenReady` deliberately — "so a rule does not wait on a
+  // window it never needs" — so the engine is by design independent of the
+  // window at START, and was by accident dependent on it at STOP. Starting here
+  // as well makes the two agree.
+  //
+  // Idempotent: `start()` returns immediately when its timer is already set, so
+  // the call from `whenReady` still owns the first sweep and this one is a no-op
+  // on a cold launch.
+  ruleEngine.start()
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,

@@ -53,10 +53,39 @@ describe('the six deferred steps are deferred, not deleted', () => {
   // Two of the old steps were narrated over screens that contradicted them:
   // "live CPU, memory, disk" over the Fleet keys tab, "tunnels and databases"
   // over an empty frp panel. A tip anchored to its own view cannot be staged
-  // over the wrong one — but only if each view has at most one.
-  it('gives no view two competing tips', () => {
-    const views = FEATURE_TIPS.map((t) => t.view)
-    expect(new Set(views).size).toBe(views.length)
+  // over the wrong one — but only if each DESTINATION has at most one.
+  //
+  // Per destination rather than per `view`, which is what this asserted when every
+  // tip had a view to itself. Monitoring, Operations and the four promoted modules
+  // all share `view: 'monitor'` — deliberately, because they are one mounted tree —
+  // so the thing that has to be unique is the view plus the tab within it. The
+  // invariant is unchanged and the key is now precise enough to express it: a
+  // second tip on Docker would still fail here, and so would a second tip on the
+  // Monitoring rail generally.
+  it('gives no destination two competing tips', () => {
+    const keys = FEATURE_TIPS.map((t) => `${t.view}/${t.tab ?? ''}`)
+    expect(new Set(keys).size, keys.join(', ')).toBe(keys.length)
+  })
+
+  // A `tab` only means something on the shared Monitoring view. Anywhere else it
+  // would be silently ignored, which is the kind of dead field that later reads as
+  // a working filter.
+  it('only puts a tab on a tip whose view has tabs', () => {
+    for (const t of FEATURE_TIPS) {
+      if (t.tab) expect(t.view, t.id).toBe('monitor')
+    }
+  })
+
+  // A tip about a module must name it, or it cannot be filtered out when the
+  // module is off — which is the whole point of `tipsFor`. Asserted over the
+  // promoted four because those are the ones whose destination disappears
+  // entirely: their rail icon is hidden while the module is off.
+  it('names the module behind every tip that describes one', () => {
+    for (const id of ['tip-docker', 'tip-kubernetes', 'tip-cicd', 'tip-processes']) {
+      const tip = FEATURE_TIPS.find((t) => t.id === id)
+      expect(tip, id).toBeTruthy()
+      expect(tip!.module, id).toBeTruthy()
+    }
   })
 
   it('has no duplicate ids, so "seen" cannot mark the wrong one', () => {

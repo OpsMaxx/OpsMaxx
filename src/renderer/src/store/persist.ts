@@ -9,6 +9,22 @@ const SEED_VERSION = 2
 
 interface Persisted {
   version?: number
+  /**
+   * The colour scheme, which was not saved at all until now.
+   *
+   * `theme` lives on AppState rather than in `settings` -- it is read as
+   * `useApp(s => s.theme)` from three places -- and it was absent from both this
+   * shape and `save()`, so every launch reset it to `'dark'`. Somebody who chose
+   * light got it back for one session at a time.
+   *
+   * Restored by `replaceAll`, and nothing else has to be wired: App.tsx applies
+   * the theme in an effect keyed on it, so putting the value back in the store is
+   * what puts it on the screen.
+   *
+   * Absent in every save written before this, which is why it is optional; the
+   * store's own default stands in.
+   */
+  theme?: unknown
   workspaces: unknown
   monitorGroups?: unknown
   // Absent in saves written before this was stored; the store falls back to
@@ -200,7 +216,22 @@ async function hydrate(): Promise<void> {
       state.panes !== prev.panes ||
       state.tabCwd !== prev.tabCwd
 
-    if (dataChanged || activeChanged || windowChanged || state.settings !== prev.settings) {
+    // Grouped with the window layout rather than with the data, and that
+    // placement is the whole decision: a theme change has to trigger a SAVE, or
+    // it is forgotten again on the next launch, but it must not mark the backup
+    // stale. "Backup out of date" has to keep meaning that servers, workspaces,
+    // vault entries or connections changed -- if switching to light mode raised
+    // it, the warning would stop being believed, which is the failure
+    // `serversWithoutStatus` above exists to prevent for a different field.
+    const themeChanged = state.theme !== prev.theme
+
+    if (
+      dataChanged ||
+      activeChanged ||
+      windowChanged ||
+      themeChanged ||
+      state.settings !== prev.settings
+    ) {
       if (timer) clearTimeout(timer)
       timer = setTimeout(save, 400)
     }
@@ -212,6 +243,7 @@ function save(): Promise<void> {
   return (
     window.opsmaxx?.data.save({
       version: SEED_VERSION,
+      theme: s.theme,
       workspaces: s.workspaces,
       activeWorkspaceId: s.activeWorkspaceId,
       monitorGroups: s.monitorGroups,

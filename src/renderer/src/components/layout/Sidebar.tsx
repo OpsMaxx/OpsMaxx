@@ -11,15 +11,17 @@ import { ApiSidebar } from '../http/ApiSidebar'
 import { VaultSidebar } from '../vault/VaultSidebar'
 import { useVault } from '../../store/vault'
 import { openTunnels, useNav } from '../../store/nav'
+import { MODULES, isPromotedModule, type ModuleId } from '../../../../shared/modules'
 
 const titles: Record<string, string> = {
   connections: 'Connections',
   databases: 'Databases',
   tunnels: 'Tunnels & VPN',
   http: 'HTTP Client',
-  // Overridden below when the Operations rail is showing: the two share one
-  // ActivityView, so this map alone titled the Operations sidebar "Fleet
-  // Monitor" while the page beside it said Operations.
+  // Overridden below when the Operations rail is showing, and again when a
+  // promoted module is: all of them share one ActivityView, so this map alone
+  // titled the Operations sidebar "Fleet Monitor" while the page beside it said
+  // Operations — and would now do the same to Docker and Kubernetes.
   monitor: 'Fleet Monitor',
   vault: 'Vault'
 }
@@ -27,6 +29,7 @@ const titles: Record<string, string> = {
 export function Sidebar(): React.JSX.Element | null {
   const activity = useApp((s) => s.activity)
   const fleetRail = useNav((s) => s.fleetRail)
+  const monitorTab = useNav((s) => s.monitorTab)
   const collapsed = useApp((s) => s.sidebarCollapsed)
   const width = useApp((s) => s.sidebarWidth)
   const setWidth = useApp((s) => s.setSidebarWidth)
@@ -59,11 +62,24 @@ export function Sidebar(): React.JSX.Element | null {
 
   if (activity === 'settings' || activity === 'ai' || collapsed) return null
 
+  // What the header says. Three cases share `activity === 'monitor'`: the
+  // Operations rail, a promoted module's own destination, and Monitoring itself.
+  // The registry `label` is used for a promoted module rather than a second copy
+  // of the four names, so renaming a module renames its sidebar with it.
+  const promotedTitle =
+    activity === 'monitor' && fleetRail === 'monitor' && isPromotedModule(monitorTab as ModuleId)
+      ? (MODULES.find((m) => m.id === monitorTab)?.label ?? null)
+      : null
+  const title =
+    activity === 'monitor' && fleetRail === 'operations'
+      ? 'Operations'
+      : (promotedTitle ?? titles[activity] ?? '')
+
   return (
     <aside className="sidebar" style={{ width }}>
       <div className="sidebar-header">
         <span className="sidebar-title">
-          {activity === 'monitor' && fleetRail === 'operations' ? 'Operations' : (titles[activity] ?? '')}
+          {title}
         </span>
         <div className="sidebar-actions">
           {activity === 'connections' && (
