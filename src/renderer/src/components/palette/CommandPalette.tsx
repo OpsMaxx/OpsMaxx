@@ -11,6 +11,7 @@ import {
   Activity,
   Bot,
   Download,
+  Bug,
   CornerDownLeft
 } from 'lucide-react'
 import { useApp } from '../../store/app'
@@ -28,6 +29,7 @@ import {
 } from '../../store/nav'
 import { ACTIVITY_ITEMS } from '../layout/ActivityBar'
 import { MODULES, isOperateModule, moduleEnabled } from '../../../../shared/modules'
+import { reportBug } from '../../lib/reportBug'
 import { fuzzyScore } from '../../lib/fuzzy'
 
 interface Cmd {
@@ -149,6 +151,18 @@ export function CommandPalette(): React.JSX.Element {
           store.setActivity('connections')
           store.setModal('import-ssh')
         }
+      },
+      // The same one click as the rail's bug button, for the half of this
+      // audience that reaches for Ctrl+K before it reaches for a mouse. Both
+      // call the one function, so neither can drift into copying without
+      // opening or opening without copying.
+      {
+        id: 'a-bug',
+        group: 'Actions',
+        title: 'Report a bug',
+        sub: 'Copies your diagnostics and opens the issue form',
+        icon: <Bug size={16} />,
+        run: () => void reportBug()
       },
       { id: 'a-set', group: 'Settings', title: 'Open Settings', icon: <Settings size={16} />, run: () => store.setActivity('settings') }
     ]

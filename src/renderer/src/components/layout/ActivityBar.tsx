@@ -8,10 +8,12 @@ import {
   Globe,
   Settings,
   PanelLeft,
-  Wrench
+  Wrench,
+  Bug
 } from 'lucide-react'
 import { useApp } from '../../store/app'
 import { clsx } from '../../lib/format'
+import { reportBug } from '../../lib/reportBug'
 import { openMonitor, openOperations, useNav } from '../../store/nav'
 import type { ActivityView } from '../../types'
 
@@ -101,6 +103,27 @@ export function ActivityBar(): React.JSX.Element {
         )
       )}
       <div className="activity-spacer" />
+      {/* Directly above the gear, because that is where a person looks for help
+          — and because this rail is the only chrome that is on screen on every
+          view, whatever is open. The status bar was the other candidate and it
+          is the wrong shape for this: every chip there reports a state, three of
+          them appear only when something is wrong, and they compete for one row
+          of horizontal space that already holds the workspace, the session
+          count, the approval countdown, the alert count, the backup warning, the
+          update indicator and the local metric. A permanent action chip in that
+          row either pushes a warning off a narrow window or teaches that a chip
+          may or may not be a status — and this control has to be found by
+          someone who has never gone looking for it.
+
+          It does not take an `active` class: it opens a browser, so there is no
+          view here for the rail to be showing. */}
+      <button
+        className="activity-btn"
+        title="Report a bug — copies your diagnostics and opens the issue form"
+        onClick={() => void reportBug()}
+      >
+        <Bug size={20} />
+      </button>
       <button
         className={clsx('activity-btn', activity === 'settings' && 'active')}
         // The dot's meaning lives on the button, not on the dot. Every control
