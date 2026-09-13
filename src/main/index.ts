@@ -424,6 +424,7 @@ import {
   clearSessionElevations,
   clearAllSessionElevations
 } from './services/mcpServer'
+import { forgetSession as forgetOAuthSession, listPendingConsents, approveConsent, denyConsent } from './services/mcpOAuth'
 
 const isDev = !app.isPackaged
 
@@ -4698,10 +4699,15 @@ ipcMain.handle('aiMcp:listSessions', () => listSessions())
 // process.
 ipcMain.handle('aiMcp:revokeSession', (_e, id: string) => {
   clearSessionElevations(id)
+  // A refresh token outlives its access token by design, so revoking without
+  // this would leave a client able to mint a fresh one straight afterwards --
+  // a revoke that does not revoke.
+  forgetOAuthSession(id)
   return revokeSession(id)
 })
 ipcMain.handle('aiMcp:deleteSession', (_e, id: string) => {
   clearSessionElevations(id)
+  forgetOAuthSession(id)
   return deleteSession(id)
 })
 ipcMain.handle('aiMcp:setSessionGroup', (_e, id: string, groupId: string | null, groupName: string) =>
@@ -4713,8 +4719,24 @@ ipcMain.handle('aiMcp:explainAccess', (_e, sessionId: string, serverId: string |
 ipcMain.handle('aiMcp:killAllSessions', () => {
   const count = killAllSessions()
   clearAllSessionElevations()
+  for (const session of listSessions()) forgetOAuthSession(session.id)
+  // An authorization still waiting on a human is an access grant in flight.
+  // "Stop all AI access" has to mean that one never lands either.
+  for (const consent of listPendingConsents()) denyConsent(consent.id)
   const denied = denyAllPending()
   return { revoked: count, denied }
+})
+
+// ---- AI & MCP: OAuth consent ----
+ipcMain.handle('aiMcp:listAuthorizations', () => listPendingConsents())
+ipcMain.handle(
+  'aiMcp:approveAuthorization',
+  (_e, consentId: string, grant: { groupId: string; groupName: string; workspaces: { id: string; name: string }[] }) =>
+    approveConsent(consentId, grant)
+)
+ipcMain.handle('aiMcp:denyAuthorization', (_e, consentId: string) => {
+  denyConsent(consentId)
+  return { ok: true }
 })
 
 // ---- AI & MCP: approvals ----

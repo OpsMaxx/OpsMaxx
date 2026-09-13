@@ -116,13 +116,33 @@ describe('MCP server (integration)', () => {
     await client.close()
   })
 
-  it('rejects a request with no/invalid bearer token', async () => {
-    const client = await connectedClient('not-a-real-token')
-    const result = await client.callTool({ name: 'list_workspaces', arguments: {} })
-    expect(result.isError).toBe(true)
-    const text = (result.content as { type: string; text: string }[])[0].text
-    expect(text.toLowerCase()).toContain('not recognized')
-    await client.close()
+  // A bad token used to get all the way to a tool call and be refused there,
+  // which meant an unauthenticated caller first received initialize and
+  // tools/list -- every tool description and the whole instructions block.
+  // Now the transport refuses it before the protocol starts.
+  it('rejects a bad bearer token before the handshake, not at the tool call', async () => {
+    await expect(connectedClient('not-a-real-token')).rejects.toThrow()
+  })
+
+  it('answers an unauthenticated request with the header that advertises OAuth', async () => {
+    const res = await fetch(`http://127.0.0.1:${PORT}/mcp`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'p', version: '1' } }
+      })
+    })
+    expect(res.status).toBe(401)
+    // This header is what sends a client to the protected-resource metadata.
+    // Without it, it has no way to find out that OAuth is even on offer.
+    expect(res.headers.get('www-authenticate')).toContain('resource_metadata=')
+    const body = await res.text()
+    // And it must disclose nothing about the tools while it is at it.
+    expect(body).not.toContain('execute_command')
+    expect(body).not.toContain('list_servers')
   })
 
   it('a Read Only session is denied writing a file without ever reaching SSH', async () => {

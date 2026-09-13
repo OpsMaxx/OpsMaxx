@@ -344,18 +344,29 @@ describe('auth failures point at the half of the fix that works', () => {
     })
     revokeSession(session.id)
 
-    const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${PORT}/mcp`), {
-      requestInit: { headers: { Authorization: `Bearer ${token}` } }
+    // The refusal now happens at the transport rather than at the tool call --
+    // a dead token never gets as far as a handshake, and the client is told so
+    // with a 401 that also advertises how to authenticate properly. The
+    // guidance itself is what this test is about, and it has to survive the
+    // move: a bare 401 would put the user straight back in the reported loop.
+    const res = await fetch(`http://127.0.0.1:${PORT}/mcp`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'revoked-test', version: '1' } }
+      })
     })
-    const c = new Client({ name: 'revoked-test', version: '1.0.0' })
-    await c.connect(transport)
-    try {
-      const out = await call(c, { name: 'Nope', host: '10.0.0.30' })
-      expect(out).toContain('revoked')
-      expect(out).toContain('not enough on its own')
-      expect(out).toContain('Connect')
-    } finally {
-      await c.close()
-    }
+    expect(res.status).toBe(401)
+    const out = await res.text()
+    expect(out).toContain('revoked')
+    expect(out).toContain('not enough on its own')
+    expect(out).toContain('Connect')
   })
 })

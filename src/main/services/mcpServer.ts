@@ -13,6 +13,17 @@ import { assessCommand } from '../../shared/commandRisk'
 import { authenticate, getSession, getMcpConfig, type AuthFailureReason } from './mcpAuth'
 import { startCliPairing, confirmCliPairing } from './cliPairing'
 import {
+  protectedResourceMetadata,
+  authorizationServerMetadata,
+  wwwAuthenticateHeader,
+  registerClient,
+  beginAuthorization,
+  consentRedirectUrl,
+  exchangeCode,
+  refresh as refreshOAuthToken,
+  revoke as revokeOAuthToken
+} from './mcpOAuth'
+import {
   listCachedServers,
   listCachedWorkspaces,
   getCachedWorkspace,
@@ -4262,6 +4273,163 @@ function readBody(req: IncomingMessage): Promise<unknown> {
   })
 }
 
+function sendJson(res: ServerResponse, code: number, body: unknown, headers: Record<string, string> = {}): void {
+  res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers })
+  res.end(JSON.stringify(body))
+}
+
+function formBody(raw: string): URLSearchParams {
+  return new URLSearchParams(raw)
+}
+
+function readRaw(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    req.on('data', (c: Buffer) => chunks.push(c))
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    req.on('error', reject)
+  })
+}
+
+async function handleRegister(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (!getMcpConfig().enabled) {
+    return sendJson(res, 403, { error: 'access_denied', error_description: 'AI & MCP access is disabled in OpsMaxx.' })
+  }
+  let body: unknown
+  try {
+    body = JSON.parse(await readRaw(req))
+  } catch {
+    return sendJson(res, 400, { error: 'invalid_client_metadata', error_description: 'Body must be JSON.' })
+  }
+  const result = registerClient(body)
+  if (!result.ok) return sendJson(res, 400, { error: 'invalid_redirect_uri', error_description: result.error })
+  return sendJson(res, 201, {
+    client_id: result.client.clientId,
+    client_name: result.client.clientName,
+    redirect_uris: result.client.redirectUris,
+    client_id_issued_at: Math.floor(Date.parse(result.client.createdAt) / 1000),
+    grant_types: ['authorization_code', 'refresh_token'],
+    response_types: ['code'],
+    token_endpoint_auth_method: 'none'
+  })
+}
+
+/**
+ * The browser lands here. It does NOT get to approve anything: this returns a
+ * holding page, and the actual decision -- including which access group the
+ * client gets -- is made by a human in the OpsMaxx window. The page polls until
+ * that happens and then follows the redirect.
+ *
+ * Consent in a browser page would mean the approving surface is a web page any
+ * local process can open, rather than the application the user already trusts
+ * with these credentials.
+ */
+async function handleAuthorize(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const url = new URL(req.url ?? '/authorize', 'http://127.0.0.1')
+
+  // Polling endpoint for the holding page.
+  const waiting = url.searchParams.get('consent')
+  if (waiting) {
+    const target = consentRedirectUrl(waiting)
+    return sendJson(res, 200, target ? { done: true, redirect: target } : { done: false })
+  }
+
+  if (!getMcpConfig().enabled) {
+    return sendJson(res, 403, { error: 'access_denied', error_description: 'AI & MCP access is disabled in OpsMaxx.' })
+  }
+
+  const begun = beginAuthorization({
+    clientId: url.searchParams.get('client_id') ?? '',
+    redirectUri: url.searchParams.get('redirect_uri') ?? '',
+    codeChallenge: url.searchParams.get('code_challenge') ?? '',
+    codeChallengeMethod: url.searchParams.get('code_challenge_method') ?? '',
+    state: url.searchParams.get('state'),
+    resource: url.searchParams.get('resource'),
+    responseType: url.searchParams.get('response_type') ?? ''
+  })
+
+  // A bad client_id or redirect_uri must NOT be redirected anywhere -- that is
+  // exactly the open-redirect the exact-match rule exists to prevent. It is
+  // reported to the browser instead.
+  if (!begun.ok) {
+    return sendJson(res, 400, { error: begun.error, error_description: begun.description })
+  }
+
+  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+  res.end(holdingPage(begun.consentId))
+}
+
+function holdingPage(consentId: string): string {
+  // No interpolation of anything a client supplied: only this server's own id.
+  const id = consentId.replace(/[^a-f0-9]/g, '')
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Approve in OpsMaxx</title>
+<style>
+ body{font:15px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;
+      background:#0f1115;color:#e6e8ee}
+ main{max-width:30rem;padding:2rem;text-align:center}
+ h1{font-size:1.25rem;margin:0 0 .75rem}
+ p{margin:0 0 .75rem;color:#a8aec0}
+</style></head>
+<body><main>
+<h1>Waiting for approval in OpsMaxx</h1>
+<p>Switch to the OpsMaxx window and choose an access group for this client, then approve it.</p>
+<p>You can close this tab if you change your mind.</p>
+</main>
+<script>
+ const id = ${JSON.stringify(id)};
+ async function poll() {
+   try {
+     const r = await fetch('/authorize?consent=' + encodeURIComponent(id));
+     const d = await r.json();
+     if (d.done && d.redirect) { window.location.replace(d.redirect); return; }
+   } catch (e) { /* the app may be shutting down; keep trying */ }
+   setTimeout(poll, 1000);
+ }
+ poll();
+</script>
+</body></html>`
+}
+
+async function handleToken(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const body = formBody(await readRaw(req))
+  const grantType = body.get('grant_type')
+  const clientId = body.get('client_id') ?? ''
+
+  if (grantType === 'authorization_code') {
+    const result = exchangeCode({
+      code: body.get('code') ?? '',
+      clientId,
+      redirectUri: body.get('redirect_uri') ?? '',
+      codeVerifier: body.get('code_verifier') ?? '',
+      resource: body.get('resource')
+    })
+    return result.ok
+      ? sendJson(res, 200, result.token)
+      : sendJson(res, 400, { error: result.error, error_description: result.description })
+  }
+
+  if (grantType === 'refresh_token') {
+    const result = refreshOAuthToken({ refreshToken: body.get('refresh_token') ?? '', clientId })
+    return result.ok
+      ? sendJson(res, 200, result.token)
+      : sendJson(res, 400, { error: result.error, error_description: result.description })
+  }
+
+  return sendJson(res, 400, {
+    error: 'unsupported_grant_type',
+    error_description: 'Only authorization_code and refresh_token are supported.'
+  })
+}
+
+async function handleRevoke(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const body = formBody(await readRaw(req))
+  revokeOAuthToken(body.get('token') ?? '')
+  // RFC 7009: a revocation request always succeeds, so that a caller cannot use
+  // it to probe which tokens exist.
+  res.writeHead(200, { 'cache-control': 'no-store' }).end()
+}
+
 async function handlePairStart(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (!getMcpConfig().enabled) {
     res.writeHead(403, { 'content-type': 'application/json' })
@@ -4373,6 +4541,25 @@ export async function startMcpServer(): Promise<{ ok: boolean; error?: string }>
           return
         }
 
+        // Discovery is deliberately unauthenticated: a client cannot know how to
+        // authenticate until it has read these, which is the entire point of
+        // RFC 9728. They disclose only endpoint URLs on a loopback port.
+        if (req.method === 'GET' && req.url.split('?')[0].startsWith('/.well-known/oauth-protected-resource')) {
+          return sendJson(res, 200, protectedResourceMetadata())
+        }
+        if (
+          req.method === 'GET' &&
+          ['/.well-known/oauth-authorization-server', '/.well-known/openid-configuration'].includes(
+            req.url.split('?')[0]
+          )
+        ) {
+          return sendJson(res, 200, authorizationServerMetadata())
+        }
+        if (req.method === 'POST' && req.url === '/register') return handleRegister(req, res)
+        if (req.method === 'GET' && req.url.startsWith('/authorize')) return handleAuthorize(req, res)
+        if (req.method === 'POST' && req.url === '/token') return handleToken(req, res)
+        if (req.method === 'POST' && req.url === '/revoke') return handleRevoke(req, res)
+
         if (req.method === 'POST' && req.url === '/pair/start') return handlePairStart(req, res)
         if (req.method === 'POST' && req.url === '/pair/confirm') return handlePairConfirm(req, res)
 
@@ -4400,6 +4587,34 @@ export async function startMcpServer(): Promise<{ ok: boolean; error?: string }>
           // No standalone SSE stream and no session to delete.
           res.writeHead(405, { allow: 'POST', 'content-type': 'application/json' })
           res.end(JSON.stringify({ error: 'This MCP endpoint is stateless; use POST.' }))
+          return
+        }
+
+        // Authenticate at the TRANSPORT, before the protocol.
+        //
+        // This used to happen only inside each tool handler, which meant an
+        // unauthenticated caller still got a full initialize and tools/list --
+        // all 36 tool descriptions and the whole instructions block -- and was
+        // refused only when it tried to do something. Loopback-only, so not a
+        // severe leak, but it was a real one.
+        //
+        // It also has to be a 401 carrying WWW-Authenticate for a client to
+        // discover that OAuth exists at all: that header is what sends it to
+        // the protected-resource metadata. A 403, or a JSON-RPC error inside a
+        // 200, is invisible to that machinery.
+        const preAuth = authenticate(bearerFrom(req.headers))
+        if ('error' in preAuth) {
+          res.writeHead(401, {
+            'content-type': 'application/json',
+            'www-authenticate': wwwAuthenticateHeader(),
+            'cache-control': 'no-store'
+          })
+          res.end(
+            JSON.stringify({
+              error: 'unauthorized',
+              error_description: AUTH_MESSAGES[preAuth.error]
+            })
+          )
           return
         }
 

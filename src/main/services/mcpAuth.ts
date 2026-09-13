@@ -114,6 +114,7 @@ export interface CreateSessionInput {
   groupId: string | null
   groupName: string
   ttlMinutes: number | null // null = no expiration
+  kind?: 'oauth' | 'relay'
 }
 
 export function createSession(input: CreateSessionInput): { session: McpAgentSession; token: string } {
@@ -130,10 +131,36 @@ export function createSession(input: CreateSessionInput): { session: McpAgentSes
     createdAt: now.toISOString(),
     expiresAt: input.ttlMinutes ? new Date(now.getTime() + input.ttlMinutes * 60_000).toISOString() : null,
     lastActiveAt: now.toISOString(),
-    revoked: false
+    revoked: false,
+    kind: input.kind
   }
   const list = loadSessions()
   list.push(session)
+  writeSessions()
+  return { session, token: raw }
+}
+
+/**
+ * Replace a session's token, keeping the session itself.
+ *
+ * This is what a refresh does, and keeping `id` is the whole point: approval
+ * elevations are keyed on it, and so is the audit trail. Minting a fresh
+ * session on every refresh would silently re-ask for every approval the user
+ * had already given, roughly hourly, which is worse than the expiry it set out
+ * to fix.
+ */
+export function rotateSessionToken(
+  id: string,
+  ttlMinutes: number | null
+): { session: McpAgentSession; token: string } | null {
+  const session = loadSessions().find((s) => s.id === id)
+  if (!session || session.revoked) return null
+  const raw = randomBytes(32).toString('hex')
+  const now = new Date()
+  session.tokenHash = hashToken(raw)
+  session.tokenPreview = raw.slice(-4)
+  session.expiresAt = ttlMinutes ? new Date(now.getTime() + ttlMinutes * 60_000).toISOString() : null
+  session.lastActiveAt = now.toISOString()
   writeSessions()
   return { session, token: raw }
 }

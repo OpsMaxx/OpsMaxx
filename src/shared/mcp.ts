@@ -359,6 +359,23 @@ export interface McpAgentSession {
   expiresAt: string | null
   lastActiveAt: string
   revoked: boolean
+  /**
+   * How this session's credential is allowed to be presented.
+   *
+   * `oauth`  — issued through the authorization flow. Its access token is
+   *            short-lived and refreshed, so it never sits in a config file.
+   * `relay`  — issued by CLI pairing, for the stdio relay. The relay speaks
+   *            HTTP to this same endpoint and cannot run a browser flow, so it
+   *            is the one thing that still authenticates with a raw bearer.
+   * absent   — created before this field existed. Accepted as a bearer for now
+   *            so an upgrade does not cut off a working relay, and shown as
+   *            legacy in the UI. The transport cannot tell a relay apart from
+   *            any other HTTP client -- both are a POST with a bearer -- so
+   *            what is actually enforced is the KIND OF CREDENTIAL, not the
+   *            kind of client. That is the only version of this that a server
+   *            can check rather than take a client's word for.
+   */
+  kind?: 'oauth' | 'relay'
 }
 
 // Everything below `status` is optional, and the optionality is not laziness —
