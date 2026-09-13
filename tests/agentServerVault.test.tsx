@@ -2,7 +2,7 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { render, waitFor } from '@testing-library/react'
 import { stubBridge } from './setup/renderer'
-import { AgentServerWatcher } from '../src/renderer/src/components/ai/AgentServerWatcher'
+import { AgentConfigWatcher } from '../src/renderer/src/components/ai/AgentConfigWatcher'
 import { useApp } from '../src/renderer/src/store/app'
 import { useVault } from '../src/renderer/src/store/vault'
 
@@ -51,7 +51,7 @@ function mount(): void {
       })
     }
   })
-  render(<AgentServerWatcher />)
+  render(<AgentConfigWatcher />)
 }
 
 beforeEach(() => {

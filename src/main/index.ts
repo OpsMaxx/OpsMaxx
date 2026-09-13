@@ -402,7 +402,14 @@ import {
 } from './services/approvals'
 import { onCliPairingEvent, cancelCliPairing } from './services/cliPairing'
 import { claudeCodeCommand, writeClaudeDesktopConfig, writeCodexConfig } from './services/clientConfig'
-import { setAgentServerCreator, type AgentServerRequest, type AgentServerResult } from './services/agentServerCreate'
+import {
+  setAgentServerCreator,
+  setAgentConfigWriter,
+  type AgentServerRequest,
+  type AgentServerResult,
+  type AgentConfigRequest,
+  type AgentConfigResult
+} from './services/agentConfigWrite'
 import { keyMaterialFor, listDefaultKeys, readKeyMaterialAt, sshDir } from './services/sshKeys'
 import { setVaultAutoLock } from './services/vault'
 import {
@@ -4895,6 +4902,37 @@ setAgentServerCreator((req: AgentServerRequest) => {
     // that failed to answer.
     setTimeout(() => {
       if (pendingServerCreates.delete(id)) resolve({ ok: false, error: 'Timed out adding the server.' })
+    }, 30000)
+  })
+})
+
+// ---- AI & MCP: agent-initiated config edits (update/remove server, tunnels) ----
+// The same round trip as above and for the same reason. A second channel rather
+// than a second meaning for the first: the add path carries a credential and the
+// renderer does real work for it (vault vs keychain, and a rollback when the
+// keychain refuses), while everything here is one store call and an answer.
+let configWriteSeq = 0
+const pendingConfigWrites = new Map<string, (result: AgentConfigResult) => void>()
+
+ipcMain.on('aiMcp:config-write-reply', (_e, id: string, result: AgentConfigResult) => {
+  const resolve = pendingConfigWrites.get(id)
+  if (!resolve) return
+  pendingConfigWrites.delete(id)
+  resolve(result)
+})
+
+setAgentConfigWriter((req: AgentConfigRequest) => {
+  const target = mainWindow
+  if (!target || target.isDestroyed()) {
+    return Promise.resolve({ ok: false, error: 'The OpsMaxx window is closed.' })
+  }
+  const id = `cfgwrite-${configWriteSeq++}`
+  return new Promise<AgentConfigResult>((resolve) => {
+    pendingConfigWrites.set(id, resolve)
+    target.webContents.send('aiMcp:config-write', { id, request: req })
+    setTimeout(() => {
+      if (pendingConfigWrites.delete(id))
+        resolve({ ok: false, error: 'Timed out changing the OpsMaxx configuration.' })
     }, 30000)
   })
 })

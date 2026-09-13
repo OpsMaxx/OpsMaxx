@@ -326,3 +326,65 @@ describe('which deadline the countdown believes', () => {
     expect(resolveFuseDeadline(undefined, '2026-09-07T10:00:00.000Z', null)).toBeNull()
   })
 })
+
+// The copy for the verbs that arrived with update_server, remove_server,
+// create_tunnel and delete_tunnel.
+//
+// Both blocks below used to branch on one test — `/^start\b/` — which was
+// enough while each capability had a single pair of verbs. It is not a style
+// point: an action beginning "Remove" fell to the else branch, so deleting a
+// saved connection was described to the person approving it as adding one, and
+// defining a tunnel was described as closing one.
+describe('managing connections says which of the three things it is doing', () => {
+  const say = (action: string): string =>
+    `${riskReasons(subject({ capability: 'manageServers', action })).join(' ')} ${
+      describeConsequence(subject({ capability: 'manageServers', action })).text
+    }`
+
+  it('describes an add as an add', () => {
+    const text = say('Add server "Scanner02" (root@10.0.0.1:22, auth: key)')
+    expect(text).toContain('stores a credential')
+    expect(text).not.toContain('Deletes')
+  })
+
+  it('describes a removal as a deletion that cannot be undone', () => {
+    const text = say('Remove server "Scanner02" from Personal')
+    expect(text).toContain('deletes a saved connection')
+    expect(text).toContain('keeps no copy')
+    // The exact failure this guards: a deletion described as an addition.
+    expect(text).not.toContain('Adds a server')
+  })
+
+  it('describes a change as a rewrite, and says later calls follow it', () => {
+    const text = say('Change server "Scanner02" (host, port to 2222)')
+    expect(text).toContain('Rewrites a saved connection')
+    expect(text).toContain('go wherever it now points')
+    expect(text).not.toContain('Adds a server')
+  })
+})
+
+describe('tunnels say whether one is being written, removed, started or stopped', () => {
+  const say = (action: string): string =>
+    `${riskReasons(subject({ capability: 'sshTunnel', action })).join(' ')} ${
+      describeConsequence(subject({ capability: 'sshTunnel', action })).text
+    }`
+
+  it('says a defined tunnel is not a running one', () => {
+    const text = say('Define tunnel "PG forward" (local, 127.0.0.1:15432 -> 10.0.0.5:5432, over "Bastion")')
+    expect(text).toContain('does NOT start it')
+    expect(text).toContain('outlives this session')
+    // Must not read as "a tunnel is opening now".
+    expect(text).not.toContain('Opens a tunnel')
+  })
+
+  it('says a removed tunnel is stopped first', () => {
+    const text = say('Remove tunnel "PG forward" (127.0.0.1:15432 -> 10.0.0.5:5432)')
+    expect(text).toContain('stopped first')
+    expect(text).not.toContain('Opens a tunnel')
+  })
+
+  it('still describes starting and stopping the way it always did', () => {
+    expect(say('Start tunnel "PG forward" (127.0.0.1:15432 -> 10.0.0.5:5432)')).toContain('Opens a tunnel')
+    expect(say('Stop tunnel "PG forward" (127.0.0.1:15432 -> 10.0.0.5:5432)')).toContain('Closes that tunnel')
+  })
+})

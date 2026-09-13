@@ -67,9 +67,14 @@ whitelist, so a new tool cannot appear on the bridge without a diff somebody rea
 | `query_database` | `databaseAccess` for reads; `+ writeFiles` and always ASK for anything that writes | Rows, capped |
 | `list_tunnels` | `sshTunnel` | Configured tunnels and whether each is running |
 | `set_tunnel` | `sshTunnel`, always ASK to start | Confirmation, with the bound port |
+| `create_tunnel` | `sshTunnel`, **always ASK**, **never cached** | A saved tunnel — **not a running one**. Starting it is `set_tunnel` and a second approval. A `remote` forward binding a non-loopback address is graded higher, and the prompt says it publishes that port on the server's network |
+| `delete_tunnel` | `sshTunnel`, **always ASK**, **never cached** | That the tunnel is gone; it is stopped first if running |
 | `list_vpns` | `vpnControl` | Names, engine, mode and state — **never an endpoint, key or listener address** |
 | `set_vpn` | `vpnControl`, always ASK to start; **frp refused outright** | Confirmation, with a listener count |
-| `add_server` | `manageServers`, resolved on the **workspace** | The name the new connection was saved under |
+| `add_server` | `manageServers`, resolved on the **workspace**, **never cached** | The name the new connection was saved under. `jumpHosts` names existing servers to reach it through, so a bastion-only host can be onboarded without disclosing one; `verify: true` dials it once and reports whether it came up rather than reporting a dead entry as added |
+| `update_server` | `manageServers`, **never cached** | Which fields changed. Only what you pass is touched — a port change does not disturb the stored credential |
+| `remove_server` | `manageServers`, **always ASK even on ALLOW**, **never cached** | That the connection and its stored credential are gone. The approval names what the removal takes with it when the server is another server's jump host |
+| `test_connection` | `viewServer` | Whether the connection came up, and the *category* of failure if not — never a hostname, port or username, and never the driver's own text, which contains the address |
 | `list_containers` | `containers` | Containers on one server: image, state, the runtime's own status line, published ports and compose project. It says when it fell back to root, and distinguishes "not in a project" from "the runtime could not say" |
 | `container_logs` | `containers`, weighed higher at the prompt than the list | The last lines a container wrote. **It never follows** — a stream would outlive the approval that authorised it, and the stop-all-AI-access switch works by resolving requests still pending |
 | `fleet_inventory` | `fleetRead`, resolved on the **workspace** | One row per server from what the sampler already collected, each stamped with when. Drift is deliberately absent from it |
@@ -122,10 +127,22 @@ unrecognised verb counts as a write: there are too many dialects to enumerate an
 "harmless" is the expensive direction to be wrong in. Mongo shell syntax is classified separately,
 since `db.users.find({})` leads with the collection rather than the verb.
 
-`set_tunnel` can only start or stop a tunnel the user has already defined — it cannot create one or
-change where an existing one points. Starting always requires approval whatever the group says,
-because it binds a listening port on the user's own machine. Stopping does not, being the safe
-direction.
+`set_tunnel` starts and stops tunnels; `create_tunnel` and `delete_tunnel` define and remove them.
+Starting always requires approval whatever the group says, because it binds a listening port on the
+user's own machine. Stopping does not, being the safe direction.
+
+Defining one asks too, and for a reason worth stating: a tunnel an agent writes **outlives the
+session that wrote it**, and the next person to press Start starts what the agent wrote. Defining
+does not start it — that stays a separate approval, so nothing an agent writes carries traffic
+without a second yes. The sharp case is a `remote` forward, which listens **on the server**: a
+non-loopback listen address there publishes the port to that server's whole network, so it is
+graded higher and the prompt says exactly that instead of "define a tunnel".
+
+**Prefer a jump host to a tunnel.** If the goal is to reach a machine that sits behind another,
+`add_server`/`update_server` take `jumpHosts` — authenticated at every hop, binding no port, and
+leaving nothing behind. The server instructions say so, because the alternative an agent reaches
+for otherwise is a relay on the bastion that forwards straight past the authentication the bastion
+exists to enforce.
 
 `set_vpn` is the same shape one step further out, and gated on `vpnControl` rather than
 `sshTunnel`. It can start or stop a VPN profile the user has already defined; it cannot create one
@@ -189,6 +206,47 @@ prints before exiting non-zero. The body goes through `redactOutput` with the co
 token as a known secret, which is close to free and worth very little: that token never reaches a
 runner, so a job leaking `$CI_JOB_TOKEN` is leaking the *platform's* credential, which OpsMaxx has
 never seen and cannot enumerate. Only the pattern layer applies, and it is not exhaustive.
+
+### Managing connections
+
+`add_server`, `update_server` and `remove_server` share the `manageServers` capability, and
+`test_connection` needs only `viewServer`. None of them touches the machine at the far end — they
+edit OpsMaxx's own records.
+
+The capability used to mean only "add", and adding was all it could do. That made the bridge a
+one-way ratchet: an agent that wrote a wrong entry could not correct or withdraw it, so every
+mistake became manual cleanup and the rational move was to stop using `add_server` at all. Two
+consequences of closing that are deliberate and are not left to the capability's plain reading:
+
+- **Removing always asks**, on every group, including one raised to ALLOW
+  (`evaluateServerRemove`, `policyEngine.ts`). An administrator who set this to ALLOW meant "add
+  servers without asking me"; that cannot be read as consent to delete them, and an upgrade must
+  not turn the first into the second in silence.
+- **One approval is one write.** `add_server`, `update_server` and `remove_server` are all marked
+  per-call, so an approval authorises the call in front of the user and never the next one.
+  Without that, `add_server` — which has no server id yet and so shares one elevation key across
+  every add in a session — approved the first write and then wrote every one after it silently.
+
+**Jump hosts.** `jumpHosts` names servers that already exist, by friendly name, in dial order.
+Each hop authenticates with that saved server's own stored credential, so no credential is passed
+for it, and an agent cannot describe a bastion OpsMaxx has not been told about — it never sees an
+address to type. Without this, an estate reachable only through a bastion could not be onboarded
+over the bridge at all: every entry dialled direct, timed out at TCP, and was still reported as
+added.
+
+**Verification.** `verify: true` dials the new entry once, through its jump chain and VPN, and
+reports whether it came up. It runs after the write, because the credential only reaches the
+keychain once the renderer has stored it. A failure is a **warning, not a rollback** — a saved
+connection to a host that is down, or behind a VPN that is not up, is a correct record of a real
+machine, and deleting it would also throw away the approval the user just gave.
+
+**Duplicates.** `list_servers` with `dedup: true` returns an opaque identity per server: equal
+tokens mean the same host, port and account. It is an HMAC keyed on the session's own secret, so
+it discloses nothing, cannot be turned back into an address, and differs in every session — it
+answers "is this box already registered" for as long as the task asking it, and is meaningless to
+anyone reading it later. It exists because the honest alternative people actually used was to SSH
+into every saved server and run `hostname`, which is a far larger disclosure, needs `terminal`,
+and is worse for privacy than the non-secret metadata it was avoiding.
 
 ### `add_server`
 

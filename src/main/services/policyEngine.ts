@@ -618,6 +618,45 @@ export function evaluateTunnelOpen(group: AccessGroup | null): Decision {
     : tunnel
 }
 
+// Defining a tunnel is not the safer half of set_tunnel.
+//
+// Opening one binds a port; WRITING one decides where that port goes, and it
+// survives the session that created it -- the next person to press Start in the
+// Tunnels view starts whatever an agent wrote there. A `remote` forward is the
+// sharp end: it listens ON THE SERVER, so a non-loopback listen address
+// publishes the port to that server's whole network. So this is never silent
+// either, and the tool grades a non-loopback remote forward higher again.
+export function evaluateTunnelDefine(group: AccessGroup | null): Decision {
+  if (!group) return { decision: 'deny', reason: 'No AI access is assigned to this workspace.' }
+  const tunnel = evaluateCapability(group, 'sshTunnel')
+  if (tunnel.decision === 'deny') return { decision: 'deny', reason: 'SSH tunnels are denied for this access group.' }
+  return tunnel.decision === 'allow'
+    ? { decision: 'ask', reason: 'Defining or removing a tunnel always requires approval.' }
+    : tunnel
+}
+
+// Deleting a saved connection rides `manageServers`, the capability that until
+// now only added them.
+//
+// That widening is the reason this exists. A group an administrator set to
+// ALLOW meant "add servers without asking me"; it cannot be read as consent to
+// delete them, and an upgrade must never turn the first into the second in
+// silence. So an `allow` is upgraded to `ask` here -- the same treatment
+// `evaluateTunnelOpen` and `evaluateVpnControl` give the acts that are bigger
+// than the capability's plain reading.
+//
+// gate() carries the second half: remove_server is marked per-call, so one
+// approval authorises one deletion and never the next.
+export function evaluateServerRemove(group: AccessGroup | null): Decision {
+  if (!group) return { decision: 'deny', reason: 'No AI access is assigned to this workspace.' }
+  const manage = evaluateCapability(group, 'manageServers')
+  if (manage.decision === 'deny')
+    return { decision: 'deny', reason: 'Managing servers is denied for this access group.' }
+  return manage.decision === 'allow'
+    ? { decision: 'ask', reason: 'Deleting a saved connection always requires approval.' }
+    : manage
+}
+
 // VPN kinds an AI agent may never run, whatever access group governs it.
 //
 // The same treatment as UNRESTRICTED_SHELL_PATTERNS above, for the same reason.

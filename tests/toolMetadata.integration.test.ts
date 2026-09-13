@@ -138,6 +138,10 @@ describe('tool metadata', () => {
       'list_runs',
       'query_database',
       'rerun_run',
+      // Dials a real host and hangs up. It runs nothing and returns nothing
+      // from the far end, but whether the connection comes up is a fact about
+      // the outside world and not about OpsMaxx's own configuration.
+      'test_connection',
       'trigger_run'
     ])
   })

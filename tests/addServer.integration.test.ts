@@ -13,7 +13,7 @@ import {
   setAgentServerCreator,
   type AgentServerRequest,
   type AgentServerResult
-} from '../src/main/services/agentServerCreate'
+} from '../src/main/services/agentConfigWrite'
 
 const PORT = 58735
 const PASSWORD = 'hunter2-do-not-log-me'

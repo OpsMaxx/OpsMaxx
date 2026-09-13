@@ -1,5 +1,5 @@
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { randomUUID } from 'node:crypto'
+import { createHmac, randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { app } from 'electron'
 import { z } from 'zod'
@@ -33,6 +33,7 @@ import {
   listCachedVpns,
   listCachedCicdConnections,
   serverToSshConfig,
+  type CachedServer,
   type CachedDatabase,
   type CachedTunnel,
   type CachedVpn,
@@ -47,6 +48,8 @@ import {
   evaluateFilePath,
   evaluateDatabaseStatement,
   evaluateTunnelOpen,
+  evaluateTunnelDefine,
+  evaluateServerRemove,
   evaluateVpnControl,
   evaluateCiTrigger,
   isVpnKindRefusedForAi,
@@ -65,10 +68,12 @@ import { knownSecretValuesForServer, resolveChainSecrets, resolveDbSecrets } fro
 import { DockerReader } from './docker'
 import { buildDockerActionCommand, buildDockerLogsCommand } from '../../shared/docker'
 import type { DockerContainer } from '../../shared/docker'
-import { sshExec } from './ssh'
+import { sshExec, sshTest } from './ssh'
+import { preparedSshTarget } from './vpn/transport'
+import { classifyConnectionError, agentFaultSentence } from '../../shared/connectionError'
 import { dbQuery } from './db'
 import { tunnelStart, tunnelStop, tunnelList } from './tunnel'
-import { parseEndpoint } from '../../shared/tunnel'
+import { parseEndpoint, TUNNEL_DEFAULT_LISTEN } from '../../shared/tunnel'
 import {
   isVpnManagerReady,
   startVpn,
@@ -86,7 +91,12 @@ import {
   forgetAgentRun as cicdForgetAgentRun
 } from './cicd/wiring'
 import type { CicdAdapter, CicdConnection, CicdOutcome, CicdRun, CicdTriggerResult } from '../../shared/cicd'
-import { createServerForAgent } from './agentServerCreate'
+import {
+  createServerForAgent,
+  writeConfigForAgent,
+  type AgentHop,
+  type AgentServerPatch
+} from './agentConfigWrite'
 import { sftpConnect, sftpList, sftpRead, sftpWrite, sftpDisconnect } from './sftp'
 import { metricsSample } from './metrics'
 import { HostFactsReader } from './hostFacts'
@@ -210,6 +220,166 @@ function resolveServerOrError(
     return { error: errorText(formatAmbiguity(result.matches)) }
   }
   return { match: result.match }
+}
+
+/**
+ * A stable, opaque handle for "which machine is this entry".
+ *
+ * The problem it solves, from the field: an agent cannot tell whether a server
+ * is already registered, because the bridge deliberately discloses no hostname.
+ * The workaround people actually used was to SSH into every saved server and
+ * run `hostname` -- which is a far larger disclosure, and needs `terminal`, to
+ * answer a question that should need nothing.
+ *
+ * So: equal tokens mean equal host, port and user. The token itself says
+ * nothing. It is an HMAC, not a hash, and the key is the session's own
+ * `tokenHash` -- a value that already exists, is already 256 bits of secret,
+ * and is already persisted with the session, so this needs no new field, no new
+ * file and no migration.
+ *
+ * KEYING IT PER SESSION IS THE POINT, not a limitation. A per-install salt
+ * would make these values correlatable forever: the same token in two logs a
+ * month apart would confirm two agents met the same machine. Per session, the
+ * value answers the duplicate question for exactly as long as the onboarding
+ * task that asked it, and is meaningless to anyone reading it afterwards.
+ *
+ * Host and username are case-folded and trimmed first, because `Root@HOST` and
+ * `root@host` are one machine and an agent comparing them must be told so.
+ */
+function dedupToken(session: McpAgentSession, server: CachedServer): string {
+  return createHmac('sha256', session.tokenHash)
+    .update(`${server.host.trim().toLowerCase()}\u0000${server.port}\u0000${server.username.trim().toLowerCase()}`)
+    .digest('hex')
+    .slice(0, 12)
+}
+
+/**
+ * Friendly names -> a jump chain of saved servers.
+ *
+ * An agent never sees a hostname, so it cannot name a bastion by address even
+ * if it wanted to; a hop is therefore always a reference to something already
+ * saved, and it authenticates with THAT server's stored credential. Nothing
+ * here carries a secret, and nothing here lets an agent describe a machine
+ * OpsMaxx has not been told about.
+ */
+function resolveJumpHosts(
+  session: McpAgentSession,
+  names: string[] | undefined,
+  targetServerId: string | null
+): { hops: AgentHop[] } | { error: CallToolResult } {
+  if (!names || names.length === 0) return { hops: [] }
+  const hops: AgentHop[] = []
+  const seen = new Set<string>()
+  for (const name of names) {
+    const resolved = resolveServerOrError(session, name)
+    if ('error' in resolved) return resolved
+    const hop = resolved.match.server
+    // Refused rather than silently dropped: a chain missing a hop dials
+    // somewhere the caller did not ask for.
+    if (hop.id === targetServerId)
+      return { error: errorText(`"${hop.name}" cannot be its own jump host.`) }
+    if (seen.has(hop.id))
+      return { error: errorText(`"${hop.name}" is listed twice in the same jump chain.`) }
+    // A hop the session may not see would confirm, by resolving, that a server
+    // it was never shown exists -- and would then be dialled on its behalf.
+    if (effectiveCapability(session, hop.id, 'viewServer').decision === 'deny')
+      return { error: errorText(`No server matching "${name}" is available to this session.`) }
+    seen.add(hop.id)
+    hops.push({
+      serverId: hop.id,
+      label: hop.name,
+      host: hop.host,
+      port: hop.port,
+      username: hop.username,
+      auth: hop.auth,
+    })
+  }
+  return { hops }
+}
+
+/**
+ * Which saved servers are reached THROUGH this one, at any depth.
+ *
+ * The dependency graph under src/shared already answers this, better, and this
+ * deliberately does not import it: that module is named in
+ * tests/jobsNotExposed.test.ts as one the MCP bridge may not reach, because it
+ * is the graph the patch runner consults to decide what a reboot takes down,
+ * and the assertion there says in as many words to move a helper rather than
+ * the boundary. So this reads the same fact off the cache the bridge has.
+ *
+ * TRANSITIVE, like the module it echoes. A bastion in front of a bastion guards
+ * everything behind both, and an operator told about two machines when five go
+ * dark has been told something worse than nothing.
+ *
+ * Matches a hop by saved reference AND by address, because two saved records
+ * can be one machine and a hop that names no server is invisible to a
+ * reference-only walk. What it still cannot see is a hop whose address matches
+ * nothing saved -- `unmatchedHops` below counts those, and the sentence says so
+ * rather than letting "none found" read as "safe".
+ */
+function serversBehind(serverId: string): { names: string[]; unmatchedHops: number } {
+  const all = listCachedServers()
+  const addressOf = (host: string | undefined, port: number | undefined): string =>
+    `${(host ?? '').trim().toLowerCase()}:${port ?? 22}`
+  const byAddress = new Map<string, string>()
+  for (const s of all) byAddress.set(addressOf(s.host, s.port), s.id)
+
+  const hopTargets = (s: CachedServer): string[] =>
+    (s.route ?? [])
+      .map((h) => h.serverId ?? byAddress.get(addressOf(h.host, h.port)))
+      .filter((id): id is string => typeof id === 'string')
+
+  let unmatched = 0
+  for (const s of all)
+    for (const h of s.route ?? [])
+      if (!h.serverId && !byAddress.has(addressOf(h.host, h.port))) unmatched += 1
+
+  const found = new Set<string>()
+  let frontier = [serverId]
+  // Bounded as well as visited-checked. A route loop is a mistake somebody
+  // made, and it must not become a walk that never returns.
+  for (let depth = 0; depth < all.length + 1 && frontier.length > 0; depth += 1) {
+    const next: string[] = []
+    for (const s of all)
+      if (hopTargets(s).some((id) => frontier.includes(id)) && !found.has(s.id) && s.id !== serverId) {
+        found.add(s.id)
+        next.push(s.id)
+      }
+    frontier = next
+  }
+  return { names: all.filter((s) => found.has(s.id)).map((s) => s.name), unmatchedHops: unmatched }
+}
+
+/** The jump chain as the audit entry and the approval dialog should read it.
+ *  Names, never addresses -- this string is persisted. */
+function routeSuffix(hops: AgentHop[]): string {
+  return hops.length === 0 ? '' : `, through ${hops.map((h) => h.label).join(' then ')}`
+}
+
+/**
+ * Dial the server and hang up, and say what happened in a sentence with no
+ * address in it.
+ *
+ * `sshTest` opens the real chain -- every hop, the VPN, the stored credentials
+ * -- and closes it; it runs no command and reads nothing. What it returns on
+ * failure is the driver's own text, which routinely contains the host
+ * (`connect ECONNREFUSED 10.21.15.7:22`). That text never leaves this function:
+ * it is classified and discarded, and the sentence is written from the fault.
+ */
+async function probeServer(server: CachedServer): Promise<{ ok: boolean; reason: string }> {
+  const result = await sshTest(preparedSshTarget(serverToSshConfig(server)))
+  if (result.ok) return { ok: true, reason: '' }
+  // Its own outcome rather than a generic failure, because it is the one
+  // failure nothing on this bridge can fix: OpsMaxx will not record trust for
+  // a host key on an agent's say-so, and it should not.
+  if (classifyConnectionError(result.error) === 'host-key')
+    return {
+      ok: false,
+      reason:
+        'the host key does not match the one saved for this server. OpsMaxx will not accept a host ' +
+        'key on an agent’s behalf — open this server in OpsMaxx once and accept it there'
+    }
+  return { ok: false, reason: agentFaultSentence(result.error) }
 }
 
 // The server/workspace assignment (Phase 4) decides which group governs a
@@ -478,6 +648,26 @@ interface GateSubject {
    * starts, both refuse the cancel that would stop them.
    */
   containment?: boolean
+  /**
+   * One approval authorises THIS call and nothing after it.
+   *
+   * `sessionElevations` keys on session + serverId + capability, which is the
+   * right grain for "may this agent read files on this host" and the wrong one
+   * for two different kinds of tool.
+   *
+   * `remove_server` is the obvious case: it shares `manageServers` with
+   * add_server, so keying the exemption on the capability -- the way ciTrigger
+   * does -- would have made every add per-call too.
+   *
+   * `add_server` is the case that was already broken. It has no server id yet,
+   * so it passes the literal string 'pending-new-server', and EVERY add in a
+   * session therefore shared one cache key: approve the first, and the second,
+   * third and fourth were auto-approved and audited as `approved-earlier`. An
+   * elevation is a statement about a known host; for a tool whose subject does
+   * not exist yet it silently turned one approval into unlimited writes to the
+   * connection list.
+   */
+  perCall?: boolean
 }
 
 /**
@@ -599,7 +789,7 @@ async function gate(
     // because an `allow` never reaches this branch at all -- it falls past both
     // of gate()'s tests to `return { ok: true }` and would make this exclusion
     // dead code on exactly the configuration it was written for.
-    const perCall = ctx.capability === 'ciTrigger'
+    const perCall = ctx.capability === 'ciTrigger' || subject.perCall === true
     const key = elevationKey(ctx.session.id, ctx.serverId, ctx.capability)
     if (!perCall && sessionElevations.has(key)) {
       recordAudit({
@@ -750,6 +940,13 @@ Addressing
   OpsMaxx resolves the name and authenticates against the provider on your behalf.
 - Saved databases are a THIRD name space, addressed by the friendly name list_databases
   returns. You never see a host, port or credential for one.
+- A JUMP HOST is named the same way. add_server and update_server take jumpHosts as friendly
+  names of servers that already exist, and each hop authenticates with that server's own stored
+  credential. You cannot describe a bastion OpsMaxx has not been told about, and you do not
+  need to: if a machine is only reachable through another, name that other one.
+- list_servers can return an opaque identity token per server (dedup: true). Equal tokens mean
+  the same host, port and account. It is the only way to tell whether a machine is already
+  registered — do not SSH into servers to compare hostnames.
 
 Choosing a tool
 - Prefer the specific tool over execute_command: read_file over \`cat\`, list_files over \`ls\`,
@@ -764,6 +961,11 @@ Choosing a tool
 - Read pipeline state with list_pipelines, list_runs and get_run before reaching for
   get_run_logs: the logs are large, and the status, timing and step list usually answer the
   question on their own.
+- To reach a machine that sits behind another, give it a jumpHosts entry naming the one in
+  front. Do not build a forward for this: a jump is authenticated at every hop and binds no
+  port, while create_tunnel leaves a listener behind that outlives your session.
+- Before adding a server, call list_servers with dedup: true and compare identity tokens. An
+  entry that is already there should be corrected with update_server, not added a second time.
 
 Permissions
 - Every call is checked against an access group. A call may return "Denied", or block while the
@@ -778,6 +980,9 @@ Not available
 - Running jobs, defining rules, a shell on the OpsMaxx machine itself, reading the vault, and
   restoring a backup are not on this bridge at any permission setting. describe_capabilities
   says the same, and is the authority on what this session may actually do.
+- No tool creates, edits or deletes a VPN profile. A VPN decides which network everything after
+  it travels over, so you may start or stop one the user wrote and you can never author one.
+  There is no add_vpn or edit_vpn to look for.
 - No tool creates, edits or deletes a CI/CD connection. You cannot change where one points, what
   credential it uses, or add one of your own — a human does that in OpsMaxx. There is no
   add_ci_connection to look for.
@@ -1445,9 +1650,21 @@ function buildServer(): McpServer {
         'every other tool addresses a server by one of these names, and no other identifier — not a hostname, ' +
         'an IP or a connection string — will resolve. A server the user has not granted AI access to does not ' +
         'appear here.',
+      inputSchema: {
+        dedup: z
+          .boolean()
+          .optional()
+          .describe(
+            'Also return an opaque identity token for each server. Two servers with the same token ' +
+              'are the same host, port and account — use it to tell whether a machine is already ' +
+              'registered before adding it again. The token itself discloses nothing, cannot be ' +
+              'turned back into an address, and is different in every session, so do not store it ' +
+              'or compare it against one from another session.'
+          )
+      },
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false }
     },
-    async (extra) => {
+    async ({ dedup }, extra) => {
       const auth = authenticateExtra(extra)
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
       const { session } = auth
@@ -1460,19 +1677,25 @@ function buildServer(): McpServer {
       if (servers.length === 0) {
         return text(`${header}\n\nNo servers are available to AI access in this session's workspace(s).`)
       }
+      // The token is appended, never substituted: the NAME is the address in
+      // this bridge and a line that led with an opaque id would invite an agent
+      // to try using it as one.
+      const label = (s: CachedServer): string =>
+        dedup ? `- ${s.name}  [id ${dedupToken(session, s)}]` : `- ${s.name}`
+      const note = dedup
+        ? '\n\nServers sharing an [id] are the same host, port and account. The id is opaque and only meaningful within this session.'
+        : ''
       if (workspaceNames.length === 1) {
-        const lines = servers.map((s) => `- ${s.name}`)
-        return text(`${header}\n\nServers:\n${lines.join('\n')}`)
+        const lines = servers.map(label)
+        return text(`${header}\n\nServers:\n${lines.join('\n')}${note}`)
       }
       const byWorkspace = new Map<string, string[]>()
       for (const s of servers) {
         const wsName = getCachedWorkspace(s.workspaceId)?.name ?? s.workspaceId
-        byWorkspace.set(wsName, [...(byWorkspace.get(wsName) ?? []), s.name])
+        byWorkspace.set(wsName, [...(byWorkspace.get(wsName) ?? []), label(s)])
       }
-      const groups = [...byWorkspace.entries()].map(
-        ([wsName, names]) => `${wsName}:\n${names.map((n) => `- ${n}`).join('\n')}`
-      )
-      return text(`${header}\n\nServers:\n${groups.join('\n\n')}`)
+      const groups = [...byWorkspace.entries()].map(([wsName, lines]) => `${wsName}:\n${lines.join('\n')}`)
+      return text(`${header}\n\nServers:\n${groups.join('\n\n')}${note}`)
     }
   )
 
@@ -1508,6 +1731,10 @@ function buildServer(): McpServer {
           `Workspace: ${workspace.name}`,
           `Server: ${s.name}`,
           `OS: ${s.os}`,
+          // The same opaque identity list_servers can return, so an agent that
+          // already has a name can check "is this the same box as that one"
+          // without listing everything again.
+          `Identity: ${dedupToken(auth.session, s)} (opaque; equal identities mean the same host, port and account)`,
           `Access group: ${serverGroup?.name ?? 'No AI Access'}`,
           `Effective permissions for this session:\n${caps}`
         ].join('\n')
@@ -2232,7 +2459,20 @@ function buildServer(): McpServer {
     async (extra) => {
       const auth = authenticateExtra(extra)
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
-      const tunnels = listCachedTunnels(auth.session.workspaces.map((w) => w.id))
+      const { session } = auth
+      // This checked nothing but the bearer token until now, while the
+      // documentation said it was gated on sshTunnel -- and a listing here
+      // discloses real addresses, `listen -> target`, which is more than most
+      // tools on this bridge will say. The doc described the intended design;
+      // this makes it true rather than correcting it downwards.
+      //
+      // Denied per workspace rather than as a whole: a session spanning two
+      // workspaces should still see the one it is permitted.
+      const tunnels = listCachedTunnels(
+        session.workspaces
+          .map((w) => w.id)
+          .filter((id) => effectiveWorkspaceCapability(session, id, 'sshTunnel').decision !== 'deny')
+      )
       if (tunnels.length === 0) return text('No tunnels are configured in this session\'s workspaces.')
       const live = new Map(tunnelList().map((t) => [t.id, t]))
       return text(
@@ -2556,6 +2796,26 @@ function buildServer(): McpServer {
         keyPath: z.string().optional().describe('Absolute path to a private key file, when auth is "key"'),
         passphrase: z.string().optional().describe('Passphrase for the private key, if it has one'),
         os: z.string().optional().describe('Operating system label, default "Linux"'),
+        jumpHosts: z
+          .array(z.string())
+          .optional()
+          .describe(
+            'Reach this server through these saved servers, in order — the first is dialled first, ' +
+              'and the new server is reached from the last. Each entry is a friendly name exactly as ' +
+              'returned by list_servers; a hostname or IP will not resolve. Each hop authenticates ' +
+              'with that saved server\u2019s own stored credential, so no credential is needed here. ' +
+              'Use this for anything behind a bastion: without it the connection is dialled directly ' +
+              'and will fail at TCP.'
+          ),
+        verify: z
+          .boolean()
+          .optional()
+          .describe(
+            'Dial the server once after adding it and report whether the connection came up. ' +
+              'Pass true when onboarding — otherwise a server that cannot be reached is still ' +
+              'reported as added, and the failure only surfaces on some later call. The entry is ' +
+              'kept either way; a failure comes back as a warning, not an error.'
+          ),
         intent: INTENT_PARAM
       }
     },
@@ -2594,6 +2854,13 @@ function buildServer(): McpServer {
 
       const port = args.port ?? 22
       const username = args.username?.trim() || 'root'
+
+      // Resolved BEFORE the approval, so the dialog can name the bastion. A
+      // person asked to approve "add a server" is owed the fact that it will be
+      // reached through one of their existing machines, and which.
+      const jump = resolveJumpHosts(session, args.jumpHosts, null)
+      if ('error' in jump) return jump.error
+
       const ctx: AuditContext = {
         session,
         workspaceId: workspace.id,
@@ -2606,7 +2873,7 @@ function buildServer(): McpServer {
         // string is persisted to the audit log and shown in a dialog.
         action: `Add server "${name}" (${username}@${args.host}:${port}, auth: ${method}${
           method === 'agent' ? '' : ', credential supplied by the agent'
-        })`,
+        }${routeSuffix(jump.hops)})`,
         capability: 'manageServers'
       }
 
@@ -2618,7 +2885,12 @@ function buildServer(): McpServer {
           toolName: 'add_server',
           level: 'high',
           because: 'it writes to OpsMaxx\u2019s own connection list and stores a credential there',
-          intent: args.intent
+          intent: args.intent,
+          // One approval, one server. Without this every add in a session
+          // shares the 'pending-new-server' elevation key above and the second
+          // onwards are approved by the first -- which is how four unwanted
+          // connections get written after one dialog.
+          perCall: true
         },
         extra
       )
@@ -2634,7 +2906,8 @@ function buildServer(): McpServer {
         password: args.password,
         keyPath: args.keyPath,
         passphrase: args.passphrase,
-        os: args.os
+        os: args.os,
+        route: jump.hops
       })
       if (!result.ok) {
         recordAudit({
@@ -2647,10 +2920,566 @@ function buildServer(): McpServer {
       }
 
       auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
-      return text(
+      const base =
         `Added "${name}" to ${workspace.name}. Refer to it by that name in other tools. ` +
-          `Its credential is in the OS keychain and cannot be read back through this bridge.`
+        `Its credential is in the OS keychain and cannot be read back through this bridge.`
+      if (!args.verify) return text(base)
+
+      // AFTER the write, and it has to be: the credential only reaches the
+      // keychain once the renderer has stored it, so there is nothing to dial
+      // with beforehand.
+      //
+      // A failure does NOT undo the add. The renderer already rolls back the
+      // one failure where a half-record is useless -- the keychain refusing the
+      // credential -- and this is a different thing: a saved connection to a
+      // host that is down, or behind a VPN that is not up, is a correct record
+      // of a real machine. Deleting it would also throw away an approval the
+      // user has just given, and make them grant it again to retry.
+      const created = result.serverId ? getCachedServer(result.serverId) : null
+      if (!created)
+        return text(
+          `${base}\n\nIt could not be verified: OpsMaxx has not finished saving it yet. ` +
+            `Use test_connection to check it.`
+        )
+      const probe = await probeServer(created)
+      return text(
+        probe.ok
+          ? `${base}\n\nVerified: the connection came up.`
+          : `${base}\n\nWarning: the connection did not come up — ${probe.reason}. The entry was ` +
+              `kept. Fix it with update_server, or check it again with test_connection.`
       )
+    }
+  )
+
+
+  // ------------------------------------- changing and removing a connection
+  //
+  // add_server shipped alone, and add-only turned out to be the wrong shape: an
+  // agent that writes a wrong entry cannot fix it or take it back, so every
+  // mistake becomes manual cleanup in the UI and the rational move is to stop
+  // using add_server at all. These two close that loop. Neither touches the
+  // machine at the other end -- they edit OpsMaxx's own records.
+  server.registerTool(
+    'update_server',
+    {
+      title: 'Change a server',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      description:
+        'Changes a saved connection: where it points, which account and credential it uses, which ' +
+        'saved servers it jumps through, or its name. Use this to correct an entry rather than ' +
+        'removing and re-adding it — the entry keeps its identity, so anything referring to it ' +
+        'keeps working. Only the fields you pass are changed; everything else is left alone. ' +
+        'Requires the manageServers capability.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        name: z.string().optional().describe('A new friendly name. Must not collide with another server.'),
+        host: z.string().optional().describe('New hostname or IP address'),
+        port: z.number().int().min(1).max(65535).optional().describe('New SSH port'),
+        username: z.string().optional().describe('New SSH username'),
+        auth: z
+          .enum(['password', 'key', 'agent'])
+          .optional()
+          .describe('New authentication method. Pass the matching credential field with it.'),
+        password: z.string().optional().describe('New password, when auth is "password"'),
+        keyPath: z.string().optional().describe('New absolute path to a private key file, when auth is "key"'),
+        passphrase: z.string().optional().describe('New passphrase for the private key, if it has one'),
+        os: z.string().optional().describe('New operating system label'),
+        jumpHosts: z
+          .array(z.string())
+          .optional()
+          .describe(
+            'Replace the jump chain with these saved servers, in order, named exactly as ' +
+              'list_servers returns them. Pass an empty array to remove the jump chain and dial ' +
+              'directly. Omit it to leave the existing chain untouched.'
+          ),
+        verify: z
+          .boolean()
+          .optional()
+          .describe('Dial the server after the change and report whether the connection came up.'),
+        intent: INTENT_PARAM
+      }
+    },
+    async (args, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const { session } = auth
+      const resolved = resolveServerOrError(session, args.serverName)
+      if ('error' in resolved) return resolved.error
+      const { server: target, workspace } = resolved.match
+
+      const changes: string[] = []
+      const patch: AgentServerPatch = {}
+
+      if (args.name !== undefined) {
+        const next = args.name.trim()
+        if (!next) return errorText('A server name cannot be empty.')
+        // Every other tool addresses servers by name, so a collision would make
+        // one of the two unreachable through this bridge.
+        if (
+          listCachedServers([target.workspaceId]).some(
+            (s) => s.id !== target.id && s.name.toLowerCase() === next.toLowerCase()
+          )
+        )
+          return errorText(`A server named "${next}" already exists in ${workspace.name}.`)
+        patch.name = next
+        changes.push(`name to "${next}"`)
+      }
+      if (args.host !== undefined) {
+        patch.host = args.host.trim()
+        changes.push('host')
+      }
+      if (args.port !== undefined) {
+        patch.port = args.port
+        changes.push(`port to ${args.port}`)
+      }
+      if (args.username !== undefined) {
+        patch.username = args.username.trim() || 'root'
+        changes.push(`user to ${patch.username}`)
+      }
+      if (args.os !== undefined) patch.os = args.os
+
+      if (args.auth !== undefined) {
+        if (args.auth === 'password' && !args.password) return errorText('auth "password" requires a password.')
+        if (args.auth === 'key' && !args.keyPath) return errorText('auth "key" requires keyPath.')
+        patch.auth = args.auth
+        changes.push(`auth to ${args.auth}`)
+      }
+      // Only when one was actually sent. An update that changes a port must not
+      // quietly wipe the key the connection has been authenticating with.
+      if (args.password !== undefined) patch.password = args.password
+      if (args.keyPath !== undefined) patch.keyPath = args.keyPath
+      if (args.passphrase !== undefined) patch.passphrase = args.passphrase
+      if (args.password !== undefined || args.keyPath !== undefined) changes.push('credential')
+
+      if (args.jumpHosts !== undefined) {
+        const jump = resolveJumpHosts(session, args.jumpHosts, target.id)
+        if ('error' in jump) return jump.error
+        patch.route = jump.hops
+        changes.push(jump.hops.length === 0 ? 'jump chain removed' : `jump chain to ${jump.hops.map((h) => h.label).join(' then ')}`)
+      }
+
+      if (changes.length === 0) return errorText('Nothing to change — pass at least one field to update.')
+
+      const ctx: AuditContext = {
+        session,
+        workspaceId: target.workspaceId,
+        workspaceName: workspace.name,
+        serverId: target.id,
+        serverName: target.name,
+        // Names what moves, never the credential itself.
+        action: `Change server "${target.name}" (${changes.join(', ')})`,
+        capability: 'manageServers'
+      }
+      const check = effectiveWorkspaceCapability(session, target.workspaceId, 'manageServers')
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'update_server',
+          level: 'high',
+          because:
+            'it rewrites a saved connection, and later calls that name it go wherever it now points',
+          intent: args.intent,
+          perCall: true
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      const result = await writeConfigForAgent({ kind: 'server.update', serverId: target.id, patch })
+      if (!result.ok) {
+        recordAudit({
+          ...auditBase(ctx),
+          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          result: 'error',
+          error: result.error ?? 'unknown error'
+        })
+        return errorText(`Could not change the server: ${result.error ?? 'unknown error'}`)
+      }
+      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+
+      const finalName = patch.name ?? target.name
+      const base = `Changed "${target.name}": ${changes.join(', ')}.`
+      if (!args.verify) return text(base)
+      const after = getCachedServer(target.id)
+      if (!after) return text(`${base}\n\nIt could not be verified: OpsMaxx has not finished saving it yet.`)
+      const probe = await probeServer(after)
+      return text(
+        probe.ok
+          ? `${base}\n\nVerified: the connection came up.`
+          : `${base}\n\nWarning: the connection did not come up — ${probe.reason}. "${finalName}" was still changed.`
+      )
+    }
+  )
+
+  server.registerTool(
+    'remove_server',
+    {
+      title: 'Remove a server',
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+      description:
+        'Deletes a saved connection from OpsMaxx, along with the credential stored for it. It does ' +
+        'not touch the machine itself. OpsMaxx keeps no copy, so this cannot be undone from here — ' +
+        'prefer update_server when an entry is wrong rather than absent. Requires the manageServers ' +
+        'capability, and always asks the user, whatever the access group says.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        intent: INTENT_PARAM
+      }
+    },
+    async (args, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const { session } = auth
+      const resolved = resolveServerOrError(session, args.serverName)
+      if ('error' in resolved) return resolved.error
+      const { server: target, workspace } = resolved.match
+
+      // What goes dark. This server may be the way in to others, and the person
+      // approving is the only one who can weigh that -- so it is worked out
+      // before the prompt and put into the sentence they read.
+      const behind = serversBehind(target.id)
+      const blindSpot =
+        behind.unmatchedHops > 0
+          ? ` ${behind.unmatchedHops} jump hop(s) in this workspace name no saved server, so this list cannot see what is behind those.`
+          : ''
+      const goesDark =
+        behind.names.length > 0
+          ? `${target.name} is the way in to ${behind.names.length} other saved server(s): ${behind.names.join(', ')}. ` +
+            `Removing it does not stop them working, but nothing here will be able to reach them through it again.${blindSpot}`
+          : null
+
+      const ctx: AuditContext = {
+        session,
+        workspaceId: target.workspaceId,
+        workspaceName: workspace.name,
+        serverId: target.id,
+        serverName: target.name,
+        action: `Remove server "${target.name}" from ${workspace.name}`,
+        capability: 'manageServers'
+      }
+
+      // evaluateServerRemove, not the plain capability: an `allow` meant "add
+      // without asking me" and cannot be read as consent to delete.
+      const sessionGroup = sessionGroupFor(session)
+      const found = resolveRestriction(listAssignments(), target.id, target.workspaceId)
+      const scopeGroup = found.kind === 'group' ? getGroup(found.groupId) : null
+      const check =
+        found.kind === 'no-ai-access'
+          ? NO_AI_ACCESS
+          : sessionGroup
+            ? withRestriction(
+                evaluateServerRemove(sessionGroup),
+                scopeGroup ? evaluateServerRemove(scopeGroup) : null,
+                `the server's own access group ("${scopeGroup?.name}")`
+              )
+            : { decision: 'deny' as const, reason: 'This AI session has no access group.' }
+
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'remove_server',
+          level: 'high',
+          because: goesDark
+            ? `it deletes a saved connection and its stored credential, and OpsMaxx keeps no copy to put back. ${goesDark}`
+            : `it deletes a saved connection and its stored credential, and OpsMaxx keeps no copy to put back.${blindSpot}`,
+          intent: args.intent,
+          // One approval deletes one server, never the next one.
+          perCall: true
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      const result = await writeConfigForAgent({ kind: 'server.remove', serverId: target.id })
+      if (!result.ok) {
+        recordAudit({
+          ...auditBase(ctx),
+          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          result: 'error',
+          error: result.error ?? 'unknown error'
+        })
+        return errorText(`Could not remove the server: ${result.error ?? 'unknown error'}`)
+      }
+      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      return text(
+        `Removed "${target.name}" from ${workspace.name}, and the credential stored for it.` +
+          (behind.names.length > 0
+            ? ` It was the way in to ${behind.names.length} other saved server(s); those entries still exist but may no longer connect.`
+            : '')
+      )
+    }
+  )
+
+  server.registerTool(
+    'test_connection',
+    {
+      title: 'Test a connection',
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+      description:
+        'Dials a saved server and hangs up, reporting whether the connection came up. It runs no ' +
+        'command, reads nothing and returns nothing from the host — it answers "is this entry ' +
+        'healthy" and only that, which is why it needs no terminal access. Use it to check an ' +
+        'entry before relying on it, and to tell "this server is misconfigured" apart from "this ' +
+        'server is down". The reason for a failure is reported as a category; no hostname, port or ' +
+        'username is disclosed.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        intent: INTENT_PARAM
+      }
+    },
+    async (args, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const { session } = auth
+      const resolved = resolveServerOrError(session, args.serverName)
+      if ('error' in resolved) return resolved.error
+      const { server: target, workspace } = resolved.match
+
+      const ctx: AuditContext = {
+        session,
+        workspaceId: target.workspaceId,
+        workspaceName: workspace.name,
+        serverId: target.id,
+        serverName: target.name,
+        action: `Test the connection to "${target.name}"`,
+        capability: 'viewServer'
+      }
+      // viewServer, not terminal. Opening the connection the user already
+      // configured, to a host they already saved, and closing it again is
+      // strictly less than running something on it -- and "is this entry
+      // healthy" must not require the ability to run things to answer.
+      const check = effectiveCapability(session, target.id, 'viewServer')
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'test_connection',
+          level: 'low',
+          because: 'it opens a connection to the server and immediately closes it, running nothing',
+          intent: args.intent
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      const probe = await probeServer(target)
+      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      return text(
+        probe.ok
+          ? `"${target.name}" is reachable and authentication succeeded.`
+          : `"${target.name}" did not connect — ${probe.reason}.`
+      )
+    }
+  )
+
+  server.registerTool(
+    'create_tunnel',
+    {
+      title: 'Define a tunnel',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      description:
+        'Saves a new tunnel in OpsMaxx, carried over one of the saved servers. It does NOT start ' +
+        'it — use set_tunnel for that, which takes its own approval. Prefer a jump host on the ' +
+        'server itself (add_server / update_server jumpHosts) when the goal is simply to reach a ' +
+        'machine behind a bastion: that is authenticated at every hop and needs no listening port. ' +
+        'Requires the sshTunnel capability and always asks the user.',
+      inputSchema: {
+        name: z.string().describe('Friendly name for the tunnel, e.g. "Postgres forward". Must be unique.'),
+        kind: z
+          .enum(['local', 'remote', 'socks'])
+          .describe(
+            'local: listens on this machine and forwards to a target reached from the server. ' +
+              'remote: listens ON THE SERVER and forwards back to this machine. ' +
+              'socks: a SOCKS5 proxy on this machine, tunnelled through the server.'
+          ),
+        serverName: z.string().describe('The saved server that carries the tunnel, named exactly as returned by list_servers'),
+        listen: z
+          .string()
+          .describe(
+            'Where it listens, as "host:port" or just a port. For a remote tunnel this address is ' +
+              'ON THE SERVER, and anything other than 127.0.0.1 publishes the port to that ' +
+              'server’s network. Defaults to 127.0.0.1 on the conventional port for the kind.'
+          )
+          .optional(),
+        target: z
+          .string()
+          .describe('Where it forwards to, as "host:port". Not used for a socks proxy.')
+          .optional(),
+        intent: INTENT_PARAM
+      }
+    },
+    async (args, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const { session } = auth
+      const resolved = resolveServerOrError(session, args.serverName)
+      if ('error' in resolved) return resolved.error
+      const { server: carrier, workspace } = resolved.match
+
+      const name = args.name.trim()
+      if (!name) return errorText('A tunnel name is required.')
+      if (listCachedTunnels([carrier.workspaceId]).some((t) => t.name.toLowerCase() === name.toLowerCase()))
+        return errorText(`A tunnel named "${name}" already exists in ${workspace.name}.`)
+
+      const listen = (args.listen ?? '').trim() || TUNNEL_DEFAULT_LISTEN[args.kind]
+      // parseEndpoint answers with port 0 rather than throwing, so an unchecked
+      // value would be saved as a tunnel that can never bind.
+      const listenAt = parseEndpoint(listen)
+      if (!listenAt.port) return errorText(`"${listen}" is not a valid listen address — use "host:port" or a port number.`)
+
+      let target = ''
+      if (args.kind !== 'socks') {
+        target = (args.target ?? '').trim()
+        if (!target) return errorText(`A ${args.kind} tunnel needs a target, as "host:port".`)
+        const targetAt = parseEndpoint(target)
+        if (!targetAt.port) return errorText(`"${target}" is not a valid target — use "host:port".`)
+      }
+
+      // A remote forward listens on the SERVER. Loopback there is what sshd
+      // allows without GatewayPorts and is the safe default; anything else
+      // publishes the port to that server's whole network, which is the one
+      // thing on this tool the approving person most needs to be told.
+      const published = args.kind === 'remote' && !/^(127\.|localhost$|::1$)/i.test(listenAt.host)
+
+      const ctx: AuditContext = {
+        session,
+        workspaceId: carrier.workspaceId,
+        workspaceName: workspace.name,
+        serverId: carrier.id,
+        serverName: name,
+        action: `Define tunnel "${name}" (${args.kind}, ${listen}${target ? ` -> ${target}` : ''}, over "${carrier.name}")`,
+        capability: 'sshTunnel'
+      }
+
+      const sessionGroup = sessionGroupFor(session)
+      const scopeGroupId = resolveGroupId(listAssignments(), '', carrier.workspaceId)
+      const scopeGroup = scopeGroupId ? getGroup(scopeGroupId) : null
+      const check = sessionGroup
+        ? withRestriction(
+            evaluateTunnelDefine(sessionGroup),
+            scopeGroup ? evaluateTunnelDefine(scopeGroup) : null,
+            `the workspace's access group ("${scopeGroup?.name}")`
+          )
+        : { decision: 'deny' as const, reason: 'This AI session has no access group.' }
+
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'create_tunnel',
+          level: published ? 'high' : 'medium',
+          because: published
+            ? `it writes a remote forward that listens on ${listenAt.host} ON THE SERVER, which publishes that port to the server’s own network`
+            : 'it writes a tunnel into OpsMaxx that outlives this session, and whoever presses Start next starts it',
+          intent: args.intent,
+          perCall: true
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      const result = await writeConfigForAgent({
+        kind: 'tunnel.add',
+        workspaceId: carrier.workspaceId,
+        name,
+        tunnelKind: args.kind,
+        serverId: carrier.id,
+        listen,
+        target
+      })
+      if (!result.ok) {
+        recordAudit({
+          ...auditBase(ctx),
+          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          result: 'error',
+          error: result.error ?? 'unknown error'
+        })
+        return errorText(`Could not define the tunnel: ${result.error ?? 'unknown error'}`)
+      }
+      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      return text(
+        `Defined "${name}" in ${workspace.name}. It is NOT running — start it with set_tunnel, ` +
+          `which asks the user separately.`
+      )
+    }
+  )
+
+  server.registerTool(
+    'delete_tunnel',
+    {
+      title: 'Delete a tunnel',
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+      description:
+        'Deletes a saved tunnel from OpsMaxx. If it is running it is stopped first, so anything ' +
+        'using it loses its connection. Requires the sshTunnel capability and always asks the user.',
+      inputSchema: {
+        tunnelName: z.string().describe('Friendly name exactly as returned by list_tunnels'),
+        intent: INTENT_PARAM
+      }
+    },
+    async (args, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const { session } = auth
+
+      const wanted = args.tunnelName.trim().toLowerCase()
+      const matches = listCachedTunnels(session.workspaces.map((w) => w.id)).filter(
+        (t) => t.name.toLowerCase() === wanted
+      )
+      if (matches.length === 0) return errorText(`No tunnel named "${args.tunnelName}" is available to this session.`)
+      if (matches.length > 1) return errorText(`"${args.tunnelName}" matches more than one tunnel.`)
+      const tunnel = matches[0]
+      const workspace = getCachedWorkspace(tunnel.workspaceId)
+
+      const ctx: AuditContext = {
+        session,
+        workspaceId: tunnel.workspaceId,
+        workspaceName: workspace?.name ?? '',
+        serverId: tunnel.id,
+        serverName: tunnel.name,
+        action: `Remove tunnel "${tunnel.name}" (${tunnel.listen}${tunnel.target ? ` -> ${tunnel.target}` : ''})`,
+        capability: 'sshTunnel'
+      }
+
+      const sessionGroup = sessionGroupFor(session)
+      const scopeGroupId = resolveGroupId(listAssignments(), '', tunnel.workspaceId)
+      const scopeGroup = scopeGroupId ? getGroup(scopeGroupId) : null
+      const check = sessionGroup
+        ? withRestriction(
+            evaluateTunnelDefine(sessionGroup),
+            scopeGroup ? evaluateTunnelDefine(scopeGroup) : null,
+            `the workspace's access group ("${scopeGroup?.name}")`
+          )
+        : { decision: 'deny' as const, reason: 'This AI session has no access group.' }
+
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'delete_tunnel',
+          level: 'medium',
+          because: 'it deletes a saved tunnel, and anything that expected that port loses it',
+          intent: args.intent,
+          perCall: true
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      const result = await writeConfigForAgent({ kind: 'tunnel.remove', tunnelId: tunnel.id })
+      if (!result.ok) {
+        recordAudit({
+          ...auditBase(ctx),
+          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          result: 'error',
+          error: result.error ?? 'unknown error'
+        })
+        return errorText(`Could not remove the tunnel: ${result.error ?? 'unknown error'}`)
+      }
+      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      return text(`Removed "${tunnel.name}".`)
     }
   )
 

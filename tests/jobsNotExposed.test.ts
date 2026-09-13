@@ -96,9 +96,25 @@ const ALLOWED_TOOLS = [
   'query_database',
   'list_tunnels',
   'set_tunnel',
+  // Defining and deleting a tunnel record. Both write to OpsMaxx's own
+  // configuration and neither starts anything: create_tunnel saves a tunnel
+  // and set_tunnel is still required, with its own approval, to run it.
+  'create_tunnel',
+  'delete_tunnel',
   'list_vpns',
   'set_vpn',
   'add_server',
+  // The other half of managing a connection, added after add-only turned out
+  // to be a one-way ratchet: an agent that wrote a wrong entry had no way to
+  // correct or withdraw it, so every mistake became manual cleanup. Neither
+  // reaches the machine at the far end -- they edit OpsMaxx's own records --
+  // and remove_server always asks, whatever the access group says.
+  'update_server',
+  'remove_server',
+  // Dials a saved server and hangs up. It runs no command and returns nothing
+  // from the host, which is why it sits on `viewServer` rather than `terminal`:
+  // "is this entry healthy" must not require the ability to run things.
+  'test_connection',
   // Reading the container list on one server. It opens no shell and runs no
   // container action — `containerControl` exists for that and has no tool
   // behind it. Gated on its own `containers` capability, denied on the Read

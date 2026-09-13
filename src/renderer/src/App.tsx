@@ -19,7 +19,7 @@ import { Settings } from './components/settings/Settings'
 import { VaultView } from './components/vault/VaultView'
 import { AiPanel } from './components/ai/AiPanel'
 import { ApprovalWatcher } from './components/ai/ApprovalWatcher'
-import { AgentServerWatcher } from './components/ai/AgentServerWatcher'
+import { AgentConfigWatcher } from './components/ai/AgentConfigWatcher'
 import { FleetWatcher } from './components/monitor/FleetWatcher'
 import { VaultUnlockModal } from './components/vault/VaultUnlockModal'
 import { OnboardingTour } from './components/onboarding/OnboardingTour'
@@ -123,7 +123,7 @@ export default function App(): React.JSX.Element {
       <VpnPromptModal />
       {/* Surfaces an AI approval request no matter which tab is active. */}
       <ApprovalWatcher />
-      <AgentServerWatcher />
+      <AgentConfigWatcher />
       <FleetWatcher />
       <VaultUnlockModal />
       <SetupCard />

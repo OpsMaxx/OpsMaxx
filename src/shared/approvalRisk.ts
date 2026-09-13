@@ -157,11 +157,19 @@ export function riskReasons(s: ApprovalSubject): string[] {
     out.push('it returns which security updates the host is missing, which is what the host is unpatched against')
   if (s.capability === 'serverMetrics')
     out.push('it returns the host’s listening ports and failed services, not only its CPU and memory')
+  // Four verbs now, not two. `starts` alone was enough while set_tunnel was the
+  // only tool here; "Define" and "Remove" would both have fallen to its else
+  // branch and told the reader a tunnel was being closed when one was being
+  // written. Each verb is matched on the action string the tool actually builds.
   if (s.capability === 'sshTunnel')
     out.push(
-      starts
-        ? 'it opens a network path between this machine and a port on the server'
-        : 'it closes a tunnel that other things may still be using'
+      /^define\b/i.test(action)
+        ? 'it writes a tunnel into OpsMaxx that outlives this session, and whoever presses Start next starts it'
+        : /^remove\b/i.test(action)
+          ? 'it deletes a saved tunnel, and anything that expected that port loses it'
+          : starts
+            ? 'it opens a network path between this machine and a port on the server'
+            : 'it closes a tunnel that other things may still be using'
     )
   if (s.capability === 'vpnControl')
     out.push(
@@ -169,8 +177,17 @@ export function riskReasons(s: ApprovalSubject): string[] {
         ? 'it changes which network your later SSH and database sessions travel over'
         : 'it stops a VPN that other sessions may depend on'
     )
+  // Same problem, same fix: this capability grew two verbs that destroy or
+  // rewrite rather than add, and a single sentence about "writes ... and stores
+  // a credential" describes none of what a removal does.
   if (s.capability === 'manageServers')
-    out.push('it writes to OpsMaxx’s own connection list and stores a credential there')
+    out.push(
+      /^remove\b/i.test(action)
+        ? 'it deletes a saved connection and its stored credential, and OpsMaxx keeps no copy to put back'
+        : /^(change|update)\b/i.test(action)
+          ? 'it rewrites a saved connection — where it points, which account it uses, or what it jumps through'
+          : 'it writes to OpsMaxx’s own connection list and stores a credential there'
+    )
 
   const prod = productionHint(s)
   if (prod) out.push(`"${prod}" reads as production`)
@@ -500,9 +517,13 @@ export function describeConsequence(s: ApprovalSubject): Consequence {
       }
     case 'sshTunnel':
       return {
-        text: starts
-          ? `Opens a tunnel between this machine and a port on ${host}. It stays open until somebody closes it.`
-          : `Closes that tunnel. Anything currently using it loses its connection.`,
+        text: /^define\b/i.test(action)
+          ? `Saves a tunnel in OpsMaxx. It does NOT start it — starting is a separate approval — but it stays in the Tunnels view afterwards, and whoever presses Start next starts what the agent wrote.`
+          : /^remove\b/i.test(action)
+            ? `Deletes that saved tunnel. If it is running it is stopped first, and anything using it loses its connection.`
+            : starts
+              ? `Opens a tunnel between this machine and a port on ${host}. It stays open until somebody closes it.`
+              : `Closes that tunnel. Anything currently using it loses its connection.`,
         known: true
       }
     case 'vpnControl':
@@ -514,7 +535,11 @@ export function describeConsequence(s: ApprovalSubject): Consequence {
       }
     case 'manageServers':
       return {
-        text: `Adds a server to OpsMaxx’s own connection list and stores a credential for it. It does not give the agent any access to the server it adds.`,
+        text: /^remove\b/i.test(action)
+          ? `Deletes this connection from OpsMaxx and its stored credential with it. OpsMaxx keeps no copy, so putting it back means typing the credential again. It does not touch the machine itself.`
+          : /^(change|update)\b/i.test(action)
+            ? `Rewrites a saved connection in OpsMaxx — where it points, which account it uses, or which saved server it jumps through. Later calls that name it, from this agent or anyone else, go wherever it now points.`
+            : `Adds a server to OpsMaxx’s own connection list and stores a credential for it. It does not give the agent any access to the server it adds.`,
         known: true
       }
     case 'viewServer':

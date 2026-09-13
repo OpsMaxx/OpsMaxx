@@ -188,7 +188,9 @@ Production API" without going anywhere near that server's configuration.
 
 Combined with `manageServers`, the two compose into something neither grants alone: an agent could
 add a server *and* bring up a VPN that server's traffic is routed through, and both actions would
-look ordinary in isolation. That composition is the reason for the three rules below, and none of
+look ordinary in isolation. `manageServers` now also edits and removes connections, which widens
+that composition rather than narrowing it — hence the two rules on it: removing always asks, and
+one approval is one write, so neither half of the composition can be assembled silently. That composition is the reason for the three rules below, and none of
 them is a preference:
 
 - **Starting a VPN is always ASK**, on every group, including one a user has explicitly raised to
@@ -202,6 +204,35 @@ them is a preference:
 - **There is no tool that creates or edits a VPN profile.** No `add_vpn`, no `edit_vpn`, and this
   is asserted by a test rather than left to reviewer memory. An agent can run a profile the user
   wrote; it can never author where one points.
+
+### Tunnels are authorable and VPN profiles are not
+
+`create_tunnel` and `delete_tunnel` exist; `add_vpn` and `edit_vpn` still do not, and the
+difference is the point rather than an inconsistency that has not been tidied up yet.
+
+A VPN profile decides which network **everything downstream of it** travels over — sessions the
+agent never touches, and connections the user opens by hand afterwards. Its blast radius is not
+bounded by anything the approval dialog can name. A tunnel binds **one named port**, is listed in
+the Tunnels view under a name the user can read, and does not carry traffic until somebody starts
+it: `create_tunnel` writes the record and `set_tunnel` takes its own, separate approval to run it.
+So defining one is a bounded act that a person can be shown and can undo, and starting one already
+had a control.
+
+Three things did not change:
+
+- **Reverse proxies (frp) are still refused outright**, in both directions, before the access
+  group is read (`isVpnKindRefusedForAi`).
+- **Defining a tunnel always asks**, on every group including ALLOW (`evaluateTunnelDefine`), and
+  one approval defines one tunnel.
+- **A `remote` forward listens on the server.** A non-loopback listen address there publishes the
+  port to that server's whole network, which is the one fact a person clicking "define a tunnel"
+  would never infer. It is graded higher and the prompt says it in those words.
+
+The reason this is worth writing down rather than simply shipping: the alternative to a jump host
+or a tunnel, for an agent asked to reach an internal estate, is a relay process on the bastion
+forwarding straight into the internal subnet — which bypasses the jump authentication the bastion
+exists to enforce, leaves no record in OpsMaxx, and is subject to no approval at all. Prefer
+`jumpHosts` on the server itself to either; the server instructions say so.
 
 None of the built-in groups grants `vpnControl` outright: **Read Only** denies it, and **Read &
 Write**, **Sudo Access** and **Full Access** all set it to ASK. A group saved before this version

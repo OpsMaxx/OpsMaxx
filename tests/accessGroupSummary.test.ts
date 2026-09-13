@@ -90,7 +90,7 @@ describe('summariseAccessGroup — built-in groups', () => {
     expect(s.sentence).toBe(
       'Can see server details, run commands, read files, download files, query databases, read server metrics, ' +
         'list containers and read their logs, start and stop containers, see backup health, and read across the fleet without asking. ' +
-        'Cannot use sudo, add servers to the workspace, start and stop VPNs, and list reverse proxies, start and cancel CI pipelines, write files, upload files, open SSH tunnels, read the server inventory and its pending security updates, collect this server’s firewall rule list, collect this server’s sudoers rules, or read CI pipelines and build output.'
+        'Cannot use sudo, add, change and remove servers in the workspace, start and stop VPNs, and list reverse proxies, start and cancel CI pipelines, write files, upload files, define and open SSH tunnels, read the server inventory and its pending security updates, collect this server’s firewall rule list, collect this server’s sudoers rules, or read CI pipelines and build output.'
     )
     expect(s.counts).toEqual({ allow: 10, ask: 0, deny: 11 })
     expect(s.elevated).toEqual([])
@@ -113,7 +113,7 @@ describe('summariseAccessGroup — built-in groups', () => {
       'Can see server details, run commands, read files, download files, query databases, read server metrics, list containers and read their logs, start and stop containers, see backup health, and read across the fleet without asking.'
     )
     expect(s.clauses[1]).toBe(
-      'Asks you first before adding servers to the workspace, starting and stopping VPNs, and listing reverse proxies, writing files, uploading files, and opening SSH tunnels.'
+      'Asks you first before adding, changing and removing servers in the workspace, starting and stopping VPNs, and listing reverse proxies, writing files, uploading files, and defining and opening SSH tunnels.'
     )
     expect(s.clauses[2]).toBe(
       'Cannot use sudo, start and cancel CI pipelines, read the server inventory and its pending security updates, collect this server’s firewall rule list, collect this server’s sudoers rules, or read CI pipelines and build output.'
@@ -152,10 +152,10 @@ describe('summariseAccessGroup — built-in groups', () => {
       group(allowAll({ sudo: 'ask', manageServers: 'ask', vpnControl: 'ask' }))
     )
     expect(s.clauses[0]).toBe(
-      'Can see server details, run commands, read files, write files, download files, upload files, open SSH tunnels, query databases, read server metrics, list containers and read their logs, start and stop containers, see backup health, and read across the fleet without asking.'
+      'Can see server details, run commands, read files, write files, download files, upload files, define and open SSH tunnels, query databases, read server metrics, list containers and read their logs, start and stop containers, see backup health, and read across the fleet without asking.'
     )
     expect(s.clauses[1]).toBe(
-      'Asks you first before using sudo, adding servers to the workspace, and starting and stopping VPNs, and listing reverse proxies.'
+      'Asks you first before using sudo, adding, changing and removing servers in the workspace, and starting and stopping VPNs, and listing reverse proxies.'
     )
     expect(s.elevated).toEqual([])
   })
@@ -178,7 +178,7 @@ describe('summariseAccessGroup — built-in groups', () => {
         'list containers and read their logs, start and stop containers, see backup health, and read across the fleet without asking.'
     )
     expect(s.clauses[1]).toBe('Asks you first before running commands and querying databases.')
-    expect(s.clauses[2]).toContain('Cannot use sudo, add servers to the workspace')
+    expect(s.clauses[2]).toContain('Cannot use sudo, add, change and remove servers in the workspace')
   })
 })
 
@@ -193,7 +193,7 @@ describe('summariseAccessGroup — edge cases', () => {
   it('names the dangerous capabilities when everything is allowed', () => {
     const s = summariseAccessGroup(group(everything('allow')))
     expect(s.sentence).toBe(
-      'Can do everything without asking — including using sudo, adding servers to the workspace, starting and stopping VPNs, and listing reverse proxies, and starting and cancelling CI pipelines.'
+      'Can do everything without asking — including using sudo, adding, changing and removing servers in the workspace, starting and stopping VPNs, and listing reverse proxies, and starting and cancelling CI pipelines.'
     )
     expect(s.elevated).toEqual(ELEVATED_CAPABILITIES)
   })
@@ -220,7 +220,7 @@ describe('summariseAccessGroup — edge cases', () => {
       group(allowAll({ manageServers: 'allow', vpnControl: 'allow', ciTrigger: 'allow', writeFiles: 'ask' }))
     )
     expect(
-      s.clauses[0].startsWith('Can use sudo, add servers to the workspace, start and stop VPNs, and list reverse proxies,')
+      s.clauses[0].startsWith('Can use sudo, add, change and remove servers in the workspace, start and stop VPNs, and list reverse proxies,')
     ).toBe(true)
     expect(s.elevated).toEqual(ELEVATED_CAPABILITIES)
   })
@@ -336,7 +336,7 @@ describe('summariseAccessGroup — path rules outrank the capability', () => {
     expect(s.overriddenByPath).toEqual(['readFiles'])
     // and it is not left sitting in the flat "Cannot" list as an absolute
     expect(s.clauses).toContain(
-      `Cannot add servers to the workspace, start and stop VPNs, and list reverse proxies, ${CIT}, ${HF}, ${FW}, ${SU}, or ${CIR}.`
+      `Cannot add, change and remove servers in the workspace, start and stop VPNs, and list reverse proxies, ${CIT}, ${HF}, ${FW}, ${SU}, or ${CIR}.`
     )
   })
 
@@ -403,7 +403,7 @@ describe('summariseAccessGroup — path rules outrank the capability', () => {
     )
     expect(s.clauses).toEqual([
       'Can see server details, run commands, download files, query databases, read server metrics, list containers and read their logs, start and stop containers, see backup health, and read across the fleet without asking.',
-      `Cannot use sudo, add servers to the workspace, start and stop VPNs, and list reverse proxies, ${CIT}, upload files, open SSH tunnels, ${HF}, ${FW}, ${SU}, or ${CIR}.`,
+      `Cannot use sudo, add, change and remove servers in the workspace, start and stop VPNs, and list reverse proxies, ${CIT}, upload files, define and open SSH tunnels, ${HF}, ${FW}, ${SU}, or ${CIR}.`,
       'Can read files without asking — except 19 path rules that block it.',
       'Cannot write files — except 2 path rules that ask you first.'
     ])
@@ -427,7 +427,7 @@ describe('summariseAccessGroup — path rules outrank the capability', () => {
       group(everything('allow'), [{ id: '1', pattern: '/etc/shadow', read: 'deny', write: 'deny' }])
     )
     expect(s.clauses[0]).toBe(
-      'Can do everything without asking except the file paths below — including using sudo, adding servers to the workspace, starting and stopping VPNs, and listing reverse proxies, and starting and cancelling CI pipelines.'
+      'Can do everything without asking except the file paths below — including using sudo, adding, changing and removing servers in the workspace, starting and stopping VPNs, and listing reverse proxies, and starting and cancelling CI pipelines.'
     )
     expect(s.elevated).toEqual(ELEVATED_CAPABILITIES)
   })

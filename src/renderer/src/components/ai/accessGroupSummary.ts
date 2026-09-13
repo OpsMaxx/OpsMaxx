@@ -38,7 +38,7 @@ const PHRASING: Record<AiCapability, Phrasing> = {
   writeFiles: { verb: 'write files', gerund: 'writing files' },
   sftpDownload: { verb: 'download files', gerund: 'downloading files' },
   sftpUpload: { verb: 'upload files', gerund: 'uploading files' },
-  sshTunnel: { verb: 'open SSH tunnels', gerund: 'opening SSH tunnels' },
+  sshTunnel: { verb: 'define and open SSH tunnels', gerund: 'defining and opening SSH tunnels' },
   databaseAccess: { verb: 'query databases', gerund: 'querying databases' },
   sudo: { verb: 'use sudo', gerund: 'using sudo' },
   containers: { verb: 'list containers and read their logs', gerund: 'reading containers' },
@@ -65,7 +65,13 @@ const PHRASING: Record<AiCapability, Phrasing> = {
     verb: 'collect this server’s firewall rule list',
     gerund: 'collecting this server’s firewall rule list'
   },
-  manageServers: { verb: 'add servers to the workspace', gerund: 'adding servers to the workspace' },
+  // All three verbs, matching the capability's own detail. The card is what
+  // most people read instead of the grid, so a summary that still said only
+  // "add servers" would be the last place the old, narrower promise survived.
+  manageServers: {
+    verb: 'add, change and remove servers in the workspace',
+    gerund: 'adding, changing and removing servers in the workspace'
+  },
   // Says what it grants and what it does not, matching the capability's own
   // detail. "Control VPNs and reverse proxies" reads as a power over both, and
   // no value of this setting grants the second: an frp proxy makes a port on

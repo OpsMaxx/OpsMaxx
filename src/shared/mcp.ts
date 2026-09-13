@@ -77,7 +77,16 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
   {
     id: 'sshTunnel',
     label: 'SSH tunnels',
-    detail: 'Lists tunnels, and opens or closes a forward between this machine and a port on the server.'
+    // Defining one is named separately from opening one on purpose. A tunnel an
+    // agent writes outlives the session that wrote it and is started by whoever
+    // presses Start next, so "opens a forward" no longer covers what this
+    // grants. The remote case is spelled out because it is the one that puts a
+    // listener somewhere other than the user's own machine.
+    detail:
+      'Lists tunnels, defines and removes them, and opens or closes a forward. A local forward ' +
+      'and a SOCKS proxy listen on this machine; a remote forward listens on the SERVER, where a ' +
+      'non-loopback address publishes the port to that server’s network. Defining, removing and ' +
+      'opening all ask; defining one does not start it.'
   },
   {
     id: 'databaseAccess',
@@ -149,8 +158,19 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
   },
   {
     id: 'manageServers',
-    label: 'Add servers to the workspace',
-    detail: 'Adds a new server to the workspace. It does not grant any access to the server it adds.'
+    label: 'Add, change and remove servers in the workspace',
+    // Says all three, because it grants all three. It used to say only "Adds a
+    // new server", which was true when add_server was the whole of this
+    // capability and became the most misleading sentence in this file the
+    // moment update_server and remove_server joined it: an administrator
+    // reading it would have believed they had granted strictly less than they
+    // had. Deleting is called out separately because it is the one that
+    // destroys something, and because it always asks whatever this is set to.
+    detail:
+      'Adds a server to the workspace, changes a saved one — including where it points, which ' +
+      'account it uses and which other saved server it jumps through — and removes one. It does ' +
+      'not grant any access to the servers it manages. Removing always asks, and one approval ' +
+      'removes one server: an allow here is not a standing permission to delete.'
   },
   {
     id: 'vpnControl',

@@ -1,67 +1,15 @@
-// What actually went wrong with a connection, worked out from the text the
-// failure arrived with.
+// The renderer's half of connection-error handling: the copy and the buttons.
 //
-// ssh2, node's socket layer and five database drivers each phrase the same
-// handful of problems differently, and none of them phrase any of it for a
-// person. Classifying in one place is what lets every surface say one short
-// sentence and offer the one button that fixes it, instead of pasting a driver
-// string into a toast and leaving the reader to interpret it.
+// The classifier itself moved to src/shared/connectionError.ts when the MCP
+// bridge needed it — main cannot import from the renderer, and `test_connection`
+// has to turn an ssh2 failure into a sentence with no address in it. Same split
+// as src/shared/capacity.ts and this directory's capacity.ts, and for the same
+// reason: the logic is shared, the wording and the affordances are not.
+//
+// Re-exported here so every existing caller keeps its import unchanged.
+export { classifyConnectionError, agentFaultSentence, type ConnectionFault } from '../../../shared/connectionError'
 
-export type ConnectionFault =
-  /**
-   * Not a fault at all: the shell ended, which is what `exit` does.
-   *
-   * It is in this union because the dead-session card asks this classifier
-   * what happened, and every unrecognised string fell through to `unknown` —
-   * whose whole job is to admit it cannot explain a FAILURE. So typing `exit`
-   * produced "OpsMaxx could not tell what went wrong from what the server
-   * said." over a session that had done exactly what it was told, which reads
-   * as a bug in the app rather than a shell closing.
-   */
-  | 'exited'
-  | 'host-key'
-  | 'port-in-use'
-  | 'passphrase'
-  | 'key-missing'
-  | 'auth'
-  | 'refused'
-  | 'unreachable'
-  | 'permission'
-  | 'unknown'
-
-// First match wins, so the specific patterns come before the general ones.
-// "Permission denied (publickey)" is a rejected credential, not a filesystem
-// refusal, and has to be tested before the bare permission pattern.
-const PATTERNS: [ConnectionFault, RegExp][] = [
-  // A clean exit, and only a clean one. `transport.ts` writes "shell exited"
-  // for status 0 and "shell exited with N" for anything else, so the negative
-  // lookahead is the whole difference: a shell that died on an error stays a
-  // failure and keeps its Edit button. Matching the "session closed" wrapper
-  // instead would have swallowed both, which is the mistake this narrow
-  // pattern exists to avoid.
-  ['exited', /\bshell exited\b(?! with)/i],
-  // `Host denied (verification failed)` is ssh2's own wording when our verifier
-  // refuses, and it matched none of the patterns beside it -- so the one error
-  // the user can actually finish in a single action was classified as generic.
-  ['host-key', /host key|host verification|hostkey|fingerprint|host denied|no trusted host key/i],
-  ['port-in-use', /EADDRINUSE|already in use/i],
-  ['passphrase', /passphrase|encrypted private key/i],
-  ['key-missing', /(ENOENT|no such file|cannot (open|read))[^]*(key|\.pem|id_)/i],
-  [
-    'auth',
-    /authentication|permission denied \(|publickey|password rejected|access denied for user|auth failed|login failed/i
-  ],
-  ['refused', /ECONNREFUSED|connection refused/i],
-  ['unreachable', /ENOTFOUND|EHOSTUNREACH|ENETUNREACH|ETIMEDOUT|getaddrinfo|timed out|timeout/i],
-  ['permission', /permission denied|EACCES|access denied|not permitted/i]
-]
-
-export function classifyConnectionError(text: string | null | undefined): ConnectionFault {
-  if (!text) return 'unknown'
-  for (const [fault, re] of PATTERNS) if (re.test(text)) return fault
-  return 'unknown'
-}
-
+import { classifyConnectionError, type ConnectionFault } from '../../../shared/connectionError'
 /**
  * The message out of a thrown IPC rejection, without the transport's own
  * preamble.

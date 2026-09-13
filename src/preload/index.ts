@@ -1626,6 +1626,15 @@ const api = {
     },
     replyCreateServer: (id: string, result: { ok: boolean; serverId?: string; error?: string }): void =>
       ipcRenderer.send('aiMcp:create-server-reply', id, result),
+    onConfigWriteRequest: (
+      cb: (e: { id: string; request: Record<string, unknown> }) => void
+    ): (() => void) => {
+      const h = (_e: IpcRendererEvent, ev: { id: string; request: Record<string, unknown> }): void => cb(ev)
+      ipcRenderer.on('aiMcp:config-write', h)
+      return () => ipcRenderer.removeListener('aiMcp:config-write', h)
+    },
+    replyConfigWrite: (id: string, result: { ok: boolean; id?: string; error?: string }): void =>
+      ipcRenderer.send('aiMcp:config-write-reply', id, result),
     cancelPairing: (id: string): Promise<void> => ipcRenderer.invoke('aiMcp:cancelPairing', id),
     onPairingEvent: (
       cb: (e: { type: 'created' | 'resolved' | 'expired'; request: CliPairingRequest }) => void
