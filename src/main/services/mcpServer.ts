@@ -62,6 +62,7 @@ import { fleetCached } from './fleetSampler'
 import type { CapacityReport } from '../../shared/capacity'
 import { requestApproval } from './approvals'
 import { remoteText, remoteName, hostReportedBlock } from '../../shared/remoteText'
+import { capacityDigest } from '../../shared/fleetForecast'
 import { recordAudit, AUDIT_LOG_PATH } from './auditLog'
 import { redactOutput } from './secretRedaction'
 import { knownSecretValuesForServer, resolveChainSecrets, resolveDbSecrets } from './credentialResolver'
@@ -2121,10 +2122,19 @@ function buildServer(): McpServer {
         approval: check.decision === 'ask' ? 'approved' : 'not-required',
         result: 'success'
       })
-      // The report carries host names already redacted and no free text -- see
-      // CapacityReport. Returned whole rather than summarised: every field on
-      // it is a conclusion, not a sample.
-      return { content: [{ type: 'text', text: JSON.stringify(report, null, 2) }] }
+      // Sentences, not the report.
+      //
+      // This used to be JSON.stringify(report, null, 2), defended by a comment
+      // saying every field on it was a conclusion rather than a sample. That
+      // was measurably untrue: `segments[].points[]` are literally the samples,
+      // and on a real host over thirty days the reply was about ten kilobytes
+      // of them -- five hundred points across four metrics -- whose every
+      // conclusion was the word "flat". The chart points are for a chart, and
+      // the renderer has its own channel that still carries them.
+      //
+      // `s.name` is the friendly name already resolved above; no hostname or
+      // address reaches this string.
+      return { content: [{ type: 'text', text: capacityDigest(report, s.name) }] }
     }
   )
 

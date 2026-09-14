@@ -1,13 +1,14 @@
-import net from 'node:net'
 import { remoteText } from '../../shared/remoteText'
-import tls from 'node:tls'
 import http from 'node:http'
-import type { Duplex } from 'node:stream'
+import zlib from 'node:zlib'
+import type { Transform } from 'node:stream'
 import {
+  DECODABLE_ENCODINGS,
   MAX_REDIRECT_HOPS,
   MAX_RESPONSE_BYTES,
   REDIRECT_STATUSES,
   clampTimeout,
+  contentEncodings,
   isPinnedOrigin,
   methodAllowsBody,
   parseTarget,
@@ -18,7 +19,7 @@ import {
   type HttpResult,
   type HttpSshTarget
 } from '../../shared/httpClient'
-import { acquire, release, type PooledConnection } from './ssh'
+import { asSocket, closeDial, dial, startTls, type DialResult } from './netTransport'
 
 /**
  * Executes the HTTP client's requests.
@@ -38,158 +39,136 @@ import { acquire, release, type PooledConnection } from './ssh'
  * follows a Location to a host the far end named.
  */
 
-/**
- * ssh2's channel is a Duplex, and Node's HTTP client expects a net.Socket. The
- * missing pieces are all connection-management no-ops on a stream that is
- * already multiplexed inside an SSH connection: there is no Nagle to disable
- * and no event loop handle to ref. Without them the request throws on the
- * first `setNoDelay` rather than sending anything.
- */
-function asSocket(stream: Duplex): net.Socket {
-  const shim = stream as unknown as net.Socket & Record<string, unknown>
-  if (typeof shim.setNoDelay !== 'function') shim.setNoDelay = () => shim
-  if (typeof shim.setKeepAlive !== 'function') shim.setKeepAlive = () => shim
-  if (typeof shim.ref !== 'function') shim.ref = () => shim
-  if (typeof shim.unref !== 'function') shim.unref = () => shim
-  // http.ClientRequest sets its own timeout on the socket. A channel has none,
-  // so the request-level timer below is what actually enforces it.
-  if (typeof shim.setTimeout !== 'function') shim.setTimeout = () => shim
-  return shim
-}
+// --------------------------------------------------------------- decoding
 
-function tcpConnect(host: string, port: number, timeoutMs: number): Promise<net.Socket> {
-  return new Promise((resolve, reject) => {
-    const socket = net.connect({ host, port })
-    const fail = (err: Error): void => {
-      socket.destroy()
-      reject(err)
+/**
+ * A decompressor for one content coding, or null for one we cannot undo.
+ *
+ * `deflate` has two spellings in the wild. The RFC says zlib-wrapped, and some
+ * servers (IIS historically, and a few reverse proxies since) send raw deflate
+ * with no header at all. `deflate-raw` is not a real coding name — it is the
+ * internal token `decodeContent` retries with when the wrapped decoder rejects
+ * the stream, so both spellings work without guessing from the first byte.
+ */
+function decoderFor(coding: string): Transform | null {
+  switch (coding) {
+    case 'gzip':
+    case 'x-gzip':
+      return zlib.createGunzip()
+    case 'deflate':
+      return zlib.createInflate()
+    case 'deflate-raw':
+      return zlib.createInflateRaw()
+    case 'br':
+      return zlib.createBrotliDecompress()
+    // Added to Node after this app's floor, so it is probed rather than
+    // assumed. A build without it treats zstd as undecodable, which is the
+    // same outcome as any other coding we do not implement.
+    case 'zstd': {
+      const make = (zlib as unknown as { createZstdDecompress?: () => Transform })
+        .createZstdDecompress
+      return typeof make === 'function' ? make() : null
     }
-    socket.setTimeout(timeoutMs, () => fail(new Error(`Timed out connecting to ${host}:${port}`)))
-    socket.once('connect', () => {
-      socket.setTimeout(0)
-      socket.removeListener('error', fail)
-      resolve(socket)
-    })
-    socket.once('error', fail)
-  })
+    default:
+      return null
+  }
 }
 
 /**
- * A direct-tcpip channel from the server to the request's host and port. The
- * server resolves the hostname, which is the whole point: `localhost` is the
- * server's loopback, and a private name resolves in the server's network.
- */
-function forwardOut(conn: PooledConnection, host: string, port: number): Promise<Duplex> {
-  return new Promise((resolve, reject) => {
-    conn.client.forwardOut('127.0.0.1', 0, host, port, (err, stream) =>
-      err ? reject(err) : resolve(stream as unknown as Duplex)
-    )
-  })
-}
-
-/** TLS on top of an already-open transport, so every `via` mode shares it. */
-function startTls(
-  socket: Duplex,
-  servername: string,
-  insecure: boolean,
-  timeoutMs: number,
-  caPem?: string
-): Promise<tls.TLSSocket> {
-  return new Promise((resolve, reject) => {
-    const secure = tls.connect({
-      socket: asSocket(socket),
-      // SNI. Omitted for an IP literal, which is not a valid SNI value and
-      // makes some servers abort the handshake outright.
-      ...(net.isIP(servername) ? {} : { servername }),
-      // A private CA for this request only. Node replaces the root store when
-      // `ca` is set, so the system roots go back in alongside it — a company CA
-      // for the internal Jenkins must not stop the same session reaching
-      // github.com. Verification stays on either way: this is the opposite of
-      // `insecureTls`, not a softer spelling of it.
-      ...(caPem ? { ca: [caPem, ...tls.rootCertificates] } : {}),
-      rejectUnauthorized: !insecure
-    })
-    const timer = setTimeout(() => {
-      secure.destroy()
-      reject(new Error('Timed out during the TLS handshake'))
-    }, timeoutMs)
-    secure.once('secureConnect', () => {
-      clearTimeout(timer)
-      resolve(secure)
-    })
-    secure.once('error', (err) => {
-      clearTimeout(timer)
-      reject(err)
-    })
-  })
-}
-
-/**
- * A TCP connection that has actually gone through a VPN profile.
+ * Undo one coding, stopping at `limit` bytes.
  *
- * This is the third copy of `vpnStart` → `vpnOpenForward` →
- * `unsupported`-means-system-mode → `registerVpnConsumer` (`db.ts:104-160` and
- * `ssh.ts:459-490` are the other two), and three copies is where the pattern is
- * usually worth a shared helper. Extracting it means refactoring two working
- * subsystems, so it is not done here — but writing the third copy without
- * saying so is how the fourth gets written.
- *
- * Both imports are dynamic, as in the existing callers: the VPN manager pulls
- * in the whole driver set, and a request that never touches a VPN should not
- * pay for it.
+ * The limit is enforced DURING decompression rather than after, which is the
+ * whole point: a few hundred kilobytes of gzip can expand to gigabytes, and a
+ * decoder that allocates the full output before anyone checks its size has
+ * already taken main's heap with it. Streaming means the cap is a counter, and
+ * hitting it destroys the decoder mid-flight.
  */
-async function vpnConnect(
-  vpnProfileId: string,
-  host: string,
-  port: number,
-  timeoutMs: number
-): Promise<{ socket: net.Socket; close: () => void }> {
-  const { vpnOpenForward, vpnStart } = await import('./vpn/manager')
+function inflateOnce(
+  input: Buffer<ArrayBuffer>,
+  coding: string,
+  limit: number
+): Promise<{ out: Buffer<ArrayBuffer>; truncated: boolean }> {
+  return new Promise((resolve, reject) => {
+    const stream = decoderFor(coding)
+    if (!stream) {
+      reject(new Error(`No decoder for ${coding}`))
+      return
+    }
+    const chunks: Buffer<ArrayBuffer>[] = []
+    let size = 0
+    let stopped = false
 
-  // First, and before anything can time out downstream. A profile that failed
-  // to come up has a real reason, and an ETIMEDOUT twenty seconds later hides
-  // it behind something that looks like a broken CI server.
-  const started = await vpnStart(vpnProfileId)
-  if (!started.ok) {
-    throw new Error(started.error ?? 'The VPN for this request could not be started.')
-  }
-
-  const consumer = { kind: 'cicd' as const, id: `${host}:${port}`, name: host }
-  let fwd: { port: number; close: () => void } | null = null
-  try {
-    fwd = await vpnOpenForward(vpnProfileId, host, port, consumer)
-  } catch (err) {
-    // System mode has a real route and nothing to forward through. Anything
-    // else is a genuine failure.
-    if ((err as { code?: string }).code !== 'unsupported') throw err
-  }
-
-  if (!fwd) {
-    // Still register: stopping the profile would cut this request, and the
-    // confirmation has to be able to say so.
-    const { registerVpnConsumer } = await import('./vpn/dependencies')
-    const release = registerVpnConsumer(vpnProfileId, consumer)
-    try {
-      return {
-        socket: await tcpConnect(host, port, timeoutMs),
-        close: release
+    stream.on('data', (chunk: Buffer<ArrayBuffer>) => {
+      if (stopped) return
+      if (size + chunk.length > limit) {
+        chunks.push(chunk.subarray(0, limit - size))
+        stopped = true
+        // Resolve before destroying: destroy emits an error on some streams,
+        // and the handler below must not turn a successful truncation into a
+        // failed request.
+        resolve({ out: Buffer.concat(chunks), truncated: true })
+        stream.destroy()
+        return
       }
-    } catch (err) {
-      release()
-      throw err
-    }
-  }
+      chunks.push(chunk)
+      size += chunk.length
+    })
+    stream.on('end', () => {
+      if (!stopped) resolve({ out: Buffer.concat(chunks), truncated: false })
+    })
+    stream.on('error', (err) => {
+      if (!stopped) reject(err)
+    })
+    stream.end(input)
+  })
+}
 
-  const local = fwd
-  try {
-    return {
-      socket: await tcpConnect('127.0.0.1', local.port, timeoutMs),
-      close: local.close
+/**
+ * The body as the server meant it, with `Content-Encoding` undone.
+ *
+ * Three rules, each of which is a bug if it goes the other way:
+ *
+ *   - Codings are undone in REVERSE. The header lists them in the order they
+ *     were applied, so `gzip, br` is brotli over gzip and decoding left to
+ *     right produces garbage on the first step.
+ *   - A coding we cannot undo returns the ORIGINAL bytes with no `decodedFrom`.
+ *     Half-decoded output that claims to be decoded is worse than compressed
+ *     output that says so.
+ *   - A decoder that rejects the stream does the same. The common case is a
+ *     server sending raw deflate under the wrapped name, which is retried once;
+ *     anything else is a body we should hand over untouched rather than
+ *     failing a request that genuinely succeeded.
+ */
+async function decodeContent(
+  body: Buffer<ArrayBuffer>,
+  encodings: string[],
+  limit: number
+): Promise<{ body: Buffer<ArrayBuffer>; truncated: boolean; decodedFrom?: string }> {
+  if (encodings.length === 0) return { body, truncated: false }
+  if (encodings.some((c) => !DECODABLE_ENCODINGS.has(c))) return { body, truncated: false }
+
+  let out = body
+  let truncated = false
+  for (const coding of [...encodings].reverse()) {
+    try {
+      const step = await inflateOnce(out, coding, limit)
+      out = step.out
+      truncated = step.truncated
+    } catch {
+      if (coding !== 'deflate') return { body, truncated: false }
+      try {
+        const step = await inflateOnce(out, 'deflate-raw', limit)
+        out = step.out
+        truncated = step.truncated
+      } catch {
+        return { body, truncated: false }
+      }
     }
-  } catch (err) {
-    local.close()
-    throw err
+    // A body cut short is not a valid input to the next decoder, so stop here
+    // and report what we have rather than feeding it a fragment.
+    if (truncated) break
   }
+  return { body: out, truncated, decodedFrom: encodings.join(', ') }
 }
 
 /** Node attaches a `code` to transport errors; surfacing it lets the UI explain the failure. */
@@ -274,30 +253,20 @@ async function sendOnce(
   const timeoutMs = clampTimeout(spec.timeoutMs)
   const { method, headers } = hop
 
-  let conn: PooledConnection | null = null
-  let transport: Duplex | null = null
-  let closeVpn: (() => void) | null = null
+  let dialled: DialResult | null = null
 
   try {
-    if (spec.via.kind === 'server') {
-      conn = await acquire(ctx.prepare(spec.via.server))
-      transport = await forwardOut(conn, target.hostname, target.port)
-    } else if (spec.via.kind === 'vpn') {
-      const dialled = await vpnConnect(
-        spec.via.vpnProfileId,
-        target.hostname,
-        target.port,
-        timeoutMs
-      )
-      transport = dialled.socket
-      closeVpn = dialled.close
-    } else {
-      transport = await tcpConnect(target.hostname, target.port, timeoutMs)
-    }
+    dialled = await dial(spec.via, target.hostname, target.port, timeoutMs, (t) => ctx.prepare(t))
 
     const socket = target.tls
-      ? await startTls(transport, target.hostname, spec.insecureTls === true, timeoutMs, spec.caPem)
-      : asSocket(transport)
+      ? await startTls(
+          dialled.transport,
+          target.hostname,
+          spec.insecureTls === true,
+          timeoutMs,
+          spec.caPem
+        )
+      : asSocket(dialled.transport)
 
     return await new Promise<HttpResult>((resolve) => {
       const started = Date.now()
@@ -341,6 +310,29 @@ async function sendOnce(
           agent
         },
         (res) => {
+          // A stream is not a response, and this client buffers.
+          //
+          // `text/event-stream` never ends on its own, so buffering one means
+          // sitting on the socket until the request timeout and then reporting
+          // ETIMEDOUT — a Send button that appears to hang, for a request the
+          // server answered instantly. Refusing immediately is the honest
+          // version of the same limitation, and it names the limitation rather
+          // than looking like a broken endpoint.
+          //
+          // Streaming properly needs a chunked IPC channel of its own. When
+          // that exists, this guard is what it replaces.
+          const contentType = String(res.headers['content-type'] ?? '')
+          if (/^\s*text\/event-stream\b/i.test(contentType)) {
+            res.destroy()
+            finish({
+              ok: false,
+              error:
+                'This endpoint answers with a server-sent event stream, which OpsMaxx cannot display yet — the response is read in full before it is shown, and a stream has no end to wait for.',
+              code: 'ESTREAMUNSUPPORTED'
+            })
+            return
+          }
+
           const chunks: Buffer[] = []
           let size = 0
           let truncated = false
@@ -358,22 +350,38 @@ async function sendOnce(
             size += chunk.length
           })
 
+          // `end` and `close` both land here (see below), and decoding is
+          // async — so without this the second one starts a second decode of
+          // the same buffer while the first is still running.
+          let finishing = false
           const done = (): void => {
-            const body = Buffer.concat(chunks)
-            finish({
-              ok: true,
-              status: res.statusCode ?? 0,
-              statusText: res.statusMessage ?? '',
-              headers: Object.fromEntries(
-                Object.entries(res.headers).map(([k, v]) => [
-                  k,
-                  Array.isArray(v) ? v.join(', ') : String(v ?? '')
-                ])
-              ),
-              body: body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
-              durationMs: Date.now() - started,
-              truncated
-            })
+            if (finishing) return
+            finishing = true
+
+            const headerPairs = Object.entries(res.headers).map(
+              ([k, v]) => [k, Array.isArray(v) ? v.join(', ') : String(v ?? '')] as const
+            )
+            // Taken from the raw array BEFORE the join above. This is the one
+            // header that cannot be put back together afterwards.
+            const setCookie = res.headers['set-cookie']
+
+            const raw = Buffer.concat(chunks)
+            void decodeContent(raw, contentEncodings(Object.fromEntries(headerPairs)), MAX_RESPONSE_BYTES)
+              .then(({ body, truncated: expandedPastCap, decodedFrom }) => {
+                finish({
+                  ok: true,
+                  status: res.statusCode ?? 0,
+                  statusText: res.statusMessage ?? '',
+                  headers: Object.fromEntries(headerPairs),
+                  ...(setCookie && setCookie.length > 0 ? { setCookie } : {}),
+                  body: body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
+                  durationMs: Date.now() - started,
+                  // Either end can cut the body short: the socket read, or the
+                  // decoder expanding past the cap.
+                  truncated: truncated || expandedPastCap,
+                  ...(decodedFrom ? { decodedFrom } : {})
+                })
+              })
           }
           res.on('end', done)
           // A capped body destroys the stream, which ends it via `close`
@@ -390,20 +398,10 @@ async function sendOnce(
   } catch (err) {
     return { ok: false, error: messageOf(err), code: codeOf(err) }
   } finally {
-    // The channel belongs to this request; the pooled SSH connection does not.
-    try {
-      transport?.destroy()
-    } catch {
-      /* a transport that never opened has nothing to close */
-    }
-    if (conn) release(conn)
-    // Same rule for a VPN forward: it was opened for this request, including
-    // the one that failed, and a listener per attempt would leak.
-    try {
-      closeVpn?.()
-    } catch {
-      /* already closed with the tunnel */
-    }
+    // The channel belongs to this request; the pooled SSH connection does not,
+    // and a VPN forward opened for this request — including the one that
+    // failed — is a listener per attempt if nobody closes it.
+    if (dialled) closeDial(dialled)
   }
 }
 

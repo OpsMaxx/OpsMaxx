@@ -39,12 +39,25 @@
 // number rather than a per-metric configuration table.
 //
 // ----------------------------------------------------------------------------
-// No imports
+// No runtime imports
 // ----------------------------------------------------------------------------
-// This file imports nothing, from anywhere. `TrendPoint` is structurally the
-// history store's `SeriesPoint` and the assignability is asserted in
-// tests/capacity.test.ts, because shared/ may not reach into src/main. Main
-// passes real SeriesPoints in; the renderer receives the report over IPC.
+// This file imports TYPES, from one sibling in shared/, and no runtime value
+// from anywhere. `TrendPoint` is structurally the history store's `SeriesPoint`
+// and the assignability is asserted in tests/capacity.test.ts, because shared/
+// may not reach into src/main. Main passes real SeriesPoints in; the renderer
+// receives the report over IPC.
+//
+// The rule that matters is the runtime half: everything below is arithmetic on
+// values the caller supplies, so main can run it, the renderer can run it, and
+// a test can run it with no store, no clock and no Electron. The disk's
+// byte-domain answer is FITTED BY THE CALLER and arrives here as data for the
+// same reason.
+
+// The one import, and it is types only -- see the note above about shared/ not
+// reaching into src/main. `BytesReading` is what the disk's byte-domain answer
+// travels as, and `BytesPolicy` is how this file states the disk's refusal
+// policy without importing the function that applies it.
+import type { BytesPolicy, BytesReading } from './bytesForecast'
 
 /** The three series a capacity question is asked about. A subset of item A's
  *  METRICS, by name, checked against it where main wires the two together. */
@@ -85,6 +98,16 @@ export interface TrendSegment {
   /** Silence before this segment, in ms. 0 when it merely follows a resolution
    *  change with no missing time — the line continues, its meaning changes. */
   gapBefore: number
+  /**
+   * Set when the silence has a cause we know about: OpsMaxx was not running.
+   *
+   * "This server went quiet" and "we were not watching" are different facts
+   * about the same hole in a line, and only one of them is about the server.
+   * Leaving them indistinguishable is what made the panel's advice a standing
+   * accusation — it told every operator to leave the app running, because it
+   * could not tell which gaps were theirs.
+   */
+  gapKnown?: 'not-running'
 }
 
 /** Why `forecast` declined to give a number. One per host per metric, and the
@@ -111,6 +134,46 @@ export type RefusalReason =
   /** A real rate, but the crossing is past the horizon this feature will
    *  state — beyond which "the rate holds" is not a claim worth making. */
   | 'beyond-horizon'
+  /**
+   * Samples exist across the window but sit in too few parts of it.
+   *
+   * The refusal that replaces most of what contiguity used to refuse, and it
+   * is a different claim: not "there is a hole in the data" — there always is —
+   * but "everything we have is one clump, so a line through it describes those
+   * hours and not this window". A host with five hundred samples taken inside
+   * ten hours of a month is this, and it used to arrive as 'too-few-points'
+   * saying "only 8 samples", which is how the feature came to look broken.
+   */
+  | 'sparse'
+
+/**
+ * How much of the fitted window was actually looked at.
+ *
+ * Deliberately NOT "what share of the window was observed". Duty cycle is the
+ * wrong question for a level: a disk fills whether or not anybody is watching,
+ * so a laptop that runs for two hours a day has still seen the disk at sixty
+ * moments spread across a month, and a line through them is a true claim about
+ * that month. Duty cycle calls that 8% and refuses it, which is the behaviour
+ * this whole file was rewritten to stop.
+ *
+ * What a fit genuinely cannot survive is CLUSTERING. Five hundred samples
+ * inside ten hours of a thirty-day window are, for the purpose of fitting a
+ * line, one point; two dense clumps at either end are two. Occupancy catches
+ * exactly that and nothing else.
+ *
+ * The window always begins and ends at a sample, so an empty part is always an
+ * interior one — which is why there is no separate "longest gap" rule to go
+ * with this. At half the parts occupied, the longest silence cannot be more
+ * than half the window.
+ */
+export interface Coverage {
+  /** How many parts the window was cut into. FORECAST_COVERAGE_BUCKETS. */
+  parts: number
+  /** How many of them contain at least one sample. */
+  occupied: number
+  /** The longest single silence inside the window, in ms, for the sentence. */
+  longestGapMs: number
+}
 
 export interface ForecastRefused {
   ok: false
@@ -120,6 +183,10 @@ export interface ForecastRefused {
   from: number
   to: number
   points: number
+  /** How well the window was covered. Optional only so that the many hand-built
+   *  `Forecast` literals in tests and in the fleet roll-up keep compiling; it is
+   *  always set by `forecast()`, and it is the whole content of a 'sparse'. */
+  coverage?: Coverage
 }
 
 export interface ForecastMade {
@@ -146,6 +213,11 @@ export interface ForecastMade {
   points: number
   /** Whether the fit saw instantaneous readings, hourly means, or both. */
   res: 'full' | 'hourly' | 'mixed'
+  /** How well the window was covered. Stated beside the date for the same
+   *  reason `from`/`to` are: "fills in 11 days, from 21 days of data, 9 parts
+   *  of 10 sampled" is a sentence a reader can judge, and "fills in 11 days"
+   *  is not. */
+  coverage?: Coverage
 }
 
 export type Forecast = ForecastMade | ForecastRefused
@@ -171,6 +243,23 @@ export interface Trend {
   resolutionBoundary: number | null
   /** Null when no threshold was asked for (cpu). */
   forecast: Forecast | null
+  /**
+   * The same question asked in BYTES, where the stored percentage is too
+   * coarse to answer it. Null for every metric except disk.
+   *
+   * Disk is the metric this whole feature was named for and the one it could
+   * never answer: `diskPct` holds df's own Capacity column, which is a rounded
+   * integer, so on a 193 GiB filesystem one stored point is about two
+   * gigabytes. A disk gaining a gigabyte a week does not move that series for a
+   * fortnight and then moves it a whole point, which reads as 'flat' followed
+   * by 'step-change' forever. The byte series has been sampled beside it the
+   * whole time.
+   *
+   * Computed by the caller and passed in, because this file holds no runtime
+   * import: main reads the series, `forecastBytes` fits it, and the answer
+   * travels here.
+   */
+  bytes: BytesReading | null
 }
 
 export interface CapacityReport {
@@ -268,6 +357,61 @@ export const GAP_FACTOR = 3
  */
 export const GAP_MIN_MS = 2 * HOUR_MS
 
+/**
+ * The fitted window, cut into this many parts, to test whether the samples are
+ * spread through it or clumped in one corner of it. See `Coverage`.
+ *
+ * Ten, because a tenth of the SHORTEST window this will ever fit
+ * (FORECAST_MIN_WINDOW_MS, six hours) is thirty-six minutes — comfortably
+ * longer than the sampler's two-minute default and longer than the coarse
+ * tier's own bucket, so a part is never empty merely because no sample was due
+ * inside it. Twenty parts of six hours is eighteen minutes, and would start
+ * refusing perfectly healthy hosts that are sampled every ten.
+ */
+export const FORECAST_COVERAGE_BUCKETS = 10
+
+/**
+ * And at least this share of those parts must contain a sample.
+ *
+ * A fit is a claim about the WHOLE window, and half of it having been looked at
+ * is the least that supports one. At exactly one half the largest unobserved
+ * stretch is necessarily under half the window, so the line is never mostly
+ * bridging. A share rather than a count, so that changing the number of parts
+ * above does not silently change the policy.
+ */
+export const FORECAST_MIN_OCCUPANCY = 0.5
+
+/**
+ * Which gap rule each metric gets, and why, one line per metric.
+ *
+ * LEVEL — the quantity persists while nobody is looking. An observation after a
+ * silence is still an observation of the same accumulating thing, so the
+ * silence is missing evidence rather than a different machine:
+ *
+ *   diskPct   the file written while the app was shut is still on the disk
+ *   inodePct  likewise — inodes are consumed, not borrowed
+ *   memPct    allocation outlives the sampler being away
+ *
+ * RATE — the quantity is instantaneous and has no memory. What the CPU did
+ * yesterday says nothing about what it is doing now, so a line drawn across a
+ * silence is drawn through nothing that was ever true:
+ *
+ *   cpu
+ *
+ * THIS IS THE DISTINCTION THE FILE USED TO LACK. Everything was treated as a
+ * rate, so every metric was fitted on the last unbroken run only — and on a
+ * desktop app, where the laptop shuts and the machine sleeps, that meant a
+ * thirty-day question was answered from the last ten hours. For a CPU that is
+ * correct. For a disk it throws away the evidence and then blames the operator
+ * for not leaving the app running.
+ */
+export const CAPACITY_METRIC_DOMAIN: Record<CapacityMetric, 'level' | 'rate'> = {
+  cpu: 'rate',
+  memPct: 'level',
+  diskPct: 'level',
+  inodePct: 'level'
+}
+
 /** Fallbacks for the typical spacing when there are too few intervals to take
  *  a median of. */
 const NOMINAL_SPACING: Record<'full' | 'hourly', number> = {
@@ -343,18 +487,25 @@ export function runs(points: TrendPoint[]): TrendPoint[][] {
 
 /** Runs, split further wherever the resolution changes, each carrying how much
  *  silence preceded it. This is what a chart draws. */
-export function segments(points: TrendPoint[]): TrendSegment[] {
+export function segments(points: TrendPoint[], resumedAt: number[] = []): TrendSegment[] {
   const out: TrendSegment[] = []
   let previousEnd: number | null = null
   for (const run of runs(points)) {
     let gapBefore = previousEnd === null ? 0 : run[0].ts - previousEnd
+    // A gap that CONTAINS a moment the sampler started again is a gap OpsMaxx
+    // was absent for. The end is inclusive and the start is not: a resume at
+    // the instant the previous run ended did not interrupt anything.
+    const known =
+      previousEnd !== null && resumedAt.some((t) => t > previousEnd! && t <= run[0].ts)
+        ? ('not-running' as const)
+        : undefined
     for (const p of run) {
       const last = out[out.length - 1]
       if (last && last.res === p.res && last.points[last.points.length - 1].ts <= p.ts && gapBefore === 0) {
         last.points.push(p)
         continue
       }
-      out.push({ res: p.res, points: [p], gapBefore })
+      out.push({ res: p.res, points: [p], gapBefore, ...(gapBefore > 0 && known ? { gapKnown: known } : {}) })
       // Only the first segment of a run inherits the run's gap; a resolution
       // change inside a run is continuous in time.
       gapBefore = 0
@@ -412,7 +563,12 @@ export function downsample(segment: TrendSegment, bucketMs: number): TrendSegmen
     acc.push(p)
   }
   flush()
-  return { res: segment.res, points: out, gapBefore: segment.gapBefore }
+  return {
+    res: segment.res,
+    points: out,
+    gapBefore: segment.gapBefore,
+    ...(segment.gapKnown ? { gapKnown: segment.gapKnown } : {})
+  }
 }
 
 /** Least squares, with x measured from the first point so that millisecond
@@ -451,18 +607,114 @@ function fit(points: TrendPoint[]): { slope: number; intercept: number; r2: numb
   return { slope, intercept, r2, x0 }
 }
 
-/** The largest rise across one or two consecutive intervals. Two, because a
- *  step that lands mid-hour is split across two hourly means and would
- *  otherwise read as two ordinary changes. */
-function largestJump(points: TrendPoint[]): number {
+/**
+ * The largest rise across one or two consecutive intervals — never across a
+ * silence.
+ *
+ * Two intervals, because a step that lands mid-hour is split across two hourly
+ * means and would otherwise read as two ordinary changes.
+ *
+ * THE TIME BOUND IS WHAT MAKES CROSS-GAP FITTING POSSIBLE AT ALL, and without
+ * it this rule silently defeats the entire change. Once a level metric is
+ * fitted across gaps, the growth that accumulated while nobody was looking
+ * arrives as ONE interval: a disk that gained four gigabytes over a weekend the
+ * laptop was shut shows up as a single pair of samples carrying most of the
+ * fitted rise, trips FORECAST_STEP_SHARE, and is refused as "something was
+ * untarred". Every ordinary host would refuse that way, and the only visible
+ * effect of fitting across gaps would have been to change the word in the
+ * refusal from 'flat' to 'step-change'.
+ *
+ * A pair further apart than `maxSpanMs` is therefore not a jump at all — it is
+ * two measurements of a quantity that was accumulating in between, which is
+ * what a level metric does. GAP_MIN_MS is the bound, the same threshold that
+ * decides what counts as a break anywhere else in this file, so "not a jump"
+ * and "a break in the series" mean the same span of time.
+ *
+ * What the rule still catches is what it was written for: a step BETWEEN
+ * CONSECUTIVE SAMPLES, minutes apart, which is an event and not a trend.
+ */
+function largestJump(points: TrendPoint[], maxSpanMs: number): number {
   let max = 0
   for (let i = 0; i < points.length; i++) {
     for (let k = 1; k <= STEP_SPAN_POINTS && i + k < points.length; k++) {
+      if (points[i + k].ts - points[i].ts > maxSpanMs) break
       const d = points[i + k].v - points[i].v
       if (d > max) max = d
     }
   }
   return max
+}
+
+/**
+ * How many parts of [first..last] contain a sample, and the longest silence.
+ *
+ * Exported because main applies the window chosen from one series to another —
+ * the disk's percentage series and its byte series must be described as being
+ * about the same stretch of time by construction, not by two rules that happen
+ * to agree today.
+ */
+export function coverageOf(points: TrendPoint[]): Coverage {
+  const parts = FORECAST_COVERAGE_BUCKETS
+  if (points.length === 0) return { parts, occupied: 0, longestGapMs: 0 }
+  const from = points[0].ts
+  const to = points[points.length - 1].ts
+  const span = to - from
+  let longestGapMs = 0
+  for (let i = 1; i < points.length; i++) {
+    const d = points[i].ts - points[i - 1].ts
+    if (d > longestGapMs) longestGapMs = d
+  }
+  // A window with no width at all is one instant, however many samples landed
+  // in it. One part, occupied.
+  if (span <= 0) return { parts, occupied: 1, longestGapMs }
+  const seen = new Set<number>()
+  for (const p of points) {
+    // The last point lands exactly on the upper edge and would index one past
+    // the end.
+    seen.add(Math.min(parts - 1, Math.floor(((p.ts - from) / span) * parts)))
+  }
+  return { parts, occupied: seen.size, longestGapMs }
+}
+
+/**
+ * The stretch of series a level metric is fitted over, and how well it covers
+ * it.
+ *
+ * Walks the runs oldest-first and takes the LONGEST window that clears the
+ * occupancy gate, so that one stale reading from three weeks ago cannot drag a
+ * host below the gate: that run is dropped and everything after it stands. When
+ * nothing clears the gate, the newest run is returned marked `sparse` — which
+ * is never worse than the behaviour this replaces, because the newest run is
+ * exactly what that behaviour always used.
+ */
+export function fitWindow(points: TrendPoint[]): {
+  window: TrendPoint[]
+  coverage: Coverage
+  sparse: boolean
+} {
+  const rs = runs(points)
+  if (rs.length === 0) return { window: [], coverage: coverageOf([]), sparse: false }
+  const need = FORECAST_MIN_OCCUPANCY * FORECAST_COVERAGE_BUCKETS
+  for (let i = 0; i < rs.length; i++) {
+    const w = rs.slice(i).flat()
+    const span = w[w.length - 1].ts - w[0].ts
+    // Anything shorter than the minimum window cannot be accepted here anyway,
+    // and letting it through would hand back a narrower window than the caller
+    // would have had. Stop and fall through to the newest run.
+    if (span < FORECAST_MIN_WINDOW_MS) break
+    const coverage = coverageOf(w)
+    if (coverage.occupied >= need) return { window: w, coverage, sparse: false }
+  }
+  const last = rs[rs.length - 1]
+  const whole = points[points.length - 1].ts - points[0].ts
+  return {
+    window: last,
+    coverage: coverageOf(points),
+    // A host that is simply young is not sparse — it gets the 'too-few-points'
+    // or 'window-too-short' refusal it has always had, which tells the operator
+    // to wait rather than to change anything.
+    sparse: whole >= FORECAST_MIN_WINDOW_MS
+  }
 }
 
 function resolutionOf(points: TrendPoint[]): 'full' | 'hourly' | 'mixed' {
@@ -479,36 +731,81 @@ function resolutionOf(points: TrendPoint[]): 'full' | 'hourly' | 'mixed' {
 /**
  * When this series crosses `threshold`, or why that question has no answer.
  *
- * Fitted on the MOST RECENT contiguous run only. Older runs describe a machine
- * on the other side of an outage or a reinstall, and stitching them together
- * is precisely the invented trend this function exists to refuse.
+ * WHICH STRETCH IT IS FITTED ON depends on what kind of quantity it is, and
+ * that is the whole of the redesign — see CAPACITY_METRIC_DOMAIN.
+ *
+ * A 'rate' is fitted on the MOST RECENT contiguous run only. A CPU has no
+ * memory of the hours nobody watched, so a line across a silence is drawn
+ * through nothing that was ever true.
+ *
+ * A 'level' is fitted across the silences, over the longest window whose
+ * samples are actually SPREAD through it. A disk keeps filling while the app
+ * is shut, so the reading after a gap is a real measurement of the same
+ * accumulating quantity, and refusing to use it does not make the answer safer
+ * — it makes there be no answer. Measured on a real host, the old rule read
+ * five hundred samples over thirty days and fitted two hundred and ninety-one
+ * of them spanning ten hours, because a laptop sleeps.
+ *
+ * What replaces contiguity as the guard is three things together, and none of
+ * them is sufficient alone: occupancy (`Coverage`), which refuses a clump
+ * dressed up as a window; r2, which refuses a line the points do not sit on;
+ * and the step rule, now bounded in time so that accumulated growth across a
+ * gap is not mistaken for an event.
  */
-export function forecast(points: TrendPoint[], threshold: number, now: number): Forecast {
+export function forecast(
+  points: TrendPoint[],
+  threshold: number,
+  now: number,
+  mode: 'level' | 'rate' = 'level'
+): Forecast {
   if (points.length === 0) return { ok: false, reason: 'no-data', from: 0, to: 0, points: 0 }
+
   const all = runs(points)
-  const run = all[all.length - 1]
-  const from = run[0].ts
-  const to = run[run.length - 1].ts
+  const chosen =
+    mode === 'rate'
+      ? { window: all[all.length - 1], coverage: coverageOf(all[all.length - 1]), sparse: false }
+      : fitWindow(points)
+  const window = chosen.window
+  const from = window[0].ts
+  const to = window[window.length - 1].ts
   const refuse = (reason: RefusalReason): ForecastRefused => ({
     ok: false,
     reason,
     from,
     to,
-    points: run.length
+    points: window.length,
+    coverage: chosen.coverage
   })
 
-  if (now - to > FORECAST_MAX_STALE_MS) return refuse('stale')
-  if (run.length < FORECAST_MIN_POINTS) return refuse('too-few-points')
+  // Staleness is asked of the SERIES, not of the chosen window: a host that
+  // stopped reporting yesterday is stale whichever stretch of its past the
+  // window rule settled on.
+  const newest = points[points.length - 1].ts
+  if (now - newest > FORECAST_MAX_STALE_MS) return refuse('stale')
+  if (chosen.sparse) {
+    // The span reported is the WHOLE series, because the sentence is "over
+    // thirty days we looked in two parts of ten" — describing only the clump
+    // would hide the very thing being refused.
+    return {
+      ok: false,
+      reason: 'sparse',
+      from: points[0].ts,
+      to: newest,
+      points: points.length,
+      coverage: chosen.coverage
+    }
+  }
+  if (window.length < FORECAST_MIN_POINTS) return refuse('too-few-points')
   const span = to - from
   if (span < FORECAST_MIN_WINDOW_MS) return refuse('window-too-short')
-  if (run[run.length - 1].v >= threshold) return refuse('already-past')
+  if (window[window.length - 1].v >= threshold) return refuse('already-past')
 
-  const { slope, intercept, r2, x0 } = fit(run)
+  const { slope, intercept, r2, x0 } = fit(window)
   const rise = slope * span
   if (rise <= -FORECAST_FLAT_RISE_PCT) return refuse('falling')
   if (rise < FORECAST_FLAT_RISE_PCT) return refuse('flat')
   if (r2 < FORECAST_MIN_R2) return refuse('noisy')
-  if (largestJump(run) >= FORECAST_STEP_SHARE * rise) return refuse('step-change')
+  if (largestJump(window, GAP_MIN_MS) >= FORECAST_STEP_SHARE * rise) return refuse('step-change')
 
   // slope > 0 here: `rise` is slope * span with both positive.
   const at = x0 + (threshold - intercept) / slope
@@ -528,8 +825,9 @@ export function forecast(points: TrendPoint[], threshold: number, now: number): 
     confidence,
     from,
     to,
-    points: run.length,
-    res: resolutionOf(run)
+    points: window.length,
+    res: resolutionOf(window),
+    coverage: chosen.coverage
   }
 }
 
@@ -554,6 +852,14 @@ export interface ReportOptions {
   fullResolutionDays: number
   retainedDays: number
   maxPoints?: number
+  /** Per metric, fitted by the caller. Only diskPct ever carries one — see
+   *  `Trend.bytes`. */
+  bytes?: Partial<Record<CapacityMetric, BytesReading>>
+  /** Moments the sampler started again after being stopped: app launch, and
+   *  the machine waking. A gap spanning one of these is a gap OpsMaxx caused,
+   *  and `segments` marks it so the panel can say which kind of silence it is
+   *  looking at. */
+  resumedAt?: number[]
 }
 
 /**
@@ -572,7 +878,7 @@ export function buildCapacityReport(
   const trends: Trend[] = CAPACITY_METRICS.map((metric) => {
     const points = series[metric] ?? []
     const threshold = opts.thresholds[metric]
-    const segs = segments(points)
+    const segs = segments(points, opts.resumedAt ?? [])
     // One bucket size for the whole trend, so the two sides of a resolution
     // boundary stay comparable to the eye.
     const bucketMs = Math.max(1, Math.ceil((opts.to - opts.from) / maxPoints))
@@ -592,7 +898,11 @@ export function buildCapacityReport(
       low,
       high,
       resolutionBoundary: resolutionBoundary(points),
-      forecast: threshold === undefined ? null : forecast(points, threshold, opts.now)
+      forecast:
+        threshold === undefined
+          ? null
+          : forecast(points, threshold, opts.now, CAPACITY_METRIC_DOMAIN[metric]),
+      bytes: opts.bytes?.[metric] ?? null
     }
   })
   return {
@@ -635,7 +945,6 @@ export const CAPACITY_THRESHOLDS: Partial<Record<CapacityMetric, number>> = {
  * preload half has not landed must show a panel that says so rather than throw
  * `undefined is not a function`.
  */
-import type { BytesReading } from './bytesForecast'
 
 export interface CapacityBridge {
   trends(hostId: string, windowDays: number): Promise<CapacityReport | null>
@@ -652,6 +961,55 @@ export interface CapacityBridge {
     windowDays: number,
     ceilingBytes?: number
   ): Promise<BytesReading | null>
+}
+
+/**
+ * The byte ceiling a disk is forecast against.
+ *
+ * The same percentage the percent-domain row uses, applied to the filesystem's
+ * usable size -- derived from CAPACITY_THRESHOLDS rather than written out
+ * again, so that the two sentences about one disk cannot drift apart in a later
+ * edit.
+ *
+ * `usableBytes` is HostMetrics.diskCapacity, not diskTotal, and the difference
+ * is not pedantry: df's Capacity column excludes the blocks ext4 reserves for
+ * root, so on a default filesystem 90% of the raw total is about four and a
+ * half points of disk LATER than the 90% the row above reports. On a 193 GiB
+ * disk that is roughly nine gigabytes, or weeks, of disagreement between two
+ * lines of the same panel.
+ */
+export function diskCeilingBytes(usableBytes: number): number | null {
+  const pct = CAPACITY_THRESHOLDS.diskPct
+  return pct === undefined || usableBytes <= 0 ? null : (pct / 100) * usableBytes
+}
+
+/**
+ * `bytesForecast`'s policy, for a disk rather than for a database.
+ *
+ * That file's own constants were tuned for a series written when somebody opens
+ * a database panel: its minimum window is 24 hours against this file's 6, and
+ * it tolerates 14 DAYS of staleness against this file's 6 hours. Left alone,
+ * the byte line would cheerfully forecast a disk that had been silent for a
+ * week while the percentage line directly above it said `stale` -- two
+ * sentences about one disk, disagreeing, which is the failure this whole panel
+ * is written against.
+ *
+ * The flat rule is replaced outright rather than scaled. `BYTES_FLAT_RISE_SHARE`
+ * is two percent of how big the thing already is, which is the right rule for a
+ * database, where "big" is relative and nobody set a ceiling. A disk HAS a
+ * ceiling and the row above already defines what flat means on it: half a
+ * percentage point of the filesystem. So that is what it means here, in bytes.
+ */
+export function diskBytesPolicy(usableBytes: number): BytesPolicy {
+  return {
+    minWindowMs: FORECAST_MIN_WINDOW_MS,
+    maxStaleMs: FORECAST_MAX_STALE_MS,
+    horizonDays: FORECAST_HORIZON_DAYS,
+    flatRiseBytes: (FORECAST_FLAT_RISE_PCT / 100) * usableBytes,
+    // The same bound, for the same reason, as the percent-domain rule next
+    // door: growth accumulated across a silence is not a step. See largestJump.
+    maxJumpSpanMs: GAP_MIN_MS
+  }
 }
 
 /** The windows the panel offers. A day, a week (exactly the full-resolution

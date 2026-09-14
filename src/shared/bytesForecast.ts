@@ -138,10 +138,48 @@ function fit(run: BytesPoint[]): { slope: number; intercept: number; r2: number;
   return { slope, intercept, r2, x0 }
 }
 
-function largestJump(run: BytesPoint[]): number {
+function largestJump(run: BytesPoint[], maxSpanMs: number): number {
   let worst = 0
-  for (let i = 1; i < run.length; i++) worst = Math.max(worst, run[i].v - run[i - 1].v)
+  for (let i = 1; i < run.length; i++) {
+    // A pair further apart than this is not a jump: it is two measurements of
+    // something that was growing in between. Unbounded -- the default -- is the
+    // behaviour this function has always had. See BytesPolicy.maxJumpSpanMs.
+    if (run[i].ts - run[i - 1].ts > maxSpanMs) continue
+    worst = Math.max(worst, run[i].v - run[i - 1].v)
+  }
   return worst
+}
+
+/**
+ * Overrides for a caller whose series is not a database.
+ *
+ * Every default is the exported constant above it, so a caller that passes
+ * nothing gets exactly today's behaviour and the database path is unchanged.
+ *
+ * It exists because the disk asks the same question of the same arithmetic
+ * under a different regime. A database size is read when somebody opens a
+ * panel; a host's disk is swept every two minutes, against a ceiling that
+ * genuinely exists, beside a percentage row whose refusal policy it has to
+ * agree with. Tuning the constants in place to suit it would have silently
+ * re-tuned database growth, which nobody asked for.
+ */
+export interface BytesPolicy {
+  minWindowMs?: number
+  maxStaleMs?: number
+  horizonDays?: number
+  /**
+   * An ABSOLUTE flat floor in bytes, replacing the relative rule.
+   *
+   * The relative rule is right for a database, where "too big" is a judgement
+   * and two percent of the current size is the only scale available. It is
+   * wrong for a disk, which has a real ceiling: at two percent of the run's
+   * start, a disk with 170 GiB used would need 3.4 GiB of growth before it
+   * stopped being flat, while the percentage row beside it needed under one.
+   */
+  flatRiseBytes?: number
+  /** Pairs further apart than this are not compared by the step rule. Defaults
+   *  to Infinity, which is today's behaviour. */
+  maxJumpSpanMs?: number
 }
 
 /**
@@ -153,8 +191,13 @@ function largestJump(run: BytesPoint[]): number {
 export function forecastBytes(
   points: BytesPoint[],
   ceiling: number | null,
-  now: number
+  now: number,
+  policy: BytesPolicy = {}
 ): BytesReading {
+  const minWindowMs = policy.minWindowMs ?? BYTES_MIN_WINDOW_MS
+  const maxStaleMs = policy.maxStaleMs ?? BYTES_MAX_STALE_MS
+  const horizonDays = policy.horizonDays ?? BYTES_HORIZON_DAYS
+  const maxJumpSpanMs = policy.maxJumpSpanMs ?? Infinity
   const empty = (refusal: BytesRefusal, from = 0, to = 0, n = 0): BytesReading => ({
     perDay: null,
     crossesAt: null,
@@ -174,10 +217,10 @@ export function forecastBytes(
   const to = run[run.length - 1].ts
   const latest = run[run.length - 1].v
 
-  if (now - to > BYTES_MAX_STALE_MS) return empty('stale', from, to, run.length)
+  if (now - to > maxStaleMs) return empty('stale', from, to, run.length)
   if (run.length < BYTES_MIN_POINTS) return empty('too-few-points', from, to, run.length)
   const span = to - from
-  if (span < BYTES_MIN_WINDOW_MS) return empty('window-too-short', from, to, run.length)
+  if (span < minWindowMs) return empty('window-too-short', from, to, run.length)
 
   const { slope, intercept, r2, x0 } = fit(run)
   const rise = slope * span
@@ -187,11 +230,13 @@ export function forecastBytes(
   // versa -- so this is a choice about which number is STABLE rather than a
   // behaviour difference. The latest reading moves with every vacuum and
   // checkpoint; the run's first reading does not move at all.
-  const floor = Math.max(1, Math.abs(run[0].v)) * BYTES_FLAT_RISE_SHARE
+  const floor =
+    policy.flatRiseBytes ?? Math.max(1, Math.abs(run[0].v)) * BYTES_FLAT_RISE_SHARE
   if (rise <= -floor) return empty('shrinking', from, to, run.length)
   if (rise < floor) return empty('flat', from, to, run.length)
   if (r2 < BYTES_MIN_R2) return empty('noisy', from, to, run.length)
-  if (largestJump(run) >= BYTES_STEP_SHARE * rise) return empty('step-change', from, to, run.length)
+  if (largestJump(run, maxJumpSpanMs) >= BYTES_STEP_SHARE * rise)
+    return empty('step-change', from, to, run.length)
 
   const spanDays = span / DAY_MS
   const perDay = slope * DAY_MS
@@ -216,7 +261,7 @@ export function forecastBytes(
   }
   const at = x0 + (ceiling - intercept) / slope
   const days = Math.max(0, (at - now) / DAY_MS)
-  if (days > BYTES_HORIZON_DAYS) {
+  if (days > horizonDays) {
     return { ...base, crossesAt: null, days: null, refusal: 'beyond-horizon' }
   }
   return { ...base, crossesAt: at, days, refusal: null }

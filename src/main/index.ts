@@ -1,7 +1,7 @@
 // Must come first: redirects userData for portable builds before any
 // service module resolves its file paths.
 import './portable'
-import { app, shell, BrowserWindow, ipcMain, nativeTheme, dialog, session, Menu, Notification, powerMonitor } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, nativeTheme, dialog, session, Menu, Notification, powerMonitor, webContents } from 'electron'
 import { join } from 'node:path'
 import { readFileSync, existsSync, writeFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -59,6 +59,20 @@ import { FleetSampler, fleetCached, setActiveFleetSampler } from './services/fle
 import type { AutoStartSettings, AutoStartState } from '../shared/autostart'
 import { pruneJsonl } from './services/jsonlPrune'
 import { diagnosticsText } from './services/diagnostics'
+// Deliberately NOT added to the jsonl prune loop below: retention is for the
+// four audit files, which answer questions a year later. The debug trace is
+// session-scoped scratch — deleted whenever it is switched on, capped at 8 MB,
+// and never aged out, because dropping its OLDEST lines would drop the setup
+// that explains the failure.
+import {
+  debugRecord,
+  debugStatus,
+  deleteDebugLog,
+  installIpcDebugTap,
+  syncDebugLog
+} from './services/debugLog'
+import { buildDebugBundle, saveDebugBundle } from './services/debugBundle'
+import { mayOpenExternally } from '../shared/externalUrl'
 import type { DiagnosticsCrash } from '../shared/diagnostics'
 import { AUDIT_LOG_PATH } from './services/auditLog'
 import { LOCAL_SESSION_LOG_PATH } from './services/localSessionLog'
@@ -81,6 +95,9 @@ import {
 import {
   CAPACITY_THRESHOLDS,
   buildCapacityReport,
+  diskBytesPolicy,
+  diskCeilingBytes,
+  fitWindow,
   type CapacityReport
 } from '../shared/capacity'
 import { BroadcastRunner } from './services/broadcast'
@@ -144,6 +161,7 @@ import { buildK8sLogsCommand } from '../shared/kubernetes'
 import type { K8sCordonTarget, K8sExecTarget, K8sRolloutTarget } from '../shared/kubernetes'
 import type { BroadcastProgress, BroadcastRequest } from '../shared/broadcast'
 import { planBroadcast, verifyApproval } from '../shared/broadcast'
+import { SAMPLING_RESUMED } from '../shared/fleet'
 import type { FleetSamplerConfig } from '../shared/fleet'
 import {
   webhookConfigure,
@@ -241,6 +259,7 @@ import { storeFrpToken } from './services/vpn/frpSetup'
 import { toVpnResult } from './services/vpn/errors'
 import { preparedSshTarget, withVpnTransportDb } from './services/vpn/transport'
 import { httpRequest } from './services/httpClient'
+import { wsClose, wsCloseForOwner, wsOpen, wsSend } from './services/wsClient'
 import { ServiceCheckRunner } from './services/serviceChecks'
 import * as cicd from './services/cicd/wiring'
 import type { CicdConnection } from '../shared/cicd'
@@ -264,6 +283,7 @@ import {
 } from './services/localFiles'
 import { isLocalTarget, LOCAL_TARGET } from '../shared/execTarget'
 import type { HttpRequestSpec } from '../shared/httpClient'
+import type { WsOpenResult, WsOpenSpec, WsSendResult } from '../shared/httpSocket'
 import type { HttpCheck } from '../shared/httpMonitor'
 import type { CredentialShape } from '../shared/credentialShape'
 import type {
@@ -437,6 +457,18 @@ import {
   clearAllSessionElevations
 } from './services/mcpServer'
 import { forgetSession as forgetOAuthSession, listPendingConsents, approveConsent, denyConsent } from './services/mcpOAuth'
+
+// FIRST, before anything in this file registers a handler.
+//
+// It reassigns `ipcMain.handle` so every channel records its name, duration and
+// outcome while debug mode is on — and nothing at all while it is off. A
+// registration that ran before this line would not be wrapped, and `ipcMain` is
+// imported here and nowhere else under src/main, so "before everything in this
+// file" is the whole of the requirement. tests/ipcDebugTap.test.ts pins that,
+// because moving a handler into a feature module is how it would quietly stop
+// being true. services/debugLog.ts has the rest of the reasoning, including why
+// the arguments are never recorded.
+installIpcDebugTap()
 
 const isDev = !app.isPackaged
 
@@ -635,8 +667,17 @@ function createWindow(): void {
     )
   }
 
+  // The scheme is checked before the URL reaches the OS — see
+  // shared/externalUrl.ts for what that guards against and why the predicate
+  // lives there rather than inline here.
+  //
+  // The deny is unchanged and unconditional: the link opens in the user's
+  // browser or not at all, never in an Electron window carrying this preload.
+  //
+  // The other `shell.openExternal` in main (services/updater.ts) takes a module
+  // constant rather than anything from the renderer, so it needs none of this.
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    if (mayOpenExternally(details.url)) void shell.openExternal(details.url)
     return { action: 'deny' }
   })
 
@@ -1131,6 +1172,46 @@ ipcMain.handle(
   }
 )
 
+// ---- WebSocket client ----
+//
+// Sockets are opened in main for the reasons requests are — a private
+// certificate, an SSH or VPN route, no CORS — plus one only WebSockets have:
+// the browser cannot set handshake headers at all, so a browser-based client
+// has to put credentials in the query string, where they land in access logs.
+// Node can send a real `Authorization` header, so this does.
+ipcMain.handle('ws:open', (e, spec: WsOpenSpec): Promise<WsOpenResult> =>
+  wsOpen(spec, e.sender.id, {
+    prepare: (target) => preparedSshTarget(target as Parameters<typeof preparedSshTarget>[0]),
+    emit: (ownerId, id, event) => {
+      const target = webContents.fromId(ownerId)
+      if (target && !target.isDestroyed()) target.send(`ws:event:${id}`, event)
+    }
+  })
+)
+
+ipcMain.handle('ws:send', (_e, id: unknown, data: unknown): WsSendResult => {
+  if (typeof id !== 'string') return { ok: false, error: 'That socket is not open.' }
+  if (typeof data !== 'string' && !(data instanceof ArrayBuffer)) {
+    return { ok: false, error: 'A frame is either text or bytes.' }
+  }
+  return wsSend(id, data)
+})
+
+ipcMain.handle('ws:close', (_e, id: unknown, code?: unknown, reason?: unknown) => {
+  if (typeof id !== 'string') return
+  wsClose(
+    id,
+    typeof code === 'number' ? code : undefined,
+    typeof reason === 'string' ? reason : undefined
+  )
+})
+
+// A reloaded renderer would otherwise strand one SSH channel per socket it
+// had open, for the life of the app.
+app.on('web-contents-created', (_e, contents) => {
+  contents.once('destroyed', () => wsCloseForOwner(contents.id))
+})
+
 /**
  * Service checks run HERE, not in the panel that shows them.
  *
@@ -1392,6 +1473,12 @@ function startHistory(): void {
     if (store.recovery !== 'none') {
       store.recordEvent('history-recovery', null, { recovery: store.recovery })
     }
+    // The far end of however long this machine was not running. Written as soon
+    // as the store opens, which is the earliest moment it can be: whatever gap
+    // precedes it is a gap OpsMaxx caused by being shut, and the capacity panel
+    // says so instead of implying a server went quiet. See SAMPLING_RESUMED for
+    // why this is recorded on the way up rather than on quit.
+    store.recordEvent(SAMPLING_RESUMED, null, { reason: 'start' })
     // Only the CHANGE is recorded, not every refusal. A machine whose clock is
     // permanently wrong runs this four times a day forever, and a store that
     // refuses to age out is not helped by an event every six hours saying so.
@@ -3946,11 +4033,59 @@ function capacityReportFor(hostId: unknown, windowDays: unknown): CapacityReport
       : 7
   const now = Date.now()
   const from = now - days * 86_400_000
-  return buildCapacityReport(hostId, historyStore.readTrends(hostId, from, now), {
+  const trends = historyStore.readTrends(hostId, from, now)
+
+  /**
+   * The disk, again, in bytes.
+   *
+   * `readTrends` answers for the four CAPACITY_METRICS only, and `diskUsed` is
+   * deliberately not one of them -- that file is percentages and says so -- so
+   * the byte series is a second, separate read.
+   *
+   * THE FILTER IS NOT DEFENSIVE TIDYING. Until the guard in `metricsToSamples`
+   * landed, a probe that failed wrote a literal 0 into this series: `diskUsed`
+   * is typed `number` rather than `number | null`, and a failed `df` parse
+   * returns zero rather than nothing. Those rows are in existing databases for
+   * up to ninety days. One zero among thirty-gigabyte readings is not a small
+   * disk, it is an absence, and least squares does not survive it -- a single
+   * one drags the fit into describing the failure instead of the disk. Rows the
+   * hourly roll-up already averaged a zero into cannot be recovered; they read
+   * slightly low and age out on their own.
+   */
+  const usedPoints = historyStore.readSeries(hostId, 'diskUsed', from, now).filter((p) => p.v > 0)
+  const facts = new Map(historyStore.readFacts(hostId).map((f) => [f.key, f.value]))
+  // What diskPct is a percentage OF. `diskTotal` is the fallback for hosts last
+  // sampled before diskCapacity was collected, and for the two local probes,
+  // where the two quantities coincide by construction.
+  const usable = Number(facts.get('diskCapacity') ?? facts.get('diskTotal') ?? 0)
+  // ONE windowing decision, taken on the percentage series and applied to the
+  // byte series, so that the two sentences about one disk are about the same
+  // stretch of time by construction rather than by two rules that agree today.
+  const win = fitWindow(trends.diskPct)
+  const windowFrom = win.window.length === 0 ? from : win.window[0].ts
+  const diskBytes =
+    usedPoints.length === 0
+      ? null
+      : forecastBytes(
+          usedPoints.filter((p) => p.ts >= windowFrom),
+          diskCeilingBytes(usable),
+          now,
+          diskBytesPolicy(usable)
+        )
+
+  // Gaps OpsMaxx itself caused, so the panel can say "we were not running"
+  // rather than implying the server went quiet. Read for the window only.
+  const resumedAt = historyStore
+    .readEvents({ kind: SAMPLING_RESUMED, from, limit: 500 })
+    .map((e) => e.ts)
+
+  return buildCapacityReport(hostId, trends, {
     now,
     from,
     to: now,
     thresholds: CAPACITY_THRESHOLDS,
+    bytes: diskBytes === null ? {} : { diskPct: diskBytes },
+    resumedAt,
     // Carried into the report rather than duplicated in the panel: the
     // renderer cannot import a main-process constant, and a panel with "7
     // days" typed into it goes on saying that after the policy changes.
@@ -4740,6 +4875,41 @@ ipcMain.handle('diagnostics:text', (_e, crash?: DiagnosticsCrash | null) =>
   )
 )
 
+// ---- Debug trace ----
+//
+// The other half of a bug report: what the app DID. Off unless the user turned
+// it on, deleted when they do, previewed in full before it is saved, and SAVED
+// rather than copied — it carries hostnames and error text, which the
+// diagnostics block above deliberately does not. services/debugLog.ts has the
+// argument for why this can exist beside a payload that is safe by
+// construction.
+//
+// There is no `debug:set`. The toggle is a renderer setting, so it arrives on
+// data:save like every other one, and `syncDebugLog` owns the transition.
+ipcMain.handle('debug:status', () => debugStatus())
+ipcMain.handle('debug:build', () =>
+  buildDebugBundle({ webhook: webhookStatus(), aiBridgeRunning: mcpServerStatus().running })
+)
+ipcMain.handle('debug:save', (_e, text: unknown) =>
+  typeof text === 'string'
+    ? saveDebugBundle(text)
+    : Promise.resolve({ ok: false as const, error: 'Nothing to save.' })
+)
+ipcMain.handle('debug:delete', () => deleteDebugLog())
+// `on`, not `handle`, for two reasons: a renderer error report wants no reply,
+// and a handler here would be tapped by the wrapper in services/debugLog.ts and
+// so would record the act of recording. Shape-checked and capped rather than
+// trusted — this is renderer-supplied text, and `debugRecord` drops it anyway
+// when debug mode is off.
+ipcMain.on('debug:event', (_e, kind: unknown, message: unknown, stack: unknown) => {
+  if (typeof kind !== 'string' || typeof message !== 'string') return
+  debugRecord('renderer', {
+    kind: kind.slice(0, 64),
+    message: message.slice(0, 2000),
+    ...(typeof stack === 'string' ? { stack: stack.slice(0, 2000) } : {})
+  })
+})
+
 // ---- Data persistence ----
 ipcMain.handle('data:load', () => loadData())
 ipcMain.handle('data:save', (_e, data: unknown) => {
@@ -4756,6 +4926,11 @@ ipcMain.handle('data:save', (_e, data: unknown) => {
   // is not what "off" means.
   if (!isLocalTerminalEnabled()) localFilesDisposeAll()
   syncAccessWriteEnabled(data)
+  // Same pattern, and it also owns the transition: switching the debug trace on
+  // truncates the file so a report carries one reproduction, and switching it
+  // off closes the session and takes the console tee back out. See
+  // services/debugLog.ts for why a restart must NOT truncate.
+  syncDebugLog(data)
   // Same pattern again, and the sharpest instance of it: a custom drift watch's
   // PATH is interpolated into the collector script, so the process that runs
   // the script re-validates every stored watch rather than trusting a dialog it
@@ -5168,6 +5343,13 @@ app.whenReady().then(() => {
    */
   setShellIntegrationRoot(app.getPath('userData'))
 syncAccessWriteEnabled(loadData())
+  // `true` for boot: a debug session that was already on RESUMES rather than
+  // starting fresh, because reproducing a bug can need a restart and a capture
+  // that wiped itself on every launch would lose the reproduction it was
+  // switched on for. Read here rather than waiting for the renderer's first
+  // data:save, or the events from app start — the ones that explain a startup
+  // bug — are exactly what goes missing.
+  syncDebugLog(loadData(), true)
 syncDriftWatches(loadData())
   // Before the MCP server: the bridge asks the manager what is running, and a
   // bridge that answered "nothing" because the manager had not booted would be
@@ -5180,6 +5362,33 @@ syncDriftWatches(loadData())
   // cheaper than either.
   powerMonitor.on('resume', () => vpnHandleWake())
   powerMonitor.on('unlock-screen', () => vpnHandleWake())
+
+  /**
+   * The estate needs the same nudge, and for a reason of its own.
+   *
+   * The fleet sampler is a chain of setTimeouts (fleetSampler.ts schedule()),
+   * and a timer armed before the lid closed fires late, on the old cadence.
+   * Worse, the samples either side of the sleep are what a capacity forecast
+   * has to span, so every sleep used to put a hole in the series that the
+   * forecaster then refused to look across.
+   *
+   * `resume()` is NOT the call here, despite the name. It returns early
+   * whenever a timer is already armed -- which, after a wake, it always is --
+   * so it would be a no-op on exactly the path it looks written for.
+   * `sampleNow()` sweeps unconditionally, and its own `finally` re-arms the
+   * cadence from the moment of the wake. Overlap is already impossible: sweep()
+   * refuses to start while one is in flight.
+   *
+   * 'resume' only, not 'unlock-screen'. That one fires for every screensaver,
+   * and sweeping an estate over SSH because somebody came back from coffee is
+   * load nobody asked for. Note the vault is fully locked on suspend just
+   * below, so most targets will be credential-blocked until the user unlocks;
+   * the sampler skips those per-target and the unlock path resumes them.
+   */
+  powerMonitor.on('resume', () => {
+    historyStore?.recordEvent(SAMPLING_RESUMED, null, { reason: 'wake' })
+    void fleetSampler.sampleNow()
+  })
 
   /**
    * The two vault stages, mapped onto what the machine is actually doing.

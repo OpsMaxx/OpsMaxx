@@ -2,12 +2,19 @@ import { describe, it, expect } from 'vitest'
 
 import {
   buildFleetForecast,
+  capacityDigest,
   fleetForecastRow,
   FORECAST_REFUSAL_WORDS,
   forecastHeadline,
   type FleetForecastInput
 } from '../src/shared/fleetForecast'
-import { CAPACITY_METRICS, type Forecast, type RefusalReason } from '../src/shared/capacity'
+import {
+  CAPACITY_METRICS,
+  type CapacityReport,
+  type Forecast,
+  type RefusalReason,
+  type Trend
+} from '../src/shared/capacity'
 
 // Item 47's fleet expansion forecast. The roadmap row named the design in four
 // words -- refusal-first is the feature -- and every test here is about that:
@@ -196,5 +203,135 @@ describe('a crossing states the window it was drawn from', () => {
     // same number.
     const r = fleetForecastRow(input({ forecast: made({ days: 11, at: T0 + 99 * DAY }) }))
     expect(r.days).toBe(11)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The digest -- what an agent receives.
+// ---------------------------------------------------------------------------
+//
+// `get_capacity_trends` used to return the whole CapacityReport as JSON: about
+// ten kilobytes against a real host, five hundred chart points across four
+// metrics, and every conclusion in it the word "flat". These pin the shape that
+// replaced it -- sentences, with the window and the coverage attached to every
+// number, and nothing an agent has to parse.
+
+describe('one host as sentences', () => {
+  const DAY = 86_400_000
+  const NOW = 1_700_000_000_000
+
+  const trend = (over: Partial<Trend>): Trend => ({
+    metric: 'diskPct',
+    segments: [],
+    read: 400,
+    latest: { ts: NOW, v: 71.4, res: 'full' },
+    low: 60,
+    high: 72,
+    resolutionBoundary: null,
+    forecast: null,
+    bytes: null,
+    ...over
+  })
+
+  const report = (trends: Trend[]): CapacityReport => ({
+    hostId: 's1',
+    from: NOW - 30 * DAY,
+    to: NOW,
+    now: NOW,
+    fullResolutionDays: 7,
+    retainedDays: 90,
+    trends
+  })
+
+  it('states a crossing with the window AND the coverage it came from', () => {
+    const text = capacityDigest(
+      report([
+        trend({
+          forecast: {
+            ok: true,
+            at: NOW + 11 * DAY,
+            days: 11,
+            threshold: 90,
+            perDay: 1.7,
+            r2: 0.94,
+            confidence: 'high',
+            from: NOW - 21 * DAY,
+            to: NOW,
+            points: 400,
+            res: 'full',
+            coverage: { parts: 10, occupied: 9, longestGapMs: 2 * DAY }
+          }
+        })
+      ]),
+      'web-01'
+    )
+    expect(text).toContain('Disk: 71.4% now')
+    expect(text).toContain('Reaches 90% in 11 day(s)')
+    expect(text).toContain('from 21 days of data')
+    // Never without this. "Reaches 90% in 11 days, from 21 days of data" still
+    // reads as three weeks of watching, and on a desktop app it never is.
+    expect(text).toContain('9 of 10 parts of it sampled')
+  })
+
+  it('names the rule that refused, and keeps the rate when there is one', () => {
+    const text = capacityDigest(
+      report([
+        trend({
+          forecast: {
+            ok: false,
+            reason: 'sparse',
+            from: NOW - 30 * DAY,
+            to: NOW,
+            points: 320,
+            coverage: { parts: 10, occupied: 2, longestGapMs: 29 * DAY }
+          },
+          bytes: {
+            perDay: 188_743_680,
+            crossesAt: null,
+            days: null,
+            refusal: 'no-ceiling',
+            r2: 0.9,
+            confidence: 'medium',
+            from: NOW - 10 * 3_600_000,
+            to: NOW,
+            points: 300,
+            latest: 32_500_000_000
+          }
+        })
+      ]),
+      'db-02'
+    )
+    expect(text).toContain('No forecast:')
+    expect(text).toContain(FORECAST_REFUSAL_WORDS.sparse)
+    // The useful half survives the refusal: withholding "it is growing 180 MiB
+    // a day" because no date could be named would be withholding it for the
+    // wrong reason.
+    expect(text).toContain('still growing 180 MiB a day')
+  })
+
+  it('says something about CPU rather than nothing at all', () => {
+    // `forecast: null` used to render as silence, leaving an agent to decide
+    // for itself whether that was an error.
+    const text = capacityDigest(
+      report([trend({ metric: 'cpu', latest: { ts: NOW, v: 4.2, res: 'full' }, low: 2, high: 23 })]),
+      'web-01'
+    )
+    expect(text).toContain('CPU: 4.2% now')
+    expect(text).toContain('2%-23% across the window')
+    expect(text).toContain('a CPU does not fill up')
+  })
+
+  it('says a host with no history has none, and that this is not an all-clear', () => {
+    const text = capacityDigest(report([trend({ read: 0, latest: null })]), 'web-03')
+    expect(text).toContain('nothing has been recorded')
+    expect(text).toContain('does not mean the server has spare capacity')
+  })
+
+  it('fits in a fraction of what the report it replaced cost', () => {
+    const text = capacityDigest(
+      report(CAPACITY_METRICS.map((metric) => trend({ metric }))),
+      'web-01'
+    )
+    expect(text.length).toBeLessThan(1000)
   })
 })

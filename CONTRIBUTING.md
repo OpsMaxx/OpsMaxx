@@ -145,10 +145,47 @@ A good report includes:
   Six of this project's fixes were diagnosed from a picture of the running app
   and could not have been from prose
 
-The easy way to supply the first two: **Settings → Advanced → Copy diagnostics**
-puts a block of text on your clipboard — versions, platform, which features are
-on. It holds nothing secret to begin with: it is versions, counts and on/off
-states by construction, not a filter run over something larger. Paste that.
+### The bug button
+
+There is a **bug icon in the left rail**, above the gear, and on `Ctrl+K` as
+"Report a bug". It collects the report, shows it to you, and opens the issue
+form with your version and OS already filled in. Nothing is written or sent
+until you have read it and pressed the button underneath.
+
+For anything that **fails, misbehaves or hangs**, do this first:
+
+1. Press the bug button and choose **Start recording**. It closes and gets out
+   of the way; the bug icon keeps a dot while it runs.
+2. Make the bug happen again. Restarting OpsMaxx is fine — the recording
+   survives it.
+3. Press the bug button again. That stops the recording and builds the report.
+4. **Save report…**, then drag the saved file into the issue.
+
+Every step is on the bug button. You never have to go and find a setting first,
+which is deliberate: the version of this that began "open Settings → Advanced"
+is the one nobody used.
+
+Without step 1 the report still carries your versions, counts and feature
+states, which is enough for a good many bugs. With it, the report also carries
+which internal operations ran, how long each took and which ones failed —
+which is the difference between "the tunnel panel is empty" and a line saying
+what the tunnel list call actually returned.
+
+Settings → Advanced shows how big the recording has got and has a **Delete**
+button, but it is not how you start one.
+
+**What a debug trace contains.** Channel names, timings and error text. Never
+the arguments to a call, so passwords, passphrases and key material are not in
+it by construction rather than by filtering. Secret-shaped strings are stripped
+before anything is written. **Hostnames, usernames, file paths and command text
+are not**, and cannot be — no rule tells a hostname from an ordinary word. That
+is why the app shows you the whole report before it writes it. Read it, and
+delete any line you would rather not publish.
+
+**Settings → Advanced → Copy diagnostics** is still there and is still the right
+answer when all that is wanted is the version block: it holds nothing secret to
+begin with — versions, counts and on/off states by construction, not a filter
+run over something larger.
 
 Anything you paste **by hand** still needs **hostnames, usernames, keys and IPs
 taken out** first. Attach a long log as a file rather than pasting it: an

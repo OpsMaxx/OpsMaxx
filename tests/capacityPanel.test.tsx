@@ -113,7 +113,9 @@ describe('a forecast the data cannot support', () => {
     const young = points(T0, 61, 2 * MIN, 'full', (i) => 50 + i * 0.1)
     stubBridge({ capacity: { trends: () => Promise.resolve(report(young, 1)) } })
     render(<CapacityPanel servers={[ALPHA]} />)
-    await waitFor(() => expect(screen.getByText(/Only 2 hours of unbroken data/)).toBeTruthy())
+    // Not "unbroken" any more: the fit spans breaks, so the only thing wrong
+    // with this host is that it is two hours old.
+    await waitFor(() => expect(screen.getByText(/Only 2 hours of data/)).toBeTruthy())
     expect(screen.getByText(/at least 6 hours/)).toBeTruthy()
     expect(screen.queryByText(/Reaches 90%/)).toBeNull()
   })
@@ -152,11 +154,16 @@ describe('a server that was unreachable', () => {
     expect(container.querySelectorAll('[data-testid="segment-hourly"]').length).toBe(2)
   })
 
-  it('does not forecast from the climb on the far side of the outage', async () => {
+  it('forecasts across the outage, and says how much of the window it saw', async () => {
+    // The panel's half of the change tested in tests/capacity.test.ts: the disk
+    // climbed either side of a two-day silence, so the answer is a date rather
+    // than "flat over 12 hours" -- and the date arrives with the window AND the
+    // coverage, because "from 5.5 days of data" would otherwise read as five
+    // and a half days of watching.
     stubBridge({ capacity: { trends: () => Promise.resolve(report([...before, ...after])) } })
     render(<CapacityPanel servers={[ALPHA]} />)
-    await waitFor(() => expect(screen.getByText(/Flat over 12 hours/)).toBeTruthy())
-    expect(screen.queryByText(/Reaches 90%/)).toBeNull()
+    await waitFor(() => expect(screen.getByText(/Reaches 90%/)).toBeTruthy())
+    expect(screen.getByText(/parts sampled/)).toBeTruthy()
   })
 })
 

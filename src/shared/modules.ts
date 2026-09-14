@@ -212,7 +212,7 @@ export const MODULES: ModuleDef[] = [
     surface: 'read',
     label: 'Capacity trends',
     detail:
-      'How full a server is getting and when it runs out — "this disk fills in eleven days" — drawn from the samples the monitor already writes. It stores nothing of its own, schedules nothing and evaluates nothing in the background: every line is derived on demand from history that exists whether or not this is on. A forecast is never stated without the window it was drawn from, and a gap where a server was unreachable is left as a hole in the line rather than drawn across.',
+      'How full a server is getting and when it runs out — "this disk fills in eleven days" — drawn from the samples the monitor already writes. It stores nothing of its own, schedules nothing and evaluates nothing in the background: every line is derived on demand from history that exists whether or not this is on. A forecast is never stated without the window it was drawn from and how much of that window was sampled. A gap where nothing was measured is left as a hole in the line rather than drawn across; disk and memory are still forecast ACROSS such gaps, because a disk keeps filling while nobody is watching, while CPU is not.',
     // ON for a fresh install. This is the cheapest module in the list: it reads
     // the local history store, opens no connection, schedules nothing and
     // evaluates nothing in the background. It was off for symmetry with its

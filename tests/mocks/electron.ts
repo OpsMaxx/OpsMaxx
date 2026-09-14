@@ -40,7 +40,26 @@ export const safeStorage = {
 }
 
 export const dialog = {
-  showMessageBox: async () => ({ response: 1 })
+  showMessageBox: async () => ({ response: 1 }),
+  // Overridden per test by debugBundle.test.ts. Cancelled by default, because a
+  // test that forgot to say where the file goes should not write one.
+  showSaveDialog: async (): Promise<{ canceled: boolean; filePath?: string }> => ({
+    canceled: true
+  })
+}
+
+// debugLog.ts installs a tap over `handle`, so the mock has to be a real,
+// reassignable object rather than a frozen stub. `handle` and `on` record what
+// was registered so tests/ipcDebugTap.test.ts can invoke a channel by name.
+export const ipcMain = {
+  handlers: new Map<string, (...args: unknown[]) => unknown>(),
+  listeners: new Map<string, (...args: unknown[]) => unknown>(),
+  handle(channel: string, fn: (...args: unknown[]) => unknown): void {
+    this.handlers.set(channel, fn)
+  },
+  on(channel: string, fn: (...args: unknown[]) => unknown): void {
+    this.listeners.set(channel, fn)
+  }
 }
 
 // backup.ts references this at module scope (only called from

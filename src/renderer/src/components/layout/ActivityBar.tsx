@@ -79,6 +79,9 @@ export function ActivityBar(): React.JSX.Element {
   const setActivity = useApp((s) => s.setActivity)
   const toggleSidebar = useApp((s) => s.toggleSidebar)
   const backupDirty = useApp((s) => s.settings.backupDirty)
+  // Same source the Settings toggle writes, so the rail cannot claim a capture
+  // that is not running or stay quiet about one that is.
+  const recording = useApp((s) => s.settings.debugLogEnabled === true)
   // Two rail buttons, one `activity`. See the comment on the Operations button.
   const rail = useNav((s) => s.fleetRail)
   const monitorTab = useNav((s) => s.monitorTab)
@@ -221,10 +224,23 @@ export function ActivityBar(): React.JSX.Element {
           view here for the rail to be showing. */}
       <button
         className="activity-btn"
-        title="Report a bug — saves and copies your diagnostics and opens the issue form"
-        onClick={() => void reportBug()}
+        // The dot's meaning lives on the button, the way the gear's does below:
+        // a bare red dot reads equally as "recording" and as "something is
+        // broken", and the sentence is what separates them — for a hover and for
+        // a screen reader, which gets this as the button's name.
+        //
+        // It is on THIS button rather than in the status bar because it has to
+        // be true wherever the user is when they notice, and because the control
+        // that turns it off is the one it is attached to.
+        title={
+          recording
+            ? 'Report a bug — debug mode is recording what the app does. Press to stop recording and build a report.'
+            : 'Report a bug — collects a report you can read before you send it'
+        }
+        onClick={() => reportBug()}
       >
         <Bug size={20} />
+        {recording && <span className="activity-badge" aria-hidden />}
       </button>
       <button
         className={clsx('activity-btn', activity === 'settings' && 'active')}

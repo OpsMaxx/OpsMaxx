@@ -29,6 +29,32 @@
 // db-prod.internal.example` comes through whole, because no rule can tell a
 // host from a word. So the crash block is the one part of the payload the user
 // has to look at, and both screens that copy it now show it first and say so.
+//
+// THE BUNDLE IS BACK, NEXT DOOR, AND THIS TYPE IS UNCHANGED
+//
+// Everything above is still literally true of `Diagnostics`. It is worth saying
+// out loud that a second artefact now exists beside it, because otherwise the
+// next reader finds main/services/debugBundle.ts and concludes this rule was
+// quietly dropped.
+//
+// The complaint that produced it is fair and is not answered by anything here:
+// this payload says what an installation IS and nothing about what it DID, so a
+// maintainer reading a report still cannot see the sequence of events that
+// produced the bug. main/services/debugLog.ts records that sequence, and
+// debugBundle.ts pairs it with `formatDiagnostics`'s output.
+//
+// It differs from the design this header describes on every axis that made that
+// one bad. It is off by default and started by an explicit switch. It is
+// deleted each time that switch is thrown, so there is no retention window to
+// get wrong. It is written through `appendLogLine` with the same symlink,
+// ownership and mode guards as the four audit logs, so there is no second set
+// of file questions. Every line is redacted at the writer. And it is shown to
+// the user in full before it can be saved, and saved rather than copied.
+//
+// What it does NOT do is claim to be safe by construction, which is why it is a
+// separate module and a separate file rather than a field here. The rule this
+// header states — a field that would need a redaction pass does not belong in
+// this type — is intact, and that is exactly why the trace is not in it.
 
 /** What the crash screen already holds. Renderer-supplied, because the crash
  *  happened there and main never saw it. */

@@ -107,12 +107,44 @@ export interface HttpResponseOk {
   ok: true
   status: number
   statusText: string
+  /**
+   * One entry per header NAME. A header sent more than once is joined with
+   * `', '`, which is the rule RFC 9110 gives for combining field lines — and
+   * which `set-cookie` is the one documented exception to, hence `setCookie`
+   * below.
+   */
   headers: Record<string, string>
+  /**
+   * Every `Set-Cookie` line, unjoined and in the order the server sent them.
+   *
+   * Separate from `headers` because `set-cookie` is the one field that cannot
+   * survive being combined: an `Expires` date contains a comma, so splitting a
+   * joined string back apart is guesswork that gets the common case wrong.
+   * A cookie jar has to read this; `headers['set-cookie']` is kept only so the
+   * raw view still shows what arrived.
+   *
+   * Absent when the response set none.
+   */
+  setCookie?: string[]
   /** ArrayBuffer so it survives structured clone across IPC without re-encoding. */
   body: ArrayBuffer
   durationMs: number
-  /** True when the body hit MAX_RESPONSE_BYTES and was cut short. */
+  /**
+   * True when the body hit MAX_RESPONSE_BYTES and was cut short — measured
+   * after decoding, so a compressed response is capped on what it expands to
+   * rather than on what arrived.
+   */
   truncated: boolean
+  /**
+   * The `Content-Encoding` that was decoded away, when one was.
+   *
+   * `body` is the DECODED bytes, but the `content-encoding` header is left on
+   * `headers` as the server sent it: the header describes the response that
+   * arrived, and rewriting it would hide a detail someone debugging a proxy is
+   * looking for. This field is how a viewer can say "gzip, decoded" instead of
+   * appearing to contradict the header.
+   */
+  decodedFrom?: string
 }
 
 export interface HttpResponseErr {
@@ -233,6 +265,52 @@ export function parseTarget(raw: string): ParsedTarget | { error: string } {
 export function clampTimeout(ms: number | undefined): number {
   if (!ms || !Number.isFinite(ms) || ms <= 0) return DEFAULT_TIMEOUT_MS
   return Math.min(Math.floor(ms), MAX_TIMEOUT_MS)
+}
+
+// -------------------------------------------------------------- body codecs
+
+/**
+ * The content codings this client can undo, innermost last.
+ *
+ * `identity` is legal and means "nothing was applied", so it is accepted and
+ * skipped rather than treated as unknown. Anything else — a coding some proxy
+ * invented, or one Node's zlib does not implement — leaves the body alone and
+ * `decodedFrom` unset, which is the honest outcome: bytes we cannot decode are
+ * still the bytes that arrived.
+ */
+export const DECODABLE_ENCODINGS = new Set(['gzip', 'x-gzip', 'deflate', 'br', 'zstd'])
+
+/**
+ * `Content-Encoding` as a list, in the order it was APPLIED.
+ *
+ * The header lists codings in application order, so undoing them means walking
+ * it backwards — `Content-Encoding: gzip, br` was brotli'd over a gzip, and
+ * decoding in header order produces garbage on the first step. The reversal
+ * belongs to the decoder; this just reports what was declared.
+ *
+ * Returns an empty array for an absent, empty or `identity`-only header.
+ */
+export function contentEncodings(headers: Record<string, string>): string[] {
+  const raw = Object.entries(headers).find(([k]) => k.toLowerCase() === 'content-encoding')?.[1]
+  if (!raw) return []
+  return raw
+    .split(',')
+    .map((part) => part.trim().toLowerCase())
+    .filter((part) => part !== '' && part !== 'identity')
+}
+
+/**
+ * The charset a text body is in, lowercased, or null when none was declared.
+ *
+ * Only the parameter is read — guessing from the bytes is a different job, and
+ * a wrong guess silently corrupts text rather than failing. A caller with no
+ * answer here should default to UTF-8, which is what every API that did not say
+ * actually means in practice.
+ */
+export function charsetOf(contentType: string | undefined): string | null {
+  if (!contentType) return null
+  const match = /;\s*charset\s*=\s*"?([^";\s]+)"?/i.exec(contentType)
+  return match ? match[1].toLowerCase() : null
 }
 
 // ------------------------------------------------------------- link-local

@@ -179,11 +179,38 @@ function TrendRow({
       </div>
 
       {gaps.map((s, i) => (
-        <div key={i} className="state-unknown">
-          <AlertTriangle size={11} /> No samples for {span(s.gapBefore)}. The line is broken there
-          rather than joined — nothing was measured across it.
+        <div key={i} className={s.gapKnown === 'not-running' ? 'faint' : 'state-unknown'}>
+          {/* Two different facts, and only one of them is about the server.
+              A gap OpsMaxx caused by not running is not a warning about the
+              host, so it does not get the warning colour or the triangle. */}
+          {s.gapKnown === 'not-running' ? (
+            <>
+              OpsMaxx was not running for {span(s.gapBefore)} — nothing was measured across it, so
+              the line is broken there rather than joined.
+            </>
+          ) : (
+            <>
+              <AlertTriangle size={11} /> No samples for {span(s.gapBefore)}. The line is broken
+              there rather than joined — nothing was measured across it.
+            </>
+          )}
         </div>
       ))}
+
+      {/* The disk, in bytes.
+          A second sentence on the same row, not a second chart: the figure the
+          percentage above is rounded from, the rate at full precision, and what
+          is left before the threshold. This is the row the whole panel is named
+          for and the one the stored integer percentage could never answer. */}
+      {trend.bytes !== null && trend.bytes.latest !== null && (
+        <div className="panel-note faint" style={{ marginTop: 2 }}>
+          {bytes(trend.bytes.latest)} used
+          {trend.bytes.perDay !== null && <> · growing {bytes(trend.bytes.perDay)} a day</>}
+          {trend.bytes.crossesAt !== null && trend.bytes.days !== null && (
+            <> · {threshold ?? 90}% in {Math.floor(trend.bytes.days)} day(s)</>
+          )}
+        </div>
+      )}
 
       {trend.forecast !== null && threshold !== null && (
         <div

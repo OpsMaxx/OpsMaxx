@@ -200,3 +200,68 @@ describe('bytes as an operator reads them', () => {
     expect(formatBytes(-2 * 1024 ** 2)).toBe('-2.0 MiB')
   })
 })
+
+// ---------------------------------------------------------------------------
+// The policy parameter.
+// ---------------------------------------------------------------------------
+//
+// Added so a disk could use this arithmetic under a different regime. The thing
+// worth pinning hardest is the half that did NOT change: a caller that passes
+// no policy must behave exactly as it did, because the database growth series
+// still depends on it and nobody asked for that to be re-tuned.
+
+describe('a caller whose series is not a database', () => {
+  const HOUR = 3_600_000
+  const DAY = 86_400_000
+  const T0 = 1_700_000_000_000
+  const MB = 1024 * 1024
+
+  /** Steady growth, hourly, for `days` days, ending at T0. */
+  const growing = (days: number, perDay: number, start = 1000 * MB): BytesPoint[] =>
+    Array.from({ length: days * 24 }, (_, i) => ({
+      ts: T0 - (days * 24 - 1 - i) * HOUR,
+      v: start + (perDay * i) / 24
+    }))
+
+  it('behaves identically when given no policy at all', () => {
+    const pts = growing(6, 200 * MB)
+    expect(forecastBytes(pts, null, T0)).toEqual(forecastBytes(pts, null, T0, {}))
+  })
+
+  it('keeps the database staleness horizon unless told otherwise', () => {
+    // Two days old is nothing for a series written when somebody opens a panel.
+    const stale = growing(6, 200 * MB).map((p) => ({ ...p, ts: p.ts - 2 * DAY }))
+    expect(forecastBytes(stale, null, T0).refusal).not.toBe('stale')
+    // The disk regime is six hours, and says so.
+    expect(forecastBytes(stale, null, T0, { maxStaleMs: 6 * HOUR }).refusal).toBe('stale')
+  })
+
+  it('takes an absolute flat floor in place of the relative one', () => {
+    // 2% of a 1000 MB start is 20 MB, so 60 MB of total growth is a trend by
+    // the database rule. An absolute floor of 100 MB calls the same series flat.
+    const slow = growing(6, 10 * MB)
+    expect(forecastBytes(slow, null, T0).refusal).toBe('no-ceiling')
+    expect(forecastBytes(slow, null, T0, { flatRiseBytes: 100 * MB }).refusal).toBe('flat')
+  })
+
+  it('does not count growth across a silence as a step, once bounded', () => {
+    // THE TRAP, AND THE REASON THE BOUND EXISTS. Two days of readings, ten days
+    // during which the laptop was shut, then two more days. Nothing unusual
+    // happened: the thing grew at exactly 200 MB a day throughout.
+    //
+    // Unbounded, the single pair of readings spanning those ten days carries
+    // ten days of perfectly ordinary growth -- most of the whole rise -- and is
+    // refused as "something was added at once". Every gappy series refuses that
+    // way, which is why fitting across gaps without this bound would have
+    // changed nothing but the wording of the refusal.
+    const perDay = 200 * MB
+    const before = growing(2, perDay).map((p) => ({ ...p, ts: p.ts - 12 * DAY }))
+    const after = growing(2, perDay, 1000 * MB + perDay * 12)
+    const series = [...before, ...after]
+    expect(forecastBytes(series, null, T0).refusal).toBe('step-change')
+    // Bounded, it is what it is: a rate.
+    const bounded = forecastBytes(series, null, T0, { maxJumpSpanMs: 2 * HOUR })
+    expect(bounded.refusal).toBe('no-ceiling')
+    expect(Math.abs((bounded.perDay ?? 0) - perDay) / perDay).toBeLessThan(0.05)
+  })
+})

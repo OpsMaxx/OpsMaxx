@@ -4,6 +4,13 @@ import type { AutoStartSettings, AutoStartState } from '../shared/autostart'
 import type { UnitDraft, UserUnitsReading } from '../shared/userUnits'
 import type { BackupAlarm } from '../shared/backup'
 import type { HttpRequestSpec, HttpResult } from '../shared/httpClient'
+import type {
+  HttpSocketBridge,
+  WsEvent,
+  WsOpenResult,
+  WsOpenSpec,
+  WsSendResult
+} from '../shared/httpSocket'
 import type { CheckResult, HttpCheck } from '../shared/httpMonitor'
 import type {
   AgentRunReport,
@@ -15,6 +22,7 @@ import type {
 } from '../shared/cicd'
 import type { CredentialShape } from '../shared/credentialShape'
 import type { DiagnosticsCrash } from '../shared/diagnostics'
+import type { DebugBundle, DebugStatus, SaveResult } from '../shared/debug'
 import type { LocalTarget } from '../shared/execTarget'
 import type {
   SshConnectConfig,
@@ -316,6 +324,36 @@ const api = {
     text: (crash?: DiagnosticsCrash | null): Promise<string> =>
       ipcRenderer.invoke('diagnostics:text', crash ?? null)
   },
+  /**
+   * The other half of a bug report: what the app DID.
+   *
+   * Unlike `diagnostics` above, this is NOT safe by construction. `build`
+   * returns the diagnostics block plus a trace of which internal operations ran
+   * and which failed, and a failure names what it failed to reach — hostnames,
+   * usernames, paths, the text of an error a server wrote. `redactOutput` takes
+   * the secrets out at the writer and cannot take a hostname out, so the
+   * renderer shows the whole thing before the user can do anything with it.
+   *
+   * There is no `copy` here on purpose. A report is SAVED: an attachment is
+   * inert, while pasted text renders as Markdown and is read by automation,
+   * which is the line CONTRIBUTING.md already draws for long logs. `save`
+   * returns what actually happened — written, cancelled, or why not — because
+   * the path it replaces claimed success whenever nothing threw.
+   *
+   * No `setEnabled` either: the toggle is an ordinary renderer setting and
+   * reaches main on `data:save` like every other one.
+   */
+  debug: {
+    status: (): Promise<DebugStatus> => ipcRenderer.invoke('debug:status'),
+    build: (): Promise<DebugBundle> => ipcRenderer.invoke('debug:build'),
+    save: (text: string): Promise<SaveResult> => ipcRenderer.invoke('debug:save', text),
+    /** Remove the trace. The user's copy of their own hostnames is theirs. */
+    delete: (): Promise<void> => ipcRenderer.invoke('debug:delete'),
+    /** Fire-and-forget, and dropped in main when debug mode is off. `send`
+     *  rather than `invoke` so an error report cannot itself await main. */
+    event: (kind: string, message: string, stack?: string): void =>
+      ipcRenderer.send('debug:event', kind, message, stack)
+  },
   ssh: {
     connect: (cfg: SshConnectConfig & { serverId?: string }): Promise<void> =>
       ipcRenderer.invoke('ssh:connect', cfg),
@@ -439,6 +477,25 @@ const api = {
     /** Re-read a description a collection already points at. */
     readSpecFile: (path: string): Promise<string> => ipcRenderer.invoke('http:readSpecFile', path)
   },
+  /**
+   * WebSocket sessions, opened in main over the same three routes a request
+   * takes. The reason this is not `new WebSocket()` in the renderer: the
+   * browser cannot set handshake headers, cannot be handed a private CA, and
+   * cannot reach a service bound to a server's loopback.
+   */
+  httpSocket: {
+    open: (spec: WsOpenSpec): Promise<WsOpenResult> => ipcRenderer.invoke('ws:open', spec),
+    send: (id: string, data: string | ArrayBuffer): Promise<WsSendResult> =>
+      ipcRenderer.invoke('ws:send', id, data),
+    close: (id: string, code?: number, reason?: string): Promise<void> =>
+      ipcRenderer.invoke('ws:close', id, code, reason),
+    onEvent: (id: string, cb: (event: WsEvent) => void): (() => void) => {
+      const ch = `ws:event:${id}`
+      const h = (_e: IpcRendererEvent, event: WsEvent): void => cb(event)
+      ipcRenderer.on(ch, h)
+      return () => ipcRenderer.removeListener(ch, h)
+    }
+  } satisfies HttpSocketBridge,
   /**
    * Service checks, which run in main whether or not anything is displaying
    * them. The renderer owns the LIST (it is user configuration, persisted with

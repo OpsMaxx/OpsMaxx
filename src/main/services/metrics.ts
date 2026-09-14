@@ -428,6 +428,12 @@ function parse(
   const disk = section(text, 'DISK')[0]?.trim().split(/\s+/) ?? []
   const diskTotal = (parseInt(disk[1]) || 0) * 1024
   const diskUsed = (parseInt(disk[2]) || 0) * 1024
+  // Column 3, Available -- read here for the first time, though it has been in
+  // every listing this probe has ever taken. `diskUsed + diskAvail` is exactly
+  // the denominator the Capacity column below is a percentage of, which is what
+  // lets a forecast be computed at full precision in the SAME basis as the
+  // integer percentage we store. See HostMetrics.diskCapacity.
+  const diskAvail = (parseInt(disk[3]) || 0) * 1024
   /**
    * df's OWN Capacity column, not a percentage derived here.
    *
@@ -451,7 +457,7 @@ function parse(
    * the right trade here. A figure an operator can check against `df -h` is
    * worth more than a decimal place nobody can reconcile.
    */
-  const diskCapacity = /^(\d+)%$/.exec(disk[4] ?? '')
+  const dfCapacity = /^(\d+)%$/.exec(disk[4] ?? '')
 
   // Inodes. `df -iP` gives: Filesystem Inodes IUsed IFree IUse% Mounted.
   //
@@ -510,9 +516,12 @@ function parse(
     memAvailable,
     memFree,
     memCache,
-    diskPct: diskCapacity ? Number(diskCapacity[1]) : null,
+    diskPct: dfCapacity ? Number(dfCapacity[1]) : null,
     diskUsed,
     diskTotal,
+    // Zero when df said nothing, matching diskTotal's convention. `diskUsed` is
+    // 0 in that case too, so this is 0 rather than a denominator of nothing.
+    diskCapacity: diskTotal === 0 ? 0 : diskUsed + diskAvail,
     inodePct,
     mounts,
     load1,

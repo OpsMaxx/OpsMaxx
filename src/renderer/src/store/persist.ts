@@ -37,6 +37,10 @@ interface Persisted {
   databases: unknown
   // Absent in saves written before the HTTP client existed.
   apiCollections?: unknown
+  // The API client's own workspace — environments, cookies, tabs and the
+  // documents as edited. Absent in saves written before the client had one,
+  // which is not an error: it is rebuilt from `apiCollections`.
+  apiWorkspace?: unknown
   // Absent in saves written before external service checks existed.
   httpChecks?: unknown
   // Absent in saves written before the CI/CD module existed. The records carry
@@ -161,6 +165,7 @@ async function hydrate(): Promise<void> {
       state.tunnels !== prev.tunnels ||
       state.databases !== prev.databases ||
       state.apiCollections !== prev.apiCollections ||
+      state.apiWorkspace !== prev.apiWorkspace ||
       state.httpChecks !== prev.httpChecks ||
       state.cicdConnections !== prev.cicdConnections
 
@@ -181,6 +186,11 @@ async function hydrate(): Promise<void> {
       state.tunnels !== prev.tunnels ||
       state.databases !== prev.databases ||
       state.apiCollections !== prev.apiCollections ||
+      // The requests themselves, not just the list of APIs. A saved request
+      // body or an environment that writes to disk but does NOT mark the
+      // backup stale is the silent data-loss path described below, pointed at
+      // the half of the HTTP client people actually type into.
+      state.apiWorkspace !== prev.apiWorkspace ||
       // Checks are stored data a backup carries, so adding one has to mark the
       // last backup stale like adding a server does.
       state.httpChecks !== prev.httpChecks ||
@@ -253,6 +263,7 @@ function save(): Promise<void> {
       tunnels: s.tunnels,
       databases: s.databases,
       apiCollections: s.apiCollections,
+      apiWorkspace: s.apiWorkspace,
       httpChecks: s.httpChecks,
       cicdConnections: s.cicdConnections,
       settings: s.settings,
