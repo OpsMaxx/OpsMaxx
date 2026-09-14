@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import { useApp } from '../src/renderer/src/store/app'
+import { useVaultPrompt } from '../src/renderer/src/store/vaultPrompt'
 import userEvent from '@testing-library/user-event'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -919,7 +920,71 @@ describe('a user can actually create a connection', () => {
     // that reaches the store is the record that reaches that file.
     expect(JSON.stringify(saved)).not.toContain('ghp_secret')
   })
+
+  // Connect appeared to do NOTHING. Verify said the credential reached Jenkins,
+  // the button was enabled, it went in and the modal just sat there -- because
+  // the handler was `.then(onClose)` with no `.catch`, and the likeliest
+  // rejection is the most invisible one: `createSecret` refuses a locked vault
+  // by design. An unhandled rejection is not a UI.
+  it('says why the save failed instead of sitting there', async () => {
+    const b = bridge()
+    b.createSecret = vi.fn(async () => {
+      throw new Error('The vault refused the change.')
+    })
+    useApp.setState({ cicdConnections: [] })
+    render(<CicdPanel bridge={b} />)
+    await fillConnectForm()
+    await userEvent.click(screen.getByRole('button', { name: /^connect$/i }))
+
+    expect(await screen.findByText(/The vault refused the change\./)).toBeTruthy()
+    // Still open, and nothing half-saved.
+    expect(screen.getByRole('button', { name: /^connect$/i })).toBeTruthy()
+    expect(useApp.getState().cicdConnections).toHaveLength(0)
+  })
+
+  it('offers to unlock when that is the only thing wrong, then saves', async () => {
+    const b = bridge()
+    let calls = 0
+    b.createSecret = vi.fn(async () => {
+      calls++
+      if (calls === 1) throw new Error('OPSMAXX_VAULT_LOCKED: the vault is locked.')
+      return 'vault-after-unlock'
+    })
+    const request = vi.fn(async () => true)
+    useVaultPrompt.setState({ request })
+    useApp.setState({ cicdConnections: [] })
+    render(<CicdPanel bridge={b} />)
+    await fillConnectForm()
+    await userEvent.click(screen.getByRole('button', { name: /^connect$/i }))
+
+    await waitFor(() => expect(useApp.getState().cicdConnections).toHaveLength(1))
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(useApp.getState().cicdConnections[0].vaultEntryId).toBe('vault-after-unlock')
+  })
+
+  it('never shows the user the marker it recognises a locked vault by', async () => {
+    const b = bridge()
+    b.createSecret = vi.fn(async () => {
+      throw new Error('OPSMAXX_VAULT_LOCKED: the vault is locked.')
+    })
+    useVaultPrompt.setState({ request: vi.fn(async () => false) })
+    useApp.setState({ cicdConnections: [] })
+    render(<CicdPanel bridge={b} />)
+    await fillConnectForm()
+    await userEvent.click(screen.getByRole('button', { name: /^connect$/i }))
+
+    expect(await screen.findByText(/the vault is locked\./)).toBeTruthy()
+    expect(screen.queryByText(/OPSMAXX_VAULT_LOCKED/)).toBeNull()
+  })
 })
+
+/** The shortest path to a Connect button that is enabled. */
+async function fillConnectForm(): Promise<void> {
+  await userEvent.click(screen.getByRole('button', { name: /connect an account/i }))
+  await userEvent.type(screen.getByLabelText(/^name/i), 'Platform')
+  await userEvent.type(screen.getByLabelText(/url/i), 'https://github.com')
+  await userEvent.type(screen.getByLabelText(/token/i), 'ghp_secret')
+}
 
 describe('re-running a finished run', () => {
   // `rerun` reached the contract, preload, IPC, wiring and the GitHub adapter,

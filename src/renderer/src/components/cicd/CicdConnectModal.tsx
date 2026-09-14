@@ -3,6 +3,7 @@ import { Field, Modal } from '../common/Modal'
 import { useWorkspaceServers, useWorkspaceVpns, useApp } from '../../store/app'
 import { clsx } from '../../lib/format'
 import { maskToken } from '../../../../shared/tokenDisplay'
+import { withoutVaultMarker } from '../../lib/withVaultUnlock'
 import type { CicdBridge, CicdConnection, CicdProvider, CicdRoute } from '../../../../shared/cicd'
 
 /**
@@ -166,6 +167,13 @@ export function CicdConnectModal({
   )
   const [insecureTls, setInsecureTls] = useState(editing?.insecureTls === true)
   const [verify, setVerify] = useState<VerifyState>({ kind: 'idle' })
+  // Saving has its own two states because it can fail, and used to fail in
+  // silence: the confirm handler was `.then(onClose)` with no `.catch`, so a
+  // rejected save left the button pressed, the modal open and nothing said. The
+  // most likely rejection is the most invisible one -- a locked vault, which
+  // `createSecret` refuses by design.
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const def = PROVIDERS.find((p) => p.id === provider) ?? PROVIDERS[0]
 
@@ -233,7 +241,13 @@ export function CicdConnectModal({
       footerNote={
         <>
           {missing && <span className="field-hint danger">{missing}</span>}
-          {!missing && <VerifyNote state={verify} def={def} />}
+          {/* A failed save outranks the verify note: it is the newer fact, and
+              the two describe different halves of the same button press. */}
+          {saveError !== null ? (
+            <span className="field-hint danger">{saveError}</span>
+          ) : (
+            !missing && <VerifyNote state={verify} def={def} />
+          )}
         </>
       }
       footer={
@@ -253,15 +267,26 @@ export function CicdConnectModal({
         </button>
       }
       confirm={{
-        label: editing ? 'Save' : 'Connect',
+        label: saving ? 'Saving…' : editing ? 'Save' : 'Connect',
         // `onSave` is optional only so a test can render this without a store.
         // The panel always supplies one; a build where it does not is a build
         // where nothing could be saved, and that is worth failing loudly in a
         // test rather than quietly grey on screen.
-        disabled: missing !== null || !onSave,
+        disabled: missing !== null || !onSave || saving,
         onClick: () => {
-          if (missing || !onSave) return
-          void Promise.resolve(onSave(draft(), token)).then(onClose)
+          if (missing || !onSave || saving) return
+          setSaveError(null)
+          setSaving(true)
+          void Promise.resolve(onSave(draft(), token))
+            .then(onClose)
+            .catch((err: unknown) => {
+              // Only on the failure path: the success path has unmounted this
+              // component, and setting state there is a warning about nothing.
+              setSaving(false)
+              // The marker is how the renderer recognises a locked vault
+              // without matching an English sentence. Nobody should read it.
+              setSaveError(withoutVaultMarker(err instanceof Error ? err.message : String(err)))
+            })
         }
       }}
     >

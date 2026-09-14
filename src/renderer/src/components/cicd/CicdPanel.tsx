@@ -3,7 +3,7 @@ import { Activity } from 'lucide-react'
 import { PanelShell } from '../monitor/PanelShell'
 import { EmptyState } from '../common/EmptyState'
 import { UnlockVaultButton } from '../common/UnlockVaultButton'
-import { isVaultLocked } from '../../lib/withVaultUnlock'
+import { isVaultLocked, withVaultUnlock } from '../../lib/withVaultUnlock'
 import { clsx, duration } from '../../lib/format'
 import { remoteText } from '../../../../shared/remoteText'
 import { useApp } from '../../store/app'
@@ -141,7 +141,15 @@ export function CicdPanel({
     if (seed) return
     let record = connection
     if (token !== '' && cicdBridgeHas(bridge, 'createSecret')) {
-      const vaultEntryId = await bridge!.createSecret(`CI/CD — ${connection.name}`, token)
+      // Through `withVaultUnlock`, because a vault WRITE needs the vault fully
+      // open and `createSecret` says so by refusing. Without the offer, the only
+      // thing standing between a verified account and a saved one was a locked
+      // vault the user was never asked to open. Declining still throws, and the
+      // modal now says so on the button rather than swallowing it.
+      const vaultEntryId = await withVaultUnlock(
+        `Unlocking lets OpsMaxx store the token for ${connection.name}.`,
+        () => bridge!.createSecret(`CI/CD — ${connection.name}`, token)
+      )
       record = { ...connection, vaultEntryId }
     }
     // `upsert`, not a bulk set: `connections` here is the ACTIVE workspace's
