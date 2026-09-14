@@ -23,9 +23,16 @@
  * after an ssh2 upgrade, check that the patch still applied before looking here.
  */
 
-import { utils } from 'ssh2'
+// ssh2 is CommonJS, and `utils` is an object literal inside its `module.exports`
+// rather than a plain binding, so cjs-module-lexer does not see it as a named
+// export. The main bundle is ESM, so `import { utils } from 'ssh2'` type-checks,
+// passes every test under Vitest's resolver, and then throws SyntaxError the
+// moment the packaged app starts. Default-import and destructure instead.
+import ssh2 from 'ssh2'
 
 import { CloudError } from '../../../shared/cloud'
+
+const { utils } = ssh2
 
 /** What a certificate says about itself, as far as we need to read. */
 export interface ParsedCertificate {
