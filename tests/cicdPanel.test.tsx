@@ -96,6 +96,10 @@ function bridge(over: Partial<CicdBridge> = {}): CicdBridge {
     listParams: vi.fn(async () => []),
     getConfig: vi.fn(async () => ({ kind: 'xml' as const, text: '<flow-definition/>' })),
     recentRuns: vi.fn(async () => []),
+    queue: vi.fn(async () => ({
+      items: [],
+      capacity: { busyExecutors: 0, totalExecutors: 0, agents: [] }
+    })),
     getLog: vi.fn(
       async (): Promise<CicdLogChunk> => ({ mode: 'snapshot', text: 'done\n', more: false })
     ),

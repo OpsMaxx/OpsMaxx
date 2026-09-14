@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { createJenkinsAdapter, jenkinsParams, triggerJenkins } from '../src/main/services/cicd/jenkins'
+import {
+  createJenkinsAdapter,
+  jenkinsCapacity,
+  jenkinsParams,
+  jenkinsQueue,
+  triggerJenkins
+} from '../src/main/services/cicd/jenkins'
 import type { CicdHttp, CicdResponse } from '../src/shared/cicd'
 
 /**
@@ -561,5 +567,129 @@ describe('a Jenkins behind SSO', () => {
     // guess which. The new branch must not have swallowed that.
     const { http } = fake(() => ({ status: 403, body: '' }))
     await expect(adapter(http).listPipelines()).rejects.toThrow(/403/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+describe('the queue, and why nothing is running', () => {
+  it('bounds the queue read and does not pull the whole task object', async () => {
+    // `task` carries the job's entire configuration on some plugin combinations,
+    // and there is no pagination to save you.
+    const { http, calls } = fake(() => json({ items: [] }))
+    await jenkinsQueue(http)
+    expect(calls[0].path).toContain('tree=')
+    expect(calls[0].path).toContain('task[name,url]')
+    expect(calls[0].path).toContain('{0,200}')
+  })
+
+  it('keeps the provider reason, which is the whole point of the view', async () => {
+    const { http } = fake(() =>
+      json({
+        items: [
+          {
+            id: 12,
+            why: 'Waiting for next available executor',
+            stuck: false,
+            blocked: true,
+            inQueueSince: 1_700_000_000_000,
+            task: { name: 'trivy' }
+          }
+        ]
+      })
+    )
+    const [item] = await jenkinsQueue(http)
+    expect(item).toMatchObject({
+      id: 12,
+      name: 'trivy',
+      why: 'Waiting for next available executor',
+      stuck: false,
+      blocked: true
+    })
+  })
+
+  it('survives a queue item with no reason and no task name', async () => {
+    const { http } = fake(() => json({ items: [{ id: 1 }] }))
+    const [item] = await jenkinsQueue(http)
+    expect(item.why).toBeUndefined()
+    expect(item.name).toBe('unnamed')
+    expect(item.stuck).toBe(false)
+  })
+})
+
+describe('the executors behind the queue', () => {
+  const computer = (over: Record<string, unknown> = {}): unknown => ({
+    displayName: 'Built-In Node',
+    offline: false,
+    temporarilyOffline: false,
+    numExecutors: 2,
+    idle: true,
+    monitorData: {
+      'hudson.node_monitors.DiskSpaceMonitor': { size: 66_113_196_032, totalSize: 107_304_955_904 }
+    },
+    ...over
+  })
+
+  it('asks for the whole monitor map, because which monitors exist varies', async () => {
+    // Asking for a monitor the controller does not have is not an error Jenkins
+    // reports -- it is simply absent from the answer.
+    const { http, calls } = fake(() => json({ busyExecutors: 0, totalExecutors: 2, computer: [] }))
+    await jenkinsCapacity(http)
+    expect(calls[0].path).toContain('monitorData[*]')
+  })
+
+  it('reads the counts and the disk figure', async () => {
+    const { http } = fake(() =>
+      json({ busyExecutors: 1, totalExecutors: 2, computer: [computer()] })
+    )
+    const cap = await jenkinsCapacity(http)
+    expect(cap.busyExecutors).toBe(1)
+    expect(cap.totalExecutors).toBe(2)
+    expect(cap.agents[0]).toMatchObject({
+      name: 'Built-In Node',
+      offline: false,
+      executors: 2,
+      idle: true,
+      diskFreeBytes: 66_113_196_032
+    })
+  })
+
+  it('distinguishes taken-offline from gone, and keeps the reason', async () => {
+    // A person taking an agent offline and an agent falling over are different
+    // mornings, and Jenkins reports them in different fields.
+    const { http } = fake(() =>
+      json({
+        busyExecutors: 0,
+        totalExecutors: 0,
+        computer: [
+          computer({
+            offline: true,
+            temporarilyOffline: true,
+            offlineCauseReason: 'Disconnected by admin'
+          })
+        ]
+      })
+    )
+    const cap = await jenkinsCapacity(http)
+    expect(cap.agents[0].offline).toBe(true)
+    expect(cap.agents[0].temporarilyOffline).toBe(true)
+    expect(cap.agents[0].offlineReason).toBe('Disconnected by admin')
+  })
+
+  it('omits a disk figure the controller does not report', async () => {
+    const { http } = fake(() =>
+      json({ busyExecutors: 0, totalExecutors: 1, computer: [computer({ monitorData: {} })] })
+    )
+    const cap = await jenkinsCapacity(http)
+    expect(cap.agents[0].diskFreeBytes).toBeUndefined()
+  })
+
+  it('reports a login redirect here too', async () => {
+    const { http } = fake(() => ({
+      status: 302,
+      headers: { location: '/securityRealm/commenceLogin' },
+      body: ''
+    }))
+    await expect(jenkinsCapacity(http)).rejects.toThrow(/did not accept the API token/i)
   })
 })

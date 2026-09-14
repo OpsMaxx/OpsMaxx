@@ -1311,6 +1311,7 @@ ipcMain.handle(
   (_e, connectionId: string, pipelineRef: string, limit?: number) =>
     cicd.recentRuns(connectionId, pipelineRef, limit)
 )
+ipcMain.handle('cicd:queue', (_e, connectionId: string) => cicd.getQueue(connectionId))
 ipcMain.handle('cicd:getConfig', (_e, connectionId: string, pipelineRef: string) =>
   cicd.getPipelineConfig(connectionId, pipelineRef)
 )

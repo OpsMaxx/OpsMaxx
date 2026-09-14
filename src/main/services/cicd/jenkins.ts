@@ -28,6 +28,9 @@
 import {
   jenkinsOutcome,
   type CicdAdapter,
+  type CicdAgent,
+  type CicdCapacity,
+  type CicdQueueItem,
   type CicdHttp,
   type CicdLogChunk,
   type CicdParam,
@@ -533,5 +536,83 @@ export async function cancelJenkins(
   return {
     run: { id: runId, attempt: 1 },
     note: 'Asked Jenkins to stop the build. Jenkins does not report whether it was still running, so check the run.'
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Queue and capacity — deliberately not on the adapter
+// ---------------------------------------------------------------------------
+//
+// Same reasoning as the trigger functions above. A build queue and a pool of
+// executors are Jenkins concepts: GitHub exposes no queue a token can read, and
+// GitLab's pending jobs are a different subject with different semantics. The
+// header of shared/cicd.ts refuses an interface whose capability flags outnumber
+// its members, so these stay named functions that only Jenkins has.
+
+/**
+ * What is waiting, and why.
+ *
+ * `why` is the reason this is worth reading at all. "Waiting for next available
+ * executor" and "is offline" and a label expression matching no agent are three
+ * different mornings, and until now the Jenkins UI was the only place to tell
+ * them apart.
+ *
+ * `/queue/api/json` takes a `tree=` like everything else here. `task[name,url]`
+ * rather than the whole task: the task object carries the job's entire
+ * configuration on some plugin combinations.
+ */
+export async function jenkinsQueue(http: CicdHttp): Promise<CicdQueueItem[]> {
+  const tree = 'items[id,why,stuck,blocked,inQueueSince,task[name,url]]{0,200}'
+  const body = asJson(
+    expectOk(await http({ method: 'GET', path: `/queue/api/json?tree=${tree}` }), 'Reading the queue'),
+    'Reading the queue'
+  )
+  const items = Array.isArray(body?.items) ? body.items : []
+  return items.map((i: any): CicdQueueItem => ({
+    id: num(i?.id) ?? 0,
+    name: typeof i?.task?.name === 'string' ? i.task.name : 'unnamed',
+    ...(typeof i?.why === 'string' && i.why ? { why: i.why } : {}),
+    stuck: i?.stuck === true,
+    blocked: i?.blocked === true,
+    ...(num(i?.inQueueSince) !== undefined ? { since: num(i.inQueueSince) } : {})
+  }))
+}
+
+/**
+ * The executors, and the agents they live on.
+ *
+ * `monitorData[*]` rather than a named monitor: which monitors are installed
+ * depends on the controller, and asking for one that is absent is not an error
+ * Jenkins reports -- it simply is not in the answer. So the whole map comes back
+ * and the disk figure is picked out of it if it happens to be there.
+ */
+export async function jenkinsCapacity(http: CicdHttp): Promise<CicdCapacity> {
+  const tree =
+    'busyExecutors,totalExecutors,computer[displayName,offline,temporarilyOffline,offlineCauseReason,numExecutors,idle,monitorData[*]]'
+  const body = asJson(
+    expectOk(
+      await http({ method: 'GET', path: `/computer/api/json?tree=${tree}` }),
+      'Reading the executors'
+    ),
+    'Reading the executors'
+  )
+  const computers = Array.isArray(body?.computer) ? body.computer : []
+  return {
+    busyExecutors: num(body?.busyExecutors) ?? 0,
+    totalExecutors: num(body?.totalExecutors) ?? 0,
+    agents: computers.map((c: any): CicdAgent => {
+      const disk = c?.monitorData?.['hudson.node_monitors.DiskSpaceMonitor']
+      const reason = typeof c?.offlineCauseReason === 'string' ? c.offlineCauseReason.trim() : ''
+      return {
+        name: typeof c?.displayName === 'string' ? c.displayName : 'unnamed',
+        offline: c?.offline === true,
+        temporarilyOffline: c?.temporarilyOffline === true,
+        ...(reason ? { offlineReason: reason } : {}),
+        executors: num(c?.numExecutors) ?? 0,
+        idle: c?.idle === true,
+        ...(num(disk?.size) !== undefined ? { diskFreeBytes: num(disk.size) } : {}),
+        ...(num(disk?.totalSize) !== undefined ? { diskTotalBytes: num(disk.totalSize) } : {})
+      }
+    })
   }
 }

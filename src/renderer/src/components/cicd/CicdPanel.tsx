@@ -11,6 +11,7 @@ import { StatusWord } from './Status'
 import { CicdConnectModal } from './CicdConnectModal'
 import { CicdRunWorkbench } from './CicdRunWorkbench'
 import { PipelineBrowser } from './PipelineBrowser'
+import { QueuePanel } from './QueuePanel'
 import {
   BUCKET_LABEL,
   BUCKET_ORDER,
@@ -83,7 +84,7 @@ export function CicdPanel({
   // Which half of the module is on screen. Activity is the landing view because
   // it answers "is anything broken"; Pipelines answers "what exists", which is a
   // different question and was previously unanswerable here at all.
-  const [tab, setTab] = useState<'activity' | 'pipelines'>('activity')
+  const [tab, setTab] = useState<'activity' | 'pipelines' | 'queue'>('activity')
 
   // Tell main the saved list changed. It carries nothing: main re-reads the
   // file it persists, so this is a nudge rather than a handover. `connections`
@@ -264,9 +265,19 @@ export function CicdPanel({
               Pipelines
               {allPipelines.length > 0 && <span className="count">{allPipelines.length}</span>}
             </button>
+            <button
+              type="button"
+              className={clsx('seg-btn', tab === 'queue' && 'active')}
+              aria-pressed={tab === 'queue'}
+              onClick={() => setTab('queue')}
+            >
+              Queue &amp; capacity
+            </button>
           </div>
 
-          {tab === 'pipelines' ? (
+          {tab === 'queue' ? (
+            <QueuePanel connections={connections} bridge={bridge} />
+          ) : tab === 'pipelines' ? (
             <PipelineBrowser
               connections={connections}
               pipelines={allPipelines}

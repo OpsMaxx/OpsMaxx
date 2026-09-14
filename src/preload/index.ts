@@ -17,7 +17,9 @@ import type {
   CicdConnection,
   CicdLogChunk,
   CicdPanelState,
+  CicdCapacity,
   CicdConfigSource,
+  CicdQueueItem,
   CicdRun,
   CicdParam,
   CicdTriggerResult
@@ -541,6 +543,10 @@ const api = {
       ipcRenderer.invoke('cicd:getConfig', connectionId, pipelineRef),
     recentRuns: (connectionId: string, pipelineRef: string, limit?: number): Promise<CicdRun[]> =>
       ipcRenderer.invoke('cicd:recentRuns', connectionId, pipelineRef, limit),
+    queue: (
+      connectionId: string
+    ): Promise<{ items: CicdQueueItem[]; capacity: CicdCapacity }> =>
+      ipcRenderer.invoke('cicd:queue', connectionId),
     getLog: (
       connectionId: string,
       pipelineRef: string,

@@ -369,3 +369,34 @@ button.cicd-step {
   font-variant-numeric: tabular-nums;
   color: var(--text-faint);
 }
+
+/* The queue view. Rows rather than a table: every line is a status word, a name
+   and one figure, which is what `.cicd-row` already is -- but these are not
+   pressable, so they are divs and must not borrow the hover. */
+.cicd-queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-height: 0;
+  overflow-y: auto;
+}
+.cicd-queue-row {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: baseline;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border-subtle);
+  min-width: 0;
+}
+.cicd-queue-row:last-of-type {
+  border-bottom: 0;
+}
+/* The provider's own sentence about why something is waiting. Indented under
+   its row because it is prose, not a column, and it is the most useful text on
+   this screen. */
+.cicd-queue-why {
+  margin: 0;
+  padding: 0 var(--sp-3) var(--sp-2) calc(var(--sp-3) + 96px);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}

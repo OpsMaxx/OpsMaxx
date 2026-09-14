@@ -34,8 +34,10 @@ import { randomUUID } from 'node:crypto'
 import { vaultList, vaultSave } from '../vault'
 import type { VaultEntry } from '../../../shared/vault'
 import type {
+  CicdCapacity,
   CicdConfigSource,
   CicdConnection,
+  CicdQueueItem,
   CicdRun,
   CicdLogChunk,
   AgentRunReport,
@@ -44,7 +46,13 @@ import type {
   CicdPipeline,
   CicdTriggerResult
 } from '../../../shared/cicd'
-import { triggerJenkins, jenkinsParams, cancelJenkins } from './jenkins'
+import {
+  triggerJenkins,
+  jenkinsParams,
+  cancelJenkins,
+  jenkinsQueue,
+  jenkinsCapacity
+} from './jenkins'
 import { triggerGitlab, listGitlabParams, cancelGitlab } from './gitlab'
 import { triggerGithub, rerunGithub, cancelGithub } from './github'
 
@@ -364,6 +372,30 @@ export function recentRuns(connectionId: string, pipelineRef: string, limit = 20
     (t) => t.targetId === `${connectionId}\u0000${pipelineRef}`
   )
   return (target?.runs ?? []).slice(0, Math.max(1, Math.min(Math.trunc(limit) || 1, 50)))
+}
+
+/**
+ * The queue and the executors, for a provider that has them.
+ *
+ * A named refusal rather than an empty result: a table with no rows reads as
+ * "nothing is queued", which is a claim, and for GitHub and GitLab it would be a
+ * claim nothing had checked.
+ */
+export async function getQueue(
+  connectionId: string
+): Promise<{ items: CicdQueueItem[]; capacity: CicdCapacity }> {
+  const c = requireConnection(connectionId)
+  if (c.provider !== 'jenkins') {
+    throw new Error(
+      `${c.provider} has no build queue OpsMaxx can read, so there is nothing to show here. This view is Jenkins-only.`
+    )
+  }
+  const http = makeCicdHttp(c, resolveSecret(c))
+  // Sequential, not parallel: one connection, one credential, and the poller
+  // already keeps reads serial per account for the same reason.
+  const items = await jenkinsQueue(http)
+  const capacity = await jenkinsCapacity(http)
+  return { items, capacity }
 }
 
 export async function getPipelineConfig(
