@@ -28,6 +28,9 @@
 import {
   jenkinsOutcome,
   type CicdAdapter,
+  type CicdAgent,
+  type CicdCapacity,
+  type CicdQueueItem,
   type CicdHttp,
   type CicdLogChunk,
   type CicdParam,
@@ -84,10 +87,38 @@ function header(res: CicdResponse, name: string): string | undefined {
   return undefined
 }
 
+/**
+ * A redirect to somewhere that is plainly a login.
+ *
+ * Jenkins under an SSO security realm does NOT answer 401 to a credential it will
+ * not take -- it answers 302 to the realm's login entry point, because that is
+ * what it would do for a browser. The bare status is useless to the reader: an
+ * instance whose anonymous reads return 200 and whose token-authenticated reads
+ * return 302 looks like an OpsMaxx fault and is not one.
+ *
+ * Matched on the Location, not on the status alone, because a redirect to a
+ * canonical URL is a different and harmless thing.
+ */
+const LOGIN_REDIRECT = /commenceLogin|securityRealm|\/login\b|oauth|saml|openid|adfs/i
+
 function expectOk(res: CicdResponse, what: string): CicdResponse {
   if (res.status >= 200 && res.status < 300) return res
   if (res.status === 403) throw new Error(`${what}: ${FORBIDDEN}`)
   if (res.status === 404) throw new Error(`${what}: Jenkins returned 404 — nothing at that path.`)
+  if (res.status >= 300 && res.status < 400) {
+    const to = header(res, 'location') ?? ''
+    if (LOGIN_REDIRECT.test(to)) {
+      throw new Error(
+        `${what}: Jenkins redirected to a login page, so it did not accept the API token for this request. That is what an instance behind SSO does instead of answering 401 — the realm has to be configured to accept API tokens, or the token belongs to an account the realm does not know.`
+      )
+    }
+    // Still worth distinguishing from a 4xx: a redirect means Jenkins is there
+    // and answering, and OpsMaxx does not follow one because the target does not
+    // inherit the credential.
+    throw new Error(
+      `${what}: Jenkins redirected (${res.status})${to ? ` to ${to}` : ''}, and a redirect target does not inherit the credential, so it was not followed.`
+    )
+  }
   throw new Error(`${what}: Jenkins returned ${res.status}.`)
 }
 
@@ -323,7 +354,39 @@ export function createJenkinsAdapter(http: CicdHttp, opts: JenkinsAdapterOptions
       }
     },
 
-    listParams: (pipelineRef) => jenkinsParams(http, pipelineRef)
+    listParams: (pipelineRef) => jenkinsParams(http, pipelineRef),
+
+    /**
+     * The job's own definition, as Jenkins stores it.
+     *
+     * `config.xml`, not `wfapi` or an inline script field: it is the one endpoint
+     * every job kind answers -- freestyle, pipeline and multibranch alike -- and
+     * it is what an admin would open in the Jenkins UI. A declarative pipeline's
+     * script sits inside it, which is the common case and the reason this is
+     * worth showing at all.
+     *
+     * Deliberately NOT parsed. It is a file from somebody else's controller, its
+     * dialect changes with every plugin version, and the panel's job is to show
+     * it rather than to have an opinion about it. This is also the one read here
+     * with no `tree=` and no JSON: the endpoint serves XML and the selector does
+     * not apply, so it is capped by bytes instead -- the same figure and the same
+     * reason as the log reader, because nothing here decides how many bytes this
+     * process accepts on a stranger's say-so.
+     */
+    async getConfig(pipelineRef) {
+      const res = expectOk(
+        await http({ method: 'GET', path: `/${pipelineRef}/config.xml` }),
+        'Reading the job configuration'
+      )
+      const text = res.body ?? ''
+      const capped = text.length > cfg.maxLogBytes
+      return {
+        kind: 'xml' as const,
+        text: capped ? text.slice(0, cfg.maxLogBytes) : text,
+        path: `${pipelineRef}/config.xml`,
+        ...(capped ? { truncated: true } : {})
+      }
+    }
   }
 }
 
@@ -473,5 +536,143 @@ export async function cancelJenkins(
   return {
     run: { id: runId, attempt: 1 },
     note: 'Asked Jenkins to stop the build. Jenkins does not report whether it was still running, so check the run.'
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Queue and capacity — deliberately not on the adapter
+// ---------------------------------------------------------------------------
+//
+// Same reasoning as the trigger functions above. A build queue and a pool of
+// executors are Jenkins concepts: GitHub exposes no queue a token can read, and
+// GitLab's pending jobs are a different subject with different semantics. The
+// header of shared/cicd.ts refuses an interface whose capability flags outnumber
+// its members, so these stay named functions that only Jenkins has.
+
+/**
+ * What is waiting, and why.
+ *
+ * `why` is the reason this is worth reading at all. "Waiting for next available
+ * executor" and "is offline" and a label expression matching no agent are three
+ * different mornings, and until now the Jenkins UI was the only place to tell
+ * them apart.
+ *
+ * `/queue/api/json` takes a `tree=` like everything else here. `task[name,url]`
+ * rather than the whole task: the task object carries the job's entire
+ * configuration on some plugin combinations.
+ */
+export async function jenkinsQueue(http: CicdHttp): Promise<CicdQueueItem[]> {
+  const tree = 'items[id,why,stuck,blocked,inQueueSince,task[name,url]]{0,200}'
+  const body = asJson(
+    expectOk(await http({ method: 'GET', path: `/queue/api/json?tree=${tree}` }), 'Reading the queue'),
+    'Reading the queue'
+  )
+  const items = Array.isArray(body?.items) ? body.items : []
+  return items.map((i: any): CicdQueueItem => ({
+    id: num(i?.id) ?? 0,
+    name: typeof i?.task?.name === 'string' ? i.task.name : 'unnamed',
+    ...(typeof i?.why === 'string' && i.why ? { why: i.why } : {}),
+    stuck: i?.stuck === true,
+    blocked: i?.blocked === true,
+    ...(num(i?.inQueueSince) !== undefined ? { since: num(i.inQueueSince) } : {})
+  }))
+}
+
+/**
+ * The executors, and the agents they live on.
+ *
+ * `monitorData[*]` rather than a named monitor: which monitors are installed
+ * depends on the controller, and asking for one that is absent is not an error
+ * Jenkins reports -- it simply is not in the answer. So the whole map comes back
+ * and the disk figure is picked out of it if it happens to be there.
+ */
+export async function jenkinsCapacity(http: CicdHttp): Promise<CicdCapacity> {
+  const tree =
+    'busyExecutors,totalExecutors,computer[displayName,offline,temporarilyOffline,offlineCauseReason,numExecutors,idle,monitorData[*]]'
+  const body = asJson(
+    expectOk(
+      await http({ method: 'GET', path: `/computer/api/json?tree=${tree}` }),
+      'Reading the executors'
+    ),
+    'Reading the executors'
+  )
+  const computers = Array.isArray(body?.computer) ? body.computer : []
+  return {
+    busyExecutors: num(body?.busyExecutors) ?? 0,
+    totalExecutors: num(body?.totalExecutors) ?? 0,
+    agents: computers.map((c: any): CicdAgent => {
+      const disk = c?.monitorData?.['hudson.node_monitors.DiskSpaceMonitor']
+      const reason = typeof c?.offlineCauseReason === 'string' ? c.offlineCauseReason.trim() : ''
+      return {
+        name: typeof c?.displayName === 'string' ? c.displayName : 'unnamed',
+        offline: c?.offline === true,
+        temporarilyOffline: c?.temporarilyOffline === true,
+        ...(reason ? { offlineReason: reason } : {}),
+        executors: num(c?.numExecutors) ?? 0,
+        idle: c?.idle === true,
+        ...(num(disk?.size) !== undefined ? { diskFreeBytes: num(disk.size) } : {}),
+        ...(num(disk?.totalSize) !== undefined ? { diskTotalBytes: num(disk.totalSize) } : {})
+      }
+    })
+  }
+}
+
+/**
+ * Enable or disable a job.
+ *
+ * A WRITE, and a quiet one. Cancelling a run is visible within the minute;
+ * disabling a job produces no failure and no alert -- the next commit simply
+ * never builds, and it stays that way until somebody notices. The confirm this
+ * sits behind has to say that, because the API will not.
+ *
+ * Jenkins answers these with a 302 back to the job page on success, the same as
+ * the build endpoint, so a redirect is not treated as a failure here. That is
+ * also why the login-redirect check in `expectOk` matches on the Location and
+ * not on the status: a 302 to the job page and a 302 to an SSO realm are
+ * opposite outcomes.
+ */
+export async function setJenkinsJobEnabled(
+  http: CicdHttp,
+  pipelineRef: string,
+  enabled: boolean
+): Promise<CicdTriggerResult> {
+  const res = await http({
+    method: 'POST',
+    path: `/${pipelineRef}/${enabled ? 'enable' : 'disable'}`
+  })
+  if (res.status !== 302 && (res.status < 200 || res.status >= 300)) {
+    expectOk(res, enabled ? 'Enabling the job' : 'Disabling the job')
+  }
+  return {
+    note: enabled
+      ? 'Asked Jenkins to enable the job. It will build again on its next trigger.'
+      : 'Asked Jenkins to disable the job. Nothing will build it until it is enabled again.'
+  }
+}
+
+/**
+ * Drop one item out of the queue.
+ *
+ * Not the same verb as cancelling a run, and deliberately a separate function:
+ * a queued item has no build number, so there is nothing for `cancelJenkins` to
+ * address. Jenkins answers a successful cancel with a redirect and gives no way
+ * to distinguish "removed it" from "it had already started" -- the same
+ * ambiguity `cancelJenkins` documents -- so the note claims only the request.
+ */
+export async function cancelJenkinsQueueItem(
+  http: CicdHttp,
+  itemId: number
+): Promise<CicdTriggerResult> {
+  const res = await http({ method: 'POST', path: `/queue/cancelItem?id=${encodeURIComponent(String(itemId))}` })
+  if (res.status !== 302 && res.status !== 404 && (res.status < 200 || res.status >= 300)) {
+    expectOk(res, 'Cancelling a queued item')
+  }
+  // 404 means it is no longer in the queue, which is either already cancelled or
+  // already started. Saying which would be a guess.
+  return {
+    note:
+      res.status === 404
+        ? 'That item is no longer in the queue. It has either been cancelled already or has started.'
+        : 'Asked Jenkins to drop the queued item. If it had already started, it is now a running build.'
   }
 }

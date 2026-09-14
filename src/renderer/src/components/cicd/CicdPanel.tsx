@@ -10,6 +10,8 @@ import { useApp } from '../../store/app'
 import { StatusWord } from './Status'
 import { CicdConnectModal } from './CicdConnectModal'
 import { CicdRunWorkbench } from './CicdRunWorkbench'
+import { PipelineBrowser } from './PipelineBrowser'
+import { QueuePanel } from './QueuePanel'
 import {
   BUCKET_LABEL,
   BUCKET_ORDER,
@@ -57,11 +59,18 @@ export function CicdPanel({
   connections: seed,
   bridge = cicdBridge(),
   intervalSec = DEFAULT_INTERVAL_SEC,
+  canTrigger = false,
   onSaveConnection
 }: {
   connections?: CicdConnection[]
   bridge?: CicdBridge
   intervalSec?: number
+  /**
+   * Whether the `cicdTrigger` module is on. Decided at the mount point, like
+   * every other module, so this panel never reads the registry itself -- and so
+   * `tests/moduleBoundaries.test.ts` can still find the guard where it looks.
+   */
+  canTrigger?: boolean
   onSaveConnection?: (connection: CicdConnection, token: string) => void | Promise<void>
 }): React.JSX.Element {
   const stored = useCicdConnectionList()
@@ -79,6 +88,10 @@ export function CicdPanel({
   const [bucket, setBucket] = useState<CicdBucket | 'all'>('all')
   const [selected, setSelected] = useState<{ connectionId: string; pipelineRef: string; runId: string } | null>(null)
   const [connecting, setConnecting] = useState<'new' | 'token' | null>(null)
+  // Which half of the module is on screen. Activity is the landing view because
+  // it answers "is anything broken"; Pipelines answers "what exists", which is a
+  // different question and was previously unanswerable here at all.
+  const [tab, setTab] = useState<'activity' | 'pipelines' | 'queue'>('activity')
 
   // Tell main the saved list changed. It carries nothing: main re-reads the
   // file it persists, so this is a nudge rather than a handover. `connections`
@@ -88,6 +101,22 @@ export function CicdPanel({
     if (!bridge) return
     void bridge.configure().catch(() => undefined)
   }, [bridge, connections])
+
+  // Three different emptinesses the panel used to report with one sentence.
+  // `unread` has answered nothing; `barren` answered and showed no pipelines at
+  // all, which for Jenkins is what a credential that cannot see the jobs looks
+  // like -- an empty list, not an error.
+  // Every pipeline every connected account has told us about, flattened. The
+  // browser groups it; nothing here fetches.
+  const allPipelines = connections.flatMap((c) => states.get(c.id)?.pipelines ?? [])
+
+  const unread = connections.filter((c) => states.get(c.id)?.readAt === undefined).map((c) => c.name)
+  const barren = connections
+    .filter((c) => {
+      const st = states.get(c.id)
+      return st?.readAt !== undefined && st.pipelines.length === 0
+    })
+    .map((c) => c.name)
 
   const { rows, olderThanWindow, neverRun } = useMemo(
     () => rankRows(connections, states, seenAt, now),
@@ -171,8 +200,10 @@ export function CicdPanel({
             here is as fresh as the last successful read — which the header states.
           </p>
           <p className="ui-note">
-            Reading a run is all this module does. Starting one is a separate module on the
-            Operations rail, because the consequence is that a deploy goes out.
+            Reading is what this module does on its own. Starting, cancelling and disabling live
+            on the same screen but behind a second module — "Start a build" — because the
+            consequence is that a deploy goes out, and that is a separate decision from being
+            allowed to look.
           </p>
         </>
       }
@@ -225,6 +256,48 @@ export function CicdPanel({
             onUpdateToken={() => setConnecting('token')}
           />
 
+          <div className="segment modal-segment cicd-tabs">
+            <button
+              type="button"
+              className={clsx('seg-btn', tab === 'activity' && 'active')}
+              aria-pressed={tab === 'activity'}
+              onClick={() => setTab('activity')}
+            >
+              Activity
+            </button>
+            <button
+              type="button"
+              className={clsx('seg-btn', tab === 'pipelines' && 'active')}
+              aria-pressed={tab === 'pipelines'}
+              onClick={() => setTab('pipelines')}
+            >
+              Pipelines
+              {allPipelines.length > 0 && <span className="count">{allPipelines.length}</span>}
+            </button>
+            <button
+              type="button"
+              className={clsx('seg-btn', tab === 'queue' && 'active')}
+              aria-pressed={tab === 'queue'}
+              onClick={() => setTab('queue')}
+            >
+              Queue &amp; capacity
+            </button>
+          </div>
+
+          {tab === 'queue' ? (
+            <QueuePanel connections={connections} bridge={bridge} canTrigger={canTrigger} />
+          ) : tab === 'pipelines' ? (
+            <PipelineBrowser
+              connections={connections}
+              pipelines={allPipelines}
+              bridge={bridge}
+              canTrigger={canTrigger}
+              onOpenRun={(connectionId, pipelineRef, run) =>
+                setSelected({ connectionId, pipelineRef, runId: run.id })
+              }
+            />
+          ) : (
+          <>
           <div className="row cicd-filters">
             <input
               className="input"
@@ -267,13 +340,31 @@ export function CicdPanel({
           </div>
 
           {shown.length === 0 ? (
+            // "Every connected account answered" was printed whenever there were
+            // no rows -- including when an account had never been read, and when
+            // it had been read and showed no pipelines whatsoever. Claiming a
+            // successful empty read that never happened sent the reader to look
+            // at Jenkins, where the builds this panel said it had asked about
+            // were sitting in plain sight.
             <EmptyState
               compact
-              title={rows.length === 0 ? 'Nothing has run in the last 24 hours' : 'Nothing matched'}
+              title={
+                rows.length > 0
+                  ? 'Nothing matched'
+                  : unread.length > 0
+                    ? 'Not read yet'
+                    : barren.length > 0
+                      ? 'No pipelines to show'
+                      : 'Nothing has run in the last 24 hours'
+              }
               message={
-                rows.length === 0
-                  ? 'Every connected account answered, and none of its pipelines has produced a run inside the window.'
-                  : 'No run in the window matches that filter. Clear it to see the rest.'
+                rows.length > 0
+                  ? 'No run in the window matches that filter. Clear it to see the rest.'
+                  : unread.length > 0
+                    ? `${unread.join(', ')} ${unread.length === 1 ? 'has' : 'have'} not answered yet, so nothing below reflects ${unread.length === 1 ? 'it' : 'them'}. Press Refresh; if it stays unread, the account is not being polled.`
+                    : barren.length > 0
+                      ? `${barren.join(', ')} answered and listed no pipelines at all. That is what a credential with no access to the jobs looks like — the provider returns an empty list rather than refusing — so check what the token's account can see.`
+                      : 'Every connected account answered, and none of its pipelines has produced a run inside the window.'
               }
             />
           ) : (
@@ -301,6 +392,8 @@ export function CicdPanel({
                 </div>
               ))}
             </div>
+          )}
+          </>
           )}
         </>
       )}

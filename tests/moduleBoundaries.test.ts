@@ -240,11 +240,11 @@ const MODULE_FILES: Record<string, string[]> = {
   // panels land they belong on these two lists, and the list that actually
   // matters is `cicd`'s.
   cicd: ['src/shared/cicd.ts'],
-  // No files of its own yet. It shares the shared contract with `cicd` and
-  // adds the trigger controls in a later wave; listed so the coverage
-  // assertion below stays true of the registry rather than of this list.
-  // cicdTrigger: phase 2 — see src/shared/modules.ts. MODULE_FILES is asserted
-  // to match the registry exactly, so this comes back when the entry does.
+  // Shares the shared contract with `cicd` and renders inside its panel rather
+  // than owning one: the controls are the same screen, the capability is a
+  // separate grant. Same caveat as `cicd` above -- this checks the RENDERER
+  // half, and says nothing about the main-process file that holds the token.
+  cicdTrigger: ['src/shared/cicd.ts'],
   kubernetes: [
     'src/shared/kubernetes.ts',
     'src/shared/k8sSkew.ts',

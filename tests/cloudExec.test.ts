@@ -27,6 +27,20 @@ const TREE_ROOT = fileURLToPath(new URL('./.tmp-cloudexec', import.meta.url))
 let dir = ''
 let argvLog = ''
 
+// The fake CLI is a /bin/sh shim, so this suite is POSIX-only. CI runs the
+// full suite on ubuntu, and the Windows job runs a different, narrower set --
+// but a contributor on Windows running `npm test` would otherwise meet a wall
+// of failures about a shell that is not there, which says nothing useful about
+// the code under test. Skipped loudly rather than silently.
+const POSIX_ONLY = process.platform !== 'win32'
+if (!POSIX_ONLY) {
+  // eslint-disable-next-line no-console
+  console.warn(
+    'SKIPPING cloudExec tests on Windows: the CLI fixture is a /bin/sh shim. ' +
+      'Detection and the argv guards are covered on POSIX in CI.'
+  )
+}
+
 function installFake(name: string, kind: string): void {
   const shim = join(dir, name)
   // A shim rather than a copy, so the fixture stays the single source of truth.
@@ -38,6 +52,7 @@ function installFake(name: string, kind: string): void {
 }
 
 beforeEach(() => {
+  if (!POSIX_ONLY) return
   // mkdtempSync needs the parent to exist.
   mkdirSync(TREE_ROOT, { recursive: true })
   dir = mkdtempSync(join(TREE_ROOT, 'bin-'))
@@ -53,6 +68,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  if (!POSIX_ONLY) return
   delete process.env.OPSMAXX_CLOUD_BIN_DIR
   delete process.env.FAKE_CLOUD_ARGV_LOG
   delete process.env.FAKE_CLOUD_MODE
@@ -69,7 +85,7 @@ const loggedArgv = (): string[][] =>
         .map((l) => JSON.parse(l) as string[])
     : []
 
-describe('detecting a provider CLI', () => {
+describe.skipIf(!POSIX_ONLY)('detecting a provider CLI', () => {
   it('finds each tool and reports its path and version', async () => {
     const expected: [CloudProvider, string][] = [
       ['gcp', '458.0.1'],
@@ -119,7 +135,7 @@ describe('detecting a provider CLI', () => {
   })
 })
 
-describe('running a provider command', () => {
+describe.skipIf(!POSIX_ONLY)('running a provider command', () => {
   it('passes the argument array through untouched', async () => {
     // The point of argv arrays: a value that would be syntax in a shell arrives
     // at the far side as one ordinary argument.

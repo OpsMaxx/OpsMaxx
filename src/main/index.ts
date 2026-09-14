@@ -1352,6 +1352,23 @@ ipcMain.handle('cicd:createSecret', (_e, label: string, token: string) =>
   cicd.createSecret(label, token)
 )
 
+ipcMain.handle(
+  'cicd:recentRuns',
+  (_e, connectionId: string, pipelineRef: string, limit?: number) =>
+    cicd.recentRuns(connectionId, pipelineRef, limit)
+)
+ipcMain.handle('cicd:queue', (_e, connectionId: string) => cicd.getQueue(connectionId))
+ipcMain.handle(
+  'cicd:setJobEnabled',
+  (_e, connectionId: string, pipelineRef: string, enabled: boolean) =>
+    cicd.setJobEnabled(connectionId, pipelineRef, enabled)
+)
+ipcMain.handle('cicd:cancelQueueItem', (_e, connectionId: string, itemId: number) =>
+  cicd.cancelQueueItem(connectionId, itemId)
+)
+ipcMain.handle('cicd:getConfig', (_e, connectionId: string, pipelineRef: string) =>
+  cicd.getPipelineConfig(connectionId, pipelineRef)
+)
 ipcMain.handle('cicd:listParams', (_e, connectionId: string, pipelineRef: string) =>
   cicd.listParams(connectionId, pipelineRef)
 )
@@ -4993,7 +5010,10 @@ ipcMain.handle('data:save', (_e, data: unknown) => {
   // Same file, same reason. The CI/CD module reads its connections from disk
   // rather than from IPC (see services/cicd/wiring.ts), so the write that just
   // changed them is where it has to look again.
-  cicd.reload(data)
+  //
+  // Reschedules as well as re-reads. `reload` alone left a newly saved account
+  // with no poll targets -- never read, no error, empty panel until a restart.
+  cicd.reloadAndReschedule(data)
 })
 
 // ---- AI & MCP: access groups ----

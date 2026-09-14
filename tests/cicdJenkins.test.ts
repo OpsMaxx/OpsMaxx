@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { createJenkinsAdapter, jenkinsParams, triggerJenkins } from '../src/main/services/cicd/jenkins'
+import {
+  createJenkinsAdapter,
+  jenkinsCapacity,
+  jenkinsParams,
+  jenkinsQueue,
+  triggerJenkins
+} from '../src/main/services/cicd/jenkins'
 import type { CicdHttp, CicdResponse } from '../src/shared/cicd'
 
 /**
@@ -64,6 +70,7 @@ describe('every read carries a field selector', () => {
       if (req.path.includes('/api/json')) return json({ jobs: [], builds: [], property: [] })
       if (req.path.includes('wfapi')) return json({ stages: [] })
       if (req.path.includes('progressiveText')) return { status: 200, body: '' }
+      if (req.path.includes('config.xml')) return { status: 200, body: '<flow-definition/>' }
       return json({})
     })
     const a = adapter(http)
@@ -72,14 +79,39 @@ describe('every read carries a field selector', () => {
     await a.getRun('job/app', '7', 1)
     await a.getLog('job/app', '7', undefined)
     await a.listParams('job/app')
+    // Every read the adapter offers, or this guard is only as good as whoever
+    // remembered to extend it -- which is the failure it exists to prevent.
+    await a.getConfig!('job/app')
 
-    expect(calls.length).toBeGreaterThan(4)
+    expect(calls.length).toBeGreaterThan(5)
     for (const c of calls) {
       if (c.path.includes('/api/json')) expect(c.path).toContain('tree=')
-      // The only two reads without one, both because the endpoint does not
-      // implement the selector at all.
-      else expect(c.path).toMatch(/wfapi\/describe|logText\/progressiveText/)
+      // The only reads without one, each because the endpoint does not implement
+      // the selector at all: two return plain text, one returns XML.
+      else expect(c.path).toMatch(/wfapi\/describe|logText\/progressiveText|config\.xml/)
     }
+  })
+
+  it('covers every read the adapter declares, so a new one cannot slip past', () => {
+    // The guard above is a loop over recorded calls, so a read it never invokes
+    // is a read it never checks. This pins the list itself.
+    const a = adapter(fake(() => json({})).http)
+    const reads = Object.keys(a).filter(
+      (k) => typeof (a as unknown as Record<string, unknown>)[k] === 'function'
+    )
+    expect(new Set(reads)).toEqual(
+      new Set([
+        'apiRoot',
+        'capabilities',
+        'verify',
+        'listPipelines',
+        'listRuns',
+        'getRun',
+        'getLog',
+        'listParams',
+        'getConfig'
+      ])
+    )
   })
 
   it('bounds a build list with the range specifier, because Jenkins has no pagination', async () => {
@@ -472,5 +504,192 @@ describe('apiRoot', () => {
   ])('keeps the context path in %s', (input, expected) => {
     const { http } = fake(() => undefined)
     expect(adapter(http).apiRoot(input)).toBe(expected)
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+describe('a Jenkins behind SSO', () => {
+  /**
+   * The failure that cost a whole afternoon. An instance running an SSO security
+   * realm answers a credential it will not take with 302 to the realm's login
+   * entry point -- NOT 401 -- because that is what it would do for a browser.
+   * Anonymous reads on the same instance returned 200, so the panel showed an
+   * empty page and the reader went looking for a fault in Jenkins.
+   *
+   * `Jenkins returned 302` is the status. These pin the cause.
+   */
+  const ssoRedirect = (): Reply => ({
+    status: 302,
+    headers: { location: '/api/securityRealm/commenceLogin' },
+    body: ''
+  })
+
+  it('says the token was not accepted, rather than naming the status', async () => {
+    const { http } = fake(() => ssoRedirect())
+    await expect(adapter(http).listPipelines()).rejects.toThrow(/did not accept the API token/i)
+  })
+
+  it('names SSO, because that is the thing to go and change', async () => {
+    const { http } = fake(() => ssoRedirect())
+    await expect(adapter(http).listPipelines()).rejects.toThrow(/SSO/)
+  })
+
+  it('recognises the realm by its Location, whatever the path in front of it', async () => {
+    for (const location of [
+      'https://ci.example.com/securityRealm/commenceLogin?from=%2Fapi%2Fjson',
+      '/login?from=%2F',
+      'https://sso.example.com/oauth2/authorize?client_id=jenkins',
+      'https://example.okta.com/app/saml/sso'
+    ]) {
+      const { http } = fake(() => ({ status: 302, headers: { location }, body: '' }))
+      await expect(adapter(http).listPipelines()).rejects.toThrow(/did not accept the API token/i)
+    }
+  })
+
+  it('does not cry SSO at a redirect that is only a redirect', async () => {
+    // A canonicalising redirect is a different and harmless thing, and saying
+    // "your SSO is misconfigured" at one would send the reader somewhere useless.
+    const { http } = fake(() => ({
+      status: 301,
+      headers: { location: 'https://ci.example.com/jenkins/api/json' },
+      body: ''
+    }))
+    const err = await adapter(http).listPipelines().catch((e: Error) => e)
+    expect((err as Error).message).toMatch(/redirected \(301\)/)
+    expect((err as Error).message).not.toMatch(/SSO/)
+    // Still explains why it stopped rather than following.
+    expect((err as Error).message).toMatch(/does not inherit the credential/)
+  })
+
+  it('leaves 403 saying what it always said', async () => {
+    // Jenkins answers 403 for three different things and the message refuses to
+    // guess which. The new branch must not have swallowed that.
+    const { http } = fake(() => ({ status: 403, body: '' }))
+    await expect(adapter(http).listPipelines()).rejects.toThrow(/403/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+describe('the queue, and why nothing is running', () => {
+  it('bounds the queue read and does not pull the whole task object', async () => {
+    // `task` carries the job's entire configuration on some plugin combinations,
+    // and there is no pagination to save you.
+    const { http, calls } = fake(() => json({ items: [] }))
+    await jenkinsQueue(http)
+    expect(calls[0].path).toContain('tree=')
+    expect(calls[0].path).toContain('task[name,url]')
+    expect(calls[0].path).toContain('{0,200}')
+  })
+
+  it('keeps the provider reason, which is the whole point of the view', async () => {
+    const { http } = fake(() =>
+      json({
+        items: [
+          {
+            id: 12,
+            why: 'Waiting for next available executor',
+            stuck: false,
+            blocked: true,
+            inQueueSince: 1_700_000_000_000,
+            task: { name: 'trivy' }
+          }
+        ]
+      })
+    )
+    const [item] = await jenkinsQueue(http)
+    expect(item).toMatchObject({
+      id: 12,
+      name: 'trivy',
+      why: 'Waiting for next available executor',
+      stuck: false,
+      blocked: true
+    })
+  })
+
+  it('survives a queue item with no reason and no task name', async () => {
+    const { http } = fake(() => json({ items: [{ id: 1 }] }))
+    const [item] = await jenkinsQueue(http)
+    expect(item.why).toBeUndefined()
+    expect(item.name).toBe('unnamed')
+    expect(item.stuck).toBe(false)
+  })
+})
+
+describe('the executors behind the queue', () => {
+  const computer = (over: Record<string, unknown> = {}): unknown => ({
+    displayName: 'Built-In Node',
+    offline: false,
+    temporarilyOffline: false,
+    numExecutors: 2,
+    idle: true,
+    monitorData: {
+      'hudson.node_monitors.DiskSpaceMonitor': { size: 66_113_196_032, totalSize: 107_304_955_904 }
+    },
+    ...over
+  })
+
+  it('asks for the whole monitor map, because which monitors exist varies', async () => {
+    // Asking for a monitor the controller does not have is not an error Jenkins
+    // reports -- it is simply absent from the answer.
+    const { http, calls } = fake(() => json({ busyExecutors: 0, totalExecutors: 2, computer: [] }))
+    await jenkinsCapacity(http)
+    expect(calls[0].path).toContain('monitorData[*]')
+  })
+
+  it('reads the counts and the disk figure', async () => {
+    const { http } = fake(() =>
+      json({ busyExecutors: 1, totalExecutors: 2, computer: [computer()] })
+    )
+    const cap = await jenkinsCapacity(http)
+    expect(cap.busyExecutors).toBe(1)
+    expect(cap.totalExecutors).toBe(2)
+    expect(cap.agents[0]).toMatchObject({
+      name: 'Built-In Node',
+      offline: false,
+      executors: 2,
+      idle: true,
+      diskFreeBytes: 66_113_196_032
+    })
+  })
+
+  it('distinguishes taken-offline from gone, and keeps the reason', async () => {
+    // A person taking an agent offline and an agent falling over are different
+    // mornings, and Jenkins reports them in different fields.
+    const { http } = fake(() =>
+      json({
+        busyExecutors: 0,
+        totalExecutors: 0,
+        computer: [
+          computer({
+            offline: true,
+            temporarilyOffline: true,
+            offlineCauseReason: 'Disconnected by admin'
+          })
+        ]
+      })
+    )
+    const cap = await jenkinsCapacity(http)
+    expect(cap.agents[0].offline).toBe(true)
+    expect(cap.agents[0].temporarilyOffline).toBe(true)
+    expect(cap.agents[0].offlineReason).toBe('Disconnected by admin')
+  })
+
+  it('omits a disk figure the controller does not report', async () => {
+    const { http } = fake(() =>
+      json({ busyExecutors: 0, totalExecutors: 1, computer: [computer({ monitorData: {} })] })
+    )
+    const cap = await jenkinsCapacity(http)
+    expect(cap.agents[0].diskFreeBytes).toBeUndefined()
+  })
+
+  it('reports a login redirect here too', async () => {
+    const { http } = fake(() => ({
+      status: 302,
+      headers: { location: '/securityRealm/commenceLogin' },
+      body: ''
+    }))
+    await expect(jenkinsCapacity(http)).rejects.toThrow(/did not accept the API token/i)
   })
 })

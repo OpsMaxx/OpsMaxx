@@ -17,6 +17,10 @@ import type {
   CicdConnection,
   CicdLogChunk,
   CicdPanelState,
+  CicdCapacity,
+  CicdConfigSource,
+  CicdQueueItem,
+  CicdRun,
   CicdParam,
   CicdTriggerResult
 } from '../shared/cicd'
@@ -587,6 +591,22 @@ const api = {
     > => ipcRenderer.invoke('cicd:verify', connection, secret),
     listParams: (connectionId: string, pipelineRef: string): Promise<CicdParam[]> =>
       ipcRenderer.invoke('cicd:listParams', connectionId, pipelineRef),
+    getConfig: (connectionId: string, pipelineRef: string): Promise<CicdConfigSource> =>
+      ipcRenderer.invoke('cicd:getConfig', connectionId, pipelineRef),
+    recentRuns: (connectionId: string, pipelineRef: string, limit?: number): Promise<CicdRun[]> =>
+      ipcRenderer.invoke('cicd:recentRuns', connectionId, pipelineRef, limit),
+    queue: (
+      connectionId: string
+    ): Promise<{ items: CicdQueueItem[]; capacity: CicdCapacity }> =>
+      ipcRenderer.invoke('cicd:queue', connectionId),
+    setJobEnabled: (
+      connectionId: string,
+      pipelineRef: string,
+      enabled: boolean
+    ): Promise<CicdTriggerResult> =>
+      ipcRenderer.invoke('cicd:setJobEnabled', connectionId, pipelineRef, enabled),
+    cancelQueueItem: (connectionId: string, itemId: number): Promise<CicdTriggerResult> =>
+      ipcRenderer.invoke('cicd:cancelQueueItem', connectionId, itemId),
     getLog: (
       connectionId: string,
       pipelineRef: string,

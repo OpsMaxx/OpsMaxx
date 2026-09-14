@@ -417,6 +417,89 @@ export interface CicdAdapter {
    * GitHub's workflow_dispatch.inputs, GitLab's project variables.
    */
   listParams(pipelineRef: string): Promise<CicdParam[]>
+  /**
+   * The pipeline's own definition. Optional: absent means "this provider cannot
+   * show you one yet", and the caller must say so rather than render nothing.
+   */
+  getConfig?(pipelineRef: string): Promise<CicdConfigSource>
+}
+
+/**
+ * One item waiting to start.
+ *
+ * Jenkins-shaped, and deliberately NOT on `CicdAdapter`. The file header's rule
+ * is that the adapter covers the questions all three providers answer the same
+ * way; a build queue is not one of them -- GitHub has no queue a token can read
+ * and GitLab's pending jobs are a different subject with different semantics.
+ * Faking a shared verb is what `rerunRun` already refuses to do.
+ *
+ * `why` is the whole value of the thing. "Waiting for next available executor"
+ * versus "is offline" versus a label expression that matches nothing are three
+ * different problems, and the Jenkins UI is currently the only place an operator
+ * can tell them apart. Provider-authored, so it is `remoteText` at the edge.
+ */
+export interface CicdQueueItem {
+  id: number
+  /** The job, as the provider names it. Display only. */
+  name: string
+  /** Why it has not started. Absent when the provider gives no reason. */
+  why?: string
+  /** Queued long enough that the provider itself calls it stuck. */
+  stuck: boolean
+  blocked: boolean
+  since?: number
+  /** The pipeline this belongs to, when it can be matched to a known one. */
+  pipelineRef?: string
+}
+
+/** One build agent, and what it can currently do. */
+export interface CicdAgent {
+  name: string
+  offline: boolean
+  /** Taken offline by a person, as opposed to having gone away. */
+  temporarilyOffline: boolean
+  /** The provider's own words for why. Display only. */
+  offlineReason?: string
+  executors: number
+  idle: boolean
+  /** Free bytes on the agent's work volume, where the provider reports it. */
+  diskFreeBytes?: number
+  diskTotalBytes?: number
+}
+
+/**
+ * What the controller can run right now.
+ *
+ * Answers "why is nothing running", which is the routine question the run feed
+ * cannot address at all: a queue of four against zero idle executors is a
+ * different morning from an empty queue.
+ */
+export interface CicdCapacity {
+  busyExecutors: number
+  totalExecutors: number
+  agents: CicdAgent[]
+}
+
+/**
+ * A pipeline's definition, as the provider stores it.
+ *
+ * On the adapter rather than a per-provider free function, unlike the queue and
+ * the executors: every provider HAS a definition and the question "show me what
+ * this pipeline actually does" means the same thing in all three. Only the
+ * dialect differs, which is what `kind` carries.
+ *
+ * Optional on the adapter because two of the three do not implement it yet, and
+ * the panel greys the section with its reason rather than pretending. Text is
+ * provider-authored -- it is a file from somebody else's repository -- so it is
+ * displayed and never parsed.
+ */
+export interface CicdConfigSource {
+  kind: 'xml' | 'yaml' | 'script'
+  text: string
+  /** Where it came from, when the provider names a path. Display only. */
+  path?: string
+  /** Set when the provider capped what it returned, same contract as a log. */
+  truncated?: boolean
 }
 
 /**
@@ -561,6 +644,40 @@ export interface CicdBridge {
     ref: string,
     params?: Record<string, string>
   ): Promise<CicdTriggerResult>
+  /**
+   * Read a pipeline's definition. Rejects when the provider has no
+   * implementation, so the caller can say which provider rather than showing an
+   * empty box.
+   */
+  getConfig(connectionId: string, pipelineRef: string): Promise<CicdConfigSource>
+  /**
+   * Recent runs for one pipeline, from what the poller already holds.
+   *
+   * Not on `CicdPanelState` because that broadcast goes to every window on every
+   * read, and carrying a history per pipeline would scale with the controller
+   * rather than with what is on screen.
+   */
+  recentRuns(connectionId: string, pipelineRef: string, limit?: number): Promise<CicdRun[]>
+  /**
+   * The build queue and the executors behind it.
+   *
+   * Rejects for a provider that has no such concept, naming it, so the tab can
+   * say which rather than showing an empty table that reads as "nothing queued".
+   */
+  queue(connectionId: string): Promise<{ items: CicdQueueItem[]; capacity: CicdCapacity }>
+  /**
+   * Enable or disable a job. Gated in main and behind a confirm in the UI, like
+   * every other write here -- and the quietest of them: a disabled job produces
+   * no failure and no alert, it simply stops building.
+   */
+  setJobEnabled(
+    connectionId: string,
+    pipelineRef: string,
+    enabled: boolean
+  ): Promise<CicdTriggerResult>
+  /** Drop one item out of the queue. A queued item has no build number, so this
+   *  is a different verb from `cancel` rather than a special case of it. */
+  cancelQueueItem(connectionId: string, itemId: number): Promise<CicdTriggerResult>
   cancel(connectionId: string, pipelineRef: string, runId: string): Promise<CicdTriggerResult>
   rerun(connectionId: string, pipelineRef: string, runId: string): Promise<CicdTriggerResult>
   /** Drop a vault entry a deleted connection owned. See releaseCicdSecrets. */

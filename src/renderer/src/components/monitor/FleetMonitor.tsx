@@ -801,7 +801,11 @@ export function FleetMonitor(): React.JSX.Element {
       )}
       {moduleEnabled(modules, 'cicd') && (
         <div style={show('cicd')}>
-          <CicdPanel />
+          {/* The write half is one screen with the read half, and one module
+              apart from it. `cicdTrigger` is decided HERE, at the mount point,
+              like every other module -- the panel renders what it is told it
+              may, and does not read the registry itself. */}
+          <CicdPanel canTrigger={moduleEnabled(modules, 'cicdTrigger')} />
         </div>
       )}
 

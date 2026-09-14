@@ -94,6 +94,14 @@ function bridge(over: Partial<CicdBridge> = {}): CicdBridge {
     createSecret: vi.fn(async () => 'vault-new'),
     verify: vi.fn(async () => ({ ok: true as const, identity: 'octocat' })),
     listParams: vi.fn(async () => []),
+    getConfig: vi.fn(async () => ({ kind: 'xml' as const, text: '<flow-definition/>' })),
+    recentRuns: vi.fn(async () => []),
+    queue: vi.fn(async () => ({
+      items: [],
+      capacity: { busyExecutors: 0, totalExecutors: 0, agents: [] }
+    })),
+    setJobEnabled: vi.fn(async () => ({ note: '' })),
+    cancelQueueItem: vi.fn(async () => ({ note: '' })),
     getLog: vi.fn(
       async (): Promise<CicdLogChunk> => ({ mode: 'snapshot', text: 'done\n', more: false })
     ),
@@ -383,13 +391,46 @@ describe('the empty state', () => {
   })
 
   it('distinguishes nothing ran from nothing matched', async () => {
+    // A pipeline that exists and has not run. `pipelines: []` would be a
+    // different statement -- see the two tests below.
+    render(
+      <CicdPanel
+        connections={[CONN]}
+        bridge={bridge({ snapshot: async () => [state({ pipelines: [pipeline()] })] })}
+      />
+    )
+    expect(await screen.findByText('Nothing has run in the last 24 hours')).toBeTruthy()
+  })
+
+  // The panel said "Every connected account answered" for all three of these.
+  // The first is the one that cost real time: Jenkins had run three jobs
+  // thirteen hours earlier, the panel reported a successful empty read it had
+  // never performed, and the reader went looking for a fault in Jenkins.
+  it('does not claim an account answered when it has never been read', async () => {
+    render(
+      <CicdPanel
+        connections={[CONN]}
+        bridge={bridge({ snapshot: async () => [state({ readAt: undefined, pipelines: [] })] })}
+      />
+    )
+    expect(await screen.findByText('Not read yet')).toBeTruthy()
+    expect(screen.queryByText(/Every connected account answered/)).toBeNull()
+    // Names the account, so a reader with four of them knows which.
+    expect(screen.getByText(new RegExp(`${CONN.name} has not answered yet`))).toBeTruthy()
+  })
+
+  it('says so when an account answered with no pipelines at all', async () => {
+    // What a Jenkins credential that cannot see the jobs looks like: an empty
+    // list, HTTP 200, no error anywhere.
     render(
       <CicdPanel
         connections={[CONN]}
         bridge={bridge({ snapshot: async () => [state({ pipelines: [] })] })}
       />
     )
-    expect(await screen.findByText('Nothing has run in the last 24 hours')).toBeTruthy()
+    expect(await screen.findByText('No pipelines to show')).toBeTruthy()
+    expect(screen.getByText(/listed no pipelines at all/)).toBeTruthy()
+    expect(screen.queryByText(/Every connected account answered/)).toBeNull()
   })
 })
 

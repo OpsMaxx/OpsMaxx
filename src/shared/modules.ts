@@ -449,44 +449,39 @@ export const MODULES: ModuleDef[] = [
   },
 
   // ---------------------------------------------------------------------------
-  // `cicdTrigger` — WRITTEN, TESTED, AND DELIBERATELY NOT REGISTERED IN PHASE 1
+  // `cicdTrigger` — registered in phase 2, after phase 1 met a real CI server
   // ---------------------------------------------------------------------------
   //
-  // The operate half of the CI/CD module exists in full: the three adapters
-  // have trigger/cancel/rerun, `wiring.ts` dispatches them, `mcpServer.ts` has
-  // the three tools behind `evaluateCiTrigger` and a per-call approval, and the
-  // run workbench has the buttons. All of it is tested.
+  // This was withheld with a stated condition: "phase 1 has not yet been run
+  // against a real CI server, and the trigger half is the half where being wrong
+  // starts a production deploy. Read-only finds the unknown-unknowns first; this
+  // goes in when it has."
   //
-  // It is not in this list because phase 1 has not yet been run against a real
-  // CI server, and the trigger half is the half where being wrong starts a
-  // production deploy. Read-only finds the unknown-unknowns first; this goes in
-  // when it has.
+  // It has. Read-only was pointed at a live Jenkins and found three of them: a
+  // discovery that swallowed its own exception, a panel that reported a
+  // successful read it had never performed, and an SSO realm that answers a
+  // rejected API token with 302 to its login page rather than 401. All three are
+  // fixed. The condition was the point of the delay, and it was met.
   //
-  // Registering it again is this block becoming an entry again — no other
-  // change. Everything it needs is already built and already guarded:
-  //   - `OperateModuleId` / `OPERATE_MODULE_IDS` below
-  //   - `tests/monitorSurfaces.test.ts`, which pins the operate list exactly
-  //   - `docs/plans/cicd-phase-2.md`
-  // {
-  // id: 
-  // surface: 'operate',
-  // label: 'Start a build',
-  // detail:
-  // 'Start, re-run and cancel builds on a CI server OpsMaxx does not administer. What runs is the pipeline definition already in that repository — not anything composed here — so it can deploy, migrate or restart whatever that file says. Once a run has started OpsMaxx cannot stop it: cancelling is a request to a third party that may already have finished.',
-  // // `operate` rather than `read`, and the contract on ModuleSurface does not
-  // // settle it: what this writes to is a third party's API, not an estate
-  // // host, and the surface field is worded about servers. The split is taken
-  // // for the reason `access` → `keyRevoke` was taken — this rail names tabs by
-  // // CONSEQUENCE, not by mechanism, and the consequence here is that a deploy
-  // // goes out. Reading a pipeline and firing one are not the same decision,
-  // // so they are not the same toggle.
-  // //
-  // // OFF by default, like every operate module, and this one has the weakest
-  // // undo in the registry: patch and broadcast at least act through a
-  // // connection OpsMaxx holds and can drop. This hands the verb to somebody
-  // // else's scheduler and then has no say in it.
-  // defaultEnabled: false
-  // },
+  // Still `operate` and still OFF by default. The consequence has not changed:
+  // this hands the verb to somebody else's scheduler and then has no say in it,
+  // and it remains the weakest undo in the registry -- patch and broadcast at
+  // least act through a connection OpsMaxx holds and can drop.
+  {
+    id: 'cicdTrigger',
+    surface: 'operate',
+    label: 'Start a build',
+    detail:
+      'Start, re-run and cancel builds on a CI server OpsMaxx does not administer, and enable or disable a job. What runs is the pipeline definition already in that repository — not anything composed here — so it can deploy, migrate or restart whatever that file says. Once a run has started OpsMaxx cannot stop it: cancelling is a request to a third party that may already have finished.',
+    // `operate` rather than `read`, and the contract on ModuleSurface does not
+    // settle it: what this writes to is a third party's API, not an estate
+    // host, and the surface field is worded about servers. The split is taken
+    // for the reason `access` → `keyRevoke` was taken — this rail names tabs by
+    // CONSEQUENCE, not by mechanism, and the consequence here is that a deploy
+    // goes out. Reading a pipeline and firing one are not the same decision,
+    // so they are not the same toggle.
+    defaultEnabled: false
+  },
 
   {
     id: 'kubernetes',
@@ -517,16 +512,15 @@ export const MODULES: ModuleDef[] = [
  */
 export type OperateModuleId = Extract<
   ModuleId,
-  'broadcast' | 'patch' | 'jobs' | 'keyRevoke'
+  'broadcast' | 'patch' | 'jobs' | 'keyRevoke' | 'cicdTrigger'
 >
 
 export const OPERATE_MODULE_IDS: readonly OperateModuleId[] = [
   'broadcast',
   'patch',
   'jobs',
-  'keyRevoke'
-  // 'cicdTrigger' — phase 2. See the block above the MODULES entry it belongs
-  // to; this line and the union above go back together with that one.
+  'keyRevoke',
+  'cicdTrigger'
 ]
 
 /** Whether this module's destination is Operations rather than Monitoring. */
