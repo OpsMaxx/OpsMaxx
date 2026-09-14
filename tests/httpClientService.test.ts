@@ -179,6 +179,56 @@ describe('httpRequest, direct', () => {
     expect(headers['x-bad']).toBeUndefined()
   })
 
+  // GitHub answers 403 "Request forbidden by administrative rules" to a request
+  // with no User-Agent, and `node:http` sends none by default. That reads as a
+  // rejected token, so it cost an evening once - hence a test rather than a
+  // trust that the header is still there.
+  it('sends a User-Agent, which node does not add on its own', async () => {
+    const result = await httpRequest(
+      { url: `${plainUrl}/echo`, method: 'GET', headers: {}, via: { kind: 'direct' } },
+      ctx
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const headers = JSON.parse(text(result.body)).headers
+    // The version is whatever the electron mock reports, and asserting it would
+    // make a release bump a test change. That it names the app is the contract.
+    expect(headers['user-agent']).toMatch(/^OpsMaxx\//)
+  })
+
+  it('lets a caller set its own User-Agent instead', async () => {
+    const result = await httpRequest(
+      {
+        url: `${plainUrl}/echo`,
+        method: 'GET',
+        headers: { 'User-Agent': 'mine/1.0' },
+        via: { kind: 'direct' }
+      },
+      ctx
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(JSON.parse(text(result.body)).headers['user-agent']).toBe('mine/1.0')
+  })
+
+  // Header names are case-insensitive on the wire, so a lowercase one from the
+  // API client has to suppress the default too - otherwise the request carries
+  // two User-Agent headers and the far end picks.
+  it('recognises a caller header whatever its case', async () => {
+    const result = await httpRequest(
+      {
+        url: `${plainUrl}/echo`,
+        method: 'GET',
+        headers: { 'user-agent': 'lower/2.0' },
+        via: { kind: 'direct' }
+      },
+      ctx
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(JSON.parse(text(result.body)).headers['user-agent']).toBe('lower/2.0')
+  })
+
   it('reports an unreachable port rather than throwing', async () => {
     // Port 1 on loopback: nothing listens there, and it fails immediately.
     const result = await httpRequest(

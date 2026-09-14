@@ -1,3 +1,4 @@
+import { app } from 'electron'
 import { remoteText } from '../../shared/remoteText'
 import http from 'node:http'
 import zlib from 'node:zlib'
@@ -417,6 +418,20 @@ export async function httpRequest(
 ): Promise<HttpResult> {
   const maxHops = Math.min(Math.max(Math.floor(spec.maxRedirects ?? 0), 0), MAX_REDIRECT_HOPS)
   const { headers } = sanitizeHeaders(spec.headers ?? {})
+
+  // `node:http` sends no User-Agent of its own - curl and browsers add one, the
+  // Node module does not - and GitHub's REST API refuses a request without one
+  // with 403 "Request forbidden by administrative rules", which reads as a
+  // rejected token rather than a malformed request. That is a property of every
+  // request this client makes rather than of one provider, so the default lives
+  // here instead of in a provider's header block.
+  //
+  // A caller that sets its own still wins, including the API client's own
+  // requests, where the point is to send exactly what the user typed.
+  // `CROSS_ORIGIN_SAFE_HEADERS` already carries `user-agent` across a redirect.
+  if (!Object.keys(headers).some((name) => name.toLowerCase() === 'user-agent')) {
+    headers['User-Agent'] = `OpsMaxx/${app.getVersion()}`
+  }
 
   // Set when a cross-origin hop lost the route or the TLS relaxations, so a
   // later failure can say why it was reached the way it was.
