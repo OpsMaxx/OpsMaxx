@@ -152,6 +152,12 @@ export function parseWindowsMetrics(text: string, now: number = Date.now()): Hos
         : null,
     diskUsed,
     diskTotal: diskTotal ?? 0,
+    // The same number as diskTotal, because diskPct just above is a percentage
+    // OF diskTotal on this platform -- NTFS reserves nothing from the volume
+    // size the way ext4 reserves blocks for root. The field records which
+    // quantity the percentage is of; here the two coincide, and saying so is
+    // what stops a later reader assuming the Linux relationship holds.
+    diskCapacity: diskTotal ?? 0,
     // NTFS has an MFT rather than a fixed inode table, and nothing reports a
     // comparable exhaustion figure.
     inodePct: null,

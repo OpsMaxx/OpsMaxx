@@ -37,6 +37,9 @@ const metrics = (over: Partial<HostMetrics> = {}): HostMetrics => ({
   diskPct: 56,
   diskUsed: 500,
   diskTotal: 1000,
+  // Less than diskTotal, as on a real ext4 root: df's Capacity column excludes
+  // the blocks reserved for root, so 56% of 900 is what diskPct means here.
+  diskCapacity: 900,
   netRx: 7,
   netTx: 8,
   uptime: 9000,
@@ -57,6 +60,39 @@ describe('mapping a sample onto the schema', () => {
     )
     expect(s.cpu).toBe(12)
     expect(s.uptime).toBe(9000)
+  })
+
+  it('records no byte series at all when the probe could not read the filesystem', () => {
+    // THE BUG THIS PINS. memUsed and diskUsed are typed `number`, not
+    // `number | null`, so there is no null for the guards beside them to catch
+    // -- and a probe that failed does not leave them absent, it leaves them
+    // ZERO. darwinDisk returns {diskPct: null, diskUsed: 0, diskTotal: 0} in as
+    // many words when it cannot parse a line.
+    //
+    // The effect was invisible until the capacity forecast started fitting
+    // those bytes: one zero among thirty-gigabyte readings is not a small disk,
+    // it is an absence, and a least-squares fit through it describes the failed
+    // probe rather than the disk.
+    const s = metricsToSamples({
+      ...metrics(),
+      diskPct: null,
+      diskUsed: 0,
+      diskTotal: 0,
+      diskCapacity: 0
+    })
+    expect('diskUsed' in s).toBe(false)
+    expect('diskPct' in s).toBe(false)
+    // Memory was fine on that sweep and is still recorded: the totals are read
+    // independently, so one broken probe does not silence the other series.
+    expect(s.memUsed).toBe(1024)
+    expect(s.cpu).toBe(12)
+  })
+
+  it('records no memory bytes when /proc/meminfo could not be read', () => {
+    const s = metricsToSamples({ ...metrics(), memPct: null, memUsed: 0, memTotal: 0 })
+    expect('memUsed' in s).toBe(false)
+    expect('memPct' in s).toBe(false)
+    expect(s.diskUsed).toBe(500)
   })
 
   it('routes the constants to facts rather than paying the metric budget for them', () => {
@@ -145,6 +181,10 @@ describe('a sweep against a real store', () => {
     // wrote nothing at all passes as 0 === 0.
     expect(facts.map((f) => f.key).sort()).toEqual([
       'cores',
+      // What diskPct is a percentage OF, beside the raw size df prints. The
+      // capacity forecast needs the first and a user checking us against `df -h`
+      // needs the second, and on Linux they are different numbers.
+      'diskCapacity',
       'diskTotal',
       'hostname',
       'kernel',
@@ -153,7 +193,7 @@ describe('a sweep against a real store', () => {
       `${PORT_FACT_PREFIX}tcp/0.0.0.0:443`,
       `${UNIT_FACT_PREFIX}nginx.service`
     ])
-    expect(store.readEvents({ hostId: 'a', kind: 'fact-added' })).toHaveLength(8)
+    expect(store.readEvents({ hostId: 'a', kind: 'fact-added' })).toHaveLength(9)
   })
 
   it('writes facts once and only re-writes what changed', async () => {

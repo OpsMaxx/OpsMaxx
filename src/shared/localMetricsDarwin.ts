@@ -188,28 +188,71 @@ export function darwinMemory(
  * Disk, and the reason this whole module exists.
  *
  * `df` on APFS reports the CONTAINER as the total, which every volume in that
- * container shares. Dividing used by it reported a volume at 40% capacity as
- * 3.7% full — a plausible wrong number, which is worse than an absent one.
+ * container shares. Dividing THIS VOLUME's used by it reported a machine at 97%
+ * full as 3.7% — a plausible wrong number, which is worse than an absent one.
  *
- * Used over used-plus-available is the fill of the space this volume can
- * actually reach. It is what `df`'s own Capacity column shows and what Finder
- * shows, and on a non-shared filesystem it is identical to used over total.
+ * THE FIX FOR THAT WAS ALSO WRONG, in the same direction, and it survived
+ * because its own comment named the condition it needed and never checked it:
+ * "used over used-plus-available ... on a non-shared filesystem is identical to
+ * used over total". Every modern macOS is a SHARED filesystem. `/` is the
+ * sealed System volume and everything of the user's lives on the Data volume
+ * beside it, in one container, sharing one pool of free space. So for `/`,
+ * `used + available` is this volume's 17 GiB plus the CONTAINER's 13 GiB free,
+ * and the 391 GiB the Data volume is holding is invisible to the sum. Measured
+ * on a 500 GB MacBook with 12.6 GiB genuinely left:
+ *
+ *     df -kP /   →  482797652 blocks, 18017788 used, 13266020 avail, 58%
+ *     reported   →  "30.0 GiB disk, 17.2 GiB used (57%)"
+ *     truth      →  460 GiB disk, 12.6 GiB free, 97% full
+ *
+ * A 500 GB disk reported as a 30 GiB disk is the part a user notices. The part
+ * that matters more is that 57% reads as half empty on a machine that is about
+ * to run out, so no disk alert fires and the capacity forecast has nothing to
+ * forecast.
+ *
+ * WHAT IS ACTUALLY TRUE OF A SHARED CONTAINER: the total is the container, and
+ * the only number that means anything to whoever is about to write a file is
+ * what is AVAILABLE. Everything else is used -- by this volume, by its
+ * siblings, by APFS itself -- and which of them is holding it does not change
+ * whether the next write fits. So used is `total - available`, which is
+ * `df`'s Size and Avail columns and nothing derived. That is the figure Finder
+ * and About This Mac show, and it agrees with the Capacity column of the DATA
+ * volume, which is the one row of `df` that describes the machine.
+ *
+ * It is deliberately NOT `df`'s Capacity column for `/`, which is 58% here. The
+ * app agreeing with `df /` was never the goal; agreeing with how full the disk
+ * is, was. On Linux -- one filesystem, no shared container -- the two coincide,
+ * which is why the SSH probe reads the Capacity column and this does not.
  */
 export function darwinDisk(line: string | undefined): {
   diskPct: number | null
   diskUsed: number
   diskTotal: number
+  diskCapacity: number
 } {
   const cols = (line ?? '').trim().split(/\s+/)
-  if (cols.length < 5) return { diskPct: null, diskUsed: 0, diskTotal: 0 }
-  const usedKb = num(cols[2])
+  const nothing = { diskPct: null, diskUsed: 0, diskTotal: 0, diskCapacity: 0 }
+  if (cols.length < 5) return nothing
+  const totalKb = num(cols[1])
   const availKb = num(cols[3])
-  if (usedKb === null || availKb === null) return { diskPct: null, diskUsed: 0, diskTotal: 0 }
-  const reachable = usedKb + availKb
+  // `usedKb` is read and deliberately not used for the fill: on a shared
+  // container it is one volume's share and always understates the disk. It is
+  // still parsed, because a line where it is missing is a line this cannot
+  // trust at all.
+  const usedKb = num(cols[2])
+  if (totalKb === null || availKb === null || usedKb === null) return nothing
+  if (totalKb <= 0 || availKb > totalKb) return nothing
+  const usedOfContainer = totalKb - availKb
   return {
-    diskPct: reachable > 0 ? (usedKb / reachable) * 100 : null,
-    diskUsed: usedKb * 1024,
-    diskTotal: reachable * 1024
+    diskPct: (usedOfContainer / totalKb) * 100,
+    diskUsed: usedOfContainer * 1024,
+    diskTotal: totalKb * 1024,
+    // The same number as diskTotal, and now for a defensible reason rather than
+    // a coincidence: the percentage above is a share OF the container, so the
+    // container is what it is a percentage of. On Linux the two differ, because
+    // there diskTotal is df's raw Size and the percentage excludes the blocks
+    // reserved for root.
+    diskCapacity: totalKb * 1024
   }
 }
 

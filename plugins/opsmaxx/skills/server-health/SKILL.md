@@ -24,7 +24,11 @@ Two rules first, because getting them wrong wastes a turn:
 3. `get_host_facts` — only when the question is what the server *is* rather than how it is
    doing: distro, arch, virtualisation, pending and security updates, reboot-pending.
 4. `get_capacity_trends` — only when the question is about direction ("will it fill up"), not
-   the current number. It forecasts over a window of days.
+   the current number. It forecasts over a window of days and answers in sentences, one per
+   metric. Every number it states carries the window it came from AND how much of that window
+   was sampled: OpsMaxx only collects while it is running, so "from 21 days of data" can mean
+   nine parts of ten, or two. A refusal names the rule that stopped it — pass it on rather than
+   reading it as "there is room".
 5. `list_alerts` — what already fired, so you are not re-diagnosing something known.
 
 `execute_command` is for work that genuinely needs a shell. Reach for it after the tools above,

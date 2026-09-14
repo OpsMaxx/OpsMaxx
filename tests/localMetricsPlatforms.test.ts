@@ -72,28 +72,58 @@ describe('macOS: CPU', () => {
 })
 
 describe('macOS: disk — the number that made this necessary', () => {
-  const LINE = '/dev/disk3s3s1   482797652  18017788  27163300    40%    /'
+  // Real `df -kP /` from a 500 GB MacBook: a 460 GiB APFS container, of which
+  // this volume (the sealed System volume) holds 17 GiB and 12.6 GiB is free.
+  // The other 391 GiB is on the Data volume beside it, in the same container,
+  // and does not appear on this line at all.
+  const LINE = '/dev/disk3s3s1   482797652  18017788  13266020    58%    /'
+  const TOTAL_KB = 482797652
+  const AVAIL_KB = 13266020
 
-  it('reports what df and Finder report, not used-over-container', () => {
+  it('reports the size of the disk, not one volume plus the free space', () => {
+    // The bug a user spots first: a 500 GB machine described as a 30 GiB one,
+    // because `used + available` on a shared container is 17 + 12.6.
     const d = darwinDisk(LINE)
-    // 40% is what `df` itself prints in its Capacity column.
-    expect(d.diskPct as number).toBeCloseTo(39.9, 1)
+    expect(d.diskTotal).toBe(TOTAL_KB * 1024)
+    expect(d.diskTotal / 1024 ** 3).toBeCloseTo(460.4, 1)
   })
 
-  it('is emphatically not the old answer', () => {
-    // used / total on APFS, which is what the procfs parser computed: 3.7%.
+  it('reports how full the disk is, which is what anyone is asking', () => {
+    // 12.6 GiB free of 460 GiB. Not 58% (df's Capacity for this VOLUME) and
+    // emphatically not 57% (used over used-plus-available) -- both of which
+    // read as a half-empty disk on a machine that is about to run out, so no
+    // alert fires and there is nothing left to forecast.
+    //
+    // 97% is what Finder, About This Mac, and df's own row for the Data volume
+    // all report for this same container.
     const d = darwinDisk(LINE)
+    expect(d.diskPct as number).toBeCloseTo(97.3, 1)
+  })
+
+  it('is emphatically not either of the two older answers', () => {
+    const d = darwinDisk(LINE)
+    // 3.7%: this volume's used over the container, what the procfs parser did.
     expect(d.diskPct as number).toBeGreaterThan(30)
+    // 57%: used over used-plus-available, which replaced it and understated a
+    // full disk by forty points.
+    expect(d.diskPct as number).toBeGreaterThan(90)
   })
 
-  it('counts the total as what this volume can actually reach', () => {
+  it('counts everything not available as used, whoever is holding it', () => {
+    // Which volume in the container holds a block does not change whether the
+    // next write fits.
     const d = darwinDisk(LINE)
-    expect(d.diskTotal).toBe((18017788 + 27163300) * 1024)
+    expect(d.diskUsed).toBe((TOTAL_KB - AVAIL_KB) * 1024)
+    expect(d.diskCapacity).toBe(d.diskTotal)
   })
 
   it('is null on a line it cannot read', () => {
     expect(darwinDisk(undefined).diskPct).toBeNull()
     expect(darwinDisk('nonsense').diskPct).toBeNull()
+    // A total of zero is not an empty disk, and available exceeding the total
+    // is a line that has been misparsed.
+    expect(darwinDisk('/dev/x 0 0 0 0% /').diskPct).toBeNull()
+    expect(darwinDisk('/dev/x 100 10 200 5% /').diskPct).toBeNull()
   })
 })
 
@@ -190,19 +220,27 @@ describe('macOS: what the platform has no answer for', () => {
 })
 
 describe('macOS: on this machine', () => {
-  it.runIf(platform === 'darwin')('agrees with df about the disk', () => {
+  it.runIf(platform === 'darwin')('agrees with df about how full the disk is', () => {
     const out = execFileSync('sh', ['-c', DARWIN_METRICS_CMD], {
       encoding: 'utf8',
       maxBuffer: 8e6
     })
     const m = parseDarwinMetrics(out)
-    const df = execFileSync('sh', ['-c', "df -kP / | tail -1 | awk '{print $5}'"], {
+    // Size and Available for `/`, which on APFS describe the whole container.
+    //
+    // NOT df's Capacity column for `/`, which this test used to check and which
+    // is why the old answer survived: that column is the fill of one VOLUME,
+    // and on a sealed-System-volume Mac it reads about 58% while the machine
+    // has twelve gigabytes left. Checking against it made the wrong number
+    // look verified against the very tool it disagreed with.
+    const df = execFileSync('sh', ['-c', "df -kP / | tail -1 | awk '{print $2, $4}'"], {
       encoding: 'utf8'
     })
-    const capacity = Number(df.replace('%', '').trim())
-    // Within a point of what df itself prints, which is the number a person
-    // would check this against.
-    expect(Math.abs((m.diskPct as number) - capacity)).toBeLessThan(1.5)
+    const [totalKb, availKb] = df.trim().split(/\s+/).map(Number)
+    const full = ((totalKb - availKb) / totalKb) * 100
+    expect(Math.abs((m.diskPct as number) - full)).toBeLessThan(1.5)
+    // And the disk is the size df says it is, not one volume's share of it.
+    expect(Math.abs(m.diskTotal - totalKb * 1024) / (totalKb * 1024)).toBeLessThan(0.01)
     expect(m.cores).toBeGreaterThan(0)
     expect(m.load1).not.toBeNull()
     expect(m.uptime).toBeGreaterThan(0)
