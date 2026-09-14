@@ -55,10 +55,16 @@ const CONSEQUENCE: Record<OperateModuleId, string> = {
   broadcast: 'Runs a shell command on every server you select.',
   patch: 'Installs packages in waves, and restarts hosts that ask for it.',
   jobs: 'Makes servers run things: once as a job, on a schedule, or as a service that survives you.',
-  keyRevoke: 'Removes one SSH key from every account across the estate that trusts it.'
-  // cicdTrigger: 'Starts a build on a CI server OpsMaxx does not administer, and
-  //   cannot stop once it runs.' — phase 2, with its MODULES entry. TypeScript
-  //   enforces this list against OperateModuleId, so it comes back when that does.
+  keyRevoke: 'Removes one SSH key from every account across the estate that trusts it.',
+  // Listed because TypeScript enforces this map against `OperateModuleId`, and
+  // stated in the same consequence-first voice as its neighbours -- but this one
+  // has no tab HERE. Its controls render inside the CI/CD panel on the
+  // Monitoring rail, beside the runs they act on, because a build is started
+  // from the pipeline you are looking at rather than from a separate screen that
+  // makes you find it again. The module is still its own grant; only the
+  // location is shared.
+  cicdTrigger:
+    'Starts, cancels and disables builds on a CI server OpsMaxx does not administer, and cannot stop one once it runs.'
 }
 
 /**

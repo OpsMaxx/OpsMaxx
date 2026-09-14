@@ -25,10 +25,13 @@ import type { CicdBridge, CicdCapacity, CicdConnection, CicdQueueItem } from '..
  */
 export function QueuePanel({
   connections,
-  bridge
+  bridge,
+  canTrigger = false
 }: {
   connections: readonly CicdConnection[]
   bridge?: CicdBridge
+  /** `cicdTrigger`. Decided at the mount point; this only renders it. */
+  canTrigger?: boolean
 }): React.JSX.Element {
   const [connectionId, setConnectionId] = useState(connections[0]?.id ?? '')
   const [state, setState] = useState<
@@ -37,7 +40,9 @@ export function QueuePanel({
     | { kind: 'ok'; items: CicdQueueItem[]; capacity: CicdCapacity; at: number }
     | { kind: 'failed'; error: string }
   >({ kind: 'idle' })
+  const [dropping, setDropping] = useState<number | null>(null)
   const can = cicdBridgeHas(bridge, 'queue')
+  const canDrop = canTrigger && cicdBridgeHas(bridge, 'cancelQueueItem')
 
   const read = useCallback((): void => {
     if (!can || connectionId === '') return
@@ -125,6 +130,26 @@ export function QueuePanel({
                   <span className="spacer" />
                   {i.since !== undefined && (
                     <span className="cicd-row-age">{waitingFor(i.since)}</span>
+                  )}
+                  {canDrop && (
+                    <button
+                      type="button"
+                      className="btn secondary size-24"
+                      disabled={dropping === i.id}
+                      title="Drop this item out of the queue. If it has already started, it is a running build and this will not stop it."
+                      onClick={() => {
+                        setDropping(i.id)
+                        void bridge!
+                          .cancelQueueItem(connectionId, i.id)
+                          .catch(() => undefined)
+                          .finally(() => {
+                            setDropping(null)
+                            read()
+                          })
+                      }}
+                    >
+                      {dropping === i.id ? 'Dropping...' : 'Drop'}
+                    </button>
                   )}
                 </div>
               ))}

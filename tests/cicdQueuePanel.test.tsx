@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueuePanel } from '../src/renderer/src/components/cicd/QueuePanel'
 import type { CicdBridge, CicdCapacity, CicdConnection } from '../src/shared/cicd'
@@ -37,6 +37,7 @@ const capacity = (over: Partial<CicdCapacity> = {}): CicdCapacity => ({
 function bridge(over: Partial<CicdBridge> = {}): CicdBridge {
   return {
     queue: vi.fn(async () => ({ items: [], capacity: capacity() })),
+    cancelQueueItem: vi.fn(async () => ({ note: 'Asked Jenkins to drop the queued item.' })),
     ...over
   } as unknown as CicdBridge
 }
@@ -147,5 +148,39 @@ describe('reading it again', () => {
     expect(b.queue).toHaveBeenCalledTimes(1)
     await user.click(screen.getByRole('button', { name: /read now/i }))
     expect(b.queue).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('dropping a queued item', () => {
+  const queued = {
+    items: [{ id: 7, name: 'trivy', stuck: false, blocked: true }],
+    capacity: capacity()
+  }
+
+  it('offers nothing when cicdTrigger is off', async () => {
+    const b = bridge({ queue: vi.fn(async () => queued) })
+    render(<QueuePanel connections={[CONN]} bridge={b} />)
+    await screen.findByText('BLOCKED')
+    expect(screen.queryByRole('button', { name: /drop/i })).toBeNull()
+  })
+
+  it('drops it when it is on, and says what that does not promise', async () => {
+    const user = userEvent.setup()
+    const b = bridge({ queue: vi.fn(async () => queued) })
+    render(<QueuePanel connections={[CONN]} bridge={b} canTrigger />)
+    const drop = await screen.findByRole('button', { name: /drop/i })
+    // An item that has already started is a running build, and this does not
+    // stop one. The control says so rather than implying otherwise.
+    expect(drop.getAttribute('title')).toContain('will not stop it')
+    await user.click(drop)
+    expect(b.cancelQueueItem).toHaveBeenCalledWith('c1', 7)
+  })
+
+  it('re-reads afterwards, so the row does not linger after it is gone', async () => {
+    const user = userEvent.setup()
+    const b = bridge({ queue: vi.fn(async () => queued) })
+    render(<QueuePanel connections={[CONN]} bridge={b} canTrigger />)
+    await user.click(await screen.findByRole('button', { name: /drop/i }))
+    await waitFor(() => expect((b.queue as unknown as { mock: { calls: unknown[] } }).mock.calls.length).toBeGreaterThan(1))
   })
 })

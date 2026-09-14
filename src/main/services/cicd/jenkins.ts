@@ -616,3 +616,63 @@ export async function jenkinsCapacity(http: CicdHttp): Promise<CicdCapacity> {
     })
   }
 }
+
+/**
+ * Enable or disable a job.
+ *
+ * A WRITE, and a quiet one. Cancelling a run is visible within the minute;
+ * disabling a job produces no failure and no alert -- the next commit simply
+ * never builds, and it stays that way until somebody notices. The confirm this
+ * sits behind has to say that, because the API will not.
+ *
+ * Jenkins answers these with a 302 back to the job page on success, the same as
+ * the build endpoint, so a redirect is not treated as a failure here. That is
+ * also why the login-redirect check in `expectOk` matches on the Location and
+ * not on the status: a 302 to the job page and a 302 to an SSO realm are
+ * opposite outcomes.
+ */
+export async function setJenkinsJobEnabled(
+  http: CicdHttp,
+  pipelineRef: string,
+  enabled: boolean
+): Promise<CicdTriggerResult> {
+  const res = await http({
+    method: 'POST',
+    path: `/${pipelineRef}/${enabled ? 'enable' : 'disable'}`
+  })
+  if (res.status !== 302 && (res.status < 200 || res.status >= 300)) {
+    expectOk(res, enabled ? 'Enabling the job' : 'Disabling the job')
+  }
+  return {
+    note: enabled
+      ? 'Asked Jenkins to enable the job. It will build again on its next trigger.'
+      : 'Asked Jenkins to disable the job. Nothing will build it until it is enabled again.'
+  }
+}
+
+/**
+ * Drop one item out of the queue.
+ *
+ * Not the same verb as cancelling a run, and deliberately a separate function:
+ * a queued item has no build number, so there is nothing for `cancelJenkins` to
+ * address. Jenkins answers a successful cancel with a redirect and gives no way
+ * to distinguish "removed it" from "it had already started" -- the same
+ * ambiguity `cancelJenkins` documents -- so the note claims only the request.
+ */
+export async function cancelJenkinsQueueItem(
+  http: CicdHttp,
+  itemId: number
+): Promise<CicdTriggerResult> {
+  const res = await http({ method: 'POST', path: `/queue/cancelItem?id=${encodeURIComponent(String(itemId))}` })
+  if (res.status !== 302 && res.status !== 404 && (res.status < 200 || res.status >= 300)) {
+    expectOk(res, 'Cancelling a queued item')
+  }
+  // 404 means it is no longer in the queue, which is either already cancelled or
+  // already started. Saying which would be a guess.
+  return {
+    note:
+      res.status === 404
+        ? 'That item is no longer in the queue. It has either been cancelled already or has started.'
+        : 'Asked Jenkins to drop the queued item. If it had already started, it is now a running build.'
+  }
+}

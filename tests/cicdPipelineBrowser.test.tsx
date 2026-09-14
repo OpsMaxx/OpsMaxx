@@ -50,6 +50,7 @@ function bridge(over: Partial<CicdBridge> = {}): CicdBridge {
   return {
     recentRuns: vi.fn(async () => [run()]),
     getConfig: vi.fn(async () => ({ kind: 'xml' as const, text: '<flow-definition/>', path: 'job/trivy/config.xml' })),
+    setJobEnabled: vi.fn(async () => ({ note: 'Asked Jenkins to disable the job.' })),
     ...over
   } as unknown as CicdBridge
 }
@@ -219,5 +220,89 @@ describe('the detail pane', () => {
     )
     await user.click(screen.getByText('trivy'))
     expect(await screen.findByText(/cannot read build history/)).toBeTruthy()
+  })
+})
+
+describe('the write half, which is a separate grant', () => {
+  const open = async (canTrigger: boolean, b = bridge()): Promise<void> => {
+    const user = userEvent.setup()
+    render(
+      <PipelineBrowser
+        connections={[CONN]}
+        pipelines={[pipeline()]}
+        bridge={b}
+        canTrigger={canTrigger}
+        onOpenRun={noop}
+      />
+    )
+    await user.click(screen.getByText('trivy'))
+  }
+
+  it('shows no write control at all when cicdTrigger is off', async () => {
+    // Not greyed -- absent. A disabled Disable button on a screen the user has
+    // read access to is an invitation to go looking for the switch.
+    await open(false)
+    expect(screen.queryByRole('button', { name: /^disable$/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^enable$/i })).toBeNull()
+    // The read half is unaffected.
+    expect(screen.getByRole('button', { name: /show/i })).toBeTruthy()
+  })
+
+  it('shows them when it is on', async () => {
+    await open(true)
+    expect(screen.getByRole('button', { name: /^disable$/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^enable$/i })).toBeTruthy()
+  })
+
+  it('will not disable a job on one press', async () => {
+    // Disabling is the quiet destructive one: no failure, no alert, the next
+    // commit simply never builds.
+    const user = userEvent.setup()
+    const b = bridge()
+    await open(true, b)
+    await user.click(screen.getByRole('button', { name: /^disable$/i }))
+    expect(b.setJobEnabled).not.toHaveBeenCalled()
+    expect(screen.getByText(/produces no failure and no alert/)).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: /disable it/i }))
+    expect(b.setJobEnabled).toHaveBeenCalledWith('c1', 'job/trivy', false)
+  })
+
+  it('lets the confirm be backed out of', async () => {
+    const user = userEvent.setup()
+    const b = bridge()
+    await open(true, b)
+    await user.click(screen.getByRole('button', { name: /^disable$/i }))
+    await user.click(screen.getByRole('button', { name: /keep it on/i }))
+    expect(b.setJobEnabled).not.toHaveBeenCalled()
+  })
+
+  it('enables without a confirm, because turning it back on breaks nothing', async () => {
+    const user = userEvent.setup()
+    const b = bridge()
+    await open(true, b)
+    await user.click(screen.getByRole('button', { name: /^enable$/i }))
+    expect(b.setJobEnabled).toHaveBeenCalledWith('c1', 'job/trivy', true)
+  })
+
+  it('reports the provider note verbatim, including a failure', async () => {
+    const user = userEvent.setup()
+    const b = bridge({
+      setJobEnabled: vi.fn(async () => {
+        throw new Error('Jenkins returned 403.')
+      })
+    })
+    await open(true, b)
+    await user.click(screen.getByRole('button', { name: /^enable$/i }))
+    expect(await screen.findByText(/Jenkins returned 403/)).toBeTruthy()
+  })
+
+  it('greys the controls when the preload half cannot do it', async () => {
+    const partial = bridge()
+    delete (partial as unknown as Record<string, unknown>).setJobEnabled
+    await open(true, partial)
+    const btn = screen.getByRole('button', { name: /^disable$/i })
+    expect(btn.hasAttribute('disabled')).toBe(true)
+    expect(btn.getAttribute('title')).toContain('cannot enable or disable a job')
   })
 })

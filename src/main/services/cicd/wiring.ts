@@ -51,7 +51,9 @@ import {
   jenkinsParams,
   cancelJenkins,
   jenkinsQueue,
-  jenkinsCapacity
+  jenkinsCapacity,
+  setJenkinsJobEnabled,
+  cancelJenkinsQueueItem
 } from './jenkins'
 import { triggerGitlab, listGitlabParams, cancelGitlab } from './gitlab'
 import { triggerGithub, rerunGithub, cancelGithub } from './github'
@@ -426,6 +428,38 @@ export async function listParams(connectionId: string, pipelineRef: string): Pro
   }
 }
 
+
+/**
+ * Enable or disable a job. Jenkins-only, for the same reason the queue is.
+ *
+ * Not gated here, like every other write in this file -- the gate is the MCP
+ * capability for an agent and the module toggle plus a confirm for a person.
+ * See the comment above `triggerRun`.
+ */
+export async function setJobEnabled(
+  connectionId: string,
+  pipelineRef: string,
+  enabled: boolean
+): Promise<CicdTriggerResult> {
+  const c = requireConnection(connectionId)
+  if (c.provider !== 'jenkins') {
+    throw new Error(`Enabling and disabling a job is Jenkins-only; ${c.provider} has no equivalent.`)
+  }
+  return setJenkinsJobEnabled(makeCicdHttp(c, resolveSecret(c)), pipelineRef, enabled)
+}
+
+/** Drop one item out of the queue. A queued item has no build number, so this
+ *  is a different verb from `cancelRun` rather than a special case of it. */
+export async function cancelQueueItem(
+  connectionId: string,
+  itemId: number
+): Promise<CicdTriggerResult> {
+  const c = requireConnection(connectionId)
+  if (c.provider !== 'jenkins') {
+    throw new Error(`Cancelling a queued item is Jenkins-only; ${c.provider} has no build queue.`)
+  }
+  return cancelJenkinsQueueItem(makeCicdHttp(c, resolveSecret(c)), itemId)
+}
 
 export async function cancelRun(
   connectionId: string,

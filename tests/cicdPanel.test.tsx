@@ -100,6 +100,8 @@ function bridge(over: Partial<CicdBridge> = {}): CicdBridge {
       items: [],
       capacity: { busyExecutors: 0, totalExecutors: 0, agents: [] }
     })),
+    setJobEnabled: vi.fn(async () => ({ note: '' })),
+    cancelQueueItem: vi.fn(async () => ({ note: '' })),
     getLog: vi.fn(
       async (): Promise<CicdLogChunk> => ({ mode: 'snapshot', text: 'done\n', more: false })
     ),

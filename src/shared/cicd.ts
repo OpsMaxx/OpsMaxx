@@ -665,6 +665,19 @@ export interface CicdBridge {
    * say which rather than showing an empty table that reads as "nothing queued".
    */
   queue(connectionId: string): Promise<{ items: CicdQueueItem[]; capacity: CicdCapacity }>
+  /**
+   * Enable or disable a job. Gated in main and behind a confirm in the UI, like
+   * every other write here -- and the quietest of them: a disabled job produces
+   * no failure and no alert, it simply stops building.
+   */
+  setJobEnabled(
+    connectionId: string,
+    pipelineRef: string,
+    enabled: boolean
+  ): Promise<CicdTriggerResult>
+  /** Drop one item out of the queue. A queued item has no build number, so this
+   *  is a different verb from `cancel` rather than a special case of it. */
+  cancelQueueItem(connectionId: string, itemId: number): Promise<CicdTriggerResult>
   cancel(connectionId: string, pipelineRef: string, runId: string): Promise<CicdTriggerResult>
   rerun(connectionId: string, pipelineRef: string, runId: string): Promise<CicdTriggerResult>
   /** Drop a vault entry a deleted connection owned. See releaseCicdSecrets. */

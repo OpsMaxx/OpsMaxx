@@ -1312,6 +1312,14 @@ ipcMain.handle(
     cicd.recentRuns(connectionId, pipelineRef, limit)
 )
 ipcMain.handle('cicd:queue', (_e, connectionId: string) => cicd.getQueue(connectionId))
+ipcMain.handle(
+  'cicd:setJobEnabled',
+  (_e, connectionId: string, pipelineRef: string, enabled: boolean) =>
+    cicd.setJobEnabled(connectionId, pipelineRef, enabled)
+)
+ipcMain.handle('cicd:cancelQueueItem', (_e, connectionId: string, itemId: number) =>
+  cicd.cancelQueueItem(connectionId, itemId)
+)
 ipcMain.handle('cicd:getConfig', (_e, connectionId: string, pipelineRef: string) =>
   cicd.getPipelineConfig(connectionId, pipelineRef)
 )

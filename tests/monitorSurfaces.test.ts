@@ -46,11 +46,9 @@ describe('the read/operate split', () => {
     // server; it stopped one being reachable from a destination that promises
     // it cannot.
     //
-    // `cicdTrigger` WOULD be the fifth, and it is deliberately absent in phase
-    // 1. It is built and tested; it is not registered because the CI module has
-    // not yet been run against a real CI server, and the trigger half is the
-    // half where being wrong starts a production deploy. When it returns, the
-    // argument for putting it on THIS rail is: it does not change a server
+    // `cicdTrigger` is the fifth, registered in phase 2 once the read half had
+    // been run against a real CI server -- the condition its own comment set.
+    // The argument for putting it on THIS rail: it does not change a server
     // directly — it asks a CI provider to run a pipeline, and what that
     // pipeline then does to the estate is somebody else's file. The `surface`
     // field is worded about servers, so it does not settle it; the rail's
@@ -58,6 +56,7 @@ describe('the read/operate split', () => {
     // consequence of pressing the button is that a deploy goes out.
     expect(modulesOnSurface('operate').map((m) => m.id).sort()).toEqual([
       'broadcast',
+      'cicdTrigger',
       'jobs',
       'keyRevoke',
       'patch'

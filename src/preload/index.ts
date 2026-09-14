@@ -547,6 +547,14 @@ const api = {
       connectionId: string
     ): Promise<{ items: CicdQueueItem[]; capacity: CicdCapacity }> =>
       ipcRenderer.invoke('cicd:queue', connectionId),
+    setJobEnabled: (
+      connectionId: string,
+      pipelineRef: string,
+      enabled: boolean
+    ): Promise<CicdTriggerResult> =>
+      ipcRenderer.invoke('cicd:setJobEnabled', connectionId, pipelineRef, enabled),
+    cancelQueueItem: (connectionId: string, itemId: number): Promise<CicdTriggerResult> =>
+      ipcRenderer.invoke('cicd:cancelQueueItem', connectionId, itemId),
     getLog: (
       connectionId: string,
       pipelineRef: string,

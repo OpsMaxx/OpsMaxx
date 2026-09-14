@@ -59,11 +59,18 @@ export function CicdPanel({
   connections: seed,
   bridge = cicdBridge(),
   intervalSec = DEFAULT_INTERVAL_SEC,
+  canTrigger = false,
   onSaveConnection
 }: {
   connections?: CicdConnection[]
   bridge?: CicdBridge
   intervalSec?: number
+  /**
+   * Whether the `cicdTrigger` module is on. Decided at the mount point, like
+   * every other module, so this panel never reads the registry itself -- and so
+   * `tests/moduleBoundaries.test.ts` can still find the guard where it looks.
+   */
+  canTrigger?: boolean
   onSaveConnection?: (connection: CicdConnection, token: string) => void | Promise<void>
 }): React.JSX.Element {
   const stored = useCicdConnectionList()
@@ -193,8 +200,10 @@ export function CicdPanel({
             here is as fresh as the last successful read — which the header states.
           </p>
           <p className="ui-note">
-            Reading a run is all this module does. Starting one is a separate module on the
-            Operations rail, because the consequence is that a deploy goes out.
+            Reading is what this module does on its own. Starting, cancelling and disabling live
+            on the same screen but behind a second module — "Start a build" — because the
+            consequence is that a deploy goes out, and that is a separate decision from being
+            allowed to look.
           </p>
         </>
       }
@@ -276,12 +285,13 @@ export function CicdPanel({
           </div>
 
           {tab === 'queue' ? (
-            <QueuePanel connections={connections} bridge={bridge} />
+            <QueuePanel connections={connections} bridge={bridge} canTrigger={canTrigger} />
           ) : tab === 'pipelines' ? (
             <PipelineBrowser
               connections={connections}
               pipelines={allPipelines}
               bridge={bridge}
+              canTrigger={canTrigger}
               onOpenRun={(connectionId, pipelineRef, run) =>
                 setSelected({ connectionId, pipelineRef, runId: run.id })
               }

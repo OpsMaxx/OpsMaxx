@@ -400,3 +400,15 @@ button.cicd-step {
   font-size: var(--fs-sm);
   color: var(--text-muted);
 }
+
+/* The write controls. Same screen as the reads, different module -- so they sit
+   in their own labelled block rather than beside the Definition button, where
+   "Show" and "Disable" would have read as the same kind of thing. */
+.cicd-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.cicd-actions .row {
+  gap: var(--sp-2);
+}
