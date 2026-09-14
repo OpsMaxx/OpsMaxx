@@ -289,6 +289,17 @@ button.cicd-step {
   flex-direction: column;
   min-height: 0;
 }
+/* A <button> sizes to its content even at `display: flex`, so a row only fills
+   its line when a flex parent stretches it. `.cicd-tree` does that for the top
+   level; nested rows sit inside `.tree-children`, which is a plain block in
+   global.css, and were coming out shrink-to-fit -- so the status column stopped
+   lining up the moment a pipeline was inside a folder. Scoped here rather than
+   fixed on `.tree-children` itself, because seven other sidebars use that class
+   and none of them has this problem. */
+.cicd-tree .tree-children {
+  display: flex;
+  flex-direction: column;
+}
 
 /* A pipeline row carries its own status word on the right. It is a leaf, so it
    has no chevron and the label takes the space one would have used. */
