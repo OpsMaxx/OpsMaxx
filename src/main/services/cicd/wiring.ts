@@ -34,7 +34,9 @@ import { randomUUID } from 'node:crypto'
 import { vaultList, vaultSave } from '../vault'
 import type { VaultEntry } from '../../../shared/vault'
 import type {
+  CicdConfigSource,
   CicdConnection,
+  CicdRun,
   CicdLogChunk,
   AgentRunReport,
   CicdPanelState,
@@ -336,6 +338,46 @@ export async function rerunRun(
   throw new Error(
     `Re-running a finished run is a ${c.provider === 'jenkins' ? 'Jenkins' : 'GitLab'} concept this module does not expose yet. Start a new run instead.`
   )
+}
+
+/**
+ * A pipeline's definition.
+ *
+ * Dispatched through the adapter rather than a per-provider free function,
+ * because unlike the queue every provider has a definition and the question
+ * means the same thing in all three. A provider that has not implemented it says
+ * so by NAME -- "GitLab" rather than "not supported" -- because the reader is
+ * deciding whether to go and look somewhere else.
+ */
+/**
+ * The runs the poller already holds for one pipeline.
+ *
+ * No network: the scheduler keeps a bounded history per target, and the panel's
+ * detail pane wants more than the single `last` that `CicdPanelState` carries.
+ * Serving it on demand rather than widening the broadcast is deliberate --
+ * `panelState` goes to every window on every read, and a controller with two
+ * thousand jobs would be shipping forty thousand runs per tick to show twenty.
+ */
+export function recentRuns(connectionId: string, pipelineRef: string, limit = 20): CicdRun[] {
+  const snap = poller?.snapshot()
+  const target = (snap?.targets ?? []).find(
+    (t) => t.targetId === `${connectionId}\u0000${pipelineRef}`
+  )
+  return (target?.runs ?? []).slice(0, Math.max(1, Math.min(Math.trunc(limit) || 1, 50)))
+}
+
+export async function getPipelineConfig(
+  connectionId: string,
+  pipelineRef: string
+): Promise<CicdConfigSource> {
+  const c = requireConnection(connectionId)
+  const adapter = createCicdAdapter(c, resolveSecret(c))
+  if (!adapter.getConfig) {
+    throw new Error(
+      `Reading a pipeline's definition is not implemented for ${c.provider} yet, so there is nothing to show here.`
+    )
+  }
+  return adapter.getConfig(pipelineRef)
 }
 
 export async function listParams(connectionId: string, pipelineRef: string): Promise<CicdParam[]> {

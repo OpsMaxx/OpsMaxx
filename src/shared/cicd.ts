@@ -417,6 +417,33 @@ export interface CicdAdapter {
    * GitHub's workflow_dispatch.inputs, GitLab's project variables.
    */
   listParams(pipelineRef: string): Promise<CicdParam[]>
+  /**
+   * The pipeline's own definition. Optional: absent means "this provider cannot
+   * show you one yet", and the caller must say so rather than render nothing.
+   */
+  getConfig?(pipelineRef: string): Promise<CicdConfigSource>
+}
+
+/**
+ * A pipeline's definition, as the provider stores it.
+ *
+ * On the adapter rather than a per-provider free function, unlike the queue and
+ * the executors: every provider HAS a definition and the question "show me what
+ * this pipeline actually does" means the same thing in all three. Only the
+ * dialect differs, which is what `kind` carries.
+ *
+ * Optional on the adapter because two of the three do not implement it yet, and
+ * the panel greys the section with its reason rather than pretending. Text is
+ * provider-authored -- it is a file from somebody else's repository -- so it is
+ * displayed and never parsed.
+ */
+export interface CicdConfigSource {
+  kind: 'xml' | 'yaml' | 'script'
+  text: string
+  /** Where it came from, when the provider names a path. Display only. */
+  path?: string
+  /** Set when the provider capped what it returned, same contract as a log. */
+  truncated?: boolean
 }
 
 /**
@@ -561,6 +588,20 @@ export interface CicdBridge {
     ref: string,
     params?: Record<string, string>
   ): Promise<CicdTriggerResult>
+  /**
+   * Read a pipeline's definition. Rejects when the provider has no
+   * implementation, so the caller can say which provider rather than showing an
+   * empty box.
+   */
+  getConfig(connectionId: string, pipelineRef: string): Promise<CicdConfigSource>
+  /**
+   * Recent runs for one pipeline, from what the poller already holds.
+   *
+   * Not on `CicdPanelState` because that broadcast goes to every window on every
+   * read, and carrying a history per pipeline would scale with the controller
+   * rather than with what is on screen.
+   */
+  recentRuns(connectionId: string, pipelineRef: string, limit?: number): Promise<CicdRun[]>
   cancel(connectionId: string, pipelineRef: string, runId: string): Promise<CicdTriggerResult>
   rerun(connectionId: string, pipelineRef: string, runId: string): Promise<CicdTriggerResult>
   /** Drop a vault entry a deleted connection owned. See releaseCicdSecrets. */

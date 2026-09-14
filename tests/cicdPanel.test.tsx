@@ -94,6 +94,8 @@ function bridge(over: Partial<CicdBridge> = {}): CicdBridge {
     createSecret: vi.fn(async () => 'vault-new'),
     verify: vi.fn(async () => ({ ok: true as const, identity: 'octocat' })),
     listParams: vi.fn(async () => []),
+    getConfig: vi.fn(async () => ({ kind: 'xml' as const, text: '<flow-definition/>' })),
+    recentRuns: vi.fn(async () => []),
     getLog: vi.fn(
       async (): Promise<CicdLogChunk> => ({ mode: 'snapshot', text: 'done\n', more: false })
     ),

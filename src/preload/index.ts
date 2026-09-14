@@ -17,6 +17,8 @@ import type {
   CicdConnection,
   CicdLogChunk,
   CicdPanelState,
+  CicdConfigSource,
+  CicdRun,
   CicdParam,
   CicdTriggerResult
 } from '../shared/cicd'
@@ -535,6 +537,10 @@ const api = {
     > => ipcRenderer.invoke('cicd:verify', connection, secret),
     listParams: (connectionId: string, pipelineRef: string): Promise<CicdParam[]> =>
       ipcRenderer.invoke('cicd:listParams', connectionId, pipelineRef),
+    getConfig: (connectionId: string, pipelineRef: string): Promise<CicdConfigSource> =>
+      ipcRenderer.invoke('cicd:getConfig', connectionId, pipelineRef),
+    recentRuns: (connectionId: string, pipelineRef: string, limit?: number): Promise<CicdRun[]> =>
+      ipcRenderer.invoke('cicd:recentRuns', connectionId, pipelineRef, limit),
     getLog: (
       connectionId: string,
       pipelineRef: string,

@@ -258,3 +258,103 @@ button.cicd-step {
   flex-direction: column;
   min-width: 0;
 }
+
+/* ---------------------------------------------------------------------------
+   The pipeline browser.
+
+   Two panes on one divider, the same arrangement the run workbench uses. The
+   left pane borrows the app's `.tree-row` vocabulary from global.css rather
+   than growing a second one: a pipeline folder and a server folder are the same
+   gesture, and a reader who has learned one has learned both.
+   --------------------------------------------------------------------------- */
+
+.cicd-browser {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 0;
+}
+
+.cicd-browser-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) 0;
+  overflow-y: auto;
+}
+
+.cicd-tree {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* A pipeline row carries its own status word on the right. It is a leaf, so it
+   has no chevron and the label takes the space one would have used. */
+.cicd-pipe-row {
+  gap: var(--sp-2);
+  justify-content: space-between;
+}
+.cicd-pipe-row .label {
+  min-width: 0;
+}
+
+/* A level the user can name and cannot open. Dimmed, and deliberately not a
+   button -- see PipelineBrowser.tsx. `default` rather than `pointer` is the
+   whole tell that it does not respond. */
+.tree-row.is-ghost {
+  cursor: default;
+  opacity: 0.55;
+}
+.tree-row.is-ghost:hover {
+  background: none;
+}
+
+.cicd-browser-detail {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--sp-2) 0 var(--sp-2) var(--sp-4);
+}
+
+.cicd-detail-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.cicd-detail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.cicd-detail-head h3 {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.cicd-config {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+/* Bounded, because a config.xml is a whole file and the pane below it is not
+   the only thing on the page. */
+.cicd-config .cicd-log-body {
+  max-height: 420px;
+}
+
+/* The sub-tab row. `.count` matches the tree-section count so the two readings
+   of "how many" look the same. */
+.cicd-tabs {
+  margin-bottom: var(--sp-2);
+}
+.cicd-tabs .count {
+  margin-left: var(--sp-2);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}

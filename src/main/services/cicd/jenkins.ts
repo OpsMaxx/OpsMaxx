@@ -351,7 +351,39 @@ export function createJenkinsAdapter(http: CicdHttp, opts: JenkinsAdapterOptions
       }
     },
 
-    listParams: (pipelineRef) => jenkinsParams(http, pipelineRef)
+    listParams: (pipelineRef) => jenkinsParams(http, pipelineRef),
+
+    /**
+     * The job's own definition, as Jenkins stores it.
+     *
+     * `config.xml`, not `wfapi` or an inline script field: it is the one endpoint
+     * every job kind answers -- freestyle, pipeline and multibranch alike -- and
+     * it is what an admin would open in the Jenkins UI. A declarative pipeline's
+     * script sits inside it, which is the common case and the reason this is
+     * worth showing at all.
+     *
+     * Deliberately NOT parsed. It is a file from somebody else's controller, its
+     * dialect changes with every plugin version, and the panel's job is to show
+     * it rather than to have an opinion about it. This is also the one read here
+     * with no `tree=` and no JSON: the endpoint serves XML and the selector does
+     * not apply, so it is capped by bytes instead -- the same figure and the same
+     * reason as the log reader, because nothing here decides how many bytes this
+     * process accepts on a stranger's say-so.
+     */
+    async getConfig(pipelineRef) {
+      const res = expectOk(
+        await http({ method: 'GET', path: `/${pipelineRef}/config.xml` }),
+        'Reading the job configuration'
+      )
+      const text = res.body ?? ''
+      const capped = text.length > cfg.maxLogBytes
+      return {
+        kind: 'xml' as const,
+        text: capped ? text.slice(0, cfg.maxLogBytes) : text,
+        path: `${pipelineRef}/config.xml`,
+        ...(capped ? { truncated: true } : {})
+      }
+    }
   }
 }
 

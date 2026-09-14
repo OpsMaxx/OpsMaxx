@@ -1306,6 +1306,14 @@ ipcMain.handle('cicd:createSecret', (_e, label: string, token: string) =>
   cicd.createSecret(label, token)
 )
 
+ipcMain.handle(
+  'cicd:recentRuns',
+  (_e, connectionId: string, pipelineRef: string, limit?: number) =>
+    cicd.recentRuns(connectionId, pipelineRef, limit)
+)
+ipcMain.handle('cicd:getConfig', (_e, connectionId: string, pipelineRef: string) =>
+  cicd.getPipelineConfig(connectionId, pipelineRef)
+)
 ipcMain.handle('cicd:listParams', (_e, connectionId: string, pipelineRef: string) =>
   cicd.listParams(connectionId, pipelineRef)
 )

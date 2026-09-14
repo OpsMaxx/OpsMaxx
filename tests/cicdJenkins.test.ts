@@ -64,6 +64,7 @@ describe('every read carries a field selector', () => {
       if (req.path.includes('/api/json')) return json({ jobs: [], builds: [], property: [] })
       if (req.path.includes('wfapi')) return json({ stages: [] })
       if (req.path.includes('progressiveText')) return { status: 200, body: '' }
+      if (req.path.includes('config.xml')) return { status: 200, body: '<flow-definition/>' }
       return json({})
     })
     const a = adapter(http)
@@ -72,14 +73,39 @@ describe('every read carries a field selector', () => {
     await a.getRun('job/app', '7', 1)
     await a.getLog('job/app', '7', undefined)
     await a.listParams('job/app')
+    // Every read the adapter offers, or this guard is only as good as whoever
+    // remembered to extend it -- which is the failure it exists to prevent.
+    await a.getConfig!('job/app')
 
-    expect(calls.length).toBeGreaterThan(4)
+    expect(calls.length).toBeGreaterThan(5)
     for (const c of calls) {
       if (c.path.includes('/api/json')) expect(c.path).toContain('tree=')
-      // The only two reads without one, both because the endpoint does not
-      // implement the selector at all.
-      else expect(c.path).toMatch(/wfapi\/describe|logText\/progressiveText/)
+      // The only reads without one, each because the endpoint does not implement
+      // the selector at all: two return plain text, one returns XML.
+      else expect(c.path).toMatch(/wfapi\/describe|logText\/progressiveText|config\.xml/)
     }
+  })
+
+  it('covers every read the adapter declares, so a new one cannot slip past', () => {
+    // The guard above is a loop over recorded calls, so a read it never invokes
+    // is a read it never checks. This pins the list itself.
+    const a = adapter(fake(() => json({})).http)
+    const reads = Object.keys(a).filter(
+      (k) => typeof (a as unknown as Record<string, unknown>)[k] === 'function'
+    )
+    expect(new Set(reads)).toEqual(
+      new Set([
+        'apiRoot',
+        'capabilities',
+        'verify',
+        'listPipelines',
+        'listRuns',
+        'getRun',
+        'getLog',
+        'listParams',
+        'getConfig'
+      ])
+    )
   })
 
   it('bounds a build list with the range specifier, because Jenkins has no pagination', async () => {

@@ -10,6 +10,7 @@ import { useApp } from '../../store/app'
 import { StatusWord } from './Status'
 import { CicdConnectModal } from './CicdConnectModal'
 import { CicdRunWorkbench } from './CicdRunWorkbench'
+import { PipelineBrowser } from './PipelineBrowser'
 import {
   BUCKET_LABEL,
   BUCKET_ORDER,
@@ -79,6 +80,10 @@ export function CicdPanel({
   const [bucket, setBucket] = useState<CicdBucket | 'all'>('all')
   const [selected, setSelected] = useState<{ connectionId: string; pipelineRef: string; runId: string } | null>(null)
   const [connecting, setConnecting] = useState<'new' | 'token' | null>(null)
+  // Which half of the module is on screen. Activity is the landing view because
+  // it answers "is anything broken"; Pipelines answers "what exists", which is a
+  // different question and was previously unanswerable here at all.
+  const [tab, setTab] = useState<'activity' | 'pipelines'>('activity')
 
   // Tell main the saved list changed. It carries nothing: main re-reads the
   // file it persists, so this is a nudge rather than a handover. `connections`
@@ -93,6 +98,10 @@ export function CicdPanel({
   // `unread` has answered nothing; `barren` answered and showed no pipelines at
   // all, which for Jenkins is what a credential that cannot see the jobs looks
   // like -- an empty list, not an error.
+  // Every pipeline every connected account has told us about, flattened. The
+  // browser groups it; nothing here fetches.
+  const allPipelines = connections.flatMap((c) => states.get(c.id)?.pipelines ?? [])
+
   const unread = connections.filter((c) => states.get(c.id)?.readAt === undefined).map((c) => c.name)
   const barren = connections
     .filter((c) => {
@@ -237,6 +246,37 @@ export function CicdPanel({
             onUpdateToken={() => setConnecting('token')}
           />
 
+          <div className="segment modal-segment cicd-tabs">
+            <button
+              type="button"
+              className={clsx('seg-btn', tab === 'activity' && 'active')}
+              aria-pressed={tab === 'activity'}
+              onClick={() => setTab('activity')}
+            >
+              Activity
+            </button>
+            <button
+              type="button"
+              className={clsx('seg-btn', tab === 'pipelines' && 'active')}
+              aria-pressed={tab === 'pipelines'}
+              onClick={() => setTab('pipelines')}
+            >
+              Pipelines
+              {allPipelines.length > 0 && <span className="count">{allPipelines.length}</span>}
+            </button>
+          </div>
+
+          {tab === 'pipelines' ? (
+            <PipelineBrowser
+              connections={connections}
+              pipelines={allPipelines}
+              bridge={bridge}
+              onOpenRun={(connectionId, pipelineRef, run) =>
+                setSelected({ connectionId, pipelineRef, runId: run.id })
+              }
+            />
+          ) : (
+          <>
           <div className="row cicd-filters">
             <input
               className="input"
@@ -331,6 +371,8 @@ export function CicdPanel({
                 </div>
               ))}
             </div>
+          )}
+          </>
           )}
         </>
       )}
