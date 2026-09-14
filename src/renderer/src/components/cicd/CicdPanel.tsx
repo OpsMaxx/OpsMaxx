@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Activity } from 'lucide-react'
+import { Activity, KeyRound, Pencil, Plus, Settings2, Trash2 } from 'lucide-react'
 import { PanelShell } from '../monitor/PanelShell'
 import { EmptyState } from '../common/EmptyState'
 import { UnlockVaultButton } from '../common/UnlockVaultButton'
@@ -7,7 +7,10 @@ import { isVaultLocked, withVaultUnlock } from '../../lib/withVaultUnlock'
 import { clsx, duration } from '../../lib/format'
 import { remoteText } from '../../../../shared/remoteText'
 import { useApp } from '../../store/app'
+import { TabStrip } from '../panel/TabStrip'
+import { ContextMenu, type MenuEntry } from '../connections/ContextMenu'
 import { StatusWord } from './Status'
+import { CicdAccountsModal } from './CicdAccountsModal'
 import { CicdConnectModal } from './CicdConnectModal'
 import { CicdRunWorkbench } from './CicdRunWorkbench'
 import { PipelineBrowser } from './PipelineBrowser'
@@ -17,8 +20,10 @@ import {
   BUCKET_ORDER,
   type CicdBucket,
   type CicdRow,
+  PROVIDER_LABEL,
   cicdBridgeHas,
   cicdBridge,
+  hostOf,
   isStale,
   pathLabel,
   rankRows,
@@ -49,11 +54,49 @@ import type { CicdBridge, CicdConnection, CicdPanelState } from '../../../../sha
  * the last good pipelines alongside `error` precisely so a panel that mounts
  * mid-outage can still say what it last knew, and emptying the list would
  * replace a stale answer with a wrong one.
+ *
+ * ---------------------------------------------------------------------------
+ * ONE TAB PER ACCOUNT, PLUS THE ONE THAT SEES ALL OF THEM
+ * ---------------------------------------------------------------------------
+ *
+ * This screen used to flatten every connected account into one body, which put
+ * every account's freshness line and every account's error banner in a stack
+ * above a merged feed. Three accounts was already a wall, and none of it said
+ * which account a reader should go and look at.
+ *
+ * The strip is DERIVED from the connection list rather than opened and closed
+ * like session tabs: an account is a saved record, so every one of them is
+ * always a tab and there is nothing to reopen. That is also why the strip has
+ * no `×` — closing a tab here could only mean disconnecting the account, which
+ * belongs behind a confirm rather than behind a 13px glyph. `TabStrip` takes
+ * `onClose` optionally for exactly this case, so the keyboard model, the
+ * overflow menu and the scroll-into-view all come along anyway.
+ *
+ * The dot on each tab is the account's own health, so the strip answers "which
+ * one needs me" without being opened. `All accounts` keeps the ranked feed,
+ * because "is anything broken anywhere" is a real question a per-account tab
+ * cannot answer.
+ *
+ * ---------------------------------------------------------------------------
+ * WHICH SUB-TABS EXIST DEPENDS ON THE PROVIDER
+ * ---------------------------------------------------------------------------
+ *
+ * `Queue & capacity` is Jenkins-only — `getQueue` in main refuses every other
+ * provider BY NAME, because GitHub exposes no queue a token can read and
+ * GitLab's pending jobs are a different subject. The tab was offered anyway,
+ * so selecting it on a GitHub account read, threw, and painted main's refusal
+ * in red: a broken page for a screen that should never have been offered. It
+ * is now absent unless something in view actually has a queue, which is the
+ * same rule stated once in the UI instead of discovered once per click.
  */
 
 /** How far off a read has to be before the number stops meaning "now". Not on
  *  `CicdPanelState`, which carries no interval — see the report. */
 const DEFAULT_INTERVAL_SEC = 20
+
+/** The cross-account tab's id. Not a connection id, and cannot collide with one:
+ *  every real id is minted as `cicd-<base36>`. */
+const ALL = 'all'
 
 export function CicdPanel({
   connections: seed,
@@ -87,11 +130,57 @@ export function CicdPanel({
   const [filter, setFilter] = useState('')
   const [bucket, setBucket] = useState<CicdBucket | 'all'>('all')
   const [selected, setSelected] = useState<{ connectionId: string; pipelineRef: string; runId: string } | null>(null)
-  const [connecting, setConnecting] = useState<'new' | 'token' | null>(null)
+  /**
+   * The connect modal, and WHICH account it is for.
+   *
+   * A discriminated union rather than the two strings this was, because those
+   * two strings produced the same blank modal: "Update token" rendered a
+   * NEW-connection form, so pressing it minted a fresh id and saved a SECOND
+   * account with the same name beside the one whose token had expired. Both
+   * then polled, both showed the same error, and — because an agent addresses
+   * an account by name — both became unreachable from every CI tool.
+   *
+   * `CicdConnectModal` has taken an `editing` prop since it was written and
+   * implements the whole edit path; nothing ever passed one.
+   */
+  const [connecting, setConnecting] = useState<
+    { mode: 'new' } | { mode: 'edit'; connection: CicdConnection } | null
+  >(null)
+  /** The accounts list: open plainly, or open on one account's remove confirm. */
+  const [accountsOpen, setAccountsOpen] = useState<
+    { on: 'list' } | { on: 'remove'; connection: CicdConnection } | null
+  >(null)
+  /** Which account is on screen. `all` is the cross-account feed. */
+  const [account, setAccount] = useState<string>(ALL)
+  const [tabMenu, setTabMenu] = useState<{
+    connection: CicdConnection
+    x: number
+    y: number
+  } | null>(null)
   // Which half of the module is on screen. Activity is the landing view because
   // it answers "is anything broken"; Pipelines answers "what exists", which is a
   // different question and was previously unanswerable here at all.
   const [tab, setTab] = useState<'activity' | 'pipelines' | 'queue'>('activity')
+
+  /**
+   * The accounts the body is currently about.
+   *
+   * An id that no longer names anything falls back to every account rather than
+   * to an empty screen: removing the account you were looking at should land on
+   * the feed, not on a blank tab whose name is gone.
+   */
+  const inView = account !== ALL && connections.some((c) => c.id === account) ? account : ALL
+  const scoped = useMemo(
+    () => (inView === ALL ? connections : connections.filter((c) => c.id === inView)),
+    [connections, inView]
+  )
+
+  // Jenkins is the only provider with a queue main can read. Offering the tab
+  // for anything else is offering a page that can only fail.
+  const hasQueue = scoped.some((c) => c.provider === 'jenkins')
+  // A sub-tab that has just stopped existing under the reader — switching from
+  // a Jenkins account to a GitHub one — must not leave the body on it.
+  const subTab = tab === 'queue' && !hasQueue ? 'activity' : tab
 
   // Tell main the saved list changed. It carries nothing: main re-reads the
   // file it persists, so this is a nudge rather than a handover. `connections`
@@ -108,10 +197,10 @@ export function CicdPanel({
   // like -- an empty list, not an error.
   // Every pipeline every connected account has told us about, flattened. The
   // browser groups it; nothing here fetches.
-  const allPipelines = connections.flatMap((c) => states.get(c.id)?.pipelines ?? [])
+  const allPipelines = scoped.flatMap((c) => states.get(c.id)?.pipelines ?? [])
 
-  const unread = connections.filter((c) => states.get(c.id)?.readAt === undefined).map((c) => c.name)
-  const barren = connections
+  const unread = scoped.filter((c) => states.get(c.id)?.readAt === undefined).map((c) => c.name)
+  const barren = scoped
     .filter((c) => {
       const st = states.get(c.id)
       return st?.readAt !== undefined && st.pipelines.length === 0
@@ -119,11 +208,11 @@ export function CicdPanel({
     .map((c) => c.name)
 
   const { rows, olderThanWindow, neverRun } = useMemo(
-    () => rankRows(connections, states, seenAt, now),
+    () => rankRows(scoped, states, seenAt, now),
     // `now` deliberately absent: the ranking must not resort itself every
     // second under the reader's cursor. It is recomputed when the data changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [connections, states, seenAt]
+    [scoped, states, seenAt]
   )
 
   const needle = filter.trim().toLowerCase()
@@ -169,6 +258,11 @@ export function CicdPanel({
     }
     if (seed) return
     let record = connection
+    // The entry the account pointed at BEFORE this save. Re-saving an existing
+    // account with a new token writes a new vault entry, and without this the
+    // old one stays in the vault with nothing left pointing at it — a stored
+    // credential for an account that no longer uses it, invisible to everything.
+    const replaced = connection.vaultEntryId
     if (token !== '' && cicdBridgeHas(bridge, 'createSecret')) {
       // Through `withVaultUnlock`, because a vault WRITE needs the vault fully
       // open and `createSecret` says so by refusing. Without the offer, the only
@@ -186,7 +280,54 @@ export function CicdPanel({
     // every other workspace's connections had been deleted — releasing their
     // vault entries on the way out.
     upsert(record)
+    // AFTER the upsert, never before: dropping the old entry first would leave
+    // the account pointing at a vault entry that no longer exists for as long
+    // as the write took, and permanently if the write then failed.
+    if (
+      replaced !== '' &&
+      replaced !== record.vaultEntryId &&
+      cicdBridgeHas(bridge, 'deleteSecrets')
+    ) {
+      void bridge!.deleteSecrets(replaced).catch(() => undefined)
+    }
   }
+
+  /** Every other account's name, so the form can refuse a duplicate. See the
+   *  `existingNames` prop — two accounts sharing a name make both unreachable
+   *  from every agent tool. */
+  const takenNames = (editing?: CicdConnection): string[] =>
+    connections.filter((c) => c.id !== editing?.id).map((c) => c.name)
+
+  /**
+   * Right-clicking a tab.
+   *
+   * Edit and Update token open the same form; they differ only in what the
+   * reader came to change, and naming both is what makes the second one
+   * findable at all — an expired token is the common reason to open this and
+   * "Edit" does not read as the place to fix it. Remove goes through the
+   * accounts list rather than deleting from here, because the confirm has to
+   * name what else goes with it — but it opens ON this account, so the reader
+   * does not have to find it again in a list they did not ask for.
+   */
+  const accountMenu = (c: CicdConnection): MenuEntry[] => [
+    {
+      label: 'Edit…',
+      icon: <Pencil size={14} />,
+      onClick: () => setConnecting({ mode: 'edit', connection: c })
+    },
+    {
+      label: 'Update token…',
+      icon: <KeyRound size={14} />,
+      onClick: () => setConnecting({ mode: 'edit', connection: c })
+    },
+    { label: '', separator: true },
+    {
+      label: 'Remove…',
+      icon: <Trash2 size={14} />,
+      danger: true,
+      onClick: () => setAccountsOpen({ on: 'remove', connection: c })
+    }
+  ]
 
   return (
     <PanelShell
@@ -231,7 +372,10 @@ export function CicdPanel({
           title="No CI account is connected"
           message="Connect a Jenkins, GitLab or GitHub account and OpsMaxx will watch its pipelines. Nothing is polled until one exists."
           action={
-            <button className="btn primary size-28" onClick={() => setConnecting('new')}>
+            <button
+              className="btn primary size-28"
+              onClick={() => setConnecting({ mode: 'new' })}
+            >
               Connect an account
             </button>
           }
@@ -246,49 +390,119 @@ export function CicdPanel({
         />
       ) : (
         <>
+          <div className="cicd-accounts-strip">
+            <TabStrip
+              label="CI/CD account tabs"
+              items={[
+                {
+                  id: ALL,
+                  title: 'All accounts',
+                  status: <AccountDot connections={connections} states={states} now={now} />,
+                  tooltip:
+                    connections.length === 1
+                      ? 'The one connected account.'
+                      : `Every connected account (${connections.length}), ranked together.`
+                },
+                ...connections.map((c) => ({
+                  id: c.id,
+                  title: c.name,
+                  status: <AccountDot connections={[c]} states={states} now={now} />,
+                  tooltip: `${c.name} — ${PROVIDER_LABEL[c.provider]} at ${hostOf(c.baseUrl)}`
+                }))
+              ]}
+              activeId={inView}
+              onSelect={setAccount}
+              // Deliberately no `onClose` and no `onReorder`: the strip is
+              // derived from the saved accounts, so there is nothing to close
+              // that is not a disconnection, and nothing to reorder that is not
+              // the list itself.
+              onContextMenu={(id, x, y) => {
+                const c = connections.find((k) => k.id === id)
+                if (c) setTabMenu({ connection: c, x, y })
+              }}
+            >
+              <button
+                type="button"
+                className="tab-new"
+                title="Connect a CI account."
+                aria-label="Connect a CI account"
+                onClick={() => setConnecting({ mode: 'new' })}
+              >
+                <Plus size={16} />
+              </button>
+              <button
+                type="button"
+                className="tab-new"
+                title="Edit or remove connected accounts."
+                aria-label="Manage CI accounts"
+                onClick={() => setAccountsOpen({ on: 'list' })}
+              >
+                <Settings2 size={15} />
+              </button>
+            </TabStrip>
+          </div>
+
           <Freshness
-            connections={connections}
+            connections={scoped}
             states={states}
             intervalSec={intervalSec}
             now={now}
             bridge={bridge}
             canRefresh={canRefresh}
-            onUpdateToken={() => setConnecting('token')}
+            // On the cross-account tab only the accounts with something wrong
+            // get a block of their own. Stacking every healthy account's two
+            // lines above the feed is what pushed the feed off the screen, and
+            // a healthy account's detail is one click away in its own tab.
+            troubleOnly={inView === ALL && connections.length > 1}
+            onUpdateToken={(connection) => setConnecting({ mode: 'edit', connection })}
           />
 
           <div className="segment modal-segment cicd-tabs">
             <button
               type="button"
-              className={clsx('seg-btn', tab === 'activity' && 'active')}
-              aria-pressed={tab === 'activity'}
+              className={clsx('seg-btn', subTab === 'activity' && 'active')}
+              aria-pressed={subTab === 'activity'}
               onClick={() => setTab('activity')}
             >
               Activity
             </button>
             <button
               type="button"
-              className={clsx('seg-btn', tab === 'pipelines' && 'active')}
-              aria-pressed={tab === 'pipelines'}
+              className={clsx('seg-btn', subTab === 'pipelines' && 'active')}
+              aria-pressed={subTab === 'pipelines'}
               onClick={() => setTab('pipelines')}
             >
               Pipelines
               {allPipelines.length > 0 && <span className="count">{allPipelines.length}</span>}
             </button>
-            <button
-              type="button"
-              className={clsx('seg-btn', tab === 'queue' && 'active')}
-              aria-pressed={tab === 'queue'}
-              onClick={() => setTab('queue')}
-            >
-              Queue &amp; capacity
-            </button>
+            {/* Absent, not disabled. A greyed tab is still a claim that the
+                screen exists and is merely unavailable; for GitHub and GitLab
+                there is no queue to be unavailable. */}
+            {hasQueue && (
+              <button
+                type="button"
+                className={clsx('seg-btn', subTab === 'queue' && 'active')}
+                aria-pressed={subTab === 'queue'}
+                onClick={() => setTab('queue')}
+              >
+                Queue &amp; capacity
+              </button>
+            )}
           </div>
 
-          {tab === 'queue' ? (
-            <QueuePanel connections={connections} bridge={bridge} canTrigger={canTrigger} />
-          ) : tab === 'pipelines' ? (
+          {subTab === 'queue' ? (
+            <QueuePanel
+              // Only the accounts that HAVE a queue, so the panel's own default
+              // lands on one. It defaulted to the first connection whatever its
+              // provider, which on a GitHub-first list read, threw, and printed
+              // main's refusal in red on arrival.
+              connections={scoped.filter((c) => c.provider === 'jenkins')}
+              bridge={bridge}
+              canTrigger={canTrigger}
+            />
+          ) : subTab === 'pipelines' ? (
             <PipelineBrowser
-              connections={connections}
+              connections={scoped}
               pipelines={allPipelines}
               bridge={bridge}
               canTrigger={canTrigger}
@@ -320,9 +534,6 @@ export function CicdPanel({
               ))}
             </select>
             <span className="spacer" />
-            <button className="btn secondary size-28" onClick={() => setConnecting('new')}>
-              Connect an account
-            </button>
           </div>
 
           <div className="panel-stats" data-testid="cicd-counts">
@@ -398,9 +609,41 @@ export function CicdPanel({
         </>
       )}
 
+      {tabMenu && (
+        <ContextMenu
+          x={tabMenu.x}
+          y={tabMenu.y}
+          entries={accountMenu(tabMenu.connection)}
+          onClose={() => setTabMenu(null)}
+        />
+      )}
+
+      {accountsOpen !== null && (
+        <CicdAccountsModal
+          states={states}
+          confirmRemove={accountsOpen.on === 'remove' ? accountsOpen.connection : undefined}
+          onAdd={() => {
+            setAccountsOpen(null)
+            setConnecting({ mode: 'new' })
+          }}
+          onEdit={(connection) => {
+            setAccountsOpen(null)
+            setConnecting({ mode: 'edit', connection })
+          }}
+          onClose={() => setAccountsOpen(null)}
+        />
+      )}
+
       {connecting !== null && (
         <CicdConnectModal
           bridge={bridge}
+          // Editing reuses the SAME record — its id, its workspace and its
+          // existing vault pointer — so saving replaces the account rather than
+          // appending a second one beside it. See the `connecting` state above.
+          editing={connecting.mode === 'edit' ? connecting.connection : undefined}
+          existingNames={takenNames(
+            connecting.mode === 'edit' ? connecting.connection : undefined
+          )}
           // Always `save`. This was gated on the optional `onSaveConnection`
           // prop, and nothing in the app passed one — so the Connect button was
           // permanently disabled and no connection could be created at all.
@@ -472,6 +715,7 @@ function Freshness({
   now,
   bridge,
   canRefresh,
+  troubleOnly = false,
   onUpdateToken
 }: {
   connections: CicdConnection[]
@@ -480,11 +724,40 @@ function Freshness({
   now: number
   bridge?: CicdBridge
   canRefresh: boolean
-  onUpdateToken: () => void
+  /**
+   * Show only the accounts with something wrong, plus a line accounting for
+   * the rest.
+   *
+   * Set on the cross-account tab. Every account's two lines and every account's
+   * banner stacked above the feed is what pushed the feed off the screen, and
+   * the accounts that were fine contributed all of the height and none of the
+   * information. The count still states how many were checked, so the shorter
+   * block is not a quieter claim — going silent about an account is exactly
+   * what this panel is not allowed to do.
+   */
+  troubleOnly?: boolean
+  onUpdateToken: (connection: CicdConnection) => void
 }): React.JSX.Element {
+  const rows = connections.map((c) => ({
+    c,
+    trouble: hasTrouble(states.get(c.id), intervalSec, now)
+  }))
+  const shown = troubleOnly ? rows.filter((r) => r.trouble) : rows
+  const quiet = rows.length - shown.length
   return (
     <div className="cicd-freshness">
-      {connections.map((c) => {
+      {quiet > 0 && (
+        <div className="panel-stats" data-testid="cicd-accounts-ok">
+          <span>
+            {quiet} of {rows.length} {rows.length === 1 ? 'account is' : 'accounts are'} answering
+            on time
+          </span>
+          <span className="faint">
+            Open an account&apos;s own tab for its last read and its request budget.
+          </span>
+        </div>
+      )}
+      {shown.map(({ c }) => {
         const s = states.get(c.id)
         // The connection's OWN cadence when main has reported one. GitHub polls
         // at 60s against its hourly budget and Jenkins at 15s; judging both
@@ -536,7 +809,7 @@ function Freshness({
                   {c.name} refused the token. It has expired or been revoked — the runs below are
                   the last ones read and are not being refreshed.
                 </span>
-                <button className="btn secondary size-24" onClick={onUpdateToken}>
+                <button className="btn secondary size-24" onClick={() => onUpdateToken(c)}>
                   Update token
                 </button>
               </div>
@@ -577,12 +850,51 @@ function isRateLimited(s: CicdPanelState | undefined): boolean {
   return s.error !== undefined && /rate limit|429|too many requests/i.test(s.error)
 }
 
-/** The host, for a note that has to name the machine rather than the account.
- *  A URL the user typed may not parse; showing it whole beats throwing. */
-function hostOf(baseUrl: string): string {
-  try {
-    return new URL(baseUrl).host
-  } catch {
-    return baseUrl
+/**
+ * Whether this account is worth a block of its own.
+ *
+ * "Never read" counts. An account that has not answered is not a healthy one,
+ * and it is exactly the state a freshly connected account that cannot dial
+ * sits in — the one case where hiding it would hide the whole problem.
+ */
+function hasTrouble(s: CicdPanelState | undefined, intervalSec: number, now: number): boolean {
+  if (!s) return true
+  return (
+    s.error !== undefined || isRateLimited(s) || isStale(s.readAt, s.intervalSec ?? intervalSec, now)
+  )
+}
+
+/**
+ * One account's health, as the dot on its tab.
+ *
+ * Four roles and the unknown one is achromatic, the same rule the rows follow:
+ * an account we have not managed to read is neither green nor red. Over a SET
+ * of accounts it takes the WORST rather than a majority, so `All accounts` goes
+ * red while any one account is failing instead of averaging the estate into
+ * looking fine.
+ */
+function AccountDot({
+  connections,
+  states,
+  now
+}: {
+  connections: readonly CicdConnection[]
+  states: Map<string, CicdPanelState>
+  now: number
+}): React.JSX.Element | null {
+  if (connections.length === 0) return null
+  let role = 'is-ok'
+  for (const c of connections) {
+    const s = states.get(c.id)
+    if (s?.error !== undefined) return <span className="state-dot is-alarm" aria-hidden="true" />
+    if (isRateLimited(s)) role = 'is-watch'
+    else if (
+      s === undefined ||
+      s.readAt === undefined ||
+      isStale(s.readAt, s.intervalSec ?? DEFAULT_INTERVAL_SEC, now)
+    ) {
+      if (role !== 'is-watch') role = 'is-unknown'
+    }
   }
+  return <span className={clsx('state-dot', role)} aria-hidden="true" />
 }

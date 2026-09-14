@@ -8,6 +8,7 @@ import type {
   CicdPanelState,
   CicdOutcome,
   CicdPipeline,
+  CicdProvider,
   CicdRun
 } from '../../../../shared/cicd'
 
@@ -101,6 +102,34 @@ export function useCicdState(bridge: CicdBridge | undefined): Map<string, CicdPa
   }, [bridge])
 
   return states
+}
+
+/**
+ * What to call a provider in front of a person.
+ *
+ * `CicdProvider` is a lowercase wire value and rendering it raw produces
+ * "github" beside "Jenkins". The connect modal already carries these three
+ * strings in its `PROVIDERS` table, but that table is a form description --
+ * placeholders, scope help, token URLs -- and importing it to read one label
+ * would pull the whole thing into the tab strip.
+ */
+export const PROVIDER_LABEL: Record<CicdProvider, string> = {
+  jenkins: 'Jenkins',
+  gitlab: 'GitLab CI',
+  github: 'GitHub Actions'
+}
+
+/**
+ * The host, for a note that has to name the machine rather than the account.
+ *
+ * A URL the user typed may not parse; showing it whole beats throwing.
+ */
+export function hostOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host
+  } catch {
+    return baseUrl
+  }
 }
 
 /** A clock that makes "read 34s ago" count up instead of freezing at mount. */

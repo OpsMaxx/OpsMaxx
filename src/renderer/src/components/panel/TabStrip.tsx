@@ -37,9 +37,19 @@ interface TabStripProps {
   items: readonly TabStripItem[]
   activeId: string | null
   onSelect: (id: string) => void
-  onClose: (id: string) => void
-  /** `toIndex` is a position among `items`. */
-  onReorder: (id: string, toIndex: number) => void
+  /**
+   * Optional: a strip whose tabs cannot be closed simply does not draw a `×`.
+   *
+   * Absent means no close affordance and no middle-click, which is what a strip
+   * DERIVED from a saved list needs -- the CI/CD strip has one tab per connected
+   * account, so a `×` would either do nothing or mean "disconnect this account",
+   * and the second belongs behind a confirm rather than behind a 13px glyph.
+   */
+  onClose?: (id: string) => void
+  /** Optional, like `onClose`: absent means the tabs are not draggable at all,
+   *  rather than draggable into a reorder nothing listens for.
+   *  `toIndex` is a position among `items`. */
+  onReorder?: (id: string, toIndex: number) => void
   /** Optional: a strip with no per-tab menu simply does not offer one. */
   onContextMenu?: (id: string, x: number, y: number) => void
   /**
@@ -207,12 +217,12 @@ export function TabStrip({
         aria-orientation="horizontal"
         onKeyDown={onKeyDown}
         onDragOver={(e) => {
-          if (!dragId) return
+          if (!dragId || !onReorder) return
           e.preventDefault()
           setDropGap(gapFor(e.clientX))
         }}
         onDrop={(e) => {
-          if (!dragId) return
+          if (!dragId || !onReorder) return
           e.preventDefault()
           const gap = gapFor(e.clientX)
           const from = items.findIndex((t) => t.id === dragId)
@@ -245,15 +255,18 @@ export function TabStrip({
                 tabIndex={active ? 0 : -1}
                 className={clsx('tab', active && 'active', dragId === t.id && 'dragging')}
                 title={t.tooltip ?? t.title}
-                draggable
-                onDragStart={(e) => {
-                  setDragId(t.id)
-                  e.dataTransfer.effectAllowed = 'move'
-                  // Firefox refuses to start a drag without payload. The value
-                  // is never read — `dragId` is the source of truth, because
-                  // dataTransfer cannot be inspected during dragover.
-                  e.dataTransfer.setData('text/plain', t.id)
-                }}
+                draggable={onReorder !== undefined}
+                onDragStart={
+                  onReorder &&
+                  ((e) => {
+                    setDragId(t.id)
+                    e.dataTransfer.effectAllowed = 'move'
+                    // Firefox refuses to start a drag without payload. The value
+                    // is never read — `dragId` is the source of truth, because
+                    // dataTransfer cannot be inspected during dragover.
+                    e.dataTransfer.setData('text/plain', t.id)
+                  })
+                }
                 onClick={() => onSelect(t.id)}
                 onDoubleClick={
                   onRename &&
@@ -265,14 +278,17 @@ export function TabStrip({
                     setEditing({ id: t.id, text: t.title })
                   })
                 }
-                onAuxClick={(e) => {
-                  // Middle-click closes, as everywhere else. preventDefault
-                  // stops the autoscroll cursor appearing over the strip.
-                  if (e.button === 1) {
-                    e.preventDefault()
-                    onClose(t.id)
-                  }
-                }}
+                onAuxClick={
+                  onClose &&
+                  ((e) => {
+                    // Middle-click closes, as everywhere else. preventDefault
+                    // stops the autoscroll cursor appearing over the strip.
+                    if (e.button === 1) {
+                      e.preventDefault()
+                      onClose(t.id)
+                    }
+                  })
+                }
                 onContextMenu={
                   onContextMenu &&
                   ((e) => {
@@ -324,22 +340,24 @@ export function TabStrip({
                 ) : (
                   <span className="title">{t.title}</span>
                 )}
-                <span
-                  // A span, not a button: a button inside a button is invalid
-                  // HTML, and browsers recover from it by breaking one of them.
-                  // The tab itself carries the role, and closing has its own
-                  // keyboard route (Ctrl+W) rather than a second tab stop per
-                  // tab, which is what the ARIA pattern advises.
-                  role="presentation"
-                  className="close"
-                  aria-hidden
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onClose(t.id)
-                  }}
-                >
-                  <X size={13} />
-                </span>
+                {onClose && (
+                  <span
+                    // A span, not a button: a button inside a button is invalid
+                    // HTML, and browsers recover from it by breaking one of them.
+                    // The tab itself carries the role, and closing has its own
+                    // keyboard route (Ctrl+W) rather than a second tab stop per
+                    // tab, which is what the ARIA pattern advises.
+                    role="presentation"
+                    className="close"
+                    aria-hidden
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onClose(t.id)
+                    }}
+                  >
+                    <X size={13} />
+                  </span>
+                )}
               </button>
               {i === items.length - 1 && dropGap === items.length && (
                 <span className="tab-drop" aria-hidden />

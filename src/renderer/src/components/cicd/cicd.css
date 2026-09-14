@@ -412,3 +412,39 @@ button.cicd-step {
 .cicd-actions .row {
   gap: var(--sp-2);
 }
+
+/* The account strip.
+   `.tabbar` is the shared strip from global.css, borrowed whole -- the CI/CD
+   tabs are the session tabs with a different thing inside them. Only the gap
+   below it is local, because this strip sits above a second row of sub-tabs
+   rather than directly on a panel body. */
+.cicd-accounts-strip {
+  margin-bottom: var(--sp-2);
+}
+
+/* One connected account, in the manage list. Rows rather than a table for the
+   reason the queue rows are: every line is a name, a note and two controls. */
+.cicd-account-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.cicd-account-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-card);
+  min-width: 0;
+}
+.cicd-account-row > .grow {
+  min-width: 0;
+}
+/* Tabular so a column of "read 34s ago" does not jitter as the seconds tick. */
+.cicd-account-read {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}

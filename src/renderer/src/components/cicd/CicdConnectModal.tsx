@@ -134,6 +134,7 @@ export function CicdConnectModal({
   onClose,
   onSave,
   editing,
+  existingNames,
   bridge
 }: {
   onClose: () => void
@@ -144,6 +145,19 @@ export function CicdConnectModal({
    */
   onSave?: (connection: CicdConnection, token: string) => void | Promise<void>
   editing?: CicdConnection
+  /**
+   * Names already taken, so a second account cannot shadow the first.
+   *
+   * Not cosmetic, and not a nicety about tidy lists: an AI agent addresses a CI
+   * account BY NAME and by nothing else — `resolveCicdOrError` in
+   * `src/main/services/mcpServer.ts` lowercases and matches on it, and refuses
+   * when more than one matches. Two accounts sharing a name therefore make BOTH
+   * of them unreachable from every agent tool, which is a failure that shows up
+   * nowhere near this form. The caller passes the workspace's other names; the
+   * editing account's own is excluded by the caller, so re-saving without a
+   * rename is not an error.
+   */
+  existingNames?: readonly string[]
   bridge?: CicdBridge
 }): React.JSX.Element {
   const servers = useWorkspaceServers()
@@ -189,17 +203,19 @@ export function CicdConnectModal({
   const missing =
     name.trim() === ''
       ? 'Give the account a name — it is what an AI agent and the tree will call it.'
-      : baseUrl.trim() === ''
-        ? 'A URL is needed before anything can be dialled.'
-        : def.needsUsername && username.trim() === ''
-          ? 'Jenkins authenticates as a user, so it needs the username the token belongs to.'
-          : token.trim() === ''
-            ? 'Paste the token. It is sent to the provider and never stored by this panel.'
-            : routeKind === 'server' && !serverId
-              ? 'Choose which saved server the requests should leave from.'
-              : routeKind === 'vpn' && !vpnProfileId
-                ? 'Choose which VPN profile the requests should go through.'
-                : null
+      : existingNames?.some((n) => n.toLowerCase() === name.trim().toLowerCase())
+        ? 'Another connected account is already called that. An agent addresses an account by name, so two sharing one make both unreachable — give this one a name of its own.'
+        : baseUrl.trim() === ''
+          ? 'A URL is needed before anything can be dialled.'
+          : def.needsUsername && username.trim() === ''
+            ? 'Jenkins authenticates as a user, so it needs the username the token belongs to.'
+            : token.trim() === ''
+              ? 'Paste the token. It is sent to the provider and never stored by this panel.'
+              : routeKind === 'server' && !serverId
+                ? 'Choose which saved server the requests should leave from.'
+                : routeKind === 'vpn' && !vpnProfileId
+                  ? 'Choose which VPN profile the requests should go through.'
+                  : null
 
   const draft = (): CicdConnection => ({
     id: editing?.id ?? `cicd-${Date.now().toString(36)}`,

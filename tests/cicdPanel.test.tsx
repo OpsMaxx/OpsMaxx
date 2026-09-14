@@ -1078,3 +1078,237 @@ describe('re-running a finished run', () => {
     expect(screen.queryByRole('button', { name: /^re-run$/i })).toBeNull()
   })
 })
+
+// ---------------------------------------------------------------------------
+// One tab per account, and the two verbs the panel never had
+// ---------------------------------------------------------------------------
+
+/** A saved account in the ACTIVE workspace, which is what the panel lists. */
+function saved(over: Partial<CicdConnection> = {}): CicdConnection {
+  return { ...CONN, workspaceId: useApp.getState().activeWorkspaceId, ...over }
+}
+
+describe('the account strip', () => {
+  it('gives every connected account a tab beside the cross-account one', async () => {
+    useApp.setState({
+      cicdConnections: [
+        saved({ id: 'c1', name: 'Platform' }),
+        saved({ id: 'c2', name: 'Tooling' })
+      ]
+    })
+    render(<CicdPanel bridge={bridge({ snapshot: async () => [] })} />)
+    const strip = await screen.findByRole('tablist', { name: /CI\/CD account tabs/i })
+    expect(within(strip).getByRole('tab', { name: /All accounts/ })).toBeTruthy()
+    expect(within(strip).getByRole('tab', { name: /Platform/ })).toBeTruthy()
+    expect(within(strip).getByRole('tab', { name: /Tooling/ })).toBeTruthy()
+  })
+
+  // The strip is derived from the saved accounts, so a `×` could only mean
+  // disconnecting one -- which belongs behind a confirm, not behind a glyph
+  // that appears on hover.
+  it('offers no close affordance, because closing a tab is not a thing here', async () => {
+    useApp.setState({ cicdConnections: [saved()] })
+    const { container } = render(<CicdPanel bridge={bridge({ snapshot: async () => [] })} />)
+    await screen.findByRole('tablist', { name: /CI\/CD account tabs/i })
+    expect(container.querySelector('.tabbar .tab .close')).toBeNull()
+  })
+
+  it('narrows the feed to the account whose tab is selected', async () => {
+    useApp.setState({
+      cicdConnections: [
+        saved({ id: 'c1', name: 'Platform' }),
+        saved({ id: 'c2', name: 'Tooling' })
+      ]
+    })
+    render(
+      <CicdPanel
+        bridge={bridge({
+          snapshot: async () => [
+            state({ connectionId: 'c1', pipelines: [pipeline({ name: 'deploy', last: run() })] }),
+            state({
+              connectionId: 'c2',
+              pipelines: [
+                pipeline({ connectionId: 'c2', ref: 'p2', name: 'publish', last: run({ connectionId: 'c2', pipelineRef: 'p2', id: 'r2' }) })
+              ]
+            })
+          ]
+        })}
+      />
+    )
+    // Both accounts on the cross-account tab.
+    expect(await screen.findByText('deploy')).toBeTruthy()
+    expect(screen.getByText('publish')).toBeTruthy()
+
+    await userEvent.click(screen.getByRole('tab', { name: /Tooling/ }))
+    await waitFor(() => expect(screen.queryByText('deploy')).toBeNull())
+    expect(screen.getByText('publish')).toBeTruthy()
+  })
+})
+
+describe('a sub-tab the provider has no answer for', () => {
+  // main's `getQueue` refuses every provider but Jenkins BY NAME. Offering the
+  // tab anyway meant selecting it read, threw, and printed that refusal in red.
+  it('is absent for GitHub rather than present and broken', async () => {
+    useApp.setState({ cicdConnections: [saved({ provider: 'github' })] })
+    render(<CicdPanel bridge={bridge({ snapshot: async () => [] })} />)
+    await screen.findByRole('tablist', { name: /CI\/CD account tabs/i })
+    expect(screen.queryByRole('button', { name: /queue & capacity/i })).toBeNull()
+  })
+
+  it('is offered for Jenkins, which does have one', async () => {
+    useApp.setState({ cicdConnections: [saved({ provider: 'jenkins' })] })
+    render(<CicdPanel bridge={bridge({ snapshot: async () => [] })} />)
+    expect(await screen.findByRole('button', { name: /queue & capacity/i })).toBeTruthy()
+  })
+
+  // Selected on a Jenkins tab, then the reader switches to a GitHub one. The
+  // body must not stay on a screen that no longer exists.
+  it('falls back to Activity when the selected account loses it', async () => {
+    useApp.setState({
+      cicdConnections: [
+        saved({ id: 'c1', name: 'Builds', provider: 'jenkins' }),
+        saved({ id: 'c2', name: 'Actions', provider: 'github' })
+      ]
+    })
+    render(<CicdPanel bridge={bridge({ snapshot: async () => [] })} />)
+    await userEvent.click(screen.getByRole('tab', { name: /Builds/ }))
+    await userEvent.click(screen.getByRole('button', { name: /queue & capacity/i }))
+    await userEvent.click(screen.getByRole('tab', { name: /Actions/ }))
+
+    expect(screen.queryByRole('button', { name: /queue & capacity/i })).toBeNull()
+    expect(
+      (screen.getByRole('button', { name: /^activity$/i }) as HTMLElement).getAttribute(
+        'aria-pressed'
+      )
+    ).toBe('true')
+  })
+})
+
+describe('updating an expired token', () => {
+  /** A connection whose last read was refused, which is what raises the button. */
+  function expired(): CicdBridge {
+    return bridge({
+      snapshot: async () => [state({ error: '401 Unauthorized' })]
+    })
+  }
+
+  // THE BUG. "Update token" rendered a blank NEW-connection form, so pressing
+  // it minted a fresh id and saved a SECOND account beside the one whose token
+  // had expired -- same name, same URL, both polling, both failing. And because
+  // an agent addresses an account by name, a duplicate name makes BOTH of them
+  // unreachable from every CI tool.
+  it('replaces the account rather than saving a second one beside it', async () => {
+    useApp.setState({ cicdConnections: [saved({ id: 'c1', name: 'Platform' })] })
+    const b = expired()
+    b.createSecret = vi.fn(async () => 'vault-rotated')
+    render(<CicdPanel bridge={b} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: /update token/i }))
+    // The form opens on THIS account, already filled in.
+    expect(screen.getByText(/Edit Platform/)).toBeTruthy()
+    await userEvent.type(screen.getByLabelText(/token/i), 'ghp_rotated')
+    await userEvent.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() => expect(b.createSecret).toHaveBeenCalledTimes(1))
+    const after = useApp.getState().cicdConnections
+    expect(after).toHaveLength(1)
+    expect(after[0].id).toBe('c1')
+    expect(after[0].vaultEntryId).toBe('vault-rotated')
+  })
+
+  // The old entry is a stored credential nothing points at any more. Nothing
+  // would ever have surfaced it.
+  it('releases the vault entry the old token lived in', async () => {
+    useApp.setState({ cicdConnections: [saved({ id: 'c1', vaultEntryId: 'vault-old' })] })
+    const b = expired()
+    b.createSecret = vi.fn(async () => 'vault-rotated')
+    render(<CicdPanel bridge={b} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: /update token/i }))
+    await userEvent.type(screen.getByLabelText(/token/i), 'ghp_rotated')
+    await userEvent.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() => expect(b.deleteSecrets).toHaveBeenCalledWith('vault-old'))
+  })
+})
+
+describe('two accounts of the same provider', () => {
+  // Storable has never been the problem -- every layer is keyed by id. Being
+  // ADDRESSABLE is: `resolveCicdOrError` in main matches on the lowercased name
+  // and refuses when more than one matches, so a duplicate name silently makes
+  // both accounts unreachable from every agent tool.
+  it('refuses a name another account already has', async () => {
+    useApp.setState({ cicdConnections: [saved({ id: 'c1', name: 'Platform' })] })
+    render(<CicdPanel bridge={bridge({ snapshot: async () => [] })} />)
+    await userEvent.click(await screen.findByRole('button', { name: /connect a CI account/i }))
+    await userEvent.type(screen.getByLabelText(/^name/i), 'platform')
+
+    expect(screen.getByText(/already called that/i)).toBeTruthy()
+    expect((screen.getByRole('button', { name: /^connect$/i }) as HTMLButtonElement).disabled).toBe(
+      true
+    )
+  })
+
+  it('accepts a second account of the same provider under its own name', async () => {
+    useApp.setState({ cicdConnections: [saved({ id: 'c1', name: 'Platform' })] })
+    const b = bridge({ snapshot: async () => [] })
+    b.createSecret = vi.fn(async () => 'vault-2')
+    render(<CicdPanel bridge={b} />)
+    await userEvent.click(await screen.findByRole('button', { name: /connect a CI account/i }))
+    await userEvent.type(screen.getByLabelText(/^name/i), 'Tooling')
+    await userEvent.type(screen.getByLabelText(/url/i), 'https://github.com')
+    await userEvent.type(screen.getByLabelText(/token/i), 'ghp_second')
+    await userEvent.click(screen.getByRole('button', { name: /^connect$/i }))
+
+    await waitFor(() => expect(useApp.getState().cicdConnections).toHaveLength(2))
+    const [a, c] = useApp.getState().cicdConnections
+    expect(a.provider).toBe(c.provider)
+    expect(a.id).not.toBe(c.id)
+  })
+})
+
+describe('removing an account', () => {
+  it('drops it from the store and releases its stored token', async () => {
+    useApp.setState({
+      cicdConnections: [saved({ id: 'c1', name: 'Platform', vaultEntryId: 'vault-1' })]
+    })
+    const deleteSecrets = vi.fn(async () => undefined)
+    stubBridge({ cicd: { deleteSecrets } })
+    render(<CicdPanel bridge={bridge({ snapshot: async () => [] })} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: /manage CI accounts/i }))
+    await userEvent.click(await screen.findByRole('button', { name: /^remove$/i }))
+    // The confirm names what else goes: a row leaving a list reads as
+    // reversible, and the credential it takes with it is not.
+    expect(screen.getByText(/Remove Platform\?/)).toBeTruthy()
+    expect(screen.getByText(/cannot be recovered/i)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: /^remove$/i }))
+
+    await waitFor(() => expect(useApp.getState().cicdConnections).toHaveLength(0))
+    expect(deleteSecrets).toHaveBeenCalledWith('vault-1')
+  })
+
+  // Right-clicking the tab has already named the account. Landing the reader in
+  // the full list would make them find it again among rows that all look alike.
+  it('confirms the account the tab menu named, without a detour through the list', async () => {
+    useApp.setState({
+      cicdConnections: [
+        saved({ id: 'c1', name: 'Platform', vaultEntryId: 'vault-1' }),
+        saved({ id: 'c2', name: 'Tooling', vaultEntryId: 'vault-2' })
+      ]
+    })
+    stubBridge({ cicd: { deleteSecrets: vi.fn(async () => undefined) } })
+    render(<CicdPanel bridge={bridge({ snapshot: async () => [] })} />)
+
+    await userEvent.pointer({
+      keys: '[MouseRight]',
+      target: await screen.findByRole('tab', { name: /Tooling/ })
+    })
+    await userEvent.click(await screen.findByRole('button', { name: /^remove…$/i }))
+    expect(screen.getByText(/Remove Tooling\?/)).toBeTruthy()
+
+    await userEvent.click(screen.getByRole('button', { name: /^remove$/i }))
+    await waitFor(() => expect(useApp.getState().cicdConnections).toHaveLength(1))
+    expect(useApp.getState().cicdConnections[0].name).toBe('Platform')
+  })
+})
