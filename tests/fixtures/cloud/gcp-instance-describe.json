@@ -1,0 +1,5 @@
+{
+  "name": "prod-web-01",
+  "status": "RUNNING",
+  "networkInterfaces": [{"networkIP": "10.20.0.4", "accessConfigs": [{"natIP": "203.0.113.10", "type": "ONE_TO_ONE_NAT"}]}]
+}

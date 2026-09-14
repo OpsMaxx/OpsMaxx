@@ -1,0 +1,14 @@
+[
+  {
+    "name": "prod-web-01",
+    "status": "RUNNING",
+    "zone": "https://www.googleapis.com/compute/v1/projects/example-prod-security/zones/me-central2-c",
+    "networkInterfaces": [{"networkIP": "10.20.0.4", "accessConfigs": [{"natIP": "203.0.113.10"}]}]
+  },
+  {
+    "name": "prod-worker-02",
+    "status": "TERMINATED",
+    "zone": "https://www.googleapis.com/compute/v1/projects/example-prod-security/zones/me-central2-c",
+    "networkInterfaces": [{"networkIP": "10.20.0.5"}]
+  }
+]

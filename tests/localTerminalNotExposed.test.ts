@@ -280,6 +280,32 @@ const SEED_FILES = [
 // localFiles joined it with the Files view's local half, and it is the
 // starkest of the four: it reads and writes arbitrary paths directly. It needs
 // no shell at all to hand over the vault.
+// ---------------------------------------------------------------------------
+// THE ONE DELIBERATE WIDENING: services/cloud
+// ---------------------------------------------------------------------------
+//
+// `cloud/cloudExec.ts` spawns a local process, and it IS reachable from this
+// bridge. That is not an oversight and it is not on the list below.
+//
+// Cloud servers are addressable by agents, which was decided explicitly: an
+// agent can list, connect to, run commands on, and create GCE/EC2/Azure servers
+// exactly as it can any other. Reaching one means running the user's own
+// `gcloud`, `aws` or `az`, so an agent can cause a local binary to start. There
+// is no version of that feature where it cannot.
+//
+// What makes it a different thing from `localExec` -- the module directly above
+// this comment in spirit -- is that `localExec` runs an arbitrary COMMAND
+// STRING through a shell, and nothing here does. The cloud path accepts no
+// command at all. Everything that reaches execFile is an argv array assembled
+// by a builder in shared/cloudCommands.ts, from identifiers that have passed
+// the anchored patterns in shared/cloud.ts, none of which can begin with `-`.
+// An agent chooses a project and an instance; it does not choose a program, a
+// flag, or a word of syntax.
+//
+// Those two properties are the whole basis of the decision, so they are pinned
+// by their own assertions at the bottom of this file rather than left to
+// convention. If either stops being true, this widening is no longer the thing
+// that was agreed to.
 function isForbiddenSpecifier(spec: string): boolean {
   if (/node-pty/i.test(spec)) return true
   const base = spec.replace(/\.[cm]?[jt]sx?$/i, '').split(/[/\\]/).pop() ?? ''
@@ -375,6 +401,10 @@ const MUST_BE_IN_CLOSURE = [
   'src/main/services/secretRedaction.ts',
   'src/main/services/cliPairing.ts',
   'src/main/services/ssh.ts',
+  // Reached from ssh.ts. Proves the cloud path really is inside this closure,
+  // so the assertions about it below are checking something live.
+  'src/main/services/cloud/cloudExec.ts',
+  'src/main/services/cloud/providers/gcp.ts',
   'src/main/services/sftp.ts',
   'src/main/services/db.ts',
   'src/main/services/tunnel.ts',
@@ -532,6 +562,79 @@ describe('the AI permission model has no word for a local shell', () => {
       unexpected,
       `New AI capabilities must be added to ALLOWED_CAPABILITIES in this test, deliberately: ` +
         `${unexpected.join(', ')}`
+    ).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 4. What the cloud widening is conditional on
+// ---------------------------------------------------------------------------
+
+// See the long comment beside isForbiddenSpecifier. Cloud execution is allowed
+// to be agent-reachable because it can run no shell and can carry no command.
+// These are those two claims, as assertions.
+
+describe('the agent-reachable cloud path can run no shell and no command', () => {
+  const CLOUD_DIR = join(ROOT, 'src/main/services/cloud')
+
+  /**
+   * Comments stripped before scanning.
+   *
+   * Not fastidiousness: the first run of this test failed on cloudExec.ts,
+   * whose header says "`shell: true` does not appear in this file and must not
+   * be added to it". A guard that cannot tell a prohibition from a violation
+   * teaches the next person to delete the prohibition.
+   */
+  function stripComments(text: string): string {
+    return text.replace(/\/\*[^]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ')
+  }
+
+  function cloudSources(): { rel: string; text: string }[] {
+    return tsFilesIn(CLOUD_DIR).map((f) => ({
+      rel: relative(ROOT, f).split('\\').join('/'),
+      text: stripComments(readFileSync(f, 'utf8'))
+    }))
+  }
+
+  it('walked real files, not an empty directory', () => {
+    // Without this the two assertions below pass by checking nothing at all.
+    const files = cloudSources()
+    expect(files.length, 'no files under src/main/services/cloud').toBeGreaterThan(3)
+    expect(files.map((f) => f.rel)).toContain('src/main/services/cloud/cloudExec.ts')
+    // And the stripper must not have emptied everything it read.
+    expect(files.some((f) => f.text.includes('execFile'))).toBe(true)
+  })
+
+  it('never spawns through a shell', () => {
+    // `shell: true` hands the arguments to a command interpreter, at which
+    // point an identifier that passed every pattern can still become syntax.
+    // The Windows `.cmd` case goes through cmd.exe with an argv array and a
+    // character allowlist instead, which is why that is not this.
+    const offenders = cloudSources()
+      .filter((f) => /shell\s*:\s*true/.test(f.text))
+      .map((f) => f.rel)
+    expect(
+      offenders,
+      `These files spawn through a shell. The cloud path is agent-reachable on the ` +
+        `condition that it cannot: see the note beside isForbiddenSpecifier above.\n  ` +
+        offenders.join('\n  ')
+    ).toEqual([])
+  })
+
+  it('uses only the argv-array spawners, never the string-command ones', () => {
+    // `exec` and `execSync` take a command STRING and run it with a shell.
+    // `execFile` and `spawn` take a program and an argv array. Only the second
+    // pair may appear here.
+    const offenders: string[] = []
+    for (const f of cloudSources()) {
+      for (const m of f.text.matchAll(/(?<![A-Za-z])(execSync|exec)\s*\(/g)) {
+        offenders.push(`${f.rel} calls ${m[1]}()`)
+      }
+    }
+    expect(
+      offenders,
+      `A command string is a shell invocation however it is spelled. Use execFile or spawn ` +
+        `with an argument array.\n  ` + offenders.join('\n  ')
     ).toEqual([])
   })
 })

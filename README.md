@@ -61,6 +61,7 @@ Most terminal tools do one thing. A typical DevOps task needs four: open a shell
 | **SSH terminal** | xterm with GPU rendering, split panes, search, and unlimited chained jump hosts per server |
 | **Local terminal** | Your own zsh, bash, PowerShell, Git Bash, MSYS2 or WSL in a tab beside the SSH ones — and reachable by no AI agent |
 | **SFTP browser** | Browse, edit, upload and delete over the same connection |
+| **Cloud servers** | Google Cloud, AWS and Azure machines through the `gcloud`, `aws` or `az` already on your machine — no cloud credential is stored, and the result is a real SSH session, so files and monitoring work against it too |
 | **Remote desktop** | RDP to a Windows host, through a bastion when it needs one — with its own account, and no SSH required |
 | **Monitoring** | Live CPU, memory, disk and network per server, a fleet wall, background checking and webhook alerts |
 | **Service checks** | HTTP checks against anything you can reach, running whether or not the window is open, with ping and traceroute beside them |
@@ -109,6 +110,7 @@ Already keep hosts in `~/.ssh/config`? Import them instead of retyping — `Prox
 | **[AI agent access](docs/ai-agents.md)** | How MCP clients reach your infrastructure without seeing a credential |
 | **[Workspaces](docs/workspaces.md)** | Keeping clients, environments and projects apart, and locking them |
 | **[Terminal](docs/terminal.md)** | The terminal, the local shell, the command palette and every shortcut |
+| **[Cloud servers](docs/cloud.md)** | Google Cloud, AWS and Azure through the CLI you already have — and why it brokers rather than wraps |
 | **[Monitoring](docs/monitoring.md)** | Watching a fleet, and running one change across all of it |
 | **[Databases](docs/databases.md)** | Five engines, direct or through a bastion |
 | **[Tunnels and VPN](docs/tunnels.md)** | Forwards, SOCKS5, WireGuard, OpenVPN and frp |

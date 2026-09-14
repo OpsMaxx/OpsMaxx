@@ -1,5 +1,14 @@
 import { useState, useEffect } from 'react'
-import { KeyRound, Lock, UserCheck, FileBadge, FolderOpen, ChevronRight } from 'lucide-react'
+import {
+  KeyRound,
+  Lock,
+  UserCheck,
+  FileBadge,
+  FolderOpen,
+  ChevronRight,
+  Cloud,
+  Server
+} from 'lucide-react'
 import { Modal } from '../common/Modal'
 import { useApp } from '../../store/app'
 import { rdpSecretId } from '../../../../shared/rdp'
@@ -7,6 +16,19 @@ import type { CredentialShape } from '../../../../shared/credentialShape'
 import { RouteHops } from './RouteHops'
 import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
+import {
+  CLOUD_PROVIDER_LABEL,
+  validateCloudTarget,
+  type CloudProvider,
+  type CloudTarget
+} from '../../../../shared/cloud'
+import {
+  CloudTargetFields,
+  draftToTarget,
+  emptyCloudDraft,
+  targetToDraft,
+  type CloudDraft
+} from './CloudTargetFields'
 import { useVault } from '../../store/vault'
 import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import { useVaultPrompt } from '../../store/vaultPrompt'
@@ -44,8 +66,22 @@ const AUTH: {
     label: 'Certificate',
     icon: <FileBadge size={16} />,
     unavailable:
-      'Certificate authentication is not implemented in this build. It is disabled rather than hidden because a connection saved with it would silently fall back to private-key authentication.'
+      'OpsMaxx can present an SSH certificate — that is how Microsoft Entra ID logins work — but this form has no field to supply one, and a connection saved with it here would fall back to private-key authentication without saying so. Choose Google Cloud, AWS or Azure above for a certificate issued by a cloud provider.'
   }
+]
+
+/**
+ * How a server is reached, as a table rather than a chain of conditions.
+ *
+ * The same discipline as AUTH above and as KINDS in AddDatabaseModal: one row
+ * per choice, so a fourth provider is a row and not four new branches spread
+ * through the render, the validation and the save.
+ */
+const CONNECTION_TYPES: { id: 'ssh' | CloudProvider; label: string; icon: React.ReactNode }[] = [
+  { id: 'ssh', label: 'SSH', icon: <Server size={16} /> },
+  { id: 'gcp', label: CLOUD_PROVIDER_LABEL.gcp, icon: <Cloud size={16} /> },
+  { id: 'aws', label: CLOUD_PROVIDER_LABEL.aws, icon: <Cloud size={16} /> },
+  { id: 'azure', label: CLOUD_PROVIDER_LABEL.azure, icon: <Cloud size={16} /> }
 ]
 
 /**
@@ -69,8 +105,27 @@ function missingField(f: {
   editing: boolean
   /** RDP only: there is no SSH credential to demand. */
   rdpOnly: boolean
+  /** Cloud only: the provider supplies address and credential, so neither is asked for. */
+  cloud: { provider: CloudProvider; target: CloudTarget | null } | null
 }): { field: string; why: string } | null {
   if (!f.name.trim()) return { field: 'name', why: 'Give this connection a name.' }
+  /**
+   * A cloud server is complete when its identifiers are.
+   *
+   * There is no address to demand - the provider resolves one at connect time,
+   * and for a private instance there is none until a tunnel exists - and no
+   * credential either, because the provider mints a short-lived one per
+   * connection. So the SSH checks below do not merely not apply; asking any of
+   * them would be asking for something that does not exist.
+   */
+  if (f.cloud) {
+    if (!f.cloud.target) {
+      return { field: 'cloud', why: 'Choose the project, location and instance.' }
+    }
+    const problems = validateCloudTarget(f.cloud.target)
+    if (problems.length > 0) return { field: problems[0].field, why: problems[0].why }
+    return null
+  }
   if (!f.host.trim()) return { field: 'host', why: 'Enter the server address.' }
   /**
    * An RDP-only machine has no SSH credential, so none is required.
@@ -141,6 +196,16 @@ export function AddServerModal(): React.JSX.Element {
   const [port, setPort] = useState(String(existing?.port ?? 22))
   const [username, setUsername] = useState(existing?.username ?? 'root')
   const [auth, setAuth] = useState<AuthMethod>(existing?.auth ?? 'key')
+  /**
+   * Which kind of server this is. Seeded from the saved record so opening a
+   * cloud connection for editing shows cloud fields rather than an empty host.
+   */
+  const [connectionType, setConnectionType] = useState<'ssh' | CloudProvider>(
+    existing?.cloud?.type ?? 'ssh'
+  )
+  const [cloudDraft, setCloudDraft] = useState<CloudDraft>(
+    existing?.cloud ? targetToDraft(existing.cloud) : emptyCloudDraft
+  )
   const [keyPath, setKeyPath] = useState('')
   // Blank means "leave whatever is stored", the same contract the key path box
   // has when editing — see the placeholder.
@@ -293,6 +358,10 @@ export function AddServerModal(): React.JSX.Element {
   // "type a new one" branch on an edit.
   const usingVault = vaultEntryId !== ''
 
+  const isCloud = connectionType !== 'ssh'
+  const cloudProvider = isCloud ? (connectionType as CloudProvider) : null
+  const cloudTarget = cloudProvider ? draftToTarget(cloudProvider, cloudDraft) : null
+
   const missing = missingField({
     name,
     host,
@@ -301,7 +370,8 @@ export function AddServerModal(): React.JSX.Element {
     password,
     usingVault,
     editing: !!editId,
-    rdpOnly: speaks === 'rdp'
+    rdpOnly: speaks === 'rdp',
+    cloud: cloudProvider ? { provider: cloudProvider, target: cloudTarget } : null
   })
   const valid = missing === null
 
@@ -404,11 +474,32 @@ export function AddServerModal(): React.JSX.Element {
         // than the one already stored — otherwise the test cannot tell them
         // whether the path they are about to save actually works.
         agentSocket: auth === 'agent' ? agentSocket.trim() || undefined : undefined,
-        hops,
-        vpnProfileId: vpnProfileId || undefined
+        hops: isCloud ? [] : hops,
+        vpnProfileId: isCloud ? undefined : vpnProfileId || undefined,
+        /**
+         * Sent for a cloud server, and only here.
+         *
+         * Everywhere else main resolves the target from the saved record and
+         * ignores whatever the renderer claims, which is the right rule: a
+         * caller must not be able to redirect a saved server. But a connection
+         * being TESTED has not been saved yet, so there is no record to resolve
+         * — and without this the test dialled the empty host a cloud record
+         * carries and failed with a network error that said nothing, in
+         * precisely the situation the button exists for.
+         *
+         * Safe because this reaches one IPC channel the renderer owns, the
+         * value is the user's own unsaved form input, and main validates it
+         * before any argument is built. No MCP tool can reach this path.
+         */
+        cloudTarget: cloudTarget ?? undefined
       } as never)
       if (r?.ok) {
-        setTestResult({ ok: true, text: `Connected to ${host.trim()} as ${username.trim() || 'root'}.` })
+        setTestResult({
+          ok: true,
+          text: isCloud
+            ? 'Connected. The provider brokered the connection and the machine accepted it.'
+            : `Connected to ${host.trim()} as ${username.trim() || 'root'}.`
+        })
         return
       }
       // Through the same classifier the terminal's failure card uses, so a
@@ -425,12 +516,16 @@ export function AddServerModal(): React.JSX.Element {
     if (!valid) return
     const fields = {
       name: name.trim(),
-      host: host.trim(),
+      // Empty for a cloud server. The provider resolves the address at connect
+      // time, and for a private instance there is none to save until a tunnel
+      // exists - so a value typed here before switching type must not survive.
+      host: isCloud ? '' : host.trim(),
       port: Number(port) || 22,
       username: username.trim() || 'root',
       auth,
       route: hops,
       vpnProfileId,
+      ...(cloudTarget ? { cloud: cloudTarget } : {}),
       // Only meaningful where there is a shell to withhold. An RDP-only
       // machine has none, and carrying `sftpOnly` there would describe a
       // restriction on a protocol this record says nothing about.
@@ -459,6 +554,20 @@ export function AddServerModal(): React.JSX.Element {
     // that uses it, and changed in one place when it rotates — whereas a copy
     // per server is what makes rotation a hunt.
     let secret: Record<string, string | undefined> | null = null
+
+    /**
+     * A cloud server stores nothing.
+     *
+     * There is no credential to keep: the provider mints a short-lived key or
+     * certificate for each connection and OpsMaxx never sees a token. Falling
+     * through to the branches below would write whatever happened to be left in
+     * the SSH fields, producing a stored secret that nothing ever reads.
+     */
+    if (isCloud) {
+      setModal(null)
+      if (!editId) openServer(id, 'terminal')
+      return
+    }
 
     if (usingVault) {
       secret = { vaultEntryId }
@@ -649,6 +758,44 @@ export function AddServerModal(): React.JSX.Element {
         />
       </div>
 
+      {/**
+       * How this server is reached, which is a question about the machine
+       * rather than about the connection: a GCE instance behind IAP has no
+       * address to type, and a plain host has no project to pick. Choosing
+       * first means the rest of the form asks only questions that apply.
+       *
+       * Hidden while editing. Changing an existing server from SSH to a cloud
+       * provider would keep its name, its id and everything pointing at it
+       * while sending it somewhere else entirely - the same "quietest dangerous
+       * thing" the update_server tool refuses to do silently.
+       */}
+      {!editId && (
+        <div className="field">
+          <label className="field-label">Connection Type</label>
+          <div className="radio-cards">
+            {CONNECTION_TYPES.map((t) => (
+              <button
+                key={t.id}
+                className={clsx('radio-card', connectionType === t.id && 'active')}
+                onClick={() => setConnectionType(t.id)}
+              >
+                {t.icon}
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {isCloud && cloudProvider && (
+        <CloudTargetFields
+          provider={cloudProvider}
+          draft={cloudDraft}
+          onChange={setCloudDraft}
+        />
+      )}
+
+      {!isCloud && (
       <div className="field-row">
         <div className="field" style={{ gridColumn: 'span 1' }}>
           <label className="field-label">Server / IP</label>
@@ -670,6 +817,7 @@ export function AddServerModal(): React.JSX.Element {
           </div>
         </div>
       </div>
+      )}
 
       {/**
        * SSH authentication, hidden for a machine that does not speak SSH.
@@ -681,7 +829,7 @@ export function AddServerModal(): React.JSX.Element {
        * authentication method for a protocol this server does not accept is
        * not a field to leave blank, it is a question not to ask.
        */}
-      {speaks !== 'rdp' && (
+      {speaks !== 'rdp' && !isCloud && (
         <>
       <div className="field">
         <label className="field-label">Authentication</label>
@@ -899,6 +1047,10 @@ export function AddServerModal(): React.JSX.Element {
        * before it could be saved. The two protocols are separate connections
        * and the form now says so.
        */}
+      {/* A cloud connection is SSH. The provider brokers an SSH credential and
+          a tunnel to port 22; there is no RDP path through any of it, so
+          offering the choice would offer something that cannot work. */}
+      {!isCloud && (
       <div className="col" style={{ gap: 'var(--sp-2)', marginBottom: 'var(--sp-3)' }}>
         <span className="field-label">This machine speaks</span>
         <div className="segment">
@@ -927,10 +1079,12 @@ export function AddServerModal(): React.JSX.Element {
               : 'Terminal, files and monitoring, over one authenticated connection.'}
         </span>
       </div>
+      )}
 
       {/* The delivery/backup account shape: sshd forces internal-sftp, so
           files work and nothing runs. Only meaningful where there is a shell
           to withhold, so it is not offered for an RDP-only machine. */}
+
       {speaks !== 'rdp' && (
         <label className="row" style={{ gap: 'var(--sp-2)', alignItems: 'flex-start', marginBottom: 'var(--sp-3)' }}>
           <input
@@ -1027,13 +1181,24 @@ export function AddServerModal(): React.JSX.Element {
         </div>
       )}
 
-      <VpnTransportSelect
-        value={vpnProfileId}
-        onChange={setVpnProfileId}
-        hint="The VPN is the outer transport: any jump hosts below are dialled through it, and so is everything that rides this server — terminals, SFTP, metrics, remote desktops and its SSH tunnels."
-      />
+      {/**
+       * Neither applies to a cloud server, and both were worse than useless
+       * here: the connection layer checks the cloud target BEFORE the VPN, so a
+       * profile chosen here would have been silently ignored, and a jump chain
+       * cannot carry a provider's local tunnel at all — the dial refuses it.
+       * A control that is ignored is a lie about what the app will do.
+       */}
+      {!isCloud && (
+        <>
+          <VpnTransportSelect
+            value={vpnProfileId}
+            onChange={setVpnProfileId}
+            hint="The VPN is the outer transport: any jump hosts below are dialled through it, and so is everything that rides this server — terminals, SFTP, metrics, remote desktops and its SSH tunnels."
+          />
 
-      <RouteHops hops={hops} onChange={setHops} excludeServerId={editId} />
+          <RouteHops hops={hops} onChange={setHops} excludeServerId={editId} />
+        </>
+      )}
 
       <div className="disclosure">
         <button className="disclosure-head" onClick={() => setAdvanced((v) => !v)}>

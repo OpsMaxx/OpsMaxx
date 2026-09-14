@@ -14,12 +14,14 @@ import {
   Route,
   Server as ServerIcon,
   Monitor,
-  Plug
+  Plug,
+  Cloud
 } from 'lucide-react'
 import { useApp, useWorkspaceFolders, useWorkspaceServers } from '../../store/app'
 import { disambiguateServerNames } from '../../../../shared/serverNames'
 import { rdpSecretId } from '../../../../shared/rdp'
 import { clsx } from '../../lib/format'
+import { cloudTargetSubtitle } from '../../../../shared/cloud'
 import { toast } from '../../store/toast'
 import { ContextMenu, MenuEntry } from './ContextMenu'
 import { Modal } from '../common/Modal'
@@ -259,10 +261,16 @@ export function ConnectionTree(): React.JSX.Element {
         e.preventDefault()
         setCtx({ x: e.clientX, y: e.clientY, server: s })
       }}
-      title={`${s.username}@${s.host}:${s.port} — double-click for a new session`}
+      // A cloud server has no address to describe itself with: `host` is empty
+      // by construction, so the ordinary user@host:port tooltip would read
+      // "@:22". What identifies it is the provider and where the machine sits.
+      title={`${
+        s.cloud ? cloudTargetSubtitle(s.cloud) : `${s.username}@${s.host}:${s.port}`
+      } — double-click for a new session`}
     >
       <span className={clsx('status-dot', s.status)} />
       <span className="label">{labels.get(s.id) ?? s.name}</span>
+      {s.cloud && <Cloud size={12} className="faint" />}
       {s.route.length > 0 && <Route size={12} className="faint" />}
       <span className="spacer" />
       {s.favorite && <Star size={12} className="fav" fill="currentColor" />}

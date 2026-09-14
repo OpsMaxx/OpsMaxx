@@ -1,0 +1,4 @@
+[
+  {"name": "prod-server-01", "resourceGroup": "production-rg", "powerState": "VM running", "publicIps": "203.0.113.40", "privateIps": "10.1.0.4"},
+  {"name": "prod-server-02", "resourceGroup": "production-rg", "powerState": "VM deallocated", "publicIps": "", "privateIps": "10.1.0.5"}
+]

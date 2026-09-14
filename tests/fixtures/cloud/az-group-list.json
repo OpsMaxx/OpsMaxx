@@ -1,0 +1,4 @@
+[
+  {"name": "production-rg", "location": "uaenorth"},
+  {"name": "staging-rg", "location": "uaenorth"}
+]

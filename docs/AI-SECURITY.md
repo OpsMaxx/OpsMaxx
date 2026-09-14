@@ -80,19 +80,24 @@ Regardless of which access group a session holds:
 Worth drawing out, because the broad version of the claim is false and stating the narrow one is
 the only way to keep the guard honest.
 
-OpsMaxx does run programs on this machine while serving an agent. Ten modules inside the very
+OpsMaxx does run programs on this machine while serving an agent. Modules inside the very
 import closure that `tests/localTerminalNotExposed.test.ts` walks spawn child processes:
 `vpn/supervisor.ts`, `vpn/binaries.ts`, `vpn/drivers/wireguard.ts`, `vpn/netstate.ts`, the three
-`vpn/elevation/*.ts`, `vpn/driver.ts`, and two modules under `src/cli/`. Bringing up a WireGuard
-tunnel means executing a binary locally; there is no version of that feature that does not.
+`vpn/elevation/*.ts`, `vpn/driver.ts`, two modules under `src/cli/`, and — since cloud servers —
+`cloud/cloudExec.ts` and the three provider brokers beside it. Bringing up a WireGuard tunnel, or
+reaching a GCE instance behind IAP, means executing a binary locally; there is no version of
+either feature that does not.
 
 Those are fine, and the reasons they are fine are exactly the properties a shell lacks:
 
-- **The argv is OpsMaxx's, not the agent's.** An agent supplies a profile name. It never supplies
-  a command, an argument or a path. `vpn/binaries.ts` runs either an engine OpsMaxx ships,
-  checked against a manifest of its exact bytes before the first exec, or a system-installed one
-  from a fixed allowlist of directories — never a `PATH` search, because on Windows the search *is*
-  the vulnerability.
+- **The argv is OpsMaxx's, not the agent's.** For the VPN engines an agent supplies a profile
+  name and nothing else — never a command, an argument or a path. `vpn/binaries.ts` runs either
+  an engine OpsMaxx ships, checked against a manifest of its exact bytes before the first exec,
+  or a system-installed one from a fixed allowlist of directories — never a `PATH` search,
+  because on Windows the search *is* the vulnerability.
+
+  Cloud servers are the one place an agent's input reaches an argv at all, and they are covered
+  separately below.
 - **They are behind `vpnControl` and an approval.** No built-in group grants it outright, and
   starting a VPN is ASK on every group including one raised to ALLOW — see the section below.
 - **The two `src/cli` spawns are not agent-driven at all.** They are what `opsmaxx claude`,
@@ -104,6 +109,44 @@ An interactive shell has none of that. Its entire purpose is that the argv is wh
 So the claim this document makes — and the one the test enforces — is that **no agent-facing surface
 reaches an interactive shell on this machine**, not that no local process ever runs at an agent's
 request.
+
+### Cloud servers: where an agent's input does reach an argv
+
+Reaching a Google Cloud, AWS or Azure machine means running the `gcloud`, `aws` or `az` on this
+computer, and an agent can address a cloud server — and create or change one — exactly as it can
+any other. So the first bullet above does not hold here in its strongest form: an agent supplies a
+project id, a zone, an instance name, and those become elements of an argument array.
+
+That was a deliberate decision rather than an oversight, and it is bounded by properties that are
+checked in code, not by convention:
+
+- **No command, ever.** Nothing on this path accepts a command string. Every argument is an
+  element of an array assembled by a builder in `src/shared/cloudCommands.ts`, and no shell is
+  involved at any point — `shell: true` does not appear under `src/main/services/cloud/`, and a
+  test fails if it ever does.
+- **No flags, either.** Argument arrays stop shell injection but not *flag* injection: a value
+  beginning with `-` is read by the CLI as an option, and `gcloud --flags-file=FILE` reads an
+  arbitrary local file. Every identifier is matched against an anchored pattern that cannot begin
+  with `-` or contain a control character, checked in the connection form, again on an agent
+  write, again when the record is read back from disk, and again inside the builder. A value that
+  fails is refused before any process starts.
+- **No SSH arguments at all.** OpsMaxx never invokes OpenSSH for a cloud server — it brokers a
+  credential and a tunnel and then connects with its own SSH engine — so there is no
+  `-o ProxyCommand=` to smuggle a local command into. The field that would carry one does not
+  exist anywhere in the product.
+- **The binary is resolved, not searched for loosely.** Fixed per-platform install locations
+  first, then `PATH` on POSIX only, for the reason stated above. A candidate under a
+  world-writable directory is refused outright: anyone who can write the directory can replace
+  what is in it. The path and version actually used are recorded.
+
+There is no separate capability for this. A cloud server is reached under the same
+`viewServer`/`terminal`/`readFiles` grants as any other, and creating or changing one needs
+`manageServers`, which always asks. If that trade is not one you want, deny `manageServers` and
+keep cloud servers in a workspace your agent sessions do not cover.
+
+What OpsMaxx still will not do is let an agent choose the *program*. It picks which of three
+known tools runs, with which known subcommand, and the agent fills in names that must look like
+names.
 
 ## Threat model
 
@@ -344,6 +387,12 @@ README:
   and common secret-*shaped* text (env-style assignments, PEM blocks, bearer tokens, AWS key IDs,
   connection-string passwords). A credential in a format none of those patterns match, and that
   OpsMaxx doesn't already hold as a known value for that server, will not be caught.
+- **Cloud servers can start a local process at an agent's request.** The section above sets out
+  what bounds it — no command, no flag, no shell, no SSH arguments — but the honest summary is
+  that an agent addressing a cloud server causes `gcloud`, `aws` or `az` to run on your computer
+  with identifiers it supplied. The validators are what stand between that and something worse,
+  and they are ordinary code that can have a bug in it. If you would rather that surface did not
+  exist, do not add cloud servers to a workspace an agent session covers.
 - **A denied or ASK-gated capability is a policy decision, not a sandbox.** OpsMaxx does not
   run commands inside a container or restricted shell on the target server; `execute_command` runs
   exactly what it's given, over the same SSH session an interactive terminal would use, once

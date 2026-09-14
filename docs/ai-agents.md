@@ -14,6 +14,12 @@ check metrics through OpsMaxx. The agent asks for a server by its friendly name;
 resolves the real connection, enforces per-capability policy, and can stop and ask you before
 anything sensitive runs.
 
+Cloud servers — Google Cloud, AWS and Azure — are addressable the same way, under the same access
+groups. They are the one kind of server where serving an agent means running a program on *your*
+computer rather than only on a remote host, because that is what reaching them requires. What
+bounds that, and how to opt out of it, is in
+[AI-SECURITY.md](AI-SECURITY.md#cloud-servers-where-an-agents-input-does-reach-an-argv).
+
 ![AI agent → MCP → OpsMaxx policy → approval → SSH/SFTP/database → servers](images/ai-mcp-architecture.svg)
 
 **An AI agent connected through OpsMaxx never receives:**

@@ -1,0 +1,82 @@
+diff --git a/node_modules/ssh2/lib/client.js b/node_modules/ssh2/lib/client.js
+index 7291c2c..8ab319f 100644
+--- a/node_modules/ssh2/lib/client.js
++++ b/node_modules/ssh2/lib/client.js
+@@ -2154,6 +2154,21 @@ function hostKeysProve(client, keys_, cb) {
+ 
+ function getKeyAlgos(client, key, serverSigAlgs) {
+   switch (key.type) {
++    // An RSA CERTIFICATE. Without this case the switch falls through, the
++    // caller leaves the hash algorithm undefined, and the key signs with its
++    // own default of SHA-1 while the request announces a SHA-2 algorithm --
++    // which every current server rejects. The request keeps the certificate
++    // spelling; Protocol.authPK strips it for the signature blob.
++    case 'ssh-rsa-cert-v01@openssh.com':
++    case 'rsa-sha2-256-cert-v01@openssh.com':
++    case 'rsa-sha2-512-cert-v01@openssh.com': {
++      const offered = Array.isArray(serverSigAlgs) ? serverSigAlgs : [];
++      if (offered.indexOf('rsa-sha2-512-cert-v01@openssh.com') !== -1
++          || offered.indexOf('rsa-sha2-512') !== -1) {
++        return [['rsa-sha2-512-cert-v01@openssh.com', 'sha512']];
++      }
++      return [['rsa-sha2-256-cert-v01@openssh.com', 'sha256']];
++    }
+     case 'ssh-rsa':
+       if (client._protocol._compatFlags & COMPAT.IMPLY_RSA_SHA2_SIGALGS) {
+         if (!Array.isArray(serverSigAlgs))
+diff --git a/node_modules/ssh2/lib/protocol/Protocol.js b/node_modules/ssh2/lib/protocol/Protocol.js
+index 7302488..2ad293d 100644
+--- a/node_modules/ssh2/lib/protocol/Protocol.js
++++ b/node_modules/ssh2/lib/protocol/Protocol.js
+@@ -646,8 +646,16 @@ class Protocol {
+     if (!keyAlgo)
+       keyAlgo = keyType;
+ 
++    // OpenSSH certificates: the algorithm named in the request identifies the
++    // CERTIFICATE ("ssh-ed25519-cert-v01@openssh.com"), but the algorithm named
++    // inside the signature blob must be the plain one ("ssh-ed25519"). OpenSSH's
++    // verifier compares that inner name against the plain type and rejects the
++    // certificate spelling, so the two cannot share one variable.
++    const sigAlgo = keyAlgo.replace(/-cert-v0[01]@openssh\.com$/, '');
++
+     const userLen = Buffer.byteLength(username);
+     const algoLen = Buffer.byteLength(keyAlgo);
++    const sigAlgoLen = Buffer.byteLength(sigAlgo);
+     const pubKeyLen = pubKey.length;
+     const sessionID = this._kex.sessionID;
+     const sesLen = sessionID.length;
+@@ -697,7 +705,7 @@ class Protocol {
+     }
+ 
+     cbSign(packet, (signature) => {
+-      signature = convertSignature(signature, keyType);
++      signature = convertSignature(signature, sigAlgo);
+       if (signature === false)
+         throw new Error('Error while converting handshake signature');
+ 
+@@ -705,7 +713,7 @@ class Protocol {
+       p = this._packetRW.write.allocStart;
+       packet = this._packetRW.write.alloc(
+         1 + 4 + userLen + 4 + 14 + 4 + 9 + 1 + 4 + algoLen + 4 + pubKeyLen + 4
+-          + 4 + algoLen + 4 + sigLen
++          + 4 + sigAlgoLen + 4 + sigLen
+       );
+ 
+       // TODO: simply copy from original "packet" to new `packet` to avoid
+@@ -729,12 +737,12 @@ class Protocol {
+       writeUInt32BE(packet, pubKeyLen, p += algoLen);
+       packet.set(pubKey, p += 4);
+ 
+-      writeUInt32BE(packet, 4 + algoLen + 4 + sigLen, p += pubKeyLen);
++      writeUInt32BE(packet, 4 + sigAlgoLen + 4 + sigLen, p += pubKeyLen);
+ 
+-      writeUInt32BE(packet, algoLen, p += 4);
+-      packet.utf8Write(keyAlgo, p += 4, algoLen);
++      writeUInt32BE(packet, sigAlgoLen, p += 4);
++      packet.utf8Write(sigAlgo, p += 4, sigAlgoLen);
+ 
+-      writeUInt32BE(packet, sigLen, p += algoLen);
++      writeUInt32BE(packet, sigLen, p += sigAlgoLen);
+       packet.set(signature, p += 4);
+ 
+       // Servers shouldn't send packet type 60 in response to signed publickey

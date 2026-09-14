@@ -51,6 +51,13 @@ import type {
   InspectStatus
 } from '../shared/inspect'
 import type { HostFacts } from '../shared/hostFacts'
+import type { CloudFault, CloudProvider } from '../shared/cloud'
+import type {
+  CloudAccount,
+  CloudAuthStatus,
+  CloudInstance,
+  CloudLocation
+} from '../shared/cloudCommands'
 import type { HostPosture } from '../shared/posture'
 import type { FleetSampleEvent, FleetSamplerConfig, FleetSamplerStatus,
   FleetCollectResult,
@@ -256,6 +263,24 @@ const jobsBridge: JobsBridge = {
   }
 }
 
+/** What every cloud:* channel answers with. A failure is a value, not a throw. */
+export type CloudReply<T> = { ok: true; value: T } | { ok: false; fault: CloudFault; error: string }
+
+/**
+ * Mirrors ProviderDetectionResult in services/cloud/binaries.ts.
+ *
+ * Restated rather than imported: that module reaches into node:fs and
+ * node:child_process, and the renderer must not pull it in through a type-only
+ * import that someone later makes a value import.
+ */
+export interface ProviderDetectionResult {
+  installed: boolean
+  executablePath?: string
+  version?: string
+  supported: boolean
+  error?: string
+}
+
 const api = {
   platform: (): Promise<NodeJS.Platform> => ipcRenderer.invoke('app:platform'),
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
@@ -353,6 +378,33 @@ const api = {
      *  rather than `invoke` so an error report cannot itself await main. */
     event: (kind: string, message: string, stack?: string): void =>
       ipcRenderer.send('debug:event', kind, message, stack)
+  },
+  /**
+   * Cloud provider detection, sign-in state and resource discovery.
+   *
+   * Read-only, all of it: these ask the user's own provider CLI what it can
+   * see. Connecting is still ssh.connect - a cloud server is dialled exactly
+   * like any other, and main resolves the provider from the saved record.
+   */
+  cloud: {
+    /** `force` skips the per-run cache: what "Check again" is for. */
+    detect: (
+      provider: CloudProvider,
+      force?: boolean
+    ): Promise<CloudReply<ProviderDetectionResult>> =>
+      ipcRenderer.invoke('cloud:detect', provider, force),
+    authStatus: (provider: CloudProvider, account?: string): Promise<CloudReply<CloudAuthStatus>> =>
+      ipcRenderer.invoke('cloud:authStatus', provider, account),
+    accounts: (provider: CloudProvider): Promise<CloudReply<CloudAccount[]>> =>
+      ipcRenderer.invoke('cloud:accounts', provider),
+    locations: (provider: CloudProvider, account: string): Promise<CloudReply<CloudLocation[]>> =>
+      ipcRenderer.invoke('cloud:locations', provider, account),
+    instances: (
+      provider: CloudProvider,
+      account: string,
+      location: string
+    ): Promise<CloudReply<CloudInstance[]>> =>
+      ipcRenderer.invoke('cloud:instances', provider, account, location)
   },
   ssh: {
     connect: (cfg: SshConnectConfig & { serverId?: string }): Promise<void> =>

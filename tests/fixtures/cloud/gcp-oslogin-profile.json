@@ -1,0 +1,7 @@
+{
+  "name": "1234567890",
+  "posixAccounts": [
+    {"username": "someone_example_com", "uid": "1001", "primary": true, "homeDirectory": "/home/someone_example_com"},
+    {"username": "secondary_account", "uid": "1002", "primary": false}
+  ]
+}

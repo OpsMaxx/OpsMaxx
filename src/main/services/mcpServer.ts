@@ -65,6 +65,11 @@ import { remoteText, remoteName, hostReportedBlock } from '../../shared/remoteTe
 import { capacityDigest } from '../../shared/fleetForecast'
 import { recordAudit, AUDIT_LOG_PATH } from './auditLog'
 import { redactOutput } from './secretRedaction'
+import {
+  CLOUD_PROVIDER_LABEL,
+  validateCloudTarget,
+  type CloudTarget
+} from '../../shared/cloud'
 import { knownSecretValuesForServer, resolveChainSecrets, resolveDbSecrets } from './credentialResolver'
 import { DockerReader } from './docker'
 import { buildDockerActionCommand, buildDockerLogsCommand } from '../../shared/docker'
@@ -248,10 +253,39 @@ function resolveServerOrError(
  * `root@host` are one machine and an agent comparing them must be told so.
  */
 function dedupToken(session: McpAgentSession, server: CachedServer): string {
-  return createHmac('sha256', session.tokenHash)
-    .update(`${server.host.trim().toLowerCase()}\u0000${server.port}\u0000${server.username.trim().toLowerCase()}`)
-    .digest('hex')
-    .slice(0, 12)
+  /**
+   * A cloud server is identified by its cloud target, not by host and port.
+   *
+   * It has no host: the provider resolves an address at connect time and a
+   * private instance has none until a tunnel exists, so every cloud record
+   * carries the same empty string. Hashing that would give every cloud server
+   * in a workspace one identity, and this tool's own description tells an agent
+   * that a shared token means "the same machine, already registered" - so an
+   * agent following the documented advice would decline to add a new GCE
+   * instance because an unrelated Azure VM existed.
+   */
+  const identity = server.cloud
+    ? `cloud\u0000${JSON.stringify(cloudIdentityParts(server.cloud))}`
+    : `${server.host.trim().toLowerCase()}\u0000${server.port}\u0000${server.username.trim().toLowerCase()}`
+  return createHmac('sha256', session.tokenHash).update(identity).digest('hex').slice(0, 12)
+}
+
+/**
+ * The fields that decide whether two cloud records name the same machine.
+ *
+ * Transport is excluded deliberately: the same instance reached directly and
+ * through a tunnel is one machine, and an agent asking "is this already
+ * registered" should be told yes.
+ */
+function cloudIdentityParts(target: CloudTarget): string[] {
+  switch (target.type) {
+    case 'gcp':
+      return ['gcp', target.project, target.zone, target.instance]
+    case 'aws':
+      return ['aws', target.region, target.instanceId, target.osUser]
+    case 'azure':
+      return ['azure', target.subscription, target.resourceGroup, target.vm]
+  }
 }
 
 /**
@@ -1650,6 +1684,87 @@ function buildServer(): McpServer {
     { instructions: INSTRUCTIONS }
   )
 
+/**
+ * The cloud targets an agent may write.
+ *
+ * A discriminated union rather than a loose object, so an agent that sends a
+ * GCP project with an AWS instance id is refused by the schema before any of
+ * our own validation runs. The values are checked again by
+ * validateCloudTarget - these fields become arguments to a real program, and
+ * the shape being right is not the same as the contents being safe.
+ */
+const CLOUD_TARGET_SCHEMA = z
+  .discriminatedUnion('type', [
+    z.object({
+      type: z.literal('gcp'),
+      project: z.string().describe('Google Cloud project ID'),
+      zone: z.string().describe('Compute zone, e.g. "me-central2-c"'),
+      instance: z.string().describe('Instance name'),
+      transport: z
+        .enum(['auto', 'direct', 'iap'])
+        .optional()
+        .describe('"auto" tunnels through IAP when the instance has no external address')
+    }),
+    z.object({
+      type: z.literal('aws'),
+      profile: z.string().describe('Local AWS profile name, as in ~/.aws/config'),
+      region: z.string().describe('Region, e.g. "me-central-1"'),
+      instanceId: z.string().describe('EC2 instance ID, e.g. "i-0123456789abcdef0"'),
+      osUser: z.string().describe('Login name on the instance, e.g. "ubuntu"'),
+      transport: z
+        .enum(['auto', 'ip', 'eice'])
+        .optional()
+        .describe('"auto" uses an EC2 Instance Connect Endpoint when there is no public address')
+    }),
+    z.object({
+      type: z.literal('azure'),
+      subscription: z.string().describe('Subscription ID, or its display name'),
+      resourceGroup: z.string().describe('Resource group name'),
+      vm: z.string().describe('VM name'),
+      authentication: z
+        .literal('entra')
+        .optional()
+        .describe('Microsoft Entra ID. The only supported value; local VM users are ordinary SSH servers.')
+    })
+  ])
+  .describe(
+    'Reach this server through a cloud provider CLI already installed and signed in on this ' +
+      'machine, instead of dialling a host. No cloud credential is stored: the provider keeps ' +
+      'the session and OpsMaxx uses whatever it has at connect time.'
+  )
+
+/**
+ * How a cloud target reads in an approval dialog and an audit entry.
+ *
+ * Identifiers only, and deliberately the same words the user typed into the
+ * form, so the line in the audit log matches the server in the sidebar.
+ */
+function cloudTargetDescription(target: CloudTarget): string {
+  switch (target.type) {
+    case 'gcp':
+      return `${target.instance} in ${target.zone}, project ${target.project}`
+    case 'aws':
+      return `${target.instanceId} in ${target.region}, profile ${target.profile}`
+    case 'azure':
+      return `${target.vm} in ${target.resourceGroup}`
+  }
+}
+
+/** Fill in the defaults the schema leaves optional, then check the values. */
+function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
+  if (typeof raw !== 'object' || raw === null) return { error: 'cloud must be an object.' }
+  const r = raw as Record<string, unknown>
+  const withDefaults =
+    r.type === 'azure'
+      ? { ...r, authentication: r.authentication ?? 'entra' }
+      : { ...r, transport: r.transport ?? 'auto' }
+  const problems = validateCloudTarget(withDefaults)
+  if (problems.length > 0) {
+    return { error: problems.map((p) => `${p.field}: ${p.why}`).join(' ') }
+  }
+  return withDefaults as CloudTarget
+}
+
   server.registerTool(
     'list_workspaces',
     {
@@ -1684,7 +1799,8 @@ function buildServer(): McpServer {
           .optional()
           .describe(
             'Also return an opaque identity token for each server. Two servers with the same token ' +
-              'are the same host, port and account — use it to tell whether a machine is already ' +
+              'are the same machine — the same host, port and account, or the same cloud instance — ' +
+              'use it to tell whether a machine is already ' +
               'registered before adding it again. The token itself discloses nothing, cannot be ' +
               'turned back into an address, and is different in every session, so do not store it ' +
               'or compare it against one from another session.'
@@ -1711,7 +1827,7 @@ function buildServer(): McpServer {
       const label = (s: CachedServer): string =>
         dedup ? `- ${s.name}  [id ${dedupToken(session, s)}]` : `- ${s.name}`
       const note = dedup
-        ? '\n\nServers sharing an [id] are the same host, port and account. The id is opaque and only meaningful within this session.'
+        ? '\n\nServers sharing an [id] are the same machine. The id is opaque and only meaningful within this session.'
         : ''
       if (workspaceNames.length === 1) {
         const lines = servers.map(label)
@@ -1762,7 +1878,7 @@ function buildServer(): McpServer {
           // The same opaque identity list_servers can return, so an agent that
           // already has a name can check "is this the same box as that one"
           // without listing everything again.
-          `Identity: ${dedupToken(auth.session, s)} (opaque; equal identities mean the same host, port and account)`,
+          `Identity: ${dedupToken(auth.session, s)} (opaque; equal identities mean the same machine — the same host, port and account, or the same cloud instance)`,
           `Access group: ${serverGroup?.name ?? 'No AI Access'}`,
           `Effective permissions for this session:\n${caps}`
         ].join('\n')
@@ -2818,7 +2934,11 @@ function buildServer(): McpServer {
         "straight to the operating system's secure storage and are never readable back through this bridge.",
       inputSchema: {
         name: z.string().describe('Friendly name for the connection, e.g. "Web Server Staging". Must be unique.'),
-        host: z.string().describe('Hostname or IP address'),
+        host: z
+          .string()
+          .optional()
+          .describe('Hostname or IP address. Omit when passing cloud instead.'),
+        cloud: CLOUD_TARGET_SCHEMA.optional(),
         workspaceName: z
           .string()
           .optional()
@@ -2885,9 +3005,35 @@ function buildServer(): McpServer {
         return errorText(`A server named "${name}" already exists in ${workspace.name}.`)
       }
 
+      // A server is reached one way or the other, never both and never neither.
+      // Silently preferring one would produce an entry that dials somewhere the
+      // caller did not ask for.
+      const hostGiven = (args.host ?? '').trim()
+      if (hostGiven && args.cloud) {
+        return errorText('Pass either host or cloud, not both — they are two ways to reach a server.')
+      }
+      if (!hostGiven && !args.cloud) return errorText('A host is required, or a cloud target.')
+
+      let cloud: CloudTarget | undefined
+      if (args.cloud) {
+        const normalised = normaliseCloudTarget(args.cloud)
+        if ('error' in normalised) return errorText(normalised.error)
+        cloud = normalised
+      }
+
       const method = args.auth ?? 'agent'
-      if (method === 'password' && !args.password) return errorText('auth "password" requires a password.')
-      if (method === 'key' && !args.keyPath) return errorText('auth "key" requires keyPath.')
+      // A cloud provider supplies the credential itself - a short-lived key or
+      // certificate minted per connection - so any credential sent alongside
+      // one would be stored and never used.
+      if (cloud && (args.password || args.keyPath || args.passphrase)) {
+        return errorText(
+          'A cloud server needs no credential here: the provider issues a short-lived one at connect time.'
+        )
+      }
+      if (!cloud && method === 'password' && !args.password) {
+        return errorText('auth "password" requires a password.')
+      }
+      if (!cloud && method === 'key' && !args.keyPath) return errorText('auth "key" requires keyPath.')
 
       const port = args.port ?? 22
       const username = args.username?.trim() || 'root'
@@ -2895,6 +3041,12 @@ function buildServer(): McpServer {
       // Resolved BEFORE the approval, so the dialog can name the bastion. A
       // person asked to approve "add a server" is owed the fact that it will be
       // reached through one of their existing machines, and which.
+      if (cloud && args.jumpHosts?.length) {
+        return errorText(
+          'A cloud server cannot also be reached through jump hosts: the provider returns a local ' +
+            'tunnel or an address of its own, which a bastion cannot carry.'
+        )
+      }
       const jump = resolveJumpHosts(session, args.jumpHosts, null)
       if ('error' in jump) return jump.error
 
@@ -2908,9 +3060,11 @@ function buildServer(): McpServer {
         serverName: name,
         // Deliberately describes the credential without reproducing it: this
         // string is persisted to the audit log and shown in a dialog.
-        action: `Add server "${name}" (${username}@${args.host}:${port}, auth: ${method}${
-          method === 'agent' ? '' : ', credential supplied by the agent'
-        }${routeSuffix(jump.hops)})`,
+        action: cloud
+          ? `Add server "${name}" (${CLOUD_PROVIDER_LABEL[cloud.type]}: ${cloudTargetDescription(cloud)}${routeSuffix(jump.hops)})`
+          : `Add server "${name}" (${username}@${hostGiven}:${port}, auth: ${method}${
+              method === 'agent' ? '' : ', credential supplied by the agent'
+            }${routeSuffix(jump.hops)})`,
         capability: 'manageServers'
       }
 
@@ -2936,7 +3090,7 @@ function buildServer(): McpServer {
       const result = await createServerForAgent({
         workspaceId: workspace.id,
         name,
-        host: args.host.trim(),
+        host: hostGiven,
         port,
         username,
         auth: method,
@@ -2944,7 +3098,8 @@ function buildServer(): McpServer {
         keyPath: args.keyPath,
         passphrase: args.passphrase,
         os: args.os,
-        route: jump.hops
+        route: jump.hops,
+        ...(cloud ? { cloud } : {})
       })
       if (!result.ok) {
         recordAudit({
@@ -3011,6 +3166,10 @@ function buildServer(): McpServer {
         serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
         name: z.string().optional().describe('A new friendly name. Must not collide with another server.'),
         host: z.string().optional().describe('New hostname or IP address'),
+        cloud: CLOUD_TARGET_SCHEMA.optional().describe(
+          'Repoint this server at a cloud instance. Replaces the whole target: pass every field ' +
+            'of it, not just the one that changed.'
+        ),
         port: z.number().int().min(1).max(65535).optional().describe('New SSH port'),
         username: z.string().optional().describe('New SSH username'),
         auth: z
@@ -3088,7 +3247,42 @@ function buildServer(): McpServer {
       if (args.passphrase !== undefined) patch.passphrase = args.passphrase
       if (args.password !== undefined || args.keyPath !== undefined) changes.push('credential')
 
+      if (args.cloud !== undefined) {
+        // Both would leave a record that dials the cloud target and quietly
+        // ignores the host, which is the silent repointing this tool exists to
+        // refuse to do without saying so.
+        if (args.host !== undefined) {
+          return errorText(
+            'Pass either host or cloud, not both — they are two ways to reach a server, and a ' +
+              'record carrying both would use the cloud target and ignore the host.'
+          )
+        }
+        const normalised = normaliseCloudTarget(args.cloud)
+        if ('error' in normalised) return errorText(normalised.error)
+        // Replaced wholesale rather than merged. A half-changed target - a new
+        // zone against an old instance name - is a connection to somewhere
+        // nobody chose, and this is the tool whose whole warning is that
+        // repointing a server is the quietest dangerous thing here.
+        patch.cloud = normalised
+        changes.push(
+          `cloud target to ${CLOUD_PROVIDER_LABEL[normalised.type]} ${cloudTargetDescription(normalised)}`
+        )
+      }
+
+      if (args.host !== undefined && target.cloud && args.cloud === undefined) {
+        return errorText(
+          `"${target.name}" is reached through its cloud provider, which resolves the address ` +
+            'itself. Setting a host would have no effect. Pass cloud to repoint it.'
+        )
+      }
+
       if (args.jumpHosts !== undefined) {
+        // A cloud target returns a local tunnel or an address of its own, and
+        // neither can be carried by a bastion - the connection would refuse at
+        // dial time, so it is refused here where it can be explained.
+        if ((args.cloud ?? target.cloud) && args.jumpHosts.length > 0) {
+          return errorText('A cloud server cannot also be reached through jump hosts.')
+        }
         const jump = resolveJumpHosts(session, args.jumpHosts, target.id)
         if ('error' in jump) return jump.error
         patch.route = jump.hops

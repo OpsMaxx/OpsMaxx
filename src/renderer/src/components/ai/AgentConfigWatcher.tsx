@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import type { CloudTarget } from '../../../../shared/cloud'
 import { useApp } from '../../store/app'
 import { useVault } from '../../store/vault'
 import { toast } from '../../store/toast'
@@ -35,6 +36,7 @@ interface CreateRequest {
   passphrase?: string
   os?: string
   route?: RequestHop[]
+  cloud?: CloudTarget
 }
 
 interface ServerPatch {
@@ -48,6 +50,7 @@ interface ServerPatch {
   passphrase?: string
   os?: string
   route?: RequestHop[]
+  cloud?: CloudTarget
 }
 
 type ConfigRequest =
@@ -108,17 +111,24 @@ export function AgentConfigWatcher(): null {
             // a field that is not named here is dropped in silence — which is
             // exactly how a bastion-only server would come back configured to
             // dial direct and time out, with nothing saying why.
-            route: toHops(req.route) ?? []
+            route: toHops(req.route) ?? [],
+            // Same trap, same fix: without this a cloud server would be saved
+            // with an empty host and no way to reach anything.
+            ...(req.cloud ? { cloud: req.cloud } : {})
           })
 
           // Same shape AddServerModal writes: credentials go to OS secure
           // storage keyed by server id, never into the connection list itself.
+          // A cloud server has no credential to store: the provider mints a
+          // short-lived one per connection and OpsMaxx keeps none of it.
           let secret: { password?: string; keyPath?: string; passphrase?: string; vaultEntryId?: string } | null =
-            req.auth === 'password'
-              ? { password: req.password }
-              : req.auth === 'key'
-                ? { keyPath: req.keyPath, passphrase: req.passphrase || undefined }
-                : null
+            req.cloud
+              ? null
+              : req.auth === 'password'
+                ? { password: req.password }
+                : req.auth === 'key'
+                  ? { keyPath: req.keyPath, passphrase: req.passphrase || undefined }
+                  : null
 
           /**
            * Into the vault when it is already open, and NEVER a prompt.

@@ -1892,6 +1892,10 @@ export const useApp = create<AppState>((set, get) => ({
           // because `updateServer` spreads its patch; only creation lost them.
           ...(input.sftpOnly === true ? { sftpOnly: true } : {}),
           ...(input.rdp ? { rdp: input.rdp } : {}),
+          // Named explicitly for the reason the comment above gives: this
+          // action builds the record field by field, so a field that is not
+          // listed here is silently dropped on create and works only on edit.
+          ...(input.cloud ? { cloud: input.cloud } : {}),
           demo: false
         }
       ]

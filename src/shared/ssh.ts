@@ -1,7 +1,17 @@
 import type { DiskMount } from './mounts'
 // Shared SSH types used by main, preload and renderer.
 
-export type SshAuth = 'password' | 'key' | 'agent'
+/**
+ * `certificate` is an OpenSSH certificate: a public key signed by a CA that the
+ * server trusts, presented instead of a key the server was told about in
+ * advance. It exists for cloud logins that issue short-lived credentials -
+ * Azure's Entra ID being the one that forced it - where nothing is enrolled on
+ * the machine and access expires on its own.
+ *
+ * It needs ssh2 to be patched; see patches/ssh2+1.17.0.patch and
+ * services/cloud/certKey.ts.
+ */
+export type SshAuth = 'password' | 'key' | 'agent' | 'certificate'
 
 export interface SshHop {
   host: string
@@ -39,6 +49,15 @@ export interface SshHop {
    * the agent the user actually keeps their keys in. See shared/sshAgent.ts.
    */
   agentSocket?: string
+  /**
+   * The OpenSSH certificate to present, as the contents of a `*-cert.pub`.
+   *
+   * Only read when `auth` is 'certificate', and paired with the private key in
+   * `privateKey` or `keyPath` that the certificate certifies. Held as text
+   * rather than a path because it is minted per connection and deleted with the
+   * temporary directory it arrived in.
+   */
+  certificate?: string
 }
 
 export interface SshConnectConfig extends SshHop {

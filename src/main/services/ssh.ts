@@ -5,9 +5,17 @@ import { readFileSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { WebContents } from 'electron'
 import type { SshCloseInfo, SshConnectConfig, SshHop, SshStatus, SshStatusPhase } from '../../shared/ssh'
+import type { CloudTarget } from '../../shared/cloud'
 import { agentForHop } from '../../shared/sshAgent'
+import { debugRecord } from './debugLog'
 import { verifyHostKey } from './knownhosts'
 import { isEncryptedPrivateKey, defaultIdentityPath } from './sshKeys'
+import {
+  assertCertificateUsable,
+  certificateAuthHandler,
+  certificateKey,
+  parseOpenSshCertificate
+} from './cloud/certKey'
 
 interface Session {
   conn: PooledConnection | null
@@ -161,6 +169,28 @@ function authFor(hop: SshHop): Partial<ConnectConfig> {
       })
       if (error) throw new Error(error)
       return { agent }
+    }
+    case 'certificate': {
+      /**
+       * An OpenSSH certificate, presented in place of a registered key.
+       *
+       * Handed to ssh2 through `authHandler` rather than `privateKey`: that
+       * option is filtered to a string or Buffer and anything else is silently
+       * dropped, after which publickey never enters the allowed-methods list
+       * and the failure reads as a rejected credential. See
+       * certificateAuthHandler for the whole story.
+       *
+       * The window is checked here rather than left to the server, because a
+       * server refuses an expired certificate with the same
+       * "Permission denied (publickey)" it uses for everything else - which
+       * sends the user to look at their cloud roles instead of at an expiry
+       * they can fix by signing in again.
+       */
+      if (!hop.certificate) throw new Error('No certificate was supplied for this connection.')
+      const cert = parseOpenSshCertificate(hop.certificate)
+      assertCertificateUsable(cert)
+      const key = certificateKey(loadPrivateKey(hop), cert, hop.passphrase)
+      return { authHandler: certificateAuthHandler(hop.username, key) as never }
     }
     case 'key':
     default:
@@ -439,9 +469,19 @@ function hopForward(prev: Client, target: SshHop): Promise<NodeJS.ReadableStream
 // Walk the jump chain, each hop tunnelled through the previous, then connect
 // to the target. Shared by the shell (sshConnect) and SFTP services.
 export async function openChain(
-  cfg: SshHop & { hops?: SshHop[]; vpnProfileId?: string; serverName?: string; serverId?: string },
+  cfg: SshHop & {
+    hops?: SshHop[]
+    vpnProfileId?: string
+    cloudTarget?: CloudTarget
+    serverName?: string
+    serverId?: string
+  },
   onHop?: (index: number, count: number) => void
 ): Promise<{ clients: Client[]; client: Client; close?: () => void }> {
+  // A cloud server is dialled through whatever its provider brokered. Checked
+  // first because it is the more specific case: a cloud target carries its own
+  // address and credential, and the VPN question does not arise for one.
+  if (cfg.cloudTarget) return openChainOverCloud(cfg, onHop)
   // A server behind a VPN is dialled through a loopback forward into the
   // tunnel. Only the first hop needs rewriting — everything after it is
   // reached through the hop before, so the chain is already inside.
@@ -449,8 +489,56 @@ export async function openChain(
   return openChainDirect(cfg, onHop)
 }
 
+/**
+ * The unpooled cloud path.
+ *
+ * `acquire` has its own (cloudDial) because the pool needs the release attached
+ * to the CONNECTION rather than to the call. This one serves the callers that
+ * deliberately do not pool - sshTest and sshOpenFresh, which exist to prove
+ * that THIS credential authenticates right now - and hands the release back as
+ * the chain's `close`, which those callers already invoke.
+ */
+async function openChainOverCloud(
+  cfg: SshHop & {
+    hops?: SshHop[]
+    cloudTarget?: CloudTarget
+    serverName?: string
+    serverId?: string
+  },
+  onHop?: (index: number, count: number) => void
+): Promise<{ clients: Client[]; client: Client; close?: () => void }> {
+  assertNoJumpChain(cfg)
+  const { brokerFor } = await import('./cloud/providers')
+  const target = cfg.cloudTarget as CloudTarget
+  const prepared = await brokerFor(target.type).prepare(target)
+  recordCloudLifecycle(target.type, cfg.serverName, prepared.notes)
+
+  const next = { ...cfg, ...prepared.hop }
+
+  try {
+    const chain = await openChainDirect(next, onHop)
+    return {
+      ...chain,
+      // openChainDirect opens no transport of its own, so the release is the
+      // whole teardown.
+      close: () => {
+        void prepared.release()
+      }
+    }
+  } catch (err) {
+    await prepared.release()
+    throw err
+  }
+}
+
 async function openChainOverVpn(
-  cfg: SshHop & { hops?: SshHop[]; vpnProfileId?: string; serverName?: string; serverId?: string },
+  cfg: SshHop & {
+    hops?: SshHop[]
+    vpnProfileId?: string
+    cloudTarget?: CloudTarget
+    serverName?: string
+    serverId?: string
+  },
   onHop?: (index: number, count: number) => void
 ): Promise<{ clients: Client[]; client: Client; close?: () => void }> {
   const { vpnOpenForward, vpnStart } = await import('./vpn/manager')
@@ -567,11 +655,12 @@ export interface PooledConnection {
   // The hop this connection was opened through, held for as long as this
   // connection lives so a shared bastion is not torn down underneath it.
   parent?: PooledConnection
-  // Closes the VPN forward this connection was dialled through, and releases
-  // its live-dependent registration. Held here rather than by the caller
-  // because the pool outlives any one acquire(): the socket must stay up until
-  // the last session using it lets go.
-  vpnRelease?: () => void
+  // Tears down whatever transport this connection was dialled through: a VPN
+  // forward and its live-dependent registration, or a cloud provider's tunnel
+  // and the temporary credential directory beside it. Held here rather than by
+  // the caller because the pool outlives any one acquire(): the socket must
+  // stay up until the last session using it lets go.
+  transportRelease?: () => void
 }
 
 const pool = new Map<string, PooledConnection>()
@@ -580,7 +669,12 @@ const connecting = new Map<string, Promise<PooledConnection>>()
 // Identity of a single hop. Includes the parent so the same host reached by a
 // different route is not mistaken for the same connection.
 function hopKey(
-  hop: SshHop & { serverId?: string; vpnProfileId?: string; poolTag?: string },
+  hop: SshHop & {
+    serverId?: string
+    vpnProfileId?: string
+    cloudTarget?: CloudTarget
+    poolTag?: string
+  },
   parentKey?: string
 ): string {
   const self = hop.serverId
@@ -602,7 +696,7 @@ function hopKey(
   // call is an identity that never repeats, and a key that never repeats is a
   // pool that never hits: see vpnDial, where that cost every VPN-routed command
   // its own full authentication. The forward cannot go stale under a live
-  // connection because the connection owns it -- `vpnRelease` closes it when
+  // connection because the connection owns it -- `transportRelease` closes it when
   // the connection is destroyed, not when an acquire ends.
   const via = hop.vpnProfileId ? `|vpn:${hop.vpnProfileId}` : ''
   const tag = hop.poolTag ? `|${hop.poolTag}` : ''
@@ -621,11 +715,11 @@ function destroy(conn: PooledConnection): void {
   // release() matters: release() is also the idle path, and a connection
   // sitting in the idle window still has a live socket through the forward.
   try {
-    conn.vpnRelease?.()
+    conn.transportRelease?.()
   } catch {
     /* a forward that is already gone must not stop the rest of the teardown */
   }
-  conn.vpnRelease = undefined
+  conn.transportRelease = undefined
 }
 
 // Acquires one hop, reusing a live connection when there is one. `parent` must
@@ -682,11 +776,11 @@ async function acquireOne(
       // confirmation counts, so it went on naming sessions that no longer
       // existed. A dead client can never need its forward again.
       try {
-        conn.vpnRelease?.()
+        conn.transportRelease?.()
       } catch {
         /* a forward already gone must not break the close path */
       }
-      conn.vpnRelease = undefined
+      conn.transportRelease = undefined
     })
     return conn
   })().finally(() => connecting.delete(key))
@@ -704,7 +798,13 @@ async function acquireOne(
 // bastion share one authenticated bastion connection — the code is requested
 // once, not once per destination.
 export async function acquire(
-  cfg: SshHop & { serverId?: string; hops?: SshHop[]; vpnProfileId?: string; serverName?: string },
+  cfg: SshHop & {
+    serverId?: string
+    hops?: SshHop[]
+    vpnProfileId?: string
+    cloudTarget?: CloudTarget
+    serverName?: string
+  },
   onHop?: (index: number, count: number) => void,
   // False for unattended callers. An unknown host is then refused rather than
   // raising a trust dialog nobody is present to reason about. Set in main only
@@ -715,7 +815,49 @@ export async function acquire(
   // tunnel. The forward is attached to the pooled connection rather than
   // released here, because the pool outlives this call — closing it now would
   // cut the connection the moment it was handed over.
-  const dial = cfg.vpnProfileId ? await vpnDial(cfg) : null
+  // A cloud server is reached through whatever its provider brokered: a tunnel,
+  // or an address the provider resolved, plus a credential that expires on its
+  // own. Same shape as vpnDial and released the same way - the process has to
+  // outlive the acquire and die with the connection.
+  /**
+   * A cloud target the pool already holds is not brokered again.
+   *
+   * vpnDial is cheap enough to run and throw away on a pool hit - it starts an
+   * already-running profile and opens one forward. Brokering a cloud
+   * connection is not: it is three or four provider CLI invocations and, for a
+   * private instance, spawning a tunnel and waiting for it to bind. Running
+   * that on every acquire and discarding it on the hit would put several
+   * seconds and several API calls behind every `sshExec` - and the metrics
+   * sampler calls one on a timer, so it would spawn and kill a tunnel forever.
+   *
+   * Safe to check here because acquireOne's hit path is synchronous: nothing
+   * awaits between the lookup below and its own, so the entry cannot vanish in
+   * between. `connecting` is included so a second caller joins an open already
+   * in flight instead of starting a second broker for the same server.
+   */
+  const cloudKey = cfg.cloudTarget && !cfg.hops?.length ? hopKey(cfg) : null
+  if (cloudKey !== null && (pool.has(cloudKey) || connecting.has(cloudKey))) {
+    return await acquireOne(cfg, null, allowPrompt)
+  }
+
+  /**
+   * Cloud first, matching openChain.
+   *
+   * The two paths used to disagree - this one preferred the VPN, openChain
+   * preferred the cloud target - so a server carrying both (a VPN can be
+   * assigned to any server from the VPN panel, including a cloud one) behaved
+   * one way for a terminal and the other for `Test connection`. Whichever rule
+   * is right, they have to be the same rule.
+   *
+   * Cloud is the right one: the provider hands back either a loopback tunnel on
+   * this machine or an address it resolved, and neither is reached over a VPN.
+   * The VPN is not silently useful here, it is simply not in the path.
+   */
+  const dial = cfg.cloudTarget
+    ? await cloudDial(cfg)
+    : cfg.vpnProfileId
+      ? await vpnDial(cfg)
+      : null
   const effective = dial?.cfg ?? cfg
 
   const hops = effective.hops ?? []
@@ -731,13 +873,88 @@ export async function acquire(
       // the forward is redundant — the existing connection already has its own
       // — so release it immediately rather than leaking a listener per
       // acquire.
-      if (conn.vpnRelease) dial.release()
-      else conn.vpnRelease = dial.release
+      if (conn.transportRelease) dial.release()
+      else conn.transportRelease = dial.release
     }
     return conn
   } catch (err) {
     dial?.release()
     throw err
+  }
+}
+
+/**
+ * Have the cloud provider broker this connection, and return a config that
+ * dials what it handed back.
+ *
+ * Deliberately the same shape as vpnDial below, because it is the same idea: an
+ * outer transport that has to be brought up before the SSH dial and torn down
+ * after the last user of it lets go. The difference is only who provides it.
+ *
+ * Everything cloud-specific stops here. What comes out is an ordinary SshHop -
+ * an address, a username and a credential - so the chain walk, the pool, the
+ * terminal, SFTP, the metrics sampler and the MCP tools below this line have no
+ * idea a cloud was involved.
+ */
+/**
+ * What the provider did, in order, for the connection log.
+ *
+ * Notes only - "Resolved the instance", "Opened an IAP tunnel". Never the
+ * provider's own output, which carries account addresses and, in its debug
+ * modes, bearer tokens. The debug log redacts every line it writes anyway;
+ * this keeps the material out of it in the first place.
+ */
+function recordCloudLifecycle(provider: string, serverName: string | undefined, notes: string[]): void {
+  debugRecord('cloud.prepare', { provider, server: serverName, steps: notes.join('; ') })
+}
+
+/**
+ * A cloud target and a jump chain cannot both apply.
+ *
+ * The provider hands back either a loopback tunnel on THIS machine or an
+ * address it resolved for us. Neither is reachable "through" a bastion, and
+ * the rewrite would be nonsense in any case: the VPN path replaces the first
+ * hop because a VPN carries the route to the bastion, whereas a cloud broker
+ * produces the destination itself. Replacing hops[0] with it would dial the
+ * target, then try to reach the real target through it.
+ *
+ * Refused rather than quietly ignored, because silently dropping a bastion is
+ * how a connection ends up going somewhere the user did not intend.
+ */
+function assertNoJumpChain(cfg: { hops?: SshHop[] }): void {
+  if (cfg.hops?.length) {
+    throw new Error(
+      'A cloud server cannot also be reached through jump hosts: the provider returns a ' +
+        'local tunnel or an address of its own, which a bastion cannot carry. Remove the jump chain.'
+    )
+  }
+}
+
+async function cloudDial(
+  cfg: SshHop & {
+    serverId?: string
+    hops?: SshHop[]
+    cloudTarget?: CloudTarget
+    serverName?: string
+  }
+): Promise<{ cfg: typeof cfg; release: () => void } | null> {
+  const target = cfg.cloudTarget
+  if (!target) return null
+  assertNoJumpChain(cfg)
+
+  const { brokerFor } = await import('./cloud/providers')
+  const prepared = await brokerFor(target.type).prepare(target)
+  recordCloudLifecycle(target.type, cfg.serverName, prepared.notes)
+
+  // The target itself, never a hop: assertNoJumpChain above has established
+  // there is no chain to rewrite.
+  const next = { ...cfg, ...prepared.hop }
+
+  return {
+    cfg: next,
+    release: () => {
+      void prepared.release()
+    }
   }
 }
 
@@ -822,7 +1039,7 @@ async function vpnDial(
     // and produces "Channel open failure: open failed".
     //
     // Dropping the port is safe because the forward's lifetime is already tied
-    // to the CONNECTION rather than to the acquire: `conn.vpnRelease` closes it
+    // to the CONNECTION rather than to the acquire: `conn.transportRelease` closes it
     // when the connection is destroyed, and a pool hit releases the redundant
     // one it just opened. The comment on hopKey feared reusing a connection
     // whose forward had closed; that cannot happen, because the forward outlives

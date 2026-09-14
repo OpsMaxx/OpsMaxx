@@ -1,0 +1,5 @@
+{
+  "azure-cli": "2.57.0",
+  "azure-cli-core": "2.57.0",
+  "extensions": {"ssh": "2.0.3"}
+}

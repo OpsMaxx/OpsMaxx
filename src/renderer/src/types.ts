@@ -1,3 +1,4 @@
+import type { CloudTarget } from '../../shared/cloud'
 import type { RdpSettings } from '../../shared/rdp'
 
 // Re-exported for the same reason the VPN domain is: one definition of the
@@ -68,6 +69,22 @@ export interface Server {
   // pass it, and a reference to a deleted profile means "connect directly"
   // rather than "fail" — one deleted profile must not strand a fleet.
   vpnProfileId: UUID | null
+  /**
+   * Present when this server is reached through a cloud provider rather than by
+   * dialling `host` directly.
+   *
+   * A cloud server has no address of its own to save: the provider resolves one
+   * at connect time, and for a private instance there is no address at all
+   * until a tunnel exists. So `host` is left empty on these records and this
+   * field is what identifies the machine - a project and instance name, a
+   * region and instance id, a resource group and VM.
+   *
+   * It holds identifiers only. No access token, no refresh token and no key
+   * ever reaches this record, because cloud identity stays with the cloud
+   * provider's own tooling; reconnecting uses whatever session that tooling has
+   * now, not one we captured earlier.
+   */
+  cloud?: CloudTarget
   /**
    * This account can transfer files but cannot run anything.
    *

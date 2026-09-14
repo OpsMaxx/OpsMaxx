@@ -30,3 +30,4 @@ resources/bin/*
 # Stray local build of the Go sidecar. The shipped binaries go to
 # resources/bin/ via scripts/build-sidecar.sh; this one is nobody's artifact.
 sidecar/netd/netd
+tests/.tmp-cloudexec/

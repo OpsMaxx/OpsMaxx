@@ -1,3 +1,6 @@
+import type { CloudTarget } from './cloud'
+import type { SshAuth } from './ssh'
+
 export type DbKind = 'postgres' | 'mysql' | 'mssql' | 'mongodb' | 'redis'
 
 // Optional SSH jump: the driver connects to a local forward instead of the
@@ -7,11 +10,22 @@ export interface DbSshConfig {
   host: string
   port: number
   username: string
-  auth: 'password' | 'key' | 'agent'
+  // Widened from a copy of the three original methods when cloud servers
+  // arrived: a database reached through a GCE or Azure VM authenticates the
+  // same way that VM does, certificate included. Kept as the shared union so
+  // the two cannot drift apart again.
+  auth: SshAuth
   password?: string
   keyPath?: string
   privateKey?: string
   passphrase?: string
+  certificate?: string
+  /**
+   * Set by main when the server this database is tunnelled through is a cloud
+   * one. Resolved from the saved record like every other transport detail, and
+   * never sent by the renderer.
+   */
+  cloudTarget?: CloudTarget
 }
 
 export interface DbConnectConfig {

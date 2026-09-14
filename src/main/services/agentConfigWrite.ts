@@ -13,6 +13,7 @@
 // Collapsing them would have meant rewriting the add path's test to prove a
 // refactor, which is the wrong thing to spend a rewrite on.
 
+import type { CloudTarget } from '../../shared/cloud'
 import type { SshAuth } from '../../shared/ssh'
 import type { TunnelKind } from '../../shared/tunnel'
 
@@ -35,6 +36,7 @@ export interface AgentHop {
 export interface AgentServerRequest {
   workspaceId: string
   name: string
+  /** Empty for a cloud server: the provider resolves the address at connect time. */
   host: string
   port: number
   username: string
@@ -45,6 +47,14 @@ export interface AgentServerRequest {
   os?: string
   /** The jump chain, first hop dialled first. Absent means connect directly. */
   route?: AgentHop[]
+  /**
+   * Reach this server through a cloud provider instead of dialling `host`.
+   *
+   * Validated before it gets here and validated again on the way back out of
+   * the data cache. It carries identifiers only - there is no credential to
+   * pass, because the provider's own CLI holds the session.
+   */
+  cloud?: CloudTarget
 }
 
 export interface AgentServerResult {
@@ -68,6 +78,7 @@ export interface AgentServerPatch {
   passphrase?: string
   os?: string
   route?: AgentHop[]
+  cloud?: CloudTarget
 }
 
 export type AgentConfigRequest =

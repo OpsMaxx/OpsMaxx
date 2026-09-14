@@ -1,5 +1,6 @@
 import type { DbConnectConfig } from '../../../shared/db'
 import type { SshHop } from '../../../shared/ssh'
+import type { CloudTarget } from '../../../shared/cloud'
 import { getCachedDatabase, getCachedServer } from '../mcpDataCache'
 import { vpnForDatabase, vpnForServer } from './dependencies'
 import { resolveChainSecrets } from '../credentialResolver'
@@ -31,14 +32,73 @@ export function withVpnTransport<T extends SshHop & { serverId?: string }>(
   return { ...cfg, vpnProfileId, serverName: getCachedServer(cfg.serverId)?.name }
 }
 
+/**
+ * Attach the cloud target a saved server is reached through.
+ *
+ * A pure annotation, exactly like withVpnTransport above and for the same
+ * reason: resolved in main from the saved record rather than sent by the
+ * renderer, so a connection cannot skip its provider because one call site was
+ * written before the feature existed. A server with no cloud target is returned
+ * untouched, which is what makes it safe to apply everywhere.
+ *
+ * The async half - detecting the CLI, opening a tunnel, minting a credential -
+ * deliberately does NOT happen here. This function stays synchronous so that
+ * preparedSshTarget can too, and ssh.ts does the dialling where the VPN layer
+ * already does its own. Making this async would turn thirty call sites into
+ * awaits for no gain.
+ */
+export function withCloudTransport<T extends SshHop & { serverId?: string; cloudTarget?: CloudTarget }>(
+  cfg: T
+): T & { cloudTarget?: CloudTarget } {
+  /**
+   * No server id means nothing is saved to resolve against: the connection
+   * editor testing an entry before it exists. Whatever the caller supplied
+   * stands, because there is nothing more authoritative — it is the user's own
+   * unsaved form input, it reaches one renderer-owned IPC channel, and the
+   * broker validates every field before it builds an argument.
+   */
+  if (!cfg.serverId) return cfg
+
+  /**
+   * For anything SAVED the record decides, and a caller-supplied target is
+   * discarded rather than merged.
+   *
+   * Keeping it would be a way to redirect a saved server from outside: pass the
+   * id of an ordinary SSH host together with a cloud target, and the connection
+   * goes somewhere the record never named. Resolving transports in main from
+   * the saved record — never from what the caller claims — is the rule the VPN
+   * annotation above is built on, and it has to hold here for the same reason.
+   */
+  const cloud = getCachedServer(cfg.serverId)?.cloud
+  if (!cloud) return cfg.cloudTarget ? { ...cfg, cloudTarget: undefined } : cfg
+  return { ...cfg, cloudTarget: cloud }
+}
+
+/**
+ * The same annotation for the SSH hop a database is tunnelled through.
+ *
+ * Without it a database reached through a cloud server dials the empty host on
+ * that record and fails: `openEphemeralForward` calls `openChain`, which looks
+ * for `cloudTarget` and finds nothing, because nothing on the database path
+ * ever put one there. The type in shared/db.ts says a cloud-hosted database
+ * works; this is what makes that true.
+ */
+export function withCloudTransportDb(cfg: DbConnectConfig): DbConnectConfig {
+  if (!cfg.ssh?.serverId) return cfg
+  const cloud = getCachedServer(cfg.ssh.serverId)?.cloud
+  if (!cloud) return cfg
+  return { ...cfg, ssh: { ...cfg.ssh, cloudTarget: cloud } }
+}
+
 export function withVpnTransportDb(cfg: DbConnectConfig): DbConnectConfig {
   // A test dialog and a saved connection are the same shape, but only a saved
   // one has an id in the cache — an unsaved "Test connection" has nothing to
   // look up, and asking it to pick a VPN it has not been assigned yet would be
   // guessing.
+  const withCloud = withCloudTransportDb(cfg)
   const vpnProfileId = vpnForDatabase(cfg.id)
-  if (!vpnProfileId) return cfg
-  return { ...cfg, vpnProfileId, name: cfg.name ?? getCachedDatabase(cfg.id)?.name }
+  if (!vpnProfileId) return withCloud
+  return { ...withCloud, vpnProfileId, name: cfg.name ?? getCachedDatabase(cfg.id)?.name }
 }
 
 /**
@@ -67,6 +127,9 @@ export function withVpnTransportDb(cfg: DbConnectConfig): DbConnectConfig {
  */
 export function preparedSshTarget<T extends SshHop & { serverId?: string; hops?: SshHop[] }>(
   cfg: T
-): T & { vpnProfileId?: string; serverName?: string } {
-  return withVpnTransport(resolveChainSecrets(cfg))
+): T & { vpnProfileId?: string; serverName?: string; cloudTarget?: CloudTarget } {
+  // Cloud last, and it is another pure annotation: a server that is not a cloud
+  // one comes back untouched, so every existing caller is unaffected and every
+  // cloud one is handled without being edited.
+  return withCloudTransport(withVpnTransport(resolveChainSecrets(cfg)))
 }

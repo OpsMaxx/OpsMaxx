@@ -1,0 +1,5 @@
+[
+  {"id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301", "name": "Production", "state": "Enabled", "isDefault": true},
+  {"id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8", "name": "Staging", "state": "Enabled", "isDefault": false},
+  {"id": "6ba7b811-9dad-11d1-80b4-00c04fd430c8", "name": "Old", "state": "Disabled", "isDefault": false}
+]

@@ -1,0 +1,5 @@
+[
+  {"name": "me-central2-c", "status": "UP", "region": "https://www.googleapis.com/compute/v1/projects/example-prod-security/regions/me-central2"},
+  {"name": "us-central1-a", "status": "UP", "region": "https://www.googleapis.com/compute/v1/projects/example-prod-security/regions/us-central1"},
+  {"name": "us-central1-b", "status": "DOWN", "region": "https://www.googleapis.com/compute/v1/projects/example-prod-security/regions/us-central1"}
+]

@@ -1,0 +1,5 @@
+[
+  {"projectId": "example-prod-security", "name": "Example Prod Security", "lifecycleState": "ACTIVE"},
+  {"projectId": "example-staging", "name": "Example Staging", "lifecycleState": "ACTIVE"},
+  {"projectId": "example-retired", "name": "Example Retired", "lifecycleState": "DELETE_REQUESTED"}
+]

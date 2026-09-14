@@ -12,6 +12,7 @@ import type { TunnelKind } from '../../shared/tunnel'
 import type { VpnKind, VpnMode } from '../../shared/vpn'
 import type { CicdProvider } from '../../shared/cicd'
 import type { RdpSettings } from '../../shared/rdp'
+import { isValidCloudTarget, type CloudTarget } from '../../shared/cloud'
 
 export type CachedHop = SshHop & { serverId?: string }
 
@@ -47,6 +48,17 @@ export interface CachedServer {
    * remote desktop is not something an agent drives.
    */
   rdp?: RdpSettings
+  /**
+   * Present when this server is reached through a cloud provider's CLI rather
+   * than by dialling an address directly.
+   *
+   * Cached for the same reason the rest of this record is: the connection layer
+   * resolves the target from the saved record, not from whatever a caller
+   * passed, so a cloud server cannot be dialled as a plain host by a call site
+   * that forgot. It holds identifiers only - a project, a zone, an instance
+   * name - and never a token or a key, because there are none to hold.
+   */
+  cloud?: CloudTarget
 }
 
 export interface CachedDatabase {
@@ -180,10 +192,21 @@ function parseServers(raw: unknown): CachedServer[] {
         os: asString(s.os, 'Linux'),
         route: parseRoute(s.route),
         vpnProfileId: typeof s.vpnProfileId === 'string' ? s.vpnProfileId : null,
-        ...(rdp ? { rdp } : {})
+        ...(rdp ? { rdp } : {}),
+        ...(isValidCloudTarget(s.cloud) ? { cloud: s.cloud } : {})
       }
     })
 }
+
+// A cloud target is validated HERE, on the way in from disk, and not merely
+// where it is used.
+//
+// This file is the boundary between a JSON blob anyone can edit and the code
+// that turns identifiers into arguments for a real program. Checking at the
+// boundary means a hand-edited or corrupted record becomes "this server has no
+// cloud target" - visibly broken, nothing runs - rather than a project name
+// shaped like `--flags-file=/etc/passwd` arriving at a builder that trusts it.
+// The builders check again anyway; this is the cheaper place for it to fail.
 
 // Absent, malformed, or a port that is not a port all mean the same thing: this
 // server does not speak RDP. Returning a default-shaped record instead would

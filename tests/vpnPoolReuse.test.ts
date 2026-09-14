@@ -43,11 +43,17 @@ describe('why dropping the port is safe', () => {
     // The original comment feared reusing a connection whose forward had since
     // closed. It cannot: the forward is closed when the CONNECTION is
     // destroyed.
-    expect(SSH).toMatch(/conn\.vpnRelease = dial\.release/)
-    expect(SSH).toMatch(/vpnRelease/)
+    //
+    // `vpnRelease` became `transportRelease` when cloud providers arrived: a
+    // pooled connection can now be riding a provider's tunnel and a temporary
+    // credential directory instead of a VPN forward, and both have to be torn
+    // down at exactly the same moment for exactly the same reason. The name is
+    // wider; the guarantee this test pins is unchanged.
+    expect(SSH).toMatch(/conn\.transportRelease = dial\.release/)
+    expect(SSH).toMatch(/transportRelease/)
   })
 
   it('a pool hit releases the forward it opened rather than leaking it', () => {
-    expect(SSH).toMatch(/if \(conn\.vpnRelease\) dial\.release\(\)/)
+    expect(SSH).toMatch(/if \(conn\.transportRelease\) dial\.release\(\)/)
   })
 })

@@ -14,6 +14,7 @@ Everything OpsMaxx does, what it replaces, and the shapes of work it was built f
 | **SSH terminal** | Full xterm terminal with GPU rendering, search, split panes, copy-on-select and configurable zoom |
 | **Local terminal** | Your own zsh, bash, PowerShell, Git Bash, MSYS2 or WSL in a tab beside the SSH ones — discovered per platform, a login shell on macOS, and reachable by no AI agent |
 | **Jump hosts / bastions** | Unlimited chained hops per server, each with its own credentials |
+| **Cloud servers** | Google Cloud, AWS and Azure machines as ordinary servers — through the `gcloud`, `aws` or `az` you already have, signed in as you already are. No cloud credential is stored, and the result is a real SSH session, so files, monitoring and the rest work against it |
 | **Two-factor auth** | Answers keyboard-interactive challenges; connections are shared so you enter a code once, not per session |
 | **SFTP browser** | Browse, edit, upload, rename and delete files over the same connection |
 | **Remote desktop** | RDP to a Windows host in a tab, through a bastion when the host is only reachable from one — with the server certificate pinned on first use |

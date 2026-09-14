@@ -258,6 +258,13 @@ import type { InspectStartOptions } from '../shared/inspect'
 import { storeFrpToken } from './services/vpn/frpSetup'
 import { toVpnResult } from './services/vpn/errors'
 import { preparedSshTarget, withVpnTransportDb } from './services/vpn/transport'
+import { brokerFor } from './services/cloud/providers'
+import {
+  describeCloudFault,
+  isCloudError,
+  type CloudFault,
+  type CloudProvider
+} from '../shared/cloud'
 import { httpRequest } from './services/httpClient'
 import { wsClose, wsCloseForOwner, wsOpen, wsSend } from './services/wsClient'
 import { ServiceCheckRunner } from './services/serviceChecks'
@@ -1040,6 +1047,45 @@ setSshPrompter((req: KeyboardRequest) => {
   })
 })
 
+
+// ---- Cloud providers (Google Cloud, AWS, Azure) ----
+// Detection, authentication state and resource discovery for the connection
+// editor. Every one of these answers a question about the user's own machine or
+// their own cloud account; none of them connects to anything.
+//
+// They return a result rather than throwing, because every failure here is an
+// ordinary state the form has to render - no CLI installed, signed out, session
+// expired - and an exception would turn "you need to run `az login`" into an
+// unhandled rejection.
+type CloudReply<T> = { ok: true; value: T } | { ok: false; fault: CloudFault; error: string }
+
+async function cloudReply<T>(run: () => Promise<T>): Promise<CloudReply<T>> {
+  try {
+    return { ok: true, value: await run() }
+  } catch (e) {
+    if (isCloudError(e)) {
+      return { ok: false, fault: e.fault, error: describeCloudFault(e.fault, e.detail) }
+    }
+    const message = e instanceof Error ? e.message : String(e)
+    return { ok: false, fault: 'unknown', error: message }
+  }
+}
+
+ipcMain.handle('cloud:detect', (_e, provider: CloudProvider, force?: boolean) =>
+  cloudReply(() => brokerFor(provider).detect(force === true))
+)
+ipcMain.handle('cloud:authStatus', (_e, provider: CloudProvider, account?: string) =>
+  cloudReply(() => brokerFor(provider).authStatus(account))
+)
+ipcMain.handle('cloud:accounts', (_e, provider: CloudProvider) =>
+  cloudReply(() => brokerFor(provider).listAccounts())
+)
+ipcMain.handle('cloud:locations', (_e, provider: CloudProvider, account: string) =>
+  cloudReply(() => brokerFor(provider).listLocations(account))
+)
+ipcMain.handle('cloud:instances', (_e, provider: CloudProvider, account: string, location: string) =>
+  cloudReply(() => brokerFor(provider).listInstances(account, location))
+)
 
 ipcMain.handle('ssh:connect', (e, cfg: SshConnectConfig & { serverId?: string }) =>
   sshConnect(e.sender, preparedSshTarget(cfg))

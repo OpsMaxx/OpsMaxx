@@ -1,0 +1,23 @@
+{
+  "Reservations": [
+    {
+      "Instances": [
+        {
+          "InstanceId": "i-0123456789abcdef0",
+          "State": {"Code": 16, "Name": "running"},
+          "Placement": {"AvailabilityZone": "me-central-1a"},
+          "PrivateIpAddress": "10.0.1.15",
+          "PublicIpAddress": "203.0.113.25",
+          "Tags": [{"Key": "Name", "Value": "prod-api-01"}, {"Key": "env", "Value": "prod"}]
+        },
+        {
+          "InstanceId": "i-000000001111aaaab",
+          "State": {"Code": 80, "Name": "stopped"},
+          "Placement": {"AvailabilityZone": "me-central-1a"},
+          "PrivateIpAddress": "10.0.1.16",
+          "Tags": []
+        }
+      ]
+    }
+  ]
+}

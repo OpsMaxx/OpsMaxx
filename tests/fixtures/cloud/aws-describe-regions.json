@@ -1,0 +1,6 @@
+{
+  "Regions": [
+    {"RegionName": "me-central-1", "Endpoint": "ec2.me-central-1.amazonaws.com", "OptInStatus": "opted-in"},
+    {"RegionName": "us-east-1", "Endpoint": "ec2.us-east-1.amazonaws.com", "OptInStatus": "opt-in-not-required"}
+  ]
+}
