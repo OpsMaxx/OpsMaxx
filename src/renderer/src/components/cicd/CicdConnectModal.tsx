@@ -8,12 +8,16 @@ import type { CicdBridge, CicdConnection, CicdProvider, CicdRoute } from '../../
 /**
  * Connect a CI account. ONE modal, progressively revealed.
  *
- * Not a wizard, and that is a constraint rather than a preference:
- * `components/onboarding/setupQuestions.ts` says outright that this audience
- * closes multi-step wizards. The shape follows `AddApiModal` — a `.segment`
- * picker, a hint line that changes with the choice, then `Field`s — and the
- * provider choice changes exactly three things: the URL placeholder, the token
- * help block, and what Verify probes. Everything else is the same form.
+ * Not a wizard, and the reason stands on its own rather than citing another
+ * file's: this is ONE form with three provider variants, and the provider choice
+ * changes exactly three things — the URL placeholder, the token help block, and
+ * what Verify probes. Split into steps it would be three screens of the same
+ * fields. The shape follows `AddApiModal`: a `.segment` picker, a hint line that
+ * changes with the choice, then `Field`s.
+ *
+ * (It used to cite the first-run card as precedent. That card is now six screens,
+ * for reasons that are about four unrelated questions rather than one form — so
+ * the citation would have inverted itself, which is what cross-references do.)
  *
  * Verify dials, reports, and saves nothing, exactly like
  * `AddServerModal.testConnection`. A token that can read but not start a build

@@ -20,26 +20,31 @@ import type { ThemeMode } from '../../store/app'
  * or an already-open connection default on, and everything that reaches out
  * lives here.
  *
- * Why one screen and not a wizard. This audience closes multi-step wizards.
- * Three groups, all visible, Enter to accept — the whole thing is answerable
- * without reading it, and readable by anyone who wants to.
- *
  * ===========================================================================
- * WHAT WAS ADDED, AND WHY IT IS STILL ONE SCREEN
+ * WHY THIS IS A WIZARD NOW, HAVING ARGUED AT LENGTH THAT IT SHOULD NOT BE
  * ===========================================================================
  *
- * The card grew two things: a PERSONA row at the top, and four groups of
- * PREFERENCES below the module questions. Neither makes it a wizard, and the
- * paragraph above is not being walked back — it is the reason for the shape the
- * additions took.
+ * It used to be one screen, on the theory that this audience closes multi-step
+ * wizards and that everything visible at once is answerable in a keystroke
+ * without reading. The theory met a first-time user, who did not read it. One
+ * screen carrying a persona row, four questions of three lines each and four
+ * preference groups is not a form that is quick to answer; it is a wall, and
+ * being able to dismiss a wall with Enter is not the same as having read it.
  *
- * A wizard would have been four screens: who are you, which modules, which
- * preferences, here is your app. What is here instead is one screen where the
- * module questions are open and the preference groups are collapsed, each showing
- * its current value in its own header. So the whole thing is still answerable
- * with one keystroke without reading it, and every extra decision is one
- * disclosure away rather than one screen away. Progressive disclosure costs a
- * click; a wizard costs the willingness to continue.
+ * So it is six screens: the persona, the four questions one at a time, and a
+ * review that still carries the preference groups collapsed. What the old
+ * argument was actually protecting was never the single screen — it was the
+ * guarantee underneath it, that somebody who commits without reading gets a
+ * fuller app and nothing that writes to a server. That guarantee is untouched and
+ * still pinned by tests/setupQuestions.test.ts: Enter now ADVANCES rather than
+ * commits, so six of them commit exactly the defaults one of them used to, and
+ * Escape still accepts what is on screen and skips the rest.
+ *
+ * The preferences did NOT become ten more screens. They keep the collapsed
+ * <details> shape on the review step, because they already have working defaults
+ * and the rule below means the right outcome for most installs is to touch none
+ * of them. Progressive disclosure was the right tool for decisions most people
+ * should not make, and the wrong tool for four questions everybody must.
  *
  * Why a persona at all, when the four questions already exist. The questions ask
  * what you DO with servers, which is the right question and the wrong starting
@@ -53,17 +58,18 @@ export interface SetupQuestion {
   id: string
   /** Asked in the second person, answerable without knowing the product. */
   question: string
-  /** What ticking it turns on, in the user's terms rather than module ids. */
+  /** What answering yes turns on, in the user's terms rather than module ids. */
   detail: string
   /** The honest cost, shown whether or not it flatters the answer. */
   cost: string
   modules: ModuleId[]
   /**
-   * Ticked when the card opens.
+   * The answer this question's screen opens on.
    *
-   * Only for answers whose modules read and never write. Somebody who presses
-   * Enter without reading gets a fuller app than they had before and nothing
-   * that touches a server they have not already opened.
+   * Only ever `true` for answers whose modules read and never write. Somebody who
+   * presses Enter through every screen without reading gets a fuller app than
+   * they had before and nothing that touches a server they have not already
+   * opened.
    */
   preselected: boolean
 }
@@ -72,7 +78,7 @@ export const SETUP_QUESTIONS: SetupQuestion[] = [
   {
     id: 'containers',
     question: 'Do you work with containers?',
-    detail: 'Docker and Kubernetes panels on every server — containers, pods, logs, and a shell inside a running container.',
+    detail: 'Docker and Kubernetes panels on every server.',
     cost: 'Reads only, and nothing runs until you open the panel.',
     modules: ['docker', 'kubernetes'],
     preselected: true
@@ -80,8 +86,7 @@ export const SETUP_QUESTIONS: SetupQuestion[] = [
   {
     id: 'fleet',
     question: 'Do you look after a fleet, or a couple of machines?',
-    detail:
-      'Inventory, configuration drift, a change log and a security posture table across every server in the workspace.',
+    detail: 'Inventory, drift, a change log and security posture across the workspace.',
     cost: 'These read every host on a schedule, including running its package manager once an hour.',
     modules: ['inventory', 'drift', 'changeLog', 'posture'],
     preselected: false
@@ -89,7 +94,7 @@ export const SETUP_QUESTIONS: SetupQuestion[] = [
   {
     id: 'operate',
     question: 'Do you change servers from here, or only watch them?',
-    detail: 'Run a command across many servers at once, plan and apply package updates, and leave long jobs running.',
+    detail: 'Run commands across many servers, apply package updates, leave jobs running.',
     cost: 'This is the half of the app that writes to your servers.',
     modules: ['broadcast', 'patch', 'jobs'],
     preselected: false
@@ -97,8 +102,7 @@ export const SETUP_QUESTIONS: SetupQuestion[] = [
   {
     id: 'cicd',
     question: 'Do your servers get changed by a pipeline?',
-    detail:
-      'Connect Jenkins, GitLab CI or GitHub Actions and read pipelines, run history and failed-step logs next to the server the run changed.',
+    detail: 'Jenkins, GitLab CI or GitHub Actions, beside the server the run changed.',
     // Two costs, because there are two and hiding either would flatter the
     // answer: the traffic leaves the machine, and the token is long-lived.
     cost: 'This one talks to a service outside your estate, on a timer, with a token you paste in.',
@@ -116,8 +120,8 @@ export const SETUP_QUESTIONS: SetupQuestion[] = [
  * Fold the answers into the module state.
  *
  * A false answer turns its modules OFF rather than leaving them alone: the
- * card shows what each answer controls, so somebody who unticks containers has
- * said something about Docker, and honouring only the ticks would make the
+ * card shows what each answer controls, so somebody who answers no to containers
+ * has said something about Docker, and honouring only the yeses would make the
  * card a one-way switch that quietly disagrees with what it displayed.
  *
  * Modules not named by any question are untouched. That is deliberate and it
@@ -171,8 +175,8 @@ export function defaultSetupAnswers(): Record<string, boolean> {
 // The three stores are also why a patch is the shape. These fields do not live
 // together: theme is top-level renderer state, four are `AppSettings`, and the
 // update preferences are owned by MAIN in its own file, because the launch check
-// happens before a window exists. One screen, three destinations, so nothing
-// here may assume it can be handed over in a single object.
+// happens before a window exists. One card, three destinations, so nothing here
+// may assume it can be handed over in a single object.
 
 /** A choice on a preference group. `undefined` means the user never touched it. */
 export interface PrefAnswers {

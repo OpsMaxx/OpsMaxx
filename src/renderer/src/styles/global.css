@@ -5206,43 +5206,112 @@ details[open] > .disclosure-head .chev {
 .setup-card {
   /* Wider than the 620px it was. The persona row wants four cards side by side
      above ~700px, and the preference rows put a label and its options on one
-     line; at 620 both wrapped and the card read as a list of wrapped things. */
+     line; at 620 both wrapped and the card read as a list of wrapped things.
+
+     Fixed height, and the BODY scrolls rather than the card. Six screens of
+     different lengths in a card that sized to its contents would resize the
+     modal under the pointer on every Next; a min-height plus `margin-top: auto`
+     on the answer buttons is what keeps them in the same pixel throughout. The
+     min() is what stops a short window from being given a card it cannot fit. */
   width: min(720px, 100%);
+  min-height: min(430px, calc(100vh - var(--sp-8) * 2));
   max-height: calc(100vh - var(--sp-8) * 2);
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   background: var(--bg-panel);
   border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-lg);
 }
 
+/* A chrome bar, not a title block: the product name on the left, where you are
+   on the right. The screen's own question is the h1 and it lives in the body --
+   two display-sized headings competing for the top of the card was the first
+   thing this redesign took out. */
 .setup-head {
-  padding: var(--sp-6) var(--sp-6) var(--sp-4);
+  display: flex;
+  gap: var(--sp-4);
+  align-items: center;
+  padding: var(--sp-4) var(--sp-6);
   border-bottom: 1px solid var(--border-subtle);
 }
-.setup-head h1 {
-  margin: 0 0 var(--sp-2);
+.setup-brand {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text);
+}
+.setup-steps {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+  margin-left: auto;
+}
+.setup-dots {
+  display: flex;
+  gap: 5px;
+}
+/* Four lines rather than reusing `.tour-dot`: the walkthrough and the first-run
+   card are separate surfaces, and restyling one must not silently restyle the
+   other. */
+.setup-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+.setup-dot.on {
+  width: 16px;
+  background: var(--accent);
+}
+.setup-step-count {
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* The body, and the only part of the card that swaps between steps. Head and
+   foot are fixed, so this is what scrolls when the review step runs long. */
+.setup-step {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-6);
+}
+/* The question itself, and the only display-sized text on the screen. It is
+   focused programmatically on every step change; Chromium does not paint a ring
+   for that, so there is nothing here suppressing one -- anybody who reaches it
+   by keyboard still gets it. */
+.setup-step-title {
+  margin: 0;
   font-size: var(--fs-display);
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--text);
 }
-.setup-head p {
+.setup-q-detail {
   margin: 0;
+  max-width: 60ch;
   font-size: var(--fs-body);
   color: var(--text-muted);
-  max-width: 58ch;
+}
+/* The cost is stated whether or not it flatters the answer, and it is the one
+   line that stays legible when the row is not selected -- an honest tool does
+   not grey out the drawback of the thing it is recommending. */
+.setup-q-cost {
+  margin: 0;
+  max-width: 60ch;
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
 }
 
-.setup-questions {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  padding: var(--sp-4) var(--sp-6);
-}
-
-/* A row, not a checkbox with a label beside it: the whole thing is the target,
-   which is the difference between three easy answers and three small ones. */
+/* The choice-row look, kept for its remaining user.
+   `PublicUrlWizard` renders ngrok-or-frp with these classes; the first-run card
+   that introduced them now asks one question per screen and uses `.setup-yn`
+   instead. Left here rather than renamed into the VPN block, because the two
+   surfaces are meant to look like the same kind of choice. */
 .setup-q {
   display: flex;
   gap: var(--sp-3);
@@ -5272,7 +5341,6 @@ details[open] > .disclosure-head .chev {
   border-color: var(--accent);
   background: var(--bg-active);
 }
-
 .setup-tick {
   flex: 0 0 auto;
   width: 18px;
@@ -5289,7 +5357,6 @@ details[open] > .disclosure-head .chev {
   background: var(--accent);
   border-color: var(--accent);
 }
-
 .setup-q-body {
   display: flex;
   flex-direction: column;
@@ -5301,16 +5368,73 @@ details[open] > .disclosure-head .chev {
   font-weight: 600;
   color: var(--text);
 }
-.setup-q-detail {
+
+/* The two answers, pinned to the bottom of the body so they land in the same
+   pixel on all four question screens however long the lines above them run.
+   The card's min-height does the other half of that job. */
+.setup-yesno {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: auto;
+  padding-top: var(--sp-4);
+}
+.setup-yn {
+  flex: 1 1 0;
+  align-items: center;
+  text-align: center;
+  padding: var(--sp-4);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+}
+
+/* The review step's answer list. Each row is a button back to the screen that
+   set it, because "click it to change it" is one instruction and "press Back
+   four times" is four. */
+.setup-review-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.setup-review-row {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.setup-review-row:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+.setup-review-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.setup-review-q {
   font-size: var(--fs-body);
   color: var(--text-muted);
 }
-/* The cost is stated whether or not it flatters the answer, and it is the one
-   line that stays legible when the row is not selected -- an honest tool does
-   not grey out the drawback of the thing it is recommending. */
-.setup-q-cost {
+.setup-review-a {
+  margin-left: auto;
   font-size: var(--fs-sm);
+  font-weight: 600;
   color: var(--text-faint);
+}
+/* `--accent-ink`, not `--accent`: this is text, and the fill token is tuned
+   against the white label on it rather than the surfaces behind it. Pinned by
+   tests/contrast.test.ts. */
+.setup-review-a.on {
+  color: var(--accent-ink);
 }
 
 .setup-foot {
@@ -5325,16 +5449,16 @@ details[open] > .disclosure-head .chev {
   color: var(--text-faint);
   max-width: 46ch;
 }
-.setup-foot .btn {
+/* `.primary`, not `.btn`. Back is also a `.btn` and a bare `margin-left: auto`
+   on both would push the two of them to the right together. */
+.setup-foot .btn.primary {
   margin-left: auto;
   flex: 0 0 auto;
   gap: var(--sp-2);
 }
-
-@media (prefers-reduced-motion: reduce) {
-  .setup-q {
-    transition: none;
-  }
+.setup-foot .btn {
+  flex: 0 0 auto;
+  gap: var(--sp-2);
 }
 
 /* The Modules page's three groups. A heading and one line of why, so the two
@@ -5354,9 +5478,10 @@ details[open] > .disclosure-head .chev {
 }
 
 /* ---------------------------------------------------------------------------
-   The first-run card's three sections: who you are, what you want, how it
-   behaves. One screen, with the preferences collapsed -- see SetupCard.tsx for
-   why that is progressive disclosure rather than a wizard in disguise.
+   The first-run card's three kinds of screen: who you are, one question at a
+   time, then a review that still keeps the preferences collapsed. See
+   SetupCard.tsx for why the card became six screens, and for the one guarantee
+   the change was not allowed to cost.
    --------------------------------------------------------------------------- */
 
 .setup-section-label {
@@ -5388,7 +5513,8 @@ details[open] > .disclosure-head .chev {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: var(--sp-2);
 }
-.setup-persona {
+.setup-persona,
+.setup-yn {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -5404,15 +5530,18 @@ details[open] > .disclosure-head .chev {
     border-color 120ms ease,
     background 120ms ease;
 }
-.setup-persona:hover {
+.setup-persona:hover,
+.setup-yn:hover {
   background: var(--bg-hover);
   border-color: var(--border-strong);
 }
-.setup-persona:focus-visible {
+.setup-persona:focus-visible,
+.setup-yn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.setup-persona.on {
+.setup-persona.on,
+.setup-yn.on {
   border-color: var(--accent);
   background: var(--bg-active);
 }
@@ -5426,8 +5555,10 @@ details[open] > .disclosure-head .chev {
   color: var(--text-muted);
 }
 
+/* No page padding of its own any more: it sits inside `.setup-step`, which has
+   it. */
 .setup-prefs {
-  padding: 0 var(--sp-6) var(--sp-2);
+  margin-top: var(--sp-2);
 }
 
 .setup-group {
@@ -5552,7 +5683,9 @@ details[open] > .disclosure-head .chev {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .setup-persona {
+  .setup-persona,
+  .setup-yn,
+  .setup-q {
     transition: none;
   }
 }
