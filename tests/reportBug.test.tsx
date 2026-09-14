@@ -1,103 +1,72 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
 import { ActivityBar } from '../src/renderer/src/components/layout/ActivityBar'
 import { CommandPalette } from '../src/renderer/src/components/palette/CommandPalette'
-import { ISSUES_URL } from '../src/renderer/src/lib/reportBug'
+import { ReportBugModal } from '../src/renderer/src/components/common/ReportBugModal'
+import { ISSUES_BASE, ISSUE_TEMPLATE, issueUrl } from '../src/renderer/src/lib/reportBug'
+import { useApp } from '../src/renderer/src/store/app'
 import { useToasts } from '../src/renderer/src/store/toast'
 
 // Reporting a bug was seven steps across two applications, and step one was
-// knowing to look in Settings > Advanced. Nothing anywhere in the app said
-// "report a bug" or pointed at the issue tracker at all.
+// knowing to look in Settings > Advanced. Then it became one silent click that
+// wrote a file into the downloads folder nobody had agreed to and claimed the
+// file had been saved whenever nothing had thrown -- including every time the
+// user cancelled the save dialog.
 //
-// So what is asserted here is the whole click, not its parts: the diagnostics
-// land in a FILE and on the clipboard AND the issue form opens AND the user is
-// told which of those just happened. A test that only checked the copy would
-// have passed on the day this feature did not exist.
+// So what is asserted here is the CONSENT and the HONESTY, not just the effect:
+// nothing is written and no browser opens until the user has had the text on
+// screen and pressed the button under it, and what the app then says about the
+// file is what actually happened to it.
 
-const DIAGNOSTICS = 'OpsMaxx diagnostics\nversion: 0.36.12\n'
-
-/** What the download half did, recorded off a fake anchor.
- *
- *  `document.createElement` is stubbed rather than letting a real anchor be
- *  clicked: jsdom treats a click on an `<a href>` as a navigation it has not
- *  implemented, so a real one would pass while writing a warning instead of a
- *  file, and the name and the body are exactly what has to be asserted. */
-interface Download {
-  name: string | null
-  body: string | null
-  type: string | null
+const BUNDLE = {
+  text: 'OpsMaxx bug report\nversion: 0.36.12\n\n[trace]\n  {"event":"ipc"}\n',
+  version: '0.36.12',
+  os: 'macOS' as const,
+  events: 1,
+  truncated: false
 }
 
-/** The bridge slice this path uses, with every half recorded.
+type SaveResult =
+  | { ok: true; path: string }
+  | { ok: false; cancelled: true }
+  | { ok: false; error: string }
+
+/** The debug slice the modal uses, with every half recorded.
  *
- *  `objectUrl: 'throw'` stands for every environment where the download cannot
- *  happen -- no `createObjectURL`, downloads switched off -- which must cost
- *  the user the file and nothing else. */
+ *  `build: null` stands for the two ways the report can be unavailable: an old
+ *  preload with no `build` method, and a collector in main that threw. */
 function stub(
-  text: string | null = DIAGNOSTICS,
-  objectUrl: 'ok' | 'throw' = 'ok'
+  save: SaveResult = { ok: true, path: '/Users/x/Downloads/opsmaxx-bug-report-2026-01-01.txt' },
+  build: typeof BUNDLE | null = BUNDLE
 ): {
-  write: ReturnType<typeof vi.fn>
+  saveFn: ReturnType<typeof vi.fn>
+  buildFn: ReturnType<typeof vi.fn>
   open: ReturnType<typeof vi.fn>
-  download: Download
 } {
-  const write = vi.fn()
+  const buildFn = vi.fn().mockResolvedValue(build)
+  const saveFn = vi.fn().mockResolvedValue(save)
   stubBridge({
-    clipboard: { write },
-    // `null` stands for the two ways the text can be unavailable: an old
-    // preload with no `text` method, and a collector that threw.
-    ...(text === null ? {} : { diagnostics: { text: vi.fn().mockResolvedValue(text) } })
+    ...(build === null ? {} : { debug: { build: buildFn, save: saveFn, event: vi.fn() } })
   })
   const open = vi.fn().mockReturnValue(null)
   vi.spyOn(window, 'open').mockImplementation(open as unknown as typeof window.open)
-
-  const download: Download = { name: null, body: null, type: null }
-  const revoke = vi.fn()
-  Object.defineProperty(URL, 'createObjectURL', {
-    configurable: true,
-    writable: true,
-    value: (blob: Blob) => {
-      if (objectUrl === 'throw') throw new Error('createObjectURL is not available')
-      download.type = blob.type
-      void blob.text().then((t) => {
-        download.body = t
-      })
-      return 'blob:diagnostics'
-    }
-  })
-  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, writable: true, value: revoke })
-
-  const real = document.createElement.bind(document)
-  // Cast because Electron widens `createElement`'s overloads with `webview`,
-  // and a general implementation cannot satisfy that one signature.
-  vi.spyOn(document, 'createElement').mockImplementation(((
-    tag: string,
-    opts?: ElementCreationOptions
-  ): HTMLElement => {
-    const el = real(tag, opts) as HTMLElement
-    if (tag === 'a') {
-      // Swallow the click so jsdom never tries to follow the blob: URL, and
-      // record the filename the user would have got.
-      el.click = (): void => {
-        download.name = (el as HTMLAnchorElement).download
-      }
-    }
-    return el
-  }) as typeof document.createElement)
-
-  return { write, open, download }
+  return { saveFn, buildFn, open }
 }
 
 const messages = (): string[] => useToasts.getState().toasts.map((t) => t.message)
 
 beforeEach(() => {
   vi.restoreAllMocks()
+  useToasts.getState().clear()
+  useApp.getState().setModal(null)
+  useApp.getState().setSettings({ debugLogEnabled: false })
 })
 
-describe('one click reports a bug from the activity bar', () => {
+describe('the bug button opens the report dialog', () => {
   const button = (): HTMLElement => screen.getByRole('button', { name: /^Report a bug/ })
 
   it('is on the rail without anything being opened first', () => {
@@ -105,152 +74,232 @@ describe('one click reports a bug from the activity bar', () => {
     render(<ActivityBar />)
     // The whole point: found by someone who has not opened Settings, does not
     // know the palette exists, and has never seen the crash card.
-    expect(button().getAttribute('title')).toContain('saves and copies your diagnostics')
-    expect(button().getAttribute('title')).toContain('opens the issue form')
+    expect(button().getAttribute('title')).toContain('read before you send')
   })
 
-  it('saves the diagnostics, copies them and opens the issue form on the one press', async () => {
-    const { write, open, download } = stub()
-    render(<ActivityBar />)
-
-    await userEvent.click(button())
-
-    await waitFor(() => expect(write).toHaveBeenCalledWith(DIAGNOSTICS))
-    await waitFor(() => expect(download.body).toBe(DIAGNOSTICS))
-    expect(open).toHaveBeenCalledWith(ISSUES_URL, '_blank', 'noopener,noreferrer')
-  })
-
-  it('writes a dated .txt the reporter can attach without opening it first', async () => {
-    const { download } = stub()
-    render(<ActivityBar />)
-
-    await userEvent.click(button())
-
-    // `.txt` and `text/plain`, because the payload is `key: value` lines and an
-    // attachment named for anything else invites GitHub, an editor or the
-    // reporter to render it as something it is not.
-    await waitFor(() => expect(download.name).toMatch(/^opsmaxx-diagnostics-\d{4}-\d{2}-\d{2}\.txt$/))
-    expect(download.type).toBe('text/plain')
-  })
-
-  it('starts the download before the browser tab takes the focus', async () => {
-    const calls: string[] = []
-    const { open, download } = stub()
-    Object.defineProperty(download, 'name', {
-      configurable: true,
-      set() {
-        calls.push('download')
-      },
-      get: () => null
-    })
-    ;(open as ReturnType<typeof vi.fn>).mockImplementation(() => {
-      calls.push('open')
-      return null
-    })
-    render(<ActivityBar />)
-
-    await userEvent.click(button())
-
-    // The order is the feature: a form opened first steals the focus and the
-    // save is the half that loses.
-    await waitFor(() => expect(calls).toEqual(['download', 'open']))
-  })
-
-  it('still copies and still opens when the file cannot be written', async () => {
-    const { write, open, download } = stub(DIAGNOSTICS, 'throw')
-    render(<ActivityBar />)
-
-    await userEvent.click(button())
-
-    // No `createObjectURL`, or downloads switched off. That costs the user the
-    // attachment and must cost them nothing else.
-    await waitFor(() => expect(write).toHaveBeenCalledWith(DIAGNOSTICS))
-    expect(download.name).toBeNull()
-    expect(open).toHaveBeenCalledWith(ISSUES_URL, '_blank', 'noopener,noreferrer')
-    expect(messages()[0]).toMatch(/clipboard/i)
-    expect(messages()[0]).not.toMatch(/download/i)
-  })
-
-  it('names the file, the clipboard and the form it just opened', async () => {
+  it('says it is recording while debug mode is on, on the control that stops it', () => {
     stub()
+    useApp.getState().setSettings({ debugLogEnabled: true })
+    render(<ActivityBar />)
+    // A capture running silently is the failure mode this indicator exists for,
+    // and the sentence is on the button because a bare dot reads equally as
+    // "recording" and as "something is broken".
+    expect(button().getAttribute('title')).toContain('recording')
+  })
+
+  it('opens the dialog and writes nothing on the press itself', async () => {
+    const { saveFn, open } = stub()
     render(<ActivityBar />)
 
     await userEvent.click(button())
 
-    await waitFor(() => expect(messages()).toHaveLength(1))
-    const [said] = messages()
-    // Every half of what just happened. A toast that only said "Copied" would
-    // leave the browser tab unexplained, one that only said "Opened" would
-    // leave the user retyping their version numbers by hand, and one that never
-    // mentioned the download leaves a file in their downloads folder they did
-    // not ask for and cannot account for.
-    expect(said).toMatch(/downloads/i)
-    expect(said).toMatch(/attach/i)
-    expect(said).toMatch(/clipboard/i)
-    expect(said).toMatch(/paste/i)
-    expect(said).toMatch(/issue form/i)
+    await waitFor(() => expect(useApp.getState().modal).toBe('report-bug'))
+    // The press used to save a file, overwrite the clipboard and open a browser
+    // tab before the user had seen anything. None of that may happen here.
+    expect(saveFn).not.toHaveBeenCalled()
+    expect(open).not.toHaveBeenCalled()
   })
 
-  it('still opens the form when the diagnostics cannot be collected', async () => {
-    const { write, open, download } = stub(null)
-    render(<ActivityBar />)
-
-    await userEvent.click(button())
-
-    // A user who pressed this has a bug to report. Losing the version block is
-    // a reason to say so, not a reason for the button to do nothing.
-    await waitFor(() => expect(open).toHaveBeenCalledWith(ISSUES_URL, '_blank', 'noopener,noreferrer'))
-    expect(write).not.toHaveBeenCalled()
-    // And nothing is written either: an empty file in the downloads folder is
-    // worse than no file, because it is the one the reporter would attach.
-    expect(download.name).toBeNull()
-    expect(messages()[0]).toMatch(/Settings > Advanced/)
-  })
-})
-
-describe('the issue form is opened empty', () => {
-  // This is a constraint, not a style choice, and it is easy to "improve" away.
-  // A pre-filled body puts the diagnostics in the address bar, the browser's
-  // history and every proxy log on the way, and GitHub truncates a long URL —
-  // so the [config] section, the half that four bugs needed, is exactly the
-  // part that would vanish. The clipboard has neither problem.
-  it('carries no query string and no fragment', () => {
-    const url = new URL(ISSUES_URL)
-    expect(url.search).toBe('')
-    expect(url.hash).toBe('')
-    expect(url.pathname).toBe('/OpsMaxx/OpsMaxx/issues/new/choose')
-  })
-
-  it('points at the chooser, not at a template', () => {
-    expect(ISSUES_URL).toBe('https://github.com/OpsMaxx/OpsMaxx/issues/new/choose')
-  })
-})
-
-describe('the palette reaches it too', () => {
-  const entry = (container: HTMLElement): HTMLElement => {
+  it('the palette reaches the same dialog', async () => {
+    stub()
+    const { container } = render(<CommandPalette />)
     const hit = [...container.querySelectorAll('.palette-item')].find(
       (el) => el.querySelector('.p-title')?.textContent === 'Report a bug'
     )
     expect(hit, 'the palette has no "Report a bug" entry').toBeTruthy()
-    return hit as HTMLElement
-  }
 
-  it('lists it under Actions', () => {
+    await userEvent.click(hit as HTMLElement)
+
+    // Both entry points call the one function, so neither can drift.
+    await waitFor(() => expect(useApp.getState().modal).toBe('report-bug'))
+  })
+})
+
+describe('the report is read before it is written', () => {
+  const saveButton = (): HTMLElement => screen.getByRole('button', { name: /Save report/ })
+
+  it('shows the whole report, including the trace', async () => {
     stub()
-    const { container } = render(<CommandPalette />)
-    const groups = [...container.querySelectorAll('.palette-group')].map((el) => el.textContent)
-    expect(groups).toContain('Actions')
-    expect(entry(container)).toBeTruthy()
+    render(<ReportBugModal />)
+
+    // The preview is a GATE here rather than the courtesy it is for the
+    // diagnostics block: the trace carries error text, and an error names the
+    // host it failed to reach.
+    await waitFor(() => expect(screen.getByText(/\[trace\]/)).toBeTruthy())
   })
 
-  it('does the same one thing the rail button does', async () => {
-    const { write, open, download } = stub()
-    const { container } = render(<CommandPalette />)
+  it('warns that a hostname cannot be filtered out', async () => {
+    stub()
+    render(<ReportBugModal />)
 
-    await userEvent.click(entry(container))
+    // The diagnostics block may promise "counts and on/off states only". This
+    // may not, and the difference has to be on screen rather than in a comment.
+    const said = document.body.textContent ?? ''
+    expect(said).toMatch(/hostnames/i)
+    expect(said).toMatch(/a hostname cannot be/i)
+  })
 
-    await waitFor(() => expect(write).toHaveBeenCalledWith(DIAGNOSTICS))
-    await waitFor(() => expect(download.body).toBe(DIAGNOSTICS))
-    expect(open).toHaveBeenCalledWith(ISSUES_URL, '_blank', 'noopener,noreferrer')
+  it('saves nothing and opens nothing until the button under the preview is pressed', async () => {
+    const { saveFn, open } = stub()
+    render(<ReportBugModal />)
+
+    await waitFor(() => expect(saveButton()).toBeTruthy())
+    expect(saveFn).not.toHaveBeenCalled()
+    expect(open).not.toHaveBeenCalled()
+  })
+
+  it('opens the issue form only after the file is really written', async () => {
+    const { saveFn, open } = stub()
+    render(<ReportBugModal />)
+    await waitFor(() => expect(saveButton()).toBeTruthy())
+
+    await userEvent.click(saveButton())
+
+    await waitFor(() => expect(saveFn).toHaveBeenCalledWith(BUNDLE.text))
+    expect(open).toHaveBeenCalledWith(
+      issueUrl(BUNDLE.version, BUNDLE.os),
+      '_blank',
+      'noopener,noreferrer'
+    )
+    // And it names the path it actually wrote, which is the half the old toast
+    // could not do because it never had one.
+    await waitFor(() =>
+      expect(document.body.textContent).toContain('opsmaxx-bug-report-2026-01-01.txt')
+    )
+  })
+
+  it('says CANCELLED when the user cancels the dialog, and opens no browser', async () => {
+    const { open } = stub({ ok: false, cancelled: true })
+    render(<ReportBugModal />)
+    await waitFor(() => expect(saveButton()).toBeTruthy())
+
+    await userEvent.click(saveButton())
+
+    // This is the bug the old path had: `saveDiagnosticsFile` returned true
+    // whenever nothing threw, so a cancelled save was reported as a file in the
+    // downloads folder that did not exist.
+    await waitFor(() => expect(messages()[0]).toMatch(/cancelled/i))
+    expect(messages()[0]).toMatch(/not saved/i)
+    // And no path is named, because there is no file to name. The old toast
+    // named the downloads folder either way.
+    expect(document.body.textContent).not.toMatch(/Saved to/)
+    expect(open).not.toHaveBeenCalled()
+  })
+
+  it('says why when the write fails', async () => {
+    const { open } = stub({ ok: false, error: 'EACCES: permission denied' })
+    render(<ReportBugModal />)
+    await waitFor(() => expect(saveButton()).toBeTruthy())
+
+    await userEvent.click(saveButton())
+
+    await waitFor(() => expect(messages()[0]).toMatch(/EACCES/))
+    expect(open).not.toHaveBeenCalled()
+  })
+
+  it('stops the capture when the dialog opens, so the reporter need not remember to', async () => {
+    stub()
+    useApp.getState().setSettings({ debugLogEnabled: true })
+    render(<ReportBugModal />)
+
+    // Pressing Report IS the moment they finished reproducing. It goes through
+    // the ordinary setting so main hears about it on the same data:save, and the
+    // Settings toggle cannot disagree with the dialog.
+    await waitFor(() => expect(useApp.getState().settings.debugLogEnabled).toBe(false))
+  })
+
+  it('starts the recording from here, without sending anyone to Settings', async () => {
+    stub()
+    render(<ReportBugModal />)
+
+    // THE regression this guards. Reporting a bug used to begin with knowing to
+    // look in Settings > Advanced, which is a path only somebody who already
+    // knows the app can walk. A dialog that asks for a recording and then points
+    // at another screen to start one has reinstated exactly that, one step
+    // later -- so the control has to be in the step that asks for it.
+    const start = screen.getByRole('button', { name: /Start recording/ })
+    expect(document.body.textContent).not.toMatch(/Settings . Advanced . Debug mode/)
+
+    await userEvent.click(start)
+
+    await waitFor(() => expect(useApp.getState().settings.debugLogEnabled).toBe(true))
+    // And it gets out of the way, because what it just asked for happens in the
+    // app rather than in this dialog.
+    expect(useApp.getState().modal).toBeNull()
+    expect(messages()[0]).toMatch(/reproduce/i)
+  })
+
+  it('offers the quick path, and says what it costs, when nothing was recorded', async () => {
+    stub()
+    render(<ReportBugModal />)
+
+    await waitFor(() => expect(screen.getByText(/Record what the app does/)).toBeTruthy())
+    // A report with no trace is still a report; it is the one the old button
+    // sent every time. The dialog says what it is missing rather than refusing.
+    expect(screen.getByRole('button', { name: /Save report/ })).toBeTruthy()
+  })
+
+  it('cannot save when the report could not be collected', async () => {
+    stub({ ok: true, path: '/x' }, null)
+    render(<ReportBugModal />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Save report/ }).hasAttribute('disabled')).toBe(true)
+    )
+    // There is deliberately no fallback text to save: a file that claims to be
+    // a bug report and is not one is worse than no file, because it is the one
+    // that gets attached.
+    expect(document.body.textContent).toMatch(/could not be collected/i)
+  })
+})
+
+describe('the issue URL carries the two short fields and nothing else', () => {
+  // This was "carries no query string at all", and the reasoning behind that is
+  // unchanged and still binding: a pre-filled `?body=` puts the report in the
+  // address bar, the browser's history and every proxy log on the way, and
+  // GitHub truncates a long URL -- so the [config] section, the half four bugs
+  // needed, is exactly the part that would vanish. The file has neither problem.
+  //
+  // What changed is narrower than it looks. `version` and `os` are two short
+  // strings the app already prints on its own Settings screen, bounded by
+  // construction -- a semver and one of three literals. The reason a BLOCK
+  // cannot go in a URL is its length and its contents, and a version number has
+  // neither property. So the rule is not "no query string", it is "these three
+  // keys, and never the payload" -- which is what this pins.
+  const url = (): URL => new URL(issueUrl('0.40.1', 'macOS'))
+
+  it('permits only template, version and os', () => {
+    expect([...url().searchParams.keys()].sort()).toEqual(['os', 'template', 'version'])
+  })
+
+  it('never carries a body, a title or a fragment', () => {
+    const u = url()
+    expect(u.searchParams.get('body')).toBeNull()
+    expect(u.searchParams.get('title')).toBeNull()
+    expect(u.hash).toBe('')
+  })
+
+  it('stays short enough that GitHub cannot truncate anything that matters', () => {
+    expect(issueUrl('0.40.1', 'macOS').length).toBeLessThan(300)
+  })
+
+  it('points at the bug template, not at the chooser', () => {
+    // The chooser asked every reporter to first classify their own bug, which
+    // is the question the button they pressed has already answered -- and it
+    // takes no parameters, so prefilling anything requires this path.
+    expect(url().pathname).toBe('/OpsMaxx/OpsMaxx/issues/new')
+    expect(url().searchParams.get('template')).toBe(ISSUE_TEMPLATE)
+    expect(ISSUES_BASE).toBe('https://github.com/OpsMaxx/OpsMaxx/issues/new')
+  })
+
+  it('prefills field ids the template actually has', () => {
+    // GitHub matches a query parameter to an issue-form field by its `id` and
+    // silently ignores one that matches nothing. Renaming a field in the
+    // template would otherwise break the prefill with no signal anywhere.
+    const yml = readFileSync('.github/ISSUE_TEMPLATE/bug_report.yml', 'utf8')
+    for (const id of ['version', 'os']) expect(yml).toContain(`id: ${id}`)
+    // And `os` is a dropdown, so the value has to be one of its option labels
+    // verbatim or it selects nothing at all.
+    for (const os of ['Windows', 'macOS', 'Linux']) expect(yml).toContain(os)
   })
 })

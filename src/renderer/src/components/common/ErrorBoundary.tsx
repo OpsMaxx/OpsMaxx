@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { AlertTriangle, Copy, RotateCcw } from 'lucide-react'
 import { bridgeHas } from '../../lib/bridge'
+import { forwardDebugError } from '../../lib/debugForward'
 
 interface Props {
   children: ReactNode
@@ -27,6 +28,10 @@ export class ErrorBoundary extends Component<Props, State> {
     // Goes to the terminal in dev and to the crash log in production.
     console.error('[renderer] unhandled error:', error, info.componentStack)
     const componentStack = info.componentStack ?? null
+    // And into the debug trace, which is the copy a maintainer can read: the
+    // line above goes to a devtools console nobody has open. `installDebugForwarding`
+    // catches what React does not, and this catches what only React sees.
+    forwardDebugError('boundary', error.message, error.stack ?? undefined)
     this.setState({ stack: componentStack })
 
     // Built here rather than on the click, so the text is on screen BEFORE the

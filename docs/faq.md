@@ -111,8 +111,41 @@ kind — they are text the app did not write, so they get filtered rather than s
 are stripped and every path is cut to its last segment, but an error that failed to reach a
 host usually names it, and no pattern can reliably tell a hostname from any other word. So the
 crash screen shows you the whole report before it copies anything: read it first, and once you
-have pasted it, delete any line you would rather not post. It is not sent anywhere and nothing
-is written to disk — the button puts the text on your clipboard, and you decide where it goes.
+have pasted it, delete any line you would rather not post. **Copy diagnostics** itself writes
+nothing to disk — the button puts the text on your clipboard, and you decide where it goes. The
+bug button in the left rail does save a file, and says so before it does; see below.
+
+### What is debug mode?
+
+A recording of what the app does, off until you ask for one. It exists because everything in the
+block above describes what your installation *is* — versions, counts, which features are on — and
+nothing about what it *did*, which for anything that fails, misbehaves or hangs is the half that
+matters.
+
+It all happens on the **bug icon in the left rail**, which is on screen whatever you have open.
+Press it, choose **Start recording**, and it closes and leaves you to it — the icon keeps a dot
+for as long as the recording runs. Make the problem happen again, then press the icon a second
+time. That stops the recording, builds one report out of it and the block above, shows you the
+whole thing, and — once you press Save — writes it as a single text file and opens the issue form
+with your version and operating system already filled in. Drag the file into the issue.
+
+Restarting OpsMaxx while it is recording is fine; the recording survives it, and starting a new
+one clears the old.
+
+**What is in it.** Which internal operations ran, how long each took and which ones failed, plus
+any error the app raised. Never the *arguments* to those operations, so passwords, passphrases
+and key material are absent by construction rather than by filtering. Secret-shaped strings
+— tokens, keys, `PASSWORD=` assignments — are stripped before anything is written.
+
+**What is not filtered out.** Hostnames, IP addresses, usernames, file paths and command text.
+An error that failed to reach a machine usually names it, and no rule can reliably tell a
+hostname from an ordinary word. That is precisely why the app puts the whole report on screen
+before it writes it: read it, and delete any line you would rather not publish.
+
+**Where it lives.** One file in the app's own data folder, readable only by your user account,
+capped at 8 MB. Nothing is sent anywhere — OpsMaxx never uploads it, and you attach the report
+yourself or not at all. Settings → Advanced shows its size and has a **Delete** button; filing a
+bug report does not remove it.
 
 ### Does it work offline?
 

@@ -205,6 +205,24 @@ export interface AppSettings {
    */
   accessWriteEnabled: boolean
   /**
+   * Whether main is writing a debug trace to `opsmaxx-debug.jsonl`.
+   *
+   * ABSENCE READS AS FALSE, for `accessWriteEnabled`'s reason directly above
+   * rather than `localTerminalEnabled`'s: a capture nobody switched on is a
+   * file of hostnames and error text that nobody agreed to. Main keeps its own
+   * copy (services/debugGate.ts) and `debugRecord` consults that, because the
+   * writing happens there and a renderer flag would only constrain the honest
+   * UI.
+   *
+   * Shipping the `false` into the defaults below is safe HERE, and the
+   * distinction is worth keeping straight: the trap this file documents at
+   * `terminalClickToMove` is that a shipped `false` is written into every
+   * install by the wholesale settings save and then outranks a later change of
+   * default. That only costs anything for a key that might one day want to
+   * default ON. This one never will.
+   */
+  debugLogEnabled: boolean
+  /**
    * Configuration files the operator added to the drift read, beyond the fixed
    * catalogue -- item 46.
    *
@@ -324,6 +342,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   webhookAlertsEnabled: false,
   webhookNotifyOnResolved: true,
   accessWriteEnabled: false,
+  debugLogEnabled: false,
   driftWatches: [],
   vaultAutoBiometricPrompt: true,
   closeTabOnShellExit: true,
@@ -349,6 +368,7 @@ export type ModalKind =
   | 'add-database'
   | 'add-api'
   | 'import-ssh'
+  | 'report-bug'
   | null
 
 /** Which of the three destinations the Tunnels & VPN view is showing. */

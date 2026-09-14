@@ -30,6 +30,7 @@ import { CommandPalette } from './components/palette/CommandPalette'
 import { AddServerModal } from './components/connections/AddServerModal'
 import { RouteEditor } from './components/connections/RouteEditor'
 import { SshConfigImport } from './components/connections/SshConfigImport'
+import { ReportBugModal } from './components/common/ReportBugModal'
 import { SshPrompt } from './components/connections/SshPrompt'
 import { VpnPromptModal } from './components/vpn/VpnPromptModal'
 import { WorkspaceManager } from './components/workspace/WorkspaceManager'
@@ -114,6 +115,7 @@ export default function App(): React.JSX.Element {
       {modal === 'add-database' && <AddDatabaseModal />}
       {modal === 'add-api' && <AddApiModal />}
       {modal === 'import-ssh' && <SshConfigImport />}
+      {modal === 'report-bug' && <ReportBugModal />}
       {/* Not a `modal` kind: the unlock prompt can appear over any view. */}
       <WorkspaceUnlock />
       {/* Can appear during any connection attempt, including SFTP and metrics. */}

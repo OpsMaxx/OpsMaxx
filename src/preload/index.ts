@@ -15,6 +15,7 @@ import type {
 } from '../shared/cicd'
 import type { CredentialShape } from '../shared/credentialShape'
 import type { DiagnosticsCrash } from '../shared/diagnostics'
+import type { DebugBundle, DebugStatus, SaveResult } from '../shared/debug'
 import type { LocalTarget } from '../shared/execTarget'
 import type {
   SshConnectConfig,
@@ -315,6 +316,36 @@ const api = {
   diagnostics: {
     text: (crash?: DiagnosticsCrash | null): Promise<string> =>
       ipcRenderer.invoke('diagnostics:text', crash ?? null)
+  },
+  /**
+   * The other half of a bug report: what the app DID.
+   *
+   * Unlike `diagnostics` above, this is NOT safe by construction. `build`
+   * returns the diagnostics block plus a trace of which internal operations ran
+   * and which failed, and a failure names what it failed to reach — hostnames,
+   * usernames, paths, the text of an error a server wrote. `redactOutput` takes
+   * the secrets out at the writer and cannot take a hostname out, so the
+   * renderer shows the whole thing before the user can do anything with it.
+   *
+   * There is no `copy` here on purpose. A report is SAVED: an attachment is
+   * inert, while pasted text renders as Markdown and is read by automation,
+   * which is the line CONTRIBUTING.md already draws for long logs. `save`
+   * returns what actually happened — written, cancelled, or why not — because
+   * the path it replaces claimed success whenever nothing threw.
+   *
+   * No `setEnabled` either: the toggle is an ordinary renderer setting and
+   * reaches main on `data:save` like every other one.
+   */
+  debug: {
+    status: (): Promise<DebugStatus> => ipcRenderer.invoke('debug:status'),
+    build: (): Promise<DebugBundle> => ipcRenderer.invoke('debug:build'),
+    save: (text: string): Promise<SaveResult> => ipcRenderer.invoke('debug:save', text),
+    /** Remove the trace. The user's copy of their own hostnames is theirs. */
+    delete: (): Promise<void> => ipcRenderer.invoke('debug:delete'),
+    /** Fire-and-forget, and dropped in main when debug mode is off. `send`
+     *  rather than `invoke` so an error report cannot itself await main. */
+    event: (kind: string, message: string, stack?: string): void =>
+      ipcRenderer.send('debug:event', kind, message, stack)
   },
   ssh: {
     connect: (cfg: SshConnectConfig & { serverId?: string }): Promise<void> =>

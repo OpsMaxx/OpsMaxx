@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import type { DebugStatus } from '../../../../shared/debug'
 import type { AutoStartSettings, AutoStartState } from '../../../../shared/autostart'
 import { ACCESS_WRITE_OPT_IN_NOTE } from '../../../../shared/access'
 import { UnlockVaultButton } from '../common/UnlockVaultButton'
@@ -321,6 +322,12 @@ const SETTING_INDEX: SettingEntry[] = [
   // Modules
   { section: 'modules', title: 'Modules', desc: 'Which subsystems are switched on for this workspace.', aliases: 'features enable disable subsystem' },
   // Advanced
+  {
+    section: 'advanced',
+    title: 'Debug mode',
+    desc: 'Record which internal operations run and which fail, so a bug report can say what the app did.',
+    aliases: 'debug log logging trace verbose bug report troubleshoot diagnose capture record'
+  },
   {
     section: 'advanced',
     title: 'Copy diagnostics',
@@ -693,6 +700,81 @@ function Toggle({ label, desc, initial = false }: { label: string; desc: string;
  * retention questions, in exchange for a paragraph of text the clipboard already
  * carries.
  */
+/**
+ * The recording's status, its size, and the button that deletes it.
+ *
+ * NOT the way anybody starts one. That is the bug icon in the left rail, which
+ * is on screen in every view and whose dialog has a Start recording button in
+ * step 1 — see ReportBugModal.tsx for why it has to be there and not here.
+ * Reporting a bug that began with "first find Settings → Advanced" is the
+ * failure this whole feature was built against, and a recording that could only
+ * be started from this page would have reinstated it one screen later.
+ *
+ * What this page is for is the question you come looking for an answer to: is
+ * it still running, how big has it got, and how do I get rid of it. The switch
+ * stays because a thing that can be turned on has to be turnable off from the
+ * place that lists what is on.
+ *
+ * The description says what is recorded in the same words the dialog does. It
+ * cannot promise what the panel below promises: that payload is versions and
+ * counts, this one is error text, and an error names what it failed to reach.
+ * See src/main/services/debugLog.ts.
+ */
+function DebugPanel(): React.JSX.Element {
+  const settings = useApp((s) => s.settings)
+  const setSettings = useApp((s) => s.setSettings)
+  const [status, setStatus] = useState<DebugStatus | null>(null)
+
+  const refresh = useCallback((): void => {
+    const api = window.opsmaxx?.debug
+    if (!bridgeHas(api as Record<string, unknown> | undefined, 'status')) return
+    void api
+      ?.status()
+      .then(setStatus)
+      .catch(() => {
+        /* nothing to show; the size line stays hidden */
+      })
+  }, [])
+
+  useEffect(refresh, [refresh, settings.debugLogEnabled])
+
+  const kb = status === null ? 0 : Math.round(status.bytes / 1024)
+
+  return (
+    <>
+      <SettingSwitch
+        label="Debug mode"
+        desc="Record which internal operations run and which fail, so a bug report can say what the app did and not only what it is. You do not need this page to start one — the bug icon in the left rail offers it, which is where a report begins. Those messages come from this machine and your servers, and they routinely name hostnames, usernames, file paths and commands; passwords, keys and tokens are filtered out before anything is written, a hostname cannot be. Nothing is sent anywhere: the trace stays on this computer, you read the whole report before it is written, and starting a new recording clears the old one."
+        checked={settings.debugLogEnabled === true}
+        onChange={(v) => setSettings({ debugLogEnabled: v })}
+      />
+      {status !== null && status.bytes > 0 && (
+        <div className="setting-row">
+          <div className="s-info">
+            <div className="s-title">Recorded trace</div>
+            <div className="s-desc">
+              {status.events > 0 ? `${status.events} events, ` : ''}
+              {kb} KB on disk{status.truncated ? ', cut at the 8 MB cap' : ''}. Yours to delete
+              whenever you like — reporting a bug does not remove it.
+            </div>
+          </div>
+          <button
+            className="btn sm"
+            onClick={() => {
+              const api = window.opsmaxx?.debug
+              if (!bridgeHas(api as Record<string, unknown> | undefined, 'delete')) return
+              void api?.delete().then(refresh)
+              toast('Debug trace deleted.')
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      )}
+    </>
+  )
+}
+
 function DiagnosticsPanel(): React.JSX.Element {
   const [text, setText] = useState<string | null>(null)
 
@@ -1389,6 +1471,7 @@ export function Settings(): React.JSX.Element {
             <div className="settings-section">
               <h2>Diagnostics</h2>
               <div className="sub">What to include when you report a problem.</div>
+              <DebugPanel />
               <DiagnosticsPanel />
             </div>
           )}

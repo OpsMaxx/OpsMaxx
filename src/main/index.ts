@@ -59,6 +59,20 @@ import { FleetSampler, fleetCached, setActiveFleetSampler } from './services/fle
 import type { AutoStartSettings, AutoStartState } from '../shared/autostart'
 import { pruneJsonl } from './services/jsonlPrune'
 import { diagnosticsText } from './services/diagnostics'
+// Deliberately NOT added to the jsonl prune loop below: retention is for the
+// four audit files, which answer questions a year later. The debug trace is
+// session-scoped scratch — deleted whenever it is switched on, capped at 8 MB,
+// and never aged out, because dropping its OLDEST lines would drop the setup
+// that explains the failure.
+import {
+  debugRecord,
+  debugStatus,
+  deleteDebugLog,
+  installIpcDebugTap,
+  syncDebugLog
+} from './services/debugLog'
+import { buildDebugBundle, saveDebugBundle } from './services/debugBundle'
+import { mayOpenExternally } from '../shared/externalUrl'
 import type { DiagnosticsCrash } from '../shared/diagnostics'
 import { AUDIT_LOG_PATH } from './services/auditLog'
 import { LOCAL_SESSION_LOG_PATH } from './services/localSessionLog'
@@ -438,6 +452,18 @@ import {
 } from './services/mcpServer'
 import { forgetSession as forgetOAuthSession, listPendingConsents, approveConsent, denyConsent } from './services/mcpOAuth'
 
+// FIRST, before anything in this file registers a handler.
+//
+// It reassigns `ipcMain.handle` so every channel records its name, duration and
+// outcome while debug mode is on — and nothing at all while it is off. A
+// registration that ran before this line would not be wrapped, and `ipcMain` is
+// imported here and nowhere else under src/main, so "before everything in this
+// file" is the whole of the requirement. tests/ipcDebugTap.test.ts pins that,
+// because moving a handler into a feature module is how it would quietly stop
+// being true. services/debugLog.ts has the rest of the reasoning, including why
+// the arguments are never recorded.
+installIpcDebugTap()
+
 const isDev = !app.isPackaged
 
 // Windows shows the AppUserModelID as the heading on every notification, and
@@ -635,8 +661,17 @@ function createWindow(): void {
     )
   }
 
+  // The scheme is checked before the URL reaches the OS — see
+  // shared/externalUrl.ts for what that guards against and why the predicate
+  // lives there rather than inline here.
+  //
+  // The deny is unchanged and unconditional: the link opens in the user's
+  // browser or not at all, never in an Electron window carrying this preload.
+  //
+  // The other `shell.openExternal` in main (services/updater.ts) takes a module
+  // constant rather than anything from the renderer, so it needs none of this.
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    if (mayOpenExternally(details.url)) void shell.openExternal(details.url)
     return { action: 'deny' }
   })
 
@@ -4740,6 +4775,41 @@ ipcMain.handle('diagnostics:text', (_e, crash?: DiagnosticsCrash | null) =>
   )
 )
 
+// ---- Debug trace ----
+//
+// The other half of a bug report: what the app DID. Off unless the user turned
+// it on, deleted when they do, previewed in full before it is saved, and SAVED
+// rather than copied — it carries hostnames and error text, which the
+// diagnostics block above deliberately does not. services/debugLog.ts has the
+// argument for why this can exist beside a payload that is safe by
+// construction.
+//
+// There is no `debug:set`. The toggle is a renderer setting, so it arrives on
+// data:save like every other one, and `syncDebugLog` owns the transition.
+ipcMain.handle('debug:status', () => debugStatus())
+ipcMain.handle('debug:build', () =>
+  buildDebugBundle({ webhook: webhookStatus(), aiBridgeRunning: mcpServerStatus().running })
+)
+ipcMain.handle('debug:save', (_e, text: unknown) =>
+  typeof text === 'string'
+    ? saveDebugBundle(text)
+    : Promise.resolve({ ok: false as const, error: 'Nothing to save.' })
+)
+ipcMain.handle('debug:delete', () => deleteDebugLog())
+// `on`, not `handle`, for two reasons: a renderer error report wants no reply,
+// and a handler here would be tapped by the wrapper in services/debugLog.ts and
+// so would record the act of recording. Shape-checked and capped rather than
+// trusted — this is renderer-supplied text, and `debugRecord` drops it anyway
+// when debug mode is off.
+ipcMain.on('debug:event', (_e, kind: unknown, message: unknown, stack: unknown) => {
+  if (typeof kind !== 'string' || typeof message !== 'string') return
+  debugRecord('renderer', {
+    kind: kind.slice(0, 64),
+    message: message.slice(0, 2000),
+    ...(typeof stack === 'string' ? { stack: stack.slice(0, 2000) } : {})
+  })
+})
+
 // ---- Data persistence ----
 ipcMain.handle('data:load', () => loadData())
 ipcMain.handle('data:save', (_e, data: unknown) => {
@@ -4756,6 +4826,11 @@ ipcMain.handle('data:save', (_e, data: unknown) => {
   // is not what "off" means.
   if (!isLocalTerminalEnabled()) localFilesDisposeAll()
   syncAccessWriteEnabled(data)
+  // Same pattern, and it also owns the transition: switching the debug trace on
+  // truncates the file so a report carries one reproduction, and switching it
+  // off closes the session and takes the console tee back out. See
+  // services/debugLog.ts for why a restart must NOT truncate.
+  syncDebugLog(data)
   // Same pattern again, and the sharpest instance of it: a custom drift watch's
   // PATH is interpolated into the collector script, so the process that runs
   // the script re-validates every stored watch rather than trusting a dialog it
@@ -5168,6 +5243,13 @@ app.whenReady().then(() => {
    */
   setShellIntegrationRoot(app.getPath('userData'))
 syncAccessWriteEnabled(loadData())
+  // `true` for boot: a debug session that was already on RESUMES rather than
+  // starting fresh, because reproducing a bug can need a restart and a capture
+  // that wiped itself on every launch would lose the reproduction it was
+  // switched on for. Read here rather than waiting for the renderer's first
+  // data:save, or the events from app start — the ones that explain a startup
+  // bug — are exactly what goes missing.
+  syncDebugLog(loadData(), true)
 syncDriftWatches(loadData())
   // Before the MCP server: the bridge asks the manager what is running, and a
   // bridge that answered "nothing" because the manager had not booted would be

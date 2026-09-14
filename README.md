@@ -153,7 +153,7 @@ Please do keep the copyright notice, and do not imply the maintainers endorse a 
 
 **Built for the DevOps community.** If OpsMaxx saves you time, a ⭐ helps others find it.
 
-[⬇ Download OpsMaxx](https://github.com/OpsMaxx/OpsMaxx/releases/latest) · [🐞 Report a bug](https://github.com/OpsMaxx/OpsMaxx/issues/new/choose) · [📧 Contact](mailto:aliwaqarofficial@gmail.com)
+[⬇ Download OpsMaxx](https://github.com/OpsMaxx/OpsMaxx/releases/latest) · [🐞 Report a bug](https://github.com/OpsMaxx/OpsMaxx/issues/new?template=bug_report.yml) · [📧 Contact](mailto:aliwaqarofficial@gmail.com)
 
 *Keywords: open source SSH client, free SSH client for Windows, free MobaXterm alternative, PuTTY alternative, Termius alternative, SecureCRT alternative, Xshell alternative, MobaXterm for Mac, SSH client for macOS, SSH client for Linux, SSH terminal manager, SSH connection manager, SFTP client, SCP file transfer, SSH tunnel manager, port forwarding tool, SOCKS5 proxy client, bastion host client, jump host SSH client, ProxyJump GUI, ssh config importer, server monitoring tool, database GUI client, PostgreSQL client, MySQL client, MongoDB client, Redis client, SQL Server client, database over SSH tunnel, password manager for developers, encrypted secrets vault, AES-256-GCM vault, DevOps tools, sysadmin tools, self-hosted, no telemetry, no subscription, Electron SSH client, cross-platform terminal, Windows macOS Linux, MCP server, Model Context Protocol, AI agent SSH access, Claude Code MCP integration, Claude Desktop MCP server, Codex MCP server, Gemini CLI MCP, AI DevOps tool, secure AI infrastructure access, AI agent access control, credential-free AI automation, human-in-the-loop AI approvals, AI audit log.*
 

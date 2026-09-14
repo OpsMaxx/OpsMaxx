@@ -8,11 +8,19 @@ body:
         The version and your operating system are the only two things we really need from
         you. Everything below them helps, and none of it is worth abandoning the report over.
 
-        **Settings → Advanced → Copy diagnostics** puts a short block of text on your
-        clipboard describing this install — versions, platform, which features are switched
-        on. It holds nothing secret to begin with: versions, counts and on/off states are all
-        there is in it, not the result of a filter. Pasting that block saves a round of
-        questions.
+        **If you got here from the bug button in OpsMaxx, drag the saved report file into
+        this form.** That file is the single most useful thing you can attach — it carries
+        your versions and feature states, and, if debug mode was on, what the app actually
+        did before it went wrong.
+
+        **If you did not**, and the problem is something that fails, misbehaves or hangs:
+        press the **bug icon in the left rail**, choose **Start recording**, make it happen
+        again, then press that icon a second time. It shows you the whole report before it
+        writes anything, saves it as one text file, and brings you back here.
+
+        **Settings → Advanced → Copy diagnostics** is the quick version when all you want is
+        the version block — versions, counts and on/off states by construction, not the
+        result of a filter. Pasting that saves a round of questions.
 
         Anything you paste **by hand** — terminal output, a log, a config file — should have
         hostnames, usernames, IPs and key material taken out first. If a log is long, attach

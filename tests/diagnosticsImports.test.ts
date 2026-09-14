@@ -31,11 +31,27 @@ import ts from 'typescript'
 
 const ROOT = resolve(__dirname, '..')
 
-/** The two halves of the feature: the pure formatter the renderer also sees, and
- *  main's collector. */
+/**
+ * The feature's four halves: the pure formatter the renderer also sees, main's
+ * collector, the trace, and the report built from both.
+ *
+ * `debugBundle.ts` and `debugLog.ts` were added because the thing this guard
+ * protects is whatever LEAVES THE MACHINE, and that is now the report rather
+ * than the diagnostics block alone. The trace is a bundle of exactly the kind
+ * src/shared/diagnostics.ts's header argues against collecting, and the answer
+ * to that argument — off by default, user-started, previewed, cleared on each
+ * enable — says nothing about what the module may import. This does.
+ *
+ * They pass as written: `debugLog.ts` reaches logAppend and secretRedaction,
+ * `debugBundle.ts` reaches those plus diagnostics, and nothing below is in
+ * either closure. `history` is the one worth naming — the bounded, user-started
+ * trace is the deliberate substitute for it, not a reason to admit it.
+ */
 const SEED_FILES = [
   join(ROOT, 'src/shared/diagnostics.ts'),
-  join(ROOT, 'src/main/services/diagnostics.ts')
+  join(ROOT, 'src/main/services/diagnostics.ts'),
+  join(ROOT, 'src/main/services/debugLog.ts'),
+  join(ROOT, 'src/main/services/debugBundle.ts')
 ]
 
 /**
