@@ -84,10 +84,38 @@ function header(res: CicdResponse, name: string): string | undefined {
   return undefined
 }
 
+/**
+ * A redirect to somewhere that is plainly a login.
+ *
+ * Jenkins under an SSO security realm does NOT answer 401 to a credential it will
+ * not take -- it answers 302 to the realm's login entry point, because that is
+ * what it would do for a browser. The bare status is useless to the reader: an
+ * instance whose anonymous reads return 200 and whose token-authenticated reads
+ * return 302 looks like an OpsMaxx fault and is not one.
+ *
+ * Matched on the Location, not on the status alone, because a redirect to a
+ * canonical URL is a different and harmless thing.
+ */
+const LOGIN_REDIRECT = /commenceLogin|securityRealm|\/login\b|oauth|saml|openid|adfs/i
+
 function expectOk(res: CicdResponse, what: string): CicdResponse {
   if (res.status >= 200 && res.status < 300) return res
   if (res.status === 403) throw new Error(`${what}: ${FORBIDDEN}`)
   if (res.status === 404) throw new Error(`${what}: Jenkins returned 404 — nothing at that path.`)
+  if (res.status >= 300 && res.status < 400) {
+    const to = header(res, 'location') ?? ''
+    if (LOGIN_REDIRECT.test(to)) {
+      throw new Error(
+        `${what}: Jenkins redirected to a login page, so it did not accept the API token for this request. That is what an instance behind SSO does instead of answering 401 — the realm has to be configured to accept API tokens, or the token belongs to an account the realm does not know.`
+      )
+    }
+    // Still worth distinguishing from a 4xx: a redirect means Jenkins is there
+    // and answering, and OpsMaxx does not follow one because the target does not
+    // inherit the credential.
+    throw new Error(
+      `${what}: Jenkins redirected (${res.status})${to ? ` to ${to}` : ''}, and a redirect target does not inherit the credential, so it was not followed.`
+    )
+  }
   throw new Error(`${what}: Jenkins returned ${res.status}.`)
 }
 

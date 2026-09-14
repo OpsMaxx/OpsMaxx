@@ -588,6 +588,24 @@ let poller: CicdPoller | null = null
  */
 const pipelines = new Map<string, CicdPipeline[]>()
 
+/**
+ * What the last discovery did, per connection.
+ *
+ * Discovery used to fail in complete silence -- `catch {}`, keep the old list,
+ * carry on. That is survivable when there is an old list to keep, and invisible
+ * when there is not: a connection whose FIRST discovery fails ends up with zero
+ * pipelines, therefore zero poll targets, therefore no poll, therefore no
+ * `lastReadAt` and no target error either. `panelState` sources `error` from
+ * failed targets alone, so a connection that never got off the ground reported
+ * nothing wrong anywhere and the panel sat on "never read" indefinitely.
+ *
+ * The timestamp matters as much as the error. An account that answers with an
+ * empty job list -- which is what Jenkins returns for jobs the credential
+ * cannot see -- has genuinely been read, and calling that "never read" sends
+ * the user looking for a network fault that is not there.
+ */
+const discovery = new Map<string, { at: number; error?: string }>()
+
 function targetsFor(connectionId: string): CicdPollTarget[] {
   return (pipelines.get(connectionId) ?? []).map((p) => ({
     id: `${connectionId}\u0000${p.ref}`,
@@ -625,11 +643,18 @@ function panelState(connectionId: string): CicdPanelState {
   })
   const failed = targets.filter((t) => t.error)
   const provider = connections.find((c) => c.id === connectionId)?.provider
+  const disco = discovery.get(connectionId)
+  // A failed target first -- it is the more specific fact, and it means the
+  // account was reachable enough to schedule. Discovery's error is the fallback
+  // for a connection that never produced a target to fail.
+  const error = failed.length > 0 ? failed[0].error : disco?.error
   return {
     connectionId,
     intervalSec: Math.round((provider ? POLL_INTERVAL_MS[provider] : 20_000) / 1000),
-    readAt: sched?.lastReadAt,
-    ...(failed.length > 0 ? { error: failed[0].error } : {}),
+    // A successful discovery IS a read, and for an account with no pipelines
+    // visible to it, the only one there will ever be.
+    readAt: sched?.lastReadAt ?? (disco !== undefined && disco.error === undefined ? disco.at : undefined),
+    ...(error !== undefined ? { error } : {}),
     failures: failed.length,
     ...(sched?.rate ? { budget: sched.rate } : {}),
     pipelines: withRuns
@@ -654,11 +679,17 @@ async function discover(emit: (event: CicdPanelState) => void): Promise<void> {
       const secret = resolveSecret(c)
       const found = await createCicdAdapter(c, secret).listPipelines()
       pipelines.set(c.id, found)
-    } catch {
+      discovery.set(c.id, { at: Date.now() })
+    } catch (err) {
       // Keep the previous list. The poll that follows will report the failure
       // against the rows the user can already see, which is more useful than
-      // an empty panel with a message.
+      // an empty panel with a message -- but RECORD it, because when there is
+      // no previous list there is no poll either and nothing else will.
       if (!pipelines.has(c.id)) pipelines.set(c.id, [])
+      discovery.set(c.id, {
+        at: Date.now(),
+        error: err instanceof Error ? err.message : String(err)
+      })
     }
     emit(panelState(c.id))
   }
@@ -687,6 +718,37 @@ export function configure(emit: (event: CicdPanelState) => void): void {
     if (![...live].some((id) => key.startsWith(id))) logCursors.delete(key)
   }
   void discover(emit)
+}
+
+/**
+ * Re-read the saved connections and, if the set actually changed, rediscover.
+ *
+ * `data:save` calls `reload()`, which keeps main's list current and changes
+ * nothing else -- no reschedule, no discovery. Today the panel covers that: it
+ * calls `bridge.configure()` whenever `connections` changes, and that does run
+ * discovery. But that leaves the saved file and the poller in agreement only
+ * while a window is mounted and that one effect fires, and the MCP tools reach
+ * this module with no renderer at all. Closing the gap here costs twenty lines
+ * and removes the dependency on a `useEffect` in another process.
+ *
+ * Guarded on a real change rather than run on every save. `data:save` fires for
+ * anything in the file -- a window move, a tab close -- and rediscovery asks
+ * every provider what pipelines it has. Polling a CI account because somebody
+ * resized a pane would be a rate-limit budget spent on nothing.
+ */
+export function reloadAndReschedule(data?: unknown): void {
+  const before = JSON.stringify(connections)
+  reload(data)
+  if (JSON.stringify(connections) === before) return
+  // Schedule what is already known first, so an account that is merely being
+  // renamed does not stop being polled while discovery runs.
+  poller?.configure(connections, allTargets())
+  // Drop pipelines for connections that are gone, so `allTargets()` cannot keep
+  // scheduling a deleted account.
+  const live = new Set(connections.map((c) => c.id))
+  for (const id of [...pipelines.keys()]) if (!live.has(id)) pipelines.delete(id)
+  for (const id of [...discovery.keys()]) if (!live.has(id)) discovery.delete(id)
+  if (broadcast) void discover(broadcast)
 }
 
 /** The panel's Refresh button. Optional id narrows it to one connection. */

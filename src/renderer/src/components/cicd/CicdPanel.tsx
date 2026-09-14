@@ -89,6 +89,18 @@ export function CicdPanel({
     void bridge.configure().catch(() => undefined)
   }, [bridge, connections])
 
+  // Three different emptinesses the panel used to report with one sentence.
+  // `unread` has answered nothing; `barren` answered and showed no pipelines at
+  // all, which for Jenkins is what a credential that cannot see the jobs looks
+  // like -- an empty list, not an error.
+  const unread = connections.filter((c) => states.get(c.id)?.readAt === undefined).map((c) => c.name)
+  const barren = connections
+    .filter((c) => {
+      const st = states.get(c.id)
+      return st?.readAt !== undefined && st.pipelines.length === 0
+    })
+    .map((c) => c.name)
+
   const { rows, olderThanWindow, neverRun } = useMemo(
     () => rankRows(connections, states, seenAt, now),
     // `now` deliberately absent: the ranking must not resort itself every
@@ -267,13 +279,31 @@ export function CicdPanel({
           </div>
 
           {shown.length === 0 ? (
+            // "Every connected account answered" was printed whenever there were
+            // no rows -- including when an account had never been read, and when
+            // it had been read and showed no pipelines whatsoever. Claiming a
+            // successful empty read that never happened sent the reader to look
+            // at Jenkins, where the builds this panel said it had asked about
+            // were sitting in plain sight.
             <EmptyState
               compact
-              title={rows.length === 0 ? 'Nothing has run in the last 24 hours' : 'Nothing matched'}
+              title={
+                rows.length > 0
+                  ? 'Nothing matched'
+                  : unread.length > 0
+                    ? 'Not read yet'
+                    : barren.length > 0
+                      ? 'No pipelines to show'
+                      : 'Nothing has run in the last 24 hours'
+              }
               message={
-                rows.length === 0
-                  ? 'Every connected account answered, and none of its pipelines has produced a run inside the window.'
-                  : 'No run in the window matches that filter. Clear it to see the rest.'
+                rows.length > 0
+                  ? 'No run in the window matches that filter. Clear it to see the rest.'
+                  : unread.length > 0
+                    ? `${unread.join(', ')} ${unread.length === 1 ? 'has' : 'have'} not answered yet, so nothing below reflects ${unread.length === 1 ? 'it' : 'them'}. Press Refresh; if it stays unread, the account is not being polled.`
+                    : barren.length > 0
+                      ? `${barren.join(', ')} answered and listed no pipelines at all. That is what a credential with no access to the jobs looks like — the provider returns an empty list rather than refusing — so check what the token's account can see.`
+                      : 'Every connected account answered, and none of its pipelines has produced a run inside the window.'
               }
             />
           ) : (

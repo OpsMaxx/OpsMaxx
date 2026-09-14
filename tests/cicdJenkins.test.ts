@@ -474,3 +474,66 @@ describe('apiRoot', () => {
     expect(adapter(http).apiRoot(input)).toBe(expected)
   })
 })
+
+// ---------------------------------------------------------------------------
+
+describe('a Jenkins behind SSO', () => {
+  /**
+   * The failure that cost a whole afternoon. An instance running an SSO security
+   * realm answers a credential it will not take with 302 to the realm's login
+   * entry point -- NOT 401 -- because that is what it would do for a browser.
+   * Anonymous reads on the same instance returned 200, so the panel showed an
+   * empty page and the reader went looking for a fault in Jenkins.
+   *
+   * `Jenkins returned 302` is the status. These pin the cause.
+   */
+  const ssoRedirect = (): Reply => ({
+    status: 302,
+    headers: { location: '/api/securityRealm/commenceLogin' },
+    body: ''
+  })
+
+  it('says the token was not accepted, rather than naming the status', async () => {
+    const { http } = fake(() => ssoRedirect())
+    await expect(adapter(http).listPipelines()).rejects.toThrow(/did not accept the API token/i)
+  })
+
+  it('names SSO, because that is the thing to go and change', async () => {
+    const { http } = fake(() => ssoRedirect())
+    await expect(adapter(http).listPipelines()).rejects.toThrow(/SSO/)
+  })
+
+  it('recognises the realm by its Location, whatever the path in front of it', async () => {
+    for (const location of [
+      'https://ci.example.com/securityRealm/commenceLogin?from=%2Fapi%2Fjson',
+      '/login?from=%2F',
+      'https://sso.example.com/oauth2/authorize?client_id=jenkins',
+      'https://example.okta.com/app/saml/sso'
+    ]) {
+      const { http } = fake(() => ({ status: 302, headers: { location }, body: '' }))
+      await expect(adapter(http).listPipelines()).rejects.toThrow(/did not accept the API token/i)
+    }
+  })
+
+  it('does not cry SSO at a redirect that is only a redirect', async () => {
+    // A canonicalising redirect is a different and harmless thing, and saying
+    // "your SSO is misconfigured" at one would send the reader somewhere useless.
+    const { http } = fake(() => ({
+      status: 301,
+      headers: { location: 'https://ci.example.com/jenkins/api/json' },
+      body: ''
+    }))
+    const err = await adapter(http).listPipelines().catch((e: Error) => e)
+    expect((err as Error).message).toMatch(/redirected \(301\)/)
+    expect((err as Error).message).not.toMatch(/SSO/)
+    // Still explains why it stopped rather than following.
+    expect((err as Error).message).toMatch(/does not inherit the credential/)
+  })
+
+  it('leaves 403 saying what it always said', async () => {
+    // Jenkins answers 403 for three different things and the message refuses to
+    // guess which. The new branch must not have swallowed that.
+    const { http } = fake(() => ({ status: 403, body: '' }))
+    await expect(adapter(http).listPipelines()).rejects.toThrow(/403/)
+  })
+})
