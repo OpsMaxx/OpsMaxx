@@ -169,6 +169,30 @@ export interface HostMetrics {
   diskUsed: number
   diskTotal: number
   /**
+   * The denominator `diskPct` is a percentage OF. Zero when `df` said nothing,
+   * on the same "was this measured" convention as `diskTotal`.
+   *
+   * It is NOT `diskTotal`, and the gap between them is the whole reason this
+   * field exists. df's Capacity column is `used / (used + available)` -- it
+   * excludes the blocks ext4 reserves for root, because nobody can fill them --
+   * while `diskTotal` is the raw size df prints in its Size column. On a
+   * filesystem with the default 5% reservation the two denominators differ by
+   * about five percent of the disk, which is a week of headroom on anything
+   * filling fast enough to be worth forecasting.
+   *
+   * Both are worth keeping and neither substitutes for the other: `diskTotal`
+   * is what `df -h` prints and what a user checks us against, and this is what
+   * the percentage beside it actually means. Capacity trends forecasts on
+   * `diskUsed / diskCapacity`, so that a stored percentage and a forecast
+   * percentage are the same quantity -- the app disagreeing with itself about
+   * one disk is a bug this codebase has already had once, and the comment
+   * above `diskPct` in services/metrics.ts is the account of it.
+   *
+   * Constant in practice: reserved blocks do not change, so one reading is good
+   * for a whole history, which is why it is stored as a FACT and not a series.
+   */
+  diskCapacity: number
+  /**
    * Which filesystem the three figures above are for.
    *
    * Absent means `/`, which is what every POSIX collector measures and what the

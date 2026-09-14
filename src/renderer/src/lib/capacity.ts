@@ -72,24 +72,25 @@ export function shortDate(ts: number): string {
  * will never produce a forecast. Every branch here says what would change it.
  */
 /**
- * Where the breaks come from, said once.
+ * What to do about a window that is mostly one clump, said once.
  *
- * Every refusal above this line told the operator what was MISSING and none of
- * them said what produces it, which on this panel is the only question worth
- * answering: a run of samples breaks because OpsMaxx stopped collecting, and
- * OpsMaxx collects only while it is running. A laptop shut overnight is an
- * eleven-hour break, and eleven-hour breaks are why a host with three hundred
- * samples can still have no forecast — the fit runs on one unbroken run, not
- * on the total.
+ * THIS REPLACES A SENTENCE THAT WAS AN ACCUSATION. The old one was attached to
+ * every "not enough data" refusal and told the operator that quitting OpsMaxx
+ * broke the run, because the forecaster fitted one unbroken run and a laptop
+ * shut overnight severed it. That was true of the code and it was the code that
+ * was wrong: a disk keeps filling while the app is shut, so the reading after
+ * the gap is a real measurement and the gap is missing evidence, not a
+ * different machine. The forecaster now spans those gaps, so on
+ * 'too-few-points' and 'window-too-short' the advice is simply false — those
+ * hosts need time, not a settings change.
  *
- * "Only 8 samples; 12 are needed" is true and leaves a reader to conclude the
- * feature is broken, which is how it was reported. This is the sentence that
- * turns it into something to do.
+ * It survives here, on 'sparse' alone, because there it is still the only thing
+ * to do: a host sampled inside a single ten-hour stretch of a month has nothing
+ * spread through the month to fit, and running for longer is what fixes it.
  */
-const WHY_BREAKS =
-  'Samples are only collected while OpsMaxx is running with background checking on, so quitting it ' +
-  'breaks the run — leave it running (Settings can start it at login, in the background) and the ' +
-  'window fills on its own.'
+const WHY_SPARSE =
+  'Samples are collected while OpsMaxx is running with background checking on, so leaving it ' +
+  'running (Settings can start it at login, in the background) spreads them through the window.'
 
 export function refusalText(
   f: Forecast & { ok: false },
@@ -104,9 +105,19 @@ export function refusalText(
     case 'stale':
       return `No samples for ${span(Date.now() - f.to)}. Nothing to forecast from until this server reports again.`
     case 'too-few-points':
-      return `Only ${f.points} sample${f.points === 1 ? '' : 's'} since the last break in the data; ${FORECAST_MIN_POINTS} are needed over at least ${span(FORECAST_MIN_WINDOW_MS)}. ${WHY_BREAKS}`
+      // No longer "since the last break in the data": there is no last break
+      // any more, the fit spans them. This host simply needs time.
+      return `Only ${f.points} sample${f.points === 1 ? '' : 's'} so far; ${FORECAST_MIN_POINTS} are needed over at least ${span(FORECAST_MIN_WINDOW_MS)}.`
     case 'window-too-short':
-      return `Only ${held} of unbroken data. A rate needs at least ${span(FORECAST_MIN_WINDOW_MS)}, so that one backup or one build is not the whole trend. ${WHY_BREAKS}`
+      return `Only ${held} of data. A rate needs at least ${span(FORECAST_MIN_WINDOW_MS)}, so that one backup or one build is not the whole trend.`
+    case 'sparse': {
+      const c = f.coverage
+      const where =
+        c === undefined
+          ? 'too few parts of this window'
+          : `only ${c.occupied} of ${c.parts} parts of this window (the longest silence is ${span(c.longestGapMs)})`
+      return `Samples cover ${where}. A line through them would describe those hours rather than the window. ${WHY_SPARSE}`
+    }
     case 'already-past':
       return `Already at or over ${threshold}%. There is nothing left to predict.`
     case 'flat':
@@ -131,7 +142,12 @@ export function refusalText(
 export function forecastText(f: Forecast, metric: CapacityMetric, threshold: number): string {
   if (!f.ok) return refusalText(f, metric, threshold)
   const when = f.days < 1 ? 'within a day' : `in ${span(f.days * DAY_MS)}`
-  return `Reaches ${f.threshold}% ${when} — ${shortDate(f.at)} — from ${span(f.to - f.from)} of data.`
+  // The coverage clause joins the window clause as the second half that cannot
+  // be dropped: "from 21 days of data" reads as 21 days of watching, and on a
+  // desktop app it never is.
+  const covered =
+    f.coverage === undefined ? '' : ` (${f.coverage.occupied}/${f.coverage.parts} parts sampled)`
+  return `Reaches ${f.threshold}% ${when} — ${shortDate(f.at)} — from ${span(f.to - f.from)} of data${covered}.`
 }
 
 /** The rate, spelled out, so the reader can sanity-check the projection
@@ -171,6 +187,10 @@ export interface DrawnSegment {
    *  a run of single readings, which have no spread. */
   band: string
   gapBefore: number
+  /** Carried through from the report: the silence before this segment has a
+   *  known cause, and the label says which rather than implying the host went
+   *  quiet. See TrendSegment.gapKnown. */
+  gapKnown?: 'not-running'
   /** x of this segment's first point, for labelling the silence before it. */
   x0: number
 }
@@ -218,7 +238,14 @@ export function draw(trend: Trend, from: number, to: number, box: Box, threshold
             'Z'
           ].join(' ')
         : ''
-      return { res: s.res, line, band, gapBefore: s.gapBefore, x0: round(x(s.points[0].ts)) }
+      return {
+        res: s.res,
+        line,
+        band,
+        gapBefore: s.gapBefore,
+        ...(s.gapKnown ? { gapKnown: s.gapKnown } : {}),
+        x0: round(x(s.points[0].ts))
+      }
     })
 
   return {

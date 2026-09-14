@@ -4,6 +4,13 @@ import type { AutoStartSettings, AutoStartState } from '../shared/autostart'
 import type { UnitDraft, UserUnitsReading } from '../shared/userUnits'
 import type { BackupAlarm } from '../shared/backup'
 import type { HttpRequestSpec, HttpResult } from '../shared/httpClient'
+import type {
+  HttpSocketBridge,
+  WsEvent,
+  WsOpenResult,
+  WsOpenSpec,
+  WsSendResult
+} from '../shared/httpSocket'
 import type { CheckResult, HttpCheck } from '../shared/httpMonitor'
 import type {
   AgentRunReport,
@@ -470,6 +477,25 @@ const api = {
     /** Re-read a description a collection already points at. */
     readSpecFile: (path: string): Promise<string> => ipcRenderer.invoke('http:readSpecFile', path)
   },
+  /**
+   * WebSocket sessions, opened in main over the same three routes a request
+   * takes. The reason this is not `new WebSocket()` in the renderer: the
+   * browser cannot set handshake headers, cannot be handed a private CA, and
+   * cannot reach a service bound to a server's loopback.
+   */
+  httpSocket: {
+    open: (spec: WsOpenSpec): Promise<WsOpenResult> => ipcRenderer.invoke('ws:open', spec),
+    send: (id: string, data: string | ArrayBuffer): Promise<WsSendResult> =>
+      ipcRenderer.invoke('ws:send', id, data),
+    close: (id: string, code?: number, reason?: string): Promise<void> =>
+      ipcRenderer.invoke('ws:close', id, code, reason),
+    onEvent: (id: string, cb: (event: WsEvent) => void): (() => void) => {
+      const ch = `ws:event:${id}`
+      const h = (_e: IpcRendererEvent, event: WsEvent): void => cb(event)
+      ipcRenderer.on(ch, h)
+      return () => ipcRenderer.removeListener(ch, h)
+    }
+  } satisfies HttpSocketBridge,
   /**
    * Service checks, which run in main whether or not anything is displaying
    * them. The renderer owns the LIST (it is user configuration, persisted with

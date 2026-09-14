@@ -415,6 +415,21 @@ interface AppState {
   tunnels: Tunnel[]
   databases: DatabaseConn[]
   apiCollections: ApiCollection[]
+  /**
+   * The API client's own workspace: environments, cookies, tabs, and the
+   * documents as the user has edited them.
+   *
+   * Owned by the embedded client rather than by OpsMaxx, which is why it is
+   * held opaquely — the shape belongs to the library, and re-declaring it here
+   * would be a copy that drifts. `shared/apiWorkspaceSnapshot.ts` is the only
+   * thing that looks inside, and its job is to keep response bodies and typed
+   * credentials OUT of it before it ever reaches disk.
+   *
+   * `apiCollections` remains the identity list — which APIs exist, what they
+   * are called and how their requests are routed. This is what the user has
+   * done inside them.
+   */
+  apiWorkspace: unknown | null
   /** External service checks. See shared/httpMonitor.ts. */
   httpChecks: HttpCheck[]
   /**
@@ -664,6 +679,7 @@ interface AppState {
   updateApiCollection: (id: string, patch: Partial<Omit<ApiCollection, 'id' | 'workspaceId'>>) => void
   deleteApiCollection: (id: string) => void
   setActiveApiCollection: (id: string | null) => void
+  setApiWorkspace: (snapshot: unknown) => void
   setTunnelStatus: (id: string, status: Tunnel['status']) => void
   setVpnProfiles: (profiles: VpnProfile[]) => void
   upsertVpnProfile: (profile: VpnProfile) => void
@@ -694,6 +710,7 @@ interface AppState {
         | 'tunnels'
         | 'databases'
         | 'apiCollections'
+        | 'apiWorkspace'
         | 'httpChecks'
         | 'cicdConnections'
         | 'settings'
@@ -1043,6 +1060,7 @@ export const useApp = create<AppState>((set, get) => ({
   tunnels: [],
   databases: [],
   apiCollections: [],
+  apiWorkspace: null,
   httpChecks: [],
   cicdConnections: [],
 
@@ -2017,6 +2035,8 @@ export const useApp = create<AppState>((set, get) => ({
 
   setActiveApiCollection: (id) => set({ activeApiCollectionId: id }),
 
+  setApiWorkspace: (snapshot) => set({ apiWorkspace: snapshot }),
+
   // A live tunnel re-emits its status on every connection open and close, so
   // this is called constantly with a status that has not moved. Writing it
   // anyway would still allocate a fresh tunnel object, and anything selecting
@@ -2346,6 +2366,12 @@ export const useApp = create<AppState>((set, get) => ({
         viaServerId: c.viaServerId ?? null,
         insecureTls: c.insecureTls === true
       })),
+      // Absent in every save written before the client had a workspace of its
+      // own, and absent is not an error: the client rebuilds one from the
+      // collections above, which is exactly what an upgrade should do. Kept
+      // opaque — `shared/apiWorkspaceSnapshot.ts` is the only thing that
+      // validates or reads it.
+      apiWorkspace: data.apiWorkspace ?? s.apiWorkspace ?? null,
       // Saves written before this module have no key at all, which is not the
       // same as an empty list — `?? s.cicdConnections` keeps the distinction the
       // way the keys above it do. See normalizeCicd for what an older save, or

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useApp } from './store/app'
 import { clsx } from './lib/format'
 import { initPersistence } from './store/persist'
@@ -40,9 +40,21 @@ import { Toasts } from './components/common/Toasts'
 // The connections panel stays mounted whatever the active view is: unmounting
 // it would tear down every live terminal, so switching to Databases and back
 // would drop running processes. Other views are cheap and mount on demand.
+//
+// The HTTP client is the second exception, for the same reason wearing a
+// different hat. It holds an embedded API client with every collection loaded
+// and whatever the user has typed into a request — headers, a body, a URL
+// half-edited — none of which is saved anywhere until it is sent. Unmounting
+// on the way to Terminals and back threw all of it away, which is a large part
+// of why the client read as unusable.
 function MainArea(): React.JSX.Element {
   const activity = useApp((s) => s.activity)
   const onConnections = activity === 'connections'
+  const onHttp = activity === 'http'
+  // Not mounted until first visited: the API client is the largest thing in
+  // the renderer, and someone who never opens it should not pay to build it.
+  const httpVisited = useRef(false)
+  if (onHttp) httpVisited.current = true
 
   return (
     <>
@@ -57,7 +69,11 @@ function MainArea(): React.JSX.Element {
           holds the thing they set up yesterday — so TunnelsView keeps them
           behind a single icon and switches between them in place. */}
       {activity === 'tunnels' && <TunnelsView />}
-      {activity === 'http' && <HttpView />}
+      {httpVisited.current && (
+        <div className={clsx('main-host', !onHttp && 'hidden')} aria-hidden={!onHttp}>
+          <HttpView />
+        </div>
+      )}
       {activity === 'vault' && <VaultView />}
       {activity === 'ai' && <AiPanel />}
       {activity === 'settings' && <Settings />}

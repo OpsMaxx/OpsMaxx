@@ -2,10 +2,20 @@ import { useState } from 'react'
 import { Globe, Pencil, Plus, ServerCog, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { useApp, useWorkspaceApiCollections, useWorkspaceServers } from '../../store/app'
 import { clsx } from '../../lib/format'
-import { ApiClientPane } from './ApiClientPane'
-import { EndpointEditor } from './EndpointEditor'
-import { RequestPane } from './RequestPane'
+import { ScalarClient } from './ScalarClient'
+import { WsConsole } from './WsConsole'
+import { GraphQlConsole } from './GraphQlConsole'
 import type { ApiCollection } from '../../types'
+
+/**
+ * What the pane is being used for.
+ *
+ * Three protocols rather than three screens: they share the collection, its
+ * route and its certificate setting, and somebody testing an API moves between
+ * them constantly. Splitting them across activities would mean re-choosing the
+ * API and the route each time.
+ */
+type Mode = 'rest' | 'ws' | 'graphql'
 
 /**
  * The HTTP client.
@@ -26,58 +36,49 @@ export function HttpView(): React.JSX.Element {
 
   if (!active) return <EmptyState onAdd={() => setModal('add-api')} />
 
-  return (
-    <div className="main">
-      <HttpToolbar collectionId={active.id} />
-      {/* Keyed on the collection so switching one resets what is selected
-          and what was typed into it, rather than showing the previous
-          collection's request against this one's base URL. */}
-      <CollectionBody key={active.id} collection={active} />
-    </div>
-  )
+  return <HttpBody collections={collections} active={active} />
 }
 
-/**
- * Which client a collection gets.
- *
- * A collection with an imported description keeps the OpenAPI reader: it has
- * a real document, with schemas and examples this app does not attempt to
- * reproduce, and rendering that is what the reader is good at.
- *
- * A collection WITHOUT one gets the request pane. There is no document to
- * read — the reader was being handed a synthetic one built from the paths
- * below, and it showed them in its list and then refused to open any of them,
- * leaving "Select an operation to view details" with no Send button anywhere
- * on the screen. Writing requests is a smaller thing to own outright than a
- * document reader that has to be persuaded to act like a request builder.
- */
-function CollectionBody({ collection }: { collection: ApiCollection }): React.JSX.Element {
-  const endpoints = collection.endpoints ?? []
-  const [picked, setPicked] = useState<string | null>(null)
-
-  if (collection.specUrl || collection.specPath) {
-    return (
-      <ApiClientPane
-        key={`${collection.id}:${collection.specUrl ?? ''}:${collection.specPath ?? ''}`}
-        collection={collection}
-      />
-    )
-  }
-
-  // The first one, until something else is picked: a collection with paths in
-  // it should open on one, and one that has none opens on a blank request
-  // rather than on nothing at all.
-  const selected = endpoints.find((e) => e.id === picked) ?? endpoints[0] ?? null
+function HttpBody({
+  collections,
+  active
+}: {
+  collections: readonly ApiCollection[]
+  active: ApiCollection
+}): React.JSX.Element {
+  const [mode, setMode] = useState<Mode>('rest')
 
   return (
-    <>
-      <EndpointEditor
-        collection={collection}
-        selectedId={selected?.id ?? null}
-        onSelect={setPicked}
-      />
-      <RequestPane collection={collection} endpoint={selected} />
-    </>
+    <div className="main">
+      <HttpToolbar collectionId={active.id} mode={mode} onMode={setMode} />
+      {/*
+        All three stay MOUNTED, and the inactive ones are hidden rather than
+        removed.
+
+        The REST client is the expensive one — an embedded API client holding
+        every collection — but the argument is the same for all three: none of
+        what is typed into them is saved anywhere until it is sent, and a live
+        WebSocket does not survive being unmounted at all. Switching protocol
+        to check something and coming back has to return you to what you were
+        doing.
+
+        Deliberately not keyed on the collection either. It used to be, which
+        is exactly how a half-written request disappeared when somebody
+        switched API.
+      */}
+      <div className={clsx('http-mode', mode !== 'rest' && 'hidden')} aria-hidden={mode !== 'rest'}>
+        <ScalarClient collections={collections} activeId={active.id} />
+      </div>
+      <div className={clsx('http-mode', mode !== 'ws' && 'hidden')} aria-hidden={mode !== 'ws'}>
+        <WsConsole collection={active} />
+      </div>
+      <div
+        className={clsx('http-mode', mode !== 'graphql' && 'hidden')}
+        aria-hidden={mode !== 'graphql'}
+      >
+        <GraphQlConsole collection={active} />
+      </div>
+    </div>
   )
 }
 
@@ -96,7 +97,15 @@ function CollectionBody({ collection }: { collection: ApiCollection }): React.JS
  * change `viaServerId` and `insecureTls`; the name, the base URL and the spec
  * were fixed at creation, so a typo meant deleting the API and retyping it.
  */
-function HttpToolbar({ collectionId }: { collectionId: string }): React.JSX.Element {
+function HttpToolbar({
+  collectionId,
+  mode,
+  onMode
+}: {
+  collectionId: string
+  mode: Mode
+  onMode: (mode: Mode) => void
+}): React.JSX.Element {
   const collections = useWorkspaceApiCollections()
   const servers = useWorkspaceServers()
   const update = useApp((s) => s.updateApiCollection)
@@ -193,6 +202,25 @@ function HttpToolbar({ collectionId }: { collectionId: string }): React.JSX.Elem
           Hostnames resolve on {viaServer.name}, so <code>localhost</code> is its own loopback.
         </span>
       )}
+
+      <div className="segment http-modes">
+        {(
+          [
+            ['rest', 'REST'],
+            ['ws', 'WebSocket'],
+            ['graphql', 'GraphQL']
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            className={clsx('seg-btn', mode === id && 'active')}
+            aria-pressed={mode === id}
+            onClick={() => onMode(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       <div className="spacer" />
 

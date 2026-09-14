@@ -143,7 +143,7 @@ export interface HistoryWriter {
 }
 
 /**
- * The eight numeric series worth keeping per sample.
+ * The nine numeric series worth keeping per sample.
  *
  * Everything else on HostMetrics is a fact — see metricsToFacts. memTotal,
  * diskTotal, cores and kernel do not change between sweeps, and storing them as
@@ -161,12 +161,34 @@ export function metricsToSamples(host: HostMetrics): Record<string, number> {
     // no inode figures at all -- btrfs and zfs among them -- answers `df -i`
     // with dashes, and a zero would draw those hosts as having none left.
     ...(host.inodePct === null ? {} : { inodePct: host.inodePct }),
-    memUsed: host.memUsed,
+    // memUsed and diskUsed are BYTES, and they carried no guard at all until
+    // the capacity forecaster started fitting them.
+    //
+    // The reason they were missed is that the reason to guard them is not
+    // visible from their own types. Both are `number` rather than `number |
+    // null`, so there is no null to test for -- and a probe that failed does
+    // not leave them absent, it leaves them ZERO. parseDf on a listing it
+    // could not read returns `{ diskPct: null, diskUsed: 0, diskTotal: 0 }`,
+    // so the neighbour above is correctly omitted while the byte series
+    // quietly records a root filesystem with nothing on it.
+    //
+    // One zero is worse here than in any percentage series next to it. A
+    // percentage that drops to 0 for one sweep is a visible glitch on a chart;
+    // a byte series that drops from 30 GiB to 0 and back is a fit through an
+    // enormous fall and an enormous rise, which is precisely the shape the
+    // step-change rule was written to catch -- so the forecast is not merely
+    // wrong, it is REFUSED, and the host reports "something was written at
+    // once" about a probe that failed.
+    //
+    // The totals are the test rather than the values, because zero used bytes
+    // is a real reading on a fresh tmpfs and zero TOTAL bytes is not a
+    // filesystem at all.
+    ...(host.memTotal > 0 ? { memUsed: host.memUsed } : {}),
     // Same guard as cpu and inodePct, and it matters as much: a stored 0
     // becomes a point on the capacity trend, and a forecast drawn through
     // failed probes slopes towards an emptying disk.
     ...(host.diskPct === null ? {} : { diskPct: host.diskPct }),
-    diskUsed: host.diskUsed,
+    ...(host.diskTotal > 0 ? { diskUsed: host.diskUsed } : {}),
     netRx: host.netRx,
     netTx: host.netTx,
     uptime: host.uptime
@@ -194,7 +216,13 @@ export function metricsToFacts(host: HostMetrics): Record<string, string> {
     kernel: host.kernel,
     cores: String(host.cores),
     memTotal: String(host.memTotal),
-    diskTotal: String(host.diskTotal)
+    diskTotal: String(host.diskTotal),
+    // What diskPct is a percentage OF -- see HostMetrics.diskCapacity. A fact
+    // rather than a series because a filesystem's reserved blocks are fixed at
+    // format time: one reading of it is good for the whole history, and the
+    // capacity forecast needs it to convert a byte series into the same
+    // percentage the panel shows.
+    diskCapacity: String(host.diskCapacity)
   }
   if (host.listenerSource) facts.listenerSource = host.listenerSource
   // null is not empty. A host with no systemd reports null and must not have

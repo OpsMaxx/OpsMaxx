@@ -165,3 +165,24 @@ export interface FleetSamplerStatus {
 export const FLEET_INTERVAL_DEFAULT_MS = 120_000
 export const FLEET_INTERVAL_MIN_MS = 30_000
 export const FLEET_INTERVAL_MAX_MS = 3_600_000
+
+/**
+ * The history event kind meaning "sampling started again after being stopped".
+ *
+ * Estate-wide, so it is written with a null host, beside `service-down` and
+ * `service-recovered` which are null-host for the same reason.
+ *
+ * IT IS RECORDED ON THE WAY BACK UP, NOT ON THE WAY DOWN, and that is the
+ * whole reason it works. A "sampling stopped" event would have to be written
+ * before quit, and the two ways this actually stops -- the app being killed,
+ * and the machine losing power -- write nothing at all. Every gap has a far
+ * end, so marking the far end catches all of them.
+ *
+ * What it buys is a distinction the panel could not previously draw: a hole in
+ * a line because a server went quiet, and a hole because OpsMaxx was not
+ * running, are different facts and only one of them is about the server. Two
+ * rows per launch and per wake, in a table that already holds alerts for four
+ * hundred days -- which is why an event is the right carrier and a series
+ * would not have been.
+ */
+export const SAMPLING_RESUMED = 'sampling-resumed'

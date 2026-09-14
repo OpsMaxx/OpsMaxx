@@ -1,8 +1,12 @@
 import { describe, it, expect } from 'vitest'
+import { forecastBytes } from '../src/shared/bytesForecast'
 import {
   CAPACITY_METRICS,
   CAPACITY_THRESHOLDS,
+  FORECAST_FLAT_RISE_PCT,
   FORECAST_MIN_POINTS,
+  diskBytesPolicy,
+  diskCeilingBytes,
   buildCapacityReport,
   downsample,
   forecast,
@@ -96,20 +100,103 @@ describe('a gap is not a flat line', () => {
     expect(runs(both).map((r) => r.length)).toEqual([73, 13])
   })
 
-  it('forecasts from the latest run only, never across the silence', () => {
+  it('fits a LEVEL across the silence, because a disk fills while nobody watches', () => {
     // Three days climbing 40 -> 68.8, then two days unreachable, then half a
-    // day flat at 80. Fitting the whole array gives a steep rise that nothing
-    // observed: the climb ended before the outage and the 40 -> 80 step across
-    // it is an artefact of the host being absent, not a measurement.
+    // day at 80.
+    //
+    // THIS TEST USED TO ASSERT THE OPPOSITE, and the comment explaining why was
+    // the clearest statement of the bug: it called the rise across the outage
+    // "an artefact of the host being absent, not a measurement". Read the
+    // numbers. The disk was at 68.8 when the samples stopped and at 80 when
+    // they resumed; it really did gain eleven points, at 5.6 a day, which is
+    // the same climb as the three days before it. Nothing was invented by the
+    // absence. What the absence costs is knowledge of the RATE inside it, not
+    // of the change across it -- and that is what the coverage gate and the
+    // bounded step rule are for.
+    //
+    // The old behaviour fitted the twelve hours after the outage, found them
+    // flat, and reported 'flat' about a disk that had climbed forty points in
+    // five days. That is the failure this whole file was rewritten for.
     const before = points(T0 - 2 * DAY - 12 * HOUR, 73, HOUR, 'hourly', (i) => 40 + i * 0.4)
     const after = points(T0, 13, HOUR, 'hourly', () => 80)
     const f = forecast([...before, ...after], 90, T0)
-    expect(f.ok).toBe(false)
-    // Flat, because the run it is entitled to use is flat.
-    expect(f.ok === false && f.reason).toBe('flat')
-    // Drawn from the twelve hours after the outage, not the five days on disk.
-    expect(f.from).toBe(T0 - 12 * HOUR)
+    expect(f.ok).toBe(true)
+    // The whole series, not the last run: 86 points over five and a half days.
+    expect(f.from).toBe(T0 - 5 * DAY - 12 * HOUR)
     expect(f.to).toBe(T0)
+    expect(f.points).toBe(86)
+    // And the sentence carries how much of that window was actually looked at,
+    // because "from 5.5 days of data" would otherwise read as 5.5 days of
+    // watching, which it is not.
+    expect(f.ok === true && f.coverage).toEqual({
+      parts: 10,
+      occupied: 7,
+      longestGapMs: 2 * DAY
+    })
+  })
+
+  it('does not call ordinary growth across a gap a step change', () => {
+    // THE TRAP THAT WOULD HAVE MADE THE WHOLE CHANGE POINTLESS. Once a level is
+    // fitted across gaps, everything that accumulated while the laptop was shut
+    // arrives as one interval. Unbounded, the step rule sees that single pair
+    // carrying most of the fitted rise and refuses -- so every host would have
+    // gone on refusing, with 'step-change' printed where 'flat' used to be.
+    //
+    // A steady half a point an hour, sampled for six hours a day for six days.
+    // Every overnight gap carries nine points of perfectly ordinary growth.
+    const days: TrendPoint[] = []
+    for (let d = 5; d >= 0; d--) {
+      const end = T0 - d * DAY
+      for (const p of points(end, 7, HOUR, 'hourly', (i) => 40 + (5 - d) * 6 + i * 0.5)) {
+        days.push(p)
+      }
+    }
+    const f = forecast(days, 90, T0)
+    expect(f.ok === false && f.reason).not.toBe('step-change')
+    expect(f.ok).toBe(true)
+  })
+
+  it('still refuses a step BETWEEN CONSECUTIVE SAMPLES, which is an event', () => {
+    // The bound is on time, not on gaps as such: minutes apart, a jump is still
+    // somebody untarring a release, and that is what the rule was written for.
+    const flat = points(T0 - 12 * HOUR, 73, 10 * MIN, 'full', () => 50)
+    const jumped = points(T0, 73, 10 * MIN, 'full', () => 68)
+    const f = forecast([...flat, ...jumped], 90, T0)
+    expect(f.ok === false && f.reason).toBe('step-change')
+  })
+
+  it('refuses a clump that cannot stand on its own, and says so as sparse', () => {
+    // A month of history, all of it in one short burst an hour ago plus a
+    // handful of readings thirty days back.
+    //
+    // NOTE WHAT DOES **NOT** HAPPEN HERE, because it is the more common case
+    // and it is deliberately not a refusal: when the recent burst is itself
+    // long enough to fit -- six hours or more -- it is fitted, and the answer
+    // states that six-hour window. That is honest and it is what the old code
+    // did. 'sparse' is the narrower case where neither view works: the long one
+    // is two clumps with nothing in between, and the recent one is too short to
+    // stand alone. Refusing then is right, and saying "only 8 samples" about a
+    // host with three hundred -- which is what this used to say -- was not.
+    const clump = points(T0, 300, MIN, 'full', (i) => 50 + i * 0.001)
+    const ancient = points(T0 - 30 * DAY, 20, 2 * MIN, 'full', () => 49)
+    const f = forecast([...ancient, ...clump], 90, T0)
+    expect(f.ok).toBe(false)
+    expect(f.ok === false && f.reason).toBe('sparse')
+    // The refusal is about the WHOLE window, not about the clump -- reporting
+    // five hours here would hide the very thing being refused.
+    expect(f.from).toBe(T0 - 30 * DAY - 38 * MIN)
+    expect(f.points).toBe(320)
+    expect(f.ok === false && f.coverage?.occupied).toBeLessThan(5)
+  })
+
+  it('keeps last-run-only for a RATE, where the silence really is unknowable', () => {
+    // A CPU has no memory of the hours nobody watched. Same data as the level
+    // case above; opposite answer, and both are right.
+    const before = points(T0 - 2 * DAY - 12 * HOUR, 73, HOUR, 'hourly', (i) => 40 + i * 0.4)
+    const after = points(T0, 13, HOUR, 'hourly', () => 80)
+    const f = forecast([...before, ...after], 90, T0, 'rate')
+    expect(f.ok).toBe(false)
+    expect(f.ok === false && f.reason).toBe('flat')
     expect(f.points).toBe(13)
   })
 
@@ -406,5 +493,105 @@ describe('the report main hands the panel', () => {
     expect(r.trends.map((t) => t.read)).toEqual([0, 0, 0, 0])
     expect(r.trends[2].latest).toBeNull()
     expect(r.trends[2].forecast).toEqual({ ok: false, reason: 'no-data', from: 0, to: 0, points: 0 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The disk, in bytes -- the question this feature is named for and could not
+// answer.
+// ---------------------------------------------------------------------------
+
+describe('a disk whose stored percentage is too coarse to forecast', () => {
+  // The live host that prompted the change: 193 GiB root, 30.3 GiB used, df
+  // reporting a flat `16`. One percentage point is about two gigabytes there,
+  // so a disk gaining a gigabyte a week does not move the stored series for a
+  // fortnight and then moves it a whole point.
+  const GIB = 1024 ** 3
+  const TOTAL = 193 * GIB
+  // What df's Capacity column is a percentage OF: total less the blocks ext4
+  // reserves for root.
+  const USABLE = Math.round(TOTAL * 0.95)
+  // Nearly full and creeping up: 88% of usable, gaining a tenth of a point a
+  // day. This is the case the feature exists for and the one quantisation
+  // destroys most completely -- see the two tests below.
+  const START = 0.88 * USABLE
+  const PER_DAY = 0.001 * USABLE
+
+  /** Fourteen days of hourly readings, growing steadily. */
+  const used = Array.from({ length: 14 * 24 }, (_, i) => ({
+    ts: T0 - (14 * 24 - 1 - i) * HOUR,
+    v: START + (PER_DAY * i) / 24
+  }))
+
+  it('is refused outright when asked in whole percentage points', () => {
+    // THE BUG, STATED AS A TEST. The same disk, through the stored integer
+    // series: a fortnight of real, steady growth becomes a staircase of one-
+    // point steps, and a staircase is refused whichever way it falls. Slowly
+    // enough and the rise never clears the flat rule; fast enough and each
+    // single step is most of the whole rise, which is the definition of the
+    // step rule. A disk creeping towards full sits exactly where both apply,
+    // and it is the disk anybody actually wants forecast.
+    //
+    // Here it is 'step-change': one stored point is roughly two gigabytes, and
+    // against a total rise of 1.4 points a single step of 1 is well over the
+    // 0.6 share. Nothing about the disk is a step -- it gained a steady tenth
+    // of a point a day for fourteen days.
+    const asPct = used.map((p) => ({
+      ts: p.ts,
+      v: Math.round((p.v / USABLE) * 100),
+      res: 'full' as const
+    }))
+    const f = forecast(asPct, 90, T0)
+    expect(f.ok).toBe(false)
+    expect(f.ok === false && f.reason).toBe('step-change')
+  })
+
+  it('answers in bytes, from the series that was being sampled all along', () => {
+    const r = forecastBytes(used, diskCeilingBytes(USABLE), T0, diskBytesPolicy(USABLE))
+    expect(r.refusal).toBeNull()
+    expect(r.perDay).not.toBeNull()
+    // The real rate, recovered to within a percent of itself.
+    expect(Math.abs((r.perDay ?? 0) - PER_DAY) / PER_DAY).toBeLessThan(0.01)
+    // And a date. The series has already run fourteen of the twenty days from
+    // 88%, so what is left is six.
+    expect(r.days).not.toBeNull()
+    expect(Math.round(r.days ?? 0)).toBe(6)
+  })
+
+  it('measures against what df calls capacity, not the raw size', () => {
+    // Four and a half points of disk between the two denominators -- about nine
+    // gigabytes here, which is weeks at this rate. Forecasting against the raw
+    // total would put the crossing later than the percentage row beside it says,
+    // and two lines of one panel would disagree about one disk.
+    const onUsable = diskCeilingBytes(USABLE) ?? 0
+    const onTotal = diskCeilingBytes(TOTAL) ?? 0
+    expect(onTotal - onUsable).toBeGreaterThan(8 * GIB)
+    expect(onUsable).toBe(0.9 * USABLE)
+  })
+
+  it('takes its flat rule from the percentage row, not from the database one', () => {
+    // bytesForecast's own flat rule is 2% of how big the thing already is,
+    // which is right for a database and meaningless for a disk with a real
+    // ceiling. Half a percentage point of the filesystem is what "flat" means
+    // on the row above, so it is what it means here.
+    expect(diskBytesPolicy(USABLE).flatRiseBytes).toBe((FORECAST_FLAT_RISE_PCT / 100) * USABLE)
+  })
+
+  it('refuses a disk that has been silent for two days, as the percentage row does', () => {
+    // Left on bytesForecast's own 14-day staleness, the byte line would forecast
+    // a disk that had been quiet for a week while the line directly above it
+    // said `stale`.
+    const old = used.map((p) => ({ ...p, ts: p.ts - 2 * DAY }))
+    const r = forecastBytes(old, diskCeilingBytes(USABLE), T0, diskBytesPolicy(USABLE))
+    expect(r.refusal).toBe('stale')
+  })
+
+  it('keeps the rate when nothing said how big is too big', () => {
+    // A host whose diskCapacity fact has not been collected yet. The date is
+    // refused and "+1.4 GiB a day" survives, because that is the half somebody
+    // acts on.
+    const r = forecastBytes(used, null, T0, diskBytesPolicy(0))
+    expect(r.refusal).toBe('no-ceiling')
+    expect(r.perDay).not.toBeNull()
   })
 })

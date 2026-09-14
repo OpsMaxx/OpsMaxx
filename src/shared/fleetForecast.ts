@@ -23,7 +23,8 @@
 // with the list, because "3 of 14 hosts could be forecast" is the honest
 // headline and "2 hosts fill within a week" on its own is not.
 
-import type { CapacityMetric, Forecast, RefusalReason } from './capacity'
+import type { CapacityMetric, CapacityReport, Forecast, RefusalReason, Trend } from './capacity'
+import { formatBytes } from './bytesForecast'
 
 export interface FleetForecastInput {
   hostId: string
@@ -83,7 +84,9 @@ export const FORECAST_REFUSAL_WORDS: Record<RefusalReason, string> = {
   falling: 'it is going down',
   noisy: 'the readings scatter too far from any line to extrapolate',
   'step-change': 'the rise is one jump rather than a trend, so something was added at once',
-  'beyond-horizon': 'the rate is real but the crossing is beyond the horizon this will predict'
+  'beyond-horizon': 'the rate is real but the crossing is beyond the horizon this will predict',
+  sparse:
+    'the samples sit in too few parts of the window to describe it, so a line through them would be about those hours instead'
 }
 
 /**
@@ -204,4 +207,128 @@ export function forecastHeadline(
     return `Soonest: ${soonest.hostName} in ${soonest.days} day(s); ${of}.`
   }
   return `Nothing is forecast to cross a threshold; ${of}.`
+}
+
+
+// ---------------------------------------------------------------------------
+// The digest -- one host's report as sentences, for an agent.
+// ---------------------------------------------------------------------------
+//
+// It lives in this file rather than a new one because this file is already
+// "the forecast in the operator's words": FORECAST_REFUSAL_WORDS and
+// METRIC_WORD are here, and a second home for those sentences would be a
+// second place for them to drift from what the panel says.
+//
+// WHAT IT REPLACES. `get_capacity_trends` used to return the whole
+// CapacityReport as pretty-printed JSON. Measured against a real host over a
+// thirty-day window that was about ten kilobytes: five hundred chart points
+// across four metrics, and every conclusion in it the single word "flat". An
+// agent then has to reduce that to a sentence -- doing, differently and worse,
+// arithmetic this code has already done -- and the chart points it paid for
+// exist to be drawn, which an agent cannot do. The renderer keeps the full
+// report on its own channel, where the points are the point.
+
+const DAY = 86_400_000
+const HOUR = 3_600_000
+
+/** A span in the coarsest unit that does not overstate it. The renderer has its
+ *  own richer version; this one exists so the digest needs no renderer code. */
+function plainSpan(ms: number): string {
+  const abs = Math.abs(ms)
+  if (abs < 2 * DAY) {
+    const h = Math.max(1, Math.round(abs / HOUR))
+    return `${h} hour${h === 1 ? '' : 's'}`
+  }
+  const d = Math.round(abs / DAY)
+  return `${d} day${d === 1 ? '' : 's'}`
+}
+
+function pct(n: number): string {
+  return `${Math.round(n * 10) / 10}%`
+}
+
+/** The coverage clause, which never appears without a number it qualifies. */
+function coverageClause(f: Forecast): string {
+  const c = f.coverage
+  if (c === undefined) return ''
+  return `, ${c.occupied} of ${c.parts} parts of it sampled`
+}
+
+/**
+ * One metric's line.
+ *
+ * Every branch either states a rate or names a refusal, and a stated rate never
+ * appears without the window it was drawn from -- the same rule the panel is
+ * held to, for the same reason: "fills in 11 days" is not an honest sentence
+ * and "fills in 11 days, from 21 days of data" is.
+ */
+function trendLine(t: Trend): string {
+  // METRIC_WORD is written for mid-sentence use in the fleet rows next door
+  // ("web-01: disk reaches 90%..."). Here each metric starts its own line, so
+  // it starts with a capital -- the words themselves stay in one place.
+  const word = METRIC_WORD[t.metric]
+  const what = word.charAt(0).toUpperCase() + word.slice(1)
+  const now = t.latest === null ? null : pct(t.latest.v)
+  const head = now === null ? `${what}: no samples in this window.` : `${what}: ${now} now`
+
+  if (t.latest === null) return head
+
+  // cpu. It has no threshold and never will: a CPU at 100% is busy, not full.
+  // Saying nothing at all -- which is what `forecast: null` rendered as -- left
+  // an agent to decide for itself whether that was an error.
+  if (t.forecast === null) {
+    const range =
+      t.low === null || t.high === null ? '' : `, ${pct(t.low)}-${pct(t.high)} across the window`
+    return `${head}${range}. No forecast: a CPU does not fill up.`
+  }
+
+  const f = t.forecast
+  // `?? null` rather than a bare read: this is the MCP path, and a Trend that
+  // reached it without the field -- an older report shape, a caller that built
+  // one by hand -- must produce a sentence without the byte half, not a
+  // TypeError where the agent expected an answer.
+  const bytes = t.bytes ?? null
+  // The byte answer leads for disk when there is one, because it is the precise
+  // one -- the percentage it sits beside is df's rounded integer.
+  const size =
+    bytes !== null && bytes.latest !== null ? ` (${formatBytes(bytes.latest)} used)` : ''
+
+  if (f.ok) {
+    const rate = `${f.perDay > 0 ? '+' : ''}${Math.round(f.perDay * 100) / 100} points a day`
+    return (
+      `${head}${size}, ${rate}. Reaches ${f.threshold}% in ${Math.floor(f.days)} day(s), ` +
+      `${f.confidence} confidence, from ${plainSpan(f.to - f.from)} of data${coverageClause(f)}.`
+    )
+  }
+
+  // A refusal that still has a rate is the useful half kept: "no crossing date,
+  // but it is growing 180 MiB a day" is something to act on, and withholding it
+  // because the percentage row could not name a date would be withholding it
+  // for the wrong reason.
+  const kept =
+    bytes !== null && bytes.perDay !== null
+      ? ` It is still growing ${formatBytes(bytes.perDay)} a day over ${plainSpan(bytes.to - bytes.from)}.`
+      : ''
+  return `${head}${size}. No forecast: ${FORECAST_REFUSAL_WORDS[f.reason]}.${kept}`
+}
+
+/**
+ * The whole answer for one host, in sentences.
+ *
+ * `hostName` is the friendly name the caller already resolved; this file never
+ * sees a hostname or an address.
+ */
+export function capacityDigest(report: CapacityReport, hostName: string): string {
+  const window = plainSpan(report.to - report.from)
+  const read = report.trends.reduce((n, t) => Math.max(n, t.read), 0)
+  if (read === 0) {
+    return (
+      `${hostName}: nothing has been recorded in the last ${window}, so there is nothing to ` +
+      `forecast. This does not mean the server has spare capacity. Samples are collected while ` +
+      `OpsMaxx is running with background checking on, and kept for ${report.retainedDays} days.`
+    )
+  }
+  return [`${hostName} - capacity over the last ${window}.`, ...report.trends.map(trendLine)].join(
+    '\n'
+  )
 }
