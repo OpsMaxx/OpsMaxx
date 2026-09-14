@@ -12,7 +12,11 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { CloudError, type CloudProvider } from '../src/shared/cloud'
-import { detectProvider, resetCloudBinaryCache } from '../src/main/services/cloud/binaries'
+import {
+  checkExecutable,
+  detectProvider,
+  resetCloudBinaryCache
+} from '../src/main/services/cloud/binaries'
 import { cloudExec, cloudExecOrThrow } from '../src/main/services/cloud/cloudExec'
 
 const FAKE = fileURLToPath(new URL('./fixtures/fake-cloud-cli.mjs', import.meta.url))
@@ -26,6 +30,7 @@ const TREE_ROOT = fileURLToPath(new URL('./.tmp-cloudexec', import.meta.url))
 
 let dir = ''
 let argvLog = ''
+let realPath = ''
 
 // The fake CLI is a /bin/sh shim, so this suite is POSIX-only. CI runs the
 // full suite on ubuntu, and the Windows job runs a different, narrower set --
@@ -34,7 +39,6 @@ let argvLog = ''
 // the code under test. Skipped loudly rather than silently.
 const POSIX_ONLY = process.platform !== 'win32'
 if (!POSIX_ONLY) {
-  // eslint-disable-next-line no-console
   console.warn(
     'SKIPPING cloudExec tests on Windows: the CLI fixture is a /bin/sh shim. ' +
       'Detection and the argv guards are covered on POSIX in CI.'
@@ -60,6 +64,7 @@ beforeEach(() => {
   installFake('gcloud', 'gcp')
   installFake('aws', 'aws')
   installFake('az', 'azure')
+  realPath = process.env.PATH ?? ''
   process.env.OPSMAXX_CLOUD_BIN_DIR = dir
   process.env.FAKE_CLOUD_ARGV_LOG = argvLog
   process.env.FAKE_CLOUD_MODE = 'ok'
@@ -69,6 +74,9 @@ beforeEach(() => {
 
 afterEach(() => {
   if (!POSIX_ONLY) return
+  // Restored, not left mutated: a test that rewrites PATH and walks away
+  // changes the environment every later test in this worker runs in.
+  process.env.PATH = realPath
   delete process.env.OPSMAXX_CLOUD_BIN_DIR
   delete process.env.FAKE_CLOUD_ARGV_LOG
   delete process.env.FAKE_CLOUD_MODE
@@ -112,26 +120,36 @@ describe.skipIf(!POSIX_ONLY)('detecting a provider CLI', () => {
     if (!got.installed) expect(got.error).toBeTruthy()
   })
 
+  // The rules below are asserted against checkExecutable directly rather than
+  // through detectProvider. Planting a bad candidate and asserting "nothing was
+  // found" only holds on a machine with no real CLI installed: it passed on a
+  // laptop without gcloud and failed on a CI runner that ships the Google Cloud
+  // SDK, because detection correctly rejected the fixture and then correctly
+  // found the real one. The rule is what this file is about; what else happens
+  // to be on the machine is not.
+  it('accepts an ordinary executable', async () => {
+    expect(await checkExecutable(join(dir, 'gcloud'))).toBe(null)
+  })
+
   it('refuses a binary that is not executable', async () => {
     chmodSync(join(dir, 'gcloud'), 0o644)
-    resetCloudBinaryCache()
-    process.env.PATH = dir
-    const got = await detectProvider('gcp')
-    expect(got.installed).toBe(false)
-    expect(got.error).toMatch(/not executable/)
+    expect(await checkExecutable(join(dir, 'gcloud'))).toMatch(/not executable/)
   })
 
   it('refuses a binary under a world-writable directory', async () => {
     // Anyone who can write the directory can replace what is in it, which is
     // the substitution attack the check exists for.
-    if (process.platform === 'win32') return
     chmodSync(dir, 0o777)
-    resetCloudBinaryCache()
-    process.env.PATH = dir
-    const got = await detectProvider('gcp')
-    expect(got.installed).toBe(false)
-    expect(got.error).toMatch(/world-writable/)
-    chmodSync(dir, 0o755)
+    try {
+      expect(await checkExecutable(join(dir, 'gcloud'))).toMatch(/world-writable/)
+    } finally {
+      chmodSync(dir, 0o755)
+    }
+  })
+
+  it('refuses a relative path and one that is not there', async () => {
+    expect(await checkExecutable('gcloud')).toMatch(/relative path/)
+    expect(await checkExecutable(join(dir, 'nope'))).toMatch(/does not exist/)
   })
 })
 
@@ -190,16 +208,7 @@ describe.skipIf(!POSIX_ONLY)('running a provider command', () => {
     }
   })
 
-  it('throws cli-not-installed rather than spawning nothing', async () => {
-    process.env.OPSMAXX_CLOUD_BIN_DIR = join(dir, 'nowhere')
-    process.env.PATH = join(dir, 'nowhere')
-    resetCloudBinaryCache()
-    try {
-      await cloudExec('gcp', ['compute', 'instances', 'list'])
-      throw new Error('expected a throw')
-    } catch (e) {
-      expect(e).toBeInstanceOf(CloudError)
-      expect((e as CloudError).fault).toBe('cli-not-installed')
-    }
-  })
+  // The absent-CLI case lives in cloudExecMissingCli.test.ts, where detection
+  // is stubbed: it cannot be asserted here without assuming the machine has no
+  // gcloud, which CI runners do have.
 })

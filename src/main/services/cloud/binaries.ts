@@ -118,8 +118,15 @@ function expandHome(p: string): string {
  * the shape of vpn/binaries.ts's own check deliberately, minus the allowlisted
  * roots (see the header) and minus the manifest hash (there is nothing to
  * compare against for a tool we did not build).
+ *
+ * Exported so the rules can be tested on a file the test made, rather than
+ * through `detectProvider`, whose answer also depends on what happens to be
+ * installed on the machine running the test. Asserting "nothing was found"
+ * after planting a bad candidate only holds where no real CLI exists - it
+ * passed on a laptop with no gcloud and failed on a CI runner that ships the
+ * Google Cloud SDK, which is the test being wrong rather than the code.
  */
-async function checkExecutable(candidate: string): Promise<string | null> {
+export async function checkExecutable(candidate: string): Promise<string | null> {
   if (!isAbsolute(candidate)) {
     return 'is a relative path, which depends on the working directory.'
   }
