@@ -376,12 +376,60 @@ describe('update_server', () => {
     }
   })
 
-  it('asks again for a second change in the same session', async () => {
+  // One yes covers the connection it was given about, and stops there.
+  //
+  // This used to ask again for every field. An agent walking a server through
+  // two edits -- set the host, then set the jump chain -- put two identical
+  // cards in front of an operator who had answered the first one seconds
+  // earlier, which is the exact shape that teaches someone to click through a
+  // dialog without reading it. The three tests below pin the edges of the
+  // narrower grant: same server yes, other server no, other tool no.
+  it('does not ask again for a second change to the same server in one session', async () => {
     const a = autoRespond('approved')
     const c = await clientFor('grp-full')
     try {
       await call(c, 'update_server', { serverName: 'Scanner01', port: 2201 })
       await call(c, 'update_server', { serverName: 'Scanner01', port: 2202 })
+      expect(a.count()).toBe(1)
+      // And the carried one says so, because the audit log is the only place
+      // "a human looked at this one" and "a human looked at one like it" stay
+      // apart.
+      // The log is shared with every test above, so match the two ports this
+      // test actually set rather than every change Scanner01 has ever seen.
+      const carried = listAudit().filter((e) => /^Change server "Scanner01" \(port to 220[12]\)/.test(e.action))
+      // Newest first, and exactly two rows: the carried call writes ONE, saying
+      // it was carried. It used to write two -- gate() recorded
+      // 'approved-earlier' with `result: 'success'` before the change had run,
+      // and the tool then recorded 'approved' on top, which is the audit log
+      // claiming a human had looked at a card nobody was shown.
+      expect(carried.map((e) => e.approval)).toEqual(['approved-earlier', 'approved'])
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  it('asks again for a change to a different server', async () => {
+    const a = autoRespond('approved')
+    const c = await clientFor('grp-full')
+    try {
+      await call(c, 'update_server', { serverName: 'Scanner01', port: 2201 })
+      await call(c, 'update_server', { serverName: 'Scanner01-dup', port: 2202 })
+      expect(a.count()).toBe(2)
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  it('does not let a change approval buy the removal of that same server', async () => {
+    // Both are `manageServers`. Keying the memory on the capability alone would
+    // have made a yes about repointing a connection into a silent delete of it.
+    const a = autoRespond('approved')
+    const c = await clientFor('grp-full')
+    try {
+      await call(c, 'update_server', { serverName: 'Scanner01', port: 2201 })
+      await call(c, 'remove_server', { serverName: 'Scanner01' })
       expect(a.count()).toBe(2)
     } finally {
       a.stop()

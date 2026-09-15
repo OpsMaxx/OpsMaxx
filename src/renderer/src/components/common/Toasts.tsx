@@ -11,10 +11,13 @@ export function Toasts(): React.JSX.Element {
         <div
           key={t.id}
           className={clsx('toast', t.kind)}
-          // A sticky toast is not click-to-dismiss: its whole point is the
-          // button inside it, and a stray click on the message should not throw
-          // away the only route to fixing the problem.
-          onClick={t.sticky ? undefined : () => dismiss(t.id)}
+          // A toast with a button is not click-to-dismiss: its whole point is
+          // that button, and a stray click on the message should not throw away
+          // the only route to fixing the problem. Keyed on the action rather
+          // than on `sticky`, because an actionable message now clears itself
+          // and would otherwise become click-to-destroy the moment it stopped
+          // being permanent.
+          onClick={t.sticky || t.action ? undefined : () => dismiss(t.id)}
           role={t.kind === 'error' ? 'alert' : 'status'}
         >
           {t.kind === 'ok' && <CheckCircle2 size={16} style={{ color: 'var(--ok)' }} />}
@@ -34,7 +37,10 @@ export function Toasts(): React.JSX.Element {
               {t.action.label}
             </button>
           )}
-          {t.sticky && (
+          {/* Offered whenever the toast cannot be dismissed by clicking it:
+              an actionable message clears itself after nine seconds, and this
+              is how someone who is done with it gets those nine seconds back. */}
+          {(t.sticky || t.action) && (
             <button
               className="icon-btn sm"
               title="Dismiss"

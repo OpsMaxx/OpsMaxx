@@ -24,7 +24,27 @@ describe('what one approval covers', () => {
     // Not session-wide: a person approving an action is looking at a server
     // name while they do it, and carrying that consent to a machine they were
     // not looking at is a different grant from the one they gave.
-    expect(SRC).toMatch(/const elevationKey = \(sessionId: string, serverId: string, capability: string\)/)
+    expect(SRC).toMatch(/const elevationKey = \(sessionId: string, serverId: string, scope: string\)/)
+    // The scope defaults to the capability, which is what keeps that grain the
+    // default for every caller that does not ask for a narrower one.
+    expect(GATE).toMatch(/elevationKey\(ctx\.session\.id, ctx\.serverId, subject\.elevationScope \?\? ctx\.capability\)/)
+  })
+
+  // A capability several differently-shaped tools share is too coarse a key on
+  // its own. `manageServers` is the case: an approval to repoint a connection
+  // must not also buy the deletion of it. So update_server names a scope, which
+  // narrows its remembered yes to that one tool on that one server -- and
+  // remove_server stays per-call, so it reads no elevation and writes none.
+  it('does not let one tool spend another tool\'s approval', () => {
+    expect(SRC).toMatch(/elevationScope: 'update_server'/)
+    // Each window runs to the end of that tool's GateSubject literal, which is
+    // where `perCall` lives. Sized past remove_server's long `because`.
+    const removeAt = SRC.indexOf("toolName: 'remove_server'")
+    expect(removeAt).toBeGreaterThanOrEqual(0)
+    expect(SRC.slice(removeAt, removeAt + 1200)).toMatch(/perCall: true/)
+    const addAt = SRC.indexOf("toolName: 'add_server'")
+    expect(addAt).toBeGreaterThanOrEqual(0)
+    expect(SRC.slice(addAt, addAt + 1200)).toMatch(/perCall: true/)
   })
 
   it('remembers only after a real approval', () => {

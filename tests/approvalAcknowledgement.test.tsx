@@ -117,9 +117,12 @@ describe('acknowledging a decision', () => {
     h.fire({ type: 'resolved', request: request({ status: 'denied' }) })
     await waitFor(() => expect(useToasts.getState().toasts).toHaveLength(1))
     const [t] = useToasts.getState().toasts
-    // Sticky, because an acknowledgement that fades in three seconds is one an
-    // operator who alt-tabbed never sees.
-    expect(t.sticky).toBe(true)
+    // Not sticky. An acknowledgement that fades in three seconds is one an
+    // operator who alt-tabbed never sees, so it gets the longer window a
+    // message with a button earns -- but it clears itself in the end. Keeping
+    // it forever meant a session's worth of resolved approvals stacked in the
+    // corner, each waiting to be dismissed by hand.
+    expect(t.sticky).toBe(false)
     expect(t.action?.label).toBe('View in audit log')
     t.action?.run()
     expect(useNav.getState().aiSection).toBe('audit')

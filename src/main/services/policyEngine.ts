@@ -653,8 +653,13 @@ export function evaluateTunnelDefine(group: AccessGroup | null): Decision {
 // credential. A capability whose plain reading is "may add servers" cannot
 // carry that unasked.
 //
-// gate() carries the second half: both tools are marked per-call, so one
-// approval authorises one write and never the next.
+// gate() carries the second half, and grades the two differently. remove_server
+// is per-call: one approval, one deletion, never the next. update_server is
+// scoped instead (`elevationScope`), so the first change to a connection asks
+// and later changes to THAT connection in that session do not -- an operator
+// who has just approved a repoint does not want the same card again for the
+// next field. Neither grant reaches the other tool, another server, or the
+// session after this one.
 export function evaluateServerWrite(group: AccessGroup | null, act: 'change' | 'delete'): Decision {
   if (!group) return { decision: 'deny', reason: 'No AI access is assigned to this workspace.' }
   const manage = evaluateCapability(group, 'manageServers')

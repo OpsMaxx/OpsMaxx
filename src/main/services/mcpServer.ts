@@ -728,8 +728,26 @@ interface GateSubject {
    * elevation is a statement about a known host; for a tool whose subject does
    * not exist yet it silently turned one approval into unlimited writes to the
    * connection list.
+   *
+   * `update_server` used to be here and is not any more -- see
+   * `elevationScope`, which gives it the grain it actually wanted.
    */
   perCall?: boolean
+  /**
+   * Narrow the elevation cache from the capability to this one tool.
+   *
+   * Without it the cache key is session + server + CAPABILITY, which is the
+   * right grain for "may this agent read files on this host" and too coarse
+   * for a capability several differently-shaped tools share. `manageServers`
+   * is the case: an approval to repoint a connection must not also buy the
+   * delete of it, and both are that one capability.
+   *
+   * So this sits between the two extremes. `perCall` asks every single time;
+   * no scope at all lets one yes cover every tool on the capability; a scope
+   * makes one yes cover repeat calls of THAT tool on THAT server for the rest
+   * of the session, and nothing else.
+   */
+  elevationScope?: string
 }
 
 /**
@@ -791,8 +809,8 @@ function countSessionActions(sessionId: string): number | null {
  */
 const sessionElevations = new Set<string>()
 
-const elevationKey = (sessionId: string, serverId: string, capability: string): string =>
-  `${sessionId}\u0000${serverId}\u0000${capability}`
+const elevationKey = (sessionId: string, serverId: string, scope: string): string =>
+  `${sessionId}\u0000${serverId}\u0000${scope}`
 
 /** Forget what a session was allowed the moment it stops existing. */
 export function clearSessionElevations(sessionId: string): void {
@@ -811,7 +829,7 @@ async function gate(
   check: { decision: 'allow' | 'ask' | 'deny'; reason: string },
   subject: GateSubject,
   extra?: ExtraLike
-): Promise<{ ok: true } | { ok: false; result: CallToolResult }> {
+): Promise<{ ok: true; approval: GateApproval } | { ok: false; result: CallToolResult }> {
   if (check.decision === 'deny') {
     recordAudit({
       agentName: ctx.session.agentName,
@@ -852,24 +870,19 @@ async function gate(
     // of gate()'s tests to `return { ok: true }` and would make this exclusion
     // dead code on exactly the configuration it was written for.
     const perCall = ctx.capability === 'ciTrigger' || subject.perCall === true
-    const key = elevationKey(ctx.session.id, ctx.serverId, ctx.capability)
+    // Defaults to the capability, so every caller that names no scope keeps the
+    // grain it has always had -- approving one `execute_command` on a host
+    // still covers `terminal` on that host and still asks afresh for `sudo`.
+    const key = elevationKey(ctx.session.id, ctx.serverId, subject.elevationScope ?? ctx.capability)
     if (!perCall && sessionElevations.has(key)) {
-      recordAudit({
-        agentName: ctx.session.agentName,
-        sessionId: ctx.session.id,
-        workspaceId: ctx.workspaceId,
-        workspaceName: ctx.workspaceName,
-        serverId: ctx.serverId,
-        serverName: ctx.serverName,
-        action: ctx.action,
-        capability: ctx.capability,
-        // Recorded as what it is: allowed on the strength of an approval given
-        // earlier in this session, not an action nobody approved. The audit log
-        // is the only place that distinction survives.
-        approval: 'approved-earlier',
-        result: 'success'
-      })
-      return { ok: true }
+      // Reported as what it is -- allowed on the strength of an approval given
+      // earlier in this session, not an action nobody approved. The audit log
+      // is the only place that distinction survives, so it is handed to the
+      // caller rather than written here: this used to record its own row, with
+      // `result: 'success'` set before the action had run, and the tool then
+      // wrote a second row claiming a human had just approved it. One row, from
+      // the place that knows how the call actually ended.
+      return { ok: true, approval: 'approved-earlier' }
     }
     if (extra) await noteAwaitingApproval(extra, ctx.action, ctx.serverName)
     const decision = await requestApproval({
@@ -937,10 +950,24 @@ async function gate(
     }
   }
 
-  return { ok: true }
+  // An `ask` that reached here was answered by a human just now; an `allow`
+  // never entered either branch above.
+  return { ok: true, approval: check.decision === 'ask' ? 'approved' : 'not-required' }
 }
 
-function auditSuccess(ctx: AuditContext, approval: 'not-required' | 'approved', extra: { exitCode?: number } = {}): void {
+/**
+ * How a call got past gate(), in the audit log's own words.
+ *
+ * gate() hands this back rather than leaving each tool to infer it from
+ * `check.decision`, because that inference cannot see the session elevation.
+ * Every tool used to write 'approved' for any `ask` it survived, so a call
+ * waved through on an approval given earlier was recorded as one a human had
+ * just looked at -- on top of the 'approved-earlier' row gate() had already
+ * written for it. Two rows, and the louder one was the untrue one.
+ */
+type GateApproval = 'not-required' | 'approved' | 'approved-earlier'
+
+function auditSuccess(ctx: AuditContext, approval: GateApproval, extra: { exitCode?: number } = {}): void {
   recordAudit({
     agentName: ctx.session.agentName,
     sessionId: ctx.session.id,
@@ -1421,7 +1448,7 @@ async function cicdRead(
     extra
   )
   if (!gated.ok) return gated.result
-  const approval = check.decision === 'ask' ? 'approved' : 'not-required'
+  const approval = gated.approval
   try {
     const full = cicdRecordFor(conn)
     const body = await work(createCicdAdapter(full, resolveSecret(full)), full)
@@ -1485,7 +1512,7 @@ async function cicdWrite(
     extra
   )
   if (!gated.ok) return gated.result
-  const approval = check.decision === 'ask' ? 'approved' : 'not-required'
+  const approval = gated.approval
   try {
     const body = await work(cicdRecordFor(conn))
     auditSuccess(ctx, approval)
@@ -1966,13 +1993,13 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           serverName: s.name,
           action: command,
           capability: 'terminal',
-          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          approval: gated.approval,
           result: 'error',
           error: result.error
         })
         return errorText(`Command failed: ${result.error ?? 'unknown error'}`)
       }
-      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required', { exitCode: result.code ?? undefined })
+      auditSuccess(ctx, gated.approval, { exitCode: result.code ?? undefined })
       const stdout = redactOutput(result.stdout, secrets)
       const stderr = redactOutput(result.stderr, secrets)
       const truncNote = result.truncated ? '\n[output truncated]' : ''
@@ -2032,10 +2059,10 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const result = await sftpRead(key, path)
       sftpDisconnect(key)
       if (!result.ok) {
-        recordAudit({ ...auditBase(ctx), approval: check.decision === 'ask' ? 'approved' : 'not-required', result: 'error', error: result.error })
+        recordAudit({ ...auditBase(ctx), approval: gated.approval, result: 'error', error: result.error })
         return errorText(`Read failed: ${result.error}`)
       }
-      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      auditSuccess(ctx, gated.approval)
       return text(redactOutput(result.data ?? '', secrets))
     }
   )
@@ -2092,10 +2119,10 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const result = await sftpWrite(key, path, content)
       sftpDisconnect(key)
       if (!result.ok) {
-        recordAudit({ ...auditBase(ctx), approval: check.decision === 'ask' ? 'approved' : 'not-required', result: 'error', error: result.error })
+        recordAudit({ ...auditBase(ctx), approval: gated.approval, result: 'error', error: result.error })
         return errorText(`Write failed: ${result.error}`)
       }
-      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      auditSuccess(ctx, gated.approval)
       return text(`Wrote ${content.length} bytes to ${path}.`)
     }
   )
@@ -2150,10 +2177,10 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const result = await sftpList(key, path)
       sftpDisconnect(key)
       if (!result.ok) {
-        recordAudit({ ...auditBase(ctx), approval: check.decision === 'ask' ? 'approved' : 'not-required', result: 'error', error: result.error })
+        recordAudit({ ...auditBase(ctx), approval: gated.approval, result: 'error', error: result.error })
         return errorText(`List failed: ${result.error}`)
       }
-      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      auditSuccess(ctx, gated.approval)
       const lines = (result.data ?? []).map((e) => `${e.dir ? 'd' : '-'} ${e.perms} ${String(e.size).padStart(10)} ${e.name}`)
       return text(lines.length ? lines.join('\n') : '(empty directory)')
     }
@@ -2235,7 +2262,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         serverName: s.name,
         action: 'get_capacity_trends',
         capability: 'serverMetrics',
-        approval: check.decision === 'ask' ? 'approved' : 'not-required',
+        approval: gated.approval,
         result: 'success'
       })
       // Sentences, not the report.
@@ -2451,7 +2478,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (usable && entry?.facts) {
         facts = entry.facts
         provenance = 'Read from OpsMaxx’s background collection, not collected just now.'
-        auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+        auditSuccess(ctx, gated.approval)
       } else {
         const cfg = resolveChainSecrets(serverToSshConfig(s))
         const reader = new HostFactsReader({
@@ -2462,7 +2489,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         if (!probe.ok) {
           recordAudit({
             ...auditBase(ctx),
-            approval: check.decision === 'ask' ? 'approved' : 'not-required',
+            approval: gated.approval,
             result: 'error',
             error: `${probe.reason}: ${probe.detail}`
           })
@@ -2475,7 +2502,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
               : `The server answered but returned no usable facts: ${remoteText(probe.detail, 200)}`
           )
         }
-        auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+        auditSuccess(ctx, gated.approval)
         facts = probe.facts
         provenance = 'Collected just now.'
       }
@@ -2583,7 +2610,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       )
       if (!gated.ok) return gated.result
 
-      const approval = check.decision === 'ask' ? 'approved' : 'not-required'
+      const approval = gated.approval
       try {
         const result = await dbQuery(resolveDbSecrets(databaseConfig(db)), statement)
         if (!result.ok) {
@@ -2715,7 +2742,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         extra
       )
       if (!gated.ok) return gated.result
-      const approval = check.decision === 'ask' ? 'approved' : 'not-required'
+      const approval = gated.approval
 
       try {
         if (!running) {
@@ -2880,7 +2907,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         extra
       )
       if (!gated.ok) return gated.result
-      const approval = check.decision === 'ask' ? 'approved' : 'not-required'
+      const approval = gated.approval
 
       try {
         if (!running) {
@@ -3104,14 +3131,14 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!result.ok) {
         recordAudit({
           ...auditBase(ctx),
-          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          approval: gated.approval,
           result: 'error',
           error: result.error ?? 'unknown error'
         })
         return errorText(`Could not add the server: ${result.error ?? 'unknown error'}`)
       }
 
-      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      auditSuccess(ctx, gated.approval)
       const base =
         `Added "${name}" to ${workspace.name}. Refer to it by that name in other tools. ` +
         `Its credential is in the OS keychain and cannot be read back through this bridge.`
@@ -3308,6 +3335,14 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       // by this agent, another agent, or the person clicking it -- goes
       // somewhere new. `manageServers` set to ALLOW means "add servers without
       // asking me" and cannot carry that.
+      //
+      // So the FIRST change to a given server always opens a card. What it no
+      // longer does is open one for every change after it: this was `perCall`,
+      // and an agent walking a server through two edits -- set the host, then
+      // set the jump chain -- produced two identical dialogs about a connection
+      // the operator had just said yes to. `elevationScope` keeps the approval
+      // pinned to this tool and this server, so the yes does not spread to
+      // remove_server, to another connection, or past the end of the session.
       const check = serverWriteCheck(session, target, 'change')
       const gated = await gate(
         ctx,
@@ -3318,7 +3353,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           because:
             'it rewrites a saved connection, and later calls that name it go wherever it now points',
           intent: args.intent,
-          perCall: true
+          elevationScope: 'update_server'
         },
         extra
       )
@@ -3328,13 +3363,13 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!result.ok) {
         recordAudit({
           ...auditBase(ctx),
-          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          approval: gated.approval,
           result: 'error',
           error: result.error ?? 'unknown error'
         })
         return errorText(`Could not change the server: ${result.error ?? 'unknown error'}`)
       }
-      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      auditSuccess(ctx, gated.approval)
 
       const finalName = patch.name ?? target.name
       const base = `Changed "${target.name}": ${changes.join(', ')}.`
@@ -3422,13 +3457,13 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!result.ok) {
         recordAudit({
           ...auditBase(ctx),
-          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          approval: gated.approval,
           result: 'error',
           error: result.error ?? 'unknown error'
         })
         return errorText(`Could not remove the server: ${result.error ?? 'unknown error'}`)
       }
-      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      auditSuccess(ctx, gated.approval)
       return text(
         `Removed "${target.name}" from ${workspace.name}, and the credential stored for it.` +
           (behind.names.length > 0
@@ -3491,7 +3526,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!gated.ok) return gated.result
 
       const probe = await probeServer(target)
-      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      auditSuccess(ctx, gated.approval)
       return text(
         probe.ok
           ? `"${target.name}" is reachable and authentication succeeded.`
@@ -3618,13 +3653,13 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!result.ok) {
         recordAudit({
           ...auditBase(ctx),
-          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          approval: gated.approval,
           result: 'error',
           error: result.error ?? 'unknown error'
         })
         return errorText(`Could not define the tunnel: ${result.error ?? 'unknown error'}`)
       }
-      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      auditSuccess(ctx, gated.approval)
       return text(
         `Defined "${name}" in ${workspace.name}. It is NOT running — start it with set_tunnel, ` +
           `which asks the user separately.`
@@ -3698,13 +3733,13 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!result.ok) {
         recordAudit({
           ...auditBase(ctx),
-          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          approval: gated.approval,
           result: 'error',
           error: result.error ?? 'unknown error'
         })
         return errorText(`Could not remove the tunnel: ${result.error ?? 'unknown error'}`)
       }
-      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      auditSuccess(ctx, gated.approval)
       return text(`Removed "${tunnel.name}".`)
     }
   )
@@ -3773,7 +3808,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         if (!probe.ok) {
           recordAudit({
             ...auditBase(ctx),
-            approval: check.decision === 'ask' ? 'approved' : 'not-required',
+            approval: gated.approval,
             result: 'error',
             error: probe.reason ?? 'docker unavailable'
           })
@@ -3781,7 +3816,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
             `Docker could not be read on ${s.name}: ${probe.reason ?? 'the runtime did not answer'}`
           )
         }
-        auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+        auditSuccess(ctx, gated.approval)
         if (probe.containers.length === 0) {
           return text(`No containers on ${s.name}${probe.usedSudo ? ' (read as root)' : ''}.`)
         }
@@ -3798,7 +3833,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         const message = e instanceof Error ? e.message : String(e)
         recordAudit({
           ...auditBase(ctx),
-          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          approval: gated.approval,
           result: 'error',
           error: message
         })
@@ -3898,7 +3933,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         if (!result.ok) {
           recordAudit({
             ...auditBase(ctx),
-            approval: check.decision === 'ask' ? 'approved' : 'not-required',
+            approval: gated.approval,
             result: 'error',
             error: result.error ?? 'docker logs failed'
           })
@@ -3906,7 +3941,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
             `Could not read logs for ${container} on ${s.name}: ${result.error ?? 'the runtime refused'}`
           )
         }
-        auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+        auditSuccess(ctx, gated.approval)
         const body = redactOutput(result.out, secrets).trimEnd()
         return text(
           `Last ${tail} line(s) from ${container} on ${s.name}` +
@@ -3917,7 +3952,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         const message = e instanceof Error ? e.message : String(e)
         recordAudit({
           ...auditBase(ctx),
-          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          approval: gated.approval,
           result: 'error',
           error: message
         })
@@ -4023,7 +4058,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           `\n    collected ${facts.at ? agePhrase(Date.now() - facts.at) : 'never'}`
         )
       })
-      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      auditSuccess(ctx, gated.approval)
       return text(
         `${servers.length} server(s) across ${permitted.length} workspace(s):\n\n${rows.join('\n\n')}`
       )
@@ -4111,7 +4146,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         if (!result.ok) {
           recordAudit({
             ...auditBase(ctx),
-            approval: check.decision === 'ask' ? 'approved' : 'not-required',
+            approval: gated.approval,
             result: 'error',
             error: result.error ?? (result.out.trim() || 'the runtime refused')
           })
@@ -4119,7 +4154,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
             `Could not ${action} ${container} on ${s.name}: ${result.error ?? (result.out.trim() || 'the runtime refused')}`
           )
         }
-        auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+        auditSuccess(ctx, gated.approval)
         return text(
           `${action === 'stop' ? 'Stopped' : action === 'start' ? 'Started' : 'Restarted'} ` +
             `${container} on ${s.name}${usedSudo ? ' (as root)' : ''}.`
@@ -4128,7 +4163,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         const message = e instanceof Error ? e.message : String(e)
         recordAudit({
           ...auditBase(ctx),
-          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          approval: gated.approval,
           result: 'error',
           error: message
         })
@@ -4211,7 +4246,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           `    ${alarm ? `${alarm.level.toUpperCase()}: ${alarm.detail}` : 'no alarm raised'}`
         )
       })
-      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      auditSuccess(ctx, gated.approval)
       const worrying = alarms.filter((a) => a.level === 'alarm').length
       return text(
         `${destinations.length} backup destination(s)` +
@@ -4362,7 +4397,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const rows = alertReader(Math.min(200, (limit ?? 50) * 4)).filter((r) => visible.has(r.serverId))
       if (rows.length === 0) return text('No alerts have fired for the servers in this workspace.')
       const shown = rows.slice(0, limit ?? 50)
-      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      auditSuccess(ctx, gated.approval)
       return text(
         `${shown.length} alert(s), newest first:\n\n` +
           shown
@@ -4433,7 +4468,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         if (!probe.ok) {
           recordAudit({
             ...auditBase(ctx),
-            approval: check.decision === 'ask' ? 'approved' : 'not-required',
+            approval: gated.approval,
             result: 'error',
             error: probe.reason ?? 'docker unavailable'
           })
@@ -4441,7 +4476,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
             `Docker could not be read on ${s.name}: ${probe.reason ?? 'the runtime did not answer'}`
           )
         }
-        auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+        auditSuccess(ctx, gated.approval)
 
         const projects = new Map<string, DockerContainer[]>()
         const ungrouped: DockerContainer[] = []
@@ -4483,7 +4518,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         const message = e instanceof Error ? e.message : String(e)
         recordAudit({
           ...auditBase(ctx),
-          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          approval: gated.approval,
           result: 'error',
           error: message
         })
@@ -4550,13 +4585,13 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         if (!probe.ok) {
           recordAudit({
             ...auditBase(ctx),
-            approval: check.decision === 'ask' ? 'approved' : 'not-required',
+            approval: gated.approval,
             result: 'error',
             error: probe.reason
           })
           return errorText(`Images could not be read on ${s.name}: ${probe.detail ?? probe.reason}`)
         }
-        auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+        auditSuccess(ctx, gated.approval)
         if (probe.images.length === 0) return text(`No images on ${s.name}.`)
         const dangling = probe.images.filter((i) => i.dangling)
         const named = probe.images.filter((i) => !i.dangling)
@@ -4573,7 +4608,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         const message = e instanceof Error ? e.message : String(e)
         recordAudit({
           ...auditBase(ctx),
-          approval: check.decision === 'ask' ? 'approved' : 'not-required',
+          approval: gated.approval,
           result: 'error',
           error: message
         })
@@ -4656,7 +4691,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       }
       const readings = drift.readings ?? []
       const changed = readings.filter((r) => r.status !== 'ok')
-      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      auditSuccess(ctx, gated.approval)
       if (changed.length === 0) {
         return text(
           `${readings.length} watched file(s) on ${s.name} still match their baseline` +
@@ -4772,7 +4807,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
             changed.map((r) => `    ${r.watchId} — ${r.status}`).join('\n')
         )
       }
-      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      auditSuccess(ctx, gated.approval)
 
       const parts: string[] = []
       parts.push(
@@ -4862,7 +4897,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!gated.ok) return gated.result
 
       const conns = listCachedCicdConnections(permitted.map((w) => w.id))
-      auditSuccess(ctx, check.decision === 'ask' ? 'approved' : 'not-required')
+      auditSuccess(ctx, gated.approval)
       if (conns.length === 0) return text("No CI/CD connections are configured in this session's workspaces.")
       // Names are the user's own words, chosen in OpsMaxx, so they are not
       // remote text and are not fenced. Everything past this tool is.

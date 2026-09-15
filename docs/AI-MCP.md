@@ -228,10 +228,14 @@ consequences of closing that are deliberate and are not left to the capability's
   Deleting `Prod DB` is loud and the next call that names it fails; repointing it keeps the
   name, the stored credential and the sidebar entry, and every later use — by this agent,
   another agent, or the person clicking it — goes to the new host.
-- **One approval is one write.** `add_server`, `update_server` and `remove_server` are all marked
-  per-call, so an approval authorises the call in front of the user and never the next one.
-  Without that, `add_server` — which has no server id yet and so shares one elevation key across
-  every add in a session — approved the first write and then wrote every one after it silently.
+- **An approval never spreads.** `add_server` and `remove_server` are marked per-call, so an
+  approval authorises the call in front of the user and never the next one. Without that,
+  `add_server` — which has no server id yet and so shares one elevation key across every add in a
+  session — approved the first write and then wrote every one after it silently. `update_server`
+  is scoped to itself rather than per-call: the first change to a connection asks, and further
+  changes to that same connection in that same session do not, because an operator who has just
+  approved a repoint should not be shown the same card again for the next field. That yes still
+  reaches no other tool, no other server and no later session.
 
 **Jump hosts.** `jumpHosts` names servers that already exist, by friendly name, in dial order.
 Each hop authenticates with that saved server's own stored credential, so no credential is passed

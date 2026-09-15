@@ -180,7 +180,12 @@ export async function denyAndStopAllAi(): Promise<void> {
   toast(
     `Stopped every agent: ${result.revoked} session(s) revoked, ${result.denied} waiting request(s) denied.`,
     'ok',
-    { label: 'View in audit log', run: () => openAi('audit') }
+    { label: 'View in audit log', run: () => openAi('audit') },
+    // The one acknowledgement that outranks the nine-second window. Every other
+    // agent in the workspace was just cut off; the operator who pressed the
+    // button needs to read the counts, and anyone who pressed it and looked
+    // away needs them still to be there.
+    { sticky: true }
   )
 }
 

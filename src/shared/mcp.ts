@@ -166,13 +166,20 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
     // reading it would have believed they had granted strictly less than they
     // had. Deleting is called out separately because it is the one that
     // destroys something, and because it always asks whatever this is set to.
+    //
+    // The scope of a change approval is spelled out rather than left as "one
+    // approval is one change", which stopped being true when repeat edits to a
+    // server the operator had just approved were folded into that first yes. A
+    // sentence that understates what a yes buys is the same bug as a label that
+    // understates what a grant buys.
     detail:
       'Adds a server to the workspace, changes a saved one — including where it points, which ' +
       'account it uses and which other saved server it jumps through — and removes one. It does ' +
       'not grant any access to the servers it manages. Adding is the only part this setting can ' +
-      'make silent: changing and removing an existing connection always ask, and one approval is ' +
-      'one change. Setting this to allow is not a standing permission to repoint or delete what ' +
-      'is already saved.'
+      'make silent: changing and removing an existing connection always ask. Approving a change ' +
+      'covers further changes to that same server for the rest of that agent session and nothing ' +
+      'else; each removal is asked for on its own. Setting this to allow is not a standing ' +
+      'permission to repoint or delete what is already saved.'
   },
   {
     id: 'vpnControl',
