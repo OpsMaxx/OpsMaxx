@@ -1093,8 +1093,13 @@ ipcMain.handle('ssh:connect', (e, cfg: SshConnectConfig & { serverId?: string })
 // Dials and hangs up. Goes through the same preparedSshTarget
 // pipeline as a real connect, because a test that skipped either would pass on
 // a profile whose credential or transport is the thing that is wrong.
+//
+// The `true` is the opt-in to prompting, and only this caller has it: somebody
+// pressed Test, so a fingerprint to confirm or a code to type is the answer to
+// their click. sshTest defaults to false for the MCP bridge's probe, which has
+// nobody in front of it.
 ipcMain.handle('ssh:test', (_e, cfg: SshConnectConfig & { serverId?: string }) =>
-  sshTest(preparedSshTarget(cfg))
+  sshTest(preparedSshTarget(cfg), true)
 )
 /**
  * What credential a server has, with none of its value.
@@ -1477,12 +1482,32 @@ ipcMain.handle('sftp:edit-external-stop', (_e, path: string) => externalEditStop
 // services/mcpServer.ts imports metricsSample — a branch in that module would
 // pull localExec into the agent-facing import closure. See
 // tests/localTerminalNotExposed.test.ts.
-ipcMain.handle('metrics:sample', (_e, key: string, cfg: SshConnectConfig & { serverId?: string }) => {
+/**
+ * `interactive` says whether a person is looking at THIS host right now.
+ *
+ * It used to prompt unconditionally, which is wrong for the fleet grid: that
+ * card polls every server that is not marked offline, so one sweep across an
+ * estate with second factors on it could raise N verification-code dialogs
+ * attached to nothing anybody did — and once a second dialog exists, the
+ * prompt for the connection the user actually asked for is the one that gets
+ * covered or dropped. It is right for the Monitor tab and the terminal's
+ * monitor strip, which are one host, on screen, because the user opened it.
+ *
+ * DEFAULTS TO FALSE, and that direction is the point. The flag can only ever
+ * raise a dialog, never suppress one, so the rule `acquire` states — an
+ * unattended caller is never decided by the renderer — is not weakened by
+ * taking it from there. A renderer that lies can ask a question; it cannot
+ * skip one.
+ *
+ * Costs nothing on a host that is already connected either way: metricsSample
+ * shares the connection pool, so a terminal and a poll authenticate once.
+ */
+ipcMain.handle('metrics:sample', (_e, key: string, cfg: SshConnectConfig & { serverId?: string }, interactive?: boolean) => {
   if (isLocalTarget(cfg)) {
     if (!isLocalTerminalEnabled()) return Promise.resolve({ ok: false, error: LOCAL_TARGET_OFF })
     return localMetricsSample(key)
   }
-  return metricsSample(key, preparedSshTarget(cfg))
+  return metricsSample(key, preparedSshTarget(cfg), interactive === true)
 })
 ipcMain.handle('metrics:disconnect', (_e, key: string) => {
   // There is no connection to hand back for this machine, only the CPU
@@ -2253,7 +2278,8 @@ ipcMain.handle('fleet:drift-local', (_e, ctx: unknown) =>
 const accessCommitter = new AccessCommitter({
   // The ONLY thing in this app that opens a connection which cannot be the one
   // that wrote the file. See sshOpenFresh and rule 2.
-  openFresh: (cfg) => sshOpenFresh(preparedSshTarget(cfg as SshConnectConfig))
+  openFresh: (cfg, timeoutMs) =>
+    sshOpenFresh(preparedSshTarget(cfg as SshConnectConfig), timeoutMs)
 })
 
 /** How long one host's staged write is given. Longer than a read probe: it
@@ -4646,7 +4672,9 @@ ipcMain.handle('knownhosts:forget', (_e, id: string) => knownHostForget(id))
 
 // ---- Tunnels ----
 ipcMain.handle('tunnel:start', (e, cfg: TunnelConfig, ssh: TunnelSshConfig) =>
-  tunnelStart(e.sender, cfg, preparedSshTarget(ssh))
+  // Somebody pressed Start. The MCP bridge's set_tunnel keeps the default and
+  // never puts a dialog on screen.
+  tunnelStart(e.sender, cfg, preparedSshTarget(ssh), true)
 )
 ipcMain.handle('tunnel:stop', (_e, id: string) => tunnelStop(id))
 ipcMain.handle('tunnel:list', () => tunnelList())

@@ -14,6 +14,10 @@ export function ServerMonitorCard({
   server: Server
   onOpen: () => void
 }): React.JSX.Element {
+  // No third argument on purpose. This card is rendered once per server in
+  // the fleet grid, so lifting the prompt here would let one sweep raise a
+  // dialog per host. Unreadable gauges plus the refusal text is the right
+  // answer; the Monitor tab is where a host is authenticated.
   const m = useServerMetrics(server, server.status !== 'offline')
   const off = server.status === 'offline'
 

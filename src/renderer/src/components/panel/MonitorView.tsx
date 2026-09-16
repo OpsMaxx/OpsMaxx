@@ -49,7 +49,8 @@ export function MonitorView({
   // it keeps sampling over the shell's SSH connection in the background.
   visible?: boolean
 }): React.JSX.Element {
-  const m = useServerMetrics(server, visible && server.status !== 'offline')
+  // One host the user navigated to, so it may prompt. See the hook.
+  const m = useServerMetrics(server, visible && server.status !== 'offline', true)
   const real = server.demo === false
   const local = server.id === LOCAL_ID
 

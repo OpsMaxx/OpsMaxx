@@ -61,7 +61,17 @@ function walk(prev: number, min: number, max: number, step: number): number {
 
 // Live metrics for a server. Real servers are polled over SSH every 2s;
 // demo servers use a smooth random walk so the UI still animates.
-export function useServerMetrics(server: Server, active: boolean): LiveMetrics {
+export function useServerMetrics(
+  server: Server,
+  active: boolean,
+  /**
+   * True where a person is looking at THIS host: the Monitor tab and the
+   * terminal's monitor strip. False — the default — for the fleet grid, which
+   * polls every server at once and must not be able to raise a
+   * verification-code dialog per host out of a screen nobody clicked into.
+   */
+  interactive = false
+): LiveMetrics {
   const real = server.demo === false
   const ref = useRef<LiveMetrics>(initial(server))
   const net = useRef<{ rx: number; tx: number; t: number } | null>(null)
@@ -96,7 +106,8 @@ export function useServerMetrics(server: Server, active: boolean): LiveMetrics {
          */
         const res = await window.opsmaxx?.metrics.sample(
           server.id,
-          server.id === LOCAL_ID ? (LOCAL_TARGET as unknown as typeof cfg) : cfg
+          server.id === LOCAL_ID ? (LOCAL_TARGET as unknown as typeof cfg) : cfg,
+          interactive
         )
         if (!alive) return
         const s = ref.current
@@ -216,7 +227,7 @@ export function useServerMetrics(server: Server, active: boolean): LiveMetrics {
       clearInterval(iv)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, real, server.id])
+  }, [active, real, server.id, interactive])
 
   return ref.current
 }

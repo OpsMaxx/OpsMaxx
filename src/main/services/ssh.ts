@@ -476,17 +476,27 @@ export async function openChain(
     serverName?: string
     serverId?: string
   },
-  onHop?: (index: number, count: number) => void
+  onHop?: (index: number, count: number) => void,
+  /**
+   * False for a caller with nobody in front of it, exactly as on `acquire`.
+   *
+   * This walker had no such parameter at all, so every caller on it took
+   * `connectClient`'s default and could raise a verification-code dialog or a
+   * trust-on-first-use dialog no matter who asked. `sshTest` is the one that
+   * mattered: it is reached from the MCP bridge's `test_connection`, and its
+   * own comment already said it does not prompt.
+   */
+  allowPrompt = true
 ): Promise<{ clients: Client[]; client: Client; close?: () => void }> {
   // A cloud server is dialled through whatever its provider brokered. Checked
   // first because it is the more specific case: a cloud target carries its own
   // address and credential, and the VPN question does not arise for one.
-  if (cfg.cloudTarget) return openChainOverCloud(cfg, onHop)
+  if (cfg.cloudTarget) return openChainOverCloud(cfg, onHop, allowPrompt)
   // A server behind a VPN is dialled through a loopback forward into the
   // tunnel. Only the first hop needs rewriting — everything after it is
   // reached through the hop before, so the chain is already inside.
-  if (cfg.vpnProfileId) return openChainOverVpn(cfg, onHop)
-  return openChainDirect(cfg, onHop)
+  if (cfg.vpnProfileId) return openChainOverVpn(cfg, onHop, allowPrompt)
+  return openChainDirect(cfg, onHop, allowPrompt)
 }
 
 /**
@@ -505,7 +515,8 @@ async function openChainOverCloud(
     serverName?: string
     serverId?: string
   },
-  onHop?: (index: number, count: number) => void
+  onHop?: (index: number, count: number) => void,
+  allowPrompt = true
 ): Promise<{ clients: Client[]; client: Client; close?: () => void }> {
   assertNoJumpChain(cfg)
   const { brokerFor } = await import('./cloud/providers')
@@ -516,7 +527,7 @@ async function openChainOverCloud(
   const next = { ...cfg, ...prepared.hop }
 
   try {
-    const chain = await openChainDirect(next, onHop)
+    const chain = await openChainDirect(next, onHop, allowPrompt)
     return {
       ...chain,
       // openChainDirect opens no transport of its own, so the release is the
@@ -539,7 +550,8 @@ async function openChainOverVpn(
     serverName?: string
     serverId?: string
   },
-  onHop?: (index: number, count: number) => void
+  onHop?: (index: number, count: number) => void,
+  allowPrompt = true
 ): Promise<{ clients: Client[]; client: Client; close?: () => void }> {
   const { vpnOpenForward, vpnStart } = await import('./vpn/manager')
   const vpnId = cfg.vpnProfileId as string
@@ -570,7 +582,7 @@ async function openChainOverVpn(
       id: cfg.serverId ?? first.host,
       name: cfg.serverName ?? first.host
     })
-    const chain = await openChainDirect(cfg, onHop).catch((e) => {
+    const chain = await openChainDirect(cfg, onHop, allowPrompt).catch((e) => {
       release()
       throw e
     })
@@ -592,7 +604,7 @@ async function openChainOverVpn(
     : { ...cfg, ...rewritten }
 
   try {
-    const chain = await openChainDirect(next, onHop)
+    const chain = await openChainDirect(next, onHop, allowPrompt)
     return { ...chain, close: () => local.close() }
   } catch (err) {
     local.close()
@@ -602,18 +614,19 @@ async function openChainOverVpn(
 
 async function openChainDirect(
   cfg: SshHop & { hops?: SshHop[] },
-  onHop?: (index: number, count: number) => void
+  onHop?: (index: number, count: number) => void,
+  allowPrompt = true
 ): Promise<{ clients: Client[]; client: Client }> {
   const hops = cfg.hops ?? []
   const clients: Client[] = []
   let sock: NodeJS.ReadableStream | undefined
   for (let i = 0; i < hops.length; i++) {
     onHop?.(i, hops.length)
-    const client = await connectClient(hops[i], sock)
+    const client = await connectClient(hops[i], sock, allowPrompt)
     clients.push(client)
     sock = await hopForward(client, i + 1 < hops.length ? hops[i + 1] : cfg)
   }
-  const client = await connectClient(cfg, sock)
+  const client = await connectClient(cfg, sock, allowPrompt)
   clients.push(client)
   return { clients, client }
 }
@@ -664,7 +677,16 @@ export interface PooledConnection {
 }
 
 const pool = new Map<string, PooledConnection>()
-const connecting = new Map<string, Promise<PooledConnection>>()
+/**
+ * Opens in flight, with the intent each one was started under.
+ *
+ * `allowPrompt` is stored beside the promise because joining an open is
+ * joining its ANSWER to a second factor, not just its socket. An unattended
+ * open ends the connection rather than answering a challenge, so a terminal
+ * that joined one got no verification-code dialog and a failure — which is
+ * exactly "it is not asking for the code any more".
+ */
+const connecting = new Map<string, { promise: Promise<PooledConnection>; allowPrompt: boolean }>()
 
 // Identity of a single hop. Includes the parent so the same host reached by a
 // different route is not mistaken for the same connection.
@@ -728,7 +750,9 @@ function destroy(conn: PooledConnection): void {
 async function acquireOne(
   hop: SshHop & { serverId?: string },
   parent: PooledConnection | null,
-  allowPrompt = true
+  allowPrompt = true,
+  /** False on the one retry below, so this can never bounce more than once. */
+  mayRetry = true
 ): Promise<PooledConnection> {
   const key = hopKey(hop, parent?.key)
 
@@ -745,10 +769,33 @@ async function acquireOne(
   // together authenticate once, not twice.
   const inflight = connecting.get(key)
   if (inflight) {
-    const conn = await inflight
-    conn.refs++
-    if (parent) release(parent)
-    return conn
+    try {
+      const conn = await inflight.promise
+      conn.refs++
+      if (parent) release(parent)
+      return conn
+    } catch (err) {
+      /**
+       * An attended caller must not inherit an unattended refusal.
+       *
+       * The collapse above is right whenever the open succeeds — one code
+       * typed, one authentication, every caller served. It is wrong when the
+       * open was started by something that is not allowed to ask: the
+       * keyboard-interactive handler ends that connection the moment a
+       * challenge arrives, and the person who opened a terminal a millisecond
+       * later then watches it fail having never been asked for anything.
+       *
+       * So wait for it — the unattended refusal is immediate, so this costs
+       * milliseconds — and dial again with the dialog allowed. Waiting rather
+       * than opening a second socket straight away is what keeps the success
+       * path collapsed to a single authentication.
+       */
+      if (!allowPrompt || inflight.allowPrompt || !mayRetry) {
+        if (parent) release(parent)
+        throw err
+      }
+      return acquireOne(hop, parent, allowPrompt, false)
+    }
   }
 
   const promise = (async () => {
@@ -783,9 +830,14 @@ async function acquireOne(
       conn.transportRelease = undefined
     })
     return conn
-  })().finally(() => connecting.delete(key))
+  })().finally(() => {
+    // Only if it is still ours: a failed open that an attended caller retried
+    // has already been replaced here, and deleting that one would uncollapse
+    // every joiner behind it.
+    if (connecting.get(key)?.promise === promise) connecting.delete(key)
+  })
 
-  connecting.set(key, promise)
+  connecting.set(key, { promise, allowPrompt })
   try {
     return await promise
   } catch (err) {
@@ -1556,6 +1608,21 @@ export interface FreshSession {
 
 export async function sshOpenFresh(
   cfg: SshHop & { serverId?: string; hops?: SshHop[]; vpnProfileId?: string; serverName?: string },
+  /**
+   * PASS ONE if the person may be asked something, and do not rely on this
+   * default.
+   *
+   * Thirty seconds is right for a connect nobody has to participate in and
+   * wrong for one that can raise a verification-code dialog: the dialog itself
+   * waits two minutes and the handshake underneath waits 135 seconds, extended
+   * deliberately the moment a challenge arrives (see connectClient). An outer
+   * flat limit shorter than either of those does not fail the connection
+   * honestly — it cancels one the operator is in the middle of answering, and
+   * the caller reports whatever a cancelled connect means to it.
+   *
+   * The access committer passes what is left of its rollback window; see
+   * accessOpenBudgetMs.
+   */
   timeoutMs = 30_000,
   now: () => number = Date.now
 ): Promise<FreshSession> {
@@ -1564,7 +1631,21 @@ export async function sshOpenFresh(
   // must not turn out to be, and taking only the "before" list would miss it.
   const before = pooledConnectionIds()
   const chain = await withDeadline(
-    openChain(cfg),
+    /**
+     * PROMPTS, on purpose, and it is the only unpooled caller that does.
+     *
+     * An operator has just confirmed a key change on their own servers and is
+     * watching it land; a second factor asked for here is the answer to that,
+     * and refusing instead would make access commits impossible on precisely
+     * the hosts most likely to require one. The usual worry does not apply
+     * because this path is NOT exposed to the MCP bridge — see the note above
+     * the access handlers in main — so there is no agent whose request could
+     * turn into a dialog.
+     *
+     * Stated rather than taken from the default, because the default is the
+     * other way round for every other caller of openChain.
+     */
+    openChain(cfg, undefined, true),
     timeoutMs,
     `Timed out after ${timeoutMs}ms opening an independent session`
   )
@@ -1708,17 +1789,27 @@ function cleanup(sessionId: string): void {
  * that no longer exist. `openChain` gives the same dial, the same jump-host
  * chain and the same host-key verification with nothing retained.
  *
- * `allowPrompt` is NOT passed through: a first contact with an unknown host
- * during a test would raise the trust dialog, and answering it would record a
- * trust decision as a side effect of pressing a button labelled Test. The probe
- * reports the refusal instead, and trust is granted by connecting.
+ * `allowPrompt` DEFAULTS TO FALSE, and that default is the whole point.
+ *
+ * This is not only the connection editor's Test button. `probeServer` on the
+ * MCP bridge calls it for `test_connection`, so an agent could reach it — and a
+ * first contact with an unknown host would then raise the trust dialog, with
+ * answering it recording a trust decision as a side effect of something the
+ * agent asked for. The same goes for a second factor: a code dialog out of an
+ * agent's probe is attached to nothing the person did.
+ *
+ * The comment here used to say this already. It was not true, because there was
+ * no parameter on `openChain` to pass — every caller took the default, which is
+ * the opposite one. Now the default is the safe one and the caller with a person
+ * in front of it, the `ssh:test` IPC handler, is the one that opts in.
  */
 export async function sshTest(
-  cfg: SshHop & { hops?: SshHop[]; vpnProfileId?: string; serverName?: string; serverId?: string }
+  cfg: SshHop & { hops?: SshHop[]; vpnProfileId?: string; serverName?: string; serverId?: string },
+  allowPrompt = false
 ): Promise<{ ok: boolean; error?: string }> {
   let chain: { clients: Client[]; close?: () => void } | null = null
   try {
-    chain = await openChain(cfg)
+    chain = await openChain(cfg, undefined, allowPrompt)
     return { ok: true }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }

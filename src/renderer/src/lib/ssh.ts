@@ -61,16 +61,37 @@ export interface SshHopInfo {
   port: number
   username: string
   auth: 'password' | 'key' | 'agent'
+  /** The bastion's OWN jump chain. See below for why this is not optional. */
+  hops: SshHop[]
 }
 
-// The SSH details the main process needs to open a connection. Credentials are
-// deliberately absent — main merges them from the encrypted store by serverId.
+/**
+ * The SSH details the main process needs to open a connection. Credentials are
+ * deliberately absent — main merges them from the encrypted store by serverId.
+ *
+ * `hops` was missing, and its absence is the v0.27.0 bug again on two more
+ * surfaces. A server carries its jump chain in `route`; main reads `hops`. Drop
+ * the rename and the config still type-checks, still resolves its credential,
+ * and SILENTLY dials the bastion's own private address from this laptop — so a
+ * database or a tunnel whose jump host is itself behind another jump host fails
+ * with a connect timeout naming an address the user never typed.
+ *
+ * That is not a corner: it is the ordinary shape of an estate with one
+ * authentication gateway in front of a second bastion, which is exactly the
+ * topology this was reported from.
+ *
+ * It also decides pool identity. `hopKey` includes the parent, so a hop with no
+ * parent is a DIFFERENT connection from the same hop reached through its chain
+ * — meaning a database could not share the bastion a terminal had already
+ * authenticated even once the forward started pooling.
+ */
 export function sshHopFor(server: Server): SshHopInfo {
   return {
     serverId: server.id,
     host: server.host,
     port: server.port,
     username: server.username,
-    auth: server.auth === 'password' ? 'password' : server.auth === 'agent' ? 'agent' : 'key'
+    auth: server.auth === 'password' ? 'password' : server.auth === 'agent' ? 'agent' : 'key',
+    hops: sshHopsFor(server)
   }
 }

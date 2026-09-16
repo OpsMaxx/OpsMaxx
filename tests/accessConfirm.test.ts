@@ -17,6 +17,8 @@ import {
 } from '../src/shared/access'
 import {
   AccessCommitter,
+  ACCESS_CONFIRM_TIMEOUT_MS,
+  accessOpenBudgetMs,
   type AccessCommitRequest,
   type AccessFreshSession
 } from '../src/main/services/access'
@@ -472,5 +474,103 @@ describe.skipIf(process.platform === 'win32')('the confirmation, run for real', 
   it('uses no sudo in either', async () => {
     expect(accessVerifyCommand('c4')).not.toMatch(/\bsudo\b/)
     expect(accessDisarmCommand('/x', 'c4')).not.toMatch(/\bsudo\b/)
+  })
+})
+
+
+// ===========================================================================
+// How long the fresh session may take to authenticate
+// ===========================================================================
+//
+// Reported on a server with a second factor: a key change the operator had just
+// confirmed came back `reverted-unconfirmed` and was undone.
+//
+// The cause was two deadlines that disagreed. `sshOpenFresh` defaulted to
+// thirty seconds, while the verification-code dialog it can raise waits two
+// minutes and the handshake underneath it waits 135 -- extended deliberately
+// the moment a challenge arrives, because the only correct deadline for a
+// person reading a code off their phone is longer than the dialog they are
+// answering. The outer, flat, arbitrary limit won, and cancelled a connection
+// mid-answer.
+//
+// The fix is not a bigger number. It is having ONE deadline again: the host's
+// own dead-man's switch, which is the only clock here with a reason.
+
+describe('the budget for opening the verifying session', () => {
+  const ROLLBACK = 300
+
+  it('is what is left of the rollback window, less the commands still to run', () => {
+    const budget = accessOpenBudgetMs({
+      stagedAt: STAGED_AT,
+      rollbackSeconds: ROLLBACK,
+      now: STAGED_AT + 2_000
+    })
+    expect(budget).toBe(300_000 - 2_000 - 2 * ACCESS_CONFIRM_TIMEOUT_MS)
+  })
+
+  /**
+   * The point of the change. A code typed at leisure has to fit, and under the
+   * old flat thirty seconds it did not: the handshake's own human-aware
+   * deadline is 135 seconds and the outer limit has to leave room for it.
+   */
+  it('leaves room for a second factor to actually be answered', () => {
+    const budget = accessOpenBudgetMs({
+      stagedAt: STAGED_AT,
+      rollbackSeconds: ROLLBACK,
+      now: STAGED_AT + 2_000
+    })
+    expect(budget).toBeGreaterThan(135_000)
+  })
+
+  // Bounded by construction: it can never outlive the window, so a confirmation
+  // can never be written against a file the host has already put back.
+  it('never reaches past the rollback deadline', () => {
+    for (const elapsed of [0, 1_000, 60_000, 250_000, 299_000]) {
+      const budget = accessOpenBudgetMs({
+        stagedAt: STAGED_AT,
+        rollbackSeconds: ROLLBACK,
+        now: STAGED_AT + elapsed
+      })
+      expect(STAGED_AT + elapsed + budget).toBeLessThan(STAGED_AT + ROLLBACK * 1000)
+    }
+  })
+
+  it('shrinks with a shorter window rather than ignoring it', () => {
+    const short = accessOpenBudgetMs({ stagedAt: STAGED_AT, rollbackSeconds: 60, now: STAGED_AT })
+    const long = accessOpenBudgetMs({ stagedAt: STAGED_AT, rollbackSeconds: 300, now: STAGED_AT })
+    expect(short).toBeLessThan(long)
+    expect(short).toBe(60_000 - 2 * ACCESS_CONFIRM_TIMEOUT_MS)
+  })
+
+  // A negative delay is not a thing to hand a timer, and past the deadline the
+  // pre-check in confirm() has already reported the honest outcome.
+  it('is zero rather than negative once the window has closed', () => {
+    expect(
+      accessOpenBudgetMs({ stagedAt: STAGED_AT, rollbackSeconds: 60, now: STAGED_AT + 120_000 })
+    ).toBe(0)
+  })
+
+  it('is zero when only the reserved commands would fit', () => {
+    expect(
+      accessOpenBudgetMs({ stagedAt: STAGED_AT, rollbackSeconds: 40, now: STAGED_AT })
+    ).toBe(0)
+  })
+})
+
+describe('the committer hands that budget to the opener', () => {
+  it('does not leave sshOpenFresh\'s own default in charge', async () => {
+    let seen: number | undefined = -1
+    const s = session()
+    const c = new AccessCommitter({
+      openFresh: async (_cfg, timeoutMs) => {
+        seen = timeoutMs
+        return s
+      },
+      now: () => STAGED_AT + 2_000
+    })
+    await c.confirm({}, req())
+    expect(seen).toBe(
+      accessOpenBudgetMs({ stagedAt: STAGED_AT, rollbackSeconds: 300, now: STAGED_AT + 2_000 })
+    )
   })
 })

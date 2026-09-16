@@ -32,7 +32,9 @@ export function MonitorStrip({
   // Sampling runs commands over the same SSH connection the shell uses, so it
   // only polls for the tab actually on screen — never hidden tabs or tabs in
   // other workspaces.
-  const m = useServerMetrics(server, open && visible && server.status !== 'offline')
+  // One host, on screen, because the user opened this strip: it may ask for a
+  // fingerprint or a second factor. The fleet grid may not — see the hook.
+  const m = useServerMetrics(server, open && visible && server.status !== 'offline', true)
 
   const toggle = (): void => setSettings({ showMonitorStrip: !open })
 

@@ -213,10 +213,30 @@ async function handleSocks(t: Active, client: Client, socket: net.Socket): Promi
 
 // ---------------------------------------------------------------- lifecycle
 
+/**
+ * A tunnel gets its OWN connection, jump boxes and all.
+ *
+ * `openChain` and not `acquire`, deliberately, and unlike the ephemeral
+ * forward below. A tunnel is a long-lived thing an operator started and expects
+ * to outlive whatever else is open: riding the shared pool would mean a
+ * terminal closing, or the pool's idle rules, deciding when a published port
+ * stops answering. It dials every hop of its own chain and `tunnelStop` ends
+ * every one of them, so nothing it holds is anybody else's.
+ */
 export async function tunnelStart(
   wc: WebContents | null,
   cfg: TunnelConfig,
-  ssh: TunnelSshConfig
+  ssh: TunnelSshConfig,
+  /**
+   * False for a caller with nobody in front of it.
+   *
+   * The MCP bridge can start a tunnel (`set_tunnel`), and an agent doing so
+   * must not be able to raise a verification-code dialog on a bastion or a
+   * trust-on-first-use dialog for an unknown host — that would record a trust
+   * decision as a side effect of something the agent asked for. The IPC handler
+   * opts in, because there a person pressed Start.
+   */
+  allowPrompt = false
 ): Promise<TunnelResult> {
   await tunnelStop(cfg.id)
 
@@ -234,21 +254,36 @@ export async function tunnelStart(
   emit(t)
 
   try {
-    const chain = await openChain(ssh)
+    const chain = await openChain(ssh, undefined, allowPrompt)
     t.clients = chain.clients
     const client = chain.client
 
-    // A dropped SSH connection must not leave a listener accepting traffic
-    // that has nowhere to go.
-    client.on('close', () => {
-      if (tunnels.get(cfg.id) === t && t.state === 'active') {
-        setState(t, 'error', 'SSH connection closed')
-        void tunnelStop(cfg.id, true)
-      }
-    })
-    client.on('error', (err: Error) => {
-      if (tunnels.get(cfg.id) === t) setState(t, 'error', err.message)
-    })
+    /**
+     * EVERY hop, not just the last one.
+     *
+     * A dropped SSH connection must not leave a listener accepting traffic that
+     * has nowhere to go — and on a chain the connection that drops is often not
+     * the one carrying the traffic. Hops 1..n ride channels opened on the hop
+     * before, so a bastion going away kills the whole chain in fact, but only
+     * the client whose socket actually closed is guaranteed to say so. Watching
+     * the last one alone left a multi-hop tunnel reporting `active`, with a
+     * bound port, over a path that had been dead for minutes.
+     *
+     * Stopping is idempotent and `tunnels.get(cfg.id) === t` guards a tunnel
+     * that has already been replaced, so several hops closing at once is one
+     * stop, not n.
+     */
+    for (const c of chain.clients) {
+      c.on('close', () => {
+        if (tunnels.get(cfg.id) === t && t.state === 'active') {
+          setState(t, 'error', 'SSH connection closed')
+          void tunnelStop(cfg.id, true)
+        }
+      })
+      c.on('error', (err: Error) => {
+        if (tunnels.get(cfg.id) === t) setState(t, 'error', err.message)
+      })
+    }
 
     if (cfg.kind === 'remote') {
       const port = await new Promise<number>((resolve, reject) => {

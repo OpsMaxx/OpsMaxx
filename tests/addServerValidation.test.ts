@@ -195,7 +195,7 @@ describe('a profile can be checked before it is saved', () => {
     const i = ssh.indexOf('export async function sshTest')
     expect(i).toBeGreaterThan(-1)
     const body = ssh.slice(i, i + 1600)
-    expect(body).toContain('openChain(cfg)')
+    expect(body).toContain('openChain(cfg, undefined, allowPrompt)')
     expect(body).not.toContain('acquire(')
   })
 
@@ -208,12 +208,34 @@ describe('a profile can be checked before it is saved', () => {
     expect(body).toMatch(/for \(const c of chain\?\.clients \?\? \[\]\) c\.end\(\)/)
   })
 
-  // Answering a first-contact trust dialog would record a trust decision as a
-  // side effect of pressing a button labelled Test.
-  it('does not raise the host-key trust prompt', () => {
+  /**
+   * Answering a first-contact trust dialog would record a trust decision as a
+   * side effect of something that is not a connection -- and `sshTest` is not
+   * only the Test button. `probeServer` on the MCP bridge calls it for
+   * `test_connection`, so an agent can reach it.
+   *
+   * This used to be asserted by checking that the word `allowPrompt` did NOT
+   * appear in the body, on the reasoning that not passing it meant not
+   * prompting. It meant the opposite: `openChain` had no such parameter, so
+   * every caller took `connectClient`'s default, which is to ask. The doc
+   * comment describing the safe behaviour sat directly above code that did the
+   * unsafe thing, and the test agreed with the comment.
+   *
+   * So the assertion is now on the DEFAULT, which is the thing that decides it.
+   */
+  it('defaults to raising no dialog at all', () => {
     const i = ssh.indexOf('export async function sshTest')
-    const doc = ssh.slice(Math.max(0, i - 1500), i)
-    expect(doc).toMatch(/allowPrompt/)
-    expect(ssh.slice(i, i + 1600)).not.toMatch(/allowPrompt/)
+    const body = ssh.slice(i, i + 1600)
+    expect(body).toMatch(/allowPrompt = false/)
+  })
+
+  // The one caller with a person in front of it. Somebody pressed Test, so a
+  // fingerprint to confirm or a code to type is the answer to their click.
+  it('is opted in to prompting only from the IPC handler', () => {
+    const main = read('src/main/index.ts')
+    expect(main).toContain('sshTest(preparedSshTarget(cfg), true)')
+    // And not by the agent-facing probe, which has nobody to ask.
+    const mcp = read('src/main/services/mcpServer.ts')
+    expect(mcp).toContain('sshTest(preparedSshTarget(serverToSshConfig(server)))')
   })
 })

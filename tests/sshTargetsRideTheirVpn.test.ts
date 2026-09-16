@@ -45,8 +45,8 @@ describe('main resolves credentials and the VPN together', () => {
     // Named individually because each is a feature that silently could not
     // reach a VPN-only host, and a count would not notice one regressing.
     for (const call of [
-      'tunnelStart(e.sender, cfg, preparedSshTarget(ssh))',
-      'return metricsSample(key, preparedSshTarget(cfg))'
+      'tunnelStart(e.sender, cfg, preparedSshTarget(ssh), true)',
+      'return metricsSample(key, preparedSshTarget(cfg), interactive === true)'
     ]) {
       expect(stripped).toContain(call)
     }

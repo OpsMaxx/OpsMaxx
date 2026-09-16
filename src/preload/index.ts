@@ -696,8 +696,12 @@ const api = {
     }
   },
   metrics: {
-    sample: (key: string, cfg: SshConnectConfig & { serverId?: string }): Promise<MetricsResult> =>
-      ipcRenderer.invoke('metrics:sample', key, cfg),
+    sample: (
+      key: string,
+      cfg: SshConnectConfig & { serverId?: string },
+      // True only where a person is looking at this one host. See the handler.
+      interactive?: boolean
+    ): Promise<MetricsResult> => ipcRenderer.invoke('metrics:sample', key, cfg, interactive),
     disconnect: (key: string): Promise<void> => ipcRenderer.invoke('metrics:disconnect', key)
   },
   // Outbound alert delivery. The URL never comes back across this bridge —

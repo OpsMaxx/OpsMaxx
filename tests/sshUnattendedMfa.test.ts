@@ -89,6 +89,78 @@ describe('a stored answer', () => {
   })
 })
 
+/**
+ * The same rule, on the OTHER chain walker.
+ *
+ * `acquire` threads `allowPrompt` to every hop. `openChain` — the unpooled one
+ * behind sshTest, sshOpenFresh, tunnels and the ephemeral forwards a database
+ * dials through — had no such parameter at all, so every caller on it took
+ * `connectClient`'s default, which is to ask. The fix above was therefore only
+ * half applied: the sweep could not raise a dialog, and the agent-facing probe
+ * next to it still could.
+ */
+describe('the unpooled walker', () => {
+  it('takes the flag', () => {
+    expect(SSH).toMatch(/async function openChainDirect\([\s\S]{0,240}allowPrompt = true/)
+    expect(SSH).toMatch(/export async function openChain\([\s\S]{0,900}allowPrompt = true/)
+  })
+
+  it('passes it to every hop and to the target, not only the first', () => {
+    const i = SSH.indexOf('async function openChainDirect(')
+    const body = SSH.slice(i, SSH.indexOf('// ---------------------------------------------------------------- pooling', i))
+    expect(body).toContain('connectClient(hops[i], sock, allowPrompt)')
+    expect(body).toContain('connectClient(cfg, sock, allowPrompt)')
+    // Nothing left taking the default, which is what the old code did twice.
+    expect(body).not.toMatch(/connectClient\([^)]*sock\)/)
+  })
+
+  // A VPN or a cloud broker in front of the chain must not lose it on the way.
+  it('carries it through the transports that wrap the chain', () => {
+    expect(SSH).toContain('openChainOverCloud(cfg, onHop, allowPrompt)')
+    expect(SSH).toContain('openChainOverVpn(cfg, onHop, allowPrompt)')
+  })
+})
+
+/**
+ * Joining an open is joining its ANSWER to a challenge, not just its socket.
+ *
+ * `acquireOne` collapses concurrent opens for one key, which is right whenever
+ * the open succeeds — one code typed, every caller served. It was wrong when
+ * the open in flight was an unattended one: that branch ENDS the connection
+ * the moment a challenge arrives, so a person who opened a terminal a
+ * millisecond later watched it fail having never been asked for anything.
+ *
+ * That is the tester's own sentence — "it is not asking for the Auth Key now" —
+ * and it is the one failure mode here that produces no dialog at all rather
+ * than a dialog in the wrong place.
+ */
+describe('a person joining an open that nobody was watching', () => {
+  const ACQUIRE = SSH.slice(SSH.indexOf('async function acquireOne('), SSH.indexOf('export async function acquire('))
+
+  it('records what each open was started under', () => {
+    expect(SSH).toMatch(/const connecting = new Map<string, \{ promise: Promise<PooledConnection>; allowPrompt: boolean \}>\(\)/)
+    expect(ACQUIRE).toContain('connecting.set(key, { promise, allowPrompt })')
+  })
+
+  it('does not keep an unattended refusal as its own answer', () => {
+    expect(ACQUIRE).toContain('if (!allowPrompt || inflight.allowPrompt || !mayRetry) {')
+    expect(ACQUIRE).toContain('return acquireOne(hop, parent, allowPrompt, false)')
+  })
+
+  // Once, never in a loop: the retry is itself attended, so the next joiner
+  // hits the first arm of the condition above.
+  it('bounces at most once', () => {
+    expect(ACQUIRE).toMatch(/mayRetry = true/)
+  })
+
+  // The success path still collapses. Two callers must not become two
+  // authentications just because one of them is allowed to ask.
+  it('still shares an open that succeeds', () => {
+    expect(ACQUIRE).toContain('const conn = await inflight.promise')
+    expect(ACQUIRE).toContain('conn.refs++')
+  })
+})
+
 describe('the interactive path is untouched', () => {
   it('still prompts when a person is there', () => {
     expect(HANDLER).toContain('void prompter({')

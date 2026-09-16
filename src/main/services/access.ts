@@ -204,8 +204,12 @@ export interface AccessCommitDeps {
    * any pool. `sshOpenFresh` is the only implementation the app ships; a
    * `sshExec`-shaped one would satisfy the types and fail the judgement, which
    * is the point of the judgement.
+   *
+   * `timeoutMs` is how long it may spend doing that, and the caller computes it
+   * from the rollback window rather than leaving the implementation's own
+   * default in charge. See `openBudget` below.
    */
-  openFresh: (cfg: unknown) => Promise<AccessFreshSession>
+  openFresh: (cfg: unknown, timeoutMs?: number) => Promise<AccessFreshSession>
   now?: () => number
 }
 
@@ -220,6 +224,43 @@ export interface AccessCommitDeps {
  * there.
  */
 export const ACCESS_CONFIRM_TIMEOUT_MS = 20_000
+
+/**
+ * How long the fresh session may take to authenticate.
+ *
+ * NOT a second deadline. It is what is left of the rollback window after
+ * reserving the two commands that follow, so this protocol goes on having
+ * exactly one deadline: the host's own dead-man's switch. Whatever is left
+ * before the host puts the previous file back is time this may safely use, and
+ * time after it is time nothing may use — `judgeAccessVerification` tests that
+ * first, both before this opens and again with the evidence in hand.
+ *
+ * It exists because a flat one did real harm on a server with a second factor.
+ * `sshOpenFresh` defaulted to thirty seconds, which is shorter than the
+ * verification-code dialog it can raise (two minutes) and shorter still than
+ * the handshake deadline underneath it (135 seconds, extended on purpose the
+ * moment a person is asked something — see connectClient). So the outer, flat
+ * limit cancelled a connection while the operator was reading a code off their
+ * phone, and the change they had just confirmed was reported
+ * `reverted-unconfirmed` and undone. Two deadlines that disagree by a factor of
+ * four, and the arbitrary one won.
+ *
+ * Reserving two commands rather than one because both run on the path that
+ * matters: `accessVerifyCommand` and then `accessDisarmCommand`. A budget that
+ * spent the whole window on the connect would authenticate successfully and
+ * then have no time left to write the confirmation, which reports as the same
+ * failure by a longer route.
+ */
+export function accessOpenBudgetMs(o: {
+  stagedAt: number
+  rollbackSeconds: number
+  now: number
+}): number {
+  const remaining = o.stagedAt + o.rollbackSeconds * 1000 - o.now
+  // Never negative: the caller is past the deadline, the pre-check has already
+  // said so, and a negative delay is not a thing to hand a timer.
+  return Math.max(0, remaining - 2 * ACCESS_CONFIRM_TIMEOUT_MS)
+}
 
 export interface AccessCommitRequest {
   serverId: string
@@ -282,7 +323,10 @@ export class AccessCommitter {
     let session: AccessFreshSession | null = null
     let openError: string | undefined
     try {
-      session = await this.deps.openFresh(cfg)
+      session = await this.deps.openFresh(
+        cfg,
+        accessOpenBudgetMs({ stagedAt: req.stagedAt, rollbackSeconds, now: clock() })
+      )
     } catch (e) {
       // Not classified further, and shared/access.ts says why: a refused key
       // and an unreachable host are the same fact from here, and both mean the

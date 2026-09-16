@@ -2361,7 +2361,9 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         auditSuccess(ctx, 'not-required')
       } else {
         const cfg = resolveChainSecrets(serverToSshConfig(s))
-        const result = await metricsSample(`mcp:${s.id}`, cfg)
+        // No dialog: an agent asked for this, so there is nobody whose click a
+        // verification-code prompt would be the answer to.
+        const result = await metricsSample(`mcp:${s.id}`, cfg, false)
         if (!result.ok || !result.data) {
           recordAudit({ ...auditBase(ctx), approval: 'not-required', result: 'error', error: result.error })
           return errorText(`Could not sample metrics: ${result.error ?? 'unknown error'}`)
