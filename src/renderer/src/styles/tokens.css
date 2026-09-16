@@ -188,7 +188,16 @@
 
   /* Chrome */
   --titlebar-h: 40px;
-  --activitybar-w: 52px;
+  /* Wide enough for a word under each icon. It was 52px when the rail was
+     icons and tooltips only; a tooltip is not a label, because it costs a hover
+     and cannot be read while deciding where to go.
+     Measured, not guessed. "Connections" is the widest label at 73px, inside 78
+     usable pixels once the button's padding is taken off. The five pixels of
+     slack are deliberate: this was set twice from a measurement with none to
+     spare, and the system font stack is not the same width on Windows and Linux
+     as on the machine it was measured on. A label that does not fit ellipsises,
+     which is a worse outcome than four pixels of column. */
+  --activitybar-w: 96px;
   --statusbar-h: 24px;
 }
 

@@ -29,15 +29,46 @@ import type { ActivityView } from '../../types'
  * its own private copy is how six of these ended up unreachable from Ctrl+K
  * while the walkthrough claimed it reached every action in the app.
  */
-export const ACTIVITY_ITEMS: { id: ActivityView; icon: React.ReactNode; label: string }[] = [
+export const ACTIVITY_ITEMS: {
+  id: ActivityView
+  icon: React.ReactNode
+  label: string
+  /**
+   * What the rail prints under the icon, when that is not the full label.
+   *
+   * The rail is a fixed-width column and the palette is a full-width list, so
+   * the same string cannot serve both: "Tunnels & VPN" is the honest name of
+   * the destination and does not fit under a 20px icon. The long one stays the
+   * tooltip and the accessible name, which is what a person reads when they
+   * are unsure; this is the one they read when they already know.
+   */
+  rail?: string
+}[] = [
   { id: 'connections', icon: <Server size={20} />, label: 'Connections' },
   { id: 'databases', icon: <Database size={20} />, label: 'Databases' },
-  { id: 'tunnels', icon: <Network size={20} />, label: 'Tunnels & VPN' },
-  { id: 'http', icon: <Globe size={20} />, label: 'HTTP Client' },
+  { id: 'tunnels', icon: <Network size={20} />, label: 'Tunnels & VPN', rail: 'Tunnels' },
+  { id: 'http', icon: <Globe size={20} />, label: 'HTTP Client', rail: 'HTTP' },
   { id: 'monitor', icon: <Activity size={20} />, label: 'Monitoring' },
   { id: 'vault', icon: <KeyRound size={20} />, label: 'Vault' },
   { id: 'ai', icon: <Bot size={20} />, label: 'AI & MCP' }
 ]
+
+/**
+ * The visible label under an icon.
+ *
+ * `aria-hidden`, and every button carries an `aria-label` with its full
+ * sentence, so adding this text changed no accessible name. It matters most on
+ * the two buttons whose tooltip explains a red dot: a screen reader gets
+ * "Settings — backup out of date: …" rather than the word "Settings" beside an
+ * unnamed decoration.
+ */
+function RailLabel({ children }: { children: string }): React.JSX.Element {
+  return (
+    <span className="activity-label" aria-hidden>
+      {children}
+    </span>
+  )
+}
 
 /**
  * The icon for each promoted module.
@@ -65,6 +96,16 @@ const PROMOTED_ICONS: Record<string, React.ReactNode> = {
  * the subject distinction has to be legible: "Monitoring — reading the estate"
  * sits two buttons up, and `processes` is here precisely because it is not that.
  */
+const PROMOTED_RAIL: Record<string, string> = {
+  docker: 'Docker',
+  kubernetes: 'Kubernetes',
+  cicd: 'CI/CD',
+  // The registry calls it "Local processes", which is the right name in a list
+  // of twenty modules and one word too many under an icon. The distinction it
+  // is drawing against Monitoring lives in the tooltip.
+  processes: 'Processes'
+}
+
 const PROMOTED_TITLES: Record<string, string> = {
   docker: 'Docker — containers, compose projects and images',
   kubernetes: 'Kubernetes — clusters, pods and workloads',
@@ -110,8 +151,14 @@ export function ActivityBar(): React.JSX.Element {
 
   return (
     <div className="activitybar">
-      <button className="activity-btn" title="Toggle sidebar" onClick={toggleSidebar}>
+      <button
+        className="activity-btn"
+        title="Toggle sidebar"
+        aria-label="Toggle sidebar"
+        onClick={toggleSidebar}
+      >
         <PanelLeft size={20} />
+        <RailLabel>Sidebar</RailLabel>
       </button>
       <div style={{ height: 8 }} />
       {/* The destinations scroll; the sidebar toggle above and Report a bug and
@@ -157,9 +204,11 @@ export function ActivityBar(): React.JSX.Element {
                 activity === 'monitor' && rail === 'monitor' && !onPromotedTab && 'active'
               )}
               title="Monitoring — reading the estate"
+              aria-label="Monitoring — reading the estate"
               onClick={() => openMonitor(onPromotedTab ? 'overview' : monitorTab)}
             >
               <Activity size={20} />
+              <RailLabel>Monitoring</RailLabel>
             </button>
             <button
               className={clsx(
@@ -167,6 +216,7 @@ export function ActivityBar(): React.JSX.Element {
                 activity === 'monitor' && rail === 'operations' && 'active'
               )}
               title="Operations — changing the estate"
+              aria-label="Operations — changing the estate"
               onClick={() => openOperations(operationsTab)}
             >
               {/* A spanner rather than another waveform. The two rails differ by
@@ -174,6 +224,7 @@ export function ActivityBar(): React.JSX.Element {
                   than hue — an operator glancing at a 44px column reads the
                   silhouette and nothing else. */}
               <Wrench size={20} />
+              <RailLabel>Operations</RailLabel>
             </button>
             {/* The promoted modules, immediately after the two fleet buttons.
                 Here rather than at the top of the rail because they ARE fleet
@@ -190,9 +241,11 @@ export function ActivityBar(): React.JSX.Element {
                   activity === 'monitor' && rail === 'monitor' && monitorTab === m.id && 'active'
                 )}
                 title={PROMOTED_TITLES[m.id] ?? m.label}
+                aria-label={PROMOTED_TITLES[m.id] ?? m.label}
                 onClick={() => openMonitor(m.id)}
               >
                 {PROMOTED_ICONS[m.id]}
+                <RailLabel>{PROMOTED_RAIL[m.id] ?? m.label}</RailLabel>
               </button>
             ))}
           </div>
@@ -201,9 +254,11 @@ export function ActivityBar(): React.JSX.Element {
             key={it.id}
             className={clsx('activity-btn', activity === it.id && 'active')}
             title={it.label}
+            aria-label={it.label}
             onClick={() => setActivity(it.id)}
           >
             {it.icon}
+            <RailLabel>{it.rail ?? it.label}</RailLabel>
           </button>
         )
       )}
@@ -237,10 +292,16 @@ export function ActivityBar(): React.JSX.Element {
             ? 'Report a bug — debug mode is recording what the app does. Press to stop recording and build a report.'
             : 'Report a bug — collects a report you can read before you send it'
         }
+        aria-label={
+          recording
+            ? 'Report a bug — debug mode is recording what the app does. Press to stop recording and build a report.'
+            : 'Report a bug — collects a report you can read before you send it'
+        }
         onClick={() => reportBug()}
       >
         <Bug size={20} />
         {recording && <span className="activity-badge" aria-hidden />}
+        <RailLabel>Report bug</RailLabel>
       </button>
       <button
         className={clsx('activity-btn', activity === 'settings' && 'active')}
@@ -259,10 +320,16 @@ export function ActivityBar(): React.JSX.Element {
             ? 'Settings — backup out of date: stored connections have changed since the last export'
             : 'Settings'
         }
+        aria-label={
+          backupDirty
+            ? 'Settings — backup out of date: stored connections have changed since the last export'
+            : 'Settings'
+        }
         onClick={() => setActivity('settings')}
       >
         <Settings size={20} />
         {backupDirty && <span className="activity-badge" aria-hidden />}
+        <RailLabel>Settings</RailLabel>
       </button>
     </div>
   )

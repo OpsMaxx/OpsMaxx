@@ -242,8 +242,10 @@ button {
 }
 .activity-btn {
   position: relative;
-  width: 40px;
-  height: 40px;
+  width: 84px;
+  /* Icon (20) + gap + one 10px line, with room to breathe. A FIXED height, for
+     the reason below: it is the anti-squash guarantee, not a look. */
+  height: 52px;
   /* A flex item shrinks below its stated height by default, so in a cramped
      column these silently compressed to 30px instead of the container
      scrolling -- twelve squashed icons rather than ten correct ones and a
@@ -252,10 +254,44 @@ button {
      overrule is not a hit target at all. */
   flex: none;
   display: grid;
-  place-items: center;
+  /* Two rows now, not one centred cell: the icon sits on its own row and the
+     label under it, both centred. `place-items: center` still does the
+     centring; the rows are what keep the icon from drifting when a label wraps
+     to nothing (the sidebar toggle) or runs long. */
+  grid-auto-rows: min-content;
+  align-content: center;
+  justify-items: center;
+  gap: 3px;
+  padding: 0 3px;
   border-radius: var(--r-md);
   color: var(--text-faint);
   transition: color 0.12s, background 0.12s;
+}
+/* The word under the icon.
+   Capped and ellipsised rather than wrapped: a label that grew to two lines
+   would make one button taller than its neighbours, and `.activity-btn`'s fixed
+   height is what stops the column squashing instead of scrolling. Anything that
+   does not fit is still readable in the tooltip, which every one of these
+   buttons still has. */
+.activity-label {
+  max-width: 100%;
+  /* An existing step, not a new one, and NOT the 11px caption step.
+     10px read fine in the column, but the scale is explicit that a locally
+     reasonable extra step is how twelve of them accumulated -- so the rail
+     widened to fit a size that already exists rather than the scale growing a
+     size to fit the rail.
+     11px was the obvious candidate and is wrong here: that step is reserved for
+     tracked all-caps labels, which are read as a silhouette rather than letter
+     by letter, and its exception list is deliberately capped so that reaching
+     for it is a decision rather than a habit. These are sentence-case words.
+     So 12px, which is the floor the same scale sets for anything a person
+     actually reads, and 2px of rail rather than an argument. */
+  font-size: var(--fs-identifier);
+  font-weight: 500;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .activity-btn:hover {
   color: var(--text);
@@ -268,9 +304,9 @@ button {
 .activity-btn.active::before {
   content: '';
   position: absolute;
-  left: -8px;
-  top: 9px;
-  bottom: 9px;
+  left: -4px;
+  top: 12px;
+  bottom: 12px;
   width: 3px;
   border-radius: var(--r-pill);
   background: var(--accent);
@@ -2414,10 +2450,13 @@ details[open] > .disclosure-head .chev {
   background: var(--danger-soft);
 }
 /* Unread-style dot marking a pending backup on the Settings button. */
+/* Offset from the CENTRE rather than from the right edge: the button is wider
+   than its icon now, and `right: 7px` put the dot in empty space a third of the
+   button away from the thing it is marking. */
 .activity-badge {
   position: absolute;
-  top: 7px;
-  right: 7px;
+  top: 4px;
+  left: calc(50% + 6px);
   width: 8px;
   height: 8px;
   border-radius: 50%;
