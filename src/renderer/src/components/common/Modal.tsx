@@ -1,4 +1,4 @@
-import { ReactNode, useRef } from 'react'
+import { ReactNode, useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { clsx } from '../../lib/format'
@@ -52,6 +52,111 @@ interface ModalProps {
   /** Extra controls, to the left of Cancel. Use `confirm` for the commit. */
   footer?: ReactNode
   size?: 'md' | 'lg'
+  /**
+   * Which layer this dialog belongs on. Higher wins, whatever the order the
+   * two were opened in and whatever order they sit in the tree.
+   *
+   * Only one dialog in the app sets it: the second-factor prompt, which the
+   * vault dialog used to cover completely. Both render the same `.scrim`, and
+   * `.scrim` carries one z-index for all of them, so stacking fell through to
+   * DOM order -- and App.tsx happens to mount the vault dialog after the
+   * prompt. The user was then looking at "Vault locked" while a live SSH
+   * challenge with a 135-second fuse sat underneath it, unanswerable, until
+   * the connection died with "the challenge was not answered in time".
+   *
+   * A dialog that something is WAITING ON outranks one that merely needs
+   * doing. That is the whole rule, and it is a property of the dialog rather
+   * than of where somebody put it in the tree.
+   */
+  priority?: number
+  /**
+   * False for a dialog that must not be closed by a stray Escape or a click
+   * that lands outside it. Defaults to true, which is right for every dialog
+   * whose close does nothing but close it.
+   *
+   * The second-factor prompt is not one of those: closing it REPLIES to the
+   * server with an empty answer, which is a wrong second factor and spends one
+   * of the host's MaxAuthTries. See SshPrompt's `cancel`.
+   */
+  dismissible?: boolean
+}
+
+// ---------------------------------------------------------------- layering
+//
+// Every dialog renders `.scrim`, which is `position: fixed` with a single
+// z-index, so two open at once stack by DOM order and the document-level
+// Escape and outside-click handlers of BOTH of them fire on one keypress.
+// This is the list that decides which one is actually in front, and therefore
+// which one those handlers belong to.
+//
+// A module-level array rather than context: `Modal` is used from thirty places
+// and several of them are mounted outside any provider a context would need,
+// and the thing being tracked is genuinely global -- there is one screen.
+
+interface OpenModal {
+  id: number
+  priority: number
+}
+
+const openModals: OpenModal[] = []
+const layerListeners = new Set<() => void>()
+let nextModalId = 1
+
+const announceLayers = (): void => {
+  for (const l of layerListeners) l()
+}
+
+/** Open dialogs, lowest layer first. Priority decides, then the order they opened. */
+const byLayer = (): OpenModal[] =>
+  openModals
+    .map((m, i) => ({ m, i }))
+    .sort((a, b) => a.m.priority - b.m.priority || a.i - b.i)
+    .map(({ m }) => m)
+
+/**
+ * This dialog's place in the stack: what to paint at, and whether the keyboard
+ * and the mouse belong to it.
+ *
+ * Registration happens in an effect, so on the very first render this dialog
+ * is not in the list yet. That case is treated as "on top", which is what it
+ * is about to be -- reporting it as covered would arm nothing and paint it at
+ * the bottom for a frame.
+ */
+function useModalLayer(priority: number): { zIndex: number; top: boolean } {
+  const idRef = useRef(0)
+  if (idRef.current === 0) idRef.current = nextModalId++
+  const id = idRef.current
+  const [, bump] = useState(0)
+
+  useEffect(() => {
+    const listener = (): void => bump((n) => n + 1)
+    layerListeners.add(listener)
+    return () => {
+      layerListeners.delete(listener)
+    }
+  }, [])
+
+  useEffect(() => {
+    openModals.push({ id, priority })
+    announceLayers()
+    return () => {
+      const i = openModals.findIndex((m) => m.id === id)
+      if (i !== -1) openModals.splice(i, 1)
+      announceLayers()
+    }
+  }, [id, priority])
+
+  const order = byLayer()
+  const pos = order.findIndex((m) => m.id === id)
+  /**
+   * `.scrim`'s own z-index is 100; these ride on top of it in the same space.
+   *
+   * The headroom above is `.menu` at 150, so this has room for fifty open
+   * dialogs before it would reach something else — and `priority` costs one
+   * step, not a band, for the same reason. If a design ever wants real bands here,
+   * raise `.menu` rather than widening the multiplier.
+   */
+  return { zIndex: 100 + (pos < 0 ? order.length : pos), top: pos < 0 || pos === order.length - 1 }
 }
 
 export function Modal({
@@ -63,13 +168,19 @@ export function Modal({
   cancelLabel = 'Cancel',
   footerNote,
   footer,
-  size = 'md'
+  size = 'md',
+  priority = 0,
+  dismissible = true
 }: ModalProps): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
-  useClickOutside(ref, onClose)
+  const { zIndex, top } = useModalLayer(priority)
+  // Only the dialog in front. Both of these listen on `document`, so without
+  // the guard one Escape closes every open dialog at once -- including ones
+  // the user cannot see, whose close is not always harmless.
+  useClickOutside(ref, onClose, dismissible && top)
   const hasFooter = confirm !== undefined || footer !== undefined || footerNote !== undefined
   return (
-    <div className="scrim">
+    <div className="scrim" style={{ zIndex }}>
       <div className={clsx('modal', size === 'lg' && 'lg')} ref={ref} role="dialog" aria-modal>
         <div className="modal-header">
           <div>
