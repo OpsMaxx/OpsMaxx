@@ -1297,7 +1297,12 @@ async function collectMssql(client: unknown): Promise<DbAnswer<unknown>[]> {
   return answers
 }
 
-export async function dbOps(cfg: DbConnectConfig): Promise<DbOpsReport> {
+export async function dbOps(
+  cfg: DbConnectConfig,
+  // False for the size sampler, which runs on a timer with nobody watching.
+  // True from the Operations panel. See build() in ./db.
+  allowPrompt = false
+): Promise<DbOpsReport> {
   const started = Date.now()
   const base = {
     engine: cfg.kind as DbOpsEngine,
@@ -1313,7 +1318,7 @@ export async function dbOps(cfg: DbConnectConfig): Promise<DbOpsReport> {
     // NOT ensure(). See openTransient() in ./db for the two reasons: the
     // session timeout below never resets, and a denied question aborts whatever
     // transaction the operator has open in the query tab.
-    conn = await openTransient(cfg)
+    conn = await openTransient(cfg, allowPrompt)
     const answers =
       cfg.kind === 'postgres'
         ? await collectPostgres(conn.client)

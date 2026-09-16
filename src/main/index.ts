@@ -4388,7 +4388,9 @@ ipcMain.handle('fleet:collect-now', (_e, serverIds?: string[]) =>
 // feature.
 ipcMain.handle('db:test', (_e, cfg: DbConnectConfig) => dbTest(withVpnTransportDb(resolveDbSecrets(cfg))))
 ipcMain.handle('db:query', (_e, cfg: DbConnectConfig, text: string) =>
-  dbQuery(withVpnTransportDb(resolveDbSecrets(cfg)), text)
+  // A person typed this query. The MCP bridge's query_database keeps the
+  // default and never raises a dialog on a bastion.
+  dbQuery(withVpnTransportDb(resolveDbSecrets(cfg)), text, true)
 )
 ipcMain.handle('db:info', (_e, cfg: DbConnectConfig) => dbInfo(withVpnTransportDb(resolveDbSecrets(cfg))))
 ipcMain.handle('db:shell', (_e, cfg: DbConnectConfig, line: string) =>
@@ -4423,7 +4425,7 @@ ipcMain.handle('db:close', (_e, id: string) => dbClose(id))
 const dbVerdictSeen = new Map<string, string>()
 
 ipcMain.handle('db:ops', async (_e, cfg: DbConnectConfig) => {
-  const report = await dbOps(withVpnTransportDb(resolveDbSecrets(cfg)))
+  const report = await dbOps(withVpnTransportDb(resolveDbSecrets(cfg)), true)
   // Item 47's growth series. Recorded HERE rather than inside `dbOps` so that
   // function stays a pure read with no store dependency, and recorded only
   // when the report yields a number this can honestly plot -- see

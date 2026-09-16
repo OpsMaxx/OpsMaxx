@@ -1,7 +1,7 @@
 import net from 'node:net'
 import type { Client } from 'ssh2'
 import type { WebContents } from 'electron'
-import { openChain } from './ssh'
+import { acquire, openChain, release } from './ssh'
 import type { TunnelConfig, TunnelResult, TunnelSshConfig, TunnelState, TunnelStatus } from '../../shared/tunnel'
 
 // Port forwarding over the SSH transport:
@@ -383,16 +383,40 @@ export function tunnelDisposeAll(): void {
   for (const id of [...tunnels.keys()]) void tunnelStop(id, true)
 }
 
-// Opens a local forward on an ephemeral port and returns it. Used to reach a
-// database that is only routable from the SSH server. Not registered as a
-// user-visible tunnel — the caller owns its lifetime.
+/**
+ * A local forward on an ephemeral port. Used to reach a database that is only
+ * routable from the SSH server. Not a user-visible tunnel — the caller owns its
+ * lifetime.
+ *
+ * POOLED, where it used to dial its own connection through `openChain`.
+ *
+ * The old behaviour was one full SSH authentication per database connection.
+ * On a bastion with a second factor that is one verification code per
+ * connection, and `openTransient` — which the Operations panel uses on purpose,
+ * because a shared client would leak its session settings into the query tab —
+ * opens a fresh one every time it runs. So reading a database behind a
+ * two-factor bastion meant typing a code per click, and none of those codes
+ * could be spent on the connection the user's own terminal had already
+ * authenticated to the same machine.
+ *
+ * `acquire` is the same pool every terminal, SFTP browser and metrics sample
+ * already shares, so the bastion is authenticated once and this rides it. It
+ * also brings the VPN and cloud transports with it, which this path was
+ * hand-rolling or missing.
+ *
+ * `close()` therefore RELEASES rather than ending the clients: ending them
+ * would tear down the terminal sitting on the same connection.
+ */
 export async function openEphemeralForward(
   ssh: TunnelSshConfig,
   targetHost: string,
-  targetPort: number
+  targetPort: number,
+  // False for a caller with nobody in front of it -- the MCP bridge's database
+  // tools and the size sampler. See ssh.ts's keyboard-interactive handler.
+  allowPrompt = false
 ): Promise<{ port: number; close: () => void }> {
-  const chain = await openChain(ssh)
-  const client = chain.client
+  const conn = await acquire(ssh, undefined, allowPrompt)
+  const client = conn.client
   const sockets = new Set<net.Socket>()
 
   const server = net.createServer((socket) => {
@@ -424,21 +448,44 @@ export async function openEphemeralForward(
       })
   })
 
-  const port = await listen(server, '127.0.0.1', 0)
-
-  return {
-    port,
-    close: () => {
-      for (const s of sockets) s.destroy()
-      sockets.clear()
-      server.close()
-      for (const c of [...chain.clients].reverse()) {
-        try {
-          c.end()
-        } catch {
-          /* ignore */
-        }
-      }
-    }
+  // Released on the way out too. Binding a local port is the one thing here
+  // that can fail after the connection is in hand, and a ref taken and never
+  // given back pins the bastion open for the life of the app.
+  let port: number
+  try {
+    port = await listen(server, '127.0.0.1', 0)
+  } catch (err) {
+    server.close()
+    release(conn)
+    throw err
   }
+
+  let closed = false
+  const close = (): void => {
+    if (closed) return
+    closed = true
+    for (const s of sockets) s.destroy()
+    sockets.clear()
+    server.close()
+    client.removeListener('close', onConnectionLost)
+    // Hand the connection back rather than ending it. Another pane may be on
+    // it; the pool's own idle rules decide when it actually goes away.
+    release(conn)
+  }
+
+  /**
+   * The shared connection going away takes this listener with it.
+   *
+   * Without this the local port stays bound over a dead channel, so the
+   * database driver's next connection hangs until its own timeout rather than
+   * being refused — and the caller's `close()` would later release a connection
+   * that is already gone. Closing the listener turns a dropped bastion into a
+   * refused connection, which every driver reports immediately and clearly.
+   */
+  function onConnectionLost(): void {
+    close()
+  }
+  client.once('close', onConnectionLost)
+
+  return { port, close }
 }

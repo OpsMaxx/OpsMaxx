@@ -107,10 +107,78 @@ describe('databases', () => {
   })
 
   it('leaves an unsaved test connection alone', () => {
-    // A "Test connection" dialog has no record in the cache. Guessing a VPN
-    // for it would be inventing a decision the user has not made.
+    // A "Test connection" dialog has no record in the cache, and nothing on the
+    // config either. There is no decision to carry, so nothing is invented.
     const cfg = dbCfg({ id: 'not-saved-yet' })
     expect(withVpnTransportDb(cfg)).toBe(cfg)
+  })
+
+  /**
+   * An unsaved connection's own choice stands; a saved one's cannot be
+   * overridden.
+   *
+   * This is the rule `withCloudTransport` already states for a cloud target,
+   * and it was missing here in both directions. The dialog's Test connection
+   * button had no way to say which VPN the user had just picked — the profile
+   * was resolved only from a record that did not exist yet, so a test of a
+   * VPN-only database dialled an address this machine cannot route and failed
+   * with a network error that explained nothing. And a caller-supplied profile
+   * on a SAVED id was passed through untouched, which is a way to route a saved
+   * connection through a tunnel its record never named.
+   */
+  it('honours a profile the dialog supplies for a connection that is not saved', () => {
+    vpnIds.add('v1')
+    const out = withVpnTransportDb(dbCfg({ id: '', vpnProfileId: 'v1' }))
+    expect(out.vpnProfileId).toBe('v1')
+  })
+
+  it('discards one supplied for a saved connection whose record names none', () => {
+    vpnIds.add('v1')
+    databases.push({ id: 'db1', name: 'prod', vpnProfileId: null })
+    expect(withVpnTransportDb(dbCfg({ vpnProfileId: 'v1' })).vpnProfileId).toBeUndefined()
+  })
+
+  /**
+   * The jump host's own VPN, which nothing applied.
+   *
+   * `withCloudTransportDb` annotated the bastion with its cloud target and the
+   * VPN half of the same question was never asked, so a database reached
+   * through a bastion that is only routable over a tunnel dialled the bastion's
+   * private address from this machine. `acquire` does the dialling once the
+   * annotation is there.
+   */
+  it('annotates the bastion with its own VPN', () => {
+    vpnIds.add('v1')
+    servers.push({ id: 'bastion', name: 'jump', vpnProfileId: 'v1' })
+    const out = withVpnTransportDb(dbCfg({ ssh: { serverId: 'bastion', host: '10.0.0.1', port: 22, username: 'root' } }))
+    expect((out.ssh as { vpnProfileId?: string }).vpnProfileId).toBe('v1')
+  })
+
+  it('leaves a bastion with no VPN untouched', () => {
+    servers.push({ id: 'bastion', name: 'jump', vpnProfileId: null })
+    const ssh = { serverId: 'bastion', host: '10.0.0.1', port: 22, username: 'root' }
+    const out = withVpnTransportDb(dbCfg({ ssh }))
+    expect(out.ssh).toBe(ssh)
+  })
+
+  // Same rule as everywhere else here: the database's own profile is resolved
+  // from its record, and the bastion's from the bastion's. They are different
+  // questions and a database can have both.
+  it('keeps the two profiles apart', () => {
+    vpnIds.add('v1')
+    vpnIds.add('v2')
+    databases.push({ id: 'db1', name: 'prod', vpnProfileId: 'v1' })
+    servers.push({ id: 'bastion', name: 'jump', vpnProfileId: 'v2' })
+    const out = withVpnTransportDb(dbCfg({ ssh: { serverId: 'bastion', host: '10.0.0.1', port: 22, username: 'root' } }))
+    expect(out.vpnProfileId).toBe('v1')
+    expect((out.ssh as { vpnProfileId?: string }).vpnProfileId).toBe('v2')
+  })
+
+  it("lets the saved record's own profile win over one the caller sent", () => {
+    vpnIds.add('v1')
+    vpnIds.add('v2')
+    databases.push({ id: 'db1', name: 'prod', vpnProfileId: 'v1' })
+    expect(withVpnTransportDb(dbCfg({ vpnProfileId: 'v2' })).vpnProfileId).toBe('v1')
   })
 
   it('treats a reference to a deleted profile as direct', () => {

@@ -120,9 +120,11 @@ describe('every add-flow dialog puts its commit in the same place', () => {
   it('Add Database: the confirm is the last control in the footer', async () => {
     render(<AddDatabaseModal />)
     expect(confirmButton().textContent).toBe('Add database')
-    // Cancel sits immediately before it, never after.
+    // Cancel sits immediately before it, never after, and Test connection sits
+    // before Cancel -- the same order Add Server uses, so the two dialogs that
+    // both dial something put the same three controls in the same places.
     const buttons = [...footer().querySelectorAll('button')].map((b) => b.textContent)
-    expect(buttons).toEqual(['Cancel', 'Add database'])
+    expect(buttons).toEqual(['Test connection', 'Cancel', 'Add database'])
   })
 
   it('Create tunnel: the confirm is in the footer, not in a card inside the body', async () => {

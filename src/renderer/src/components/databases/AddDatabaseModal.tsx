@@ -11,6 +11,9 @@ import { KIND_COLOR } from './DatabaseSidebar'
 import { VpnTransportSelect } from '../vpn/VpnTransportSelect'
 import { saveDatabaseEdit, useDbEditor } from '../../store/dbEditor'
 import { displayHostFromUri } from '../../../../shared/dbAddress'
+import { dbConnectConfig } from '../../lib/dbConfig'
+import { adviseOnError } from '../../lib/connectionError'
+import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import type { DbKind, UUID } from '../../types'
 
 // Per-engine, and `dbLabel`/`dbPlaceholder` are REQUIRED fields rather than a
@@ -166,6 +169,96 @@ export function AddDatabaseModal(): React.JSX.Element {
     })
   }
 
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null)
+
+  /**
+   * What to send as the credential for a test, if anything.
+   *
+   * Main resolves a database's secret by record id, and falls back to the
+   * keychain only when neither `password` nor `uri` is present. So:
+   *
+   *  - typed into the form: sent inline, because there is nothing saved that
+   *    would match it — testing what is stored rather than what is on screen
+   *    is the one thing this button must not do;
+   *  - a vault entry chosen here: read out of the vault and sent inline, for
+   *    the same reason. An unsaved connection has no blob for main to find the
+   *    reference in;
+   *  - left blank while editing: nothing sent, so main resolves whatever is
+   *    already stored. That is what makes "I only changed the port" testable
+   *    without retyping a password.
+   */
+  const secretForTest = async (): Promise<{ password?: string; uri?: string }> => {
+    const entryId = useUri ? vaultUriEntryId : vaultEntryId
+    if (entryId) {
+      if (!vaultUnlocked) {
+        await useVaultPrompt
+          .getState()
+          .request('Testing this connection needs the credential in your vault.')
+      }
+      const value = useVault.getState().entries.find((e) => e.id === entryId)?.password
+      // Still locked, or the entry is gone. Send nothing rather than an empty
+      // string, which would read as "there is no password" and authenticate as
+      // one.
+      if (!value) return {}
+      return useUri ? { uri: value } : { password: value }
+    }
+    if (useUri) return uri.trim() ? { uri: uri.trim() } : {}
+    return password ? { password } : {}
+  }
+
+  const testConnection = async (): Promise<void> => {
+    if (!valid || testing) return
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const fn = window.opsmaxx?.db?.test
+      if (!fn) {
+        // Said, rather than a button that quietly does nothing — the same rule
+        // the rest of the app applies to an unwired bridge.
+        setTestResult({
+          ok: false,
+          text: 'This build cannot test a connection. Restart the app to rebuild it.'
+        })
+        return
+      }
+      const cfg = dbConnectConfig(
+        {
+          // '' for a connection that has not been saved: nothing for main to
+          // look up, which is why the secret above goes inline. An edit keeps
+          // its id so a blank password field still resolves what is stored.
+          id: editId ?? '',
+          kind,
+          host: useUri ? '' : host.trim(),
+          port: Number(port) || kindOf(kind).port,
+          username: useUri ? '' : username.trim(),
+          database: database.trim(),
+          ssl,
+          sshServerId: sshServerId || null,
+          vpnProfileId
+        },
+        servers
+      )
+      const secret = await secretForTest()
+      // A stored credential that lives in the vault fails here while the vault
+      // is shut; this offers the unlock and runs the test again rather than
+      // reporting it as a connection failure.
+      const r = await withVaultUnlock(`Testing ${name.trim() || 'this connection'}`, () =>
+        fn({ ...cfg, ...secret })
+      )
+      if (r?.ok) {
+        setTestResult({ ok: true, text: r.version ? `Connected. ${r.version}` : 'Connected.' })
+        return
+      }
+      // Through the same classifier the terminal's failure card uses, so a
+      // refused port reads as a refused port rather than as the driver's text.
+      const advice = adviseOnError(r?.error)
+      setTestResult({ ok: false, text: advice.hint ? `${advice.cause} ${advice.hint}` : advice.cause })
+    } finally {
+      setTesting(false)
+    }
+  }
+
   const save = async (): Promise<void> => {
     if (!valid) return
     // A parse that did not succeed must never render as though it did. The
@@ -273,6 +366,23 @@ export function AddDatabaseModal(): React.JSX.Element {
       title={editId ? 'Edit Database' : 'Add Database'}
       subtitle={editId ? `Change how OpsMaxx reaches ${existing?.name ?? 'this database'}` : 'Create a database connection profile'}
       onClose={() => setModal(null)}
+      footerNote={
+        testResult && (
+          <span className={clsx('field-hint', testResult.ok ? 'ok' : 'danger')}>{testResult.text}</span>
+        )
+      }
+      // Beside the primary, where the fields are still editable — the same
+      // place Add Server puts it. A failure reported here can be corrected
+      // without saving a connection that does not work and coming back to it.
+      footer={
+        <button
+          className="btn secondary size-28"
+          disabled={!valid || testing}
+          onClick={() => void testConnection()}
+        >
+          {testing ? 'Testing…' : 'Test connection'}
+        </button>
+      }
       confirm={{
         label: editId ? 'Save changes' : 'Add database',
         disabled: !valid,

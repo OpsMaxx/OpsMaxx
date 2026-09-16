@@ -90,15 +90,52 @@ export function withCloudTransportDb(cfg: DbConnectConfig): DbConnectConfig {
   return { ...cfg, ssh: { ...cfg.ssh, cloudTarget: cloud } }
 }
 
+/** The bastion a database is tunnelled through, annotated with its own VPN. */
+function withVpnTransportJump(cfg: DbConnectConfig): DbConnectConfig {
+  if (!cfg.ssh?.serverId) return cfg
+  const ssh = withVpnTransport(cfg.ssh as SshHop & { serverId: string })
+  return ssh === cfg.ssh ? cfg : { ...cfg, ssh: ssh as DbConnectConfig['ssh'] }
+}
+
 export function withVpnTransportDb(cfg: DbConnectConfig): DbConnectConfig {
-  // A test dialog and a saved connection are the same shape, but only a saved
-  // one has an id in the cache — an unsaved "Test connection" has nothing to
-  // look up, and asking it to pick a VPN it has not been assigned yet would be
-  // guessing.
-  const withCloud = withCloudTransportDb(cfg)
-  const vpnProfileId = vpnForDatabase(cfg.id)
-  if (!vpnProfileId) return withCloud
-  return { ...withCloud, vpnProfileId, name: cfg.name ?? getCachedDatabase(cfg.id)?.name }
+  /**
+   * A test dialog and a saved connection are the same shape, and the rule for
+   * each is different.
+   *
+   * For anything SAVED the record decides and a caller-supplied profile is
+   * discarded, exactly as withCloudTransport does with a cloud target and for
+   * the same reason: keeping it would be a way to route a saved connection
+   * through a tunnel the record never named, from outside main.
+   *
+   * An UNSAVED one has no record to consult, so the form's own choice stands —
+   * it is the user's own input, on its way to being saved a moment later, and
+   * there is nothing more authoritative. This used to be described as
+   * "guessing"; it is not, and dropping it is what made Test connection
+   * silently ignore a VPN the user had just picked.
+   */
+  /**
+   * The bastion's own VPN, which nothing applied.
+   *
+   * `withCloudTransportDb` annotates the jump host with its cloud target, and
+   * the VPN half of the same question was never asked — so a database reached
+   * through a bastion that is itself only routable over a tunnel dialled the
+   * bastion's private address from this machine and failed with a connect
+   * timeout. Exactly the omission the note at the top of this file describes,
+   * on the one hop nothing had swept.
+   *
+   * `withVpnTransport` is a pure annotation keyed on the hop's own serverId, so
+   * a bastion with no VPN comes back untouched, and `acquire` does the dialling
+   * — including the forward's lifetime and its pool tag. Note this is the
+   * bastion's profile, not the database's: `buildOverVpn` handles that one, and
+   * clears this field when its forward has already arrived at the bastion.
+   */
+  const withCloud = withVpnTransportJump(withCloudTransportDb(cfg))
+  const saved = getCachedDatabase(cfg.id)
+  const vpnProfileId = vpnForDatabase(cfg.id) ?? (saved ? undefined : cfg.vpnProfileId)
+  if (!vpnProfileId) {
+    return cfg.vpnProfileId ? { ...withCloud, vpnProfileId: undefined } : withCloud
+  }
+  return { ...withCloud, vpnProfileId, name: cfg.name ?? saved?.name }
 }
 
 /**

@@ -252,7 +252,8 @@ async function mongoCollection(db: any, name: string, calls: ChainCall[]): Promi
 }
 
 async function mongoShell(cfg: DbConnectConfig, text: string): Promise<DbShellResult> {
-  const conn = await ensure(cfg)
+  // The shell is a person at a prompt; there is no unattended caller here.
+  const conn = await ensure(cfg, true)
   const client = conn.client
   const db = client.db(mongoDbName(cfg))
   const body = text.replace(/;+\s*$/, '')
@@ -397,7 +398,7 @@ function metaSql(kind: DbKind, cmd: string, arg: string): string | null {
 }
 
 async function runSql(cfg: DbConnectConfig, sql: string): Promise<DbShellResult> {
-  const r = await dbQuery(cfg, sql)
+  const r = await dbQuery(cfg, sql, true)
   if (!r.ok) return { ok: false, error: r.error, elapsedMs: r.elapsedMs }
   if (r.kind === 'rows') {
     return {
@@ -441,7 +442,7 @@ async function sqlShell(cfg: DbConnectConfig, text: string): Promise<DbShellResu
 // --------------------------------------------------------------------- redis
 
 async function redisShell(cfg: DbConnectConfig, text: string): Promise<DbShellResult> {
-  const r = await dbQuery(cfg, text)
+  const r = await dbQuery(cfg, text, true)
   if (!r.ok) return { ok: false, error: r.error, elapsedMs: r.elapsedMs }
   const v = r.json
   if (v === null || v === undefined) return { ok: true, text: '(nil)', elapsedMs: r.elapsedMs }

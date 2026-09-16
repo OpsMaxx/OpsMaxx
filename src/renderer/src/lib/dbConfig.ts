@@ -15,7 +15,20 @@ import type { DbConnectConfig } from '../../../shared/db'
  * to look one up, which is what keeps every password on the far side of the
  * bridge.
  */
-export function dbConnectConfig(db: DatabaseConn, servers: Server[]): DbConnectConfig {
+/**
+ * The fields this needs, rather than a whole saved record.
+ *
+ * Widened for the Add Database dialog's Test connection button, which has the
+ * same fields and no record yet. Narrowing the parameter rather than copying
+ * the function is what keeps the jump host and the VPN from being forgotten on
+ * exactly the path that exists to find out whether they work.
+ */
+export type DbConnectFields = Pick<
+  DatabaseConn,
+  'id' | 'kind' | 'host' | 'port' | 'username' | 'database' | 'ssl' | 'sshServerId' | 'vpnProfileId'
+>
+
+export function dbConnectConfig(db: DbConnectFields, servers: Server[]): DbConnectConfig {
   const jump = db.sshServerId ? servers.find((s) => s.id === db.sshServerId) : undefined
   return {
     id: db.id,
@@ -25,6 +38,11 @@ export function dbConnectConfig(db: DatabaseConn, servers: Server[]): DbConnectC
     username: db.username,
     database: db.database,
     ssl: db.ssl,
-    ssh: jump ? sshHopFor(jump) : undefined
+    ssh: jump ? sshHopFor(jump) : undefined,
+    // Dropped here until now, which is why a VPN chosen in the dialog was
+    // ignored by a test: main resolves the profile from the SAVED record, and
+    // an unsaved connection has no record to resolve. A saved one is
+    // unaffected — main still decides for those.
+    vpnProfileId: db.vpnProfileId ?? undefined
   }
 }

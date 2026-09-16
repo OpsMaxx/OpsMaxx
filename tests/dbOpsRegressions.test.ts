@@ -127,7 +127,7 @@ describe('every statement the collector can send is a read or a bounded timeout'
   })
 
   it('the collector opens its own connection rather than borrowing the query editor’s', () => {
-    expect(collector).toMatch(/openTransient\(cfg\)/)
+    expect(collector).toMatch(/openTransient\(cfg, allowPrompt\)/)
     // ensure() is the module-cached client the query editor and the shell share.
     expect(collector).not.toMatch(/await ensure\(/)
     expect(collector).not.toMatch(/import \{[^}]*\bensure\b[^}]*\} from '\.\/db'/)

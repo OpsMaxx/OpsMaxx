@@ -48,12 +48,27 @@ const DB_CONNECT_TIMEOUT_MS = 10_000
 
 // Open the SSH forward (when configured) and hand the driver a config pointed
 // at the local end of it.
-async function build(cfg: DbConnectConfig): Promise<Conn> {
+/**
+ * Who is asking, which decides whether a bastion may put a dialog on screen.
+ *
+ * Defaults to false everywhere below, because the two callers that are NOT a
+ * person -- the MCP bridge's database tools and the hourly size sampler -- are
+ * the ones a wrong default actually harms: a verification-code dialog out of a
+ * background read is attached to nothing anybody did, and unanswered it costs
+ * the host a failed authentication. The IPC handlers, which exist because
+ * somebody clicked, pass true.
+ *
+ * It is nearly free now that the forward is pooled: an unattended read joins
+ * the bastion a terminal has already authenticated and never reaches a prompt
+ * at all. It matters when nothing is open, which is where the refusal ssh.ts
+ * already writes -- connect once from a terminal tab -- is the right answer.
+ */
+async function build(cfg: DbConnectConfig, allowPrompt = false): Promise<Conn> {
   // A VPN wraps everything else: if the database is behind one, even the
   // bastion is only reachable once the tunnel is up. Bringing it up here, and
   // waiting, is also what stops the failure surfacing downstream as an
   // unexplained connect timeout.
-  if (cfg.vpnProfileId) return buildOverVpn(cfg)
+  if (cfg.vpnProfileId) return buildOverVpn(cfg, allowPrompt)
   if (!cfg.ssh) return buildDriver(cfg)
 
   if (cfg.uri && /^mongodb\+srv:/i.test(cfg.uri)) {
@@ -68,7 +83,7 @@ async function build(cfg: DbConnectConfig): Promise<Conn> {
   if (!targetHost) throw new Error('No database server to tunnel to.')
 
   const { openEphemeralForward } = await import('./tunnel')
-  const fwd = await openEphemeralForward(cfg.ssh, targetHost, targetPort)
+  const fwd = await openEphemeralForward(cfg.ssh, targetHost, targetPort, allowPrompt)
   try {
     const conn = await buildDriver({
       ...cfg,
@@ -104,7 +119,7 @@ async function build(cfg: DbConnectConfig): Promise<Conn> {
 // In system mode there is a real route already and openForward is absent; the
 // driver connects directly and the only thing this branch contributes is
 // making sure the tunnel is actually up first.
-async function buildOverVpn(cfg: DbConnectConfig): Promise<Conn> {
+async function buildOverVpn(cfg: DbConnectConfig, allowPrompt = false): Promise<Conn> {
   const { vpnOpenForward, vpnStart } = await import('./vpn/manager')
   const vpnId = cfg.vpnProfileId as string
 
@@ -159,7 +174,7 @@ async function buildOverVpn(cfg: DbConnectConfig): Promise<Conn> {
     })
     // Back through build(), not straight to buildDriver(): a bastion still has
     // to be dialled, it just reaches its host over a route that now exists.
-    const conn = await build({ ...cfg, vpnProfileId: undefined })
+    const conn = await build({ ...cfg, vpnProfileId: undefined }, allowPrompt)
     const inner = conn.close
     return {
       ...conn,
@@ -180,7 +195,33 @@ async function buildOverVpn(cfg: DbConnectConfig): Promise<Conn> {
     // is byte-for-byte the code that runs without a VPN, which is the point:
     // one transport was inserted underneath, and nothing else had to know.
     const inner = cfg.ssh
-      ? { ...cfg, vpnProfileId: undefined, ssh: { ...cfg.ssh, host: '127.0.0.1', port: local.port } }
+      ? {
+          ...cfg,
+          vpnProfileId: undefined,
+          ssh: {
+            ...cfg.ssh,
+            host: '127.0.0.1',
+            port: local.port,
+            /**
+             * Two things the pool needs, now that this hop reaches it.
+             *
+             * `poolTag` because a hop carrying a `serverId` keys on that id
+             * alone — so without it this loopback-rewritten bastion and a
+             * DIRECT connection to the same bastion would share one pool entry,
+             * and whichever was dialled first would decide which network the
+             * other one's bytes went over. It names the VPN, never the
+             * ephemeral port, or the key would never repeat and the pool would
+             * never hit. Same rule, and same wording, as acquire's own rewrite.
+             *
+             * `vpnProfileId` cleared because this tunnel is already the one
+             * carrying us: the bastion's own profile, if it has one, must not
+             * be opened a second time underneath a forward that has already
+             * arrived at it.
+             */
+            poolTag: `fwd:${vpnId}`,
+            vpnProfileId: undefined
+          }
+        }
       : {
           ...cfg,
           vpnProfileId: undefined,
@@ -291,14 +332,14 @@ async function buildDriver(cfg: DbConnectConfig): Promise<Conn> {
  * The caller owns what comes back and must close() it. That also tears down the
  * SSH or VPN forward it opened, because the close() build() returns is wrapped.
  */
-export async function openTransient(cfg: DbConnectConfig): Promise<Conn> {
-  return build(cfg)
+export async function openTransient(cfg: DbConnectConfig, allowPrompt = false): Promise<Conn> {
+  return build(cfg, allowPrompt)
 }
 
-export async function ensure(cfg: DbConnectConfig): Promise<Conn> {
+export async function ensure(cfg: DbConnectConfig, allowPrompt = false): Promise<Conn> {
   const existing = conns.get(cfg.id)
   if (existing) return existing
-  const conn = await build(cfg)
+  const conn = await build(cfg, allowPrompt)
   conns.set(cfg.id, conn)
   return conn
 }
@@ -317,7 +358,8 @@ export function mongoDbName(cfg: DbConnectConfig): string | undefined {
 
 export async function dbTest(cfg: DbConnectConfig): Promise<DbTestResult> {
   try {
-    const conn = await build(cfg)
+    // Somebody pressed Test connection; nothing else reaches this.
+    const conn = await build(cfg, true)
     let version = ''
     try {
       if (cfg.kind === 'postgres') version = (await conn.client.query('SELECT version()')).rows[0].version
@@ -344,10 +386,14 @@ function tokenize(line: string): string[] {
   return out
 }
 
-export async function dbQuery(cfg: DbConnectConfig, text: string): Promise<DbQueryResult> {
+export async function dbQuery(
+  cfg: DbConnectConfig,
+  text: string,
+  allowPrompt = false
+): Promise<DbQueryResult> {
   const started = Date.now()
   try {
-    const conn = await ensure(cfg)
+    const conn = await ensure(cfg, allowPrompt)
     const elapsed = (): number => Date.now() - started
 
     if (cfg.kind === 'postgres') {
@@ -397,7 +443,8 @@ export async function dbQuery(cfg: DbConnectConfig, text: string): Promise<DbQue
 
 export async function dbInfo(cfg: DbConnectConfig): Promise<DbInfo> {
   try {
-    const conn = await ensure(cfg)
+    // The schema tree, drawn because somebody opened a database.
+    const conn = await ensure(cfg, true)
     if (cfg.kind === 'postgres') {
       const dbs = (await conn.client.query('SELECT datname FROM pg_database WHERE datistemplate=false ORDER BY 1')).rows.map((r: any) => r.datname)
       const tables = (await conn.client.query("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY 1")).rows.map((r: any) => r.tablename)
