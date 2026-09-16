@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { GitBranch, Wifi, Bell, Cpu, AlertTriangle, ShieldAlert } from 'lucide-react'
 import { useApp } from '../../store/app'
+import { offerUnlockForBackups, useBackupRuns } from '../../store/backupRuns'
 import { LABEL, chipValue, useAlerts } from '../../store/alerts'
 import { useFleetStatus, samplerWarning } from '../../store/fleetStatus'
 import { useVaultPrompt } from '../../store/vaultPrompt'
@@ -57,6 +58,15 @@ export function StatusBar(): React.JSX.Element {
   const ws = useApp((s) => s.activeWorkspace())
   const tabs = useApp((s) => s.tabs)
   const backupDirty = useApp((s) => s.settings.backupDirty)
+  const paused = useBackupRuns((s) => s.paused)
+  /**
+   * The only pause with a remedy this chip can perform.
+   *
+   * A missing passphrase needs the destination editor; a locked vault needs one
+   * unlock, which `VaultUnlockModal` raises Touch ID for on its own. Read off a
+   * code rather than the sentence, so the offer does not depend on wording.
+   */
+  const vaultPaused = paused.some((p) => p.code === 'vault-locked')
   const alerts = useAlerts((s) => s.active)
   // Whether the thing that raises those alerts is actually running. An alert
   // count of zero means nothing if nobody is checking.
@@ -142,7 +152,32 @@ export function StatusBar(): React.JSX.Element {
           <span>{warning.label}</span>
         </button>
       )}
-      {backupDirty && (
+      {/* Before the staleness warning, and it replaces it while it is showing.
+          "Backup out of date" says the last backup is old and asks for a new
+          one; this says the thing that would have made a new one has stopped,
+          and names the one action that restarts it. Showing both would be two
+          chips about one problem, the more actionable of them second. */}
+      {paused.length > 0 ? (
+        <button
+          className="item backup-warn"
+          title={
+            // The remedy in the sentence, and the click performs it. A chip
+            // that says "backups have stopped" and then opens a page which
+            // cannot restart them is a chip that has reported a problem and
+            // moved on.
+            vaultPaused
+              ? `${paused[0].destinationName}: ${paused[0].reason} Click to unlock and resume.`
+              : paused.length === 1
+                ? `${paused[0].destinationName}: ${paused[0].reason} Click to open Backup & Restore.`
+                : `${paused.length} scheduled backups are not running. ${paused[0].reason} Click to open Backup & Restore.`
+          }
+          onClick={() => (vaultPaused ? void offerUnlockForBackups() : openSettings('backup'))}
+        >
+          <AlertTriangle size={12} />
+          <span>{vaultPaused ? 'Backups paused — unlock' : 'Backups paused'}</span>
+        </button>
+      ) : (
+      backupDirty && (
         <button
           className="item backup-warn"
           title="Stored connections have changed since the last export. Click to open Backup & Restore."
@@ -155,6 +190,7 @@ export function StatusBar(): React.JSX.Element {
           <AlertTriangle size={12} />
           <span>Backup out of date</span>
         </button>
+      )
       )}
       <UpdateIndicator />
       <div className="item metric">

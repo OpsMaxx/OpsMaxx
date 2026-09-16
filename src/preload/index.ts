@@ -1348,12 +1348,41 @@ const api = {
       ipcRenderer.on('backup:ran', h)
       return () => ipcRenderer.removeListener('backup:ran', h)
     },
+    /**
+     * A scheduled run was due and could not be attempted.
+     *
+     * Distinct from a failed run: nothing was tried and nothing is broken. The
+     * status bar says so because a backup that has quietly stopped is the one
+     * state this feature can least afford to keep to itself.
+     */
+    onSkipped: (
+      cb: (info: { destinationId: string; destinationName: string; reason: string }) => void
+    ): (() => void) => {
+      const h = (
+        _e: unknown,
+        info: { destinationId: string; destinationName: string; reason: string }
+      ): void => cb(info)
+      ipcRenderer.on('backup:skipped', h)
+      return () => ipcRenderer.removeListener('backup:skipped', h)
+    },
     relaunch: (): Promise<void> => ipcRenderer.invoke('backup:relaunch'),
     // Destinations. Note what is NOT here: no credential, in either direction.
     // An SFTP destination names a saved server and an S3 one names a vault
     // entry, and main resolves both — so the renderer can configure where the
     // vault gets uploaded without ever holding the key to the place it lands.
     destinations: (): Promise<BackupTargetsFile> => ipcRenderer.invoke('backup:destinations'),
+    /**
+     * Keep a destination's unattended passphrase on this machine, or clear it.
+     *
+     * Write-only on purpose. Nothing reads one back across this bridge — the
+     * panel asks only WHETHER one is set — because a channel that returned it
+     * would put the passphrase back in the window, which is precisely what
+     * keeping it in the OS keychain is for.
+     */
+    setMachinePassphrase: (id: string, passphrase: string | null): Promise<BackupResult> =>
+      ipcRenderer.invoke('backup:setMachinePassphrase', id, passphrase),
+    hasMachinePassphrase: (id: string): Promise<boolean> =>
+      ipcRenderer.invoke('backup:hasMachinePassphrase', id),
     alarms: (): Promise<BackupAlarm[]> => ipcRenderer.invoke('backup:alarms'),
     saveDestinations: (destinations: BackupDestination[]): Promise<BackupTargetsFile> =>
       ipcRenderer.invoke('backup:saveDestinations', destinations),

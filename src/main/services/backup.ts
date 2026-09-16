@@ -13,7 +13,12 @@ import { tmpdir } from 'node:os'
 import { randomBytes, scrypt, createCipheriv, createDecipheriv } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { atomicWriteFileSync } from './atomicWrite'
-import { exportSecrets, importSecrets } from './secrets'
+import {
+  exportSecrets,
+  getSecret,
+  importSecrets,
+  MACHINE_ONLY_SECRET_PREFIX
+} from './secrets'
 import { removeHistoryFiles } from './history'
 import { CRED_PROXY_AUDIT_FILE } from './credProxy'
 import { RULES_FILE } from '../../shared/rules'
@@ -36,6 +41,7 @@ import type {
   BackupResult,
   BackupRunReport,
   BackupStage,
+  BackupSkipCode,
   BackupSummary,
   BackupTargetsFile,
   BackupVerification,
@@ -576,7 +582,8 @@ export function readTargets(): BackupTargetsFile {
     version: 1,
     destinations: raw.destinations,
     lastRunAt: raw.lastRunAt ?? {},
-    lastReport: raw.lastReport ?? {}
+    lastReport: raw.lastReport ?? {},
+    skipped: raw.skipped ?? {}
   }
 }
 
@@ -623,11 +630,41 @@ export function saveDestinations(destinations: BackupDestination[]): BackupTarge
  */
 export function recordRun(destinationId: string, report: BackupRunReport, at = Date.now()): void {
   const current = readTargets()
+  // Whatever was blocking this destination is no longer blocking it — it just
+  // ran. A stale skip left here would say "paused" about a schedule that is
+  // working, which is the same class of lie in the other direction.
+  const skipped = { ...(current.skipped ?? {}) }
+  delete skipped[destinationId]
   writeTargets({
     ...current,
     lastRunAt: { ...current.lastRunAt, [destinationId]: at },
-    lastReport: { ...current.lastReport, [destinationId]: report }
+    lastReport: { ...current.lastReport, [destinationId]: report },
+    skipped
   })
+}
+
+/**
+ * Remember that a destination was due and declined.
+ *
+ * `since` is the FIRST tick that declined for this reason, not the latest one,
+ * so "paused for six hours" can be said rather than "paused just now" repeated
+ * every five minutes. A changed reason starts the clock again, because it is a
+ * different condition.
+ */
+export function recordSkip(
+  destinationId: string,
+  reason: string,
+  at = Date.now(),
+  code: BackupSkipCode = 'other'
+): boolean {
+  const current = readTargets()
+  const prev = (current.skipped ?? {})[destinationId]
+  if (prev?.reason === reason) return false
+  writeTargets({
+    ...current,
+    skipped: { ...(current.skipped ?? {}), [destinationId]: { reason, since: at, code } }
+  })
+  return true
 }
 
 /**
@@ -1159,9 +1196,40 @@ export async function dumpToDestination(
  * written against — the operator stops thinking about it, and finds out when
  * they need the file.
  */
-export function scheduledPassphrase(dest: BackupDestination): { password?: string; skipped?: string } {
+/** Where a destination's machine-held passphrase lives, if it has one. */
+export const machinePassphraseId = (destinationId: string): string =>
+  `${MACHINE_ONLY_SECRET_PREFIX}backup-passphrase:${destinationId}`
+
+export function scheduledPassphrase(
+  dest: BackupDestination
+): { password?: string; skipped?: string; code?: BackupSkipCode } {
+  /**
+   * The machine's own keychain, for a destination that asked for it.
+   *
+   * Checked first and returning early, because the vault path below is not a
+   * fallback for it: a destination set to `machine` whose secret has gone
+   * missing must say so, not quietly start using a vault entry the user
+   * detached from it months ago and encrypt a generation nobody can open.
+   */
+  if (dest.passphraseSource === 'machine') {
+    const stored = getSecret(machinePassphraseId(dest.id))
+    if (!stored) {
+      return {
+        skipped: 'This destination keeps its passphrase on this machine, and none is stored.',
+        code: 'no-passphrase'
+      }
+    }
+    if (stored.length < MIN_PASSPHRASE) {
+      return { skipped: `The stored passphrase is shorter than ${MIN_PASSPHRASE} characters.` }
+    }
+    return { password: stored }
+  }
+
   if (!dest.passphraseVaultEntryId) {
-    return { skipped: 'No vault entry is set to hold the passphrase for unattended runs.' }
+    return {
+      skipped: 'No vault entry is set to hold the passphrase for unattended runs.',
+      code: 'no-passphrase'
+    }
   }
   const status = vaultStatus()
   if (!status.exists) return { skipped: 'The passphrase lives in the vault, and there is no vault on this machine.' }
@@ -1170,7 +1238,14 @@ export function scheduledPassphrase(dest: BackupDestination): { password?: strin
   // the stage existing: the timeout that used to stop it fires precisely
   // because nobody is at the keyboard, which is when a schedule runs.
   const entries = vaultEntriesForResolve()
-  if (!entries) return { skipped: 'The passphrase lives in the vault, and the vault is locked.' }
+  // The one skip with a single obvious remedy, and one the user can perform
+  // from wherever they happen to be standing. See the status bar.
+  if (!entries) {
+    return {
+      skipped: 'The passphrase lives in the vault, and the vault is locked.',
+      code: 'vault-locked'
+    }
+  }
   const entry = entries.find((e) => e.id === dest.passphraseVaultEntryId)
   if (!entry) return { skipped: 'The vault entry holding the passphrase no longer exists.' }
   if (!entry.password) return { skipped: `Vault entry “${entry.name}” has no secret to use as a passphrase.` }
@@ -1184,6 +1259,17 @@ export interface TickResult {
   ran: BackupRunReport[]
   /** Destination id -> why it did not run. Never empty-and-silent. */
   skipped: Record<string, string>
+  /**
+   * Destinations that have just STARTED being skipped, or started being
+   * skipped for a different reason.
+   *
+   * The transition, for the same reason `newlyFailing` is a transition: a
+   * notification every five minutes about a vault that is still locked is
+   * noise, and noise is how a paused backup becomes one nobody reads. The
+   * standing condition lives in the targets file for the panel and the status
+   * bar to read.
+   */
+  newlySkipped: { destinationId: string; destinationName: string; reason: string }[]
   /**
    * Runs that failed where the previous one had not.
    *
@@ -1205,11 +1291,22 @@ export interface TickResult {
 export async function backupTick(now = Date.now(), opts: RunOptions = {}): Promise<TickResult> {
   const file = readTargets()
   const due = dueDestinations(file.destinations, file.lastRunAt, now)
-  const result: TickResult = { ran: [], skipped: {}, newlyFailing: [] }
+  const result: TickResult = { ran: [], skipped: {}, newlyFailing: [], newlySkipped: [] }
   for (const dest of due) {
-    const { password, skipped } = scheduledPassphrase(dest)
+    const { password, skipped, code } = scheduledPassphrase(dest)
     if (!password) {
-      result.skipped[dest.id] = skipped ?? 'No passphrase available.'
+      const reason = skipped ?? 'No passphrase available.'
+      result.skipped[dest.id] = reason
+      // Written down, not just returned. The reason used to go into a result
+      // object no caller read, so a schedule blocked by a locked vault looked
+      // exactly like one that was working.
+      if (recordSkip(dest.id, reason, now, code ?? 'other')) {
+        result.newlySkipped.push({
+          destinationId: dest.id,
+          destinationName: dest.name,
+          reason
+        })
+      }
       // NOT marked as attempted: a locked vault is a condition that clears on
       // its own, and pushing the next attempt a full period into the future
       // because the user happened to be locked at the tick would turn an
@@ -1245,15 +1342,27 @@ export interface ScheduleHandlers {
   /** A destination that has just started failing, for something the user will
    *  actually see. Only the transition — see TickResult.newlyFailing. */
   onNewFailure?: (report: BackupRunReport) => void
+  /**
+   * A destination that was due and could not be attempted — almost always a
+   * locked vault after a restart.
+   *
+   * Separate from `onNewFailure` because it is a different thing to say. A
+   * failure means the backup was tried and did not work, and the user should
+   * look at the destination. A skip means it was never tried, nothing is
+   * broken, and the one action that fixes it is unlocking the vault. Reporting
+   * the second as the first sends people to debug a bucket that is fine.
+   */
+  onNewSkip?: (info: { destinationId: string; destinationName: string; reason: string }) => void
 }
 
 export function startBackupSchedule(handlers: ScheduleHandlers = {}): void {
   if (scheduleTimer) return
   scheduleTimer = setInterval(() => {
     void backupTick()
-      .then(({ ran, newlyFailing }) => {
+      .then(({ ran, newlyFailing, newlySkipped }) => {
         for (const r of ran) handlers.onRun?.(describeRun(r), r)
         for (const r of newlyFailing) handlers.onNewFailure?.(r)
+        for (const s of newlySkipped) handlers.onNewSkip?.(s)
       })
       .catch((err: unknown) => {
         console.error('[backup] scheduled run failed:', err)

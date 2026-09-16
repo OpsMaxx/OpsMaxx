@@ -34,6 +34,30 @@ function write(map: SecretMap): void {
 // importing it from the module it has always imported it from.
 export { secretsAvailable }
 
+/**
+ * Secrets that must never leave this machine — not even inside a backup.
+ *
+ * Everything else here is exported into the bundle on purpose: a restored
+ * machine needs its server credentials, and `importSecrets` re-seals them under
+ * the new machine's keychain. There is exactly one class for which that is
+ * self-defeating, and it is the passphrase a scheduled backup encrypts WITH.
+ * Putting it in the bundle would ship the key to the file inside the file,
+ * which is the same as shipping no passphrase at all — the argument the vault
+ * requirement was built on in the first place.
+ *
+ * A prefix rather than a list, because there is one per destination, and one
+ * that no server, database, VPN or CI id can produce: those are generated ids
+ * and none of them starts with two underscores.
+ *
+ * The consequence has to be said in the UI where the choice is made: a
+ * restored machine does NOT get this passphrase back, so the operator needs it
+ * recorded somewhere a lost laptop does not take with it.
+ */
+export const MACHINE_ONLY_SECRET_PREFIX = '__machine__'
+
+export const isMachineOnlySecret = (id: string): boolean =>
+  id.startsWith(MACHINE_ONLY_SECRET_PREFIX)
+
 export function setSecret(id: string, value: string): boolean {
   if (!secretsAvailable()) return false
   const map = read()
@@ -60,6 +84,8 @@ export function getSecret(id: string): string | null {
 export function exportSecrets(): Record<string, string> {
   const out: Record<string, string> = {}
   for (const id of Object.keys(read())) {
+    // The one carve-out, and the whole reason the prefix exists. See above.
+    if (isMachineOnlySecret(id)) continue
     const value = getSecret(id)
     if (value !== null) out[id] = value
   }
@@ -71,6 +97,10 @@ export function importSecrets(plain: Record<string, string>): boolean {
   if (!secretsAvailable()) return false
   const map = read()
   for (const [id, value] of Object.entries(plain)) {
+    // Belt as well as braces. Nothing should be able to put one of these in a
+    // bundle, and a bundle that somehow carries one must not be able to
+    // overwrite this machine's own with another machine's.
+    if (isMachineOnlySecret(id)) continue
     map[id] = safeStorage.encryptString(value).toString('base64')
   }
   write(map)

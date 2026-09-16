@@ -335,7 +335,41 @@ describe('choosing a destination', () => {
         'A scheduled run has nobody to type a passphrase, so it needs a vault entry holding one.'
       )
     ).toBeTruthy()
-    expect(screen.getByText(/only happen while the vault is unlocked/)).toBeTruthy()
+    // The vault route's cost, stated accurately. It used to say scheduled runs
+    // "only happen while the vault is unlocked", which is not what the code
+    // does: the resolve path keeps working while the vault is merely secured,
+    // so an idle screen does not stop a backup. A restart does, until somebody
+    // unlocks — and that is the sentence worth printing.
+    expect(screen.getByText(/not a restart, until somebody unlocks/)).toBeTruthy()
+  })
+
+  /**
+   * The second route, and the reason it exists: a schedule whose whole promise
+   * is "stop thinking about it" cannot require somebody to unlock a vault after
+   * every reboot. It is opt-in and it costs something, so the panel says what.
+   */
+  it('offers a machine-held passphrase, and states what it gives up', async () => {
+    stubBridge(bridge({ destinations: vi.fn(async () => targets({ destinations: [] })) }))
+    render(<BackupDestinations />)
+
+    await userEvent.click(await screen.findByRole('button', { name: /Local directory/ }))
+    await userEvent.type(screen.getByPlaceholderText('Name this destination'), 'NAS')
+    await userEvent.type(screen.getByPlaceholderText('Folder to write backups into'), '/Volumes/nas')
+    const hours = screen.getByRole('spinbutton', { name: /Run every/ })
+    await userEvent.clear(hours)
+    await userEvent.type(hours, '6')
+
+    await userEvent.click(screen.getByRole('radio', { name: /Keep it on this machine/ }))
+
+    // The two consequences an operator cannot discover later by looking at the
+    // panel, so they are printed where the choice is made.
+    expect(screen.getByText(/restoring onto another machine does not bring it back/i)).toBeTruthy()
+    expect(
+      screen.getByText(/Anyone with this machine can open every generation/)
+    ).toBeTruthy()
+    // And the vault picker is gone, because it is not what this destination
+    // will read.
+    expect(screen.queryByText(/Vault entry holding the backup passphrase/)).toBeNull()
   })
 })
 

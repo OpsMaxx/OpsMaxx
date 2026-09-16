@@ -621,7 +621,10 @@ describe('backupTick', () => {
 
   it('says so when the destination names no passphrase entry at all', () => {
     expect(scheduledPassphrase(localDest('/tmp/x', { everyHours: 1 }))).toEqual({
-      skipped: 'No vault entry is set to hold the passphrase for unattended runs.'
+      skipped: 'No vault entry is set to hold the passphrase for unattended runs.',
+      // Not `vault-locked`: unlocking would not help, so the status bar must not
+      // offer an unlock that changes nothing. This one needs the editor.
+      code: 'no-passphrase'
     })
   })
 
@@ -631,6 +634,24 @@ describe('backupTick', () => {
       scheduledPassphrase(localDest('/tmp/x', { everyHours: 1, passphraseVaultEntryId: 'pw' }))
     ).toEqual({
       skipped: 'The passphrase lives in the vault, and there is no vault on this machine.'
+    })
+  })
+
+  /**
+   * The one skip the status bar acts on, and the reason it carries a code at
+   * all. Persistent Touch ID already stores the vault key across restarts, but
+   * nothing raises it at launch — so the chip offers the unlock, and matching
+   * an English sentence to decide that would be a promise nobody knew they had
+   * to keep.
+   */
+  it('marks a locked vault as the one thing an unlock would fix', async () => {
+    await vaultWith([{ id: 'pw', name: 'Backup passphrase', password: 'long enough' }])
+    vaultLock()
+    expect(
+      scheduledPassphrase(localDest('/tmp/x', { everyHours: 1, passphraseVaultEntryId: 'pw' }))
+    ).toEqual({
+      skipped: 'The passphrase lives in the vault, and the vault is locked.',
+      code: 'vault-locked'
     })
   })
 })

@@ -472,6 +472,39 @@ interface EditorProps {
 
 function DestinationEditor(props: EditorProps): React.JSX.Element {
   const [dest, setDest] = useState<BackupDestination>(props.value)
+  /**
+   * Whether a machine-held passphrase exists — never what it is.
+   *
+   * The bridge is write-only by design, so this asks a yes/no question and the
+   * field shows "Stored on this machine" rather than a row of dots that might
+   * be a real secret or might be a placeholder. That ambiguity is the one the
+   * password fields elsewhere in this app were changed to avoid.
+   */
+  const [machineSet, setMachineSet] = useState(false)
+  const [machinePw, setMachinePw] = useState('')
+  useEffect(() => {
+    let live = true
+    void window.opsmaxx?.backup
+      ?.hasMachinePassphrase?.(props.value.id)
+      .then((yes) => {
+        if (live) setMachineSet(yes === true)
+      })
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [props.value.id])
+
+  const saveMachinePw = async (): Promise<void> => {
+    const r = await window.opsmaxx?.backup?.setMachinePassphrase?.(dest.id, machinePw)
+    if (r?.ok) {
+      setMachineSet(true)
+      setMachinePw('')
+      toast('Passphrase stored on this machine', 'ok')
+      return
+    }
+    toast(r?.error ?? 'This machine would not store the passphrase.', 'error')
+  }
   const patch = (p: Partial<BackupDestination>): void =>
     setDest((d) => ({ ...d, ...p }) as BackupDestination)
   const problem = destinationProblem(dest)
@@ -654,26 +687,86 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
 
         {dest.everyHours > 0 && (
           <>
+            {/* The choice, stated as the trade it is. Neither option is the
+                right one for everybody, and the previous version simply did
+                not offer the second — so a schedule that stopped after every
+                restart was the only shape available. */}
             <div className="row" style={{ gap: 8, marginBottom: 6 }}>
-              <select
-                className="input grow"
-                value={dest.passphraseVaultEntryId ?? ''}
-                disabled={!props.vaultUnlocked}
-                onChange={(e) => patch({ passphraseVaultEntryId: e.target.value || undefined })}
-              >
-                <option value="">Vault entry holding the backup passphrase…</option>
-                {props.vaultEntries.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.name}
-                  </option>
-                ))}
-              </select>
+              <label className="s-desc" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input
+                  type="radio"
+                  checked={(dest.passphraseSource ?? 'vault') === 'vault'}
+                  onChange={() => patch({ passphraseSource: 'vault' })}
+                />
+                Passphrase from the vault
+              </label>
+              <label className="s-desc" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input
+                  type="radio"
+                  checked={dest.passphraseSource === 'machine'}
+                  onChange={() => patch({ passphraseSource: 'machine' })}
+                />
+                Keep it on this machine
+              </label>
             </div>
-            <div className="s-desc" style={{ marginBottom: 6 }}>
-              Nobody is present at 3am to type a passphrase, so a scheduled run reads one from the
-              vault — which means scheduled runs only happen while the vault is unlocked. A run
-              that is skipped for that reason says so rather than quietly not happening.
-            </div>
+
+            {(dest.passphraseSource ?? 'vault') === 'vault' ? (
+              <>
+                <div className="row" style={{ gap: 8, marginBottom: 6 }}>
+                  <select
+                    className="input grow"
+                    value={dest.passphraseVaultEntryId ?? ''}
+                    disabled={!props.vaultUnlocked}
+                    onChange={(e) => patch({ passphraseVaultEntryId: e.target.value || undefined })}
+                  >
+                    <option value="">Vault entry holding the backup passphrase…</option>
+                    {props.vaultEntries.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="s-desc" style={{ marginBottom: 6 }}>
+                  Nobody is present at 3am to type a passphrase, so a scheduled run reads one from
+                  the vault. The vault keeps resolving after the idle timeout, so this survives a
+                  screen left alone — but not a restart, until somebody unlocks. A run skipped for
+                  that reason says so in the status bar rather than quietly not happening.
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="row" style={{ gap: 8, marginBottom: 6 }}>
+                  <input
+                    className="input grow"
+                    type="password"
+                    placeholder={
+                      machineSet ? 'Stored on this machine — type to replace' : 'Backup passphrase'
+                    }
+                    value={machinePw}
+                    onChange={(e) => setMachinePw(e.target.value)}
+                  />
+                  <button
+                    className="btn secondary size-28"
+                    disabled={machinePw.length < 8}
+                    onClick={() => void saveMachinePw()}
+                  >
+                    {machineSet ? 'Replace' : 'Store'}
+                  </button>
+                </div>
+                {/* Said here, where the choice is made, and not in a document
+                    nobody opens. Both sentences are consequences the operator
+                    cannot discover later by looking at the panel. */}
+                <div className="s-desc" style={{ marginBottom: 6 }}>
+                  Kept in this machine&rsquo;s keychain, so runs continue after a restart with
+                  nobody present. It is deliberately left out of every backup — a passphrase
+                  inside the file it protects would protect nothing — which means{' '}
+                  <strong>restoring onto another machine does not bring it back</strong>. Write it
+                  down somewhere a lost laptop does not take with it. Anyone with this machine can
+                  open every generation this destination has written.
+                </div>
+              </>
+            )}
           </>
         )}
 

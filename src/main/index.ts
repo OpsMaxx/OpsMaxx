@@ -318,6 +318,8 @@ import {
   relaunchApp,
   runBackupToDestination,
   saveDestinations,
+  machinePassphraseId,
+  MIN_PASSPHRASE as BACKUP_MIN_PASSPHRASE,
   startBackupSchedule,
   stopBackupSchedule
 } from './services/backup'
@@ -4576,6 +4578,34 @@ const announceBackupRan = (report: BackupRunReport): void => {
   notifyRenderer('backup:ran', { at: report.finishedAt, destination: report.destinationName })
 }
 
+/**
+ * Store, or clear, a destination's machine-held passphrase.
+ *
+ * One direction only. There is no handler that reads one back: the renderer
+ * sets it and never needs it again, and a channel that returned it would make
+ * the passphrase reachable from the window, which is the thing keeping it in
+ * the keychain is meant to avoid. The panel shows whether one is SET, never
+ * what it is.
+ */
+ipcMain.handle('backup:setMachinePassphrase', (_e, id: string, passphrase: string | null) => {
+  if (typeof id !== 'string' || id === '') return { ok: false, error: 'No destination.' }
+  const key = machinePassphraseId(id)
+  if (passphrase === null || passphrase === '') {
+    deleteSecret(key)
+    return { ok: true }
+  }
+  if (passphrase.length < BACKUP_MIN_PASSPHRASE) {
+    return { ok: false, error: `Passphrase must be at least ${BACKUP_MIN_PASSPHRASE} characters.` }
+  }
+  if (!setSecret(key, passphrase)) {
+    return { ok: false, error: 'This machine will not store secrets, so it cannot hold a passphrase.' }
+  }
+  return { ok: true }
+})
+ipcMain.handle('backup:hasMachinePassphrase', (_e, id: string): boolean =>
+  typeof id === 'string' && id !== '' && getSecret(machinePassphraseId(id)) !== null
+)
+
 ipcMain.handle('backup:destinations', () => readTargets())
 ipcMain.handle('backup:saveDestinations', (_e, destinations: BackupDestination[]) =>
   saveDestinations(destinations)
@@ -5594,6 +5624,31 @@ syncDriftWatches(loadData())
       const n = new Notification({
         title: `Backup to ${report.destinationName} failed`,
         body: `${report.failedStage ? BACKUP_STAGE_LABEL[report.failedStage] : 'the run'}: ${report.error ?? 'no reason given'}`,
+        icon: appIcon()
+      })
+      n.on('click', () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          if (mainWindow.isMinimized()) mainWindow.restore()
+          mainWindow.focus()
+        }
+      })
+      n.show()
+    },
+    /**
+     * A schedule that was due and could not be attempted.
+     *
+     * Told differently from a failure, because the action is different: nothing
+     * is broken and there is nothing to debug, the vault is shut. Raised on the
+     * transition only, and the standing condition is in the targets file for
+     * the status bar and the panel — so this says it once rather than every
+     * five minutes for as long as the vault stays locked.
+     */
+    onNewSkip: (info) => {
+      notifyRenderer('backup:skipped', info)
+      if (!Notification.isSupported()) return
+      const n = new Notification({
+        title: `Backup to ${info.destinationName} was not run`,
+        body: info.reason,
         icon: appIcon()
       })
       n.on('click', () => {

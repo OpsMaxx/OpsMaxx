@@ -39,6 +39,16 @@ export interface BackupResult {
 // Destinations
 // ---------------------------------------------------------------------------
 
+/**
+ * Why a due destination was not attempted, as something other than English.
+ *
+ * `vault-locked` is the one the UI acts on: it is the only skip with a single
+ * obvious remedy, and the remedy is one the user can perform from wherever they
+ * are standing. Matching the sentence instead would make the status bar's
+ * offer depend on wording nobody would think to keep stable.
+ */
+export type BackupSkipCode = 'vault-locked' | 'no-passphrase' | 'other'
+
 export const BACKUP_DESTINATION_KINDS = ['local', 'sftp', 's3'] as const
 export type BackupDestinationKind = (typeof BACKUP_DESTINATION_KINDS)[number]
 
@@ -84,6 +94,24 @@ interface BackupDestinationBase {
    * no-op.
    */
   passphraseVaultEntryId?: string
+  /**
+   * Where an unattended run gets its passphrase.
+   *
+   * `vault` is the default and the safer of the two: the secret exists only
+   * while the vault is open or secured, so a backup cannot be made by anyone
+   * who merely has the machine. The cost is that a schedule stops after a
+   * restart until somebody unlocks, which for a feature whose whole promise is
+   * "stop thinking about it" is a real cost — the status bar now says so rather
+   * than letting it happen quietly.
+   *
+   * `machine` keeps it in the OS keychain instead, under a reserved id that
+   * `exportSecrets` refuses to put in a bundle. Runs then survive restarts with
+   * nobody present. What it gives up is stated where it is chosen: anyone with
+   * this machine can decrypt every bundle this destination has written — which
+   * for an off-site destination is still the attacker needing both — and a
+   * restored machine does not get the passphrase back.
+   */
+  passphraseSource?: 'vault' | 'machine'
 }
 
 export interface LocalBackupDestination extends BackupDestinationBase {
@@ -407,6 +435,20 @@ export interface BackupTargetsFile {
   lastRunAt: Record<string, number>
   /** Destination id -> the last run, success or failure, for the panel. */
   lastReport: Record<string, BackupRunReport>
+  /**
+   * Destination id -> why the schedule last declined to run it, and since when.
+   *
+   * A skip is not a failure and must not be filed as one: nothing was attempted
+   * and nothing is broken. It is also not nothing, which is how it used to be
+   * treated — `backupTick` wrote the reason into a result object that no caller
+   * read, so a schedule blocked by a locked vault was indistinguishable from a
+   * schedule that was working. That is the failure mode an unattended feature
+   * can least afford.
+   *
+   * Cleared the moment the destination runs, so this only ever describes a live
+   * condition.
+   */
+  skipped?: Record<string, { reason: string; since: number; code?: BackupSkipCode }>
   /**
    * Set when the file exists but could not be read.
    *

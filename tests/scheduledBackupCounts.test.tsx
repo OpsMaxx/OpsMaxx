@@ -158,10 +158,22 @@ describe('an unattended run still needs its passphrase', () => {
    */
   it('skips rather than guesses, and does not push the next run out', () => {
     const svc = SRC('src/main/services/backup.ts')
-    const i = svc.indexOf('const { password, skipped } = scheduledPassphrase(dest)')
+    const i = svc.indexOf('const { password, skipped, code } = scheduledPassphrase(dest)')
     expect(i).toBeGreaterThan(-1)
-    const body = svc.slice(i, i + 700)
-    expect(body).toContain('result.skipped[dest.id] =')
+    const body = svc.slice(i, i + 1500)
+    expect(body).toContain('result.skipped[dest.id] = reason')
+    // Not marked as attempted: a locked vault clears on its own, and pushing
+    // the next attempt a full period out because the user happened to be
+    // locked at the tick would turn an hourly backup into a daily one.
     expect(body).toContain('continue')
+  })
+
+  // And it is written down, which is the half that was missing. The reason went
+  // into a result object no caller read, so a schedule blocked by a locked
+  // vault was indistinguishable from one that was working.
+  it('records the skip where something can read it', () => {
+    const svc = SRC('src/main/services/backup.ts')
+    expect(svc).toContain('export function recordSkip')
+    expect(svc).toContain("if (recordSkip(dest.id, reason, now, code ?? 'other'))")
   })
 })
