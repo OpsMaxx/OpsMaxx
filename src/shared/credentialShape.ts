@@ -43,6 +43,17 @@ export interface CredentialShape {
    * which reads as a form that has forgotten its own state.
    */
   vaultEntryId?: string
+  /**
+   * True when a second-factor answer has been remembered for this server.
+   *
+   * A boolean, never the answer — same rule as everything else here. It exists
+   * because a stored answer is used INSTEAD of asking: the prompter returns it
+   * and no dialog is ever shown. That is right for a static secret and wrong
+   * for a one-time code, and when it is wrong the failure is invisible — the
+   * connection simply stops asking and starts failing, with nothing on any
+   * screen saying an answer is being replayed on the user's behalf.
+   */
+  savedAnswer?: boolean
 }
 
 /**

@@ -1,4 +1,4 @@
-import { getSecret } from './secrets'
+import { getSecret, setSecret } from './secrets'
 import type { CredentialShape } from '../../shared/credentialShape'
 import { vaultEntriesForResolve, vaultStatus } from './vault'
 import { VpnError } from './vpn/errors'
@@ -206,6 +206,11 @@ export function credentialShapeForServer(serverId: string): CredentialShape {
   }
   if (!blob) return { kind: 'none' }
 
+  // Carried on EVERY return below, `kind: 'none'` included. A blob holding
+  // nothing but a remembered second factor is exactly the invisible case: no
+  // credential to report, and an answer being replayed on every connect.
+  const savedAnswer = !!blob.kbAnswer
+
   if (blob.vaultEntryId) {
     let locked = false
     try {
@@ -215,12 +220,35 @@ export function credentialShapeForServer(serverId: string): CredentialShape {
     } catch (e) {
       locked = isVaultLockedError(e)
     }
-    return { kind: 'vault', vaultLocked: locked, vaultEntryId: blob.vaultEntryId }
+    return { kind: 'vault', vaultLocked: locked, vaultEntryId: blob.vaultEntryId, savedAnswer }
   }
-  if (blob.agentSocket) return { kind: 'agent' }
-  if (blob.keyPath) return { kind: 'key', keyPath: blob.keyPath }
-  if (blob.password) return { kind: 'password' }
-  return { kind: 'none' }
+  if (blob.agentSocket) return { kind: 'agent', savedAnswer }
+  if (blob.keyPath) return { kind: 'key', keyPath: blob.keyPath, savedAnswer }
+  if (blob.password) return { kind: 'password', savedAnswer }
+  return { kind: 'none', savedAnswer }
+}
+
+/**
+ * Drop a remembered second-factor answer, leaving the credential alone.
+ *
+ * The only way out of a wrong one. A stored answer short-circuits the prompter
+ * before any dialog is shown, so if a one-time code was remembered by mistake
+ * the connection stops asking and starts failing, and nothing the user can
+ * reach explains why. Returns whether there was one.
+ */
+export function forgetKbAnswer(serverId: string): boolean {
+  const raw = getSecret(serverId)
+  if (!raw) return false
+  let blob: SecretBlob
+  try {
+    blob = JSON.parse(raw) as SecretBlob
+  } catch {
+    return false
+  }
+  if (!blob?.kbAnswer) return false
+  delete blob.kbAnswer
+  setSecret(serverId, JSON.stringify(blob))
+  return true
 }
 
 export function knownSecretValuesForServer(serverId: string): string[] {

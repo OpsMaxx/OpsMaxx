@@ -237,6 +237,7 @@ export function AddServerModal(): React.JSX.Element {
    * flash a demand for a key it already has.
    */
   const [stored, setStored] = useState<CredentialShape | null>(null)
+  const [forgetting, setForgetting] = useState(false)
   useEffect(() => {
     if (!editId) return
     let live = true
@@ -1035,6 +1036,41 @@ export function AddServerModal(): React.JSX.Element {
       )}
 
       </>
+      )}
+
+      {/**
+       * A remembered second factor, and the way out of one.
+       *
+       * A stored answer is handed to the connection INSTEAD of raising the
+       * verification-code dialog, which is right for a static secret and wrong
+       * for a one-time code. When it is wrong the symptom is that the server
+       * stops asking and starts refusing, and nothing anywhere said an answer
+       * was being replayed. Saying so here, beside the credential it sits
+       * next to, is the whole fix; the button is what makes it actionable.
+       */}
+      {stored?.savedAnswer && (
+        <div className="col" style={{ gap: 'var(--sp-1)', marginBottom: 'var(--sp-3)' }}>
+          <span className="field-label">Second factor</span>
+          <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+            <span className="field-hint grow">
+              An answer to this server&rsquo;s second-factor challenge is remembered, so it is sent
+              without asking. Forget it if this server uses a code that changes each login.
+            </span>
+            <button
+              className="btn secondary size-28"
+              disabled={forgetting || !editId}
+              onClick={() => {
+                setForgetting(true)
+                void window.opsmaxx?.ssh
+                  ?.forgetKbAnswer?.(editId as string)
+                  .then(() => setStored((sh) => (sh ? { ...sh, savedAnswer: false } : sh)))
+                  .finally(() => setForgetting(false))
+              }}
+            >
+              {forgetting ? 'Forgetting…' : 'Forget saved answer'}
+            </button>
+          </div>
+        </div>
       )}
 
       {/**

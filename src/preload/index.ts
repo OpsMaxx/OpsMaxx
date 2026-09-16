@@ -442,6 +442,9 @@ const api = {
      *  a key was rejected or none was ever stored. */
     credentialShape: (serverId: string): Promise<CredentialShape> =>
       ipcRenderer.invoke('ssh:credential-shape', serverId),
+    /** Drop a remembered second-factor answer, so the server asks again. */
+    forgetKbAnswer: (serverId: string): Promise<boolean> =>
+      ipcRenderer.invoke('ssh:forget-kb-answer', serverId),
     poolList: (): Promise<{ key: string; host: string; username: string; sessions: number }[]> =>
       ipcRenderer.invoke('ssh:pool-list'),
     poolClose: (key: string): Promise<void> => ipcRenderer.invoke('ssh:pool-close', key),

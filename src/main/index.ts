@@ -349,6 +349,7 @@ import {
   resolveDbSecrets,
   credentialResolvable,
   credentialShapeForServer,
+  forgetKbAnswer,
   resolveVaultField,
   type SecretBlob
 } from './services/credentialResolver'
@@ -1115,6 +1116,18 @@ ipcMain.handle('ssh:test', (_e, cfg: SshConnectConfig & { serverId?: string }) =
 ipcMain.handle('ssh:credential-shape', (_e, serverId: string): CredentialShape => {
   if (typeof serverId !== 'string' || serverId === '') return { kind: 'none' }
   return credentialShapeForServer(serverId)
+})
+/**
+ * Drop a remembered second-factor answer. Touches nothing else in the blob.
+ *
+ * A stored answer is returned to the prompter INSTEAD of raising the dialog,
+ * so a one-time code remembered by mistake makes a server quietly stop asking
+ * and start failing. Without this there was no way to undo that short of
+ * deleting the credential.
+ */
+ipcMain.handle('ssh:forget-kb-answer', (_e, serverId: string): boolean => {
+  if (typeof serverId !== 'string' || serverId === '') return false
+  return forgetKbAnswer(serverId)
 })
 ipcMain.handle('ssh:pool-list', () => poolList())
 ipcMain.handle('ssh:pool-close', (_e, key: string) => poolClose(key))
