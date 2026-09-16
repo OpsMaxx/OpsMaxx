@@ -103,6 +103,15 @@ export interface AppSettings {
   // the UI can warn that the last backup no longer reflects reality.
   backupDirty: boolean
   lastBackupAt: string | null
+  /**
+   * Where the last backup went, when it went somewhere with a name.
+   *
+   * Null for a manual export, which the user chose the location of and does not
+   * need telling about. Set for a scheduled or Run-button destination, because
+   * "Last exported 20 minutes ago" is the wrong sentence for a file nobody
+   * exported, and the name is what makes the reassurance checkable.
+   */
+  lastBackupTo: string | null
   // Whether Ctrl/Cmd+1…9 counts hidden workspaces when numbering. Off means
   // hidden workspaces are skipped and cannot be reached by shortcut.
   switchHiddenWorkspaces: boolean
@@ -327,6 +336,7 @@ export interface AppSettings {
 export const DEFAULT_SETTINGS: AppSettings = {
   backupDirty: false,
   lastBackupAt: null,
+  lastBackupTo: null,
   switchHiddenWorkspaces: false,
   sshMasterIdleMinutes: 15,
   vaultAutoLockMinutes: 15,

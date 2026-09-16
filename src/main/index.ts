@@ -323,7 +323,7 @@ import {
 } from './services/backup'
 import { databaseDumpTarget, dumpableDatabases } from './services/backupTargets'
 import { BACKUP_STAGE_LABEL } from '../shared/backup'
-import type { BackupDestination, DumpRunReport } from '../shared/backup'
+import type { BackupDestination, BackupRunReport, DumpRunReport } from '../shared/backup'
 import {
   checkForUpdates,
   getUpdaterStatus,
@@ -4558,6 +4558,24 @@ ipcMain.handle('backup:relaunch', () => relaunchApp())
 // destination names a server whose secret credentialResolver reads in main, and
 // an S3 destination names a vault entry that backupTargets reads in main. What
 // crosses this boundary is an id.
+/**
+ * A backup was made. Say so, wherever it came from.
+ *
+ * The renderer raises "Backup out of date" the moment stored data changes and
+ * lowers it when somebody exports — and only when somebody exports. So a user
+ * who set up a scheduled destination got working, verified, retained backups
+ * and a permanent red warning telling them to go and make one by hand, which is
+ * the opposite of what scheduling is for. The flag is about whether a current
+ * backup EXISTS, not about which button produced it.
+ *
+ * Only on success: a failed run has not made a backup, and lowering the flag
+ * for one would replace a nag with a lie.
+ */
+const announceBackupRan = (report: BackupRunReport): void => {
+  if (!report.ok) return
+  notifyRenderer('backup:ran', { at: report.finishedAt, destination: report.destinationName })
+}
+
 ipcMain.handle('backup:destinations', () => readTargets())
 ipcMain.handle('backup:saveDestinations', (_e, destinations: BackupDestination[]) =>
   saveDestinations(destinations)
@@ -4582,6 +4600,7 @@ ipcMain.handle('backup:runDestination', async (_e, id: string, password: string)
   }
   const report = await runBackupToDestination(dest, password)
   recordRun(dest.id, report)
+  announceBackupRan(report)
   return report
 })
 ipcMain.handle('backup:listRemote', async (_e, id: string) => {
@@ -5561,7 +5580,10 @@ syncDriftWatches(loadData())
   // interval AND a vault entry holding its passphrase, and a tick that cannot
   // find one records why rather than doing nothing.
   startBackupSchedule({
-    onRun: (line) => console.log('[backup]', line),
+    onRun: (line, report) => {
+      console.log('[backup]', line)
+      announceBackupRan(report)
+    },
     // Raised outside the window, because the panel that shows the failure is
     // three clicks into Settings and nobody goes there to check that a backup
     // they set up months ago is still working. Only on the transition into

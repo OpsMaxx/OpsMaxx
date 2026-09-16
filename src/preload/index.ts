@@ -1335,6 +1335,19 @@ const api = {
     import: (password: string, path: string): Promise<BackupResult> =>
       ipcRenderer.invoke('backup:import', password, path),
     deleteAll: (): Promise<BackupResult> => ipcRenderer.invoke('backup:deleteAll'),
+    /**
+     * A backup was written to a destination — scheduled, or by the Run button.
+     *
+     * The renderer keeps the "a current backup exists" flag, and only the
+     * manual export could lower it. A scheduled run had no way to say it had
+     * just made one, so setting up automatic backups left the warning on
+     * forever. This is how an unattended run reports itself.
+     */
+    onRan: (cb: (info: { at: string; destination: string }) => void): (() => void) => {
+      const h = (_e: unknown, info: { at: string; destination: string }): void => cb(info)
+      ipcRenderer.on('backup:ran', h)
+      return () => ipcRenderer.removeListener('backup:ran', h)
+    },
     relaunch: (): Promise<void> => ipcRenderer.invoke('backup:relaunch'),
     // Destinations. Note what is NOT here: no credential, in either direction.
     // An SFTP destination names a saved server and an S3 one names a vault

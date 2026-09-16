@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useApp } from './store/app'
+import { startBackupRunWatch } from './store/backupRuns'
 import { clsx } from './lib/format'
 import { initPersistence } from './store/persist'
 import { startVaultLockWatch } from './store/vault'
@@ -95,6 +96,10 @@ export default function App(): React.JSX.Element {
   // secures or locks, the decrypted entries this renderer is holding have to
   // go — see startVaultLockWatch for what leaving them behind meant.
   useEffect(() => startVaultLockWatch(), [])
+  // App level, not panel level: a six-hourly backup almost never lands while
+  // somebody is looking at the Backup page, and a run nobody heard about leaves
+  // the warning up. See startBackupRunWatch.
+  useEffect(() => startBackupRunWatch(), [])
 
   // Density is a root attribute so it can tighten every surface from CSS
   // rather than threading a prop through every component.

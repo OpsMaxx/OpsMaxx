@@ -66,7 +66,7 @@ export function BackupPanel(): React.JSX.Element {
       })
       return
     }
-    setSettings({ backupDirty: false, lastBackupAt: new Date().toISOString() })
+    setSettings({ backupDirty: false, lastBackupAt: new Date().toISOString(), lastBackupTo: null })
     setExportPw('')
     setExportPw2('')
     toast(`Backup saved to ${r?.path}`, 'ok')
@@ -166,8 +166,14 @@ export function BackupPanel(): React.JSX.Element {
           </div>
           <div className="s-desc">
             {settings.backupDirty
-              ? 'Your connections have changed since the last export. Download a new backup and store it somewhere safe so this configuration can be recovered.'
-              : `Last exported ${when(settings.lastBackupAt)}.`}
+              ? 'Your connections have changed since the last export. Download a new backup and store it somewhere safe so this configuration can be recovered — or set up a destination below to have one written on a schedule.'
+              : settings.lastBackupTo
+                ? // Named, because this one was not exported by hand: the user
+                  // has no memory of choosing a folder for it, and the place it
+                  // landed is what makes the reassurance something they can go
+                  // and verify.
+                  `Last backed up ${when(settings.lastBackupAt)} to ${settings.lastBackupTo}.`
+                : `Last exported ${when(settings.lastBackupAt)}.`}
           </div>
         </div>
       </div>

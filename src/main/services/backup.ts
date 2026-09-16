@@ -1233,8 +1233,15 @@ let scheduleTimer: ReturnType<typeof setInterval> | null = null
 export const TICK_MS = 5 * 60 * 1000
 
 export interface ScheduleHandlers {
-  /** Every run, for the log. */
-  onRun?: (line: string) => void
+  /**
+   * Every run, for the log — and with the report, because a run that SUCCEEDED
+   * is news the rest of the app needs.
+   *
+   * The line alone was not enough: the renderer's "Backup out of date" flag is
+   * cleared by whoever made a backup, and a scheduled run had no way to say it
+   * had made one. See announceBackupRan in main.
+   */
+  onRun?: (line: string, report: BackupRunReport) => void
   /** A destination that has just started failing, for something the user will
    *  actually see. Only the transition — see TickResult.newlyFailing. */
   onNewFailure?: (report: BackupRunReport) => void
@@ -1245,7 +1252,7 @@ export function startBackupSchedule(handlers: ScheduleHandlers = {}): void {
   scheduleTimer = setInterval(() => {
     void backupTick()
       .then(({ ran, newlyFailing }) => {
-        for (const r of ran) handlers.onRun?.(describeRun(r))
+        for (const r of ran) handlers.onRun?.(describeRun(r), r)
         for (const r of newlyFailing) handlers.onNewFailure?.(r)
       })
       .catch((err: unknown) => {
