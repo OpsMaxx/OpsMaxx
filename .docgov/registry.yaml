@@ -1,0 +1,234 @@
+version: 1
+documents:
+  claude:
+    path: CLAUDE.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: Working on OpsMaxx
+    hash: c9977fecadd7e7df
+    lines: 106
+  code-of-conduct:
+    path: CODE_OF_CONDUCT.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: Contributor Covenant Code of Conduct
+    hash: c1d27061e8b4a490
+    lines: 47
+  contributing:
+    path: CONTRIBUTING.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: Contributing to OpsMaxx
+    hash: 9b6fa409f7419841
+    lines: 182
+  docs-ai-agents:
+    path: docs/ai-agents.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: AI agent access
+    hash: 2bec913d0d4ae9ba
+    lines: 205
+  docs-ai-mcp:
+    path: docs/AI-MCP.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: "AI & MCP — technical guide"
+    hash: 9ca340048adfd332
+    lines: 550
+  docs-ai-security:
+    path: docs/AI-SECURITY.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: "AI & MCP — threat model and security boundaries"
+    hash: 1ab9e3e35d9f14e9
+    lines: 323
+  docs-databases:
+    path: docs/databases.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: Databases
+    hash: f74a15ce58dc5e2d
+    lines: 30
+  docs-design-panel-audit:
+    path: docs/design/panel-audit.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: Fleet panel UX audit
+    hash: 7a3f8a23d6ed2283
+    lines: 288
+  docs-faq:
+    path: docs/faq.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: FAQ
+    hash: 39b5f7ce4a39fb35
+    lines: 175
+  docs-features:
+    path: docs/features.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: Features
+    hash: 50314a643404b814
+    lines: 117
+  docs-install:
+    path: docs/install.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: Install
+    hash: 72d8d648d8fb5d63
+    lines: 265
+  docs-monitoring:
+    path: docs/monitoring.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: Monitoring and fleet operations
+    hash: ef971d3ca4ca3aec
+    lines: 65
+  docs-plans-cicd-module:
+    path: docs/plans/cicd-module.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: "CI/CD module — Jenkins, GitLab CI, GitHub Actions"
+    hash: 3ae52c07bc1cf27c
+    lines: 1451
+  docs-plans-cicd-phase-2:
+    path: docs/plans/cicd-phase-2.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: "CI/CD module — phase 2"
+    hash: 9f8fc1b1966bf19a
+    lines: 167
+  docs-plans-local-terminal-plan:
+    path: docs/plans/local-terminal-plan.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: "Local Terminal + Tab/Pane Multiplexing — Implementation Plan"
+    hash: 506ec13c3da60f0d
+    lines: 2622
+  docs-plans-roadmap-execution:
+    path: docs/plans/roadmap-execution.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: "Roadmap execution — wave log"
+    hash: 0d6c0e43f47d1b1a
+    lines: 816
+  docs-plans-vpn-tunnel-clients:
+    path: docs/plans/vpn-tunnel-clients.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: "VPN & Tunnel Clients for OpsMaxx"
+    hash: b29c28f12527bfdb
+    lines: 1079
+  docs-roadmap:
+    path: docs/ROADMAP.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: OpsMaxx roadmap
+    hash: 2ffd4ef877033caa
+    lines: 1969
+  docs-security:
+    path: docs/security.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: Security
+    hash: 5420aa58b8654b44
+    lines: 23
+  docs-terminal:
+    path: docs/terminal.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: Terminal
+    hash: 2da024e7eab43755
+    lines: 363
+  docs-tunnels:
+    path: docs/tunnels.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: Tunnels and VPN
+    hash: 781531868d85412f
+    lines: 43
+  docs-vault:
+    path: docs/vault.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: "Vault, backup and settings"
+    hash: d70b6c66c8378ec4
+    lines: 58
+  docs-vpn:
+    path: docs/VPN.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: VPN and reverse-proxy tunnels
+    hash: c3e2a18c0cb199ef
+    lines: 377
+  docs-workspaces:
+    path: docs/workspaces.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: Workspaces
+    hash: 9bcb1a93fdf61068
+    lines: 73
+  packaging-winget-readme:
+    path: packaging/winget/README.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: winget manifests
+    hash: 8fd1114be1c5947c
+    lines: 27
+  readme:
+    path: README.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: OpsMaxx
+    hash: 3ba25244641c3588
+    lines: 161
+  security:
+    path: SECURITY.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: Security Policy
+    hash: 85a7bb44356dae6d
+    lines: 350
+  sidecar-netd-readme:
+    path: sidecar/netd/README.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: opsmaxx-netd
+    hash: 4aa90adcfdb6a283
+    lines: 559
+  third-party-notices:
+    path: THIRD-PARTY-NOTICES.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: Third-Party Notices
+    hash: a5f095428a0ff585
+    lines: 528

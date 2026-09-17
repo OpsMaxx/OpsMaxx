@@ -1,0 +1,17 @@
+version: 1
+project:
+  name: opsmaxx
+  mode: open-source
+  visibility: mixed
+  layout: full
+documentation:
+  root: docs
+governance:
+  canonical_changes_require_review: true
+  prevent_duplicate_domains: true
+  warn_only: true
+drift:
+  enabled: true
+generated:
+  allow_manual_edit: false
+domains: {}
