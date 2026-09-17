@@ -7,7 +7,8 @@ import {
   FolderOpen,
   ChevronRight,
   Cloud,
-  Server
+  Server,
+  MonitorDot
 } from 'lucide-react'
 import { Modal } from '../common/Modal'
 import { useApp } from '../../store/app'
@@ -77,8 +78,17 @@ const AUTH: {
  * per choice, so a fourth provider is a row and not four new branches spread
  * through the render, the validation and the save.
  */
-const CONNECTION_TYPES: { id: 'ssh' | CloudProvider; label: string; icon: React.ReactNode }[] = [
+/**
+ * How this machine is reached, as the first question.
+ *
+ * RDP IS ONE OF THEM. It was not, and the only way to describe a Windows box
+ * was to pick SSH — the protocol it does not speak — and then find "RDP only"
+ * in a segmented control further down. Two controls answering one question,
+ * and the first of them answering it wrong.
+ */
+const CONNECTION_TYPES: { id: 'ssh' | 'rdp' | CloudProvider; label: string; icon: React.ReactNode }[] = [
   { id: 'ssh', label: 'SSH', icon: <Server size={16} /> },
+  { id: 'rdp', label: 'RDP', icon: <MonitorDot size={16} /> },
   { id: 'gcp', label: CLOUD_PROVIDER_LABEL.gcp, icon: <Cloud size={16} /> },
   { id: 'aws', label: CLOUD_PROVIDER_LABEL.aws, icon: <Cloud size={16} /> },
   { id: 'azure', label: CLOUD_PROVIDER_LABEL.azure, icon: <Cloud size={16} /> }
@@ -200,8 +210,8 @@ export function AddServerModal(): React.JSX.Element {
    * Which kind of server this is. Seeded from the saved record so opening a
    * cloud connection for editing shows cloud fields rather than an empty host.
    */
-  const [connectionType, setConnectionType] = useState<'ssh' | CloudProvider>(
-    existing?.cloud?.type ?? 'ssh'
+  const [connectionType, setConnectionType] = useState<'ssh' | 'rdp' | CloudProvider>(
+    existing?.rdpOnly === true ? 'rdp' : (existing?.cloud?.type ?? 'ssh')
   )
   const [cloudDraft, setCloudDraft] = useState<CloudDraft>(
     existing?.cloud ? targetToDraft(existing.cloud) : emptyCloudDraft
@@ -220,14 +230,14 @@ export function AddServerModal(): React.JSX.Element {
   const [vpnProfileId, setVpnProfileId] = useState<UUID | null>(existing?.vpnProfileId ?? null)
   const [sftpOnly, setSftpOnly] = useState(existing?.sftpOnly === true)
   /**
-   * Which protocols this record describes, derived from what was saved.
+   * A record saved when one machine could be both, before RDP became a
+   * connection type of its own.
    *
-   * One control rather than two booleans, because two booleans could not say
-   * "RDP only" — and that was the gap: SSH was assumed by the dialog itself.
+   * Frozen at open and never set: there is no control that creates this shape
+   * any more. It exists so editing such a record keeps its desktop instead of
+   * silently dropping it on save.
    */
-  const [speaks, setSpeaks] = useState<'ssh' | 'ssh+rdp' | 'rdp'>(
-    existing?.rdpOnly === true ? 'rdp' : existing?.rdp ? 'ssh+rdp' : 'ssh'
-  )
+  const [legacyBoth] = useState(existing?.rdpOnly !== true && existing?.rdp !== undefined)
   /**
    * What is already saved against this connection, so the form can tell
    * "leave blank to keep it" apart from "there is nothing here".
@@ -359,7 +369,20 @@ export function AddServerModal(): React.JSX.Element {
   // "type a new one" branch on an edit.
   const usingVault = vaultEntryId !== ''
 
-  const isCloud = connectionType !== 'ssh'
+  /**
+   * Which protocols this record describes — READ OFF THE CONNECTION TYPE.
+   *
+   * It used to be a segmented control of its own, "This machine speaks", sitting
+   * under a Connection Type row that did not offer RDP. So describing a Windows
+   * box meant picking SSH — the protocol it does not speak — and then correcting
+   * it further down: two controls answering one question, the first of them
+   * answering it wrong. RDP is a connection type now, and `ssh+rdp` is only ever
+   * what an older record already said about itself.
+   */
+  const speaks: 'ssh' | 'ssh+rdp' | 'rdp' =
+    connectionType === 'rdp' ? 'rdp' : legacyBoth ? 'ssh+rdp' : 'ssh'
+
+  const isCloud = connectionType !== 'ssh' && connectionType !== 'rdp'
   const cloudProvider = isCloud ? (connectionType as CloudProvider) : null
   const cloudTarget = cloudProvider ? draftToTarget(cloudProvider, cloudDraft) : null
 
@@ -515,6 +538,20 @@ export function AddServerModal(): React.JSX.Element {
 
   const save = async (): Promise<void> => {
     if (!valid) return
+    /**
+     * The account the desktop signs in as.
+     *
+     * `rdpRelay` reads `server.rdp.username` and falls back to
+     * `server.username`, so leaving this undefined on an RDP-only machine sent
+     * it the form's SSH default — `root` — against a Windows box. Defaulted to
+     * the placeholder the field already showed, so blank means what it looked
+     * like it meant. Still `undefined` for an SSH+RDP machine, where falling
+     * back to the server's account is the documented behaviour every record
+     * saved before this relies on.
+     */
+    const rdpAccount =
+      rdpUsername.trim() || (speaks === 'rdp' ? 'Administrator' : undefined)
+
     const fields = {
       name: name.trim(),
       // Empty for a cloud server. The provider resolves the address at connect
@@ -522,7 +559,11 @@ export function AddServerModal(): React.JSX.Element {
       // exists - so a value typed here before switching type must not survive.
       host: isCloud ? '' : host.trim(),
       port: Number(port) || 22,
-      username: username.trim() || 'root',
+      // `root` IS THE WRONG DEFAULT FOR A WINDOWS DESKTOP, and it was not
+      // inert: rdpRelay falls back to this field, so an RDP-only record saved
+      // with the form's SSH default tried to sign in as root. The one account
+      // the user was actually asked for is the one that gets stored.
+      username: speaks === 'rdp' ? rdpAccount : username.trim() || 'root',
       auth,
       route: hops,
       vpnProfileId,
@@ -541,8 +582,9 @@ export function AddServerModal(): React.JSX.Element {
         ? {
             port: Number(rdpPort) || 3389,
             // Absent means "use the server's", which is every record saved
-            // before RDP had an account of its own.
-            username: rdpUsername.trim() || undefined,
+            // before RDP had an account of its own — still the case for a
+            // machine that speaks both.
+            username: rdpAccount,
             domain: rdpDomain.trim() || undefined,
             nla: rdpNla
           }
@@ -770,23 +812,41 @@ export function AddServerModal(): React.JSX.Element {
        * while sending it somewhere else entirely - the same "quietest dangerous
        * thing" the update_server tool refuses to do silently.
        */}
-      {!editId && (
-        <div className="field">
-          <label className="field-label">Connection Type</label>
-          <div className="radio-cards">
-            {CONNECTION_TYPES.map((t) => (
-              <button
-                key={t.id}
-                className={clsx('radio-card', connectionType === t.id && 'active')}
-                onClick={() => setConnectionType(t.id)}
-              >
-                {t.icon}
-                {t.label}
-              </button>
-            ))}
-          </div>
+      {/* SHOWN WHILE EDITING TOO, and disabled there. Hiding it meant opening a
+          Windows connection and being shown no indication of what it was — and
+          the type is now the single control that decides which half of this
+          form applies. Disabled keeps the rule the row was hidden for: changing
+          an existing server's type would keep its name, its id and everything
+          pointing at it while sending it somewhere else entirely. */}
+      <div className="field">
+        <label className="field-label">Connection Type</label>
+        <div className="radio-cards">
+          {CONNECTION_TYPES.map((t) => (
+            <button
+              key={t.id}
+              className={clsx('radio-card', connectionType === t.id && 'active')}
+              disabled={!!editId}
+              title={editId ? 'A saved connection keeps the type it was created with.' : undefined}
+              onClick={() => setConnectionType(t.id)}
+            >
+              {t.icon}
+              {t.label}
+            </button>
+          ))}
         </div>
-      )}
+        {speaks === 'rdp' && (
+          <span className="field-hint">
+            The desktop, and only the desktop. No shell, no files and no monitoring — those all need
+            SSH, so a machine that serves both is two connections.
+          </span>
+        )}
+        {legacyBoth && (
+          <span className="field-hint">
+            Saved when one connection could be both. It keeps its desktop; new connections are one
+            protocol each.
+          </span>
+        )}
+      </div>
 
       {isCloud && cloudProvider && (
         <CloudTargetFields
@@ -812,10 +872,18 @@ export function AddServerModal(): React.JSX.Element {
               <input className="input" value={port} onChange={(e) => setPort(e.target.value)} />
             </div>
           )}
-          <div className="field">
-            <label className="field-label">Username</label>
-            <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} />
-          </div>
+          {/* SSH's account, and the second half of "it asks for my username
+              twice": this stayed on screen for an RDP-only machine next to
+              "Sign in as", and it was the one that decided — rdpRelay falls
+              back to `server.username` when the RDP account is blank, so a
+              Windows box saved with the default `root` tried to sign in as
+              root. One machine, one account field. */}
+          {speaks !== 'rdp' && (
+            <div className="field">
+              <label className="field-label">Username</label>
+              <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} />
+            </div>
+          )}
         </div>
       </div>
       )}
@@ -1073,50 +1141,6 @@ export function AddServerModal(): React.JSX.Element {
         </div>
       )}
 
-      {/**
-       * What the machine speaks, as one choice.
-       *
-       * This was two independent checkboxes — "Files only (no shell)" and
-       * "Also reachable by RDP" — and between them they could not express
-       * "RDP only". SSH was assumed by the dialog's own subtitle, so a Windows
-       * box with nothing on port 22 had to be given an invented SSH account
-       * before it could be saved. The two protocols are separate connections
-       * and the form now says so.
-       */}
-      {/* A cloud connection is SSH. The provider brokers an SSH credential and
-          a tunnel to port 22; there is no RDP path through any of it, so
-          offering the choice would offer something that cannot work. */}
-      {!isCloud && (
-      <div className="col" style={{ gap: 'var(--sp-2)', marginBottom: 'var(--sp-3)' }}>
-        <span className="field-label">This machine speaks</span>
-        <div className="segment">
-          {(
-            [
-              ['ssh', 'SSH'],
-              ['ssh+rdp', 'SSH and RDP'],
-              ['rdp', 'RDP only']
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              className={clsx('seg-btn', speaks === value && 'active')}
-              onClick={() => setSpeaks(value)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <span className="field-hint">
-          {speaks === 'rdp'
-            ? 'No shell, no files and no monitoring — those all need SSH. The server opens on its desktop.'
-            : speaks === 'ssh+rdp'
-              ? 'One machine, two connections. The desktop signs in with the username and password below, so an account authenticating by key needs a password stored as well.'
-              : 'Terminal, files and monitoring, over one authenticated connection.'}
-        </span>
-      </div>
-      )}
-
       {/* The delivery/backup account shape: sshd forces internal-sftp, so
           files work and nothing runs. Only meaningful where there is a shell
           to withhold, so it is not offered for an RDP-only machine. */}
@@ -1140,8 +1164,10 @@ export function AddServerModal(): React.JSX.Element {
         </label>
       )}
 
+      {/* No longer indented: it was a sub-block of the "This machine speaks"
+          control, and on an RDP connection it is the main event. */}
       {speaks !== 'ssh' && (
-        <div className="col" style={{ gap: 'var(--sp-2)', marginBottom: 'var(--sp-3)', paddingLeft: 22 }}>
+        <div className="col" style={{ gap: 'var(--sp-2)', marginBottom: 'var(--sp-3)' }}>
           {/**
            * RDP's own account and password.
            *
