@@ -173,8 +173,21 @@ export function RdpView({
         if (disposed) return
 
         element = document.createElement('iron-remote-desktop')
-        // A property, not an attribute: it is a module object.
-        ;(element as unknown as { module: unknown }).module = backend
+        /**
+         * `Backend`, not the module namespace.
+         *
+         * A property rather than an attribute, because it is an object — but it
+         * is a specific one. The element does `new this.module.SessionBuilder()`
+         * and reads DesktopSize, InputTransaction, ClipboardData and DeviceEvent
+         * off the same object, and those five are exactly what the package's
+         * `Backend` export holds. The namespace does not carry them at the top
+         * level, so handing it over got as far as connecting and then failed
+         * with "this.module.SessionBuilder is not a constructor".
+         *
+         * Everything else this file calls — init, enableCredssp — stays on the
+         * namespace, which is where the package exports those.
+         */
+        ;(element as unknown as { module: unknown }).module = backend.Backend
         element.setAttribute('scale', 'fit')
         element.setAttribute('flexcenter', 'true')
         element.style.cssText = 'flex:1; min-height:0; display:block'

@@ -118,6 +118,21 @@ describe('starting the RDP backend', () => {
     expect(element, 'the element must be created only after init resolves').toBeGreaterThan(init)
   })
 
+  it('hands the element the Backend export, not the module namespace', () => {
+    // The element does `new this.module.SessionBuilder()` and reads
+    // DesktopSize, InputTransaction, ClipboardData and DeviceEvent off the same
+    // object. Those five are what `Backend` holds; the namespace does not carry
+    // them at the top level, so passing it got as far as connecting and then
+    // failed with "this.module.SessionBuilder is not a constructor".
+    expect(VIEW).toContain('.module = backend.Backend')
+    expect(VIEW).not.toMatch(/\.module = backend\b(?!\.)/)
+  })
+
+  it('still takes init and the extensions off the namespace, where they live', () => {
+    expect(VIEW).toContain('await backend.init(')
+    expect(VIEW).toContain('backend.enableCredssp(')
+  })
+
   it('checks for teardown after that await, like every other one here', () => {
     const after = VIEW.slice(VIEW.indexOf('await backend.init('))
     expect(after.slice(0, 120)).toContain('if (disposed) return')
