@@ -8,6 +8,9 @@ import {
   onApprovalEvent,
   EXTENSION_CEILING_SECONDS,
   EXTENSION_MAX_PER_CALL_SECONDS,
+  armApproval,
+  armAllPendingApprovals,
+  listRecentApprovals,
   type ApprovalEvent, resetApprovalVolumeForTests } from '../src/main/services/approvals'
 import { setMcpConfig, resetMcpAuthForTests } from '../src/main/services/mcpAuth'
 
@@ -98,16 +101,98 @@ describe('the intent an agent sends with a request', () => {
   })
 })
 
+describe('the fuse does not burn before anybody has been asked', () => {
+  beforeEach(() => {
+    resetApprovalVolumeForTests()
+    resetMcpAuthForTests()
+    setMcpConfig({ approvalTimeoutSeconds: 60 })
+    vi.useFakeTimers()
+  })
+
+  // The 01:32 AM case. The window was closed — on macOS that does not quit the
+  // app — so nothing rendered the dialog, nothing bounced the dock, and the
+  // request auto-denied 120 seconds later. The agent was told a human had
+  // refused it. No human had been asked.
+  it('an unarmed request outlives the timeout instead of auto-denying', async () => {
+    const pending = req()
+    const [request] = listPendingApprovals()
+    expect(request.deadlineAt).toBeUndefined()
+
+    await vi.advanceTimersByTimeAsync(600_000)
+    expect(listPendingApprovals()).toHaveLength(1)
+
+    respondToApproval(request.id, 'approved')
+    expect(await pending).toBe('approved')
+  })
+
+  // The blocked agent still has to be answered eventually: its tool call is
+  // waiting on this promise, and "never shown, never resolved" would hold that
+  // call open for the life of the process.
+  it('but it does not wait forever — an unseen request gives up after half an hour', async () => {
+    const pending = req()
+    await vi.advanceTimersByTimeAsync(29 * 60_000)
+    expect(listPendingApprovals()).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(2 * 60_000)
+    expect(await pending).toBe('timeout')
+  })
+
+  it('arming starts the clock, and arming twice does not restart it', async () => {
+    const pending = req()
+    const [request] = listPendingApprovals()
+    expect(armApproval(request.id)).toBe(true)
+    const deadline = listPendingApprovals()[0].deadlineAt
+    expect(deadline).toBeTruthy()
+
+    await vi.advanceTimersByTimeAsync(30_000)
+    // A second window event must not hand the request another full minute.
+    expect(armApproval(request.id)).toBe(false)
+    expect(listPendingApprovals()[0].deadlineAt).toBe(deadline)
+
+    await vi.advanceTimersByTimeAsync(31_000)
+    expect(await pending).toBe('timeout')
+  })
+
+  it('the window appearing arms everything that was waiting unseen', async () => {
+    const pending = req()
+    expect(armAllPendingApprovals()).toBe(1)
+    await vi.advanceTimersByTimeAsync(61_000)
+    expect(await pending).toBe('timeout')
+  })
+
+  it('a request nobody answered is still readable afterwards, not only in the audit log', async () => {
+    const pending = req()
+    const [request] = listPendingApprovals()
+    armApproval(request.id)
+    await vi.advanceTimersByTimeAsync(61_000)
+    expect(await pending).toBe('timeout')
+
+    expect(listPendingApprovals()).toHaveLength(0)
+    const [recent] = listRecentApprovals()
+    expect(recent.id).toBe(request.id)
+    expect(recent.status).toBe('timeout')
+    // The field that answers "why was I asked at all on Full Access".
+    expect(recent.policyReason).toBe('Sudo Access: sudo = ask')
+  })
+})
+
 describe('giving the operator more time', () => {
   beforeEach(() => {
     resetApprovalVolumeForTests()
     vi.useFakeTimers()
   })
+
+  /** Create a request and put it in front of somebody, which is what starts
+   *  its fuse. Without the arming step there is no deadline to extend. */
+  const armedReq = (): ReturnType<typeof req> => {
+    const pending = req()
+    for (const r of listPendingApprovals()) armApproval(r.id)
+    return pending
+  }
   afterEach(() => {
   })
 
   it('pushes the deadline back and says so, rather than leaving the renderer to guess', async () => {
-    const pending = req()
+    const pending = armedReq()
     const [before] = listPendingApprovals()
     const was = Date.parse(before.deadlineAt as string)
 
@@ -127,7 +212,7 @@ describe('giving the operator more time', () => {
   })
 
   it('actually re-arms the timer — the request survives past the original fuse', async () => {
-    const pending = req()
+    const pending = armedReq()
     const [request] = listPendingApprovals()
     expect(extendApproval(request.id, 300)).toBe(true)
 
@@ -141,7 +226,7 @@ describe('giving the operator more time', () => {
   })
 
   it('adds to the time that is left rather than restarting the clock from now', async () => {
-    const pending = req()
+    const pending = armedReq()
     const [request] = listPendingApprovals()
     const was = Date.parse(request.deadlineAt as string)
     await vi.advanceTimersByTimeAsync(30_000)
@@ -154,7 +239,7 @@ describe('giving the operator more time', () => {
   })
 
   it('refuses to resurrect a request the clock already denied', async () => {
-    const pending = req()
+    const pending = armedReq()
     const [request] = listPendingApprovals()
     await vi.advanceTimersByTimeAsync(61_000)
     expect(await pending).toBe('timeout')
@@ -163,7 +248,7 @@ describe('giving the operator more time', () => {
   })
 
   it('refuses to reopen a request a human already answered', async () => {
-    const pending = req()
+    const pending = armedReq()
     const [request] = listPendingApprovals()
     respondToApproval(request.id, 'denied')
     expect(await pending).toBe('denied')
@@ -188,7 +273,7 @@ describe('giving the operator more time', () => {
   })
 
   it('caps a single grant, so one fat-fingered number cannot spend the whole allowance', async () => {
-    const pending = req()
+    const pending = armedReq()
     const [request] = listPendingApprovals()
     const was = Date.parse(request.deadlineAt as string)
     expect(extendApproval(request.id, 86_400)).toBe(true)
@@ -200,7 +285,7 @@ describe('giving the operator more time', () => {
   })
 
   it('stops extending at the ceiling — a fuse that can be pushed back forever is not a fuse', async () => {
-    const pending = req()
+    const pending = armedReq()
     const [request] = listPendingApprovals()
     const was = Date.parse(request.deadlineAt as string)
 
@@ -219,7 +304,7 @@ describe('giving the operator more time', () => {
   })
 
   it('still fires once the ceiling is reached, so the fail-closed default survives every extension', async () => {
-    const pending = req()
+    const pending = armedReq()
     const [request] = listPendingApprovals()
     // Bounded, not `while (extendApproval(...))`. An unbounded loop here spins
     // forever the moment the ceiling stops being enforced -- which is exactly

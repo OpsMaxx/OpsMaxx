@@ -21,7 +21,11 @@ const pending = new Map<
   {
     request: ApprovalRequest
     resolve: (v: 'approved' | 'denied' | 'timeout') => void
-    timer: ReturnType<typeof setTimeout>
+    /** null until armApproval() — the fuse does not burn before the question
+     *  has been put to somebody. */
+    timer: ReturnType<typeof setTimeout> | null
+    /** The backstop under an unarmed request, so nothing waits forever. */
+    unseen: ReturnType<typeof setTimeout> | null
     /** Seconds granted by extendApproval so far, against EXTENSION_CEILING_SECONDS. */
     extendedSeconds: number
     /** subjectKey(input), kept so a deny can start this subject's cooldown. */
@@ -60,6 +64,23 @@ const DENY_COOLDOWN_MS = 30_000
 /** subject -> epoch ms the cooldown expires. Pruned lazily; see requestApproval. */
 const recentDenials = new Map<string, number>()
 
+/**
+ * The longest a request may wait to be SEEN.
+ *
+ * Not the approval fuse — that one only starts once somebody has been shown the
+ * question. This is the backstop under it: an agent's tool call is blocked on
+ * this promise, and a request that is never armed (the app quit to the tray for
+ * the weekend, notifications off) would otherwise hold that call open forever.
+ * Long enough that it is not a second, sneakier fuse; short enough that nothing
+ * hangs indefinitely.
+ */
+const UNSEEN_MAX_MS = 30 * 60_000
+
+/** Recently resolved requests, newest first. Process-lifetime only: the audit
+ *  log is the durable record, this is the Approvals page's short memory. */
+const recent: ApprovalRequest[] = []
+const RECENT_MAX = 20
+
 // Session, capability and the thing acted on. The same triple gate() keys its
 // elevation cache on, because it is the same notion of "one of these again"
 // -- plus one bit, below.
@@ -95,6 +116,7 @@ const subjectKey = (i: {
 /** Only for tests and for a fresh process: the guard holds no secrets. */
 export function resetApprovalVolumeForTests(): void {
   recentDenials.clear()
+  recent.length = 0
 }
 
 export type ApprovalEvent =
@@ -207,7 +229,6 @@ export function requestApproval(input: CreateApprovalInput): Promise<ApprovalDec
     if (e.request.sessionId === input.sessionId && e.containment === containment) live++
   if (live >= MAX_PENDING_PER_SESSION) return Promise.resolve('refused')
 
-  const timeoutMs = getMcpConfig().approvalTimeoutSeconds * 1000
   const request: ApprovalRequest = {
     id: `appr-${randomBytes(6).toString('hex')}`,
     createdAt: new Date().toISOString(),
@@ -237,26 +258,78 @@ export function requestApproval(input: CreateApprovalInput): Promise<ApprovalDec
     // Sent, rather than left for the renderer to reconstruct from createdAt plus
     // the configured timeout: that reconstruction is right only while the fuse
     // cannot move, and extendApproval moves it.
-    deadlineAt: new Date(Date.now() + timeoutMs).toISOString()
+    //
+    // ABSENT UNTIL THE REQUEST HAS BEEN SHOWN. See armApproval.
+    deadlineAt: undefined
   }
 
   return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      finish(request.id, 'timeout')
-    }, timeoutMs)
-
-    pending.set(request.id, { request, resolve, timer, extendedSeconds: 0, subject, containment })
+    const unseen = setTimeout(() => finish(request.id, 'timeout'), UNSEEN_MAX_MS)
+    pending.set(request.id, {
+      request,
+      resolve,
+      timer: null,
+      unseen,
+      extendedSeconds: 0,
+      subject,
+      containment
+    })
     emitter.emit('event', { type: 'created', request } satisfies ApprovalEvent)
   })
+}
+
+/**
+ * Start this request's fuse, because somebody can now see it.
+ *
+ * THE FUSE USED TO START AT CREATION, whether or not anything had put the
+ * question on a screen. On macOS `window-all-closed` deliberately does not
+ * quit, so a closed window meant `webContents.send` was skipped, the dock never
+ * bounced, no modal existed — and 120 seconds later the request auto-denied
+ * itself. Same for "start in the background", and for a machine where
+ * `Notification.isSupported()` is false. The agent was told a human had refused
+ * it; no human had been asked. Five of those landed in one night's audit log.
+ *
+ * So arming is the caller's job, and the caller is the one that knows the
+ * question was actually surfaced: a visible window it was sent to, a delivered
+ * OS notification, or the operator opening the app later and finding it waiting.
+ *
+ * Idempotent, and never re-arms: calling it on a request already counting down
+ * would silently extend the fuse past extendApproval's ceiling, which is the
+ * one guarantee this timer has to keep.
+ */
+export function armApproval(id: string): boolean {
+  const entry = pending.get(id)
+  if (!entry || entry.timer) return false
+  const timeoutMs = getMcpConfig().approvalTimeoutSeconds * 1000
+  if (entry.unseen) clearTimeout(entry.unseen)
+  entry.unseen = null
+  entry.timer = setTimeout(() => finish(id, 'timeout'), timeoutMs)
+  entry.request.deadlineAt = new Date(Date.now() + timeoutMs).toISOString()
+  emitter.emit('event', { type: 'extended', request: entry.request } satisfies ApprovalEvent)
+  return true
+}
+
+/** Arm everything still waiting — the window just became visible. */
+export function armAllPendingApprovals(): number {
+  let armed = 0
+  for (const id of pending.keys()) if (armApproval(id)) armed++
+  return armed
 }
 
 function finish(id: string, decision: 'approved' | 'denied' | 'timeout'): void {
   const entry = pending.get(id)
   if (!entry) return
-  clearTimeout(entry.timer)
+  if (entry.timer) clearTimeout(entry.timer)
+  if (entry.unseen) clearTimeout(entry.unseen)
   pending.delete(id)
   entry.request.status = decision
   entry.request.resolvedAt = new Date().toISOString()
+  // A resolved request used to vanish from every surface but the audit log, so
+  // the one question an operator has after a timeout -- "what was I asked, and
+  // why was I asked it at all" -- was answerable only by going and finding the
+  // audit row. Kept here, capped, oldest dropped first.
+  recent.unshift(entry.request)
+  recent.length = Math.min(recent.length, RECENT_MAX)
   // A denial answers this subject for a while. Without it the agent's very next
   // call re-opens the same modal, and "deny" becomes a button the operator
   // presses repeatedly rather than a decision. A timeout is not a decision, so
@@ -322,6 +395,10 @@ export const EXTENSION_MAX_PER_CALL_SECONDS = 10 * 60
 export function extendApproval(id: string, seconds: number): boolean {
   const entry = pending.get(id)
   if (!entry) return false
+  // Nothing is counting down yet, so there is nothing to push back — and
+  // arming it here on the operator's behalf would start the fuse from the
+  // press rather than leave it waiting to be seen.
+  if (!entry.timer) return false
   if (!Number.isFinite(seconds) || seconds <= 0) return false
 
   const grant = Math.min(
@@ -354,6 +431,18 @@ export function extendApproval(id: string, seconds: number): boolean {
 
 export function listPendingApprovals(): ApprovalRequest[] {
   return [...pending.values()].map((e) => e.request)
+}
+
+/**
+ * What recently resolved, newest first — a SEPARATE call on purpose.
+ *
+ * Folding these into listPendingApprovals() would have been one line fewer and
+ * wrong: that list drives the modal queue (approvalQueue.ts) and the sidebar
+ * badge (AiPanel.tsx), so a resolved request in it raises a dialog asking about
+ * something already answered. Only the Approvals page reads this.
+ */
+export function listRecentApprovals(): ApprovalRequest[] {
+  return [...recent]
 }
 
 // Used by the global "STOP ALL AI ACCESS" kill switch: every outstanding

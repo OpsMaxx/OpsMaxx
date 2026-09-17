@@ -40,7 +40,7 @@ describe('a destructive command is never allowed silently, on any group', () => 
 
   it('says which finding stopped it, not just that something did', () => {
     const d = evaluateCommand(full, 'docker volume rm app_data')
-    expect(d.reason).toContain('removes or stops containers')
+    expect(d.reason).toContain('removes containers, images or volumes')
   })
 
   it('leaves an ordinary command alone, or the gate is a prompt on everything', () => {

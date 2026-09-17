@@ -7,8 +7,8 @@ export interface Decision {
   reason: string
 }
 
-// Server-specific assignment overrides the workspace default; a workspace
-// with no assignment at all defaults to No AI Access (null groupId).
+// Server-specific assignment overrides the workspace default; a target with no
+// assignment at all carries no restriction, and the session's own group applies.
 /**
  * Whether a target carries a deliberate assignment, and to what.
  *
@@ -357,9 +357,11 @@ export function evaluateCommand(group: AccessGroup | null, command: string): Dec
   // `sudo cat /etc/shadow` under a group with sudo=allow must still be refused
   // by the /etc/shadow rule, not waved through because sudo was permitted.
   let base: Decision
+  let sudoGranted = false
   if (isSudo) {
     const sudo = evaluateCapability(group, 'sudo')
     if (sudo.decision === 'deny') return { decision: 'deny', reason: 'Sudo is denied for this access group.' }
+    sudoGranted = sudo.decision === 'allow'
     base =
       sudo.decision === 'ask'
         ? { decision: 'ask', reason: 'Sudo commands require approval.' }
@@ -385,9 +387,20 @@ export function evaluateCommand(group: AccessGroup | null, command: string): Dec
   // overrule them -- so a command whose ONLY finding is "runs as root" is left
   // to the sudo branch above. `sudo rm -rf /` still lands here, because its
   // finding is the rm, not the sudo.
+  //
+  // A GROUP THAT GRANTED SUDO HAS ALREADY ANSWERED THE `elevated` TIER.
+  // `sudo docker build`, `sudo systemctl restart`, `sudo apt install` are the
+  // ordinary work of an operator who deliberately set sudo to `allow`, and
+  // asking anyway made that setting mean nothing: a Full Access session still
+  // raised a card on every one of them, and a card nobody answers in 120
+  // seconds is a denial. `destructive` is NOT waived — `assessCommand` stops
+  // collecting `elevated` reasons the moment a DESTRUCTIVE rule matches, so
+  // `sudo rm -rf /var/lib`, `sudo mkfs`, `sudo dd` and `zfs destroy` still ask
+  // whatever the group says. That tier is the one no setting may switch off.
   const assessed = assessCommand(command)
   const beyondSudo = assessed.reasons.filter((r) => r !== SUDO_REASON)
-  if (base.decision === 'allow' && assessed.risk !== 'ordinary' && beyondSudo.length > 0) {
+  const waived = sudoGranted && assessed.risk === 'elevated'
+  if (base.decision === 'allow' && assessed.risk !== 'ordinary' && beyondSudo.length > 0 && !waived) {
     base = {
       decision: 'ask',
       reason: `Requires approval: this command ${beyondSudo.join(', and ')}.`

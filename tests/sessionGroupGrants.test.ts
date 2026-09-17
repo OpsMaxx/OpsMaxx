@@ -47,13 +47,24 @@ describe('one knob is enough', () => {
     expect(effective(FULL, null, 'sudo ls -l /opt').decision).toBe('allow')
   })
 
-  it('but sudo = allow is not a blanket pass for dangerous commands', () => {
-    // `sudo systemctl restart nginx` still asks, and should: the sudo
-    // capability answers "may this run as root", and the command classifier
-    // answers "is this the kind of thing somebody should see first". Allowing
-    // the first has never meant waiving the second, and a group set to allow
-    // sudo would otherwise stop a service without anybody being told.
-    expect(effective(FULL, null, 'sudo systemctl restart nginx').decision).toBe('ask')
+  it('sudo = allow covers the elevated tier, because a human already answered it', () => {
+    // This used to ask, and asking was the bug behind the second report: a
+    // session on Full Access raised a card for `sudo systemctl restart nginx`,
+    // `sudo apt install` and `sudo docker build` — the ordinary work of the
+    // operator who had just granted sudo. A card nobody answers is a denial,
+    // and these were landing overnight.
+    expect(effective(FULL, null, 'sudo systemctl restart nginx').decision).toBe('allow')
+    expect(effective(FULL, null, 'sudo docker build -t app:1 .').decision).toBe('allow')
+  })
+
+  it('but the destructive tier is still not waivable', () => {
+    // `assessCommand` stops collecting elevated reasons once a DESTRUCTIVE rule
+    // matches, so this half is untouched by the waiver above. No group setting
+    // reaches it.
+    // Writes allowed too, so what stops this is the risk tier and not the
+    // write capability.
+    const writable = group('Full Access', { sudo: 'allow', writeFiles: 'allow' })
+    expect(effective(writable, null, 'sudo rm -rf /home/app/data').decision).toBe('ask')
   })
 
   it('still asks when the group itself says ask', () => {

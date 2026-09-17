@@ -3,7 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
 import { refreshMcpDataCache } from '../src/main/services/mcpDataCache'
-import { setAssignment, resetPolicyCacheForTests } from '../src/main/services/policyStore'
+import { setAssignment, removeAssignment, listAssignments, resetPolicyCacheForTests } from '../src/main/services/policyStore'
 import { setMcpConfig, createSession, revokeSession, setSessionGroup, listSessions, resetMcpAuthForTests } from '../src/main/services/mcpAuth'
 import { startMcpServer, stopMcpServer, explainSessionAccess } from '../src/main/services/mcpServer'
 import { onApprovalEvent, respondToApproval } from '../src/main/services/approvals'
@@ -286,6 +286,40 @@ describe('making the model legible', () => {
     // Every capability, not a frozen count: the next one added should make the
     // coverage test below fail, not this one.
     expect(rows).toHaveLength(AI_CAPABILITIES.length)
+  })
+
+  it('names the assignment that held a capability down, and the workspace it hangs off', () => {
+    // The reported loop: a custom group with every capability allowed, and
+    // sudo still denied. The table said DENY in the Workspace column and
+    // stopped there, and "Edit access groups" opened the session's OWN group —
+    // already all-allow — so the user set it to allow again and nothing moved.
+    setAssignment({ level: 'workspace', workspaceId: 'ws-prod' }, 'grp-read-write')
+    const { session } = createSession({
+      agentName: 'Held down',
+      workspaces: [{ id: 'ws-prod', name: 'Production' }],
+      groupId: 'grp-full',
+      groupName: 'Full Access',
+      ttlMinutes: null
+    })
+
+    // Full Access allows writes outright; Read & Write holds them at ASK.
+    const held = explainSessionAccess(session.id, null)!.find((r) => r.capability === 'writeFiles')!
+    expect(held.fromSession).toBe('allow')
+    expect(held.decision).toBe('ask')
+    expect(held.decidedBy).toBe('scope')
+    // What the UI needs to send them to the right page.
+    expect(held.scopeGroupId).toBe('grp-read-write')
+    expect(held.scopeGroupName).toBe('Read & Write')
+    expect(held.scopeWorkspaceName).toBe('Production')
+    expect(held.reason).toContain('Production')
+
+    // And removing the assignment — the option the workspace picker did not
+    // have — hands the session its own group back.
+    for (const a of listAssignments()) removeAssignment(a.id)
+    const lifted = explainSessionAccess(session.id, null)!.find((r) => r.capability === 'writeFiles')!
+    expect(lifted.decision).toBe('allow')
+    expect(lifted.decidedBy).toBe('both')
+    expect(lifted.scopeGroupId).toBeNull()
   })
 
   it('reports every capability, so the view cannot quietly omit one', () => {

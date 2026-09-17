@@ -1763,6 +1763,8 @@ const api = {
     killAllSessions: (): Promise<{ revoked: number; denied: number }> =>
       ipcRenderer.invoke('aiMcp:killAllSessions'),
     listApprovals: (): Promise<ApprovalRequest[]> => ipcRenderer.invoke('aiMcp:listApprovals'),
+    // Resolved ones, for the Approvals page only — never for the modal queue.
+    recentApprovals: (): Promise<ApprovalRequest[]> => ipcRenderer.invoke('aiMcp:recentApprovals'),
     respondApproval: (id: string, decision: 'approved' | 'denied'): Promise<boolean> =>
       ipcRenderer.invoke('aiMcp:respondApproval', id, decision),
     // Resolves false when the fuse did NOT move: the request was already

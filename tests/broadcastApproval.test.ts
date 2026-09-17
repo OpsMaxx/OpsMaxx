@@ -202,9 +202,17 @@ describe('spellings the classifier used to miss', () => {
   it("sees docker's noun-verb spellings", () => {
     // `docker system prune` and `docker volume rm` are how these are written
     // now; the verb-only rule matched neither.
-    expect(assessCommand('docker system prune -af --volumes').risk).toBe('elevated')
-    expect(assessCommand('docker volume rm pgdata').risk).toBe('elevated')
-    expect(assessCommand('docker compose down').risk).toBe('elevated')
+    //
+    // DESTRUCTIVE, not elevated: these delete state that no restart brings
+    // back, which puts them with lvremove and zfs destroy — and the elevated
+    // tier is waived for a group that granted sudo, so the distinction is now
+    // the difference between a card and no card.
+    expect(assessCommand('docker system prune -af --volumes').risk).toBe('destructive')
+    expect(assessCommand('docker volume rm pgdata').risk).toBe('destructive')
+    expect(assessCommand('docker compose down').risk).toBe('destructive')
+    // Stopping one is still restartable, and stays where it was.
+    expect(assessCommand('docker stop api').risk).toBe('elevated')
+    expect(assessCommand('docker compose stop').risk).toBe('elevated')
   })
 
   it('flags package removals spelled purge or autoremove', () => {
@@ -288,7 +296,7 @@ describe('spellings the classifier used to miss', () => {
     expect(why('sudo -n apt-get install nginx')).toContain('changes installed packages')
     expect(why('sudo -n systemctl restart nginx')).toContain('restarts a service')
     expect(why('sudo -n service nginx reload')).toContain('restarts a service')
-    expect(why('sudo -u root docker system prune -af')).toContain('removes or stops containers')
+    expect(why('sudo -u root docker system prune -af')).toContain('removes containers, images or volumes')
   })
 })
 

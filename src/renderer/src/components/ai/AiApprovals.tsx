@@ -17,6 +17,9 @@ export function AiApprovals(): React.JSX.Element {
   // the promise had no rejection path, so a bridge error left the panel saying
   // nothing was waiting, for as long as it stayed open.
   const [unreadable, setUnreadable] = useState(false)
+  // What recently resolved, including the ones nobody answered. Its own call:
+  // these must never reach the modal queue or the sidebar badge.
+  const [recent, setRecent] = useState<ApprovalRequest[]>([])
 
   const load = (): void => {
     void window.opsmaxx?.aiMcp
@@ -26,6 +29,7 @@ export function AiApprovals(): React.JSX.Element {
         setUnreadable(false)
       })
       .catch(() => setUnreadable(true))
+    void window.opsmaxx?.aiMcp.recentApprovals?.().then((a) => setRecent(a ?? []))
   }
 
   useEffect(() => {
@@ -97,6 +101,7 @@ export function AiApprovals(): React.JSX.Element {
               {consequence.text}
             </div>
             <div className="r-sub mono">{a.action}</div>
+            {a.policyReason && <div className="r-sub">Rule: {a.policyReason}</div>}
           </div>
           <div className="spacer" />
           <button className="btn sm danger" onClick={() => respond(a.id, 'denied')}>
@@ -108,6 +113,37 @@ export function AiApprovals(): React.JSX.Element {
         </div>
         )
       })}
+
+      {/* A TIMED-OUT REQUEST USED TO LEAVE NO TRACE HERE. finish() deletes it
+          from the pending map, so the row simply vanished on the next poll and
+          the only record was an audit line on another page — while the agent
+          had been told a human refused it. These are read-only: the request is
+          resolved and the agent has long since been answered. */}
+      {recent.length > 0 && (
+        <>
+          <h3 style={{ marginTop: 20 }}>Recently resolved</h3>
+          <div className="sub">
+            Kept until OpsMaxx restarts. The audit log is the permanent record.
+          </div>
+          {recent.map((a) => (
+            <div className="list-row" key={a.id} style={{ opacity: 0.75 }}>
+              <div>
+                <div className="r-title">
+                  {a.agentName} ·{' '}
+                  <span style={{ color: a.status === 'approved' ? 'var(--text-muted)' : 'var(--warn)' }}>
+                    {a.status === 'timeout' ? 'Nobody answered — denied' : a.status}
+                  </span>
+                </div>
+                <div className="r-sub">
+                  {a.workspaceName} / {a.serverName}
+                </div>
+                <div className="r-sub mono">{a.action}</div>
+                {a.policyReason && <div className="r-sub">Rule: {a.policyReason}</div>}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   )
 }

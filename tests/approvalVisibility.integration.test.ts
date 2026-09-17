@@ -6,7 +6,7 @@ import { refreshMcpDataCache } from '../src/main/services/mcpDataCache'
 import { setAssignment, resetPolicyCacheForTests } from '../src/main/services/policyStore'
 import { setMcpConfig, createSession, resetMcpAuthForTests } from '../src/main/services/mcpAuth'
 import { startMcpServer, stopMcpServer } from '../src/main/services/mcpServer'
-import { onApprovalEvent, respondToApproval, listPendingApprovals, resetApprovalVolumeForTests } from '../src/main/services/approvals'
+import { onApprovalEvent, respondToApproval, listPendingApprovals, armApproval, resetApprovalVolumeForTests } from '../src/main/services/approvals'
 
 // An ASK-tier tool call blocks until a human answers it in the app. Before
 // this, the agent got no output whatsoever for the whole approval timeout and
@@ -130,6 +130,12 @@ describe('a pending approval is visible to the agent', () => {
 
   it('says where the request was waiting when nobody answers it', async () => {
     const client = await connectedClient()
+    // The fuse no longer starts on its own — main arms it once the question has
+    // actually been put in front of somebody, and there is no window here. This
+    // listener is that arming step, doing what src/main/index.ts does.
+    const off = onApprovalEvent((e) => {
+      if (e.type === 'created') armApproval(e.request.id)
+    })
     const result = await client.callTool({
       name: 'write_file',
       arguments: { serverName: 'Nginx Server Prod', path: '/tmp/x', content: 'x' }
@@ -139,6 +145,7 @@ describe('a pending approval is visible to the agent', () => {
     expect(text).toContain('OpsMaxx window')
     // A timeout the user can act on names the setting that stops it recurring.
     expect(text).toContain('Ask to Allow')
+    off()
     await client.close()
   }, 10_000)
 

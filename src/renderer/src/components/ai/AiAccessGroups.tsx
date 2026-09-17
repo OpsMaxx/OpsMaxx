@@ -382,6 +382,18 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
       () => void setWorkspaceGroup(groupId)
     )
   }
+  // The way back out. `setWorkspaceGroup(null)` is NOT this: null means somebody
+  // chose No AI Access, which is the strictest assignment there is. Removing the
+  // assignment is the only thing that returns a workspace to "the session's group
+  // applies as written", and until this existed the picker could reach every
+  // state except that one — the state a fresh install is in.
+  const clearWorkspaceAssignment = async (): Promise<void> => {
+    if (!workspaceAssignment) return load()
+    await apply(
+      () => window.opsmaxx?.aiPolicy.removeAssignment(workspaceAssignment.id),
+      () => void clearWorkspaceAssignment()
+    )
+  }
   const setServerOverride = async (serverId: string, groupId: string | null): Promise<void> => {
     await apply(
       () => window.opsmaxx?.aiPolicy.setAssignment({ level: 'server', serverId }, groupId),
@@ -401,28 +413,12 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
     <div id="ai-assignments">
       <h2>Server & workspace assignment</h2>
       <div className="sub">
-        Assign an access group per workspace as the default, then override individual servers. A server
-        with no override inherits its workspace's default; a workspace with no assignment is No AI
-        Access.
+        Nothing here is needed to give an agent access — a session's own access group is the grant, and
+        a workspace with no assignment leaves it exactly as written. What an assignment does is hold a
+        workspace <i>below</i> that grant, for servers that must stay locked down whatever an agent was
+        issued. A server with no override inherits its workspace's assignment.
       </div>
 
-      {!workspaceAssignment?.groupId && (
-        // Unassigned is the state a fresh install is in, and it denies every
-        // call. Saying nothing here is what makes an agent look broken rather
-        // than unconfigured: it connects, lists its tools, and is refused on
-        // everything.
-        <div className="setting-row" style={{ alignItems: 'flex-start' }}>
-          <div className="s-info">
-            <div className="s-title">
-              <TriangleAlert size={13} /> This workspace is not assigned to an access group
-            </div>
-            <div className="s-desc">
-              Every AI request against its servers is denied. An agent will still connect and list its
-              tools, then fail on each call — pick a group below to change that.
-            </div>
-          </div>
-        </div>
-      )}
       <div className="setting-row">
         <div className="s-info">
           <div className="s-title">Workspace</div>
@@ -441,9 +437,13 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
         </div>
         <select
           className="input"
-          value={workspaceAssignment?.groupId ?? ''}
-          onChange={(e) => setWorkspaceGroup(e.target.value || null)}
+          value={workspaceAssignment ? (workspaceAssignment.groupId ?? '') : '__none'}
+          onChange={(e) => {
+            if (e.target.value === '__none') return clearWorkspaceAssignment()
+            return setWorkspaceGroup(e.target.value || null)
+          }}
         >
+          <option value="__none">(no restriction — each session's own group applies)</option>
           <option value="">No AI Access</option>
           {groups.map((g) => (
             <option key={g.id} value={g.id}>
