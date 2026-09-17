@@ -197,6 +197,28 @@ describe('saving a server', () => {
     expect(useApp.getState().servers.find((s) => s.id === id)?.sftpOnly).toBe(true)
   })
 
+  it('keeps the RDP-only flag a new server was created with', () => {
+    // The same bug again, one field later. `rdp` was fixed and `rdpOnly` was
+    // not, so a machine saved as RDP-only came back looking like an SSH server
+    // that also has a desktop — and `openServer` reads exactly this flag to
+    // decide what opening it means. Clicking the connection opened a terminal
+    // against port 22 on a Windows box, as root.
+    const id = useApp.getState().addServer({
+      name: 'Desktop only',
+      host: 'win2.example.test',
+      username: 'Administrator',
+      rdpOnly: true,
+      rdp: { port: 3389, nla: true }
+    })
+    const saved = useApp.getState().servers.find((s) => s.id === id)
+    expect(saved?.rdpOnly).toBe(true)
+
+    // And the consequence the flag exists for: opening it is the desktop.
+    useApp.getState().openServer(id)
+    const [tab] = useApp.getState().tabs
+    expect(tab.kind).toBe('rdp')
+  })
+
   it('leaves both absent when they were not asked for', () => {
     // Absent, not false: `undefined` is what every consumer reads as "this
     // server does not do that", and a present-but-off record would offer the
@@ -205,6 +227,7 @@ describe('saving a server', () => {
     const saved = useApp.getState().servers.find((s) => s.id === id)
     expect(saved?.rdp).toBeUndefined()
     expect(saved?.sftpOnly).toBeUndefined()
+    expect(saved?.rdpOnly).toBeUndefined()
   })
 })
 

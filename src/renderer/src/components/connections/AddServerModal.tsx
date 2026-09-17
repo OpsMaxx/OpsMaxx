@@ -812,27 +812,35 @@ export function AddServerModal(): React.JSX.Element {
        * while sending it somewhere else entirely - the same "quietest dangerous
        * thing" the update_server tool refuses to do silently.
        */}
-      {/* SHOWN WHILE EDITING TOO, and disabled there. Hiding it meant opening a
-          Windows connection and being shown no indication of what it was — and
-          the type is now the single control that decides which half of this
-          form applies. Disabled keeps the rule the row was hidden for: changing
-          an existing server's type would keep its name, its id and everything
-          pointing at it while sending it somewhere else entirely. */}
+      {/* SHOWN WHILE EDITING TOO. Hiding it meant opening a Windows connection
+          and being shown no indication of what it was — and the type is now the
+          single control that decides which half of this form applies.
+
+          WHAT STAYS LOCKED IS THE CLOUD HALF. The row was hidden for a real
+          reason: moving an existing server to a cloud provider keeps its name,
+          its id and everything pointing at it while sending it somewhere else
+          entirely. SSH and RDP are not that. They are the same host on a
+          different port, and a machine saved as one when it is the other is a
+          correction somebody has to be able to make — the alternative is
+          deleting the connection and typing it in again. */}
       <div className="field">
         <label className="field-label">Connection Type</label>
         <div className="radio-cards">
-          {CONNECTION_TYPES.map((t) => (
+          {CONNECTION_TYPES.map((t) => {
+            const locked = !!editId && (existing?.cloud !== undefined || (t.id !== 'ssh' && t.id !== 'rdp'))
+            return (
             <button
               key={t.id}
               className={clsx('radio-card', connectionType === t.id && 'active')}
-              disabled={!!editId}
-              title={editId ? 'A saved connection keeps the type it was created with.' : undefined}
+              disabled={locked}
+              title={locked ? 'A saved connection cannot be pointed at a different kind of target.' : undefined}
               onClick={() => setConnectionType(t.id)}
             >
               {t.icon}
               {t.label}
             </button>
-          ))}
+            )
+          })}
         </div>
         {speaks === 'rdp' && (
           <span className="field-hint">
@@ -840,10 +848,10 @@ export function AddServerModal(): React.JSX.Element {
             SSH, so a machine that serves both is two connections.
           </span>
         )}
-        {legacyBoth && (
+        {legacyBoth && speaks !== 'rdp' && (
           <span className="field-hint">
             Saved when one connection could be both. It keeps its desktop; new connections are one
-            protocol each.
+            protocol each. Choose RDP above to make this one the desktop only.
           </span>
         )}
       </div>

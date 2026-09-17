@@ -98,6 +98,32 @@ describe('how a Windows machine is described', () => {
   })
 })
 
+/**
+ * Loading the WebAssembly backend is not starting it.
+ *
+ * Reported as "Could not open the desktop — Cannot read properties of undefined
+ * (reading '__wbindgen_malloc')", which is the wasm module's allocator being
+ * reached before the module exists. <iron-remote-desktop> stores the module it
+ * is handed and logs "Web bridge initialized"; it never calls init(), so every
+ * desktop failed on the first frame.
+ */
+describe('starting the RDP backend', () => {
+  const VIEW = src('src/renderer/src/components/rdp/RdpView.tsx')
+
+  it('initialises the wasm module before handing it to the element', () => {
+    expect(VIEW).toContain('await backend.init(')
+    const init = VIEW.indexOf('await backend.init(')
+    const element = VIEW.indexOf("createElement('iron-remote-desktop')")
+    expect(init).toBeGreaterThan(-1)
+    expect(element, 'the element must be created only after init resolves').toBeGreaterThan(init)
+  })
+
+  it('checks for teardown after that await, like every other one here', () => {
+    const after = VIEW.slice(VIEW.indexOf('await backend.init('))
+    expect(after.slice(0, 120)).toContain('if (disposed) return')
+  })
+})
+
 describe('which account the desktop signs in as', () => {
   it('prefers RDP\'s own, and falls back to the server\'s', () => {
     // The fallback is what keeps every record saved before this working.

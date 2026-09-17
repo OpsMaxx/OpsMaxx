@@ -157,6 +157,21 @@ export function RdpView({
         ])
         if (disposed) return
 
+        /**
+         * LOADING THE BACKEND IS NOT STARTING IT.
+         *
+         * `init()` is what instantiates the WebAssembly module; everything else
+         * the backend exports reaches through `wasm.__wbindgen_malloc`, which
+         * does not exist until it resolves. Importing the module and handing it
+         * straight to the element therefore failed with "Cannot read properties
+         * of undefined (reading '__wbindgen_malloc')" on the first desktop
+         * anyone opened — a sentence that names an internal of a dependency and
+         * tells the user nothing at all. <iron-remote-desktop> does not call
+         * this for us: it stores `module` and logs "Web bridge initialized".
+         */
+        await backend.init('WARN')
+        if (disposed) return
+
         element = document.createElement('iron-remote-desktop')
         // A property, not an attribute: it is a module object.
         ;(element as unknown as { module: unknown }).module = backend
