@@ -5,6 +5,11 @@ import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
 import { BackupDestinations } from '../src/renderer/src/components/settings/BackupDestinations'
 import { useVault } from '../src/renderer/src/store/vault'
+// Imported rather than written as 8, which is what it used to say. The floor
+// moved to 12 and four tests here failed on a placeholder -- the number is one
+// constant now, and a test that hardcoded it would go stale again on the next
+// raise.
+import { MIN_PASSPHRASE } from '../src/shared/backup'
 import type {
   BackupDestination,
   BackupRunReport,
@@ -109,7 +114,7 @@ describe('the destination list', () => {
     stubBridge(bridge())
     render(<BackupDestinations />)
 
-    const field = await screen.findByPlaceholderText('Backup passphrase (min 8)')
+    const field = await screen.findByPlaceholderText(`Backup passphrase (min ${MIN_PASSPHRASE})`)
     const button = screen.getByRole('button', { name: /Back up now/ })
     expect((button as HTMLButtonElement).disabled).toBe(true)
 
@@ -125,7 +130,7 @@ describe('the destination list', () => {
     stubBridge(bridge({ runDestination }))
     render(<BackupDestinations />)
 
-    const field = await screen.findByPlaceholderText('Backup passphrase (min 8)')
+    const field = await screen.findByPlaceholderText(`Backup passphrase (min ${MIN_PASSPHRASE})`)
     await userEvent.type(field, 'a-real-passphrase')
     await userEvent.click(screen.getByRole('button', { name: /Back up now/ }))
 
@@ -175,7 +180,7 @@ describe('the destination list', () => {
     render(<BackupDestinations />)
 
     await userEvent.type(
-      await screen.findByPlaceholderText('Backup passphrase (min 8)'),
+      await screen.findByPlaceholderText(`Backup passphrase (min ${MIN_PASSPHRASE})`),
       'a-real-passphrase'
     )
     await userEvent.click(screen.getByRole('button', { name: /Restore from here/ }))
@@ -211,7 +216,7 @@ describe('the destination list', () => {
     render(<BackupDestinations />)
 
     await userEvent.type(
-      await screen.findByPlaceholderText('Backup passphrase (min 8)'),
+      await screen.findByPlaceholderText(`Backup passphrase (min ${MIN_PASSPHRASE})`),
       'a-real-passphrase'
     )
     await userEvent.click(screen.getByRole('button', { name: /Restore from here/ }))

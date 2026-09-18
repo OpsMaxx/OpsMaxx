@@ -1,5 +1,16 @@
 import { createHash } from 'node:crypto'
-import { utils as sshUtils } from 'ssh2'
+// A DEFAULT IMPORT, not `import { utils } from 'ssh2'`.
+//
+// The main bundle is ESM and ssh2 survives as a bare specifier, so Node works
+// out its named exports with cjs-module-lexer -- which recognises
+// `Client: require('./client.js')` and does NOT recognise `utils: { ... }`, an
+// object literal. A named import of `utils` therefore throws "Named export
+// 'utils' not found" before a line of the app runs. That shipped once, as
+// 0.42.0, and the app would not start at all; `tests/esmExternals.test.ts`
+// exists because of it and caught this one.
+import ssh2 from 'ssh2'
+
+const sshUtils = ssh2.utils
 import { AGENT, EXTENSION, SIGN_FLAGS, type AgentIdentity } from '../../../shared/sshAgentHost'
 import type { VaultEntry } from '../../../shared/vault'
 import {
