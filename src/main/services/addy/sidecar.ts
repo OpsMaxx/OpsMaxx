@@ -59,13 +59,21 @@ export interface AddySidecar {
  */
 export type AddydRole = '--crypto' | '--rtc'
 
+/** The bundled file's name, exactly as the build script writes it. */
+export const ADDYD_BINARY = 'opsmaxx-addyd'
+
 export async function openAddyd(
   role: AddydRole = '--crypto',
   log?: (line: string) => void
 ): Promise<AddySidecar> {
   let resolved
   try {
-    resolved = await resolveBundledBinary('addyd', 'npm run build:addyd')
+    // `opsmaxx-addyd`, not `addyd`: the name is the one scripts/build-addyd.sh
+    // writes and resources/bin/manifest.json records, and the resolver looks up
+    // a bundled file by exactly that name. addydBinaryName.test.ts reads both
+    // files and pins them together, because the bare name shipped once and the
+    // only symptom was a runtime error nobody sees until they try to pair.
+    resolved = await resolveBundledBinary(ADDYD_BINARY, 'npm run build:addyd')
   } catch (err) {
     if (err instanceof BundledBinaryError) {
       throw new AddyError('relay-unreachable', err.message)
