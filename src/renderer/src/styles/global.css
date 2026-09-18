@@ -4620,7 +4620,12 @@ details[open] > .disclosure-head .chev {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /* `safe` so a message taller than the pane overflows DOWNWARD rather than
+     centring past the top edge, where the Reconnect button becomes unreachable:
+     the failure text can be an error, a backtrace, a relay reason and an
+     advisory concatenated, which is easily taller than a short pane. */
+  justify-content: safe center;
+  overflow-y: auto;
   gap: var(--sp-3);
   padding: var(--sp-6);
   text-align: center;
@@ -6070,4 +6075,15 @@ details[open] > .disclosure-head .chev {
   color: var(--text-dim);
   background: var(--bg-hover);
   border-bottom: 1px solid var(--border);
+}
+
+/* The desktop and its overlay, with a positioning context of their own.
+   The overlay is `inset: 0`; while that resolved against `.rdp-view` it painted
+   over the viewbar, so in a failed session the Reconnect button was enabled and
+   unclickable and the user@host line sat behind an opaque panel. */
+.rdp-stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
 }

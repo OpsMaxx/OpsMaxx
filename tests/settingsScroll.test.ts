@@ -80,10 +80,13 @@ describe('every scroll container in the sheet can actually shrink', () => {
       .filter(([, , body]) => /overflow(-y)?:\s*(auto|scroll)/.test(body))
       .filter(([, , body]) => !/min-height:\s*0/.test(body))
       .filter(([, , body]) => !/\b(height|max-height|flex):/.test(body))
+      // An element pinned on all four edges already HAS a definite height: it
+      // is the distance between its top and bottom, and there is nothing for a
+      // min-height to release. `.scrim` was the first of these and was exempted
+      // by name; `.rdp-overlay` is the second, which is the point at which a
+      // list of names stops being the rule and starts hiding it.
+      .filter(([, , body]) => !/\binset:\s*0\b/.test(body))
       .map(([, sel]) => sel.trim().split('\n').pop()!.trim())
-      // `.scrim` is `position: fixed; inset: 0` — already viewport-bounded, so
-      // it has nothing to shrink relative to and needs no min-height.
-      .filter((sel) => sel !== '.scrim')
     expect(bad, `scroll containers that cannot shrink: ${bad.join(', ')}`).toEqual([])
   })
 

@@ -67,6 +67,9 @@ interface UserInteraction {
    * Windows desktop, 800,038 of its 800,128 pixels non-black, at (-688, -677).
    */
   setVisibility(visible: boolean): void
+  /** `fit`, `full` or `real`. Re-asserting `fit` is how a resize that the
+   *  server ignores stops leaving the desktop stretched — see the resize. */
+  setScale(scale: string): void
 }
 
 /**
@@ -77,9 +80,28 @@ interface UserInteraction {
  * The desktop is legible but soft, and every dialog is laid out for a screen
  * nobody is looking at.
  *
- * Widths are rounded down to a multiple of 4: several RDP codecs encode in
- * 4-pixel tiles, and a width that is not a multiple of one is a well-worn
- * source of a green or torn right-hand column.
+ * Width is rounded down to an EVEN number, and height is not rounded at all.
+ *
+ * It used to round both down to a multiple of four, on the usual story about
+ * codecs encoding in 4-pixel tiles and a ragged edge producing a green or torn
+ * right-hand column. That story is inherited folklore: it comes from
+ * uncompressed bitmap rows being DWORD-aligned and from old FreeRDP and xrdp
+ * breakage, which is encoder-side padding rather than a constraint on the
+ * desktop size, and RemoteFX works in 64x64 tiles with a clipping region that
+ * handles ragged edges by design.
+ *
+ * What the rounding did cost is real. `fit` scales by
+ * min(availWidth / canvas.width, availHeight / canvas.height), so a canvas up
+ * to three pixels narrower than its pane is resampled by about 1.002 — the
+ * whole desktop bilinearly filtered, every session, for nothing. Even width
+ * cuts that to at most one pixel, and to exactly zero whenever the pane's width
+ * is a whole number, which on a maximised window it usually is.
+ *
+ * Even width is kept because MS-RDPEDISP states it for MONITOR_LAYOUT.Width,
+ * and MS-RDPEDISP is the channel `ui.resize` actually drives — so that is the
+ * one place a violation would be on the wire. Marked as reasoned rather than
+ * verified: it could not be confirmed against IronRDP, whose wasm is inlined as
+ * a base64 data URI and has no greppable strings. Height has no such rule.
  *
  * MEASURED IN CSS PIXELS, WHICH MEANS HALF RESOLUTION ON A RETINA DISPLAY, and
  * that is a known, deliberate omission rather than an oversight. On a dpr-2
@@ -118,8 +140,8 @@ function desktopSizeOf(el: HTMLElement): { width: number; height: number } {
   // ceiling keeps a maximised window on a very large display from asking for a
   // desktop the server will refuse.
   return {
-    width: clamp(rect.width, 640, 4096) & ~3,
-    height: clamp(rect.height, 480, 2160) & ~3
+    width: clamp(rect.width, 640, 4096) & ~1,
+    height: clamp(rect.height, 480, 2160)
   }
 }
 
@@ -203,6 +225,9 @@ export function RdpView({
   /** Something true about a session that WORKED — shown while it runs, not
    *  after it fails. Currently only the no-forward-secrecy fallback. */
   const [notice, setNotice] = useState<string | null>(null)
+  /** The session ran and finished, rather than never starting. Only the title
+   *  differs, but "could not open" about a desktop that opened is a lie. */
+  const [ended, setEnded] = useState(false)
   // Bumped by Reconnect. Re-running the effect is the whole teardown-and-retry:
   // the cleanup shuts the old session down before the new one is built.
   const [attempt, setAttempt] = useState(0)
@@ -467,6 +492,7 @@ export function RdpView({
             // live either.
             if (!disposed) {
               closeSession()
+              setEnded(true)
               setError('The remote desktop session ended.')
               setPhase('failed')
             }
@@ -507,6 +533,23 @@ export function RdpView({
             const next = desktopSizeOf(host)
             try {
               ui.resize(next.width, next.height)
+              // IMMEDIATELY, IN THE SAME TASK, and that is the whole point.
+              //
+              // resize() publishes its new size to the component's own signals
+              // BEFORE it asks the session for anything, which pins the viewer
+              // to the requested box while the canvas still holds the old
+              // desktop. A server that accepts the resize corrects it when the
+              // new frame arrives; a server with no display control -- xrdp, or
+              // anything pre-2012R2 -- accepts nothing and never corrects it,
+              // so the desktop stayed stretched to the wrong aspect until the
+              // next resize.
+              //
+              // Re-asserting the fit here writes to the same signals before
+              // Svelte flushes, so the stretched value never reaches the DOM
+              // and never paints. On the accepting path it is idempotent: the
+              // fit is recomputed to the same numbers, and the server's own
+              // canvasResized recomputes it again anyway.
+              ui.setScale('fit')
             } catch {
               // A session that died between the observation and the call has
               // already surfaced its own failure; resizing it is not a second
@@ -586,6 +629,9 @@ export function RdpView({
   }, [started, attempt, server.id])
 
   const retry = (): void => {
+    // Cleared here, or a reconnect that never opens still claims the session
+    // "ended" — which is the opposite of what happened.
+    setEnded(false)
     setAttempt((n) => n + 1)
   }
 
@@ -613,7 +659,13 @@ export function RdpView({
           type="button"
           className="icon-btn"
           title="Reconnect"
-          disabled={phase === 'loading' || phase === 'connecting'}
+          // NOT disabled while connecting, which is the one state a user most
+          // needs it in. A host that stalls inside CredSSP never resolves and
+          // neither `await ready` nor connect() has a client-side deadline, so
+          // "Connecting..." sat there for ever with every control greyed out
+          // and closing the tab the only way out. Retry already tears the old
+          // attempt down through the effect cleanup; it was simply unreachable.
+          disabled={phase === 'loading'}
           onClick={retry}
         >
           <RotateCw size={15} />
@@ -627,29 +679,43 @@ export function RdpView({
           {notice}
         </div>
       )}
-      <div ref={hostRef} className={clsx('rdp-surface', phase !== 'connected' && 'rdp-busy')} />
-      {phase !== 'connected' && (
-        <div className="rdp-overlay">
-          <Monitor size={26} />
-          {phase === 'failed' ? (
-            <>
-              <div className="rdp-overlay-title">Could not open the desktop</div>
-              <div className="rdp-overlay-msg">{error}</div>
-              <button type="button" className="btn" onClick={retry}>
-                <RotateCw size={14} /> Reconnect
-              </button>
-            </>
-          ) : (
-            <div className="rdp-overlay-msg">
-              {phase === 'idle'
-                ? 'Ready.'
-                : phase === 'loading'
-                  ? 'Loading the remote desktop client…'
-                  : `Connecting to ${server.name}…`}
-            </div>
-          )}
-        </div>
-      )}
+      {/* The surface and its overlay share a positioning context of their own.
+          The overlay is `inset: 0`, and while it was positioned against
+          `.rdp-view` it painted over the viewbar: in a failed session the
+          Reconnect button was enabled, visible through nothing, and unclickable,
+          and the user@host line was hidden behind an opaque panel. */}
+      <div className="rdp-stage">
+        <div ref={hostRef} className={clsx('rdp-surface', phase !== 'connected' && 'rdp-busy')} />
+        {phase !== 'connected' && (
+          <div className="rdp-overlay">
+            <Monitor size={26} />
+            {phase === 'failed' ? (
+              <>
+                {/* A session that RAN and then ended is not a failure to open
+                    one. Signing out of Windows reported "Could not open the
+                    desktop" about a desktop that had demonstrably opened, which
+                    reads as a bug in the app rather than as what the user just
+                    did. */}
+                <div className="rdp-overlay-title">
+                  {ended ? 'The remote desktop session ended' : 'Could not open the desktop'}
+                </div>
+                <div className="rdp-overlay-msg">{error}</div>
+                <button type="button" className="btn" onClick={retry}>
+                  <RotateCw size={14} /> Reconnect
+                </button>
+              </>
+            ) : (
+              <div className="rdp-overlay-msg">
+                {phase === 'idle'
+                  ? 'Ready.'
+                  : phase === 'loading'
+                    ? 'Loading the remote desktop client…'
+                    : `Connecting to ${server.name}…`}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
