@@ -25,9 +25,9 @@
  */
 
 export type T2Field =
-  | { name: string; kind: "bool" }
-  | { name: string; kind: "int"; min: number; max: number }
-  | { name: string; kind: "enum"; values: readonly string[] };
+  | { name: string; kind: 'bool' }
+  | { name: string; kind: 'int'; min: number; max: number }
+  | { name: string; kind: 'enum'; values: readonly string[] }
 
 /**
  * The allowlist.
@@ -48,32 +48,24 @@ export type T2Field =
  * classified" but "no capability-gating key is in T2".
  */
 export const T2_ALLOWLIST: readonly T2Field[] = [
-  { name: "theme", kind: "enum", values: ["light", "dark", "system"] },
-  { name: "terminalFontSize", kind: "int", min: 8, max: 32 },
+  { name: 'theme', kind: 'enum', values: ['light', 'dark', 'system'] },
+  { name: 'terminalFontSize', kind: 'int', min: 8, max: 32 },
   {
-    name: "terminalScheme",
-    kind: "enum",
-    values: [
-      "default",
-      "solarized-dark",
-      "solarized-light",
-      "nord",
-      "dracula",
-      "gruvbox",
-      "custom",
-    ],
+    name: 'terminalScheme',
+    kind: 'enum',
+    values: ['default', 'solarized-dark', 'solarized-light', 'nord', 'dracula', 'gruvbox', 'custom'],
   },
-  { name: "compactDensity", kind: "bool" },
-  { name: "dbSchemaWidth", kind: "int", min: 120, max: 2000 },
-  { name: "dbEditorHeight", kind: "int", min: 80, max: 2000 },
-  { name: "cicdStepsWidth", kind: "int", min: 120, max: 2000 },
-  { name: "cicdDetailHeight", kind: "int", min: 80, max: 2000 },
-  { name: "showMonitorStrip", kind: "bool" },
-  { name: "closeTabOnShellExit", kind: "bool" },
-  { name: "switchHiddenWorkspaces", kind: "bool" },
-] as const;
+  { name: 'compactDensity', kind: 'bool' },
+  { name: 'dbSchemaWidth', kind: 'int', min: 120, max: 2000 },
+  { name: 'dbEditorHeight', kind: 'int', min: 80, max: 2000 },
+  { name: 'cicdStepsWidth', kind: 'int', min: 120, max: 2000 },
+  { name: 'cicdDetailHeight', kind: 'int', min: 80, max: 2000 },
+  { name: 'showMonitorStrip', kind: 'bool' },
+  { name: 'closeTabOnShellExit', kind: 'bool' },
+  { name: 'switchHiddenWorkspaces', kind: 'bool' },
+] as const
 
-export const T2_NAMES: readonly string[] = T2_ALLOWLIST.map((f) => f.name);
+export const T2_NAMES: readonly string[] = T2_ALLOWLIST.map((f) => f.name)
 
 /**
  * Keys whose ABSENCE grants something, and which therefore may never be T2.
@@ -82,12 +74,12 @@ export const T2_NAMES: readonly string[] = T2_ALLOWLIST.map((f) => f.name);
  * field meets the polarity trap rather than reading past it.
  */
 export const CAPABILITY_GATING_KEYS: readonly string[] = [
-  "modules",
-  "localTerminalEnabled",
-  "aiPolicy",
-  "allowEscalation",
-  "credentialProxyEnabled",
-];
+  'modules',
+  'localTerminalEnabled',
+  'aiPolicy',
+  'allowEscalation',
+  'credentialProxyEnabled',
+]
 
 /**
  * Validate a profile that arrived from the server.
@@ -97,43 +89,36 @@ export const CAPABILITY_GATING_KEYS: readonly string[] = [
  * the server can set any number it likes and this process will render it.
  */
 export function validateT2(raw: unknown): Record<string, unknown> {
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error("addy: a public profile is a flat object");
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('addy: a public profile is a flat object')
   }
-  const out: Record<string, unknown> = {};
+  const out: Record<string, unknown> = {}
   for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
-    const field = T2_ALLOWLIST.find((f) => f.name === name);
+    const field = T2_ALLOWLIST.find((f) => f.name === name)
     if (!field) {
       // Named, because the fix is to classify it rather than to widen the
       // allowlist by reflex.
-      throw new Error(
-        `addy: ${name} is not in the T2 allowlist, so it is secret`,
-      );
+      throw new Error(`addy: ${name} is not in the T2 allowlist, so it is secret`)
     }
     switch (field.kind) {
-      case "bool":
-        if (typeof value !== "boolean")
-          throw new Error(`addy: ${name} wants a boolean`);
-        break;
-      case "int":
-        if (typeof value !== "number" || !Number.isInteger(value)) {
-          throw new Error(`addy: ${name} wants a whole number`);
+      case 'bool':
+        if (typeof value !== 'boolean') throw new Error(`addy: ${name} wants a boolean`)
+        break
+      case 'int':
+        if (typeof value !== 'number' || !Number.isInteger(value)) {
+          throw new Error(`addy: ${name} wants a whole number`)
         }
         if (value < field.min || value > field.max) {
-          throw new Error(
-            `addy: ${name} is ${value}, allowed ${field.min} to ${field.max}`,
-          );
+          throw new Error(`addy: ${name} is ${value}, allowed ${field.min} to ${field.max}`)
         }
-        break;
-      case "enum":
-        if (typeof value !== "string" || !field.values.includes(value)) {
-          throw new Error(
-            `addy: ${name} is not one of ${field.values.join(", ")}`,
-          );
+        break
+      case 'enum':
+        if (typeof value !== 'string' || !field.values.includes(value)) {
+          throw new Error(`addy: ${name} is not one of ${field.values.join(', ')}`)
         }
-        break;
+        break
     }
-    out[name] = value;
+    out[name] = value
   }
-  return out;
+  return out
 }

@@ -12,10 +12,10 @@
 
 /** Every T0 collection. Sorted, so two implementations enumerate it alike. */
 export const SYNCED_COLLECTIONS = [
-  "apiCollections",
-  "apiWorkspace",
-  "cicdConnections",
-  "databases",
+  'apiCollections',
+  'apiWorkspace',
+  'cicdConnections',
+  'databases',
   /**
    * What the user actually CALLS each device, keyed on its `pub_sign`.
    *
@@ -32,15 +32,15 @@ export const SYNCED_COLLECTIONS = [
    * and the epoch problem solves itself: a rotation already re-seals every T0
    * collection, which is exactly what an immutable chain entry cannot do.
    */
-  "deviceNames",
-  "env",
-  "folders",
-  "httpChecks",
-  "knownHosts",
-  "manifest",
-  "monitorGroups",
-  "servers",
-  "tunnels",
+  'deviceNames',
+  'env',
+  'folders',
+  'httpChecks',
+  'knownHosts',
+  'manifest',
+  'monitorGroups',
+  'servers',
+  'tunnels',
   /**
    * The vault travels as OPAQUE BYTES -- `opsmaxx-vault.json` verbatim, already
    * ciphertext under the user's master password.
@@ -49,12 +49,12 @@ export const SYNCED_COLLECTIONS = [
    * are all irrelevant to syncing, and the recovery phrase is not a skeleton
    * key for it. Two secrets, each doing the job it was designed for.
    */
-  "vault",
-  "vpns",
-  "workspaces",
-] as const;
+  'vault',
+  'vpns',
+  'workspaces',
+] as const
 
-export type SyncedCollection = (typeof SYNCED_COLLECTIONS)[number];
+export type SyncedCollection = (typeof SYNCED_COLLECTIONS)[number]
 
 /**
  * Everything deliberately device-local, with the reason.
@@ -74,57 +74,39 @@ export type SyncedCollection = (typeof SYNCED_COLLECTIONS)[number];
  * currently destroyed on a device wipe with no copy anywhere.
  */
 export const NOT_SYNCED: Readonly<Record<string, string>> = {
-  tabs: "per-device window state; syncing it would fight the user on two screens",
-  panes:
-    "per-device window state; syncing it would fight the user on two screens",
-  activeTabId:
-    "per-device window state; syncing it would fight the user on two screens",
-  activeWorkspaceId:
-    "per-device window state; syncing it would fight the user on two screens",
-  tabCwd:
-    "per-device window state; syncing it would fight the user on two screens",
-  settings:
-    "the cosmetic subset is the T2 public profile; the rest is per-device",
-  theme:
-    "carried in the T2 public profile so a new device looks right before pairing",
-  version: "a local on-disk seed marker, not user data",
+  tabs: 'per-device window state; syncing it would fight the user on two screens',
+  panes: 'per-device window state; syncing it would fight the user on two screens',
+  activeTabId: 'per-device window state; syncing it would fight the user on two screens',
+  activeWorkspaceId: 'per-device window state; syncing it would fight the user on two screens',
+  tabCwd: 'per-device window state; syncing it would fight the user on two screens',
+  settings: 'the cosmetic subset is the T2 public profile; the rest is per-device',
+  theme: 'carried in the T2 public profile so a new device looks right before pairing',
+  version: 'a local on-disk seed marker, not user data',
 
   runbooks:
-    "UNDECIDED: user-authored notes about their own estate, unreproducible, and currently lost on a device wipe",
-  rules:
-    "UNDECIDED: automation rules with pinned server ids; the same shape as runbooks",
-  processes: "UNDECIDED: managed long-running process definitions",
-  backupTargets:
-    "UNDECIDED: where backups go; holds no credential but maps where the estate copies live",
-  credproxyRules:
-    "UNDECIDED: which third-party endpoints this machine forwards to",
-  envSecrets:
-    "UNDECIDED: which environment variables were registered as secret-bearing",
+    'UNDECIDED: user-authored notes about their own estate, unreproducible, and currently lost on a device wipe',
+  rules: 'UNDECIDED: automation rules with pinned server ids; the same shape as runbooks',
+  processes: 'UNDECIDED: managed long-running process definitions',
+  backupTargets: 'UNDECIDED: where backups go; holds no credential but maps where the estate copies live',
+  credproxyRules: 'UNDECIDED: which third-party endpoints this machine forwards to',
+  envSecrets: 'UNDECIDED: which environment variables were registered as secret-bearing',
 
-  mcpConfig:
-    "device-local: names the loopback port and this install own bridge entry",
-  aiPolicy:
-    "device-local: an access-control decision that must not be settable from a synced object",
+  mcpConfig: 'device-local: names the loopback port and this install own bridge entry',
+  aiPolicy: 'device-local: an access-control decision that must not be settable from a synced object',
   history:
-    "device-local: an append-only command log; syncing it would put every command run anywhere on every machine",
-  localSessions:
-    "device-local: an append-only log of local shells, their paths and directories",
-  jobApprovals: "device-local: an append-only record of who approved what",
-  credproxyAudit:
-    "device-local: an append-only record of every credential forwarded and to whom",
-  aiAudit: "device-local: an append-only record of every AI action",
+    'device-local: an append-only command log; syncing it would put every command run anywhere on every machine',
+  localSessions: 'device-local: an append-only log of local shells, their paths and directories',
+  jobApprovals: 'device-local: an append-only record of who approved what',
+  credproxyAudit: 'device-local: an append-only record of every credential forwarded and to whom',
+  aiAudit: 'device-local: an append-only record of every AI action',
   inspectCA:
-    "device-local: a certificate authority installed into THIS machine OS trust store; syncing it would install one machine interception CA on every other",
-  rdpCerts:
-    "device-local: trusted RDP host certificates, per-machine like known hosts",
-  vaultBio:
-    "device-local: a biometric enrolment bound to this machine secure enclave",
+    'device-local: a certificate authority installed into THIS machine OS trust store; syncing it would install one machine interception CA on every other',
+  rdpCerts: 'device-local: trusted RDP host certificates, per-machine like known hosts',
+  vaultBio: 'device-local: a biometric enrolment bound to this machine secure enclave',
   vpnState:
-    "device-local: engine key material, including a tsnet node identity that IS this device on the tailnet",
-  externalEdit:
-    "device-local: scratch copies of remote files opened in the user own editor",
-  instanceId:
-    "device-local: deliberately excluded from wipe and reused nowhere in addy",
+    'device-local: engine key material, including a tsnet node identity that IS this device on the tailnet',
+  externalEdit: 'device-local: scratch copies of remote files opened in the user own editor',
+  instanceId: 'device-local: deliberately excluded from wipe and reused nowhere in addy',
 
   /**
    * Found by this guardrail on its first run, which is the guardrail working:
@@ -132,14 +114,14 @@ export const NOT_SYNCED: Readonly<Record<string, string>> = {
    * all four, and the reason is the point.
    */
   secrets:
-    "device-local: safeStorage credentials. They reach another device inside the vault collection or a backup bundle, never as their own synced object -- a sync path carrying unsealed credentials would be a second way to lose them",
+    'device-local: safeStorage credentials. They reach another device inside the vault collection or a backup bundle, never as their own synced object -- a sync path carrying unsealed credentials would be a second way to lose them',
   wslocks:
-    "device-local: workspace lock passwords protect a workspace on THIS machine; syncing them would make one machine unlock decision apply everywhere",
+    'device-local: workspace lock passwords protect a workspace on THIS machine; syncing them would make one machine unlock decision apply everywhere',
   mcpSessions:
-    "device-local: live agent sessions, bound to this install bridge and meaningless on another machine",
+    'device-local: live agent sessions, bound to this install bridge and meaningless on another machine',
   inspectCapture:
-    "device-local: plaintext request and response bodies spilled by the traffic inspector. Swept on every inspector start, and the last thing that should acquire a second copy on another machine",
-};
+    'device-local: plaintext request and response bodies spilled by the traffic inspector. Swept on every inspector start, and the last thing that should acquire a second copy on another machine',
+}
 
 /**
  * The two optional UI surfaces, and the only parts of addy that are modules.
@@ -151,7 +133,7 @@ export const NOT_SYNCED: Readonly<Record<string, string>> = {
  * commit. The precedent is already set and is right anyway -- VPN, tunnels and
  * backup are not modules either.
  */
-export const ADDY_MODULE_IDS = ["addyClipboard", "addyTransfer"] as const;
+export const ADDY_MODULE_IDS = ['addyClipboard', 'addyTransfer'] as const
 
 /**
  * Error codes `addyd` may emit.
@@ -161,16 +143,16 @@ export const ADDY_MODULE_IDS = ["addyClipboard", "addyTransfer"] as const;
  * the direction is one-way: addyd may emit a subset, never a superset.
  */
 export type AddyErrorCode =
-  | "config-invalid"
-  | "not-paired"
-  | "pairing-refused"
-  | "pairing-expired"
-  | "sas-mismatch"
-  | "roster-invalid"
-  | "roster-forked"
-  | "roster-rewound"
-  | "schema-too-new"
-  | "quota-exceeded"
-  | "relay-unreachable"
-  | "peer-unreachable"
-  | "internal";
+  | 'config-invalid'
+  | 'not-paired'
+  | 'pairing-refused'
+  | 'pairing-expired'
+  | 'sas-mismatch'
+  | 'roster-invalid'
+  | 'roster-forked'
+  | 'roster-rewound'
+  | 'schema-too-new'
+  | 'quota-exceeded'
+  | 'relay-unreachable'
+  | 'peer-unreachable'
+  | 'internal'
