@@ -235,3 +235,35 @@ describe('running the RDP session', () => {
     expect(after).toContain("setPhase('failed')")
   })
 })
+
+/**
+ * Painting into a surface nobody can see.
+ *
+ * The fourth of these, and the clearest. <iron-remote-desktop> renders into a
+ * canvas that starts `visibility: hidden` and translated off-screen, and the
+ * only call it makes to setVisibility itself is `false`, in the `finally` when
+ * a session ends. Turning it on is the embedder's job -- which is why
+ * setVisibility is on the object handed to the embedder at all.
+ *
+ * Measured on a live session before this was fixed: the canvas held a complete
+ * Windows desktop, 800,038 of its 800,128 pixels non-black, sitting at
+ * (-688, -677) with visibility hidden on it and two of its ancestors. Every
+ * layer below it worked; the picture was simply not on screen.
+ */
+describe('showing the RDP surface', () => {
+  const VIEW = src('src/renderer/src/components/rdp/RdpView.tsx')
+
+  it('turns the component visible, because it never does it itself', () => {
+    expect(VIEW).toContain('ui.setVisibility(true)')
+  })
+
+  it('does so before the overlay stops covering the surface', () => {
+    // If the phase flips first, the pane is uncovered while still hidden --
+    // the same black screen, for a few frames or for ever if the call is lost.
+    const show = VIEW.indexOf('ui.setVisibility(true)')
+    const connected = VIEW.indexOf("setPhase('connected')")
+    expect(show).toBeGreaterThan(-1)
+    expect(connected).toBeGreaterThan(-1)
+    expect(show, 'setVisibility must precede the connected phase').toBeLessThan(connected)
+  })
+})

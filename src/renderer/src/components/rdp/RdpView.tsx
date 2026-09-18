@@ -54,6 +54,19 @@ interface UserInteraction {
   shutdown(): void
   ctrlAltDel(): void
   resize(width: number, height: number, scale?: number): void
+  /**
+   * Show the surface. The component never does this for us.
+   *
+   * It renders into a canvas that starts `visibility: hidden` and translated
+   * off-screen, and the only call it makes to this itself is `false`, in the
+   * `finally` when a session ends. `setVisibility` is on the object it hands
+   * the embedder precisely because turning it ON is the embedder's job.
+   *
+   * Without it a session connects, runs and paints a complete desktop into a
+   * surface nobody can see. Measured on a live session: the canvas held a
+   * Windows desktop, 800,038 of its 800,128 pixels non-black, at (-688, -677).
+   */
+  setVisibility(visible: boolean): void
 }
 
 /**
@@ -282,6 +295,11 @@ export function RdpView({
 
         const session = await ui.connect(config.build())
         if (disposed) return
+
+        // Before the phase flips, so the surface is showing by the time the
+        // overlay stops covering it. See setVisibility on the interface: the
+        // component starts hidden and only ever hides itself again.
+        ui.setVisibility(true)
         setPhase('connected')
 
         // THE SESSION HAS TO BE RUN. Connecting only gets as far as a server
