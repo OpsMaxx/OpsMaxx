@@ -123,6 +123,23 @@ function forgetFailure(serverId: string): void {
 }
 
 /**
+ * Something true about a session that WORKED, kept apart from why one failed.
+ *
+ * These are two different things and putting them in one box made the product
+ * worse: the "connected without forward secrecy" note was stored as a failure,
+ * so the next genuine error — a refused password — was shown after it, in
+ * brackets, behind a sentence about TLS that had nothing to do with it.
+ *
+ * An advisory describes the host and outlives the session, so it is cleared
+ * only when a connection no longer needs the thing it warns about.
+ */
+const advisories = new Map<string, string>()
+
+export function rdpAdvisory(serverId: string): string | null {
+  return advisories.get(serverId) ?? null
+}
+
+/**
  * The errno cases worth naming, because each one sends you somewhere different.
  *
  * Anything unrecognised keeps its own message rather than being flattened into
@@ -565,10 +582,13 @@ async function openSession(
 
     ws.send(buildResponse(request.destination, handshake.x224Response, handshake.certChain))
     // Got through, so whatever went wrong last time no longer describes
-    // anything and must not be shown against the next failure — unless it is
-    // the note above, which describes what this very session is doing.
-    if (degraded) rememberFailure(ticket.serverId, new Error(degraded))
-    else forgetFailure(ticket.serverId)
+    // anything and must not be shown against the next failure.
+    forgetFailure(ticket.serverId)
+    // The fallback is not a failure, and must not be filed as one: it is a
+    // standing fact about this host's certificate, shown after whatever the
+    // session itself has to say rather than in front of it.
+    if (degraded) advisories.set(ticket.serverId, degraded)
+    else advisories.delete(ticket.serverId)
     relay(ws, handshake.tlsSocket, dialled.close)
   } catch (err) {
     // WHY THIS IS RECORDED RATHER THAN ONLY SENT.

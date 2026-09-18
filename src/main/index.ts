@@ -206,7 +206,7 @@ import type { VaultEntry, VaultResult } from '../shared/vault'
 import { VAULT_LOCKED } from '../shared/vault'
 import { wsLockIds, wsLockSet, wsLockVerify, wsLockRemove, wsLockDelete } from './services/wslock'
 import { tunnelStart, tunnelStop, tunnelList, tunnelDisposeAll } from './services/tunnel'
-import { rdpLastError, rdpMintTicket, stopRdpRelay } from './services/rdpRelay'
+import { rdpAdvisory, rdpLastError, rdpMintTicket, stopRdpRelay } from './services/rdpRelay'
 import type { RdpDesktopSize } from '../shared/rdp'
 import type { TunnelConfig, TunnelSshConfig } from '../shared/tunnel'
 import { knownHostList, knownHostForget } from './services/knownhosts'
@@ -4975,6 +4975,12 @@ ipcMain.handle('rdp:ticket', (_e, serverId: string, size?: RdpDesktopSize) =>
 // error PDU has no room to carry. Read-only, and it names no address: the tab
 // already knows which server it is looking at.
 ipcMain.handle('rdp:lastError', (_e, serverId: string) => rdpLastError(serverId))
+
+// Not a failure: something true about a session that worked, such as a host
+// whose certificate forced a key exchange with no forward secrecy. Separate
+// channel because it is shown after the session's own error, never instead of
+// it.
+ipcMain.handle('rdp:advisory', (_e, serverId: string) => rdpAdvisory(serverId))
 
 // ---- VPN ----
 // -------------------------------------------------------------- inspector

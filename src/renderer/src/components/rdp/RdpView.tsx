@@ -97,11 +97,24 @@ function describeError(err: unknown): string {
   if (err && typeof err === 'object' && 'kind' in err && typeof err.kind === 'function') {
     const kind = (err as { kind: () => number }).kind()
     const base = ERROR_KIND[kind] ?? ERROR_KIND[0]
-    const backtrace =
+    const raw =
       'backtrace' in err && typeof err.backtrace === 'function'
         ? (err as { backtrace: () => string }).backtrace()
         : ''
-    return backtrace ? `${base} (${backtrace})` : base
+    // The client is Rust compiled in CI, so its backtrace carries the build
+    // machine's absolute paths — "[CredSSP @ /home/runner/work/IronRDP/...]".
+    // That tells the reader nothing and crowds out the part that does.
+    const backtrace = raw.replace(/\s*@\s*\/\S+/g, '')
+
+    // 0xc000006d is the one worth translating, because the sentence above is
+    // true of several causes and this narrows it to one the user can act on.
+    // A local account often has to be named `.\name` and a domain one
+    // `DOMAIN\name`; a bare username is the usual reason a password that is
+    // demonstrably correct is still refused.
+    const hint = backtrace.includes('STATUS_LOGON_FAILURE')
+      ? ' The username or password was refused. For a local account try .\\name, and for a domain account DOMAIN\\name.'
+      : ''
+    return backtrace ? `${base}${hint} (${backtrace})` : `${base}${hint}`
   }
   if (err instanceof Error) return err.message
   return String(err)
@@ -285,9 +298,23 @@ export function RdpView({
         // refused, the server was deleted, or the machine simply has no remote
         // desktop service running. The second sentence is the one that tells
         // you where to go next.
-        const reason = await window.opsmaxx?.rdp.lastError(server.id).catch(() => null)
+        // THE SESSION'S OWN ANSWER FIRST.
+        //
+        // This used to lead with the relay's reason and put the client's in
+        // brackets behind it, which read fine while the relay's reason was the
+        // specific one. Then a host connected over a fallback key exchange and
+        // every later failure on it opened with a sentence about TLS — so a
+        // refused password arrived as a parenthetical inside a note about
+        // certificates. Whatever the client says is what happened just now.
+        //
+        // The relay's reason follows, for the failures the client can only
+        // describe as a 502. The advisory is last: it is not why this failed.
+        const [reason, advisory] = await Promise.all([
+          window.opsmaxx?.rdp.lastError(server.id).catch(() => null) ?? null,
+          window.opsmaxx?.rdp.advisory(server.id).catch(() => null) ?? null
+        ])
         if (disposed) return
-        setError(reason ? `${reason} (${describeError(err)})` : describeError(err))
+        setError([describeError(err), reason, advisory].filter(Boolean).join(' '))
         setPhase('failed')
       }
     }

@@ -1599,7 +1599,13 @@ const api = {
      *  PDU the WASM client reports carries an integer and an HTTP status, so
      *  this is the only place the actual reason exists. */
     lastError: (serverId: string): Promise<string | null> =>
-      ipcRenderer.invoke('rdp:lastError', serverId)
+      ipcRenderer.invoke('rdp:lastError', serverId),
+    /** Something true about a session that WORKED — a host whose certificate
+     *  forced a weaker key exchange, say. Shown after the failure, not before:
+     *  filing it as a failure once buried a refused password behind a sentence
+     *  about TLS. */
+    advisory: (serverId: string): Promise<string | null> =>
+      ipcRenderer.invoke('rdp:advisory', serverId)
   },
   tunnel: {
     start: (cfg: TunnelConfig, ssh: TunnelSshConfig): Promise<TunnelResult> =>
