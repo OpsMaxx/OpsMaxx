@@ -1,0 +1,4 @@
+opsmaxx-addyd 0.48.0 (79f05cad)
+
+Go modules linked into this binary:
+  github.com/opsmaxx/opsmaxx/sidecar/addyd

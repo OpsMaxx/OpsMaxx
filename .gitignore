@@ -31,3 +31,8 @@ resources/bin/*
 # resources/bin/ via scripts/build-sidecar.sh; this one is nobody's artifact.
 sidecar/netd/netd
 tests/.tmp-cloudexec/
+
+# A bare `go build` in the sidecar leaves its binary beside the source.
+# The real output goes to resources/bin via scripts/build-addyd.sh.
+sidecar/addyd/addyd
+sidecar/netd/netd

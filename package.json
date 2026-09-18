@@ -65,7 +65,7 @@
     "build:frpc": "bash scripts/build-frpc.sh",
     "build:openvpn": "bash scripts/build-openvpn.sh",
     "fetch:wintun": "bash scripts/fetch-wintun.sh",
-    "build:engines": "npm run build:sidecar && npm run build:frpc && npm run build:openvpn && npm run fetch:wintun",
+    "build:engines": "npm run build:sidecar && npm run build:addyd && npm run build:frpc && npm run build:openvpn && npm run fetch:wintun",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck:cli": "tsc --noEmit -p tsconfig.cli.json",
@@ -81,7 +81,8 @@
     "dist:portable": "npm run build && electron-builder --win portable",
     "test": "vitest run",
     "test:capability": "ELECTRON_RUN_AS_NODE=1 electron ./node_modules/vitest/vitest.mjs run tests/historyCapability.test.ts",
-    "check:advisories": "node scripts/check-engine-advisories.mjs"
+    "check:advisories": "node scripts/check-engine-advisories.mjs",
+    "build:addyd": "bash scripts/build-addyd.sh"
   },
   "dependencies": {
     "@devolutions/iron-remote-desktop": "0.11.0",
