@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 
 	"github.com/opsmaxx/opsmaxx/sidecar/addyd/protocol"
@@ -422,4 +423,83 @@ func decodeParams(req Request, into any) error {
 		return wrapCoded(ErrConfigInvalid, err, "reading %s parameters", req.Method)
 	}
 	return nil
+}
+
+// --- request authorization ---
+
+type signRequestParams struct {
+	Method string `json:"method"`
+	// Path WITHOUT the query string. The server rebuilds the authorization
+	// from its own view of the request and compares, so a client that signed
+	// the query would sign something the server never reconstructs.
+	Path string `json:"path"`
+	// Base64 of the request body, or empty for none.
+	Body string `json:"body"`
+}
+
+// handleSignRequest signs one API request authorization.
+//
+// THE PARENT DOES THE HTTP AND THIS PROCESS DOES THE SIGNING, which is the
+// whole shape of the split: main already has an HTTP client, a proxy
+// configuration and a certificate store, and none of that should be linked
+// into the process holding the account key. What crosses the boundary is a
+// method, a path and a body hash -- never a key, and never a socket.
+//
+// The nonce is drawn HERE rather than passed in. A caller that chose its own
+// could reuse one, and the server spends a nonce per device: a replayed
+// authorization is refused, which would look to the parent like an
+// intermittent network failure rather than like the bug it is.
+func handleSignRequest(req Request) (any, error) {
+	var in signRequestParams
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+	if in.Method == "" || in.Path == "" {
+		return nil, codedf(ErrConfigInvalid, "signRequest needs a method and a path")
+	}
+	if strings.ContainsRune(in.Path, '?') {
+		// Refused rather than trimmed. Trimming would sign something other
+		// than what the caller asked for, silently, and the failure would
+		// appear at the server as a bad signature with no hint where it came
+		// from.
+		return nil, codedf(ErrConfigInvalid, "path carries a query string; sign the path alone")
+	}
+
+	var body []byte
+	if in.Body != "" {
+		decoded, err := base64.StdEncoding.DecodeString(in.Body)
+		if err != nil {
+			return nil, codedf(ErrConfigInvalid, "body is not base64")
+		}
+		body = decoded
+	}
+
+	keys.mu.RLock()
+	acct := keys.account
+	device := keys.device
+	loaded := keys.loaded
+	keys.mu.RUnlock()
+	if !loaded || device == nil {
+		return nil, codedf(ErrNotPaired, "no account is loaded")
+	}
+
+	nonce, err := protocol.Nonce()
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "drawing a nonce")
+	}
+	authz := protocol.Authz{
+		AccountID:   acct,
+		DeviceNonce: nonce,
+		Method:      in.Method,
+		Path:        in.Path,
+		BodyHash:    protocol.HashBody(body),
+	}
+	sig, err := protocol.Sign(device.Sign, authz)
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "signing the request")
+	}
+	return map[string]any{
+		"nonce":     hex.EncodeToString(nonce),
+		"signature": hex.EncodeToString(sig),
+	}, nil
 }
