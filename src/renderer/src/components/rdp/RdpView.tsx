@@ -80,6 +80,35 @@ interface UserInteraction {
  * Widths are rounded down to a multiple of 4: several RDP codecs encode in
  * 4-pixel tiles, and a width that is not a multiple of one is a well-worn
  * source of a green or torn right-hand column.
+ *
+ * MEASURED IN CSS PIXELS, WHICH MEANS HALF RESOLUTION ON A RETINA DISPLAY, and
+ * that is a known, deliberate omission rather than an oversight. On a dpr-2
+ * screen a 1500x900 pane negotiates a 1500x900 desktop, which the compositor
+ * then rasterises across 3000x1800 device pixels: every glyph upsampled 2x.
+ * Multiplying by devicePixelRatio here is what fixes it, and `scale="fit"`
+ * does scale the larger canvas back down to the pane, so it genuinely sharpens
+ * rather than letterboxes.
+ *
+ * It is not done because the multiply alone is not the whole change and the
+ * rest is not verifiable from here:
+ *
+ *  - Windows would render a 2x desktop at 100% DPI, so every control comes out
+ *    half its physical size. The companion is a DesktopScaleFactor passed as
+ *    the third argument to resize(), which the component forwards untouched to
+ *    the session. Nothing in the package's types or source states its units or
+ *    its accepted values, and MS-RDPEDISP ignores an invalid scale pair
+ *    wholesale, so this needs proving against a real host before it is trusted.
+ *  - A server with no Microsoft::Windows::RDS::DisplayControl -- xrdp, or
+ *    anything pre-2012R2 -- ignores the resize AND the scale factor. There the
+ *    change is not a trade-off but a regression with no way back: a sharp
+ *    desktop permanently at half size.
+ *  - Twice the linear resolution is four times the pixels to encode, send and
+ *    decode. Free on a LAN, not free on a WAN.
+ *  - A 2x multiply meets the 4096 ceiling below on any large display.
+ *
+ * So it wants a live test against a host known to support display control, and
+ * a fallback for hosts that do not, which is a change of its own rather than a
+ * line in this function.
  */
 function desktopSizeOf(el: HTMLElement): { width: number; height: number } {
   const rect = el.getBoundingClientRect()
@@ -207,6 +236,37 @@ export function RdpView({
    * has to be after both. It also covers returning to a tab that was
    * `display: none`, where the same no-op applies.
    */
+  /**
+   * Let go of held keys when this tab stops being the visible one.
+   *
+   * The component releases held input on exactly three events: window blur,
+   * visibilitychange, and mouseleave on the canvas. Switching OpsMaxx tabs is
+   * none of them — WorkspacePanel sets `display: none`, which blurs the host
+   * without any window-level event at all, while the OS window keeps focus.
+   *
+   * So: hold Ctrl, press a digit to switch workspace, and the Ctrl keydown was
+   * forwarded but the keyup is dropped by the capture gate, because by then the
+   * component is no longer activeElement. The remote holds Ctrl down for ever
+   * and every later keystroke arrives as a chord. Nothing recovers it; even
+   * mouseleave will not fire if the pointer never moves.
+   *
+   * `releaseAllInputs` is not on the object the component hands the embedder —
+   * the twenty entries of getExposedFunctions are the whole surface — so the
+   * only way to reach it is the component's own window-blur listener. That
+   * handler does one thing, `a.focusLost()`, and capture is recomputed from
+   * document.activeElement on every keystroke rather than latched, so a
+   * synthetic blur cannot leave it stuck off: the focus effect above restores
+   * it on the way back.
+   *
+   * The one thing this cannot prove is that no third-party library in the
+   * renderer listens for window blur. Nothing in src/renderer/src does, and the
+   * editors here bind to their own elements, but a dependency could.
+   */
+  useEffect(() => {
+    if (visible || phase !== 'connected') return
+    window.dispatchEvent(new Event('blur'))
+  }, [visible, phase])
+
   useEffect(() => {
     if (!visible || phase !== 'connected') return
     const id = requestAnimationFrame(() => {

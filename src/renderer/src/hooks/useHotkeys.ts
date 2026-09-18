@@ -208,16 +208,28 @@ export function switchableWorkspaces(workspaces: Workspace[], includeHidden: boo
   return includeHidden ? workspaces : workspaces.filter((w) => !w.hidden)
 }
 
-function inTerminal(target: EventTarget | null): boolean {
-  return !!(target as HTMLElement)?.closest?.('.xterm, .terminal-wrap')
+/**
+ * Whether the keystroke belongs to something that owns the keyboard.
+ *
+ * A terminal routes its own keys through runShortcut via
+ * attachCustomKeyEventHandler, so it is skipped here. A remote desktop is the
+ * same case for a stronger reason: every key in it is meant for the other
+ * machine, and an app shortcut that fires there both steals the key AND leaves
+ * the modifier held down on the remote -- the keyup lands after the tab has
+ * been hidden, where the component's capture gate drops it. Ctrl+1 to switch
+ * workspace left Ctrl stuck down on Windows.
+ *
+ * `.rdp-surface` is the host div; the component and its canvas sit inside it,
+ * and `closest` walks up from whatever inside it had focus.
+ */
+function ownsTheKeyboard(target: EventTarget | null): boolean {
+  return !!(target as HTMLElement)?.closest?.('.xterm, .terminal-wrap, .rdp-surface')
 }
 
 export function useHotkeys(): void {
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
-      // Terminals route their own keys through runShortcut via
-      // attachCustomKeyEventHandler, so they are skipped here.
-      if (inTerminal(e.target)) return
+      if (ownsTheKeyboard(e.target)) return
       if (runShortcut(e, 'app')) e.preventDefault()
     }
     window.addEventListener('keydown', handler)

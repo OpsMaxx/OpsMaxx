@@ -267,3 +267,38 @@ describe('showing the RDP surface', () => {
     expect(show, 'setVisibility must precede the connected phase').toBeLessThan(connected)
   })
 })
+
+/**
+ * Keys that belong to the other machine.
+ *
+ * Two independent bugs met here. App shortcuts fired while a remote desktop had
+ * focus, stealing the keystroke — and worse, the modifier's keyup then landed
+ * after the tab had been hidden, where the component's capture gate drops it,
+ * so the remote held Ctrl down indefinitely and every later keystroke arrived
+ * as a chord.
+ *
+ * The component releases held input on window blur, visibilitychange and canvas
+ * mouseleave. Switching OpsMaxx tabs is none of those: it sets `display: none`,
+ * which blurs the host while the OS window keeps focus. `releaseAllInputs` is
+ * not on the object the component hands the embedder, so the release is reached
+ * through its own window-blur listener.
+ */
+describe('keys while a remote desktop has focus', () => {
+  const HOTKEYS = src('src/renderer/src/hooks/useHotkeys.ts')
+  const VIEW = src('src/renderer/src/components/rdp/RdpView.tsx')
+
+  it('app shortcuts yield to the desktop, as they already did to a terminal', () => {
+    expect(HOTKEYS).toContain('.rdp-surface')
+    // Alongside the terminal selectors, not replacing them.
+    expect(HOTKEYS).toMatch(/\.xterm[^']*\.rdp-surface/)
+  })
+
+  it('releases held keys when the tab stops being visible', () => {
+    expect(VIEW).toContain("window.dispatchEvent(new Event('blur'))")
+    // Guarded on the tab going away, not on it arriving: dispatching this
+    // while the desktop is on screen would drop the user's own modifiers.
+    const at = VIEW.indexOf("window.dispatchEvent(new Event('blur'))")
+    const before = VIEW.slice(Math.max(0, at - 160), at)
+    expect(before).toContain('if (visible')
+  })
+})
