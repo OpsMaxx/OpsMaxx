@@ -6010,3 +6010,53 @@ details[open] > .disclosure-head .chev {
 .env-secret .icon-btn.active {
   color: var(--accent-ink);
 }
+
+/* Cloud target picker — the project/zone/instance fields on the add-server form.
+
+   Same shape as `.lt-picker` and for the same recorded reason: a datalist's
+   affordance is a few pixels wide and people type the whole name past it. What
+   differs is that every row here has two identities — a GCP project is
+   `billing-284401` displayed as "Billing" — so a row shows both and the filter
+   matches either. */
+.cloud-pick-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.cloud-pick-row .input {
+  flex: 1;
+  min-width: 0;
+}
+.cloud-pick {
+  margin-top: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-hover);
+  display: flex;
+  flex-direction: column;
+}
+.cloud-pick-one {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  text-align: left;
+  padding: 5px 10px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-body);
+  cursor: pointer;
+}
+.cloud-pick-one:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+/* The id keeps its own colour on hover too, or it vanishes into the accent. */
+.cloud-pick-one:hover .faint {
+  color: var(--accent-text);
+  opacity: 0.75;
+}

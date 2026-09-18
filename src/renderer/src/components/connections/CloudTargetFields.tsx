@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Copy,
   Loader2,
@@ -532,6 +533,22 @@ const TRANSPORT_HINT: Record<CloudProvider, string> = {
  * organisation is a broader permission than connecting to one instance in it.
  * A form that only offers what it managed to enumerate would lock those users
  * out of their own servers.
+ *
+ * TYPABLE EVEN WHEN THE LIST LOADED, which it was not. This used to be two
+ * mutually exclusive branches: a `<select>` when discovery returned anything
+ * and a text box only when it returned nothing. An organisation with a
+ * thousand projects therefore got a scrolling menu and no way to search it,
+ * and the user's own report is what found it. So the field is always an input
+ * and the list is an extra affordance beside it.
+ *
+ * An explicit button rather than a `<datalist>`, following LogTailPanel, which
+ * tried the datalist first and recorded why it came back off: its arrow is a
+ * few pixels wide and it needs the field focused, so an operator typed the
+ * whole name by hand while the list sat unopened.
+ *
+ * Filtering matches the id AND the display name, because they differ for every
+ * provider here — a GCP project is `my-project-284401` called "Billing", and
+ * the user knows whichever one they know.
  */
 function Picker({
   label,
@@ -551,36 +568,88 @@ function Picker({
   disabled?: boolean
 }): React.JSX.Element {
   const id = `cloud-${label.toLowerCase().replace(/\s+/g, '-')}`
+  const [picking, setPicking] = useState(false)
+
+  // Capped, like the log tail's picker: past a couple of hundred rows the list
+  // stops being something you read and the typing is what narrows it.
+  const shown = useMemo(() => {
+    const q = value.trim().toLowerCase()
+    const matches =
+      q === ''
+        ? options
+        : options.filter(
+            (o) => o.value.toLowerCase().includes(q) || o.label.toLowerCase().includes(q)
+          )
+    return matches.slice(0, 200)
+  }, [options, value])
+
+  // The field holds the id, because that is what the form submits. So when the
+  // id alone says nothing, the name it belongs to is shown under it.
+  const chosen = options.find((o) => o.value === value)
+
   return (
     <div className="field">
       <label className="field-label" htmlFor={id}>
         {label}
       </label>
-      {options.length > 0 ? (
-        <select
-          id={id}
-          className="input"
-          value={options.some((o) => o.value === value) ? value : ''}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.value)}
-        >
-          <option value="">Choose…</option>
-          {options.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-      ) : (
+      <div className="cloud-pick-row">
         <input
           id={id}
           className="input"
           value={value}
           placeholder={placeholder}
           disabled={disabled}
-          onChange={(e) => onChange(e.target.value)}
+          autoComplete="off"
+          spellCheck={false}
+          onChange={(e) => {
+            onChange(e.target.value)
+            if (options.length > 0) setPicking(true)
+          }}
         />
+        {options.length > 0 && (
+          <button
+            type="button"
+            className="btn ghost sm"
+            title={`Pick from ${options.length}`}
+            disabled={disabled}
+            aria-expanded={picking}
+            onClick={() => setPicking((v) => !v)}
+          >
+            <ChevronDown size={13} />
+          </button>
+        )}
+      </div>
+      {picking && !disabled && options.length > 0 && (
+        <div className="cloud-pick">
+          {shown.length === 0 ? (
+            <div className="faint" style={{ padding: '6px 10px' }}>
+              Nothing matches what you have typed. It is still a valid {label.toLowerCase()} if
+              you know it — the list is only what we could enumerate.
+            </div>
+          ) : (
+            shown.map((o) => (
+              <button
+                type="button"
+                key={o.value}
+                className="cloud-pick-one"
+                onClick={() => {
+                  onChange(o.value)
+                  setPicking(false)
+                }}
+              >
+                <span>{o.label}</span>
+                {o.label !== o.value && <span className="faint mono">{o.value}</span>}
+              </button>
+            ))
+          )}
+          {options.length > shown.length && (
+            <div className="faint" style={{ padding: '4px 10px' }}>
+              {shown.length} of {options.length} — keep typing to narrow.
+            </div>
+          )}
+        </div>
       )}
+      {chosen && chosen.label !== value && <span className="field-hint">{chosen.label}</span>}
       {level.loading && (
         <span className="field-hint">
           <Loader2 size={11} className="spin" /> Looking…
