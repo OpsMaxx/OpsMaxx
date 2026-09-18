@@ -315,3 +315,98 @@
 .pair-problem .btn {
   margin-top: 8px;
 }
+
+/* First-run setup. */
+.addy-setup {
+  max-width: 560px;
+}
+
+.addy-field {
+  display: block;
+  margin: 12px 0;
+}
+
+.addy-field span {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.addy-field input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: inherit;
+  font: inherit;
+}
+
+.addy-field small {
+  display: block;
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.addy-setup .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  margin: 8px 8px 8px 0;
+}
+
+.addy-setup .btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.addy-problem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 10px 0;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+/* The phrase. Numbered, monospace and spaced out, because it is copied by hand
+   onto paper and a transcription error is an account nobody can recover. */
+.addy-phrase {
+  list-style: none;
+  padding: 14px;
+  margin: 14px 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+}
+
+.addy-phrase-n {
+  display: inline-block;
+  width: 22px;
+  color: var(--text-faint);
+  user-select: none;
+}
+
+.addy-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 14px 0;
+  font-size: 13px;
+}

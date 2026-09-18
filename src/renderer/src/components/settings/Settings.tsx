@@ -31,7 +31,7 @@ import { ShortcutManager } from './ShortcutManager'
 import { BackupPanel } from './BackupPanel'
 import { AgentPanel } from '../sshAgent/AgentPanel'
 import { BitwardenImport } from '../vault/BitwardenImport'
-import { PairingPanel } from '../addy/PairingPanel'
+import { AddySetup } from '../addy/AddySetup'
 import { UpdatePanel } from './UpdatePanel'
 import { useOnboarding } from '../../store/onboarding'
 import { SshSessions } from './SshSessions'
@@ -1475,12 +1475,12 @@ export function Settings(): React.JSX.Element {
               </div>
               <CredProxyPanel />
 
-              <h3>Devices on your addy account</h3>
+              <h3>addy</h3>
               <div className="sub">
-                Pairing needs both devices open at the same time. You compare seven emoji at the
-                end; that comparison is the whole security of it.
+                A relay you run yourself, which carries your data between your devices and cannot
+                read any of it.
               </div>
-              <PairingPanel baseURL={settings.addyRelayURL ?? ''} />
+              <AddySetup />
 
               <h3>Import from another password manager</h3>
               <BitwardenImport />

@@ -1,4 +1,5 @@
 import { AddyError, openAddyd, type AddySidecar } from './sidecar'
+import { storeAddySecret } from './keys'
 import {
   beginPairing,
   forgetPairing,
@@ -80,6 +81,104 @@ class AddySession {
     this.relay = null
     this.account = null
     await held?.close()
+  }
+
+  /**
+   * Mints an account and registers it on a relay.
+   *
+   * THE ONLY TIME THE RECOVERY PHRASE EXISTS. The sidecar returns it once and
+   * has no call that returns it again, so this hands it straight to the caller
+   * and keeps no copy -- not in a field, not in a log, not in the keychain.
+   * A phrase the app can produce on request is a phrase that leaks the day
+   * something can ask.
+   *
+   * The secrets go to the keychain under the machine-only prefix, so they
+   * cannot ride in a backup: the root key comes back from the phrase and the
+   * account key from pairing, and the device key deliberately does not come
+   * back at all.
+   */
+  async createAccount(
+    baseURL: string,
+    invite: string,
+    label: string
+  ): Promise<{ accountId: string; mnemonic: string }> {
+    const relay = baseURL.replace(/\/+$/, '')
+    if (!relay.startsWith('https://')) {
+      // Refused rather than upgraded. A relay reached over plain HTTP is one
+      // whose TLS nothing checked, and silently rewriting what somebody typed
+      // is how they end up trusting an address they did not choose.
+      throw new AddyError('config-invalid', 'a relay address must be https://')
+    }
+
+    await this.detach()
+    const addyd = await openAddyd('--crypto')
+    this.addyd = addyd
+
+    const minted = await addyd.send<{
+      accountId: string
+      mnemonic: string
+      rootSignPub: string
+      secrets: { deviceSignSeed: string; deviceEncKey: string; akSeed: string }
+      genesis: string
+      escrow: string
+      epoch: number
+    }>('createAccount', { label })
+
+    // REGISTERED BEFORE ANYTHING IS STORED. A machine that saved keys for an
+    // account the relay rejected would look attached and be able to do
+    // nothing, and the user would have a recovery phrase for an account that
+    // does not exist.
+    const resp = await fetch(`${relay}/v1/account`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        account: minted.accountId,
+        root_sign_pub: minted.rootSignPub,
+        genesis: minted.genesis,
+        escrow: minted.escrow,
+        invite
+      })
+    }).catch((err: unknown) => {
+      throw new AddyError(
+        'relay-unreachable',
+        `could not reach ${relay}: ${err instanceof Error ? err.message : String(err)}`
+      )
+    })
+
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => resp.statusText)
+      await this.detach()
+      throw new AddyError(
+        resp.status === 403 ? 'pairing-refused' : 'config-invalid',
+        resp.status === 403
+          ? 'that invite has been used, has expired, or is not one this relay issued'
+          : `the relay refused the account (${resp.status}): ${detail.slice(0, 200)}`
+      )
+    }
+
+    // Now it is real, so the keys are worth keeping.
+    for (const [kind, value] of [
+      ['device', minted.secrets.deviceSignSeed],
+      ['device-enc', minted.secrets.deviceEncKey],
+      ['account', minted.secrets.akSeed]
+    ] as const) {
+      if (!storeAddySecret(kind === 'account' ? 'account' : 'device', `${minted.accountId}:${kind}`, value)) {
+        throw new AddyError(
+          'config-invalid',
+          'this machine has no usable keychain, so the account keys cannot be stored. Nothing was kept.'
+        )
+      }
+    }
+
+    this.account = {
+      baseURL: relay,
+      token: '',
+      accountId: minted.accountId,
+      epoch: minted.epoch
+    }
+    this.relay = new RelayClient({ baseURL: relay, token: '' }, addyd)
+
+    return { accountId: minted.accountId, mnemonic: minted.mnemonic }
   }
 
   /**

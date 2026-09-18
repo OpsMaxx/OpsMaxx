@@ -406,6 +406,20 @@ const api = {
      *  and decided the winner was right. */
     discardConflict: (id: number): Promise<void> => ipcRenderer.invoke('addy:discardConflict', id),
 
+    /**
+     * Mint an account on a relay.
+     *
+     * The recovery phrase comes back ONCE and is never obtainable again --
+     * there is no call that returns it, deliberately. Whatever the renderer
+     * does with it, it has to do now.
+     */
+    createAccount: (
+      baseURL: string,
+      invite: string,
+      label: string
+    ): Promise<{ accountId: string; mnemonic: string }> =>
+      ipcRenderer.invoke('addy:createAccount', baseURL, invite, label),
+
     /** Start a pairing and return the code IMMEDIATELY. The other device has
      *  not answered yet; `awaitPairing` is what resolves when it does. */
     beginPairing: (baseURL: string): Promise<{ code: string; pairingId: string }> =>
