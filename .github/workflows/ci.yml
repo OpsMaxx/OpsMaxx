@@ -71,6 +71,19 @@ jobs:
         run: |
           go vet ./...
           go test ./...
+      # The addy sidecar is a second Go module in this repo and was not covered
+      # at all -- including `protocol_test.go`, whose whole job is to fail when
+      # the Go error codes and the TypeScript `AddyErrorCode` union drift apart.
+      # A parity test nothing runs is a comment.
+      #
+      # It also runs the vendored protocol package's vector check, which is the
+      # gate that keeps this copy byte-compatible with the addy server's. See
+      # sidecar/addyd/protocol/VENDORED.md.
+      - name: addy sidecar vet and test
+        working-directory: sidecar/addyd
+        run: |
+          go vet ./...
+          go test ./...
       - name: Sidecar cross-compile
         run: npm run build:sidecar
       # The engine build scripts only ever run in the release workflow, so a
