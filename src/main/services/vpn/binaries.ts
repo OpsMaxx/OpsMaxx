@@ -1,12 +1,16 @@
 import { execFile } from 'node:child_process'
-import { createHash } from 'node:crypto'
-import { createReadStream } from 'node:fs'
-import { readFile, realpath, stat } from 'node:fs/promises'
+import { realpath, stat } from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join, relative, sep } from 'node:path'
-import { app } from 'electron'
 import type { VpnEngineInfo, VpnKind } from '../../../shared/vpn'
 import { isEngineBundledOn } from '../../../shared/vpnEngines'
 import { VpnError } from './errors'
+import {
+  BundledBinaryError,
+  forgetManifest,
+  resolveBundledBinary,
+  sha256File,
+  type BundledBinary
+} from '../bundledBinary'
 
 // Deciding which file to execute is the whole of this module, and it is the
 // single most security-sensitive decision the VPN layer makes: everything
@@ -24,12 +28,6 @@ import { VpnError } from './errors'
 // calls: OpsMaxx now ships `openvpn` on macOS and Linux, but a Windows
 // build has none — and someone may still want the copy they installed
 // themselves. See its own comment for why the ordering is not symmetric.
-
-// Read at call time, not module load: `process.platform` is stubbed in the
-// resolver tests, and a constant captured at import would silently ignore it.
-function exeSuffix(): string {
-  return process.platform === 'win32' ? '.exe' : ''
-}
 
 // Which engine each binary implements. The name alone reaches the caller, so
 // this is where it turns back into a `VpnKind` for the returned info.
@@ -79,80 +77,31 @@ const BUILD_SCRIPT: Record<string, string> = {
   openvpn: 'scripts/build-openvpn.sh'
 }
 
-interface ManifestEntry {
-  sha256: string
-  size?: number
-  version?: string
-}
-
-interface BinaryManifest {
-  version?: string
-  binaries?: Record<string, ManifestEntry | string>
-}
-
 // Verification is per app run, not per spawn: a supervised engine restarts on
 // backoff and re-hashing a 30 MB sidecar on every restart would be pure cost.
+// The manifest itself is cached one level down, in `bundledBinary`.
 const bundledCache = new Map<string, VpnEngineInfo>()
-let manifestCache: BinaryManifest | null = null
 
 /** Drops the per-run caches. Tests use it between fixture trees; production
  *  never calls it, which is the point of caching per run. */
 export function resetBinaryCache(): void {
   bundledCache.clear()
-  manifestCache = null
+  // The lifted module holds the parsed manifest now, and a test that swaps
+  // fixture trees has to clear both or the second tree is verified against the
+  // first tree's hashes.
+  forgetManifest()
 }
 
-export function sha256File(path: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const hash = createHash('sha256')
-    const stream = createReadStream(path)
-    stream.on('error', reject)
-    // Streamed rather than readFile'd: these are tens of megabytes and the
-    // main process is also drawing the UI.
-    stream.on('data', (chunk) => hash.update(chunk))
-    stream.on('end', () => resolve(hash.digest('hex')))
-  })
-}
+// Re-exported rather than moved out of reach: the supervisor and the resolver
+// tests both import it from here, and a lift that renames every call site is a
+// lift that touches files it had no reason to.
+export { sha256File }
 
 function kindOf(name: string): VpnKind {
   const base = name.endsWith('.exe') ? name.slice(0, -4) : name
   const kind = ENGINE_KIND[base]
   if (!kind) throw new VpnError('internal', `Unknown VPN engine binary ${JSON.stringify(name)}.`)
   return kind
-}
-
-/** `resources/bin` in a dev checkout, `<resourcesPath>/bin` when packaged.
- *  The relative shape below the root is identical in both, so nothing else in
- *  this module has to know which one it got. */
-function bundledRoot(): string {
-  const override = process.env.OPSMAXX_VPN_BIN_DIR
-  if (override) return override
-  if (app?.isPackaged && process.resourcesPath) return join(process.resourcesPath, 'bin')
-  const appPath = typeof app?.getAppPath === 'function' ? app.getAppPath() : process.cwd()
-  return join(appPath, 'resources', 'bin')
-}
-
-/** POSIX-separated, relative to the `bin` root. This is the manifest key, so
- *  it must be built the same way on every platform. */
-function manifestKey(name: string): string {
-  return `${process.platform}-${process.arch}/${name}${exeSuffix()}`
-}
-
-async function loadManifest(root: string): Promise<BinaryManifest | null> {
-  if (manifestCache) return manifestCache
-  try {
-    const parsed = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8')) as BinaryManifest
-    manifestCache = parsed
-    return parsed
-  } catch {
-    return null
-  }
-}
-
-function entryOf(manifest: BinaryManifest | null, key: string): ManifestEntry | null {
-  const raw = manifest?.binaries?.[key]
-  if (!raw) return null
-  return typeof raw === 'string' ? { sha256: raw } : raw
 }
 
 /**
@@ -165,48 +114,32 @@ export async function resolveBundled(name: string): Promise<VpnEngineInfo> {
   const cached = bundledCache.get(name)
   if (cached) return cached
 
+  // `kindOf` first, and deliberately: it throws for a name this module does not
+  // own, which is what stops a caller resolving an arbitrary binary through the
+  // VPN path. A sidecar that is not an engine goes straight to
+  // `resolveBundledBinary` rather than being given a kind it has no business
+  // having.
   const kind = kindOf(name)
-  const root = bundledRoot()
-  const key = manifestKey(name)
-  const file = join(root, ...key.split('/'))
 
-  const st = await stat(file).catch(() => null)
-  if (!st || !st.isFile() || st.size === 0) {
-    // A zero-length file is the shape antivirus quarantine leaves behind, and
-    // it is indistinguishable from a truncated download, so both get the same
-    // message naming the path (E43).
-    throw new VpnError(
-      'binary-missing',
-      `Looked for ${file}. If this is a development checkout, run ${BUILD_SCRIPT[name] ?? 'npm run build:engines'} to build it; otherwise antivirus software may have quarantined it.`
-    )
-  }
-
-  const manifest = await loadManifest(root)
-  const entry = entryOf(manifest, key)
-  if (!entry) {
-    // A missing manifest or a missing entry is the normal state of a dev
-    // checkout before the engines have been built. That is an absence, not a
-    // tamper, and calling it a tamper would train people to ignore the word.
-    throw new VpnError(
-      'binary-missing',
-      `${file} is not listed in ${join(root, 'manifest.json')}, so it cannot be verified. Run ${BUILD_SCRIPT[name] ?? 'npm run build:engines'} to produce both.`
-    )
-  }
-
-  const actual = await sha256File(file)
-  if (actual !== entry.sha256) {
-    throw new VpnError(
-      'binary-untrusted',
-      `${file} hashes to ${actual} but the manifest records ${entry.sha256}.`
-    )
+  let resolved: BundledBinary
+  try {
+    resolved = await resolveBundledBinary(name, BUILD_SCRIPT[name] ?? 'npm run build:engines')
+  } catch (err) {
+    // The lifted resolver's two reasons map onto this module's two codes.
+    // Keeping the mapping here rather than down there is what lets the VPN
+    // layer keep its own vocabulary while sharing the check itself.
+    if (err instanceof BundledBinaryError) {
+      throw new VpnError(err.reason === 'untrusted' ? 'binary-untrusted' : 'binary-missing', err.message)
+    }
+    throw err
   }
 
   const info: VpnEngineInfo = {
     kind,
     available: true,
-    path: file,
-    sha256: actual,
-    version: entry.version ?? (await probeVersion(file)),
+    path: resolved.path,
+    sha256: resolved.sha256,
+    version: resolved.version ?? (await probeVersion(resolved.path)),
     bundled: true
   }
   bundledCache.set(name, info)
