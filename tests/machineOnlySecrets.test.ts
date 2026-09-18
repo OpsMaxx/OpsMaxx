@@ -50,6 +50,10 @@ vi.mock('node:fs', async (orig) => {
 
 const secrets = await import('../src/main/services/secrets')
 const { MACHINE_ONLY_SECRET_PREFIX, exportSecrets, importSecrets, setSecret, getSecret } = secrets
+// Imported after the mocks, like `secrets` itself: it reaches the keychain
+// through that module and would otherwise bind the real one.
+const { ADDY_SECRET_KINDS, addySecretId, addyAccountSecretId, storeAddySecret, loadAddySecret } =
+  await import('../src/main/services/addy/keys')
 
 beforeEach(() => {
   for (const k of Object.keys(store)) delete store[k]
@@ -98,6 +102,57 @@ describe('what a restore is allowed to write', () => {
     importSecrets({ [id]: 'some other machine', 's-prod-1': 'fine' })
     expect(getSecret(id)).toBe('this machine')
     expect(getSecret('s-prod-1')).toBe('fine')
+  })
+})
+
+describe("addy's keys are not in a bundle either", () => {
+  /**
+   * addy's premise is that the server holds no key. That premise survives a
+   * compromised relay and dies to a bundle, which collects every credential
+   * the app holds, seals it under one passphrase, and is then designed to be
+   * copied somewhere else -- a bucket, an SFTP host, a second laptop.
+   *
+   * Per kind, against the real `exportSecrets`, rather than reading the prefix
+   * off the id and calling it proved. The prefix is how it works; this is
+   * whether it works.
+   */
+  it.each(ADDY_SECRET_KINDS)('keeps the %s key out of the bundle', (kind) => {
+    storeAddySecret(kind, 'acct-1', `the ${kind} key`)
+    // Still readable here -- excluded from the bundle, not from the app.
+    expect(loadAddySecret(kind, 'acct-1')).toBe(`the ${kind} key`)
+    expect(Object.keys(exportSecrets())).not.toContain(addySecretId(kind, 'acct-1'))
+  })
+
+  it('refuses one that arrives in a bundle anyway', () => {
+    // Belt as well as braces, and the direction that matters most for the
+    // device key: a bundle that carried one must not be able to install
+    // another machine's identity here. Two machines answering to one roster
+    // entry is the state revocation cannot express.
+    const id = addySecretId('device', 'acct-1')
+    importSecrets({ [id]: "another machine's device key" })
+    expect(getSecret(id)).toBeNull()
+  })
+
+  it('gives each epoch its own account key rather than overwriting', () => {
+    // Both are held at once during a transition: objects re-sealed under n+1
+    // land before the signed transition entry does, so a client still reading
+    // n needs n. An id that ignored the epoch would drop one of them.
+    storeAddySecret('account', 'acct-1:7', 'AK_7')
+    storeAddySecret('account', 'acct-1:8', 'AK_8')
+    expect(getSecret(addyAccountSecretId('acct-1', 7))).toBe('AK_7')
+    expect(getSecret(addyAccountSecretId('acct-1', 8))).toBe('AK_8')
+  })
+
+  it('builds every addy id from the prefix, with no second path', () => {
+    // The file-level half: a future key stored with a hand-written id would
+    // pass every test above by simply not being in ADDY_SECRET_KINDS.
+    const src = readFileSync(resolve(__dirname, '..', 'src/main/services/addy/keys.ts'), 'utf8')
+    expect(src).toContain('`${MACHINE_ONLY_SECRET_PREFIX}addy-${kind}:${scope}`')
+    // One builder. Every other id in the module goes through `addySecretId`,
+    // so there is a single place the prefix can be dropped from -- and a
+    // second interpolation of it is a second path that has to be argued for in
+    // a diff rather than added quietly.
+    expect(src.match(/\$\{MACHINE_ONLY_SECRET_PREFIX\}/g)?.length).toBe(1)
   })
 })
 
