@@ -1301,6 +1301,36 @@ describe.skipIf(!HAVE_NETD)('start, over a real handshake', () => {
     return { rxBytes: reply.result?.rxBytes ?? 0, txBytes: reply.result?.txBytes ?? 0 }
   }
 
+  /**
+   * Both counters past where they started, or the last reading at the deadline.
+   *
+   * The peer's byte counters are eventually consistent: it updates them as it
+   * processes packets, not synchronously with the SOCKS reply we are already
+   * holding. Sampling once, immediately, failed on a CI runner with "expected
+   * 92 to be greater than 92" — rx had moved and tx had not, which is this
+   * same conversation read a moment too early rather than a packet that never
+   * went anywhere.
+   *
+   * Returns rather than asserts, so the caller still owns the expectation: if
+   * the counters genuinely never move, this hands back the unchanged reading
+   * and the test fails on the line that says what it wanted.
+   */
+  async function countersPast(start: {
+    rxBytes: number
+    txBytes: number
+  }): Promise<{ rxBytes: number; txBytes: number }> {
+    const deadline = Date.now() + 5_000
+    let latest = await peerCounters()
+    while (
+      Date.now() < deadline &&
+      !(latest.rxBytes > start.rxBytes && latest.txBytes > start.txBytes)
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      latest = await peerCounters()
+    }
+    return latest
+  }
+
   function boundPort(kind: string): number {
     const listeners = wireguardDriver.status(PROFILE_ID)?.listeners ?? []
     const found = listeners.find((l) => l.kind === kind)
@@ -1414,7 +1444,7 @@ describe.skipIf(!HAVE_NETD)('start, over a real handshake', () => {
     // The proof that it was the tunnel and not loopback: the peer node, a
     // separate process reachable only through WireGuard, saw the bytes and
     // answered.
-    const after = await peerCounters()
+    const after = await countersPast(before)
     expect(after.rxBytes).toBeGreaterThan(before.rxBytes)
     expect(after.txBytes).toBeGreaterThan(before.txBytes)
   }, REAL_SIDECAR_TIMEOUT_MS)
