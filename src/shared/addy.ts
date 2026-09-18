@@ -156,3 +156,25 @@ export type AddyErrorCode =
   | 'relay-unreachable'
   | 'peer-unreachable'
   | 'internal'
+
+/**
+ * One conflict copy, as the chooser sees it.
+ *
+ * Declared here rather than in the main-process service because the renderer
+ * needs it and must not import a main module -- that pulls Electron, the vault
+ * and the sidecar into the renderer's bundle for the sake of four fields.
+ */
+export interface ConflictCopy {
+  id: number
+  collection: string
+  /** Hex of the device that wrote the LOSING copy. */
+  device: string
+  createdAt: string
+  /** The losing copy's contents, unsealed. Absent when it could not be opened
+   *  -- sealed under an epoch this device no longer holds, most likely -- with
+   *  `problem` saying so. */
+  losing?: unknown
+  /** The copy that won, as it stands on the relay now. */
+  winning?: unknown
+  problem?: string
+}

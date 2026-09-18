@@ -285,6 +285,7 @@ export interface ProviderDetectionResult {
   error?: string
 }
 
+import type { ConflictCopy } from '../shared/addy'
 import type {
   AgentApprovalRequest,
   AgentDecision,
@@ -356,7 +357,19 @@ const api = {
     revocation: (): Promise<AddyRevocation | null> => ipcRenderer.invoke('addy:revocation'),
     /** Acknowledge a finished wipe so the machine can be set up again, as a
      *  new device. Recovers nothing: the data is already gone. */
-    clearRevocation: (): Promise<void> => ipcRenderer.invoke('addy:clearRevocation')
+    clearRevocation: (): Promise<void> => ipcRenderer.invoke('addy:clearRevocation'),
+
+    /** Conflict copies waiting for a choice, with BOTH sides already opened --
+     *  the relay cannot open either, so this is the only place they can be
+     *  made comparable. Empty when no account is configured. */
+    conflicts: (): Promise<ConflictCopy[]> => ipcRenderer.invoke('addy:conflicts'),
+    /** Write the chosen contents and drop the copy, in that order: the reverse
+     *  loses the losing copy if the write fails. */
+    resolveConflict: (id: number, collection: string, chosen: unknown): Promise<void> =>
+      ipcRenderer.invoke('addy:resolveConflict', id, collection, chosen),
+    /** Drop a copy without writing anything, for the user who looked at both
+     *  and decided the winner was right. */
+    discardConflict: (id: number): Promise<void> => ipcRenderer.invoke('addy:discardConflict', id)
   },
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
   autoStart: {

@@ -325,6 +325,7 @@ import {
 } from './services/backup'
 import { clearRevocation, revocationState } from './services/addy/revoke'
 import { sshAgent } from './services/sshAgent/service'
+import { addySession } from './services/addy/session'
 import type { AgentDecision, SshAgentSettings } from '../shared/sshAgentHost'
 import { databaseDumpTarget, dumpableDatabases } from './services/backupTargets'
 import { BACKUP_STAGE_LABEL } from '../shared/backup'
@@ -1791,6 +1792,7 @@ async function closeLiveSessions(): Promise<void> {
   // shut before the store behind them is unlinked rather than after.
   void stopRdpRelay()
   await sshAgent.stop()
+  await addySession.detach()
   await stopMcpServer().catch(() => undefined)
 
   // The transports themselves.
@@ -4636,6 +4638,16 @@ ipcMain.handle('sshAgent:pending', () => sshAgent.pending())
 ipcMain.handle('addy:revocation', () => revocationState())
 ipcMain.handle('addy:clearRevocation', () => clearRevocation())
 
+// Conflict copies. Empty rather than an error when this device is not attached
+// to an account: the renderer asks on mount, on every window, before anybody
+// has been near addy, and an exception there is an error dialog for a feature
+// nobody has turned on.
+ipcMain.handle('addy:conflicts', () => addySession.conflicts())
+ipcMain.handle('addy:resolveConflict', (_e, id: number, collection: string, chosen: unknown) =>
+  addySession.resolveConflict(id, collection, chosen)
+)
+ipcMain.handle('addy:discardConflict', (_e, id: number) => addySession.discardConflict(id))
+
 // Destinations. The renderer never sees a credential for any of them: an SFTP
 // destination names a server whose secret credentialResolver reads in main, and
 // an S3 destination names a vault entry that backupTargets reads in main. What
@@ -5032,6 +5044,9 @@ const lockVaultFully = (): VaultResult => {
   // the same reason its comment gives: the automatic path and the manual one
   // must not diverge.
   sshAgent.onVaultLocked()
+  // The addy sidecar holds the account key in memory; the vault locking is
+  // exactly the moment it should stop holding it.
+  void addySession.detach()
   const r = vaultLock()
   notifyRenderer('vault:auto-locked')
   return r
@@ -5450,6 +5465,8 @@ app.on('before-quit', (e) => {
   // Same shape of problem, sharper: an agent socket that outlived the app is a
   // socket every tool on the machine still connects to, answered by nothing.
   void sshAgent.stop()
+  // Nothing addyd holds is on disk, so stopping it IS the remediation.
+  void addySession.detach()
   externalEditDisposeAll()
   vaultDispose()
   void stopMcpServer()

@@ -97,3 +97,115 @@
     animation: none;
   }
 }
+
+/* The conflict chooser.
+ *
+ * Two panes side by side, because the decision is a comparison: a chooser that
+ * showed one copy at a time would be asking somebody to hold the other in
+ * their head, which is the thing they are here because they cannot do. */
+.conflict-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg-scrim);
+}
+
+.conflict {
+  width: 100%;
+  max-width: 900px;
+  max-height: 86vh;
+  overflow-y: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 22px;
+  color: var(--text);
+}
+
+.conflict-icon {
+  color: var(--text-muted);
+}
+
+.conflict h2 {
+  font-size: 16px;
+  margin: 10px 0 6px;
+}
+
+.conflict-problem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 12px 0;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.conflict-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin: 16px 0;
+}
+
+/* Stacked below the width where two columns stop being a comparison and start
+   being two narrow columns of wrapped JSON. */
+@media (max-width: 720px) {
+  .conflict-pair {
+    grid-template-columns: 1fr;
+  }
+}
+
+.conflict-pair h3 {
+  font-size: 13px;
+  margin: 0 0 6px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.conflict-when {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+.conflict-pair pre {
+  margin: 0;
+  padding: 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+  max-height: 40vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.conflict-actions .btn {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.conflict-actions .btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

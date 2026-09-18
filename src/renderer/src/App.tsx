@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useApp } from './store/app'
 import { RevokedScreen } from './components/addy/RevokedScreen'
 import { AgentApprovalWatcher } from './components/sshAgent/AgentApprovalWatcher'
+import { ConflictChooser } from './components/addy/ConflictChooser'
 import type { AddyRevocation } from '../../preload'
 import { startBackupRunWatch } from './store/backupRuns'
 import { clsx } from './lib/format'
@@ -194,6 +195,9 @@ export default function App(): React.JSX.Element {
           ansible, or a script, so the user is looking at something else
           entirely. */}
       <AgentApprovalWatcher />
+      {/* Two devices changed the same thing. Neither copy was thrown away and
+          somebody has to choose, so it appears wherever they are. */}
+      <ConflictChooser />
       <AgentConfigWatcher />
       <FleetWatcher />
       <VaultUnlockModal />
