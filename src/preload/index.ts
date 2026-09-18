@@ -346,6 +346,22 @@ const api = {
       return () => ipcRenderer.removeListener('sshAgent:approval-event', h)
     }
   },
+  /**
+   * Importing from another password manager.
+   *
+   * Preview only from here: the entries come back decrypted, the renderer
+   * shows them, and saving goes through the ordinary `vault.save` -- so an
+   * import cannot reach the vault by a path nothing else uses.
+   */
+  importVault: {
+    bitwardenPreview: (source: {
+      serverURL: string
+      email: string
+      password: string
+      twoFactorCode?: string
+    }): Promise<{ entries?: VaultEntry[]; skipped?: { name: string; reason: string }[]; error?: string }> =>
+      ipcRenderer.invoke('import:bitwardenPreview', source)
+  },
   addy: {
     /**
      * Whether this device has been revoked, and how far the wipe got.

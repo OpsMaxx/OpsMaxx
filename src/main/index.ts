@@ -326,6 +326,8 @@ import {
 import { clearRevocation, revocationState } from './services/addy/revoke'
 import { sshAgent } from './services/sshAgent/service'
 import { addySession } from './services/addy/session'
+import { previewBitwardenImport } from './services/import/bitwarden'
+import type { BitwardenSource } from './services/import/bitwarden'
 import type { AgentDecision, SshAgentSettings } from '../shared/sshAgentHost'
 import { databaseDumpTarget, dumpableDatabases } from './services/backupTargets'
 import { BACKUP_STAGE_LABEL } from '../shared/backup'
@@ -4647,6 +4649,19 @@ ipcMain.handle('addy:resolveConflict', (_e, id: number, collection: string, chos
   addySession.resolveConflict(id, collection, chosen)
 )
 ipcMain.handle('addy:discardConflict', (_e, id: number) => addySession.discardConflict(id))
+
+// ---- importing another password manager ----
+//
+// A PREVIEW, not an import. The user is about to merge somebody else's data
+// model into their vault and should see it first -- and the step that can fail
+// for six different reasons should fail before anything is written rather than
+// halfway through. The write itself goes through the ordinary `vault:save`,
+// so an import cannot reach the vault by a path nothing else uses.
+ipcMain.handle('import:bitwardenPreview', (_e, source: BitwardenSource) =>
+  previewBitwardenImport(source).catch((err: unknown) => ({
+    error: err instanceof Error ? err.message : String(err)
+  }))
+)
 
 // Destinations. The renderer never sees a credential for any of them: an SFTP
 // destination names a server whose secret credentialResolver reads in main, and

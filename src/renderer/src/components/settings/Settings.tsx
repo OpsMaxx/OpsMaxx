@@ -30,6 +30,7 @@ import { bridgeOn, bridgeHas } from '../../lib/bridge'
 import { ShortcutManager } from './ShortcutManager'
 import { BackupPanel } from './BackupPanel'
 import { AgentPanel } from '../sshAgent/AgentPanel'
+import { BitwardenImport } from '../vault/BitwardenImport'
 import { UpdatePanel } from './UpdatePanel'
 import { useOnboarding } from '../../store/onboarding'
 import { SshSessions } from './SshSessions'
@@ -1472,6 +1473,9 @@ export function Settings(): React.JSX.Element {
                 Let a script or an agent call a third-party API without ever holding the key.
               </div>
               <CredProxyPanel />
+
+              <h3>Import from another password manager</h3>
+              <BitwardenImport />
             </div>
           )}
 

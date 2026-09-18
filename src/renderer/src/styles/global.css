@@ -2,6 +2,7 @@
 @import '../components/cicd/cicd.css';
 @import '../components/addy/addy.css';
 @import '../components/sshAgent/agent.css';
+@import '../components/vault/bitwardenImport.css';
 
 /* ============================= Reset ============================= */
 *,
