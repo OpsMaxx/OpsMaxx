@@ -542,13 +542,33 @@ async function openSession(
 
     const { host, port: target } = wanted
     dialled = await dialTarget(server, host, target)
-    const handshake = await performHandshake(dialled.stream, request.x224, wanted)
+    // Set when the fallback below carried the session. It survives the success
+    // path deliberately: this describes the server's certificate, which is a
+    // standing condition, not a failed attempt — so it stays on record until a
+    // connection succeeds without needing it.
+    let degraded: string | null = null
+    let handshake: Handshake
+    try {
+      handshake = await performHandshake(dialled.stream, request.x224, wanted)
+    } catch (err) {
+      if (!isKeyUsageRefusal(err)) throw err
+      // A fresh connection, not a second handshake on this one: the failed TLS
+      // attempt has already consumed the X.224 exchange and left the stream
+      // unusable, so there is nothing here to retry on.
+      dialled.close()
+      dialled = await dialTarget(server, host, target)
+      handshake = await performHandshake(dialled.stream, request.x224, wanted, RSA_KEY_EXCHANGE)
+      degraded =
+        "This host's certificate does not permit the usual key exchange, so the desktop connected with an older one that has no forward secrecy. Reissuing the machine's RDP certificate with the digitalSignature key usage restores it."
+    }
     tlsSocket = handshake.tlsSocket
 
     ws.send(buildResponse(request.destination, handshake.x224Response, handshake.certChain))
     // Got through, so whatever went wrong last time no longer describes
-    // anything and must not be shown against the next failure.
-    forgetFailure(ticket.serverId)
+    // anything and must not be shown against the next failure — unless it is
+    // the note above, which describes what this very session is doing.
+    if (degraded) rememberFailure(ticket.serverId, new Error(degraded))
+    else forgetFailure(ticket.serverId)
     relay(ws, handshake.tlsSocket, dialled.close)
   } catch (err) {
     // WHY THIS IS RECORDED RATHER THAN ONLY SENT.
@@ -766,6 +786,43 @@ async function dialThroughVpn(
 // `remoteAddress`, so anything socket-shaped here would fork the two paths at
 // exactly the point where they must not differ.
 /**
+ * THE SECOND ATTEMPT, FOR A CERTIFICATE THAT FORBIDS THE FIRST ONE'S CIPHER.
+ *
+ * Electron links BoringSSL, and BoringSSL enforces the leaf certificate's
+ * X.509 KeyUsage against the key exchange it negotiated: keyEncipherment for
+ * RSA, digitalSignature for ECDHE_RSA. That enforcement became the default in
+ * BORINGSSL_API_VERSION 19; OpenSSL does not do it, and neither do mstsc or
+ * FreeRDP. A Windows RDP host whose self-signed certificate carries
+ * keyEncipherment but not digitalSignature therefore refuses an ECDHE
+ * handshake here and completes one everywhere else, as
+ * "KEY_USAGE_BIT_INCORRECT ... ssl_cert.cc".
+ *
+ * There is a BoringSSL switch for this — SSL_set_enforce_rsa_key_usage — and
+ * node:tls exposes no way to reach it, so the only lever left is to stop
+ * asking for the key exchange the certificate forbids. Offering RSA key
+ * exchange makes keyEncipherment the bit that matters, which is the one such a
+ * certificate has. TLS 1.3 has no RSA key exchange at all, hence the cap.
+ *
+ * NOT THE DEFAULT, AND THIS IS THE POINT. RSA key exchange has no forward
+ * secrecy: somebody who records this session and later obtains the server's
+ * private key can read it. So the normal path is untouched and keeps ECDHE,
+ * and this is reached only after a server has refused, for that server, with
+ * the reason recorded so the downgrade is visible rather than silent.
+ */
+export const RSA_KEY_EXCHANGE = {
+  ciphers: 'AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA256:AES128-SHA:AES256-SHA',
+  maxVersion: 'TLSv1.2'
+} as const
+
+/** Whether this failure is the one RSA_KEY_EXCHANGE can answer. Matched on the
+ *  BoringSSL reason code, which is stable and specific — anything broader would
+ *  retry handshakes that failed for reasons a cipher list cannot fix. */
+export function isKeyUsageRefusal(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err)
+  return message.includes('KEY_USAGE_BIT_INCORRECT')
+}
+
+/**
  * An RDP Negotiation Failure in the X.224 Connection Confirm, in words.
  *
  * MS-RDPBCGR 2.2.1.2: the Confirm is a 4-byte TPKT header and a 7-byte CC-TPDU,
@@ -808,7 +865,9 @@ function performHandshake(
   x224Request: Buffer,
   // The RDP host, for the certificate pin. Never the bastion: the identity
   // being checked is the machine the desktop is on, not the route to it.
-  target: { host: string; port: number }
+  target: { host: string; port: number },
+  // Empty for the normal attempt. RSA_KEY_EXCHANGE on the retry.
+  tls: { ciphers?: string; maxVersion?: 'TLSv1.2' } = {}
 ): Promise<Handshake> {
   return new Promise<Handshake>((resolve, reject) => {
     let settled = false
@@ -868,7 +927,14 @@ function performHandshake(
         // replaces it is the pin checked below, which is the same policy this
         // app applies to SSH host keys. Turning this to `true` does not harden
         // the connection; it removes the feature.
-        { socket: stream as unknown as import('node:net').Socket, rejectUnauthorized: false },
+        {
+          socket: stream as unknown as import('node:net').Socket,
+          rejectUnauthorized: false,
+          // Normally undefined, so the default suites and TLS 1.3 apply. Set
+          // only on the second attempt, for a server whose certificate forbids
+          // the key exchange the first attempt chose. See RSA_KEY_EXCHANGE.
+          ...tls
+        },
         () => {
           if (settled) return
           // The network half is done, so the deadline for it stops here. What

@@ -81,9 +81,8 @@ vi.mock('../src/main/services/ssh', () => ({
   }
 }))
 
-const { rdpMintTicket, rdpRelayStatus, rdpLastError, stopRdpRelay } = await import(
-  '../src/main/services/rdpRelay'
-)
+const { rdpMintTicket, rdpRelayStatus, rdpLastError, stopRdpRelay, RSA_KEY_EXCHANGE, isKeyUsageRefusal } =
+  await import('../src/main/services/rdpRelay')
 const { buildResponse, parseRequest } = await import('../src/main/services/rdcleanpath')
 
 const KEY = readFileSync(join(__dirname, 'fixtures/rdp/test-key.pem'))
@@ -905,5 +904,81 @@ describe('a server that refuses the security it was offered', () => {
     expect(reply.closeCode).toBeUndefined()
     expect(rdpLastError('srv-plain')).toBeNull()
     ws.close()
+  })
+})
+
+// A CERTIFICATE THAT FORBIDS THE CIPHER THE HANDSHAKE CHOSE.
+//
+// Electron links BoringSSL, which enforces the leaf certificate's X.509
+// KeyUsage against the negotiated key exchange — keyEncipherment for RSA,
+// digitalSignature for ECDHE_RSA — and has done by default since
+// BORINGSSL_API_VERSION 19. A Windows RDP host whose self-signed certificate
+// carries keyEncipherment but not digitalSignature therefore fails here with
+// KEY_USAGE_BIT_INCORRECT while connecting fine from mstsc and FreeRDP, which
+// do not enforce it. A user hit exactly that.
+//
+// WHAT THESE TESTS CANNOT DO, said plainly: Node links OpenSSL, which does not
+// enforce KeyUsage at all, so the failure cannot be reproduced in this suite
+// and neither can the retry that answers it. Everything below pins the
+// DECISION — when to retry, with what, and that it is not the default. The
+// end-to-end path was verified by the reporter's own screenshot, not here, and
+// pretending otherwise by building a test that passes for unrelated reasons
+// would be worse than saying so.
+describe('the RSA key exchange fallback', () => {
+  it('recognises the BoringSSL refusal and nothing broader', () => {
+    expect(
+      isKeyUsageRefusal(
+        new Error(
+          'TLS handshake failed: 1322850782048:error:1000012e:SSL routines:OPENSSL_internal:KEY_USAGE_BIT_INCORRECT:../../third_party/boringssl/src/ssl/ssl_cert.cc:397:'
+        )
+      )
+    ).toBe(true)
+
+    // A cipher list cannot fix any of these, and retrying them would double
+    // the time every genuinely broken host takes to fail.
+    for (const other of [
+      'TLS handshake failed: socket hang up',
+      'TLS handshake failed: CERTIFICATE_VERIFY_FAILED',
+      'RDP handshake timed out',
+      'the certificate for this host was not trusted'
+    ]) {
+      expect(isKeyUsageRefusal(new Error(other)), other).toBe(false)
+    }
+  })
+
+  it('offers only RSA key exchange, since that is the whole point', () => {
+    // Every suite here is TLS_RSA_WITH_*. An ECDHE suite in this list would
+    // let the server pick the very exchange the certificate forbids, and the
+    // retry would fail the same way as the attempt before it.
+    for (const suite of RSA_KEY_EXCHANGE.ciphers.split(':')) {
+      expect(suite.startsWith('ECDHE'), suite).toBe(false)
+      expect(suite.startsWith('DHE'), suite).toBe(false)
+    }
+  })
+
+  it('caps at TLS 1.2, because TLS 1.3 has no RSA key exchange at all', () => {
+    expect(RSA_KEY_EXCHANGE.maxVersion).toBe('TLSv1.2')
+  })
+
+  it('is never what the first attempt uses', async () => {
+    // The ordinary path keeps ECDHE and forward secrecy. If this fallback ever
+    // becomes the default, every RDP session silently loses forward secrecy —
+    // so the source is pinned rather than trusted to stay that way.
+    const { readFileSync } = await import('node:fs')
+    const { resolve } = await import('node:path')
+    const src = readFileSync(
+      resolve(__dirname, '..', 'src/main/services/rdpRelay.ts'),
+      'utf8'
+    )
+    const first = src.indexOf('handshake = await performHandshake(dialled.stream, request.x224, wanted)')
+    const fallback = src.indexOf('RSA_KEY_EXCHANGE)')
+    expect(first).toBeGreaterThan(-1)
+    expect(fallback).toBeGreaterThan(first)
+
+    // And the retry dials again. Reusing the stream is the obvious wrong
+    // implementation: the failed TLS attempt already consumed the X.224
+    // exchange, so a second handshake on it cannot work.
+    const between = src.slice(first, fallback)
+    expect(between).toContain('dialled = await dialTarget(server, host, target)')
   })
 })
