@@ -295,10 +295,22 @@ describe('keys while a remote desktop has focus', () => {
 
   it('releases held keys when the tab stops being visible', () => {
     expect(VIEW).toContain("window.dispatchEvent(new Event('blur'))")
-    // Guarded on the tab going away, not on it arriving: dispatching this
-    // while the desktop is on screen would drop the user's own modifiers.
+
+    // Guarded on the tab going AWAY, not on it arriving: dispatching while the
+    // desktop is on screen would drop the user's own held modifiers.
+    //
+    // Asserted on the effect's own guard line rather than on how many
+    // characters precede the dispatch — the first version of this measured a
+    // 160-character window and broke the moment a try/catch and its comment
+    // were added between the two, which is a test measuring layout.
+    expect(VIEW).toContain("if (visible || phase !== 'connected') return")
+
+    // And wrapped: the component's shutdown() leaves `this.session` set, so a
+    // dispatch after teardown reaches a consumed WASM session and throws
+    // synchronously into the effect that dispatched it.
     const at = VIEW.indexOf("window.dispatchEvent(new Event('blur'))")
-    const before = VIEW.slice(Math.max(0, at - 160), at)
-    expect(before).toContain('if (visible')
+    const around = VIEW.slice(at - 600, at + 200)
+    expect(around).toContain('try {')
+    expect(around).toContain('} catch {')
   })
 })

@@ -203,6 +203,10 @@ function describeError(err: unknown): string {
   return String(err)
 }
 
+/** How long the component gets to emit `ready` before we give up on it. It is
+ *  a local WASM instantiation, not a network call, so this is generous. */
+const READY_TIMEOUT_MS = 30_000
+
 type Phase = 'idle' | 'loading' | 'connecting' | 'connected' | 'failed'
 
 export function RdpView({
@@ -283,13 +287,38 @@ export function RdpView({
    * synthetic blur cannot leave it stuck off: the focus effect above restores
    * it on the way back.
    *
-   * The one thing this cannot prove is that no third-party library in the
-   * renderer listens for window blur. Nothing in src/renderer/src does, and the
-   * editors here bind to their own elements, but a dependency could.
+   * TWO HONEST CAVEATS.
+   *
+   * This is a broadcast, not a message to one session. The component registers
+   * its blur listener on the global `window` per instance, and unlike its
+   * keydown handler that listener has no focus gate — so with several desktops
+   * open, hiding one releases held input on all of them. A keyup for a key
+   * nobody is holding is a protocol no-op, and a background tab cannot be
+   * mid-drag by definition, so the cost is a redundant write per tab switch
+   * rather than a defect. Narrowing it would mean reaching further into the
+   * component than this is worth.
+   *
+   * And nothing here can prove that no third-party library listens for window
+   * blur. Nothing in src/renderer/src does, and the editors bind to their own
+   * elements, but a dependency could.
    */
   useEffect(() => {
     if (visible || phase !== 'connected') return
-    window.dispatchEvent(new Event('blur'))
+    // WRAPPED, because there is one window where this reaches a dead session.
+    //
+    // The component's shutdown() calls `this.session?.shutdown()` and never
+    // clears `this.session`, so afterwards the optional chain still passes and
+    // releaseAllInputs() runs against a consumed WASM session. The listener
+    // outlives the shutdown too — it goes only when the element is detached.
+    // React runs every cleanup for a commit before any setup, so the main
+    // effect's cleanup can shut the session down and this effect's cleanup can
+    // then dispatch into it. That throw would land synchronously here, inside
+    // dispatchEvent, rather than anywhere that could handle it.
+    try {
+      window.dispatchEvent(new Event('blur'))
+    } catch {
+      /* the session went out from under us; there is nothing left to release */
+    }
   }, [visible, phase])
 
   useEffect(() => {
@@ -358,15 +387,31 @@ export function RdpView({
         element.setAttribute('flexcenter', 'true')
         element.style.cssText = 'flex:1; min-height:0; display:block'
 
-        const ready = new Promise<UserInteraction>((resolve) => {
+        // A DEADLINE, because this promise has a path on which it never settles.
+        //
+        // If teardown lands between appending the element and its `ready`
+        // event, the cleanup detaches the element and the event never fires.
+        // The disposed check below covers the case where `ready` DOES arrive;
+        // without a timeout the other case leaves this async function suspended
+        // for the life of the window, holding the element and its WASM instance
+        // with it.
+        const ready = new Promise<UserInteraction | null>((resolve) => {
           element.addEventListener(
             'ready',
             (e) => resolve((e as CustomEvent<ReadyDetail>).detail.irgUserInteraction),
             { once: true }
           )
+          setTimeout(() => resolve(null), READY_TIMEOUT_MS)
         })
         host.appendChild(element)
         const ui = await ready
+        if (!ui) {
+          if (!disposed) {
+            setError('The remote desktop client did not finish loading.')
+            setPhase('failed')
+          }
+          return
+        }
         if (disposed) {
           ui.shutdown()
           return

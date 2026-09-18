@@ -74,6 +74,18 @@ let sessions = 0
 // Sockets past the token check but not yet relaying. See inUse().
 let connecting = 0
 let idleTimer: NodeJS.Timeout | null = null
+/**
+ * Bumped every time the relay is torn down.
+ *
+ * stopRdpRelay zeroes the counters synchronously, but `terminate()` fires each
+ * socket's `close` asynchronously. If a new listener is built in that gap — the
+ * idle shutdown is fire-and-forget, and a mint can land during the awaits in
+ * the teardown — the old sockets' close handlers arrive late and decrement
+ * counters that now belong to the NEW relay, so a live desktop reads as idle
+ * and is reaped sixty seconds later for no visible reason. Each session
+ * remembers the generation it was counted in and only releases its own.
+ */
+let generation = 0
 
 /**
  * The relay's own view of itself.
@@ -301,6 +313,9 @@ export async function stopRdpRelay(): Promise<void> {
   port = null
   sessions = 0
   connecting = 0
+  // Past this point, every counter release from the relay being torn down
+  // belongs to a generation that no longer owns these numbers.
+  generation++
 
   // Each live socket, explicitly. `WebSocketServer.close()` stops the server
   // accepting new connections and does NOT close the ones it already has —
@@ -496,10 +511,13 @@ function handleConnection(ws: WebSocket, req: { url?: string }): void {
   // else records that this socket exists.
   connecting++
   let counted = true
+  // Same generation scoping as relay(): a socket terminated by a teardown
+  // emits its close after the counters have been zeroed and possibly re-used.
+  const gen = generation
   const uncount = (): void => {
     if (!counted) return
     counted = false
-    connecting = Math.max(0, connecting - 1)
+    if (gen === generation) connecting = Math.max(0, connecting - 1)
   }
 
   // A socket that opens and never sends a PDU would otherwise sit here for as
@@ -512,6 +530,21 @@ function handleConnection(ws: WebSocket, req: { url?: string }): void {
   }, HANDSHAKE_TIMEOUT_MS)
   firstMessage.unref()
 
+  // ONE ASSUMPTION, WRITTEN DOWN RATHER THAN DEFENDED.
+  //
+  // This reads the first frame and relay() attaches the real message handler
+  // only after the dial and the handshake, seconds later. Anything arriving in
+  // between has no listener and is dropped. Nothing does: the RDCleanPath
+  // client waits for the response PDU before it sends a single TLS record.
+  //
+  // That is an assumption about someone else's code, which this file otherwise
+  // refuses to make — so it is stated here rather than left implicit. If it
+  // ever stops holding, the fix is `ws.pause()` on the next line and
+  // `ws.resume()` at the end of relay() once the real handler is on: frames
+  // then queue in the socket, bounded by the TCP receive window, which is how
+  // relay() already handles backpressure in this direction. Buffering them into
+  // an array instead would add an unbounded memory path for a misbehaving
+  // client, to defend against a symptom that does not exist.
   ws.once('message', (data: Buffer) => {
     clearTimeout(firstMessage)
     const first = Buffer.from(data)
@@ -1147,11 +1180,14 @@ function relay(ws: WebSocket, tlsSocket: TLSSocket, closeTransport: () => void):
     }
   })
 
+  const gen = generation
   let closed = false
   const close = (): void => {
     if (closed) return
     closed = true
-    sessions = Math.max(0, sessions - 1)
+    // The transport still has to go, whoever it belonged to; only the counter
+    // is generation-scoped, because a newer relay owns that number now.
+    if (gen === generation) sessions = Math.max(0, sessions - 1)
     if (!tlsSocket.destroyed) tlsSocket.destroy()
     // The SSH chain or VPN forward beneath the TLS session. Destroying only the
     // TLS socket would leave a bastion connection open per closed desktop.
