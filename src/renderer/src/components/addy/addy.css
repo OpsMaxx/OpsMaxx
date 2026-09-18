@@ -1,0 +1,99 @@
+/* The revocation block.
+ *
+ * Deliberately not styled as a dialog. A dialog implies something behind it,
+ * and there is nothing behind this -- App renders it INSTEAD of the app, not
+ * over it, because everything it would sit on top of lists server names and
+ * vault entries. It fills the window, is not dismissible, and has one action.
+ */
+.revoked-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg-app);
+  overflow-y: auto;
+  /* Above everything, including the frameless title bar's own drag region:
+     there is no window control on this screen that should still work. */
+  z-index: 10000;
+}
+
+.revoked-card {
+  max-width: 520px;
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 28px;
+  color: var(--text);
+}
+
+.revoked-icon {
+  color: var(--danger);
+  margin-bottom: 12px;
+}
+
+.revoked-card h1 {
+  font-size: 19px;
+  margin: 0 0 12px;
+  line-height: 1.3;
+}
+
+.revoked-card p {
+  color: var(--text-muted);
+  line-height: 1.55;
+  margin: 0 0 14px;
+  font-size: 13px;
+}
+
+.revoked-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text) !important;
+}
+
+.revoked-problem {
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  margin-bottom: 14px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.revoked-problem > svg {
+  color: var(--danger);
+  flex: none;
+  margin-top: 2px;
+}
+
+.revoked-problem p {
+  margin: 6px 0 0;
+}
+
+.revoked-note {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 14px;
+}
+
+.spin {
+  animation: revoked-spin 1s linear infinite;
+}
+
+@keyframes revoked-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The one place a reduced-motion preference matters here: this spinner can be
+   on screen for the whole length of a wipe. */
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}

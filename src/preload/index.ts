@@ -285,8 +285,39 @@ export interface ProviderDetectionResult {
   error?: string
 }
 
+/** Mirrors RevocationTombstone in main/services/addy/revoke.ts. Declared
+ *  rather than imported: the preload must not pull a main-process module into
+ *  the renderer's bundle, and this is three fields. */
+export interface AddyRevocation {
+  accountId: string
+  deviceId: string
+  at: string
+  stage: 'wiping' | 'wiped' | 'failed'
+  error?: string
+  cleared?: boolean
+}
+
 const api = {
   platform: (): Promise<NodeJS.Platform> => ipcRenderer.invoke('app:platform'),
+  // addy: the satellite relay. Sync, pairing and continuity.
+  //
+  // The renderer never holds a key and never sees one. Everything here either
+  // asks main a question about state main already owns, or asks it to do
+  // something whose keys live in the addyd sidecar -- the same division the
+  // vault and credential proxy already use, for the same reason.
+  addy: {
+    /**
+     * Whether this device has been revoked, and how far the wipe got.
+     *
+     * Read before the first frame is drawn. The revocation screen is a BLOCK,
+     * not a notice, so it has to be resolved before anything that could show a
+     * server name or a vault entry mounts.
+     */
+    revocation: (): Promise<AddyRevocation | null> => ipcRenderer.invoke('addy:revocation'),
+    /** Acknowledge a finished wipe so the machine can be set up again, as a
+     *  new device. Recovers nothing: the data is already gone. */
+    clearRevocation: (): Promise<void> => ipcRenderer.invoke('addy:clearRevocation')
+  },
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
   autoStart: {
     get: (): Promise<AutoStartState> => ipcRenderer.invoke('app:autoStart'),

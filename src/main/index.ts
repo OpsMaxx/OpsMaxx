@@ -323,6 +323,7 @@ import {
   startBackupSchedule,
   stopBackupSchedule
 } from './services/backup'
+import { clearRevocation, revocationState } from './services/addy/revoke'
 import { databaseDumpTarget, dumpableDatabases } from './services/backupTargets'
 import { BACKUP_STAGE_LABEL } from '../shared/backup'
 import type { BackupDestination, BackupRunReport, DumpRunReport } from '../shared/backup'
@@ -1749,6 +1750,59 @@ function closeHistoryNow(): void {
   } finally {
     historyStore = null
   }
+}
+
+/**
+ * Close everything holding a live connection, before a path that deletes the
+ * files those connections were opened against.
+ *
+ * Two callers, and they are the same operation with different reasons: the
+ * user asking to delete everything, and a roster entry saying this device is
+ * revoked. Both used to be able to unlink the vault, the server list and the
+ * host-key pins while an SSH session, a database connection and the credential
+ * proxy were all still live. That does not make any of them stop -- it makes
+ * them carry on against files that are gone, which is how a "delete
+ * everything" ends with a shell open on a production host and a proxy still
+ * forwarding credentials for it. It matters most on the failure path, where
+ * the app deliberately does NOT relaunch and so keeps running in that state.
+ *
+ * Consumers before transports, the same order `before-quit` uses and for the
+ * same reason: nothing should observe a half-dead network on the way down.
+ * Unlike `before-quit` this does not end the process -- the app has to stay up
+ * to report what happened, and in the revocation case to hold the screen that
+ * explains it.
+ */
+async function closeLiveSessions(): Promise<void> {
+  // A scheduled backup mid-run would read files this is about to delete, and
+  // write a bundle of whatever survived.
+  stopBackupSchedule()
+
+  // Consumers of a pooled SSH connection.
+  logTailer.disposeAll()
+  broadcast.disposeAll()
+  jobRunner.disposeAll()
+  ruleEngine.stop()
+  serviceChecks.dispose()
+  cicd.dispose()
+
+  // Anything serving on loopback. These hand out credentials, so they must be
+  // shut before the store behind them is unlinked rather than after.
+  void stopRdpRelay()
+  await stopMcpServer().catch(() => undefined)
+
+  // The transports themselves.
+  sshDisposeAll()
+  localDisposeAll()
+  sftpDisposeAll()
+  localFilesDisposeAll()
+  metricsDisposeAll()
+  dbDisposeAll()
+  externalEditDisposeAll()
+
+  // Last, and deliberately: the vault is what several of the above were using
+  // to authenticate, so it is the one thing that must still be there while
+  // they close.
+  vaultDispose()
 }
 
 // ---- Fleet sampling ----
@@ -4553,8 +4607,19 @@ ipcMain.handle('backup:alarms', (): BackupAlarm[] => {
     return []
   }
 })
-ipcMain.handle('backup:deleteAll', () => deleteAllData(closeHistoryNow))
+ipcMain.handle('backup:deleteAll', async () => {
+  await closeLiveSessions()
+  return deleteAllData(closeHistoryNow)
+})
 ipcMain.handle('backup:relaunch', () => relaunchApp())
+
+// ---- addy ----
+//
+// Read before the first frame: the revocation screen is a block, not a notice,
+// so it has to be resolved before anything that could show a server name or a
+// vault entry mounts.
+ipcMain.handle('addy:revocation', () => revocationState())
+ipcMain.handle('addy:clearRevocation', () => clearRevocation())
 
 // Destinations. The renderer never sees a credential for any of them: an SFTP
 // destination names a server whose secret credentialResolver reads in main, and

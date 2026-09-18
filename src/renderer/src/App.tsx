@@ -1,5 +1,7 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useApp } from './store/app'
+import { RevokedScreen } from './components/addy/RevokedScreen'
+import type { AddyRevocation } from '../../preload'
 import { startBackupRunWatch } from './store/backupRuns'
 import { clsx } from './lib/format'
 import { initPersistence } from './store/persist'
@@ -84,6 +86,29 @@ function MainArea(): React.JSX.Element {
 
 export default function App(): React.JSX.Element {
   useHotkeys()
+  /**
+   * Resolved before anything else renders.
+   *
+   * `undefined` means "not asked yet" and is deliberately distinct from `null`,
+   * which means "asked, and this device is fine". Rendering the app while the
+   * answer is unknown would show a sidebar full of server names for however
+   * many milliseconds the IPC round trip takes, on precisely the machine that
+   * is not supposed to see them again.
+   */
+  const [revocation, setRevocation] = useState<AddyRevocation | null | undefined>(undefined)
+  useEffect(() => {
+    const bridge = window.opsmaxx?.addy
+    // No bridge at all (a build without one, or a test harness) is not a
+    // revocation. Failing towards blocked here would brick every such build.
+    if (!bridge) {
+      setRevocation(null)
+      return
+    }
+    void bridge.revocation().then(
+      (r) => setRevocation(r?.cleared ? null : r),
+      () => setRevocation(null)
+    )
+  }, [])
   const theme = useApp((s) => s.theme)
   const modal = useApp((s) => s.modal)
   const paletteOpen = useApp((s) => s.paletteOpen)
@@ -118,6 +143,23 @@ export default function App(): React.JSX.Element {
     apply(theme)
     window.opsmaxx?.theme.set(theme as 'dark' | 'light' | 'system')
   }, [theme])
+
+  // Nothing at all rather than a flash of the app. The window is already
+  // showing the shell's background at this point, and this resolves in one IPC
+  // round trip.
+  if (revocation === undefined) return <div className="app" />
+
+  if (revocation) {
+    return (
+      <RevokedScreen
+        state={revocation}
+        onClear={async () => {
+          await window.opsmaxx?.addy.clearRevocation()
+          setRevocation(null)
+        }}
+      />
+    )
+  }
 
   return (
     <div className="app">

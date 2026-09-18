@@ -1,5 +1,6 @@
 @import './tokens.css';
 @import '../components/cicd/cicd.css';
+@import '../components/addy/addy.css';
 
 /* ============================= Reset ============================= */
 *,
