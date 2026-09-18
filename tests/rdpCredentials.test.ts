@@ -314,3 +314,51 @@ describe('keys while a remote desktop has focus', () => {
     expect(around).toContain('} catch {')
   })
 })
+
+/**
+ * Sharpness, and the reason it is asked for in the resize rather than at connect.
+ *
+ * A desktop negotiated in CSS pixels is rasterised across twice as many device
+ * pixels on a 2x display: every glyph upsampled, which is most of why a remote
+ * desktop looks soft on a Retina screen.
+ *
+ * Raising it at CONNECT would be the obvious place and is the dangerous one: a
+ * server with no Microsoft::Windows::RDS::DisplayControl accepts no resize and
+ * no scale factor, so it would be left showing a sharp desktop permanently at
+ * half physical size with no way back. Raising it in the resize means such a
+ * server ignores the call and keeps exactly today's behaviour — the worst case
+ * is no improvement rather than a regression.
+ *
+ * The constraints are IronRDP's own, from ironrdp-displaycontrol's monitor
+ * layout PDU: width MUST NOT be odd, both dimensions are 200..8192, and the
+ * scale factor is ignored below 100 or above 500 percent.
+ */
+describe('the negotiated desktop size', () => {
+  const VIEW = src('src/renderer/src/components/rdp/RdpView.tsx')
+
+  it('never asks for an odd width, which the protocol forbids', () => {
+    expect(VIEW).toContain('& ~1')
+    // And no longer rounds height, which has no such rule — that rounding
+    // existed only as folklore and cost a resample on every session.
+    expect(VIEW).not.toMatch(/height:\s*clamp\([^)]*\)\s*&\s*~/)
+  })
+
+  it('stays inside the protocol ceiling rather than a guessed one', () => {
+    expect(VIEW).toContain('8192')
+  })
+
+  it('asks for device pixels only in the resize, never at connect', () => {
+    // connect passes the CSS-pixel size: one argument, no ratio.
+    expect(VIEW).toContain('.withDesktopSize(desktopSizeOf(host))')
+    // the resize passes the ratio and a DesktopScaleFactor percentage.
+    expect(VIEW).toContain('desktopSizeOf(host, dpr)')
+    expect(VIEW).toMatch(/ui\.resize\(next\.width, next\.height, Math\.round\(100 \*/)
+  })
+
+  it('re-measures when the display changes, which fires no resize on macOS', () => {
+    // Window geometry there is in points, so moving between a 2x and a 1x
+    // display leaves every box identical while devicePixelRatio halves.
+    expect(VIEW).toContain('dppx')
+    expect(VIEW).toContain('armDprWatch')
+  })
+})

@@ -132,16 +132,20 @@ interface UserInteraction {
  * a fallback for hosts that do not, which is a change of its own rather than a
  * line in this function.
  */
-function desktopSizeOf(el: HTMLElement): { width: number; height: number } {
+function desktopSizeOf(el: HTMLElement, dpr = 1): { width: number; height: number } {
   const rect = el.getBoundingClientRect()
+  // Capped at 2. Beyond that the pixel cost grows faster than the sharpness,
+  // and 3x displays are rare enough not to design the ceiling around.
+  const scale = Math.max(1, Math.min(dpr, 2))
   const clamp = (v: number, lo: number, hi: number): number =>
     Math.max(lo, Math.min(hi, Math.floor(v)))
-  // The floor is what a pane that has not been laid out yet collapses to; the
-  // ceiling keeps a maximised window on a very large display from asking for a
-  // desktop the server will refuse.
+  // The floor is what a pane that has not been laid out yet collapses to. The
+  // ceiling is the protocol's: ironrdp-displaycontrol states width and height
+  // MUST be between 200 and 8192, so anything above that is refused outright
+  // rather than merely unwise.
   return {
-    width: clamp(rect.width, 640, 4096) & ~1,
-    height: clamp(rect.height, 480, 2160)
+    width: clamp(rect.width * scale, 640, 8192) & ~1,
+    height: clamp(rect.height * scale, 480, 8192)
   }
 }
 
@@ -555,52 +559,73 @@ export function RdpView({
         // reallocates its framebuffer; a desktop that renegotiated sixty times
         // a second would spend the drag redrawing rather than resizing.
         let debounce: ReturnType<typeof setTimeout> | undefined
+        const resizeToPane = (): void => {
+          if (disposed) return
+          // A HIDDEN TAB IS NOT A RESIZE.
+          //
+          // Inactive tabs are `display: none`, so the observer fires with a
+          // 0x0 rect the moment the user switches away. desktopSizeOf then
+          // clamps that up to its 640x480 floor and this sent a real
+          // MS-RDPEDISP renegotiation: every window on the remote desktop
+          // crushed into 640x480 and the icons rearranged. Switching back
+          // renegotiates the size up again, and Windows does not put the
+          // layout back — so half a second on another tab permanently
+          // rearranged the user's desktop.
+          //
+          // The floor in desktopSizeOf was papering over exactly this, which
+          // is why it describes "a pane that has not been laid out yet".
+          const rect = host.getBoundingClientRect()
+          if (!rect.width || !rect.height) return
+
+          // ASKED FOR IN DEVICE PIXELS, AND ONLY HERE.
+          //
+          // The connect above negotiates in CSS pixels, which on a 2x display
+          // means the desktop is rasterised across twice as many device
+          // pixels as it has: every glyph upsampled, which is most of why a
+          // remote desktop looks soft on a Retina screen.
+          //
+          // Raising it in the RESIZE rather than at connect is what makes
+          // this safe. A server with no Microsoft::Windows::RDS::DisplayControl
+          // -- xrdp, anything pre-2012R2 -- ignores this call, so it keeps
+          // exactly today's behaviour; the worst case is no improvement
+          // rather than a sharp desktop permanently at half physical size,
+          // which is what asking at connect time would have risked.
+          //
+          // The third argument is DesktopScaleFactor, a percentage. Without
+          // it Windows would render a 2x desktop at 100% DPI and every
+          // control would come out half its physical size. ironrdp-display
+          // control states the range: ignored below 100 or above 500.
+          const dpr = window.devicePixelRatio || 1
+          const next = desktopSizeOf(host, dpr)
+          try {
+            ui.resize(next.width, next.height, Math.round(100 * Math.min(Math.max(dpr, 1), 2)))
+            // IMMEDIATELY, IN THE SAME TASK, and that is the whole point.
+            //
+            // resize() publishes its new size to the component's own signals
+            // BEFORE it asks the session for anything, which pins the viewer
+            // to the requested box while the canvas still holds the old
+            // desktop. A server that accepts the resize corrects it when the
+            // new frame arrives; a server with no display control -- xrdp, or
+            // anything pre-2012R2 -- accepts nothing and never corrects it,
+            // so the desktop stayed stretched to the wrong aspect until the
+            // next resize.
+            //
+            // Re-asserting the fit here writes to the same signals before
+            // Svelte flushes, so the stretched value never reaches the DOM
+            // and never paints. On the accepting path it is idempotent: the
+            // fit is recomputed to the same numbers, and the server's own
+            // canvasResized recomputes it again anyway.
+            ui.setScale('fit')
+          } catch {
+            // A session that died between the observation and the call has
+            // already surfaced its own failure; resizing it is not a second
+            // thing to report.
+          }
+        }
+
         const observer = new ResizeObserver(() => {
           clearTimeout(debounce)
-          debounce = setTimeout(() => {
-            if (disposed) return
-            // A HIDDEN TAB IS NOT A RESIZE.
-            //
-            // Inactive tabs are `display: none`, so the observer fires with a
-            // 0x0 rect the moment the user switches away. desktopSizeOf then
-            // clamps that up to its 640x480 floor and this sent a real
-            // MS-RDPEDISP renegotiation: every window on the remote desktop
-            // crushed into 640x480 and the icons rearranged. Switching back
-            // renegotiates the size up again, and Windows does not put the
-            // layout back — so half a second on another tab permanently
-            // rearranged the user's desktop.
-            //
-            // The floor in desktopSizeOf was papering over exactly this, which
-            // is why it describes "a pane that has not been laid out yet".
-            const rect = host.getBoundingClientRect()
-            if (!rect.width || !rect.height) return
-
-            const next = desktopSizeOf(host)
-            try {
-              ui.resize(next.width, next.height)
-              // IMMEDIATELY, IN THE SAME TASK, and that is the whole point.
-              //
-              // resize() publishes its new size to the component's own signals
-              // BEFORE it asks the session for anything, which pins the viewer
-              // to the requested box while the canvas still holds the old
-              // desktop. A server that accepts the resize corrects it when the
-              // new frame arrives; a server with no display control -- xrdp, or
-              // anything pre-2012R2 -- accepts nothing and never corrects it,
-              // so the desktop stayed stretched to the wrong aspect until the
-              // next resize.
-              //
-              // Re-asserting the fit here writes to the same signals before
-              // Svelte flushes, so the stretched value never reaches the DOM
-              // and never paints. On the accepting path it is idempotent: the
-              // fit is recomputed to the same numbers, and the server's own
-              // canvasResized recomputes it again anyway.
-              ui.setScale('fit')
-            } catch {
-              // A session that died between the observation and the call has
-              // already surfaced its own failure; resizing it is not a second
-              // thing to report.
-            }
-          }, 250)
+          debounce = setTimeout(resizeToPane, 250)
         })
         observer.observe(host)
 
@@ -619,10 +644,39 @@ export function RdpView({
         const refocus = (): void => element.focus({ preventScroll: true })
         host.addEventListener('pointerdown', refocus)
 
+        // A DISPLAY CHANGE THAT RESIZES NOTHING.
+        //
+        // macOS reports window geometry in points, which map 1:1 to CSS pixels
+        // whatever the backing scale, so dragging the window between the
+        // built-in 2x display and an external 1x monitor leaves innerWidth,
+        // innerHeight and this element's box identical while devicePixelRatio
+        // goes 2 -> 1. No resize event, no observer callback, nothing. Now that
+        // the negotiated size depends on the ratio, that silence would leave
+        // the desktop at the wrong resolution until something else moved.
+        //
+        // A resolution media query is the only reliable signal, and it has to
+        // be re-armed after each change because the query names the ratio it
+        // was built for.
+        let dprQuery: MediaQueryList | null = null
+        const onDprChange = (): void => {
+          dprQuery?.removeEventListener('change', onDprChange)
+          armDprWatch()
+          // Through the same debounce as a real resize, so a drag across a
+          // boundary does not renegotiate per frame.
+          clearTimeout(debounce)
+          debounce = setTimeout(resizeToPane, 250)
+        }
+        const armDprWatch = (): void => {
+          dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`)
+          dprQuery.addEventListener('change', onDprChange)
+        }
+        armDprWatch()
+
         cleanupResize = () => {
           clearTimeout(debounce)
           observer.disconnect()
           host.removeEventListener('pointerdown', refocus)
+          dprQuery?.removeEventListener('change', onDprChange)
         }
       } catch (err) {
         if (disposed) return
