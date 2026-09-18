@@ -38,6 +38,7 @@ import type { HttpCheck } from '../../../shared/httpMonitor'
 import type { CicdConnection } from '../../../shared/cicd'
 import type { TerminalScheme } from '../../../shared/terminalTheme'
 import { bridgeHas } from '../lib/bridge'
+import { DEFAULT_SSH_AGENT_SETTINGS, type SshAgentSettings } from '../../../shared/sshAgentHost'
 
 // Clean default: a single empty workspace. No sample servers/VPNs/tunnels.
 const DEFAULT_WORKSPACE: Workspace = {
@@ -118,6 +119,16 @@ export interface AppSettings {
   // Minutes an authenticated SSH connection is kept alive after its last
   // session closes. 0 = close at once, -1 = keep until the app exits.
   sshMasterIdleMinutes: number
+  /**
+   * The SSH agent OpsMaxx SERVES, for other tools to use.
+   *
+   * Persisted here rather than in main so it travels with the rest of the
+   * user's settings -- including into a backup, which matters: a restored
+   * machine that silently started an agent socket the user had turned off
+   * would be the wrong surprise, and one that forgot they had turned it ON
+   * would break their git.
+   */
+  sshAgent: SshAgentSettings
   // Minutes of vault inactivity before it locks itself. 0 = never. A vault that
   // never locks makes every other protection on it optional, so the default is
   // deliberately short rather than off.
@@ -339,6 +350,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lastBackupTo: null,
   switchHiddenWorkspaces: false,
   sshMasterIdleMinutes: 15,
+  sshAgent: DEFAULT_SSH_AGENT_SETTINGS,
   vaultAutoLockMinutes: 15,
   dbSizeSamplingEnabled: false,
   terminalFontSize: 13,

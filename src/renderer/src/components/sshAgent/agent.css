@@ -93,3 +93,70 @@
   outline: 2px solid var(--text);
   outline-offset: 1px;
 }
+
+/* The settings panel. */
+.agent-panel-problem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 10px 0;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.agent-panel-sock {
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+
+.agent-panel-code {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.agent-panel-code code {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  /* Allowed to wrap. A truncated socket path is one somebody pastes and then
+     spends ten minutes wondering why nothing connects. */
+  word-break: break-all;
+}
+
+.agent-panel-keys {
+  margin: 14px 0;
+}
+
+.agent-panel-key {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+}
+
+.agent-panel-key code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  word-break: break-all;
+}
+
+.agent-panel-key-broken .agent-panel-why {
+  color: var(--danger);
+  font-size: 12px;
+}

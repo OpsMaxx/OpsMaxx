@@ -29,6 +29,7 @@ import { JOB_DETACHED_SETTING_NOTE } from '../../../../shared/jobs'
 import { bridgeOn, bridgeHas } from '../../lib/bridge'
 import { ShortcutManager } from './ShortcutManager'
 import { BackupPanel } from './BackupPanel'
+import { AgentPanel } from '../sshAgent/AgentPanel'
 import { UpdatePanel } from './UpdatePanel'
 import { useOnboarding } from '../../store/onboarding'
 import { SshSessions } from './SshSessions'
@@ -1366,6 +1367,13 @@ export function Settings(): React.JSX.Element {
                 checked={settings.jobsDetached !== false}
                 onChange={(v) => setSettings({ jobsDetached: v })}
               />
+
+              <h3>SSH agent</h3>
+              <div className="sub">
+                Other tools on this machine can use the SSH keys in your vault, without a second
+                copy of them sitting in ~/.ssh.
+              </div>
+              <AgentPanel />
             </div>
           )}
 
