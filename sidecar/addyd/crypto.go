@@ -1,0 +1,425 @@
+package main
+
+import (
+	"bytes"
+	"crypto/ecdh"
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"sync"
+
+	"github.com/opsmaxx/opsmaxx/sidecar/addyd/protocol"
+)
+
+// The --crypto role's methods.
+//
+// THIS PROCESS HOLDS THE KEYS AND NEVER LINKS A WEBRTC STACK. The split is the
+// whole reason addyd has two subcommands: a stack that parses untrusted SDP,
+// STUN, DTLS and SRTP straight off the open internet should not be loaded in
+// the address space that holds the account key, whether or not it is reached.
+//
+// The parent (Electron main) holds the SEALED key material -- it is the only
+// party with a keychain -- and hands it over on `load`. This process holds the
+// unsealed keys for as long as it runs and writes none of them anywhere.
+
+// vault is the unsealed key material, for one account.
+//
+// A mutex rather than a channel-owned goroutine: the operations are short,
+// there is no ordering requirement between them, and the parent serialises its
+// own requests anyway. What the lock is actually for is `reset`, which can
+// arrive while a seal is in flight.
+type vault struct {
+	mu sync.RWMutex
+
+	loaded  bool
+	account protocol.AccountID
+	device  *protocol.DeviceKeys
+	// epochs holds every epoch key this device has been given. More than one
+	// at a time during a transition: objects re-sealed under n+1 land before
+	// the signed transition entry does, so a client still reading n needs n.
+	epochs map[uint64]*protocol.EpochKeys
+}
+
+var keys = &vault{epochs: map[uint64]*protocol.EpochKeys{}}
+
+func (v *vault) reset() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	// Zeroed rather than dropped. Go will not promise the old bytes are gone,
+	// but leaving them reachable when we have a reference is a choice, and
+	// this is the one process on the machine whose whole job is holding them.
+	for _, e := range v.epochs {
+		// The profile key is ours to clear. The X25519 private key is held by
+		// crypto/ecdh behind an interface with no zeroing method, which is a
+		// limit of the standard library rather than a decision here -- worth
+		// saying so rather than leaving a reader to wonder why one is wiped
+		// and the other is not.
+		zero(e.Profile)
+	}
+	v.epochs = map[uint64]*protocol.EpochKeys{}
+	v.device = nil
+	v.loaded = false
+	v.account = protocol.AccountID{}
+}
+
+func zero(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+}
+
+func (v *vault) epoch(n uint64) (*protocol.EpochKeys, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if !v.loaded {
+		return nil, codedf(ErrNotPaired, "no account is loaded")
+	}
+	e, ok := v.epochs[n]
+	if !ok {
+		// Named rather than generic: a client asking for an epoch this device
+		// does not hold is usually a client that missed a rotation, and the
+		// remedy is to fetch the roster rather than to retry.
+		return nil, codedf(ErrNotPaired, "this device holds no key for epoch %d", n)
+	}
+	return e, nil
+}
+
+// --- load ---
+
+type loadRequest struct {
+	// Hex of the 32-byte account id.
+	AccountID string `json:"accountId"`
+	// Base64 of the device's Ed25519 seed and of its X25519 private key.
+	//
+	// TWO INDEPENDENT KEYS, not one seed and a conversion. Birational maps
+	// between Ed25519 and X25519 exist and are exactly the shortcut the
+	// protocol package forbids: keys that share bytes make every
+	// cross-protocol attack on the pair live in a system that otherwise has
+	// none. The parent stores both.
+	DeviceSignSeed string `json:"deviceSignSeed"`
+	DeviceEncKey   string `json:"deviceEncKey"`
+	// Epoch number -> base64 AK_n. Several at once during a transition.
+	EpochKeys map[uint64]string `json:"epochKeys"`
+}
+
+// handleLoad takes the key material from the parent.
+//
+// Nothing is persisted here. The parent's keychain is the store; this process
+// is where the keys are USABLE, and it forgets everything when it exits --
+// which is what makes killing the sidecar a real remediation rather than a
+// gesture.
+func handleLoad(req Request) (any, error) {
+	var in loadRequest
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+
+	raw, err := hex.DecodeString(in.AccountID)
+	if err != nil || len(raw) != protocol.AccountIDLen {
+		return nil, codedf(ErrConfigInvalid, "accountId is %d bytes of hex", protocol.AccountIDLen)
+	}
+	seed, err := base64.StdEncoding.DecodeString(in.DeviceSignSeed)
+	if err != nil || len(seed) != ed25519.SeedSize {
+		return nil, codedf(ErrConfigInvalid, "deviceSignSeed is %d bytes, base64", ed25519.SeedSize)
+	}
+	encRaw, err := base64.StdEncoding.DecodeString(in.DeviceEncKey)
+	if err != nil || len(encRaw) != 32 {
+		return nil, codedf(ErrConfigInvalid, "deviceEncKey is 32 bytes, base64")
+	}
+	if len(in.EpochKeys) == 0 {
+		return nil, codedf(ErrNotPaired, "no epoch key was supplied; this device cannot read anything")
+	}
+
+	encKey, err := ecdh.X25519().NewPrivateKey(encRaw)
+	if err != nil {
+		return nil, wrapCoded(ErrConfigInvalid, err, "loading the device encryption key")
+	}
+	device := &protocol.DeviceKeys{
+		Sign:     ed25519.NewKeyFromSeed(seed),
+		SignSeed: seed,
+		Enc:      encKey,
+	}
+
+	var acct protocol.AccountID
+	copy(acct[:], raw)
+
+	epochs := make(map[uint64]*protocol.EpochKeys, len(in.EpochKeys))
+	for n, encoded := range in.EpochKeys {
+		ak, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return nil, codedf(ErrConfigInvalid, "the key for epoch %d is not base64", n)
+		}
+		e, err := protocol.DeriveEpoch(ak, acct, n)
+		zero(ak)
+		if err != nil {
+			return nil, wrapCoded(ErrConfigInvalid, err, "deriving epoch %d", n)
+		}
+		epochs[n] = e
+	}
+
+	keys.mu.Lock()
+	keys.account = acct
+	keys.device = device
+	keys.epochs = epochs
+	keys.loaded = true
+	keys.mu.Unlock()
+
+	return map[string]any{
+		"accountId": acct.String(),
+		"devicePub": hex.EncodeToString(device.Sign.Public().(ed25519.PublicKey)),
+		"epochs":    epochNumbers(epochs),
+	}, nil
+}
+
+func epochNumbers(m map[uint64]*protocol.EpochKeys) []uint64 {
+	out := make([]uint64, 0, len(m))
+	for n := range m {
+		out = append(out, n)
+	}
+	return out
+}
+
+// --- seal / open ---
+
+type sealRequest struct {
+	Collection    string `json:"collection"`
+	Epoch         uint64 `json:"epoch"`
+	Schema        uint32 `json:"schema"`
+	WriterVersion string `json:"writerVersion"`
+	Counter       uint64 `json:"counter"`
+	// Base64 of the plaintext. The parent decides what a collection contains;
+	// this process never parses it.
+	Payload string `json:"payload"`
+}
+
+func handleSeal(req Request) (any, error) {
+	var in sealRequest
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+	e, err := keys.epoch(in.Epoch)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := base64.StdEncoding.DecodeString(in.Payload)
+	if err != nil {
+		return nil, codedf(ErrConfigInvalid, "payload is not base64")
+	}
+
+	keys.mu.RLock()
+	acct := keys.account
+	keys.mu.RUnlock()
+
+	sealed, err := protocol.SealCollection(protocol.Collection{
+		Name:          in.Collection,
+		Schema:        in.Schema,
+		WriterVersion: in.WriterVersion,
+		Counter:       in.Counter,
+		Payload:       payload,
+	}, acct, in.Epoch, e.Profile)
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "sealing %s", in.Collection)
+	}
+	return map[string]any{"sealed": base64.StdEncoding.EncodeToString(sealed)}, nil
+}
+
+type openRequest struct {
+	Collection string `json:"collection"`
+	Epoch      uint64 `json:"epoch"`
+	Sealed     string `json:"sealed"`
+	// What the reader can understand, and the highest counter it has already
+	// seen for this collection. Both are anti-rollback controls and both are
+	// enforced inside OpenCollection rather than by the caller.
+	KnownSchema uint32 `json:"knownSchema"`
+	SeenCounter uint64 `json:"seenCounter"`
+}
+
+func handleOpen(req Request) (any, error) {
+	var in openRequest
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+	e, err := keys.epoch(in.Epoch)
+	if err != nil {
+		return nil, err
+	}
+	sealed, err := base64.StdEncoding.DecodeString(in.Sealed)
+	if err != nil {
+		return nil, codedf(ErrConfigInvalid, "sealed is not base64")
+	}
+
+	keys.mu.RLock()
+	acct := keys.account
+	keys.mu.RUnlock()
+
+	c, err := protocol.OpenCollection(sealed, in.Collection, acct, in.Epoch, e.Profile, in.KnownSchema, in.SeenCounter)
+	if err != nil {
+		// The three failures a caller must tell apart, because the remedies
+		// differ: a schema it cannot read means go read-only for that
+		// collection, a rewound counter means refuse and warn, and anything
+		// else means the bytes are not what they claim.
+		switch {
+		case errors.Is(err, protocol.ErrSchemaTooNew):
+			return nil, wrapCoded(ErrSchemaTooNew, err, "opening %s", in.Collection)
+		case errors.Is(err, protocol.ErrObjectRollback):
+			return nil, wrapCoded(ErrRosterRewound, err, "opening %s", in.Collection)
+		default:
+			return nil, wrapCoded(ErrRosterInvalid, err, "opening %s", in.Collection)
+		}
+	}
+
+	return map[string]any{
+		"collection":    c.Name,
+		"schema":        c.Schema,
+		"writerVersion": c.WriterVersion,
+		"counter":       c.Counter,
+		"payload":       base64.StdEncoding.EncodeToString(c.Payload),
+	}, nil
+}
+
+// --- roster ---
+
+type verifyRosterRequest struct {
+	// Base64 of the concatenated chain, exactly as the relay serves it.
+	Chain string `json:"chain"`
+	// Hex of RK_sign's public half and of epoch 1's AK_sign public half. FROM
+	// THE CALLER, never from the server: a chain verified against a key the
+	// server supplied is not verified, and that is the single most important
+	// sentence in this file.
+	RootSignPub  string `json:"rootSignPub"`
+	Epoch1Sign   string `json:"epoch1Sign"`
+	PinnedSeq    uint64 `json:"pinnedSeq"`
+	PinnedHead   string `json:"pinnedHead"`
+	HavePinnedAt bool   `json:"havePin"`
+}
+
+func handleVerifyRoster(req Request) (any, error) {
+	var in verifyRosterRequest
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+	chain, err := base64.StdEncoding.DecodeString(in.Chain)
+	if err != nil {
+		return nil, codedf(ErrConfigInvalid, "chain is not base64")
+	}
+	rootPub, err := hex.DecodeString(in.RootSignPub)
+	if err != nil || len(rootPub) != ed25519.PublicKeySize {
+		return nil, codedf(ErrConfigInvalid, "rootSignPub is 32 bytes of hex")
+	}
+	epoch1, err := hex.DecodeString(in.Epoch1Sign)
+	if err != nil || len(epoch1) != ed25519.PublicKeySize {
+		return nil, codedf(ErrConfigInvalid, "epoch1Sign is 32 bytes of hex")
+	}
+
+	var pin *protocol.Pin
+	if in.HavePinnedAt {
+		head, err := hex.DecodeString(in.PinnedHead)
+		if err != nil {
+			return nil, codedf(ErrConfigInvalid, "pinnedHead is hex")
+		}
+		pin = &protocol.Pin{Seq: in.PinnedSeq, Hash: head}
+	}
+
+	keys.mu.RLock()
+	acct := keys.account
+	self := keys.device
+	loaded := keys.loaded
+	keys.mu.RUnlock()
+	if !loaded {
+		return nil, codedf(ErrNotPaired, "no account is loaded")
+	}
+
+	v, err := protocol.VerifyChain(chain, acct, rootPub, epoch1, pin)
+	if err != nil {
+		switch {
+		case errors.Is(err, protocol.ErrForked):
+			return nil, wrapCoded(ErrRosterForked, err, "verifying the roster")
+		case errors.Is(err, protocol.ErrRewound):
+			return nil, wrapCoded(ErrRosterRewound, err, "verifying the roster")
+		default:
+			return nil, wrapCoded(ErrRosterInvalid, err, "verifying the roster")
+		}
+	}
+
+	// `Devices` is the LIVE set: the verifier applies revocations as it walks
+	// the chain, so a revoked device is absent rather than flagged. That makes
+	// "am I still here" the whole question, and it is a stronger one than a
+	// flag -- there is no field a forged entry could set to claim otherwise.
+	devices := make([]map[string]any, 0, len(v.Devices))
+	for _, d := range v.Devices {
+		devices = append(devices, map[string]any{
+			"pubSign":       hex.EncodeToString(d.PubSign),
+			"pubEnc":        hex.EncodeToString(d.PubEnc),
+			"epoch":         d.Epoch,
+			"mnemonicAdded": d.MnemonicAuthored(),
+		})
+	}
+
+	// Whether THIS device is still in the roster, which is the question the
+	// revocation wipe is waiting on. Answered here rather than by the parent
+	// comparing keys, because the comparison IS the security property and it
+	// belongs where the device key actually is.
+	stillListed := false
+	if self != nil {
+		mine := self.Sign.Public().(ed25519.PublicKey)
+		for _, d := range v.Devices {
+			if ed25519.PublicKey(d.PubSign).Equal(mine) {
+				stillListed = true
+			}
+		}
+	}
+
+	return map[string]any{
+		"devices":    devices,
+		"head":       hex.EncodeToString(v.Head),
+		"headSeq":    v.HeadSeq,
+		"epoch":      v.Epoch,
+		"entries":    v.Entries,
+		"selfListed": stillListed,
+	}, nil
+}
+
+// --- fingerprint ---
+
+func handleFingerprint(req Request) (any, error) {
+	var in struct {
+		Head string `json:"head"`
+	}
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+	head, err := hex.DecodeString(in.Head)
+	if err != nil {
+		return nil, codedf(ErrConfigInvalid, "head is hex")
+	}
+	keys.mu.RLock()
+	acct := keys.account
+	loaded := keys.loaded
+	keys.mu.RUnlock()
+	if !loaded {
+		return nil, codedf(ErrNotPaired, "no account is loaded")
+	}
+	words, err := protocol.Fingerprint(head, acct)
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "computing the fingerprint")
+	}
+	return map[string]any{"words": words}, nil
+}
+
+func decodeParams(req Request, into any) error {
+	if len(req.Params) == 0 {
+		return codedf(ErrConfigInvalid, "%s needs parameters", req.Method)
+	}
+	// DisallowUnknownFields: a parameter the sidecar does not know is a
+	// parent and a sidecar that disagree about the protocol, and silently
+	// ignoring it is how that disagreement survives to the point where it
+	// matters. Cheap here, because both sides ship together.
+	dec := json.NewDecoder(bytes.NewReader(req.Params))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(into); err != nil {
+		return wrapCoded(ErrConfigInvalid, err, "reading %s parameters", req.Method)
+	}
+	return nil
+}

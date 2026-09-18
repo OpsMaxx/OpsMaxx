@@ -117,11 +117,46 @@ func dispatch(ctx context.Context, w *Writer, role string, req Request) {
 		}
 	}()
 
+	// ROLE-GATED, and the gate is the point of the split rather than a
+	// formality. `--rtc` links a WebRTC stack and must never be able to reach
+	// a key; `--crypto` holds the keys and must never be asked to parse SDP.
+	// A method reachable from both roles would collapse the distinction the
+	// two processes exist to maintain.
+	if role == "crypto" {
+		if handler, ok := cryptoMethods[req.Method]; ok {
+			result, err := handler(req)
+			if err != nil {
+				w.Fail(req.ID, err)
+				return
+			}
+			w.Respond(req.ID, result)
+			return
+		}
+	}
+
 	switch req.Method {
 	case "ping":
 		w.Respond(req.ID, map[string]string{"role": role, "version": Version})
+	case "reset":
+		// Forgets every key this process holds. The parent calls it when the
+		// vault locks, and it is why killing or resetting the sidecar is a
+		// real remediation: nothing here is on disk, so forgetting is all
+		// there is to do.
+		keys.reset()
+		w.Respond(req.ID, map[string]any{"ok": true})
 	default:
 		w.Fail(req.ID, codedf(ErrConfigInvalid, "unknown method %q for role %s", req.Method, role))
 	}
 	_ = ctx
+}
+
+// cryptoMethods is the --crypto role's surface, as a map rather than a switch
+// so that `ping` and `reset` above cannot be shadowed by one of them and so
+// that a test can enumerate it.
+var cryptoMethods = map[string]func(Request) (any, error){
+	"load":         handleLoad,
+	"seal":         handleSeal,
+	"open":         handleOpen,
+	"verifyRoster": handleVerifyRoster,
+	"fingerprint":  handleFingerprint,
 }
