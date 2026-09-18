@@ -286,6 +286,7 @@ export interface ProviderDetectionResult {
 }
 
 import type { AddyPairingConfirmation, ConflictCopy } from '../shared/addy'
+import type { ProvisionManifest, ProvisionPlan } from '../shared/provision'
 import type {
   AgentApprovalRequest,
   AgentDecision,
@@ -361,6 +362,24 @@ const api = {
       twoFactorCode?: string
     }): Promise<{ entries?: VaultEntry[]; skipped?: { name: string; reason: string }[]; error?: string }> =>
       ipcRenderer.invoke('import:bitwardenPreview', source)
+  },
+  /**
+   * Setting up a fresh machine from a manifest.
+   *
+   * Preview then apply, and apply takes the manifest that was previewed. The
+   * post-restore script is shown in full and approved separately, every time:
+   * a manifest arrives by email, and a hook that ran on less than that would be
+   * a delivery mechanism rather than a feature.
+   */
+  provision: {
+    preview: (manifest: unknown): Promise<ProvisionPlan> =>
+      ipcRenderer.invoke('provision:preview', manifest),
+    apply: (opts: {
+      manifest: ProvisionManifest
+      passphrase: string
+      hookApproved: boolean
+    }): Promise<{ ok: boolean; done: string[]; failed?: string; hookOutput?: string }> =>
+      ipcRenderer.invoke('provision:apply', opts)
   },
   addy: {
     /**

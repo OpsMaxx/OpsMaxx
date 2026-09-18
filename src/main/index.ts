@@ -327,6 +327,8 @@ import { clearRevocation, revocationState } from './services/addy/revoke'
 import { sshAgent } from './services/sshAgent/service'
 import { addySession } from './services/addy/session'
 import { previewBitwardenImport } from './services/import/bitwarden'
+import { apply as applyProvision, preview as previewProvision } from './services/provision'
+import type { ApplyOptions as ProvisionApplyOptions } from './services/provision'
 import type { BitwardenSource } from './services/import/bitwarden'
 import type { AgentDecision, SshAgentSettings } from '../shared/sshAgentHost'
 import { databaseDumpTarget, dumpableDatabases } from './services/backupTargets'
@@ -4664,6 +4666,15 @@ ipcMain.handle('addy:cancelPairing', () => addySession.cancelPairing())
 // services/addy/clipboard.ts for why that is a decision and not a shortcut.
 ipcMain.handle('addy:sendClipboard', () => addySession.sendClipboard())
 ipcMain.handle('addy:receiveClipboard', () => addySession.receiveClipboard())
+
+// ---- hot-device provisioning ----
+//
+// Two calls, and the second takes the manifest the user was shown rather than
+// re-reading the file. A manifest re-read between preview and apply is one
+// that could have changed, and the thing it would change is a script somebody
+// already approved.
+ipcMain.handle('provision:preview', (_e, manifest: unknown) => previewProvision(manifest))
+ipcMain.handle('provision:apply', (_e, opts: ProvisionApplyOptions) => applyProvision(opts))
 
 /**
  * The keystrokes that make the clipboard explicit.
