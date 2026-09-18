@@ -286,9 +286,9 @@ function CreateSessionForm({
         <div className="s-info">
           <div className="s-title">Access group</div>
           <div className="s-desc">
-            What this agent may do on the servers in those workspaces. This is the grant — there is
-            nothing else to set. A server can still be held below it individually, and the session
-            says so when one is.
+            What this agent may do on the servers in those workspaces. This is the grant. A workspace
+            or a single server can be held below it by an assignment under Access Groups — the
+            session says so when one is, and names it.
           </div>
         </div>
         <select

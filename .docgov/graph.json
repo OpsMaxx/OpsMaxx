@@ -1,0 +1,877 @@
+{
+  "version": 1,
+  "generated": "2026-09-13",
+  "nodes": [
+    {
+      "id": "claude",
+      "path": "CLAUDE.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 106,
+      "hash": "c9977fecadd7e7df",
+      "generated": false
+    },
+    {
+      "id": "code-of-conduct",
+      "path": "CODE_OF_CONDUCT.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 47,
+      "hash": "c1d27061e8b4a490",
+      "generated": false
+    },
+    {
+      "id": "contributing",
+      "path": "CONTRIBUTING.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 182,
+      "hash": "9b6fa409f7419841",
+      "generated": false
+    },
+    {
+      "id": "readme",
+      "path": "README.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 161,
+      "hash": "3ba25244641c3588",
+      "generated": false
+    },
+    {
+      "id": "security",
+      "path": "SECURITY.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 350,
+      "hash": "85a7bb44356dae6d",
+      "generated": false
+    },
+    {
+      "id": "third-party-notices",
+      "path": "THIRD-PARTY-NOTICES.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 528,
+      "hash": "a5f095428a0ff585",
+      "generated": false
+    },
+    {
+      "id": "docs-ai-mcp",
+      "path": "docs/AI-MCP.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 550,
+      "hash": "9ca340048adfd332",
+      "generated": false
+    },
+    {
+      "id": "docs-ai-security",
+      "path": "docs/AI-SECURITY.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 323,
+      "hash": "1ab9e3e35d9f14e9",
+      "generated": false
+    },
+    {
+      "id": "docs-roadmap",
+      "path": "docs/ROADMAP.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 1969,
+      "hash": "2ffd4ef877033caa",
+      "generated": false
+    },
+    {
+      "id": "docs-vpn",
+      "path": "docs/VPN.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 377,
+      "hash": "c3e2a18c0cb199ef",
+      "generated": false
+    },
+    {
+      "id": "docs-ai-agents",
+      "path": "docs/ai-agents.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 205,
+      "hash": "2bec913d0d4ae9ba",
+      "generated": false
+    },
+    {
+      "id": "docs-databases",
+      "path": "docs/databases.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 30,
+      "hash": "f74a15ce58dc5e2d",
+      "generated": false
+    },
+    {
+      "id": "docs-design-panel-audit",
+      "path": "docs/design/panel-audit.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 288,
+      "hash": "7a3f8a23d6ed2283",
+      "generated": false
+    },
+    {
+      "id": "docs-faq",
+      "path": "docs/faq.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 175,
+      "hash": "39b5f7ce4a39fb35",
+      "generated": false
+    },
+    {
+      "id": "docs-features",
+      "path": "docs/features.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 117,
+      "hash": "50314a643404b814",
+      "generated": false
+    },
+    {
+      "id": "docs-install",
+      "path": "docs/install.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 265,
+      "hash": "72d8d648d8fb5d63",
+      "generated": false
+    },
+    {
+      "id": "docs-monitoring",
+      "path": "docs/monitoring.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 65,
+      "hash": "ef971d3ca4ca3aec",
+      "generated": false
+    },
+    {
+      "id": "docs-plans-cicd-module",
+      "path": "docs/plans/cicd-module.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 1451,
+      "hash": "3ae52c07bc1cf27c",
+      "generated": false
+    },
+    {
+      "id": "docs-plans-cicd-phase-2",
+      "path": "docs/plans/cicd-phase-2.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 167,
+      "hash": "9f8fc1b1966bf19a",
+      "generated": false
+    },
+    {
+      "id": "docs-plans-local-terminal-plan",
+      "path": "docs/plans/local-terminal-plan.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 2622,
+      "hash": "506ec13c3da60f0d",
+      "generated": false
+    },
+    {
+      "id": "docs-plans-roadmap-execution",
+      "path": "docs/plans/roadmap-execution.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 816,
+      "hash": "0d6c0e43f47d1b1a",
+      "generated": false
+    },
+    {
+      "id": "docs-plans-vpn-tunnel-clients",
+      "path": "docs/plans/vpn-tunnel-clients.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 1079,
+      "hash": "b29c28f12527bfdb",
+      "generated": false
+    },
+    {
+      "id": "docs-security",
+      "path": "docs/security.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 23,
+      "hash": "5420aa58b8654b44",
+      "generated": false
+    },
+    {
+      "id": "docs-terminal",
+      "path": "docs/terminal.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 363,
+      "hash": "2da024e7eab43755",
+      "generated": false
+    },
+    {
+      "id": "docs-tunnels",
+      "path": "docs/tunnels.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 43,
+      "hash": "781531868d85412f",
+      "generated": false
+    },
+    {
+      "id": "docs-vault",
+      "path": "docs/vault.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 58,
+      "hash": "d70b6c66c8378ec4",
+      "generated": false
+    },
+    {
+      "id": "docs-workspaces",
+      "path": "docs/workspaces.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 73,
+      "hash": "9bcb1a93fdf61068",
+      "generated": false
+    },
+    {
+      "id": "packaging-winget-readme",
+      "path": "packaging/winget/README.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 27,
+      "hash": "8fd1114be1c5947c",
+      "generated": false
+    },
+    {
+      "id": "sidecar-netd-readme",
+      "path": "sidecar/netd/README.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 559,
+      "hash": "4aa90adcfdb6a283",
+      "generated": false
+    }
+  ],
+  "edges": [
+    {
+      "from": "contributing",
+      "to": "docs-ai-mcp",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "contributing",
+      "to": "docs-ai-security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-install",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-features",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-ai-agents",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-workspaces",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-terminal",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-databases",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-tunnels",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-vault",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-faq",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-install",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-install",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-ai-agents",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-ai-agents",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-features",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-install",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-install",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-features",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-install",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-ai-agents",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-workspaces",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-terminal",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-monitoring",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-databases",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-tunnels",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-vault",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "docs-faq",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "contributing",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "code-of-conduct",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "security",
+      "to": "docs-ai-security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-ai-mcp",
+      "to": "docs-ai-agents",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-ai-mcp",
+      "to": "docs-ai-security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-ai-security",
+      "to": "docs-ai-mcp",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-ai-security",
+      "to": "security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-ai-security",
+      "to": "security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-ai-security",
+      "to": "security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-vpn",
+      "to": "third-party-notices",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-vpn",
+      "to": "third-party-notices",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-vpn",
+      "to": "docs-ai-security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-ai-agents",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-ai-agents",
+      "to": "docs-ai-security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-ai-agents",
+      "to": "docs-ai-mcp",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-ai-agents",
+      "to": "docs-ai-security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-ai-agents",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-databases",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-databases",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-faq",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-faq",
+      "to": "docs-install",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-faq",
+      "to": "docs-ai-agents",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-faq",
+      "to": "docs-ai-security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-faq",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-faq",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-features",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-features",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-install",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-install",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-monitoring",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-monitoring",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-security",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-security",
+      "to": "security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-security",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-terminal",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-terminal",
+      "to": "docs-install",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-terminal",
+      "to": "security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-terminal",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-tunnels",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-tunnels",
+      "to": "docs-vpn",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-tunnels",
+      "to": "docs-vpn",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-tunnels",
+      "to": "third-party-notices",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-tunnels",
+      "to": "security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-tunnels",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-vault",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-vault",
+      "to": "docs-monitoring",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-vault",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-workspaces",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-workspaces",
+      "to": "docs-vault",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-workspaces",
+      "to": "docs-vault",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-workspaces",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    }
+  ]
+}

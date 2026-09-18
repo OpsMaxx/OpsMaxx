@@ -433,10 +433,13 @@ import {
 } from './services/mcpAuth'
 import {
   listPendingApprovals,
+  listRecentApprovals,
   respondToApproval,
   extendApproval,
   onApprovalEvent,
-  denyAllPending
+  denyAllPending,
+  armApproval,
+  armAllPendingApprovals
 } from './services/approvals'
 import { onCliPairingEvent, cancelCliPairing } from './services/cliPairing'
 import { claudeCodeCommand, writeClaudeDesktopConfig, writeCodexConfig } from './services/clientConfig'
@@ -708,7 +711,13 @@ function createWindow(): void {
   // cannot see. Backing off while hidden is most of the idle cost of this
   // feature; resuming on focus samples immediately so the numbers are current
   // by the time the user has looked at them.
-  const active = (): void => vpnSetCadence('active')
+  const active = (): void => {
+    vpnSetCadence('active')
+    // Anything that was waiting unseen — created while the window was closed,
+    // hidden, or on a machine with no OS notifications — starts its fuse now
+    // that there is somewhere for it to be answered.
+    armAllPendingApprovals()
+  }
   const idle = (): void => vpnSetCadence('idle')
   mainWindow.on('focus', active)
   mainWindow.on('show', active)
@@ -4557,15 +4566,20 @@ ipcMain.handle('sshconfig:read', () => {
 // renders lives inside the window. If OpsMaxx is not in front, nothing tells
 // the user anything is waiting — the agent simply appears to hang for the
 // whole timeout, which is exactly how it was reported.
-function notifyApprovalPending(request: ApprovalRequest): void {
-  if (mainWindow && !mainWindow.isDestroyed()) {
+/** True when this actually put the question in front of somebody — which is
+ *  what decides whether its fuse may start. See armApproval. */
+function notifyApprovalPending(request: ApprovalRequest): boolean {
+  let surfaced = false
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
     // Bounces the dock icon on macOS, flashes the taskbar on Windows. Left as
     // 'informational' rather than 'critical': the request expires on its own,
     // so it does not warrant a bouncing icon that will not stop.
     app.dock?.bounce('informational')
     mainWindow.flashFrame(true)
+    // The dialog lives in the window, and the window is on screen.
+    surfaced = true
   }
-  if (!Notification.isSupported()) return
+  if (!Notification.isSupported()) return surfaced
   const n = new Notification({
     title: `${request.agentName} needs approval`,
     body: `${request.action}\non ${request.serverName}`,
@@ -4579,6 +4593,7 @@ function notifyApprovalPending(request: ApprovalRequest): void {
     }
   })
   n.show()
+  return true
 }
 
 // ---- Notifications ----
@@ -5406,6 +5421,7 @@ ipcMain.handle('aiMcp:denyAuthorization', (_e, consentId: string) => {
 
 // ---- AI & MCP: approvals ----
 ipcMain.handle('aiMcp:listApprovals', () => listPendingApprovals())
+ipcMain.handle('aiMcp:recentApprovals', () => listRecentApprovals())
 ipcMain.handle('aiMcp:respondApproval', (_e, id: string, decision: 'approved' | 'denied') =>
   respondToApproval(id, decision)
 )
@@ -5418,7 +5434,12 @@ ipcMain.handle('aiMcp:respondApproval', (_e, id: string, decision: 'approved' | 
 ipcMain.handle('aiMcp:extendApproval', (_e, id: string, seconds: number) => extendApproval(id, seconds))
 onApprovalEvent((e) => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('ai:approval-event', e)
-  if (e.type === 'created') notifyApprovalPending(e.request)
+  // THE FUSE STARTS HERE, NOT AT CREATION, and only if this reached somebody:
+  // a window that is closed or was never shown, with OS notifications
+  // unavailable, used to auto-deny an agent 120 seconds after a question no
+  // human was ever shown. Anything left unarmed is armed the moment the window
+  // appears, below.
+  if (e.type === 'created' && notifyApprovalPending(e.request)) armApproval(e.request.id)
   // Stop the taskbar flashing once the thing it was flashing about is answered.
   if (e.type === 'resolved' && mainWindow && !mainWindow.isDestroyed()) mainWindow.flashFrame(false)
 })

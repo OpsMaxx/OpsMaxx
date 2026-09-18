@@ -1920,6 +1920,13 @@ export const useApp = create<AppState>((set, get) => ({
           // because `updateServer` spreads its patch; only creation lost them.
           ...(input.sftpOnly === true ? { sftpOnly: true } : {}),
           ...(input.rdp ? { rdp: input.rdp } : {}),
+          // The very next field to be added after that comment was written, and
+          // the very next one to be dropped. `rdp` came through, `rdpOnly` did
+          // not, so a machine saved as RDP-only came back looking like an SSH
+          // server that also has a desktop — and `openServer` reads exactly this
+          // flag to decide what "open" means. Clicking it opened a terminal
+          // against port 22 on a Windows box, as root.
+          ...(input.rdpOnly === true ? { rdpOnly: true } : {}),
           // Named explicitly for the reason the comment above gives: this
           // action builds the record field by field, so a field that is not
           // listed here is silently dropped on create and works only on edit.

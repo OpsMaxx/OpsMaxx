@@ -157,9 +157,37 @@ export function RdpView({
         ])
         if (disposed) return
 
+        /**
+         * LOADING THE BACKEND IS NOT STARTING IT.
+         *
+         * `init()` is what instantiates the WebAssembly module; everything else
+         * the backend exports reaches through `wasm.__wbindgen_malloc`, which
+         * does not exist until it resolves. Importing the module and handing it
+         * straight to the element therefore failed with "Cannot read properties
+         * of undefined (reading '__wbindgen_malloc')" on the first desktop
+         * anyone opened — a sentence that names an internal of a dependency and
+         * tells the user nothing at all. <iron-remote-desktop> does not call
+         * this for us: it stores `module` and logs "Web bridge initialized".
+         */
+        await backend.init('WARN')
+        if (disposed) return
+
         element = document.createElement('iron-remote-desktop')
-        // A property, not an attribute: it is a module object.
-        ;(element as unknown as { module: unknown }).module = backend
+        /**
+         * `Backend`, not the module namespace.
+         *
+         * A property rather than an attribute, because it is an object — but it
+         * is a specific one. The element does `new this.module.SessionBuilder()`
+         * and reads DesktopSize, InputTransaction, ClipboardData and DeviceEvent
+         * off the same object, and those five are exactly what the package's
+         * `Backend` export holds. The namespace does not carry them at the top
+         * level, so handing it over got as far as connecting and then failed
+         * with "this.module.SessionBuilder is not a constructor".
+         *
+         * Everything else this file calls — init, enableCredssp — stays on the
+         * namespace, which is where the package exports those.
+         */
+        ;(element as unknown as { module: unknown }).module = backend.Backend
         element.setAttribute('scale', 'fit')
         element.setAttribute('flexcenter', 'true')
         element.style.cssText = 'flex:1; min-height:0; display:block'

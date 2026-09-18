@@ -157,7 +157,16 @@ const DESTRUCTIVE = [
   // One key away from `crontab -e`, and it takes the whole schedule with it.
   { rx: commandStart(String.raw`crontab\s+-[a-z]*r[a-z]*\b`), why: 'removes the crontab' },
   { rx: atCommandStart('lvremove|vgremove|pvremove'), why: 'removes a volume or volume group' },
-  { rx: commandStart(String.raw`(zfs|zpool)\s+destroy\b`), why: 'destroys a dataset or pool' }
+  { rx: commandStart(String.raw`(zfs|zpool)\s+destroy\b`), why: 'destroys a dataset or pool' },
+  // Container removal, with the volume that holds the data. `docker volume rm`
+  // and `docker system prune -af` delete state no restart brings back, which is
+  // the same fact `lvremove` is here for.
+  {
+    rx: commandStart(
+      String.raw`(docker|podman)\s+(?:(?:container|image|volume|network|system|compose)\s+)?(rm|rmi|prune|down)\b`
+    ),
+    why: 'removes containers, images or volumes'
+  }
 ]
 
 /** The one finding the command gate is allowed to ignore, because a group that
@@ -179,11 +188,17 @@ const ELEVATED = [
   },
   // The noun-verb spellings (`docker system prune`, `docker volume rm`) are the
   // common ones now, and the verb-only rule matched none of them.
+  //
+  // ONLY THE RESTARTABLE HALF IS HERE. A stopped container starts again; a
+  // removed volume is gone, and it belongs with lvremove and zfs destroy in
+  // DESTRUCTIVE above — which matters now that a group granting sudo waives
+  // this tier. Splitting them is what keeps "a destructive command is never
+  // allowed silently, on any group" true of `sudo docker volume rm`.
   {
     rx: commandStart(
-      String.raw`(docker|podman)\s+(?:(?:container|image|volume|network|system|compose)\s+)?(rm|rmi|stop|kill|prune|down)\b`
+      String.raw`(docker|podman)\s+(?:(?:container|compose)\s+)?(stop|kill)\b`
     ),
-    why: 'removes or stops containers'
+    why: 'stops containers'
   },
   // A BUILD RUNS A DOCKERFILE, and a Dockerfile is a program: `RUN curl ... |
   // sh` is a normal line in one. It is not a read, it is not reversible in the

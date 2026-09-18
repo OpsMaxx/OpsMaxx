@@ -1,0 +1,1810 @@
+{
+  "version": 1,
+  "generated": "2026-09-13T12:57:15.943Z",
+  "layout": "full",
+  "mode": "open-source",
+  "git": {
+    "repo": true,
+    "clean": false
+  },
+  "fingerprint": {
+    "head": "20a547fab9501a04cd4dcd6c27ab446816782a43",
+    "documents": 29,
+    "tree": "fefd7515bc1077eb"
+  },
+  "summary": {
+    "documents": 29,
+    "unclassified": 8,
+    "lowConfidence": 8,
+    "moves": 12,
+    "annotations": 29,
+    "splits": 8,
+    "extracts": 0,
+    "merges": 0,
+    "archives": 0,
+    "creates": 9,
+    "brokenLinks": 0,
+    "collisions": 0,
+    "duplicateCandidates": 4,
+    "needJudgement": 24,
+    "highRisk": 8,
+    "safe": 38,
+    "confident": 5,
+    "review": 24
+  },
+  "classifications": [
+    {
+      "path": "CLAUDE.md",
+      "current": "unknown",
+      "proposed": "agent.instructions",
+      "confidence": 99,
+      "needsReview": false,
+      "signals": [
+        "filename matches ^(claude|agents|gemini)\\.mdx?$|^\\."
+      ],
+      "candidates": [
+        {
+          "type": "agent.instructions",
+          "score": 100
+        },
+        {
+          "type": "operations.runbook",
+          "score": 30
+        }
+      ],
+      "owner": "Zeeshan Sultan",
+      "lastChanged": "2026-09-13",
+      "lines": 106,
+      "registered": false,
+      "digest": "c9977fecadd7e7df"
+    },
+    {
+      "path": "CODE_OF_CONDUCT.md",
+      "current": "unknown",
+      "proposed": "governance.code-of-conduct",
+      "confidence": 99,
+      "needsReview": false,
+      "signals": [
+        "filename matches ^code_of_conduct",
+        "canonical singleton path"
+      ],
+      "candidates": [
+        {
+          "type": "governance.code-of-conduct",
+          "score": 155
+        }
+      ],
+      "owner": "ghauri01",
+      "lastChanged": "2026-08-21",
+      "lines": 47,
+      "registered": false,
+      "digest": "c1d27061e8b4a490"
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "current": "unknown",
+      "proposed": "governance.contributing",
+      "confidence": 99,
+      "needsReview": false,
+      "signals": [
+        "filename matches ^contributing",
+        "canonical singleton path"
+      ],
+      "candidates": [
+        {
+          "type": "governance.contributing",
+          "score": 160
+        },
+        {
+          "type": "user.getting-started",
+          "score": 20
+        }
+      ],
+      "owner": "ghauri01",
+      "lastChanged": "2026-09-13",
+      "lines": 182,
+      "registered": false,
+      "digest": "9b6fa409f7419841"
+    },
+    {
+      "path": "README.md",
+      "current": "unknown",
+      "proposed": "user.readme",
+      "confidence": 99,
+      "needsReview": false,
+      "signals": [
+        "filename matches ^readme\\.mdx?$",
+        "canonical singleton path"
+      ],
+      "candidates": [
+        {
+          "type": "user.readme",
+          "score": 160
+        },
+        {
+          "type": "docs.index",
+          "score": 55
+        },
+        {
+          "type": "operations.infrastructure",
+          "score": 25
+        }
+      ],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-13",
+      "lines": 161,
+      "registered": false,
+      "digest": "3ba25244641c3588"
+    },
+    {
+      "path": "SECURITY.md",
+      "current": "unknown",
+      "proposed": "security.public-model",
+      "confidence": 99,
+      "needsReview": false,
+      "signals": [
+        "filename matches ^security\\.mdx?$",
+        "canonical singleton path"
+      ],
+      "candidates": [
+        {
+          "type": "security.public-model",
+          "score": 130
+        }
+      ],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-13",
+      "lines": 350,
+      "registered": false,
+      "digest": "85a7bb44356dae6d"
+    },
+    {
+      "path": "THIRD-PARTY-NOTICES.md",
+      "current": "unknown",
+      "proposed": "governance.attribution",
+      "confidence": 95,
+      "needsReview": false,
+      "signals": [
+        "filename matches ^(third[-_ ]?party[-_ ]?notices?|n"
+      ],
+      "candidates": [
+        {
+          "type": "governance.attribution",
+          "score": 95
+        }
+      ],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-09",
+      "lines": 528,
+      "registered": false,
+      "digest": "a5f095428a0ff585"
+    },
+    {
+      "path": "docs/AI-MCP.md",
+      "current": "unknown",
+      "proposed": "operations.runbook",
+      "confidence": 30,
+      "needsReview": true,
+      "signals": [
+        "content matches (?<![\\w-])(escalat\\w*|pager|severi"
+      ],
+      "candidates": [
+        {
+          "type": "operations.runbook",
+          "score": 30
+        }
+      ],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-13",
+      "lines": 550,
+      "registered": false,
+      "digest": "9ca340048adfd332"
+    },
+    {
+      "path": "docs/AI-SECURITY.md",
+      "current": "unknown",
+      "proposed": "security.threat-model",
+      "confidence": 45,
+      "needsReview": true,
+      "signals": [
+        "content matches \\b(trust boundar|threat actor|atta"
+      ],
+      "candidates": [
+        {
+          "type": "security.threat-model",
+          "score": 45
+        },
+        {
+          "type": "operations.runbook",
+          "score": 30
+        }
+      ],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-12",
+      "lines": 323,
+      "registered": false,
+      "digest": "1ab9e3e35d9f14e9"
+    },
+    {
+      "path": "docs/ROADMAP.md",
+      "current": "unknown",
+      "proposed": "product.roadmap",
+      "confidence": 90,
+      "needsReview": false,
+      "signals": [
+        "filename matches roadmap"
+      ],
+      "candidates": [
+        {
+          "type": "product.roadmap",
+          "score": 90
+        },
+        {
+          "type": "operations.observability",
+          "score": 35
+        },
+        {
+          "type": "operations.runbook",
+          "score": 30
+        },
+        {
+          "type": "security.authorization",
+          "score": 30
+        },
+        {
+          "type": "operations.infrastructure",
+          "score": 25
+        }
+      ],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-08",
+      "lines": 1969,
+      "registered": false,
+      "digest": "2ffd4ef877033caa"
+    },
+    {
+      "path": "docs/VPN.md",
+      "current": "unknown",
+      "proposed": "unknown",
+      "confidence": 0,
+      "needsReview": true,
+      "signals": [
+        "no signal matched"
+      ],
+      "candidates": [],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-13",
+      "lines": 377,
+      "registered": false,
+      "digest": "c3e2a18c0cb199ef"
+    },
+    {
+      "path": "docs/ai-agents.md",
+      "current": "unknown",
+      "proposed": "unknown",
+      "confidence": 0,
+      "needsReview": true,
+      "signals": [
+        "no signal matched"
+      ],
+      "candidates": [],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-13",
+      "lines": 205,
+      "registered": false,
+      "digest": "2bec913d0d4ae9ba"
+    },
+    {
+      "path": "docs/databases.md",
+      "current": "unknown",
+      "proposed": "unknown",
+      "confidence": 0,
+      "needsReview": true,
+      "signals": [
+        "no signal matched"
+      ],
+      "candidates": [],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-13",
+      "lines": 30,
+      "registered": false,
+      "digest": "f74a15ce58dc5e2d"
+    },
+    {
+      "path": "docs/design/panel-audit.md",
+      "current": "unknown",
+      "proposed": "unknown",
+      "confidence": 0,
+      "needsReview": true,
+      "signals": [
+        "no signal matched"
+      ],
+      "candidates": [],
+      "owner": "ghauri01",
+      "lastChanged": "2026-09-08",
+      "lines": 288,
+      "registered": false,
+      "digest": "7a3f8a23d6ed2283"
+    },
+    {
+      "path": "docs/faq.md",
+      "current": "unknown",
+      "proposed": "user.faq",
+      "confidence": 85,
+      "needsReview": false,
+      "signals": [
+        "filename matches ^faq|\\bfaq\\b"
+      ],
+      "candidates": [
+        {
+          "type": "user.faq",
+          "score": 85
+        }
+      ],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-13",
+      "lines": 175,
+      "registered": false,
+      "digest": "39b5f7ce4a39fb35"
+    },
+    {
+      "path": "docs/features.md",
+      "current": "unknown",
+      "proposed": "product.feature",
+      "confidence": 55,
+      "needsReview": false,
+      "signals": [
+        "filename matches feature"
+      ],
+      "candidates": [
+        {
+          "type": "product.feature",
+          "score": 55
+        },
+        {
+          "type": "operations.infrastructure",
+          "score": 25
+        }
+      ],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-13",
+      "lines": 117,
+      "registered": false,
+      "digest": "50314a643404b814"
+    },
+    {
+      "path": "docs/install.md",
+      "current": "unknown",
+      "proposed": "user.getting-started",
+      "confidence": 20,
+      "needsReview": true,
+      "signals": [
+        "content matches \\bnpm install\\b|\\bpip install\\b|\\b"
+      ],
+      "candidates": [
+        {
+          "type": "user.getting-started",
+          "score": 20
+        }
+      ],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-13",
+      "lines": 265,
+      "registered": false,
+      "digest": "72d8d648d8fb5d63"
+    },
+    {
+      "path": "docs/monitoring.md",
+      "current": "unknown",
+      "proposed": "operations.observability",
+      "confidence": 70,
+      "needsReview": false,
+      "signals": [
+        "filename matches observability|monitoring|telemetry"
+      ],
+      "candidates": [
+        {
+          "type": "operations.observability",
+          "score": 70
+        },
+        {
+          "type": "operations.runbook",
+          "score": 30
+        },
+        {
+          "type": "operations.infrastructure",
+          "score": 25
+        }
+      ],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-13",
+      "lines": 65,
+      "registered": false,
+      "digest": "ef971d3ca4ca3aec"
+    },
+    {
+      "path": "docs/plans/cicd-module.md",
+      "current": "unknown",
+      "proposed": "product.prd",
+      "confidence": 25,
+      "needsReview": true,
+      "signals": [
+        "content matches \\bacceptance criteria\\b"
+      ],
+      "candidates": [
+        {
+          "type": "product.prd",
+          "score": 25
+        }
+      ],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-12",
+      "lines": 1451,
+      "registered": false,
+      "digest": "3ae52c07bc1cf27c"
+    },
+    {
+      "path": "docs/plans/cicd-phase-2.md",
+      "current": "unknown",
+      "proposed": "unknown",
+      "confidence": 0,
+      "needsReview": true,
+      "signals": [
+        "no signal matched"
+      ],
+      "candidates": [],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-12",
+      "lines": 167,
+      "registered": false,
+      "digest": "9f8fc1b1966bf19a"
+    },
+    {
+      "path": "docs/plans/local-terminal-plan.md",
+      "current": "unknown",
+      "proposed": "architecture.trd",
+      "confidence": 30,
+      "needsReview": true,
+      "signals": [
+        "content matches \\b(rollback|rollout)\\b.*\\n[\\s\\S]*\\"
+      ],
+      "candidates": [
+        {
+          "type": "architecture.trd",
+          "score": 30
+        },
+        {
+          "type": "operations.runbook",
+          "score": 30
+        },
+        {
+          "type": "architecture.adr",
+          "score": 20
+        },
+        {
+          "type": "product.prd",
+          "score": 20
+        }
+      ],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-08",
+      "lines": 2622,
+      "registered": false,
+      "digest": "506ec13c3da60f0d"
+    },
+    {
+      "path": "docs/plans/roadmap-execution.md",
+      "current": "unknown",
+      "proposed": "product.roadmap",
+      "confidence": 90,
+      "needsReview": false,
+      "signals": [
+        "filename matches roadmap"
+      ],
+      "candidates": [
+        {
+          "type": "product.roadmap",
+          "score": 90
+        },
+        {
+          "type": "architecture.adr",
+          "score": 35
+        },
+        {
+          "type": "operations.runbook",
+          "score": 30
+        },
+        {
+          "type": "operations.infrastructure",
+          "score": 25
+        },
+        {
+          "type": "release.deprecation",
+          "score": 25
+        }
+      ],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-08",
+      "lines": 816,
+      "registered": false,
+      "digest": "0d6c0e43f47d1b1a"
+    },
+    {
+      "path": "docs/plans/vpn-tunnel-clients.md",
+      "current": "unknown",
+      "proposed": "security.threat-model",
+      "confidence": 45,
+      "needsReview": true,
+      "signals": [
+        "content matches \\b(trust boundar|threat actor|atta"
+      ],
+      "candidates": [
+        {
+          "type": "security.threat-model",
+          "score": 45
+        },
+        {
+          "type": "operations.runbook",
+          "score": 30
+        },
+        {
+          "type": "release.deprecation",
+          "score": 25
+        }
+      ],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-08",
+      "lines": 1079,
+      "registered": false,
+      "digest": "b29c28f12527bfdb"
+    },
+    {
+      "path": "docs/security.md",
+      "current": "unknown",
+      "proposed": "security.public-model",
+      "confidence": 18,
+      "needsReview": true,
+      "signals": [
+        "filename matches ^security\\.mdx?$",
+        "not at the canonical path SECURITY.md"
+      ],
+      "candidates": [
+        {
+          "type": "security.public-model",
+          "score": 18
+        }
+      ],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-13",
+      "lines": 23,
+      "registered": false,
+      "digest": "5420aa58b8654b44"
+    },
+    {
+      "path": "docs/terminal.md",
+      "current": "unknown",
+      "proposed": "operations.runbook",
+      "confidence": 30,
+      "needsReview": true,
+      "signals": [
+        "content matches (?<![\\w-])(escalat\\w*|pager|severi"
+      ],
+      "candidates": [
+        {
+          "type": "operations.runbook",
+          "score": 30
+        }
+      ],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-13",
+      "lines": 363,
+      "registered": false,
+      "digest": "2da024e7eab43755"
+    },
+    {
+      "path": "docs/tunnels.md",
+      "current": "unknown",
+      "proposed": "unknown",
+      "confidence": 0,
+      "needsReview": true,
+      "signals": [
+        "no signal matched"
+      ],
+      "candidates": [],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-13",
+      "lines": 43,
+      "registered": false,
+      "digest": "781531868d85412f"
+    },
+    {
+      "path": "docs/vault.md",
+      "current": "unknown",
+      "proposed": "unknown",
+      "confidence": 0,
+      "needsReview": true,
+      "signals": [
+        "no signal matched"
+      ],
+      "candidates": [],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-13",
+      "lines": 58,
+      "registered": false,
+      "digest": "d70b6c66c8378ec4"
+    },
+    {
+      "path": "docs/workspaces.md",
+      "current": "unknown",
+      "proposed": "unknown",
+      "confidence": 0,
+      "needsReview": true,
+      "signals": [
+        "no signal matched"
+      ],
+      "candidates": [],
+      "owner": "Zeeshan Sultan",
+      "lastChanged": "2026-09-09",
+      "lines": 73,
+      "registered": false,
+      "digest": "9bcb1a93fdf61068"
+    },
+    {
+      "path": "packaging/winget/README.md",
+      "current": "unknown",
+      "proposed": "docs.index",
+      "confidence": 55,
+      "needsReview": false,
+      "signals": [
+        "filename matches ^(readme|index)\\.mdx?$"
+      ],
+      "candidates": [
+        {
+          "type": "docs.index",
+          "score": 55
+        },
+        {
+          "type": "user.readme",
+          "score": 25
+        },
+        {
+          "type": "user.getting-started",
+          "score": 20
+        }
+      ],
+      "owner": "Zeeshan Sultan",
+      "lastChanged": "2026-09-08",
+      "lines": 27,
+      "registered": false,
+      "digest": "8fd1114be1c5947c"
+    },
+    {
+      "path": "sidecar/netd/README.md",
+      "current": "unknown",
+      "proposed": "user.readme",
+      "confidence": 99,
+      "needsReview": false,
+      "signals": [
+        "filename matches ^readme\\.mdx?$",
+        "canonical singleton path"
+      ],
+      "candidates": [
+        {
+          "type": "user.readme",
+          "score": 160
+        },
+        {
+          "type": "docs.index",
+          "score": 55
+        },
+        {
+          "type": "security.threat-model",
+          "score": 45
+        }
+      ],
+      "owner": "Zeeshan",
+      "lastChanged": "2026-09-08",
+      "lines": 559,
+      "registered": false,
+      "digest": "4aa90adcfdb6a283"
+    }
+  ],
+  "actions": [
+    {
+      "kind": "ANNOTATE",
+      "path": "CLAUDE.md",
+      "to": "CLAUDE.md",
+      "type": "agent.instructions",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-83462",
+      "tier": "safe"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "CODE_OF_CONDUCT.md",
+      "to": "CODE_OF_CONDUCT.md",
+      "type": "governance.code-of-conduct",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-87340",
+      "tier": "safe"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "CONTRIBUTING.md",
+      "to": "CONTRIBUTING.md",
+      "type": "governance.contributing",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-39950",
+      "tier": "safe"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "README.md",
+      "to": "README.md",
+      "type": "user.readme",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-89766",
+      "tier": "safe"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "SECURITY.md",
+      "to": "SECURITY.md",
+      "type": "security.public-model",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-71682",
+      "tier": "safe"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "THIRD-PARTY-NOTICES.md",
+      "to": "THIRD-PARTY-NOTICES.md",
+      "type": "governance.attribution",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-04844",
+      "tier": "safe"
+    },
+    {
+      "kind": "SPLIT",
+      "path": "THIRD-PARTY-NOTICES.md",
+      "type": "governance.attribution",
+      "risk": "high",
+      "requiresJudgement": true,
+      "reason": "528 lines across 3 independently addressable concepts",
+      "into": [
+        {
+          "title": "Bundled binaries",
+          "lines": 124,
+          "to": "THIRD-PARTY-NOTICES/bundled-binaries.md"
+        },
+        {
+          "title": "Key runtime dependencies",
+          "lines": 71,
+          "to": "THIRD-PARTY-NOTICES/key-runtime-dependencies.md"
+        },
+        {
+          "title": "Full dependency license inventory (production tree)",
+          "lines": 278,
+          "to": "THIRD-PARTY-NOTICES/full-dependency-license-inventory-production-tre.md"
+        }
+      ],
+      "id": "DG-95523",
+      "tier": "review"
+    },
+    {
+      "kind": "MOVE",
+      "path": "docs/AI-MCP.md",
+      "to": "docs/06-operations/runbooks/AI-MCP.md",
+      "type": "operations.runbook",
+      "reason": "a Runbook belongs in docs/06-operations/runbooks/",
+      "risk": "medium",
+      "requiresJudgement": true,
+      "id": "DG-52155",
+      "tier": "review"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/AI-MCP.md",
+      "to": "docs/06-operations/runbooks/AI-MCP.md",
+      "type": "operations.runbook",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-36928",
+      "tier": "safe"
+    },
+    {
+      "kind": "SPLIT",
+      "path": "docs/AI-MCP.md",
+      "type": "operations.runbook",
+      "risk": "high",
+      "requiresJudgement": true,
+      "reason": "550 lines across 3 independently addressable concepts",
+      "into": [
+        {
+          "title": "The MCP server",
+          "lines": 160,
+          "to": "docs/06-operations/runbooks/AI-MCP/the-mcp-server.md"
+        },
+        {
+          "title": "Access Groups",
+          "lines": 73,
+          "to": "docs/06-operations/runbooks/AI-MCP/access-groups.md"
+        },
+        {
+          "title": "Connecting Claude Desktop",
+          "lines": 61,
+          "to": "docs/06-operations/runbooks/AI-MCP/connecting-claude-desktop.md"
+        }
+      ],
+      "id": "DG-35454",
+      "tier": "review"
+    },
+    {
+      "kind": "MOVE",
+      "path": "docs/AI-SECURITY.md",
+      "to": "docs/04-security/threat-models/AI-SECURITY.md",
+      "type": "security.threat-model",
+      "reason": "a Threat Model belongs in docs/04-security/threat-models/",
+      "risk": "medium",
+      "requiresJudgement": true,
+      "id": "DG-77693",
+      "tier": "review"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/AI-SECURITY.md",
+      "to": "docs/04-security/threat-models/AI-SECURITY.md",
+      "type": "security.threat-model",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-30072",
+      "tier": "safe"
+    },
+    {
+      "kind": "MOVE",
+      "path": "docs/ROADMAP.md",
+      "to": "docs/01-product/roadmap/ROADMAP.md",
+      "type": "product.roadmap",
+      "reason": "a Roadmap belongs in docs/01-product/roadmap/",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-44346",
+      "tier": "confident"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/ROADMAP.md",
+      "to": "docs/01-product/roadmap/ROADMAP.md",
+      "type": "product.roadmap",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-16159",
+      "tier": "safe"
+    },
+    {
+      "kind": "SPLIT",
+      "path": "docs/ROADMAP.md",
+      "type": "product.roadmap",
+      "risk": "high",
+      "requiresJudgement": true,
+      "reason": "1969 lines across 6 independently addressable concepts",
+      "into": [
+        {
+          "title": "Where this stands, as of 0.16.x",
+          "lines": 44,
+          "to": "docs/01-product/roadmap/ROADMAP/where-this-stands-as-of-0-16-x.md"
+        },
+        {
+          "title": "Built since this was written",
+          "lines": 82,
+          "to": "docs/01-product/roadmap/ROADMAP/built-since-this-was-written.md"
+        },
+        {
+          "title": "The gap audit — 5 Sep, against 0.15.2",
+          "lines": 1039,
+          "to": "docs/01-product/roadmap/ROADMAP/the-gap-audit-5-sep-against-0-15-2.md"
+        },
+        {
+          "title": "The maintenance tier — the week itself",
+          "lines": 409,
+          "to": "docs/01-product/roadmap/ROADMAP/the-maintenance-tier-the-week-itself.md"
+        },
+        {
+          "title": "Leverage against cost",
+          "lines": 205,
+          "to": "docs/01-product/roadmap/ROADMAP/leverage-against-cost.md"
+        },
+        {
+          "title": "The plan — six months, one focused person",
+          "lines": 71,
+          "to": "docs/01-product/roadmap/ROADMAP/the-plan-six-months-one-focused-person.md"
+        }
+      ],
+      "id": "DG-69949",
+      "tier": "review"
+    },
+    {
+      "kind": "CLASSIFY",
+      "path": "docs/VPN.md",
+      "reason": "no classification signal matched",
+      "risk": "low",
+      "requiresJudgement": true,
+      "id": "DG-31947",
+      "tier": "review"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/VPN.md",
+      "to": "docs/10-internal/VPN.md",
+      "type": "unknown",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-54630",
+      "tier": "safe"
+    },
+    {
+      "kind": "CLASSIFY",
+      "path": "docs/ai-agents.md",
+      "reason": "no classification signal matched",
+      "risk": "low",
+      "requiresJudgement": true,
+      "id": "DG-04970",
+      "tier": "review"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/ai-agents.md",
+      "to": "docs/10-internal/ai-agents.md",
+      "type": "unknown",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-30344",
+      "tier": "safe"
+    },
+    {
+      "kind": "CLASSIFY",
+      "path": "docs/databases.md",
+      "reason": "no classification signal matched",
+      "risk": "low",
+      "requiresJudgement": true,
+      "id": "DG-51407",
+      "tier": "review"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/databases.md",
+      "to": "docs/10-internal/databases.md",
+      "type": "unknown",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-65182",
+      "tier": "safe"
+    },
+    {
+      "kind": "CLASSIFY",
+      "path": "docs/design/panel-audit.md",
+      "reason": "no classification signal matched",
+      "risk": "low",
+      "requiresJudgement": true,
+      "id": "DG-04308",
+      "tier": "review"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/design/panel-audit.md",
+      "to": "docs/10-internal/panel-audit.md",
+      "type": "unknown",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-61231",
+      "tier": "safe"
+    },
+    {
+      "kind": "MOVE",
+      "path": "docs/faq.md",
+      "to": "docs/08-user/faq/faq.md",
+      "type": "user.faq",
+      "reason": "a FAQ belongs in docs/08-user/faq/",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-49851",
+      "tier": "confident"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/faq.md",
+      "to": "docs/08-user/faq/faq.md",
+      "type": "user.faq",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-46582",
+      "tier": "safe"
+    },
+    {
+      "kind": "MOVE",
+      "path": "docs/features.md",
+      "to": "docs/01-product/features/features.md",
+      "type": "product.feature",
+      "reason": "a Feature Spec belongs in docs/01-product/features/",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-64363",
+      "tier": "confident"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/features.md",
+      "to": "docs/01-product/features/features.md",
+      "type": "product.feature",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-03654",
+      "tier": "safe"
+    },
+    {
+      "kind": "MOVE",
+      "path": "docs/install.md",
+      "to": "docs/08-user/getting-started/install.md",
+      "type": "user.getting-started",
+      "reason": "a Getting Started belongs in docs/08-user/getting-started/",
+      "risk": "medium",
+      "requiresJudgement": true,
+      "id": "DG-64847",
+      "tier": "review"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/install.md",
+      "to": "docs/08-user/getting-started/install.md",
+      "type": "user.getting-started",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-55242",
+      "tier": "safe"
+    },
+    {
+      "kind": "MOVE",
+      "path": "docs/monitoring.md",
+      "to": "docs/06-operations/observability/monitoring.md",
+      "type": "operations.observability",
+      "reason": "a Observability belongs in docs/06-operations/observability/",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-53223",
+      "tier": "confident"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/monitoring.md",
+      "to": "docs/06-operations/observability/monitoring.md",
+      "type": "operations.observability",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-05602",
+      "tier": "safe"
+    },
+    {
+      "kind": "MOVE",
+      "path": "docs/plans/cicd-module.md",
+      "to": "docs/01-product/requirements/cicd-module.md",
+      "type": "product.prd",
+      "reason": "a PRD belongs in docs/01-product/requirements/",
+      "risk": "medium",
+      "requiresJudgement": true,
+      "id": "DG-14307",
+      "tier": "review"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/plans/cicd-module.md",
+      "to": "docs/01-product/requirements/cicd-module.md",
+      "type": "product.prd",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-92254",
+      "tier": "safe"
+    },
+    {
+      "kind": "SPLIT",
+      "path": "docs/plans/cicd-module.md",
+      "type": "product.prd",
+      "risk": "high",
+      "requiresJudgement": true,
+      "reason": "1451 lines across 12 independently addressable concepts",
+      "into": [
+        {
+          "title": "2. Module registration",
+          "lines": 41,
+          "to": "docs/01-product/requirements/cicd-module/2-module-registration.md"
+        },
+        {
+          "title": "3. The credential problem, which is the first thing to solve",
+          "lines": 55,
+          "to": "docs/01-product/requirements/cicd-module/3-the-credential-problem-which-is-the-first-thin.md"
+        },
+        {
+          "title": "4. Authorization, approvals, audit",
+          "lines": 181,
+          "to": "docs/01-product/requirements/cicd-module/4-authorization-approvals-audit.md"
+        },
+        {
+          "title": "5. Outbound HTTP",
+          "lines": 184,
+          "to": "docs/01-product/requirements/cicd-module/5-outbound-http.md"
+        },
+        {
+          "title": "6. Provider adapters",
+          "lines": 208,
+          "to": "docs/01-product/requirements/cicd-module/6-provider-adapters.md"
+        },
+        {
+          "title": "7. Polling",
+          "lines": 68,
+          "to": "docs/01-product/requirements/cicd-module/7-polling.md"
+        },
+        {
+          "title": "8. UX",
+          "lines": 67,
+          "to": "docs/01-product/requirements/cicd-module/8-ux.md"
+        },
+        {
+          "title": "9. AI agent integration (MCP)",
+          "lines": 256,
+          "to": "docs/01-product/requirements/cicd-module/9-ai-agent-integration-mcp.md"
+        },
+        {
+          "title": "10. Files to touch",
+          "lines": 57,
+          "to": "docs/01-product/requirements/cicd-module/10-files-to-touch.md"
+        },
+        {
+          "title": "12. Sequencing",
+          "lines": 43,
+          "to": "docs/01-product/requirements/cicd-module/12-sequencing.md"
+        },
+        {
+          "title": "13. Open questions",
+          "lines": 62,
+          "to": "docs/01-product/requirements/cicd-module/13-open-questions.md"
+        },
+        {
+          "title": "14b. Implementation status",
+          "lines": 92,
+          "to": "docs/01-product/requirements/cicd-module/14b-implementation-status.md"
+        }
+      ],
+      "id": "DG-68718",
+      "tier": "review"
+    },
+    {
+      "kind": "CLASSIFY",
+      "path": "docs/plans/cicd-phase-2.md",
+      "reason": "no classification signal matched",
+      "risk": "low",
+      "requiresJudgement": true,
+      "id": "DG-29234",
+      "tier": "review"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/plans/cicd-phase-2.md",
+      "to": "docs/10-internal/cicd-phase-2.md",
+      "type": "unknown",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-09133",
+      "tier": "safe"
+    },
+    {
+      "kind": "MOVE",
+      "path": "docs/plans/local-terminal-plan.md",
+      "to": "docs/03-architecture/components/local-terminal-plan.md",
+      "type": "architecture.trd",
+      "reason": "a TRD belongs in docs/03-architecture/components/",
+      "risk": "medium",
+      "requiresJudgement": true,
+      "id": "DG-34589",
+      "tier": "review"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/plans/local-terminal-plan.md",
+      "to": "docs/03-architecture/components/local-terminal-plan.md",
+      "type": "architecture.trd",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-45634",
+      "tier": "safe"
+    },
+    {
+      "kind": "SPLIT",
+      "path": "docs/plans/local-terminal-plan.md",
+      "type": "architecture.trd",
+      "risk": "high",
+      "requiresJudgement": true,
+      "reason": "2622 lines across 3 independently addressable concepts",
+      "into": [
+        {
+          "title": "⚠️ Review findings — read before starting",
+          "lines": 303,
+          "to": "docs/03-architecture/components/local-terminal-plan/review-findings-read-before-starting.md"
+        },
+        {
+          "title": "File structure",
+          "lines": 42,
+          "to": "docs/03-architecture/components/local-terminal-plan/file-structure.md"
+        },
+        {
+          "title": "Phase plan",
+          "lines": 2137,
+          "to": "docs/03-architecture/components/local-terminal-plan/phase-plan.md"
+        }
+      ],
+      "id": "DG-04820",
+      "tier": "review"
+    },
+    {
+      "kind": "MOVE",
+      "path": "docs/plans/roadmap-execution.md",
+      "to": "docs/01-product/roadmap/roadmap-execution.md",
+      "type": "product.roadmap",
+      "reason": "a Roadmap belongs in docs/01-product/roadmap/",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-22869",
+      "tier": "confident"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/plans/roadmap-execution.md",
+      "to": "docs/01-product/roadmap/roadmap-execution.md",
+      "type": "product.roadmap",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-83642",
+      "tier": "safe"
+    },
+    {
+      "kind": "SPLIT",
+      "path": "docs/plans/roadmap-execution.md",
+      "type": "product.roadmap",
+      "risk": "high",
+      "requiresJudgement": true,
+      "reason": "816 lines across 4 independently addressable concepts",
+      "into": [
+        {
+          "title": "Wave 1 — the cheap wins (roadmap 19a, 21)",
+          "lines": 64,
+          "to": "docs/01-product/roadmap/roadmap-execution/wave-1-the-cheap-wins-roadmap-19a-21.md"
+        },
+        {
+          "title": "Wave 2 — the plumbing (roadmap A, C, B)",
+          "lines": 154,
+          "to": "docs/01-product/roadmap/roadmap-execution/wave-2-the-plumbing-roadmap-a-c-b.md"
+        },
+        {
+          "title": "Wave 2 — the plumbing",
+          "lines": 50,
+          "to": "docs/01-product/roadmap/roadmap-execution/wave-2-the-plumbing.md"
+        },
+        {
+          "title": "Item 29 — a renderer that can be tested",
+          "lines": 514,
+          "to": "docs/01-product/roadmap/roadmap-execution/item-29-a-renderer-that-can-be-tested.md"
+        }
+      ],
+      "id": "DG-66755",
+      "tier": "review"
+    },
+    {
+      "kind": "MOVE",
+      "path": "docs/plans/vpn-tunnel-clients.md",
+      "to": "docs/04-security/threat-models/vpn-tunnel-clients.md",
+      "type": "security.threat-model",
+      "reason": "a Threat Model belongs in docs/04-security/threat-models/",
+      "risk": "medium",
+      "requiresJudgement": true,
+      "id": "DG-15902",
+      "tier": "review"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/plans/vpn-tunnel-clients.md",
+      "to": "docs/04-security/threat-models/vpn-tunnel-clients.md",
+      "type": "security.threat-model",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-52345",
+      "tier": "safe"
+    },
+    {
+      "kind": "SPLIT",
+      "path": "docs/plans/vpn-tunnel-clients.md",
+      "type": "security.threat-model",
+      "risk": "high",
+      "requiresJudgement": true,
+      "reason": "1079 lines across 6 independently addressable concepts",
+      "into": [
+        {
+          "title": "2. Current-state analysis",
+          "lines": 81,
+          "to": "docs/04-security/threat-models/vpn-tunnel-clients/2-current-state-analysis.md"
+        },
+        {
+          "title": "3. Engine / library selection matrix",
+          "lines": 44,
+          "to": "docs/04-security/threat-models/vpn-tunnel-clients/3-engine-library-selection-matrix.md"
+        },
+        {
+          "title": "5. Architecture",
+          "lines": 466,
+          "to": "docs/04-security/threat-models/vpn-tunnel-clients/5-architecture.md"
+        },
+        {
+          "title": "6. Per-protocol integration detail",
+          "lines": 200,
+          "to": "docs/04-security/threat-models/vpn-tunnel-clients/6-per-protocol-integration-detail.md"
+        },
+        {
+          "title": "8. Edge-case register",
+          "lines": 83,
+          "to": "docs/04-security/threat-models/vpn-tunnel-clients/8-edge-case-register.md"
+        },
+        {
+          "title": "9. Phased implementation plan",
+          "lines": 46,
+          "to": "docs/04-security/threat-models/vpn-tunnel-clients/9-phased-implementation-plan.md"
+        }
+      ],
+      "id": "DG-34922",
+      "tier": "review"
+    },
+    {
+      "kind": "CLASSIFY",
+      "path": "docs/security.md",
+      "to": "docs/security.md",
+      "type": "security.public-model",
+      "reason": "`SECURITY.md` holds one document and is already claimed — left in place for you to decide",
+      "risk": "medium",
+      "requiresJudgement": true,
+      "id": "DG-18500",
+      "tier": "review"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/security.md",
+      "to": "SECURITY.md",
+      "type": "security.public-model",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-76170",
+      "tier": "safe"
+    },
+    {
+      "kind": "MOVE",
+      "path": "docs/terminal.md",
+      "to": "docs/06-operations/runbooks/terminal.md",
+      "type": "operations.runbook",
+      "reason": "a Runbook belongs in docs/06-operations/runbooks/",
+      "risk": "medium",
+      "requiresJudgement": true,
+      "id": "DG-43117",
+      "tier": "review"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/terminal.md",
+      "to": "docs/06-operations/runbooks/terminal.md",
+      "type": "operations.runbook",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-95058",
+      "tier": "safe"
+    },
+    {
+      "kind": "CLASSIFY",
+      "path": "docs/tunnels.md",
+      "reason": "no classification signal matched",
+      "risk": "low",
+      "requiresJudgement": true,
+      "id": "DG-74466",
+      "tier": "review"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/tunnels.md",
+      "to": "docs/10-internal/tunnels.md",
+      "type": "unknown",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-45976",
+      "tier": "safe"
+    },
+    {
+      "kind": "CLASSIFY",
+      "path": "docs/vault.md",
+      "reason": "no classification signal matched",
+      "risk": "low",
+      "requiresJudgement": true,
+      "id": "DG-96489",
+      "tier": "review"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/vault.md",
+      "to": "docs/10-internal/vault.md",
+      "type": "unknown",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-82218",
+      "tier": "safe"
+    },
+    {
+      "kind": "CLASSIFY",
+      "path": "docs/workspaces.md",
+      "reason": "no classification signal matched",
+      "risk": "low",
+      "requiresJudgement": true,
+      "id": "DG-41553",
+      "tier": "review"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "docs/workspaces.md",
+      "to": "docs/10-internal/workspaces.md",
+      "type": "unknown",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-05160",
+      "tier": "safe"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "packaging/winget/README.md",
+      "to": "packaging/winget/README.md",
+      "type": "docs.index",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-75724",
+      "tier": "safe"
+    },
+    {
+      "kind": "ANNOTATE",
+      "path": "sidecar/netd/README.md",
+      "to": "sidecar/netd/README.md",
+      "type": "user.readme",
+      "reason": "no docgov frontmatter; add id, type, authority, visibility",
+      "risk": "low",
+      "requiresJudgement": false,
+      "id": "DG-88716",
+      "tier": "safe"
+    },
+    {
+      "kind": "SPLIT",
+      "path": "sidecar/netd/README.md",
+      "type": "user.readme",
+      "risk": "high",
+      "requiresJudgement": true,
+      "reason": "559 lines across 3 independently addressable concepts",
+      "into": [
+        {
+          "title": "Protocol",
+          "lines": 190,
+          "to": "sidecar/netd/README/protocol.md"
+        },
+        {
+          "title": "Traffic inspection (`inspect.*`)",
+          "lines": 57,
+          "to": "sidecar/netd/README/traffic-inspection-inspect.md"
+        },
+        {
+          "title": "System mode (`--privileged`)",
+          "lines": 133,
+          "to": "sidecar/netd/README/system-mode-privileged.md"
+        }
+      ],
+      "id": "DG-14105",
+      "tier": "review"
+    },
+    {
+      "kind": "CREATE",
+      "type": "operations.deployment",
+      "to": "docs/06-operations/deployment/",
+      "risk": "low",
+      "requiresJudgement": false,
+      "reason": "ci detected (.github/workflows/ci.yml) but no Deployment Guide exists",
+      "id": "DG-81474",
+      "tier": "safe"
+    },
+    {
+      "kind": "CREATE",
+      "type": "engineering.testing",
+      "to": "docs/05-engineering/testing/",
+      "risk": "low",
+      "requiresJudgement": false,
+      "reason": "ci detected (.github/workflows/ci.yml) but no Testing Strategy exists",
+      "id": "DG-84983",
+      "tier": "safe"
+    },
+    {
+      "kind": "CREATE",
+      "type": "security.architecture",
+      "to": "docs/04-security/architecture/",
+      "risk": "low",
+      "requiresJudgement": false,
+      "reason": "auth detected (tests/sessionElevation.test.ts) but no Security Architecture exists",
+      "id": "DG-75306",
+      "tier": "safe"
+    },
+    {
+      "kind": "CREATE",
+      "type": "security.authorization",
+      "to": "docs/04-security/authorization/",
+      "risk": "low",
+      "requiresJudgement": false,
+      "reason": "auth detected (tests/sessionElevation.test.ts) but no Authorization Model exists",
+      "id": "DG-96328",
+      "tier": "safe"
+    },
+    {
+      "kind": "CREATE",
+      "type": "security.threat-model",
+      "to": "docs/04-security/threat-models/",
+      "risk": "low",
+      "requiresJudgement": false,
+      "reason": "auth detected (tests/sessionElevation.test.ts) but no Threat Model exists",
+      "id": "DG-49252",
+      "tier": "safe"
+    },
+    {
+      "kind": "CREATE",
+      "type": "security.data-classification",
+      "to": "docs/04-security/data-classification/",
+      "risk": "low",
+      "requiresJudgement": false,
+      "reason": "iac-secrets detected (src/renderer/src/components/vault/VaultSidebar.tsx) but no Data Classification exists",
+      "id": "DG-07288",
+      "tier": "safe"
+    },
+    {
+      "kind": "CREATE",
+      "type": "operations.configuration",
+      "to": "docs/06-operations/configuration/",
+      "risk": "low",
+      "requiresJudgement": false,
+      "reason": "iac-secrets detected (src/renderer/src/components/vault/VaultSidebar.tsx) but no Configuration Reference exists",
+      "id": "DG-57377",
+      "tier": "safe"
+    },
+    {
+      "kind": "CREATE",
+      "type": "architecture.overview",
+      "to": "docs/03-architecture/overview/",
+      "risk": "low",
+      "requiresJudgement": false,
+      "reason": "every repository should have this",
+      "id": "DG-58136",
+      "tier": "safe"
+    },
+    {
+      "kind": "CREATE",
+      "type": "engineering.development",
+      "to": "docs/05-engineering/development/",
+      "risk": "low",
+      "requiresJudgement": false,
+      "reason": "every repository should have this",
+      "id": "DG-18764",
+      "tier": "safe"
+    }
+  ],
+  "duplicates": [
+    {
+      "a": "docs/AI-MCP.md",
+      "b": "docs/ai-agents.md",
+      "aId": "docs-ai-mcp",
+      "bId": "docs-ai-agents",
+      "score": 0.6,
+      "reasons": []
+    },
+    {
+      "a": "docs/AI-MCP.md",
+      "b": "docs/AI-SECURITY.md",
+      "aId": "docs-ai-mcp",
+      "bId": "docs-ai-security",
+      "score": 0.58,
+      "reasons": []
+    },
+    {
+      "a": "docs/VPN.md",
+      "b": "docs/tunnels.md",
+      "aId": "docs-vpn",
+      "bId": "docs-tunnels",
+      "score": 0.58,
+      "reasons": []
+    },
+    {
+      "a": "docs/ROADMAP.md",
+      "b": "docs/plans/roadmap-execution.md",
+      "aId": "docs-roadmap",
+      "bId": "docs-plans-roadmap-execution",
+      "score": 0.51,
+      "reasons": []
+    }
+  ],
+  "contradictionCandidates": [
+    {
+      "a": "docs/AI-MCP.md",
+      "b": "docs/ai-agents.md",
+      "aId": "docs-ai-mcp",
+      "bId": "docs-ai-agents",
+      "score": 0.6,
+      "reasons": [],
+      "authorityA": "historical",
+      "authorityB": "historical",
+      "sameAuthority": true,
+      "note": "equal authority — a contradiction here has no tie-break"
+    },
+    {
+      "a": "docs/AI-MCP.md",
+      "b": "docs/AI-SECURITY.md",
+      "aId": "docs-ai-mcp",
+      "bId": "docs-ai-security",
+      "score": 0.58,
+      "reasons": [],
+      "authorityA": "historical",
+      "authorityB": "historical",
+      "sameAuthority": true,
+      "note": "equal authority — a contradiction here has no tie-break"
+    },
+    {
+      "a": "docs/VPN.md",
+      "b": "docs/tunnels.md",
+      "aId": "docs-vpn",
+      "bId": "docs-tunnels",
+      "score": 0.58,
+      "reasons": [],
+      "authorityA": "historical",
+      "authorityB": "historical",
+      "sameAuthority": true,
+      "note": "equal authority — a contradiction here has no tie-break"
+    },
+    {
+      "a": "docs/ROADMAP.md",
+      "b": "docs/plans/roadmap-execution.md",
+      "aId": "docs-roadmap",
+      "bId": "docs-plans-roadmap-execution",
+      "score": 0.51,
+      "reasons": [],
+      "authorityA": "historical",
+      "authorityB": "historical",
+      "sameAuthority": true,
+      "note": "equal authority — a contradiction here has no tie-break"
+    }
+  ],
+  "gaps": [
+    {
+      "type": "operations.deployment",
+      "label": "Deployment Guide",
+      "because": "ci",
+      "evidence": ".github/workflows/ci.yml"
+    },
+    {
+      "type": "engineering.testing",
+      "label": "Testing Strategy",
+      "because": "ci",
+      "evidence": ".github/workflows/ci.yml"
+    },
+    {
+      "type": "security.architecture",
+      "label": "Security Architecture",
+      "because": "auth",
+      "evidence": "tests/sessionElevation.test.ts"
+    },
+    {
+      "type": "security.authorization",
+      "label": "Authorization Model",
+      "because": "auth",
+      "evidence": "tests/sessionElevation.test.ts"
+    },
+    {
+      "type": "security.threat-model",
+      "label": "Threat Model",
+      "because": "auth",
+      "evidence": "tests/sessionElevation.test.ts"
+    },
+    {
+      "type": "security.data-classification",
+      "label": "Data Classification",
+      "because": "iac-secrets",
+      "evidence": "src/renderer/src/components/vault/VaultSidebar.tsx"
+    },
+    {
+      "type": "operations.configuration",
+      "label": "Configuration Reference",
+      "because": "iac-secrets",
+      "evidence": "src/renderer/src/components/vault/VaultSidebar.tsx"
+    },
+    {
+      "type": "architecture.overview",
+      "label": "Architecture Overview",
+      "because": "baseline",
+      "evidence": null
+    },
+    {
+      "type": "engineering.development",
+      "label": "Development Guide",
+      "because": "baseline",
+      "evidence": null
+    }
+  ],
+  "brokenLinks": [],
+  "collisions": [],
+  "scopes": [
+    {
+      "name": "netd",
+      "prefix": "sidecar/netd",
+      "declared": false
+    }
+  ],
+  "stack": [
+    {
+      "id": "ci",
+      "evidence": ".github/workflows/ci.yml",
+      "count": 4
+    },
+    {
+      "id": "tests",
+      "evidence": "sidecar/netd/diagnose_test.go",
+      "count": 765
+    },
+    {
+      "id": "auth",
+      "evidence": "tests/sessionElevation.test.ts",
+      "count": 3
+    },
+    {
+      "id": "iac-secrets",
+      "evidence": "src/renderer/src/components/vault/VaultSidebar.tsx",
+      "count": 3
+    }
+  ],
+  "contracts": [],
+  "agentInstructions": [
+    "CLAUDE.md",
+    ".claude/rules"
+  ]
+}

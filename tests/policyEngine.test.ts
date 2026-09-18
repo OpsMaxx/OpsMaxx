@@ -107,6 +107,49 @@ describe('read-only, read/write and sudo groups', () => {
   })
 })
 
+describe('a group that granted sudo has already answered the elevated tier', () => {
+  // The reported symptom: a session on Full Access, every capability ALLOW,
+  // and `sudo docker build` still raised an approval card — which then
+  // auto-denied at 01:32 because nobody was awake to answer it.
+  // Full Access, as the reporter had it: writes allowed too, so a denial below
+  // is the risk tier talking and not the write capability.
+  const sudoAllowed = group({ terminal: 'allow', sudo: 'allow', writeFiles: 'allow' })
+  const sudoAsked = group({ terminal: 'allow', sudo: 'ask', writeFiles: 'allow' })
+
+  it.each([
+    'sudo docker build -t app:1 .',
+    'sudo systemctl restart nginx',
+    'sudo apt-get install -y curl',
+    'sudo docker compose build'
+  ])('%s runs without a card when the group set sudo = allow', (cmd) => {
+    expect(evaluateCommand(sudoAllowed, cmd).decision).toBe('allow')
+  })
+
+  it('a destructive command still asks — that tier is not waivable', () => {
+    // A path the file rules have nothing to say about, so the card this raises
+    // is the risk tier's own and not a path denial wearing its clothes.
+    expect(evaluateCommand(sudoAllowed, 'sudo rm -rf /home/app/data').decision).toBe('ask')
+    expect(evaluateCommand(sudoAllowed, 'sudo rm -rf /var/lib/postgresql').decision).not.toBe('allow')
+  })
+
+  // Never silent, whichever of the two stopped it: the path rules deny a raw
+  // device outright, which is stricter than the card and not a waiver.
+  it.each(['sudo mkfs.ext4 /dev/sda1', 'sudo dd if=/dev/zero of=/dev/sda'])(
+    '%s is never allowed outright',
+    (cmd) => {
+      expect(evaluateCommand(sudoAllowed, cmd).decision).not.toBe('allow')
+    }
+  )
+
+  it('waives nothing for a command that is not sudo', () => {
+    expect(evaluateCommand(sudoAllowed, 'docker build -t app:1 .').decision).toBe('ask')
+  })
+
+  it('waives nothing when sudo is only asked for — the human has not answered yet', () => {
+    expect(evaluateCommand(sudoAsked, 'sudo docker build -t app:1 .').decision).toBe('ask')
+  })
+})
+
 describe('unrestricted shells are always denied', () => {
   const fullAccess = group({ terminal: 'allow', sudo: 'allow' })
 

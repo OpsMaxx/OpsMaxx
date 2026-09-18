@@ -182,8 +182,23 @@ function buildRequestPdu(destination: string, token: string, x224: Buffer): Buff
   )
 }
 
-function connectRelay(proxyUrl: string, token: string): WebSocket {
-  return new WebSocket(`${proxyUrl}?token=${encodeURIComponent(token)}`)
+/**
+ * Connect the way the app does: the minted URL, unaltered.
+ *
+ * This helper used to append `?token=` itself, and that is how the relay
+ * shipped refusing every socket the real client opened. The ticket did not
+ * carry a token in its URL, the wasm client opens the proxy address verbatim,
+ * and the relay closed anything arriving without one — so the suite was green
+ * against a URL shape nothing in the app minted. Take the ticket's word for it.
+ */
+function connectRelay(proxyUrl: string): WebSocket {
+  return new WebSocket(proxyUrl)
+}
+
+/** The proxy address with no token on it, which is what a client carrying its
+ *  token only in the PDU opens. */
+function withoutUrlToken(proxyUrl: string): string {
+  return proxyUrl.split('?')[0]
 }
 
 /** The first binary frame the relay sends back, or the close code if it hangs up. */
@@ -239,7 +254,9 @@ describe('minting a ticket', () => {
     expect(result.ticket?.password).toBe('hunter2')
     // Loopback, always. A relay reachable off this machine would be an
     // unauthenticated RDP proxy for the network.
-    expect(result.ticket?.proxyUrl).toMatch(/^ws:\/\/127\.0\.0\.1:\d+\/rdp$/)
+    expect(result.ticket?.proxyUrl).toMatch(/^ws:\/\/127\.0\.0\.1:\d+\/rdp\?token=/)
+    // The token rides the URL as well as the PDU, and the relay takes either.
+    expect(new URL(result.ticket!.proxyUrl).searchParams.get('token')).toBe(result.ticket!.token)
   })
 
   it('refuses a server that is not configured for RDP', async () => {
@@ -307,7 +324,7 @@ describe('the RDCleanPath handshake', () => {
     const { ticket } = await rdpMintTicket('srv-1')
     expect(ticket).toBeDefined()
 
-    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    const ws = connectRelay(ticket!.proxyUrl)
     await new Promise((r) => ws.once('open', r))
     ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
 
@@ -338,7 +355,7 @@ describe('the RDCleanPath handshake', () => {
   it('refuses a PDU whose token is not the one that was minted', async () => {
     defineServer('srv-1', fake.port)
     const { ticket } = await rdpMintTicket('srv-1')
-    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    const ws = connectRelay(ticket!.proxyUrl)
     await new Promise((r) => ws.once('open', r))
 
     // The right socket, the wrong request. Authenticating only the upgrade
@@ -355,7 +372,7 @@ describe('the RDCleanPath handshake', () => {
   it('refuses a destination the ticket was not minted for', async () => {
     defineServer('srv-1', fake.port)
     const { ticket } = await rdpMintTicket('srv-1')
-    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    const ws = connectRelay(ticket!.proxyUrl)
     await new Promise((r) => ws.once('open', r))
 
     // This is the attack the ticket exists to stop: a renderer using the relay
@@ -368,10 +385,10 @@ describe('the RDCleanPath handshake', () => {
     ws.close()
   })
 
-  it('rejects a socket with no token at all', async () => {
+  it('rejects a socket presenting a token that was never minted', async () => {
     defineServer('srv-1', fake.port)
     const { ticket } = await rdpMintTicket('srv-1')
-    const ws = new WebSocket(ticket!.proxyUrl)
+    const ws = new WebSocket(`${withoutUrlToken(ticket!.proxyUrl)}?token=not-a-real-one`)
     const closed = await new Promise<number>((resolve) => {
       ws.once('close', (code: number) => resolve(code))
       ws.once('error', () => resolve(-1))
@@ -381,14 +398,54 @@ describe('the RDCleanPath handshake', () => {
     expect(closed === 1008 || closed === -1).toBe(true)
   })
 
+  /**
+   * The shape the real client opens, and the one that was refused.
+   *
+   * RDCleanPath carries proxy_auth_token in the PDU; nothing appends it to the
+   * socket URL. A relay that demanded it there closed every desktop anyone ever
+   * opened, and it reached the renderer as the bare "WebSocket is `Closed`".
+   */
+  it('accepts a socket whose token is only in the PDU', async () => {
+    defineServer('srv-1', fake.port)
+    const { ticket } = await rdpMintTicket('srv-1')
+    const ws = new WebSocket(withoutUrlToken(ticket!.proxyUrl))
+    await new Promise((r) => ws.once('open', r))
+
+    ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
+    const reply = await firstReply(ws)
+
+    // A response PDU, not an error and not a close: it got through the X.224
+    // replay and the TLS handshake against the fake server.
+    expect(reply.closeCode).toBeUndefined()
+    expect(reply.data?.[0]).toBe(0x30)
+    expect(fake.received.length).toBeGreaterThan(0)
+    ws.close()
+  })
+
+  it('still refuses a PDU-only socket whose token was never minted', async () => {
+    defineServer('srv-1', fake.port)
+    await rdpMintTicket('srv-1')
+    const relayPort = rdpRelayStatus().port!
+    const ws = new WebSocket(`ws://127.0.0.1:${relayPort}/rdp`)
+    await new Promise((r) => ws.once('open', r))
+
+    ws.send(buildRequestPdu('127.0.0.1:1', 'not-the-token', X224_REQUEST))
+    const closed = await new Promise<number>((resolve) => {
+      ws.once('close', (code: number) => resolve(code))
+      ws.once('error', () => resolve(-1))
+    })
+    expect(closed === 1008 || closed === -1).toBe(true)
+    expect(fake.received).toHaveLength(0)
+  })
+
   it('spends a token on first use so a leaked URL opens nothing', async () => {
     defineServer('srv-1', fake.port)
     const { ticket } = await rdpMintTicket('srv-1')
 
-    const first = connectRelay(ticket!.proxyUrl, ticket!.token)
+    const first = connectRelay(ticket!.proxyUrl)
     await new Promise((r) => first.once('open', r))
 
-    const second = connectRelay(ticket!.proxyUrl, ticket!.token)
+    const second = connectRelay(ticket!.proxyUrl)
     const closed = await new Promise<number>((resolve) => {
       second.once('close', (code: number) => resolve(code))
       second.once('error', () => resolve(-1))
@@ -406,7 +463,7 @@ describe('certificate trust', () => {
       route: [{ host: 'bastion', port: 22, username: 'jump' }]
     })
     const { ticket } = await rdpMintTicket('srv-jump')
-    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    const ws = connectRelay(ticket!.proxyUrl)
     await new Promise((r) => ws.once('open', r))
     ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
     await firstReply(ws)
@@ -419,7 +476,7 @@ describe('certificate trust', () => {
     defineServer('srv-1', fake.port)
     certTrusted = false
     const { ticket } = await rdpMintTicket('srv-1')
-    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    const ws = connectRelay(ticket!.proxyUrl)
     await new Promise((r) => ws.once('open', r))
     ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
 
@@ -447,8 +504,11 @@ describe('relay lifecycle', () => {
     defineServer('srv-1', fake.port)
     const a = await rdpMintTicket('srv-1')
     const b = await rdpMintTicket('srv-1')
-    expect(a.ticket?.proxyUrl).toBe(b.ticket?.proxyUrl)
+    // The listener, not the whole URL: two tickets share a port and a path and
+    // differ in the token they carry on it.
+    expect(withoutUrlToken(a.ticket!.proxyUrl)).toBe(withoutUrlToken(b.ticket!.proxyUrl))
     expect(a.ticket?.token).not.toBe(b.ticket?.token)
+    expect(a.ticket?.proxyUrl).not.toBe(b.ticket?.proxyUrl)
   })
 
   it('tears down live sessions on shutdown, not just the listener', async () => {
@@ -459,7 +519,7 @@ describe('relay lifecycle', () => {
       route: [{ host: 'bastion', port: 22, username: 'jump' }]
     })
     const { ticket } = await rdpMintTicket('srv-jump')
-    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    const ws = connectRelay(ticket!.proxyUrl)
     await new Promise((r) => ws.once('open', r))
     ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
     await firstReply(ws)
@@ -501,7 +561,7 @@ describe('reaching a host through a jump route', () => {
       ]
     })
     const { ticket } = await rdpMintTicket('srv-jump')
-    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    const ws = connectRelay(ticket!.proxyUrl)
     await new Promise((r) => ws.once('open', r))
     ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
 
@@ -527,7 +587,7 @@ describe('reaching a host through a jump route', () => {
       route: [{ host: 'bastion', port: 22, username: 'jump' }]
     })
     const { ticket } = await rdpMintTicket('srv-one')
-    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    const ws = connectRelay(ticket!.proxyUrl)
     await new Promise((r) => ws.once('open', r))
     ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
     await firstReply(ws)
@@ -544,7 +604,7 @@ describe('reaching a host through a jump route', () => {
       route: [{ host: 'bastion', port: 22, username: 'jump' }]
     })
     const { ticket } = await rdpMintTicket('srv-jump')
-    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    const ws = connectRelay(ticket!.proxyUrl)
     await new Promise((r) => ws.once('open', r))
     ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
     await firstReply(ws)
@@ -558,7 +618,7 @@ describe('reaching a host through a jump route', () => {
   it('does not open a chain at all for a server with no route', async () => {
     defineServer('srv-direct', fake.port)
     const { ticket } = await rdpMintTicket('srv-direct')
-    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    const ws = connectRelay(ticket!.proxyUrl)
     await new Promise((r) => ws.once('open', r))
     ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
     await firstReply(ws)
@@ -588,7 +648,7 @@ describe('destination matching', () => {
     const { ticket } = await rdpMintTicket('srv-case')
     expect(ticket?.destination).toBe(`LOCALHOST:${fake.port}`)
 
-    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    const ws = connectRelay(ticket!.proxyUrl)
     await new Promise((r) => ws.once('open', r))
     ws.send(buildRequestPdu(`localhost:${fake.port}`, ticket!.token, X224_REQUEST))
 
@@ -602,7 +662,7 @@ describe('destination matching', () => {
   it('still refuses a different port on the same host', async () => {
     defineServer('srv-1', fake.port)
     const { ticket } = await rdpMintTicket('srv-1')
-    const ws = connectRelay(ticket!.proxyUrl, ticket!.token)
+    const ws = connectRelay(ticket!.proxyUrl)
     await new Promise((r) => ws.once('open', r))
     ws.send(buildRequestPdu(`127.0.0.1:${fake.port + 1}`, ticket!.token, X224_REQUEST))
 

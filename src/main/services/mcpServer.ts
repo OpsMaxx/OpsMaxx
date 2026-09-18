@@ -5584,25 +5584,70 @@ export interface CapabilityExplanation {
   fromScope: 'allow' | 'ask' | 'deny'
   fromSession: 'allow' | 'ask' | 'deny' | null
   decidedBy: 'scope' | 'session' | 'both'
+  /** The group the restriction came from, so the UI can send the user to the
+   *  one that actually decided. `null` for an explicit No AI Access, which is
+   *  not a group, and for a row nothing narrowed. */
+  scopeGroupId: string | null
+  scopeGroupName: string | null
+  /** Which of the session's workspaces that assignment hangs off. Named in the
+   *  UI because a session spanning several has no single "the workspace". */
+  scopeWorkspaceId: string | null
+  scopeWorkspaceName: string | null
+}
+
+/** One workspace's deliberate restriction, resolved once per explain call. */
+interface ScopeSource {
+  workspaceId: string | null
+  workspaceName: string | null
+  group: AccessGroup | null
+  /** Set to No AI Access, which is not the same as carrying no assignment. */
+  shut: boolean
+}
+
+function scopeSourcesFor(session: McpAgentSession, serverId: string | null): ScopeSource[] {
+  if (serverId) {
+    const server = getCachedServer(serverId)
+    const found = server
+      ? resolveRestriction(listAssignments(), serverId, server.workspaceId)
+      : ({ kind: 'none' } as const)
+    return [
+      {
+        workspaceId: server?.workspaceId ?? null,
+        workspaceName: session.workspaces.find((w) => w.id === server?.workspaceId)?.name ?? null,
+        group: found.kind === 'group' ? getGroup(found.groupId) : null,
+        shut: found.kind === 'no-ai-access'
+      }
+    ]
+  }
+  // EVERY workspace, not `workspaces[0]`. A session scoped to two of them was
+  // explained by whichever happened to be first, so an assignment on the other
+  // one denied calls the table showed as allowed.
+  return session.workspaces.map((w) => {
+    const found = resolveRestriction(listAssignments(), '', w.id)
+    return {
+      workspaceId: w.id,
+      workspaceName: w.name,
+      group: found.kind === 'group' ? getGroup(found.groupId) : null,
+      shut: found.kind === 'no-ai-access'
+    }
+  })
 }
 
 // The same functions the tools call, so the UI cannot drift from what is
 // actually enforced. A permissions screen that computes its own answer is
 // worse than no permissions screen, because it will eventually disagree with
 // reality and be believed.
+//
+// ONE DRIFT REMAINS AND IS DELIBERATE: this is capability-shaped, and
+// `execute_command` is additionally graded per command by `evaluateCommand`.
+// A row here reading ALLOW can still ask when the command itself carries a
+// destructive finding. SessionAccess.tsx says so under the table.
 export function explainSessionAccess(sessionId: string, serverId: string | null): CapabilityExplanation[] | null {
   const session = getSession(sessionId)
   if (!session) return null
 
   const sessionGroup = sessionGroupFor(session)
-  const scopeGroup = serverId
-    ? serverGroupFor(serverId)
-    : (() => {
-        const first = session.workspaces[0]
-        if (!first) return null
-        const groupId = resolveGroupId(listAssignments(), '', first.id)
-        return groupId ? getGroup(groupId) : null
-      })()
+  const sources = scopeSourcesFor(session, serverId)
 
   return AI_CAPABILITIES.map(({ id, label }) => {
     // `fromSession` is now the GRANT and `fromScope` the optional restriction,
@@ -5615,10 +5660,42 @@ export function explainSessionAccess(sessionId: string, serverId: string | null)
     const sess = sessionGroup
       ? evaluateCapability(sessionGroup, id)
       : { decision: 'deny' as const, reason: 'This AI session has no access group.' }
-    const scope = scopeGroup ? evaluateCapability(scopeGroup, id) : null
-    const combined = serverId
-      ? effectiveCapability(session, serverId, id)
-      : withRestriction(sess, scope, 'the workspace')
+
+    // The strictest restriction across the session's workspaces, and which one
+    // it came from. `resolveRestriction`, not `resolveGroupId`: the latter
+    // reports an explicit No AI Access as "no assignment", so a workspace
+    // somebody deliberately shut rendered as fully allowed while every call
+    // against it was denied.
+    let winner: { decision: Decision; source: ScopeSource } | null = null
+    for (const source of sources) {
+      const decision = source.shut
+        ? NO_AI_ACCESS
+        : source.group
+          ? evaluateCapability(source.group, id)
+          : null
+      if (!decision) continue
+      // `mostRestrictive` prefers its first argument on a tie, so this replaces
+      // the incumbent only when the new one is strictly narrower — the first
+      // workspace to reach a given decision is the one named for it.
+      if (!winner || mostRestrictive(winner.decision, decision) === decision) winner = { decision, source }
+    }
+
+    const scope = winner?.decision ?? null
+    const combined = winner?.source.shut
+      ? NO_AI_ACCESS
+      : withRestriction(
+          sess,
+          scope,
+          winner?.source.workspaceName
+            ? `${winner.source.workspaceName} is assigned "${winner.source.group?.name ?? 'No AI Access'}", which`
+            : 'the workspace'
+        )
+    const decidedBy =
+      !scope || scope.decision === sess.decision
+        ? ('both' as const)
+        : combined.decision === scope.decision
+          ? ('scope' as const)
+          : ('session' as const)
     return {
       capability: id,
       label,
@@ -5626,12 +5703,11 @@ export function explainSessionAccess(sessionId: string, serverId: string | null)
       reason: combined.reason,
       fromScope: scope ? scope.decision : sess.decision,
       fromSession: sess.decision,
-      decidedBy:
-        !scope || scope.decision === sess.decision
-          ? 'both'
-          : combined.decision === scope.decision
-            ? 'scope'
-            : 'session'
+      decidedBy,
+      scopeGroupId: decidedBy === 'scope' ? (winner?.source.group?.id ?? null) : null,
+      scopeGroupName: decidedBy === 'scope' ? (winner?.source.group?.name ?? 'No AI Access') : null,
+      scopeWorkspaceId: decidedBy === 'scope' ? (winner?.source.workspaceId ?? null) : null,
+      scopeWorkspaceName: decidedBy === 'scope' ? (winner?.source.workspaceName ?? null) : null
     }
   })
 }

@@ -301,7 +301,10 @@ export async function rdpMintTicket(
 
   const ticket: RdpTicket = {
     token,
-    proxyUrl: `ws://127.0.0.1:${listenPort}/rdp`,
+    // The token rides the URL as well as the PDU. Belt and braces, and it costs
+    // nothing: the socket is loopback and single-use, and handleConnection
+    // accepts either.
+    proxyUrl: `ws://127.0.0.1:${listenPort}/rdp?token=${encodeURIComponent(token)}`,
     destination,
     // The account the ticket signs in as, resolved above: RDP's own where one
     // is set, the server's where it is not.
@@ -323,20 +326,62 @@ function formatDestination(host: string, port: number): string {
   return host.includes(':') ? `[${host}]:${port}` : `${host}:${port}`
 }
 
+/**
+ * The PDU's `proxy_auth_token`, or null if this is not a request we can read.
+ *
+ * Deliberately lenient and deliberately not the real parse: its only job is to
+ * find which ticket a socket is claiming, before anything has been dialled.
+ * openSession parses the same bytes properly straight afterwards and is what
+ * decides whether the request is well formed and whether the token matches the
+ * destination.
+ */
+function proxyAuthOf(first: Buffer): string | null {
+  try {
+    return parseRequest(first).proxyAuth ?? null
+  } catch {
+    return null
+  }
+}
+
+/** Take a minted ticket out of the book. Idempotent. */
+function spend(token: string): Ticket | undefined {
+  const ticket = tickets.get(token)
+  if (!ticket) return undefined
+  clearTimeout(ticket.expires)
+  tickets.delete(token)
+  return ticket
+}
+
+/**
+ * THE TOKEN MAY ARRIVE ON THE URL OR IN THE PDU, and this used to insist on the
+ * URL.
+ *
+ * RDCleanPath carries `proxy_auth_token` inside the request PDU, which is where
+ * the client puts it: `withAuthToken()` reaches the Rust side, and the socket it
+ * opens is the proxy address verbatim. Nothing appends a query string. So a
+ * relay that closed every socket arriving without `?token=` closed every socket
+ * the real client has ever opened — with 1008, which reaches the renderer as the
+ * bare "WebSocket is `Closed`" that was reported.
+ *
+ * It survived because the tests reached for the relay through a helper that
+ * appends `?token=` itself, so the whole suite exercised a URL shape the app
+ * does not mint. The ticket now carries the token in its URL as well, so the
+ * common path still authenticates twice — but a socket without one is no longer
+ * refused before it can present the PDU. Authentication is not weakened: the
+ * check that matters is the one in openSession, which binds the token to the
+ * destination the PDU asks for, and no session starts without it.
+ */
 function handleConnection(ws: WebSocket, req: { url?: string }): void {
-  const token = new URL(req.url ?? '/', 'http://127.0.0.1').searchParams.get('token')
-  const ticket = token === null ? undefined : tickets.get(token)
-  if (!token || !ticket) {
+  const urlToken = new URL(req.url ?? '/', 'http://127.0.0.1').searchParams.get('token')
+  const ticket = urlToken === null ? undefined : spend(urlToken)
+  if (urlToken !== null && !ticket) {
+    // Presented one and it was wrong: nothing to wait for.
     ws.close(1008, 'bad token')
     return
   }
-  // Spent on sight. A token that opened a socket cannot open a second one, so a
-  // leaked URL is worth nothing after the session it was minted for starts.
-  clearTimeout(ticket.expires)
-  tickets.delete(token)
 
-  // Counted from here, not from the start of openSession: the ticket is gone
-  // as of the line above, so between now and the handshake finishing nothing
+  // Counted from here, not from the start of openSession: a ticket presented on
+  // the URL is already gone, so between now and the handshake finishing nothing
   // else records that this socket exists.
   connecting++
   let counted = true
@@ -358,7 +403,23 @@ function handleConnection(ws: WebSocket, req: { url?: string }): void {
 
   ws.once('message', (data: Buffer) => {
     clearTimeout(firstMessage)
-    void openSession(ws, token, ticket, Buffer.from(data)).finally(uncount)
+    const first = Buffer.from(data)
+    // No token on the URL: the PDU has to name one, and it has to be a ticket
+    // this process minted. Parsed here only far enough to find it; openSession
+    // parses it properly and is what checks it against the destination.
+    let token = urlToken
+    let resolved = ticket
+    if (!resolved) {
+      token = proxyAuthOf(first)
+      resolved = token === null ? undefined : spend(token)
+      if (!token || !resolved) {
+        uncount()
+        ws.close(1008, 'bad token')
+        scheduleIdleShutdown()
+        return
+      }
+    }
+    void openSession(ws, token as string, resolved, first).finally(uncount)
   })
   ws.on('close', () => {
     clearTimeout(firstMessage)
