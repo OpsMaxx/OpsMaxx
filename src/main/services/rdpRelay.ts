@@ -90,6 +90,76 @@ export function rdpRelayStatus(): { listening: boolean; sessions: number; port?:
 }
 
 /**
+ * Why the last attempt on a given server failed, in words.
+ *
+ * The paragraph above says a sticky `lastError` was dropped because "a failure
+ * nobody displays is a failure the session itself already reported". The half
+ * of that which is wrong is "reported": what the session reports is an
+ * RDCleanPath error PDU carrying an integer and an HTTP status, so a refused
+ * certificate, a deleted server, a session cap and a machine with no RDP
+ * service running all arrive as "general error (code 1); HTTP 502 bad
+ * gateway". A real Linux host with no xrdp on it is what proved the point.
+ *
+ * So this comes back, with the two things that were missing before: it is
+ * displayed, and it is keyed by server rather than global, so two desktops
+ * failing at once cannot show each other's reason.
+ */
+const failures = new Map<string, string>()
+
+/** Kept small on purpose: one entry per server, and the map only ever holds
+ *  servers the user has actually tried to open. */
+function rememberFailure(serverId: string, err: unknown): void {
+  failures.set(serverId, explain(err))
+}
+
+export function rdpLastError(serverId: string): string | null {
+  return failures.get(serverId) ?? null
+}
+
+/** Cleared when a session gets through, so a stale reason cannot outlive the
+ *  problem it described. */
+function forgetFailure(serverId: string): void {
+  failures.delete(serverId)
+}
+
+/**
+ * The errno cases worth naming, because each one sends you somewhere different.
+ *
+ * Anything unrecognised keeps its own message rather than being flattened into
+ * a house phrase - the point of this function is to stop losing detail, so
+ * inventing a friendlier wording for an error nobody predicted would repeat
+ * the mistake at one remove.
+ */
+function explain(err: unknown): string {
+  // Down the `cause` chain: dialDirect wraps the socket error to say which
+  // host and port it was, so the errno is one level in.
+  let code: string | undefined
+  for (let e: unknown = err, hops = 0; e && hops < 5; hops++) {
+    const c = (e as { code?: string }).code
+    if (typeof c === 'string') {
+      code = c
+      break
+    }
+    e = (e as { cause?: unknown }).cause
+  }
+  const message = err instanceof Error ? err.message : String(err)
+  switch (code) {
+    case 'ECONNREFUSED':
+      return 'Nothing is listening for remote desktop on that host and port. A Windows machine needs Remote Desktop turned on; a Linux one needs xrdp installed and running.'
+    case 'ETIMEDOUT':
+      return 'The host did not answer. It may be off, or a firewall may be dropping the remote desktop port.'
+    case 'ENOTFOUND':
+    case 'EAI_AGAIN':
+      return 'That hostname did not resolve.'
+    case 'EHOSTUNREACH':
+    case 'ENETUNREACH':
+      return 'There is no route to that host from here.'
+    default:
+      return message
+  }
+}
+
+/**
  * Whether anything is using the relay: a live session, a minted ticket nobody
  * has spent yet, or a connection between its WebSocket upgrade and the end of
  * its TLS handshake.
@@ -476,8 +546,24 @@ async function openSession(
     tlsSocket = handshake.tlsSocket
 
     ws.send(buildResponse(request.destination, handshake.x224Response, handshake.certChain))
+    // Got through, so whatever went wrong last time no longer describes
+    // anything and must not be shown against the next failure.
+    forgetFailure(ticket.serverId)
     relay(ws, handshake.tlsSocket, dialled.close)
   } catch (err) {
+    // WHY THIS IS RECORDED RATHER THAN ONLY SENT.
+    //
+    // The RDCleanPath error PDU carries an integer and an HTTP status and
+    // nothing else, so every failure in this block — a destination that does
+    // not match the ticket, a server that was deleted, too many sessions, a
+    // refused certificate, a host that is simply not listening — reaches the
+    // user as the same "general error (code 1); HTTP 502 bad gateway". That
+    // sent somebody hunting a relay bug when the answer was that the machine
+    // had no RDP service running on it at all.
+    //
+    // So the reason is kept here for the tab to ask about. Keyed by server, so
+    // two desktops failing at once cannot show each other's reason.
+    rememberFailure(ticket.serverId, err)
     try {
       // An error PDU rather than a bare close, so the client reports why.
       ws.send(buildError(1, 502))
@@ -543,7 +629,11 @@ function dialDirect(host: string, port: number): Promise<Dialled> {
       resolve({ stream: socket, close: () => socket.destroy() })
     )
     socket.once('error', (err) =>
-      reject(new Error(`could not reach ${host}:${port}: ${err.message}`))
+      // `cause` carried, not just the message. Without it the errno is gone by
+      // the time anything wants to explain the failure, and ECONNREFUSED —
+      // "there is no RDP service on that machine" — becomes indistinguishable
+      // from a timeout or a DNS miss, which send you somewhere entirely else.
+      reject(new Error(`could not reach ${host}:${port}: ${err.message}`, { cause: err }))
     )
   })
 }

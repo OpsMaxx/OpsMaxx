@@ -1594,7 +1594,12 @@ const api = {
      * to happen. What the renderer cannot do is choose whose password it is.
      */
     ticket: (serverId: string, size?: RdpDesktopSize): Promise<RdpTicketResult> =>
-      ipcRenderer.invoke('rdp:ticket', serverId, size)
+      ipcRenderer.invoke('rdp:ticket', serverId, size),
+    /** Why the relay's last attempt on this server failed, or null. The error
+     *  PDU the WASM client reports carries an integer and an HTTP status, so
+     *  this is the only place the actual reason exists. */
+    lastError: (serverId: string): Promise<string | null> =>
+      ipcRenderer.invoke('rdp:lastError', serverId)
   },
   tunnel: {
     start: (cfg: TunnelConfig, ssh: TunnelSshConfig): Promise<TunnelResult> =>

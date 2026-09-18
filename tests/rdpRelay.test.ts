@@ -81,7 +81,7 @@ vi.mock('../src/main/services/ssh', () => ({
   }
 }))
 
-const { rdpMintTicket, rdpRelayStatus, stopRdpRelay } = await import(
+const { rdpMintTicket, rdpRelayStatus, rdpLastError, stopRdpRelay } = await import(
   '../src/main/services/rdpRelay'
 )
 const { buildResponse, parseRequest } = await import('../src/main/services/rdcleanpath')
@@ -540,7 +540,7 @@ describe('relay lifecycle', () => {
     await stopRdpRelay()
     expect(rdpRelayStatus().listening).toBe(false)
 
-    const ws = new WebSocket(`${ticket!.proxyUrl}?token=${ticket!.token}`)
+    const ws = new WebSocket(ticket!.proxyUrl)
     const failed = await new Promise<boolean>((resolve) => {
       ws.once('error', () => resolve(true))
       ws.once('open', () => resolve(false))
@@ -698,7 +698,7 @@ describe('the Origin header on the upgrade', () => {
     defineServer('srv-1', fake.port)
     const { ticket } = await rdpMintTicket('srv-1')
     const ws = new WebSocket(
-      `${ticket!.proxyUrl}?token=${ticket!.token}`,
+      ticket!.proxyUrl,
       origin === undefined ? {} : { headers: { Origin: origin } }
     )
     const outcome = await new Promise<'open' | 'refused'>((resolve) => {
@@ -736,5 +736,84 @@ describe('the Origin header on the upgrade', () => {
 
   it('still accepts a client that sends no Origin at all', async () => {
     expect(await upgrade(undefined)).toBe('open')
+  })
+})
+
+// WHAT THE 502 WOULD NOT SAY.
+//
+// The RDCleanPath error PDU carries an integer and an HTTP status, so a
+// refused certificate, a deleted server, a session cap and a machine with no
+// RDP service on it all reach the user as "general error (code 1); HTTP 502
+// bad gateway". A real Linux host with no xrdp running is what proved that
+// unhelpful: the message sent somebody looking for a relay bug that was not
+// there.
+describe('the reason behind the 502', () => {
+  it('names a host that is not listening, rather than only failing', async () => {
+    // A port nothing is on: the fake server's port, closed first, so the number
+    // is real and bindable rather than guessed.
+    const dead = await startFakeRdpServer()
+    const deadPort = dead.port
+    await dead.close()
+
+    defineServer('srv-dead', deadPort)
+    const { ticket } = await rdpMintTicket('srv-dead')
+    const ws = new WebSocket(ticket!.proxyUrl)
+    await new Promise((r) => ws.once('open', r))
+    ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
+    await firstReply(ws)
+
+    const reason = rdpLastError('srv-dead')
+    expect(reason).toBeTruthy()
+    // The sentence has to be the one that moves somebody along, so it is
+    // asserted by its content and not merely by being non-empty.
+    expect(reason).toContain('Nothing is listening')
+    expect(reason).toContain('xrdp')
+    ws.close()
+  })
+
+  it('keeps one server’s reason away from another’s', async () => {
+    const dead = await startFakeRdpServer()
+    const deadPort = dead.port
+    await dead.close()
+
+    defineServer('srv-dead', deadPort)
+    const { ticket } = await rdpMintTicket('srv-dead')
+    const ws = new WebSocket(ticket!.proxyUrl)
+    await new Promise((r) => ws.once('open', r))
+    ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
+    await firstReply(ws)
+    ws.close()
+
+    // A server that never failed has nothing to report, so a tab cannot show
+    // the neighbouring tab's problem.
+    expect(rdpLastError('srv-dead')).toBeTruthy()
+    expect(rdpLastError('srv-never-tried')).toBeNull()
+  })
+
+  it('forgets the reason once a session gets through', async () => {
+    const dead = await startFakeRdpServer()
+    const deadPort = dead.port
+    await dead.close()
+
+    defineServer('srv-1', deadPort)
+    const failed = await rdpMintTicket('srv-1')
+    const bad = new WebSocket(failed.ticket!.proxyUrl)
+    await new Promise((r) => bad.once('open', r))
+    bad.send(buildRequestPdu(failed.ticket!.destination, failed.ticket!.token, X224_REQUEST))
+    await firstReply(bad)
+    bad.close()
+    expect(rdpLastError('srv-1')).toBeTruthy()
+
+    // Now the same server, listening. A stale reason displayed against a later
+    // failure is worse than none, because it describes a problem that is fixed.
+    defineServer('srv-1', fake.port)
+    const ok = await rdpMintTicket('srv-1')
+    const good = new WebSocket(ok.ticket!.proxyUrl)
+    await new Promise((r) => good.once('open', r))
+    good.send(buildRequestPdu(ok.ticket!.destination, ok.ticket!.token, X224_REQUEST))
+    const reply = await firstReply(good)
+    expect(reply.closeCode).toBeUndefined()
+    expect(rdpLastError('srv-1')).toBeNull()
+    good.close()
   })
 })

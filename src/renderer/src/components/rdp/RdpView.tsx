@@ -278,7 +278,16 @@ export function RdpView({
         }
       } catch (err) {
         if (disposed) return
-        setError(describeError(err))
+        // The WASM client's own message first, then the relay's reason if it
+        // has one. The client can only report the RDCleanPath error PDU, which
+        // is an integer and an HTTP status, so on its own it says "general
+        // error (code 1); HTTP 502 bad gateway" whether the certificate was
+        // refused, the server was deleted, or the machine simply has no remote
+        // desktop service running. The second sentence is the one that tells
+        // you where to go next.
+        const reason = await window.opsmaxx?.rdp.lastError(server.id).catch(() => null)
+        if (disposed) return
+        setError(reason ? `${reason} (${describeError(err)})` : describeError(err))
         setPhase('failed')
       }
     }

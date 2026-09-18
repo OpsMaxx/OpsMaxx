@@ -206,7 +206,7 @@ import type { VaultEntry, VaultResult } from '../shared/vault'
 import { VAULT_LOCKED } from '../shared/vault'
 import { wsLockIds, wsLockSet, wsLockVerify, wsLockRemove, wsLockDelete } from './services/wslock'
 import { tunnelStart, tunnelStop, tunnelList, tunnelDisposeAll } from './services/tunnel'
-import { rdpMintTicket, stopRdpRelay } from './services/rdpRelay'
+import { rdpLastError, rdpMintTicket, stopRdpRelay } from './services/rdpRelay'
 import type { RdpDesktopSize } from '../shared/rdp'
 import type { TunnelConfig, TunnelSshConfig } from '../shared/tunnel'
 import { knownHostList, knownHostForget } from './services/knownhosts'
@@ -4970,6 +4970,11 @@ ipcMain.handle('tunnel:list', () => tunnelList())
 ipcMain.handle('rdp:ticket', (_e, serverId: string, size?: RdpDesktopSize) =>
   rdpMintTicket(serverId, size)
 )
+
+// The relay's reason for the last failure on this server, which the RDCleanPath
+// error PDU has no room to carry. Read-only, and it names no address: the tab
+// already knows which server it is looking at.
+ipcMain.handle('rdp:lastError', (_e, serverId: string) => rdpLastError(serverId))
 
 // ---- VPN ----
 // -------------------------------------------------------------- inspector
