@@ -4650,6 +4650,16 @@ ipcMain.handle('addy:resolveConflict', (_e, id: number, collection: string, chos
 )
 ipcMain.handle('addy:discardConflict', (_e, id: number) => addySession.discardConflict(id))
 
+// Pairing. Three calls rather than one, because the user has to be able to
+// read the code aloud while the other device is still being found -- a single
+// call that resolved only on completion would have nothing to show them.
+ipcMain.handle('addy:beginPairing', (_e, baseURL: string) => addySession.beginPairing(baseURL))
+ipcMain.handle('addy:awaitPairing', () => addySession.awaitPairing())
+ipcMain.handle('addy:joinPairing', (_e, baseURL: string, code: string, pairingId: string) =>
+  addySession.joinPairing(baseURL, code, pairingId)
+)
+ipcMain.handle('addy:cancelPairing', () => addySession.cancelPairing())
+
 // ---- importing another password manager ----
 //
 // A PREVIEW, not an import. The user is about to merge somebody else's data

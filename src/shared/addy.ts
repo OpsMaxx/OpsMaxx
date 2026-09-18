@@ -178,3 +178,17 @@ export interface ConflictCopy {
   winning?: unknown
   problem?: string
 }
+
+/** What both devices show once a pairing has been confirmed.
+ *
+ *  Declared here so the renderer can name it without importing a main module. */
+export interface AddyPairingConfirmation {
+  /** Seven emoji, identical on both devices. */
+  sas: string[]
+  /** The same list as words, so a phone call works as well as a photograph. */
+  sasWords: string
+  peer: { pubSign: string; pubEnc?: string }
+  /** Present only on the joining device: its own public halves, for the other
+   *  device to write into the roster entry that adds it. */
+  self?: { pubSign: string; pubEnc: string }
+}

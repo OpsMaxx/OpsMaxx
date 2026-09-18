@@ -285,7 +285,7 @@ export interface ProviderDetectionResult {
   error?: string
 }
 
-import type { ConflictCopy } from '../shared/addy'
+import type { AddyPairingConfirmation, ConflictCopy } from '../shared/addy'
 import type {
   AgentApprovalRequest,
   AgentDecision,
@@ -385,7 +385,25 @@ const api = {
       ipcRenderer.invoke('addy:resolveConflict', id, collection, chosen),
     /** Drop a copy without writing anything, for the user who looked at both
      *  and decided the winner was right. */
-    discardConflict: (id: number): Promise<void> => ipcRenderer.invoke('addy:discardConflict', id)
+    discardConflict: (id: number): Promise<void> => ipcRenderer.invoke('addy:discardConflict', id),
+
+    /** Start a pairing and return the code IMMEDIATELY. The other device has
+     *  not answered yet; `awaitPairing` is what resolves when it does. */
+    beginPairing: (baseURL: string): Promise<{ code: string; pairingId: string }> =>
+      ipcRenderer.invoke('addy:beginPairing', baseURL),
+    /** Resolves with the emoji to compare, once the other device has proved it
+     *  knows the code. Rejects if it never does, or if the proof fails. */
+    awaitPairing: (): Promise<AddyPairingConfirmation> => ipcRenderer.invoke('addy:awaitPairing'),
+    /** The other side: both halves of what the first device showed. */
+    joinPairing: (
+      baseURL: string,
+      code: string,
+      pairingId: string
+    ): Promise<AddyPairingConfirmation> =>
+      ipcRenderer.invoke('addy:joinPairing', baseURL, code, pairingId),
+    /** Ends it and forgets the shared secret. For "these do not match", and
+     *  for closing the panel. */
+    cancelPairing: (): Promise<void> => ipcRenderer.invoke('addy:cancelPairing')
   },
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
   autoStart: {

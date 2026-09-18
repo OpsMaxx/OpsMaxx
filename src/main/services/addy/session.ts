@@ -1,4 +1,10 @@
 import { AddyError, openAddyd, type AddySidecar } from './sidecar'
+import {
+  beginPairing,
+  forgetPairing,
+  joinPairing,
+  type PairingConfirmation
+} from './pairing'
 import { RelayClient } from './relay'
 import {
   discardConflict,
@@ -63,11 +69,70 @@ class AddySession {
    *  at quit: nothing addyd holds is on disk, so stopping it IS the
    *  remediation rather than a step towards one. */
   async detach(): Promise<void> {
+    await this.cancelPairing()
     const held = this.addyd
     this.addyd = null
     this.relay = null
     this.account = null
     await held?.close()
+  }
+
+  /**
+   * A pairing, driven from here.
+   *
+   * ONE AT A TIME, deliberately. Two concurrent pairings on one device means
+   * two codes on screen and a user who can compare the wrong emoji against the
+   * wrong device -- which is the single failure the emoji exist to prevent.
+   */
+  private pairing: { id: string; abort: AbortController } | null = null
+
+  async beginPairing(baseURL: string): Promise<{ code: string; pairingId: string }> {
+    await this.cancelPairing()
+    const addyd = this.addyd ?? (await openAddyd())
+    this.addyd ??= addyd
+
+    const abort = new AbortController()
+    const { handle, confirmed } = await beginPairing({ addyd, baseURL }, abort.signal)
+    this.pairing = { id: handle.pairingId, abort }
+
+    // The confirmation resolves later, when the other device answers. Held
+    // rather than awaited so the caller can show the code NOW -- the user has
+    // to read it out loud while this is still waiting.
+    this.pendingConfirmation = confirmed
+    return handle
+  }
+
+  private pendingConfirmation: Promise<PairingConfirmation> | null = null
+
+  /** Resolves when the other device has confirmed, with the emoji to compare. */
+  async awaitPairing(): Promise<PairingConfirmation> {
+    if (!this.pendingConfirmation) {
+      throw new AddyError('config-invalid', 'no pairing is in progress')
+    }
+    return this.pendingConfirmation
+  }
+
+  async joinPairing(baseURL: string, code: string, pairingId: string): Promise<PairingConfirmation> {
+    await this.cancelPairing()
+    const addyd = this.addyd ?? (await openAddyd())
+    this.addyd ??= addyd
+    const abort = new AbortController()
+    this.pairing = { id: pairingId, abort }
+    return joinPairing({ addyd, baseURL }, code, pairingId, abort.signal)
+  }
+
+  /** Ends whatever is in progress and forgets the shared secret.
+   *
+   *  Called when the user says the emoji do not match, when they close the
+   *  panel, and before starting a second pairing. A session left behind is one
+   *  an attacker can still send frames to. */
+  async cancelPairing(): Promise<void> {
+    const held = this.pairing
+    this.pairing = null
+    this.pendingConfirmation = null
+    if (!held) return
+    held.abort.abort()
+    if (this.addyd) await forgetPairing({ addyd: this.addyd, baseURL: '' }, held.id)
   }
 
   private deps(): ConflictDeps {

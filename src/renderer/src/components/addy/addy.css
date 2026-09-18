@@ -209,3 +209,109 @@
   opacity: 0.5;
   cursor: default;
 }
+
+/* Pairing. */
+.pair-panel,
+.pair-compare {
+  max-width: 520px;
+}
+
+.pair-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.pair-actions .btn,
+.pair-panel .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.pair-panel .btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.pair-code {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 14px;
+}
+
+.pair-code code {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  word-break: break-all;
+}
+
+.pair-field {
+  display: block;
+  margin: 10px 0;
+}
+
+.pair-field span {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.pair-field input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: inherit;
+  font: inherit;
+}
+
+/* The comparison. Large, because it is the one thing on this screen the user
+   has to actually look at, and small emoji are emoji people say "yes" to
+   without reading. */
+.pair-emoji {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 16px 0 8px;
+  font-size: 34px;
+  line-height: 1.2;
+}
+
+.pair-words {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 0 0 14px;
+}
+
+.pair-problem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.pair-problem .btn {
+  margin-top: 8px;
+}

@@ -129,6 +129,12 @@ export interface AppSettings {
    * would break their git.
    */
   sshAgent: SshAgentSettings
+  /** The addy relay this account lives on, as `https://relay.example`.
+   *
+   *  Empty until the user names one. It is not a secret and it is not a
+   *  credential: the relay holds no key, and knowing its address buys an
+   *  attacker the same nothing it buys anybody else. */
+  addyRelayURL?: string
   // Minutes of vault inactivity before it locks itself. 0 = never. A vault that
   // never locks makes every other protection on it optional, so the default is
   // deliberately short rather than off.

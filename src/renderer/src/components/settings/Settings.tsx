@@ -31,6 +31,7 @@ import { ShortcutManager } from './ShortcutManager'
 import { BackupPanel } from './BackupPanel'
 import { AgentPanel } from '../sshAgent/AgentPanel'
 import { BitwardenImport } from '../vault/BitwardenImport'
+import { PairingPanel } from '../addy/PairingPanel'
 import { UpdatePanel } from './UpdatePanel'
 import { useOnboarding } from '../../store/onboarding'
 import { SshSessions } from './SshSessions'
@@ -1473,6 +1474,13 @@ export function Settings(): React.JSX.Element {
                 Let a script or an agent call a third-party API without ever holding the key.
               </div>
               <CredProxyPanel />
+
+              <h3>Devices on your addy account</h3>
+              <div className="sub">
+                Pairing needs both devices open at the same time. You compare seven emoji at the
+                end; that comparison is the whole security of it.
+              </div>
+              <PairingPanel baseURL={settings.addyRelayURL ?? ''} />
 
               <h3>Import from another password manager</h3>
               <BitwardenImport />
