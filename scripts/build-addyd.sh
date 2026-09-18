@@ -46,7 +46,23 @@ TARGETS=(
   "windows arm64  win32-arm64"
 )
 
-single="${1:-}"
+# A list, not one name: `build-addyd.sh darwin-x64 darwin-arm64`. The release
+# builds only the targets it will actually ship, and macOS ships two, so the
+# single-target form this used to take would have meant invoking the whole
+# script twice -- running the Go vet and test pass twice with it. Matches
+# build-sidecar.sh, which has always taken a list; the two sit side by side in
+# every caller and differing on this was a trap waiting for someone.
+wanted=("$@")
+
+# Whether $1 is one of the requested targets, or none were requested at all.
+is_wanted() {
+  [ "${#wanted[@]}" -eq 0 ] && return 0
+  local w
+  for w in "${wanted[@]}"; do
+    [ "$w" = "$1" ] && return 0
+  done
+  return 1
+}
 
 command -v go >/dev/null || { echo "build-addyd.sh: go is not on PATH" >&2; exit 1; }
 command -v node >/dev/null || { echo "build-addyd.sh: node is not on PATH" >&2; exit 1; }
@@ -62,9 +78,7 @@ echo "addyd $VERSION ($BUILD_SHA)"
 built=0
 for entry in "${TARGETS[@]}"; do
   read -r goos goarch nodedir <<<"$entry"
-  if [ -n "$single" ] && [ "$single" != "$nodedir" ]; then
-    continue
-  fi
+  is_wanted "$nodedir" || continue
 
   exe=""
   [ "$goos" = "windows" ] && exe=".exe"
@@ -80,12 +94,15 @@ for entry in "${TARGETS[@]}"; do
   built=$((built + 1))
 done
 
-if [ -n "$single" ] && [ "$built" -eq 0 ]; then
-  echo "build-addyd.sh: no target matches '$single'" >&2
+# A named target that matched nothing is a typo, and a typo that built nothing
+# must not look like a success -- the manifest step after this would then
+# happily record whatever was already on disk.
+if [ "${#wanted[@]}" -gt 0 ] && [ "$built" -ne "${#wanted[@]}" ]; then
+  echo "build-addyd.sh: asked for ${#wanted[@]} target(s), built $built" >&2
   printf '  %s\n' "${TARGETS[@]}" >&2
   exit 2
 fi
-if [ -z "$single" ] && [ "$built" -ne "${#TARGETS[@]}" ]; then
+if [ "${#wanted[@]}" -eq 0 ] && [ "$built" -ne "${#TARGETS[@]}" ]; then
   echo "build-addyd.sh: built $built of ${#TARGETS[@]} targets" >&2
   exit 1
 fi

@@ -45,16 +45,28 @@ TARGETS=(
 # Restrict to one target with e.g. `bash scripts/build-sidecar.sh darwin-arm64`.
 # Handy while iterating; CI always builds all six.
 if [ "$#" -gt 0 ]; then
+  # Kept before the loop, because `set -- $t` below overwrites the positional
+  # parameters. The old failure message printed `$*` AFTER that, so it named
+  # the last row of TARGETS rather than anything the caller had asked for --
+  # "no target matched: windows arm64 win32-arm64" in answer to a request for
+  # two darwin targets. A diagnostic that invents its own input is worse than
+  # none, because it is believed.
+  requested=("$@")
   filtered=()
-  for want in "$@"; do
+  for want in "${requested[@]}"; do
     for t in "${TARGETS[@]}"; do
-      # shellcheck disable=SC2086
-      set -- $t
-      [ "$3" = "$want" ] && filtered+=("$t")
+      read -r _goos _goarch nodedir <<<"$t"
+      [ "$nodedir" = "$want" ] && filtered+=("$t")
     done
   done
-  if [ "${#filtered[@]}" -eq 0 ]; then
-    echo "no target matched: $*" >&2
+  # Every name has to match, not merely one of them. A typo alongside a valid
+  # target would otherwise build a short list quietly, and the manifest step
+  # records whatever is on disk -- so the missing target would surface as an
+  # installer with no engine in it, which is exactly what this script's caller
+  # verifies against and the slowest possible way to find out.
+  if [ "${#filtered[@]}" -ne "${#requested[@]}" ]; then
+    echo "build-sidecar.sh: asked for ${#requested[@]} target(s) (${requested[*]}), matched ${#filtered[@]}" >&2
+    printf '  %s\n' "${TARGETS[@]}" >&2
     exit 2
   fi
   TARGETS=("${filtered[@]}")
