@@ -137,7 +137,9 @@ describe('every loopback server runs the check', () => {
     for (const [file, needle] of [
       ['src/main/services/credProxy.ts', 'refuseNonLoopback(req, res)'],
       ['src/main/services/mcpServer.ts', 'refuseNonLoopback(req, res)'],
-      ['src/main/services/rdpRelay.ts', 'loopbackUpgradeAllowed(req)']
+      // With its renderer's origins, not bare: the relay is the one of the
+      // three that a browser dials, so a bare call refuses our own window.
+      ['src/main/services/rdpRelay.ts', 'loopbackUpgradeAllowed(req, rendererOrigins())']
     ] as const) {
       const src = readFileSync(resolve(__dirname, '..', file), 'utf8')
       expect(src, `${file} does not run the loopback check`).toContain(needle)

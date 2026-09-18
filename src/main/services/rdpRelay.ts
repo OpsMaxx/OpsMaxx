@@ -12,7 +12,7 @@ import { verifyRdpCertificate } from './rdpTrust'
 import { rdpSecretId } from '../../shared/rdp'
 import type { RdpTicket, RdpTicketResult, RdpDesktopSize } from '../../shared/rdp'
 import type { SshHop } from '../../shared/ssh'
-import { loopbackUpgradeAllowed, refuseNonLoopback } from './loopbackGuard'
+import { loopbackUpgradeAllowed, refuseNonLoopback, rendererOrigins } from './loopbackGuard'
 
 // The main-process half of an RDP session.
 //
@@ -147,7 +147,14 @@ function ensureRelay(): Promise<number> {
       // the 404 handler above would guard nothing. Refused at the handshake
       // rather than closed afterwards: a closed socket looks like a network
       // problem to whatever opened it, and a refused upgrade does not.
-      verifyClient: ({ req }: { req: IncomingMessage }) => loopbackUpgradeAllowed(req)
+      //
+      // Unlike the other two loopback servers, this one IS dialled by a
+      // browser — our own renderer — and RFC 6455 makes it send an `Origin`.
+      // Refusing every Origin here refused the renderer, which is what broke
+      // RDP in 0.50.0 with exactly the "closed socket looks like a network
+      // problem" symptom the line above warns about.
+      verifyClient: ({ req }: { req: IncomingMessage }) =>
+        loopbackUpgradeAllowed(req, rendererOrigins())
     })
     sockets.on('connection', handleConnection)
 

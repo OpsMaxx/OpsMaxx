@@ -24,14 +24,28 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
  *    `127.0.0.1` or `localhost` and says so.
  *  - `Origin` is sent by browsers and by essentially nothing else. The MCP
  *    bridge is spoken to by editors and CLIs, the credential proxy by curl and
- *    by scripts, the RDP relay by this app's own renderer over a same-document
- *    WebSocket. None of them has any reason to send one.
+ *    by scripts. Neither has any reason to send one.
  *
  * So the rule is: the Host must be a loopback literal, and an Origin header
- * must not be present at all. The second is the stronger half — refusing every
- * request that carries one is a blunt instrument, and blunt is right here,
- * because the alternative is an allowlist of origins that somebody eventually
- * widens.
+ * must not be present — unless the caller names the origins it expects.
+ *
+ * THE RDP RELAY IS THE EXCEPTION, AND IT COST A RELEASE. This file first said
+ * the relay was spoken to "by this app's own renderer over a same-document
+ * WebSocket", with no reason to send an Origin. That is wrong: RFC 6455 has
+ * the browser send `Origin` on every WebSocket handshake, so the relay refused
+ * the renderer and RDP could not connect at all. Nothing caught it because
+ * tests/rdpRelay.test.ts dials with the node `ws` client, which sends no
+ * Origin — the test shared the code's mistaken assumption.
+ *
+ * Note what is actually load-bearing, because it is why an allowlist is safe
+ * here. A rebound request carries `Host: attacker.example`, so the Host check
+ * alone already refuses it. Origin exists for the narrower case the Host check
+ * cannot see: a page served by the user's OWN dev server on localhost, whose
+ * fetches do carry a loopback Host. The relay additionally picks a random port
+ * and requires a single-use ticket this process minted. So the relay allowing
+ * exactly its own renderer's origins is not the allowlist-that-gets-widened
+ * this comment used to warn about: it is not configurable, it is three values,
+ * and none of them is reachable by a page the user did not write.
  */
 
 /** Hostnames a local client legitimately dials. Compared after the port is
@@ -40,6 +54,31 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 
 export type LoopbackRefusal = 'host' | 'origin'
+
+/**
+ * The origins this app's own renderer can present on a WebSocket handshake.
+ *
+ * Packaged, the window is a `loadFile`, so the page is a `file:` URL. Chromium
+ * serialises that as `file://` on some versions and as the opaque `null` on
+ * others, and which one you get is not worth depending on — both are accepted,
+ * and neither is reachable by a remote page without also defeating the Host
+ * check, the random port and the single-use ticket.
+ *
+ * In development the window is `ELECTRON_RENDERER_URL`, so that origin is read
+ * from the environment rather than assumed to be any particular port.
+ */
+export function rendererOrigins(): ReadonlySet<string> {
+  const origins = new Set(['file://', 'null'])
+  const dev = process.env['ELECTRON_RENDERER_URL']
+  if (dev) {
+    try {
+      origins.add(new URL(dev).origin)
+    } catch {
+      // An unparseable value means no dev origin, not a crash on startup.
+    }
+  }
+  return origins
+}
 
 /**
  * Splits a `Host` header into its hostname, keeping an IPv6 literal's brackets.
@@ -64,12 +103,20 @@ export function hostnameOf(host: string): string {
  * `null` means it may proceed. A missing `Host` is refused: HTTP/1.1 requires
  * one, and a client that omits it is not one of the three this serves.
  */
-export function loopbackRefusal(req: IncomingMessage): LoopbackRefusal | null {
+export function loopbackRefusal(
+  req: IncomingMessage,
+  allowedOrigins?: ReadonlySet<string>
+): LoopbackRefusal | null {
   // Checked first, because it is the one that catches a rebound request whose
   // Host happens to be loopback — a page served from `http://localhost:3000`
   // by the user's own dev server, for instance, which is a real configuration
   // and would otherwise pass the Host check outright.
-  if (req.headers.origin !== undefined) return 'origin'
+  //
+  // With no allowlist this is the blunt "any Origin at all is a refusal" the
+  // MCP bridge and the credential proxy want. A caller that IS dialled by a
+  // browser passes the origins it expects; anything outside them still fails.
+  const origin = req.headers.origin
+  if (origin !== undefined && !allowedOrigins?.has(origin)) return 'origin'
 
   const host = req.headers.host
   if (host === undefined) return 'host'
@@ -107,6 +154,9 @@ export function refuseNonLoopback(req: IncomingMessage, res: ServerResponse): bo
  * socket looks like a network problem to the page that opened it, while a
  * refused upgrade is a clean 403 the page cannot mistake for anything else.
  */
-export function loopbackUpgradeAllowed(req: IncomingMessage): boolean {
-  return loopbackRefusal(req) === null
+export function loopbackUpgradeAllowed(
+  req: IncomingMessage,
+  allowedOrigins?: ReadonlySet<string>
+): boolean {
+  return loopbackRefusal(req, allowedOrigins) === null
 }

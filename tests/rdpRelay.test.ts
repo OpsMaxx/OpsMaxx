@@ -682,3 +682,59 @@ describe('the response PDU', () => {
     expect(() => parseRequest(pdu)).toThrow()
   })
 })
+
+// THE HANDSHAKE THE RENDERER ACTUALLY SENDS.
+//
+// Every other test in this file dials with the node `ws` client, which sends
+// no `Origin` header. The renderer is a browser and RFC 6455 makes it send one
+// on every WebSocket handshake. 0.50.0 refused any request carrying an Origin
+// at all, so RDP could not connect from the app while all of these stayed
+// green — the tests shared the code's assumption instead of checking it.
+//
+// So these dial the way Chromium does, and the foreign-origin case is what
+// stops the fix from being "allow everything".
+describe('the Origin header on the upgrade', () => {
+  async function upgrade(origin: string | undefined): Promise<'open' | 'refused'> {
+    defineServer('srv-1', fake.port)
+    const { ticket } = await rdpMintTicket('srv-1')
+    const ws = new WebSocket(
+      `${ticket!.proxyUrl}?token=${ticket!.token}`,
+      origin === undefined ? {} : { headers: { Origin: origin } }
+    )
+    const outcome = await new Promise<'open' | 'refused'>((resolve) => {
+      ws.once('open', () => resolve('open'))
+      ws.once('error', () => resolve('refused'))
+    })
+    ws.close()
+    return outcome
+  }
+
+  it('accepts a packaged renderer, which sends file://', async () => {
+    expect(await upgrade('file://')).toBe('open')
+  })
+
+  // Chromium serialises a file: page's origin as the opaque `null` on some
+  // versions. Which one this build sends is not worth depending on.
+  it('accepts the opaque null a file: page can present instead', async () => {
+    expect(await upgrade('null')).toBe('open')
+  })
+
+  it('accepts the dev server origin when that is what loaded the window', async () => {
+    const before = process.env['ELECTRON_RENDERER_URL']
+    process.env['ELECTRON_RENDERER_URL'] = 'http://localhost:5173'
+    try {
+      expect(await upgrade('http://localhost:5173')).toBe('open')
+    } finally {
+      if (before === undefined) delete process.env['ELECTRON_RENDERER_URL']
+      else process.env['ELECTRON_RENDERER_URL'] = before
+    }
+  })
+
+  it('still refuses a page that is not ours', async () => {
+    expect(await upgrade('https://evil.example')).toBe('refused')
+  })
+
+  it('still accepts a client that sends no Origin at all', async () => {
+    expect(await upgrade(undefined)).toBe('open')
+  })
+})
