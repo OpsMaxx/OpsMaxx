@@ -285,6 +285,14 @@ export interface ProviderDetectionResult {
   error?: string
 }
 
+import type {
+  AgentApprovalRequest,
+  AgentDecision,
+  AgentIdentity,
+  AgentStatus,
+  SshAgentSettings
+} from '../shared/sshAgentHost'
+
 /** Mirrors RevocationTombstone in main/services/addy/revoke.ts. Declared
  *  rather than imported: the preload must not pull a main-process module into
  *  the renderer's bundle, and this is three fields. */
@@ -305,6 +313,38 @@ const api = {
   // asks main a question about state main already owns, or asks it to do
   // something whose keys live in the addyd sidecar -- the same division the
   // vault and credential proxy already use, for the same reason.
+  /**
+   * The SSH agent this app serves.
+   *
+   * Note the direction: this is the agent OTHER TOOLS talk to, not the one
+   * OpsMaxx talks to for a given host. The second is `ssh.*` and is unrelated.
+   */
+  sshAgent: {
+    status: (): Promise<AgentStatus> => ipcRenderer.invoke('sshAgent:status'),
+    /** Keys the agent can offer, including ones that will not parse -- those
+     *  carry a `problem` and are shown with it rather than silently missing. */
+    identities: (): Promise<AgentIdentity[]> => ipcRenderer.invoke('sshAgent:identities'),
+    /** Start, stop or reconfigure in one call: the settings carry `enabled`. */
+    configure: (settings: SshAgentSettings): Promise<AgentStatus> =>
+      ipcRenderer.invoke('sshAgent:configure', settings),
+    /** Answer a pending approval. The SCOPE comes from the renderer because
+     *  the user chose it there; main never infers one. */
+    resolve: (id: string, decision: AgentDecision): Promise<boolean> =>
+      ipcRenderer.invoke('sshAgent:resolve', id, decision),
+    /** Prompts outstanding right now. Read on mount, because a prompt raised
+     *  while no window was open would otherwise never be seen. */
+    pending: (): Promise<AgentApprovalRequest[]> => ipcRenderer.invoke('sshAgent:pending'),
+    onApprovalEvent: (
+      cb: (e: { type: 'created' | 'resolved'; request: AgentApprovalRequest }) => void
+    ): (() => void) => {
+      const h = (
+        _e: IpcRendererEvent,
+        ev: { type: 'created' | 'resolved'; request: AgentApprovalRequest }
+      ): void => cb(ev)
+      ipcRenderer.on('sshAgent:approval-event', h)
+      return () => ipcRenderer.removeListener('sshAgent:approval-event', h)
+    }
+  },
   addy: {
     /**
      * Whether this device has been revoked, and how far the wipe got.

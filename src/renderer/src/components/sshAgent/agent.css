@@ -1,0 +1,95 @@
+/* The signature prompt.
+ *
+ * A scrim over everything, because the question is blocking in the literal
+ * sense: a command in a terminal is waiting on the answer, and a prompt the
+ * user can ignore is one that times out into a refusal they did not choose. */
+.agent-approval-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg-scrim);
+}
+
+.agent-approval {
+  width: 100%;
+  max-width: 480px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 22px;
+  color: var(--text);
+}
+
+.agent-approval-icon {
+  color: var(--text-muted);
+}
+
+.agent-approval h2 {
+  font-size: 16px;
+  margin: 10px 0 16px;
+}
+
+.agent-approval-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 0 0 18px;
+  font-size: 13px;
+}
+
+.agent-approval-facts dt {
+  color: var(--text-muted);
+}
+
+.agent-approval-facts dd {
+  margin: 0;
+  min-width: 0;
+}
+
+/* A fingerprint is compared character by character or not at all, so it gets a
+   monospace font and is allowed to wrap rather than being truncated with an
+   ellipsis -- a truncated fingerprint is worse than none. */
+.agent-approval-fp {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  word-break: break-all;
+}
+
+.agent-approval-warn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.agent-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-approval-actions .btn {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* The refusal is first in the DOM and focused, so a reflexive Return refuses.
+   It is also the visually quietest, because the expensive mistake here is
+   allowing something you did not mean to, and that one is not reversible. */
+.agent-approval-actions .btn:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
+}

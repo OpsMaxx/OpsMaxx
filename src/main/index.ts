@@ -324,6 +324,8 @@ import {
   stopBackupSchedule
 } from './services/backup'
 import { clearRevocation, revocationState } from './services/addy/revoke'
+import { sshAgent } from './services/sshAgent/service'
+import type { AgentDecision, SshAgentSettings } from '../shared/sshAgentHost'
 import { databaseDumpTarget, dumpableDatabases } from './services/backupTargets'
 import { BACKUP_STAGE_LABEL } from '../shared/backup'
 import type { BackupDestination, BackupRunReport, DumpRunReport } from '../shared/backup'
@@ -1788,6 +1790,7 @@ async function closeLiveSessions(): Promise<void> {
   // Anything serving on loopback. These hand out credentials, so they must be
   // shut before the store behind them is unlinked rather than after.
   void stopRdpRelay()
+  await sshAgent.stop()
   await stopMcpServer().catch(() => undefined)
 
   // The transports themselves.
@@ -4618,6 +4621,18 @@ ipcMain.handle('backup:relaunch', () => relaunchApp())
 // Read before the first frame: the revocation screen is a block, not a notice,
 // so it has to be resolved before anything that could show a server name or a
 // vault entry mounts.
+// ---- the SSH agent this app serves ----
+//
+// Not to be confused with the `ssh:*` handlers, which are about talking TO an
+// agent for a given host. This is the one other tools talk to.
+ipcMain.handle('sshAgent:status', () => sshAgent.status())
+ipcMain.handle('sshAgent:identities', () => sshAgent.identities())
+ipcMain.handle('sshAgent:configure', (_e, settings: SshAgentSettings) => sshAgent.configure(settings))
+ipcMain.handle('sshAgent:resolve', (_e, id: string, decision: AgentDecision) =>
+  sshAgent.resolve(id, decision)
+)
+ipcMain.handle('sshAgent:pending', () => sshAgent.pending())
+
 ipcMain.handle('addy:revocation', () => revocationState())
 ipcMain.handle('addy:clearRevocation', () => clearRevocation())
 
@@ -5010,6 +5025,13 @@ const notifyRenderer = (channel: string, payload?: unknown): void => {
 const lockVaultFully = (): VaultResult => {
   forgetSessionKey()
   forgetVpnEdits()
+  // Every remembered SSH-agent approval, and every prompt still on screen.
+  // Carrying an approval across a lock would leave a key usable by any local
+  // process after the user deliberately shut the thing holding it -- which is
+  // the one thing locking is for. On the same line as forgetVpnEdits, and for
+  // the same reason its comment gives: the automatic path and the manual one
+  // must not diverge.
+  sshAgent.onVaultLocked()
   const r = vaultLock()
   notifyRenderer('vault:auto-locked')
   return r
@@ -5425,6 +5447,9 @@ app.on('before-quit', (e) => {
   // outlived the window would be an unowned local proxy holding a TLS session
   // to a machine nobody is looking at any more.
   void stopRdpRelay()
+  // Same shape of problem, sharper: an agent socket that outlived the app is a
+  // socket every tool on the machine still connects to, answered by nothing.
+  void sshAgent.stop()
   externalEditDisposeAll()
   vaultDispose()
   void stopMcpServer()

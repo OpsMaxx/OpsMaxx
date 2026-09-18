@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useApp } from './store/app'
 import { RevokedScreen } from './components/addy/RevokedScreen'
+import { AgentApprovalWatcher } from './components/sshAgent/AgentApprovalWatcher'
 import type { AddyRevocation } from '../../preload'
 import { startBackupRunWatch } from './store/backupRuns'
 import { clsx } from './lib/format'
@@ -188,6 +189,11 @@ export default function App(): React.JSX.Element {
       <VpnPromptModal />
       {/* Surfaces an AI approval request no matter which tab is active. */}
       <ApprovalWatcher />
+      {/* And an SSH agent signature request, for a stronger reason: the thing
+          asking is almost never OpsMaxx. It is `git push` in a terminal, or
+          ansible, or a script, so the user is looking at something else
+          entirely. */}
+      <AgentApprovalWatcher />
       <AgentConfigWatcher />
       <FleetWatcher />
       <VaultUnlockModal />
