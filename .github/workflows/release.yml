@@ -71,6 +71,20 @@ jobs:
           # Read from the module itself, so the two can never drift apart.
           go-version-file: sidecar/netd/go.mod
           cache-dependency-path: sidecar/netd/go.sum
+          # OFF ON WINDOWS, where it has never once hit and is not free.
+          #
+          # A release runs on a tag, and a cache saved from a tag is scoped to
+          # that tag, so the only entries a release can restore are ones the CI
+          # workflow left on the default branch. `check` is ubuntu-only, so a
+          # Windows entry under this key is never written there — every release
+          # logs "Cache is not found", builds, and then spends the Post step
+          # saving an entry that the next release cannot see either.
+          #
+          # That save is not small and it grows with the Go build cache: 0, then
+          # 2, then 19 minutes across the last three releases, which was 19 of
+          # the Windows job's 41. macOS and Linux do hit, restore in under a
+          # minute, and are left alone.
+          cache: ${{ runner.os != 'Windows' }}
 
       # OpenVPN is autotools, and it is built from a git checkout rather than a
       # release tarball, so the generated `configure` does not exist yet and
