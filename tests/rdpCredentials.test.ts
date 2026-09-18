@@ -179,3 +179,59 @@ describe('which account the desktop signs in as', () => {
     expect(RELAY).toContain('No password is stored for ${rdpUser}')
   })
 })
+
+/**
+ * Connecting is not running.
+ *
+ * The third bug of this shape in this one component, and they are worth reading
+ * together: `init()` had to be called before the module could be used;
+ * `Backend` rather than the namespace had to be handed over; and `connect()`
+ * returns a `run` function that has to be called or the protocol is never
+ * pumped. Every one of them got further than the last before failing, and none
+ * of them raised an error — the component is built so that the missing step
+ * looks like a finished one.
+ *
+ * This one reached a black desktop. TLS and CredSSP both succeeded, the server
+ * streamed updates continuously over the WebSocket, the canvas was allocated at
+ * the negotiated size, and not one pixel was ever written, because nothing read
+ * the stream. Inside the component `run` is `async () => { await session.run()
+ * }`; the result of `connect()` was typed `Promise<unknown>` here and thrown
+ * away.
+ *
+ * Pinned against the source rather than a render, because reproducing it needs
+ * a real wasm session against a real RDP server. The shape of the mistake is
+ * what recurs, so the shape is what is asserted.
+ */
+describe('running the RDP session', () => {
+  const VIEW = src('src/renderer/src/components/rdp/RdpView.tsx')
+
+  it('calls run() on what connect() hands back', () => {
+    expect(VIEW).toContain('const session = await ui.connect(')
+    expect(VIEW, 'connect() only gets a willing server; run() is the session').toMatch(
+      /session\s*\n?\s*\.run\(\)/
+    )
+  })
+
+  it('does not await run(), which would stall the rest of the effect', () => {
+    // run() resolves when the session ENDS. Awaiting it here would never reach
+    // the resize observer, so the pane would stop following the window.
+    //
+    // Anchored on `void session`, not on the first `.run()` in the file: the
+    // doc comment above the interface quotes the component's own
+    // `await session.run()`, and the first version of this test matched that
+    // and passed against prose.
+    expect(VIEW).toContain('void session')
+    expect(VIEW).not.toMatch(/^\s*await session\s*\n?\s*\.run\(\)/m)
+  })
+
+  it('reports a session that ends instead of leaving the tab looking live', () => {
+    // Both halves: a clean end is not an error but must not read as connected,
+    // and a failure has to surface rather than being swallowed by the void.
+    expect(VIEW).toContain('The remote desktop session ended.')
+    const call = VIEW.indexOf('void session')
+    expect(call).toBeGreaterThan(-1)
+    const after = VIEW.slice(call, call + 900)
+    expect(after).toContain('.catch(')
+    expect(after).toContain("setPhase('failed')")
+  })
+})

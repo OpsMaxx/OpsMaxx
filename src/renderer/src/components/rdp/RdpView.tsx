@@ -29,9 +29,28 @@ interface ReadyDetail {
 // Structurally what this file uses, rather than the package's full type: the
 // modules are loaded at runtime by dynamic import, and a static type import
 // from a lazily-loaded package would defeat the code splitting it exists for.
+/**
+ * What `connect` hands back. `run` is the session, not a formality.
+ *
+ * `connect()` performs the handshake and then RETURNS a `run` function rather
+ * than calling it: inside the component it is `async () => { await
+ * session.run() }`, and until something awaits it the protocol is never pumped.
+ * This was typed as `Promise<unknown>` and the result discarded, so every
+ * desktop connected — TLS, CredSSP and all — and then showed a black screen
+ * while the server streamed updates nobody read. The canvas was the right size,
+ * the socket was busy, and no error was ever raised, because nothing had gone
+ * wrong; nothing had been started.
+ */
+interface RdpSession {
+  sessionId: number
+  initialDesktopSize: { width: number; height: number }
+  /** Resolves when the session ends, rejects if it ends badly. Long-lived. */
+  run(): Promise<unknown>
+}
+
 interface UserInteraction {
   configBuilder(): ConfigBuilder
-  connect(config: unknown): Promise<unknown>
+  connect(config: unknown): Promise<RdpSession>
   shutdown(): void
   ctrlAltDel(): void
   resize(width: number, height: number, scale?: number): void
@@ -261,9 +280,32 @@ export function RdpView({
         // break NTLM logins that work.
         if (ticket.kdcProxyUrl) config.withExtension(backend.kdcProxyUrl(ticket.kdcProxyUrl))
 
-        await ui.connect(config.build())
+        const session = await ui.connect(config.build())
         if (disposed) return
         setPhase('connected')
+
+        // THE SESSION HAS TO BE RUN. Connecting only gets as far as a server
+        // that is willing to talk; `run()` is the loop that reads its updates
+        // and paints them. Not awaited here, because it resolves when the
+        // session ENDS — awaiting it would stall this effect for the life of
+        // the desktop and never reach the resize observer below.
+        void session
+          .run()
+          .then(() => {
+            // A session that ends on its own: the user signed out, or the
+            // server hung up. Not an error, and not something to leave looking
+            // live either.
+            if (!disposed) {
+              setError('The remote desktop session ended.')
+              setPhase('failed')
+            }
+          })
+          .catch((err: unknown) => {
+            if (!disposed) {
+              setError(describeError(err))
+              setPhase('failed')
+            }
+          })
 
         // Follow the pane from here on. Debounced because a window drag emits a
         // resize per frame and each one is a round trip to the server, which
