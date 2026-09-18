@@ -14,6 +14,7 @@ import {
 } from './conflicts'
 import type { ConflictCopy } from '../../../shared/addy'
 import { receiveClipboard, sendClipboard, type ClipboardDeps } from './clipboard'
+import { closeSession, dialPeer } from './p2p'
 
 /**
  * The live connection to an addy account: one sidecar, one relay client.
@@ -54,7 +55,7 @@ class AddySession {
     log?: (line: string) => void
   ): Promise<void> {
     await this.detach()
-    const addyd = await openAddyd(log)
+    const addyd = await openAddyd('--crypto', log)
     await addyd.send('load', {
       accountId: account.accountId,
       deviceSignSeed: keys.deviceSignSeed,
@@ -71,6 +72,9 @@ class AddySession {
    *  remediation rather than a step towards one. */
   async detach(): Promise<void> {
     await this.cancelPairing()
+    const rtc = this.rtc
+    this.rtc = null
+    await rtc?.close()
     const held = this.addyd
     this.addyd = null
     this.relay = null
@@ -89,7 +93,7 @@ class AddySession {
 
   async beginPairing(baseURL: string): Promise<{ code: string; pairingId: string }> {
     await this.cancelPairing()
-    const addyd = this.addyd ?? (await openAddyd())
+    const addyd = this.addyd ?? (await openAddyd('--crypto'))
     this.addyd ??= addyd
 
     const abort = new AbortController()
@@ -115,7 +119,7 @@ class AddySession {
 
   async joinPairing(baseURL: string, code: string, pairingId: string): Promise<PairingConfirmation> {
     await this.cancelPairing()
-    const addyd = this.addyd ?? (await openAddyd())
+    const addyd = this.addyd ?? (await openAddyd('--crypto'))
     this.addyd ??= addyd
     const abort = new AbortController()
     this.pairing = { id: pairingId, abort }
@@ -166,9 +170,87 @@ class AddySession {
     this.roster = devices
   }
 
+  /**
+   * The `--rtc` sidecar, started lazily.
+   *
+   * A SECOND PROCESS, and never the same one: `--crypto` holds the account key
+   * and does not link a WebRTC stack, `--rtc` parses SDP, STUN, DTLS and SRTP
+   * off the open internet and never sees a key. Lazily, because most sessions
+   * never send a clipboard and a WebRTC stack is not free to start.
+   */
+  private rtc: AddySidecar | null = null
+
+  private async ensureRtc(): Promise<AddySidecar | null> {
+    if (this.rtc?.alive()) return this.rtc
+    try {
+      this.rtc = await openAddyd('--rtc')
+      return this.rtc
+    } catch {
+      // No `--rtc` is a degraded mode, not a failure: everything falls back to
+      // the mailbox, which works.
+      this.rtc = null
+      return null
+    }
+  }
+
   private clipboardDeps(): ClipboardDeps {
     const base = this.deps()
-    return { ...base, peers: () => this.roster }
+    return {
+      ...base,
+      peers: () => this.roster,
+      tryDirect: async (peerHex, sealed) => {
+        const rtc = await this.ensureRtc()
+        if (!rtc || !this.account || !this.addyd) return false
+
+        // What the relay says about relaying, asked once per attempt. A device
+        // behind a symmetric NAT needs TURN credentials to have any chance;
+        // one on the same LAN does not need them and pays nothing for asking.
+        let iceServers: unknown[] = []
+        try {
+          const resp = await this.relay!.request('GET', '/v1/turn')
+          if (resp.ok) {
+            const turn = (await resp.json()) as {
+              mode: string
+              url?: string
+              credential?: { username: string; password: string; url: string }
+            }
+            if (turn.mode === 'embedded' && turn.credential) {
+              iceServers = [
+                {
+                  urls: [turn.credential.url],
+                  username: turn.credential.username,
+                  credential: turn.credential.password
+                }
+              ]
+            } else if (turn.mode === 'external' && turn.url) {
+              iceServers = [{ urls: [turn.url] }]
+            }
+          }
+        } catch {
+          // No relay credentials means host and server-reflexive candidates
+          // only, which is enough on a shared network and not enough behind
+          // two symmetric NATs. Worth trying rather than refusing.
+        }
+
+        const { devicePub } = await this.addyd.send<{ devicePub: string }>('whoami')
+        const deps = { rtc, relay: this.relay!, iceServers, selfDeviceHex: devicePub }
+
+        let dialled: string | null = null
+        try {
+          dialled = await dialPeer(deps, peerHex)
+          await rtc.send('rtcSend', { sessionId: dialled, payload: sealed })
+          return true
+        } catch {
+          return false
+        } finally {
+          // Closed on every path, including success: a clipboard send is one
+          // message and holding the connection open afterwards would hold
+          // goroutines, a UDP socket and an ICE agent in the sidecar for a
+          // conversation that is over.
+          if (dialled) await closeSession(deps, dialled)
+        }
+      }
+    }
   }
 
   private deps(): ConflictDeps {

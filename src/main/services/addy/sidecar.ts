@@ -57,7 +57,12 @@ export interface AddySidecar {
  * the process that is about to be handed the account key is the last one that
  * should be started without checking its bytes.
  */
-export async function openAddyd(log?: (line: string) => void): Promise<AddySidecar> {
+export type AddydRole = '--crypto' | '--rtc'
+
+export async function openAddyd(
+  role: AddydRole = '--crypto',
+  log?: (line: string) => void
+): Promise<AddySidecar> {
   let resolved
   try {
     resolved = await resolveBundledBinary('addyd', 'npm run build:addyd')
@@ -68,7 +73,12 @@ export async function openAddyd(log?: (line: string) => void): Promise<AddySidec
     throw err
   }
 
-  const child: ChildProcessWithoutNullStreams = spawn(resolved.path, ['--crypto'], {
+  // TWO PROCESSES, NEVER ONE. `--crypto` holds the account key and does not
+  // link a WebRTC stack; `--rtc` parses SDP, STUN, DTLS and SRTP off the open
+  // internet and never sees a key. Passing the role here rather than having
+  // two spawn functions keeps that a parameter a reader can see at the call
+  // site.
+  const child: ChildProcessWithoutNullStreams = spawn(resolved.path, [role], {
     stdio: ['pipe', 'pipe', 'pipe']
   })
 

@@ -2,18 +2,41 @@
 //
 // TWO SUBCOMMANDS, ONE BINARY, AND NO SHARED MEMORY BETWEEN THEM.
 //
-//	addyd --crypto   holds keys; never links a WebRTC stack
-//	addyd --rtc      speaks WebRTC; never sees a key beyond a session key
+//	addyd --crypto   holds keys; never RUNS a WebRTC stack
+//	addyd --rtc      speaks WebRTC; never sees a key
 //
 // The split exists because the two obvious alternatives are both wrong. Putting
 // the account key in the same address space as a DTLS and SDP parser reproduces
 // exactly the objection that justified splitting addyd from netd in the first
 // place -- netd can run --privileged, as root with a real TUN device, and a
 // stack that parses untrusted SDP, STUN, DTLS and SRTP straight off the open
-// internet should not be LOADED in a process that is sometimes root, whether or
-// not it is reached. And putting the keys in Node means implementing HPKE and
-// SPAKE2 in TypeScript with no existing dependencies, plus a second roster
-// verifier, which is a second thing to get wrong.
+// internet should not be REACHABLE in a process that is sometimes root. And
+// putting the keys in Node means implementing HPKE and SPAKE2 in TypeScript
+// with no existing dependencies, plus a second roster verifier, which is a
+// second thing to get wrong.
+//
+// BE PRECISE ABOUT WHAT ONE BINARY BUYS AND WHAT IT DOES NOT. This file used
+// to say --crypto "never links a WebRTC stack". That was true when --rtc was a
+// stub and stopped being true the moment pion arrived: a Go binary contains
+// every package reachable from main, so the --crypto process has pion's code
+// mapped whether or not it is called. The binary went from 2.5 MB to 10 MB
+// when pion landed, which is that fact in one number.
+//
+// What still holds, and it is the property the design actually needs:
+//
+//   - The account key is never in the process that PARSES hostile input. --rtc
+//     handles every SDP, STUN, DTLS and SRTP byte and holds no key; --crypto
+//     holds the keys and is handed a method name, a path and a body hash.
+//   - The role gate below refuses every rtc method in the crypto role and vice
+//     versa, so no untrusted byte reaches a parser in the process with the key
+//     -- there is no code path that feeds one.
+//
+// What does NOT hold is that the code is absent. A memory-disclosure bug in
+// --crypto could read pion's mapped pages, and its gadgets are available to
+// anything that gets that far. Two binaries behind build tags would close
+// that, at the cost of six more manifest rows and ~20 MB per platform. It is a
+// deliberate trade and not an oversight, which is why it is written down here
+// rather than left for somebody to discover in a size diff.
 //
 // The parent spawns both.
 package main
@@ -41,8 +64,8 @@ const maxRequestBytes = 8 << 20
 
 func main() {
 	var (
-		crypto  = flag.Bool("crypto", false, "Hold keys and perform the crypto. Never links a WebRTC stack")
-		rtc     = flag.Bool("rtc", false, "Speak WebRTC. Never sees a key beyond the session keys handed to it")
+		crypto  = flag.Bool("crypto", false, "Hold keys and perform the crypto. Never runs the WebRTC stack and is never handed a byte off the network")
+		rtc     = flag.Bool("rtc", false, "Speak WebRTC. Parses every hostile byte and never sees an account key")
 		version = flag.Bool("version", false, "Print version information as JSON and exit")
 	)
 	flag.Parse()
@@ -122,6 +145,18 @@ func dispatch(ctx context.Context, w *Writer, role string, req Request) {
 	// a key; `--crypto` holds the keys and must never be asked to parse SDP.
 	// A method reachable from both roles would collapse the distinction the
 	// two processes exist to maintain.
+	if role == "rtc" {
+		if handler, ok := rtcMethods[req.Method]; ok {
+			result, err := handler(req)
+			if err != nil {
+				w.Fail(req.ID, err)
+				return
+			}
+			w.Respond(req.ID, result)
+			return
+		}
+	}
+
 	if role == "crypto" {
 		if handler, ok := cryptoMethods[req.Method]; ok {
 			result, err := handler(req)

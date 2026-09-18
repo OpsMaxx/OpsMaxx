@@ -41,6 +41,17 @@ export interface ClipboardDeps {
   epoch(): number
   /** Every device on the roster except this one, as hex signing keys. */
   peers(): string[]
+  /**
+   * Try a direct connection first, returning true when the payload went that
+   * way. Absent means "no p2p available" -- the `--rtc` sidecar is not
+   * running, or no relay credentials were obtained -- and everything falls
+   * back to the mailbox.
+   *
+   * A function rather than a transport object, because the ONLY thing this
+   * layer needs to know is whether the bytes arrived. The dialling, the ICE
+   * and the fallback ordering all live behind it.
+   */
+  tryDirect?(peerHex: string, sealed: string): Promise<boolean>
 }
 
 /** One clipboard payload, as it crosses the wire. Sealed before it leaves. */
@@ -96,6 +107,19 @@ export async function sendClipboard(deps: ClipboardDeps): Promise<{ sent: number
       counter: Date.now(),
       payload: plaintext.toString('base64')
     })
+
+    // DIRECT FIRST, MAILBOX SECOND, and the order is decreasing quality
+    // rather than decreasing convenience: a direct path means the relay sees
+    // neither the bytes nor the timing, and a mailbox means it sees when you
+    // copied something even though it cannot read what.
+    //
+    // A direct attempt that fails is not an error. Two symmetric NATs, a
+    // corporate firewall, or a peer that is simply asleep are the ordinary
+    // cases this whole design has a second path for.
+    if (deps.tryDirect && (await deps.tryDirect(peer, sealed).catch(() => false))) {
+      sent++
+      continue
+    }
 
     const resp = await deps.relay.request('POST', '/v1/mail', {
       toDevice: peer,

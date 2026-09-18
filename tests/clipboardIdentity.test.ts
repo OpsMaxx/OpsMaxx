@@ -1,4 +1,17 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+
+// Electron's clipboard does not exist outside Electron. Mocked at module
+// scope, with a real backing string, so the send path reads what the test
+// wrote rather than a stub that returns whatever it is asked for.
+let clipboardText = ''
+vi.mock('electron', () => ({
+  clipboard: {
+    readText: () => clipboardText,
+    writeText: (v: string) => {
+      clipboardText = v
+    }
+  }
+}))
 import {
   EchoSuppressor,
   HASH_PREFIX_BYTES,
@@ -119,5 +132,71 @@ describe('echo suppression', () => {
     // sent, and the arming must survive for the write it was for.
     expect(echo.shouldIgnore(identifyText('what they copied').hash)).toBe(false)
     expect(echo.shouldIgnore(identifyText('what we wrote').hash)).toBe(true)
+  })
+})
+
+/**
+ * Direct first, mailbox second.
+ *
+ * The order is decreasing quality rather than decreasing convenience: a direct
+ * path means the relay sees neither the bytes nor the timing, and a mailbox
+ * means it sees WHEN you copied something even though it cannot read what.
+ */
+describe('which path the clipboard takes', () => {
+  async function send(tryDirect?: (peer: string, sealed: string) => Promise<boolean>) {
+    const { sendClipboard } = await import('../src/main/services/addy/clipboard')
+    const mailed: string[] = []
+    clipboardText = 'something to send'
+
+    const result = await sendClipboard({
+      addyd: {
+        alive: () => true,
+        async close() {},
+        async send<T>(): Promise<T> {
+          return { sealed: 'c2VhbGVk' } as T
+        }
+      },
+      relay: {
+        async request(_m: string, path: string) {
+          mailed.push(path)
+          return { ok: true, status: 200 } as Response
+        }
+      } as never,
+      epoch: () => 1,
+      peers: () => ['aa', 'bb'],
+      tryDirect
+    })
+    return { result, mailed }
+  }
+
+  it('does not use the mailbox when a direct path works', async () => {
+    const { result, mailed } = await send(async () => true)
+    expect(result.sent).toBe(2)
+    expect(mailed).toEqual([])
+  })
+
+  it('falls back per peer, not all or nothing', async () => {
+    // One device is awake on the same network and the other is asleep. The
+    // reachable one must not be forced through the relay because the other is
+    // unreachable.
+    const { result, mailed } = await send(async (peer) => peer === 'aa')
+    expect(result.sent).toBe(2)
+    expect(mailed).toEqual(['/v1/mail'])
+  })
+
+  it('uses the mailbox when there is no direct path at all', async () => {
+    const { result, mailed } = await send(undefined)
+    expect(result.sent).toBe(2)
+    expect(mailed).toEqual(['/v1/mail', '/v1/mail'])
+  })
+
+  it('treats a direct attempt that throws as unreachable, not as a failure', async () => {
+    // Two symmetric NATs and a corporate firewall are the ordinary cases this
+    // design has a second path for. A throw here must not lose the clipboard.
+    const { result, mailed } = await send(async () => {
+      throw new Error('ICE gathered no candidates')
+    })
+    expect(result.sent).toBe(2)
+    expect(mailed).toEqual(['/v1/mail', '/v1/mail'])
   })
 })
