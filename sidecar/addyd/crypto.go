@@ -41,6 +41,9 @@ type vault struct {
 	// at a time during a transition: objects re-sealed under n+1 land before
 	// the signed transition entry does, so a client still reading n needs n.
 	epochs map[uint64]*protocol.EpochKeys
+	// rootSignPub is RK_sign's public half, needed to verify root-signed
+	// roster entries. Public, so it is held here rather than in the keychain.
+	rootSignPub []byte
 }
 
 var keys = &vault{epochs: map[uint64]*protocol.EpochKeys{}}
@@ -61,6 +64,7 @@ func (v *vault) reset() {
 	}
 	v.epochs = map[uint64]*protocol.EpochKeys{}
 	v.device = nil
+	v.rootSignPub = nil
 	v.loaded = false
 	v.account = protocol.AccountID{}
 }
@@ -103,6 +107,14 @@ type loadRequest struct {
 	DeviceEncKey   string `json:"deviceEncKey"`
 	// Epoch number -> base64 AK_n. Several at once during a transition.
 	EpochKeys map[uint64]string `json:"epochKeys"`
+	// Hex of RK_sign's public half.
+	//
+	// PUBLIC, and still required: a device cannot verify a root-signed roster
+	// entry without it, and root-signed entries are exactly the ones that
+	// authorise an epoch change. A device that did not hold it would have to
+	// take the relay's word for which key signed a rotation, which is the one
+	// thing the roster exists to make unnecessary.
+	RootSignPub string `json:"rootSignPub"`
 }
 
 // handleLoad takes the key material from the parent.
@@ -143,6 +155,11 @@ func handleLoad(req Request) (any, error) {
 		Enc:      encKey,
 	}
 
+	rootPub, err := hex.DecodeString(in.RootSignPub)
+	if err != nil || len(rootPub) != ed25519.PublicKeySize {
+		return nil, codedf(ErrConfigInvalid, "rootSignPub is %d bytes of hex", ed25519.PublicKeySize)
+	}
+
 	var acct protocol.AccountID
 	copy(acct[:], raw)
 
@@ -164,6 +181,7 @@ func handleLoad(req Request) (any, error) {
 	keys.account = acct
 	keys.device = device
 	keys.epochs = epochs
+	keys.rootSignPub = rootPub
 	keys.loaded = true
 	keys.mu.Unlock()
 

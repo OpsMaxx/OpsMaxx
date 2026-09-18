@@ -62,6 +62,7 @@ func loadTestAccount(t *testing.T) (protocol.AccountID, uint64) {
 		"deviceSignSeed": base64.StdEncoding.EncodeToString(signSeed),
 		"deviceEncKey":   base64.StdEncoding.EncodeToString(encKey.Bytes()),
 		"epochKeys":      map[string]string{"1": base64.StdEncoding.EncodeToString(ak)},
+		"rootSignPub":    hex.EncodeToString(root.Sign.Public().(ed25519.PublicKey)),
 	})})
 	if err != nil {
 		t.Fatalf("load: %v", err)
@@ -244,6 +245,7 @@ func TestLoadRefusesKeysOfTheWrongShape(t *testing.T) {
 		"deviceSignSeed": base64.StdEncoding.EncodeToString(make([]byte, ed25519.SeedSize)),
 		"deviceEncKey":   base64.StdEncoding.EncodeToString(make([]byte, 32)),
 		"epochKeys":      map[string]string{"1": base64.StdEncoding.EncodeToString(make([]byte, 32))},
+		"rootSignPub":    hex.EncodeToString(make([]byte, 32)),
 	}
 	for _, broken := range []struct {
 		name string
@@ -253,6 +255,7 @@ func TestLoadRefusesKeysOfTheWrongShape(t *testing.T) {
 		{"a short signing seed", func(m map[string]any) { m["deviceSignSeed"] = "aGk=" }},
 		{"a short encryption key", func(m map[string]any) { m["deviceEncKey"] = "aGk=" }},
 		{"no epoch key at all", func(m map[string]any) { m["epochKeys"] = map[string]string{} }},
+		{"a short root signing key", func(m map[string]any) { m["rootSignPub"] = "aabb" }},
 	} {
 		in := map[string]any{}
 		for k, v := range good {
@@ -275,6 +278,7 @@ func TestAnUnknownParameterIsRefused(t *testing.T) {
 		"deviceSignSeed": base64.StdEncoding.EncodeToString(make([]byte, ed25519.SeedSize)),
 		"deviceEncKey":   base64.StdEncoding.EncodeToString(make([]byte, 32)),
 		"epochKeys":      map[string]string{"1": base64.StdEncoding.EncodeToString(make([]byte, 32))},
+		"rootSignPub":    hex.EncodeToString(make([]byte, 32)),
 		"deviceSeed":     "the old name for one of these",
 	})})
 	if err == nil {

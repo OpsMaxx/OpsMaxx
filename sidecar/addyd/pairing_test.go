@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/hex"
 	"github.com/opsmaxx/opsmaxx/sidecar/addyd/pair"
+	"github.com/opsmaxx/opsmaxx/sidecar/addyd/protocol"
 	"strings"
 	"testing"
 )
@@ -199,5 +201,127 @@ func TestAnUnknownPairingIsRefused(t *testing.T) {
 	}
 	if code := codeOf(err); code != ErrPairingExpired {
 		t.Fatalf("an unknown pairing reported as %q", code)
+	}
+}
+
+// PAIRING THAT ACTUALLY JOINS AN ACCOUNT.
+//
+// Confirming the emoji proves who the other device is. It does not make the
+// joiner a member of anything -- until the handoff ran, a device could complete
+// a pairing, see matching emoji, and then find it could not read a single
+// object, which looks like broken sync rather than an unfinished pairing.
+func TestAJoinedDeviceEndsUpOnTheAccount(t *testing.T) {
+	acct, epoch := loadTestAccount(t)
+
+	// The initiator's AK_n. Held by the parent and handed in for this one
+	// operation, which is why it is a parameter rather than something the
+	// sidecar digs out of its own state.
+	akSeed := bytes.Repeat([]byte{0x42}, 32)
+	head := []byte("a roster head, verbatim")
+
+	begunRaw, begunErr := handlePairBegin(Request{Method: "pairBegin"})
+	begun := result(t, begunRaw, begunErr)
+	code := begun["code"].(string)
+	id := begun["pairingId"].(string)
+	start := nested(t, begun, "startFrame")
+
+	// The joiner: a different device, so no account and its own fresh key.
+	initiatorDevice := keys.device
+	keys.mu.Lock()
+	keys.device = nil
+	keys.mu.Unlock()
+
+	joinedRaw, joinedErr := handlePairJoin(Request{Method: "pairJoin", Params: params(t, map[string]any{
+		"code": code, "pairingId": id, "msgA": start["msgA"], "pubSign": start["pubSign"],
+	})})
+	joined := result(t, joinedRaw, joinedErr)
+	reply := nested(t, joined, "replyFrame")
+
+	// Back on the initiator for the reply, which is where the emoji appear.
+	joinerDevice := keys.device
+	keys.mu.Lock()
+	keys.device = initiatorDevice
+	keys.loaded = true
+	keys.mu.Unlock()
+
+	repliedRaw, repliedErr := handlePairReply(Request{Method: "pairReply", Params: params(t, map[string]any{
+		"pairingId": id, "msgB": reply["msgB"], "confirmB": reply["confirmB"],
+		"pubSign": reply["pubSign"], "pubEnc": reply["pubEnc"],
+	})})
+	replied := result(t, repliedRaw, repliedErr)
+	confirm := nested(t, replied, "confirmFrame")
+
+	// The human says the emoji match. ONLY NOW is anything sealed.
+	handoffRaw, handoffErr := handlePairHandoff(Request{Method: "pairHandoff", Params: params(t, map[string]any{
+		"pairingId":  id,
+		"epoch":      epoch,
+		"akSeed":     base64.StdEncoding.EncodeToString(akSeed),
+		"headEntry":  base64.StdEncoding.EncodeToString(head),
+		"peerPubEnc": nested(t, replied, "peer")["pubEnc"],
+		"counter":    1,
+	})})
+	handoff := result(t, handoffRaw, handoffErr)
+
+	// Back on the joiner, which confirms and then opens.
+	keys.mu.Lock()
+	keys.device = joinerDevice
+	keys.account = protocol.AccountID{}
+	keys.epochs = map[uint64]*protocol.EpochKeys{}
+	keys.loaded = false
+	keys.mu.Unlock()
+
+	if _, err := handlePairConfirm(Request{Method: "pairConfirm", Params: params(t, map[string]any{
+		"pairingId": id, "confirmA": confirm["confirmA"],
+	})}); err != nil {
+		t.Fatalf("the joiner could not confirm: %v", err)
+	}
+
+	acceptedRaw, acceptedErr := handlePairAccept(Request{Method: "pairAccept", Params: params(t, map[string]any{
+		"pairingId": id, "handoff": handoff["handoff"], "epoch": epoch, "counter": 1,
+		"accountId": start["accountId"],
+	})})
+	accepted := result(t, acceptedRaw, acceptedErr)
+
+	// THE ACCOUNT, not a claim about it: the id came out of the sealed
+	// handoff, which only the holder of the joiner's key could open.
+	if accepted["accountId"] != acct.String() {
+		t.Fatalf("the joiner landed on account %v, not %s", accepted["accountId"], acct)
+	}
+
+	// And it can now actually read: sealing and opening under the epoch it was
+	// handed is the whole point of having been given it.
+	sealedRaw, sealedErr := handleSeal(Request{Method: "seal", Params: params(t, map[string]any{
+		"collection": "servers", "epoch": epoch, "schema": 1,
+		"writerVersion": "test", "counter": 1,
+		"payload": base64.StdEncoding.EncodeToString([]byte("visible to a joined device")),
+	})})
+	sealed := result(t, sealedRaw, sealedErr)
+	openedRaw, openedErr := handleOpen(Request{Method: "open", Params: params(t, map[string]any{
+		"collection": "servers", "epoch": epoch, "sealed": sealed["sealed"],
+		"knownSchema": 1, "seenCounter": 0,
+	})})
+	opened := result(t, openedRaw, openedErr)
+	got, _ := base64.StdEncoding.DecodeString(opened["payload"].(string))
+	if string(got) != "visible to a joined device" {
+		t.Fatalf("the joined device read %q", got)
+	}
+}
+
+// A handoff outside a live pairing has no binding to bind to, and sealing one
+// anyway would be sealing to whoever asked.
+func TestAHandoffNeedsAConfirmedPairing(t *testing.T) {
+	loadTestAccount(t)
+	_, err := handlePairHandoff(Request{Method: "pairHandoff", Params: params(t, map[string]any{
+		"pairingId": "0000", "epoch": uint64(1),
+		"akSeed":     base64.StdEncoding.EncodeToString(make([]byte, 32)),
+		"headEntry":  base64.StdEncoding.EncodeToString([]byte("x")),
+		"peerPubEnc": hex.EncodeToString(make([]byte, 32)),
+		"counter":    uint64(1),
+	})})
+	if err == nil {
+		t.Fatal("a handoff was sealed with no pairing behind it")
+	}
+	if code := codeOf(err); code != ErrPairingExpired {
+		t.Fatalf("reported as %q", code)
 	}
 }

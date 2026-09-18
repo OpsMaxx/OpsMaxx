@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/ecdh"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/hex"
@@ -59,6 +60,10 @@ func handlePairBegin(req Request) (any, error) {
 		return nil, codedf(ErrNotPaired, "no account is loaded")
 	}
 
+	keys.mu.RLock()
+	acct := keys.account
+	keys.mu.RUnlock()
+
 	code, err := pair.NewCode()
 	if err != nil {
 		return nil, wrapCoded(ErrInternal, err, "minting a pairing code")
@@ -83,6 +88,21 @@ func handlePairBegin(req Request) (any, error) {
 			"pairingId": id,
 			"msgA":      base64.StdEncoding.EncodeToString(frame.MsgA),
 			"pubSign":   hex.EncodeToString(frame.PubSign),
+			// The account the joiner is being invited to.
+			//
+			// It has to travel, because the handoff binds it into the HPKE
+			// info, the key-commitment context AND the AAD -- so the joiner
+			// must know it BEFORE it can open anything, and cannot read it out
+			// of what it is trying to open. A first version of this assumed
+			// the opposite and failed with a commitment mismatch, which is the
+			// binding doing its job.
+			//
+			// Safe to send in the clear: it is derived from a public key and
+			// the relay already routes by it. And a relay that substituted one
+			// would produce a handoff that does not open -- which is the same
+			// commitment mismatch, arriving as a refusal rather than as a
+			// device joined to the wrong account.
+			"accountId": acct.String(),
 		},
 	}, nil
 }
@@ -296,4 +316,165 @@ func handlePairForget(req Request) (any, error) {
 	delete(pairings.attempts, in.PairingID)
 	pairings.mu.Unlock()
 	return map[string]any{"ok": true}, nil
+}
+
+// --- the handoff ---
+//
+// PAIRING WITHOUT THIS IS TWO DEVICES THAT AGREE WHO EACH OTHER ARE AND
+// NOTHING ELSE. The emoji confirm identity; the handoff is what actually makes
+// the joiner a member of the account, by giving it AK_n. Until this ran, a
+// device could complete a pairing, see matching emoji, and then find it could
+// not read a single object -- which looks like a broken sync rather than an
+// unfinished pairing.
+//
+// NOTHING IS SEALED BEFORE THE HUMAN CONFIRMS. The initiator calls
+// `pairHandoff` only after the user has said the emoji match, and that
+// ordering is the entire value of the confirmation step: a handoff sealed
+// before it would be a handoff to whoever answered, which is the attack the
+// emoji exist to stop.
+
+func handlePairHandoff(req Request) (any, error) {
+	var in struct {
+		PairingID string `json:"pairingId"`
+		Epoch     uint64 `json:"epoch"`
+		// Base64 of AK_n, which the parent holds sealed and hands in for this
+		// one operation. Not read from `keys`, because the epoch seed is not
+		// what `load` stores -- it stores derived keys.
+		AKSeed string `json:"akSeed"`
+		// The roster head, verbatim, so the joiner can verify the chain it is
+		// about to fetch rather than trusting the relay's copy.
+		HeadEntry string `json:"headEntry"`
+		// Hex of the peer's X25519 public half, from the confirmed pairing.
+		PeerPubEnc string `json:"peerPubEnc"`
+		Counter    uint64 `json:"counter"`
+	}
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+
+	pairings.mu.Lock()
+	initiator, ok := pairings.initiator[in.PairingID]
+	pairings.mu.Unlock()
+	if !ok {
+		// Refused rather than sealed to a key from a session nobody can prove
+		// was confirmed. A handoff outside a live, confirmed pairing has no
+		// binding to bind to.
+		return nil, codedf(ErrPairingExpired, "no confirmed pairing with that id")
+	}
+
+	akSeed, err := base64.StdEncoding.DecodeString(in.AKSeed)
+	if err != nil || len(akSeed) != 32 {
+		return nil, codedf(ErrConfigInvalid, "akSeed is 32 bytes, base64")
+	}
+	head, err := base64.StdEncoding.DecodeString(in.HeadEntry)
+	if err != nil {
+		return nil, codedf(ErrConfigInvalid, "headEntry is not base64")
+	}
+	peerEncRaw, err := hex.DecodeString(in.PeerPubEnc)
+	if err != nil || len(peerEncRaw) != 32 {
+		return nil, codedf(ErrConfigInvalid, "peerPubEnc is 32 bytes of hex")
+	}
+	peerEnc, err := ecdh.X25519().NewPublicKey(peerEncRaw)
+	if err != nil {
+		return nil, wrapCoded(ErrConfigInvalid, err, "the peer's encryption key is not on the curve")
+	}
+
+	keys.mu.RLock()
+	acct := keys.account
+	loaded := keys.loaded
+	rootPub := []byte(nil)
+	if keys.device != nil {
+		rootPub = keys.rootSignPub
+	}
+	keys.mu.RUnlock()
+	if !loaded {
+		return nil, codedf(ErrNotPaired, "no account is loaded")
+	}
+
+	// BOUND TO THE SPAKE2 SECRET. That is what stops a relay -- which carries
+	// every frame -- from substituting its own handoff: it never learns the
+	// secret, so it cannot produce a binding that opens.
+	sealed, err := protocol.SealHandoff(protocol.Handoff{
+		AccountID:   acct,
+		Epoch:       in.Epoch,
+		Counter:     in.Counter,
+		AKSeed:      akSeed,
+		RootSignPub: rootPub,
+		HeadEntry:   head,
+	}, peerEnc, initiator.Secret())
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "sealing the handoff")
+	}
+	return map[string]any{"handoff": base64.StdEncoding.EncodeToString(sealed)}, nil
+}
+
+// handlePairAccept opens the handoff on the joining device and loads the
+// account, which is the moment it becomes a member.
+func handlePairAccept(req Request) (any, error) {
+	var in struct {
+		PairingID string `json:"pairingId"`
+		Handoff   string `json:"handoff"`
+		Epoch     uint64 `json:"epoch"`
+		Counter   uint64 `json:"counter"`
+		// From the start frame. Required, because the handoff binds it and
+		// cannot be opened without it -- see the note there.
+		AccountID string `json:"accountId"`
+	}
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+
+	pairings.mu.Lock()
+	joiner, ok := pairings.joiner[in.PairingID]
+	pairings.mu.Unlock()
+	if !ok {
+		return nil, codedf(ErrPairingExpired, "no confirmed pairing with that id")
+	}
+
+	sealed, err := base64.StdEncoding.DecodeString(in.Handoff)
+	if err != nil {
+		return nil, codedf(ErrConfigInvalid, "handoff is not base64")
+	}
+
+	keys.mu.RLock()
+	device := keys.device
+	keys.mu.RUnlock()
+	if device == nil {
+		return nil, codedf(ErrNotPaired, "this device has no key; join a pairing first")
+	}
+
+	rawAcct, err := hex.DecodeString(in.AccountID)
+	if err != nil || len(rawAcct) != protocol.AccountIDLen {
+		return nil, codedf(ErrConfigInvalid, "accountId is %d bytes of hex", protocol.AccountIDLen)
+	}
+	var acct protocol.AccountID
+	copy(acct[:], rawAcct)
+
+	// Bound to the account, the epoch, the counter AND the pairing secret. A
+	// relay that swapped any of the four produces a blob that does not open,
+	// which is a refusal rather than a device joined to something it did not
+	// agree to.
+	h, err := protocol.OpenHandoff(sealed, acct, in.Epoch, in.Counter, device.Enc, joiner.Secret())
+	if err != nil {
+		return nil, wrapCoded(ErrPairingRefused, err, "opening the handoff")
+	}
+
+	epochKeys, err := protocol.DeriveEpoch(h.AKSeed, h.AccountID, h.Epoch)
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "deriving the epoch key")
+	}
+
+	keys.mu.Lock()
+	keys.account = h.AccountID
+	keys.rootSignPub = h.RootSignPub
+	keys.epochs[h.Epoch] = epochKeys
+	keys.loaded = true
+	keys.mu.Unlock()
+
+	return map[string]any{
+		"accountId":   h.AccountID.String(),
+		"epoch":       h.Epoch,
+		"rootSignPub": hex.EncodeToString(h.RootSignPub),
+		"headEntry":   base64.StdEncoding.EncodeToString(h.HeadEntry),
+	}, nil
 }
