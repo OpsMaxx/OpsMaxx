@@ -32,6 +32,7 @@ import {
   DUMP_BINARY,
   describeRun,
   dueDestinations,
+  MIN_PASSPHRASE,
   planRetention
 } from '../../shared/backup'
 import type {
@@ -59,13 +60,41 @@ import type {
 // So the bundle unseals them and re-encrypts the whole payload under a
 // passphrase the user supplies, which travels with the file.
 
-const KDF = { N: 32768, r: 8, p: 1, keylen: 32, maxmem: 96 * 1024 * 1024 }
+// `p: 3`, matching the vault's own KDF rather than the p=1 this started with.
+// The vault raised it because its file is the one thing on disk worth grinding
+// offline; a backup bundle is that same material with the machine binding
+// REMOVED, sitting in a bucket, so it had the weaker parameter and the higher
+// exposure. No argon2id: Node has no argon2 and an Electron app does not gain
+// a native module for one KDF when the vault's own answer is already here and
+// already reviewed.
+const KDF = { N: 32768, r: 8, p: 3, keylen: 32, maxmem: 96 * 1024 * 1024 }
+
+// What every bundle written before the raise used. Recorded rather than
+// assumed: a bundle carries its own parameters now, and one with none is one
+// from before this existed.
+const LEGACY_KDF = { N: 32768, r: 8, p: 1 }
 const MAGIC = 'opsmaxx-backup'
+
+interface KdfParams {
+  N: number
+  r: number
+  p: number
+}
 
 interface Envelope {
   magic: string
   version: 1
   kdf: 'scrypt'
+  /**
+   * The parameters the bundle was actually sealed with.
+   *
+   * Absent on every bundle written before the raise, which is what LEGACY_KDF
+   * stands in for. Recording them is the whole reason the raise is safe: a
+   * bundle in a bucket cannot be re-sealed the way the vault re-seals its file
+   * on the next unlock, so the reader has to be told, not asked to guess. The
+   * next raise then costs nothing.
+   */
+  kdfParams?: KdfParams
   salt: string
   iv: string
   tag: string
@@ -74,10 +103,14 @@ interface Envelope {
 
 const userFile = (name: string): string => join(app.getPath('userData'), name)
 
-function derive(password: string, salt: Buffer): Promise<Buffer> {
+function derive(password: string, salt: Buffer, params: KdfParams = KDF): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    scrypt(password, salt, KDF.keylen, { N: KDF.N, r: KDF.r, p: KDF.p, maxmem: KDF.maxmem }, (err, dk) =>
-      err ? reject(err) : resolve(dk as Buffer)
+    scrypt(
+      password,
+      salt,
+      KDF.keylen,
+      { N: params.N, r: params.r, p: params.p, maxmem: KDF.maxmem },
+      (err, dk) => (err ? reject(err) : resolve(dk as Buffer))
     )
   })
 }
@@ -116,7 +149,11 @@ function summarise(payload: BackupPayload): BackupSummary {
   }
 }
 
-export const MIN_PASSPHRASE = 8
+// Re-exported from the shared vocabulary rather than declared here: main/index
+// and the run tests already import it from this module, and the renderer
+// cannot import this one at all. See shared/backup.ts for why there is exactly
+// one of these now.
+export { MIN_PASSPHRASE }
 
 /**
  * The bytes a backup file consists of, and what is in them.
@@ -150,6 +187,7 @@ export async function buildBundle(
     magic: MAGIC,
     version: 1,
     kdf: 'scrypt',
+    kdfParams: { N: KDF.N, r: KDF.r, p: KDF.p },
     salt: salt.toString('base64'),
     iv: iv.toString('base64'),
     tag: cipher.getAuthTag().toString('base64'),
@@ -161,7 +199,7 @@ export async function buildBundle(
 
 export async function backupExport(password: string): Promise<BackupResult> {
   if (password.length < MIN_PASSPHRASE) {
-    return { ok: false, error: 'Backup passphrase must be at least 8 characters.' }
+    return { ok: false, error: `Backup passphrase must be at least ${MIN_PASSPHRASE} characters.` }
   }
 
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
@@ -193,7 +231,7 @@ async function decryptBundle(bytes: Buffer, password: string): Promise<BackupPay
     throw new Error('That file is not a OpsMaxx backup.')
   }
   if (envelope.magic !== MAGIC) throw new Error('That file is not a OpsMaxx backup.')
-  const key = await derive(password, Buffer.from(envelope.salt, 'base64'))
+  const key = await derive(password, Buffer.from(envelope.salt, 'base64'), envelope.kdfParams ?? LEGACY_KDF)
   const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64'))
   decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'))
   const plain = Buffer.concat([
@@ -768,7 +806,7 @@ export async function runBackupToDestination(
   }
 
   if (password.length < MIN_PASSPHRASE) {
-    return fail(base, 'bundle', new Error('Backup passphrase must be at least 8 characters.'))
+    return fail(base, 'bundle', new Error(`Backup passphrase must be at least ${MIN_PASSPHRASE} characters.`))
   }
 
   let bundle: { bytes: Buffer; summary: BackupSummary }

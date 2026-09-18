@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, Download, Loader2, ShieldCheck, Trash2, Up
 import { useApp } from '../../store/app'
 import { BackupDestinations } from './BackupDestinations'
 import { toast } from '../../store/toast'
+import { MIN_PASSPHRASE } from '../../../../shared/backup'
 import type { BackupResult, BackupSummary } from '../../../../shared/backup'
 
 function when(iso: string | null): string {
@@ -41,7 +42,6 @@ export function BackupPanel(): React.JSX.Element {
   const [deleteTyped, setDeleteTyped] = useState('')
   const exportPwRef = useRef<HTMLInputElement>(null)
 
-  const MIN_PASSPHRASE = 8
   const exportReady = exportPw.length >= MIN_PASSPHRASE && exportPw === exportPw2
 
   /** Did this call succeed? A cancelled dialog is neither success nor failure —

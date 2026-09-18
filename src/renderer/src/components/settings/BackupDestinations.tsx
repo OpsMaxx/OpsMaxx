@@ -21,7 +21,8 @@ import {
   BACKUP_DESTINATION_KINDS,
   BACKUP_DESTINATION_LABEL,
   BACKUP_STAGE_LABEL,
-  destinationProblem
+  destinationProblem,
+  MIN_PASSPHRASE
 } from '../../../../shared/backup'
 import type {
   BackupDestination,
@@ -33,7 +34,6 @@ import type {
   DumpEngine
 } from '../../../../shared/backup'
 
-const MIN_PASSPHRASE = 8
 
 function uid(): string {
   return `bd-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`

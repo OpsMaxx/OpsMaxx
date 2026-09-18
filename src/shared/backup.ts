@@ -1,3 +1,28 @@
+/**
+ * Minimum length of a backup passphrase.
+ *
+ * Raised from 8 to 12, matching VAULT_MIN_PASSWORD. A backup bundle is the
+ * one artefact that carries every credential the app holds AND is designed to
+ * leave the machine, so it is the last thing that should have a weaker floor
+ * than the vault it contains.
+ *
+ * Lives here because it had THREE independent copies -- this module's old
+ * export in main/services/backup, and a `const MIN_PASSPHRASE = 8` declared
+ * locally in each of two settings panels. That is precisely the drift the
+ * VAULT_MIN_PASSWORD comment in shared/vault.ts warns about, and the copy that
+ * disagreed downward would be the one accepting the weak passphrase.
+ *
+ * Existing bundles are unaffected: the floor is checked when a passphrase is
+ * chosen or used, never when one is verified against a file, so a bundle
+ * written under the old floor still opens with the passphrase it was given.
+ * A scheduled destination whose stored passphrase is now too short starts
+ * being SKIPPED with a reason naming the length -- loudly, through the same
+ * newly-skipped machinery as every other stall, rather than quietly
+ * continuing to write bundles behind a passphrase the app no longer considers
+ * adequate.
+ */
+export const MIN_PASSPHRASE = 12
+
 // Contents of a backup bundle, before encryption.
 export interface BackupPayload {
   version: 1

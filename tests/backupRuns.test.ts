@@ -31,7 +31,8 @@ import {
   dumpCommand,
   dumpObjectName,
   destinationProblem,
-  describeRun
+  describeRun,
+  MIN_PASSPHRASE
 } from '../src/shared/backup'
 import type {
   BackupDestination,
@@ -322,7 +323,7 @@ describe('runBackupToDestination', () => {
     const report = await runBackupToDestination(localDest(dir), 'short', { now: () => FIXED })
     expect(report.ok).toBe(false)
     expect(report.failedStage).toBe('bundle')
-    expect(report.error).toBe('Backup passphrase must be at least 8 characters.')
+    expect(report.error).toBe(`Backup passphrase must be at least ${MIN_PASSPHRASE} characters.`)
     expect(readdirSync(dir)).toEqual([])
   })
 
@@ -615,7 +616,7 @@ describe('backupTick', () => {
     const { skipped } = await backupTick(FIXED.getTime(), { now: () => FIXED })
 
     expect(skipped['dest-local']).toBe(
-      'Vault entry “Backup passphrase” holds a passphrase shorter than 8 characters.'
+      `Vault entry “Backup passphrase” holds a passphrase shorter than ${MIN_PASSPHRASE} characters.`
     )
   })
 

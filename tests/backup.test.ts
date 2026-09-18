@@ -18,7 +18,13 @@ import { randomBytes, scrypt, createCipheriv } from 'node:crypto'
 import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app } from 'electron'
-import { ALL_DATA_DIRS, ALL_DATA_FILES, backupImport, deleteAllData } from '../src/main/services/backup'
+import {
+  ALL_DATA_DIRS,
+  ALL_DATA_FILES,
+  backupImport,
+  buildBundle,
+  deleteAllData
+} from '../src/main/services/backup'
 import { HISTORY_FILE } from '../src/main/services/history'
 import { vpnRunRoot, vpnStateRoot } from '../src/main/services/vpn/runDir'
 
@@ -380,6 +386,45 @@ async function writeBundle(
     })
   )
 }
+
+// ---------------------------------------------------------------------------
+// The bundle's KDF was raised from scrypt p=1 to p=3, matching the vault.
+//
+// A bundle in a bucket cannot be re-sealed on next use the way the vault
+// re-seals its own file, so the raise is only safe if every bundle carries the
+// parameters it was written with. These two cases are the two halves of that:
+// new bundles say what they used, old bundles that say nothing still open.
+describe('bundle KDF parameters', () => {
+  afterEach(cleanup)
+
+  it('records the parameters it sealed with', async () => {
+    const { bytes } = await buildBundle('a-long-enough-passphrase')
+    const envelope = JSON.parse(bytes.toString('utf8')) as {
+      kdf: string
+      kdfParams?: { N: number; r: number; p: number }
+    }
+    expect(envelope.kdf).toBe('scrypt')
+    // Pinned as a literal, not read back from the module: this is the number
+    // that decides how long an offline grind takes, and a test that imports it
+    // agrees with whatever it is lowered to.
+    expect(envelope.kdfParams).toEqual({ N: 32768, r: 8, p: 3 })
+  })
+
+  it('still opens a bundle written before the parameters were recorded', async () => {
+    // writeBundle seals at p=1 and omits kdfParams, which is exactly the shape
+    // every bundle written before the raise has. If the reader used the
+    // current parameters instead of the recorded ones, this would derive a
+    // different key and fail the GCM tag -- meaning an upgrade would have
+    // orphaned every backup anyone already holds.
+    const bundle = join(app.getPath('userData'), 'legacy-kdf.spbackup')
+    await writeBundle(bundle, 'passphrase-1234')
+
+    const result = await backupImport('passphrase-1234', bundle)
+
+    expect(result.ok).toBe(true)
+    unlinkSync(bundle)
+  })
+})
 
 describe('backupImport', () => {
   afterEach(cleanup)
