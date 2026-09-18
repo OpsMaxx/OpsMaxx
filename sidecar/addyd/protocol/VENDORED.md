@@ -32,6 +32,31 @@ rather than after.
 The one failure this cannot catch is a change made identically in both copies
 and wrong in both. Nothing catches that.
 
+## Provenance
+
+Every file here carries `SPDX-License-Identifier: MIT` and the upstream path
+and commit it was copied from. `deps_test.go` asserts that, and it is the
+cheapest thing that puts the upstream path in front of whoever opens the file
+-- a copy with no provenance is a copy somebody edits in place.
+
+Files written only on this side say `// NOT VENDORED.` on their first line and
+name themselves rather than being listed somewhere a reader has to go and find.
+
+## Why this is the WHOLE package rather than the subset addyd calls
+
+A trimmed copy was considered and measured. It saves no dependencies:
+
+| dependency | needed by | droppable? |
+|---|---|---|
+| `golang.org/x/text` | `ace.go`, the canonical encoder | no |
+| `go-bip39` | the vector replay test | no |
+| `filippo.io/edwards25519` | `pair/spake2` | no |
+
+What trimming would remove is source that mirrors upstream exactly, and
+replace it with a curated subset somebody has to re-derive on every upstream
+change -- which is the opposite of what makes a copy easy to keep in step. The
+design says this is a copy; a copy is what it is.
+
 ## Licence
 
 Ours, MIT, same copyright holder as the rest of this repository. It adds no

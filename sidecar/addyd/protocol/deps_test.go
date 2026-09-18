@@ -1,3 +1,6 @@
+// NOT VENDORED. This file exists only in the client: it pins the vendored
+// set's dependency versions against the server's, which is a question that
+// only arises on this side of the copy.
 package protocol
 
 import (
@@ -53,5 +56,44 @@ func TestTheVendoredDependenciesArePinned(t *testing.T) {
 				"Bump both, or the two implementations can derive different keys from one mnemonic.",
 				module, got, version)
 		}
+	}
+}
+
+// Every vendored file says where it came from.
+//
+// A copy with no provenance is a copy somebody edits in place -- and a fix
+// made only here is a protocol divergence with no symptom until an AEAD tag
+// fails on a user's machine. The header is the cheapest thing that puts the
+// upstream path in front of whoever opens the file.
+func TestEveryVendoredFileSaysWhereItCameFrom(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
+			continue
+		}
+		body, err := os.ReadFile(e.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		head := string(body)
+		if strings.HasPrefix(head, "// NOT VENDORED.") {
+			// The exception, and it names itself rather than being listed
+			// somewhere a reader has to go and find.
+			continue
+		}
+		checked++
+		if !strings.HasPrefix(head, "// SPDX-License-Identifier: MIT\n") {
+			t.Errorf("%s has no SPDX line", e.Name())
+		}
+		if !strings.Contains(head[:min(400, len(head))], "Vendored from github.com/opsmaxx/addy") {
+			t.Errorf("%s does not say where it came from", e.Name())
+		}
+	}
+	if checked == 0 {
+		t.Fatal("checked 0 files; the walk is wrong, not the headers")
 	}
 }

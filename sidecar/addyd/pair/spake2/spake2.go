@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: MIT
+// Vendored from github.com/opsmaxx/addy internal/pair/spake2/spake2.go @ fe66709
+//
+// Edit it THERE and copy it here. A fix made only in this copy is a
+// protocol divergence with no symptom until an AEAD tag fails on somebody
+// else's machine. See VENDORED.md in this directory.
 // Package spake2 implements SPAKE2 over edwards25519, following RFC 9382.
 //
 // WHY THIS EXISTS RATHER THAN A DEPENDENCY. The design selected
