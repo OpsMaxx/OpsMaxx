@@ -778,6 +778,14 @@ function createWindow(): void {
   // what this prevents is a new one beginning against a store that is about to
   // close.
   ruleEngine.stop()
+
+  // The loopback RDP relay, for the same reason as everything above it: on
+  // macOS closing the window fires neither `window-all-closed` nor
+  // `before-quit`, so the listener stayed up with its sessions. Usually the
+  // dying renderer closes the WebSocket and the relay reaps itself within a
+  // minute — but a session that leaked its socket never does, and this is the
+  // only path that would otherwise never recover it.
+  void stopRdpRelay()
   })
 
   if (isDev && process.env['ELECTRON_RENDERER_URL']) {

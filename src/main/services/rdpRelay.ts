@@ -240,8 +240,25 @@ function ensureRelay(): Promise<number> {
       // Refusing every Origin here refused the renderer, which is what broke
       // RDP in 0.50.0 with exactly the "closed socket looks like a network
       // problem" symptom the line above warns about.
+      // A CEILING ON A FRAME NOBODY HAS AUTHENTICATED YET.
+      //
+      // ws defaults maxPayload to 100 MiB, and a socket is accepted and may
+      // buffer a whole frame of that size BEFORE the first message is parsed
+      // and its token looked at. Nothing bounded how many such sockets there
+      // could be, so anything that found the port could grow main-process
+      // memory without presenting a credential at all -- and each one held
+      // `connecting` above zero, which keeps the listener from ever idling out.
+      //
+      // 64 KiB is far above anything the protocol sends here: the first message
+      // is an RDCleanPath request PDU carrying an X.224 Connection Request, and
+      // the relayed traffic after it is TLS records, which cap at 16 KiB plus
+      // overhead.
+      maxPayload: 64 * 1024,
       verifyClient: ({ req }: { req: IncomingMessage }) =>
-        loopbackUpgradeAllowed(req, rendererOrigins())
+        // Refused at the handshake rather than after it, so a flood cannot
+        // occupy the pre-auth window in the first place. `connecting` counts
+        // sockets past the upgrade and not yet relaying.
+        connecting < MAX_SESSIONS && loopbackUpgradeAllowed(req, rendererOrigins())
     })
     sockets.on('connection', handleConnection)
 
@@ -555,7 +572,15 @@ async function openSession(
     // the seconds since should be the route this session takes.
     const server = getCachedServer(ticket.serverId)
     if (!server) throw new Error('that server no longer exists')
-    if (sessions >= MAX_SESSIONS) throw new Error('too many remote desktops are already open')
+    // `sessions + connecting`, not `sessions` alone. The counter this cap
+    // reads is only incremented in relay(), AFTER the dial and the whole
+    // handshake — so N sockets arriving together all see zero, all pass, and
+    // all go on to open an SSH chain apiece. The ceiling exists precisely to
+    // bound those chains, and it bounded nothing in the one case it was
+    // written for.
+    if (sessions + connecting >= MAX_SESSIONS) {
+      throw new Error('too many remote desktops are already open')
+    }
 
     const { host, port: target } = wanted
     dialled = await dialTarget(server, host, target)
@@ -665,9 +690,21 @@ async function dialTarget(server: CachedServer, host: string, port: number): Pro
 
 function dialDirect(host: string, port: number): Promise<Dialled> {
   return new Promise<Dialled>((resolve, reject) => {
-    const socket = netConnect({ host, port }, () =>
+    // A DEADLINE ON THE DIAL ITSELF. HANDSHAKE_TIMEOUT_MS is armed inside
+    // performHandshake, which cannot start until this resolves, so a
+    // blackholed host sat here for the OS TCP timeout -- a minute and a half
+    // or more -- with `connecting` held above zero the whole time, which is
+    // also the window in which a client giving up leaks the session.
+    const socket = netConnect({ host, port, timeout: HANDSHAKE_TIMEOUT_MS }, () => {
+      // Cleared on success: from here the socket is a long-lived relay
+      // transport, and an idle desktop must not be torn down for being quiet.
+      socket.setTimeout(0)
       resolve({ stream: socket, close: () => socket.destroy() })
-    )
+    })
+    socket.once('timeout', () => {
+      socket.destroy()
+      reject(new Error(`could not reach ${host}:${port}: timed out`))
+    })
     socket.once('error', (err) =>
       // `cause` carried, not just the message. Without it the errno is gone by
       // the time anything wants to explain the failure, and ECONNREFUSED —
@@ -902,22 +939,67 @@ function performHandshake(
     const timer = setTimeout(() => fail(new Error('RDP handshake timed out')), HANDSHAKE_TIMEOUT_MS)
 
     stream.once('error', (err: Error) => fail(new Error(`RDP handshake failed: ${err.message}`)))
-    stream.once('data', (x224Response: Buffer) => {
-      if (x224Response.length === 0) {
-        fail(new Error('the server closed the connection before the X.224 confirm'))
+    // FRAMED BY ITS OWN LENGTH, NOT BY WHAT ONE READ RETURNED.
+    //
+    // This took the first `data` chunk to be the whole Connection Confirm. TCP
+    // has no message framing, so that is an assumption about the network, and
+    // `once('data')` does not even hand back a segment — it hands back whatever
+    // the Readable had buffered when the listener attached, which can be less
+    // than one Confirm or more.
+    //
+    // Split is not exotic: an MSS clamp on a VPN, a re-segmenting proxy, a
+    // retransmit, or a server that writes the TPKT header and body separately
+    // with TCP_NODELAY set. The jump-host path is likelier still, because an
+    // ssh2 channel emits one event per SSH_MSG_CHANNEL_DATA and the bastion
+    // reproduces whatever split it saw, then adds its own.
+    //
+    // What it cost: a Confirm carrying an RDP_NEG_FAILURE arriving as 11 bytes
+    // then 8 made negotiationFailure() return null for being too short, so the
+    // refusal — the very thing that names the protocol the server wants — was
+    // skipped, the remaining bytes were fed to TLS as a ServerHello, and the
+    // user got the generic 502 this code exists to prevent.
+    //
+    // TPKT (RFC 1006 / ITU T.123): byte 0 is version 3, bytes 2-3 are the total
+    // length big-endian INCLUDING the four-byte header. That is the frame.
+    let pending = Buffer.alloc(0)
+    const onData = (chunk: Buffer): void => {
+      // Always concat: the one-chunk shortcut typed as a Buffer over a
+      // possibly-shared ArrayBuffer, and a Confirm is 19 bytes.
+      pending = Buffer.concat([pending, chunk])
+
+      // A Confirm is 11 bytes, or 19 with a negotiation structure. Anything
+      // that keeps growing without a plausible TPKT length is not one, and
+      // waiting for it for ever is how the handshake timer becomes the only
+      // thing between us and a stuck session.
+      if (pending.length > 4096) {
+        fail(new Error('the server sent an oversized X.224 confirm'))
         return
       }
+      if (pending.length < 4) return
+
+      if (pending[0] !== 0x03) {
+        fail(new Error('the server did not answer with an RDP (TPKT) confirm'))
+        return
+      }
+      const tpktLen = pending.readUInt16BE(2)
+      if (tpktLen < 7 || tpktLen > 4096) {
+        fail(new Error(`the server sent a malformed TPKT length (${tpktLen})`))
+        return
+      }
+      if (pending.length < tpktLen) return
+
+      const x224Response = pending.subarray(0, tpktLen)
+      // Anything past the Confirm belongs to TLS. Unshifting rather than
+      // dropping it: a server may write its ServerHello into the same segment,
+      // and those bytes are not ours to discard.
+      const rest = pending.subarray(tpktLen)
+
       // READ THE ANSWER BEFORE ASSUMING IT SAID YES.
       //
-      // This used to treat any non-empty first chunk as a confirm and go
-      // straight to TLS. A server that is refusing the security it was offered
-      // replies with an RDP Negotiation Failure here and then does not speak
-      // TLS at all, so the refusal surfaced as a TLS error and then as the
-      // generic 502 — with the actual answer, which names the protocol the
-      // server wants, sitting unread in the bytes we already had.
-      //
-      // RdpView already has the right sentence for the commonest case; it just
-      // never got to run, because the relay failed first.
+      // A server refusing the security it was offered replies with an RDP
+      // Negotiation Failure here and then does not speak TLS at all, so the
+      // refusal used to surface as a TLS error and then as the generic 502 —
+      // with the actual answer sitting unread in the bytes we already had.
       const refusal = negotiationFailure(x224Response)
       if (refusal) {
         fail(new Error(refusal))
@@ -926,7 +1008,8 @@ function performHandshake(
       // Every listener has to go before the stream becomes TLS's, or the two
       // layers both consume from it.
       stream.removeAllListeners('error')
-      stream.removeAllListeners('data')
+      stream.off('data', onData)
+      if (rest.length > 0) stream.unshift(rest)
 
       // `rejectUnauthorized` stays false and that is deliberate: RDP servers
       // are self-signed by default, and the trust decision is the client's --
@@ -984,8 +1067,10 @@ function performHandshake(
         }
       )
       socket.once('error', (err) => fail(new Error(`TLS handshake failed: ${err.message}`)))
-    })
+    }
 
+    // `on`, not `once`: a Confirm that arrives in pieces needs every piece.
+    stream.on('data', onData)
     stream.write(x224Request)
   })
 }
@@ -1013,6 +1098,22 @@ function collectChain(peerCert: DetailedPeerCertificate | null): Buffer[] {
 }
 
 function relay(ws: WebSocket, tlsSocket: TLSSocket, closeTransport: () => void): void {
+  // NOTHING TO RELAY TO. Everything below hangs its cleanup off `ws`'s close
+  // and error events, so a socket that closed during openSession's async work
+  // — the dial, the handshake, or verifyRdpCertificate, which waits on a person
+  // reading a fingerprint and is deliberately unbounded — has already emitted
+  // both and will never emit them again. `sessions` would then be one higher
+  // for the life of the process: `inUse()` stays true, the idle shutdown
+  // re-arms for ever, the listener never closes, and the TLS session and its
+  // SSH chain leak untracked. stopRdpRelay cannot reach it either, because the
+  // socket is no longer among `wss.clients`.
+  if (ws.readyState !== ws.OPEN) {
+    tlsSocket.destroy()
+    closeTransport()
+    scheduleIdleShutdown()
+    return
+  }
+
   sessions++
   if (idleTimer) clearTimeout(idleTimer)
 

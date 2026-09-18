@@ -427,7 +427,7 @@ button {
   align-items: center;
   gap: var(--sp-1);
   padding: var(--sp-1) var(--sp-2);
-  font-size: var(--fs-caption);
+  font-size: var(--fs-body);
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -1021,7 +1021,7 @@ button {
   gap: 4px;
   height: 18px;
   padding: 0 7px;
-  font-size: var(--fs-caption);
+  font-size: var(--fs-body);
   font-weight: 600;
   border-radius: var(--r-pill);
   background: var(--bg-elevated);
@@ -1348,7 +1348,7 @@ details[open] > .disclosure-head .chev {
 }
 .palette-group {
   padding: var(--sp-2) var(--sp-3) 4px;
-  font-size: var(--fs-caption);
+  font-size: var(--fs-body);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1435,7 +1435,7 @@ details[open] > .disclosure-head .chev {
 }
 .menu-label {
   padding: var(--sp-2) var(--sp-3) 4px;
-  font-size: var(--fs-caption);
+  font-size: var(--fs-body);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1575,7 +1575,7 @@ details[open] > .disclosure-head .chev {
   margin-bottom: var(--sp-2);
   border-radius: var(--r-sm);
   color: var(--text-faint);
-  font-size: var(--fs-caption);
+  font-size: var(--fs-body);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -2396,7 +2396,7 @@ details[open] > .disclosure-head .chev {
 .vault-label {
   width: 82px;
   flex: none;
-  font-size: var(--fs-caption);
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -2407,7 +2407,7 @@ details[open] > .disclosure-head .chev {
   align-items: center;
   gap: 8px;
   margin-top: 10px;
-  font-size: var(--fs-caption);
+  font-size: var(--fs-body);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2591,7 +2591,7 @@ details[open] > .disclosure-head .chev {
   width: 100%;
   padding: 4px var(--sp-3);
   color: var(--text-faint);
-  font-size: var(--fs-caption);
+  font-size: var(--fs-body);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -2605,7 +2605,7 @@ details[open] > .disclosure-head .chev {
   align-items: center;
   gap: var(--sp-2);
   padding: 4px var(--sp-3);
-  font-size: var(--fs-caption);
+  font-size: var(--fs-body);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -2704,7 +2704,7 @@ details[open] > .disclosure-head .chev {
 /* 11px, which the scale permits only for a tracked all-caps label — so this is
    one, rather than being 11px running text. */
 .ft-label {
-  font-size: var(--fs-caption);
+  font-size: var(--fs-body);
   font-weight: var(--fw-caption);
   letter-spacing: var(--tracking-caption);
   text-transform: uppercase;
@@ -2895,7 +2895,7 @@ details[open] > .disclosure-head .chev {
 }
 .mini-table th {
   color: var(--text-muted);
-  font-size: var(--fs-caption);
+  font-size: var(--fs-body);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -3209,7 +3209,7 @@ details[open] > .disclosure-head .chev {
   border: 1px solid var(--accent-border);
   background: var(--accent-soft);
   color: var(--accent-ink);
-  font-size: var(--fs-caption);
+  font-size: var(--fs-body);
   font-weight: 650;
   line-height: 13px;
   letter-spacing: 0.04em;
@@ -6059,4 +6059,15 @@ details[open] > .disclosure-head .chev {
 .cloud-pick-one:hover .faint {
   color: var(--accent-text);
   opacity: 0.75;
+}
+
+/* A caveat about a session that IS working — the no-forward-secrecy fallback,
+   today. Deliberately not styled as an error: nothing has failed, and dressing
+   it in red would teach people to dismiss it. */
+.rdp-notice {
+  padding: 5px 10px;
+  font-size: var(--fs-body);
+  color: var(--text-dim);
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border);
 }

@@ -92,8 +92,16 @@ const CERT = readFileSync(join(__dirname, 'fixtures/rdp/test-cert.pem'))
 // answers with. Their contents do not matter to the relay — it must replay one
 // and return the other verbatim — but they have to be distinguishable to prove
 // it did not mangle or swap them.
-const X224_REQUEST = Buffer.from([0x03, 0x00, 0x00, 0x13, 0x0e, 0xe0, 0xaa])
-const X224_CONFIRM = Buffer.from([0x03, 0x00, 0x00, 0x13, 0x0e, 0xd0, 0xbb])
+//
+// WELL-FORMED TPKT, which these were not. Both declared a length of 0x0013 --
+// nineteen bytes -- and carried seven. Nothing noticed, because the relay read
+// the first chunk and never looked at the length field; once it began framing
+// on that field, as it must to survive a Confirm split across two segments,
+// every one of these hung waiting for twelve bytes no server was ever going to
+// send. A fixture that no real server could produce is a fixture that stops
+// testing the thing it names.
+const X224_REQUEST = Buffer.from([0x03, 0x00, 0x00, 0x07, 0x02, 0xe0, 0xaa])
+const X224_CONFIRM = Buffer.from([0x03, 0x00, 0x00, 0x07, 0x02, 0xd0, 0xbb])
 
 /**
  * A stand-in for an RDP server: raw TCP for the X.224 exchange, then TLS.
@@ -981,4 +989,134 @@ describe('the RSA key exchange fallback', () => {
     const between = src.slice(first, fallback)
     expect(between).toContain('dialled = await dialTarget(server, host, target)')
   })
+})
+
+// A SOCKET THAT LEFT WHILE WE WERE STILL SETTING UP.
+//
+// `relay()` hangs every cleanup off the WebSocket's close and error events, so
+// one that closed during openSession's async work — the dial, the handshake, or
+// verifyRdpCertificate, which waits on a person reading a fingerprint and has
+// no deadline at all — has already emitted both and will never emit them again.
+// `sessions` then stayed one higher for the life of the process: inUse() true
+// for ever, the idle shutdown re-arming for ever, the listener never closing,
+// and a TLS session plus its SSH chain leaking with nothing tracking them.
+//
+// Sixteen of those and MAX_SESSIONS refuses every new desktop while none is on
+// screen.
+describe('a client that hangs up mid-handshake', () => {
+  it('does not leave the relay believing a session is live', async () => {
+    defineServer('srv-1', fake.port)
+    const before = rdpRelayStatus().sessions
+
+    const { ticket } = await rdpMintTicket('srv-1')
+    const ws = new WebSocket(ticket!.proxyUrl)
+    await new Promise((r) => ws.once('open', r))
+    ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
+
+    // Close while the relay is still dialling and handshaking, which is the
+    // window the real client hits when the user shuts the tab on a slow host.
+    ws.close()
+
+    // Long enough for the handshake against the fake server to finish and
+    // reach relay() with a socket that is already gone.
+    await new Promise((r) => setTimeout(r, 1500))
+
+    expect(rdpRelayStatus().sessions).toBe(before)
+  }, 20_000)
+
+  it('still shuts the listener down afterwards, rather than staying up for ever', async () => {
+    // The consequence that outlives the session: a stuck counter keeps inUse()
+    // true, so the idle timer re-arms indefinitely and the loopback port stays
+    // open with nothing on it.
+    expect(rdpRelayStatus().sessions).toBe(0)
+  })
+})
+
+// A CONFIRM THAT ARRIVES IN PIECES.
+//
+// TCP has no message framing, and `once('data')` hands back whatever the
+// Readable had buffered when the listener attached — which can be less than one
+// Connection Confirm or more than one. A split is not exotic: an MSS clamp on a
+// VPN, a re-segmenting proxy, a retransmit, or a server that writes the TPKT
+// header and body separately with TCP_NODELAY set. Through a jump host it is
+// likelier still, because an ssh2 channel emits one event per
+// SSH_MSG_CHANNEL_DATA and the bastion reproduces whatever split it saw.
+//
+// The cost was specific: a Confirm carrying an RDP_NEG_FAILURE arriving as 11
+// bytes then 8 was too short for negotiationFailure() to read, so the refusal
+// naming the protocol the server wanted was skipped and the rest was fed to TLS
+// as a ServerHello.
+describe('an X.224 confirm split across segments', () => {
+  /** A refusing server that writes the Confirm in two pieces. */
+  function startSplitServer(
+    body: Buffer,
+    firstChunk: number
+  ): Promise<{ port: number; close: () => Promise<void> }> {
+    return new Promise((resolve) => {
+      const server = createServer((socket: Socket) => {
+        socket.once('data', () => {
+          socket.write(body.subarray(0, firstChunk))
+          // A tick later, so it cannot coalesce into one read.
+          setTimeout(() => socket.write(body.subarray(firstChunk)), 25)
+        })
+        socket.on('error', () => {})
+      })
+      server.listen(0, '127.0.0.1', () => {
+        const a = server.address()
+        resolve({
+          port: typeof a === 'object' && a ? a.port : 0,
+          close: () => new Promise<void>((done) => server.close(() => done()))
+        })
+      })
+    })
+  }
+
+  /** TPKT + CC-TPDU + RDP_NEG_FAILURE, 19 bytes, per MS-RDPBCGR 2.2.1.2.2. */
+  function negFailure(code: number): Buffer {
+    const buf = Buffer.alloc(19)
+    buf[0] = 0x03
+    buf.writeUInt16BE(19, 2)
+    buf[4] = 14
+    buf[5] = 0xd0
+    buf[11] = 0x03
+    buf.writeUInt16LE(8, 13)
+    buf.writeUInt32LE(code, 15)
+    return buf
+  }
+
+  it('reassembles it and still reads the refusal', async () => {
+    // 11 then 8 — the split that silently skipped the refusal, because the
+    // first piece stops one byte short of the failure code.
+    const split = await startSplitServer(negFailure(0x00000005), 11)
+    try {
+      defineServer('srv-split', split.port)
+      const { ticket } = await rdpMintTicket('srv-split')
+      const ws = new WebSocket(ticket!.proxyUrl)
+      await new Promise((r) => ws.once('open', r))
+      ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
+      await firstReply(ws)
+      ws.close()
+
+      expect(rdpLastError('srv-split')).toContain('Network Level Authentication')
+    } finally {
+      await split.close()
+    }
+  }, 20_000)
+
+  it('refuses a reply that is not TPKT at all rather than handing it to TLS', async () => {
+    const junk = await startSplitServer(Buffer.from([0x16, 0x03, 0x01, 0x00, 0x05, 0x01]), 3)
+    try {
+      defineServer('srv-junk', junk.port)
+      const { ticket } = await rdpMintTicket('srv-junk')
+      const ws = new WebSocket(ticket!.proxyUrl)
+      await new Promise((r) => ws.once('open', r))
+      ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
+      await firstReply(ws)
+      ws.close()
+
+      expect(rdpLastError('srv-junk')).toContain('TPKT')
+    } finally {
+      await junk.close()
+    }
+  }, 20_000)
 })

@@ -37,15 +37,26 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
  * tests/rdpRelay.test.ts dials with the node `ws` client, which sends no
  * Origin — the test shared the code's mistaken assumption.
  *
- * Note what is actually load-bearing, because it is why an allowlist is safe
- * here. A rebound request carries `Host: attacker.example`, so the Host check
- * alone already refuses it. Origin exists for the narrower case the Host check
- * cannot see: a page served by the user's OWN dev server on localhost, whose
- * fetches do carry a loopback Host. The relay additionally picks a random port
- * and requires a single-use ticket this process minted. So the relay allowing
- * exactly its own renderer's origins is not the allowlist-that-gets-widened
- * this comment used to warn about: it is not configurable, it is three values,
- * and none of them is reachable by a page the user did not write.
+ * Origin — the test shared the code's mistaken assumption.
+ *
+ * WHAT IS ACTUALLY LOAD-BEARING FOR THE RELAY, stated correctly because an
+ * earlier version of this paragraph was wrong in a way worth keeping visible.
+ * It said the allowlist was safe because reaching the port needed DNS
+ * rebinding, and a rebound request carries `Host: attacker.example` which the
+ * Host check refuses. That is true of `fetch`. It is NOT true of a WebSocket:
+ * a cross-origin WebSocket connect is not restricted by the same-origin policy
+ * at all, so any page may dial `ws://127.0.0.1:<port>/rdp` directly, and the
+ * browser then sends a loopback `Host` itself. `Origin: null` is free from any
+ * sandboxed iframe, `data:` or `srcdoc` document, so the `null` entry below
+ * does not narrow that set either.
+ *
+ * So the Origin allowlist is not what keeps a web page out of the relay. What
+ * does: the port is ephemeral and never published, every session needs a
+ * single-use ticket minted by main for one destination, the frame size is
+ * bounded before any token is read, and the number of unauthenticated sockets
+ * is capped. The allowlist is worth keeping — it still refuses a page on the
+ * user's own `localhost` dev server, which is the case the Host check cannot
+ * see — but it is defence in depth, not the boundary.
  */
 
 /** Hostnames a local client legitimately dials. Compared after the port is

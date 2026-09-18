@@ -171,6 +171,9 @@ export function RdpView({
   const uiRef = useRef<UserInteraction | null>(null)
   const [phase, setPhase] = useState<Phase>('idle')
   const [error, setError] = useState<string | null>(null)
+  /** Something true about a session that WORKED — shown while it runs, not
+   *  after it fails. Currently only the no-forward-secrecy fallback. */
+  const [notice, setNotice] = useState<string | null>(null)
   // Bumped by Reconnect. Re-running the effect is the whole teardown-and-retry:
   // the cleanup shuts the old session down before the new one is built.
   const [attempt, setAttempt] = useState(0)
@@ -179,6 +182,39 @@ export function RdpView({
   useEffect(() => {
     if (visible) setStarted(true)
   }, [visible])
+
+  /**
+   * Take keyboard focus, once there is something focusable to take it.
+   *
+   * The component forwards keys only while it is `document.activeElement`, and
+   * the only thing that ever sets that is its own `mouseenter` handler — a
+   * click cannot, because it preventDefault()s every mousedown and so kills the
+   * browser's focus-on-click. `mouseenter` is an edge, so a pointer already
+   * resting over the pane when the desktop appears never crosses it and the
+   * session is keyboard-dead for good.
+   *
+   * WHY THIS IS AN EFFECT AND NOT A LINE AFTER setVisibility(true), which is
+   * where it was first written and did nothing at all. At that instant two
+   * `visibility: hidden` layers are still applied: the component's own
+   * `.screen-wrapper.hidden`, which it drops on a Svelte microtask, and
+   * `.rdp-busy`, which React removes only once this phase change commits.
+   * Chromium refuses to focus a hidden element and reports nothing — the same
+   * shape as every other bug in this component, where the step you skipped
+   * looks exactly like a step you took.
+   *
+   * requestAnimationFrame rather than the effect body alone, because React's
+   * commit and the component's microtask are two independent clocks and this
+   * has to be after both. It also covers returning to a tab that was
+   * `display: none`, where the same no-op applies.
+   */
+  useEffect(() => {
+    if (!visible || phase !== 'connected') return
+    const id = requestAnimationFrame(() => {
+      const el = hostRef.current?.firstElementChild as HTMLElement | null
+      el?.focus({ preventScroll: true })
+    })
+    return () => cancelAnimationFrame(id)
+  }, [visible, phase])
 
   useEffect(() => {
     if (!started) return
@@ -294,13 +330,69 @@ export function RdpView({
         if (ticket.kdcProxyUrl) config.withExtension(backend.kdcProxyUrl(ticket.kdcProxyUrl))
 
         const session = await ui.connect(config.build())
-        if (disposed) return
+        if (disposed) {
+          // SHUT IT DOWN HERE, because the cleanup below could not.
+          //
+          // The effect's teardown calls `uiRef.current?.shutdown()`, and the
+          // component's shutdown is `this.session?.shutdown()` with `session`
+          // assigned only once connect() resolves. So a tab closed WHILE
+          // connecting ran a teardown that did nothing, and then this line
+          // returned from a session that was by then fully established: a live
+          // WebSocket to the relay, a TLS connection to the host, and the SSH
+          // chain to any bastion behind it, all with nothing holding a
+          // reference to close them. Sixteen of those and every later desktop
+          // is refused for "too many remote desktops are already open" with
+          // none on screen.
+          //
+          // It also means CredSSP completed — the password went to the machine
+          // — for a desktop the user had already closed.
+          try {
+            ui.shutdown()
+          } catch {
+            /* Best effort: a half-built session has nothing to close, and
+               throwing here would lose the return that stops this effect. */
+          }
+          return
+        }
 
         // Before the phase flips, so the surface is showing by the time the
         // overlay stops covering it. See setVisibility on the interface: the
         // component starts hidden and only ever hides itself again.
         ui.setVisibility(true)
         setPhase('connected')
+
+        // Focus is taken in an effect below, once React has committed and the
+        // component has dropped its own hidden class. Doing it here looked
+        // right and did nothing: see the effect for why.
+
+        // A session that CONNECTED can still have something worth saying: the
+        // commonest is that this host's certificate forced a key exchange with
+        // no forward secrecy. That advisory was only ever read in the catch
+        // below, so on the path where it actually applies -- a successful
+        // connection -- it was never shown, and instead surfaced later glued to
+        // the next unrelated failure on that server. The justification for the
+        // fallback is that the downgrade is visible; this is what makes it so.
+        void window.opsmaxx?.rdp
+          .advisory(server.id)
+          .then((note) => {
+            if (!disposed) setNotice(note ?? null)
+          })
+          .catch(() => {
+            /* A missing advisory is the normal case, not a failure. */
+          })
+
+        // Releasing a session that has ENDED, which nothing used to do: the
+        // client kept whatever it still held -- including its WebSocket to the
+        // relay -- until the tab was closed or Reconnect was pressed. Wrapped,
+        // because shutdown() is a call into WASM and the unmount path will run
+        // it a second time on a session that is already consumed.
+        const closeSession = (): void => {
+          try {
+            uiRef.current?.shutdown()
+          } catch {
+            /* already gone */
+          }
+        }
 
         // THE SESSION HAS TO BE RUN. Connecting only gets as far as a server
         // that is willing to talk; `run()` is the loop that reads its updates
@@ -314,12 +406,14 @@ export function RdpView({
             // server hung up. Not an error, and not something to leave looking
             // live either.
             if (!disposed) {
+              closeSession()
               setError('The remote desktop session ended.')
               setPhase('failed')
             }
           })
           .catch((err: unknown) => {
             if (!disposed) {
+              closeSession()
               setError(describeError(err))
               setPhase('failed')
             }
@@ -334,6 +428,22 @@ export function RdpView({
           clearTimeout(debounce)
           debounce = setTimeout(() => {
             if (disposed) return
+            // A HIDDEN TAB IS NOT A RESIZE.
+            //
+            // Inactive tabs are `display: none`, so the observer fires with a
+            // 0x0 rect the moment the user switches away. desktopSizeOf then
+            // clamps that up to its 640x480 floor and this sent a real
+            // MS-RDPEDISP renegotiation: every window on the remote desktop
+            // crushed into 640x480 and the icons rearranged. Switching back
+            // renegotiates the size up again, and Windows does not put the
+            // layout back — so half a second on another tab permanently
+            // rearranged the user's desktop.
+            //
+            // The floor in desktopSizeOf was papering over exactly this, which
+            // is why it describes "a pane that has not been laid out yet".
+            const rect = host.getBoundingClientRect()
+            if (!rect.width || !rect.height) return
+
             const next = desktopSizeOf(host)
             try {
               ui.resize(next.width, next.height)
@@ -345,9 +455,26 @@ export function RdpView({
           }, 250)
         })
         observer.observe(host)
+
+        // Clicking BACK into the desktop has to restore the keyboard too.
+        //
+        // Focus is lost to anything else in the app — a sidebar entry, another
+        // tab, the address row above — and clicking the desktop again does not
+        // bring it back: `mouseenter` does not fire, because the pointer is
+        // already inside, and mousedown is preventDefault()ed by the component
+        // before the browser can act on it. So the desktop keeps taking mouse
+        // input and silently ignores every keystroke.
+        //
+        // `pointerdown` runs ahead of mousedown and the component does not
+        // touch it, which makes it the one place this can be repaired without
+        // fighting the component for the event.
+        const refocus = (): void => element.focus({ preventScroll: true })
+        host.addEventListener('pointerdown', refocus)
+
         cleanupResize = () => {
           clearTimeout(debounce)
           observer.disconnect()
+          host.removeEventListener('pointerdown', refocus)
         }
       } catch (err) {
         if (disposed) return
@@ -432,6 +559,14 @@ export function RdpView({
           <RotateCw size={15} />
         </button>
       </div>
+      {/* A live session's caveat, above the desktop rather than inside the
+          failure overlay. It describes the connection you are using right now,
+          so it has to be visible while that connection is up. */}
+      {phase === 'connected' && notice && (
+        <div className="rdp-notice" role="status">
+          {notice}
+        </div>
+      )}
       <div ref={hostRef} className={clsx('rdp-surface', phase !== 'connected' && 'rdp-busy')} />
       {phase !== 'connected' && (
         <div className="rdp-overlay">
