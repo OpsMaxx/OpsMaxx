@@ -172,6 +172,34 @@ jobs:
       # conpty exclusion pattern shipped broken in the first place -- the test
       # that was meant to catch it asserted a pattern string and never ran the
       # glob.
+      # THE SIDECAR TESTS, ON THE PLATFORMS `check` DOES NOT COVER.
+      #
+      # `check` runs them on Ubuntu. Until this step existed, nothing ran them
+      # on Windows or macOS until the RELEASE workflow did -- so a
+      # platform-specific Go failure could only be discovered by a release, at
+      # the point where the tag is already pushed and three platforms are
+      # already building.
+      #
+      # That is not hypothetical. `pair` asserted a code had expired by asking
+      # for a one-nanosecond TTL and trusting `time.Now()` to advance between
+      # two calls. It does on Linux and macOS. Windows' clock has roughly
+      # fifteen milliseconds of resolution, so it does not -- and the first
+      # thing to notice was a failed Windows build of 0.50.0.
+      #
+      # Skipped on Linux because `check` already did it, and a second run of
+      # the same tests on the same OS buys nothing.
+      - uses: actions/setup-go@v5
+        if: runner.os != 'Linux'
+        with:
+          go-version-file: sidecar/addyd/go.mod
+          cache-dependency-path: sidecar/addyd/go.sum
+      - name: Sidecar tests on this platform
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          (cd sidecar/netd && go test ./...)
+          (cd sidecar/addyd && go test ./...)
+
       - name: Verify ConPTY works without the bundled redistributable (Q3)
         if: matrix.os == 'windows-latest'
         shell: pwsh

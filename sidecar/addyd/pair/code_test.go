@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Vendored from github.com/opsmaxx/addy internal/pair/code_test.go @ fe66709
+// Vendored from github.com/opsmaxx/addy internal/pair/code_test.go @ e99b5d4
 //
 // Edit it THERE and copy it here. A fix made only in this copy is a
 // protocol divergence with no symptom until an AEAD tag fails on somebody
@@ -127,8 +127,23 @@ func TestTheLimiterStopsAtItsBudget(t *testing.T) {
 }
 
 func TestAnExpiredCodeIsRefusedWithItsOwnReason(t *testing.T) {
-	l := NewLimiter(5, time.Nanosecond)
-	// Deliberately not sleeping: the deadline is already in the past.
+	l := NewLimiter(5, time.Minute)
+	// The deadline is moved into the past directly, rather than asking for a
+	// one-nanosecond TTL and trusting the clock to tick between two calls.
+	//
+	// It used to do the latter, with a comment claiming the deadline was
+	// "already in the past" -- which was never true: one nanosecond from now
+	// is in the FUTURE, and the test only passed because `time.Now()` advanced
+	// between constructing the limiter and checking it. On Linux and macOS it
+	// always does. On WINDOWS the clock has roughly fifteen milliseconds of
+	// resolution, so both calls return the same instant and the code is not
+	// expired -- which is exactly how this failed, on a Windows release build,
+	// having passed everywhere else for as long as it existed.
+	//
+	// In-package, so it can set the field. A test that has to guess at the
+	// clock is a test that reports the platform rather than the behaviour.
+	l.expires = time.Now().Add(-time.Minute)
+
 	if err := l.Attempt(); !errors.Is(err, ErrCodeExpired) {
 		t.Fatalf("Attempt on an expired code = %v, want ErrCodeExpired", err)
 	}
