@@ -459,7 +459,7 @@ function CommandPreview({
     return null
   }
   const binary = CLOUD_PROVIDER_BINARY[provider]
-  const text = lines.map((argv) => `${binary} ${argv.join(' ')}`).join('\n')
+  const text = lines.map((argv) => `${binary} ${argv.map(shellQuote).join(' ')}`).join('\n')
 
   return (
     <div className="field">
@@ -487,6 +487,29 @@ function CommandPreview({
       )}
     </div>
   )
+}
+
+/**
+ * One argv element, safe to paste into a POSIX shell.
+ *
+ * The preview is joined with spaces and sits under a Copy button, so every
+ * element is something somebody will paste. Unquoted, the placeholders below
+ * are not merely wrong — they are shell syntax. `--key-file=<temporary public
+ * key>` makes zsh redirect stdin from a file called `temporary`, which is the
+ * "no such file or directory: temporary" a user hit; `<temporary
+ * directory>/config` is worse, because the `>` redirects stdout and pasting it
+ * CREATES OR TRUNCATES a file rather than failing.
+ *
+ * Quoting here rather than in the placeholders covers the real values too: an
+ * Azure resource group or a Windows temp path with a space in it would have
+ * split into two arguments just as quietly.
+ */
+function shellQuote(arg: string): string {
+  // The unreserved set. Anything outside it gets single quotes, and a literal
+  // single quote is closed, escaped and reopened — the only sequence that is
+  // safe inside single quotes.
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(arg)) return arg
+  return `'${arg.replace(/'/g, `'\\''`)}'`
 }
 
 /** The commands a connection actually issues, in order, for this target. */

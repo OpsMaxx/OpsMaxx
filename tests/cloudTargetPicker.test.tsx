@@ -97,3 +97,59 @@ describe('picking a cloud project', () => {
     await waitFor(() => expect(draft().account).toBe('locked-down-1234'))
   })
 })
+
+// THE PREVIEW IS UNDER A COPY BUTTON, SO IT IS SHELL INPUT.
+//
+// The argv was joined with plain spaces. The placeholders contain spaces and
+// angle brackets, so pasting "--key-file=<temporary public key>" made zsh
+// redirect stdin from a file named `temporary` — "zsh: no such file or
+// directory: temporary", which is what a user hit. The Azure line was worse:
+// "<temporary directory>/config" contains a `>`, so pasting it redirected
+// stdout and CREATED a file instead of failing.
+//
+// Identifiers here are invented. This repo is public and fixtures do not carry
+// real project or instance names.
+describe('the command preview', () => {
+  async function previewText(): Promise<string> {
+    stubCloud([{ id: 'proj-1', name: 'Project One' }])
+    const user = userEvent.setup()
+    let draft: CloudDraft = {
+      ...emptyCloudDraft,
+      account: 'proj-1',
+      location: 'europe-west1-b',
+      instance: 'vm-1'
+    }
+    const view = render(<CloudTargetFields provider="gcp" draft={draft} onChange={() => {}} />)
+    const rerender = (next: CloudDraft): void => {
+      draft = next
+      view.rerender(<CloudTargetFields provider="gcp" draft={draft} onChange={rerender} />)
+    }
+    view.rerender(<CloudTargetFields provider="gcp" draft={draft} onChange={rerender} />)
+
+    await user.click(await screen.findByText('What OpsMaxx will run'))
+    const pre = document.querySelector('pre')
+    return pre?.textContent ?? ''
+  }
+
+  it('quotes the placeholder instead of handing the shell a redirect', async () => {
+    const text = await previewText()
+    expect(text).toContain('temporary public key')
+    // The failure was an unquoted `<`. Quoted, the whole argument is one token.
+    expect(text).toContain("'--key-file=<temporary public key>'")
+  })
+
+  it('leaves no bare redirect anywhere a reader could paste', async () => {
+    const text = await previewText()
+    for (const line of text.split('\n')) {
+      // Strip quoted runs, then look for what the shell would still act on.
+      const unquoted = line.replace(/'[^']*'/g, '')
+      expect(unquoted, `redirect left in: ${line}`).not.toMatch(/[<>]/)
+    }
+  })
+
+  it('does not quote ordinary arguments, which would only make it noisy', async () => {
+    const text = await previewText()
+    expect(text).toContain('--zone europe-west1-b')
+    expect(text).not.toContain("'--zone'")
+  })
+})
