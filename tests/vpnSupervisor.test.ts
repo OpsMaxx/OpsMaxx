@@ -78,13 +78,26 @@ const waitFor = async (fn: () => boolean, budgetMs = WAIT_BUDGET_MS): Promise<vo
 // nothing, no relaunch came, and the next `waitFor` died ten seconds later
 // having proved nothing. This steps the clock and re-checks instead, so a timer
 // armed slightly late is still caught.
+//
+// BUDGETED ON WALL-CLOCK, NOT ON A STEP COUNT, for the same reason `waitFor`
+// above is: the timer being waited for is armed after a REAL fs callback, and
+// how many turns that takes depends on how loaded the machine is. Twenty steps
+// is plenty on a laptop and was not on a CI runner building three platforms --
+// which is how this test failed once on a release commit whose only change was
+// a version string, with the code either side of it identical.
+//
+// `performance.now()` and not `Date.now()`, because the clock is faked and a
+// `Date` deadline would never arrive. The note above says the same thing about
+// `waitFor`; it applies here and did not used to.
 const advanceUntil = async (
   fn: () => boolean,
   stepMs: number,
-  steps = 20
+  budgetMs = WAIT_BUDGET_MS
 ): Promise<void> => {
-  for (let i = 0; i < steps; i++) {
+  const deadline = performance.now() + budgetMs
+  for (;;) {
     if (fn()) return
+    if (performance.now() > deadline) break
     await vi.advanceTimersByTimeAsync(stepMs)
     await flush()
   }
