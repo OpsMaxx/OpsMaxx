@@ -79,6 +79,49 @@ exclusion.
 | Captured HTTP bodies | `inspect-capture/` | Plaintext request and response bodies spilled to disk by the traffic inspector. Cleared on every inspector start, so usually empty — but a session that was interrupted leaves its bodies, and bodies routinely carry bearer tokens and session cookies. |
 | The traffic inspector's CA **certificate** and the system proxy settings it replaced | `inspect/` | The certificate is written `0644` **deliberately** — it is the half meant to be handed out, and it is the one you install into your OS trust store, so confirm its fingerprint before you do. The private key is **not** here; it is sealed into `opsmaxx-secrets.json` (above). `system-proxy-backup.json`, `0600`, records your proxy settings as they were before capture so they can be put back. |
 | VPN engine state | `vpn-state/` | Durable, `0700`. Holds engine **key material** — a tsnet node's private key is what makes it the same device on the tailnet next launch, so unlike the run directories this one is meant to outlive the process and nothing sweeps it. |
+| The SSH agent's socket | `opsmaxx-agent-<uid>-<random>/agent.sock` under the OS temp directory | **No file contents at all** — a Unix socket, not a file, holding nothing. It is listed here because reaching it is equivalent to holding every SSH key in the vault: any local process that can connect can ask for a signature. The directory is created `0700` with a random per-run name, and the directory is what carries the permission — several kernels ignore a socket's own mode bits, so the `0600` on the socket itself is a second line and not the first. Removed when the app quits. Nothing is written on Windows, where it is a named pipe with a random name, deliberately **not** `\\.\pipe\openssh-ssh-agent`: that name belongs to Windows' own agent and to 1Password and Bitwarden, and taking it would silently redirect every tool on the machine. |
+
+### The SSH agent OpsMaxx can serve
+
+Off by default. Turned on, OpsMaxx listens on a local socket and offers the SSH
+keys in your vault to anything on the machine that looks for an agent — git,
+rsync, ansible, a terminal you opened yourself.
+
+**Why it exists.** Without it, a key in the vault is a key only OpsMaxx can
+use, so people keep a second copy in `~/.ssh` and the vault protects nothing.
+
+**What it will not do.** It refuses every key-management message. You cannot
+`ssh-add` a key into it, and it cannot hold a key the vault has not got: a
+second key store beside the vault would hold material the vault never saw,
+survive no restart and appear in no backup. It also refuses the agent
+protocol's own lock — the vault's lock is the lock, and a second one that could
+disagree with it is a second thing to get wrong.
+
+**Every signature is asked about.** The default answer is to ask, and the
+prompt names the key and its fingerprint. Approvals you grant are remembered
+exactly as far as you said: this signature only, for a set number of minutes,
+or until the vault locks. Nothing is inferred from how recently you were at the
+keyboard, and locking the vault forgets all of it.
+
+**A forwarded request is always asked about again**, whatever you have granted.
+OpsMaxx implements `session-bind@openssh.com`, so where the client tells it
+which connection a signature is for, the prompt shows that and says when the
+request arrived over a forwarded agent — the case where a signature is least
+likely to be something you started. Where a client does **not** bind, the
+prompt says so rather than leaving the field blank: a signature going somewhere
+the agent cannot see is worth knowing about.
+
+**What it cannot defend against.** Any process running as you can connect to
+the socket, so this is not a boundary against code already running as your
+user — it is a boundary against that code using a key *without you seeing a
+prompt*. A prompt you approve without reading is a key used. If you forward
+this agent to a remote host, anyone with root there can ask it to sign; the
+per-request prompt is what limits that, and it is the reason forwarding is
+asked about every time.
+
+**Prompts refuse on their own** after two minutes, and refuse immediately if no
+window is open. A command that waits forever on a dialog nobody saw is worse
+than one that fails.
 
 ### SSH host keys
 
