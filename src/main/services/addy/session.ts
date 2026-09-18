@@ -13,6 +13,7 @@ import {
   type ConflictDeps
 } from './conflicts'
 import type { ConflictCopy } from '../../../shared/addy'
+import { receiveClipboard, sendClipboard, type ClipboardDeps } from './clipboard'
 
 /**
  * The live connection to an addy account: one sidecar, one relay client.
@@ -133,6 +134,41 @@ class AddySession {
     if (!held) return
     held.abort.abort()
     if (this.addyd) await forgetPairing({ addyd: this.addyd, baseURL: '' }, held.id)
+  }
+
+  /**
+   * Send the clipboard to every other device, or take what was sent here.
+   *
+   * Both refuse honestly when this device is not attached, because the
+   * keystroke that reaches them is a global shortcut the user can press at any
+   * time -- including before they have set addy up at all.
+   */
+  async sendClipboard(): Promise<{ sent: number; skipped?: string }> {
+    if (!this.attached) {
+      return { sent: 0, skipped: 'This device is not attached to an addy account yet.' }
+    }
+    return sendClipboard(this.clipboardDeps())
+  }
+
+  async receiveClipboard(): Promise<{ applied: boolean; from?: string; reason?: string }> {
+    if (!this.attached) {
+      return { applied: false, reason: 'This device is not attached to an addy account yet.' }
+    }
+    return receiveClipboard(this.clipboardDeps())
+  }
+
+  /** Every other device on the roster. Empty until a roster has been verified,
+   *  which is the honest answer: sending to a device list nobody checked is
+   *  sending to whatever the relay said. */
+  private roster: string[] = []
+
+  setRoster(devices: string[]): void {
+    this.roster = devices
+  }
+
+  private clipboardDeps(): ClipboardDeps {
+    const base = this.deps()
+    return { ...base, peers: () => this.roster }
   }
 
   private deps(): ConflictDeps {

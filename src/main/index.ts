@@ -1,7 +1,7 @@
 // Must come first: redirects userData for portable builds before any
 // service module resolves its file paths.
 import './portable'
-import { app, shell, BrowserWindow, ipcMain, nativeTheme, dialog, session, Menu, Notification, powerMonitor, webContents } from 'electron'
+import { app, shell, BrowserWindow, globalShortcut, ipcMain, nativeTheme, dialog, session, Menu, Notification, powerMonitor, webContents } from 'electron'
 import { join } from 'node:path'
 import { readFileSync, existsSync, writeFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -4660,6 +4660,79 @@ ipcMain.handle('addy:joinPairing', (_e, baseURL: string, code: string, pairingId
 )
 ipcMain.handle('addy:cancelPairing', () => addySession.cancelPairing())
 
+// The clipboard, on an explicit keystroke rather than by mirroring. See
+// services/addy/clipboard.ts for why that is a decision and not a shortcut.
+ipcMain.handle('addy:sendClipboard', () => addySession.sendClipboard())
+ipcMain.handle('addy:receiveClipboard', () => addySession.receiveClipboard())
+
+/**
+ * The keystrokes that make the clipboard explicit.
+ *
+ * REGISTERED ONLY WHILE AN ACCOUNT IS ATTACHED, and unregistered otherwise. A
+ * global shortcut is a system-wide claim on a key combination: taking
+ * Ctrl+Shift+C from every other application on the machine, permanently, for a
+ * feature the user has not set up, is the sort of thing that gets an app
+ * uninstalled.
+ *
+ * `register` returns false when something else already holds the combination.
+ * Reported rather than ignored -- a shortcut that silently does nothing is
+ * worse than one the user is told to change, because they conclude the feature
+ * is broken.
+ */
+const CLIPBOARD_SHORTCUTS = {
+  send: 'CommandOrControl+Shift+C',
+  receive: 'CommandOrControl+Shift+V'
+} as const
+
+let shortcutsHeld = false
+
+function notifyClipboard(title: string, body: string): void {
+  // A notification rather than a window: the user pressed a key in another
+  // application and is not looking at OpsMaxx.
+  if (Notification.isSupported()) new Notification({ title, body, silent: true }).show()
+}
+
+export function updateClipboardShortcuts(wanted: boolean): void {
+  if (wanted === shortcutsHeld) return
+  if (!wanted) {
+    globalShortcut.unregister(CLIPBOARD_SHORTCUTS.send)
+    globalShortcut.unregister(CLIPBOARD_SHORTCUTS.receive)
+    shortcutsHeld = false
+    return
+  }
+
+  const taken: string[] = []
+  if (
+    !globalShortcut.register(CLIPBOARD_SHORTCUTS.send, () => {
+      void addySession.sendClipboard().then((r) => {
+        notifyClipboard(
+          r.sent > 0 ? 'Clipboard sent' : 'Nothing sent',
+          r.skipped ?? `to ${r.sent} device${r.sent === 1 ? '' : 's'}`
+        )
+      })
+    })
+  ) {
+    taken.push(CLIPBOARD_SHORTCUTS.send)
+  }
+  if (
+    !globalShortcut.register(CLIPBOARD_SHORTCUTS.receive, () => {
+      void addySession.receiveClipboard().then((r) => {
+        notifyClipboard(
+          r.applied ? 'Clipboard received' : 'Nothing to receive',
+          r.reason ?? 'ready to paste'
+        )
+      })
+    })
+  ) {
+    taken.push(CLIPBOARD_SHORTCUTS.receive)
+  }
+
+  shortcutsHeld = true
+  if (taken.length > 0) {
+    console.warn('[addy] another application already holds:', taken.join(', '))
+  }
+}
+
 // ---- importing another password manager ----
 //
 // A PREVIEW, not an import. The user is about to merge somebody else's data
@@ -5072,6 +5145,9 @@ const lockVaultFully = (): VaultResult => {
   // The addy sidecar holds the account key in memory; the vault locking is
   // exactly the moment it should stop holding it.
   void addySession.detach()
+  // A global shortcut outliving the process would be a key combination nothing
+  // answers, held until the OS notices we are gone.
+  globalShortcut.unregisterAll()
   const r = vaultLock()
   notifyRenderer('vault:auto-locked')
   return r

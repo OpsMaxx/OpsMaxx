@@ -403,7 +403,15 @@ const api = {
       ipcRenderer.invoke('addy:joinPairing', baseURL, code, pairingId),
     /** Ends it and forgets the shared secret. For "these do not match", and
      *  for closing the panel. */
-    cancelPairing: (): Promise<void> => ipcRenderer.invoke('addy:cancelPairing')
+    cancelPairing: (): Promise<void> => ipcRenderer.invoke('addy:cancelPairing'),
+
+    /** Send what is on the clipboard to every other device on the account.
+     *  Explicit, on a keystroke -- nothing is mirrored in the background. */
+    sendClipboard: (): Promise<{ sent: number; skipped?: string }> =>
+      ipcRenderer.invoke('addy:sendClipboard'),
+    /** Put the newest thing sent to this device onto the clipboard. */
+    receiveClipboard: (): Promise<{ applied: boolean; from?: string; reason?: string }> =>
+      ipcRenderer.invoke('addy:receiveClipboard')
   },
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
   autoStart: {

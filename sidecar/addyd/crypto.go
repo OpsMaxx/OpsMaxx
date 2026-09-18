@@ -503,3 +503,22 @@ func handleSignRequest(req Request) (any, error) {
 		"signature": hex.EncodeToString(sig),
 	}, nil
 }
+
+// handleWhoami reports which account and device this process is holding.
+//
+// Needed because several operations name the device in a collection name or a
+// recipient field, and the parent must not be the party that remembers it: a
+// parent that tracked the device key separately could drift from the one
+// actually loaded, and the symptom would be a seal nobody can open.
+func handleWhoami(Request) (any, error) {
+	keys.mu.RLock()
+	defer keys.mu.RUnlock()
+	if !keys.loaded || keys.device == nil {
+		return nil, codedf(ErrNotPaired, "no account is loaded")
+	}
+	return map[string]any{
+		"accountId": keys.account.String(),
+		"devicePub": hex.EncodeToString(keys.device.Sign.Public().(ed25519.PublicKey)),
+		"epochs":    epochNumbers(keys.epochs),
+	}, nil
+}
