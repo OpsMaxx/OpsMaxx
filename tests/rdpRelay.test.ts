@@ -817,3 +817,93 @@ describe('the reason behind the 502', () => {
     good.close()
   })
 })
+
+// THE SERVER'S OWN ANSWER, WHICH NOBODY READ.
+//
+// A Windows host that requires NLA does not fail silently: it replies in the
+// X.224 Connection Confirm with an RDP Negotiation Failure naming the protocol
+// it wants, and then declines to speak TLS. The relay used to treat any first
+// chunk as a confirm, upgrade to TLS anyway, and report the resulting mess as
+// "general error (code 1); HTTP 502" — while the real answer sat unread in
+// bytes it already had. RdpView has had the right sentence for this the whole
+// time; the relay just never let it run.
+describe('a server that refuses the security it was offered', () => {
+  /** TPKT header + CC-TPDU + RDP_NEG_FAILURE, per MS-RDPBCGR 2.2.1.2.2. */
+  function negFailure(code: number): Buffer {
+    const buf = Buffer.alloc(19)
+    buf[0] = 0x03 // TPKT version
+    buf.writeUInt16BE(19, 2) // total length
+    buf[4] = 14 // LI
+    buf[5] = 0xd0 // CC-TPDU
+    buf[11] = 0x03 // RDP_NEG_FAILURE
+    buf.writeUInt16LE(8, 13) // length
+    buf.writeUInt32LE(code, 15) // failureCode
+    return buf
+  }
+
+  /** A host that answers the negotiation with a refusal and then goes quiet,
+   *  which is what a real one does — it never starts TLS. */
+  function startRefusingServer(code: number): Promise<{ port: number; close: () => Promise<void> }> {
+    return new Promise((resolve) => {
+      const server = createServer((socket: Socket) => {
+        socket.once('data', () => socket.write(negFailure(code)))
+        socket.on('error', () => {})
+      })
+      server.listen(0, '127.0.0.1', () => {
+        const a = server.address()
+        resolve({
+          port: typeof a === 'object' && a ? a.port : 0,
+          close: () => new Promise<void>((done) => server.close(() => done()))
+        })
+      })
+    })
+  }
+
+  async function reasonFor(code: number): Promise<string | null> {
+    const refuser = await startRefusingServer(code)
+    try {
+      defineServer('srv-nla', refuser.port)
+      const { ticket } = await rdpMintTicket('srv-nla')
+      const ws = new WebSocket(ticket!.proxyUrl)
+      await new Promise((r) => ws.once('open', r))
+      ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
+      await firstReply(ws)
+      ws.close()
+      return rdpLastError('srv-nla')
+    } finally {
+      await refuser.close()
+    }
+  }
+
+  it('says so when the host requires NLA, and names the setting to change', async () => {
+    const reason = await reasonFor(0x00000005)
+    expect(reason).toContain('Network Level Authentication')
+    // Naming the cause without naming the fix is what the 502 already did.
+    expect(reason).toContain('Turn NLA on')
+  })
+
+  it('tells a missing certificate apart from a refused protocol', async () => {
+    expect(await reasonFor(0x00000003)).toContain('no certificate')
+    expect(await reasonFor(0x00000002)).toContain('refuses TLS')
+  })
+
+  it('keeps an unknown failure code rather than inventing a reason for it', async () => {
+    const reason = await reasonFor(0x000000ff)
+    expect(reason).toContain('255')
+  })
+
+  it('does not read a server that simply omits the negotiation as a refusal', async () => {
+    // The fake RDP server answers with a bare 7-byte confirm and no negotiation
+    // structure at all, which is a host doing standard RDP security. Treating
+    // absence as refusal would break every one of them.
+    defineServer('srv-plain', fake.port)
+    const { ticket } = await rdpMintTicket('srv-plain')
+    const ws = new WebSocket(ticket!.proxyUrl)
+    await new Promise((r) => ws.once('open', r))
+    ws.send(buildRequestPdu(ticket!.destination, ticket!.token, X224_REQUEST))
+    const reply = await firstReply(ws)
+    expect(reply.closeCode).toBeUndefined()
+    expect(rdpLastError('srv-plain')).toBeNull()
+    ws.close()
+  })
+})

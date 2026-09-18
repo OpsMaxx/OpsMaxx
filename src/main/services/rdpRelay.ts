@@ -765,6 +765,44 @@ async function dialThroughVpn(
 // channel run the identical code: an ssh2 channel has no `setTimeout` and no
 // `remoteAddress`, so anything socket-shaped here would fork the two paths at
 // exactly the point where they must not differ.
+/**
+ * An RDP Negotiation Failure in the X.224 Connection Confirm, in words.
+ *
+ * MS-RDPBCGR 2.2.1.2: the Confirm is a 4-byte TPKT header and a 7-byte CC-TPDU,
+ * optionally followed by an 8-byte negotiation structure whose first byte is
+ * 0x02 for a response and 0x03 for a failure. A server that omits it entirely
+ * is doing standard RDP security and is not refusing anything, so a short
+ * buffer is a `null` here rather than an error — reading absence as refusal
+ * would break every host that simply has nothing to add.
+ *
+ * Returns null when there is nothing wrong, so the caller reads as a guard.
+ */
+function negotiationFailure(confirm: Buffer): string | null {
+  const NEG_AT = 11
+  if (confirm.length < NEG_AT + 8) return null
+  if (confirm[NEG_AT] !== 0x03) return null
+
+  const code = confirm.readUInt32LE(NEG_AT + 4)
+  switch (code) {
+    case 0x00000001:
+      return 'This host requires TLS for remote desktop and the connection did not offer it.'
+    case 0x00000002:
+      return 'This host refuses TLS for remote desktop, which OpsMaxx requires.'
+    case 0x00000003:
+      return 'This host has no certificate installed for remote desktop, so it cannot start TLS.'
+    case 0x00000004:
+      return 'This host rejected the combination of security options offered.'
+    case 0x00000005:
+      // The default on current Windows, and the one worth naming precisely:
+      // it is a per-server switch in this app, so the user can act on it.
+      return 'This host requires Network Level Authentication. Turn NLA on for this server in its settings, then reconnect.'
+    case 0x00000006:
+      return 'This host requires TLS with user authentication, which OpsMaxx does not offer.'
+    default:
+      return `This host refused the remote desktop security options offered (code ${code}).`
+  }
+}
+
 function performHandshake(
   stream: Duplex,
   x224Request: Buffer,
@@ -788,6 +826,22 @@ function performHandshake(
     stream.once('data', (x224Response: Buffer) => {
       if (x224Response.length === 0) {
         fail(new Error('the server closed the connection before the X.224 confirm'))
+        return
+      }
+      // READ THE ANSWER BEFORE ASSUMING IT SAID YES.
+      //
+      // This used to treat any non-empty first chunk as a confirm and go
+      // straight to TLS. A server that is refusing the security it was offered
+      // replies with an RDP Negotiation Failure here and then does not speak
+      // TLS at all, so the refusal surfaced as a TLS error and then as the
+      // generic 502 — with the actual answer, which names the protocol the
+      // server wants, sitting unread in the bytes we already had.
+      //
+      // RdpView already has the right sentence for the commonest case; it just
+      // never got to run, because the relay failed first.
+      const refusal = negotiationFailure(x224Response)
+      if (refusal) {
+        fail(new Error(refusal))
         return
       }
       // Every listener has to go before the stream becomes TLS's, or the two
