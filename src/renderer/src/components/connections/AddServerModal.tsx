@@ -35,7 +35,7 @@ import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import { useVaultPrompt } from '../../store/vaultPrompt'
 import type { VaultEntryDescriptor, VaultIndexResult } from '../../../../shared/vaultIndex'
 import { VpnTransportSelect } from '../vpn/VpnTransportSelect'
-import { adviseOnError } from '../../lib/connectionError'
+import { classifyConnectionError, faultAdvice } from '../../lib/connectionError'
 import type { AuthMethod, Hop, UUID } from '../../types'
 
 // `unavailable` says why rather than hiding the option.
@@ -529,8 +529,30 @@ export function AddServerModal(): React.JSX.Element {
       // Through the same classifier the terminal's failure card uses, so a
       // wrong username reads as a wrong username here rather than as the
       // handshake timeout it arrives as.
-      const advice = adviseOnError(r?.error)
-      setTestResult({ ok: false, text: advice.hint ? `${advice.cause} ${advice.hint}` : advice.cause })
+      const fault = classifyConnectionError(r?.error)
+      const advice = faultAdvice(fault)
+      // WHEN WE CANNOT EXPLAIN IT, THE SERVER'S OWN WORDS BEAT OUR ADMISSION.
+      //
+      // `unknown` exists to admit the classifier did not recognise the text —
+      // and this dialog then dropped that text, leaving "OpsMaxx could not tell
+      // what went wrong from what the server said" with the thing the server
+      // said thrown away. connectionError.ts already says the raw text is the
+      // honest thing to show for exactly this case; the terminal's failure card
+      // shows it and this one did not.
+      //
+      // Only for `unknown`: where the fault IS recognised, the sentence and its
+      // button are better than a driver string, which is the whole point of
+      // classifying.
+      const raw = (r?.error ?? '').trim().replace(/\s+/g, ' ')
+      setTestResult({
+        ok: false,
+        text:
+          fault === 'unknown' && raw
+            ? `${advice.cause} It said: ${raw.slice(0, 300)}`
+            : advice.hint
+              ? `${advice.cause} ${advice.hint}`
+              : advice.cause
+      })
     } finally {
       setTesting(false)
     }

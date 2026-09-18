@@ -178,7 +178,28 @@ describe('a profile can be checked before it is saved', () => {
   // username reads as a wrong username rather than as the handshake timeout it
   // arrives as.
   it('classifies the failure rather than pasting the driver string', () => {
-    expect(modal).toContain('adviseOnError(r?.error)')
+    expect(modal).toContain('classifyConnectionError(r?.error)')
+  })
+
+  /**
+   * The one case where the driver string IS the honest answer.
+   *
+   * `unknown` exists to admit the classifier did not recognise the text, and
+   * this dialog used to drop that text — leaving "OpsMaxx could not tell what
+   * went wrong from what the server said" with the thing the server said thrown
+   * away. lib/connectionError.ts says as much in its own comment: for an
+   * unrecognised failure the raw text underneath is the honest thing to show.
+   *
+   * Pinned as a pair, because the rule above is only safe while this stays
+   * narrow: a recognised fault keeps its sentence and its button, and the raw
+   * text appears only when there is no sentence worth having.
+   */
+  it('shows the server’s own words only when it could not explain them', () => {
+    expect(modal).toContain("fault === 'unknown'")
+    // Guarded by the fault, not appended unconditionally.
+    const i = modal.indexOf('It said:')
+    expect(i).toBeGreaterThan(-1)
+    expect(modal.slice(Math.max(0, i - 200), i)).toContain("fault === 'unknown'")
   })
 
   // A button that quietly does nothing is worse than no button — the rule the
