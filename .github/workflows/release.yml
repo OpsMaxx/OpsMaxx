@@ -98,9 +98,37 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq autoconf automake libtool pkg-config libcap-ng-dev
 
+      # Only the targets this runner ships. `npm run build:engines` cross-
+      # compiles all six GOOS/GOARCH pairs of BOTH Go sidecars on every runner —
+      # thirty-six builds where twelve would do, and the single largest cost
+      # left in a release now that the Windows Go cache is gone.
+      #
+      # The list comes from verify-bin-manifest.mjs rather than being written
+      # out here, because that script is the gate this build is about to be
+      # judged by: mac ships x64 and arm64 dmgs, Windows and Linux ship x64
+      # only, and a workflow holding its own copy of that would drift the first
+      # time electron-builder gained an arch. Asked this way the two cannot
+      # disagree — if the list is wrong, the check that fails is the one whose
+      # answer was used.
+      #
+      # frpc, openvpn and wintun are unchanged: they are downloads or a
+      # host-only autotools build, not the cross-compile this is about.
       - name: Build tunnel engines
         shell: bash
-        run: npm run build:engines
+        run: |
+          # Into an array, rather than relying on an unquoted expansion to be
+          # word-split. It would be, under `shell: bash` — but the same line
+          # pasted into a zsh prompt is NOT split, and the whole list arrives as
+          # one argument named after no target at all. That is not theoretical:
+          # it is how this step was first tested, and the failure blamed the
+          # script.
+          read -r -a targets <<<"$(node scripts/verify-bin-manifest.mjs --print-required-dirs)"
+          echo "building sidecars for: ${targets[*]}"
+          bash scripts/build-sidecar.sh "${targets[@]}"
+          bash scripts/build-addyd.sh "${targets[@]}"
+          npm run build:frpc
+          npm run build:openvpn
+          npm run fetch:wintun
 
       # GPL-2.0 §3. We distribute OpenVPN binaries, so we owe the corresponding
       # source, and an offer nobody can act on is not compliance. This is the

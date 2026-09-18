@@ -31,10 +31,15 @@ const BIN_ROOT = join(ROOT, 'resources', 'bin')
 //     drives a system install — see docs/VPN.md.
 //   * `wintun.dll` is Windows-only by nature. It is not an executable, so it
 //     is listed with its extension and gets no `.exe`.
+//   * `opsmaxx-addyd` was missing from these lists until it had already shipped
+//     broken once. It is bundled on every platform and the app spawns it the
+//     moment somebody creates an addy account, so leaving it out meant this
+//     check would have passed an installer with no addyd in it at all — which
+//     is the exact sentence two paragraphs up, arrived at the hard way.
 const REQUIRED = {
-  darwin: ['opsmaxx-netd', 'frpc', 'openvpn'],
-  linux: ['opsmaxx-netd', 'frpc', 'openvpn'],
-  win32: ['opsmaxx-netd', 'frpc', 'wintun.dll']
+  darwin: ['opsmaxx-netd', 'opsmaxx-addyd', 'frpc', 'openvpn'],
+  linux: ['opsmaxx-netd', 'opsmaxx-addyd', 'frpc', 'openvpn'],
+  win32: ['opsmaxx-netd', 'opsmaxx-addyd', 'frpc', 'wintun.dll']
 }
 
 function fileNameFor(name, dir) {
@@ -59,6 +64,23 @@ function requiredDirs() {
   if (process.platform === 'darwin') return ['darwin-x64', 'darwin-arm64']
   if (process.platform === 'win32') return ['win32-x64']
   return ['linux-x64']
+}
+
+// `--print-required-dirs` exists so the BUILD can ask this file which targets
+// it is about to be judged on, rather than a workflow keeping its own copy of
+// the list. The release cross-compiled all six targets of both Go sidecars on
+// every runner and threw three quarters of it away; building only these is
+// worth about fifteen minutes a release, and the danger in that is a runner
+// skipping a target it turns out to need. Reading the answer from the checker
+// is what makes that impossible: whichever list is wrong, both are wrong
+// together and this script fails loudly rather than an installer shipping
+// quietly without engines.
+//
+// Same idea as `go-version-file: go.mod` in the workflows — read it from the
+// thing that decides it, so the two cannot drift apart.
+if (process.argv.includes('--print-required-dirs')) {
+  console.log(requiredDirs().join(' '))
+  process.exit(0)
 }
 
 async function main() {
