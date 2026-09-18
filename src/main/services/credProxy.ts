@@ -1,3 +1,4 @@
+import { refuseNonLoopback } from './loopbackGuard'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { existsSync, readFileSync } from 'node:fs'
 import { timingSafeEqual } from 'node:crypto'
@@ -332,6 +333,11 @@ export class CredProxy {
     await this.stop()
     this.lastError = undefined
     const server = createServer((req, res) => {
+      // Before anything is parsed, routed or forwarded. This proxy holds the
+      // credentials for every third-party endpoint the user has registered, so
+      // a page that reached it through DNS rebinding would be making
+      // authenticated calls with them.
+      if (refuseNonLoopback(req, res)) return
       void this.handle(req, res)
     })
     // A local process that opens a socket and says nothing must not be able to

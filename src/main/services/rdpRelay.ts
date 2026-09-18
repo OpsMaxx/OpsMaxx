@@ -1,4 +1,4 @@
-import { createServer, type Server as HttpServer } from 'node:http'
+import { createServer, type IncomingMessage, type Server as HttpServer } from 'node:http'
 import { connect as netConnect } from 'node:net'
 import type { Duplex } from 'node:stream'
 import { connect as tlsConnect, type TLSSocket, type DetailedPeerCertificate } from 'node:tls'
@@ -12,6 +12,7 @@ import { verifyRdpCertificate } from './rdpTrust'
 import { rdpSecretId } from '../../shared/rdp'
 import type { RdpTicket, RdpTicketResult, RdpDesktopSize } from '../../shared/rdp'
 import type { SshHop } from '../../shared/ssh'
+import { loopbackUpgradeAllowed, refuseNonLoopback } from './loopbackGuard'
 
 // The main-process half of an RDP session.
 //
@@ -134,11 +135,20 @@ function ensureRelay(): Promise<number> {
   return new Promise<number>((resolve, reject) => {
     // 404 everything: this server exists to carry one WebSocket upgrade, and
     // serving anything over it would make it a second, unaudited surface.
-    const server = createServer((_req, res) => {
+    const server = createServer((req, res) => {
+      if (refuseNonLoopback(req, res)) return
       res.writeHead(404).end()
     })
 
-    const sockets = new WebSocketServer({ server, path: '/rdp' })
+    const sockets = new WebSocketServer({
+      server,
+      path: '/rdp',
+      // The upgrade is the only thing this server actually does, so guarding
+      // the 404 handler above would guard nothing. Refused at the handshake
+      // rather than closed afterwards: a closed socket looks like a network
+      // problem to whatever opened it, and a refused upgrade does not.
+      verifyClient: ({ req }: { req: IncomingMessage }) => loopbackUpgradeAllowed(req)
+    })
     sockets.on('connection', handleConnection)
 
     server.once('error', (err) => {

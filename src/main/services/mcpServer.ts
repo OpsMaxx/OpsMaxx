@@ -58,6 +58,7 @@ import {
   type Decision
 } from './policyEngine'
 import { getGroup, listAssignments } from './policyStore'
+import { refuseNonLoopback } from './loopbackGuard'
 import { fleetCached } from './fleetSampler'
 import type { CapacityReport } from '../../shared/capacity'
 import { requestApproval } from './approvals'
@@ -5645,6 +5646,11 @@ export async function startMcpServer(): Promise<{ ok: boolean; error?: string }>
 
   return new Promise((resolve) => {
     const server = createServer((req, res) => {
+      // Ahead of the discovery routes as well as the authenticated ones. The
+      // well-known documents are deliberately unauthenticated, which makes
+      // them the obvious thing for a rebound page to fetch first -- and they
+      // name every endpoint this bridge exposes.
+      if (refuseNonLoopback(req, res)) return
       void (async () => {
         if (!req.url) {
           res.writeHead(404).end()
