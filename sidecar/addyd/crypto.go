@@ -540,3 +540,74 @@ func handleWhoami(Request) (any, error) {
 		"epochs":    epochNumbers(keys.epochs),
 	}, nil
 }
+
+// --- minting an account ---
+
+// handleCreateAccount mints an account from nothing.
+//
+// EVERYTHING IS GENERATED HERE AND THE PARENT IS TOLD ONLY WHAT IT MUST
+// STORE. The mnemonic comes back once, because the user has to write it down
+// and nothing else will ever be able to show it to them again; the secrets
+// come back so the parent can put them in the keychain, which is the only
+// durable store on the machine; and the genesis entry comes back so the parent
+// can POST it, because the parent owns the HTTP client and this process must
+// not.
+//
+// The account is NOT registered by this call. Registration needs an invite and
+// a network round trip, and a sidecar that made one would be a sidecar with a
+// socket -- which is the thing the split exists to avoid.
+func handleCreateAccount(req Request) (any, error) {
+	var in struct {
+		// The device's pseudonym, shown in the device list on every device of
+		// the account.
+		Label string `json:"label"`
+	}
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+	if in.Label == "" {
+		return nil, codedf(ErrConfigInvalid, "a device needs a label; it is what the device list shows")
+	}
+
+	acct, err := protocol.NewAccount(in.Label)
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "minting an account")
+	}
+
+	id := protocol.DeriveAccountID(acct.Root.Sign.Public().(ed25519.PublicKey))
+
+	genesisWire, err := acct.Genesis.Wire()
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "encoding the genesis entry")
+	}
+
+	// Loaded immediately, so the very next call works without the parent
+	// having to hand back what it was just given.
+	keys.mu.Lock()
+	keys.account = id
+	keys.device = acct.Device
+	keys.rootSignPub = acct.Root.Sign.Public().(ed25519.PublicKey)
+	keys.epochs = map[uint64]*protocol.EpochKeys{1: acct.Epoch}
+	keys.loaded = true
+	keys.mu.Unlock()
+
+	return map[string]any{
+		"accountId": id.String(),
+		// SHOWN ONCE. There is no call that returns it again, and that is not
+		// an oversight: a mnemonic a process will hand back on request is a
+		// mnemonic that leaks the day something can ask.
+		"mnemonic":    acct.Mnemonic,
+		"rootSignPub": hex.EncodeToString(acct.Root.Sign.Public().(ed25519.PublicKey)),
+		// For the keychain. The parent stores these under the machine-only
+		// prefix, so they cannot ride in a backup.
+		"secrets": map[string]string{
+			"deviceSignSeed": base64.StdEncoding.EncodeToString(acct.Device.SignSeed),
+			"deviceEncKey":   base64.StdEncoding.EncodeToString(acct.Device.Enc.Bytes()),
+			"akSeed":         base64.StdEncoding.EncodeToString(acct.Epoch.AK),
+		},
+		// For the POST the parent makes.
+		"genesis": base64.StdEncoding.EncodeToString(genesisWire),
+		"escrow":  base64.StdEncoding.EncodeToString(acct.Escrow),
+		"epoch":   uint64(1),
+	}, nil
+}

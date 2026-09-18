@@ -189,9 +189,19 @@ func dispatch(ctx context.Context, w *Writer, role string, req Request) {
 // so that `ping` and `reset` above cannot be shadowed by one of them and so
 // that a test can enumerate it.
 var cryptoMethods = map[string]func(Request) (any, error){
-	"load":         handleLoad,
-	"seal":         handleSeal,
-	"open":         handleOpen,
-	"verifyRoster": handleVerifyRoster,
-	"fingerprint":  handleFingerprint,
+	"createAccount": handleCreateAccount,
+	"load":          handleLoad,
+	"whoami":        handleWhoami,
+	"seal":          handleSeal,
+	"open":          handleOpen,
+	"verifyRoster":  handleVerifyRoster,
+	"fingerprint":   handleFingerprint,
+	"signRequest":   handleSignRequest,
+	"pairBegin":     handlePairBegin,
+	"pairJoin":      handlePairJoin,
+	"pairReply":     handlePairReply,
+	"pairConfirm":   handlePairConfirm,
+	"pairHandoff":   handlePairHandoff,
+	"pairAccept":    handlePairAccept,
+	"pairForget":    handlePairForget,
 }

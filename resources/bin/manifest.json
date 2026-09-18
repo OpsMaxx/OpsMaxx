@@ -82,33 +82,33 @@
       "version": "2.6.22"
     },
     "darwin-x64/opsmaxx-addyd": {
-      "sha256": "14f5f1a5083bb76774eb3ca31665f64f6d6a50fa45f91d2e1f147ce1d28292ce",
-      "size": 10304528,
+      "sha256": "ec02d1a7a8b4b3aadf030a78708924a9258bdaf7aebf88efc13eae2e9b4338ad",
+      "size": 10475408,
       "version": "0.48.0"
     },
     "darwin-arm64/opsmaxx-addyd": {
-      "sha256": "8b7a96802adda5d586b153b7334fbebd0b2ab919b49c4caa68f1896cdee51365",
-      "size": 9563042,
+      "sha256": "c30f3820b970432008c98cdf46b6ca4fb90f55f8ecf3e7636d52b9ee2e1564fc",
+      "size": 9698114,
       "version": "0.48.0"
     },
     "linux-x64/opsmaxx-addyd": {
-      "sha256": "3ed72a0e5f8d2b215c2c9cbac232fbf6b8863f9ea843529ed9d52fa0b41a13bb",
-      "size": 10092670,
+      "sha256": "562f552a90f340f458b905b438515d43558b2d5fd25dc4ca5e6aa1402920eed8",
+      "size": 10260606,
       "version": "0.48.0"
     },
     "linux-arm64/opsmaxx-addyd": {
-      "sha256": "7b9759f6fdb56ddf701d0ad55e294f7a74223f75c5f0ad6c2f77aa860fdcbb3b",
-      "size": 9371774,
+      "sha256": "b8e8521ace3dd2c136dce3365b5c3a531ae18c4e1f8fc6e007ad0fe631fade06",
+      "size": 9502846,
       "version": "0.48.0"
     },
     "win32-x64/opsmaxx-addyd.exe": {
-      "sha256": "c2f686042b5ec7a3a872560c840566b2c28e8861f7d725d334fcf9215a64142e",
-      "size": 10332160,
+      "sha256": "bb4f12b08c0048bca8303ca95f98fa30ca9d47512b037488f9a20dc2ee058753",
+      "size": 10505216,
       "version": "0.48.0"
     },
     "win32-arm64/opsmaxx-addyd.exe": {
-      "sha256": "8e1ec500de2e1c0e3432ce94eb196c5693a9f2b2f6a0e52c2759b628d1a4b0f8",
-      "size": 9390080,
+      "sha256": "1acdbf7339df51962fa45d219766a84872da7d6972beaab5e8049400104a1145",
+      "size": 9546752,
       "version": "0.48.0"
     }
   }

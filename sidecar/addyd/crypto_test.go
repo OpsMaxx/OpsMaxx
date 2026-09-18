@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -293,4 +294,138 @@ func codeOf(err error) string {
 		return ""
 	}
 	return we.Code
+}
+
+// Minting an account from nothing.
+//
+// M1's gate, first half, in the process that will actually do it on a user's
+// machine.
+func TestItMintsAnAccountAndIsImmediatelyUsable(t *testing.T) {
+	keys.reset()
+	t.Cleanup(keys.reset)
+
+	v, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{
+		"label": "quiet-otter-41",
+	})})
+	if err != nil {
+		t.Fatalf("createAccount: %v", err)
+	}
+	out := v.(map[string]any)
+
+	// Twelve words, shown ONCE. There is no call that returns it again, which
+	// is not an oversight: a mnemonic a process hands back on request is one
+	// that leaks the day something can ask.
+	phrase, _ := out["mnemonic"].(string)
+	if words := len(strings.Fields(phrase)); words != 12 {
+		t.Fatalf("the recovery phrase is %d words", words)
+	}
+
+	secrets, ok := out["secrets"].(map[string]string)
+	if !ok {
+		t.Fatalf("no secrets to store: %T", out["secrets"])
+	}
+	for _, key := range []string{"deviceSignSeed", "deviceEncKey", "akSeed"} {
+		if secrets[key] == "" {
+			t.Errorf("the parent was not given %s to store", key)
+		}
+	}
+	if out["genesis"] == "" {
+		t.Error("no genesis entry to register with")
+	}
+
+	// USABLE IMMEDIATELY. The parent should not have to hand back what it was
+	// just given in order for the next call to work.
+	sealed, err := handleSeal(Request{Method: "seal", Params: params(t, map[string]any{
+		"collection": "servers", "epoch": uint64(1), "schema": 1,
+		"writerVersion": "test", "counter": uint64(1),
+		"payload": base64.StdEncoding.EncodeToString([]byte("first write")),
+	})})
+	if err != nil {
+		t.Fatalf("a freshly minted account could not seal: %v", err)
+	}
+
+	opened, err := handleOpen(Request{Method: "open", Params: params(t, map[string]any{
+		"collection": "servers", "epoch": uint64(1),
+		"sealed":      sealed.(map[string]any)["sealed"],
+		"knownSchema": 1, "seenCounter": uint64(0),
+	})})
+	if err != nil {
+		t.Fatalf("it could not read its own write: %v", err)
+	}
+	got, _ := base64.StdEncoding.DecodeString(opened.(map[string]any)["payload"].(string))
+	if string(got) != "first write" {
+		t.Fatalf("round trip gave %q", got)
+	}
+
+	// And the account id is the one derived from the root key, not something
+	// the server will be asked to accept on trust. Hex, so twice the byte
+	// length -- read from the constant rather than written out, because a test
+	// that hardcodes it disagrees with the protocol the day the protocol
+	// changes.
+	if id, _ := out["accountId"].(string); len(id) != protocol.AccountIDLen*2 {
+		t.Fatalf("the account id is %q (%d chars, want %d)", id, len(id), protocol.AccountIDLen*2)
+	}
+}
+
+func TestMintingNeedsALabel(t *testing.T) {
+	keys.reset()
+	// The label is what every other device's device list shows. An unlabelled
+	// device is a row somebody cannot act on when they come to revoke one.
+	if _, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{
+		"label": "",
+	})}); err == nil {
+		t.Fatal("an account was minted with no device label")
+	}
+}
+
+// EVERY HANDLER IS REACHABLE.
+//
+// The method table is a map of name to function, and a handler that is written
+// but never added to it is a handler that compiles, has passing unit tests --
+// because those call it directly -- and answers "unknown method" to the only
+// caller that matters.
+//
+// That happened: `createAccount`, `whoami`, `signRequest` and all seven
+// pairing handlers were written, tested and unreachable, because an edit to
+// the map silently did nothing and nothing noticed until a real client asked.
+//
+// This reads the source rather than reflecting, because Go has no way to
+// enumerate the functions in a package at runtime -- and the source is what
+// the omission is in.
+func TestEveryHandlerIsRegistered(t *testing.T) {
+	var defined []string
+	for _, file := range []string{"crypto.go", "pairing.go", "rtc.go"} {
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("reading %s: %v", file, err)
+		}
+		for _, line := range strings.Split(string(src), "\n") {
+			if !strings.HasPrefix(line, "func handle") {
+				continue
+			}
+			name := strings.TrimPrefix(strings.SplitN(line, "(", 2)[0], "func ")
+			defined = append(defined, strings.TrimSpace(name))
+		}
+	}
+	if len(defined) < 10 {
+		t.Fatalf("found %d handlers; the parser is wrong, not the code", len(defined))
+	}
+
+	registered := map[string]bool{}
+	for _, table := range []map[string]func(Request) (any, error){cryptoMethods, rtcMethods} {
+		for name := range table {
+			// `handleRtcOffer` is registered as `rtcOffer`, `handleLoad` as
+			// `load`: the wire name is the handler's without the prefix and
+			// with a lowercase first letter.
+			registered[name] = true
+		}
+	}
+
+	for _, fn := range defined {
+		bare := strings.TrimPrefix(fn, "handle")
+		wire := strings.ToLower(bare[:1]) + bare[1:]
+		if !registered[wire] {
+			t.Errorf("%s is written but not in any method table, so nothing can call it", fn)
+		}
+	}
 }
