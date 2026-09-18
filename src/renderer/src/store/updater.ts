@@ -87,7 +87,29 @@ export const useUpdater = create<UpdaterState>((set, get) => {
   // only ever offers a version it considers better than the running one, so an
   // offer that is not the dismissed one is a fresh decision for the user to
   // make — including after a channel switch, where the offer can be lower.
+  /**
+   * Re-read the prefs main actually holds, because a check writes one of them.
+   *
+   * `lastCheckedAt` is stamped by updater.ts in a `finally`, in MAIN. The
+   * renderer read prefs once at init and then only ever when the user changed
+   * a setting, so the panel's "Last checked N ago" was the age at app start and
+   * never moved again: pressing Check for updates re-checked and still said
+   * "Last checked 1 hour ago", which reads as a button that does nothing.
+   *
+   * The automatic check has the same problem and no button to blame, so this
+   * hangs off the status arriving rather than off the press — every path that
+   * checks ends by emitting a status, and there is exactly one of those.
+   */
+  const refreshPrefs = (): void => {
+    const u = window.opsmaxx?.updater
+    if (bridgeHas(u, 'getPrefs')) void u?.getPrefs().then((prefs) => set({ prefs })).catch(noop)
+  }
+
   const applyStatus = (status: UpdaterStatus): void => {
+    // Before the early return below, or a status that clears a dismissal keeps
+    // the stale timestamp — the one case where the user is most likely to be
+    // reading the line.
+    refreshPrefs()
     const dismissed = get().dismissedVersion
     const version = pendingVersion(status)
     if (dismissed !== null && version !== null && version !== dismissed) {
