@@ -52,7 +52,10 @@ interface Ctx {
 function LocalMachineSection({ query }: { query: string }): React.JSX.Element | null {
   const shells = useApp((s) => s.localShells)
   const refreshLocalShells = useApp((s) => s.refreshLocalShells)
-  const openLocal = useApp((s) => s.openLocal)
+  // Focus-or-open, not always-open: a server row in this same tree focuses the
+  // tab it already has, and a shell row naming one thing had no business
+  // meaning something else. `openLocal` is still what "New local shell" calls.
+  const openShell = useApp((s) => s.focusOrOpenLocal)
   // Absence means enabled, matching main's own copy in services/localGate.ts.
   const enabled = useApp((s) => s.settings.localTerminalEnabled !== false)
 
@@ -90,11 +93,11 @@ function LocalMachineSection({ query }: { query: string }): React.JSX.Element | 
           role="button"
           tabIndex={0}
           title={sh.path}
-          onClick={() => openLocal(sh)}
+          onClick={() => openShell(sh)}
           onKeyDown={(e) => {
             if (e.key !== 'Enter' && e.key !== ' ') return
             e.preventDefault()
-            openLocal(sh)
+            openShell(sh)
           }}
         >
           <TerminalIcon size={12} />

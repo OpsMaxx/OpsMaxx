@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
 import { ConnectionTree } from '../src/renderer/src/components/connections/ConnectionTree'
 import { useApp } from '../src/renderer/src/store/app'
@@ -87,6 +88,28 @@ describe('This machine section', () => {
     // And it must not have asked, either: the switch is off in main too, so the
     // call would be refused rather than merely unused.
     expect(refreshLocalShells).not.toHaveBeenCalled()
+  })
+
+  it('takes you to the shell it names, rather than starting another one', async () => {
+    // The same complaint the palette had: a server row in this tree focuses the
+    // tab already connected to it, and a shell row beside it spawned a second
+    // shell however many were already running. Asserted on the tabs, not on
+    // which store action the row was wired to — the wiring is what was wrong.
+    useApp.setState({ localShells: SHELLS, refreshLocalShells: vi.fn(), tabs: [], activeTabId: null })
+    useApp.getState().openLocal(SHELLS[0]) // bash
+    useApp.getState().openLocal(SHELLS[1]) // zsh, and now the active one
+    const bashTab = useApp.getState().tabs[0]
+
+    render(<ConnectionTree />)
+    await screen.findByText('This machine')
+    const bashRow = screen
+      .getAllByRole('button')
+      .filter((el) => el.className.includes('tree-row'))
+      .find((el) => el.textContent?.includes('bash'))
+    await userEvent.click(bashRow as HTMLElement)
+
+    expect(useApp.getState().tabs).toHaveLength(2)
+    expect(useApp.getState().activeTabId).toBe(bashTab.id)
   })
 
   it('shows nothing rather than an error when no shell was found', async () => {

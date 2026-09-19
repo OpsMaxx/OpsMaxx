@@ -14,7 +14,7 @@ import {
   Bug,
   CornerDownLeft
 } from 'lucide-react'
-import { useApp } from '../../store/app'
+import { findLocalTab, useApp } from '../../store/app'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import {
   AI_SECTIONS,
@@ -90,20 +90,50 @@ export function CommandPalette(): React.JSX.Element {
     // slice is filled by the tab bar's shell menu, which is mounted for the life
     // of the workspace panel.
     if (store.settings.localTerminalEnabled !== false) {
-      store.localShells.forEach((sh) =>
+      const tabs = store.workspaceTabs()
+      const ws = store.activeId()
+      store.localShells.forEach((sh) => {
+        // Named entries in this palette take you to the thing they name. A
+        // server row focuses its open tab rather than dialling a second
+        // session; a shell row did the opposite, so "zsh" meant a new tab every
+        // time no matter how many were already running. Identity — workspace,
+        // shell id, cwd — lives in `findLocalTab` beside the action, which is
+        // where the reasoning is written down.
+        const open = findLocalTab(tabs, ws, sh.id)
         list.push({
           id: `local-${sh.id}`,
           group: 'Local Shells',
           title: sh.label,
           // The path, never the id: ids are opaque and mean nothing to a reader.
-          sub: sh.isDefault ? `${sh.path} · default` : sh.path,
+          sub: open
+            ? `${sh.path} · open`
+            : sh.isDefault
+              ? `${sh.path} · default`
+              : sh.path,
           icon: <TerminalIcon size={16} />,
           run: () => {
             store.setActivity('connections')
-            store.openLocal(sh)
+            store.focusOrOpenLocal(sh)
           }
         })
-      )
+        // A second zsh is a real thing to want, so focusing must not be the only
+        // thing on offer. Same idiom as Duplicate Current Tab above: a separate
+        // row, present only while focusing is what the plain row would do, so
+        // the deliberate path is one keystroke away rather than behind
+        // reopening the palette on the tab you just landed on.
+        if (open)
+          list.push({
+            id: `local-new-${sh.id}`,
+            group: 'Local Shells',
+            title: `New ${sh.label} Session`,
+            sub: 'Opens an additional shell instead of focusing the open one',
+            icon: <Plus size={16} />,
+            run: () => {
+              store.setActivity('connections')
+              store.openLocal(sh)
+            }
+          })
+      })
     }
     store
       .workspaceTunnels()

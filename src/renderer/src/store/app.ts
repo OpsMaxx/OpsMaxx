@@ -595,6 +595,17 @@ interface AppState {
   // A shell on this machine, in a new tab. Never focuses an existing one: a
   // second local shell is a second shell, never the same one.
   openLocal: (shell: LocalShell, cwd?: string) => void
+  /**
+   * A shell on this machine, focusing the tab that is already running it.
+   *
+   * What `openServer` is to a server, for the surfaces that name a thing and
+   * mean "take me to it" — the palette's Local Shells group and the connection
+   * list's "This machine" — rather than "give me another one". `openLocal` is
+   * still the always-new half, the way `newSession` is for a server.
+   *
+   * Identity is `findLocalTab`'s: workspace, shell id and cwd.
+   */
+  focusOrOpenLocal: (shell: LocalShell, cwd?: string) => void
   // The same, resolved against `localShells`. Synchronous on purpose — the
   // hotkey RUNNERS entries are `(s) => boolean` and cannot await a lookup.
   // Unknown ids are a no-op rather than a fallback to the default shell:
@@ -894,6 +905,46 @@ function sameTarget(src: Tab): (t: Tab) => boolean {
   // (2)" should mean the second desktop, not the second session of any sort.
   if (src.kind === 'rdp') return (t) => t.kind === 'rdp' && t.serverId === src.serverId
   return (t) => t.kind === 'ssh' && t.serverId === src.serverId
+}
+
+/**
+ * The already-open tab for a local shell, or undefined.
+ *
+ * This is the local half of the identity `openServer` matches on for a server,
+ * and it exists as one exported function so the store action and the command
+ * palette cannot disagree about what "the same shell" means.
+ *
+ * `openServer` focuses the first tab with `kind === 'ssh' && serverId === X &&
+ * !containerRef`. Translated:
+ *
+ * - **The shell id.** Opaque, and already carries everything that distinguishes
+ *   one shell from another — a digest of the absolute path, so /bin/zsh and
+ *   /opt/homebrew/bin/zsh are two shells, and `wsl:Ubuntu-24.04` for WSL, so a
+ *   distro is its own shell rather than one of several things called "wsl".
+ *   Never parsed; compared whole.
+ * - **The cwd.** Part of the identity, not incidental to it. A shell started in
+ *   /work is not the shell the user gets by asking for plain "zsh", and
+ *   focusing it would silently answer a different question. Absent matches
+ *   absent, which is what the palette and the connection list both ask for.
+ * - **The workspace.** `openServer` gets this free, because a serverId only
+ *   exists in one workspace; a shell exists in all of them. The strip shows one
+ *   workspace's tabs, so focusing a match in another one would look like
+ *   nothing happened.
+ *
+ * The FIRST match, not the most recent — `openServer`'s `find` over `tabs` in
+ * open order. Two deliberately-opened zsh tabs stay two tabs; this only decides
+ * which one "zsh" lands on, and the stable answer is the one that does not move
+ * under the user as they open more.
+ */
+export function findLocalTab(
+  tabs: Tab[],
+  workspaceId: string,
+  shellId: string,
+  cwd?: string
+): Tab | undefined {
+  return tabs.find(
+    (t) => t.kind === 'local' && t.workspaceId === workspaceId && t.shellId === shellId && t.cwd === cwd
+  )
 }
 
 // The copy duplicateTab inserts. Built per kind rather than by spreading `src`
@@ -1388,6 +1439,15 @@ export const useApp = create<AppState>((set, get) => ({
       activeTabId: tab.id,
       panes: { ...s.panes, [tab.id]: initialPanes(tab) }
     }))
+  },
+
+  focusOrOpenLocal: (shell, cwd) => {
+    const existing = findLocalTab(get().tabs, get().activeId(), shell.id, cwd)
+    if (existing) {
+      set({ activeTabId: existing.id })
+      return
+    }
+    get().openLocal(shell, cwd)
   },
 
   openLocalById: (shellId, cwd) => {
