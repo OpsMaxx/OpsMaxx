@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { Loader2, RefreshCw } from 'lucide-react'
 import { clsx } from '../../lib/format'
 import { remoteText } from '../../../../shared/remoteText'
 import { EmptyState } from '../common/EmptyState'
 import { cicdBridgeHas } from './state'
+import { Reading } from './Reading'
 import type { CicdBridge, CicdCapacity, CicdConnection, CicdQueueItem } from '../../../../shared/cicd'
 
 /**
@@ -86,13 +87,20 @@ export function QueuePanel({
           }
           onClick={read}
         >
-          <RefreshCw size={13} />
-          {state.kind === 'reading' ? 'Reading...' : 'Read now'}
+          {state.kind === 'reading' ? (
+            <Loader2 size={13} className="spin" aria-hidden />
+          ) : (
+            <RefreshCw size={13} />
+          )}
+          {state.kind === 'reading' ? 'Reading…' : 'Read now'}
         </button>
       </div>
 
       {state.kind === 'failed' && <p className="field-hint danger">{state.error}</p>}
-      {state.kind === 'reading' && <p className="ui-note">Reading...</p>}
+      {/* A queue read is one HTTP call, but a Jenkins controller under load is
+          exactly when somebody opens this tab — so "is it working or is it
+          hung" is a real question here too, and a full stop cannot answer it. */}
+      {state.kind === 'reading' && <Reading label="Reading the queue and the executors…" />}
 
       {state.kind === 'ok' && (
         <>

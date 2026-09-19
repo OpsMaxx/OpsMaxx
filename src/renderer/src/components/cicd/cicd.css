@@ -492,3 +492,33 @@ button.cicd-step {
   font-family: var(--font-mono);
   line-height: 1.45;
 }
+
+/* ---- A read in flight -----------------------------------------------------
+   Every panel in this module said `Reading...` as a static line, which is
+   indistinguishable from a read that has hung — and these are the slowest
+   reads in the app, so the difference matters more here than anywhere else.
+
+   The moving part leads and the explanation follows it at note weight. The
+   paragraph about GitHub's first discovery is real information and it is not a
+   loading indicator; putting it second is what makes that legible.
+
+   No font-size of its own: the head inherits the panel's body size and the
+   detail is `.ui-note`, which is the measure-limited running-text style the
+   rest of the module already uses. */
+.cicd-reading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3) 0;
+}
+.cicd-reading-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  font-weight: 600;
+  color: var(--text);
+}
+.cicd-reading-detail {
+  margin: 0;
+}

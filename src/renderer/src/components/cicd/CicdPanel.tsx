@@ -10,6 +10,7 @@ import { useApp } from '../../store/app'
 import { TabStrip } from '../panel/TabStrip'
 import { ContextMenu, type MenuEntry } from '../connections/ContextMenu'
 import { StatusWord } from './Status'
+import { Reading } from './Reading'
 import { CicdAccountsModal } from './CicdAccountsModal'
 import { CicdConnectModal } from './CicdConnectModal'
 import { CicdRunWorkbench } from './CicdRunWorkbench'
@@ -234,6 +235,18 @@ export function CicdPanel({
     [scoped, states, seenAt]
   )
 
+  /**
+   * A FIRST read: something is being read and there is nothing yet to show.
+   *
+   * The distinction from a re-read is the whole reason this is not just
+   * `reading.length > 0`. With rows on screen, a read in flight changes
+   * nothing about what the panel may say — the rows are the last true answer
+   * and the counts under them describe those rows. With no rows, the panel has
+   * no answer at all, and both the count and the empty state were inventing
+   * one: "0 of 0 runs in the last 24 hours" over a heading that read "Reading…".
+   */
+  const firstRead = rows.length === 0 && reading.length > 0
+
   const needle = filter.trim().toLowerCase()
   const shown = rows.filter(
     (r) =>
@@ -377,7 +390,7 @@ export function CicdPanel({
                 ? 'Read every connected account now, ignoring the timer.'
                 : 'This build cannot read on demand. Restart the app to rebuild the bridge.'
             }
-            onClick={() => void bridge?.refresh().catch(() => undefined)}
+            onClick={() => readNow(bridge, states, connections.map((c) => c.id))}
           >
             Refresh
           </button>
@@ -567,6 +580,14 @@ export function CicdPanel({
             <span className="spacer" />
           </div>
 
+          {/* Not during a first read.
+              "0 of 0 runs in the last 24 hours" is an ANSWER, and while the
+              only account in view is still being read for the first time there
+              is no answer yet — the sentence states one, and it is the wrong
+              one. It comes back the moment there is something to count, and it
+              is kept while a RE-read runs over rows that already exist, where
+              it is the last true answer rather than a made-up one. */}
+          {!firstRead && (
           <div className="panel-stats" data-testid="cicd-counts">
             <span>
               {shown.length} of {rows.length} {rows.length === 1 ? 'run' : 'runs'} in the last 24
@@ -580,8 +601,26 @@ export function CicdPanel({
             )}
             {neverRun > 0 && <span className="faint">{neverRun} have never run</span>}
           </div>
+          )}
 
-          {shown.length === 0 ? (
+          {firstRead ? (
+            /* A read in flight is not an empty state and must not render as
+               one. `EmptyState` is a title over a paragraph with nothing in it
+               that moves, which is what the report called "just 'Reading...'"
+               — over the slowest read in the app, where telling "working" from
+               "hung" is the only question the screen has to answer.
+
+               The paragraph is kept verbatim because it is the thing that
+               stops somebody concluding their token is broken. It is now under
+               the indicator rather than standing in for one. */
+            <Reading
+              label={`Reading ${reading.join(', ')}…`}
+            >
+              GitHub in particular takes a while the first time — it lists the repositories, then
+              each one&apos;s workflows, then reads each workflow to find out whether it can be
+              started by hand. Nothing is wrong with the token while this is moving.
+            </Reading>
+          ) : shown.length === 0 ? (
             // "Every connected account answered" was printed whenever there were
             // no rows -- including when an account had never been read, and when
             // it had been read and showed no pipelines whatsoever. Claiming a
@@ -593,20 +632,16 @@ export function CicdPanel({
               title={
                 rows.length > 0
                   ? 'Nothing matched'
-                  : reading.length > 0
-                    ? 'Reading…'
-                    : unread.length > 0
-                      ? 'Not read yet'
-                      : barren.length > 0
-                        ? 'No pipelines to show'
-                        : 'Nothing has run in the last 24 hours'
+                  : unread.length > 0
+                    ? 'Not read yet'
+                    : barren.length > 0
+                      ? 'No pipelines to show'
+                      : 'Nothing has run in the last 24 hours'
               }
               message={
                 rows.length > 0
                   ? 'No run in the window matches that filter. Clear it to see the rest.'
-                  : reading.length > 0
-                    ? `${reading.join(', ')} ${reading.length === 1 ? 'is' : 'are'} being read now. GitHub in particular takes a while the first time — it lists the repositories, then each one's workflows, then reads each workflow to find out whether it can be started by hand. Nothing is wrong with the token while this line is up.`
-                    : unread.length > 0
+                  : unread.length > 0
                     ? `${unread.join(', ')} ${unread.length === 1 ? 'has' : 'have'} not answered yet, so nothing below reflects ${unread.length === 1 ? 'it' : 'them'}. Press Refresh; if it stays unread, the account is not being polled.`
                     : barren.length > 0
                       ? `${barren.join(', ')} answered and listed no pipelines at all. That is what a credential with no access to the jobs looks like — the provider returns an empty list rather than refusing — so check what the token's account can see.`
@@ -728,6 +763,40 @@ function RunRow({ row, onOpen }: { row: CicdRow; onOpen: () => void }): React.JS
 }
 
 /**
+ * Read now — and read the JOB LIST first when there is no job list.
+ *
+ * `refresh` nudges the POLLER, and the poller's targets are built from the
+ * pipelines main already knows about (`targetsFor` → `allTargets` in
+ * cicd/wiring.ts). A connection whose first discovery failed has none, so it
+ * has no targets, so `refresh` clears a backoff on a scheduler with nothing in
+ * it and reads nothing at all. Discovery itself runs only from `configure` —
+ * there is no timer behind it — which means that account was not merely stale,
+ * it was never going to be read again.
+ *
+ * That is the state the sticky-banner report was taken in: "0 of 0 runs" is an
+ * account whose job list was never read, and every control on the screen that
+ * offers to read it — Refresh, Retry, and the unlock — was a no-op for it.
+ *
+ * `configure` is not scoped to one account, so it is only used when it is the
+ * only thing that helps.
+ */
+function readNow(
+  bridge: CicdBridge | undefined,
+  states: Map<string, CicdPanelState>,
+  ids: readonly string[]
+): void {
+  if (
+    ids.some((id) => (states.get(id)?.pipelines.length ?? 0) === 0) &&
+    cicdBridgeHas(bridge, 'configure')
+  ) {
+    void bridge!.configure().catch(() => undefined)
+  }
+  if (!cicdBridgeHas(bridge, 'refresh')) return
+  if (ids.length === 1) void bridge!.refresh(ids[0]).catch(() => undefined)
+  else void bridge!.refresh().catch(() => undefined)
+}
+
+/**
  * How fresh this is, per connection, and what is wrong when something is.
  *
  * The three degraded states are deliberately not one:
@@ -779,6 +848,7 @@ function Freshness({
   }))
   const shown = troubleOnly ? rows.filter((r) => r.trouble) : rows
   const quiet = rows.length - shown.length
+
   return (
     <div className="cicd-freshness">
       {quiet > 0 && (
@@ -835,13 +905,41 @@ function Freshness({
             </div>
 
             {vaultShut ? (
+              /**
+               * A read already in flight outranks this banner, for the same
+               * reason "reading now…" outranks the two complaints in the line
+               * above: it is the newer fact.
+               *
+               * The banner's claim is present tense — "are not being refreshed"
+               * — and while main is refreshing, it is false. That is the whole
+               * of the sticky-banner report: the bar is rendered off the LAST
+               * STORED ERROR, main deliberately keeps that error attached
+               * through a retry (see `discoverOne` in cicd/wiring.ts), and so
+               * the bar outlived the lock by however long the next read took.
+               *
+               * Nothing is assumed here. `reading` is main's own flag, set
+               * before the request goes out; if this read fails on the lock
+               * again the error comes back with it and so does the banner.
+               */
+              s?.reading === true ? (
+                <Reading label={`Reading ${c.name} now.`} />
+              ) : (
               <div className="panel-note is-alarm">
                 <span className="grow">
                   {c.name} authenticates with a credential in the vault, and the vault is locked.
                   The runs below are the last ones read and are not being refreshed.
                 </span>
-                <UnlockVaultButton reason={`Unlocking resumes reading pipelines from ${c.name}.`} />
+                <UnlockVaultButton
+                  reason={`Unlocking resumes reading pipelines from ${c.name}.`}
+                  // The press was made to fix THIS screen. Waiting out the rest
+                  // of a 60-second poll with the red bar still up is the same
+                  // bug with a timer on it. `onUnlocked` runs only on a
+                  // successful unlock — a cancelled prompt leaves the banner
+                  // exactly where it was, which is correct: nothing changed.
+                  onUnlocked={() => readNow(bridge, states, [c.id])}
+                />
               </div>
+              )
             ) : expired ? (
               <div className="panel-note is-alarm">
                 <span className="grow">
@@ -869,7 +967,7 @@ function Freshness({
                     className="btn secondary size-24"
                     disabled={!canRefresh}
                     title={canRefresh ? undefined : 'This build cannot read on demand.'}
-                    onClick={() => void bridge?.refresh(c.id).catch(() => undefined)}
+                    onClick={() => readNow(bridge, states, [c.id])}
                   >
                     Retry
                   </button>

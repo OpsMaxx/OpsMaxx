@@ -3,6 +3,7 @@ import { Field, Modal } from '../common/Modal'
 import { EmptyState } from '../common/EmptyState'
 import { clsx, duration } from '../../lib/format'
 import { StatusWord, RequestedWord } from './Status'
+import { Reading } from './Reading'
 import { cicdBridge, cicdBridgeHas, pathLabel, triggerablePipelines, useCicdConnectionList, useCicdState } from './state'
 import type {
   CicdBridge,
@@ -305,7 +306,7 @@ export function TriggerModal({
       )}
 
       {params === null ? (
-        <div className="ui-note">Reading what this pipeline accepts…</div>
+        <Reading label="Reading what this pipeline accepts…" />
       ) : params.length === 0 ? (
         /* No manufactured empty form. */
         <div className="ui-note">This pipeline takes no parameters.</div>
