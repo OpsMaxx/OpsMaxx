@@ -12,6 +12,7 @@ import { documentForCollection, firstOperationOf } from '../../../../shared/apiC
 import { EnvironmentBar } from './EnvironmentBar'
 import { VAULT_LOCKED_MESSAGE } from '../../../../shared/apiSecrets'
 import { UnlockVaultButton } from '../common/UnlockVaultButton'
+import { Modal, Field } from '../common/Modal'
 import {
   fromSnapshot,
   isSnapshot,
@@ -67,6 +68,10 @@ interface Engine {
   select: (collectionId: string) => void
   /** Add a request to a collection and land on it. */
   addRequest: (collectionId: string) => void
+  /** Rename a request, or edit what it says about itself. */
+  editRequest: (target: RequestTarget, meta: RequestMeta) => void
+  /** Remove a request from its collection. */
+  deleteRequest: (target: RequestTarget) => void
   /** The environments and their variables, as the panel shows them. */
   environments: () => EnvironmentsView
   /** Which environment requests interpolate from. */
@@ -77,6 +82,23 @@ interface Engine {
   setVariable: (environmentName: string, variable: EnvVariable, index?: number) => void
   deleteVariable: (environmentName: string, index: number) => void
   unmount: () => void
+}
+
+/**
+ * A request, addressed the way the document addresses one.
+ *
+ * `summary` is the name shown everywhere — in the tree, on the request pane —
+ * so renaming a request IS editing its summary. There is no separate title.
+ */
+export interface RequestTarget {
+  collectionId: string
+  path: string
+  method: HttpMethodName
+}
+
+export interface RequestMeta {
+  summary: string
+  description: string
 }
 
 /** One environment variable, flattened out of the client's two spellings. */
@@ -264,6 +286,8 @@ export function ScalarClient({
   }
 
   const reportRef = useRef((message: string | null) => setTransportError(message))
+  const [settings, setSettings] = useState<(RequestTarget & RequestMeta) | null>(null)
+  const settingsRef = useRef((target: RequestTarget & RequestMeta) => setSettings(target))
 
   /**
    * Persisting what the user has done, on a long trailing debounce.
@@ -308,6 +332,7 @@ export function ScalarClient({
           el,
           optionsRef,
           reportRef,
+          settingsRef,
           useApp.getState().apiWorkspace,
           () => {
             scheduleSave()
@@ -453,7 +478,104 @@ export function ScalarClient({
         className={`scalar-app http-client-host ${theme === 'dark' ? 'dark-mode' : 'light-mode'}`}
         hidden={loading}
       />
+      {settings && (
+        <RequestSettings
+          target={settings}
+          onClose={() => setSettings(null)}
+          onSave={(meta) => {
+            engineRef.current?.editRequest(settings, meta)
+            setSettings(null)
+          }}
+          onDelete={() => {
+            engineRef.current?.deleteRequest(settings)
+            setSettings(null)
+          }}
+        />
+      )}
     </>
+  )
+}
+
+/**
+ * What the client's own gear opens.
+ *
+ * The control is the library's — it sits in the request header and is labelled
+ * "Operation settings" — and it emits `ui:navigate` and nothing else. Nothing
+ * in the package subscribes to that, and no settings page ships with it, so
+ * routing it somewhere is the host's job and the button was dead until it had
+ * somewhere to go.
+ *
+ * Renaming and deleting live here rather than in a menu on each tree row
+ * because they are the same two things a person wants from a request they are
+ * already looking at, and one dialog answers both. A per-row menu is worth
+ * adding for reaching a request you are NOT on; it is not a substitute for
+ * this.
+ *
+ * `summary` IS the name — it is what the tree row and the pane title show, and
+ * there is no separate title anywhere in the document.
+ */
+function RequestSettings({
+  target,
+  onClose,
+  onSave,
+  onDelete
+}: {
+  target: RequestTarget & RequestMeta
+  onClose: () => void
+  onSave: (meta: RequestMeta) => void
+  onDelete: () => void
+}): React.JSX.Element {
+  const [summary, setSummary] = useState(target.summary)
+  const [description, setDescription] = useState(target.description)
+  const [confirming, setConfirming] = useState(false)
+
+  return (
+    <Modal
+      title="Request settings"
+      subtitle={`${target.method.toUpperCase()} ${target.path}`}
+      onClose={onClose}
+      confirm={
+        confirming
+          ? {
+              label: 'Delete request',
+              onClick: onDelete,
+              // Irreversible: the operation leaves the document, and the only
+              // copy of a hand-written request is the document.
+              destructive: true
+            }
+          : { label: 'Save', onClick: () => onSave({ summary: summary.trim(), description }) }
+      }
+      footerNote={
+        confirming ? 'This removes the request from the collection. It cannot be undone.' : undefined
+      }
+      footer={
+        confirming ? (
+          <button className="btn" onClick={() => setConfirming(false)}>
+            Keep it
+          </button>
+        ) : (
+          <button className="btn" onClick={() => setConfirming(true)}>
+            Delete…
+          </button>
+        )
+      }
+    >
+      <Field label="Name">
+        <input
+          autoFocus
+          value={summary}
+          placeholder={target.path}
+          onChange={(e) => setSummary(e.target.value)}
+        />
+      </Field>
+      <Field label="Description" hint="Shown on the request, and in an exported description.">
+        <textarea
+          rows={4}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+      </Field>
+    </Modal>
   )
 }
 
@@ -468,6 +590,15 @@ async function createEngine(
   el: HTMLElement,
   optionsRef: { current: HttpTransportOptions },
   reportRef: { current: (message: string | null) => void },
+  /**
+   * Where the client's own "Operation settings" gear ends up.
+   *
+   * The gear emits `ui:navigate` on the bus and nothing in the library
+   * subscribes to it — routing is the host's job, and there is no settings
+   * page in the package to route to. So it did nothing at all, which is worse
+   * than not drawing it.
+   */
+  settingsRef: { current: (target: RequestTarget & RequestMeta) => void },
   restore: unknown,
   onChanged: () => void
 ): Promise<Engine> {
@@ -590,7 +721,35 @@ async function createEngine(
    */
   const RESHAPES = /^(operation|tag):.*(create|delete|rename|path-method)/
 
-  const stopListening = eventBus.onAny(({ event }) => {
+  const stopListening = eventBus.onAny(({ event, payload }) => {
+    // The gear, and the only reason `ui:navigate` is worth a case: the library
+    // emits it and subscribes to it nowhere, because routing belongs to
+    // whatever is hosting the client.
+    if (event === 'ui:navigate') {
+      const route = payload as {
+        page?: string
+        path?: string
+        operationPath?: string
+        method?: string
+      }
+      const slug = activeSlug.value
+      const method = methodOf(route.method)
+      const doc = slug ? documentOf(slug) : null
+      if (route.page === 'operation' && route.operationPath && method && slug && doc) {
+        const op = ((doc as { paths?: Record<string, Record<string, unknown>> }).paths ?? {})[
+          route.operationPath
+        ]?.[method] as { summary?: string; description?: string } | undefined
+        settingsRef.current({
+          collectionId: slug,
+          path: route.operationPath,
+          method,
+          summary: op?.summary ?? '',
+          description: op?.description ?? ''
+        })
+      }
+      return
+    }
+
     if (RESHAPES.test(event)) {
       const slug = activeSlug.value
       // The sidebar state reads navigation through a getter, so rebuilding it
@@ -967,6 +1126,73 @@ async function createEngine(
   }
 
   /**
+   * Rename a request, or edit what it says about itself.
+   *
+   * `summary` IS the name: it is what the tree row shows and what the request
+   * pane is titled, and there is no separate title field anywhere in the
+   * document. So "rename" and "edit the summary" are the same operation, and
+   * the dialog that does one does the other.
+   *
+   * `updateOperationMeta` rebuilds navigation itself, unlike `createOperation`
+   * next to it, so there is no `buildSidebar` here.
+   */
+  const editRequest = (target: RequestTarget, meta: RequestMeta): void => {
+    if (!documentOf(target.collectionId)) return
+    mutators.doc(target.collectionId).operation.updateOperationMeta({
+      meta: { path: target.path, method: target.method },
+      // An empty description is written as absent rather than as an empty
+      // string: the request pane renders the field when it is present, so a
+      // cleared box would otherwise leave an empty block behind forever.
+      payload: { summary: meta.summary, ...(meta.description ? { description: meta.description } : {}) }
+    })
+    onChanged()
+  }
+
+  /**
+   * Remove a request.
+   *
+   * The pane is moved off it FIRST. It renders whatever `currentPath` and
+   * `currentMethod` point at, and pointing them at an operation that has just
+   * been deleted is how the whole client renders its empty state after a
+   * delete — which reads as the delete having removed everything.
+   */
+  const deleteRequest = (target: RequestTarget): void => {
+    const doc = documentOf(target.collectionId)
+    if (!doc) return
+
+    const here =
+      currentPath.value === target.path && currentMethod.value === target.method
+    if (here) {
+      const paths = ((doc as { paths?: Record<string, Record<string, unknown>> }).paths ??
+        {}) as Record<string, Record<string, unknown>>
+      const next = Object.entries(paths)
+        .flatMap(([path, item]) =>
+          Object.keys(item)
+            .map((m) => ({ path, method: methodOf(m) }))
+            .filter((o): o is { path: string; method: HttpMethodName } => o.method !== null)
+        )
+        .find((o) => !(o.path === target.path && o.method === target.method))
+      if (next) {
+        currentPath.value = next.path
+        currentMethod.value = next.method
+        currentExample.value = 'default'
+        lastPlace.set(target.collectionId, next)
+      } else {
+        lastPlace.delete(target.collectionId)
+      }
+    }
+
+    mutators.doc(target.collectionId).operation.deleteOperation({
+      documentName: target.collectionId,
+      meta: { path: target.path, method: target.method }
+    })
+    // Same gap as the create: the operation leaves `paths` and navigation goes
+    // on listing it, so the row stays in the tree until something rebuilds.
+    workspaceStore.buildSidebar(target.collectionId)
+    onChanged()
+  }
+
+  /**
    * A document whose content can be fetched again.
    *
    * Used only to decide what to shed when the snapshot is too big: a document
@@ -1060,6 +1286,8 @@ async function createEngine(
     snapshot,
     select,
     addRequest,
+    editRequest,
+    deleteRequest,
     environments,
     setActiveEnvironment,
     createEnvironment,

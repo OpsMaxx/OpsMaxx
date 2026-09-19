@@ -369,3 +369,70 @@ describe('the client as a person meets it', () => {
     expect(view.slice(Math.max(0, at - 400), at)).not.toContain('!collection.specUrl')
   })
 })
+
+/**
+ * Rename, delete, and the gear.
+ *
+ * The mutators for all three have always been there. What was missing was
+ * anything that called them: the client's own "Operation settings" gear emits
+ * `ui:navigate` and the library subscribes to it nowhere, because routing
+ * belongs to whatever hosts the client — and no settings page ships in the
+ * package to route to. So the button did nothing, and there was no way to
+ * rename or remove a request at all.
+ */
+describe('editing a request', () => {
+  const read = (p: string): string =>
+    require_('node:fs').readFileSync(require_('node:path').resolve(__dirname, '..', p), 'utf8')
+  const client = read('src/renderer/src/components/http/ScalarClient.tsx')
+
+  const lib = (pkg: string, entry: string, file: string): string => {
+    const path = require_('node:path')
+    const resolved = require_.resolve(entry)
+    const at = resolved.lastIndexOf(pkg.split('/').join(path.sep))
+    expect(at).toBeGreaterThan(-1)
+    return require_('node:fs').readFileSync(
+      path.join(resolved.slice(0, at + pkg.length), file),
+      'utf8'
+    ) as string
+  }
+
+  it('the gear still only emits, so the host still has to route it', () => {
+    const header = lib(
+      '@scalar/api-client',
+      '@scalar/api-client/v2/blocks/operation-block',
+      'dist/v2/blocks/operation-block/OperationBlock.vue.script.js'
+    )
+    expect(header).toContain('ui:navigate')
+    // If the library ever grows a settings page and handles this itself, this
+    // fails — and the answer is to drop our dialog, not to widen the match.
+    expect(header).not.toContain('on("ui:navigate"')
+  })
+
+  it('handles ui:navigate and opens something', () => {
+    expect(client).toContain("event === 'ui:navigate'")
+    expect(client).toContain('RequestSettings')
+  })
+
+  it('renames through the summary, because that is what the name is', () => {
+    const at = client.indexOf('const editRequest')
+    expect(at).toBeGreaterThan(-1)
+    const body = client.slice(at, at + 900)
+    expect(body).toContain('updateOperationMeta')
+    expect(body).toContain('summary')
+  })
+
+  it('moves the pane off a request before deleting it', () => {
+    const at = client.indexOf('const deleteRequest')
+    expect(at).toBeGreaterThan(-1)
+    const body = client.slice(at, client.indexOf('deleteOperation'))
+    // The pane renders whatever currentPath/currentMethod point at. Deleting
+    // out from under them renders the client's empty state, which reads as the
+    // delete having removed everything.
+    expect(body).toContain('currentPath.value')
+    // And the row has to leave the tree: deleteOperation has the same gap as
+    // createOperation.
+    expect(client.slice(client.indexOf('const deleteRequest'))).toContain(
+      'workspaceStore.buildSidebar(target.collectionId)'
+    )
+  })
+})
