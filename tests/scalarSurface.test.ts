@@ -179,3 +179,49 @@ describe('the active document', () => {
     expect(key).toContain('endpoints')
   })
 })
+
+/**
+ * The request pane has to be GIVEN the width.
+ *
+ * `Operation`'s own root is `flex h-full flex-col` with no `flex-1`, so as a
+ * bare flex child it sizes to its content — measured at 512px of a 1352px
+ * pane, with the rest of the client blank.
+ *
+ * That is not only ugly. The request block's layout is driven by a CSS
+ * container query on `t-app__top-container`, so under its breakpoint the whole
+ * thing collapses: address bar wrapped under the method, Send on its own row,
+ * response stacked below the request instead of beside it. Most of what "there
+ * is nothing here" looked like was this.
+ *
+ * Pinned structurally because nothing else catches it: it renders, it throws
+ * nothing, and every test that mocks `Operation` to a string agrees it is fine.
+ */
+describe('the operation pane', () => {
+  const client = require_('node:fs').readFileSync(
+    require_('node:path').resolve(
+      __dirname,
+      '..',
+      'src/renderer/src/components/http/ScalarClient.tsx'
+    ),
+    'utf8'
+  ) as string
+
+  it('renders Operation inside a flex-1 min-w-0 container', () => {
+    const at = client.indexOf('h(Operation, {')
+    expect(at).toBeGreaterThan(-1)
+    // The wrapper is the element opened immediately before it.
+    const before = client.slice(0, at)
+    const wrapper = before.slice(before.lastIndexOf("h('div'"))
+    expect(wrapper).toContain('flex-1')
+    // Without this a flex item's `min-width: auto` refuses to shrink below its
+    // content, so the response pane widens the client past the window.
+    expect(wrapper).toContain('min-w-0')
+  })
+
+  it('still uses the web layout, not modal', () => {
+    // `modal` drew the method as a label rather than a control and hid two
+    // sections of the request block. Kept beside the width check because both
+    // are "the pane renders, and is wrong".
+    expect(client.slice(client.indexOf('h(Operation, {'))).toMatch(/layout: 'web'/)
+  })
+})

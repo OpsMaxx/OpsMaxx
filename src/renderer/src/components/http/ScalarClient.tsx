@@ -757,23 +757,43 @@ async function createEngine(
               'onUpdate:sidebarWidth': (v: number) => (sidebarWidth.value = v)
             })
           : null,
-        h(Operation, {
-          documentSlug: slug,
-          document: doc,
-          eventBus,
-          // `web`, not `modal`. The modal layout is what rendered the method
-          // beside the address bar as a LABEL rather than a control, gated
-          // `{{variable}}` completion in every input, and hid two whole
-          // sections of the request block.
-          layout: 'web',
-          path: currentPath.value,
-          method: currentMethod.value,
-          exampleName: currentExample.value,
-          environment: getActiveEnvironment(workspaceStore, doc).environment,
-          workspaceStore,
-          plugins: [],
-          options: { customFetch: transport }
-        })
+        // THE WRAPPER IS NOT DECORATION.
+        //
+        // Operation's own root is `flex h-full flex-col` with no `flex-1`, so
+        // as a bare flex child it sizes to its content and stops -- measured at
+        // 512px of a 1352px pane, with the rest of the client left blank.
+        // Scalar's own app never hits this because it renders Operation into a
+        // filled grid cell.
+        //
+        // The width is not cosmetic. The request block's layout is driven by a
+        // CSS container query on `t-app__top-container`, so under its
+        // breakpoint the whole thing collapses: the address bar wraps under the
+        // method, Send drops onto its own row, and the response stacks BELOW
+        // the request instead of beside it. Most of what "there is nothing
+        // here" looked like was this.
+        //
+        // `min-w-0` because a flex item's default `min-width: auto` refuses to
+        // shrink below its content, which is how the response pane would widen
+        // the client past the window rather than scrolling inside it.
+        h('div', { class: 'flex min-w-0 flex-1 flex-col' }, [
+          h(Operation, {
+            documentSlug: slug,
+            document: doc,
+            eventBus,
+            // `web`, not `modal`. The modal layout is what rendered the method
+            // beside the address bar as a LABEL rather than a control, gated
+            // `{{variable}}` completion in every input, and hid two whole
+            // sections of the request block.
+            layout: 'web',
+            path: currentPath.value,
+            method: currentMethod.value,
+            exampleName: currentExample.value,
+            environment: getActiveEnvironment(workspaceStore, doc).environment,
+            workspaceStore,
+            plugins: [],
+            options: { customFetch: transport }
+          })
+        ])
       ])
     }
   })
