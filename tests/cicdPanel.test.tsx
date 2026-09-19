@@ -596,6 +596,61 @@ describe('the run workbench', () => {
     expect(await screen.findByText(/No job list was read for this run/)).toBeTruthy()
   })
 
+  /**
+   * The way out of the run view.
+   *
+   * This view REPLACES the list it was opened from rather than sitting over it,
+   * so until now the only exit was a 16px × in the corner -- which reads as
+   * "close this" rather than "go back to the runs", and which somebody looking
+   * at a log for the first time does not find.
+   */
+  it('offers a labelled way back, not only the ×', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    render(
+      <CicdRunWorkbench
+        connection={CONN}
+        pipeline={pipeline()}
+        run={run()}
+        bridge={bridge()}
+        onClose={onClose}
+      />
+    )
+    const back = screen.getByTestId('cicd-run-back')
+    // The destination is named. A bare arrow beside a job name does not say
+    // which of the two lists it returns to.
+    expect(back.textContent).toContain('Back to runs')
+    await user.click(back)
+    expect(onClose).toHaveBeenCalled()
+    // The × is the same action and stays; people reach for both.
+    expect(screen.getByLabelText('Close the run')).toBeTruthy()
+  })
+
+  it('shows a Jenkins log with the console notes already gone', async () => {
+    // The adapter strips them, so by the time the pane has text there is
+    // nothing to render. Asserted at the pane because that is where the
+    // operator saw the base64.
+    render(
+      <CicdRunWorkbench
+        connection={{ ...CONN, provider: 'jenkins' }}
+        pipeline={pipeline()}
+        run={run()}
+        bridge={bridge({
+          getLog: vi.fn(
+            async (): Promise<CicdLogChunk> => ({
+              mode: 'live',
+              text: 'Started by user Zeeshan\n',
+              more: false
+            })
+          )
+        })}
+        onClose={vi.fn()}
+      />
+    )
+    expect(await screen.findByText(/Started by user Zeeshan/)).toBeTruthy()
+    expect(screen.queryByText(/ha:\/\/\/\//)).toBeNull()
+  })
+
   it('puts attacker-authored text through remoteText before showing it', async () => {
     render(
       <CicdRunWorkbench
@@ -771,6 +826,141 @@ describe('starting a run', () => {
 // ---------------------------------------------------------------------------
 // Naming discipline
 // ---------------------------------------------------------------------------
+
+/**
+ * The navigation, and the reading state.
+ *
+ * Both are reports from a live install: the strips scrolled away under a long
+ * pipeline tree, and a freshly connected GitHub account rendered as a rejected
+ * token for the tens of seconds its first discovery took.
+ */
+describe('the CI/CD navigation stays put', () => {
+  it('keeps the account tabs and the sub-tabs in one pinned block', async () => {
+    const { container } = render(<CicdPanel connections={[CONN]} bridge={bridge()} />)
+    await screen.findByText('deploy')
+    const nav = container.querySelector('.cicd-nav')
+    expect(nav).toBeTruthy()
+    // Both strips inside it, so they pin together rather than one at a time.
+    expect(nav?.querySelector('.cicd-accounts-strip')).toBeTruthy()
+    expect(nav?.querySelector('.cicd-tabs')).toBeTruthy()
+  })
+
+  it('leaves the freshness banners outside it', async () => {
+    // An account with a failure renders two or three lines of banner, and a
+    // nav bar that grows to four lines is not a nav bar.
+    const { container } = render(
+      <CicdPanel
+        connections={[CONN]}
+        bridge={bridge({ snapshot: vi.fn(async () => [state({ error: 'gone', failures: 2 })]) })}
+      />
+    )
+    await screen.findByText('deploy')
+    expect(container.querySelector('.cicd-nav .cicd-freshness')).toBeNull()
+    expect(container.querySelector('.cicd-freshness')).toBeTruthy()
+  })
+})
+
+describe('a read in flight is not a rejected token', () => {
+  const reading = (): CicdPanelState =>
+    state({ readAt: undefined, reading: true, pipelines: [] })
+
+  it('says it is reading rather than accusing the account of not being polled', async () => {
+    render(
+      <CicdPanel
+        connections={[CONN]}
+        bridge={bridge({ snapshot: vi.fn(async () => [reading()]) })}
+      />
+    )
+    expect(await screen.findByText(/being read now/)).toBeTruthy()
+    // The sentence that made a working token look refused.
+    expect(screen.queryByText(/the account is not being polled/)).toBeNull()
+  })
+
+  it('says reading now on the freshness line, not never read', async () => {
+    render(
+      <CicdPanel
+        connections={[CONN]}
+        bridge={bridge({ snapshot: vi.fn(async () => [reading()]) })}
+      />
+    )
+    const line = await screen.findByTestId('cicd-read-c1')
+    expect(line.textContent).toContain('reading now')
+    expect(line.textContent).not.toContain('never read')
+  })
+
+  it('still says never read for an account that genuinely is not being read', async () => {
+    render(
+      <CicdPanel
+        connections={[CONN]}
+        bridge={bridge({
+          snapshot: vi.fn(async () => [state({ readAt: undefined, pipelines: [] })])
+        })}
+      />
+    )
+    const line = await screen.findByTestId('cicd-read-c1')
+    expect(line.textContent).toContain('never read')
+    expect(await screen.findByText(/have not answered yet|has not answered yet/)).toBeTruthy()
+  })
+
+  it('tells the pipeline browser too, so an empty tree is not called empty', async () => {
+    const user = userEvent.setup()
+    render(
+      <CicdPanel
+        connections={[CONN]}
+        bridge={bridge({ snapshot: vi.fn(async () => [reading()]) })}
+      />
+    )
+    await user.click(await screen.findByRole('button', { name: /^Pipelines/ }))
+    expect(await screen.findByText(/Reading the job list now/)).toBeTruthy()
+  })
+})
+
+describe('the URL a provider already has for everyone', () => {
+  it('prefills github.com so the standard case needs no typing', () => {
+    render(<CicdConnectModal onClose={vi.fn()} onSave={vi.fn()} bridge={bridge()} />)
+    const url = screen.getByLabelText(/URL/) as HTMLInputElement
+    expect(url.value).toBe('https://github.com')
+  })
+
+  it('swaps the prefill with the provider', async () => {
+    const user = userEvent.setup()
+    render(<CicdConnectModal onClose={vi.fn()} onSave={vi.fn()} bridge={bridge()} />)
+    await user.click(screen.getByRole('button', { name: 'GitLab CI' }))
+    expect((screen.getByLabelText(/URL/) as HTMLInputElement).value).toBe('https://gitlab.com')
+  })
+
+  it('leaves Jenkins empty, because every one of them is somewhere different', async () => {
+    const user = userEvent.setup()
+    render(<CicdConnectModal onClose={vi.fn()} onSave={vi.fn()} bridge={bridge()} />)
+    await user.click(screen.getByRole('button', { name: 'Jenkins' }))
+    expect((screen.getByLabelText(/URL/) as HTMLInputElement).value).toBe('')
+  })
+
+  it('never overwrites a URL the user typed', async () => {
+    const user = userEvent.setup()
+    render(<CicdConnectModal onClose={vi.fn()} onSave={vi.fn()} bridge={bridge()} />)
+    const url = screen.getByLabelText(/URL/) as HTMLInputElement
+    await user.clear(url)
+    await user.type(url, 'https://ghe.corp.example')
+    // A misclick on the provider strip must not eat a GitHub Enterprise host.
+    await user.click(screen.getByRole('button', { name: 'GitLab CI' }))
+    expect((screen.getByLabelText(/URL/) as HTMLInputElement).value).toBe('https://ghe.corp.example')
+  })
+
+  it('keeps an edited account on its own URL', () => {
+    render(
+      <CicdConnectModal
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        bridge={bridge()}
+        editing={{ ...CONN, baseUrl: 'https://ghe.corp.example' }}
+      />
+    )
+    expect((screen.getByLabelText(/URL/) as HTMLInputElement).value).toBe(
+      'https://ghe.corp.example'
+    )
+  })
+})
 
 describe('the vocabulary this module fixed', () => {
   const DIR = resolve(__dirname, '../src/renderer/src/components/cicd')

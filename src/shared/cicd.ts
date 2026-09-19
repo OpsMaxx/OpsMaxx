@@ -510,13 +510,39 @@ export interface CicdConfigSource {
  * nothing more. A pipeline with no parameters gets a short confirm and no
  * manufactured empty form.
  */
+/**
+ * One input a pipeline accepts.
+ *
+ * `text` is a multi-line string and nothing more -- Jenkins' `TextParameter` is
+ * a `String` with a bigger box, and GitLab and GitHub have no separate concept.
+ * It is a type of its own only so the form can render a textarea; a release note
+ * or a patch pasted into a single-line input is unreadable.
+ *
+ * WHAT IS NOT HERE, and what happens to it. Jenkins ships parameter types this
+ * cannot express: `FileParameterDefinition` (an upload, which needs a multipart
+ * body the trigger path does not build), `RunParameterDefinition` (a picker over
+ * another job's builds), `CredentialsParameterDefinition` (a pointer into
+ * Jenkins' own credential store, which OpsMaxx must not be in the business of
+ * choosing), and the plugin types -- Active Choices, Git Parameter, Extended
+ * Choice. Each of those arrives here as `string`, with whatever default Jenkins
+ * reported, and is submitted verbatim as a form field. That is what Jenkins'
+ * own `buildWithParameters` does with an unrecognised name too, so a Git
+ * Parameter typed as a branch name works and a File Parameter does not. The
+ * form says so rather than pretending the box is the right control.
+ */
 export interface CicdParam {
   key: string
   label: string
-  type: 'string' | 'boolean' | 'choice' | 'password'
+  type: 'string' | 'text' | 'boolean' | 'choice' | 'password'
   required: boolean
   default?: string
   choices?: string[]
+  /**
+   * Set where the provider's own type is one this form cannot render properly.
+   * Shown beside the field: a plain box in place of a file picker is a control
+   * that will be submitted and will not work, and the user has to be told which.
+   */
+  unsupportedNote?: string
 }
 
 /**
@@ -558,6 +584,22 @@ export interface CicdPanelState {
   error?: string
   /** Consecutive failures, so the UI can escalate its language rather than its colour. */
   failures: number
+  /**
+   * A read of this account's job list is in flight RIGHT NOW.
+   *
+   * Separate from `readAt` being undefined, and the distinction is the whole
+   * point of the field. "Never read" is a standing condition the panel is right
+   * to complain about; "reading" is a thing that is working. GitHub's discovery
+   * walks the repositories, then each repository's workflows, then each
+   * workflow's YAML to see whether it declares `workflow_dispatch` -- tens of
+   * seconds on a real account -- and for all of that time the two states were
+   * indistinguishable, so a token that was about to work rendered as a token
+   * that had been refused.
+   *
+   * Absent rather than `false` when idle: this is a transient, and a panel that
+   * has not been told anything must not render a spinner.
+   */
+  reading?: boolean
   /** Provider rate budget, when the provider reports one. GitHub does. */
   budget?: { remaining: number; limit: number; resetAt?: number }
   /**

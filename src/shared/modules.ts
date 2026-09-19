@@ -432,7 +432,7 @@ export const MODULES: ModuleDef[] = [
     surface: 'read',
     label: 'CI/CD',
     detail:
-      'Connect a Jenkins, GitLab or GitHub Actions account and read what it did: pipelines, run history, and the log of the step that failed, beside the server the run changed. Read-only, and nothing on this tab starts, re-runs or cancels anything — that is a separate module on the Operations side.',
+      'Connect a Jenkins, GitLab or GitHub Actions account and read what it did: pipelines, run history, and the log of the step that failed, beside the server the run changed. This module reads only. Starting a build, cancelling one, and enabling or disabling a job are the separate "Start a build" module, and its controls appear on this tab only while that one is switched on.',
     // OFF by default, and the reason is not the one the other read modules
     // give. Every module above reads a machine the user administers, over a
     // connection they already opened. Enabling this POLLS A THIRD PARTY'S API

@@ -199,7 +199,26 @@ export function CicdPanel({
   // browser groups it; nothing here fetches.
   const allPipelines = scoped.flatMap((c) => states.get(c.id)?.pipelines ?? [])
 
-  const unread = scoped.filter((c) => states.get(c.id)?.readAt === undefined).map((c) => c.name)
+  /**
+   * Accounts with a read IN FLIGHT right now, and accounts that simply have
+   * nothing.
+   *
+   * These were one list and the conflation is the whole of the "GitHub Actions
+   * doesn't fetch anything and shows nothing, as if the token didn't work"
+   * report. GitHub discovery walks repositories, then each repository's
+   * workflows, then each workflow's YAML -- tens of seconds -- and for all of
+   * it the panel printed "Not read yet ... if it stays unread, the account is
+   * not being polled", which is an accusation rather than a status. `reading`
+   * comes from main (see `CicdPanelState.reading`) because the renderer has no
+   * way to know: it does not make the request.
+   */
+  const reading = scoped.filter((c) => states.get(c.id)?.reading === true).map((c) => c.name)
+  const unread = scoped
+    .filter((c) => {
+      const st = states.get(c.id)
+      return st?.readAt === undefined && st?.reading !== true
+    })
+    .map((c) => c.name)
   const barren = scoped
     .filter((c) => {
       const st = states.get(c.id)
@@ -390,6 +409,16 @@ export function CicdPanel({
         />
       ) : (
         <>
+          {/* The navigation, pinned.
+              `.content` in FleetMonitor is the scroll container, so one screen
+              into a log or a pipeline tree neither the account tabs nor the
+              Activity/Pipelines/Queue strip was on screen any more -- on a page
+              whose whole job is to be several different pages. Both are in one
+              block so they pin together; the freshness lines are deliberately
+              NOT, because an account with a failure renders two or three lines
+              of banner and a nav bar that grows to four lines is not a nav bar.
+              See `.cicd-nav` in cicd.css. */}
+          <div className="cicd-nav">
           <div className="cicd-accounts-strip">
             <TabStrip
               label="CI/CD account tabs"
@@ -442,21 +471,6 @@ export function CicdPanel({
             </TabStrip>
           </div>
 
-          <Freshness
-            connections={scoped}
-            states={states}
-            intervalSec={intervalSec}
-            now={now}
-            bridge={bridge}
-            canRefresh={canRefresh}
-            // On the cross-account tab only the accounts with something wrong
-            // get a block of their own. Stacking every healthy account's two
-            // lines above the feed is what pushed the feed off the screen, and
-            // a healthy account's detail is one click away in its own tab.
-            troubleOnly={inView === ALL && connections.length > 1}
-            onUpdateToken={(connection) => setConnecting({ mode: 'edit', connection })}
-          />
-
           <div className="segment modal-segment cicd-tabs">
             <button
               type="button"
@@ -489,6 +503,22 @@ export function CicdPanel({
               </button>
             )}
           </div>
+          </div>
+
+          <Freshness
+            connections={scoped}
+            states={states}
+            intervalSec={intervalSec}
+            now={now}
+            bridge={bridge}
+            canRefresh={canRefresh}
+            // On the cross-account tab only the accounts with something wrong
+            // get a block of their own. Stacking every healthy account's two
+            // lines above the feed is what pushed the feed off the screen, and
+            // a healthy account's detail is one click away in its own tab.
+            troubleOnly={inView === ALL && connections.length > 1}
+            onUpdateToken={(connection) => setConnecting({ mode: 'edit', connection })}
+          />
 
           {subTab === 'queue' ? (
             <QueuePanel
@@ -506,6 +536,7 @@ export function CicdPanel({
               pipelines={allPipelines}
               bridge={bridge}
               canTrigger={canTrigger}
+              reading={reading.length > 0}
               onOpenRun={(connectionId, pipelineRef, run) =>
                 setSelected({ connectionId, pipelineRef, runId: run.id })
               }
@@ -562,16 +593,20 @@ export function CicdPanel({
               title={
                 rows.length > 0
                   ? 'Nothing matched'
-                  : unread.length > 0
-                    ? 'Not read yet'
-                    : barren.length > 0
-                      ? 'No pipelines to show'
-                      : 'Nothing has run in the last 24 hours'
+                  : reading.length > 0
+                    ? 'Reading…'
+                    : unread.length > 0
+                      ? 'Not read yet'
+                      : barren.length > 0
+                        ? 'No pipelines to show'
+                        : 'Nothing has run in the last 24 hours'
               }
               message={
                 rows.length > 0
                   ? 'No run in the window matches that filter. Clear it to see the rest.'
-                  : unread.length > 0
+                  : reading.length > 0
+                    ? `${reading.join(', ')} ${reading.length === 1 ? 'is' : 'are'} being read now. GitHub in particular takes a while the first time — it lists the repositories, then each one's workflows, then reads each workflow to find out whether it can be started by hand. Nothing is wrong with the token while this line is up.`
+                    : unread.length > 0
                     ? `${unread.join(', ')} ${unread.length === 1 ? 'has' : 'have'} not answered yet, so nothing below reflects ${unread.length === 1 ? 'it' : 'them'}. Press Refresh; if it stays unread, the account is not being polled.`
                     : barren.length > 0
                       ? `${barren.join(', ')} answered and listed no pipelines at all. That is what a credential with no access to the jobs looks like — the provider returns an empty list rather than refusing — so check what the token's account can see.`
@@ -781,9 +816,13 @@ function Freshness({
             <div className="row">
               <b className="ellipsis">{c.name}</b>
               <span className={clsx('ui-note', stale && 'state-unknown')} data-testid={`cicd-read-${c.id}`}>
-                {s?.readAt === undefined
-                  ? 'never read'
-                  : `Read ${duration(s.readAt)} ago`}{' '}
+                {/* "reading now" outranks both. It is the newest fact and the
+                    only one of the three that is not a complaint. */}
+                {s?.reading === true
+                  ? 'reading now…'
+                  : s?.readAt === undefined
+                    ? 'never read'
+                    : `Read ${duration(s.readAt)} ago`}{' '}
                 · every {every}s
               </span>
               {s?.budget !== undefined && (
@@ -859,6 +898,10 @@ function isRateLimited(s: CicdPanelState | undefined): boolean {
  */
 function hasTrouble(s: CicdPanelState | undefined, intervalSec: number, now: number): boolean {
   if (!s) return true
+  // A read in flight still earns a block, but only so the "reading now…" line
+  // has somewhere to render. Without this it inherits the staleness test and
+  // would be reported as late while it is in the middle of being on time.
+  if (s.reading === true) return true
   return (
     s.error !== undefined || isRateLimited(s) || isStale(s.readAt, s.intervalSec ?? intervalSec, now)
   )

@@ -232,8 +232,20 @@ export function TriggerModal({
   const missingRequired = (params ?? []).find(
     (p) => p.required && (values[p.key] ?? '') === '' && p.type !== 'boolean'
   )
+  /**
+   * Jenkins has no ref.
+   *
+   * `triggerJenkins` sends `/build` or `/buildWithParameters` and passes no such
+   * field, because a Jenkins job's branch is part of its SCM configuration (or,
+   * for a multibranch project, part of which child job you picked) rather than
+   * something a trigger names. Demanding one here made every Jenkins build
+   * impossible to start from this dialog: the confirm stayed disabled behind
+   * "Name the branch, tag or commit to run against" for a value that was going
+   * to be dropped on the floor. GitLab and GitHub both genuinely need it.
+   */
+  const needsRef = connection.provider !== 'jenkins'
   const blocked =
-    ref.trim() === ''
+    needsRef && ref.trim() === ''
       ? 'Name the branch, tag or commit to run against.'
       : missingRequired
         ? `${missingRequired.label} is required by this pipeline.`
@@ -245,7 +257,7 @@ export function TriggerModal({
     if (blocked || !bridge || starting) return
     setStarting(true)
     try {
-      const result = await bridge.trigger(connection.id, pipeline.ref, ref.trim(), values)
+      const result = await bridge.trigger(connection.id, pipeline.ref, needsRef ? ref.trim() : '', values)
       onStarted(result)
       onClose()
     } catch (e) {
@@ -280,13 +292,17 @@ export function TriggerModal({
         cannot stop the run once it has been accepted — whatever the pipeline deploys, deploys.
       </div>
 
-      <Field
-        label="Run against"
-        required
-        hint="The branch, tag or commit the pipeline runs on."
-      >
-        <input className="input" value={ref} autoFocus onChange={(e) => setRef(e.target.value)} />
-      </Field>
+      {/* Absent for Jenkins rather than disabled: there is no Jenkins field this
+          would set, so a greyed box would be claiming one exists. */}
+      {needsRef && (
+        <Field
+          label="Run against"
+          required
+          hint="The branch, tag or commit the pipeline runs on."
+        >
+          <input className="input" value={ref} autoFocus onChange={(e) => setRef(e.target.value)} />
+        </Field>
+      )}
 
       {params === null ? (
         <div className="ui-note">Reading what this pipeline accepts…</div>
@@ -295,8 +311,24 @@ export function TriggerModal({
         <div className="ui-note">This pipeline takes no parameters.</div>
       ) : (
         params.map((p) => (
-          <Field key={p.key} label={p.label} required={p.required}>
-            {p.type === 'boolean' ? (
+          <Field
+            key={p.key}
+            label={p.label}
+            required={p.required}
+            // The provider's own caveat about this field, where there is one.
+            // See `CicdParam.unsupportedNote`: the box is rendered and will be
+            // submitted either way, so the honest thing is to say which of them
+            // is not the control Jenkins would have given you.
+            hint={p.unsupportedNote}
+          >
+            {p.type === 'text' ? (
+              <textarea
+                className="input cicd-param-text"
+                rows={4}
+                value={values[p.key] ?? ''}
+                onChange={(e) => setValues((v) => ({ ...v, [p.key]: e.target.value }))}
+              />
+            ) : p.type === 'boolean' ? (
               <label className="row cicd-check">
                 <input
                   type="checkbox"

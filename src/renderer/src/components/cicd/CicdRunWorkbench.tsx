@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { X } from 'lucide-react'
+import { ChevronLeft, X } from 'lucide-react'
 import { clsx, duration } from '../../lib/format'
 import { useApp } from '../../store/app'
 import { useDragSize } from '../../hooks/useDragSize'
@@ -101,6 +101,22 @@ export function CicdRunWorkbench({
   return (
     <div className="cicd-workbench">
       <div className="cicd-workbench-head">
+        {/* A back button, not only the ×.
+            This view REPLACES the list it was opened from -- it is not a modal
+            over it -- so the only way out was a 16px glyph in the far corner
+            that reads as "close this thing" rather than "go back to the runs".
+            Labelled with the destination, because a bare arrow beside a job
+            name is ambiguous about which of the two lists it returns to. The ×
+            stays: it is the same action, and people reach for both. */}
+        <button
+          type="button"
+          className="btn secondary size-24"
+          data-testid="cicd-run-back"
+          onClick={onClose}
+        >
+          <ChevronLeft size={14} />
+          Back to runs
+        </button>
         <StatusWord outcome={run.outcome} />
         <b className="grow ellipsis">
           {pipeline.name} · {run.label}

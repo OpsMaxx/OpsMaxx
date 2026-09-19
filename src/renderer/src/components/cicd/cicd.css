@@ -448,3 +448,47 @@ button.cicd-step {
   flex: none;
   font-variant-numeric: tabular-nums;
 }
+
+/* ---- The CI/CD nav, pinned ------------------------------------------------
+   The account tabs and the Activity / Pipelines / Queue strip, in one block.
+
+   `.content` in FleetMonitor is the scroll container and this panel is several
+   pages deep inside it, so one screen into a pipeline tree or a build log
+   neither strip was on screen any more — and a tab strip you cannot see is a
+   tab strip you cannot use, which is the same sentence `.monitor-sticky` is
+   there for one level up.
+
+   It pins at the very TOP of the scrollport rather than below the module
+   header, and the z-index is above `.monitor-sticky`'s 6 on purpose: the header
+   above it is a title and two sentences of description that are read once, and
+   the navigation is what somebody scrolling needs. So the prose scrolls and the
+   nav takes its place. `--cicd-nav-top` is the escape hatch for a host that
+   wants the header kept visible above it instead.
+
+   Opaque, because sticky elements composite over whatever passes beneath. */
+.cicd-nav {
+  position: sticky;
+  top: var(--cicd-nav-top, 0px);
+  z-index: 7;
+  padding-top: var(--sp-2);
+  background: var(--bg-panel);
+}
+
+/* The last child in the block carries the rule, so the pinned bar has an edge
+   against the content sliding under it. On the strip's own margin rather than
+   the container's so the tabs' bottom border and this one do not double up. */
+.cicd-nav .cicd-tabs {
+  margin-bottom: 0;
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border);
+}
+
+/* A Jenkins TextParameterDefinition. A release note or a patch in a
+   single-line input is unreadable, which is the only reason `text` is a
+   parameter type of its own — see `CicdParam`. */
+.cicd-param-text {
+  min-height: 72px;
+  resize: vertical;
+  font-family: var(--font-mono);
+  line-height: 1.45;
+}

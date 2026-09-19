@@ -201,6 +201,99 @@ describe('folders', () => {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * A controller does not serve one kind of job.
+ *
+ * `_class` is what separates a thing that CONTAINS jobs from a thing that RUNS,
+ * and Jenkins emits it on every object regardless of the `tree=` selector. The
+ * cases below are the shapes a real estate actually produces; each one asserts
+ * which side of that line it lands on, because getting it wrong in either
+ * direction is silent -- a folder treated as a job is an unbuildable row, and a
+ * job treated as a folder is a job that vanishes.
+ */
+describe('the job kinds a real controller serves', () => {
+  const root = (jobs: unknown[], children: Record<string, unknown[]> = {}) =>
+    fake((req) => {
+      const path = req.path.split('?')[0]
+      if (path === '/api/json') return json({ jobs })
+      const key = path.replace(/^\/(.*)\/api\/json$/, '$1')
+      return children[key] ? json({ jobs: children[key] }) : json({ jobs: [] })
+    })
+
+  it.each([
+    ['hudson.model.FreeStyleProject', 'freestyle'],
+    ['org.jenkinsci.plugins.workflow.job.WorkflowJob', 'pipeline'],
+    // A matrix project has `activeConfigurations`, not `jobs`. Its axes are
+    // builds OF it rather than jobs beside it, so it is a leaf and the row
+    // addresses the parent -- which is the thing you build.
+    ['hudson.matrix.MatrixProject', 'matrix'],
+    // Nothing starts an external job from here, but it is a real row on real
+    // controllers and hiding it would be pretending the controller is smaller
+    // than it is.
+    ['hudson.model.ExternalJob', 'external'],
+    ['hudson.maven.MavenModuleSet', 'maven']
+  ])('lists %s as a pipeline in its own right', async (cls, name) => {
+    const { http } = root([{ name, _class: cls, buildable: true }])
+    const pipelines = await adapter(http).listPipelines()
+    expect(pipelines.map((p) => p.ref)).toEqual([`job/${name}`])
+    expect(pipelines[0].groupPath).toEqual([])
+  })
+
+  it('walks an organization folder, which nests a multibranch inside a folder', async () => {
+    // The deepest shape in common use: org folder -> repository (multibranch)
+    // -> branch. Three levels, three requests, one buildable row at the bottom.
+    const { http, calls } = root(
+      [{ name: 'acme', _class: 'jenkins.branch.OrganizationFolder' }],
+      {
+        'job/acme': [
+          {
+            name: 'web',
+            _class: 'org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject'
+          }
+        ],
+        'job/acme/job/web': [
+          { name: 'main', _class: 'org.jenkinsci.plugins.workflow.job.WorkflowJob', buildable: true },
+          {
+            name: 'PR-14',
+            _class: 'org.jenkinsci.plugins.workflow.job.WorkflowJob',
+            buildable: true
+          }
+        ]
+      }
+    )
+    const pipelines = await adapter(http).listPipelines()
+    expect(pipelines.map((p) => p.ref)).toEqual([
+      'job/acme/job/web/job/main',
+      'job/acme/job/web/job/PR-14'
+    ])
+    expect(pipelines[0].groupPath.map((g) => g.label)).toEqual(['acme', 'web'])
+    // One request per container and not one per job: the branch rows came out
+    // of the multibranch read, not out of two more.
+    expect(calls.filter((c) => c.path.includes('/api/json'))).toHaveLength(3)
+  })
+
+  it('treats a node that carries a jobs array as a container whatever it calls itself', async () => {
+    // A folder plugin this build has never heard of still answers with `jobs`,
+    // and that is the honest signal. Descending on it beats dropping its
+    // children on the floor because the class name was unfamiliar.
+    const { http } = root([{ name: 'odd', _class: 'com.example.SomeOtherGrouping', jobs: [] }], {
+      'job/odd': [{ name: 'inner', _class: 'hudson.model.FreeStyleProject', buildable: true }]
+    })
+    const pipelines = await adapter(http).listPipelines()
+    expect(pipelines.map((p) => p.ref)).toEqual(['job/odd/job/inner'])
+  })
+
+  it('does not follow a container that is at the depth limit', async () => {
+    const { http } = root([{ name: 'a', _class: 'com.cloudbees.hudson.plugins.folder.Folder' }], {
+      'job/a': [{ name: 'b', _class: 'com.cloudbees.hudson.plugins.folder.Folder' }]
+    })
+    // maxDepth 1 means the root's own children are as deep as it goes.
+    expect(await adapter(http, { maxDepth: 1 }).listPipelines()).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+
 describe('runs', () => {
   it.each([
     ['a finished pass', { building: false, result: 'SUCCESS' }, 'success', undefined],
@@ -326,7 +419,9 @@ describe('progressive log', () => {
 describe('parameters', () => {
   it.each([
     ['hudson.model.StringParameterDefinition', 'string'],
-    ['hudson.model.TextParameterDefinition', 'string'],
+    // A multi-line string, and a type of its own only so the form can render a
+    // textarea. Jenkins treats it as a String everywhere else.
+    ['hudson.model.TextParameterDefinition', 'text'],
     ['hudson.model.BooleanParameterDefinition', 'boolean'],
     ['hudson.model.ChoiceParameterDefinition', 'choice'],
     ['hudson.model.PasswordParameterDefinition', 'password']
@@ -336,6 +431,45 @@ describe('parameters', () => {
     )
     const [param] = await jenkinsParams(http, 'job/app')
     expect(param.type).toBe(type)
+  })
+
+  /**
+   * The types this form cannot render as the control they deserve.
+   *
+   * Every one of them is still offered, as a text box, and still submitted --
+   * which is what Jenkins' own `buildWithParameters` does with an unrecognised
+   * field too. What must not happen is offering the box with no warning, since
+   * for a file parameter the build will simply not get a file.
+   */
+  it.each([
+    ['hudson.model.FileParameterDefinition', /multipart|file/i],
+    ['hudson.model.RunParameterDefinition', /build/i],
+    [
+      'com.cloudbees.plugins.credentials.CredentialsParameterDefinition',
+      /credential/i
+    ],
+    ['org.biouno.unochoice.ChoiceParameter', /Active Choices/i]
+  ])('says on the field what it cannot do about %s', async (cls, expected) => {
+    const { http } = fake(() =>
+      json({ property: [{ parameterDefinitions: [{ _class: cls, name: 'p' }] }] })
+    )
+    const [param] = await jenkinsParams(http, 'job/app')
+    expect(param.unsupportedNote).toMatch(expected)
+  })
+
+  it('leaves an ordinary parameter without a caveat it does not need', async () => {
+    const { http } = fake(() =>
+      json({
+        property: [
+          {
+            parameterDefinitions: [
+              { _class: 'hudson.model.StringParameterDefinition', name: 'BRANCH' }
+            ]
+          }
+        ]
+      })
+    )
+    expect((await jenkinsParams(http, 'job/app'))[0].unsupportedNote).toBeUndefined()
   })
 
   // The loose export stays, but the adapter member is the supported path.

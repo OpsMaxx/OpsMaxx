@@ -41,6 +41,7 @@ import {
   type CicdStep,
   type CicdTriggerResult
 } from '../../../shared/cicd'
+import { cleanCicdLog } from '../../../shared/cicdLog'
 
 export interface JenkinsAdapterOptions {
   connectionId: string
@@ -335,7 +336,14 @@ export function createJenkinsAdapter(http: CicdHttp, opts: JenkinsAdapterOptions
         'Reading the build log'
       )
 
-      let text = res.body ?? ''
+      // Cleaned BEFORE the cap, not after. Jenkins splices its console notes
+      // into the byte stream at arbitrary offsets, so slicing raw text at
+      // `maxLogBytes` lands inside one about as often as not -- and a note whose
+      // ESC[8mha: preamble was cut off is no longer recognisable as a note, so
+      // the base64 would survive every later pass. Cleaning first also means the
+      // cap measures what the reader will actually see rather than counting a
+      // few hundred characters of concealed annotation as log.
+      let text = cleanCicdLog(res.body ?? '')
       let withheldBytes: number | undefined
       if (text.length > cfg.maxLogBytes) {
         // Keep the tail: on a finished build the first fetch is start=0 and the
@@ -452,25 +460,67 @@ export async function jenkinsParams(http: CicdHttp, pipelineRef: string): Promis
   return defs
     .filter((d) => typeof d?.name === 'string' && d.name)
     .map((d: any): CicdParam => {
+      // `_class` first: it is the fully-qualified Java class and is the only
+      // one of the two that a plugin cannot collide with. `type` is the short
+      // name and is what a controller too old to emit `_class` gives.
       const kind = String(d._class ?? d.type ?? '')
+      // Password before Text before String. `PasswordParameterDefinition` and
+      // `TextParameterDefinition` both end in the same suffix as everything
+      // else, so the order of these tests IS the mapping.
       const type: CicdParam['type'] = /password/i.test(kind)
         ? 'password'
         : /boolean/i.test(kind)
           ? 'boolean'
           : /choice/i.test(kind)
             ? 'choice'
-            : 'string'
+            : /\btext/i.test(kind.replace(/^.*\./, ''))
+              ? 'text'
+              : 'string'
       // Never read the default of a secret, let alone hand it back.
       const fallback = type === 'password' ? undefined : d?.defaultParameterValue?.value
+      const unsupportedNote = UNSUPPORTED_PARAM[shortClass(kind)]
       return {
         key: d.name,
         label: d.name,
         type,
         required: fallback === undefined || fallback === null,
         default: fallback === undefined || fallback === null ? undefined : String(fallback),
-        choices: type === 'choice' ? (Array.isArray(d?.choices) ? d.choices.map(String) : []) : undefined
+        choices: type === 'choice' ? (Array.isArray(d?.choices) ? d.choices.map(String) : []) : undefined,
+        ...(unsupportedNote ? { unsupportedNote } : {})
       }
     })
+}
+
+const shortClass = (kind: string): string => kind.replace(/^.*[.$]/, '')
+
+/**
+ * Jenkins parameter types this form cannot render as the control they deserve.
+ *
+ * Every one of them still appears, as a text box, and is still submitted -- so
+ * a Git Parameter into which somebody types a branch name works exactly as it
+ * would in Jenkins. What is NOT claimed is that the box is the right control,
+ * because for two of these it cannot be: a file parameter needs a multipart
+ * body that `buildWithParameters` is not being given here, and a credentials
+ * parameter is a pointer into Jenkins' own credential store that OpsMaxx has no
+ * business picking on the user's behalf. The note goes on the field, where the
+ * person about to type into it will read it.
+ *
+ * Keyed on the SHORT class name so both `_class` (fully qualified) and `type`
+ * (short) land on the same entry.
+ */
+const UNSUPPORTED_PARAM: Record<string, string> = {
+  FileParameterDefinition:
+    'Jenkins expects a file upload here. OpsMaxx sends form fields, not a multipart body, so whatever is typed arrives as text and the build will not see a file. Start this one in Jenkins.',
+  RunParameterDefinition:
+    'Jenkins offers a picker over another job\u2019s builds here. OpsMaxx does not read that list, so this has to be the build reference itself.',
+  CredentialsParameterDefinition:
+    'This names an entry in Jenkins\u2019 own credential store. OpsMaxx does not read that store and will not choose one \u2014 type the credential id exactly as Jenkins knows it, or start this build in Jenkins.',
+  ChoiceParameter:
+    'This is an Active Choices parameter: Jenkins computes its options with a Groovy script at render time. OpsMaxx does not run that script, so there is no list to offer and the value has to be typed.',
+  CascadeChoiceParameter:
+    'This is an Active Choices parameter whose options depend on another field. OpsMaxx does not run the script that computes them, so the value has to be typed.',
+  DynamicReferenceParameter:
+    'This is an Active Choices reference parameter, rendered by a Groovy script OpsMaxx does not run.'
 }
 
 /**

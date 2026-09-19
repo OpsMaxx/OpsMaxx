@@ -422,6 +422,10 @@ export function FleetMonitor(): React.JSX.Element {
    * Looked up from `enabledRead` rather than the registry, so a module switched
    * off cannot produce a header for a panel that is not mounted.
    */
+  /** Collapsed by default: the blurb is written to be read once, when
+   *  choosing whether to enable the module, not on every visit afterwards. */
+  const [aboutOpen, setAboutOpen] = useState(false)
+
   const promoted = useMemo(
     () =>
       activeTab !== 'overview' && activeTab !== 'alerts' && isPromotedModule(activeTab)
@@ -557,9 +561,38 @@ export function FleetMonitor(): React.JSX.Element {
          */}
         {promoted ? (
           <div className="content-header">
-            <div>
+            {/* THE BLURB IS A PARAGRAPH, AND IT WAS PERMANENT.
+                Every module's `detail` is written to be read once, when
+                somebody is deciding whether to turn the module on. Rendered
+                here it became a fixed four-line wall above the panel, pushing
+                the actual content down on every visit for the whole life of
+                the install — reported as "the ci/cd navbar should be sticky
+                instead of the wall of text of ci/cd on top".
+                Clamped to its first line, expandable, rather than deleted:
+                it is the only place a promoted panel says what it is. Clamped
+                with CSS rather than by splitting on a full stop, which is
+                wrong the first time a detail contains an abbreviation. */}
+            <div style={{ minWidth: 0 }}>
               <h1 className="ui-page-title">{promoted.label}</h1>
-              <div className="sub ui-note">{promoted.detail}</div>
+              <button
+                className="ui-note sub"
+                aria-expanded={aboutOpen}
+                title={aboutOpen ? 'Show less' : promoted.detail}
+                onClick={() => setAboutOpen((v) => !v)}
+                style={{
+                  display: '-webkit-box',
+                  WebkitBoxOrient: 'vertical',
+                  WebkitLineClamp: aboutOpen ? 'unset' : 1,
+                  overflow: 'hidden',
+                  textAlign: 'left',
+                  background: 'none',
+                  border: 0,
+                  padding: 0,
+                  cursor: 'pointer'
+                }}
+              >
+                {promoted.detail}
+              </button>
             </div>
           </div>
         ) : (

@@ -42,6 +42,17 @@ interface ProviderDef {
   id: CicdProvider
   label: string
   placeholder: string
+  /**
+   * The URL this provider has for everyone, filled in ready to be used.
+   *
+   * `null` for Jenkins, and that is the point of the field rather than an
+   * omission: every Jenkins lives at an address only its admin knows, so a
+   * default there would be a guess presented as an answer. GitHub and GitLab
+   * each have exactly one public host, and making somebody type
+   * `https://github.com` before they can paste a token is a step with no
+   * decision in it. Enterprise users overwrite it, which is one edit either way.
+   */
+  defaultUrl: string | null
   /** What the URL field means for this provider — all three differ. */
   urlHint: string
   /** Jenkins authenticates as a user; the other two carry identity in the token. */
@@ -66,6 +77,7 @@ const PROVIDERS: ProviderDef[] = [
     id: 'github',
     label: 'GitHub Actions',
     placeholder: 'https://github.com',
+    defaultUrl: 'https://github.com',
     urlHint:
       'The web URL you use, not an API root. github.com and GitHub Enterprise have different API hosts and OpsMaxx derives the right one.',
     needsUsername: false,
@@ -86,6 +98,7 @@ const PROVIDERS: ProviderDef[] = [
     id: 'gitlab',
     label: 'GitLab CI',
     placeholder: 'https://gitlab.com',
+    defaultUrl: 'https://gitlab.com',
     urlHint: 'The instance URL. OpsMaxx appends /api/v4 itself.',
     needsUsername: false,
     scopes: [
@@ -106,6 +119,8 @@ const PROVIDERS: ProviderDef[] = [
     id: 'jenkins',
     label: 'Jenkins',
     placeholder: 'https://jenkins.example.internal',
+    // No default, deliberately. See `defaultUrl`.
+    defaultUrl: null,
     urlHint:
       'Including the context path if the admin chose one — Jenkins sits wherever it was installed, and OpsMaxx does not guess.',
     needsUsername: true,
@@ -123,6 +138,13 @@ const PROVIDERS: ProviderDef[] = [
 function trimSlash(s: string): string {
   return s.trim().replace(/\/+$/, '')
 }
+
+const defaultUrlFor = (id: CicdProvider): string | null =>
+  PROVIDERS.find((p) => p.id === id)?.defaultUrl ?? null
+
+/** Whether this is still one of the prefills rather than something typed. */
+const isDefaultUrl = (url: string): boolean =>
+  PROVIDERS.some((p) => p.defaultUrl !== null && p.defaultUrl === trimSlash(url))
 
 type VerifyState =
   | { kind: 'idle' }
@@ -166,7 +188,11 @@ export function CicdConnectModal({
 
   const [provider, setProvider] = useState<CicdProvider>(editing?.provider ?? 'github')
   const [name, setName] = useState(editing?.name ?? '')
-  const [baseUrl, setBaseUrl] = useState(editing?.baseUrl ?? '')
+  // Prefilled for the SaaS providers on a new account. An account being edited
+  // keeps its own URL whatever it is, including an empty one.
+  const [baseUrl, setBaseUrl] = useState(
+    editing?.baseUrl ?? defaultUrlFor(PROVIDERS[0].id) ?? ''
+  )
   const [username, setUsername] = useState(editing?.username ?? '')
   // Always empty on open, including when editing. A masked value in a password
   // field is a value the form would have to round-trip, and this module never
@@ -315,6 +341,13 @@ export function CicdConnectModal({
               setProvider(p.id)
               // A verify result belongs to the provider it was taken against.
               setVerify({ kind: 'idle' })
+              // Swap the prefill, but never a URL the user typed. Only a field
+              // that is empty or still holds ANOTHER provider's default is
+              // replaced -- so switching github → gitlab → github is free, and
+              // a half-typed GitHub Enterprise host survives a misclick.
+              setBaseUrl((current) =>
+                current.trim() === '' || isDefaultUrl(current) ? (defaultUrlFor(p.id) ?? '') : current
+              )
             }}
           >
             {p.label}

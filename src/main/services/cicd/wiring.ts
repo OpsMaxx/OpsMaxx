@@ -55,6 +55,7 @@ import {
   setJenkinsJobEnabled,
   cancelJenkinsQueueItem
 } from './jenkins'
+import { cleanCicdLog } from '../../../shared/cicdLog'
 import { triggerGitlab, listGitlabParams, cancelGitlab } from './gitlab'
 import { triggerGithub, rerunGithub, cancelGithub } from './github'
 
@@ -445,7 +446,15 @@ export async function setJobEnabled(
   if (c.provider !== 'jenkins') {
     throw new Error(`Enabling and disabling a job is Jenkins-only; ${c.provider} has no equivalent.`)
   }
-  return setJenkinsJobEnabled(makeCicdHttp(c, resolveSecret(c)), pipelineRef, enabled)
+  const result = await setJenkinsJobEnabled(makeCicdHttp(c, resolveSecret(c)), pipelineRef, enabled)
+  // Go back and look. Jenkins answers this with a 302 and no body, so the only
+  // evidence of what actually happened is `buildable` on the next job read --
+  // and a control whose state never changes is a control the user presses twice
+  // and then stops trusting. Awaited, so the caller's promise resolves only once
+  // the panel has been told the new state; a failure to re-read must not turn a
+  // write that succeeded into an error, hence the swallow.
+  await rediscoverOne(connectionId).catch(() => undefined)
+  return result
 }
 
 /** Drop one item out of the queue. A queued item has no build number, so this
@@ -511,7 +520,14 @@ export async function getLog(
 ): Promise<CicdLogChunk> {
   const c = requireConnection(connectionId)
   const secret = resolveSecret(c)
-  return createCicdAdapter(c, secret).getLog(pipelineRef, runId, stepName, cursor)
+  const chunk = await createCicdAdapter(c, secret).getLog(pipelineRef, runId, stepName, cursor)
+  // The one place every provider's log passes through, which is why the clean
+  // happens here rather than three times in three adapters. GitLab colours its
+  // job traces by default and GitHub carries whatever the tool inside the step
+  // printed, so ANSI is not a Jenkins problem even though the console notes are.
+  // Jenkins cleans its own a second time, earlier -- see the note there; the
+  // function is idempotent precisely so both can.
+  return { ...chunk, text: cleanCicdLog(chunk.text) }
 }
 
 /**
@@ -712,7 +728,7 @@ const pipelines = new Map<string, CicdPipeline[]>()
  * cannot see -- has genuinely been read, and calling that "never read" sends
  * the user looking for a network fault that is not there.
  */
-const discovery = new Map<string, { at: number; error?: string }>()
+const discovery = new Map<string, { at?: number; error?: string; reading?: boolean }>()
 
 function targetsFor(connectionId: string): CicdPollTarget[] {
   return (pipelines.get(connectionId) ?? []).map((p) => ({
@@ -761,9 +777,10 @@ function panelState(connectionId: string): CicdPanelState {
     intervalSec: Math.round((provider ? POLL_INTERVAL_MS[provider] : 20_000) / 1000),
     // A successful discovery IS a read, and for an account with no pipelines
     // visible to it, the only one there will ever be.
-    readAt: sched?.lastReadAt ?? (disco !== undefined && disco.error === undefined ? disco.at : undefined),
+    readAt: sched?.lastReadAt ?? (disco?.at !== undefined && disco.error === undefined ? disco.at : undefined),
     ...(error !== undefined ? { error } : {}),
     failures: failed.length,
+    ...(disco?.reading === true ? { reading: true } : {}),
     ...(sched?.rate ? { budget: sched.rate } : {}),
     pipelines: withRuns
   }
@@ -777,30 +794,74 @@ function panelState(connectionId: string): CicdPanelState {
  * A connection whose discovery failed keeps whatever pipelines it had, for the
  * same reason a failed poll keeps its rows.
  */
+async function discoverOne(
+  c: CicdConnection,
+  emit: (event: CicdPanelState) => void
+): Promise<void> {
+  // Announced BEFORE the await, not only after it.
+  //
+  // Discovery is the slow half and on GitHub it is very slow -- repositories,
+  // then a workflow list per repository, then the YAML of each one to find out
+  // whether it declares `workflow_dispatch`. Until this emit existed the panel
+  // had nothing at all to show during it: `snapshot()` returned a state with no
+  // `readAt`, no `error` and no pipelines, which the panel rendered as "not read
+  // yet ... if it stays unread, the account is not being polled". A freshly
+  // pasted token therefore looked rejected for as long as it took to work, which
+  // is the one reading the module is not allowed to invite.
+  // The previous entry is kept, error and all: an account that failed its last
+  // discovery is still failing while the retry runs, and blanking that would
+  // make the panel go quiet about a problem mid-retry. Only `reading` is added.
+  discovery.set(c.id, { ...discovery.get(c.id), reading: true })
+  emit(panelState(c.id))
+  try {
+    const secret = resolveSecret(c)
+    const found = await createCicdAdapter(c, secret).listPipelines()
+    pipelines.set(c.id, found)
+    discovery.set(c.id, { at: Date.now() })
+  } catch (err) {
+    // Keep the previous list. The poll that follows will report the failure
+    // against the rows the user can already see, which is more useful than
+    // an empty panel with a message -- but RECORD it, because when there is
+    // no previous list there is no poll either and nothing else will.
+    if (!pipelines.has(c.id)) pipelines.set(c.id, [])
+    discovery.set(c.id, {
+      at: Date.now(),
+      error: err instanceof Error ? err.message : String(err)
+    })
+  }
+  emit(panelState(c.id))
+}
+
 async function discover(emit: (event: CicdPanelState) => void): Promise<void> {
   for (const c of connections) {
     if (!c.enabled) {
       pipelines.delete(c.id)
       continue
     }
-    try {
-      const secret = resolveSecret(c)
-      const found = await createCicdAdapter(c, secret).listPipelines()
-      pipelines.set(c.id, found)
-      discovery.set(c.id, { at: Date.now() })
-    } catch (err) {
-      // Keep the previous list. The poll that follows will report the failure
-      // against the rows the user can already see, which is more useful than
-      // an empty panel with a message -- but RECORD it, because when there is
-      // no previous list there is no poll either and nothing else will.
-      if (!pipelines.has(c.id)) pipelines.set(c.id, [])
-      discovery.set(c.id, {
-        at: Date.now(),
-        error: err instanceof Error ? err.message : String(err)
-      })
-    }
-    emit(panelState(c.id))
+    await discoverOne(c, emit)
   }
+  poller?.configure(connections, allTargets())
+}
+
+/**
+ * Re-read one account's job list, now.
+ *
+ * The reason this exists is `setJobEnabled`. `buildable` -- which is what
+ * `CicdPipeline.triggerable` carries and what the Enable/Disable control reads
+ * its state off -- is produced by `listPipelines` and by nothing else. The
+ * poller re-reads RUNS, not the job list, so before this the sequence was:
+ * press Disable, Jenkins accepts it, the panel keeps rendering the job as
+ * buildable forever, and the operator presses the button again. The write was
+ * landing; nothing ever went back to look.
+ *
+ * Scoped to the one connection deliberately. Rediscovering the estate because
+ * somebody toggled one job is a folder walk of every controller and, on GitHub,
+ * a YAML fetch per workflow.
+ */
+async function rediscoverOne(connectionId: string): Promise<void> {
+  const c = connections.find((k) => k.id === connectionId)
+  if (!c || !c.enabled || !broadcast) return
+  await discoverOne(c, broadcast)
   poller?.configure(connections, allTargets())
 }
 
@@ -873,6 +934,12 @@ export function dispose(): void {
   poller = null
   connections = []
   pipelines.clear()
+  // Alongside `pipelines`, and for the same reason: a stale `discovery` entry
+  // outlives the connection it describes and `panelState` reads `readAt` out of
+  // it, so leaving it behind is a timestamp for an account that no longer
+  // exists -- and, after a re-configure, a claim about a read that happened in
+  // a previous life of this module.
+  discovery.clear()
   agentRuns.length = 0
   logCursors.clear()
   broadcast = null
