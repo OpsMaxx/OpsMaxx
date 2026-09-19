@@ -1,0 +1,277 @@
+/* Capacity trends — roadmap item 26's screen.
+ *
+ * The panel answers one question: what is going to run out, and when. So the
+ * only job this stylesheet has is to make the ranking visible without anybody
+ * reading it — the urgent card is the one the eye lands on, and a metric that
+ * is not moving recedes however high its percentage is.
+ *
+ * Colour is never the only signal. Every rank also carries its own headline in
+ * words ("Full in 11 days", "Not moving", "Not reporting any more"), because a
+ * screen that encodes urgency in a red rail alone is a screen a colour-blind
+ * operator cannot triage. The rail is the shortcut, not the statement.
+ *
+ * Every size here resolves through the five-role scale in tokens.css. 11px
+ * (--fs-caption) appears only on the tracked, uppercase column label in the
+ * estate strip, which is read as a silhouette rather than letter by letter —
+ * the one use typeScale.test.ts defends.
+ */
+
+/* ------------------------------------------------------------------ cards */
+
+.cap-cards {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+}
+
+.cap-card {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  /* Room on the left for the rail, which is drawn as a border rather than a
+     child so nothing can reflow past it. */
+  padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-4);
+  border-left-width: 3px;
+  border-left-color: var(--border-strong);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.cap-card.is-over {
+  border-left-color: var(--danger);
+  background: linear-gradient(90deg, var(--danger-soft), transparent 40%), var(--bg-card);
+}
+.cap-card.is-crossing {
+  border-left-color: var(--warn);
+  background: linear-gradient(90deg, var(--warn-soft), transparent 40%), var(--bg-card);
+}
+/* "We have stopped knowing" is not a degradation and does not get the amber
+   that means one. It is the same unknown role the change log and the alert
+   coverage lines use. */
+.cap-card.is-stalled {
+  border-left-color: var(--info);
+}
+.cap-card.is-quiet {
+  background: transparent;
+  border-left-color: var(--border);
+}
+
+/* -------------------------------------------------------------- card head */
+
+.cap-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.cap-said {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* Allowed to shrink so the value and the sparkline keep their place; a
+     flex item will not go below its content width without this. */
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+
+.cap-metric {
+  font-size: var(--fs-body);
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+/* The conclusion. The largest text on the card, because it is the reason
+   anybody opened the screen. */
+.cap-headline {
+  font-size: var(--fs-title);
+  font-weight: var(--fw-title);
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.cap-card.is-over .cap-headline {
+  color: var(--danger);
+}
+.cap-card.is-crossing .cap-headline {
+  color: var(--warn);
+}
+.cap-card.is-stalled .cap-headline {
+  color: var(--info);
+}
+/* Not muted to the point of illegibility: "Not moving" is an answer, and the
+   most common one on a healthy estate. */
+.cap-card.is-quiet .cap-headline {
+  font-size: var(--fs-subtitle);
+  color: var(--text-muted);
+}
+
+.cap-spark {
+  flex: none;
+  display: block;
+  width: 110px;
+  /* Sparkline is drawn in currentColor, so the rank sets it once here. */
+  color: var(--text-faint);
+}
+.cap-card.is-over .cap-spark {
+  color: var(--danger);
+}
+.cap-card.is-crossing .cap-spark {
+  color: var(--warn);
+}
+.cap-spark .spark {
+  width: 100%;
+}
+
+.cap-now {
+  flex: none;
+  margin-left: auto;
+  text-align: right;
+}
+
+/* The current percentage, secondary to the headline on purpose: a number that
+   is not moving is not a problem, and sizing it above the forecast is how this
+   screen used to imply otherwise. */
+.cap-value {
+  font-size: var(--fs-subtitle);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.cap-value.warn {
+  color: var(--warn);
+}
+.cap-value.danger {
+  color: var(--danger);
+}
+
+/* -------------------------------------------------------------- card body */
+
+/* Unit and basis: of what, measured when, out of how many readings. */
+.cap-basis {
+  font-size: var(--fs-body);
+  color: var(--text-faint);
+}
+
+/* The full sentence, with the window it was drawn from. Never optional, so it
+   is never given a rule that could hide it. */
+.cap-why {
+  font-size: var(--fs-body);
+  color: var(--text);
+  line-height: 1.5;
+}
+.cap-why.faint {
+  color: var(--text-muted);
+}
+.cap-why .cap-rate {
+  color: var(--text-faint);
+}
+.cap-why .chip {
+  margin-left: var(--sp-1);
+}
+
+.cap-fold {
+  margin-top: var(--sp-1);
+}
+.cap-cards + .cap-fold,
+.cap-fold + .cap-fold {
+  margin-top: var(--sp-3);
+}
+
+.cap-note {
+  font-size: var(--fs-body);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.cap-note.faint {
+  color: var(--text-faint);
+}
+
+.cap-lede {
+  margin-top: var(--sp-3);
+  font-size: var(--fs-subtitle);
+}
+
+/* ---------------------------------------------------------- estate strip */
+
+.cap-estate {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.cap-estate-head {
+  font-size: var(--fs-subtitle);
+  font-weight: 500;
+  color: var(--text);
+}
+
+.cap-fleet {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.cap-fleet > li {
+  display: grid;
+  /* Time first. The whole point of a ranked list is that the rank is a column
+     you can run your eye down, and it was previously buried at the end of a
+     sentence in the third cell of a table. */
+  grid-template-columns: 3.5rem minmax(6rem, auto) 1fr;
+  gap: var(--sp-3);
+  align-items: baseline;
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.cap-fleet > li:last-child {
+  border-bottom: none;
+}
+
+.cap-fleet-when {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--text-faint);
+  font-weight: 600;
+}
+.cap-fleet > li.is-over .cap-fleet-when {
+  color: var(--danger);
+}
+.cap-fleet > li.is-crossing .cap-fleet-when {
+  color: var(--warn);
+}
+
+.cap-fleet-host {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cap-fleet-why {
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+/* A narrow panel: the sentence drops under the name rather than being squeezed
+   to two words a column wide. */
+@media (max-width: 700px) {
+  .cap-fleet > li {
+    grid-template-columns: 3.5rem 1fr;
+  }
+  .cap-fleet-why {
+    grid-column: 2 / -1;
+  }
+  .cap-now {
+    margin-left: 0;
+  }
+}

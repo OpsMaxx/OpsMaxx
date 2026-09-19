@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueuePanel } from '../src/renderer/src/components/cicd/QueuePanel'
 import type { CicdBridge, CicdCapacity, CicdConnection } from '../src/shared/cicd'
@@ -182,5 +182,38 @@ describe('dropping a queued item', () => {
     render(<QueuePanel connections={[CONN]} bridge={b} canTrigger />)
     await user.click(await screen.findByRole('button', { name: /drop/i }))
     await waitFor(() => expect((b.queue as unknown as { mock: { calls: unknown[] } }).mock.calls.length).toBeGreaterThan(1))
+  })
+})
+
+/**
+ * A read in flight, shown as something that moves.
+ *
+ * This panel printed `Reading...` as a static line, which is indistinguishable
+ * from a read that has hung — and a Jenkins controller under load is exactly
+ * when somebody opens this tab.
+ */
+describe('reading the queue', () => {
+  it('shows a moving indicator while the read is in flight, and drops it when it lands', async () => {
+    let settle: ((r: { items: never[]; capacity: CicdCapacity }) => void) | undefined
+    const b = bridge({
+      queue: vi.fn(
+        () =>
+          new Promise<{ items: never[]; capacity: CicdCapacity }>((res) => {
+            settle = res
+          })
+      )
+    })
+    render(<QueuePanel connections={[CONN]} bridge={b} />)
+
+    const status = await screen.findByRole('status')
+    expect(status.textContent).toMatch(/Reading the queue/)
+    // The part that answers "working or hung". A full stop cannot.
+    expect(status.querySelector('.spin')).toBeTruthy()
+
+    await act(async () => {
+      settle?.({ items: [], capacity: capacity() })
+    })
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    expect(await screen.findByText('Nothing is queued')).toBeTruthy()
   })
 })

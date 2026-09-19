@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import { useApp } from '../src/renderer/src/store/app'
 import { useVaultPrompt } from '../src/renderer/src/store/vaultPrompt'
 import userEvent from '@testing-library/user-event'
@@ -871,7 +871,12 @@ describe('a read in flight is not a rejected token', () => {
         bridge={bridge({ snapshot: vi.fn(async () => [reading()]) })}
       />
     )
-    expect(await screen.findByText(/being read now/)).toBeTruthy()
+    // The indicator itself, not a sentence: a read in flight has to be
+    // distinguishable from a read that has hung, and only something that moves
+    // does that. `role="status"` is what a screen reader gets instead.
+    const status = await screen.findByRole('status')
+    expect(status.textContent).toMatch(/Reading/)
+    expect(status.querySelector('.spin')).toBeTruthy()
     // The sentence that made a working token look refused.
     expect(screen.queryByText(/the account is not being polled/)).toBeNull()
   })
@@ -911,7 +916,9 @@ describe('a read in flight is not a rejected token', () => {
       />
     )
     await user.click(await screen.findByRole('button', { name: /^Pipelines/ }))
-    expect(await screen.findByText(/Reading the job list now/)).toBeTruthy()
+    const status = await screen.findByRole('status')
+    expect(status.textContent).toMatch(/Reading the job list/)
+    expect(status.querySelector('.spin')).toBeTruthy()
   })
 })
 
@@ -1500,5 +1507,209 @@ describe('removing an account', () => {
     await userEvent.click(screen.getByRole('button', { name: /^remove$/i }))
     await waitFor(() => expect(useApp.getState().cicdConnections).toHaveLength(1))
     expect(useApp.getState().cicdConnections[0].name).toBe('Platform')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The banner that survived the unlock, and the loader that did not move.
+//
+// Reported together, from a live install: "even after unlocking the vault the
+// vault messge is sticky, the loader isn't animated, it's just 'Reading...'".
+//
+// Both are the same class of defect — the screen stating something that is no
+// longer, or not yet, true — so both are pinned by driving the real transitions
+// through `onState`, which is the channel main actually uses. Asserting that
+// `configure` was called would pass against a panel that then rendered the red
+// bar forever, which is precisely the bug.
+// ---------------------------------------------------------------------------
+
+const VAULT_LOCKED_ERROR = 'OPSMAXX_VAULT_LOCKED: the vault is locked.'
+
+/** A connection whose first discovery died on the lock: no pipelines, no read. */
+const locked = (): CicdPanelState =>
+  state({ readAt: undefined, pipelines: [], error: VAULT_LOCKED_ERROR, failures: 1 })
+
+/** What main emits when it starts a read: the previous error is KEPT (see
+ *  `discoverOne` in cicd/wiring.ts) and only `reading` is added. */
+const rereading = (): CicdPanelState => ({ ...locked(), reading: true })
+
+/** A read that got through. The error is gone and the rows are there. */
+const succeeded = (): CicdPanelState => state()
+
+const BANNER = /authenticates with a credential in the vault/
+
+/** Renders the panel and hands back main's own push channel. */
+function mounted(first: CicdPanelState, over: Partial<CicdBridge> = {}) {
+  let push: ((s: CicdPanelState) => void) | undefined
+  const b = bridge({
+    snapshot: vi.fn(async () => [first]),
+    onState: vi.fn((h: (s: CicdPanelState) => void) => {
+      push = h
+      return () => undefined
+    }),
+    ...over
+  })
+  const { container } = render(<CicdPanel connections={[CONN]} bridge={b} />)
+  return {
+    bridge: b,
+    container,
+    emit: (s: CicdPanelState) => act(() => push?.(s)),
+    /** The indicator whose label matches, because an account being re-read and
+     *  a feed with nothing in it yet both raise one and they are different
+     *  statements about different parts of the screen. */
+    status: (re: RegExp): HTMLElement | undefined =>
+      screen.queryAllByRole('status').find((el) => re.test(el.textContent ?? ''))
+  }
+}
+
+describe('the locked-vault banner goes when the lock does', () => {
+  it('is replaced by a live indicator the moment the re-read starts, and gone when it lands', async () => {
+    const { emit, status } = mounted(locked(), {
+      // Unlocking is what makes the account readable again; main is told so
+      // immediately rather than at the next poll, and reports the read.
+      configure: vi.fn(async () => undefined)
+    })
+    expect(await screen.findByText(BANNER)).toBeTruthy()
+
+    useVaultPrompt.setState({ request: vi.fn(async () => true) })
+    await userEvent.click(screen.getByRole('button', { name: /unlock vault/i }))
+
+    // Main answers the re-read request the way it really does.
+    emit(rereading())
+    await waitFor(() => expect(screen.queryByText(BANNER)).toBeNull())
+    const spinner = status(/Reading Platform now/)
+    expect(spinner).toBeTruthy()
+    expect(spinner?.querySelector('.spin')).toBeTruthy()
+
+    emit(succeeded())
+    await waitFor(() => expect(screen.queryAllByRole('status')).toHaveLength(0))
+    expect(screen.queryByText(BANNER)).toBeNull()
+    expect(await screen.findByText('deploy')).toBeTruthy()
+  })
+
+  it('keeps the banner when the unlock is cancelled — nothing changed', async () => {
+    mounted(locked())
+    expect(await screen.findByText(BANNER)).toBeTruthy()
+
+    useVaultPrompt.setState({ request: vi.fn(async () => false) })
+    await userEvent.click(screen.getByRole('button', { name: /unlock vault/i }))
+
+    // Still there, and still offering the one control that helps. A panel that
+    // cleared the error on the press alone would look identical to a
+    // successful unlock, which is the state a reader cannot recover from.
+    await waitFor(() => expect(screen.getByText(BANNER)).toBeTruthy())
+    expect(screen.getByRole('button', { name: /unlock vault/i })).toBeTruthy()
+  })
+
+  it('brings the banner back when the vault re-locks on idle', async () => {
+    const { emit } = mounted(succeeded())
+    await screen.findByText('deploy')
+    expect(screen.queryByText(BANNER)).toBeNull()
+
+    // The idle timer fires somewhere else; the next poll fails on the lock.
+    emit({ ...succeeded(), error: VAULT_LOCKED_ERROR, failures: 1 })
+    expect(await screen.findByText(BANNER)).toBeTruthy()
+  })
+
+  it('never shows the marker it recognises the lock by', async () => {
+    mounted(locked())
+    await screen.findByText(BANNER)
+    expect(screen.queryByText(/OPSMAXX_VAULT_LOCKED/)).toBeNull()
+  })
+})
+
+describe('a first read states no answer it does not have', () => {
+  it('prints no run count while the first read is still in flight', async () => {
+    const { emit } = mounted(rereading())
+    // "0 of 0 runs in the last 24 hours" is an answer, and there is none yet.
+    await waitFor(() => expect(screen.queryByTestId('cicd-counts')).toBeNull())
+    expect(screen.queryByText(/in the last 24 hours/)).toBeNull()
+
+    emit(succeeded())
+    const counts = await screen.findByTestId('cicd-counts')
+    expect(counts.textContent).toContain('1 of 1 run in the last 24 hours')
+  })
+
+  it('keeps the count over rows that already exist while a re-read runs', async () => {
+    // A re-read changes nothing about what is on screen: the rows are the last
+    // true answer and the count describes them.
+    const { emit } = mounted(succeeded())
+    await screen.findByText('deploy')
+    emit({ ...succeeded(), reading: true })
+    await waitFor(() =>
+      expect(screen.getByTestId('cicd-counts').textContent).toContain('1 of 1 run')
+    )
+  })
+
+  it('shows a moving indicator rather than a heading over a paragraph', async () => {
+    const { status } = mounted(rereading())
+    await waitFor(() => expect(status(/GitHub in particular/)).toBeTruthy())
+    const feed = status(/GitHub in particular/)
+    // The explanation is kept — it is what stops somebody concluding the token
+    // is broken — but it is subordinate to the indicator, not standing in for
+    // it, so it lives inside the same status block.
+    expect(feed?.querySelector('.spin')).toBeTruthy()
+    expect(feed?.textContent).toMatch(/^Reading Platform/)
+  })
+})
+
+/**
+ * Refresh, Retry and the unlock all promise the same thing: read this now.
+ *
+ * For the account in the report none of them delivered it. `refresh` nudges the
+ * poller, the poller's targets are built from the pipelines main already holds,
+ * and an account whose first discovery died on the locked vault holds none — so
+ * every "read now" control on the screen was a no-op for exactly the account
+ * that needed one, and there is no timer behind discovery to fix it later.
+ *
+ * Driven through main's own channel rather than asserted on call counts: a
+ * panel that called `configure` and then rendered nothing new is the bug.
+ */
+describe('read now actually reads', () => {
+  it('reads the job list first for an account that has none', async () => {
+    let push: ((s: CicdPanelState) => void) | undefined
+    const b = bridge({
+      snapshot: vi.fn(async () => [
+        state({ readAt: undefined, pipelines: [], error: 'dial tcp: timed out', failures: 2 })
+      ]),
+      onState: vi.fn((h: (s: CicdPanelState) => void) => {
+        push = h
+        return () => undefined
+      }),
+      // The poller has no target for this account, so this reads nothing.
+      refresh: vi.fn(async () => undefined),
+      // Discovery is the only thing that can get it off the ground.
+      configure: vi.fn(async () => {
+        push?.(state())
+      })
+    })
+    render(<CicdPanel connections={[CONN]} bridge={b} />)
+    await screen.findByText(/could not be read/)
+
+    await userEvent.click(screen.getByRole('button', { name: /^Refresh$/ }))
+    expect(await screen.findByText('deploy')).toBeTruthy()
+  })
+
+  it('does not re-walk the estate for an account whose job list is already known', async () => {
+    let push: ((s: CicdPanelState) => void) | undefined
+    const b = bridge({
+      snapshot: vi.fn(async () => [state({ error: 'dial tcp: timed out', failures: 2 })]),
+      onState: vi.fn((h: (s: CicdPanelState) => void) => {
+        push = h
+        return () => undefined
+      }),
+      // Targets exist, so polling them is the whole job — and rediscovery here
+      // would be a folder walk of every controller for a button press.
+      refresh: vi.fn(async () => {
+        push?.(state({ pipelines: [pipeline({ name: 'release', last: run() })] }))
+      }),
+      configure: vi.fn(async () => undefined)
+    })
+    render(<CicdPanel connections={[CONN]} bridge={b} />)
+    await screen.findByText('deploy')
+
+    await userEvent.click(screen.getByRole('button', { name: /^Retry$/ }))
+    expect(await screen.findByText('release')).toBeTruthy()
+    expect(screen.queryByText(/could not be read/)).toBeNull()
   })
 })

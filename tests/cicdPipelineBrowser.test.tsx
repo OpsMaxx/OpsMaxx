@@ -375,3 +375,42 @@ describe('the write half, which is a separate grant', () => {
     expect(build.getAttribute('title')).toContain('disabled')
   })
 })
+
+/**
+ * "The job list is arriving" and "there is no job list" looked identical.
+ *
+ * Both rendered as one grey sentence, and they mean opposite things: one
+ * resolves itself, the other never will until somebody acts. On GitHub the
+ * first state lasts tens of seconds.
+ */
+describe('a job list that is still arriving', () => {
+  it('shows a moving indicator, and keeps the reason it is slow underneath it', async () => {
+    render(
+      <PipelineBrowser
+        connections={[CONN]}
+        pipelines={[]}
+        bridge={bridge()}
+        reading
+        onOpenRun={noop}
+      />
+    )
+    const status = await screen.findByRole('status')
+    expect(status.querySelector('.spin')).toBeTruthy()
+    expect(status.textContent).toMatch(/^Reading the job list/)
+    expect(status.textContent).toMatch(/GitHub takes a while the first time/)
+  })
+
+  it('does not raise one for an account that simply has no pipelines', async () => {
+    render(
+      <PipelineBrowser
+        connections={[CONN]}
+        pipelines={[]}
+        bridge={bridge()}
+        onOpenRun={noop}
+      />
+    )
+    expect(await screen.findByText(/No pipelines have been read from this account yet/)).toBeTruthy()
+    // A spinner here would claim a read is running when none is.
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+})
