@@ -849,6 +849,13 @@ button {
   height: 26px;
   font-size: var(--fs-sm);
 }
+/* A branch of the MongoDB tree that is loading, refused, or has nothing under
+   it. A note inside the column rather than a row that could be clicked. */
+.db-tree-note {
+  padding: 4px 8px;
+  font-size: var(--fs-sm);
+}
+
 /* A long table name is a name, not a paragraph: one line, clipped, with the
    whole of it in the title attribute. */
 .db-schema .tree-row .label {
@@ -869,6 +876,20 @@ button {
   min-height: 0;
 }
 
+/* With no results to show, the editor takes the pane instead of sitting in a
+   160px box above a screenful of one grey sentence. See `resultsOpen` in
+   DatabaseView. */
+.db-editor.grow {
+  flex: 1;
+}
+/* And the empty state shrinks to a footer rather than owning what it cannot
+   fill. `.db-results` keeps `flex: 1` for the case that matters -- real rows. */
+.db-results.idle {
+  flex: none;
+  overflow: visible;
+  border-top: 1px solid var(--border-subtle);
+}
+
 /* Results own whatever is left, and centre what little they have to say when
    that is nothing -- an empty state pinned to the top-left of a very wide pane
    reads as a rendering fault rather than as an answer. */
@@ -881,6 +902,110 @@ button {
 }
 .db-results > .empty {
   margin: auto;
+}
+
+/* ---------------------------------------------------------------------------
+   The MongoDB live monitor.
+
+   Six panels on one auto-filling grid rather than a fixed column count: the
+   pane it sits in is between a schema column and the window edge and is
+   resizable, so any number chosen here would be wrong at some width.
+   --------------------------------------------------------------------------- */
+.db-mon {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-3);
+}
+.db-mon-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+.db-mon-bar .faint {
+  font-size: var(--fs-sm);
+}
+.db-mon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--sp-3);
+}
+.db-mon-panel {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  padding: var(--sp-3);
+  min-width: 0;
+}
+.db-mon-panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+/* Two across at any usable width; one when the panel itself is narrow. */
+.db-mon-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: var(--sp-2) var(--sp-3);
+}
+.db-mon-stat {
+  min-width: 0;
+}
+.db-mon-stat-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.db-mon-stat-label {
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+  text-transform: lowercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.db-mon-stat-value {
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* Holds the sparkline's height before there are two points to draw, so the
+   panel does not jump when the second sample lands. */
+.db-mon-spark-placeholder {
+  height: 26px;
+}
+.db-mon-foot {
+  /* --fs-sm and not --fs-xs: this is a sentence, and 11px is reserved for
+     tracked all-caps captions. See tests/typeScale.test.ts. */
+  font-size: var(--fs-sm);
+  margin-top: var(--sp-2);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.db-mon-foot.warn {
+  color: var(--warn);
+}
+/* A refusal is prose, not a blank chart. */
+.db-mon-refused {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+/* The driver's own sentence, under the one written for a person. */
+.db-mon-detail {
+  margin-top: 4px;
+}
+.db-mon-table {
+  font-size: var(--fs-sm);
+  width: 100%;
+}
+.db-mon-table td,
+.db-mon-table th {
+  padding: 2px 8px 2px 0;
+  text-align: left;
+  white-space: nowrap;
 }
 
 /* A divider between stacked panes. The vertical one already exists as

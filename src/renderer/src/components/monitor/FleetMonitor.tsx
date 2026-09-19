@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { PanelAbout } from './PanelShell'
 import {
   Activity,
   ChevronDown,
@@ -422,10 +423,6 @@ export function FleetMonitor(): React.JSX.Element {
    * Looked up from `enabledRead` rather than the registry, so a module switched
    * off cannot produce a header for a panel that is not mounted.
    */
-  /** Collapsed by default: the blurb is written to be read once, when
-   *  choosing whether to enable the module, not on every visit afterwards. */
-  const [aboutOpen, setAboutOpen] = useState(false)
-
   const promoted = useMemo(
     () =>
       activeTab !== 'overview' && activeTab !== 'alerts' && isPromotedModule(activeTab)
@@ -561,39 +558,21 @@ export function FleetMonitor(): React.JSX.Element {
          */}
         {promoted ? (
           <div className="content-header">
-            {/* THE BLURB IS A PARAGRAPH, AND IT WAS PERMANENT.
+            {/* THE BLURB WAS A PERMANENT WALL.
                 Every module's `detail` is written to be read once, when
-                somebody is deciding whether to turn the module on. Rendered
-                here it became a fixed four-line wall above the panel, pushing
-                the actual content down on every visit for the whole life of
-                the install — reported as "the ci/cd navbar should be sticky
-                instead of the wall of text of ci/cd on top".
-                Clamped to its first line, expandable, rather than deleted:
-                it is the only place a promoted panel says what it is. Clamped
-                with CSS rather than by splitting on a full stop, which is
-                wrong the first time a detail contains an abbreviation. */}
-            <div style={{ minWidth: 0 }}>
-              <h1 className="ui-page-title">{promoted.label}</h1>
-              <button
-                className="ui-note sub"
-                aria-expanded={aboutOpen}
-                title={aboutOpen ? 'Show less' : promoted.detail}
-                onClick={() => setAboutOpen((v) => !v)}
-                style={{
-                  display: '-webkit-box',
-                  WebkitBoxOrient: 'vertical',
-                  WebkitLineClamp: aboutOpen ? 'unset' : 1,
-                  overflow: 'hidden',
-                  textAlign: 'left',
-                  background: 'none',
-                  border: 0,
-                  padding: 0,
-                  cursor: 'pointer'
-                }}
-              >
-                {promoted.detail}
-              </button>
-            </div>
+                somebody is deciding whether to switch the module on. Rendered
+                here as a subtitle it became four fixed lines above the panel
+                on every visit for the life of the install — reported as "the
+                ci/cd navbar should be sticky instead of the wall of text of
+                ci/cd on top", and it also left the sticky nav riding OVER the
+                prose rather than replacing it.
+                `PanelAbout` is this app's own answer to exactly this, and its
+                comment says so: it exists because a blurb that stays open
+                covers the first rows of the table. Reused rather than
+                reinvented. */}
+            <h1 className="ui-page-title">
+              <PanelAbout title={promoted.label}>{promoted.detail}</PanelAbout>
+            </h1>
           </div>
         ) : (
           <>

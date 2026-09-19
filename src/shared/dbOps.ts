@@ -2858,7 +2858,14 @@ export function mongoCurrentOpCommand(limit: number, allUsers: boolean): Record<
 export const MONGO_COMMAND_BUILDERS: (() => Record<string, unknown>)[] = [
   () => mongoCollStatsCommand('placeholder'),
   () => mongoIndexStatsCommand('placeholder'),
-  () => mongoCurrentOpCommand(20, true)
+  () => mongoCurrentOpCommand(20, true),
+  // The live panel's two. They are NOT in MONGO_COMMANDS -- that map is the
+  // operational read's, and every entry in it must have a captured fixture --
+  // but they are commands this app sends, so they belong under the same
+  // read-only assertion. Arrows, so the forward reference resolves at call
+  // time rather than at module evaluation.
+  () => MONGO_MONITOR_COMMANDS.serverStatus.command,
+  () => MONGO_MONITOR_COMMANDS.top.command
 ]
 
 // ---- Coercion -------------------------------------------------------------
@@ -3532,6 +3539,258 @@ export function judgeMongoAsserts(v: MongoAssertsValue): DbVerdict {
         ? 'User assertions are failed client commands — a duplicate key, a bad query — and a healthy server has plenty.'
         : '') + faults
   }
+}
+
+// ---------------------------------------------------------------------------
+// Live monitoring
+// ---------------------------------------------------------------------------
+//
+// The Operations tab above answers eight questions once, when somebody presses
+// a button. This is the other half: a handful of numbers, sampled on a timer,
+// that say what the server is DOING right now. Compass calls it the
+// performance tab.
+//
+// The trap here is a single one and it is fatal: `opcounters`, `network.bytesIn`
+// and every counter under `top` are MONOTONIC TOTALS SINCE STARTUP. A server up
+// for three weeks reports `opcounters.query: 91043771`, and a panel that prints
+// that beside the word "queries" has told the operator nothing about now and
+// something false about the last minute. Every one of them is a delta between
+// two samples divided by the seconds between them, and where there is no
+// previous sample, or the previous sample is from before a restart, the rate is
+// NULL rather than the total and never zero.
+
+/** The six counters `opcounters` and `opcountersRepl` carry, in the order
+ *  Compass lists them. */
+export const MONGO_OPCOUNTERS = ['insert', 'query', 'update', 'delete', 'getmore', 'command'] as const
+export type MongoOpCounter = (typeof MONGO_OPCOUNTERS)[number]
+
+/**
+ * What the live panel asks for, and it is NOT what MONGO_COMMANDS asks for.
+ *
+ * MONGO_COMMANDS.serverStatus switches `globalLock`, `network` and
+ * `opcountersRepl` OFF, because none of the eight questions reads them. They
+ * are three quarters of this panel — active/queued readers and writers, bytes
+ * on the wire, and how much of the write load is replication. So the same
+ * trimmed document is asked for again with those three turned back on, spread
+ * from the original rather than retyped so the thirty-odd sections neither one
+ * wants cannot drift apart.
+ *
+ * `top` is per-collection activity since startup, admin-only, and the source of
+ * the hottest-collections list. In-flight operations come from
+ * mongoCurrentOpCommand(), which already exists.
+ */
+export const MONGO_MONITOR_COMMANDS = Object.freeze({
+  serverStatus: {
+    db: 'admin',
+    command: { ...MONGO_COMMANDS.serverStatus.command, globalLock: 1, network: 1, opcountersRepl: 1 }
+  },
+  top: { db: 'admin', command: { top: 1 } }
+})
+
+/** One reading of the whole live surface. Every field is nullable because
+ *  `serverStatus` sections come and go by version, storage engine and platform,
+ *  and an absent section is not a zeroed one. */
+export interface MongoMonitorSample {
+  /** When this app received the reply. Used as the denominator, rather than the
+   *  server's own clock, because the two need not agree and only one of them is
+   *  measuring the interval between two of OUR requests. */
+  atMs: number
+  /** `serverStatus().uptime`. The restart detector — see mongoMonitorRates. */
+  uptimeSeconds: number | null
+  opcounters: Record<MongoOpCounter, number | null>
+  replOpcounters: Record<MongoOpCounter, number | null>
+  /** `globalLock.activeClients` / `globalLock.currentQueue` — gauges, not
+   *  counters, so these are true as they stand and are not differenced. */
+  activeReads: number | null
+  activeWrites: number | null
+  queuedReads: number | null
+  queuedWrites: number | null
+  bytesIn: number | null
+  bytesOut: number | null
+  numRequests: number | null
+  connectionsCurrent: number | null
+  connectionsAvailable: number | null
+  /** `mem.virtual` / `mem.resident`, which serverStatus reports in MEGABYTES.
+   *  Converted to bytes here so formatBytes can be used like everywhere else. */
+  memVirtualBytes: number | null
+  memResidentBytes: number | null
+}
+
+export interface MongoMonitorRates {
+  /** The measured interval, which is what the numbers below are per. Shown, so
+   *  nobody has to trust that it was the configured one. */
+  windowSeconds: number
+  opsPerSec: Record<MongoOpCounter, number | null>
+  replOpsPerSec: Record<MongoOpCounter, number | null>
+  bytesInPerSec: number | null
+  bytesOutPerSec: number | null
+  requestsPerSec: number | null
+}
+
+const ZERO_COUNTERS = (): Record<MongoOpCounter, number | null> =>
+  Object.fromEntries(MONGO_OPCOUNTERS.map((k) => [k, null])) as Record<MongoOpCounter, number | null>
+
+function counters(section: unknown): Record<MongoOpCounter, number | null> {
+  const o = (section ?? {}) as Row
+  return Object.fromEntries(MONGO_OPCOUNTERS.map((k) => [k, num(o[k])])) as Record<MongoOpCounter, number | null>
+}
+
+export function parseMongoMonitorSample(serverStatus: Row | undefined, atMs: number): MongoMonitorSample {
+  const lock = (serverStatus?.globalLock ?? {}) as Row
+  const active = (lock.activeClients ?? {}) as Row
+  const queue = (lock.currentQueue ?? {}) as Row
+  const net = (serverStatus?.network ?? {}) as Row
+  const conn = (serverStatus?.connections ?? {}) as Row
+  const mem = (serverStatus?.mem ?? {}) as Row
+  const mb = (v: unknown): number | null => {
+    const n = num(v)
+    return n === null ? null : n * 1024 * 1024
+  }
+  return {
+    atMs,
+    uptimeSeconds: num(serverStatus?.uptime),
+    opcounters: serverStatus ? counters(serverStatus.opcounters) : ZERO_COUNTERS(),
+    replOpcounters: serverStatus ? counters(serverStatus.opcountersRepl) : ZERO_COUNTERS(),
+    activeReads: num(active.readers),
+    activeWrites: num(active.writers),
+    queuedReads: num(queue.readers),
+    queuedWrites: num(queue.writers),
+    bytesIn: num(net.bytesIn),
+    bytesOut: num(net.bytesOut),
+    numRequests: num(net.numRequests),
+    connectionsCurrent: num(conn.current),
+    connectionsAvailable: num(conn.available),
+    memVirtualBytes: mb(mem.virtual),
+    memResidentBytes: mb(mem.resident)
+  }
+}
+
+/**
+ * One counter's rate, or null.
+ *
+ * Null for four different reasons, and collapsing any of them to zero is the
+ * bug: either end absent, or the counter went BACKWARDS. A counter that fell
+ * means the server restarted between the two samples — the totals began again
+ * from zero, the difference is a large negative number, and `Math.max(0, ...)`
+ * would report a dead quiet minute on a server that had just come back up.
+ */
+function perSecond(before: number | null, after: number | null, seconds: number): number | null {
+  if (before === null || after === null || after < before) return null
+  return (after - before) / seconds
+}
+
+/**
+ * The rates between two samples, or null when there is no honest window.
+ *
+ * Null when the samples are not in order, when no measurable time passed, or
+ * when the server restarted between them (its uptime went backwards, which is
+ * the only signal that says so directly — every counter below it also resets,
+ * but a counter that merely stood still is indistinguishable from an idle one).
+ */
+export function mongoMonitorRates(prev: MongoMonitorSample, next: MongoMonitorSample): MongoMonitorRates | null {
+  const seconds = (next.atMs - prev.atMs) / 1000
+  if (!(seconds > 0)) return null
+  if (prev.uptimeSeconds !== null && next.uptimeSeconds !== null && next.uptimeSeconds < prev.uptimeSeconds) return null
+  const rates = (a: Record<MongoOpCounter, number | null>, b: Record<MongoOpCounter, number | null>): Record<MongoOpCounter, number | null> =>
+    Object.fromEntries(MONGO_OPCOUNTERS.map((k) => [k, perSecond(a[k], b[k], seconds)])) as Record<MongoOpCounter, number | null>
+  return {
+    windowSeconds: seconds,
+    opsPerSec: rates(prev.opcounters, next.opcounters),
+    replOpsPerSec: rates(prev.replOpcounters, next.replOpcounters),
+    bytesInPerSec: perSecond(prev.bytesIn, next.bytesIn, seconds),
+    bytesOutPerSec: perSecond(prev.bytesOut, next.bytesOut, seconds),
+    requestsPerSec: perSecond(prev.numRequests, next.numRequests, seconds)
+  }
+}
+
+/** One namespace's totals out of `top`, in microseconds and counts since the
+ *  server started. Differenced by mongoTopRates, never shown raw. */
+export interface MongoTopEntry {
+  ns: string
+  atMs: number
+  /** `total.count` — every operation of every kind against this namespace. */
+  count: number | null
+  /** `total.time`, microseconds of server time spent in them. */
+  micros: number | null
+  readCount: number | null
+  writeCount: number | null
+}
+
+/**
+ * `top`'s reply to a list of namespaces.
+ *
+ * `totals` is a map keyed by namespace with ONE key that is not a namespace:
+ * `note`, a string of prose telling the reader the numbers are cumulative. It
+ * is skipped by shape rather than by name — anything that is not an object with
+ * a `total` is not a namespace — so a future sibling of `note` cannot arrive as
+ * a row called "note" with every column empty.
+ */
+export function parseMongoTop(reply: Row | undefined, atMs: number): MongoTopEntry[] {
+  const totals = (reply?.totals ?? {}) as Row
+  const out: MongoTopEntry[] = []
+  for (const [ns, raw] of Object.entries(totals)) {
+    if (!raw || typeof raw !== 'object') continue
+    const r = raw as Row
+    const total = r.total as Row | undefined
+    if (!total || typeof total !== 'object') continue
+    const sum = (...keys: string[]): number | null => {
+      let acc: number | null = null
+      for (const k of keys) {
+        const n = num((r[k] as Row | undefined)?.count)
+        if (n === null) continue
+        acc = (acc ?? 0) + n
+      }
+      return acc
+    }
+    out.push({
+      ns,
+      atMs,
+      count: num(total.count),
+      micros: num(total.time),
+      readCount: sum('queries', 'getmore'),
+      writeCount: sum('insert', 'update', 'remove')
+    })
+  }
+  return out
+}
+
+export interface MongoTopRate {
+  ns: string
+  opsPerSec: number
+  readsPerSec: number | null
+  writesPerSec: number | null
+  /** Mean server time per operation over the window, in milliseconds. Null
+   *  when nothing ran — a mean of no operations is not zero. */
+  meanMs: number | null
+}
+
+/**
+ * The hottest namespaces over one window, busiest first.
+ *
+ * Namespaces absent from `prev` are skipped rather than counted from zero: a
+ * collection first seen in this sample has an unknown history, and treating its
+ * lifetime total as one window's work puts a three-week-old collection at the
+ * top of the list the moment the panel is opened.
+ */
+export function mongoTopRates(prev: MongoTopEntry[], next: MongoTopEntry[], seconds: number): MongoTopRate[] {
+  if (!(seconds > 0)) return []
+  const before = new Map(prev.map((e) => [e.ns, e]))
+  const out: MongoTopRate[] = []
+  for (const e of next) {
+    const b = before.get(e.ns)
+    if (!b) continue
+    const ops = perSecond(b.count, e.count, seconds)
+    if (ops === null) continue
+    const micros = perSecond(b.micros, e.micros, seconds)
+    out.push({
+      ns: e.ns,
+      opsPerSec: ops,
+      readsPerSec: perSecond(b.readCount, e.readCount, seconds),
+      writesPerSec: perSecond(b.writeCount, e.writeCount, seconds),
+      meanMs: micros === null || ops <= 0 ? null : micros / ops / 1000
+    })
+  }
+  return out.sort((a, b) => b.opsPerSec - a.opsPerSec)
 }
 
 // ===========================================================================

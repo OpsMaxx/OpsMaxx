@@ -7,6 +7,9 @@ import {
   CheckCircle2,
   AlertTriangle,
   ChevronDown,
+  ChevronRight,
+  Database,
+  Gauge,
   FileCode2,
   TerminalSquare,
   Activity,
@@ -21,6 +24,7 @@ import { useDragSize } from '../../hooks/useDragSize'
 import { clsx } from '../../lib/format'
 import { DbShell } from './DbShell'
 import { DbOpsPanel } from './DbOpsPanel'
+import { MongoMonitor } from './MongoMonitor'
 import { toast } from '../../store/toast'
 import { KIND_COLOR, KIND_SHORT } from './DatabaseSidebar'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
@@ -101,7 +105,28 @@ const OPS_BADGE: Record<DbVerdictLevel, { label: string; chip: string; title: st
   alarm: { label: '!', chip: 'danger', title: 'something is wrong' }
 }
 
-export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
+/**
+ * What a database's collections are, once somebody has opened it.
+ *
+ * `'loading'` and `'denied'` are states of their own rather than an empty
+ * array: a database whose collections could not be listed -- which is the
+ * ordinary case for `admin` and `config` under a read-only user -- must not
+ * render as a database with no collections in it.
+ */
+type Collections = Record<string, string[] | 'loading' | 'denied'>
+
+export function DatabaseView({
+  db,
+  visible
+}: {
+  db: DatabaseConn
+  /**
+   * Whether this is the database tab on screen. Every open database stays
+   * mounted so its results and shell history survive a switch, which means a
+   * background tab would otherwise keep the live monitor sampling.
+   */
+  visible: boolean
+}): React.JSX.Element {
   const deleteDatabase = useApp((s) => s.deleteDatabase)
   const servers = useWorkspaceServers()
   // The bastion this database is reached through, when it has one. Named in
@@ -124,7 +149,7 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
   // just the ones matching the currently selected name.
   const [pickerOpen, setPickerOpen] = useState(false)
   const [typed, setTyped] = useState(false)
-  const [mode, setMode] = useState<'query' | 'shell' | 'ops'>('query')
+  const [mode, setMode] = useState<'query' | 'shell' | 'ops' | 'monitor'>('query')
   // Operational reads exist for PostgreSQL, MySQL/MariaDB, MongoDB and Redis.
   // The last two were held back from the first pass deliberately, because they
   // answer completely different questions — replica-set state and oplog window;
@@ -162,11 +187,29 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
     [db.name]
   )
 
+  /**
+   * The MongoDB tree, one entry per database that has been opened.
+   *
+   * Lazily filled. `listDatabases` names the databases on connect -- one call,
+   * names only -- and a database's collections are fetched the first time its
+   * row is expanded. A server with several hundred databases is a list of
+   * several hundred names here and not several hundred listCollections.
+   */
+  const [collections, setCollections] = useState<Collections>({})
+  const [openDbs, setOpenDbs] = useState<Record<string, boolean>>({})
+
   const loadInfo = useCallback(
     async (dbn: string): Promise<DbInfo | undefined> => {
       try {
         const i = await unlocked(async () => window.opsmaxx?.db.info(cfgWith(dbn)))
         if (i) setInfo(i)
+        // dbInfo already returns the selected database's collections, so the
+        // tree starts with the one the operator is pointed at already filled
+        // rather than fetching it a second time to draw the same names.
+        if (i?.ok && dbn) {
+          setCollections((c) => ({ ...c, [dbn]: i.tables ?? [] }))
+          setOpenDbs((o) => ({ ...o, [dbn]: true }))
+        }
         return i
       } catch {
         // The connection banner already carries the failure; a second copy of
@@ -212,6 +255,8 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
     setQuery(DEFAULT_QUERY[db.kind])
     setResult(null)
     setInfo(null)
+    setCollections({})
+    setOpenDbs({})
     setDbName(db.database)
     void init(db.database)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -226,18 +271,62 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
     void loadInfo(dbn)
   }
 
+  /**
+   * Open or close one database in the tree, fetching its collections once.
+   *
+   * Closing never discards what was fetched: reopening a database the operator
+   * has already looked at is instant, and a second listCollections against a
+   * server that has not changed is a round trip for nothing.
+   */
+  const toggleDb = useCallback(
+    async (dbn: string): Promise<void> => {
+      const opening = !openDbs[dbn]
+      setOpenDbs((o) => ({ ...o, [dbn]: opening }))
+      if (!opening || collections[dbn] !== undefined) return
+      setCollections((c) => ({ ...c, [dbn]: 'loading' }))
+      try {
+        const i = await unlocked(async () => window.opsmaxx?.db.info(cfgWith(dbn)))
+        // `denied` and not an empty array. A read-only user is routinely
+        // refused listCollections on admin and config, and "no collections" is
+        // a different and wrong answer.
+        setCollections((c) => ({ ...c, [dbn]: i?.ok ? (i.tables ?? []) : 'denied' }))
+      } catch {
+        setCollections((c) => ({ ...c, [dbn]: 'denied' }))
+      }
+    },
+    [cfgWith, collections, openDbs, unlocked]
+  )
+
   const settings = useApp((st) => st.settings)
   const setSettings = useApp((st) => st.setSettings)
   const allDbs = info?.databases ?? []
 
   // What this engine calls the things in the left column, in one place rather
-  // than as a conditional at each of the three sites that needed it.
-  const objectWord = db.kind === 'redis' ? 'Keyspace' : db.kind === 'mongodb' ? 'Collections' : 'Tables'
-  const objects = info?.tables ?? []
+  // than as a conditional at each of the three sites that needed it. MongoDB
+  // draws a tree rather than a list, so its column is headed by the level the
+  // tree starts at.
+  const isTree = db.kind === 'mongodb'
+  const objectWord = db.kind === 'redis' ? 'Keyspace' : isTree ? 'Databases' : 'Tables'
+  const objects = isTree ? (info?.databases ?? []) : (info?.tables ?? [])
   const [objectFilter, setObjectFilter] = useState('')
-  const shownObjects = objectFilter.trim()
-    ? objects.filter((t) => t.toLowerCase().includes(objectFilter.trim().toLowerCase()))
-    : objects
+  const needle = objectFilter.trim().toLowerCase()
+  /**
+   * Whether a database survives the filter.
+   *
+   * The filter reaches DOWN as well as across: a database whose own name does
+   * not match stays when a collection already fetched for it does. It cannot
+   * reach into a database nobody has opened, because those collections have not
+   * been fetched -- and fetching every one of them to answer a keystroke is
+   * precisely the enumeration the lazy tree exists to avoid.
+   */
+  const matchesTree = (d: string): boolean => {
+    if (d.toLowerCase().includes(needle)) return true
+    const c = collections[d]
+    return Array.isArray(c) && c.some((n) => n.toLowerCase().includes(needle))
+  }
+  const shownObjects = !needle
+    ? objects
+    : objects.filter(isTree ? matchesTree : (t) => t.toLowerCase().includes(needle))
 
   // Both dividers, persisted through settings so an arrangement survives a
   // restart. Clamped: a column dragged to nothing is a column the user cannot
@@ -254,10 +343,8 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
     onCommit: (dbEditorHeight) => setSettings({ dbEditorHeight })
   })
   const emptyHint =
-    db.kind === 'mongodb'
-      ? dbName
-        ? `${dbName} has no collections yet.`
-        : 'Pick a database above to see its collections.'
+    isTree
+      ? 'None were listed. This user may lack listDatabases — type a name in the picker above to use one anyway.'
       : db.kind === 'redis'
         ? 'This Redis instance has no keys.'
         : 'This database has no tables yet.'
@@ -313,6 +400,18 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
       run()
     }
   }
+
+  /**
+   * Whether the results pane has anything to say.
+   *
+   * It used to be `flex: 1` unconditionally, so before the first query two
+   * thirds of a maximised window were one grey sentence and the editor was a
+   * 160px box above it -- which is what the screenshot of this view was of.
+   * With nothing to show, the space belongs to the thing the operator is
+   * actually using. The divider comes back with the results, because there is
+   * nothing to divide until then.
+   */
+  const resultsOpen = result !== null || conn.phase === 'connecting' || conn.phase === 'error'
 
   const insertTable = (t: string): void => {
     if (db.kind === 'mongodb') setQuery(`{ "find": "${t}", "limit": 20 }`)
@@ -407,6 +506,15 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
           <button className={`btn sm${mode === 'shell' ? ' primary' : ''}`} onClick={() => setMode('shell')}>
             <TerminalSquare size={13} /> Shell
           </button>
+          {isTree && (
+            <button
+              className={`btn sm${mode === 'monitor' ? ' primary' : ''}`}
+              onClick={() => setMode('monitor')}
+              title="Live server activity, sampled while this tab is on screen"
+            >
+              <Gauge size={13} /> Monitor
+            </button>
+          )}
           {hasOps && (
             <button
               className={`btn sm${mode === 'ops' ? ' primary' : ''}`}
@@ -524,6 +632,22 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
                 title="Nothing matches"
                 message={`No ${objectWord.toLowerCase()} here match “${objectFilter}”.`}
               />
+            ) : isTree ? (
+              shownObjects.map((d) => (
+                <DatabaseNode
+                  key={d}
+                  name={d}
+                  open={!!openDbs[d]}
+                  selected={d === dbName}
+                  collections={collections[d]}
+                  filter={needle}
+                  onToggle={() => void toggleDb(d)}
+                  onPick={(coll) => {
+                    if (d !== dbName) selectDb(d)
+                    insertTable(coll)
+                  }}
+                />
+              ))
             ) : (
               shownObjects.map((t) => (
                 <div key={t} className="tree-row" onClick={() => insertTable(t)}>
@@ -544,7 +668,9 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
         />
 
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
-          {mode === 'ops' && hasOps ? (
+          {mode === 'monitor' && isTree ? (
+            <MongoMonitor cfg={cfgWith(dbName)} visible={visible} />
+          ) : mode === 'ops' && hasOps ? (
             <DbOpsPanel cfg={cfgWith(dbName)} kind={db.kind} onVerdict={setOpsLevel} />
           ) : mode === 'shell' ? (
             <DbShell
@@ -556,7 +682,10 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
             />
           ) : (
             <>
-          <div className="db-editor" style={{ height: editor.size }}>
+          <div
+            className={clsx('db-editor', !resultsOpen && 'grow')}
+            style={resultsOpen ? { height: editor.size } : undefined}
+          >
             <textarea
               className="textarea"
               style={{ flex: 1, width: '100%', resize: 'none' }}
@@ -596,14 +725,16 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
               user decides how. It was a fixed 110px textarea above a results
               pane that took everything else -- so on a maximised window a query
               too long to read sat in a small box under a screenful of nothing. */}
-          <div
-            className={clsx('resizer-h', editor.dragging && 'dragging')}
-            onMouseDown={editor.onMouseDown}
-            role="separator"
-            aria-label="Resize the query editor"
-          />
+          {resultsOpen && (
+            <div
+              className={clsx('resizer-h', editor.dragging && 'dragging')}
+              onMouseDown={editor.onMouseDown}
+              role="separator"
+              aria-label="Resize the query editor"
+            />
+          )}
 
-          <div className="db-results">
+          <div className={clsx('db-results', !resultsOpen && 'idle')}>
             <Results result={result} phase={conn.phase} where={formatDbAddress(db.host, db.port)} />
           </div>
             </>
@@ -657,6 +788,97 @@ export function DatabaseView({ db }: { db: DatabaseConn }): React.JSX.Element {
             <p className="s-desc">This writes to the database.</p>
           )}
         </Modal>
+      )}
+    </div>
+  )
+}
+
+
+/**
+ * One database in the MongoDB tree, with its collections under it.
+ *
+ * The children have four states and they are four different sentences: not
+ * opened yet, being fetched, refused, and a database that genuinely holds
+ * nothing. The one that earns its own branch is `denied` -- `admin` and
+ * `config` refuse listCollections to an ordinary user, and drawing that as "no
+ * collections" tells the operator something false about the server.
+ */
+function DatabaseNode({
+  name,
+  open,
+  selected,
+  collections,
+  filter,
+  onToggle,
+  onPick
+}: {
+  name: string
+  open: boolean
+  /** The database queries currently run against. */
+  selected: boolean
+  collections: string[] | 'loading' | 'denied' | undefined
+  /** The active filter, already lowercased. */
+  filter: string
+  onToggle: () => void
+  onPick: (collection: string) => void
+}): React.JSX.Element {
+  const loaded = Array.isArray(collections) ? collections : null
+  const shown = filter && loaded && !name.toLowerCase().includes(filter)
+    ? loaded.filter((c) => c.toLowerCase().includes(filter))
+    : loaded
+  // A database kept in the results only because one of its collections matched
+  // is opened whether or not the operator opened it: the row that explains why
+  // it is still on screen is the child, not the parent.
+  const expanded = open || (!!filter && !name.toLowerCase().includes(filter) && !!shown?.length)
+
+  return (
+    <div>
+      <div className={clsx('tree-row', selected && 'active')} onClick={onToggle}>
+        <ChevronRight size={14} className={clsx('chev', expanded && 'open')} />
+        <Database size={13} className="faint" />
+        <span className="label" title={name}>
+          {name}
+        </span>
+        <span className="spacer" />
+        {loaded && (
+          <span className="db-count" title={`${loaded.length} collection(s)`}>
+            {loaded.length}
+          </span>
+        )}
+      </div>
+      {expanded && (
+        <div className="tree-children">
+          {collections === 'loading' ? (
+            <div className="row faint db-tree-note" style={{ gap: 8 }}>
+              <Loader2 size={12} className="spin" />
+              <span>Loading…</span>
+            </div>
+          ) : collections === 'denied' ? (
+            <div className="faint db-tree-note">
+              This user may not list {name}&rsquo;s collections.
+            </div>
+          ) : shown === null ? null : shown.length === 0 ? (
+            <div className="faint db-tree-note">
+              {loaded && loaded.length > 0 ? 'No match here.' : 'No collections.'}
+            </div>
+          ) : (
+            shown.map((c) => (
+              <div
+                key={c}
+                className="tree-row"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onPick(c)
+                }}
+              >
+                <Table2 size={13} className="faint" />
+                <span className="label" title={c}>
+                  {c}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
       )}
     </div>
   )
@@ -859,7 +1081,7 @@ export function DatabaseWorkspace(): React.JSX.Element {
           key={d.id}
           style={{ display: d.id === active.id ? 'flex' : 'none', flex: 1, minHeight: 0 }}
         >
-          <DatabaseView db={d} />
+          <DatabaseView db={d} visible={d.id === active.id} />
         </div>
       ))}
     </div>

@@ -169,7 +169,7 @@ export const FEATURE_TIPS: FeatureTip[] = [
     module: 'cicd',
     tab: 'cicd',
     title: 'Pipelines, beside the servers they change',
-    body: 'Connect Jenkins, GitLab CI or GitHub Actions and read what it did — run history and the log of the step that failed — next to the server the run changed. This is the one tab that talks to a service outside your estate, on a timer, with a token you paste in. Nothing here starts, re-runs or cancels a build.'
+    body: 'Connect Jenkins, GitLab CI or GitHub Actions and read what it did — run history and the log of the step that failed — next to the server the run changed. This is the one tab that talks to a service outside your estate, on a timer, with a token you paste in. Starting and cancelling are here too, behind a second module you switch on separately.'
   },
   {
     id: 'tip-processes',
