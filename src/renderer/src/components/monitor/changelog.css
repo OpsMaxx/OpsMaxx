@@ -1,0 +1,283 @@
+/* ---------------------------------------------------------------------------
+   Change log
+
+   Its own file rather than another block at the end of global.css: nothing
+   outside ChangeLogPanel.tsx reads any of these names.
+
+   The one job this stylesheet has that is not layout: making the THREE ACTOR
+   CLASSES separable without reading the row. `shared/changelog.ts` is explicit
+   that human / agent / system are three and not two — "a host that went
+   unreachable at 03:00 was nobody's doing" — and the flat list rendered all
+   three identically, so the fourteen rows nobody did buried the four somebody
+   did. Colour is the shortcut here and never the only signal: every row also
+   names its actor in words and carries an icon for its kind, so the
+   distinction survives a colour-blind reader and a bad monitor.
+
+   No colour below is a STATUS colour. A change log has no severity — the
+   entries carry none and none is invented — so the accent and the violet are
+   identity hues borrowed from the same place the log stream's host colours
+   come from, and the semantic red/amber/green ramp is left alone for things
+   that are actually wrong.
+
+   Every size resolves through the type scale. Nothing here is a raw px
+   font-size; see tests/typeScale.test.ts for why that rule exists.
+   --------------------------------------------------------------------------- */
+
+/* ---- Filters -------------------------------------------------------------- */
+
+.cl-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+/* ---- Actor tiles in the summary band --------------------------------------
+   The band itself is `.kpi-band` from global.css, unchanged — this screen is
+   not a new product and the fleet overview already established what a row of
+   answers looks like. All this adds is the left edge that says which of the
+   three classes a tile is counting, matching the row edges below it. */
+
+.cl-kpi.is-human {
+  border-left: 2px solid var(--accent-ink);
+}
+.cl-kpi.is-human .kpi-icon {
+  color: var(--accent-ink);
+}
+.cl-kpi.is-agent {
+  border-left: 2px solid var(--host-violet);
+}
+.cl-kpi.is-agent .kpi-icon {
+  color: var(--host-violet);
+}
+
+/* ---- Coverage, folded ------------------------------------------------------
+   The four source paragraphs live inside a `.note-why` body. The FINDING —
+   whether the timeline is complete — is the summary and is always on screen;
+   only the mechanism folds. See the header of PanelShell.tsx. */
+
+/* The icon sits BESIDE the disclosure, not above it: `.note-why` is a block,
+   so an inline icon in front of it lands on its own line and reads as an
+   unrelated glyph rather than as part of the warning. */
+.cl-coverage-note {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+.cl-coverage-note > .note-why {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
+}
+.cl-coverage-warn {
+  flex: none;
+  align-self: center;
+}
+
+.cl-coverage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.cl-coverage-row.is-unknown {
+  color: var(--state-unknown);
+}
+
+/* ---- Timeline -------------------------------------------------------------- */
+
+.cl-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  margin-top: var(--sp-3);
+}
+
+.cl-day {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* A date, and what it cost. The count is on the heading rather than nowhere,
+   because a collapsed day shows fewer rows than it holds and the heading is
+   the only honest place to say how many events are really under it. */
+.cl-day-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-2) var(--sp-1);
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: var(--sp-1);
+}
+.cl-day-label {
+  font-size: var(--type-subtitle-size);
+  font-weight: var(--type-subtitle-weight);
+  color: var(--text);
+}
+.cl-day-count {
+  font-size: var(--type-note-size);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- One row ---------------------------------------------------------------
+   Three columns: the kind's icon, the sentence, and the time. The time is
+   RELATIVE and secondary — right-aligned, muted, tabular — because "14 min
+   ago" is the reading a person does and `9/19/2026 8:09:09 PM` made them do
+   it themselves fourteen times in a column. The absolute is the title. */
+
+.cl-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: var(--sp-2);
+  row-gap: 2px;
+  padding: 5px var(--sp-2);
+  border-left: 2px solid transparent;
+  border-radius: var(--r-sm);
+  font-size: var(--type-body-size);
+  line-height: 1.45;
+}
+.cl-row:hover {
+  background: var(--row-hover-veil);
+}
+
+.cl-icon {
+  display: grid;
+  place-items: center;
+  align-self: center;
+  flex: none;
+  color: var(--text-faint);
+}
+
+.cl-line {
+  min-width: 0;
+  color: var(--text);
+}
+.cl-actor {
+  font-weight: 600;
+}
+
+/* The host is the thing a sysadmin scans for, so it is not dimmed into the
+   sentence around it — it is the mono face, which in this app means "a string
+   you might retype into a terminal", floored at --fs-identifier by `.mono`'s
+   own rule. */
+.cl-target {
+  font-family: var(--font-mono);
+  font-size: max(var(--fs-identifier), 0.95em);
+  color: var(--text);
+}
+
+/* "×14". The whole reason this screen was unreadable was that this number did
+   not exist and the fourteen rows did. */
+.cl-count {
+  display: inline-block;
+  margin-left: var(--sp-2);
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--bg-active);
+  color: var(--text-muted);
+  font-size: var(--fs-identifier);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  vertical-align: 1px;
+}
+
+.cl-time {
+  justify-self: end;
+  flex: none;
+  white-space: nowrap;
+  font-size: var(--type-note-size);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.cl-detail {
+  grid-column: 2 / -1;
+  min-width: 0;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* ---- The three classes -----------------------------------------------------
+   Rank, not decoration. A person's action is the loudest thing on the screen,
+   an agent's is loud and visibly not a person's, and what the sampler merely
+   noticed is quiet — because on a real estate there are ten times as many of
+   the last kind and they were drowning the other two. */
+
+.cl-row.is-human {
+  border-left-color: var(--accent-ink);
+}
+.cl-row.is-human .cl-icon {
+  color: var(--accent-ink);
+}
+
+.cl-row.is-agent {
+  border-left-color: var(--host-violet);
+}
+.cl-row.is-agent .cl-icon {
+  color: var(--host-violet);
+}
+
+/* No left edge and muted text. It is still full-size body text and still
+   states its actor in words: demoted, never hidden. A system row is how you
+   find out why something broke at 03:00. */
+.cl-row.is-system .cl-line {
+  color: var(--text-muted);
+}
+.cl-row.is-system .cl-target {
+  color: var(--text-muted);
+}
+
+/* ---- A collapsed group -----------------------------------------------------
+   Native `<details>`: keyboard-operable, announced as a disclosure, and
+   find-in-page opens it — the same three reasons `.note-why` is a `<details>`
+   and not a bespoke toggle. A group of ONE never becomes one of these; a
+   triangle that opens onto the line you are already reading teaches people not
+   to press the ones that matter. */
+
+.cl-group > summary {
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  list-style: none;
+  cursor: pointer;
+}
+.cl-group > summary::-webkit-details-marker {
+  display: none;
+}
+.cl-chev {
+  align-self: center;
+  flex: none;
+  color: var(--text-faint);
+  transition: transform 0.12s;
+}
+.cl-group[open] > summary .cl-chev {
+  transform: rotate(90deg);
+}
+
+.cl-members {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 var(--sp-2);
+  /* Indented under the row it belongs to, with a rule so a long burst does not
+     look like fourteen top-level rows again. */
+  padding: var(--sp-1) 0 var(--sp-1) var(--sp-5);
+  border-left: 1px solid var(--border-subtle);
+  margin-left: var(--sp-4);
+  list-style: none;
+}
+.cl-member {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.cl-member .cl-time {
+  justify-self: auto;
+  flex: none;
+  min-width: 7ch;
+}
+.cl-member .cl-detail {
+  grid-column: auto;
+}
