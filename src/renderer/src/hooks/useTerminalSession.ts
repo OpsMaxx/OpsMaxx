@@ -12,7 +12,7 @@ import {
 } from './useSessionRecovery'
 import { useResolvedTheme } from './useResolvedTheme'
 import { resolveScheme, type TerminalScheme } from '../../../shared/terminalTheme'
-import { parseOsc133 } from '../../../shared/shellIntegration'
+import { parseOsc133, parseOsc7 } from '../../../shared/shellIntegration'
 import { NO_PROMPT, applyMark, movementFor, isClickNotDrag, type PromptState } from '../lib/clickToMove'
 import type { TerminalTransport } from '../lib/transport'
 
@@ -231,17 +231,6 @@ export function setupTerminalUX(
     if (selTimer) clearTimeout(selTimer)
     selDisp.dispose()
     host.removeEventListener('contextmenu', onCtx)
-  }
-}
-
-export function parseOsc7(data: string): string | null {
-  // data looks like: file://hostname/absolute/path
-  const m = data.match(/^file:\/\/[^/]*(\/.*)$/)
-  if (!m) return null
-  try {
-    return decodeURIComponent(m[1])
-  } catch {
-    return m[1]
   }
 }
 

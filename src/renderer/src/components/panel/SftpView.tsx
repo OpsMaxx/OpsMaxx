@@ -23,6 +23,7 @@ import { useApp } from '../../store/app'
 import { bytes, clsx } from '../../lib/format'
 import { sshHopsFor } from '../../lib/ssh'
 import { LOCAL_TARGET } from '../../../../shared/execTarget'
+import { REMOTE_CWD_BOOTSTRAP } from '../../../../shared/shellIntegration'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import { classifyConnectionError, errorText } from '../../lib/connectionError'
 import { openSettings } from '../../store/nav'
@@ -176,6 +177,80 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   const session = useApp((s) => (paneId ? s.tabSession[paneId] : undefined))
   const termCwd = useApp((s) => (paneId ? s.tabCwd[paneId] : undefined))
   const setTabCwd = useApp((s) => s.setTabCwd)
+  // A local shell only reports its directory when the shell-integration snippet
+  // was injected at spawn, and that is a setting which ships OFF. Without it
+  // there is nothing to follow and no amount of waiting will produce one.
+  const integration = useApp((s) => s.settings.shellIntegration === true)
+
+  /**
+   * Write to whichever kind of session this pane actually is.
+   *
+   * This used to be `window.opsmaxx.ssh.write(session, …)` unconditionally. A
+   * local pane's session id belongs to the local pty map, so `ssh:write` looked
+   * it up among the SSH sessions, found nothing and returned — every `cd` the
+   * Files pane pushed to a local shell was dropped in silence.
+   */
+  const writeToShell = useCallback(
+    (data: string): void => {
+      if (!session) return
+      if (local) window.opsmaxx?.local?.write(session, data)
+      else window.opsmaxx?.ssh?.write(session, data)
+    },
+    [local, session]
+  )
+
+  /**
+   * Ask a REMOTE shell to report its directory, once per session.
+   *
+   * A local shell is spawned by this app and gets the OSC 7 emitter through its
+   * own startup files (shared/shellIntegration.ts). Nothing spawns the remote
+   * one, so the only way in is the channel the user types on — hence a line
+   * typed into it, which echoes once. Sent only while following is switched on,
+   * so a user who never links never sees it.
+   *
+   * It cannot be made to work everywhere: the snippet installs a prompt hook in
+   * bash and zsh, and deliberately evaluates to nothing in fish or dash rather
+   * than erroring there. Those shells report no directory at all, which the
+   * link button below has to say out loud.
+   */
+  const bootstrapped = useRef<string | null>(null)
+  useEffect(() => {
+    if (local || !linked || !session || bootstrapped.current === session) return
+    bootstrapped.current = session
+    window.opsmaxx?.ssh?.write(session, REMOTE_CWD_BOOTSTRAP)
+  }, [local, linked, session])
+
+  /**
+   * Whether following can work here at all, and why not when it cannot.
+   *
+   * Four distinct states, because they need four different things from the
+   * user: there is no terminal to follow; the setting that makes a local shell
+   * report is off; the shell has been asked and has not answered; or it works.
+   * Collapsing them into an enabled-looking toggle is what made this read as
+   * broken — the button was on, the pane never moved, and nothing said why.
+   */
+  const follow: { can: boolean; why: string; fix?: Fix } = !paneId
+    ? {
+        can: false,
+        why: local
+          ? 'No local shell open in this tab to follow. Open one in the terminal beside this pane.'
+          : `No terminal on ${server?.name ?? 'this server'} open in this tab to follow.`
+      }
+    : local && !integration
+      ? {
+          can: false,
+          why: 'Following needs shell integration, which is off. Without it the shell never tells OpsMaxx where it is.',
+          fix: { label: 'Turn on shell integration', run: () => openSettings('terminal') }
+        }
+      : !termCwd
+        ? {
+            can: true,
+            why: local
+              ? 'This shell has not reported a directory. zsh, bash and fish report one; cmd, PowerShell and a login bash cannot be asked to.'
+              : 'This shell has not reported a directory. OpsMaxx asks bash and zsh to on the first link; other remote shells cannot be asked.'
+          }
+        : { can: true, why: '' }
+  const following = linked && follow.can && !!termCwd
 
   const cfg = useCallback(
     () =>
@@ -256,10 +331,10 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       if (paneId) setTabCwd(paneId, p)
       if (linked && session) {
         const q = p.replace(/'/g, `'\\''`)
-        window.opsmaxx?.ssh.write(session, `cd '${q}'\n`)
+        writeToShell(`cd '${q}'\n`)
       }
     },
-    [list, paneId, setTabCwd, linked, session]
+    [list, paneId, setTabCwd, linked, session, writeToShell]
   )
 
   // Opening the channel, and the way back in after it failed. Retrying a failed
@@ -318,12 +393,18 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   }, [key])
 
   // Follow the terminal's cwd when it changes (does not push cd back).
+  //
+  // `loading` is a dependency, not just a read. A cwd that arrives while a
+  // listing is in flight — which is exactly what happens when the pane is
+  // connecting and the shell prints its first prompt — was previously tested
+  // once against a stale `loading`, dropped, and never re-tested, so the first
+  // `cd` after opening the tab was the one most likely to be missed.
   useEffect(() => {
     if (linked && termCwd && connectedRef.current && termCwd !== path && !loading) {
       void list(termCwd)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [termCwd, linked])
+  }, [termCwd, linked, loading])
 
   const open = (e: SftpEntry): void => {
     if (e.dir) void navigate(join(path, e.name))
@@ -590,10 +671,38 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
             onBlur={() => setEditingPath(null)}
           />
         )}
+        {/* Follow the terminal.
+            Three visual states, not two. `active` means a directory is
+            actually arriving; a link that is on but has heard nothing is lit
+            no differently from one that is off, because a control that looks
+            on and does nothing is the defect this path exists to fix.
+
+            Not `disabled` when following is impossible: a disabled button
+            swallows the click and the explanation with it. `aria-disabled`
+            plus the muted styling says the same thing to a screen reader and
+            to the eye, and the click still lands — on the reason, and on the
+            one setting that fixes it. */}
         <button
-          className={clsx('icon-btn', linked && 'active')}
-          title={linked ? 'Following terminal directory — click to unlink' : 'Not following terminal — click to link'}
-          onClick={() => setLinked((v) => !v)}
+          className={clsx('icon-btn', following && 'active')}
+          style={follow.can ? undefined : { opacity: 0.45 }}
+          aria-disabled={!follow.can}
+          aria-label="Follow terminal"
+          aria-pressed={follow.can ? linked : undefined}
+          title={
+            follow.why
+              ? follow.why
+              : linked
+                ? `Following the terminal (${termCwd}) — click to unlink`
+                : 'Not following the terminal — click to link'
+          }
+          onClick={() => {
+            // A reason on a tooltip is a reason nobody on a keyboard ever
+            // reads, and nobody reads one before clicking anyway. Say it when
+            // they ask for the thing it prevents.
+            if (!follow.can) return toast(follow.why, 'error', follow.fix)
+            setLinked((v) => !v)
+            if (!linked && follow.why) toast(follow.why, 'error', follow.fix)
+          }}
         >
           <Link2 size={15} />
         </button>

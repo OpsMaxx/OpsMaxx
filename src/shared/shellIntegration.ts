@@ -1,4 +1,30 @@
-// Shell integration: the OSC 133 marks, and the snippets that emit them.
+// Shell integration: the OSC 133 marks, the OSC 7 cwd report, and the snippets
+// that emit them.
+//
+// ── OSC 7, and why the Files pane needs it ─────────────────────────────────
+//
+//   ESC ] 7 ; file://<host>/<abs path> BEL
+//
+// A shell's working directory lives inside the shell process. A terminal is
+// handed bytes, not state, so the ONLY way it learns that the user typed `cd`
+// is if the shell says so — and no shell says so by default. zsh, bash and
+// fish all have to be asked, which is what the snippets below now do, once per
+// prompt (zsh/bash) or on every change to $PWD (fish).
+//
+// This is what "Follow terminal" in the Files pane rides on. Before it existed
+// the renderer registered an OSC 7 handler (useTerminalSession) and nothing in
+// the app ever emitted the sequence, so the feature could only work for someone
+// whose own dotfiles happened to emit it. The host field is left empty: the
+// renderer's parser ignores it, and a path is the only thing being reported.
+//
+// What it cannot do, in plain terms:
+//   - a shell nothing can be injected into (cmd, PowerShell, a login bash,
+//     anything not zsh/bash/fish) reports no directory, ever;
+//   - the injection only happens when the "Shell integration" setting is on;
+//   - a remote shell is not spawned by this app at all — see
+//     REMOTE_CWD_BOOTSTRAP below.
+// In each case the Files pane must say following is unavailable rather than
+// show a link button that does nothing.
 //
 // OSC 133 is the de-facto contract between a shell and its terminal about where
 // a prompt begins, where the editable input starts, and what a command exited
@@ -20,9 +46,11 @@
 // code, for the strictly worse property of modifying terminals this app does
 // not own. Turning the setting off is enough to undo all of this.
 //
-// A remote SSH session gets nothing and degrades to silence. A remote host that
-// already emits OSC 133 from its own dotfiles works for free, because the
-// renderer parses the marks wherever they come from.
+// A remote SSH session gets no OSC 133 and degrades to silence. A remote host
+// that already emits OSC 133 from its own dotfiles works for free, because the
+// renderer parses the marks wherever they come from. Its cwd is a separate
+// story: REMOTE_CWD_BOOTSTRAP at the bottom of this file is typed INTO the
+// remote shell, because there is no spawn here to attach anything to.
 //
 // ── Why the bodies are constants ───────────────────────────────────────────
 //
@@ -64,6 +92,7 @@ __om_precmd() {
   __om_status=$?
   printf '${OSC('133;D;%s')}' "$__om_status"
   printf '${OSC('133;A')}'
+  printf '${OSC('7;file://%s')}' "$PWD"
 }
 __om_preexec() { printf '${OSC('133;C')}' }
 # Appended rather than assigned: another framework's hooks must survive.
@@ -90,6 +119,7 @@ __om_precmd() {
   __om_status=$?
   printf '${OSC('133;D;%s')}' "$__om_status"
   printf '${OSC('133;A')}'
+  printf '${OSC('7;file://%s')}' "$PWD"
 }
 # Prepended, keeping anything already there — a bare assignment would silently
 # disable another tool's prompt hook.
@@ -99,7 +129,7 @@ PS1="$PS1"'\\[\\e]133;B\\a\\]'
 `
 
 /**
- * fish: the command marks only.
+ * fish: the command marks and the cwd report, but not the prompt marks.
  *
  * NOT the prompt marks, and this is a real limitation rather than an oversight.
  * Everything fish loads from `vendor_conf.d` or `conf.d` runs BEFORE
@@ -112,15 +142,25 @@ PS1="$PS1"'\\[\\e]133;B\\a\\]'
  * are reliable and give command boundaries and exit status. It does not get
  * `133;B`, and click-to-move therefore stays off in fish — which the guard in
  * clickToMove already handles, because no input mark means no movement.
+ *
+ * OSC 7 is unaffected by any of that: it hangs off `--on-variable PWD`, not off
+ * the prompt, so the Files pane can follow a fish shell even though the
+ * terminal cannot know where its prompt ends.
  */
 const FISH = `
-# OpsMaxx shell integration (OSC 133). Injected per session; not installed.
+# OpsMaxx shell integration (OSC 133 + OSC 7). Injected per session; not installed.
 function __om_preexec --on-event fish_preexec
   printf '${OSC('133;C')}'
 end
 function __om_postexec --on-event fish_postexec
   printf '${OSC('133;D;%s')}' $status
 end
+# OSC 7 needs no prompt wrapper, so fish gets this one even though it cannot
+# have the prompt marks: PWD is a variable, and fish will tell us when it moves.
+function __om_cwd --on-variable PWD
+  printf '${OSC('7;file://%s')}' "$PWD"
+end
+__om_cwd
 `
 
 /**
@@ -192,8 +232,84 @@ export function integrationFor(kind: LocalShellKind, path: string): IntegrationS
 }
 
 // ---------------------------------------------------------------------------
+// The remote half: asking a shell we did not spawn to report its directory
+// ---------------------------------------------------------------------------
+
+/** The OSC 7 report itself, double-quoted so it can live inside `eval '…'`. */
+const REMOTE_PRINTF = `printf "${OSC('7;file://%s')}" "$PWD"`
+
+/**
+ * One line, typed into a remote shell, that makes it report its cwd from then on.
+ *
+ * Everything above this point works by owning the spawn — args and env chosen
+ * before the shell starts. An SSH session has no spawn here: ssh2 opens a
+ * channel and the far end runs whatever that account's login shell is. The only
+ * channel into it is the same one the user's keystrokes go down, so the snippet
+ * has to be *typed*, and the user will see it echo once. That is the honest
+ * cost, and it is why this is sent when following is switched on rather than on
+ * every connection.
+ *
+ * ── Why the shape is this ugly ────────────────────────────────────────────
+ *
+ * It has to be harmless in a shell it does not fit, because we cannot know what
+ * the far end runs until it answers. The `test … && eval '…'` wrapper is what
+ * buys that:
+ *
+ *   bash / zsh  the test passes, eval installs a per-prompt hook.
+ *   fish        `$BASH_VERSION$ZSH_VERSION` is empty, so the test fails and the
+ *               eval's argument is never parsed — fish would reject `f() { }`
+ *               outright, so it must never reach fish's parser. (fish ≥ 3.0,
+ *               for `&&`; a fish 2.x from 2016 prints one error.)
+ *   sh / dash   the test fails, nothing happens, no cwd is ever reported.
+ *
+ * Which is the real ceiling: a remote shell that is not bash or zsh reports
+ * nothing, and there is no way to ask it that also works on the ones that are.
+ * The Files pane therefore has to treat "no directory has arrived" as a state
+ * it shows the user, not as a state it waits in forever.
+ *
+ * ponytail: single-shot install, no idempotence guard. Sending it twice adds a
+ * second hook that prints the same path twice a prompt — invisible to the user
+ * and cheaper than the guard would be. Add one if a caller ever sends it per
+ * navigation rather than per session.
+ */
+export const REMOTE_CWD_BOOTSTRAP =
+  `test -n "$BASH_VERSION$ZSH_VERSION" && eval '` +
+  `__om_cwd() { ${REMOTE_PRINTF}; }; ` +
+  `if [ -n "$ZSH_VERSION" ]; then precmd_functions+=(__om_cwd); ` +
+  `else PROMPT_COMMAND="__om_cwd\${PROMPT_COMMAND:+;$PROMPT_COMMAND}"; fi; ` +
+  `__om_cwd'\n`
+
+// ---------------------------------------------------------------------------
 // Parsing, for the renderer
 // ---------------------------------------------------------------------------
+
+/**
+ * The absolute path out of an OSC 7 payload, or null if it is not one.
+ *
+ * `file://<host>/<path>`. The host is ignored on purpose: this app only ever
+ * reads the sequence from a session it already knows the far end of, and a
+ * shell that reports a hostname the app cannot resolve (a container, a host
+ * behind a jump chain, a machine that simply disagrees about its own name) must
+ * not lose its path over it.
+ *
+ * Percent-decoded, falling back to the raw text when decoding throws — a
+ * directory whose name contains a bare `%` is legal on every filesystem here
+ * and is not a reason to report nothing.
+ *
+ * It lives beside parseOsc133 rather than in the renderer because a shell
+ * snippet and the parser that reads it back are one contract, and the test that
+ * runs the snippet through a real shell has to reach the parser without
+ * dragging xterm into a Node process.
+ */
+export function parseOsc7(data: string): string | null {
+  const m = data.match(/^file:\/\/[^/]*(\/.*)$/)
+  if (!m) return null
+  try {
+    return decodeURIComponent(m[1])
+  } catch {
+    return m[1]
+  }
+}
 
 export type PromptMark =
   | { kind: 'prompt-start' }
