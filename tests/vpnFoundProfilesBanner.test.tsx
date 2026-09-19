@@ -121,6 +121,31 @@ describe('the found-profiles offer', () => {
     expect(commitImportFile.mock.calls[1][3]).toBe('/Users/x/OpenVPN/config/home.ovpn')
   })
 
+  it('puts a real profile in the store, not the commit result', async () => {
+    // THE BUG THIS EXISTS FOR. The commit result is `{ ok, spec, vaultEntryId }`
+    // and it was handed to the store cast straight to a profile, through an
+    // `as unknown as` that the compiler could not object to. The import worked,
+    // the keys reached the vault, and the list showed nothing — the profile the
+    // user had just imported had vanished.
+    //
+    // Asserting on the STORE rather than on "was commitImportFile called" is
+    // the whole point: the call was always being made.
+    discoverProfiles.mockResolvedValue([found()])
+    render(<FoundProfilesBanner onReview={() => {}} />)
+    await userEvent.click(await screen.findByText('Import all'))
+
+    await waitFor(() => expect(useApp.getState().vpns).toHaveLength(1))
+    const stored = useApp.getState().vpns[0]
+    expect(stored.name).toBe('work')
+    expect(stored.workspaceId).toBeTruthy()
+    // An id the list can key on. Without one the row cannot render at all.
+    expect(stored.id).toMatch(/^vpn-/)
+    expect(stored.spec?.kind).toBe('openvpn')
+    // And none of the commit envelope leaked in as if it were profile data.
+    expect(stored).not.toHaveProperty('ok')
+    expect(stored).not.toHaveProperty('vaultEntryId')
+  })
+
   it('stays gone once declined, across a remount', async () => {
     discoverProfiles.mockResolvedValue([found()])
     const first = render(<FoundProfilesBanner onReview={() => {}} />)

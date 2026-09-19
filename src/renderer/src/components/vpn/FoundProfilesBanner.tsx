@@ -4,7 +4,7 @@ import { useApp } from '../../store/app'
 import { bridgeHas } from '../../lib/bridge'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import { toast } from '../../store/toast'
-import type { DiscoveredVpnProfile, VpnProfile } from '../../../../shared/vpn'
+import type { DiscoveredVpnProfile } from '../../../../shared/vpn'
 
 /**
  * OpenVPN profiles this machine already has, offered on the VPN screen.
@@ -113,7 +113,31 @@ export function FoundProfilesBanner({
           )
         )
         if (res.ok && res.spec) {
-          upsertVpnProfile(res as unknown as VpnProfile)
+          // A COMMIT RESULT IS NOT A PROFILE.
+          //
+          // This used to hand the store `res` — `{ ok, spec, vaultEntryId }` —
+          // cast straight to VpnProfile. The cast went through `as unknown as`,
+          // so the compiler said nothing, and the store took an object with no
+          // id, no name and no workspaceId. The import genuinely succeeded,
+          // the keys went into the vault, and the list showed nothing: the
+          // profile the user had just imported had vanished.
+          //
+          // The import dialog a few files away builds this properly; this is
+          // the same construction.
+          const spec = res.spec
+          // The stripped-directive report travels ON the profile. Six months
+          // from now "why does this profile not set my DNS" is answerable from
+          // the profile rather than from a dialog nobody kept open.
+          if (!spec.strippedDirectives && profile.report.stripped?.length) {
+            spec.strippedDirectives = profile.report.stripped
+          }
+          upsertVpnProfile({
+            id: `vpn-${crypto.randomUUID()}`,
+            workspaceId,
+            name: profile.name,
+            autoStart: false,
+            spec
+          })
           added += 1
         } else {
           failed.push(profile.name)
