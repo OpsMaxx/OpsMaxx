@@ -199,7 +199,8 @@ import type {
   VpnValidation,
   VpnDiagnoseRefusal,
   VpnDiagnoseResult,
-  VpnDiagnoseTarget
+  VpnDiagnoseTarget,
+  DiscoveredVpnProfile
 } from '../shared/vpn'
 import type { VaultIndexResult } from '../shared/vaultIndex'
 import type { KnownHost } from '../main/services/knownhosts'
@@ -1644,6 +1645,31 @@ const api = {
       baseDir?: string
     ): Promise<{ ok: boolean; error?: string; spec?: VpnSpec; vaultEntryId?: string }> =>
       ipcRenderer.invoke('vpn:commitImport', profileName, workspaceId, kind, text, baseDir),
+    /**
+     * Profiles OpenVPN's own installers already put on this machine.
+     *
+     * `knownSourcePaths` is what has already been imported. The file stays on
+     * disk and is re-found by every scan, so a profile is identified by its
+     * path -- a content hash would offer the same profile again the day the
+     * user edits the upstream .ovpn.
+     */
+    discoverProfiles: (knownSourcePaths?: string[]): Promise<DiscoveredVpnProfile[]> =>
+      ipcRenderer.invoke('vpn:discoverProfiles', knownSourcePaths),
+    /**
+     * Import one of those by path, rather than by text.
+     *
+     * Main reads the file. That is not a convenience: an .ovpn with an inline
+     * `<key>` block IS the private key, and this way it never crosses IPC. It
+     * is also what lets a path-form `ca ca.crt` resolve, because main knows
+     * which directory the profile came from.
+     */
+    commitImportFile: (
+      profileName: string,
+      workspaceId: string,
+      kind: VpnKind,
+      sourcePath: string
+    ): Promise<{ ok: boolean; error?: string; spec?: VpnSpec; vaultEntryId?: string }> =>
+      ipcRenderer.invoke('vpn:commitImportFile', profileName, workspaceId, kind, sourcePath),
     logs: (id: string, limit?: number): Promise<VpnLogLine[]> =>
       ipcRenderer.invoke('vpn:logs', id, limit),
     /** Probe a running tunnel from the inside. The host and port are the

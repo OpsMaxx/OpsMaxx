@@ -232,7 +232,13 @@ import {
   vpnValidate,
   vpnHandleWake
 } from './services/vpn/manager'
-import { vpnCommitImport, vpnDeleteSecrets, vpnImport } from './services/vpn/import'
+import {
+  discoverVpnProfiles,
+  vpnCommitImport,
+  vpnCommitImportFile,
+  vpnDeleteSecrets,
+  vpnImport
+} from './services/vpn/import'
 import { wireguardDriver } from './services/vpn/drivers/wireguard'
 import { mintKeypair, storeKeypair } from './services/vpn/keys'
 import {
@@ -5034,6 +5040,22 @@ ipcMain.handle(
   'vpn:commitImport',
   (_e, name: string, workspaceId: string, kind: VpnKind, text: string, baseDir?: string) =>
     vpnCommitImport(name, workspaceId, kind, text, baseDir)
+)
+// Profiles already on this machine, put there by OpenVPN's own installers.
+// `knownSourcePaths` is what the renderer has already imported, so a second
+// scan offers only what is new -- the file stays on disk and is re-found every
+// time, so identity is the path rather than a hash of the contents.
+ipcMain.handle('vpn:discoverProfiles', (_e, knownSourcePaths?: string[]) =>
+  discoverVpnProfiles({ knownSourcePaths })
+)
+// The file is read IN MAIN. The renderer never sees the text, which for an
+// .ovpn with an inline `<key>` block is the private key itself -- and reading
+// it here is also what lets a path-form `ca ca.crt` resolve against the
+// profile's own directory.
+ipcMain.handle(
+  'vpn:commitImportFile',
+  (_e, name: string, workspaceId: string, kind: VpnKind, sourcePath: string) =>
+    vpnCommitImportFile(name, workspaceId, kind, sourcePath)
 )
 ipcMain.handle('vpn:deleteSecrets', (_e, vaultEntryId: string) => vpnDeleteSecrets(vaultEntryId))
 // Editing a stored .ovpn. Three channels, because an edit is a session: the

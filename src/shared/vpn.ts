@@ -93,6 +93,16 @@ export interface OpenVpnSpec {
   strippedDirectives?: StrippedDirective[]
   // Explicit user override; absent means allowlisted auto-detect.
   binaryPath?: string
+  /**
+   * The `.ovpn` file this profile was auto-discovered from, absent for one
+   * that was pasted or dropped in.
+   *
+   * It is the identity of a discovered profile, and the whole of what makes a
+   * re-scan idempotent: the file stays on disk after the import, so it turns
+   * up in every later scan and is skipped because this field already names
+   * it. Never read to start a tunnel — the configuration is in the vault.
+   */
+  sourcePath?: string
   // Summary fields kept out of the encrypted config body so the UI can show
   // something useful without unlocking the vault.
   remotes?: { host: string; port: number; proto: string }[]
@@ -670,6 +680,20 @@ export interface VpnImportResult {
 
 // Main-process only. The split exists so the compiler stops `secrets` from
 // being returned over IPC by accident.
+export interface DiscoveredVpnProfile {
+  kind: 'openvpn'
+  /** Absolute path of the file it came from. */
+  sourcePath: string
+  /** Suggested name: the file's stem, else the parser's. The file name is
+   *  what the user themselves called this profile, and it is what the drop
+   *  path already prefers; the parser's fallback is the remote host, which
+   *  two profiles to the same server would share. */
+  name: string
+  /** Exactly what `vpnImport` would have said about the same text, so a file
+   *  that cannot be imported is reported rather than silently dropped. */
+  report: VpnImportResult
+}
+
 export interface VpnImportResultInternal extends VpnImportResult {
   secrets?: ImportedSecrets
 }

@@ -11,6 +11,7 @@ import type {
   VpnProfile
 } from '../../types'
 import { bridgeHas } from '../../lib/bridge'
+import type { DiscoveredVpnProfile } from '../../../../shared/vpn'
 import { isVaultLocked, withVaultUnlock } from '../../lib/withVaultUnlock'
 
 const ACCEPT: Record<ImportableVpnKind, string> = {
@@ -207,6 +208,76 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
   // sits there unstartable with no obvious next move.
   if (created) return <VpnProfileForm profile={created} onClose={onClose} />
 
+  /**
+   * Profiles already on this machine, offered rather than waited for.
+   *
+   * The reported complaint was that OpsMaxx ignores an OpenVPN install that is
+   * already there: it neither found the binary nor offered the profiles the
+   * official installers had left in their own directories. Discovery is a
+   * read of a handful of known directories, so it runs when the modal opens
+   * rather than behind a button somebody has to know to press.
+   *
+   * Only `openvpn`: the other kinds have no installer laying profiles down in
+   * a standard place, so there is nothing to scan for.
+   *
+   * Already-imported profiles are excluded by SOURCE PATH. The file stays on
+   * disk and is re-found by every scan, so the path is the identity; a hash of
+   * the contents would offer the same profile again the day the user edits the
+   * upstream .ovpn.
+   */
+  const [found, setFound] = useState<DiscoveredVpnProfile[]>([])
+  const [scanning, setScanning] = useState(kind === 'openvpn')
+  const known = useApp((s) => s.vpns)
+
+  useEffect(() => {
+    if (kind !== 'openvpn') return
+    let live = true
+    const already = known
+      .map((profile) => (profile.spec as { sourcePath?: string } | undefined)?.sourcePath)
+      .filter((path): path is string => !!path)
+    void window.opsmaxx.vpn
+      .discoverProfiles(already)
+      .then((list) => {
+        if (live) setFound(list)
+      })
+      .catch(() => {
+        // A machine with none of those directories is the normal case on a
+        // host that has never had OpenVPN installed. Nothing to say about it.
+      })
+      .finally(() => {
+        if (live) setScanning(false)
+      })
+    return () => {
+      live = false
+    }
+    // `known` deliberately absent: importing one of these changes it, and
+    // re-scanning mid-modal would pull the list out from under the user.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind])
+
+  /** Import one of the discovered files. Main reads it, so an inline private
+   *  key never crosses IPC and a path-form `ca ca.crt` still resolves. */
+  const importFound = async (profile: DiscoveredVpnProfile): Promise<void> => {
+    setSaving(true)
+    setCommitError(null)
+    try {
+      const res = await window.opsmaxx.vpn.commitImportFile(
+        profile.name,
+        workspaceId,
+        kind,
+        profile.sourcePath
+      )
+      if (!res.ok || !res.spec) {
+        setCommitError({ message: res.error ?? 'The profile could not be imported.', vaultLocked: false })
+        return
+      }
+      setFound((list) => list.filter((p) => p.sourcePath !== profile.sourcePath))
+      onClose()
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <Modal
       title={TITLE[kind]}
@@ -221,6 +292,61 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
       confirm={{ label: 'Import profile', disabled: !canSave, onClick: () => void save() }}
     >
       <div className="col" style={{ gap: 10 }}>
+        {/* Already on this machine. Above the drop zone on purpose: if OpenVPN
+            is installed, these are almost certainly what the user came here to
+            import, and asking them to find the same file by hand is the
+            complaint that produced this. */}
+        {kind === 'openvpn' && (scanning || found.length > 0) && (
+          <div
+            className="col"
+            style={{
+              gap: 6,
+              padding: 10,
+              borderRadius: 'var(--r-md)',
+              border: '1px solid var(--border)'
+            }}
+          >
+            <div className="row" style={{ gap: 8 }}>
+              <FileUp size={14} className="faint" />
+              <span style={{ fontSize: 12 }}>
+                {scanning ? 'Looking for profiles already on this machine…' : 'Found on this machine'}
+              </span>
+            </div>
+            {found.map((profile) => {
+              // A file that will not import is listed with its reason rather
+              // than hidden: a profile the user can see in Explorer and cannot
+              // find here reads as OpsMaxx having missed it.
+              const usable = profile.report.ok && !!profile.report.spec
+              return (
+                <div key={profile.sourcePath} className="row" style={{ gap: 8 }}>
+                  <div className="col" style={{ gap: 2, minWidth: 0 }}>
+                    <span style={{ fontSize: 12 }}>{profile.name}</span>
+                    <span
+                      className="muted"
+                      style={{
+                        fontSize: 11,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                      }}
+                      title={profile.sourcePath}
+                    >
+                      {usable ? profile.sourcePath : (profile.report.error ?? 'Cannot be imported.')}
+                    </span>
+                  </div>
+                  <span className="grow" />
+                  <button
+                    className="btn"
+                    disabled={!usable || saving}
+                    onClick={() => void importFound(profile)}
+                  >
+                    Import
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )}
         <div
           className="col"
           style={{

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { realpath, stat } from 'node:fs/promises'
+import { readdir, realpath, stat } from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join, relative, sep } from 'node:path'
 import type { VpnEngineInfo, VpnKind } from '../../../shared/vpn'
 import { isEngineBundledOn } from '../../../shared/vpnEngines'
@@ -42,18 +42,15 @@ const ENGINE_KIND: Record<string, VpnKind> = {
 
 // The only directories a system-installed OpenVPN is accepted from, in the
 // order they are tried. A fixed list rather than a search: on Windows the
-// search *is* the vulnerability.
-const SYSTEM_CANDIDATES: Record<string, { posix: string[]; win32: string[] }> = {
+// search *is* the vulnerability. Windows has no entry here because there is no
+// fixed list to write — see `winCandidates`.
+const SYSTEM_CANDIDATES: Record<string, { posix: string[] }> = {
   openvpn: {
     posix: [
       '/usr/sbin/openvpn',
       '/usr/local/sbin/openvpn',
       '/opt/homebrew/sbin/openvpn',
       '/usr/bin/openvpn'
-    ],
-    win32: [
-      'C:\\Program Files\\OpenVPN\\bin\\openvpn.exe',
-      'C:\\Program Files (x86)\\OpenVPN\\bin\\openvpn.exe'
     ]
   },
 }
@@ -61,9 +58,169 @@ const SYSTEM_CANDIDATES: Record<string, { posix: string[]; win32: string[] }> = 
 // A symlink is allowed to move a candidate around inside these roots — Homebrew
 // keeps the real binary in `Cellar` and links it into `sbin` — but not out of
 // them. `/usr/sbin/openvpn -> /tmp/evil` is the attack this rejects.
-const PLATFORM_ROOTS: { posix: string[]; win32: string[] } = {
-  posix: ['/usr', '/opt', '/bin', '/sbin'],
-  win32: ['C:\\Program Files', 'C:\\Program Files (x86)', 'C:\\Windows']
+const POSIX_ROOTS = ['/usr', '/opt', '/bin', '/sbin']
+
+/** Drops empties and duplicates, preserving order. */
+function dedupe(values: (string | undefined)[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const v of values) {
+    if (!v) continue
+    const key = v.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(v)
+  }
+  return out
+}
+
+/**
+ * Windows program directories, read from the environment rather than spelled
+ * out.
+ *
+ * `C:\Program Files` is the English name, on an English install, whose system
+ * drive is C:. None of those three is guaranteed. And inside a 32-bit process
+ * on 64-bit Windows `%ProgramFiles%` points at the *x86* tree, so
+ * `%ProgramW6432%` is the only way to reach the 64-bit one from there. The
+ * hard-coded pair stays as a last resort, not as the answer.
+ */
+export function winProgramRoots(): string[] {
+  return dedupe([
+    process.env.ProgramW6432,
+    process.env.ProgramFiles,
+    process.env['ProgramFiles(x86)'],
+    'C:\\Program Files',
+    'C:\\Program Files (x86)'
+  ])
+}
+
+/** The Windows equivalent of `POSIX_ROOTS`: trees only an administrator can
+ *  write, so a candidate that resolves inside one has not been planted. */
+function winRoots(): string[] {
+  return dedupe([...winProgramRoots(), process.env.SystemRoot, 'C:\\Windows'])
+}
+
+/** One `reg query` value, or undefined for a key or value that is not there.
+ *  `name` empty reads the key's default value (`/ve`). */
+function regQuery(key: string, name: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    try {
+      execFile(
+        'reg',
+        ['query', key, ...(name ? ['/v', name] : ['/ve'])],
+        { timeout: 5_000, windowsHide: true, maxBuffer: 1 << 20 },
+        (err, stdout) => {
+          if (err) return resolve(undefined)
+          // `reg query` prints a blank line, the key, then one indented
+          // "<name>    REG_SZ    <value>" per value. The default value prints
+          // under the name `(Default)`.
+          const m = String(stdout ?? '').match(
+            /^\s+(?:\(Default\)|\S+)\s+REG_(?:SZ|EXPAND_SZ)\s+(.+)$/m
+          )
+          resolve(m?.[1]?.trim() || undefined)
+        }
+      )
+    } catch {
+      resolve(undefined)
+    }
+  })
+}
+
+/**
+ * What the OpenVPN Community installer recorded about itself.
+ *
+ * This is the authoritative answer, and the only one that survives an install
+ * to a non-default directory. `HKLM\SOFTWARE\OpenVPN` is world-readable and
+ * administrator-writable — which is exactly why a path from it is worth more
+ * than a path we guessed — and is the same key the official GUI reads for its
+ * own `exe_path` and `config_dir`. A 32-bit installer on 64-bit Windows lands
+ * under `WOW6432Node` instead, so both are asked.
+ */
+export async function openVpnRegistryPaths(): Promise<{ exe: string[]; configDirs: string[] }> {
+  if (process.platform !== 'win32') return { exe: [], configDirs: [] }
+  const exe: (string | undefined)[] = []
+  const configDirs: (string | undefined)[] = []
+  for (const key of ['HKLM\\SOFTWARE\\OpenVPN', 'HKLM\\SOFTWARE\\WOW6432Node\\OpenVPN']) {
+    const [exePath, installDir, configDir] = await Promise.all([
+      regQuery(key, 'exe_path'),
+      regQuery(key, ''),
+      regQuery(key, 'config_dir')
+    ])
+    exe.push(exePath)
+    // The key's default value is the install directory; `bin\openvpn.exe`
+    // under it is the layout the installer has always produced.
+    if (installDir) exe.push(join(installDir, 'bin', 'openvpn.exe'))
+    configDirs.push(configDir)
+    if (installDir) configDirs.push(join(installDir, 'config'))
+  }
+  return { exe: dedupe(exe), configDirs: dedupe(configDirs) }
+}
+
+/**
+ * OpenVPN Connect — the official GUI client, and what the reporter had
+ * installed — puts itself in `<ProgramFiles>\OpenVPN Connect`. Its own CLI
+ * (`ovpnconnect.exe`) is deliberately NOT returned: it takes an entirely
+ * different command line from `openvpn`, so handing it to the driver would
+ * swap "not found" for a launch that fails in a stranger way. What is wanted
+ * is the `openvpn.exe` core binary shipped alongside it, and which
+ * subdirectory holds that has moved between versions — so this is a bounded
+ * scan for that one file name, one level down, inside a directory only an
+ * administrator can write, rather than a guess at the current layout.
+ */
+async function scanFor(dir: string, exe: string, depth = 1): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
+  const out: string[] = []
+  for (const e of entries) {
+    const full = join(dir, e.name)
+    if (e.isFile()) {
+      if (e.name.toLowerCase() === exe) out.push(full)
+    } else if (e.isDirectory() && depth > 0) {
+      out.push(...(await scanFor(full, exe, depth - 1)))
+    }
+  }
+  return out
+}
+
+/** A place to look, and any root the ordinary allowlist would not cover. */
+interface Candidate {
+  path: string
+  /** Set only for a registry-reported install: HKLM is administrator-only, so
+   *  a directory it names is as trustworthy as `%ProgramFiles%` even when it
+   *  is on another drive. Everything else is inside `winRoots()` already. */
+  extraRoots?: string[]
+}
+
+// One `reg query` pair and two directory scans per resolve is fine once and
+// wasteful on a UI poll, so the answer is held for the app run like the
+// bundled hashes above it. Cleared by `resetBinaryCache()`.
+let winCandidateCache: Map<string, Candidate[]> | null = null
+
+async function winCandidates(name: string): Promise<Candidate[]> {
+  const cached = winCandidateCache?.get(name)
+  if (cached) return cached
+  const out: Candidate[] = []
+  if (name === 'openvpn') {
+    const reg = await openVpnRegistryPaths()
+    // Registry first: every other entry below is a guess at a layout, and
+    // this one is the installer's own record of what it did.
+    for (const p of reg.exe) out.push({ path: p, extraRoots: [dirname(dirname(p))] })
+    const roots = winProgramRoots()
+    for (const root of roots) out.push({ path: join(root, 'OpenVPN', 'bin', 'openvpn.exe') })
+    for (const root of roots) {
+      for (const p of await scanFor(join(root, 'OpenVPN Connect'), 'openvpn.exe')) {
+        out.push({ path: p })
+      }
+    }
+  }
+  const seen = new Set<string>()
+  const unique = out.filter((c) => {
+    const key = c.path.toLowerCase()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  ;(winCandidateCache ??= new Map()).set(name, unique)
+  return unique
 }
 
 // Which build script produces which engine. Named in the "it is not here"
@@ -86,6 +243,7 @@ const bundledCache = new Map<string, VpnEngineInfo>()
  *  never calls it, which is the point of caching per run. */
 export function resetBinaryCache(): void {
   bundledCache.clear()
+  winCandidateCache = null
   // The lifted module holds the parsed manifest now, and a test that swaps
   // fixture trees has to clear both or the second tree is verified against the
   // first tree's hashes.
@@ -165,7 +323,7 @@ export async function resolveSystem(
 ): Promise<VpnEngineInfo> {
   const kind = kindOf(name)
   const win32 = process.platform === 'win32'
-  const roots = win32 ? PLATFORM_ROOTS.win32 : PLATFORM_ROOTS.posix
+  const roots = win32 ? winRoots() : POSIX_ROOTS
 
   if (opts.binaryPath) {
     if (!opts.confirmed) {
@@ -182,11 +340,12 @@ export async function resolveSystem(
     return describe(kind, opts.binaryPath)
   }
 
-  const fixed = SYSTEM_CANDIDATES[name]
-  const candidates = fixed ? (win32 ? fixed.win32 : fixed.posix) : []
+  const candidates: Candidate[] = win32
+    ? await winCandidates(name)
+    : (SYSTEM_CANDIDATES[name]?.posix ?? []).map((path) => ({ path }))
   for (const candidate of candidates) {
-    if (await checkExecutable(candidate, roots)) continue
-    return describe(kind, candidate)
+    if (await checkExecutable(candidate.path, [...(candidate.extraRoots ?? []), ...roots])) continue
+    return describe(kind, candidate.path)
   }
 
   // No PATH search on Windows, ever. `PATH` there routinely contains
@@ -207,7 +366,9 @@ export async function resolveSystem(
   // put four sentences of advice in a toast with no control in it. The UI
   // renders the code's hint and a button that performs it, and shows this
   // detail behind a Details disclosure for whoever actually wants the paths.
-  const where = candidates.length ? candidates.join(', ') : 'the standard install locations'
+  const where = candidates.length
+    ? candidates.map((c) => c.path).join(', ')
+    : 'the standard install locations'
   throw new VpnError(
     'binary-missing',
     win32
