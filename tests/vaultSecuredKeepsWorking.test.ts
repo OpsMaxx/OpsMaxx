@@ -127,3 +127,73 @@ describe('once the vault is fully locked', () => {
     expect(credentialResolvable('srv-vault')).toBe(false)
   })
 })
+
+/**
+ * And a wrong password must not undo it.
+ *
+ * `secured` is the state this whole file exists to protect: the vault is
+ * unlocked and serving every background reader while the renderer holds no
+ * plaintext. A surface that wants plaintext asks for the password again — and
+ * `vaultUnlock`'s catch used to zero the key, the salt and the cache
+ * unconditionally.
+ *
+ * So one typo did not merely fail. It tore down a working vault: the sweep,
+ * the backups, CI polling and VPN autostart all stopped together, and the only
+ * way back was typing the password correctly, which the user had no reason to
+ * think was suddenly required because it had all been working a moment before.
+ *
+ * You cannot fail your way into a worse state than you started in.
+ */
+describe('a failed unlock attempt', () => {
+  it('leaves a secured vault secured, and still resolving', async () => {
+    const { vaultUnlock } = await import('../src/main/services/vault')
+    vi.useFakeTimers()
+    setVaultAutoLock(15)
+    vi.advanceTimersByTime(15 * 60_000 + 1000)
+    expect(vaultStatus().stage).toBe('secured')
+
+    const bad = await vaultUnlock('not-the-password')
+    expect(bad.ok).toBe(false)
+
+    // The state is untouched...
+    expect(vaultStatus().stage).toBe('secured')
+    expect(vaultStatus().unlocked).toBe(true)
+    // ...and, which is the point, background work still authenticates.
+    const cfg = resolveSecrets({ serverId: 'srv-vault', host: 'h', username: 'deploy' } as never)
+    expect((cfg as { password?: string }).password).toBe('hunter2')
+  })
+
+  it('leaves an open vault open', async () => {
+    const { vaultUnlock } = await import('../src/main/services/vault')
+    expect(vaultStatus().stage).toBe('open')
+
+    expect((await vaultUnlock('wrong')).ok).toBe(false)
+
+    expect(vaultStatus().stage).toBe('open')
+    // `vaultList` answers an envelope, not an array — and the entries still
+    // being readable is the half that matters: the cache survived.
+    expect(vaultList()).toMatchObject({ ok: true })
+    expect((vaultList() as { entries: unknown[] }).entries).toHaveLength(1)
+  })
+
+  it('still refuses, and still locks, when the vault was locked to begin with', async () => {
+    // The fix must not turn a failed attempt into a successful one, nor leave
+    // a locked vault reporting anything but locked.
+    const { vaultUnlock } = await import('../src/main/services/vault')
+    vaultLock()
+    expect(vaultStatus().stage).toBe('locked')
+
+    const bad = await vaultUnlock('wrong')
+    expect(bad.ok).toBe(false)
+    expect(vaultStatus().stage).toBe('locked')
+    expect(vaultStatus().unlocked).toBe(false)
+  })
+
+  it('still opens on the right password after a failed attempt', async () => {
+    const { vaultUnlock } = await import('../src/main/services/vault')
+    vaultLock()
+    expect((await vaultUnlock('wrong')).ok).toBe(false)
+    expect((await vaultUnlock('a-long-enough-password')).ok).toBe(true)
+    expect(vaultStatus().stage).toBe('open')
+  })
+})

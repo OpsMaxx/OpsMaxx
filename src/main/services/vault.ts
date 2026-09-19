@@ -155,6 +155,8 @@ export async function vaultCreate(password: string): Promise<VaultResult> {
 export async function vaultUnlock(password: string): Promise<VaultResult> {
   const file = readFile()
   if (!file) return { ok: false, error: 'No vault has been created yet.' }
+  // Captured before anything can change it. See the catch at the end.
+  const wasOpen = key !== null
   try {
     const s = Buffer.from(file.salt, 'base64')
     const stored = kdfOf(file)
@@ -185,10 +187,27 @@ export async function vaultUnlock(password: string): Promise<VaultResult> {
     touchVaultActivity()
     return { ok: true }
   } catch {
-    key = null
-    salt = null
-    cache = null
-    stage = 'locked'
+    // A FAILED ATTEMPT MUST NOT LOCK A VAULT THAT WAS ALREADY OPEN.
+    //
+    // This used to zero the key, the salt and the cache unconditionally, so a
+    // mistyped password did not merely fail — it tore down a vault that was
+    // working and serving every background reader in the process. The stage
+    // that makes it reachable is `secured`: the vault IS unlocked, the
+    // renderer holds no plaintext, and a surface that wants some asks for the
+    // password again. One typo there stopped the fleet sampler, the backups,
+    // CI polling and VPN autostart together, and the only way back was typing
+    // the password correctly — which the user had no reason to think was
+    // suddenly required, because it had all been working a moment earlier.
+    //
+    // Nothing is reset on the way in either: `decrypt` assigns to `cache` only
+    // on success and every other assignment is after it, so an attempt that
+    // fails now leaves the vault exactly as it found it.
+    if (!wasOpen) {
+      key = null
+      salt = null
+      cache = null
+      stage = 'locked'
+    }
     return { ok: false, error: 'Incorrect master password.' }
   }
 }
