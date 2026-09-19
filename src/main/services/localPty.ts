@@ -1,10 +1,10 @@
 import { homedir } from 'node:os'
-import { webContents } from 'electron'
 import type { WebContents } from 'electron'
 import type {
   LocalCloseInfo,
   LocalConnectConfig,
   LocalShell,
+  LocalShellKind,
   LocalStatus,
   LocalStatusPhase
 } from '../../shared/local'
@@ -12,7 +12,7 @@ import { recordLocalSession } from './localSessionLog'
 import { findShell, sanitisedEnv } from './shellDiscovery'
 import { integrationSpawn } from './shellIntegrationFiles'
 import { isShellIntegrationEnabled } from './localGate'
-import { inspectEnv, inspectInjectsSessions, onInspectStopped } from './inspect'
+import { inspectEnv, inspectInjectsSessions, onInspectStarted, onInspectStopped } from './inspect'
 
 // node-pty is loaded lazily, on the first connect, and never at module scope.
 // A machine where the native binding will not load (an unsupported libc, a
@@ -210,6 +210,96 @@ export function outputPipe(
   }
 }
 
+/**
+ * Layered environment for a child process, where a later layer replaces an
+ * earlier variable that differs from it only by case.
+ *
+ * A plain object spread cannot do this: JavaScript object keys are
+ * case-sensitive and Windows environment variables are not. A machine that
+ * already has `Http_Proxy` set — a VPN client, a corporate login script, an
+ * earlier version of any proxy tool — ends up with BOTH that and our
+ * `HTTP_PROXY` in the block CreateProcess builds, and Windows answers
+ * GetEnvironmentVariable with a case-insensitive scan that returns whichever
+ * it meets first. The base layer is spread first, so the one it meets first is
+ * the stale one. The injection then looks applied, reports applied, and
+ * captures nothing.
+ *
+ * Collisions are resolved ACROSS layers only, never within one: inspectEnv()
+ * deliberately returns `HTTP_PROXY` and `http_proxy` together because on a
+ * POSIX machine those are two different variables and real tools read one or
+ * the other. On Windows they collapse to one variable with one value, which is
+ * the same answer either way.
+ */
+export function childEnv(...layers: Record<string, string>[]): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const layer of layers) {
+    // Every deletion happens before anything from this layer is written, which
+    // is what keeps two spellings within the same layer from evicting each
+    // other.
+    for (const key of Object.keys(layer)) {
+      const lower = key.toLowerCase()
+      for (const existing of Object.keys(out)) {
+        if (existing !== key && existing.toLowerCase() === lower) delete out[existing]
+      }
+    }
+    Object.assign(out, layer)
+  }
+  return out
+}
+
+/**
+ * What a shell is told, on its own output, about being intercepted.
+ *
+ * Silence is the failure this exists for. The panel says "Capturing on
+ * 127.0.0.1:…", the shell looks completely ordinary, the request count stays
+ * at zero, and nothing anywhere connects those three facts. One dim line at
+ * the top of the session is the cheapest honest place to say which of them is
+ * actually true for THIS shell.
+ *
+ * Two shells get a second sentence, because they are the ones where the
+ * environment is injected correctly and traffic still does not appear:
+ *
+ *  - **Windows PowerShell** (5.1, the one on every Windows machine that has
+ *    not installed PowerShell 7) ships `curl` and `wget` as built-in ALIASES
+ *    for `Invoke-WebRequest`. That cmdlet is .NET Framework: it resolves its
+ *    proxy from the machine's WinINET settings and ignores `HTTP_PROXY`
+ *    entirely. So somebody typing `curl https://…` into the terminal OpsMaxx
+ *    opened is not running curl, and no environment variable can make that
+ *    request visible. `curl.exe` is the real curl — shipped in Windows since
+ *    10 1803 — and it does honour these variables. The aliases were removed in
+ *    PowerShell 6, so `pwsh` is not warned: there `curl` already is curl.exe.
+ *
+ *  - **WSL** is a different machine. `wsl.exe` passes through only what
+ *    `WSLENV` names, so the variables do not cross at all, and under WSL2
+ *    `127.0.0.1` inside the distribution is the distribution — not this
+ *    machine's loopback, where the listener is. Claiming that session is
+ *    routed would be a straightforward lie.
+ */
+export function inspectNotice(kind: LocalShellKind): string {
+  if (kind === 'wsl') {
+    return notice(
+      'Traffic capture is on, but WSL does not inherit this environment and 127.0.0.1 inside ' +
+        'the distribution is not this machine — nothing you run here is captured.'
+    )
+  }
+  const routed = 'This terminal is routed through OpsMaxx traffic capture.'
+  if (kind === 'powershell') {
+    return notice(
+      `${routed} Windows PowerShell's curl and wget are aliases for Invoke-WebRequest, which ` +
+        'ignores HTTP_PROXY — run curl.exe instead, or the request will not appear in Traffic.'
+    )
+  }
+  return notice(routed)
+}
+
+/** Dim, on its own line, and ending with a fresh line so the prompt is not
+ *  left dangling mid-sentence. Written to the terminal's OUTPUT, never its
+ *  input: it appears like any other program's output and cannot corrupt a
+ *  half-typed command. */
+function notice(text: string): string {
+  return `\r\n\x1b[2m[OpsMaxx] ${text}\x1b[0m\r\n`
+}
+
 interface Session {
   // null while a connect is in flight — the id is claimed before the first
   // await so a concurrent close is observable. See localConnect.
@@ -227,6 +317,15 @@ interface Session {
   // a shell running as the user, so the check is worth its three lines now
   // rather than after a popped-out terminal window makes it exploitable.
   wcId: number
+  // The same WebContents, held rather than looked up again.
+  //
+  // The notices below are written from callbacks that have no `wc` of their
+  // own, and `webContents.fromId()` is an Electron call that returns nothing
+  // outside a real Electron process — which made both of them untestable and
+  // is why the stop notice had never been exercised. `send()` already checks
+  // isDestroyed(), and localDisposeForWebContents() reaps the session when the
+  // window goes away, so holding the object is no more of a leak than the id.
+  wc: WebContents
   // This shell was started while traffic capture was on, so its environment
   // points at the inspector. Recorded because that stops being true the moment
   // capture stops, and a shell left pointing at a closed port fails every
@@ -268,6 +367,7 @@ export async function localConnect(wc: WebContents, cfg: LocalConnectConfig): Pr
     ack: () => {},
     disposers: [],
     wcId: wc.id,
+    wc,
     inspected: false
   }
   sessions.set(sessionId, placeholder)
@@ -308,12 +408,10 @@ export async function localConnect(wc: WebContents, cfg: LocalConnectConfig): Pr
       // Integration sits before the shell's own env for the same reason the
       // inspector's does: a shell profile that sets one of these deliberately
       // still wins.
-      env: {
-        ...sanitisedEnv(),
-        ...inspectVars,
-        ...(integration?.env ?? {}),
-        ...(shell.env ?? {})
-      },
+      //
+      // childEnv rather than a spread, because a spread is case-sensitive and
+      // Windows environment variables are not — see its own comment.
+      env: childEnv(sanitisedEnv(), inspectVars, integration?.env ?? {}, shell.env ?? {}),
       useConpty: true,
       // See Phase 0 Q3. The bundled redistributable ConPTY is deliberately not
       // shipped; the one in conhost.exe is used instead.
@@ -375,9 +473,17 @@ export async function localConnect(wc: WebContents, cfg: LocalConnectConfig): Pr
       ack: out.onAck,
       disposers: [() => dataDisp.dispose(), () => exitDisp.dispose(), () => out.dispose()],
       wcId: wc.id,
+      wc,
       inspected: Object.keys(inspectVars).length > 0
     })
     status(wc, sessionId, 'ready', { pid: pty.pid, shellLabel: shell.label })
+    // Said at the top of every intercepted session, including the ones that
+    // are NOT actually intercepted despite the environment being set. A user
+    // who has to work out for themselves why "Capturing" and "0 requests" are
+    // both true is a user who concludes the feature is broken.
+    if (Object.keys(inspectVars).length > 0) {
+      send(wc, `local:data:${sessionId}`, inspectNotice(shell.kind))
+    }
     // One line per session start, to opsmaxx-local-sessions.jsonl — never the
     // AI audit log, which answers a different question. Nothing typed into the
     // shell is recorded, here or anywhere.
@@ -491,29 +597,55 @@ function inspectSessionEnv(): Record<string, string> {
  * would run whatever the user was in the middle of typing.
  */
 export function localNotifyInspectStopped(): void {
-  for (const [, s] of sessions) {
+  for (const [id, s] of sessions) {
     if (!s.inspected || !s.pty) continue
     s.inspected = false
-    const wc = webContents.fromId(s.wcId)
-    if (!wc || wc.isDestroyed()) continue
-    // Dim, on its own line, and ending with a fresh line so the prompt is not
-    // left dangling mid-sentence.
-    const notice =
-      '\r\n\x1b[2m[OpsMaxx] Traffic capture stopped. This shell still points at the ' +
-      'inspector; run `unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy` or open a new ' +
-      'terminal.\x1b[0m\r\n'
-    send(wc, `local:data:${sessionIdOf(s)}`, notice)
+    send(
+      s.wc,
+      `local:data:${id}`,
+      notice(
+        'Traffic capture stopped. This shell still points at the inspector; run ' +
+          '`unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy` or open a new terminal.'
+      )
+    )
   }
 }
 
-/** The map is keyed by id and the value does not carry it, so this is the
- *  reverse lookup the notice above needs. Linear, over a handful of shells. */
-function sessionIdOf(target: Session): string {
-  for (const [id, s] of sessions) if (s === target) return id
-  return ''
+/**
+ * Tell every shell that was already open when capture started that it is not
+ * part of it.
+ *
+ * The mirror image of the notice above, and the same class of bug: an
+ * environment is inherited once, at spawn. A terminal opened before Start
+ * carries on talking to the internet directly for as long as it lives, while
+ * the panel says "Capturing" over a request count that never moves. Nothing
+ * else in the app is in a position to say so — only this module knows which
+ * shells predate the capture.
+ *
+ * Nothing is injected retroactively, because nothing can be: there is no way
+ * to change a running process's environment from outside it, and writing
+ * `export` lines to the shell's stdin would run them against whatever the user
+ * was in the middle of typing. The honest answer is the one the panel's
+ * "Copy shell setup" button already gives, so that is what this points at.
+ */
+export function localNotifyInspectStarted(): void {
+  if (!inspectInjectsSessions()) return
+  for (const [id, s] of sessions) {
+    if (s.inspected || !s.pty) continue
+    send(
+      s.wc,
+      `local:data:${id}`,
+      notice(
+        'Traffic capture started, but this shell was opened before it and is not routed ' +
+          'through the inspector. Open a new terminal, or paste the lines from ' +
+          '“Copy shell setup” in Traffic.'
+      )
+    )
+  }
 }
 
 // Registered at module load rather than called from inspect.ts, so the
 // dependency stays one-way: the terminal knows about the inspector, and the
 // inspector knows only that something wants telling.
 onInspectStopped(localNotifyInspectStopped)
+onInspectStarted(localNotifyInspectStarted)

@@ -289,7 +289,7 @@ export function InspectView(): React.JSX.Element {
           title={running ? 'Listening' : 'Nothing captured yet'}
           message={
             running
-              ? 'Requests appear here as they happen. Local terminals you open now are routed through the inspector automatically.'
+              ? listeningMessage(status?.source ?? 'manual')
               : 'Start capture, then use a terminal or your browser. OpsMaxx decrypts HTTPS with a certificate authority it generates for this machine.'
           }
           action={
@@ -311,29 +311,83 @@ export function InspectView(): React.JSX.Element {
 }
 
 /**
- * The export lines for a shell OpsMaxx did not open.
+ * What the empty flow list says while capture is running.
+ *
+ * Keyed on the source, because the three sources put traffic here in three
+ * completely different ways and only one of them involves terminals at all.
+ * This used to promise, for every source, that "local terminals you open now
+ * are routed through the inspector automatically" — which is true only for
+ * `sessions`, and is the single most misleading sentence the panel could show
+ * somebody staring at a request count of zero.
+ *
+ * The `sessions` line names the exclusion out loud. A shell inherits its
+ * environment once, at spawn, so a terminal that was already open when capture
+ * started is not routed and cannot be made routed from outside it.
+ */
+export function listeningMessage(source: InspectSourceKind): string {
+  const lead = 'Requests appear here as they happen.'
+  if (source === 'sessions') {
+    return `${lead} Terminals you open from now on are routed through the inspector automatically — ones that were already open are not.`
+  }
+  if (source === 'system') {
+    return `${lead} This machine's proxy settings point at the inspector, so anything that honours them is captured.`
+  }
+  return `${lead} Nothing is pointed at the inspector automatically on this setting — use “Copy shell setup” to point a shell at it yourself.`
+}
+
+/**
+ * The environment lines for a shell OpsMaxx did not open.
  *
  * This is the whole answer for a remote session: `sshd` will not carry these
  * variables for us, so the honest thing is to hand the user the exact lines
  * and let them paste them. It is also what someone wants for a shell they
  * already had open before they pressed Start.
+ *
+ * The syntax has to match the shell it is going to be pasted into, and on
+ * Windows that is not a POSIX shell. `export HTTP_PROXY=…` in PowerShell — the
+ * shell OpsMaxx itself offers as the default on Windows — is not a syntax
+ * error that tells you what to fix; `export` is simply an unrecognised command
+ * name, so the person gets "not recognized as the name of a cmdlet" ten times
+ * and a shell that is still not pointed at anything.
  */
+export function envLines(env: Record<string, string>, platform: NodeJS.Platform): string {
+  if (platform === 'win32') {
+    // PowerShell, since that is what this app's own Windows shell list makes
+    // the default. Quoted because a proxy URL carrying credentials can contain
+    // characters PowerShell would otherwise treat as its own.
+    return Object.entries(env)
+      .map(([k, v]) => `$env:${k} = "${v}"`)
+      .join('\n')
+  }
+  return Object.entries(env)
+    .map(([k, v]) => `export ${k}=${v}`)
+    .join('\n')
+}
+
 function CopyEnvButton(): React.JSX.Element {
   const [copied, setCopied] = useState(false)
+  // Resolved once, from main. `navigator.platform` is deprecated, lies under
+  // Electron's user-agent handling, and would be the wrong question anyway:
+  // what matters is the OS the shells being pasted into are running on.
+  const [platform, setPlatform] = useState<NodeJS.Platform>('linux')
+  useEffect(() => {
+    void window.opsmaxx?.platform?.().then(setPlatform)
+  }, [])
   return (
     <button
       className="btn secondary size-28"
       onClick={() => {
         void window.opsmaxx?.inspect.env().then((env) => {
-          const lines = Object.entries(env)
-            .map(([k, v]) => `export ${k}=${v}`)
-            .join('\n')
-          void navigator.clipboard.writeText(lines)
+          void navigator.clipboard.writeText(envLines(env, platform))
           setCopied(true)
           setTimeout(() => setCopied(false), 1500)
         })
       }}
-      title="Copy the export lines that point a shell at the inspector"
+      title={
+        platform === 'win32'
+          ? 'Copy the PowerShell lines that point a shell at the inspector'
+          : 'Copy the export lines that point a shell at the inspector'
+      }
     >
       {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? 'Copied' : 'Copy shell setup'}
     </button>

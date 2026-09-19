@@ -137,6 +137,30 @@ export function onInspectStopped(fn: () => void): void {
   stopListeners.push(fn)
 }
 
+/** Things that have to be told when capture starts.
+ *
+ *  Symmetric with the registry above, and it exists for the same reason read
+ *  the other way round: a process inherits its environment once, at spawn, so
+ *  a terminal that was ALREADY OPEN when capture started did not get the proxy
+ *  variables and never will. The panel says "Capturing", that shell keeps
+ *  talking to the internet directly, and nothing on either side connects the
+ *  two — which is indistinguishable, to the person looking at it, from a
+ *  capture that is simply broken. */
+const startListeners: (() => void)[] = []
+export function onInspectStarted(fn: () => void): void {
+  startListeners.push(fn)
+}
+
+function announceStarted(): void {
+  for (const fn of startListeners) {
+    try {
+      fn()
+    } catch {
+      /* a listener that cannot report is not a reason to fail a start */
+    }
+  }
+}
+
 function announceStopped(): void {
   for (const fn of stopListeners) {
     // One listener throwing must not stop the others, and must never take the
@@ -558,6 +582,9 @@ async function doStart(opts: InspectStartOptions): Promise<InspectStatus> {
 
   run.bindHost = started.bindHost ?? bindHost
   run.bindPort = started.bindPort ?? 0
+  // After the port is known, so a shell being told it is not routed is told it
+  // about a listener that is actually up.
+  announceStarted()
 
   if ((opts.source ?? 'manual') === 'system') {
     const engaged = await engageSystemProxy(run.bindHost, run.bindPort, platformNow())
