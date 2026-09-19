@@ -39,7 +39,7 @@ describe('discovering profiles already on this machine', () => {
     // reformat and tells you nothing about the wiring.
     expect(MAIN).toContain("'vpn:discoverProfiles'")
     expect(MAIN).toContain("'vpn:commitImportFile'")
-    expect(MAIN).toContain('discoverVpnProfiles({ knownSourcePaths })')
+    expect(MAIN).toContain('discoverVpnProfiles({ knownSourcePaths, kinds })')
     expect(MAIN).toContain('vpnCommitImportFile(name, workspaceId, kind, sourcePath)')
     // Imported, not merely referenced by a string that resolves to nothing.
     expect(MAIN).toContain('discoverVpnProfiles')

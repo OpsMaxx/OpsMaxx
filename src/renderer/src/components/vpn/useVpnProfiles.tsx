@@ -708,6 +708,20 @@ export function useVpnProfiles(): VpnProfiles {
           </div>
         )}
 
+        {/* ANOTHER CLIENT ALREADY HAS A TUNNEL UP.
+            Outside the engine-missing block deliberately: this matters most
+            when the engine IS available, because that is when Start is
+            enabled and the collision actually happens — two clients fighting
+            over the same TUN device and the default route. main computes
+            these on every resolve and nothing rendered them, so they were
+            being worked out and thrown away. */}
+        {!engineMissing && (engine?.advisories?.length ?? 0) > 0 && (
+          <div className="vpn-advisory">
+            <AlertTriangle size={13} className="faint" style={{ flexShrink: 0 }} />
+            <span className="faint">{engine?.advisories?.join(' ')}</span>
+          </div>
+        )}
+
         {gated && (
           // Naming the proxies is the point. "Acknowledge exposure to continue"
           // just sends the user hunting for the checkbox they missed — and so,

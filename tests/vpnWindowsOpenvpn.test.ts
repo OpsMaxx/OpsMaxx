@@ -83,7 +83,7 @@ const electronUserData = vi.hoisted(() => {
 vi.mock('electron', () => ({ app: { getPath: () => electronUserData } }))
 
 import { resetBinaryCache, resolveSystem } from '../src/main/services/vpn/binaries'
-import { discoverVpnProfiles } from '../src/main/services/vpn/import'
+import { discoverVpnProfiles, resetDiscoveryCache } from '../src/main/services/vpn/import'
 import { isVpnError } from '../src/main/services/vpn/errors'
 
 /** Beside the repo rather than under os.tmpdir(): /tmp is world-writable and
@@ -134,6 +134,10 @@ beforeEach(() => {
 
   hoisted.calls.length = 0
   hoisted.registry.clear()
+  // Discovery caches a completed scan for 30s. Every case here swaps the whole
+  // fixture tree underneath it, so without this the second case is answered
+  // from the first case's filesystem.
+  resetDiscoveryCache()
   setEnv('ProgramFiles', programFiles)
   setEnv('ProgramW6432', undefined)
   setEnv('ProgramFiles(x86)', undefined)

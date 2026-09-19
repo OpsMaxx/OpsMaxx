@@ -307,7 +307,8 @@ import type {
   VpnDiagnoseTarget,
   VpnProfile,
   VpnPublicKeyResult,
-  VpnSpec
+  VpnSpec,
+  DiscoveredVpnProfile
 } from '../shared/vpn'
 import { externalEditOpen, externalEditStop, externalEditDisposeAll } from './services/extedit'
 import {
@@ -5045,8 +5046,10 @@ ipcMain.handle(
 // `knownSourcePaths` is what the renderer has already imported, so a second
 // scan offers only what is new -- the file stays on disk and is re-found every
 // time, so identity is the path rather than a hash of the contents.
-ipcMain.handle('vpn:discoverProfiles', (_e, knownSourcePaths?: string[]) =>
-  discoverVpnProfiles({ knownSourcePaths })
+ipcMain.handle(
+  'vpn:discoverProfiles',
+  (_e, knownSourcePaths?: string[], kinds?: DiscoveredVpnProfile['kind'][]) =>
+    discoverVpnProfiles({ knownSourcePaths, kinds })
 )
 // The file is read IN MAIN. The renderer never sees the text, which for an
 // .ovpn with an inline `<key>` block is the private key itself -- and reading

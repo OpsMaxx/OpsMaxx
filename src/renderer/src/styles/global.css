@@ -3234,6 +3234,20 @@ details[open] > .disclosure-head .chev {
   max-width: 62ch;
 }
 
+/* Another VPN client already has a tunnel up. A note on the row rather than a
+   banner: it is true of one profile's engine, not of the screen. */
+.vpn-advisory {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  /* Not --fs-caption. 11px is reserved for short labels recognised by shape,
+     and this is a sentence — tests/typeScale.test.ts enforces the difference
+     and is right to: running text at label size is the thing nobody reads. */
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
 /* First-run walkthrough. Anchored bottom-right rather than centred over a
    scrim: each step switches to the view it is describing, and that view has to
    stay visible for the step to mean anything. */

@@ -1653,8 +1653,13 @@ const api = {
      * path -- a content hash would offer the same profile again the day the
      * user edits the upstream .ovpn.
      */
-    discoverProfiles: (knownSourcePaths?: string[]): Promise<DiscoveredVpnProfile[]> =>
-      ipcRenderer.invoke('vpn:discoverProfiles', knownSourcePaths),
+    discoverProfiles: (
+      knownSourcePaths?: string[],
+      /** Which engines to scan for. Omitted means OpenVPN only, which is what
+       *  the import dialog wants; the VPN screen asks for both. */
+      kinds?: DiscoveredVpnProfile['kind'][]
+    ): Promise<DiscoveredVpnProfile[]> =>
+      ipcRenderer.invoke('vpn:discoverProfiles', knownSourcePaths, kinds),
     /**
      * Import one of those by path, rather than by text.
      *

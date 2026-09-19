@@ -32,6 +32,21 @@ import type { DiscoveredVpnProfile, VpnProfile } from '../../../../shared/vpn'
  *  not come back every launch once it has been declined. */
 const DISMISSED_KEY = 'opsmaxx.vpn.foundProfiles.dismissed'
 
+const KIND_LABEL: Record<DiscoveredVpnProfile['kind'], string> = {
+  openvpn: 'OpenVPN',
+  wireguard: 'WireGuard'
+}
+
+/** "2 OpenVPN and 1 WireGuard." Named rather than counted as "VPN profiles",
+ *  because which client left them is what tells the user where they came
+ *  from. */
+function summary(found: DiscoveredVpnProfile[]): string {
+  const counts = new Map<DiscoveredVpnProfile['kind'], number>()
+  for (const p of found) counts.set(p.kind, (counts.get(p.kind) ?? 0) + 1)
+  const parts = [...counts].map(([kind, n]) => `${n} ${KIND_LABEL[kind]}`)
+  return `Left by ${parts.join(' and ')} on this machine.`
+}
+
 export function FoundProfilesBanner({
   onReview
 }: {
@@ -57,7 +72,10 @@ export function FoundProfilesBanner({
       .map((p) => (p.spec as { sourcePath?: string } | undefined)?.sourcePath)
       .filter((path): path is string => !!path)
     void window.opsmaxx.vpn
-      .discoverProfiles(already)
+      // BOTH KINDS. WireGuard discovery exists in main — /etc/wireguard,
+      // ~/.config/wireguard, the official Windows client's tunnel store — and
+      // defaults off, so asking for OpenVPN alone left all of it unreachable.
+      .discoverProfiles(already, ['openvpn', 'wireguard'])
       // A machine that has never had OpenVPN on it is the ordinary case, and
       // it has nothing to say about it.
       .then((list) => live && setFound(list.filter((p) => p.report.ok)))
@@ -87,7 +105,12 @@ export function FoundProfilesBanner({
         // for a batch the user pressed one button for is how a person learns
         // to click through master-password dialogs.
         const res = await withVaultUnlock('Import the VPN profiles found on this machine', () =>
-          window.opsmaxx.vpn.commitImportFile(profile.name, workspaceId, 'openvpn', profile.sourcePath)
+          window.opsmaxx.vpn.commitImportFile(
+            profile.name,
+            workspaceId,
+            profile.kind,
+            profile.sourcePath
+          )
         )
         if (res.ok && res.spec) {
           upsertVpnProfile(res as unknown as VpnProfile)
@@ -113,13 +136,15 @@ export function FoundProfilesBanner({
       <Globe size={18} style={{ color: 'var(--accent-ink)', flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="s-title">
+          {/* "One OpenVPN profile" rather than "a/an OpenVPN profile": the
+              article depends on the label, and the label is data. */}
           {found.length === 1
-            ? 'There is an OpenVPN profile already on this machine'
-            : `There are ${found.length} OpenVPN profiles already on this machine`}
+            ? `One ${KIND_LABEL[found[0].kind]} profile is already on this machine`
+            : `${found.length} VPN profiles are already on this machine`}
         </div>
         <div className="s-desc">
-          Left by OpenVPN&rsquo;s own installers. Importing copies the certificates and keys into
-          the vault; the files on disk are not moved or changed.
+          {summary(found)} Importing copies the keys into the vault; the files on disk are not
+          moved or changed.
         </div>
       </div>
       <button className="btn secondary size-28" onClick={onReview} disabled={busy}>

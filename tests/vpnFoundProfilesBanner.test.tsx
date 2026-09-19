@@ -27,7 +27,12 @@ const found = (over: Partial<DiscoveredVpnProfile> = {}): DiscoveredVpnProfile =
   kind: 'openvpn',
   sourcePath: '/Users/x/OpenVPN/config/work.ovpn',
   name: 'work',
-  report: { ok: true, stripped: [], spec: { kind: 'openvpn' } } as DiscoveredVpnProfile['report'],
+  report: {
+    ok: true,
+    stripped: [],
+    warnings: [],
+    spec: { kind: 'openvpn' }
+  } as unknown as DiscoveredVpnProfile['report'],
   ...over
 })
 
@@ -44,6 +49,12 @@ beforeEach(() => {
 })
 
 describe('the found-profiles offer', () => {
+  it('asks for WireGuard as well as OpenVPN', async () => {
+    render(<FoundProfilesBanner onReview={() => {}} />)
+    await waitFor(() => expect(discoverProfiles).toHaveBeenCalled())
+    expect(discoverProfiles.mock.calls[0][1]).toEqual(['openvpn', 'wireguard'])
+  })
+
   it('says nothing on a machine that has no profiles', async () => {
     render(<FoundProfilesBanner onReview={() => {}} />)
     await waitFor(() => expect(discoverProfiles).toHaveBeenCalled())
@@ -56,14 +67,14 @@ describe('the found-profiles offer', () => {
     discoverProfiles.mockResolvedValue([found()])
     render(<FoundProfilesBanner onReview={() => {}} />)
     expect(
-      await screen.findByText(/There is an OpenVPN profile already on this machine/)
+      await screen.findByText(/One OpenVPN profile is already on this machine/)
     ).toBeTruthy()
   })
 
   it('pluralises', async () => {
     discoverProfiles.mockResolvedValue([found(), found({ sourcePath: '/b.ovpn', name: 'b' })])
     render(<FoundProfilesBanner onReview={() => {}} />)
-    expect(await screen.findByText(/There are 2 OpenVPN profiles/)).toBeTruthy()
+    expect(await screen.findByText(/2 VPN profiles are already on this machine/)).toBeTruthy()
   })
 
   it('excludes what is already imported, by source path', async () => {
@@ -74,12 +85,19 @@ describe('the found-profiles offer', () => {
     await waitFor(() => expect(discoverProfiles).toHaveBeenCalled())
     // The path of the profile already held is what gets sent, so the scan can
     // skip it. Passing nothing would offer the user their own imports back.
-    expect(discoverProfiles).toHaveBeenCalledWith(['/Users/x/OpenVPN/config/work.ovpn'])
+    // Both kinds asked for: WireGuard discovery exists in main and defaults
+    // off, so asking for OpenVPN alone would leave it unreachable.
+    expect(discoverProfiles).toHaveBeenCalledWith(
+      ['/Users/x/OpenVPN/config/work.ovpn'],
+      ['openvpn', 'wireguard']
+    )
   })
 
   it('does not offer a profile that cannot be imported', async () => {
     discoverProfiles.mockResolvedValue([
-      found({ report: { ok: false, error: 'bad' } as DiscoveredVpnProfile['report'] })
+      found({
+        report: { ok: false, error: 'bad' } as unknown as DiscoveredVpnProfile['report']
+      })
     ])
     render(<FoundProfilesBanner onReview={() => {}} />)
     await waitFor(() => expect(discoverProfiles).toHaveBeenCalled())

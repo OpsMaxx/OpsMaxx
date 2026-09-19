@@ -652,6 +652,18 @@ export interface VpnEngineInfo {
   bundled: boolean
   // Why it is unavailable, in words the user can act on.
   reason?: string
+  /**
+   * Things worth knowing before starting a tunnel, none of which prevent one.
+   *
+   * Two observations go in here: other VPN clients installed on this machine,
+   * and tunnel interfaces that already have an address. Both are cheap and
+   * both are advisory — OpsMaxx cannot tell which application owns an
+   * interface, whether it is the same network, or whether the two would
+   * actually fight, and two tunnels to different networks coexist perfectly
+   * well. So this is shown and never enforced: nothing refuses a start or
+   * tries to take an interface over on the strength of it.
+   */
+  advisories?: string[]
 }
 
 // ----------------------------------------------------------------- import
@@ -681,7 +693,9 @@ export interface VpnImportResult {
 // Main-process only. The split exists so the compiler stops `secrets` from
 // being returned over IPC by accident.
 export interface DiscoveredVpnProfile {
-  kind: 'openvpn'
+  /** The two kinds whose installers leave profiles in a known place. frp and
+   *  Tailscale have no such directory, so there is nothing to scan for. */
+  kind: 'openvpn' | 'wireguard'
   /** Absolute path of the file it came from. */
   sourcePath: string
   /** Suggested name: the file's stem, else the parser's. The file name is
