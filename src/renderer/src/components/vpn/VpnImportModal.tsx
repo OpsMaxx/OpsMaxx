@@ -206,8 +206,6 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
   // Handing over rather than closing. The profile is saved either way, but
   // leaving the user to find the form themselves is how an imported frp client
   // sits there unstartable with no obvious next move.
-  if (created) return <VpnProfileForm profile={created} onClose={onClose} />
-
   /**
    * Profiles already on this machine, offered rather than waited for.
    *
@@ -277,6 +275,8 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
       setSaving(false)
     }
   }
+
+  if (created) return <VpnProfileForm profile={created} onClose={onClose} />
 
   return (
     <Modal

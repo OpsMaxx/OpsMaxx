@@ -39,6 +39,9 @@
 // bounded by a character class that excludes ESC.
 
 /** ESC [ 8 m h a : — `ConsoleNote.PREAMBLE_STR`, the exact bytes Jenkins writes. */
+// The rule guards against a control character reaching a pattern by accident.
+// Here finding one is the entire purpose.
+// eslint-disable-next-line no-control-regex
 const JENKINS_NOTE = /\[8mha:[^]*(?:\[0m)?/g
 
 /**
@@ -48,6 +51,8 @@ const JENKINS_NOTE = /\[8mha:[^]*(?:\[0m)?/g
  * sequence's payload goes with it rather than being left on screen. Its
  * terminator is BEL or ESC-backslash, which is why the body excludes both.
  */
+// As above: ESC and BEL are the bytes this exists to remove.
+// eslint-disable-next-line no-control-regex
 const ANSI = /\[[0-9;:?]*[ -/]*[@-~]|\][^]*(?:|\\)?|[@-Z\\-_]/g
 
 /**
