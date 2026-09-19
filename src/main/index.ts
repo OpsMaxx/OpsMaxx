@@ -5183,6 +5183,13 @@ const resumeChecksAfterUnlock = (r: { ok: boolean }): { ok: boolean } => {
     // routinely shut at launch, and nothing ever retried it. Only the ones a
     // locked vault stopped — a broken config is not something unlocking fixes.
     vpnRetryVaultBlockedAutostarts()
+    // The fourth with the same shape, and the one the user actually hit. A CI
+    // account whose FIRST discovery died on a locked vault holds no pipelines,
+    // so it has no poll targets and discovery has no timer — it stays dark for
+    // the life of the process. Unlocking from the CI/CD panel's own button now
+    // re-reads that account, but an unlock from anywhere else — the sidebar,
+    // Settings, another window — reaches only this hub.
+    cicd.resumeAfterVaultUnlock()
   }
   return r
 }

@@ -163,3 +163,52 @@ describe('the panel does not gate itself off', () => {
     expect(MODAL).toMatch(/NEVER STORES THE TOKEN/)
   })
 })
+
+/**
+ * A CI account blocked by a locked vault is read again when it unlocks.
+ *
+ * The fourth member of a family that already had three: the fleet sampler, the
+ * db sampler and VPN autostart all stop when the vault shuts and all needed
+ * telling when it came back. CI/CD was missing, and it failed worse than the
+ * others — an account whose FIRST discovery died on the lock holds no
+ * pipelines, so it has no poll targets, and discovery has no timer behind it.
+ * It stayed dark for the life of the process.
+ *
+ * Pinned here rather than in a unit test because the bug is never in the
+ * function; it is in whether anything calls it. That is the failure this file
+ * was written for.
+ */
+describe('resuming CI reads when the vault unlocks', () => {
+  const WIRING = read('src/main/services/cicd/wiring.ts')
+
+  it('is implemented', () => {
+    expect(WIRING).toContain('export function resumeAfterVaultUnlock')
+  })
+
+  it('is called from the unlock path, not merely exported', () => {
+    expect(MAIN).toContain('cicd.resumeAfterVaultUnlock()')
+    // Inside the hub every unlock path funnels through, beside its three
+    // siblings — not bolted onto one handler.
+    const at = MAIN.indexOf('const resumeChecksAfterUnlock')
+    expect(at).toBeGreaterThan(-1)
+    const hub = MAIN.slice(at, at + 1600)
+    expect(hub).toContain('cicd.resumeAfterVaultUnlock()')
+    expect(hub).toContain('fleetSampler.resume()')
+  })
+
+  it('rediscovers rather than polling', () => {
+    // A poll cannot help: the targets are built from pipelines the account
+    // does not have. If this ever becomes `refresh`, the bug is back.
+    const at = WIRING.indexOf('export function resumeAfterVaultUnlock')
+    const body = WIRING.slice(at, at + 900)
+    expect(body).toContain('rediscoverOne')
+  })
+
+  it('touches only the accounts a locked vault stopped', () => {
+    // Rediscovering the estate because somebody typed a password is a folder
+    // walk of every controller and a YAML fetch per workflow on GitHub.
+    const at = WIRING.indexOf('export function resumeAfterVaultUnlock')
+    const body = WIRING.slice(at, at + 900)
+    expect(body).toContain('VAULT_LOCKED')
+  })
+})

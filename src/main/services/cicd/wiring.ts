@@ -32,6 +32,7 @@ import { loadData } from '../store'
 import type { HttpResult } from '../../../shared/httpClient'
 import { randomUUID } from 'node:crypto'
 import { vaultList, vaultSave } from '../vault'
+import { VAULT_LOCKED } from '../../../shared/vault'
 import type { VaultEntry } from '../../../shared/vault'
 import type {
   CicdCapacity,
@@ -863,6 +864,39 @@ async function rediscoverOne(connectionId: string): Promise<void> {
   if (!c || !c.enabled || !broadcast) return
   await discoverOne(c, broadcast)
   poller?.configure(connections, allTargets())
+}
+
+/**
+ * Read again the accounts a locked vault stopped.
+ *
+ * The fourth member of the family `resumeChecksAfterUnlock` already holds, and
+ * it was missing for the same reason the other three were: something stops
+ * when the vault shuts, correctly, and nothing tells it the vault came back.
+ *
+ * WHY IT HAS TO BE DISCOVERY AND NOT A POLL. The poller's targets are built
+ * from the pipelines already held, so an account whose FIRST discovery died on
+ * the lock has none — no pipelines, no targets, nothing for a poll to read.
+ * And discovery has no timer behind it. Such an account stays dark for the
+ * life of the process, whatever the panel does, which is why the renderer's
+ * own unlock button could not fix it from that side alone.
+ *
+ * Scoped to the accounts that actually failed on the lock. Rediscovering the
+ * estate because somebody typed a password is a folder walk of every
+ * controller and, on GitHub, a YAML fetch per workflow — the same reason
+ * `rediscoverOne` above is scoped to one connection.
+ *
+ * Idempotent and safe to call from every unlock path, like its three
+ * siblings: an account with no recorded vault failure is not touched.
+ */
+export function resumeAfterVaultUnlock(): void {
+  if (!broadcast) return
+  for (const [id, state] of discovery) {
+    if (!state.error?.includes(VAULT_LOCKED)) continue
+    // Not awaited, and failures are swallowed: this is a background nudge from
+    // a password prompt, and an account that fails again simply keeps the
+    // error it already had.
+    void rediscoverOne(id).catch(() => undefined)
+  }
 }
 
 export function configure(emit: (event: CicdPanelState) => void): void {
