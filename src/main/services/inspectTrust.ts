@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, X509Certificate } from 'node:crypto'
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -78,6 +78,118 @@ export function sha256Hex(pem: string): string {
  *  nothing else, however much everyone would prefer otherwise. */
 export function sha1Hex(pem: string): string {
   return createHash('sha1').update(derFromPem(pem)).digest('hex')
+}
+
+/**
+ * When the certificate stops being valid, read from the certificate.
+ *
+ * `X509Certificate` is in Node's own `crypto`, so this asks the same parser
+ * that every TLS handshake in this process uses rather than a second opinion.
+ * `null` for anything unparseable: a certificate we cannot read is not one to
+ * declare expired, and the caller treats null as "no expiry objection" and
+ * lets the store membership stand.
+ */
+export function notAfterOf(pem: string): Date | null {
+  try {
+    const at = new Date(new X509Certificate(pem).validTo)
+    return Number.isNaN(at.getTime()) ? null : at
+  } catch {
+    return null
+  }
+}
+
+// ------------------------------------------------------- what we installed
+//
+// THE RECORD IS FOR REMOVAL AND FOR EXPLANATION, NEVER FOR ANSWERING
+// "IS IT TRUSTED".
+//
+// That distinction is the whole design, and the macOS incident above is why.
+// On that machine the certificate was in the keychain and carried no trust
+// setting; a panel that trusted its own memory of having installed it said
+// everything was fine while every HTTPS request on the machine failed. So
+// trust is always re-read from the operating system, every time.
+//
+// What the record is good for is the two things a probe cannot tell you:
+//
+//   - WHICH certificate we put there, so removal takes ours out by thumbprint
+//     and leaves a same-named one from an older install alone.
+//   - THAT we put one there, so when the system now says otherwise the user
+//     can be told "this was installed on <date> and something has removed or
+//     overridden it" instead of being handed the same button again with no
+//     explanation.
+
+const RECORD_BASENAME = 'trust-installs.json'
+
+export interface TrustInstallRecord {
+  store: 'system' | 'nss'
+  /** SHA-256 of the certificate DER — the identity, not the name. */
+  fingerprint: string
+  /** SHA-1 too, because it is the only handle Windows takes. */
+  thumbprint: string
+  platform: NodeJS.Platform
+  at: string
+}
+
+function recordPath(): string {
+  return join(app.getPath('userData'), 'inspect', RECORD_BASENAME)
+}
+
+/** The records, or an empty list. Unreadable is treated as empty here — unlike
+ *  the RDP pin store, nothing security-relevant is decided from this file, so
+ *  failing closed would only break removal for no gain. */
+export async function trustInstalls(): Promise<TrustInstallRecord[]> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(recordPath(), 'utf8'))
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(
+      (r): r is TrustInstallRecord =>
+        !!r && typeof r === 'object' && typeof (r as TrustInstallRecord).fingerprint === 'string'
+    )
+  } catch {
+    return []
+  }
+}
+
+async function writeRecords(records: TrustInstallRecord[]): Promise<void> {
+  const dir = join(app.getPath('userData'), 'inspect')
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  await writeFile(recordPath(), JSON.stringify(records, null, 2), { mode: 0o600 })
+}
+
+async function rememberInstall(ctx: TrustContext, store: 'system' | 'nss'): Promise<void> {
+  const fingerprint = sha256Hex(ctx.certPem)
+  const kept = (await trustInstalls()).filter(
+    (r) => !(r.store === store && r.fingerprint === fingerprint)
+  )
+  kept.push({
+    store,
+    fingerprint,
+    thumbprint: sha1Hex(ctx.certPem).toUpperCase(),
+    platform: ctx.platform,
+    at: new Date().toISOString()
+  })
+  await writeRecords(kept).catch(() => {})
+}
+
+async function forgetInstall(ctx: TrustContext, store: 'system' | 'nss'): Promise<void> {
+  const fingerprint = sha256Hex(ctx.certPem)
+  await writeRecords(
+    (await trustInstalls()).filter((r) => !(r.store === store && r.fingerprint === fingerprint))
+  ).catch(() => {})
+}
+
+/**
+ * Thumbprints we installed into a store and have not removed.
+ *
+ * Every one of these is a root certificate this application put on the
+ * machine, so anything still listed that is NOT the current authority is
+ * litter from a regenerate — and `removeStaleTrust` is what takes it out.
+ */
+export async function staleInstalls(ctx: TrustContext): Promise<TrustInstallRecord[]> {
+  const current = sha256Hex(ctx.certPem)
+  return (await trustInstalls()).filter(
+    (r) => r.platform === ctx.platform && r.fingerprint !== current
+  )
 }
 
 // ------------------------------------------------------------------ cert file
@@ -170,13 +282,38 @@ async function systemTrustState(ctx: TrustContext): Promise<InspectTrustStore> {
   }
   invalidateTrustCache()
   if (ctx.platform === 'win32') {
-    // A certificate in the Root store IS trusted on Windows — the store is the
-    // trust setting, unlike macOS where the two are separate. `-verifystore`
-    // is still the stronger question: it fails for a certificate that is
-    // present but expired or otherwise unusable.
+    // MEMBERSHIP IS THE TRUST, AND IT IS THE ONLY THING ASKED HERE.
+    //
+    // On Windows a certificate in the Root store IS trusted — the store is the
+    // trust setting, unlike macOS where the two are separate facts and only
+    // the second one counts. So `-store` answers the question completely.
+    //
+    // This used to ask `-verifystore` instead, on the reasoning that it is the
+    // "stronger question" because it also catches a certificate that is
+    // present but unusable. It is stronger about the wrong things. It builds
+    // and validates the whole chain, revocation included, and our authority is
+    // self-signed with no CRL distribution point and no OCSP responder — so on
+    // a machine that is offline, behind a filtering proxy, or under a policy
+    // that requires a revocation answer, it reports failure for a certificate
+    // that is installed and working. The panel then says "not trusted", the
+    // Install button comes back, installing succeeds, and the panel says "not
+    // trusted" again: the loop reported from Windows.
+    //
+    // Expiry, which was the one real thing `-verifystore` added, is decided
+    // from the certificate itself. We hold the PEM, so there is no reason to
+    // ask another process a question we can answer exactly.
     const thumb = sha1Hex(ctx.certPem).toUpperCase()
-    const verified = await tryRun('certutil', ['-user', '-verifystore', 'Root', thumb])
-    if (verified.ok && verified.stdout.toUpperCase().includes(thumb)) {
+    const present = await tryRun('certutil', ['-user', '-store', 'Root', thumb])
+    const installed = present.ok && present.stdout.toUpperCase().includes(thumb)
+    if (installed) {
+      const expired = notAfterOf(ctx.certPem)
+      if (expired && expired.getTime() < Date.now()) {
+        return {
+          ...base,
+          state: 'untrusted',
+          hint: 'The inspection certificate has expired. Regenerate the authority, then install the new certificate.'
+        }
+      }
       return { ...base, state: 'trusted' }
     }
     return {
@@ -406,13 +543,66 @@ async function darwinUserTrustPresent(commonName: string): Promise<boolean> {
 export async function installSystemTrust(ctx: TrustContext): Promise<TrustChangeResult> {
   invalidateTrustCache()
   if (ctx.platform === 'win32') {
-    const res = await tryRun('certutil', ['-user', '-addstore', 'Root', ctx.certPath])
-    return res.ok
-      ? { ok: true }
-      : { ok: false, message: 'Windows refused to add the certificate to the user trust store.' }
+    // THE PROMPT TIMEOUT, NOT THE PROBE TIMEOUT.
+    //
+    // Adding to the Root store is the one certificate operation Windows will
+    // not do quietly: crypt32 raises its own "You are about to install a
+    // certificate from a certification authority" warning, and a person has to
+    // answer it. Under the ten-second probe bound that answer arrives after
+    // `certutil` has already been killed, and the result is
+    // "Windows refused to add the certificate" for an install the user was in
+    // the middle of approving -- intermittent, timing-dependent, and blamed on
+    // the wrong party. macOS is given three minutes for the same reason a few
+    // lines down; Windows was not.
+    const res = await tryRun(
+      'certutil',
+      ['-user', '-addstore', 'Root', ctx.certPath],
+      USER_TRUST_PROMPT_TIMEOUT_MS
+    )
+    if (!res.ok) {
+      return {
+        ok: false,
+        message:
+          'Windows did not add the certificate to your trust store. If a warning dialog appeared, it was declined or closed.',
+        manualCommand: `certutil -user -addstore Root "${ctx.certPath}"`
+      }
+    }
+    await rememberInstall(ctx, 'system')
+    // Falls through to the shared verification below rather than returning
+    // here. The comment on that block has always said "on every platform" and
+    // Windows was the platform it did not reach, which is how an install that
+    // silently did nothing still reported success.
+  } else if (ctx.platform === 'darwin') {
+    const darwin = await installDarwinTrust(ctx)
+    if (darwin.ok) await rememberInstall(ctx, 'system')
+    return darwin
+  } else {
+    const linux = await installLinuxTrust(ctx)
+    if (!linux.ok) return linux
   }
 
-  if (ctx.platform === 'darwin') return installDarwinTrust(ctx)
+  // Verified rather than assumed, on every platform. An elevated command can
+  // exit 0 having done half the job -- the macOS incident above is the proof,
+  // and a policy this process cannot see can do the same to an anchor
+  // directory or to a Windows Root store an administrator has locked. A
+  // certificate that looks installed and is refused by every client is far
+  // worse than an install that admits it failed.
+  invalidateTrustCache()
+  const after = await systemTrustState(ctx)
+  if (after.state !== 'trusted') {
+    return {
+      ok: false,
+      message:
+        after.hint ??
+        'The certificate was added but is still not trusted. A device management profile may be preventing it.'
+    }
+  }
+  return { ok: true }
+}
+
+/** Debian and RHEL anchors, split out so `installSystemTrust` can end in one
+ *  verification every platform reaches. */
+async function installLinuxTrust(ctx: TrustContext): Promise<TrustChangeResult> {
 
   const elevator = elevatorForPlatform(ctx.platform)
   const probe = await elevator.probe()
@@ -441,22 +631,7 @@ export async function installSystemTrust(ctx: TrustContext): Promise<TrustChange
   if (exit.code !== 0) {
     return { ok: false, message: `The trust store rejected the certificate (exit ${exit.code ?? 'unknown'}).` }
   }
-
-  // Verified rather than assumed, on every platform. An elevated command can
-  // exit 0 having done half the job — the macOS incident above is the proof,
-  // and a policy this process cannot see can do the same to an anchor
-  // directory. A certificate that looks installed and is refused by every
-  // client is far worse than an install that admits it failed.
-  invalidateTrustCache()
-  const after = await systemTrustState(ctx)
-  if (after.state !== 'trusted') {
-    return {
-      ok: false,
-      message:
-        after.hint ??
-        'The certificate was added but is still not trusted. A device management profile may be preventing it.'
-    }
-  }
+  await rememberInstall(ctx, 'system')
   return { ok: true }
 }
 
@@ -524,11 +699,100 @@ async function installDarwinTrust(ctx: TrustContext): Promise<TrustChangeResult>
   }
 }
 
+/**
+ * Roots from a previous authority, taken back out where that needs no prompt.
+ *
+ * The authority is replaced in two places — `inspectRegenerateCa`, and
+ * `inspectCa` when it finds the stored one has expired — and the second
+ * replaces it SILENTLY, because an expired authority breaks every request and
+ * leaving it in place is worse. What neither did was untrust the certificate
+ * it replaced. The key is then deleted while the root stays trusted: a root
+ * certificate on the machine that nothing can produce a signature for, which
+ * is precisely the litter the rules at the top of this file exist to prevent.
+ *
+ * Only where it can be done exactly and without asking:
+ *
+ *  - Windows, by SHA-1 thumbprint out of the record, in the per-user store.
+ *    No elevation, and it cannot touch a certificate that is not ours.
+ *  - NSS, by nickname, in the user's own database.
+ *
+ * macOS and Linux both need administrator rights, and a prompt raised by a
+ * launch the user did not initiate is one they will learn to refuse. Those are
+ * returned as `pending` so the panel can offer the cleanup as something to
+ * press, with the reason attached.
+ */
+export async function removeStaleTrust(
+  ctx: TrustContext
+): Promise<{ removed: number; pending: TrustInstallRecord[] }> {
+  const stale = await staleInstalls(ctx)
+  if (stale.length === 0) return { removed: 0, pending: [] }
+
+  const pending: TrustInstallRecord[] = []
+  let removed = 0
+  let changed = false
+
+  for (const record of stale) {
+    if (record.store === 'system' && ctx.platform === 'win32') {
+      await tryRun('certutil', ['-user', '-delstore', 'Root', record.thumbprint])
+      const still = await tryRun('certutil', ['-user', '-store', 'Root', record.thumbprint])
+      if (still.ok && still.stdout.toUpperCase().includes(record.thumbprint)) {
+        pending.push(record)
+        continue
+      }
+      removed += 1
+      changed = true
+      continue
+    }
+    if (record.store === 'nss') {
+      const dbDir = join(homedir(), '.pki', 'nssdb')
+      if (which('certutil') && existsSync(dbDir)) {
+        await tryRun('certutil', ['-d', `sql:${dbDir}`, '-D', '-n', NSS_NICKNAME])
+        removed += 1
+        changed = true
+        continue
+      }
+    }
+    pending.push(record)
+  }
+
+  if (changed) {
+    const gone = new Set(
+      stale.filter((r) => !pending.includes(r)).map((r) => `${r.store}:${r.fingerprint}`)
+    )
+    await writeRecords(
+      (await trustInstalls()).filter((r) => !gone.has(`${r.store}:${r.fingerprint}`))
+    ).catch(() => {})
+    invalidateTrustCache()
+  }
+  return { removed, pending }
+}
+
 export async function removeSystemTrust(ctx: TrustContext): Promise<TrustChangeResult> {
+  // The status panel reads through a five-second cache, and removal was the
+  // one path that never cleared it. Uninstalling therefore left the panel
+  // saying "trusted" for several seconds afterwards — which, for anyone
+  // watching to confirm the removal worked, is the same failure as the install
+  // loop with the sign flipped.
+  invalidateTrustCache()
   if (ctx.platform === 'win32') {
     const thumb = sha1Hex(ctx.certPem).toUpperCase()
+    // `-delstore` removes nothing quietly on a store the certificate is not
+    // in, and exits non-zero saying so. That is not a failure to report: the
+    // end state asked for is "not in the store", and it already holds.
     const res = await tryRun('certutil', ['-user', '-delstore', 'Root', thumb])
-    return res.ok ? { ok: true } : { ok: false, message: 'Windows did not remove the certificate.' }
+    const present = await tryRun('certutil', ['-user', '-store', 'Root', thumb])
+    const gone = !present.ok || !present.stdout.toUpperCase().includes(thumb)
+    if (gone) {
+      await forgetInstall(ctx, 'system')
+      return { ok: true }
+    }
+    return {
+      ok: false,
+      message: res.ok
+        ? 'Windows reported the certificate removed, but it is still in your trust store.'
+        : 'Windows did not remove the certificate.',
+      manualCommand: `certutil -user -delstore Root ${thumb}`
+    }
   }
   // Rule 1 at the top of this file: nothing is installed that cannot be
   // uninstalled by the same code. The user-domain fallback added a second
@@ -572,7 +836,9 @@ export async function removeSystemTrust(ctx: TrustContext): Promise<TrustChangeR
   const proc = await elevator.run({ reason, command, args })
   const exit = await proc.wait()
   if (exit.declined) return { ok: false, declined: true, message: 'The administrator prompt was declined.' }
-  return exit.code === 0 ? { ok: true } : { ok: false, message: 'The certificate could not be removed.' }
+  if (exit.code !== 0) return { ok: false, message: 'The certificate could not be removed.' }
+  await forgetInstall(ctx, 'system')
+  return { ok: true }
 }
 
 /** NSS needs no elevation: the database belongs to the user. */

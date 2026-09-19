@@ -26,6 +26,7 @@ import {
   installSystemTrust,
   removeCertFile,
   removeNssTrust,
+  removeStaleTrust,
   removeSystemTrust,
   restoreSystemProxy,
   systemProxyEngaged,
@@ -184,6 +185,21 @@ export async function inspectCa(): Promise<InspectCaInfo> {
   return mintCa()
 }
 
+/**
+ * Roots left trusted by an authority that is no longer in use.
+ *
+ * Called after every mint, because BOTH paths that replace the authority used
+ * to leave the old root trusted with its key deleted — `inspectRegenerateCa`
+ * only removed trust when the old CA happened to be loaded in memory, and the
+ * expiry replacement in `inspectCa` removed nothing at all and does not even
+ * tell the user it has happened.
+ */
+async function sweepStaleTrust(): Promise<void> {
+  const ctx = await trustContext().catch(() => null)
+  if (!ctx) return
+  await removeStaleTrust(ctx).catch(() => undefined)
+}
+
 /** Mints a new authority, replacing whatever was there. */
 export async function inspectRegenerateCa(): Promise<InspectCaInfo> {
   // Trust for the old certificate is removed first: leaving a root in the
@@ -222,6 +238,11 @@ async function mintCa(): Promise<InspectCaInfo> {
   if (!persisted) memoryCaKey = res.keyPem
 
   ca = await describeCa(res.certPem, persisted)
+  // After `ca` is set, because the sweep asks `trustContext()` which reads it —
+  // and the whole point is to compare what is trusted against the authority
+  // that is now current. Never allowed to fail the mint: a root left behind is
+  // a problem to clean up, not a reason to leave the user with no inspector.
+  await sweepStaleTrust()
   return ca
 }
 
