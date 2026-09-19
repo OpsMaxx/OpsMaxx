@@ -180,6 +180,60 @@ export function ScalarClient({
   const [envs, setEnvs] = useState<EnvironmentsView>({ names: [], active: '', variables: [] })
   const theme = useResolvedTheme()
 
+  /**
+   * THE THEME HAS TO FOLLOW THE POPUPS OUT OF THE PANE.
+   *
+   * Every floating thing the client opens -- the method dropdown, Auth Type,
+   * the server picker, the environment menu -- is a `ScalarTeleport`, and
+   * `useTeleport()` falls back to `"body"` when nothing has provided a target.
+   * Nothing has: neither this file nor the library's own v2 client calls
+   * `useProvideTeleport`. So the popup is appended to `<body>` as
+   * `<div class="scalar-app">`, and OpsMaxx's `dark-mode` class is on the pane,
+   * which is no longer an ancestor.
+   *
+   * The whole palette is declared on `.dark-mode` / `.light-mode`, so out
+   * there `--scalar-background-1` resolves to nothing. `ScalarFloatingBackdrop`
+   * is `bg-b-1 shadow-lg`, which is the ONLY thing painting a dropdown's
+   * background -- so it computes to `rgba(0, 0, 0, 0)` and the menu renders as
+   * bare text floating over whatever is behind it. Measured both ways on the
+   * running app: transparent without the class, `rgb(15, 15, 15)` with it.
+   *
+   * Re-classing the teleport roots rather than teleporting into the pane,
+   * deliberately. `.http-client-host` is `overflow: hidden` with a `transform`
+   * (both load-bearing -- see global.css), so a target inside it would clip
+   * every menu opened near an edge. And this is the library's own idiom:
+   * `@scalar/components` ships `addScalarClassesToHeadless`, which is this
+   * function for the HeadlessUI portal root.
+   */
+  useEffect(() => {
+    const mode = theme === 'dark' ? 'dark-mode' : 'light-mode'
+    const stale = theme === 'dark' ? 'light-mode' : 'dark-mode'
+    // Only direct children of body: the pane's own host is nested, carries the
+    // class already, and must not be touched by a cleanup that runs on a
+    // theme change.
+    const roots = (): HTMLElement[] =>
+      Array.from(document.body.children).filter(
+        (n): n is HTMLElement => n instanceof HTMLElement && n.classList.contains('scalar-app')
+      )
+    const apply = (el: HTMLElement): void => {
+      el.classList.remove(stale)
+      el.classList.add(mode)
+    }
+    roots().forEach(apply)
+
+    // A dropdown's root is created at the moment it opens, so classing what is
+    // already there is not enough on its own.
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (node instanceof HTMLElement && node.classList.contains('scalar-app')) apply(node)
+        }
+      }
+    })
+    observer.observe(document.body, { childList: true })
+    return () => observer.disconnect()
+  }, [theme])
+
   const servers = useApp((s) => s.servers)
   const update = useApp((s) => s.updateApiCollection)
   const active = collections.find((c) => c.id === activeId) ?? collections[0] ?? null
@@ -519,7 +573,33 @@ async function createEngine(
   // The unsubscribe is kept and called on unmount: the bus outlives the Vue
   // app, so a dropped listener would go on serialising a workspace for a
   // client that is gone.
-  const stopListening = eventBus.onAny(() => onChanged())
+  /**
+   * Events that change the SHAPE of a document, not a value inside it.
+   *
+   * `createOperation` writes the path into `document.paths` and stops -- it
+   * never calls `store.buildSidebar`, while its siblings such as
+   * `updateOperationMeta` do. So `x-scalar-navigation` still described the
+   * document as it was before, and a created request was missing from the
+   * tree: the pane jumped to it, the tree did not, and pressing `+` again
+   * collided on the same path. From the outside that is a button that does
+   * nothing.
+   *
+   * Matched on the verb rather than listed event by event, because the cost of
+   * catching one event too many is a cheap rebuild and the cost of missing one
+   * is a tree that lies.
+   */
+  const RESHAPES = /^(operation|tag):.*(create|delete|rename|path-method)/
+
+  const stopListening = eventBus.onAny(({ event }) => {
+    if (RESHAPES.test(event)) {
+      const slug = activeSlug.value
+      // The sidebar state reads navigation through a getter, so rebuilding it
+      // here is enough -- the tree updates in place and keeps whatever the
+      // user had expanded and selected.
+      if (slug && documentOf(slug)) workspaceStore.buildSidebar(slug)
+    }
+    onChanged()
+  })
   /**
    * The cookies that apply to a URL, in the shape a header wants.
    *
@@ -609,20 +689,42 @@ async function createEngine(
   const sidebarFor = (slug: string): SidebarState<TraversedEntry> | null => {
     const cached = sidebars.get(slug)
     if (cached) return cached
-    const doc = documentOf(slug)
-    const nav = (doc as { 'x-scalar-navigation'?: { children?: TraversedEntry[] } } | null)?.[
-      'x-scalar-navigation'
-    ]
-    const entries = nav?.children ?? []
-    if (entries.length === 0) return null
+    const navOf = (): TraversedEntry[] => {
+      const live = documentOf(slug) as {
+        'x-scalar-navigation'?: { children?: TraversedEntry[] }
+      } | null
+      return live?.['x-scalar-navigation']?.children ?? []
+    }
+    if (navOf().length === 0) return null
 
-    const state: SidebarState<TraversedEntry> = createSidebarState(entries, {
+    // A GETTER, NOT THE ARRAY.
+    //
+    // `createSidebarState` takes `MaybeRefOrGetter<T[]>`, and handing it the
+    // array read once froze the tree at the moment the document was built.
+    // Everything that adds or removes an operation now goes through the event
+    // bus -- `operation:create:operation`, `operation:delete:operation`,
+    // `operation:rename:example` -- so with a snapshot, a request created
+    // inside the client never appeared in the tree at all. It looked exactly
+    // like a `+` that does nothing: the pane switched to the new request, the
+    // tree did not, and creating another one collided on the same path.
+    const state: SidebarState<TraversedEntry> = createSidebarState(navOf, {
       hooks: {
         // `onAfterSelect`, not `onBefore`: the row the user sees highlighted
         // has to be the one the pane is showing.
         onAfterSelect: (id: string | null) => {
           if (id === null) return
-          const entry = state.getEntryById(id)
+          const selected = state.getEntryById(id)
+          if (!selected) return
+
+          // An example row is a request too -- it is how a description with
+          // several bodies for one endpoint is navigated -- but the path and
+          // method live on its parent operation. Resolving upwards here rather
+          // than refusing the selection is what makes those rows work at all.
+          const entry =
+            selected.type === 'example'
+              ? ((selected as { parent?: TraversedEntry }).parent ?? null)
+              : selected
+
           // Tags, descriptions and schemas are all legal selections and none
           // of them is a request. Ignoring them leaves the pane on the last
           // operation, which beats blanking it.
@@ -631,7 +733,10 @@ async function createEngine(
           if (!method) return
           currentPath.value = entry.path
           currentMethod.value = method
-          currentExample.value = exampleNameOf(entry)
+          currentExample.value =
+            selected.type === 'example'
+              ? ((selected as { name?: string }).name ?? 'default')
+              : exampleNameOf(entry)
           if (activeSlug.value) lastPlace.set(activeSlug.value, { path: entry.path, method })
         }
       }
@@ -747,6 +852,28 @@ async function createEngine(
         state && state.items.value.length > 1
           ? h(Sidebar, {
               sidebarState: state,
+              // WITHOUT THIS THE TREE IS A PICTURE.
+              //
+              // `Sidebar` does `emit('selectItem', id)` and nothing else --
+              // across the whole library the only click-driven caller of
+              // `setSelected` is the reference client's own `useModalSidebar`.
+              // With no handler, `onAfterSelect` fired only from this file's
+              // programmatic `select()`, so a user with a 200-operation
+              // description could reach exactly one of them: the one they
+              // landed on.
+              //
+              // Selecting is all that is needed here because `onAfterSelect`
+              // already does the routing. A row that is not an operation --
+              // a tag, a schema -- toggles open instead, which is what makes
+              // a folder behave like a folder.
+              onSelectItem: (id: string) => {
+                const entry = state.getEntryById(id)
+                if (entry && (entry.type === 'operation' || entry.type === 'example')) {
+                  state.setSelected(id)
+                  return
+                }
+                state.setExpanded(id, !state.isExpanded(id))
+              },
               layout: 'web',
               eventBus,
               activeWorkspace: { id: 'opsmaxx' },
@@ -829,9 +956,12 @@ async function createEngine(
     })
     if (created === undefined) return
 
-    // The tree changed shape, so the cached state describes a document that no
-    // longer matches. Rebuilt on the next `select`.
-    sidebars.delete(collectionId)
+    // `createOperation` does not rebuild navigation, so without this the new
+    // request exists in `paths` and in nothing the user can see. The cached
+    // sidebar state is KEPT: it reads navigation through a getter, so it picks
+    // the rebuild up on its own, and keeping it is what preserves whatever the
+    // user had expanded.
+    workspaceStore.buildSidebar(collectionId)
     lastPlace.set(collectionId, { path: created, method: 'get' })
     select(collectionId)
   }

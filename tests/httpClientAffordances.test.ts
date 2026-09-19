@@ -64,12 +64,25 @@ describe('the two plus buttons', () => {
   })
 
   /**
-   * Absent, not disabled, where it cannot mean anything: a collection with an
-   * imported description takes its operations from the description, and a
-   * button that always refuses teaches people that refusals are noise.
+   * It IS offered for a collection that imports a description, and the
+   * reasoning that hid it was wrong.
+   *
+   * The old argument: such a collection "takes its operations from the
+   * description", so adding one cannot mean anything. That is a claim about
+   * where its operations come FROM, and says nothing about what may be added
+   * to it. Importing a description is the normal way to start, and the first
+   * thing anyone does next is try one call the description does not have — a
+   * health check, a staging route, the endpoint the spec is behind on. Every
+   * comparable client allows it. Here the control was simply absent, with
+   * nothing on screen to say why.
+   *
+   * The request is created in the document, so it lands in the operation tree
+   * beside the imported ones.
    */
-  it('is not offered for a collection that imports a description', () => {
-    expect(VIEW).toMatch(/!collection\.specUrl && !collection\.specPath/)
+  it('is offered for every collection, imported or not', () => {
+    const at = VIEW.indexOf('Add a request to')
+    expect(at).toBeGreaterThan(-1)
+    expect(VIEW.slice(Math.max(0, at - 400), at)).not.toContain('!collection.specUrl')
   })
 
   /**

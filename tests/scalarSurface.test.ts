@@ -225,3 +225,147 @@ describe('the operation pane', () => {
     expect(client.slice(client.indexOf('h(Operation, {'))).toMatch(/layout: 'web'/)
   })
 })
+
+/**
+ * The four faults a person hit in the first minute of using the client, each
+ * pinned against the thing that actually caused it.
+ *
+ * Every one of them rendered without an error and passed every unit test,
+ * because the test mocked away the part that was wrong. So these read the real
+ * library where the claim is about the library, and the real source where the
+ * claim is about this app.
+ */
+describe('the client as a person meets it', () => {
+  const read = (p: string): string =>
+    require_('node:fs').readFileSync(require_('node:path').resolve(__dirname, '..', p), 'utf8')
+  const client = read('src/renderer/src/components/http/ScalarClient.tsx')
+
+  /**
+   * A file inside an installed package, by its real path.
+   *
+   * Not `require.resolve` on a deep path: all three of these packages declare
+   * an `exports` map, so `./dist/...` is not a subpath Node will resolve even
+   * though the file is plainly there. The package's own entry point IS
+   * exported, so the directory is derived from that.
+   */
+  const lib = (pkg: string, entry: string, file: string): string => {
+    const path = require_('node:path')
+    const resolved = require_.resolve(entry)
+    const at = resolved.lastIndexOf(pkg.split('/').join(path.sep))
+    expect(at).toBeGreaterThan(-1)
+    return require_('node:fs').readFileSync(
+      path.join(resolved.slice(0, at + pkg.length), file),
+      'utf8'
+    ) as string
+  }
+
+  describe('dropdowns are opaque', () => {
+    /**
+     * Scalar teleports every floating thing to `<body>` — `useTeleport()`
+     * falls back to `"body"` and neither this app nor the library's own v2
+     * client calls `useProvideTeleport`. The palette is declared on
+     * `.dark-mode` / `.light-mode`, so out there `--scalar-background-1`
+     * resolves to nothing and the ONLY element painting a dropdown's
+     * background computes to transparent. Measured on the running app:
+     * `rgba(0, 0, 0, 0)` without the class, `rgb(15, 15, 15)` with it.
+     */
+    it('is still the backdrop, and it still paints with a themed variable', () => {
+      const backdrop = lib(
+        '@scalar/components',
+        '@scalar/components',
+        'dist/components/ScalarFloating/ScalarFloatingBackdrop.vue.script.js'
+      )
+      // If this stops being `bg-b-1`, the reason for the observer below has
+      // changed and someone has to look rather than assume.
+      expect(backdrop).toContain('bg-b-1')
+    })
+
+    it('re-classes the teleport roots, and only the ones under body', () => {
+      expect(client).toContain("classList.contains('scalar-app')")
+      expect(client).toContain('MutationObserver')
+      // Direct children only: the pane's own host is nested and already
+      // carries the class, and a cleanup that touched it would strip the
+      // theme off the client itself.
+      expect(client).toContain('document.body.children')
+      expect(client).toContain('observer.disconnect()')
+    })
+  })
+
+  describe('a created request appears', () => {
+    /**
+     * `createOperation` writes into `document.paths` and returns. Unlike its
+     * siblings it never calls `store.buildSidebar`, so navigation went on
+     * describing the document as it was: 16 requests existed in the document
+     * and none of them was in the tree.
+     */
+    it('is still true that createOperation does not rebuild navigation', () => {
+      const mutator = lib(
+        '@scalar/workspace-store',
+        '@scalar/workspace-store/mutators',
+        'dist/mutators/operation/operation.js'
+      )
+      const body = mutator.slice(
+        mutator.indexOf('export const createOperation'),
+        mutator.indexOf('export const updateOperationMeta')
+      )
+      expect(body.length).toBeGreaterThan(200)
+      // When upstream fixes this, this test fails — and the right response is
+      // to delete our buildSidebar calls, not to loosen the assertion.
+      expect(body).not.toContain('buildSidebar')
+    })
+
+    it('calls buildSidebar itself, on the add and on the bus', () => {
+      expect(client).toContain('workspaceStore.buildSidebar(collectionId)')
+      expect(client).toContain('workspaceStore.buildSidebar(slug)')
+    })
+
+    it('reads navigation through a getter so the tree is not frozen', () => {
+      // `createSidebarState` takes MaybeRefOrGetter. Handed the array, the
+      // tree is a snapshot of the moment the document was built.
+      const at = client.indexOf('createSidebarState(')
+      expect(at).toBeGreaterThan(-1)
+      expect(client.slice(at, at + 40)).toContain('createSidebarState(navOf')
+    })
+  })
+
+  describe('the operation tree is clickable', () => {
+    /**
+     * `Sidebar` does `emit('selectItem', id)` and nothing else. With no
+     * handler, a description with 200 operations let a user reach exactly one:
+     * the one they landed on.
+     */
+    it('is still emit-only in the library', () => {
+      const sidebar = lib(
+        '@scalar/api-client',
+        '@scalar/api-client/v2/components/sidebar',
+        'dist/v2/components/sidebar/Sidebar.vue.script.js'
+      )
+      expect(sidebar).toContain('emit("selectItem"')
+      // Nothing in the component selects for you.
+      expect(sidebar).not.toContain('sidebarState.setSelected')
+    })
+
+    it('passes a handler that selects', () => {
+      const at = client.indexOf('h(Sidebar, {')
+      expect(at).toBeGreaterThan(-1)
+      const props = client.slice(at, client.indexOf('h(Operation, {'))
+      expect(props).toContain('onSelectItem')
+      expect(props).toContain('state.setSelected(id)')
+      // A row that is not a request opens instead, which is what makes a tag
+      // behave like a folder rather than a dead row.
+      expect(props).toContain('setExpanded')
+    })
+  })
+
+  it('offers add-request on every collection, imported or not', () => {
+    // It used to be hidden whenever a collection had a spec, on the reasoning
+    // that such a collection takes its operations from the description. That
+    // is about where operations come FROM, not about what may be added — and
+    // the first thing anyone does after importing is try one call the spec
+    // does not have.
+    const view = read('src/renderer/src/components/http/HttpView.tsx')
+    const at = view.indexOf('Add a request to')
+    expect(at).toBeGreaterThan(-1)
+    expect(view.slice(Math.max(0, at - 400), at)).not.toContain('!collection.specUrl')
+  })
+})

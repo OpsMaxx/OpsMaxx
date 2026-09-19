@@ -159,19 +159,27 @@ function HttpToolbar({
        * affordance that was missing had a button pointing at the wrong thing.
        *
        * The sidebar keeps "new API", which is what a list of APIs should
-       * offer. This one adds a request to the one on screen, and is absent
-       * where that cannot mean anything: a collection with an imported
-       * description takes its operations from the description.
+       * offer. This one adds a request to the one on screen.
+       *
+       * IT USED TO BE HIDDEN for a collection with an imported description, on
+       * the reasoning that such a collection "takes its operations from the
+       * description". That is true of where its operations COME FROM and says
+       * nothing about what may be added to it. Importing a description is the
+       * normal way to start, and the first thing anyone does afterwards is try
+       * one call that is not in it -- a health check, a staging endpoint, the
+       * one route the spec is behind on. Every other client allows that; here
+       * the control simply was not there, with nothing to say why.
+       *
+       * The request is created in the document, so it lands in the operation
+       * tree beside the imported ones rather than in a list next to it.
        */}
-      {!collection.specUrl && !collection.specPath && (
-        <button
-          className="icon-btn"
-          title={`Add a request to ${collection.name}`}
-          onClick={() => useApp.getState().requestApiEndpointFocus(collection.id)}
-        >
-          <Plus size={15} />
-        </button>
-      )}
+      <button
+        className="icon-btn"
+        title={`Add a request to ${collection.name}`}
+        onClick={() => useApp.getState().requestApiEndpointFocus(collection.id)}
+      >
+        <Plus size={15} />
+      </button>
 
       <label className="http-via">
         <span className="http-via-label">
