@@ -43,7 +43,9 @@ const hoisted = vi.hoisted(() => ({
   addIsIgnored: false,
   /** `-verifystore` fails however healthy the certificate is: the offline /
    *  revocation-unknown machine that produced the loop. */
-  verifyAlwaysFails: true
+  verifyAlwaysFails: true,
+  /** The fake HKCU Internet Settings values `reg query` reads. */
+  registry: new Map<string, string>()
 }))
 
 vi.mock('node:child_process', () => {
@@ -59,6 +61,27 @@ vi.mock('node:child_process', () => {
     const fail = (stdout = ''): void =>
       cb(Object.assign(new Error(`${cmd} failed`), { stdout, code: 1 }))
 
+    if (cmd === 'reg') {
+      // `reg query <key> /v <name>` prints a header, then an indented line
+      // "<name>    REG_DWORD    0x1". Reproduced rather than simplified,
+      // because the parsing of that line is what is under test.
+      const name = args[args.indexOf('/v') + 1]
+      if (args[0] === 'query') {
+        const value = hoisted.registry.get(name)
+        if (value === undefined) return fail('ERROR: The system was unable to find the specified registry key or value.')
+        const type = /^0x/.test(value) ? 'REG_DWORD' : 'REG_SZ'
+        return ok(`\n${'HKEY_CURRENT_USER\\...'}\n    ${name}    ${type}    ${value}\n\n`)
+      }
+      if (args[0] === 'add') {
+        hoisted.registry.set(name, args[args.indexOf('/d') + 1] ?? '')
+        return ok('The operation completed successfully.')
+      }
+      if (args[0] === 'delete') {
+        hoisted.registry.delete(name)
+        return ok('The operation completed successfully.')
+      }
+      return ok('')
+    }
     if (cmd !== 'certutil') return ok('')
     const verb = args[1]
     const thumb = (args[3] ?? '').toUpperCase()
@@ -114,6 +137,7 @@ import {
   removeStaleTrust,
   removeSystemTrust,
   sha1Hex,
+  systemProxyPointsAt,
   trustStatus
 } from '../src/main/services/inspectTrust'
 import type { TrustContext } from '../src/main/services/inspectTrust'
@@ -352,5 +376,57 @@ describe('a replaced authority', () => {
     const swept = await removeStaleTrust(c)
     expect(swept.removed).toBe(0)
     expect(hoisted.store.has(CURRENT_THUMB)).toBe(true)
+  })
+})
+
+/**
+ * The system proxy, and the difference between what we believe and what the
+ * machine is actually doing.
+ *
+ * `systemProxyEngaged()` answers "do we hold a backup file" — that is, do we
+ * BELIEVE we changed something. It was also the guard on applying the proxy at
+ * all, which treated the two questions as one. They come apart on exactly the
+ * machines that reported this: a Group Policy refresh, a VPN client
+ * connecting, or any other proxy tool rewrites the same three registry values,
+ * and the inspector then runs, reports itself engaged, and receives nothing.
+ */
+describe('the system proxy', () => {
+  const pointsAt = (host: string, port: number): Promise<boolean> =>
+    systemProxyPointsAt(host, port, 'win32')
+
+  beforeEach(() => hoisted.registry.clear())
+
+  it('is engaged only when the switch and the address both agree', async () => {
+    hoisted.registry.set('ProxyEnable', '0x1')
+    hoisted.registry.set('ProxyServer', '127.0.0.1:8080')
+    expect(await pointsAt('127.0.0.1', 8080)).toBe(true)
+
+    // The switch turned off with the address left behind: what a VPN client
+    // connecting typically does.
+    hoisted.registry.set('ProxyEnable', '0x0')
+    expect(await pointsAt('127.0.0.1', 8080)).toBe(false)
+
+    // The address moved somewhere else entirely: another proxy tool.
+    hoisted.registry.set('ProxyEnable', '0x1')
+    hoisted.registry.set('ProxyServer', '10.0.0.9:3128')
+    expect(await pointsAt('127.0.0.1', 8080)).toBe(false)
+  })
+
+  it('is not engaged when the values are simply absent', async () => {
+    expect(await pointsAt('127.0.0.1', 8080)).toBe(false)
+  })
+
+  it('does not accept a port that merely shares a prefix', async () => {
+    hoisted.registry.set('ProxyEnable', '0x1')
+    hoisted.registry.set('ProxyServer', '127.0.0.1:80')
+    expect(await pointsAt('127.0.0.1', 8080)).toBe(false)
+  })
+
+  it('does not read 0x10 as enabled', async () => {
+    // A DWORD of 16 prints as `0x10`, and a prefix match on `0x1` reads it as
+    // on. The word boundary in the pattern is what stops that.
+    hoisted.registry.set('ProxyEnable', '0x10')
+    hoisted.registry.set('ProxyServer', '127.0.0.1:8080')
+    expect(await pointsAt('127.0.0.1', 8080)).toBe(false)
   })
 })

@@ -114,6 +114,21 @@ export function InspectView(): React.JSX.Element {
         </div>
       )}
 
+      {/* Something else moved the machine's proxy settings while we were
+          running — a Group Policy refresh, a VPN client, another proxy tool,
+          or the user in Settings. OpsMaxx puts them back by itself wherever
+          that needs no password, so seeing this means it could not: macOS,
+          where `networksetup` requires administrator rights and a status poll
+          must not raise an authentication dialog on its own. Said out loud
+          because the alternative is a panel that says "capturing" over an
+          empty flow list. */}
+      {running && status?.systemProxyDrifted && (
+        <div className="banner warn">
+          <AlertTriangle size={14} /> This machine&rsquo;s proxy settings no longer point at
+          OpsMaxx, so nothing is being captured. Stop and start the inspector to set them again.
+        </div>
+      )}
+
       {running && status?.insecureUpstream && (
         <div className="banner danger">
           <AlertTriangle size={14} /> Upstream certificates are not being verified. Every connection

@@ -149,6 +149,12 @@ export interface InspectStatus {
   /** Set when the listener is bound to something other than loopback, which
    *  makes it an open proxy for the local network. */
   lanExposed?: boolean
+  /** Set while the machine's proxy settings no longer point at the inspector
+   *  although it is running as the system proxy — something else changed them.
+   *  OpsMaxx puts them back by itself wherever that needs no password; on
+   *  macOS it does need one, so this is what the panel says instead of
+   *  silently capturing nothing. */
+  systemProxyDrifted?: boolean
   source: InspectSourceKind
   /** The tunnel or VPN profile upstream traffic is dialled through, if any. */
   viaProfileId?: string

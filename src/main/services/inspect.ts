@@ -30,6 +30,7 @@ import {
   removeSystemTrust,
   restoreSystemProxy,
   systemProxyEngaged,
+  systemProxyPointsAt,
   trustStatus,
   writeCertFile
 } from './inspectTrust'
@@ -643,6 +644,24 @@ async function bareStatus(): Promise<InspectStatus> {
   }
 }
 
+/**
+ * Puts the machine back on the inspector after something else moved it.
+ *
+ * Only where it costs no prompt — Windows and the Linux desktops, whose proxy
+ * settings are per-user. macOS needs administrator rights for `networksetup`,
+ * and raising an authentication dialog out of a status read that the panel
+ * performs on a timer is not a repair, it is a machine that asks for a
+ * password by itself. There the drift is reported and the user decides.
+ *
+ * `engageSystemProxy` is safe to call again: it re-reads the live settings,
+ * and it will not overwrite the stored backup of what they were before we
+ * first touched them.
+ */
+async function healSystemProxy(current: NonNullable<typeof run>): Promise<void> {
+  if (platformNow() === 'darwin') return
+  await engageSystemProxy(current.bindHost, current.bindPort, platformNow()).catch(() => undefined)
+}
+
 /** Called from app quit. Everything this feature changed outside itself is
  *  undone here, whether or not the inspector is still running. */
 export async function disposeInspect(): Promise<void> {
@@ -669,8 +688,22 @@ export async function inspectStatus(extra: { restarting?: boolean } = {}): Promi
       }).catch(() => [])
     : []
   const current = run
+  // The machine's proxy settings are not ours alone, and nothing used to
+  // notice when they stopped pointing here: on Windows a Group Policy
+  // refresh or a VPN client connecting rewrites the same registry values, and
+  // on a Linux desktop the user can change them in Settings while we run. The
+  // inspector then keeps running, keeps saying it is engaged, and sees no
+  // traffic — "it sometimes stops working", with nothing in any log.
+  const drifted =
+    current && current.source === 'system'
+      ? !(await systemProxyPointsAt(current.bindHost, current.bindPort, platformNow()).catch(
+          () => true
+        ))
+      : false
+  if (drifted && current) await healSystemProxy(current)
   return {
     running: !!current && !extra.restarting,
+    systemProxyDrifted: drifted ? true : undefined,
     listening: current ? { host: current.bindHost, port: current.bindPort } : undefined,
     lanExposed: current ? current.bindHost !== '127.0.0.1' && current.bindHost !== '::1' : undefined,
     source: current?.source ?? 'manual',

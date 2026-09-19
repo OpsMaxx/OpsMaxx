@@ -44,6 +44,10 @@ const DARWIN_SYSTEM_KEYCHAIN = '/Library/Keychains/System.keychain'
 /** Bounded so a hung `security` or `certutil` cannot wedge the status panel. */
 const PROBE_TIMEOUT_MS = 10_000
 
+/** The WinINet refresh compiles C# through `Add-Type`, which is far slower on
+ *  a cold machine than any of the probes this file otherwise runs. */
+const WININET_REFRESH_TIMEOUT_MS = 60_000
+
 /** The macOS user-domain trust write raises macOS's own SecurityAgent dialog,
  *  which a human answers. `PROBE_TIMEOUT_MS` is the right bound for a question
  *  `security` answers by itself and completely the wrong one here: it would
@@ -887,7 +891,7 @@ export async function removeNssTrust(): Promise<TrustChangeResult> {
  * PowerShell locked down still gets the registry change, which is what a newly
  * started process reads.
  */
-async function notifyWinInetSettingsChanged(): Promise<void> {
+async function notifyWinInetSettingsChanged(): Promise<boolean> {
   const script = [
     "$sig = '[DllImport(\"wininet.dll\", SetLastError=true)] public static extern bool InternetSetOption(IntPtr h, int o, IntPtr b, int l);'",
     "$t = Add-Type -MemberDefinition $sig -Name W -Namespace S -PassThru",
@@ -895,7 +899,27 @@ async function notifyWinInetSettingsChanged(): Promise<void> {
     "$null = $t::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0)",
     "$null = $t::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0)"
   ].join('; ')
-  await tryRun('powershell', ['-NoProfile', '-NonInteractive', '-Command', script])
+  // A MINUTE, NOT TEN SECONDS, AND IT IS ALLOWED TO FAIL.
+  //
+  // `Add-Type -MemberDefinition` compiles C# at runtime, which on a cold
+  // machine can take longer than the probe bound — and being killed halfway
+  // means already-running browsers never learn the proxy moved, while the
+  // registry says it did. That is one of the shapes "it sometimes does not
+  // work on Windows" takes.
+  //
+  // It can also be refused outright: PowerShell in Constrained Language Mode,
+  // which AppLocker and WDAC impose, does not allow `Add-Type` at all — and a
+  // machine locked down that way is the same machine whose Group Policy is
+  // rewriting proxy settings underneath us. Nothing can be done about that
+  // from here. The registry write is the durable half and new processes pick
+  // it up; what is lost is only the live refresh of ones already open, so the
+  // failure is reported rather than treated as fatal.
+  const res = await tryRun(
+    'powershell',
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    WININET_REFRESH_TIMEOUT_MS
+  )
+  return res.ok
 }
 
 /** POSIX single-quote escaping. The paths here are ours, but they run through
@@ -983,6 +1007,72 @@ async function darwinServices(): Promise<string[]> {
 }
 
 /**
+ * Whether the machine's proxy settings ACTUALLY point at us, right now.
+ *
+ * `systemProxyEngaged()` above answers a different question — whether we have
+ * a backup file, i.e. whether we believe we changed something. The two came
+ * apart in the field and that is the bug this exists for.
+ *
+ * A proxy setting is not ours alone. On Windows a Group Policy refresh, a
+ * corporate VPN client connecting or disconnecting, or any other proxy tool
+ * rewrites the same three registry values; on GNOME and KDE the user can
+ * change them in Settings while we are running. When that happens the
+ * inspector keeps running, keeps reporting `systemProxyEngaged: true`, and
+ * intercepts nothing, because nothing is being sent to it any more. "It
+ * sometimes stops working" with nothing in any log is exactly what that looks
+ * like from the outside.
+ *
+ * Cheap enough to ask on every status read: one `reg query`, one `gsettings
+ * get`, or one `networksetup` call per service.
+ */
+export async function systemProxyPointsAt(
+  host: string,
+  port: number,
+  platform: NodeJS.Platform = process.platform
+): Promise<boolean> {
+  const want = `${host}:${port}`
+
+  if (platform === 'win32') {
+    const key = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'
+    const enable = await tryRun('reg', ['query', key, '/v', 'ProxyEnable'])
+    // `0x1` is how `reg query` prints a DWORD of 1. A machine with the value
+    // absent prints nothing and the query fails, which is also "not engaged".
+    if (!enable.ok || !/ProxyEnable\s+REG_DWORD\s+0x1\b/i.test(enable.stdout)) return false
+    const server = await tryRun('reg', ['query', key, '/v', 'ProxyServer'])
+    return server.ok && server.stdout.includes(want)
+  }
+
+  if (platform === 'darwin') {
+    const services = await darwinServices()
+    if (services.length === 0) return false
+    // EVERY service, not any: traffic leaves by whichever one is up, so one
+    // service left unconfigured is a route around the inspector.
+    for (const service of services) {
+      const secure = await tryRun('networksetup', ['-getsecurewebproxy', service])
+      const lines = secure.stdout
+      if (!/Enabled:\s*Yes/i.test(lines)) return false
+      if (!lines.includes(host) || !lines.includes(String(port))) return false
+    }
+    return true
+  }
+
+  if (platform === 'linux') {
+    if (isKde() && which(kreadconfig())) {
+      const kde = await readKdeProxy()
+      return kde.proxyType === '1' && kde.httpsProxy.includes(want)
+    }
+    if (!which('gsettings')) return false
+    const mode = (await tryRun('gsettings', ['get', 'org.gnome.system.proxy', 'mode'])).stdout.trim()
+    if (!/manual/.test(mode)) return false
+    const h = (await tryRun('gsettings', ['get', 'org.gnome.system.proxy.https', 'host'])).stdout.trim()
+    const p = (await tryRun('gsettings', ['get', 'org.gnome.system.proxy.https', 'port'])).stdout.trim()
+    return h.replace(/^'(.*)'$/, '$1') === host && p === String(port)
+  }
+
+  return false
+}
+
+/**
  * Points the machine at the inspector.
  *
  * macOS needs administrator rights for `networksetup`; Windows and GNOME do
@@ -995,7 +1085,23 @@ export async function engageSystemProxy(
   port: number,
   platform: NodeJS.Platform = process.platform
 ): Promise<TrustChangeResult> {
-  if (await systemProxyEngaged()) return { ok: true }
+  // TRUST THE MACHINE, NOT THE FILE.
+  //
+  // This used to be `if (await systemProxyEngaged()) return { ok: true }`,
+  // and `systemProxyEngaged` only asks whether a backup file exists — whether
+  // we BELIEVE we changed something. When the two disagree, that early return
+  // is an inspector that starts, reports itself engaged, and receives no
+  // traffic at all.
+  //
+  // `keepBackup` is the load-bearing half of the repair. The file already
+  // holds the user's real settings from the first time we changed them;
+  // re-capturing now would record OUR OWN proxy as the thing to restore, and
+  // restoring it would point the machine at a port nothing is listening on.
+  // That is the "no internet and no idea why" failure this file's rules exist
+  // to prevent, so a re-apply reads nothing and overwrites nothing.
+  const believed = await systemProxyEngaged()
+  if (believed && (await systemProxyPointsAt(host, port, platform))) return { ok: true }
+  const keepBackup = believed
 
   if (platform === 'darwin') {
     const services = await darwinServices()
@@ -1010,7 +1116,7 @@ export async function engageSystemProxy(
         secure: secure.stdout.split('\n')
       })
     }
-    await saveBackup(backup)
+    if (!keepBackup) await saveBackup(backup)
 
     const script = services
       .map(
@@ -1050,15 +1156,16 @@ export async function engageSystemProxy(
       const m = stdout.match(new RegExp(`${name}\\s+REG_\\w+\\s+(.*)`, 'i'))
       return m?.[1]?.trim()
     }
-    await saveBackup({
-      platform,
-      takenAt: Date.now(),
-      win32: {
-        proxyEnable: await read('ProxyEnable'),
-        proxyServer: await read('ProxyServer'),
-        proxyOverride: await read('ProxyOverride')
-      }
-    })
+    if (!keepBackup)
+      await saveBackup({
+        platform,
+        takenAt: Date.now(),
+        win32: {
+          proxyEnable: await read('ProxyEnable'),
+          proxyServer: await read('ProxyServer'),
+          proxyOverride: await read('ProxyOverride')
+        }
+      })
     const set = await tryRun('reg', [
       'add',
       key,
@@ -1083,7 +1190,8 @@ export async function engageSystemProxy(
     // KDE keeps its proxy settings in kioslaverc, not in gsettings, so a KDE
     // machine previously got "no gsettings" and no way forward at all.
     if (isKde() && which(kwriteconfig())) {
-      await saveBackup({ platform, takenAt: Date.now(), kde: await readKdeProxy() })
+      if (!keepBackup)
+        await saveBackup({ platform, takenAt: Date.now(), kde: await readKdeProxy() })
       const w = kwriteconfig()
       const url = `http://${host}:${port}`
       await tryRun(w, ['--file', 'kioslaverc', '--group', 'Proxy Settings', '--key', 'ProxyType', '1'])
@@ -1106,17 +1214,18 @@ export async function engageSystemProxy(
     }
     const get = async (schema: string, k: string): Promise<string> =>
       (await tryRun('gsettings', ['get', schema, k])).stdout.trim()
-    await saveBackup({
-      platform,
-      takenAt: Date.now(),
-      linux: {
-        mode: await get('org.gnome.system.proxy', 'mode'),
-        host: await get('org.gnome.system.proxy.http', 'host'),
-        port: await get('org.gnome.system.proxy.http', 'port'),
-        httpsHost: await get('org.gnome.system.proxy.https', 'host'),
-        httpsPort: await get('org.gnome.system.proxy.https', 'port')
-      }
-    })
+    if (!keepBackup)
+      await saveBackup({
+        platform,
+        takenAt: Date.now(),
+        linux: {
+          mode: await get('org.gnome.system.proxy', 'mode'),
+          host: await get('org.gnome.system.proxy.http', 'host'),
+          port: await get('org.gnome.system.proxy.http', 'port'),
+          httpsHost: await get('org.gnome.system.proxy.https', 'host'),
+          httpsPort: await get('org.gnome.system.proxy.https', 'port')
+        }
+      })
     await tryRun('gsettings', ['set', 'org.gnome.system.proxy.http', 'host', host])
     await tryRun('gsettings', ['set', 'org.gnome.system.proxy.http', 'port', String(port)])
     await tryRun('gsettings', ['set', 'org.gnome.system.proxy.https', 'host', host])
