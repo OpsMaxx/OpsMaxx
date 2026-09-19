@@ -8,7 +8,7 @@ import type { TraversedEntry } from '@scalar/workspace-store/schemas/navigation'
 import type { OpenApiDocument } from '@scalar/workspace-store/schemas/v3.1/strict/openapi-document'
 import type { SidebarState } from '@scalar/sidebar'
 import type { ApiCollection } from '../../types'
-import { documentForCollection, firstOperationOf } from '../../../../shared/apiCollectionImport'
+import { documentForCollection } from '../../../../shared/apiCollectionImport'
 import { EnvironmentBar } from './EnvironmentBar'
 import { VAULT_LOCKED_MESSAGE } from '../../../../shared/apiSecrets'
 import { UnlockVaultButton } from '../common/UnlockVaultButton'
@@ -143,13 +143,6 @@ function methodOf(raw: string | undefined): HttpMethodName | null {
   return (HTTP_METHODS as readonly string[]).includes(m) ? m : null
 }
 
-function placeOf(op: { path: string; method: string }): {
-  path: string
-  method: HttpMethodName
-} | null {
-  const method = methodOf(op.method)
-  return method ? { path: op.path, method } : null
-}
 
 /** What a collection's document is built from, for change detection. */
 /**
@@ -822,6 +815,15 @@ async function createEngine(
    * edge one.
    */
   const currentExample = ref('default')
+  /**
+   * Whether the selected collection has an operation the pane can show.
+   *
+   * False renders OUR empty state rather than the library's "Select an
+   * operation to view details", which is a lie in this situation: there is
+   * nothing to select, and the sentence sends the user looking for a tree row
+   * that does not exist.
+   */
+  const hasLanding = ref(true)
   const sidebarWidth = ref(280)
   // shallowRef: a sidebar state is a whole reactive object of its own, and
   // deep-tracking it from out here would make every keystroke inside it a
@@ -912,6 +914,38 @@ async function createEngine(
     return first ?? 'default'
   }
 
+  /**
+   * The first operation of a document that this client can actually render.
+   *
+   * `firstOperationOf` answers a different question -- it accepts every method
+   * OpenAPI defines, `trace` included -- and the pane cannot be pointed at a
+   * `trace`, so a document that begins with one produced no landing at all.
+   */
+  const first = (doc: Record<string, unknown>): { path: string; method: HttpMethodName } | null => {
+    const paths = (doc.paths ?? {}) as Record<string, Record<string, unknown>>
+    for (const [path, item] of Object.entries(paths)) {
+      for (const key of Object.keys(item ?? {})) {
+        const method = methodOf(key)
+        if (method) return { path, method }
+      }
+    }
+    return null
+  }
+
+  /** The first candidate that names an operation this document really has. */
+  const firstUsable = (
+    doc: Record<string, unknown>,
+    candidates: ({ path: string; method: string } | null | undefined)[]
+  ): { path: string; method: HttpMethodName } | null => {
+    const paths = (doc.paths ?? {}) as Record<string, Record<string, unknown>>
+    for (const candidate of candidates) {
+      if (!candidate) continue
+      const method = methodOf(candidate.method)
+      if (method && paths[candidate.path]?.[method]) return { path: candidate.path, method }
+    }
+    return null
+  }
+
   const select = (collectionId: string): void => {
     if (!documentOf(collectionId)) return
     activeSlug.value = collectionId
@@ -930,12 +964,35 @@ async function createEngine(
     workspaceStore.update('x-scalar-active-document', collectionId)
 
     const doc = documentOf(collectionId) as Record<string, unknown>
-    const first = firstOperationOf(doc)
-    const landing = lastPlace.get(collectionId) ?? (first ? placeOf(first) : null)
-    if (landing) {
-      currentPath.value = landing.path
-      currentMethod.value = landing.method
-    }
+
+    // THE LANDING HAS TO EXIST IN THE DOCUMENT WE ARE LANDING IN.
+    //
+    // `getRequestExampleContext` resolves the pane from the document, the path
+    // and the method -- and nothing else; `exampleName` only has to be
+    // truthy. Its four refusals are "document not found", "not an OpenAPI
+    // document", "Path <p> not found" and "Method <m> not found on path <p>".
+    // Any of them and `Operation` renders "Select an operation to view
+    // details" over a tree that is plainly showing operations.
+    //
+    // Both inputs here could name something that is not in this document:
+    //
+    //  - `lastPlace` is remembered per collection and never revalidated, so it
+    //    survives the request being deleted from inside the client, and it
+    //    survives `sync` rebuilding the document from a changed spec.
+    //  - `placeOf(first)` returns null for a document whose first operation is
+    //    a `trace`, because the client's own HttpMethod does not carry one.
+    //
+    // And when the result was null, this used to leave `currentPath` and
+    // `currentMethod` untouched -- still pointing at the collection the user
+    // was looking at BEFORE. Switching to a collection with no usable
+    // operation therefore asked the store for the previous collection's path,
+    // which is exactly the "Path / not found" case.
+    const landing = firstUsable(doc, [lastPlace.get(collectionId), first(doc)])
+    currentPath.value = landing?.path ?? ''
+    currentMethod.value = landing?.method ?? 'get'
+    if (landing) lastPlace.set(collectionId, landing)
+    else lastPlace.delete(collectionId)
+    hasLanding.value = landing !== null
 
     const state = sidebarFor(collectionId)
     sidebarState.value = state
@@ -1002,6 +1059,19 @@ async function createEngine(
       const slug = activeSlug.value
       const doc = slug ? documentOf(slug) : null
       if (!slug || !doc) return h('div', { class: 'scalar-empty' })
+
+      // Nothing in this collection the pane can point at. Said in our own
+      // words: the library's empty state reads "Select an operation to view
+      // details", which sends someone hunting for a tree row that is not
+      // there. The two ways to get here are a collection with no requests yet,
+      // and a description whose only operations are ones this client cannot
+      // send.
+      if (!hasLanding.value) {
+        return h('div', { class: 'scalar-empty' }, [
+          h('p', null, 'This API has no request to show yet.'),
+          h('p', null, 'Use the + beside the API selector to add one.')
+        ])
+      }
 
       const state = sidebarState.value
       return h('div', { class: 'flex h-full min-h-0 w-full' }, [

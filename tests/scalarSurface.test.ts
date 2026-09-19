@@ -436,3 +436,87 @@ describe('editing a request', () => {
     )
   })
 })
+
+/**
+ * Landing on an operation that is actually there.
+ *
+ * Reported as "the http client still is broken in windows, it's different
+ * than macOS": the tree showed `GET /` and the pane showed the library's
+ * "Select an operation to view details". It is not a platform difference. The
+ * pane is resolved by `getRequestExampleContext`, which refuses with "Path <p>
+ * not found" or "Method <m> not found on path <p>" — and `exampleName` is not
+ * one of its inputs at all, it only has to be truthy for the gate above it.
+ *
+ * Two ways the path could name something absent from the document:
+ *
+ *   - `lastPlace` is remembered per collection and was never revalidated, so
+ *     it outlived the request being deleted inside the client and outlived
+ *     `sync` rebuilding the document from a changed spec.
+ *   - the fallback went through a helper that accepts every method OpenAPI
+ *     defines, `trace` included, which this client cannot point at — so a
+ *     document beginning with one produced no landing.
+ *
+ * And with no landing the code left the path untouched, still naming the
+ * PREVIOUS collection's operation. Switching collections then asked this
+ * document for the other one's path.
+ */
+describe('landing on an operation', () => {
+  const client = require_('node:fs').readFileSync(
+    require_('node:path').resolve(
+      __dirname,
+      '..',
+      'src/renderer/src/components/http/ScalarClient.tsx'
+    ),
+    'utf8'
+  ) as string
+
+  it('is still true that the library resolves on path and method, not example', () => {
+    const path = require_('node:path')
+    const resolved = require_.resolve('@scalar/workspace-store/request-example')
+    const at = resolved.lastIndexOf(path.join('@scalar', 'workspace-store'))
+    const ctx = require_('node:fs').readFileSync(
+      path.join(
+        resolved.slice(0, at + '@scalar/workspace-store'.length),
+        'dist/request-example/context/get-request-example-context.js'
+      ),
+      'utf8'
+    ) as string
+    // The four refusals. If any of these strings change, the reasoning in the
+    // comment above needs re-checking rather than the test relaxing.
+    expect(ctx).toContain('not found')
+    expect(ctx).toContain('is not an OpenAPI document')
+    // exampleName is destructured but never guards the result.
+    expect(ctx).toContain('exampleName')
+  })
+
+  it('checks the candidate against the document before landing on it', () => {
+    expect(client).toContain('const firstUsable')
+    const at = client.indexOf('const firstUsable')
+    const body = client.slice(at, at + 700)
+    // The check that matters: the path AND the method must both be present.
+    expect(body).toContain('paths[candidate.path]?.[method]')
+  })
+
+  it('never leaves the pane pointing at the previous collection', () => {
+    const at = client.indexOf('const landing = firstUsable')
+    expect(at).toBeGreaterThan(-1)
+    const body = client.slice(at, at + 400)
+    // Assigned unconditionally. The bug was an `if (landing)` around these.
+    expect(body).toMatch(/currentPath\.value = landing\?\.path \?\? ''/)
+    expect(body).toMatch(/currentMethod\.value = landing\?\.method \?\? 'get'/)
+  })
+
+  it('forgets a remembered place that no longer exists', () => {
+    const at = client.indexOf('const landing = firstUsable')
+    const body = client.slice(at, at + 400)
+    expect(body).toContain('lastPlace.delete(collectionId)')
+  })
+
+  it('says so in its own words when there is nothing to show', () => {
+    // The library's "Select an operation to view details" is wrong here: there
+    // is no operation to select.
+    expect(client).toContain('This API has no request to show yet.')
+    const at = client.indexOf('if (!hasLanding.value)')
+    expect(at).toBeGreaterThan(-1)
+  })
+})
