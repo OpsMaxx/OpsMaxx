@@ -136,3 +136,46 @@ describe('the two handoffs Scalar will not tell you about', () => {
     expect(client).toMatch(/update\('x-scalar-active-proxy',\s*null\)/)
   })
 })
+
+/**
+ * Which document an edit is applied to.
+ *
+ * `initializeWorkspaceEventHandlers` routes every document-scoped event —
+ * parameters, bodies, auth, cookies, the selected server, the response that
+ * fills history — through `mutators.active()`. That resolves as
+ * `workspace['x-scalar-active-document'] ?? Object.keys(documents)[0]`, so with
+ * the key unset it is whichever collection was added FIRST, regardless of which
+ * one is on screen.
+ *
+ * With one collection that is right by accident. With two, a header typed into
+ * the second is written into the first: it vanishes from the pane on the next
+ * render, and the first is corrupted, persisted and backed up in that state,
+ * with nothing to connect the two events.
+ *
+ * Strictly worse than the behaviour before the bus was wired, where the edit
+ * was merely discarded — which is why this is pinned rather than trusted.
+ */
+describe('the active document', () => {
+  const client = require_('node:fs').readFileSync(
+    require_('node:path').resolve(__dirname, '..', 'src/renderer/src/components/http/ScalarClient.tsx'),
+    'utf8'
+  ) as string
+
+  it('is set on the store, not only on a local ref', () => {
+    expect(client).toContain("'x-scalar-active-document'")
+    // Where selecting happens, so the store and the pane can never disagree.
+    const at = client.indexOf("'x-scalar-active-document'")
+    expect(client.slice(Math.max(0, at - 800), at)).toContain('activeSlug.value = collectionId')
+  })
+
+  it('does not rebuild a document because its collection was renamed', () => {
+    // sourceKeyOf decides when a document is regenerated from its collection,
+    // and regenerating discards every request the user added. A name is not an
+    // input to that build — and renaming is what the Add-API dialog suggests
+    // when a base URL was typed wrong.
+    const key = client.slice(client.indexOf('function sourceKeyOf'), client.indexOf('function sourceKeyOf') + 400)
+    expect(key).not.toMatch(/\bname:\s*c\.name\b/)
+    expect(key).toContain('specUrl')
+    expect(key).toContain('endpoints')
+  })
+})

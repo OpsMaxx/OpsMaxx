@@ -130,9 +130,27 @@ function placeOf(op: { path: string; method: string }): {
 }
 
 /** What a collection's document is built from, for change detection. */
+/**
+ * What the document is BUILT FROM, which is not the same as what the
+ * collection says about itself.
+ *
+ * A change here rebuilds the document from scratch, which throws away every
+ * request the user added and every edit inside them, with no warning and no
+ * undo. So the key may only contain inputs to that build.
+ *
+ * `name` was in it and is not an input. Renaming a collection -- fixing a typo
+ * -- therefore destroyed its entire contents, and the Add-API dialog
+ * recommends exactly that as the way to correct a base URL. Nothing renders
+ * the document's own title either: the sidebar draws navigation entries, and
+ * all three places that show a name read it from the collection record.
+ *
+ * The rest stay. `specUrl` and `specPath` genuinely select a different
+ * document. `baseUrl` and `endpoints` are what a collection with no spec is
+ * generated from, and for a spec collection `baseUrl` is derived from the spec
+ * URL, so it only moves when that does.
+ */
 function sourceKeyOf(c: ApiCollection): string {
   return JSON.stringify({
-    name: c.name,
     specUrl: c.specUrl ?? null,
     specPath: c.specPath ?? null,
     baseUrl: c.baseUrl,
@@ -404,7 +422,7 @@ async function createEngine(
     { initializeWorkspaceEventHandlers },
     { createWorkspaceStore },
     { createWorkspaceEventBus },
-    { getActiveEnvironment },
+    { getActiveEnvironment, filterGlobalCookie },
     { generateClientMutators },
     { createApp, h, ref, shallowRef },
     { Sidebar },
@@ -502,9 +520,46 @@ async function createEngine(
   // app, so a dropped listener would go on serialising a workspace for a
   // client that is gone.
   const stopListening = eventBus.onAny(() => onChanged())
+  /**
+   * The cookies that apply to a URL, in the shape a header wants.
+   *
+   * The transport cannot get these from the request: `Cookie` is a forbidden
+   * request-header name and the Request that carries it is built -- and
+   * stripped -- before the transport is called. So they come from where Scalar
+   * actually keeps them, which is where its own persist-response-cookies
+   * writes every `Set-Cookie` it sees.
+   *
+   * `filterGlobalCookie` is Scalar's own domain and path matcher, taken from
+   * the same subpath this file already imports getActiveEnvironment from, so
+   * the rule here is the rule Scalar applies rather than a second
+   * interpretation of it.
+   */
+  const cookiesForUrl = (url: string): string => {
+    const doc = activeSlug.value ? documentOf(activeSlug.value) : null
+    const scoped = [
+      ...((workspaceStore.workspace as { 'x-scalar-cookies'?: unknown[] })['x-scalar-cookies'] ?? []),
+      ...(((doc as { 'x-scalar-cookies'?: unknown[] } | null)?.['x-scalar-cookies'] ?? []) as unknown[])
+    ]
+    return scoped
+      .filter((cookie) =>
+        filterGlobalCookie({
+          cookie: cookie as Parameters<typeof filterGlobalCookie>[0]['cookie'],
+          url,
+          disabledGlobalCookies: {}
+        })
+      )
+      .map((c) => {
+        const { name, value } = c as { name?: string; value?: string }
+        return `${name ?? ''}=${value ?? ''}`
+      })
+      .filter((pair) => pair !== '=')
+      .join('; ')
+  }
+
   const transport = createHttpTransport(
     () => optionsRef.current,
-    (message) => reportRef.current(message)
+    (message) => reportRef.current(message),
+    cookiesForUrl
   )
 
   const activeSlug = ref<string | null>(null)
@@ -596,6 +651,19 @@ async function createEngine(
   const select = (collectionId: string): void => {
     if (!documentOf(collectionId)) return
     activeSlug.value = collectionId
+
+    // THE STORE HAS TO BE TOLD TOO, and this ref is not telling it.
+    //
+    // Every document-scoped event the bus applies goes through
+    // `mutators.active()`, and `activeDocument` resolves as
+    // `workspace['x-scalar-active-document'] ?? Object.keys(documents)[0]`.
+    // Unset, that is whichever collection was added FIRST -- so with two
+    // collections open, a header typed into the second is written into the
+    // first: it disappears from the pane on the next render, which reads the
+    // second, and the first is quietly corrupted and then persisted and backed
+    // up in that state. With one collection it happens to be right, which is
+    // the worst way for this to behave.
+    workspaceStore.update('x-scalar-active-document', collectionId)
 
     const doc = documentOf(collectionId) as Record<string, unknown>
     const first = firstOperationOf(doc)

@@ -68,9 +68,18 @@ function hopsFor(redirect: RequestRedirect | undefined): number {
   return redirect === 'manual' || redirect === 'error' ? 0 : FOLLOW_HOPS
 }
 
+/**
+ * The cookies that apply to a URL, already serialised as a header value.
+ *
+ * Supplied by the caller because the browser will not let this transport carry
+ * them: see where it is used below.
+ */
+export type CookieSource = (url: string) => string
+
 export function createHttpTransport(
   read: () => HttpTransportOptions,
-  report?: TransportReporter
+  report?: TransportReporter,
+  cookiesFor?: CookieSource
 ): typeof fetch {
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = input instanceof Request ? input : new Request(input, init)
@@ -105,6 +114,22 @@ export function createHttpTransport(
     try {
       url = resolveUrl(request.url, vault)
       headers = resolveSecrets(Object.fromEntries(request.headers.entries()), vault)
+
+      // THE COOKIE THE BROWSER ALREADY THREW AWAY.
+      //
+      // `Cookie` is a forbidden request-header name, and a Request's headers
+      // carry the request guard, which drops forbidden names SILENTLY. By the
+      // time they are read above they are gone -- so a login response's cookie
+      // was shown in the cookie panel, stored in the document, and then never
+      // sent again: the next request came back 401 with nothing to explain it.
+      //
+      // Setting it here works because everything past this point is ours: the
+      // spec crosses IPC as a plain object and main writes the header verbatim.
+      // Sourcing it from the document rather than from the request is the only
+      // option, because on this path Scalar has already built the Request --
+      // and been stripped -- before the transport is called at all.
+      const cookie = cookiesFor?.(url)
+      if (cookie) headers['Cookie'] = cookie
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       report?.(message)

@@ -86,15 +86,13 @@ vi.mock('@scalar/sidebar', () => ({
 vi.mock('@scalar/workspace-store/client', () => ({
   createWorkspaceStore: () => ({
     workspace: { documents, 'x-scalar-environments': {}, 'x-scalar-active-environment': '' },
-    // Called to turn Scalar's hosted proxy off. A stub that throws here would
-    // fail every test in this file for a reason unrelated to any of them.
-    update: vi.fn(),
     addDocument: (input: { name: string; document?: unknown }) => {
       documents[input.name] = input.document ?? { openapi: '3.1.1', info: {}, paths: {} }
       return addDocument()
     },
     loadWorkspace,
     exportWorkspace: () => ({ meta: {}, documents }),
+    // Also reached to turn Scalar's hosted proxy off.
     update: vi.fn()
   })
 }))
@@ -102,7 +100,10 @@ vi.mock('@scalar/workspace-store/events', () => ({
   createWorkspaceEventBus: () => ({ onAny: () => stopListening })
 }))
 vi.mock('@scalar/workspace-store/request-example', () => ({
-  getActiveEnvironment: () => ({ environment: { variables: [] } })
+  getActiveEnvironment: () => ({ environment: { variables: [] } }),
+  // Scalar's own domain and path matcher, used to decide which stored cookies
+  // belong on a request. Nothing here exercises cookies, so it simply agrees.
+  filterGlobalCookie: () => true
 }))
 vi.mock('@scalar/workspace-store/mutators', () => ({
   generateClientMutators: () => ({
