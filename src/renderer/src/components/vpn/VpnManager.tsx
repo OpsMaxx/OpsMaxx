@@ -1,5 +1,6 @@
 import { Globe, Plus } from 'lucide-react'
 import { EmptyState } from '../common/EmptyState'
+import { FoundProfilesBanner } from './FoundProfilesBanner'
 import { useApp, useWorkspaceVpns } from '../../store/app'
 import { useVpnProfiles } from './useVpnProfiles'
 import { isReverseProxyKind } from '../../../../shared/vpn'
@@ -67,6 +68,12 @@ export function VpnManager(): React.JSX.Element {
           <Plus size={14} /> Add Tailscale
         </button>
       </div>
+
+      {/* Above both the empty state and the list. A machine that already has
+          OpenVPN set up is the case where the empty state is most wrong: it
+          says "No VPN profiles" to somebody who has several, a few
+          directories away. */}
+      <FoundProfilesBanner onReview={() => importProfile('openvpn')} />
 
       {profiles.length === 0 ? (
         <EmptyState

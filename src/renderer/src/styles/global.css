@@ -3215,6 +3215,25 @@ details[open] > .disclosure-head .chev {
   max-width: 62ch;
 }
 
+/* The same shape as the biometric offer above, and for the same kind of thing:
+   a one-time offer that appears because the machine already has something,
+   not because the user asked. `align-items: center` rather than `flex-start`
+   because this one's buttons sit on the row. */
+.vpn-found-offer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+.vpn-found-offer .s-desc {
+  margin-top: 2px;
+  max-width: 62ch;
+}
+
 /* First-run walkthrough. Anchored bottom-right rather than centred over a
    scrim: each step switches to the view it is describing, and that view has to
    stay visible for the step to mean anything. */

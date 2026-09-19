@@ -1,0 +1,135 @@
+// @vitest-environment jsdom
+import { describe, expect, it, beforeEach, vi } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { stubBridge } from './setup/renderer'
+import { FoundProfilesBanner } from '../src/renderer/src/components/vpn/FoundProfilesBanner'
+import { useApp } from '../src/renderer/src/store/app'
+import type { DiscoveredVpnProfile } from '../src/shared/vpn'
+
+/**
+ * The offer that brings an existing OpenVPN setup to the user.
+ *
+ * Discovery used to live only inside the import dialog, which is a worse
+ * answer than it sounds: somebody who already has OpenVPN configured does not
+ * think of themselves as importing anything, so the one place the offer
+ * appeared was behind a button they had no reason to press. The report was
+ * "if pre-installed it should automatically import everything".
+ *
+ * What is pinned here is behaviour, not markup: that it asks, that it counts
+ * what it found, that pressing the button actually commits each one, that
+ * declining survives a remount, and — the two that matter most — that a
+ * machine with no OpenVPN shows NOTHING, and that an older preload cannot take
+ * the screen down.
+ */
+
+const found = (over: Partial<DiscoveredVpnProfile> = {}): DiscoveredVpnProfile => ({
+  kind: 'openvpn',
+  sourcePath: '/Users/x/OpenVPN/config/work.ovpn',
+  name: 'work',
+  report: { ok: true, stripped: [], spec: { kind: 'openvpn' } } as DiscoveredVpnProfile['report'],
+  ...over
+})
+
+const discoverProfiles = vi.fn()
+const commitImportFile = vi.fn()
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  localStorage.clear()
+  useApp.setState({ vpns: [] })
+  discoverProfiles.mockResolvedValue([])
+  commitImportFile.mockResolvedValue({ ok: true, spec: { kind: 'openvpn' }, vaultEntryId: 'v1' })
+  stubBridge({ vpn: { discoverProfiles, commitImportFile } })
+})
+
+describe('the found-profiles offer', () => {
+  it('says nothing on a machine that has no profiles', async () => {
+    render(<FoundProfilesBanner onReview={() => {}} />)
+    await waitFor(() => expect(discoverProfiles).toHaveBeenCalled())
+    // The ordinary case, and it must be silent. A banner saying "found 0" is
+    // an app talking about itself.
+    expect(screen.queryByText(/already on this machine/)).toBeNull()
+  })
+
+  it('counts what it found, and says it in the singular for one', async () => {
+    discoverProfiles.mockResolvedValue([found()])
+    render(<FoundProfilesBanner onReview={() => {}} />)
+    expect(
+      await screen.findByText(/There is an OpenVPN profile already on this machine/)
+    ).toBeTruthy()
+  })
+
+  it('pluralises', async () => {
+    discoverProfiles.mockResolvedValue([found(), found({ sourcePath: '/b.ovpn', name: 'b' })])
+    render(<FoundProfilesBanner onReview={() => {}} />)
+    expect(await screen.findByText(/There are 2 OpenVPN profiles/)).toBeTruthy()
+  })
+
+  it('excludes what is already imported, by source path', async () => {
+    useApp.setState({
+      vpns: [{ id: 'p1', spec: { kind: 'openvpn', sourcePath: '/Users/x/OpenVPN/config/work.ovpn' } }]
+    } as never)
+    render(<FoundProfilesBanner onReview={() => {}} />)
+    await waitFor(() => expect(discoverProfiles).toHaveBeenCalled())
+    // The path of the profile already held is what gets sent, so the scan can
+    // skip it. Passing nothing would offer the user their own imports back.
+    expect(discoverProfiles).toHaveBeenCalledWith(['/Users/x/OpenVPN/config/work.ovpn'])
+  })
+
+  it('does not offer a profile that cannot be imported', async () => {
+    discoverProfiles.mockResolvedValue([
+      found({ report: { ok: false, error: 'bad' } as DiscoveredVpnProfile['report'] })
+    ])
+    render(<FoundProfilesBanner onReview={() => {}} />)
+    await waitFor(() => expect(discoverProfiles).toHaveBeenCalled())
+    // "Import all" must not promise something that will fail. The dialog lists
+    // these with their reason; the one-press path does not.
+    expect(screen.queryByText(/already on this machine/)).toBeNull()
+  })
+
+  it('actually imports each one when pressed', async () => {
+    discoverProfiles.mockResolvedValue([
+      found(),
+      found({ sourcePath: '/Users/x/OpenVPN/config/home.ovpn', name: 'home' })
+    ])
+    render(<FoundProfilesBanner onReview={() => {}} />)
+    await userEvent.click(await screen.findByText('Import all'))
+
+    // By path, not by text: the file is read in main so an inline private key
+    // never crosses IPC.
+    await waitFor(() => expect(commitImportFile).toHaveBeenCalledTimes(2))
+    expect(commitImportFile.mock.calls[0][3]).toBe('/Users/x/OpenVPN/config/work.ovpn')
+    expect(commitImportFile.mock.calls[1][3]).toBe('/Users/x/OpenVPN/config/home.ovpn')
+  })
+
+  it('stays gone once declined, across a remount', async () => {
+    discoverProfiles.mockResolvedValue([found()])
+    const first = render(<FoundProfilesBanner onReview={() => {}} />)
+    await screen.findByText(/already on this machine/)
+    await userEvent.click(screen.getByTitle('Not now'))
+    first.unmount()
+
+    render(<FoundProfilesBanner onReview={() => {}} />)
+    // And it does not even ask again — a declined offer that still scans every
+    // launch is doing the work for nothing.
+    expect(screen.queryByText(/already on this machine/)).toBeNull()
+  })
+
+  it('survives a preload older than the renderer', async () => {
+    stubBridge({ vpn: {} })
+    // The dev-time mismatch. This used to be the shape that takes a whole view
+    // down through the error boundary.
+    expect(() => render(<FoundProfilesBanner onReview={() => {}} />)).not.toThrow()
+    expect(screen.queryByText(/already on this machine/)).toBeNull()
+  })
+
+  it('hands the review button to the caller rather than importing', async () => {
+    discoverProfiles.mockResolvedValue([found()])
+    const onReview = vi.fn()
+    render(<FoundProfilesBanner onReview={onReview} />)
+    await userEvent.click(await screen.findByText('Review'))
+    expect(onReview).toHaveBeenCalledOnce()
+    expect(commitImportFile).not.toHaveBeenCalled()
+  })
+})
