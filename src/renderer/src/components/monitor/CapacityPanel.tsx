@@ -29,6 +29,7 @@ import {
   CONFIDENCE_HELP,
   METRIC_LABEL,
   RES_LABEL,
+  dayCount,
   draw,
   forecastText,
   rateText,
@@ -456,7 +457,7 @@ function CapacityCard({ row, report }: { row: CapacityRow; report: CapacityRepor
           {bytes(trend.bytes.latest)} used
           {trend.bytes.perDay !== null && <> · growing {bytes(trend.bytes.perDay)} a day</>}
           {trend.bytes.crossesAt !== null && trend.bytes.days !== null && (
-            <> · {threshold ?? 90}% in {Math.floor(trend.bytes.days)} day(s)</>
+            <> · {threshold ?? 90}% in {dayCount(trend.bytes.days)} day(s)</>
           )}
         </div>
       )}
@@ -671,7 +672,7 @@ function ForecastRows({ rows }: { rows: FleetForecastRow[] }): React.JSX.Element
           {shown.map((r) => (
             <li key={`${r.hostId} ${r.metric}`} data-band={r.band} className={`is-${r.band}`}>
               <span className="cap-fleet-when mono">
-                {r.band === 'over' ? 'now' : r.days === null ? '—' : `${Math.floor(r.days)}d`}
+                {r.band === 'over' ? 'now' : r.days === null ? '—' : `${dayCount(r.days)}d`}
               </span>
               <span className="cap-fleet-host mono">{r.hostName}</span>
               <span className="cap-fleet-why">{withoutHostPrefix(r.because, r.hostName)}</span>

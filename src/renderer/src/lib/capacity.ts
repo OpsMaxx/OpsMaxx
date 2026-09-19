@@ -52,9 +52,25 @@ export function span(ms: number): string {
     const h = Math.round(abs / HOUR_MS)
     return `${h} hour${h === 1 ? '' : 's'}`
   }
-  const d = abs / DAY_MS
-  const rounded = d < 10 ? Math.round(d * 10) / 10 : Math.round(d)
+  const rounded = dayCount(abs / DAY_MS)
   return `${rounded} day${rounded === 1 ? '' : 's'}`
+}
+
+/**
+ * The number of days `span` would print, for the places too narrow for words.
+ *
+ * `span` rounds — 12.7 days reads as "13 days". Two other places on the same
+ * card floored it instead, so the headline said "Fills in 13 days" while the
+ * line under it said "90% in 12 day(s)" and the estate column said "12d". Same
+ * forecast, three renderings, two answers.
+ *
+ * The rule lives here once and both forms read it, rather than each site
+ * picking its own. Below two days `span` switches to hours and this does not,
+ * which is not a disagreement: "36 hours" and "1.5d" are the same duration,
+ * unlike 12 and 13.
+ */
+export function dayCount(days: number): number {
+  return days < 10 ? Math.round(days * 10) / 10 : Math.round(days)
 }
 
 /** A date a person can read, in their own locale. Day and month only: the year
