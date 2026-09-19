@@ -40,7 +40,11 @@ const SUBPATHS: Array<[specifier: string, usedFor: string]> = [
     'OpenApiDocument, the narrowed document type'
   ],
   ['@scalar/workspace-store/schemas/navigation', 'TraversedEntry, the sidebar entry type'],
-  ['@scalar/sidebar', 'createSidebarState']
+  ['@scalar/sidebar', 'createSidebarState'],
+  [
+    '@scalar/api-client/v2/workspace-events',
+    'initializeWorkspaceEventHandlers, without which every edit is discarded'
+  ]
 ]
 
 describe('the Scalar subpaths this app imports', () => {
@@ -86,5 +90,49 @@ describe('vue', () => {
     const { readFile } = await import('node:fs/promises')
     const config = await readFile(new URL('../electron.vite.config.ts', import.meta.url), 'utf8')
     expect(config).toMatch(/dedupe:\s*\[[^\]]*'vue'/)
+  })
+})
+
+/**
+ * Two contracts the type system cannot state, both of which shipped broken.
+ *
+ * Scalar's `Operation` declares `exampleName?: string`, so omitting it is not a
+ * type error — and its render guard requires it. Without it the component fell
+ * through to "Select an operation to view details" for every request, including
+ * the one already selected. The address bar, the method control, Send, the
+ * params/body/headers/auth tabs, the code snippets, the response pane and the
+ * history all live inside the block behind that guard, so none of them had ever
+ * rendered. The feature looked unbuilt.
+ *
+ * And its blocks only EMIT. `initializeWorkspaceEventHandlers` is what binds
+ * those events to the mutators that apply them; unimported, a header or body
+ * typed into the pane reverted on the next render, auth was never stored and
+ * the history could never fill.
+ *
+ * Read from the source rather than exercised, because rendering the real
+ * component needs a Vue app, a workspace store and a document — and a test that
+ * mounts a stub proves nothing about either contract, which is precisely how
+ * both survived.
+ */
+describe('the two handoffs Scalar will not tell you about', () => {
+  const client = require_('node:fs').readFileSync(
+    require_('node:path').resolve(__dirname, '..', 'src/renderer/src/components/http/ScalarClient.tsx'),
+    'utf8'
+  ) as string
+
+  it('passes exampleName to Operation, which renders nothing without it', () => {
+    expect(client).toContain('exampleName:')
+  })
+
+  it('subscribes the event bus to the mutators', () => {
+    expect(client).toContain('initializeWorkspaceEventHandlers(')
+  })
+
+  it('turns off the hosted proxy the web layout would otherwise default to', () => {
+    // `layout: 'web'` is right for the UI and also selects
+    // https://proxy.scalar.com as the default route for every non-loopback
+    // request, carrying the URL, the headers and the body to a third party.
+    expect(client).toContain("'x-scalar-active-proxy'")
+    expect(client).toMatch(/update\('x-scalar-active-proxy',\s*null\)/)
   })
 })

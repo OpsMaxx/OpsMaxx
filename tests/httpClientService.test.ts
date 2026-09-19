@@ -386,3 +386,67 @@ describe('httpRequest, through a server', () => {
     expect(release).toHaveBeenCalledWith(conn)
   })
 })
+
+// THE BODY THAT NEVER ARRIVED.
+//
+// `content-length` is a reserved header, so a caller's value is stripped and
+// only the service can set it — and it did not. Node supplies
+// `Transfer-Encoding: chunked` as a fallback only for methods whose
+// useChunkedEncodingByDefault is true, which excludes DELETE and OPTIONS. So a
+// DELETE carrying a body went out with neither header and every server read it
+// as empty, silently: measured at seven bytes for POST and zero for DELETE.
+//
+// Reachable from the UI, not theoretical — the client offers a body editor for
+// DELETE, and Elasticsearch, Neo4j and bulk-delete APIs all take one.
+//
+// The same omission made POST, PUT and PATCH always chunked. A presigned S3 PUT
+// answers 501 to chunked and SigV4 wants the length, which is the "curl works,
+// the app does not" report.
+describe('a request body on every method that carries one', () => {
+  const seen: { method: string; length?: string; encoding?: string; body: string }[] = []
+  let bodyUrl = ''
+
+  beforeAll(async () => {
+    const srv = http.createServer((req, res) => {
+      const chunks: Buffer[] = []
+      req.on('data', (c: Buffer) => chunks.push(c))
+      req.on('end', () => {
+        seen.push({
+          method: req.method ?? '',
+          length: req.headers['content-length'],
+          encoding: req.headers['transfer-encoding'],
+          body: Buffer.concat(chunks).toString()
+        })
+        res.writeHead(200).end('ok')
+      })
+    })
+    servers.push(srv)
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r))
+    bodyUrl = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`
+  })
+
+  it.each(['POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])(
+    'delivers the bytes on %s',
+    async (method) => {
+      const payload = JSON.stringify({ method })
+      const result = await httpRequest(
+        {
+          url: `${bodyUrl}/x`,
+          method,
+          headers: { 'content-type': 'application/json' },
+          body: new TextEncoder().encode(payload).buffer as ArrayBuffer,
+          via: { kind: 'direct' }
+        },
+        ctx
+      )
+      expect(result.ok).toBe(true)
+      const got = seen.find((s) => s.method === method)
+      expect(got, `${method} never reached the server`).toBeTruthy()
+      // The bytes, not merely a request.
+      expect(got!.body).toBe(payload)
+      // And framed by length rather than left to a fallback that DELETE and
+      // OPTIONS do not get.
+      expect(got!.length).toBe(String(payload.length))
+    }
+  )
+})

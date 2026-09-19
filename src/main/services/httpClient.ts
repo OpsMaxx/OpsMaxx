@@ -298,6 +298,25 @@ async function sendOnce(
       const agent = new http.Agent({ keepAlive: false, maxSockets: 1 })
       agent.createConnection = () => socket
 
+      // THE LENGTH OF THE BODY, WHICH NOTHING ELSE WILL SUPPLY.
+      //
+      // `content-length` is in RESERVED_HEADERS, so a caller's value is
+      // stripped and this is the only place it can be set. Node only falls
+      // back to `Transfer-Encoding: chunked` for methods whose
+      // useChunkedEncodingByDefault is true, and DELETE and OPTIONS are not
+      // among them -- so a DELETE with a body went out with neither header and
+      // the server read it as empty. Measured: POST sent 7 body bytes, DELETE
+      // sent 0. Elasticsearch, Neo4j and every bulk-delete API take a body on
+      // DELETE, and the client offers an editor for it.
+      //
+      // It fixes the other direction too. POST, PUT and PATCH were always
+      // chunked, and a presigned S3 PUT answers 501 to chunked while SigV4
+      // requires the length -- "curl works, the app does not".
+      const outgoing =
+        hop.body && methodAllowsBody(method)
+          ? { ...headers, 'Content-Length': String(hop.body.byteLength) }
+          : headers
+
       const request = http.request(
         {
           method,
@@ -305,7 +324,7 @@ async function sendOnce(
           host: target.hostname,
           port: target.port,
           path: target.path,
-          headers,
+          headers: outgoing,
           // One request per transport. Keeping it alive would strand an SSH
           // channel for every request the user ever sent.
           agent

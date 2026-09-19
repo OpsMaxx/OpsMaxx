@@ -68,6 +68,13 @@ vi.mock('vue', () => {
 
 vi.mock('@scalar/api-client/v2/features/operation', () => ({ Operation: 'Operation' }))
 vi.mock('@scalar/api-client/v2/components/sidebar', () => ({ Sidebar: 'Sidebar' }))
+// Emit-only blocks stay emit-only without this: it is what binds every
+// `operation:*`, `auth:*` and `cookie:*` event to the mutator that applies it.
+// Mocked to a spy so the lifecycle tests keep testing the lifecycle, and
+// asserted for real in the surface test.
+vi.mock('@scalar/api-client/v2/workspace-events', () => ({
+  initializeWorkspaceEventHandlers: vi.fn()
+}))
 vi.mock('@scalar/api-client/style.css', () => ({}))
 vi.mock('@scalar/sidebar', () => ({
   createSidebarState: (entries: unknown[]) => ({
@@ -79,6 +86,9 @@ vi.mock('@scalar/sidebar', () => ({
 vi.mock('@scalar/workspace-store/client', () => ({
   createWorkspaceStore: () => ({
     workspace: { documents, 'x-scalar-environments': {}, 'x-scalar-active-environment': '' },
+    // Called to turn Scalar's hosted proxy off. A stub that throws here would
+    // fail every test in this file for a reason unrelated to any of them.
+    update: vi.fn(),
     addDocument: (input: { name: string; document?: unknown }) => {
       documents[input.name] = input.document ?? { openapi: '3.1.1', info: {}, paths: {} }
       return addDocument()

@@ -401,6 +401,7 @@ async function createEngine(
 ): Promise<Engine> {
   const [
     { Operation },
+    { initializeWorkspaceEventHandlers },
     { createWorkspaceStore },
     { createWorkspaceEventBus },
     { getActiveEnvironment },
@@ -410,6 +411,7 @@ async function createEngine(
     { createSidebarState }
   ] = await Promise.all([
     import('@scalar/api-client/v2/features/operation'),
+    import('@scalar/api-client/v2/workspace-events'),
     import('@scalar/workspace-store/client'),
     import('@scalar/workspace-store/events'),
     import('@scalar/workspace-store/request-example'),
@@ -423,8 +425,56 @@ async function createEngine(
   ])
 
   const workspaceStore = createWorkspaceStore()
+
+  // NO THIRD-PARTY PROXY. This is not a preference, it is the difference
+  // between a request leaving this machine for its destination and leaving it
+  // for somebody else's server.
+  //
+  // `layout: 'web'` below is right for the UI -- it is what makes the method a
+  // control rather than a label -- but Scalar reads the same value to decide
+  // routing: getDefaultProxyUrl returns 'https://proxy.scalar.com' for the web
+  // layout, and with `x-scalar-active-proxy` unset that default applies. Every
+  // request to anything but localhost would then be rewritten to
+  // proxy.scalar.com?scalar_url=<target> before reaching our transport,
+  // carrying the URL, the headers -- Authorization included -- and the body to
+  // a third party. A private hostname or an internal IP is exempt from nothing;
+  // only loopback and the reserved TLDs are.
+  //
+  // It would also quietly undo "Send from <server>": the tunnel would carry a
+  // request to Scalar rather than to the host the user picked.
+  //
+  // Unreachable until now only because the request pane never rendered, so
+  // nothing could be sent. Fixing that without this would have turned a client
+  // that did nothing into one that did something worse.
+  workspaceStore.update('x-scalar-active-proxy', null)
+
   const eventBus = createWorkspaceEventBus()
   const mutators = generateClientMutators(workspaceStore)
+
+  // THE HALF OF THE BUS THAT APPLIES ANYTHING.
+  //
+  // Scalar's v2 blocks are emit-only: typing a header emits
+  // `operation:upsert:parameter`, choosing an auth scheme emits `auth:*`, a
+  // response emits `hooks:on:request:complete`. Nothing in the library
+  // subscribes by itself. `initializeWorkspaceEventHandlers` is what binds
+  // every one of those to the mutator that performs it, and without it the
+  // events were observed -- `onAny` below debounced a save -- and then thrown
+  // away.
+  //
+  // So a header or body typed into the pane was never written to the document:
+  // it reverted on the next render, never reached a snapshot, and never went
+  // out with the request. Auth was never stored. The history dropdown could
+  // not fill, because the completion event had no handler. Cookies from a
+  // login response were dropped, which is why a session could not survive into
+  // the next request.
+  //
+  // The only things that did persist were the two paths that bypass the bus
+  // and call mutators directly: the environment bar, and adding a request.
+  initializeWorkspaceEventHandlers({
+    eventBus,
+    store: shallowRef(workspaceStore),
+    hooks: {}
+  })
 
   /** What each slug was built from, so an unchanged collection is not rebuilt. */
   const sources = new Map<string, string>()
@@ -460,6 +510,24 @@ async function createEngine(
   const activeSlug = ref<string | null>(null)
   const currentPath = ref('/')
   const currentMethod = ref<HttpMethodName>('get')
+  /**
+   * WITHOUT THIS THE CLIENT IS A DEAD SHELL, and nothing says so.
+   *
+   * Operation renders its request block only when path, method, document,
+   * exampleName and the example it resolves are ALL truthy — and its type
+   * declares `exampleName?: string`, so omitting it is not a type error. Every
+   * request therefore fell through to "Select an operation to view details",
+   * including the one already selected in the tree. Clicking a request did
+   * nothing, silently, which is exactly what it looks like when a product has
+   * not been built.
+   *
+   * The name comes from the operation's own `example` children. Scalar's
+   * resolveExampleName takes the first of them and falls back to the literal
+   * `'default'`, which is the key its store writes when a document declares no
+   * examples of its own, so that fallback is the common case rather than the
+   * edge one.
+   */
+  const currentExample = ref('default')
   const sidebarWidth = ref(280)
   // shallowRef: a sidebar state is a whole reactive object of its own, and
   // deep-tracking it from out here would make every keystroke inside it a
@@ -508,12 +576,21 @@ async function createEngine(
           if (!method) return
           currentPath.value = entry.path
           currentMethod.value = method
+          currentExample.value = exampleNameOf(entry)
           if (activeSlug.value) lastPlace.set(activeSlug.value, { path: entry.path, method })
         }
       }
     })
     sidebars.set(slug, state)
     return state
+  }
+
+  /** The example key for an operation entry: its first example child, or the
+   *  store's default. Mirrors Scalar's own resolveExampleName. */
+  const exampleNameOf = (entry: TraversedEntry | null | undefined): string => {
+    const children = (entry as { children?: { type?: string; name?: string }[] } | null)?.children
+    const first = children?.find((c) => c.type === 'example')?.name
+    return first ?? 'default'
   }
 
   const select = (collectionId: string): void => {
@@ -535,6 +612,7 @@ async function createEngine(
       // while the tree shows nothing selected is how the first click on that
       // same row became a no-op that looked like a dead control.
       const entry = findOperationEntry(state.items.value, landing.path, landing.method)
+      currentExample.value = exampleNameOf(entry)
       state.setSelected(entry?.id ?? null)
     }
   }
@@ -622,6 +700,7 @@ async function createEngine(
           layout: 'web',
           path: currentPath.value,
           method: currentMethod.value,
+          exampleName: currentExample.value,
           environment: getActiveEnvironment(workspaceStore, doc).environment,
           workspaceStore,
           plugins: [],
