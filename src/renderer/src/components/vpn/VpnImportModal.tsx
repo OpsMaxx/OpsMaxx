@@ -308,7 +308,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
           >
             <div className="row" style={{ gap: 8 }}>
               <FileUp size={14} className="faint" />
-              <span style={{ fontSize: 12 }}>
+              <span className="ui-note">
                 {scanning ? 'Looking for profiles already on this machine…' : 'Found on this machine'}
               </span>
             </div>
@@ -320,11 +320,11 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
               return (
                 <div key={profile.sourcePath} className="row" style={{ gap: 8 }}>
                   <div className="col" style={{ gap: 2, minWidth: 0 }}>
-                    <span style={{ fontSize: 12 }}>{profile.name}</span>
+                    <span className="ui-note">{profile.name}</span>
                     <span
                       className="muted"
                       style={{
-                        fontSize: 11,
+                        fontSize: 'var(--fs-caption)',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap'

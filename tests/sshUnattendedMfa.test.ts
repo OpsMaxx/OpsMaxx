@@ -144,7 +144,10 @@ describe('a person joining an open that nobody was watching', () => {
 
   it('does not keep an unattended refusal as its own answer', () => {
     expect(ACQUIRE).toContain('if (!allowPrompt || inflight.allowPrompt || !mayRetry) {')
-    expect(ACQUIRE).toContain('return acquireOne(hop, parent, allowPrompt, false)')
+    // `via` rides along on the retry too. It names the hop the forward is
+    // opened from, so dropping it here would make the one connection that
+    // bounced the only one whose failure could not say where it broke.
+    expect(ACQUIRE).toContain('return acquireOne(hop, parent, allowPrompt, false, via)')
   })
 
   // Once, never in a loop: the retry is itself attended, so the next joiner

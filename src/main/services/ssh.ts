@@ -9,6 +9,9 @@ import type { CloudTarget } from '../../shared/cloud'
 import { agentForHop } from '../../shared/sshAgent'
 import { debugRecord } from './debugLog'
 import { verifyHostKey } from './knownhosts'
+// Names only, and only for an error message: a hop is addressed by the
+// friendly name of a saved server, so that is what a failure has to say.
+import { getCachedServer } from './mcpDataCache'
 import { isEncryptedPrivateKey, defaultIdentityPath } from './sshKeys'
 import {
   assertCertificateUsable,
@@ -455,13 +458,107 @@ async function connectClient(
   })
 }
 
+/**
+ * Which link of the chain failed, carried on the error itself.
+ *
+ * A chained server that will not come up reports one line to the monitor, and
+ * until this existed that line said nothing about WHERE it broke. Measured
+ * against two real sshd's (tests/jumpHostBackground.test.ts), the failures a
+ * bastion produces are not merely vague, they are misdirection:
+ *
+ *   * a bastion whose credential is wrong        -> "All configured
+ *     authentication methods failed", which every reader takes to be the
+ *     TARGET's credential, and sends them to re-check a key that is fine;
+ *   * a bastion that will not forward            -> "(SSH) Channel open
+ *     failure: " with an empty reason;
+ *   * a target that is down behind a good bastion -> the SAME string, so the
+ *     two cases a user would act on differently are indistinguishable;
+ *   * a bastion that is simply unreachable       -> "connect ECONNREFUSED
+ *     10.20.0.10:22", an address they may never have typed.
+ *
+ * `hopIndex` is absent when the TARGET itself failed, which is what lets a
+ * caller tell "this one server is down" from "everything behind that bastion
+ * is". `hopServerId` is the saved server the hop names, for callers that route
+ * by it rather than display it — see FleetSampler's sweep.
+ */
+export interface SshChainError extends Error {
+  /** 0-based position in `hops`. Absent means the target, not a jump host. */
+  hopIndex?: number
+  hopServerId?: string
+}
+
+/**
+ * How a hop is named to a person.
+ *
+ * The saved server's own name first: this app addresses jump hosts by the
+ * friendly name of a server that already exists, so that is the string the
+ * user chose and the one they can act on. `user@host:port` only when the hop
+ * names no saved server, or names one this process has not cached yet.
+ */
+function hopLabel(hop: SshHop & { serverId?: string }): string {
+  const name = hop.serverId ? getCachedServer(hop.serverId)?.name : undefined
+  // The NAME INSTEAD OF the address, not beside it. These strings travel as
+  // far as any other connection error does, and the MCP bridge is one of the
+  // places they land — where an agent is deliberately never shown a hostname,
+  // an address or an account. A hop that names a saved server always has a
+  // name; one that does not was typed as an address by the user in the route
+  // editor, so the address is the only handle they have on it and is the one
+  // thing they can match it by.
+  return name ?? `${hop.username}@${hop.host}:${hop.port || 22}`
+}
+
+/**
+ * Attribute a failure to a hop, once.
+ *
+ * Idempotent on purpose: `acquireOne` opens the forward from the PREVIOUS hop
+ * and then authenticates THIS one, so a forward failure would otherwise be
+ * relabelled by the walk as the wrong end of the link it broke on. The first
+ * layer to know is the one that names it.
+ */
+function atHop(err: unknown, hop: SshHop & { serverId?: string }, index: number, count: number): SshChainError {
+  const e = (err instanceof Error ? err : new Error(String(err))) as SshChainError
+  if (e.hopIndex !== undefined) return e
+  const labelled: SshChainError = new Error(
+    `Jump host ${index + 1} of ${count} — ${hopLabel(hop)} — could not be reached: ${e.message}`
+  )
+  labelled.hopIndex = index
+  labelled.hopServerId = hop.serverId
+  return labelled
+}
+
 // forwardOut on the previous hop opens a channel to the next hop's host:port,
 // which becomes the transport socket for the next SSH client — a jump chain.
-function hopForward(prev: Client, target: SshHop): Promise<NodeJS.ReadableStream> {
+function hopForward(
+  prev: Client,
+  target: SshHop,
+  /**
+   * The hop the channel is being opened FROM, when there is one to name.
+   *
+   * This is the half of the distinction the walk cannot make on its own: the
+   * bastion authenticated perfectly and then could not carry the connection
+   * onwards, which is a different fault, in a different place, from the
+   * bastion refusing us — and ssh2 gives both the same empty-reasoned string.
+   */
+  via?: { hop: SshHop & { serverId?: string }; index: number; count: number }
+): Promise<NodeJS.ReadableStream> {
   return new Promise((resolve, reject) => {
     prev.forwardOut('127.0.0.1', 0, target.host, target.port || 22, (err, stream) => {
-      if (err) reject(err)
-      else resolve(stream as unknown as NodeJS.ReadableStream)
+      if (!err) {
+        resolve(stream as unknown as NodeJS.ReadableStream)
+        return
+      }
+      if (!via) {
+        reject(err)
+        return
+      }
+      const failure: SshChainError = new Error(
+        `Jump host ${via.index + 1} of ${via.count} — ${hopLabel(via.hop)} — authenticated, but could not ` +
+          `open a connection onwards to ${target.host}:${target.port || 22}: ${err.message}. ` +
+          'That is the jump host reaching the next address, not the next address refusing to authenticate.'
+      )
+      failure.hopIndex = via.index
+      failure.hopServerId = via.hop.serverId
+      reject(failure)
     })
   })
 }
@@ -622,9 +719,19 @@ async function openChainDirect(
   let sock: NodeJS.ReadableStream | undefined
   for (let i = 0; i < hops.length; i++) {
     onHop?.(i, hops.length)
-    const client = await connectClient(hops[i], sock, allowPrompt)
+    // Labelled here as well as on the pooled walk: tunnels, `Test route`,
+    // sshTest and the ephemeral forwards a database dials all come through
+    // this one, and a chain failure has to say which hop on every path that
+    // can show one to a person.
+    const client = await connectClient(hops[i], sock, allowPrompt).catch((err) => {
+      throw atHop(err, hops[i], i, hops.length)
+    })
     clients.push(client)
-    sock = await hopForward(client, i + 1 < hops.length ? hops[i + 1] : cfg)
+    sock = await hopForward(client, i + 1 < hops.length ? hops[i + 1] : cfg, {
+      hop: hops[i],
+      index: i,
+      count: hops.length
+    })
   }
   const client = await connectClient(cfg, sock, allowPrompt)
   clients.push(client)
@@ -752,7 +859,16 @@ async function acquireOne(
   parent: PooledConnection | null,
   allowPrompt = true,
   /** False on the one retry below, so this can never bounce more than once. */
-  mayRetry = true
+  mayRetry = true,
+  /**
+   * Which hop `parent` is, so a forward that will not open can name it.
+   *
+   * Passed per call rather than held on the PooledConnection, and that is not
+   * an accident: a pooled bastion is SHARED, and its position in the chain is a
+   * property of the chain being walked, not of the connection. Two servers
+   * behind the same bastion can sit at different depths.
+   */
+  via?: { hop: SshHop & { serverId?: string }; index: number; count: number }
 ): Promise<PooledConnection> {
   const key = hopKey(hop, parent?.key)
 
@@ -794,13 +910,13 @@ async function acquireOne(
         if (parent) release(parent)
         throw err
       }
-      return acquireOne(hop, parent, allowPrompt, false)
+      return acquireOne(hop, parent, allowPrompt, false, via)
     }
   }
 
   const promise = (async () => {
     // Reached through the bastion when there is one.
-    const sock = parent ? await hopForward(parent.client, hop) : undefined
+    const sock = parent ? await hopForward(parent.client, hop, via) : undefined
     const client = await connectClient(hop, sock, allowPrompt)
     const conn: PooledConnection = {
       key,
@@ -917,9 +1033,42 @@ export async function acquire(
   try {
     for (let i = 0; i < hops.length; i++) {
       onHop?.(i, hops.length)
-      parent = await acquireOne(hops[i], parent, allowPrompt)
+      /**
+       * ONE connection per bastion, shared by everything behind it.
+       *
+       * `acquireOne` keys each hop in its own right, so fifteen servers behind
+       * one jump host authenticate to that jump host once and then ride
+       * fifteen direct-tcpip channels on the single connection — OpenSSH's
+       * ControlMaster, applied to the chain rather than only to the endpoint.
+       * That is deliberately NOT one connection per target: `MaxStartups`
+       * throttles and then refuses concurrent *handshakes*, which is exactly
+       * what a sweep of an estate behind a shared bastion would produce, and
+       * `MaxSessions` does not apply to forwarded channels at all
+       * (sshd_config: it counts "shell, login or subsystem sessions", and 0
+       * still permits forwarding). So the multiplexed shape is both the
+       * cheaper one and the one that cannot trip a limit.
+       *
+       * `atHop` is what turns a failure here into something actionable: see
+       * SshChainError. The hop walk is the only place that knows the index.
+       */
+      const at = i
+      parent = await acquireOne(
+        hops[at],
+        parent,
+        allowPrompt,
+        true,
+        // The hop BEFORE this one owns the forward being opened. The first hop
+        // has none: it is dialled over a real socket.
+        at > 0 ? { hop: hops[at - 1], index: at - 1, count: hops.length } : undefined
+      ).catch((err) => {
+        throw atHop(err, hops[at], at, hops.length)
+      })
     }
-    const conn = await acquireOne(effective, parent, allowPrompt)
+    const conn = await acquireOne(effective, parent, allowPrompt, true,
+      // A failure opening the forward from the LAST hop to the target is the
+      // bastion failing to reach the target, not the target refusing us.
+      hops.length > 0 ? { hop: hops[hops.length - 1], index: hops.length - 1, count: hops.length } : undefined
+    )
     if (dial) {
       // Attach to whichever connection actually owns the socket. On a pool hit
       // the forward is redundant — the existing connection already has its own

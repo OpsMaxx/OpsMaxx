@@ -803,20 +803,46 @@ export class FleetSampler {
     if (this.shouldRun()) this.schedule(0)
   }
 
+  /**
+   * Whether this target can be sampled — THE WHOLE ROUTE, not just its end.
+   *
+   * `credentialReady` was asked about `t.serverId` alone, which is the right
+   * question for a direct connection and only half of it for a chained one.
+   * Every hop authenticates independently with its own stored credential, so a
+   * server behind a bastion whose password lives in the vault cannot be
+   * sampled while the vault is shut — however readable the target's own
+   * credential is.
+   *
+   * Unasked, that server was not skipped: it was ATTEMPTED, `resolveChainSecrets`
+   * threw VaultLockedError on the hop, and the sweep recorded it unreachable.
+   * Once per interval, for as long as the vault stayed closed — a healthy
+   * machine reported as down, in the monitor and in every panel fed from this
+   * cache (posture, access, inventory, drift), while the direct-connection
+   * server next to it in the same list sampled perfectly. That is the reported
+   * defect, and this is the gate that had the chain missing from it.
+   *
+   * Hops that name no saved server carry their credential inline and have
+   * nothing to resolve, so they cannot block.
+   */
+  private targetReady(t: FleetTarget): boolean {
+    if (!this.deps.credentialReady(t.serverId)) return false
+    return (t.cfg.hops ?? []).every((h) => {
+      const id = (h as { serverId?: string }).serverId
+      return id === undefined || this.deps.credentialReady(id)
+    })
+  }
+
   private shouldRun(): boolean {
     // `some`, not `every`: one sampleable target is a reason to sweep. The
     // blocked ones are skipped inside the loop.
-    return (
-      this.cfg.enabled &&
-      this.cfg.targets.length > 0 &&
-      this.cfg.targets.some((t) => this.deps.credentialReady(t.serverId))
-    )
+    return this.cfg.enabled && this.cfg.targets.length > 0 && this.cfg.targets.some((t) => this.targetReady(t))
   }
 
-  /** Targets that cannot be sampled because their credential is in a vault
-   *  that is shut. 0 whenever the vault is open, absent, or unreferenced. */
+  /** Targets that cannot be sampled because a credential somewhere on the
+   *  route to them is in a vault that is shut. 0 whenever the vault is open,
+   *  absent, or unreferenced. */
   private blockedCount(): number {
-    return this.cfg.targets.reduce((n, t) => (this.deps.credentialReady(t.serverId) ? n : n + 1), 0)
+    return this.cfg.targets.reduce((n, t) => (this.targetReady(t) ? n : n + 1), 0)
   }
 
   /** What this sampler last learned about one server. */
@@ -1450,7 +1476,9 @@ export class FleetSampler {
         // attempted, so the "no failure, no audit entry per interval" posture
         // this loop is written around is unchanged — it now applies to the
         // target rather than to the sweep.
-        if (!this.deps.credentialReady(t.serverId)) {
+        //
+        // `targetReady`, not `credentialReady`: the route, not its last hop.
+        if (!this.targetReady(t)) {
           swept++
           continue
         }
