@@ -476,12 +476,28 @@ func handleVerifyRoster(req Request) (any, error) {
 	// flag -- there is no field a forged entry could set to claim otherwise.
 	devices := make([]map[string]any, 0, len(v.Devices))
 	for _, d := range v.Devices {
-		devices = append(devices, map[string]any{
+		row := map[string]any{
 			"pubSign":       hex.EncodeToString(d.PubSign),
 			"pubEnc":        hex.EncodeToString(d.PubEnc),
 			"epoch":         d.Epoch,
 			"mnemonicAdded": d.MnemonicAuthored(),
-		})
+		}
+		// The pseudonym, opened HERE or not at all: it is sealed under the
+		// profile key of the epoch the device was added in, and that key never
+		// leaves this process. Omitted rather than faked when this device does
+		// not hold that epoch -- which is the ordinary state for a device that
+		// joined after a rotation, not an error. The parent shows the key's
+		// first bytes in that case, which is at least true.
+		keys.mu.RLock()
+		epoch, have := keys.epochs[d.Epoch]
+		acct := keys.account
+		keys.mu.RUnlock()
+		if have && len(d.LabelCT) > 0 {
+			if label, err := protocol.OpenLabel(d.LabelCT, acct, d.Epoch, d.PubSign, epoch.Profile); err == nil {
+				row["label"] = label
+			}
+		}
+		devices = append(devices, row)
 	}
 
 	// Whether THIS device is still in the roster, which is the question the

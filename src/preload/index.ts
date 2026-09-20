@@ -287,7 +287,7 @@ export interface ProviderDetectionResult {
   error?: string
 }
 
-import type { AddyPairingConfirmation, ConflictCopy } from '../shared/addy'
+import type { AddyPairingConfirmation, AddyStatusSnapshot, ConflictCopy } from '../shared/addy'
 import type { ProvisionManifest, ProvisionPlan } from '../shared/provision'
 import type {
   AgentApprovalRequest,
@@ -442,15 +442,23 @@ const api = {
 
     /** Finish the pairing this device started: hand over the account key and
      *  write the roster entry that adds the other device. */
-
     completePairing: (confirmation: unknown): Promise<{ devices: number }> =>
-
       ipcRenderer.invoke('addy:completePairing', confirmation),
 
     /** Finish the pairing this device JOINED: take the account key, store it,
      *  and attach. */
-
     finishJoin: (): Promise<{ accountId: string }> => ipcRenderer.invoke('addy:finishJoin'),
+
+    /** The account, the devices on it, and whether anything is moving. What
+     *  the Sync & devices panel renders; see shared/addy.ts for the shape and
+     *  for why absence is a state rather than a zero. */
+    status: (): Promise<AddyStatusSnapshot> => ipcRenderer.invoke('addy:status'),
+    /** Pushed whenever any of that changes. Returns the unsubscribe. */
+    onStatus: (cb: (s: AddyStatusSnapshot) => void): (() => void) => {
+      const h = (_e: unknown, s: AddyStatusSnapshot): void => cb(s)
+      ipcRenderer.on('addy:status', h)
+      return () => ipcRenderer.removeListener('addy:status', h)
+    },
 
     /** Send what is on the clipboard to every other device on the account.
      *  Explicit, on a keystroke -- nothing is mirrored in the background. */

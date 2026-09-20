@@ -4705,6 +4705,19 @@ ipcMain.handle('addy:completePairing', (_e, confirmation: PairingConfirmation) =
 )
 ipcMain.handle('addy:finishJoin', () => addySession.finishJoin())
 
+// WHAT THE PANEL READS. The Sync & devices panel was built before anything
+// could answer it and renders "not reported" for every figure until this
+// handler exists — deliberately, so the screen was honest while the engine
+// behind it was written. This is the line that turns it on.
+ipcMain.handle('addy:status', () => addySession.status())
+// And pushed on change, so the panel does not poll a sidecar on a timer to
+// learn that nothing happened. Registered once at startup rather than per
+// window: `watch` holds one callback and the send is guarded on a live window,
+// which is the same shape every other broadcast in this file uses.
+addySession.watch((snapshot) => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('addy:status', snapshot)
+})
+
 // The clipboard, on an explicit keystroke rather than by mirroring. See
 // services/addy/clipboard.ts for why that is a decision and not a shortcut.
 ipcMain.handle('addy:sendClipboard', () => addySession.sendClipboard())

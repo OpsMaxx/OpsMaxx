@@ -218,3 +218,58 @@ export interface AddyPairingConfirmation {
    *  device to write into the roster entry that adds it. */
   self?: { pubSign: string; pubEnc: string }
 }
+
+/**
+ * The state the Sync & devices panel renders.
+ *
+ * Declared HERE, in the shared contract, rather than on either side: the
+ * renderer wrote this shape first, as a request for what it needed to stop
+ * guessing (`components/addy/addyStatus.ts`), and main now answers it. Two
+ * copies of it would let the answer drift from the question silently, which is
+ * exactly how a panel ends up rendering a field nobody sets.
+ *
+ * THE RULE IT ENCODES: a figure nobody measured must not render as though it
+ * had been. `devices` is OMITTED — never `[]` — while this device has not
+ * verified a roster, `lastSeen` is `null` rather than 0, and `sync.running`
+ * says whether there is an engine at all, so "last sync: never" cannot be read
+ * as a fleet that has fallen behind.
+ */
+export interface AddyStatusDevice {
+  /** `pub_sign`, hex. Stable for the life of the device. */
+  id: string
+  /** The pseudonym from the roster, opened in the sidecar under the profile
+   *  key of the epoch the device was added in. Falls back to the key's first
+   *  bytes when this device does not hold that epoch. */
+  label: string
+  /** The device this window is running on. */
+  self: boolean
+  /** Epoch ms the relay last saw it. `null` when it does not report that. */
+  lastSeen: number | null
+  /** Epoch ms it joined the account. `null` when unknown. */
+  addedAt: number | null
+  revoked?: boolean
+}
+
+export interface AddyStatusSync {
+  /** Is there a sync engine running in this build at all. Every other figure
+   *  on the panel is read through this one. */
+  running: boolean
+  /** This device has authenticated to the relay. */
+  connected: boolean
+  lastSyncAt: number | null
+  error?: { message: string; at: number; code?: string }
+  /** Conflict copies waiting for a choice. */
+  conflicts: number
+  /** Objects carried in the last few sync windows, oldest first. Omitted
+   *  rather than sent flat, because a flat line claims nothing synced. */
+  history?: number[]
+}
+
+export interface AddyStatusSnapshot {
+  enrolled: boolean
+  relayURL?: string
+  accountId?: string
+  /** Omitted, not empty, until a roster has been verified on this device. */
+  devices?: AddyStatusDevice[]
+  sync: AddyStatusSync
+}

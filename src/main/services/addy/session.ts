@@ -16,7 +16,7 @@ import {
   resolveConflict,
   type ConflictDeps
 } from './conflicts'
-import type { ConflictCopy } from '../../../shared/addy'
+import type { AddyStatusSnapshot, ConflictCopy } from '../../../shared/addy'
 import { receiveClipboard, sendClipboard, type ClipboardDeps } from './clipboard'
 import { closeSession, dialPeer } from './p2p'
 
@@ -32,7 +32,16 @@ import { closeSession, dialPeer } from './p2p'
 
 /** A verified roster, as the panel needs it. */
 export interface AddyRoster {
-  devices: { pubSign: string; pubEnc: string; epoch: number; mnemonicAdded: boolean }[]
+  devices: {
+    pubSign: string
+    pubEnc: string
+    epoch: number
+    mnemonicAdded: boolean
+    /** The pseudonym, opened in the sidecar. Absent when this device does not
+     *  hold the profile key of the epoch that device was added in — the
+     *  ordinary state for one that joined after a rotation, not an error. */
+    label?: string
+  }[]
   /** Whether THIS device is still listed. False is the revocation signal. */
   stillListed: boolean
   /** H(last entry), hex: the pin two devices can compare, and the one a
@@ -79,6 +88,15 @@ class AddySession {
   /** Accept a self-signed relay certificate. Development instances only, and
    *  carried on the enrolment so a resume does not silently become strict. */
   private insecureTLS = false
+
+  /** The last roster this device VERIFIED, kept so `status()` can answer
+   *  without a network round trip on every render.
+   *
+   *  `null` means "never read", and that is not the same as an empty account:
+   *  the panel renders the two differently on purpose, so this must never be
+   *  initialised to `[]`. */
+  private lastRoster: AddyRoster | null = null
+  private watchers = new Set<(s: AddyStatusSnapshot) => void>()
 
   /** True once a device is attached to an account and the sidecar is up. */
   get attached(): boolean {
@@ -614,7 +632,13 @@ class AddySession {
     // "this device has been revoked", which is the one conclusion that must
     // never be reached by a typo.
     const verified = await addyd.send<{
-      devices: { pubSign: string; pubEnc: string; epoch: number; mnemonicAdded: boolean }[]
+      devices: {
+        pubSign: string
+        pubEnc: string
+        epoch: number
+        mnemonicAdded: boolean
+        label?: string
+      }[]
       selfListed: boolean
       head: string
       headEntry: string
@@ -629,7 +653,7 @@ class AddySession {
     this.roster = verified.devices
       .map((d) => d.pubSign)
       .filter((id) => id !== me.devicePub)
-    return {
+    const roster: AddyRoster = {
       devices: verified.devices,
       stillListed: verified.selfListed,
       head: verified.head,
@@ -637,6 +661,9 @@ class AddySession {
       headSeq: verified.headSeq,
       self: me.devicePub
     }
+    this.lastRoster = roster
+    this.announce()
+    return roster
   }
 
   /**
@@ -727,6 +754,84 @@ class AddySession {
       throw new AddyError('not-paired', 'this device is not attached to an addy account')
     }
     return { addyd: this.addyd, relay: this.relay, epoch: () => this.account!.epoch }
+  }
+
+  /**
+   * What the Sync & devices panel renders, and nothing it has to guess at.
+   *
+   * THE RULE THIS OBEYS is the one `addyStatus.ts` was written around: a
+   * number nobody measured must not render as though it had been. So the
+   * roster is OMITTED rather than sent as `[]` until this device has actually
+   * verified one, `lastSeen` and `addedAt` are `null` because the relay
+   * reports neither, and `sync.running` is `false` while there is no engine to
+   * run -- which is what stops "last sync: never" reading as a fleet that has
+   * fallen behind rather than a feature that has not started.
+   *
+   * Cheap on purpose: it reads what is already in memory plus the enrolment
+   * note on disk. The renderer calls it on mount in every window, including
+   * for people who have never opened addy.
+   */
+  async status(): Promise<AddyStatusSnapshot> {
+    const enrolment = this.account ? null : loadEnrolment()
+    const relayURL = this.account?.baseURL ?? enrolment?.baseURL
+    const accountId = this.account?.accountId ?? enrolment?.accountId
+    const roster = this.lastRoster
+
+    return {
+      // A device is enrolled once it has an account, whether or not the
+      // sidecar is up and whether or not the relay is reachable. Anything
+      // narrower would report a laptop with no network as never having set
+      // addy up, and offer it the "create an account" flow it must not take.
+      enrolled: !!accountId,
+      ...(relayURL ? { relayURL } : {}),
+      ...(accountId ? { accountId } : {}),
+      ...(roster
+        ? {
+            devices: roster.devices.map((d) => ({
+              id: d.pubSign,
+              // The pseudonym from the roster, opened in the sidecar under the
+              // epoch's profile key. When this device does not hold that epoch
+              // the sidecar sends none, and the first bytes of the key are at
+              // least true -- unlike a made-up "Device 2".
+              label: d.label ?? `device ${d.pubSign.slice(0, 8)}`,
+              self: d.pubSign === roster.self,
+              // Neither is reported by the relay. `null`, so the panel says
+              // "not reported" instead of drawing 1970 or "just now".
+              lastSeen: null,
+              addedAt: null
+            }))
+          }
+        : {}),
+      sync: {
+        // FALSE, and it will stay false until there is an engine. The panel
+        // reads every other figure through this one.
+        running: false,
+        // A token means this device authenticated to the relay, which is the
+        // strongest connection claim this build can make honestly.
+        connected: !!this.relay?.token,
+        lastSyncAt: null,
+        conflicts: (await this.conflicts()).length
+      }
+    }
+  }
+
+  /** Pushed to the renderer whenever any of the above changes, so the panel
+   *  does not poll a sidecar on a timer to learn that nothing happened. */
+  watch(cb: (s: AddyStatusSnapshot) => void): () => void {
+    this.watchers.add(cb)
+    return () => this.watchers.delete(cb)
+  }
+
+  private announce(): void {
+    if (this.watchers.size === 0) return
+    void this.status().then(
+      (s) => {
+        for (const cb of this.watchers) cb(s)
+      },
+      // A status read that fails must not take down whatever just succeeded.
+      // The panel keeps the last good answer and its own Refresh still works.
+      () => undefined
+    )
   }
 
   /** Empty rather than throwing when unattached.

@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
+import type {
+  AddyStatusDevice,
+  AddyStatusSnapshot,
+  AddyStatusSync
+} from '../../../../shared/addy'
 import { bridgeHas, bridgeOn } from '../../lib/bridge'
 import { duration } from '../../lib/format'
 
@@ -20,87 +25,41 @@ import { duration } from '../../lib/format'
  * build is actually in.
  */
 
-/** One device on the account, as the relay's roster knows it. */
-export interface AddyDevice {
-  /** `pub_sign`, hex. Stable for the life of the device, and the key the
-   *  `deviceNames` collection is keyed on. */
-  id: string
-  /** What to show. The `deviceNames` override where the user has set one, the
-   *  birth name otherwise — resolved in main, because the renderer has no
-   *  roster and must not learn to guess at one. */
-  label: string
-  /** The device this window is running on. Exactly one device, or none at all
-   *  when main cannot tell which it is. */
-  self: boolean
-  /** Epoch ms the relay last saw it. `null` when it never has, or when this
-   *  relay does not report per-device liveness. Never 0. */
-  lastSeen: number | null
-  /** Epoch ms it joined the account. `null` when unknown. */
-  addedAt: number | null
-  /** Revoked devices stay in the roster — the chain is immutable — so they are
-   *  shown as revoked rather than dropped, which is also what makes a
-   *  revocation visible from the other machines. */
-  revoked?: boolean
-}
-
-/** Whether anything is actually moving, and what went wrong if not. */
-export interface AddySync {
-  /**
-   * Is there a sync engine running in this build at all.
-   *
-   * `false` is the honest answer while it is being written, and it is the one
-   * field that stops every other pane on this panel from lying: with no engine,
-   * "last sync: never" is not a fleet that is behind, it is a feature that has
-   * not started.
-   */
-  running: boolean
-  /** A live connection to the relay, right now. */
-  connected: boolean
-  /** Epoch ms a sync last completed. `null` when none ever has. */
-  lastSyncAt: number | null
-  /** The current failure, cleared by the next success. Absent is healthy. */
-  error?: { message: string; at: number; code?: string }
-  /** Conflict copies waiting for a choice. The chooser that resolves them
-   *  mounts at the app root (App.tsx); this is the count, so the band can say
-   *  something is waiting without opening both sides of every one. */
-  conflicts: number
-  /** Objects carried in each of the last few sync windows, oldest first.
-   *  Optional: with no history the sparkline is omitted rather than drawn
-   *  flat, because a flat line is a claim that nothing synced. */
-  history?: number[]
-}
-
-/** The whole answer. */
-export interface AddyStatus {
-  /** Is this device on an account. Everything below is about that account. */
-  enrolled: boolean
-  /** The relay, as `https://relay.example`. */
-  relayURL?: string
-  accountId?: string
-  /** The roster. OMITTED — not `[]` — when main cannot read it, so the panel
-   *  can tell "no devices" from "I was not told". */
-  devices?: AddyDevice[]
-  sync: AddySync
-}
-
-/** The two calls this panel wants on `window.opsmaxx.addy`. */
-interface AddyStatusBridge {
-  status?: () => Promise<AddyStatus>
-  /** Pushed whenever any of the above changes, so the panel does not poll a
-   *  sidecar on a timer to find out that nothing happened. */
-  onStatus?: (cb: (s: AddyStatus) => void) => () => void
-}
+/**
+ * THE SHAPES, now owned by the shared contract.
+ *
+ * These four interfaces were written HERE first, as a request: main could not
+ * answer any of them, so the panel typed the questions it needed answered and
+ * rendered "not reported" for each until something did. Main answers them now,
+ * and a second copy of the shape would let the answer drift from the question
+ * without either side failing to compile — so the definitions moved to
+ * `shared/addy.ts` and these names stay as aliases, because the panel and its
+ * tests read better with them.
+ *
+ * The rule the shapes carry is unchanged and is the reason they are worth
+ * pinning: `devices` is OMITTED rather than `[]` until a roster has been
+ * verified, `lastSeen` is `null` rather than 0, and `sync.running` says
+ * whether there is an engine at all.
+ */
+export type AddyDevice = AddyStatusDevice
+export type AddySync = AddyStatusSync
+export type AddyStatus = AddyStatusSnapshot
 
 /**
- * The addy namespace, seen as the calls this panel wants rather than as the
- * calls it has.
+ * The addy namespace on the bridge.
  *
- * `as unknown as` because the bridge's real type does not declare these yet —
- * which is precisely the condition every `supported` check here exists to
- * notice. When main lands them, this cast is the line to delete.
- */
-function statusBridge(): AddyStatusBridge | undefined {
-  return window.opsmaxx?.addy as unknown as AddyStatusBridge | undefined
+ * This used to be `as unknown as` over a hand-written interface, because the
+ * bridge genuinely did not declare these calls — which is the condition every
+ * `supported` check below exists to notice. Main declares them now, so the
+ * cast is gone and a rename on either side is a compile error rather than a
+ * panel that quietly reports nothing.
+ *
+ * The `supported` check STAYS. A running app can have a preload older than the
+ * renderer — that is the ordinary state of a dev server that was not
+ * restarted, and of a window that outlived an update — and the honest
+ * rendering of it is "this build cannot answer", not a crash. */
+function statusBridge(): typeof window.opsmaxx.addy | undefined {
+  return window.opsmaxx?.addy
 }
 
 /** Whether this build can answer the question at all. */
