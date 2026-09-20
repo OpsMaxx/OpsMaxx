@@ -5,6 +5,8 @@ import {
   beginPairing,
   forgetPairing,
   joinPairing,
+  publish,
+  receive,
   type PairingConfirmation
 } from './pairing'
 import { RelayClient } from './relay'
@@ -33,8 +35,14 @@ export interface AddyRoster {
   devices: { pubSign: string; pubEnc: string; epoch: number; mnemonicAdded: boolean }[]
   /** Whether THIS device is still listed. False is the revocation signal. */
   stillListed: boolean
-  /** The chain head and its sequence, which two devices can compare. */
+  /** H(last entry), hex: the pin two devices can compare, and the one a
+   *  printed recovery card carries. */
   head?: string
+  /** That entry's own bytes, base64. What anything CHAINING a new entry needs,
+   *  because the next entry's `prev_hash` is its hash — and what a handoff
+   *  seals so a joining device can verify the chain it fetches rather than
+   *  trusting the relay's copy. Not interchangeable with `head`. */
+  headEntry?: string
   headSeq?: number
   /** This device's own `pub_sign`, so a caller can mark which row is itself. */
   self?: string
@@ -370,7 +378,166 @@ class AddySession {
     this.addyd ??= addyd
     const abort = new AbortController()
     this.pairing = { id: pairingId, abort }
+    this.joinContext = { baseURL, pairingId, abort }
     return joinPairing({ addyd, baseURL }, code, pairingId, abort.signal)
+  }
+
+  private joinContext: { baseURL: string; pairingId: string; abort: AbortController } | null = null
+
+  /**
+   * THE INITIATOR'S HALF OF "THEY MATCH", and it did not exist.
+   *
+   * Pressing that button called `cancelPairing()` and toasted "Device added".
+   * Nothing was added: no account key crossed, no roster entry was written,
+   * and the account went on containing exactly one device. The emoji matched
+   * and the app said something untrue about the user's data.
+   *
+   * Three things have to happen, in this order, and the order is the point:
+   *
+   *  1. Seal the account key to the peer, BOUND TO THE SPAKE2 SECRET. That
+   *     binding is what stops the relay — which carries every frame —
+   *     substituting a handoff of its own; it never learns the secret.
+   *  2. Write the roster entry that says the device is on the account, signed
+   *     with the epoch key and chained to the head THIS device verified.
+   *  3. Only then forget the pairing.
+   *
+   * If the roster append fails the handoff has already gone, which is the
+   * safe direction: the joiner holds a key to an account that does not list
+   * it, so it can read nothing and is refused everywhere until the entry
+   * lands. The reverse — listed but keyless — would be a device the account
+   * vouches for that cannot prove anything.
+   */
+  async completePairing(confirmation: PairingConfirmation): Promise<{ devices: number }> {
+    const addyd = this.addyd
+    const relay = this.relay
+    const account = this.account
+    const pairing = this.pairing
+    if (!addyd || !relay || !account || !pairing) {
+      throw new AddyError('config-invalid', 'no pairing is in progress on an attached account')
+    }
+    const peerPubEnc = confirmation.peer.pubEnc
+    const peerPubSign = confirmation.self?.pubSign ?? confirmation.peer.pubSign
+    if (!peerPubEnc) {
+      throw new AddyError('pairing-refused', 'the other device sent no encryption key')
+    }
+
+    // The head THIS device verified, never the relay's word for it.
+    const before = await this.refreshRoster()
+    const akSeed = loadAddySecret('account', `${account.accountId}:account`)
+    if (!akSeed) {
+      throw new AddyError('config-invalid', 'this device cannot read its own account key')
+    }
+
+    // The counter is chosen HERE and travels beside the blob, because the
+    // joiner has to pass it back to open one: it is bound into the sealed
+    // handoff, so a relay that alters it in the frame produces a refusal
+    // rather than a device joined to something it did not agree to. Same for
+    // the epoch and the account id — all three are authenticated inside, and
+    // none of them can be derived by a device that has never seen the account.
+    const counter = (before.headSeq ?? 0) + 1
+    const sealed = await addyd.send<{ handoff: string }>('pairHandoff', {
+      pairingId: pairing.id,
+      epoch: account.epoch,
+      akSeed,
+      headEntry: before.headEntry ?? '',
+      peerPubEnc,
+      counter
+    })
+    await publish({ addyd, baseURL: relay.baseURL }, pairing.id, 'initiator', {
+      handoff: sealed.handoff,
+      epoch: account.epoch,
+      counter,
+      accountId: account.accountId
+    })
+
+    const entry = await addyd.send<{ seq: number; entry: string }>('addDevice', {
+      headEntry: before.headEntry ?? '',
+      headSeq: before.headSeq ?? 0,
+      epoch: account.epoch,
+      pubSign: peerPubSign,
+      pubEnc: peerPubEnc,
+      // The pseudonym the joining device chose for itself, sealed into the
+      // entry so only devices holding this epoch's profile key can read it.
+      label: confirmation.self?.label ?? 'a paired device'
+    })
+    await relay.appendRoster(entry.seq, entry.entry)
+
+    await this.cancelPairing()
+    const after = await this.refreshRoster()
+    return { devices: after.devices.length }
+  }
+
+  /**
+   * THE JOINER'S HALF, equally absent.
+   *
+   * `joinPairing` compared emoji and stopped. It never stored a key, never
+   * set an account, never attached — so a device that had just proved it knew
+   * the code went back to knowing nothing at all.
+   *
+   * The secrets are written to the keychain BEFORE the enrolment is recorded,
+   * for the reason `createAccount` gives in reverse: a note pointing at an
+   * account whose keys were never stored is a device that looks enrolled and
+   * can do nothing.
+   */
+  async finishJoin(): Promise<{ accountId: string }> {
+    const addyd = this.addyd
+    const ctx = this.joinContext
+    if (!addyd || !ctx) throw new AddyError('config-invalid', 'no join is in progress')
+
+    const sealed = await receive<{ handoff: string; counter: number; epoch: number; accountId: string }>(
+      { addyd, baseURL: ctx.baseURL },
+      ctx.pairingId,
+      'joiner',
+      ctx.abort.signal
+    )
+    const accepted = await addyd.send<{
+      accountId: string
+      epoch: number
+      rootSignPub: string
+      epoch1SignPub: string
+      headEntry: string
+      devicePubSign: string
+      devicePubEnc: string
+      secrets: { deviceSignSeed: string; deviceEncKey: string; akSeed: string }
+    }>('pairAccept', {
+      pairingId: ctx.pairingId,
+      handoff: sealed.handoff,
+      epoch: sealed.epoch,
+      counter: sealed.counter,
+      // From the handoff frame, and required: the account id is bound inside
+      // the sealed blob and it cannot be opened without it.
+      accountId: sealed.accountId
+    })
+
+    for (const [kind, scope, value] of [
+      ['device', 'device', accepted.secrets.deviceSignSeed],
+      ['device', 'device-enc', accepted.secrets.deviceEncKey],
+      ['account', 'account', accepted.secrets.akSeed]
+    ] as const) {
+      if (!storeAddySecret(kind, `${accepted.accountId}:${scope}`, value)) {
+        throw new AddyError(
+          'config-invalid',
+          'this machine has no usable keychain, so the account keys cannot be stored. Nothing was kept.'
+        )
+      }
+    }
+
+    this.account = {
+      baseURL: ctx.baseURL,
+      token: '',
+      accountId: accepted.accountId,
+      epoch: accepted.epoch,
+      rootSignPub: accepted.rootSignPub,
+      epoch1SignPub: accepted.epoch1SignPub
+    }
+    this.relay = new RelayClient(
+      { baseURL: ctx.baseURL, token: '', insecureTLS: this.insecureTLS },
+      addyd
+    )
+    await this.loginAndRecord()
+    await this.refreshRoster().catch(() => undefined)
+    this.joinContext = null
+    return { accountId: accepted.accountId }
   }
 
   /** Ends whatever is in progress and forgets the shared secret.
@@ -450,6 +617,7 @@ class AddySession {
       devices: { pubSign: string; pubEnc: string; epoch: number; mnemonicAdded: boolean }[]
       selfListed: boolean
       head: string
+      headEntry: string
       headSeq: number
     }>('verifyRoster', {
       chain: bytes,
@@ -465,6 +633,7 @@ class AddySession {
       devices: verified.devices,
       stillListed: verified.selfListed,
       head: verified.head,
+      headEntry: verified.headEntry,
       headSeq: verified.headSeq,
       self: me.devicePub
     }

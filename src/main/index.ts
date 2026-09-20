@@ -335,6 +335,7 @@ import { vaultWaiting } from './services/vaultWaiting'
 import { clearRevocation, revocationState } from './services/addy/revoke'
 import { sshAgent } from './services/sshAgent/service'
 import { addySession } from './services/addy/session'
+import type { PairingConfirmation } from './services/addy/pairing'
 import { previewBitwardenImport } from './services/import/bitwarden'
 import { apply as applyProvision, preview as previewProvision } from './services/provision'
 import type { ApplyOptions as ProvisionApplyOptions } from './services/provision'
@@ -4696,6 +4697,13 @@ ipcMain.handle('addy:joinPairing', (_e, baseURL: string, code: string, pairingId
   addySession.joinPairing(baseURL, code, pairingId)
 )
 ipcMain.handle('addy:cancelPairing', () => addySession.cancelPairing())
+// The two calls that make a pairing real. Until these existed, "They match"
+// called cancelPairing and toasted "Device added" over an account that still
+// had one device in it.
+ipcMain.handle('addy:completePairing', (_e, confirmation: PairingConfirmation) =>
+  addySession.completePairing(confirmation)
+)
+ipcMain.handle('addy:finishJoin', () => addySession.finishJoin())
 
 // The clipboard, on an explicit keystroke rather than by mirroring. See
 // services/addy/clipboard.ts for why that is a decision and not a shortcut.

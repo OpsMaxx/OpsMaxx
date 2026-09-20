@@ -204,8 +204,12 @@ func (d Device) MnemonicAuthored() bool {
 
 // Verified is what a client adopts once the chain has passed every step.
 type Verified struct {
-	Devices   []Device
-	Head      []byte // H(last entry)
+	Devices []Device
+	Head    []byte // H(last entry)
+	// The last entry as it arrived, body || sig. What a handoff and an escrow
+	// carry, and what anything chaining a new entry hashes to get its
+	// prev_hash -- so a caller never has to re-encode an entry it parsed.
+	HeadEntry []byte
 	HeadSeq   uint64
 	Epoch     uint64 // the epoch the chain ends in
 	EpochSign []byte // AK_epoch.sign public half
@@ -246,6 +250,13 @@ var (
 func VerifyChain(raw []byte, acct AccountID, rootSignPub ed25519.PublicKey, epoch1Sign ed25519.PublicKey, pin *Pin) (*Verified, error) {
 	// Step 1: parse.
 	var entries []Entry
+	// The head's bytes as they arrived, kept rather than re-encoded. A handoff
+	// and an escrow both carry the head entry VERBATIM (see the note on
+	// Escrow.HeadEntry), and re-encoding an entry to produce them would make
+	// the blob depend on this encoder agreeing byte for byte with whichever
+	// one wrote the chain -- a disagreement that would only show up as a
+	// signature that does not verify on somebody else's machine.
+	var headWire []byte
 	rest := raw
 	for len(rest) > 0 {
 		e, next, err := DecodeEntry(rest)
@@ -253,6 +264,7 @@ func VerifyChain(raw []byte, acct AccountID, rootSignPub ed25519.PublicKey, epoc
 			return nil, fmt.Errorf("roster: entry %d: %w", len(entries), err)
 		}
 		entries = append(entries, e)
+		headWire = rest[:len(rest)-len(next)]
 		rest = next
 	}
 	if len(entries) == 0 {
@@ -457,6 +469,7 @@ func VerifyChain(raw []byte, acct AccountID, rootSignPub ed25519.PublicKey, epoc
 	return &Verified{
 		Devices:   devices,
 		Head:      prev,
+		HeadEntry: headWire,
 		HeadSeq:   last.Seq,
 		Epoch:     currentEpoch,
 		EpochSign: epochSign[currentEpoch],

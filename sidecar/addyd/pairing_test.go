@@ -325,3 +325,142 @@ func TestAHandoffNeedsAConfirmedPairing(t *testing.T) {
 		t.Fatalf("reported as %q", code)
 	}
 }
+
+// THE HALF THAT USED TO BE MISSING, in one process.
+//
+// `TestTwoDevicesPairAndSeeTheSameEmoji` stops where the app used to stop: the
+// emoji match and nothing else happens. The app then said "Device added" and
+// the account still held one device. This carries on past the comparison --
+// handoff, roster entry, accept -- and finishes by asking the JOINER to verify
+// the chain under the keys it was handed, which is the only statement worth
+// making: the second device can read the account, and the roster says so.
+//
+// The two roles share one process and one `keys`, so the vault is swapped
+// between them. That is not a shortcut around the test: a pairing where both
+// ends have the same device key would pass a weaker test and fail this one at
+// `pairAccept`, because the handoff is sealed to the joiner's X25519 key.
+func TestPairingPutsTheSecondDeviceOnTheRoster(t *testing.T) {
+	keys.reset()
+	t.Cleanup(func() {
+		keys.reset()
+		pairings.mu.Lock()
+		pairings.initiator = map[string]*pair.Initiator{}
+		pairings.joiner = map[string]*pair.Joiner{}
+		pairings.mu.Unlock()
+	})
+
+	initiatorVault := keys
+	joinerVault := &vault{epochs: map[uint64]*protocol.EpochKeys{}}
+	as := func(v *vault) { keys = v }
+	t.Cleanup(func() { keys = initiatorVault })
+
+	// Go will not spread a two-value call into `result(t, ...)` when it is not
+	// the only argument, so the handler and its params go in instead.
+	run := func(h func(Request) (any, error), method string, p map[string]any) map[string]any {
+		t.Helper()
+		v, err := h(Request{Method: method, Params: params(t, p)})
+		return result(t, v, err)
+	}
+
+	minted := run(handleCreateAccount, "createAccount", map[string]any{"label": "laptop"})
+	secrets := nested(t, minted, "secrets")
+	genesis := minted["genesis"].(string)
+
+	verify := func(chain string, root, epoch1 any) map[string]any {
+		t.Helper()
+		return run(handleVerifyRoster, "verifyRoster", map[string]any{
+			"chain": chain, "rootSignPub": root, "epoch1Sign": epoch1,
+		})
+	}
+	before := verify(genesis, minted["rootSignPub"], minted["epoch1SignPub"])
+	if n := len(before["devices"].([]map[string]any)); n != 1 {
+		t.Fatalf("a fresh account starts with %d devices", n)
+	}
+
+	// --- SPAKE2 and the comparison, as the other test covers -------------
+	begun := run(handlePairBegin, "pairBegin", map[string]any{})
+	id := begun["pairingId"].(string)
+	start := nested(t, begun, "startFrame")
+
+	as(joinerVault)
+	joined := run(handlePairJoin, "pairJoin", map[string]any{
+		"code": begun["code"], "pairingId": id,
+		"msgA": start["msgA"], "pubSign": start["pubSign"],
+	})
+	reply := nested(t, joined, "replyFrame")
+
+	as(initiatorVault)
+	replied := run(handlePairReply, "pairReply", map[string]any{
+		"pairingId": id, "msgB": reply["msgB"], "confirmB": reply["confirmB"],
+		"pubSign": reply["pubSign"], "pubEnc": reply["pubEnc"],
+	})
+	confirmFrame := nested(t, replied, "confirmFrame")
+
+	as(joinerVault)
+	confirmed := run(handlePairConfirm, "pairConfirm", map[string]any{
+		"pairingId": id, "confirmA": confirmFrame["confirmA"],
+	})
+	self := nested(t, confirmed, "self")
+
+	// --- past the comparison ---------------------------------------------
+	as(initiatorVault)
+	sealed := run(handlePairHandoff, "pairHandoff", map[string]any{
+		"pairingId":  id,
+		"epoch":      uint64(1),
+		"akSeed":     secrets["akSeed"],
+		"headEntry":  before["headEntry"],
+		"peerPubEnc": self["pubEnc"],
+		"counter":    uint64(1),
+	})
+
+	entry := run(handleAddDevice, "addDevice", map[string]any{
+		"headEntry": before["headEntry"],
+		"headSeq":   before["headSeq"],
+		"epoch":     uint64(1),
+		"pubSign":   self["pubSign"],
+		"pubEnc":    self["pubEnc"],
+		"label":     "desktop",
+	})
+	if seq, _ := entry["seq"].(uint64); seq != 1 {
+		t.Fatalf("the new entry is seq %v, not the one after genesis", entry["seq"])
+	}
+
+	// The relay stores entries and serves them back concatenated; appending is
+	// exactly what it does with the bytes it is given.
+	genesisWire, _ := base64.StdEncoding.DecodeString(genesis)
+	entryWire, err := base64.StdEncoding.DecodeString(entry["entry"].(string))
+	if err != nil {
+		t.Fatalf("the new entry is not base64: %v", err)
+	}
+	chain := base64.StdEncoding.EncodeToString(append(genesisWire, entryWire...))
+
+	after := verify(chain, minted["rootSignPub"], minted["epoch1SignPub"])
+	if n := len(after["devices"].([]map[string]any)); n != 2 {
+		t.Fatalf("after pairing the roster holds %d device(s)", n)
+	}
+
+	// --- and the joiner can read it --------------------------------------
+	as(joinerVault)
+	accepted := run(handlePairAccept, "pairAccept", map[string]any{
+		"pairingId": id,
+		"handoff":   sealed["handoff"],
+		"epoch":     uint64(1),
+		"counter":   uint64(1),
+		"accountId": minted["accountId"],
+	})
+	if accepted["accountId"] != minted["accountId"] {
+		t.Fatalf("the joiner joined %v, not %v", accepted["accountId"], minted["accountId"])
+	}
+
+	// THE CLAIM THE TOAST MAKES, checked under the joiner's own keys: it is a
+	// member of this account and the signed chain says so. Verified with the
+	// keys the HANDOFF carried, never with the ones the initiator happens to
+	// have in the same process -- that distinction is the whole test.
+	joinerView := verify(chain, accepted["rootSignPub"], accepted["epoch1SignPub"])
+	if n := len(joinerView["devices"].([]map[string]any)); n != 2 {
+		t.Fatalf("the joiner reads %d device(s) from the chain", n)
+	}
+	if listed, _ := joinerView["selfListed"].(bool); !listed {
+		t.Fatal("the joining device is not listed in the roster it just verified")
+	}
+}

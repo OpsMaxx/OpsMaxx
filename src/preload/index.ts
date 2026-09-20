@@ -440,6 +440,18 @@ const api = {
      *  for closing the panel. */
     cancelPairing: (): Promise<void> => ipcRenderer.invoke('addy:cancelPairing'),
 
+    /** Finish the pairing this device started: hand over the account key and
+     *  write the roster entry that adds the other device. */
+
+    completePairing: (confirmation: unknown): Promise<{ devices: number }> =>
+
+      ipcRenderer.invoke('addy:completePairing', confirmation),
+
+    /** Finish the pairing this device JOINED: take the account key, store it,
+     *  and attach. */
+
+    finishJoin: (): Promise<{ accountId: string }> => ipcRenderer.invoke('addy:finishJoin'),
+
     /** Send what is on the clipboard to every other device on the account.
      *  Explicit, on a keystroke -- nothing is mirrored in the background. */
     sendClipboard: (): Promise<{ sent: number; skipped?: string }> =>

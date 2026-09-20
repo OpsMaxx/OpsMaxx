@@ -429,3 +429,61 @@ func TestEveryHandlerIsRegistered(t *testing.T) {
 		}
 	}
 }
+
+// The head this returns is fed straight back in as `headEntry`, so the two
+// have to agree on an encoding. They did not: `verifyRoster` answered hex and
+// both `addDevice` and `pairHandoff` decode base64, so pairing died one step
+// after the emoji matched -- the worst possible place, because by then the
+// user has been told the two devices agree.
+//
+// Written as a ROUND TRIP rather than as "the head is base64", because that
+// assertion would still pass if the two sides drifted to different base64
+// alphabets or if `addDevice` later took raw bytes. What matters is that the
+// head one call hands out is a head the next call accepts.
+func TestTheRosterHeadCanBeFedStraightBackIn(t *testing.T) {
+	keys.reset()
+	t.Cleanup(keys.reset)
+
+	minted, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{
+		"label": "first device",
+	})})
+	if err != nil {
+		t.Fatalf("createAccount: %v", err)
+	}
+	acct := minted.(map[string]any)
+
+	verified, err := handleVerifyRoster(Request{Method: "verifyRoster", Params: params(t, map[string]any{
+		"chain":       acct["genesis"],
+		"rootSignPub": acct["rootSignPub"],
+		"epoch1Sign":  acct["epoch1SignPub"],
+	})})
+	if err != nil {
+		t.Fatalf("verifyRoster over the genesis chain: %v", err)
+	}
+	head := verified.(map[string]any)["headEntry"]
+	seq, _ := verified.(map[string]any)["headSeq"].(uint64)
+
+	// A second device's public halves. Their values do not matter here -- only
+	// that the head is decodable -- but they have to be the right shape, or
+	// the refusal would come from the wrong check and this test would pass
+	// while the head stayed broken.
+	pubSign, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generating a peer key: %v", err)
+	}
+	peerEnc, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generating a peer encryption key: %v", err)
+	}
+
+	if _, err := handleAddDevice(Request{Method: "addDevice", Params: params(t, map[string]any{
+		"headEntry": head,
+		"headSeq":   seq,
+		"epoch":     uint64(1),
+		"pubSign":   hex.EncodeToString(pubSign),
+		"pubEnc":    hex.EncodeToString(peerEnc.PublicKey().Bytes()),
+		"label":     "second device",
+	})}); err != nil {
+		t.Fatalf("the head from verifyRoster was not one addDevice could read: %v", err)
+	}
+}

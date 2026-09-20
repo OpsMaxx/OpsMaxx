@@ -472,9 +472,32 @@ func handlePairAccept(req Request) (any, error) {
 	keys.mu.Unlock()
 
 	return map[string]any{
-		"accountId":   h.AccountID.String(),
-		"epoch":       h.Epoch,
-		"rootSignPub": hex.EncodeToString(h.RootSignPub),
-		"headEntry":   base64.StdEncoding.EncodeToString(h.HeadEntry),
+		"accountId":     h.AccountID.String(),
+		"epoch":         h.Epoch,
+		"rootSignPub":   hex.EncodeToString(h.RootSignPub),
+		"epoch1SignPub": hex.EncodeToString(epochKeys.Sign.Public().(ed25519.PublicKey)),
+		"headEntry":     base64.StdEncoding.EncodeToString(h.HeadEntry),
+		// THE JOINER'S OWN PUBLIC HALVES, so the initiator can write the
+		// roster entry that adds this device. Without them the pairing
+		// completes cryptographically and the account never learns the device
+		// exists.
+		"devicePubSign": hex.EncodeToString(device.Sign.Public().(ed25519.PublicKey)),
+		"devicePubEnc":  hex.EncodeToString(device.Enc.PublicKey().Bytes()),
+		// WHAT THE PARENT MUST WRITE DOWN, mirroring createAccount.
+		//
+		// `keys.loaded = true` above attaches this sidecar for as long as the
+		// process lives, and a sidecar process does not outlive the app. Until
+		// this was returned, a device could join an account, work perfectly,
+		// and be a stranger again after a restart -- the keys existed only in
+		// a memory the parent could not reach to persist.
+		//
+		// The same trust boundary createAccount already crosses: material
+		// leaves this process once, to be sealed into the OS keychain under
+		// the machine-only prefix, and never again.
+		"secrets": map[string]string{
+			"deviceSignSeed": base64.StdEncoding.EncodeToString(device.SignSeed),
+			"deviceEncKey":   base64.StdEncoding.EncodeToString(device.Enc.Bytes()),
+			"akSeed":         base64.StdEncoding.EncodeToString(h.AKSeed),
+		},
 	}, nil
 }

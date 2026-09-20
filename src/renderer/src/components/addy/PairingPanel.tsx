@@ -27,6 +27,11 @@ export function PairingPanel({ baseURL }: { baseURL: string }): React.JSX.Elemen
   const [typedId, setTypedId] = useState('')
   const [confirmation, setConfirmation] = useState<AddyPairingConfirmation | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // The handoff is a round trip to the relay, so "They match" is not instant.
+  // Without this the obvious thing to do while nothing happens is press it
+  // again, and a second handoff against a session the first one consumed is a
+  // failure on a pairing that actually worked.
+  const [busy, setBusy] = useState(false)
   const active = useRef(false)
 
   // Cancelling on unmount is not tidiness: a pairing left in the sidecar is a
@@ -77,11 +82,43 @@ export function PairingPanel({ baseURL }: { baseURL: string }): React.JSX.Elemen
     }
   }
 
-  const accept = (): void => {
-    active.current = false
-    void window.opsmaxx?.addy.cancelPairing()
-    setStage('done')
-    toast('Device added')
+  /**
+   * "They match" — and it now does what it says.
+   *
+   * This used to call `cancelPairing()` and toast "Device added". Nothing was
+   * added: no account key crossed, no roster entry was written, and the
+   * account went on containing exactly one device. The emoji matched and the
+   * app asserted something untrue about the user's data, which is worse than
+   * any missing feature.
+   *
+   * `active.current` is cleared only once the work is done, not before it —
+   * the pairing session holds the shared secret the handoff is bound to, and
+   * forgetting it first would leave nothing to bind to.
+   */
+  const accept = async (): Promise<void> => {
+    if (!confirmation) return
+    setBusy(true)
+    try {
+      const joining = !!confirmation.self
+      if (joining) {
+        // This device typed the code: take the key, store it, attach.
+        await window.opsmaxx!.addy.finishJoin()
+      } else {
+        // This device showed the code: hand the key over, add them to the
+        // roster.
+        await window.opsmaxx!.addy.completePairing(confirmation)
+      }
+      active.current = false
+      setStage('done')
+      toast(joining ? 'This device joined the account' : 'Device added to your account', 'ok')
+    } catch (err) {
+      // Said plainly and left on this screen. A failure here means the two
+      // devices agreed and the account does not know it, which is exactly the
+      // state the old toast concealed.
+      fail(err)
+    } finally {
+      setBusy(false)
+    }
   }
 
   const reject = (): void => {
@@ -116,11 +153,12 @@ export function PairingPanel({ baseURL }: { baseURL: string }): React.JSX.Elemen
           {/* Refuse first and focused: the expensive mistake is confirming a
               pairing that is not the one you think it is, and it is not
               reversible. */}
-          <button className="btn" autoFocus onClick={reject}>
+          <button className="btn" autoFocus disabled={busy} onClick={reject}>
             <X size={14} /> They do not match
           </button>
-          <button className="btn" onClick={accept}>
-            <Check size={14} /> They match
+          <button className="btn" disabled={busy} onClick={() => void accept()}>
+            {busy ? <Loader2 size={14} className="spin" /> : <Check size={14} />}
+            {busy ? ' Adding the device…' : ' They match'}
           </button>
         </div>
       </div>

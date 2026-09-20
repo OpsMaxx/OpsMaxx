@@ -44,6 +44,12 @@ export class RelayClient {
     return this.cfg.token
   }
 
+  /** The relay this client talks to, for the unauthenticated rendezvous a
+   *  pairing uses — a joining device has no account yet, which is the point. */
+  get baseURL(): string {
+    return this.cfg.baseURL
+  }
+
   /**
    * SHA-256 of the instance's TLS SubjectPublicKeyInfo.
    *
@@ -283,6 +289,18 @@ export class RelayClient {
     }
     if (!resp.ok) throw await relayError(resp, `writing ${name}`)
     return resp.headers.get('etag') ?? ''
+  }
+
+  /**
+   * Append one entry to the roster.
+   *
+   * The server checks contiguity and NOTHING else — it holds no key and does
+   * not pretend to. Every client verifies the chain from genesis before
+   * trusting any of it, so a forged entry is caught there rather than here.
+   */
+  async appendRoster(seq: number, entry: string): Promise<void> {
+    const resp = await this.request('POST', '/v1/roster', { seq, entry })
+    if (!resp.ok) throw await relayError(resp, 'adding the device to the roster')
   }
 
   /** The roster, as bytes. Verification happens in the sidecar, under keys the

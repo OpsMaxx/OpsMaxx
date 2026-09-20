@@ -301,6 +301,113 @@ func handleOpen(req Request) (any, error) {
 
 // --- roster ---
 
+type addDeviceRequest struct {
+	// The chain head this entry follows, base64 of the wire entry, so its hash
+	// and sequence come from the chain THIS device verified rather than from
+	// anything the relay asserted.
+	HeadEntry string `json:"headEntry"`
+	HeadSeq   uint64 `json:"headSeq"`
+	Epoch     uint64 `json:"epoch"`
+	// Hex, the joining device's public halves, learned from the confirmed
+	// pairing and not from the relay.
+	PubSign string `json:"pubSign"`
+	PubEnc  string `json:"pubEnc"`
+	// The pseudonym sealed into the entry, readable only by devices holding
+	// this epoch's profile key.
+	Label string `json:"label"`
+}
+
+// handleAddDevice authors the roster entry that puts a paired device on the
+// account.
+//
+// WITHOUT THIS, PAIRING WAS THEATRE. Two devices could complete SPAKE2, show
+// identical emoji, and hand over the account key -- and the account itself
+// never learned the second device existed, because a roster entry is the only
+// thing that says so. The panel toasted "Device added" over an account with
+// one device in it.
+//
+// Signed with the EPOCH key, not the root: adding a device is an ordinary
+// operation any attached device may perform, and reserving the root key for
+// epoch changes is what keeps it offline in the user's recovery phrase rather
+// than in memory on every machine.
+//
+// The previous hash comes from the head THIS device verified. Taking the
+// server's word for the head is how a chain gets forked: a relay could serve
+// one head to one device and another head to another, and both would append
+// happily to different histories.
+func handleAddDevice(req Request) (any, error) {
+	var in addDeviceRequest
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+	pubSign, err := hex.DecodeString(in.PubSign)
+	if err != nil || len(pubSign) != ed25519.PublicKeySize {
+		return nil, codedf(ErrConfigInvalid, "pubSign is 32 bytes of hex")
+	}
+	pubEnc, err := hex.DecodeString(in.PubEnc)
+	if err != nil || len(pubEnc) != 32 {
+		return nil, codedf(ErrConfigInvalid, "pubEnc is 32 bytes of hex")
+	}
+	headWire, err := base64.StdEncoding.DecodeString(in.HeadEntry)
+	if err != nil || len(headWire) == 0 {
+		return nil, codedf(ErrConfigInvalid, "headEntry is base64 of the chain head")
+	}
+
+	keys.mu.RLock()
+	acct := keys.account
+	epoch, haveEpoch := keys.epochs[in.Epoch]
+	loaded := keys.loaded
+	keys.mu.RUnlock()
+	if !loaded || !haveEpoch {
+		return nil, codedf(ErrNotPaired, "no account is loaded for that epoch")
+	}
+
+	head, _, err := protocol.DecodeEntry(headWire)
+	if err != nil {
+		return nil, wrapCoded(ErrRosterInvalid, err, "reading the chain head")
+	}
+	prev, err := head.Hash()
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "hashing the chain head")
+	}
+
+	labelCT, err := protocol.SealLabel(in.Label, acct, in.Epoch, pubSign, epoch.Profile)
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "sealing the label")
+	}
+	nonce, err := protocol.Nonce()
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "drawing a nonce")
+	}
+
+	e := protocol.Entry{
+		AccountID: acct,
+		Epoch:     in.Epoch,
+		Seq:       in.HeadSeq + 1,
+		PrevHash:  prev,
+		Op:        protocol.OpAdd,
+		Signer:    protocol.SignerAK,
+		Nonce:     nonce,
+		PubSign:   pubSign,
+		PubEnc:    pubEnc,
+		LabelCT:   labelCT,
+		TS:        uint64(time.Now().UnixMilli()),
+	}
+	body, err := e.Encode()
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "encoding the entry")
+	}
+	e.Sig = ed25519.Sign(epoch.Sign, body)
+	wire, err := e.Wire()
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "encoding the entry")
+	}
+	return map[string]any{
+		"seq":   e.Seq,
+		"entry": base64.StdEncoding.EncodeToString(wire),
+	}, nil
+}
+
 type verifyRosterRequest struct {
 	// Base64 of the concatenated chain, exactly as the relay serves it.
 	Chain string `json:"chain"`
@@ -392,8 +499,21 @@ func handleVerifyRoster(req Request) (any, error) {
 	}
 
 	return map[string]any{
-		"devices":    devices,
+		"devices": devices,
+		// TWO different things, and conflating them is what broke pairing.
+		// `head` is H(last entry) -- hex, because it is a pin a client
+		// remembers and compares. `headEntry` is that entry's own bytes --
+		// base64, because it is a blob, and it is what `addDevice` and
+		// `pairHandoff` both need: one hashes it for the next entry's
+		// prev_hash, the other seals it so the joining device can verify the
+		// chain it is about to fetch instead of trusting the relay's copy.
+		//
+		// Until this was added, `verifyRoster` handed out only the hash while
+		// both callers wanted the entry, so every pairing died one step AFTER
+		// the emoji matched -- the worst place for it, because by then the
+		// user has been told the two devices agree.
 		"head":       hex.EncodeToString(v.Head),
+		"headEntry":  base64.StdEncoding.EncodeToString(v.HeadEntry),
 		"headSeq":    v.HeadSeq,
 		"epoch":      v.Epoch,
 		"entries":    v.Entries,

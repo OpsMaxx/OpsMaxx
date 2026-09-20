@@ -34,8 +34,10 @@ export interface PairingConfirmation {
   sasWords: string
   peer: { pubSign: string; pubEnc?: string }
   /** The joining device's own public halves, present only on the joiner, for
-   *  the initiator to write into the roster entry that adds it. */
-  self?: { pubSign: string; pubEnc: string }
+   *  the initiator to write into the roster entry that adds it. `label` is the
+   *  pseudonym that device chose for itself, sealed into that entry so only
+   *  devices holding the epoch's profile key can read it. */
+  self?: { pubSign: string; pubEnc: string; label?: string }
 }
 
 export interface PairingDeps {
@@ -47,7 +49,7 @@ export interface PairingDeps {
 }
 
 /** Posts a frame into the peer's mailbox. */
-async function publish(deps: PairingDeps, id: string, role: string, frame: unknown): Promise<void> {
+export async function publish(deps: PairingDeps, id: string, role: string, frame: unknown): Promise<void> {
   const resp = await fetch(`${deps.baseURL}/v1/pair/${id}?as=${role}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -65,7 +67,7 @@ async function publish(deps: PairingDeps, id: string, role: string, frame: unkno
  * this loops. An implementation that treated 204 as an error would give up the
  * first time the other person took more than twenty seconds to type.
  */
-async function receive<T>(deps: PairingDeps, id: string, role: string, signal: AbortSignal): Promise<T> {
+export async function receive<T>(deps: PairingDeps, id: string, role: string, signal: AbortSignal): Promise<T> {
   const deadline = Date.now() + RENDEZVOUS_TIMEOUT_MS
   while (Date.now() < deadline) {
     if (signal.aborted) throw new AddyError('pairing-expired', 'the pairing was cancelled')
