@@ -12,8 +12,20 @@ import { AddyError, type AddySidecar } from './sidecar'
 export interface RelayConfig {
   /** `https://relay.example`. */
   baseURL: string
-  /** Bearer token from login. */
+  /** Bearer token from login. Empty until `login()` has run. */
   token: string
+  /** Accept a self-signed certificate. Development instances only — a relay
+   *  run with `-dev` presents one, and refusing it would make the local
+   *  end-to-end test impossible to run at all. */
+  insecureTLS?: boolean
+}
+
+/** What the relay answers a login with. */
+export interface LoginResult {
+  token: string
+  /** SHA-256 of the instance's TLS SubjectPublicKeyInfo, hex. The pin this
+   *  login was bound to, kept so a later reconnect can notice it changed. */
+  spki: string
 }
 
 interface SignedHeaders {
@@ -23,9 +35,152 @@ interface SignedHeaders {
 
 export class RelayClient {
   constructor(
-    private readonly cfg: RelayConfig,
+    private cfg: RelayConfig,
     private readonly addyd: AddySidecar
   ) {}
+
+  /** The token this client is using, so a session can persist it. */
+  get token(): string {
+    return this.cfg.token
+  }
+
+  /**
+   * SHA-256 of the instance's TLS SubjectPublicKeyInfo.
+   *
+   * The login signature is bound to this, which is what stops a relay that
+   * terminates TLS somewhere else replaying a login it watched. It must be
+   * computed exactly as the relay computes it — over
+   * `RawSubjectPublicKeyInfo` of the LEAF certificate — so this goes through
+   * `X509Certificate.publicKey` exported as SPKI DER rather than through any
+   * of Node's friendlier certificate fields, which are not that structure.
+   *
+   * A raw TLS connection rather than `fetch`, because `fetch` does not expose
+   * the peer certificate at all.
+   */
+  async serverPin(): Promise<string> {
+    const url = new URL(this.cfg.baseURL)
+    const port = url.port ? Number(url.port) : 443
+    const { connect } = await import('node:tls')
+    const { X509Certificate, createHash } = await import('node:crypto')
+
+    return new Promise<string>((resolve, reject) => {
+      const socket = connect(
+        {
+          host: url.hostname,
+          port,
+          servername: url.hostname,
+          rejectUnauthorized: !this.cfg.insecureTLS
+        },
+        () => {
+          const der = socket.getPeerCertificate()?.raw
+          socket.end()
+          if (!der || der.length === 0) {
+            reject(new AddyError('relay-unreachable', 'the relay presented no certificate.'))
+            return
+          }
+          const spki = new X509Certificate(der).publicKey.export({ type: 'spki', format: 'der' })
+          resolve(createHash('sha256').update(spki).digest('hex'))
+        }
+      )
+      socket.setTimeout(10_000, () => {
+        socket.destroy()
+        reject(new AddyError('relay-unreachable', `${this.cfg.baseURL} did not answer in time.`))
+      })
+      socket.on('error', (e: Error) =>
+        reject(new AddyError('relay-unreachable', `${this.cfg.baseURL}: ${e.message}`))
+      )
+    })
+  }
+
+  /**
+   * Trade a signed challenge for a bearer token.
+   *
+   * THIS IS WHAT WAS MISSING. Every authorised call carried
+   * `Bearer ${this.cfg.token}` and the token was the empty string at both
+   * sites that built a client, so every one of them was unauthenticated. The
+   * comment at the top of this file described a login that did not exist.
+   *
+   * Two round trips, because the server's nonce has to exist before the
+   * device can sign it: ask for a challenge, sign it together with the TLS
+   * pin and a timestamp, present the signature. The device key never leaves
+   * the sidecar — main does the transport and addyd does the signing.
+   */
+  async login(): Promise<LoginResult> {
+    const spki = await this.serverPin()
+
+    // The account and device are what the server needs to find the key it will
+    // verify against. `whoami` names them `accountId` and `devicePub`; the
+    // wire wants `account` and `device`, so the mapping is explicit rather
+    // than a spread that would silently send the wrong field names.
+    const me = await this.addyd.send<{ accountId: string; devicePub: string }>('whoami', {})
+    const challenge = await this.raw('POST', '/v1/auth/challenge', {
+      account: me.accountId,
+      device: me.devicePub
+    })
+    const { nonce } = (await challenge.json()) as { nonce?: string }
+    if (!nonce) {
+      throw new AddyError('relay-unreachable', 'the relay issued no login challenge.')
+    }
+
+    const signed = await this.addyd.send<{
+      account: string
+      device: string
+      deviceNonce: string
+      ts: number
+      signature: string
+    }>('signLogin', { serverNonce: nonce, serverSPKI: spki })
+
+    const resp = await this.raw('POST', '/v1/auth/login', {
+      account: signed.account,
+      device: signed.device,
+      device_nonce: signed.deviceNonce,
+      server_nonce: nonce,
+      server_spki: spki,
+      ts: signed.ts,
+      signature: signed.signature
+    })
+    if (!resp.ok) {
+      throw new AddyError('relay-unreachable', `the relay refused the login: ${resp.status}.`)
+    }
+    const { token } = (await resp.json()) as { token?: string }
+    if (!token) throw new AddyError('relay-unreachable', 'the relay issued no token.')
+
+    this.cfg = { ...this.cfg, token }
+    return { token, spki }
+  }
+
+  /**
+   * An UNSIGNED request, for the two calls that happen before there is a
+   * session to sign with. Everything else goes through `request`.
+   *
+   * The challenge and the login are the only calls the relay accepts without
+   * an authorization, and necessarily so: the signature they would carry is
+   * the thing being established.
+   */
+  private async raw(method: string, path: string, body: unknown): Promise<Response> {
+    return fetch(`${this.cfg.baseURL}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      ...(await this.tlsOptions())
+    })
+  }
+
+  /**
+   * The dispatcher a development relay needs, and nothing otherwise.
+   *
+   * A relay started with `-dev` presents a self-signed certificate. Refusing
+   * it would make the local end-to-end test impossible to run, and running
+   * that test is the only way anyone can say this works. Guarded on an
+   * explicit flag that the setup screen has to set deliberately — it is never
+   * inferred from a failure, because "the certificate did not verify" is
+   * exactly the condition it must not silently paper over.
+   */
+  private async tlsOptions(): Promise<Record<string, unknown>> {
+    if (!this.cfg.insecureTLS) return {}
+    const { Agent } = await import('undici')
+    return { dispatcher: new Agent({ connect: { rejectUnauthorized: false } }) }
+  }
 
   /**
    * One signed request.

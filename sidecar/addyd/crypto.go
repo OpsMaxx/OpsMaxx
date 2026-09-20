@@ -10,6 +10,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/opsmaxx/opsmaxx/sidecar/addyd/protocol"
 )
@@ -453,6 +454,78 @@ type signRequestParams struct {
 	Path string `json:"path"`
 	// Base64 of the request body, or empty for none.
 	Body string `json:"body"`
+}
+
+type signLoginParams struct {
+	// Hex, the server's challenge nonce from POST /v1/auth/challenge.
+	ServerNonce string `json:"serverNonce"`
+	// Hex, SHA-256 of the instance's TLS SubjectPublicKeyInfo. The TOFU pin
+	// from the addy:// join string.
+	ServerSPKI string `json:"serverSPKI"`
+}
+
+// handleSignLogin signs the login the relay asks for before it will issue a
+// token.
+//
+// SEPARATE FROM handleSignRequest, and not a flag on it, because they sign
+// different things under different domain prefixes -- `addy-login-v1` against
+// `addy-authz-v1`. That separation is the reason a signature obtained for one
+// purpose cannot be replayed as the other, and collapsing them into one
+// handler with a mode would put that guarantee behind an argument.
+//
+// The device nonce and the timestamp are drawn HERE, for the reason the
+// request signer gives: a caller that chose its own could reuse one, and the
+// server spends a nonce per device.
+//
+// ServerSPKI is a parameter rather than something this process discovers. It
+// is the TLS pin, and the process holding the account key does not have a
+// socket to learn it from -- main does the transport, this does the signing,
+// and that split is the whole shape of the sidecar.
+func handleSignLogin(req Request) (any, error) {
+	var in signLoginParams
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+	serverNonce, err := hex.DecodeString(in.ServerNonce)
+	if err != nil {
+		return nil, codedf(ErrConfigInvalid, "serverNonce is not hex")
+	}
+	spki, err := hex.DecodeString(in.ServerSPKI)
+	if err != nil {
+		return nil, codedf(ErrConfigInvalid, "serverSPKI is not hex")
+	}
+
+	keys.mu.RLock()
+	acct := keys.account
+	device := keys.device
+	loaded := keys.loaded
+	keys.mu.RUnlock()
+	if !loaded || device == nil {
+		return nil, codedf(ErrNotPaired, "no account is loaded")
+	}
+
+	deviceNonce, err := protocol.Nonce()
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "drawing a nonce")
+	}
+	login := protocol.Login{
+		AccountID:   acct,
+		DeviceNonce: deviceNonce,
+		ServerNonce: serverNonce,
+		ServerSPKI:  spki,
+		TS:          uint64(time.Now().UnixMilli()),
+	}
+	sig, err := protocol.Sign(device.Sign, login)
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "signing the login")
+	}
+	return map[string]any{
+		"account":     acct.String(),
+		"device":      hex.EncodeToString(device.Sign.Public().(ed25519.PublicKey)),
+		"deviceNonce": hex.EncodeToString(deviceNonce),
+		"ts":          login.TS,
+		"signature":   hex.EncodeToString(sig),
+	}, nil
 }
 
 // handleSignRequest signs one API request authorization.
