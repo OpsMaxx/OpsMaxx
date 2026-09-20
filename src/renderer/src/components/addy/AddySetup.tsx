@@ -58,6 +58,25 @@ export function AddySetup(): React.JSX.Element | null {
    *  asking them twice in two places is how they get answered differently. */
   const [mode, setMode] = useState<'create' | 'recover'>('create')
   const [mnemonic, setMnemonic] = useState('')
+
+  /**
+   * Where the operator console would be, if this relay serves one.
+   *
+   * Built from what the user typed rather than asked for, because the app
+   * cannot know: a relay started without the provider flags has no console,
+   * and asking would mean an unauthenticated probe on every keystroke. The
+   * page itself says which of the two it is, which is the right place for
+   * that answer.
+   */
+  const consoleURL = (() => {
+    const typed = url.trim()
+    if (!typed.startsWith('https://')) return ''
+    try {
+      return new URL('/admin', typed).toString()
+    } catch {
+      return ''
+    }
+  })()
   const [recovered, setRecovered] = useState<{ devices: number } | null>(null)
 
   /**
@@ -266,7 +285,34 @@ export function AddySetup(): React.JSX.Element | null {
         {/* Said plainly, because somebody reading this has no reason to know
             where an invite comes from. */}
         <small>
-          The person running the relay mints one with <code>addy invite</code>. It works once.
+          One invite creates one account, and only the first device needs one — every machine
+          after that is added by pairing, which needs nothing from the relay's operator.
+        </small>
+        {/* THE ANSWER TO "where do I get one", which this said nothing about.
+            It named a command without saying where to run it, so somebody who
+            runs their own relay — which is everybody, that is the product —
+            had to already know the answer to follow the instruction. */}
+        <small>
+          {consoleURL ? (
+            <>
+              If this relay is yours, open{' '}
+              <a
+                href={consoleURL}
+                onClick={(e) => {
+                  e.preventDefault()
+                  // Through the window-open handler, which vets the scheme and
+                  // opens it in the user's own browser rather than in a window
+                  // carrying this preload.
+                  window.open(consoleURL, '_blank', 'noopener')
+                }}
+              >
+                {consoleURL.replace(/^https:\/\//, '')}
+              </a>{' '}
+              and sign in to create one. Otherwise ask whoever runs it.
+            </>
+          ) : (
+            <>Ask whoever runs the relay for one, or open its address and sign in if it is yours.</>
+          )}
         </small>
       </label>
       )}
