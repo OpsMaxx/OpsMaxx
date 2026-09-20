@@ -1,9 +1,11 @@
 # Vault lock/unlock UX
 
-> **Status: design, 2026-09-20.** Written from a four-way audit of the vault's
-> state machine, every surface that touches it, the threat model as the code
-> implements it, and the password-only path. No code has been written from this
-> document yet, apart from one defect fixed on the way past (§7.1).
+> **Status: implemented, 2026-09-20.** Written from a four-way audit of the
+> vault's state machine, every surface that touches it, the threat model as the
+> code implements it, and the password-only path. §5.1, §5.2 and §5.3 are built;
+> §7.1 and §7.2 are fixed. §6 is a decision to leave something alone. The open
+> questions in §8 are still open, and two claims in the first draft were wrong
+> and are corrected in place rather than quietly edited.
 
 ## 1. Executive summary
 
@@ -115,6 +117,34 @@ Cost in the threat model of §2: **zero**. Nothing is stored, nothing derived, n
 key outlives anything it already outlives. It changes *when a human is asked*,
 not *what is protected*.
 
+**DONE.** One prompt, once per launch, through the existing unlock dialog —
+no new UI. Counted per surface: auto-starting VPN profiles with a vault ref
+anywhere in the spec (scanned rather than enumerated per kind, so a new spec
+kind cannot silently undercount), saved CI connections, scheduled backup
+destinations that are not already machine-only, and the fleet sampler's own
+`vaultBlockedCount`.
+
+That last one is taken from the sampler rather than recomputed in main
+deliberately: the sampler's number is hop-aware — a host behind a bastion whose
+password is in the vault is blocked however readable its own credential is —
+and scoped to the workspace actually being watched. Recomputing it would have
+meant replicating the renderer's workspace resolution, which is a guess rather
+than a count.
+
+**Not raised again after suspend**, and this is a judgement worth recording
+rather than a gap. The lock fires as the machine goes to *sleep*, so a dialog
+raised then lands on a screen someone is walking away from and is stale by the
+time they return; a person who has just woken a machine is at it, and the next
+thing they touch carries its own unlock — which is precisely what is missing at
+launch and not after a wake. A laptop suspends several times a day, and a
+prompt on each is the nag this design rules out. The status-bar chip still says
+what is paused. **Open question in §8 if that proves wrong in use.**
+
+**ssh-agent is deliberately not counted.** It has no configured state to count
+honestly — `identities()` returns `[]` and there is no "how many keys would
+have been offered". §5.2 gave it an affordance instead, which is what it
+needed.
+
 ### 5.2 Three small wires that are missing
 
 - **Backup is not a member of `resumeChecksAfterUnlock`.** DONE — it is the
@@ -203,8 +233,14 @@ is DPAPI on Windows and libsecret on Linux. Only the gate is macOS-only.
    is the same trade already shipping on macOS, and it is the only answer those
    platforms have. This is a security decision, not an implementation one.
 4. Is a `__machine__` grant ever re-checked against the vault entry it was
-   copied from? **UNVERIFIED** — nothing was found that detects the vault copy
-   having since been rotated.
+   copied from? **Answered: no, and not detectable.** `VaultEntry` carries no
+   version, hash or `updatedAt`, so "has the vault copy changed since the
+   grant" has nothing to compare against. Recording a hash at grant time would
+   make it detectable; that is a decision, not a fix, and it is not taken here.
+5. **Should the launch prompt also be raised after a suspend?** §5.1 argues
+   not — a prompt lands on a screen the user is walking away from, and a laptop
+   suspends several times a day. If backups sitting paused after a wake turns
+   out to matter more than the nag, this is the line to change.
 
 ## 9. Provenance
 

@@ -188,7 +188,7 @@ import {
 import type { PackageManager } from '../shared/hostFacts'
 import type { DbConnectConfig } from '../shared/db'
 import { notableDbEvents } from '../shared/dbOps'
-import { setSecret, getSecret, deleteSecret, secretsAvailable } from './services/secrets'
+import { setSecret, getSecret, deleteSecret, secretsAvailable, listMachineGrants } from './services/secrets'
 import {
   vaultStatus,
   vaultCreate,
@@ -331,6 +331,7 @@ import {
   stopBackupSchedule,
   backupResumeAfterUnlock
 } from './services/backup'
+import { vaultWaiting } from './services/vaultWaiting'
 import { clearRevocation, revocationState } from './services/addy/revoke'
 import { sshAgent } from './services/sshAgent/service'
 import { addySession } from './services/addy/session'
@@ -5162,6 +5163,10 @@ setVpnPrompter((req) => {
 
 // ---- Vault ----
 ipcMain.handle('vault:status', () => vaultStatus())
+// What is configured that cannot run while the vault is shut, one phrase per
+// surface. For the launch prompt in docs/plans/vault-ux.md §5.1 — the point of
+// which is that nothing ever ASKED, so four subsystems sat dead from launch.
+ipcMain.handle('vault:waiting', () => vaultWaiting())
 ipcMain.handle('vault:create', (_e, password: string) => vaultCreate(password))
 // Every unlock path re-arms background checking.
 //
@@ -5300,6 +5305,10 @@ ipcMain.handle('wslock:delete', (_e, id: string) => wsLockDelete(id))
 ipcMain.handle('secrets:available', () => secretsAvailable())
 ipcMain.handle('secrets:set', (_e, id: string, value: string) => setSecret(id, value))
 ipcMain.handle('secrets:delete', (_e, id: string) => deleteSecret(id))
+// Ids and dates, never values — see shared/machineGrants.ts. A standing
+// authorisation that nothing enumerates cannot be withdrawn, which is
+// credProxy.ts's own objection applied to the vault.
+ipcMain.handle('secrets:machineGrants', () => listMachineGrants())
 
 // ---- Diagnostics ----
 //

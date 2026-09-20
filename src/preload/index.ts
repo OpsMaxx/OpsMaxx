@@ -3,6 +3,7 @@ import type { IpcRendererEvent } from 'electron'
 import type { AutoStartSettings, AutoStartState } from '../shared/autostart'
 import type { UnitDraft, UserUnitsReading } from '../shared/userUnits'
 import type { BackupAlarm } from '../shared/backup'
+import type { MachineGrant } from '../shared/machineGrants'
 import type { HttpRequestSpec, HttpResult } from '../shared/httpClient'
 import type {
   HttpSocketBridge,
@@ -1842,6 +1843,11 @@ const api = {
   },
   vault: {
     status: (): Promise<VaultStatus> => ipcRenderer.invoke('vault:status'),
+
+    /** What is configured that cannot run while the vault is shut, one phrase
+     *  per surface — for the launch prompt in docs/plans/vault-ux.md §5.1. */
+
+    waiting: (): Promise<string[]> => ipcRenderer.invoke('vault:waiting'),
     create: (password: string): Promise<VaultResult> => ipcRenderer.invoke('vault:create', password),
     unlock: (password: string): Promise<VaultResult> => ipcRenderer.invoke('vault:unlock', password),
     lock: (): Promise<VaultResult> => ipcRenderer.invoke('vault:lock'),
@@ -1893,7 +1899,16 @@ const api = {
   secrets: {
     available: (): Promise<boolean> => ipcRenderer.invoke('secrets:available'),
     set: (id: string, value: string): Promise<boolean> => ipcRenderer.invoke('secrets:set', id, value),
-    delete: (id: string): Promise<void> => ipcRenderer.invoke('secrets:delete', id)
+    delete: (id: string): Promise<void> => ipcRenderer.invoke('secrets:delete', id),
+    /**
+     * The standing machine-only grants, as ids and dates. NEVER values.
+     *
+     * A `__machine__` secret is readable without the master password, which is
+     * what lets an unattended run work after a reboot — and two of them have
+     * existed on users' machines with no screen listing them. An authorisation
+     * nothing enumerates cannot be withdrawn.
+     */
+    machineGrants: (): Promise<MachineGrant[]> => ipcRenderer.invoke('secrets:machineGrants')
   },
   data: {
     load: <T>(): Promise<T | null> => ipcRenderer.invoke('data:load'),

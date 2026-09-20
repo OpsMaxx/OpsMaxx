@@ -27,6 +27,7 @@ import { ApprovalWatcher } from './components/ai/ApprovalWatcher'
 import { AgentConfigWatcher } from './components/ai/AgentConfigWatcher'
 import { FleetWatcher } from './components/monitor/FleetWatcher'
 import { VaultUnlockModal } from './components/vault/VaultUnlockModal'
+import { VaultWaitingPrompt } from './components/vault/VaultWaitingPrompt'
 import { OnboardingTour } from './components/onboarding/OnboardingTour'
 import { SetupCard } from './components/onboarding/SetupCard'
 import { FeatureTipCard } from './components/onboarding/FeatureTipCard'
@@ -201,6 +202,11 @@ export default function App(): React.JSX.Element {
       <AgentConfigWatcher />
       <FleetWatcher />
       <VaultUnlockModal />
+      {/* After FleetWatcher, and that order is load-bearing: this asks the
+          sampler how many targets a shut vault is blocking, and FleetWatcher
+          is what tells the sampler what to watch. Mount effects run in tree
+          order, so the configure call is on its way before the question. */}
+      <VaultWaitingPrompt />
       <SetupCard />
       <OnboardingTour />
       <FeatureTipCard />
