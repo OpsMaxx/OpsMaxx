@@ -23,7 +23,7 @@ import {
   type SyncedCollection
 } from '../../../shared/addy'
 import { app } from 'electron'
-import { forgetSyncState, syncOnce, type SyncResult } from './sync'
+import { counterFloor, forgetSyncState, syncOnce, type SyncResult } from './sync'
 import { runRevocationWipe } from './revoke'
 import { deleteAllData } from '../backup'
 import { addyTarget } from './target'
@@ -1415,7 +1415,14 @@ class AddySession {
         epoch: account.epoch,
         sealed: existing.body.toString('base64'),
         knownSchema: 1,
-        seenCounter: 0
+        // THE FLOOR, at the worst possible moment to be without one. This is
+        // a re-key — what a person does AFTER a compromise — and every object
+        // opened here is re-sealed under the new epoch and becomes what the
+        // whole account reads. Opened at 0, a relay-served stale copy is
+        // promoted to canonical account-wide, and the rotation's own
+        // `forgetSyncState()` then zeroes every peer's floor so none of them
+        // can refuse it either.
+        seenCounter: counterFloor(name)
       })
       const sealed = await addyd.send<{ sealed: string }>('seal', {
         collection: name,
@@ -1811,7 +1818,13 @@ class AddySession {
         epoch: deps.epoch(),
         sealed: stored.body.toString('base64'),
         knownSchema: 1,
-        seenCounter: 0
+        // The comment above says deriving the counter here "keeps the
+        // anti-rollback control out of reach of anything a page could
+        // influence". Opened at 0 it did the opposite: it moved that control
+        // from the renderer to the RELAY. Serve an archived copy and the
+        // resolution is written at a number every peer refuses as a rollback,
+        // so the user's decision silently never propagates.
+        seenCounter: counterFloor(collection)
       })
       counter = opened.counter + 1
     }

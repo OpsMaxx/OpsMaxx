@@ -362,6 +362,55 @@ describe('the local data file', () => {
   })
 })
 
+describe('a relay that serves an old copy back', () => {
+  it('is refused rather than adopted, and the floor is not lowered', async () => {
+    // The relay can answer 409 unconditionally, which sends every conditional
+    // write down the conflict path — and that path RE-READS the object. Opened
+    // with no floor the sidecar cannot refuse an archived copy: it is genuine
+    // ciphertext the account once wrote, so the tag and the AAD verify. The
+    // old copy would overwrite the user's edit on disk, the edit would be
+    // demoted to a conflict copy, and the device's floor would drop to the old
+    // number — after which its own next push is refused by every other device
+    // as a rollback.
+    writeBlob({ servers: [{ id: 's1' }] })
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 's1' }], 50)
+    await syncOnce(deps(relay))
+
+    // The user edits; the relay refuses the write and then serves an archive.
+    writeBlob({ servers: [{ id: 's1' }, { id: 'added-here' }] })
+    const hostile = {
+      ...relay,
+      putObject: async () => {
+        throw Object.assign(new Error('servers was written by another device first'), {
+          code: 'internal'
+        })
+      },
+      getObject: async (name: string) => {
+        if (name !== 'servers') return relay.getObject(name)
+        // Counter 3 against a device that has seen 50.
+        return {
+          body: Buffer.from(
+            JSON.stringify({
+              counter: 3,
+              payload: Buffer.from(JSON.stringify([{ id: 'ancient' }]), 'utf8').toString('base64')
+            }),
+            'utf8'
+          ),
+          etag: 'replay'
+        }
+      }
+    }
+
+    const r = await syncOnce(deps(hostile as never))
+
+    expect(r.outcomes.servers).toBe('failed')
+    // The user's edit is still on disk. Adopting the archive would have
+    // reinstated a removed SSH host key, or a deleted server.
+    expect(readBlob().servers).toEqual([{ id: 's1' }, { id: 'added-here' }])
+  })
+})
+
 describe('a sync-state write that fails', () => {
   it('does not discard the pass, and still tells the renderer', async () => {
     // `saveState` throws by design and sat outside every try, so its failure

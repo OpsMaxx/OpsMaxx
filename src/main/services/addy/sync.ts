@@ -350,12 +350,25 @@ async function conflictWithRemote(
     state.collections[name] = { etag, counter, localHash: hash(local), at: Date.now() }
     return 'pushed'
   }
-  const opened = await openObject(deps, name, epoch, fresh.body, 0)
+  // THE FLOOR THIS DEVICE ALREADY HAS, not 0.
+  //
+  // A relay that answers 409 unconditionally sends every conditional write
+  // down this path, and this re-read is where it hands back whichever
+  // archived copy it likes. Opened at 0 the sidecar cannot refuse one: it is
+  // genuine ciphertext the account once wrote, so the tag and the AAD all
+  // verify. The old copy then overwrites the user's edit on disk, the edit is
+  // demoted to a conflict copy, and the device's floor is LOWERED to the old
+  // number — after which its own next push is refused as a rollback by every
+  // other device.
+  const opened = await openObject(deps, name, epoch, fresh.body, state.collections[name]?.counter ?? 0)
   await keepAsConflict(deps, name, epoch, opened.counter + 1, local)
   source.write(opened.payload)
   state.collections[name] = {
     etag: fresh.etag,
-    counter: opened.counter,
+    // NEVER BACKWARDS. The floor is a high-water mark; writing a lower number
+    // here would re-enable, for every later pass, exactly the replay the
+    // check above just refused.
+    counter: Math.max(opened.counter, state.collections[name]?.counter ?? 0),
     localHash: hash(opened.payload),
     at: Date.now()
   }
@@ -416,6 +429,21 @@ async function keepAsConflict(
     payload: payload.toString('base64')
   })
   await deps.relay.keepConflict(name, epoch, counter, Buffer.from(sealed.sealed, 'base64'))
+}
+
+/**
+ * The highest counter this device has seen in one collection, or 0.
+ *
+ * THE ROLLBACK FLOOR, and it has to be readable outside this module because
+ * the two places that most need it are elsewhere: the epoch rotation, which
+ * re-seals every object and therefore decides what the whole account reads
+ * next, and the conflict resolver, which decides what number the user's choice
+ * is written at. Both opened relay objects with `seenCounter: 0`, which turns
+ * the sidecar's anti-rollback check off entirely and lets the relay choose
+ * which archived copy becomes canonical.
+ */
+export function counterFloor(collection: string): number {
+  return loadState().collections[collection]?.counter ?? 0
 }
 
 /** Forget everything this device has agreed to. For a revocation wipe and for
