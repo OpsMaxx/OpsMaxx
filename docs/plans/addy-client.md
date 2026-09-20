@@ -1,10 +1,18 @@
 # addy, the client half
 
-> **Status: implemented, 2026-09-20.** `docs/plans/addy.md` is the design of
-> record and is frozen; this is the record of building the client against it —
-> what shipped, what was found to be wrong on the way, and what is still open.
-> Where the two disagree about what the code does, this file is right, because
-> it was written afterwards.
+> **Status: implemented and reviewed, 2026-09-20.** `docs/plans/addy.md` is the
+> design of record and is frozen; this is the record of building the client
+> against it — what shipped, what was found to be wrong on the way, and what is
+> still open. Where the two disagree about what the code does, this file is
+> right, because it was written afterwards.
+>
+> **Revised after review.** Three independent passes — security, correctness and
+> user experience — found thirty-one defects in what this document had already
+> called finished, four of them critical. Every one is fixed; §2 and §3 are
+> rewritten around what they found, and §7 is new. The first draft of this file
+> is wrong about how much was working and is corrected in place rather than
+> quietly edited, because the size of the gap between "tests green" and "works"
+> is the most useful thing here.
 
 ## 1. What exists now
 
@@ -29,8 +37,8 @@ is asserted from a mock alone.
 
 ## 2. The defect this module kept producing
 
-**Implemented, typechecking, unit-tested, and reachable from nowhere.** Seven
-separate times, in one feature:
+**Implemented, typechecking, unit-tested, and reachable from nowhere.** Twelve
+times, in one feature. Six were found by building; six more by the review.
 
 | What | How it was dead |
 |---|---|
@@ -40,23 +48,37 @@ separate times, in one feature:
 | `addyTarget` | no `kind: 'addy'` destination existed to open it |
 | `answerPeer` | zero callers — so no device ever answered a dial |
 | `isOwnEcho` | armed on every receive, read by nothing |
-| The revocation actor side | the victim half existed; nothing authored the entry |
+| `runRevocationWipe` | zero callers — **a stolen laptop was never wiped** |
+| The roster `Pin` | accepted by the sidecar, never supplied — rollback undetectable |
+| `Handoff.Adopt` | the four checks that make a re-key mean anything, called only by its own tests |
+| `seenCounter` | passed as `0` at three sites, disabling the anti-rollback check |
+| `protocol.Signal` | the DTLS fingerprint was never signed — **the relay was a MITM on every direct connection** |
+| `forgetAddySecret` | zero callers — a re-key never shrank the blast radius it existed to shrink |
 
 None of these is visible to a typechecker: a function nobody calls compiles
 perfectly. None is visible to a unit test either, because each unit did what it
-promised.
+promised — and four of them had a *dedicated test file* that made them look
+shipped. `tests/addyRevokeWipe.test.ts` is 180 lines exercising a wipe nothing
+could start.
 
-**What hid three of them was a graceful fallback.** `tryDirect` failed and the
-mailbox took over, so a path that could not succeed on any network looked
-exactly like a path that was merely unavailable. That is the general lesson
-worth keeping: *a degradation with no way to tell it from the good path will
-hide a dead feature indefinitely.*
+**Three shapes hid them**, and they are worth naming separately:
 
-`tests/addyStatusWired.test.ts` is the guard. It walks the source text of each
-layer and fails when a name appears in one and not the next. Crude on purpose —
-it proves a name is present, not that the call is right — because the failure it
-catches is "nothing anywhere mentions this", which is the one that got through
-seven times.
+1. **A graceful fallback with no way to tell it from the good path.**
+   `tryDirect` failed and the mailbox took over, so a path that could not
+   succeed on any network looked exactly like one that was merely unavailable.
+2. **A test that exercises the control directly.** The Go suite tested
+   `Handoff.Adopt`, the `Pin` and the wipe adversarially and thoroughly.
+   Nothing asserted that a production path reached them.
+3. **A comment asserting the property.** Five comments in this module described
+   a control the code no longer had — recovery catching truncation, a revoked
+   device wiping itself, the DTLS fingerprint being signed, the TLS pin being
+   noticed on reconnect, "never a key over the pipe". Each reads as a completed
+   control to anyone auditing by reading, which is how four of them survived.
+
+`tests/addyStatusWired.test.ts` is the guard: 67 assertions walking the source
+of each layer and failing when a name appears in one and not the next. Crude on
+purpose — it proves a name is present, not that the call is right — because the
+failure it catches is "nothing anywhere mentions this".
 
 ## 3. Bugs found by running it, not by reading it
 
@@ -72,18 +94,29 @@ Each of these passed review and a green suite.
    wipes that buffer afterwards — which is the right thing for a caller to do.
    So every *resumed* device held an all-zero AK. Silent and delayed: every key
    derived from the AK is computed during the load and is correct, so sealing,
-   opening and signing went on working, and only operations using the AK itself
-   as a binding broke — weeks later, on a machine that had been fine.
+   opening and signing all went on working, and only operations using the AK
+   itself as a binding broke — weeks after the load that caused it.
 4. **Request signatures were over the escaped path; the relay verifies the
    decoded one.** Invisible while every object name was alphanumeric. The first
    name with a colon in it returned a 401 that reads exactly like a bad token.
 5. **A rotation locked every other device out.** Handoffs were published and
    nothing read them.
-6. **A rotation also broke recovery**, until the escrow was re-sealed at the new
-   epoch: the card would have gone on opening a key the account had moved off.
+6. **A rotation also broke recovery**, until the escrow was re-sealed at the
+   new epoch.
+7. **A device pairing into a rotated account was bricked.** `pairAccept`
+   returned whatever epoch key the handoff carried and called it
+   `epoch1SignPub` — correct only for an account that has never rotated.
 
 Two of these (3 and 4) were fixed in the `addy` repository first and vendored
 here, per `sidecar/addyd/protocol/VENDORED.md`.
+
+**One thing the review got wrong, corrected by measurement.** It reported that
+an unconditional PUT is last-write-wins, so two devices creating the same
+collection lose one silently. Probed against a running relay: the second PUT
+returns 409. `ErrObjectExists` is deliberately distinct from `ErrETagMismatch`,
+and the store's own test asserts it. Reading `relay.putObject` — which only
+sends `If-Match` when given one — and inferring the server's behaviour from it
+is the same mistake as trusting a comment.
 
 ## 4. Decisions worth the ink
 
@@ -146,6 +179,28 @@ the list.
   protocol and declared `PENDING` with the reason. `deviceNames` needs a rename
   affordance that does not exist; `manifest` is M6 work whose format was
   designed early so that arriving needs no protocol change.
+- **`Handoff.Adopt` cannot verify a chain past epoch 1.** It passes
+  `epoch1 = nil` to the verifier for any later epoch, and nothing in a chain
+  ever establishes AK_1's signing key — epoch 1 is the genesis, so no
+  transition entry names it. So the helper written to make a rotation safe
+  cannot be used on an account that has rotated. Its four checks are
+  reproduced in `handleAdoptEpoch`, where the pinned epoch-1 key is in hand.
+  **The limitation belongs upstream and is recorded rather than patched in a
+  vendored copy.**
+- **A recovering device cannot fully detect a rollback.** The chain is pinned
+  against the escrow's head, and the relay chooses which escrow to serve. An
+  escrow one epoch past the chain's end is proof of a rotation and is refused,
+  so the relay must hide that too — and hiding it breaks recovery visibly for
+  anyone who really did re-key. That is a bound, not a cure: a device
+  recovering from nothing has no prior state to compare against, which is why
+  the design's printable card carries the roster head and the device count.
+  **The person is the last check.**
+- **The signalling `from` is proven, the mail `fromDevice` is not.** A session
+  description is signed, so naming another device produces a signature that
+  does not verify. A mailbox row's sender is the relay's own column: inbound
+  mail is filtered to current roster members, which stops a removed device
+  delivering under its own identity, but a relay can still relabel a row
+  between two current members.
 
 ## 6. Open questions for the owner
 
@@ -162,7 +217,40 @@ the list.
    is not the same as an enforced invariant, and the design says the server
    should refuse.
 
-## 7. Provenance
+## 7. What the review changed, and what it cost to find
+
+Three parallel passes over a feature this document had already called
+finished: an adversarial security review of the sidecar and the client against
+the stated threat model, a correctness review of the sync engine, and a
+user-experience review of the six screens. They found **thirty-one defects**,
+four of them critical, and every one is fixed.
+
+The distribution is the interesting part.
+
+| Where | Found | Worst |
+|---|---|---|
+| Security | 4 critical, 2 high, 5 low | Arbitrary file write from a decrypted notice; a revoked device sealing itself the next epoch key |
+| Correctness | 3 critical, 4 high, 6 medium | A conflict written to disk, reverted by the renderer, then pushed back as the winner |
+| User experience | 1 catastrophic, 2 severe, 11 lesser | The recovery phrase unmounted mid-write by the app itself |
+
+**Not one of them was caught by 10,000 passing tests.** That is the number
+worth carrying forward, and the reason is in §2: the suite tested units, and
+every unit did what it promised.
+
+Two findings were the reviews' own errors, and both were settled by measuring
+rather than arguing — an unconditional PUT (§3) and the direction of the
+conflict-resolution bug, which was reported as "overwrites the winner" and is
+actually "nothing is written at all, ever". A reviewer reading `putObject` and
+inferring the server's behaviour is making the same move as a reader trusting
+a comment, and it deserves the same answer: ask the running thing.
+
+**Two of my own tests were vacuous**, found by mutating the code they guarded
+and watching nothing fail. Both have been rewritten to drive the real path.
+Every security-relevant guard added in this work has since been mutation-
+checked the same way: break it, confirm a test fails, put it back. That is now
+the standard in this module, not a spot check.
+
+## 8. Provenance
 
 Built 2026-09-20 against a relay binary compiled from the `addy` repository and
 run in `-dev` mode on loopback. Every claim in §1 was produced by one of two
@@ -170,6 +258,11 @@ harnesses driving real `addyd` sidecars over real NDJSON and real HTTP: one
 covering pair → sync → clipboard → transfer → revoke, the other covering
 recover → re-key → recover again. Both print each step and fail loudly.
 
-The Go suite is 219 tests across four packages; the TypeScript suite is 10,101.
-Every test written for a security property in this work was checked by mutating
-the code it guards and confirming it fails.
+Reviewed the same day by three independent passes, and rebuilt against what
+they found — see §7.
+
+The Go suite is 222 tests across four packages; the TypeScript suite is 10,169.
+Every guard added in this work was checked by mutating the code it protects and
+confirming a test fails; two that did not were rewritten. The counts are
+recorded because a number in a document goes stale silently, and because they
+are the number that was green while twelve controls were unreachable.
