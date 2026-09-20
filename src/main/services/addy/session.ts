@@ -1,5 +1,6 @@
 import { AddyError, openAddyd, type AddySidecar } from './sidecar'
-import { storeAddySecret } from './keys'
+import { storeAddySecret, loadAddySecret } from './keys'
+import { loadEnrolment, saveEnrolment } from './enrolment'
 import {
   beginPairing,
   forgetPairing,
@@ -27,6 +28,17 @@ import { closeSession, dialPeer } from './p2p'
  * recognise, and not an empty list that looks like everything is fine.
  */
 
+/** What a resume at launch found. */
+export interface AddyResumeResult {
+  resumed: boolean
+  accountId?: string
+  baseURL?: string
+  /** Set when this machine IS enrolled and something stopped it coming back —
+   *  an unreadable keychain, an unreachable relay. Distinct from "not set
+   *  up", which is what `resumed: false` with no problem means. */
+  problem?: string
+}
+
 export interface AddyAccount {
   baseURL: string
   token: string
@@ -38,6 +50,9 @@ class AddySession {
   private addyd: AddySidecar | null = null
   private relay: RelayClient | null = null
   private account: AddyAccount | null = null
+  /** Accept a self-signed relay certificate. Development instances only, and
+   *  carried on the enrolment so a resume does not silently become strict. */
+  private insecureTLS = false
 
   /** True once a device is attached to an account and the sidecar is up. */
   get attached(): boolean {
@@ -64,7 +79,10 @@ class AddySession {
       epochKeys: keys.epochKeys
     })
     this.addyd = addyd
-    this.relay = new RelayClient({ baseURL: account.baseURL, token: account.token }, addyd)
+    this.relay = new RelayClient(
+      { baseURL: account.baseURL, token: account.token, insecureTLS: this.insecureTLS },
+      addyd
+    )
     this.account = account
   }
 
@@ -176,9 +194,109 @@ class AddySession {
       accountId: minted.accountId,
       epoch: minted.epoch
     }
-    this.relay = new RelayClient({ baseURL: relay, token: '' }, addyd)
+    this.relay = new RelayClient({ baseURL: relay, token: '', insecureTLS: this.insecureTLS }, addyd)
+
+    // LOG IN, which is the step that used to be missing entirely.
+    //
+    // Every authorised call carries `Bearer ${token}` and the token was left
+    // as the empty string here, so the account existed on the relay and this
+    // device could not do one authorised thing with it. Registering is not
+    // logging in: the first says who the account is, the second proves this
+    // device is on it.
+    //
+    // Not fatal if it fails. The account IS registered and the keys ARE
+    // stored by this point, so throwing would leave the user holding a
+    // recovery phrase for an account the app then claims not to have. The
+    // enrolment is recorded either way and the next resume tries again.
+    await this.loginAndRecord().catch(() => undefined)
 
     return { accountId: minted.accountId, mnemonic: minted.mnemonic }
+  }
+
+  /**
+   * Trade the device key for a token, and write the enrolment down.
+   *
+   * THE ENROLMENT HAD NO HOME. `this.account` is a field on a class instance,
+   * so creating an account and restarting the app lost it completely: the keys
+   * stayed in the keychain, nothing remembered which relay they belonged to,
+   * and the app came back looking as though Addy had never been set up.
+   *
+   * What is written is an ADDRESS, not a secret: the relay, the account id,
+   * the epoch and the TLS pin. The keys stay in the keychain under the
+   * machine-only prefix where `createAccount` put them. The token is
+   * deliberately NOT written — it expires, and a stale one on disk is a thing
+   * to invalidate rather than a thing to use.
+   */
+  private async loginAndRecord(): Promise<void> {
+    const account = this.account
+    const relay = this.relay
+    if (!account || !relay) return
+    const { token, spki } = await relay.login()
+    this.account = { ...account, token }
+    saveEnrolment({
+      baseURL: account.baseURL,
+      accountId: account.accountId,
+      epoch: account.epoch,
+      spki,
+      insecureTLS: this.insecureTLS
+    })
+  }
+
+  /**
+   * Come back to an account this machine already joined.
+   *
+   * Called once at launch. Without it the only attached session in the
+   * product's history was the one inside the process that created the
+   * account — `attach()` had ZERO callers, so `attached` was false on every
+   * subsequent run and every clipboard call answered "this device is not
+   * attached to an addy account yet".
+   *
+   * Silent when there is nothing to resume, which is every machine that has
+   * never set Addy up. A keychain that refuses is not silent: the enrolment
+   * is recorded and the keys are not, and the difference between "not set up"
+   * and "set up and unreadable" is one a person has to be told.
+   */
+  async resume(log?: (line: string) => void): Promise<AddyResumeResult> {
+    const saved = loadEnrolment()
+    if (!saved) return { resumed: false }
+
+    const keys = {
+      deviceSignSeed: loadAddySecret('device', `${saved.accountId}:device`),
+      deviceEncKey: loadAddySecret('device', `${saved.accountId}:device-enc`),
+      akSeed: loadAddySecret('account', `${saved.accountId}:account`)
+    }
+    if (!keys.deviceSignSeed || !keys.deviceEncKey || !keys.akSeed) {
+      return {
+        resumed: false,
+        problem:
+          'this machine is enrolled on a relay but its keys cannot be read from the keychain.'
+      }
+    }
+
+    this.insecureTLS = saved.insecureTLS === true
+    try {
+      await this.attach(
+        { baseURL: saved.baseURL, token: '', accountId: saved.accountId, epoch: saved.epoch },
+        {
+          deviceSignSeed: keys.deviceSignSeed,
+          deviceEncKey: keys.deviceEncKey,
+          epochKeys: { [saved.epoch]: keys.akSeed }
+        },
+        log
+      )
+      await this.loginAndRecord()
+      return { resumed: true, accountId: saved.accountId, baseURL: saved.baseURL }
+    } catch (err) {
+      // Attached-but-not-logged-in is a real and useful state: the sidecar is
+      // up and the keys are loaded, so the panel can say which relay this
+      // machine belongs to even while that relay is unreachable.
+      return {
+        resumed: this.attached,
+        accountId: saved.accountId,
+        baseURL: saved.baseURL,
+        problem: err instanceof Error ? err.message : String(err)
+      }
+    }
   }
 
   /**

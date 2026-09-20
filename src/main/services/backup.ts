@@ -401,6 +401,11 @@ export const TARGETS_FILE = 'opsmaxx-backup-targets.json'
 // recursively; the wipe walks both.
 export const ALL_DATA_FILES = [
   'opsmaxx-data.json',
+  // Which addy relay this machine joined: the address, the account id, the
+  // epoch and the TLS pin. No key material — that is in the keychain under the
+  // machine-only prefix. It is still a record of what this person belongs to,
+  // so "delete everything" removes it.
+  'opsmaxx-addy.json',
   'opsmaxx-secrets.json',
   // When each machine-only grant was first made. Not a secret — which is why
   // it is beside opsmaxx-secrets.json rather than inside it, where every value

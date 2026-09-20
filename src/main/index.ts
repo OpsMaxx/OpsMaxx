@@ -5897,6 +5897,24 @@ syncDriftWatches(loadData())
   // are on stop and on quit.
   void recoverInspect().catch((e) => console.error('[inspect] recovery failed:', e))
 
+  // COME BACK TO THE ADDY ACCOUNT THIS MACHINE ALREADY JOINED.
+  //
+  // `addySession.attach()` had zero callers, so the only attached session in
+  // this product's history was the one inside the process that created the
+  // account. Every later run came up detached: the keys were in the keychain,
+  // nothing remembered which relay they belonged to, and every clipboard call
+  // answered "this device is not attached to an addy account yet".
+  //
+  // Not awaited. It starts a sidecar and makes a network round trip, and a
+  // relay that is down must not hold up the window.
+  void addySession
+    .resume((line) => console.log('[addy]', line))
+    .then((r) => {
+      if (r.problem) console.error('[addy] resume:', r.problem)
+      else if (r.resumed) console.log(`[addy] resumed on ${r.baseURL}`)
+    })
+    .catch((e) => console.error('[addy] resume failed:', e))
+
   void vpnInit()
     .catch((e) => console.error('[vpn] init failed:', e))
     .finally(() => {

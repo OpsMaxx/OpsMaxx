@@ -82,6 +82,12 @@ export const NOT_SYNCED: Readonly<Record<string, string>> = {
   settings: 'the cosmetic subset is the T2 public profile; the rest is per-device',
   theme: 'carried in the T2 public profile so a new device looks right before pairing',
   version: 'a local on-disk seed marker, not user data',
+  // WHICH RELAY THIS MACHINE JOINED, and emphatically not something to sync.
+  // It is per-device by construction: the account id is shared, but the TLS
+  // pin is this machine's view of the relay and the enrolment date is when
+  // THIS device joined. Syncing it would also be circular — it is the note
+  // that tells a device how to reach the thing that would carry it.
+  addy: 'this device\'s note of which relay it joined; per-device, and the route to sync itself',
   // A machine-only grant means "this secret is readable on THIS machine
   // without the master password", and the secret it names is excluded from
   // every export precisely so it cannot travel. Syncing the record of such a
