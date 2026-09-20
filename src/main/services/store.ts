@@ -9,6 +9,25 @@ import { atomicWriteFileSync } from './atomicWrite'
 const FILE = join(app.getPath('userData'), 'opsmaxx-data.json')
 const BAK = `${FILE}.bak`
 
+/**
+ * Whether the blob exists at all, as distinct from whether it can be read.
+ *
+ * `loadData` returns null for both, which is right for the renderer — it
+ * starts clean either way — and wrong for anything that would WRITE based on
+ * the answer. Sync did: a corrupt file read as "this machine has nothing", so
+ * every collection was adopted from the relay and the file was rebuilt from an
+ * empty object, destroying `settings`, `tabs` and every other key that has no
+ * relay copy.
+ */
+export function dataFileExists(): boolean {
+  // The PRIMARY only. `loadData` falls back to the backup when the primary
+  // fails to parse, so a null answer with the primary present means both were
+  // unreadable — which is the state worth refusing to write over. Counting a
+  // leftover backup here would make a machine that has simply never saved
+  // look corrupt, and that machine is the ordinary fresh install.
+  return existsSync(FILE)
+}
+
 export function loadData(): unknown | null {
   try {
     if (existsSync(FILE)) return JSON.parse(readFileSync(FILE, 'utf8'))

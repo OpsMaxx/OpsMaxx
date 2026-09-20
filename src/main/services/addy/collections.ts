@@ -2,7 +2,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import { atomicWriteFileSync } from '../atomicWrite'
-import { loadData, saveData } from '../store'
+import { dataFileExists, loadData, saveData } from '../store'
+import { AddyError } from './sidecar'
 import { SYNCED_COLLECTIONS, type SyncedCollection } from '../../../shared/addy'
 
 /**
@@ -65,20 +66,66 @@ const userFile = (name: string): string => join(app.getPath('userData'), name)
  * by the renderer's next keystroke.
  */
 function blobKey(key: string): CollectionSource {
+  /**
+   * The blob, or a refusal.
+   *
+   * `loadData` answers null for BOTH "there is no file" and "the file and its
+   * backup are corrupt", which is right for the renderer — it starts clean
+   * either way — and dangerous here, where the answer decides whether to
+   * write. A corrupt file read as "this machine has nothing", so every
+   * collection was adopted from the relay and the blob was rebuilt from an
+   * empty object: `settings`, `tabs`, `activeWorkspaceId` and every other key
+   * with no relay copy were destroyed, along with the module state, the vault
+   * auto-lock and the local-terminal kill switch. `saveData` copies the
+   * corrupt file to the backup on its way past, so the one good copy went too.
+   */
+  const blobOrRefuse = (): Record<string, unknown> | null => {
+    const data = loadData() as Record<string, unknown> | null
+    if (data) return data
+    if (dataFileExists()) {
+      throw new AddyError(
+        'config-invalid',
+        'the local data file cannot be read, so nothing will be written over it'
+      )
+    }
+    return null
+  }
+
   return {
     inRendererStore: true,
     read(): Buffer | null {
-      const data = loadData() as Record<string, unknown> | null
+      const data = blobOrRefuse()
       if (!data || !(key in data)) return null
       return Buffer.from(JSON.stringify(data[key]), 'utf8')
     },
     write(body: Buffer): void {
-      const data = (loadData() as Record<string, unknown> | null) ?? {}
+      const data = blobOrRefuse() ?? {}
       // Parsed here rather than spliced as text: a body that is not JSON is a
       // corrupt object, and finding that out now is better than writing it
       // into the file every panel reads.
-      data[key] = JSON.parse(body.toString('utf8'))
+      const value = JSON.parse(body.toString('utf8'))
+      data[key] = value
       saveData(data)
+
+      /**
+       * AND CHECK IT LANDED. `saveData` swallows every failure into a
+       * `console.error` — correct for the renderer, which must not lose a
+       * window because a save failed — and it makes this function's own
+       * contract ("throws rather than half-writing") a lie.
+       *
+       * The consequence was not a missing write, it was an inverted one. The
+       * engine recorded agreement for a pull that never reached disk, so the
+       * next pass saw a local edit and no remote one and PUSHED the stale copy
+       * over the account. Another device's work deleted everywhere, because a
+       * disk was full, and the only trace a console line nobody reads.
+       */
+      const back = loadData() as Record<string, unknown> | null
+      if (!back || JSON.stringify(back[key]) !== JSON.stringify(value)) {
+        throw new AddyError(
+          'internal',
+          `${key} could not be written to the local data file`
+        )
+      }
     }
   }
 }

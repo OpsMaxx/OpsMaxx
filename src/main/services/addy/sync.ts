@@ -158,7 +158,21 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
       const outcome = await syncCollection(deps, name, source, state)
       result.outcomes[name] = outcome
       if (outcome === 'pushed' || outcome === 'pulled' || outcome === 'adopted') result.carried++
-      if (outcome === 'pulled' || outcome === 'adopted') changed.push(name)
+      // `conflicted` BELONGS HERE, and leaving it out was deterministic data
+      // loss rather than a race.
+      //
+      // Both conflict paths write the remote copy to disk — that is what
+      // "the remote wins and the local is kept" means. Not naming the
+      // collection meant the renderer was never told, so it went on holding
+      // the losing copy in memory and rewrote it over the file on its next
+      // save, which fires on a theme change or an opened tab. The following
+      // pass then saw a local edit and no remote one, and PUSHED the reverted
+      // copy as the account's winner. The other device's work was gone from
+      // every screen, surviving only as a conflict copy nobody had been told
+      // to look at, and the panel reported success throughout.
+      if (outcome === 'pulled' || outcome === 'adopted' || outcome === 'conflicted') {
+        changed.push(name)
+      }
       if (outcome === 'conflicted') result.conflicts.push(name)
     } catch (err) {
       result.outcomes[name] = 'failed'
@@ -172,10 +186,36 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
     }
   }
 
-  saveState(state)
-  // AFTER the state is written, and after every collection: the renderer
-  // reloads once for the whole pass rather than fifteen times, and it reloads
-  // from a file that is already consistent.
+  /**
+   * THE STATE WRITE MUST NOT TAKE THE PASS WITH IT.
+   *
+   * `saveState` throws by design — it writes temp-then-rename — and it sat
+   * outside every try. So a stale temp file or a full disk made the exception
+   * escape `syncOnce` entirely: `applied()` never ran, the renderer was never
+   * told about a single inbound write, and its next save reverted all of them.
+   * The pass after that saw local edits with no remote ones and pushed the
+   * reverts as the account's winners. A failure to write a bookkeeping file
+   * became account-wide data loss.
+   *
+   * Reported as the pass's error instead. The consequence of losing the state
+   * is bounded and recoverable: the next pass finds collections on disk it has
+   * no record of agreeing to, and treats them as conflicts — which is noisy,
+   * and is the safe direction.
+   */
+  try {
+    saveState(state)
+  } catch (err) {
+    if (!result.error) {
+      result.error = {
+        collection: 'sync state',
+        message: err instanceof Error ? err.message : String(err)
+      }
+    }
+  }
+
+  // AFTER the state write is attempted, and after every collection: the
+  // renderer reloads once for the whole pass rather than fifteen times, and it
+  // reloads from a file that is already consistent.
   if (changed.length > 0) deps.applied(changed)
   return result
 }

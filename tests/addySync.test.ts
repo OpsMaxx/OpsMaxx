@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { chmodSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -182,6 +182,22 @@ describe('a machine with nothing', () => {
     expect(r.carried).toBe(0)
   })
 
+  it('tells the renderer about a CONFLICT too, which is also a write', async () => {
+    // The omission was deterministic loss, not a race. A conflict writes the
+    // remote copy to disk; a renderer that is not told keeps the losing copy
+    // in memory and rewrites it over the file on its next save — which fires
+    // on a theme change or an opened tab — and the next pass pushes that
+    // revert as the account's winner.
+    writeBlob({ servers: [{ id: 's1' }, { id: 'added-here' }] })
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 's1' }, { id: 'added-there' }])
+
+    const r = await syncOnce(deps(relay))
+
+    expect(r.outcomes.servers).toBe('conflicted')
+    expect(applied).toHaveBeenCalledWith(['servers'])
+  })
+
   it('tells the renderer which collections landed, so they are not overwritten', async () => {
     // Eleven collections live in the blob the renderer holds in memory and
     // writes in full on every change. Without this call the next keystroke in
@@ -294,6 +310,77 @@ describe('once the two sides agree', () => {
       { id: 's1' },
       { id: 'added-here' }
     ])
+  })
+})
+
+describe('the local data file', () => {
+  it('a corrupt blob is refused, not treated as an empty machine', async () => {
+    // `loadData` answers null for "no file" AND for "file and backup both
+    // corrupt". Conflated, the second read as "this machine has nothing": all
+    // eleven blob collections adopted from the relay, and the file rebuilt
+    // from `{}` — destroying `settings`, `tabs`, `activeWorkspaceId` and every
+    // other key with no relay copy, including the module state and the
+    // local-terminal kill switch. `saveData` copies the corrupt file onto the
+    // backup on its way past, so the one good copy went too.
+    // The backup too: `loadData` falls back to it, so a stale one from an
+    // earlier test would make this corrupt file readable after all.
+    rmSync(`${DATA}.bak`, { force: true })
+    writeFileSync(DATA, '{"servers":[{"id":"s1"}],"settings":{"theme":"light"')
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 'from-the-account' }])
+
+    const r = await syncOnce(deps(relay))
+
+    expect(r.outcomes.servers).toBe('failed')
+    // And nothing was written over it.
+    expect(readFileSync(DATA, 'utf8')).toContain('"theme":"light"')
+  })
+
+  it('a write that does not land is reported, not recorded as agreement', async () => {
+    // `saveData` swallows every failure into a console line. The engine then
+    // recorded agreement for a pull that never reached disk — and the NEXT
+    // pass saw a local edit with no remote one and pushed the stale copy over
+    // the account. Another device's work deleted everywhere because a disk was
+    // full, with a console line nobody reads as the only trace.
+    writeBlob({ servers: [{ id: 's1' }] })
+    const relay = fakeRelay()
+    await syncOnce(deps(relay))
+
+    seeded(relay, 'servers', [{ id: 'from-elsewhere' }], 2)
+    // Make the write fail in a way `saveData` swallows: a directory it cannot
+    // create its temp file in. The rename never happens and the old contents
+    // stay, which is exactly the shape of a full disk.
+    chmodSync(userData, 0o500)
+    try {
+      const r = await syncOnce(deps(relay))
+      expect(r.outcomes.servers).toBe('failed')
+      // And the old contents are still there: nothing half-wrote.
+      expect(readFileSync(DATA, 'utf8')).toContain('"s1"')
+    } finally {
+      chmodSync(userData, 0o700)
+    }
+  })
+})
+
+describe('a sync-state write that fails', () => {
+  it('does not discard the pass, and still tells the renderer', async () => {
+    // `saveState` throws by design and sat outside every try, so its failure
+    // escaped `syncOnce`: `applied()` never ran, the renderer was never told
+    // about a single inbound write, and its next save reverted all of them.
+    // The pass after that pushed the reverts as the account's winners. A
+    // bookkeeping-file failure became account-wide data loss.
+    // Nothing on either side, so no collection fails and the state write is
+    // the only thing that can: that isolates the containment being tested.
+    const relay = fakeRelay()
+    chmodSync(userData, 0o500)
+    try {
+      const r = await syncOnce(deps(relay))
+      // A result came back at all — before, the exception escaped the pass.
+      expect(r.outcomes.servers).toBe('unchanged')
+      expect(r.error?.collection).toBe('sync state')
+    } finally {
+      chmodSync(userData, 0o700)
+    }
   })
 })
 
