@@ -57,6 +57,10 @@ const WRITES_TO_USERDATA = [
   'opsmaxx-credproxy.json',
   'opsmaxx-data.json',
   'opsmaxx-debug.jsonl',
+  // Built as `${FILE}.bak` in store.ts, so the derived grep below cannot see
+  // it — the case its own comment calls the author's job. It is a complete
+  // second copy of the estate, so it is data, not a setting.
+  'opsmaxx-data.json.bak',
   'opsmaxx-env-secrets.json',
   'opsmaxx-job-approvals.jsonl',
   'opsmaxx-known-hosts.json',

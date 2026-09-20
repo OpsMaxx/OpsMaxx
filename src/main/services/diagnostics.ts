@@ -14,7 +14,7 @@ import { isLocalTerminalEnabled } from './localGate'
 import { isAccessWriteEnabled } from './accessWriteGate'
 import { secretsAvailable, secretsBackend } from './secretsBackend'
 import { redactOutput } from './secretRedaction'
-import { loadData } from './store'
+import { dataAtRest, loadData } from './store'
 import { MODULES, moduleEnabled } from '../../shared/modules'
 import type { ModuleState } from '../../shared/modules'
 import { formatDiagnostics } from '../../shared/diagnostics'
@@ -147,6 +147,12 @@ export function collectDiagnostics(
       // the same bug, and this is the line that says so. On Linux it is also
       // the pair to `secretStoreBackend` above.
       'secretStore.available': secretsAvailable(),
+      // Whether the server list is sealed on disk. It is sealed with the OS
+      // secure store rather than the vault's master password, so it can fail
+      // independently of everything else here — and a report that the estate
+      // is readable in the user's profile folder is the difference between a
+      // keyring that is missing and one that was merely asleep at startup.
+      'dataFile.sealed': dataAtRest().sealed,
       'webhook.enabled': probes.webhook.enabled,
       'webhook.hasUrl': probes.webhook.hasUrl,
       'webhook.notifyOnResolved': probes.webhook.notifyOnResolved,

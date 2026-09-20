@@ -82,6 +82,14 @@ export const NOT_SYNCED: Readonly<Record<string, string>> = {
   settings: 'the cosmetic subset is the T2 public profile; the rest is per-device',
   theme: 'carried in the T2 public profile so a new device looks right before pairing',
   version: 'a local on-disk seed marker, not user data',
+  // The previous contents of opsmaxx-data.json. `saveData` copies the live
+  // file here before each write so one bad write cannot take the estate with
+  // it, which makes this a full second copy of everything the eleven blob
+  // collections already carry — at a version this device happens to have had a
+  // moment ago. Syncing it would push a stale copy of the account's own data
+  // back at the account under a second name, and the conflict chooser would
+  // then offer it as a candidate. Device-local, like the write it protects.
+  'data.json.bak': 'the local write-safety copy of the blob every other collection already carries',
   // WHICH RELAY THIS MACHINE JOINED, and emphatically not something to sync.
   // It is per-device by construction: the account id is shared, but the TLS
   // pin is this machine's view of the relay and the enrolment date is when

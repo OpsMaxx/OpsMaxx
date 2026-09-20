@@ -46,7 +46,7 @@ OpsMaxx is a **free and open-source alternative to MobaXterm, PuTTY, Termius, Se
 ## Why OpsMaxx
 
 
-Most terminal tools do one thing. A typical DevOps task needs four: open a shell through a jump host, tail a file, poke a database that is only reachable from inside the network, and look up a credential. OpsMaxx puts those in one place, keeps them organised per project, and stores every secret in your operating system's keychain rather than a plaintext config file.
+Most terminal tools do one thing. A typical DevOps task needs four: open a shell through a jump host, tail a file, poke a database that is only reachable from inside the network, and look up a credential. OpsMaxx puts those in one place, keeps them organised per project, and seals your credentials and your server list with your operating system's keychain rather than leaving them in a plaintext config file.
 
 - **No lock-in** — connections import from your existing `~/.ssh/config`
 - **No account** — nothing about you or your estate is uploaded; the one connection OpsMaxx makes on its own is the update check, on by default and switchable off

@@ -27,7 +27,15 @@ import { join } from 'node:path'
 
 const userData = mkdtempSync(join(tmpdir(), 'opsmaxx-addy-server-status-'))
 vi.mock('electron', () => ({
-  app: { getPath: () => userData, getVersion: () => '0' }
+  app: { getPath: () => userData, getVersion: () => '0' },
+  // store.ts seals opsmaxx-data.json with the OS secure store and this drives
+  // it through blobKey. Identity "encryption", like tests/mocks/electron.ts:
+  // what is under test here is the status strip, not the sealing.
+  safeStorage: {
+    isEncryptionAvailable: (): boolean => true,
+    encryptString: (v: string): Buffer => Buffer.from(v, 'utf8'),
+    decryptString: (b: Buffer): string => b.toString('utf8')
+  }
 }))
 
 const { SOURCES } = await import('../src/main/services/addy/collections')
@@ -36,8 +44,17 @@ const DATA = join(userData, 'opsmaxx-data.json')
 
 const inbound = (servers: unknown[]): Buffer => Buffer.from(JSON.stringify(servers), 'utf8')
 
-const storedServers = (): Array<Record<string, unknown>> =>
-  (JSON.parse(readFileSync(DATA, 'utf8')) as { servers: Array<Record<string, unknown>> }).servers
+// Through store.ts's envelope. The file is sealed on disk now, so parsing it
+// raw yields the wrapper and every assertion below would read `undefined`.
+const storedServers = (): Array<Record<string, unknown>> => {
+  const parsed = JSON.parse(readFileSync(DATA, 'utf8')) as { enc?: string }
+  const blob = (
+    typeof parsed.enc === 'string'
+      ? JSON.parse(Buffer.from(parsed.enc, 'base64').toString('utf8'))
+      : parsed
+  ) as { servers: Array<Record<string, unknown>> }
+  return blob.servers
+}
 
 beforeEach(() => rmSync(DATA, { force: true }))
 

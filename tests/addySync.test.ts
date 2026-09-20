@@ -34,7 +34,15 @@ import { join } from 'node:path'
 
 const userData = mkdtempSync(join(tmpdir(), 'opsmaxx-addy-sync-'))
 vi.mock('electron', () => ({
-  app: { getPath: () => userData, getVersion: () => '0.0.0-test' }
+  app: { getPath: () => userData, getVersion: () => '0.0.0-test' },
+  // store.ts seals opsmaxx-data.json with the OS secure store, and these tests
+  // drive it through blobKey. Identity "encryption", like tests/mocks/electron.ts:
+  // what is under test here is the sync engine, not the sealing.
+  safeStorage: {
+    isEncryptionAvailable: (): boolean => true,
+    encryptString: (v: string): Buffer => Buffer.from(v, 'utf8'),
+    decryptString: (b: Buffer): string => b.toString('utf8')
+  }
 }))
 
 const { syncOnce, forgetSyncState, SYNC_STATE_FILE } = await import(
@@ -138,8 +146,19 @@ function deps(relay: ReturnType<typeof fakeRelay>): Parameters<typeof syncOnce>[
 // ---------------------------------------------------------------------------
 
 const DATA = join(userData, 'opsmaxx-data.json')
-const writeBlob = (o: unknown): void => writeFileSync(DATA, JSON.stringify(o))
-const readBlob = (): Record<string, unknown> => JSON.parse(readFileSync(DATA, 'utf8'))
+// Through the same envelope store.ts writes. A helper that read the file raw
+// would report the sealed wrapper rather than the estate, and one that wrote
+// raw would hand the engine a legacy-shaped file in every test — so the path
+// under test here would be the migration, which is not what any of these are
+// about.
+const writeBlob = (o: unknown): void =>
+  writeFileSync(DATA, JSON.stringify({ v: 1, enc: Buffer.from(JSON.stringify(o), 'utf8').toString('base64') }))
+const readBlob = (): Record<string, unknown> => {
+  const parsed = JSON.parse(readFileSync(DATA, 'utf8'))
+  return typeof parsed?.enc === 'string'
+    ? JSON.parse(Buffer.from(parsed.enc, 'base64').toString('utf8'))
+    : parsed
+}
 
 /** What the relay would be holding if another device had pushed this. */
 function seeded(relay: ReturnType<typeof fakeRelay>, name: string, value: unknown, counter = 1): void {
@@ -409,8 +428,11 @@ describe('the local data file', () => {
     try {
       const r = await syncOnce(deps(relay))
       expect(r.outcomes.servers).toBe('failed')
-      // And the old contents are still there: nothing half-wrote.
-      expect(readFileSync(DATA, 'utf8')).toContain('"s1"')
+      // And the old contents are still there: nothing half-wrote. Read through
+      // readBlob rather than grepping the file for `"s1"` — the estate is
+      // sealed on disk now, so that substring is absent whether the write
+      // landed or not, and the assertion would pass for the wrong reason.
+      expect(readBlob().servers).toEqual([{ id: 's1' }])
     } finally {
       chmodSync(userData, 0o700)
     }

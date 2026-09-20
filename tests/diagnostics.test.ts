@@ -216,6 +216,7 @@ describe('the diagnostics payload', () => {
       'aiBridge.running',
       'alerts',
       'backgroundChecks',
+      'dataFile.sealed',
       'keyWritesAllowed',
       'localTargetAllowed',
       'secretStore.available',
@@ -385,9 +386,28 @@ describe('the secure store', () => {
     // it by touching every credential the user owns on every diagnostics call —
     // on macOS behind a keychain prompt. Adding it fails here.
     expect(setSecret('cred-ssh-webfrontdoor', 'correct-horse-battery-staple')).toBe(true)
-    const decrypt = vi.spyOn(safeStorage, 'decryptString')
+
+    // WHAT IS ASSERTED, AND WHY IT IS NO LONGER A CALL COUNT. This used to be
+    // `expect(decrypt).not.toHaveBeenCalled()`, which was the same claim while
+    // the credential store was the only thing on this machine using
+    // safeStorage. It is not any more: store.ts seals opsmaxx-data.json with
+    // it, and the payload counts the servers in there, so a bare call count
+    // now fails for a reason that has nothing to do with credentials.
+    //
+    // The property was never "safeStorage is untouched", it was "no CREDENTIAL
+    // is opened to build this payload" — on macOS that is a keychain prompt
+    // per credential, on a call somebody made because the app was already
+    // misbehaving. So every decrypted result is inspected instead, which says
+    // it directly rather than by proxy.
+    const opened: string[] = []
+    const real = safeStorage.decryptString.bind(safeStorage)
+    const decrypt = vi.spyOn(safeStorage, 'decryptString').mockImplementation((b: Buffer) => {
+      const out = real(b)
+      opened.push(out)
+      return out
+    })
     const text = diagnosticsText(PROBES, CRASH)
-    expect(decrypt).not.toHaveBeenCalled()
+    expect(opened).not.toContain('correct-horse-battery-staple')
     decrypt.mockRestore()
     // And neither the id nor the value is in the text by any other route.
     expect(text).not.toContain('cred-ssh-webfrontdoor')

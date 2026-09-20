@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os'
 import { randomBytes, scrypt, createCipheriv, createDecipheriv } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { atomicWriteFileSync } from './atomicWrite'
+import { loadData, saveData } from './store'
 import {
   exportSecrets,
   getSecret,
@@ -167,11 +168,22 @@ export { MIN_PASSPHRASE }
 export async function buildBundle(
   password: string
 ): Promise<{ bytes: Buffer; summary: BackupSummary }> {
+  // `data` comes through the store rather than readJson, because the file on
+  // disk is sealed with THIS machine's OS key and a bundle is the one artefact
+  // whose whole purpose is to open on another one. The plaintext object goes
+  // into the payload, which the passphrase then encrypts along with everything
+  // else — so the estate is still never on disk in the clear, and a restore
+  // re-seals it under the new machine's key on the way in.
+  //
+  // Said up here rather than beside the field: tests/machineOnlySecrets.ts
+  // reads the 400 characters after this declaration to check that
+  // `exportSecrets()` is the only thing a bundle gets its secrets from, and a
+  // comment inside the literal pushes that line out of the window.
   const payload: BackupPayload = {
     version: 1,
     createdAt: new Date().toISOString(),
     app: app.getVersion(),
-    data: readJson('opsmaxx-data.json'),
+    data: loadData(),
     secrets: exportSecrets(),
     vault: readJson('opsmaxx-vault.json'),
     workspaceLocks: readJson('opsmaxx-wslocks.json'),
@@ -302,7 +314,11 @@ export async function backupImport(
   try {
     const summary = summarise(payload)
 
-    if (payload.data !== null) writeJson('opsmaxx-data.json', payload.data)
+    // saveData, not writeJson: the bundle carries this one as a plain object
+    // (see buildBundle) and it has to be sealed again here, under the key of
+    // whichever machine is being restored onto. writeJson would land the
+    // estate on disk in the clear and nothing afterwards would notice.
+    if (payload.data !== null) saveData(payload.data)
     if (payload.vault !== null) writeJson('opsmaxx-vault.json', payload.vault)
     if (payload.workspaceLocks !== null) writeJson('opsmaxx-wslocks.json', payload.workspaceLocks)
     if (payload.knownHosts !== null) writeJson('opsmaxx-known-hosts.json', payload.knownHosts)
@@ -401,6 +417,13 @@ export const TARGETS_FILE = 'opsmaxx-backup-targets.json'
 // recursively; the wipe walks both.
 export const ALL_DATA_FILES = [
   'opsmaxx-data.json',
+  // `saveData` copies the live file here before every write, so this is a
+  // complete second copy of the estate — every hostname, port, username and
+  // folder. It was missing from this list, and the guard test below could not
+  // see it: that test scans for the literal `getPath('userData'), '<name>'`
+  // pattern, and store.ts builds this name as `${FILE}.bak`. So "delete all
+  // data" removed the server list and left the server list behind.
+  'opsmaxx-data.json.bak',
   // Which addy relay this machine joined: the address, the account id, the
   // epoch and the TLS pin. No key material — that is in the keychain under the
   // machine-only prefix. It is still a record of what this person belongs to,
