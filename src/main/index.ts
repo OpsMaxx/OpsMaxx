@@ -4839,7 +4839,15 @@ export function updateClipboardShortcuts(wanted: boolean): void {
 
 /** Re-evaluate both conditions and hold or release accordingly. */
 export function refreshClipboardShortcuts(): void {
-  updateClipboardShortcuts(clipboardShortcutsWanted && addySession.attached)
+  const hold = clipboardShortcutsWanted && addySession.attached
+  updateClipboardShortcuts(hold)
+  // AND THE OTHER HALF OF THE FEATURE. A device that can send but never
+  // answers a dial makes the direct path unreachable in both directions —
+  // every clipboard silently takes the mailbox and nothing says so. Tied to
+  // the same switch because it is the same long-poll cost: a connection held
+  // open for a feature nobody turned on buys nothing.
+  if (hold) void addySession.startAnswering()
+  else addySession.stopAnswering()
 }
 
 // The renderer owns the preference — it travels with the rest of the user's

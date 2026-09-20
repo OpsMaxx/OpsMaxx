@@ -20,8 +20,13 @@ import type { AddyStatusSnapshot, ConflictCopy, SyncedCollection } from '../../.
 import { forgetSyncState, syncOnce, type SyncResult } from './sync'
 import { addyTarget } from './target'
 import type { BackupTarget } from '../backupTargets'
-import { receiveClipboard, sendClipboard, type ClipboardDeps } from './clipboard'
-import { closeSession, dialPeer } from './p2p'
+import {
+  applySealedClipboard,
+  receiveClipboard,
+  sendClipboard,
+  type ClipboardDeps
+} from './clipboard'
+import { answerPeer, closeSession, dialPeer } from './p2p'
 
 /**
  * The live connection to an addy account: one sidecar, one relay client.
@@ -155,6 +160,7 @@ class AddySession {
     // sidecar fails every collection, and the failure would be recorded as the
     // account's state rather than as a shutdown.
     this.stopSync()
+    this.stopAnswering()
     await this.cancelPairing()
     const rtc = this.rtc
     this.rtc = null
@@ -721,6 +727,104 @@ class AddySession {
     }
   }
 
+  /**
+   * ICE servers, as the relay describes them. Asked per attempt.
+   *
+   * A device behind a symmetric NAT needs relay credentials to have any
+   * chance; one on the same LAN does not need them and pays nothing for
+   * asking. No credentials is a degraded mode rather than a failure — host and
+   * server-reflexive candidates only — so this never throws.
+   */
+  private async iceServers(): Promise<unknown[]> {
+    try {
+      const resp = await this.relay!.request('GET', '/v1/turn')
+      if (!resp.ok) return []
+      const turn = (await resp.json()) as {
+        mode: string
+        url?: string
+        credential?: { username: string; password: string; url: string }
+      }
+      if (turn.mode === 'embedded' && turn.credential) {
+        return [
+          {
+            urls: [turn.credential.url],
+            username: turn.credential.username,
+            credential: turn.credential.password
+          }
+        ]
+      }
+      if (turn.mode === 'external' && turn.url) return [{ urls: [turn.url] }]
+      return []
+    } catch {
+      return []
+    }
+  }
+
+  /** Running while this device is listening for direct dials. */
+  private answering = false
+  private answerStop: AbortController | null = null
+
+  /**
+   * LISTEN FOR A DIRECT DIAL, which nothing did.
+   *
+   * `answerPeer` was written and called from nowhere, so no device ever
+   * answered an offer — which means `tryDirect` could never succeed in either
+   * direction and every clipboard, on every network, silently took the
+   * mailbox. The direct path was not "rarely available"; it was unreachable,
+   * and the fallback hid that completely.
+   *
+   * It runs only while the clipboard shortcuts are held, and that is the
+   * decision rather than a simplification: this is a long poll against the
+   * relay held open for the life of the session, and holding a connection
+   * open for a feature the user has not switched on is a cost with no benefit
+   * attached to it.
+   */
+  async startAnswering(): Promise<void> {
+    if (this.answering || !this.attached) return
+    const rtc = await this.ensureRtc()
+    if (!rtc) return
+    this.answering = true
+    const stop = new AbortController()
+    this.answerStop = stop
+
+    void (async () => {
+      while (!stop.signal.aborted && this.attached) {
+        try {
+          const deps = {
+            rtc,
+            relay: this.relay!,
+            iceServers: await this.iceServers(),
+            selfDeviceHex: (await this.addyd!.send<{ devicePub: string }>('whoami')).devicePub
+          }
+          const session = await answerPeer(deps)
+          if (!session) continue
+          try {
+            // One message per connection, matching what the dialling side
+            // sends: it closes as soon as the payload is away.
+            const got = await rtc.send<{ payload: string | null }>('rtcReceive', {
+              sessionId: session,
+              waitMs: 10_000
+            })
+            if (got.payload) await applySealedClipboard(this.clipboardDeps(), got.payload)
+          } finally {
+            await closeSession(deps, session)
+          }
+        } catch {
+          // A failed answer is the ordinary case — two symmetric NATs, a peer
+          // that gave up, a relay blip. Waiting before the next attempt is
+          // what stops a broken relay becoming a hot loop.
+          await new Promise((r) => setTimeout(r, 2_000))
+        }
+      }
+      this.answering = false
+    })()
+  }
+
+  stopAnswering(): void {
+    this.answerStop?.abort()
+    this.answerStop = null
+  }
+
   private clipboardDeps(): ClipboardDeps {
     const base = this.deps()
     return {
@@ -730,35 +834,10 @@ class AddySession {
         const rtc = await this.ensureRtc()
         if (!rtc || !this.account || !this.addyd) return false
 
-        // What the relay says about relaying, asked once per attempt. A device
-        // behind a symmetric NAT needs TURN credentials to have any chance;
-        // one on the same LAN does not need them and pays nothing for asking.
-        let iceServers: unknown[] = []
-        try {
-          const resp = await this.relay!.request('GET', '/v1/turn')
-          if (resp.ok) {
-            const turn = (await resp.json()) as {
-              mode: string
-              url?: string
-              credential?: { username: string; password: string; url: string }
-            }
-            if (turn.mode === 'embedded' && turn.credential) {
-              iceServers = [
-                {
-                  urls: [turn.credential.url],
-                  username: turn.credential.username,
-                  credential: turn.credential.password
-                }
-              ]
-            } else if (turn.mode === 'external' && turn.url) {
-              iceServers = [{ urls: [turn.url] }]
-            }
-          }
-        } catch {
-          // No relay credentials means host and server-reflexive candidates
-          // only, which is enough on a shared network and not enough behind
-          // two symmetric NATs. Worth trying rather than refusing.
-        }
+        // What the relay says about relaying, asked once per attempt. One
+        // implementation, shared with the answering side — two copies of "how
+        // do I reach a relay" is two places to get it differently.
+        const iceServers = await this.iceServers()
 
         const { devicePub } = await this.addyd.send<{ devicePub: string }>('whoami')
         const deps = { rtc, relay: this.relay!, iceServers, selfDeviceHex: devicePub }

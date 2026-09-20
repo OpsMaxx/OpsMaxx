@@ -155,10 +155,33 @@ export async function receiveClipboard(
   if (clips.length === 0) return { applied: false, reason: 'Nothing has been sent to this device.' }
 
   const newest = clips[clips.length - 1]
+  await applySealedClipboard(deps, newest.sealed)
+
+  // Acknowledge everything, not just the one applied. The rest are older
+  // clipboard entries nobody is going to want, and leaving them means the next
+  // receive has the same backlog.
+  await deps.relay.request('POST', '/v1/mail/ack', { ids: clips.map((m) => m.id) })
+
+  return { applied: true, from: newest.fromDevice }
+}
+
+/**
+ * Opens one sealed clipboard payload and puts it on this machine's clipboard.
+ *
+ * SHARED BY BOTH PATHS ON PURPOSE. A payload that arrived over a direct
+ * connection and one that came out of the mailbox are the same bytes sealed
+ * the same way, and a second copy of this is a second place the echo flag can
+ * be armed in the wrong order — which is a loop between two devices that each
+ * re-send what the other just pasted.
+ */
+export async function applySealedClipboard(
+  deps: ClipboardDeps,
+  sealed: string
+): Promise<ClipboardIdentity> {
   const opened = await deps.addyd.send<{ payload: string }>('open', {
     collection: `${CLIPBOARD_KIND}:${await selfDevice(deps)}`,
     epoch: deps.epoch(),
-    sealed: newest.sealed,
+    sealed,
     knownSchema: 1,
     // Clipboard entries are not a document with a history, so there is no
     // rollback to enforce: every one is newer than the last by construction
@@ -173,13 +196,7 @@ export async function receiveClipboard(
   // what the other just pasted.
   echo.arm(payload.identity.hash)
   clipboard.writeText(payload.text)
-
-  // Acknowledge everything, not just the one applied. The rest are older
-  // clipboard entries nobody is going to want, and leaving them means the next
-  // receive has the same backlog.
-  await deps.relay.request('POST', '/v1/mail/ack', { ids: clips.map((m) => m.id) })
-
-  return { applied: true, from: newest.fromDevice }
+  return payload.identity
 }
 
 /** Whether a clipboard read is our own write coming back. Exposed so a future

@@ -181,3 +181,42 @@ describe('the relay is a backup destination you can actually choose', () => {
     expect(PANEL).toMatch(/kind === 'addy'/)
   })
 })
+
+/**
+ * The direct path was unreachable in both directions.
+ *
+ * `dialPeer` was wired and `answerPeer` was called from nowhere. A WebRTC
+ * connection needs an answerer, so with nobody answering, `tryDirect` could
+ * never succeed on any network — every clipboard silently took the mailbox
+ * and the fallback made that invisible. The feature was not "rarely
+ * available"; it did not work at all.
+ *
+ * The fallback is what made this survivable and what made it undetectable,
+ * which is the general lesson: a graceful degradation with no way to tell it
+ * apart from the good path will hide a dead feature indefinitely.
+ */
+describe('the direct path has both halves', () => {
+  it('something answers a dial, not just dials', () => {
+    expect(SESSION).toMatch(/answerPeer\(/)
+    expect(SESSION).toMatch(/dialPeer\(/)
+  })
+
+  it('a directly delivered payload has somewhere to go', () => {
+    // `receiveClipboard` reads the mailbox. A payload that arrived over a
+    // DataChannel would otherwise be opened into a variable nobody reads.
+    const CLIP = read('src/main/services/addy/clipboard.ts')
+    expect(CLIP).toMatch(/export async function applySealedClipboard/)
+    expect(SESSION).toMatch(/applySealedClipboard\(/)
+  })
+
+  it('listens only while the feature is switched on', () => {
+    // It is a long poll held open for the life of the session. Holding a
+    // connection for a feature nobody turned on buys nothing.
+    expect(MAIN).toMatch(/startAnswering\(\)/)
+    expect(MAIN).toMatch(/stopAnswering\(\)/)
+  })
+
+  it('stops when the session detaches', () => {
+    expect(SESSION).toMatch(/this\.stopAnswering\(\)/)
+  })
+})
