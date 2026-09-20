@@ -1,6 +1,6 @@
 import { app } from 'electron'
-import { join } from 'node:path'
-import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { atomicWriteFileSync } from '../atomicWrite'
 
 /**
@@ -74,6 +74,13 @@ export interface AddyEnrolment {
 
 export function saveEnrolment(e: Omit<AddyEnrolment, 'at'> & { at?: string }): void {
   const existing = loadEnrolment()
+  // THE DIRECTORY IS NOT A GIVEN AT EVERY CALL SITE ANY MORE. `userData`
+  // exists by the time a packaged app runs, which is why this was safe for as
+  // long as the only caller was a successful login. It is now also written on
+  // the path where a login FAILED — the record that makes that state
+  // recoverable — and a write that throws there would put the failure back
+  // exactly where it was, with nothing on disk and no way to resume.
+  mkdirSync(dirname(FILE()), { recursive: true })
   atomicWriteFileSync(
     FILE(),
     JSON.stringify(
