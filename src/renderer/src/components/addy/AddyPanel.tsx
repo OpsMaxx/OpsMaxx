@@ -465,7 +465,7 @@ function LeaveRow({
       .then((r) => {
         toast(
           r.left ? 'This device has left the account.' : 'This device was not on an account.',
-          'success'
+          'ok'
         )
         setOpen(false)
       })
