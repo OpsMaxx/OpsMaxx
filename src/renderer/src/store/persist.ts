@@ -139,10 +139,23 @@ async function hydrate(): Promise<void> {
   // memory and would otherwise run a job detached on the strength of a default
   // the user turned off last week.
   void window.opsmaxx?.jobs.setDetached(useApp.getState().settings.jobsDetached !== false)
+  // Main holds no copy of this across restarts, so it has to be told at
+  // startup as well as on change — otherwise somebody who turned the
+  // shortcuts on last week has them silently off on every subsequent launch.
+  // `=== true` rather than `!== false`: the default is OFF, because these are
+  // taken from every application on the machine.
+  void window.opsmaxx?.addy?.setClipboardShortcuts?.(
+    useApp.getState().settings.addyClipboardShortcuts === true
+  )
 
   useApp.subscribe((state, prev) => {
     if (state.settings.jobsDetached !== prev.settings.jobsDetached) {
       void window.opsmaxx?.jobs.setDetached(state.settings.jobsDetached !== false)
+    }
+    if (state.settings.addyClipboardShortcuts !== prev.settings.addyClipboardShortcuts) {
+      void window.opsmaxx?.addy?.setClipboardShortcuts?.(
+        state.settings.addyClipboardShortcuts === true
+      )
     }
     if (state.settings.sshMasterIdleMinutes !== prev.settings.sshMasterIdleMinutes) {
       void window.opsmaxx?.ssh.setPoolIdle(state.settings.sshMasterIdleMinutes)

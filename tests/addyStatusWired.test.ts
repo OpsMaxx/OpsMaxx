@@ -84,3 +84,55 @@ describe('the status the panel asks for is reachable from the panel', () => {
     expect(STATUS).toMatch(/from '\.\.\/\.\.\/\.\.\/\.\.\/shared\/addy'/)
   })
 })
+
+/**
+ * The clipboard, which was entirely dead.
+ *
+ * `updateClipboardShortcuts` was written, correct, and called from NOWHERE —
+ * so the two global shortcuts were never registered and the only way to send a
+ * clipboard was a key combination nothing listened for. The handlers, the
+ * sealing, the mailbox, the echo suppression and the p2p fallback all worked;
+ * the feature did not exist.
+ *
+ * That is the sixth time this exact hole has appeared in this codebase. It is
+ * not a typo class and it is not caught by a typechecker: a function nobody
+ * calls compiles perfectly and its unit tests pass.
+ */
+describe('the clipboard shortcuts are actually registered', () => {
+  it('something asks for them', () => {
+    // The bug, precisely: the only mention of this function in the entire
+    // repository was its own declaration.
+    const mentions = MAIN.match(/updateClipboardShortcuts\(/g) ?? []
+    expect(
+      mentions.length,
+      'updateClipboardShortcuts is declared and never called — the shortcuts are never registered'
+    ).toBeGreaterThan(1)
+  })
+
+  it('is driven by a setting the user can see, not by a default', () => {
+    // A global shortcut is taken from every application on the machine, and
+    // Cmd/Ctrl+Shift+C is DevTools in every browser. Holding it for somebody
+    // who never asked is worse than not shipping the feature.
+    expect(MAIN).toMatch(/ipcMain\.handle\(\s*'addy:setClipboardShortcuts'/)
+    expect(PRELOAD).toMatch(/invoke\('addy:setClipboardShortcuts'/)
+    const PERSIST = read('src/renderer/src/store/persist.ts')
+    expect(PERSIST).toMatch(/setClipboardShortcuts/)
+    // At startup AND on change: main keeps no copy across restarts, so a
+    // startup push is what stops the setting being silently off every launch.
+    expect((PERSIST.match(/setClipboardShortcuts/g) ?? []).length).toBeGreaterThan(1)
+  })
+
+  it('is released when this device is not on an account', () => {
+    // A shortcut whose handler can only answer "this device is not attached"
+    // teaches the user the feature is broken.
+    expect(MAIN).toMatch(/addySession\.attached/)
+    expect(MAIN).toMatch(/refreshClipboardShortcuts/)
+  })
+
+  it('offers the switch on the panel, where the feature lives', () => {
+    // A setting nobody can find cannot be how you find the feature — the same
+    // argument the addy module's own registry entry makes about its nav entry.
+    const PANEL = read('src/renderer/src/components/addy/AddyPanel.tsx')
+    expect(PANEL).toMatch(/addyClipboardShortcuts/)
+  })
+})

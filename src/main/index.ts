@@ -4769,6 +4769,8 @@ const CLIPBOARD_SHORTCUTS = {
 } as const
 
 let shortcutsHeld = false
+/** What the USER asked for, independent of whether it can be honoured yet. */
+let clipboardShortcutsWanted = false
 
 function notifyClipboard(title: string, body: string): void {
   // A notification rather than a window: the user pressed a key in another
@@ -4776,6 +4778,24 @@ function notifyClipboard(title: string, body: string): void {
   if (Notification.isSupported()) new Notification({ title, body, silent: true }).show()
 }
 
+/**
+ * Hold the two global shortcuts, or let them go.
+ *
+ * TWO CONDITIONS, BOTH REQUIRED, and neither is optional:
+ *
+ *  - the user asked for them. A global shortcut is taken from every
+ *    application on the machine, and `CommandOrControl+Shift+C` is DevTools in
+ *    every browser. Taking that on an upgrade, from somebody who has never
+ *    heard of this feature, is the kind of thing that gets an app uninstalled.
+ *  - this device is on an account with somewhere to send to. A shortcut whose
+ *    handler can only ever answer "this device is not attached" teaches the
+ *    user the feature is broken, which is the conclusion the comment below
+ *    already warns about for a different cause.
+ *
+ * Called on the setting changing, on attach and on detach — so the pair is
+ * held exactly while both are true and released the moment either stops
+ * being.
+ */
 export function updateClipboardShortcuts(wanted: boolean): void {
   if (wanted === shortcutsHeld) return
   if (!wanted) {
@@ -4816,6 +4836,25 @@ export function updateClipboardShortcuts(wanted: boolean): void {
     console.warn('[addy] another application already holds:', taken.join(', '))
   }
 }
+
+/** Re-evaluate both conditions and hold or release accordingly. */
+export function refreshClipboardShortcuts(): void {
+  updateClipboardShortcuts(clipboardShortcutsWanted && addySession.attached)
+}
+
+// The renderer owns the preference — it travels with the rest of the user's
+// settings, including into a backup — and pushes it here at startup and on
+// every change, exactly like the jobs and vault timers above.
+ipcMain.handle('addy:setClipboardShortcuts', (_e, wanted: boolean) => {
+  clipboardShortcutsWanted = wanted === true
+  refreshClipboardShortcuts()
+  return shortcutsHeld
+})
+
+// And whenever the session's attachment changes. `watch` fires on every status
+// change, which is a superset of the moments that matter and costs a boolean
+// comparison.
+addySession.watch(() => refreshClipboardShortcuts())
 
 // ---- importing another password manager ----
 //

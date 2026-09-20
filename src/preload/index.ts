@@ -453,6 +453,11 @@ const api = {
      *  the Sync & devices panel renders; see shared/addy.ts for the shape and
      *  for why absence is a state rather than a zero. */
     status: (): Promise<AddyStatusSnapshot> => ipcRenderer.invoke('addy:status'),
+    /** Hold or release the two global clipboard shortcuts. Resolves with
+     *  whether they are held — which is false when this device is not on an
+     *  account yet, however the setting is set. */
+    setClipboardShortcuts: (wanted: boolean): Promise<boolean> =>
+      ipcRenderer.invoke('addy:setClipboardShortcuts', wanted),
     /** One sync pass, now. Resolves with what each collection did, or `null`
      *  when a pass was already running or this device is not attached. */
     syncNow: (): Promise<unknown> => ipcRenderer.invoke('addy:syncNow'),

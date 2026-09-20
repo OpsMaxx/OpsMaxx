@@ -186,8 +186,57 @@ export function AddyPanel(): React.JSX.Element {
       <h3 className="ui-section-title addy-h">Devices</h3>
       <AddyDevices devices={status?.devices} supported={supported} />
 
+      {/* Offered only once there is somewhere to send to. On a one-device
+          account the shortcuts would be taken from every application on the
+          machine in exchange for nothing at all. */}
+      {status?.enrolled && <ClipboardShortcuts />}
+
       <AddyProblems status={status} />
     </PanelShell>
+  )
+}
+
+/**
+ * The clipboard shortcuts, and the honest cost of them at the switch.
+ *
+ * OFF until asked for. These are GLOBAL shortcuts — taken from every
+ * application on the machine, not just this one — and `Cmd/Ctrl+Shift+C` is
+ * DevTools in every browser. Turning that on for somebody who has never heard
+ * of the feature, on an upgrade, is how an app gets uninstalled.
+ *
+ * So the switch names what it takes, rather than saying "enable clipboard
+ * sync" and letting the user find out the next time they press the
+ * combination somewhere else.
+ */
+function ClipboardShortcuts(): React.JSX.Element {
+  const on = useApp((s) => s.settings.addyClipboardShortcuts === true)
+  const setSettings = useApp((s) => s.setSettings)
+
+  // The app's own switch row, same as the credential proxy's. A second
+  // grammar for "a setting with a title and a consequence" is how a screen
+  // starts reading as assembled out of parts.
+  return (
+    <div className="setting-row">
+      <div className="s-info">
+        <div className="s-title">Send and receive the clipboard with a keystroke</div>
+        <div className="s-desc">
+          <kbd>Cmd/Ctrl+Shift+C</kbd> sends what is on this clipboard to your other devices;{' '}
+          <kbd>Cmd/Ctrl+Shift+V</kbd> puts the newest thing sent to this one onto the clipboard.
+          Nothing is mirrored in the background — a clipboard that copied everything would send the
+          password you just copied to every machine you own.
+          <br />
+          These are taken from <strong>every application</strong> while OpsMaxx is running, and{' '}
+          <kbd>Cmd/Ctrl+Shift+C</kbd> is the developer tools in most browsers.
+        </div>
+      </div>
+      <span
+        className={clsx('switch', on && 'on')}
+        role="switch"
+        aria-checked={on ? 'true' : 'false'}
+        aria-label="Send and receive the clipboard with a keystroke"
+        onClick={() => setSettings({ addyClipboardShortcuts: !on })}
+      />
+    </div>
   )
 }
 

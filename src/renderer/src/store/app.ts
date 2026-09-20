@@ -135,6 +135,19 @@ export interface AppSettings {
    *  credential: the relay holds no key, and knowing its address buys an
    *  attacker the same nothing it buys anybody else. */
   addyRelayURL?: string
+  /**
+   * Hold the two global clipboard shortcuts.
+   *
+   * OFF by default, and that is the decision rather than an oversight. A
+   * global shortcut is taken from every application on the machine, and
+   * `Cmd/Ctrl+Shift+C` is DevTools in every browser — so switching this on for
+   * somebody who has never heard of the feature would break a key combination
+   * they use daily, on an upgrade, with no warning.
+   *
+   * Nothing is registered until this is true AND this device is on an account
+   * with somewhere to send to; see `refreshClipboardShortcuts` in main.
+   */
+  addyClipboardShortcuts?: boolean
   // Minutes of vault inactivity before it locks itself. 0 = never. A vault that
   // never locks makes every other protection on it optional, so the default is
   // deliberately short rather than off.
