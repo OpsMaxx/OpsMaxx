@@ -518,3 +518,65 @@ describe('object names that need escaping still authenticate', () => {
     expect(RELAY).toMatch(/encodeURIComponent\(name\)/)
   })
 })
+
+/**
+ * A revoked device has to find out, and then act.
+ *
+ * `revoke.ts` implements the wipe and tests it over 180 lines. It had ZERO
+ * production callers — and `selfListed`, the cryptographic answer it waits on,
+ * was computed in `refreshRoster` and read nowhere. Worse, `refreshRoster` was
+ * called from pairing, rotation, revocation and recovery, and from no path any
+ * ordinary launch takes.
+ *
+ * So the whole feature was: a stolen laptop is removed from the roster, is
+ * told nothing, and goes on syncing with the vault, the known hosts and the
+ * server list intact on its disk. The 180-line test file gave it the
+ * appearance of something that shipped.
+ */
+describe('a removed device wipes itself', () => {
+  it('something actually calls the wipe', () => {
+    expect(SESSION).toMatch(/runRevocationWipe\(/)
+    expect(SESSION).toMatch(/deleteAllData\(\)/)
+  })
+
+  it('reads the answer it is waiting on', () => {
+    // `selfListed` is a cryptographic result, not a flag: the verifier applies
+    // revocations as it walks the chain, so there is no field a forged entry
+    // could set to claim otherwise.
+    expect(SESSION).toMatch(/if \(!verified\.selfListed && this\.account\)/)
+  })
+
+  it('asks the question on every launch', () => {
+    // The gap that made all of the above unreachable. `resume` logged in and
+    // started syncing without ever fetching the roster.
+    const resume = SESSION.slice(SESSION.indexOf('async resume('))
+    const body = resume.slice(0, resume.indexOf('\n  /**', 10))
+    expect(body).toMatch(/refreshRoster\(\)/)
+  })
+
+  it('and keeps asking, for a machine that is never relaunched', () => {
+    // "The laptop is open on a desk somewhere" is the case removing a device
+    // is for.
+    const sync = SESSION.slice(SESSION.indexOf('async syncNow('))
+    const body = sync.slice(0, sync.indexOf('\n  /**', 10))
+    expect(body).toMatch(/refreshRoster\(\)/)
+  })
+
+  it('closes live sessions before deleting anything', () => {
+    // Deleting the vault out from under a running SSH session does not stop
+    // the session; it makes it carry on against files that are gone.
+    const wipe = SESSION.slice(SESSION.indexOf('private beginRevocationWipe('))
+    const body = wipe.slice(0, wipe.indexOf('\n  /**', 10))
+    expect(body.indexOf('closeSessions')).toBeLessThan(body.indexOf('wipe: ()'))
+    expect(body).toMatch(/this\.detach\(\)/)
+  })
+
+  it('blocks the window it is already running in', () => {
+    // A device removed while its window is open would otherwise look normal
+    // over a deleted estate until somebody relaunched it.
+    expect(MAIN).toMatch(/addySession\.onRevoked\(/)
+    expect(MAIN).toMatch(/webContents\.send\('addy:revoked'/)
+    expect(PRELOAD).toMatch(/ipcRenderer\.on\('addy:revoked'/)
+    expect(read('src/renderer/src/App.tsx')).toMatch(/onRevoked\?\.\(/)
+  })
+})

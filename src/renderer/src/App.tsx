@@ -107,10 +107,17 @@ export default function App(): React.JSX.Element {
       setRevocation(null)
       return
     }
+    // And listen, because a device can be removed while this window is open:
+    // main wipes it there and then, and without this the app carries on
+    // looking normal over a deleted estate until somebody relaunches — which
+    // for a machine left running on a desk is never.
+    const stop = bridge.onRevoked?.((t) => setRevocation(t as never))
+
     void bridge.revocation().then(
       (r) => setRevocation(r?.cleared ? null : r),
       () => setRevocation(null)
     )
+    return stop
   }, [])
   const theme = useApp((s) => s.theme)
   const modal = useApp((s) => s.modal)

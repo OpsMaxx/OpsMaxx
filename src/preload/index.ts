@@ -463,6 +463,13 @@ const api = {
      *  account yet, however the setting is set. */
     setClipboardShortcuts: (wanted: boolean): Promise<boolean> =>
       ipcRenderer.invoke('addy:setClipboardShortcuts', wanted),
+    /** Pushed when this device is removed from the account and wipes itself,
+     *  so the window blocks without waiting for a relaunch. */
+    onRevoked: (cb: (t: unknown) => void): (() => void) => {
+      const h = (_e: unknown, t: unknown): void => cb(t)
+      ipcRenderer.on('addy:revoked', h)
+      return () => ipcRenderer.removeListener('addy:revoked', h)
+    },
     /** Send one file to one device on this account. The bytes are sealed and
      *  go to the object store; the mailbox carries a pointer. */
     sendFile: (path: string, toDevice: string): Promise<{ id: string; name: string; size: number }> =>

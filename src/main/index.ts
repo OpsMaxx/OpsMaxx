@@ -4674,6 +4674,15 @@ ipcMain.handle('sshAgent:resolve', (_e, id: string, decision: AgentDecision) =>
 ipcMain.handle('sshAgent:pending', () => sshAgent.pending())
 
 ipcMain.handle('addy:revocation', () => revocationState())
+// PUSHED, not only polled at startup. A device removed while its window is
+// open wipes itself there and then; without this the app carries on looking
+// normal over a deleted estate until somebody relaunches it, which for a
+// machine left running is indefinitely.
+addySession.onRevoked((tombstone) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('addy:revoked', tombstone)
+  }
+})
 ipcMain.handle('addy:clearRevocation', () => clearRevocation())
 
 // Conflict copies. Empty rather than an error when this device is not attached

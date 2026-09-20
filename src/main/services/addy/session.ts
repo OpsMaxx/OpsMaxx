@@ -24,6 +24,8 @@ import {
 } from '../../../shared/addy'
 import { app } from 'electron'
 import { forgetSyncState, syncOnce, type SyncResult } from './sync'
+import { runRevocationWipe } from './revoke'
+import { deleteAllData } from '../backup'
 import { addyTarget } from './target'
 import type { BackupTarget } from '../backupTargets'
 import {
@@ -407,6 +409,21 @@ class AddySession {
         log
       )
       await this.loginAndRecord()
+      /**
+       * AND READ THE ROSTER, WHICH NOTHING DID.
+       *
+       * `refreshRoster` was called from pairing, rotation, revocation and
+       * recovery — every path except the one every launch takes. So a device
+       * that had been removed from the account resumed, logged in, started
+       * syncing and never once asked whether it was still a member. The wipe
+       * it was supposed to trigger could not fire because the question was
+       * never put.
+       *
+       * Not fatal if it fails: a laptop on a train is still attached and the
+       * panel should say which relay it belongs to. The next sync pass asks
+       * again.
+       */
+      await this.refreshRoster().catch(() => undefined)
       return { resumed: true, accountId: saved.accountId, baseURL: saved.baseURL }
     } catch (err) {
       // Attached-but-not-logged-in is a real and useful state: the sidecar is
@@ -742,9 +759,31 @@ class AddySession {
     chainEpoch = verified.epoch
 
     const me = await addyd.send<{ devicePub: string }>('whoami', {})
-    this.roster = verified.devices
-      .map((d) => d.pubSign)
-      .filter((id) => id !== me.devicePub)
+    this.roster = verified.devices.map((d) => d.pubSign).filter((id) => id !== me.devicePub)
+
+    /**
+     * THE REVOCATION SIGNAL, ACTED ON.
+     *
+     * `revoke.ts` implements the wipe, tests it over 180 lines, and had ZERO
+     * production callers — while this very field, the one it waits on, was
+     * computed here and read nowhere. So a stolen laptop was removed from the
+     * roster, told nothing, and went on syncing: full vault, known hosts,
+     * servers and env still on disk, still current.
+     *
+     * Checked here because this is the only place that verifies a chain, and
+     * `selfListed` is a cryptographic answer rather than a flag — the verifier
+     * applies revocations as it walks, so there is no field a forged entry
+     * could set to claim otherwise.
+     *
+     * NOT awaited: the wipe closes live sessions first and that can take a
+     * moment, and nothing good comes of holding a roster read open for it.
+     * The tombstone is written before the first file goes, so a crash midway
+     * still leaves the device blocked on its next launch.
+     */
+    if (!verified.selfListed && this.account) {
+      this.beginRevocationWipe(me.devicePub)
+    }
+
     const roster: AddyRoster = {
       devices: verified.devices,
       stillListed: verified.selfListed,
@@ -1046,6 +1085,10 @@ class AddySession {
       // timer would be a second schedule to reason about.
       await this.collectFiles().catch(() => undefined)
       sweepQuarantine()
+      // AND THE ROSTER, every pass. A machine that is left running for a week
+      // would otherwise never ask again after launch — and "the laptop is
+      // open on a desk somewhere" is the case removing a device is for.
+      await this.refreshRoster().catch(() => undefined)
       return result
     } finally {
       this.syncing = false
@@ -1089,6 +1132,62 @@ class AddySession {
   async resyncEverything(): Promise<SyncResult | null> {
     forgetSyncState()
     return this.syncNow()
+  }
+
+  /** True while a wipe is running, so a second roster read does not start
+   *  another one on top of it. */
+  private wiping = false
+  private revokedCb: ((t: unknown) => void) | null = null
+
+  /** Told when this device has been removed and wiped, so the window can put
+   *  the blocking screen up without waiting for a relaunch. */
+  onRevoked(cb: (t: unknown) => void): void {
+    this.revokedCb = cb
+  }
+
+  /**
+   * This device has been removed from the account. Take it apart.
+   *
+   * Everything OpsMaxx stores here goes: the vault, the credentials, the
+   * known hosts, the server list. The tombstone is written FIRST and survives
+   * the wipe, which is what makes the blocking screen appear on the next
+   * launch even if the machine is pulled mid-delete.
+   *
+   * What this is NOT is a remote kill switch, and `revoke.ts` says so at
+   * length: it needs this device to reach the relay and read the chain. A
+   * machine kept offline never hears. That is exactly why removing a device
+   * and changing the account key are two separate operations.
+   */
+  private beginRevocationWipe(deviceId: string): void {
+    if (this.wiping) return
+    const account = this.account
+    if (!account) return
+    this.wiping = true
+
+    void runRevocationWipe(
+      { accountId: account.accountId, deviceId, at: new Date().toISOString() },
+      {
+        closeSessions: async () => {
+          // Before a single file goes. Deleting the vault out from under a
+          // live SSH session does not stop the session — it makes it carry on
+          // against files that are gone.
+          this.stopSync()
+          this.stopAnswering()
+          await this.detach().catch(() => undefined)
+        },
+        wipe: () => deleteAllData()
+      }
+    )
+      .then(
+        (tombstone) => {
+          this.revokedCb?.(tombstone)
+          this.announce()
+        },
+        () => undefined
+      )
+      .finally(() => {
+        this.wiping = false
+      })
   }
 
   /** Pushed to the renderer whenever any of the above changes, so the panel
