@@ -53,6 +53,13 @@ credential until you unlock it. That happens when you quit, when you press **Loc
 and when your machine **sleeps**. Locking the screen secures the vault rather than
 locking it, because a screensaver is you stepping away, not the machine going off.
 
+One exception, and it is one you turn on yourself. If you enable **Touch ID unlock**
+(macOS only) and choose to keep it across restarts, a copy of the vault's derived key is
+kept on disk, wrapped by the OS keychain, so your fingerprint can open the vault without
+your master password. Locked still means nothing in this process can resolve a credential;
+it stops meaning that the key exists nowhere but your memory. The session-only setting,
+which is the default, keeps that copy in memory and loses it when the app quits.
+
 This split is deliberate and the reasoning is in [SECURITY.md](../SECURITY.md): the
 thing an idle timer can actually protect is the decrypted entries in the window, and
 stopping a monitoring tool from monitoring bought nothing for that.

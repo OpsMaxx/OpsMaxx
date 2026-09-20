@@ -46,9 +46,15 @@ right-click paste in the PuTTY style. It also imports the servers you already ha
 ### Is it an open-source Termius alternative?
 
 Yes. The functional difference is sync: Termius syncs your servers through its cloud on a
-paid plan, while OpsMaxx keeps everything local and moves it between machines with a
-passphrase-encrypted backup file. Nothing about your servers is uploaded anywhere; the one
-connection OpsMaxx makes on its own is the update check, described below.
+paid plan. OpsMaxx keeps everything local by default and moves it between machines with a
+passphrase-encrypted backup file. It makes one connection on its own, the update check,
+described below.
+
+If you set up a relay of your own, OpsMaxx will also sync between your devices through it.
+That is off until you configure it, the relay is a server you run, and everything it
+carries is encrypted before it leaves the machine — the relay holds no key and cannot read
+any of it. It is still a machine your data passes through, so it is worth saying rather
+than leaving "nothing is uploaded anywhere" to cover it.
 
 ### Does OpsMaxx support jump hosts and bastions?
 

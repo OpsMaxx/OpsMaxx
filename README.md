@@ -121,9 +121,9 @@ Already keep hosts in `~/.ssh/config`? Import them instead of retyping — `Prox
 ## Security
 
 
-- Credentials are stored with **Electron `safeStorage`**, backed by DPAPI on Windows, Keychain on macOS and libsecret on Linux — never in plaintext
-- The vault and backups use **AES-256-GCM** with **scrypt** key derivation
-- Workspace passwords are stored as **scrypt verifiers** compared in constant time
+- Credentials **and your server list** are sealed with **Electron `safeStorage`**, backed by DPAPI on Windows, Keychain on macOS and libsecret on Linux. Not everything the app writes is sealed — the MCP bridge config holds a live token in plaintext so the agent can read it, and captured request bodies and files opened in an external editor are plaintext by nature. [SECURITY.md](SECURITY.md) lists every file and says which is which
+- The vault and backups use **AES-256-GCM** with **scrypt** key derivation, N=32768 r=8 p=3; a file records the parameters it was written with and is re-sealed at the current ones when next opened
+- Workspace passwords are stored as **scrypt verifiers** compared in constant time. They gate the UI — they do not encrypt that workspace's servers separately
 - **Host keys are verified**: unknown servers prompt with a SHA-256 fingerprint, and a changed key is refused outright
 - **Remote desktop certificates are pinned** the same way — RDP servers are self-signed by default, so a first sighting asks and a change is refused
 - Shell input is **parsed, never evaluated** — no `eval` on anything you type
