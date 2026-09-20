@@ -410,3 +410,142 @@
   margin: 14px 0;
   font-size: 13px;
 }
+
+/* ---------------------------------------------------------------------------
+   Sync & devices — the panel behind the rail button.
+
+   It borrows rather than invents: the KPI band is `.kpi-band` from the fleet
+   overview, the table is `.mini-table`, the badges are `.chip`. What is new
+   here is the journey, which nothing else in the app has a shape for — and it
+   is a list with a rail down the left rather than anything animated, because
+   the one thing it has to do is say where you are while you are reading it.
+   --------------------------------------------------------------------------- */
+
+/* A limitation, not a failure. `.addy-problem` is bordered in danger and means
+   something broke; this means the build cannot answer the question, which is a
+   different sentence and must not wear the same colour. */
+.addy-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 0 0 var(--sp-3);
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  font-size: var(--fs-body);
+}
+
+.addy-note > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--warn);
+}
+
+.addy-h {
+  margin: var(--sp-4) 0 var(--sp-2);
+}
+
+/* The journey. Numbered by the rail, not by digits: the reader is placed by
+   which row is filled in, and a column of "1 2 3 4 5" only competes with it. */
+.addy-journey {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.addy-step {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 10px;
+  padding: 0 0 var(--sp-3);
+  position: relative;
+}
+
+/* The line between one mark and the next. On the item rather than between
+   them, so the last step ends the rail instead of trailing off it. */
+.addy-step:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  top: 20px;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+}
+
+.addy-step-mark {
+  display: grid;
+  place-items: center;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text-faint);
+  z-index: 1;
+}
+
+.addy-step.done .addy-step-mark {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+/* The one row a person is meant to act on. A ring rather than a fill: the mark
+   is 21px and a filled disc at that size reads as a state, not as a place. */
+.addy-step.now .addy-step-mark {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.addy-step.unknown .addy-step-mark {
+  border-style: dashed;
+}
+
+.addy-step-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: var(--fs-subtitle);
+  font-weight: var(--fw-subtitle);
+  color: var(--text);
+  min-height: 21px;
+}
+
+.addy-step.todo .addy-step-title,
+.addy-step.unknown .addy-step-title {
+  color: var(--text-muted);
+}
+
+.addy-step-detail {
+  margin-top: 2px;
+}
+
+.addy-step.now .addy-step-state {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.addy-setup-slot {
+  padding-top: var(--sp-1);
+}
+
+.addy-devices td .chip {
+  margin-left: 6px;
+}
+
+.addy-devices td > svg {
+  vertical-align: -2px;
+  color: var(--text-faint);
+}
+
+/* Still listed, and visibly finished with. Dropping a revoked device would
+   remove the only evidence on this machine that a revocation happened. */
+.addy-device-revoked td {
+  color: var(--text-faint);
+}
+
+.addy-problems {
+  margin-top: var(--sp-3);
+}

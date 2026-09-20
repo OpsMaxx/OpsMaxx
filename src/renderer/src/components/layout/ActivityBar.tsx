@@ -13,7 +13,8 @@ import {
   Container,
   Ship,
   GitBranch,
-  SquareActivity
+  SquareActivity,
+  Satellite
 } from 'lucide-react'
 import { useApp } from '../../store/app'
 import { clsx } from '../../lib/format'
@@ -86,7 +87,12 @@ const PROMOTED_ICONS: Record<string, React.ReactNode> = {
   cicd: <GitBranch size={20} />,
   // Deliberately not another waveform. `Activity` is Monitoring's icon and this
   // button's whole argument is that local processes are NOT that.
-  processes: <SquareActivity size={20} />
+  processes: <SquareActivity size={20} />,
+  // A dish, not a cloud and not two arrows in a circle. The relay is a thing
+  // the user runs somewhere and points their machines at, which is what the
+  // silhouette says; a cloud would say the opposite about where the data is,
+  // and a refresh glyph is what every sync button in every app already wears.
+  addy: <Satellite size={20} />
 }
 
 /**
@@ -103,14 +109,20 @@ const PROMOTED_RAIL: Record<string, string> = {
   // The registry calls it "Local processes", which is the right name in a list
   // of twenty modules and one word too many under an icon. The distinction it
   // is drawing against Monitoring lives in the tooltip.
-  processes: 'Processes'
+  processes: 'Processes',
+  // "Sync" rather than "Devices", which is the other half of the registry
+  // label: in this app a "connection" and a "server" are already estate
+  // machines, and a rail button called Devices beside them would read as a
+  // third word for the same thing. Nothing else here says Sync.
+  addy: 'Sync'
 }
 
 const PROMOTED_TITLES: Record<string, string> = {
   docker: 'Docker — containers, compose projects and images',
   kubernetes: 'Kubernetes — clusters, pods and workloads',
   cicd: 'CI/CD — pipelines and run history',
-  processes: 'Local processes — programs running on this machine'
+  processes: 'Local processes — programs running on this machine',
+  addy: 'Sync & devices — your own machines, and what has reached them'
 }
 
 const items = ACTIVITY_ITEMS

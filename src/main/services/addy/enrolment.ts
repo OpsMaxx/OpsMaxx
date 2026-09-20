@@ -31,6 +31,18 @@ export interface AddyEnrolment {
   baseURL: string
   accountId: string
   epoch: number
+  /**
+   * The two public keys a roster is verified against.
+   *
+   * FROM THE CLIENT, NEVER FROM THE SERVER. The sidecar's own comment calls
+   * that "the single most important sentence in this file": a chain verified
+   * against a key the relay supplied is not verified at all. They are recorded
+   * at mint time because that is the only moment they are known from a source
+   * that is not the relay, and without them this device can never check its
+   * own roster again.
+   */
+  rootSignPub: string
+  epoch1SignPub: string
   /** SHA-256 of the relay's TLS SubjectPublicKeyInfo, hex — the pin the login
    *  signature is bound to. Kept so a change can be noticed rather than
    *  silently accepted. */

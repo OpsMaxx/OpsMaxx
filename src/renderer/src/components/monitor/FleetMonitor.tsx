@@ -35,6 +35,7 @@ import { CronPanel } from './CronPanel'
 import { ServicesPanel } from './ServicesPanel'
 import { RulesPanel } from './RulesPanel'
 import { ChangeLogPanel } from './ChangeLogPanel'
+import { AddyPanel } from '../addy/AddyPanel'
 import {
   isOperateModule,
   isPromotedModule,
@@ -818,6 +819,16 @@ export function FleetMonitor(): React.JSX.Element {
               like every other module -- the panel renders what it is told it
               may, and does not read the registry itself. */}
           <CicdPanel canTrigger={moduleEnabled(modules, 'cicdTrigger')} />
+        </div>
+      )}
+      {/* No `servers` prop, for the same reason ProcessesPanel has none and a
+          stronger one: this panel is about the user's OWN machines and the
+          account they share, and there is no estate host anywhere on it. It is
+          mounted here because a promoted module is still a `monitorTab` in this
+          one tree — see PROMOTED_MODULE_IDS. */}
+      {moduleEnabled(modules, 'addy') && (
+        <div style={show('addy')}>
+          <AddyPanel />
         </div>
       )}
 

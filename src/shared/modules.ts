@@ -40,6 +40,7 @@ export type ModuleId =
   | 'processes'
   | 'cicd'
   | 'cicdTrigger'
+  | 'addy'
 
 /**
  * Which of the two destinations a module belongs to.
@@ -493,6 +494,29 @@ export const MODULES: ModuleDef[] = [
     // it never execs, never applies and never deletes, so the worst an unwanted
     // one does is occupy a tab.
     defaultEnabled: true
+  },
+  {
+    id: 'addy',
+    // `read`, and the contract on ModuleSurface is trivially satisfied: this
+    // module never opens a connection to a server at all. What it reads is this
+    // app's own account on a relay.
+    surface: 'read',
+    label: 'Sync & devices',
+    detail:
+      'Your own machines, and what has reached them. OpsMaxx can carry servers, workspaces, tunnels and the vault between your devices through an addy relay you run yourself — every object sealed before it leaves, and the relay holding no key. This panel is the readout and the way in: which relay this device is enrolled on, which devices are on the account, when each was last seen, and when anything last synced. It reads only, and it touches no server in the estate.',
+    // ON for a fresh install, and the argument is discoverability rather than
+    // appetite. The panel is a READOUT plus the existing setup flow: it mints
+    // no account, joins nothing and sends nothing anywhere until a person
+    // presses something. Shipping it off would repeat the exact defect it was
+    // built to fix -- the feature had no nav entry at all and its only door was
+    // three headings down the Security page of Settings, so the people who
+    // needed it could not find it. A switch nobody can find cannot be the way
+    // you find the feature.
+    //
+    // An EXISTING install still gets it off, as every new module does. See
+    // backfillModules: an upgrade is not consent, and Settings > Modules is
+    // where that install turns it on.
+    defaultEnabled: true
   }
 ]
 
@@ -537,12 +561,12 @@ export function modulesOnSurface(surface: ModuleSurface): ModuleDef[] {
  * Read modules that get their own button in the activity bar.
  *
  * ---------------------------------------------------------------------------
- * WHY THESE FOUR, AND WHY NOT BY SIZE
+ * WHY THESE FIVE, AND WHY NOT BY SIZE
  * ---------------------------------------------------------------------------
  *
  * Monitoring is generated from `modulesOnSurface('read')` with a ceiling of six
  * module slots, so the seventh enabled module onwards lands behind `More`. Eight
- * read modules ship on, which put Docker and Kubernetes — both
+ * read modules shipped on, which put Docker and Kubernetes — both
  * `defaultEnabled: true`, and two of the largest subsystems here — inside a
  * dropdown on a default install.
  *
@@ -560,7 +584,7 @@ export function modulesOnSurface(surface: ModuleSurface): ModuleDef[] {
  * capacity is when they fill up, cron is what they run, logTail is what they
  * log. One subject, many facts — which is a real destination, and stays one.
  *
- * These four are different subjects wearing a Monitoring tab:
+ * These five are different subjects wearing a Monitoring tab:
  *
  *  - `docker` is about CONTAINERS. A container is not a server, and the panel
  *    carries compose projects, disk reclaim, image scanning, health logs and an
@@ -571,6 +595,14 @@ export function modulesOnSurface(surface: ModuleSurface): ModuleDef[] {
  *    the only module whose data does not come from the estate at all.
  *  - `processes` is about PROGRAMS ON THIS MACHINE. See below; it is the one
  *    that was already a known bug.
+ *
+ *  - `addy` is about THE USER'S OWN DEVICES. Not one estate host appears on
+ *    it: the rows are the laptops and desktops this person runs OpsMaxx on,
+ *    and the numbers are about an account on a relay rather than about
+ *    anything being administered. It also fails the "another fact about the
+ *    estate" test in the other direction -- a person opens it when something
+ *    has not arrived on the machine in front of them, which is not a question
+ *    about the fleet at all.
  *
  * `processes` is the clearest case and the argument is not ours. The local
  * machine's card used to sit on the fleet overview and was REMOVED, because it
@@ -608,7 +640,8 @@ export const PROMOTED_MODULE_IDS: readonly ModuleId[] = [
   'docker',
   'kubernetes',
   'cicd',
-  'processes'
+  'processes',
+  'addy'
 ]
 
 /**

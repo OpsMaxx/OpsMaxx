@@ -94,7 +94,13 @@ describe('the read/operate split', () => {
         'kubernetes',
         // Reads a third party rather than a host, and still `read`: the panel
         // lists pipelines and fetches logs. Firing one is `cicdTrigger`, above.
-        'cicd'
+        'cicd',
+        // The one module that satisfies the read contract by never going near
+        // a server at all: it reads this app's own account on a relay -- which
+        // of the user's machines are on it and when anything last synced. The
+        // contract asks what a module does to the estate, and the answer here
+        // is nothing, from a panel that is handed no server list to do it with.
+        'addy'
       ].sort()
     )
   })

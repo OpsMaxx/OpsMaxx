@@ -262,6 +262,23 @@ const MODULE_FILES: Record<string, string[]> = {
     'src/shared/k8sReview.ts',
     'src/main/services/kubernetes.ts',
     'src/renderer/src/components/kubernetes/KubernetesPanel.tsx'
+  ],
+  // Sync & devices: the panel, the status contract it reads, and the setup
+  // flow it embeds rather than copies.
+  //
+  // What is NOT listed is the interesting half, and it is the same caveat
+  // `cicd` states above. `src/shared/addy.ts`, `src/main/services/addy/**` and
+  // the addyd sidecar are the account's keys, the sealing and the wipe; they
+  // are not the module's to own and listing them would check a boundary this
+  // module does not draw. What the walk does check is the half that could
+  // plausibly go wrong: a renderer panel about the user's own devices has no
+  // business in the vault, the keychain or a local shell — and the vault
+  // travels through addy as opaque bytes precisely so that nothing on this
+  // side ever opens it.
+  addy: [
+    'src/renderer/src/components/addy/addyStatus.ts',
+    'src/renderer/src/components/addy/AddyPanel.tsx',
+    'src/renderer/src/components/addy/AddySetup.tsx'
   ]
 }
 

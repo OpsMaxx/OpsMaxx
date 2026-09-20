@@ -1,0 +1,413 @@
+import {
+  AlertTriangle,
+  Check,
+  Circle,
+  CircleDot,
+  Clock,
+  HelpCircle,
+  Laptop,
+  MonitorSmartphone,
+  RefreshCw,
+  Satellite,
+  Wifi,
+  WifiOff
+} from 'lucide-react'
+import { PanelShell, NoteWhy } from '../monitor/PanelShell'
+import { EmptyState } from '../common/EmptyState'
+import { Sparkline } from '../common/Sparkline'
+import { useApp } from '../../store/app'
+import { clsx } from '../../lib/format'
+import { AddySetup } from './AddySetup'
+import {
+  addyJourney,
+  ago,
+  relayHost,
+  useAddyStatus,
+  type AddyDevice,
+  type AddyStatus,
+  type AddyStep
+} from './addyStatus'
+
+/**
+ * Sync & devices — the account, the machines on it, and whether anything moved.
+ *
+ * ---------------------------------------------------------------------------
+ * THE DEFECT THIS EXISTS AGAINST
+ * ---------------------------------------------------------------------------
+ *
+ * addy shipped with no nav entry at all. Its only door was `<AddySetup />`,
+ * three headings down the Security page of Settings, below the credential
+ * proxy — so the feature was reachable only by somebody who already knew it was
+ * there, and once they had used it nothing in the app ever said what had come
+ * of it. "It is very incomprehensible" is the report, and the two halves of it
+ * are that there is no way in and no readout.
+ *
+ * ---------------------------------------------------------------------------
+ * THE RULE THIS PANEL IS BUILT ON
+ * ---------------------------------------------------------------------------
+ *
+ * A PANEL THAT LIES IS WORSE THAN THE ONE WE HAD. Sync, login and persistence
+ * are being written in parallel with this screen; today the bridge answers
+ * pairing, conflicts and revocation and nothing about state. So every pane here
+ * has a fourth rendering beside good, bad and empty: NOT REPORTED. It is not a
+ * placeholder and it is not a spinner — it is a sentence saying which question
+ * this build cannot answer, sitting in the same tile that will hold the answer.
+ *
+ * The consequence is that this screen is correct today and gains meaning rather
+ * than changing shape. See `addyStatus.ts` for the contract it is asking main
+ * for, and note what it does NOT do: it never infers a number, never counts
+ * absence as zero, and never paints a green tile off a field nobody set.
+ *
+ * The setup flow is EMBEDDED rather than copied. `AddySetup` owns the one
+ * irreversible screen in the product — the recovery phrase, shown once by a
+ * sidecar that has no call to show it again — and a second implementation of
+ * that is how a user ends up with an account nobody can recover.
+ */
+export function AddyPanel(): React.JSX.Element {
+  const { status, supported, error, refresh } = useAddyStatus()
+  const relaySetting = useApp((s) => s.settings.addyRelayURL)
+  const steps = addyJourney(status, supported, relaySetting)
+  const relay = relayHost(status?.relayURL ?? relaySetting)
+
+  return (
+    <PanelShell
+      icon={<Satellite size={16} />}
+      // "Account", not the module's own name again. A promoted module already
+      // gets a page header built from its registry label -- see the `promoted`
+      // branch in FleetMonitor -- so a card titled "Sync & devices" under a page
+      // titled "Sync & devices" is the same words twice and names nothing. The
+      // convention is DockerPanel's: the page is the subject, the card is what
+      // is in it.
+      title="Account"
+      about={
+        <>
+          Your own machines, and what has reached them. OpsMaxx carries servers, workspaces,
+          tunnels and the vault between your devices through an addy relay you run yourself — every
+          object is sealed before it leaves and the relay holds no key. Nothing here reads or
+          changes a server.
+        </>
+      }
+      actions={
+        supported ? (
+          <button className="btn ghost" onClick={refresh}>
+            <RefreshCw size={14} /> Refresh
+          </button>
+        ) : undefined
+      }
+      className="addy-panel"
+      testId="addy-panel"
+    >
+      {/* First, and unconditionally, when the build cannot answer. It is the
+          frame every number below it has to be read through, so it cannot be
+          folded away behind the ⓘ — see PanelShell on where a caveat lives. */}
+      {!supported && (
+        <div className="addy-note" role="status">
+          <AlertTriangle size={15} aria-hidden />
+          <div>
+            <strong>Sync is not running on this build.</strong>
+            <NoteWhy summary="What still works, and what does not">
+              Creating an account and pairing a second device work — they talk to the relay
+              directly. What is missing is the engine that carries data afterwards and the state it
+              would report: how many devices are on the account, when each was last seen, and when
+              anything last synced. Those tiles say so rather than showing a zero.
+            </NoteWhy>
+          </div>
+        </div>
+      )}
+
+      {error !== null && (
+        <div className="addy-problem" role="alert">
+          <AlertTriangle size={15} aria-hidden />
+          <span>Could not read the sync status: {error}</span>
+        </div>
+      )}
+
+      <AddyKpis status={status} supported={supported} relay={relay} />
+
+      <h3 className="ui-section-title addy-h">Where you are</h3>
+      <ol className="addy-journey">
+        {steps.map((s) => (
+          <JourneyStep key={s.key} step={s} />
+        ))}
+      </ol>
+
+      {/* The setup flow itself, at the point in the journey it belongs to. Shown
+          only while step one is where the reader is: once a device is enrolled,
+          a "create an account" form on the same screen as the account is an
+          invitation to mint a second one by accident. */}
+      {steps[0].state !== 'done' && (
+        <div className="addy-setup-slot">
+          <h3 className="ui-section-title addy-h">Start here</h3>
+          <AddySetup />
+        </div>
+      )}
+
+      <h3 className="ui-section-title addy-h">Devices</h3>
+      <AddyDevices devices={status?.devices} supported={supported} />
+
+      <AddyProblems status={status} />
+    </PanelShell>
+  )
+}
+
+/**
+ * The band, in the shape the fleet overview uses.
+ *
+ * Same classes as FleetKpis on purpose: this is one product, and a second
+ * grammar for "a number with a label" is how a screen starts reading as
+ * assembled. The difference is what an unknown looks like — the fleet band
+ * never has one, because a host either answered or is listed as unreachable.
+ * Here a tile can be genuinely unanswered, and it prints an em dash with the
+ * reason underneath rather than a zero.
+ */
+function AddyKpis({
+  status,
+  supported,
+  relay
+}: {
+  status: AddyStatus | null
+  supported: boolean
+  relay: string | null
+}): React.JSX.Element {
+  const sync = status?.sync
+  const devices = status?.devices
+  const enrolled = status?.enrolled === true
+  const conflicts = sync?.conflicts ?? 0
+  const attention = conflicts > 0 || sync?.error !== undefined
+
+  return (
+    <section className="kpi-band" aria-label="Sync summary">
+      <div className="kpi">
+        <div className="kpi-top">
+          <span className="kpi-icon">
+            <Satellite size={13} />
+          </span>
+          <span className="kpi-label">Account</span>
+        </div>
+        <div className="kpi-value">{!supported ? '—' : enrolled ? 'On' : 'None'}</div>
+        <div className="kpi-sub" title={relay ?? undefined}>
+          {!supported
+            ? relay
+              ? `relay ${relay} — enrolment not reported`
+              : 'not reported by this build'
+            : enrolled
+              ? (relay ?? 'relay not reported')
+              : 'no account on this device'}
+        </div>
+      </div>
+
+      <div className="kpi">
+        <div className="kpi-top">
+          <span className="kpi-icon">
+            <MonitorSmartphone size={13} />
+          </span>
+          <span className="kpi-label">Devices</span>
+        </div>
+        <div className="kpi-value">{devices ? devices.filter((d) => !d.revoked).length : '—'}</div>
+        <div className="kpi-sub">
+          {devices
+            ? devices.some((d) => d.self)
+              ? 'including this one'
+              : 'on this account'
+            : 'roster not reported'}
+        </div>
+      </div>
+
+      <div className={clsx('kpi', sync?.running === true && !sync.connected && 'warn')}>
+        <div className="kpi-top">
+          <span className="kpi-icon">
+            {sync?.connected === true ? <Wifi size={13} /> : <WifiOff size={13} />}
+          </span>
+          <span className="kpi-label">Sync</span>
+        </div>
+        <div className="kpi-value">
+          {sync === undefined ? '—' : !sync.running ? 'Off' : sync.connected ? 'Live' : 'Idle'}
+        </div>
+        {/* The trend, only where there is one. A flat line drawn from a missing
+            history is a claim that nothing synced, which is a different thing
+            from not knowing. */}
+        {sync?.history !== undefined && sync.history.length > 1 && (
+          <div className="kpi-spark">
+            <Sparkline data={sync.history} height={18} />
+          </div>
+        )}
+        <div className="kpi-sub">
+          {sync === undefined
+            ? 'not reported by this build'
+            : !sync.running
+              ? 'engine not running'
+              : sync.connected
+                ? 'connected to the relay'
+                : 'not connected right now'}
+        </div>
+      </div>
+
+      <div className="kpi">
+        <div className="kpi-top">
+          <span className="kpi-icon">
+            <Clock size={13} />
+          </span>
+          <span className="kpi-label">Last sync</span>
+        </div>
+        <div className="kpi-value">
+          {sync?.lastSyncAt ? ago(sync.lastSyncAt) : sync?.lastSyncAt === null ? 'Never' : '—'}
+        </div>
+        <div className="kpi-sub">
+          {sync?.lastSyncAt
+            ? 'ago'
+            : sync?.lastSyncAt === null
+              ? 'nothing has synced yet'
+              : 'not reported by this build'}
+        </div>
+      </div>
+
+      {/* Present only when it is real. A permanent "0 problems" tile is how a
+          row stops being read — FleetKpis makes the same argument about its
+          attention tile. */}
+      {attention && (
+        <div className="kpi danger">
+          <div className="kpi-top">
+            <span className="kpi-icon">
+              <AlertTriangle size={13} />
+            </span>
+            <span className="kpi-label">Attention</span>
+          </div>
+          <div className="kpi-value">{conflicts > 0 ? conflicts : 1}</div>
+          <div className="kpi-sub">
+            {conflicts > 0 ? 'waiting for a choice' : 'sync is failing'}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+const STEP_MARK: Record<AddyStep['state'], React.ReactNode> = {
+  done: <Check size={13} />,
+  now: <CircleDot size={13} />,
+  todo: <Circle size={13} />,
+  unknown: <HelpCircle size={13} />
+}
+
+/** What each state is called, for the people who cannot see the glyph. The
+ *  shape carries it for everyone else, which is why the word is not printed. */
+const STEP_WORD: Record<AddyStep['state'], string> = {
+  done: 'Done',
+  now: 'You are here',
+  todo: 'Not yet',
+  unknown: 'Not reported'
+}
+
+function JourneyStep({ step }: { step: AddyStep }): React.JSX.Element {
+  return (
+    <li className={clsx('addy-step', step.state)}>
+      <span className="addy-step-mark" aria-hidden>
+        {STEP_MARK[step.state]}
+      </span>
+      <div className="addy-step-body">
+        <div className="addy-step-title">
+          {step.title}
+          <span className="chip addy-step-state">{STEP_WORD[step.state]}</span>
+        </div>
+        <div className="addy-step-detail ui-note">{step.detail}</div>
+      </div>
+    </li>
+  )
+}
+
+/**
+ * The roster.
+ *
+ * Three renderings, and the third is the one that matters: `undefined` means
+ * main did not tell us, `[]` means the account really has no devices on it, and
+ * those are different sentences. Collapsing them is how a screen comes to say
+ * "0 devices" about an account with four.
+ */
+function AddyDevices({
+  devices,
+  supported
+}: {
+  devices: AddyDevice[] | undefined
+  supported: boolean
+}): React.JSX.Element {
+  if (devices === undefined) {
+    return (
+      <EmptyState
+        compact
+        title="Not reported"
+        message={
+          supported
+            ? 'This build did not return a device list. Nothing is wrong with the account — the roster is simply not being read yet.'
+            : 'This build cannot read the device roster. Pairing still works; what is missing is the readout of what came of it.'
+        }
+      />
+    )
+  }
+  if (devices.length === 0) {
+    return (
+      <EmptyState
+        compact
+        title="No devices"
+        message="No device is on this account yet. Creating an account puts this one on it."
+      />
+    )
+  }
+  return (
+    <table className="mini-table addy-devices">
+      <thead>
+        <tr>
+          <th>Device</th>
+          <th>Last seen</th>
+          <th>Added</th>
+        </tr>
+      </thead>
+      <tbody>
+        {devices.map((d) => (
+          <tr key={d.id} className={clsx(d.revoked === true && 'addy-device-revoked')}>
+            <td className="strong">
+              <Laptop size={13} aria-hidden /> {d.label}
+              {d.self && <span className="chip info">This device</span>}
+              {d.revoked === true && <span className="chip danger">Revoked</span>}
+            </td>
+            {/* `null` is "the relay has never seen it", which is a real state
+                for a device that paired and has not been opened since — and it
+                is not "0s ago", which is what a zero would print. */}
+            <td>{d.lastSeen === null ? 'never' : `${ago(d.lastSeen)} ago`}</td>
+            <td>{d.addedAt === null ? '—' : `${ago(d.addedAt)} ago`}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+/** Whatever is wrong, said once, below the thing it is wrong about. */
+function AddyProblems({ status }: { status: AddyStatus | null }): React.JSX.Element | null {
+  const sync = status?.sync
+  if (sync === undefined) return null
+  const conflicts = sync.conflicts
+  if (sync.error === undefined && conflicts === 0) return null
+  return (
+    <div className="addy-problems">
+      {sync.error !== undefined && (
+        <div className="addy-problem" role="alert">
+          <AlertTriangle size={15} aria-hidden />
+          <span>
+            Sync last failed {ago(sync.error.at)} ago: {sync.error.message}
+            {sync.error.code !== undefined && ` (${sync.error.code})`}
+          </span>
+        </div>
+      )}
+      {conflicts > 0 && (
+        <div className="addy-note" role="status">
+          <AlertTriangle size={15} aria-hidden />
+          <span>
+            {conflicts} {conflicts === 1 ? 'change was' : 'changes were'} made on two devices at
+            once. OpsMaxx opens both versions over the app and asks which to keep — it cannot do
+            that in the background, because only you know which one is right.
+          </span>
+        </div>
+      )}
+    </div>
+  )
+}

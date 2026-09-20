@@ -34,6 +34,8 @@ const ENROLMENT = {
   baseURL: 'https://relay.example',
   accountId: 'aad42aad5b51c8d31d31b3f529a312e2',
   epoch: 1,
+  rootSignPub: 'a'.repeat(64),
+  epoch1SignPub: 'b'.repeat(64),
   spki: '54177fc27d256b3dabcdef',
   insecureTLS: false
 }
@@ -76,6 +78,19 @@ describe('remembering which relay this machine joined', () => {
     const after = loadEnrolment()
     expect(after?.at).toBe('2020-01-01T00:00:00.000Z')
     expect(after?.spki).toBe('rotated')
+  })
+
+  it('keeps the two keys a roster is verified against', () => {
+    // The sidecar takes these FROM THE CALLER and never from the relay — its
+    // own comment calls that the single most important sentence in the file,
+    // because a chain verified against a key the server supplied is not
+    // verified. Mint time is the only moment either is knowable from a source
+    // that is not the relay, so if they are not written here this device can
+    // never check its own roster again.
+    saveEnrolment(ENROLMENT)
+    const back = loadEnrolment()
+    expect(back?.rootSignPub).toBe('a'.repeat(64))
+    expect(back?.epoch1SignPub).toBe('b'.repeat(64))
   })
 
   it('reads a damaged file as "not enrolled" rather than throwing', () => {

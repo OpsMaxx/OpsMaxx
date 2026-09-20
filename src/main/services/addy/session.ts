@@ -28,6 +28,19 @@ import { closeSession, dialPeer } from './p2p'
  * recognise, and not an empty list that looks like everything is fine.
  */
 
+/** A verified roster, as the panel needs it. */
+export interface AddyRoster {
+  devices: { pubSign: string; pubEnc: string; epoch: number; mnemonicAdded: boolean }[]
+  /** Whether THIS device is still listed. False is the revocation signal. */
+  stillListed: boolean
+  /** The chain head and its sequence, which two devices can compare. */
+  head?: string
+  headSeq?: number
+  /** This device's own `pub_sign`, so a caller can mark which row is itself. */
+  self?: string
+  problem?: string
+}
+
 /** What a resume at launch found. */
 export interface AddyResumeResult {
   resumed: boolean
@@ -44,6 +57,11 @@ export interface AddyAccount {
   token: string
   accountId: string
   epoch: number
+  /** The root and epoch-1 signing public halves, which a roster is verified
+   *  against. Carried on the account because they must come from this client
+   *  and never from the relay. */
+  rootSignPub?: string
+  epoch1SignPub?: string
 }
 
 class AddySession {
@@ -136,6 +154,7 @@ class AddySession {
       accountId: string
       mnemonic: string
       rootSignPub: string
+      epoch1SignPub: string
       secrets: { deviceSignSeed: string; deviceEncKey: string; akSeed: string }
       genesis: string
       escrow: string
@@ -192,7 +211,9 @@ class AddySession {
       baseURL: relay,
       token: '',
       accountId: minted.accountId,
-      epoch: minted.epoch
+      epoch: minted.epoch,
+      rootSignPub: minted.rootSignPub,
+      epoch1SignPub: minted.epoch1SignPub
     }
     this.relay = new RelayClient({ baseURL: relay, token: '', insecureTLS: this.insecureTLS }, addyd)
 
@@ -237,6 +258,8 @@ class AddySession {
       baseURL: account.baseURL,
       accountId: account.accountId,
       epoch: account.epoch,
+      rootSignPub: account.rootSignPub ?? '',
+      epoch1SignPub: account.epoch1SignPub ?? '',
       spki,
       insecureTLS: this.insecureTLS
     })
@@ -276,7 +299,14 @@ class AddySession {
     this.insecureTLS = saved.insecureTLS === true
     try {
       await this.attach(
-        { baseURL: saved.baseURL, token: '', accountId: saved.accountId, epoch: saved.epoch },
+        {
+          baseURL: saved.baseURL,
+          token: '',
+          accountId: saved.accountId,
+          epoch: saved.epoch,
+          rootSignPub: saved.rootSignPub,
+          epoch1SignPub: saved.epoch1SignPub
+        },
         {
           deviceSignSeed: keys.deviceSignSeed,
           deviceEncKey: keys.deviceEncKey,
@@ -385,6 +415,59 @@ class AddySession {
 
   setRoster(devices: string[]): void {
     this.roster = devices
+  }
+
+  /**
+   * Read the roster, verify it, and remember who else is on the account.
+   *
+   * `setRoster` had ZERO callers, so `this.roster` was permanently empty and
+   * `sendClipboard` iterated nothing — the clipboard reported success having
+   * sent to no one. This is the call that fills it.
+   *
+   * Verification happens in the SIDECAR, under the account keys, and what
+   * comes back is the LIVE set: the verifier applies revocations as it walks
+   * the chain, so a revoked device is absent rather than flagged. That makes
+   * "am I still on this roster" a stronger question than any field could be,
+   * because there is nothing a forged entry could set to claim otherwise.
+   *
+   * This device is excluded from the peer list. Sending a clipboard to
+   * yourself is not continuity, and the echo suppression downstream should
+   * never have to think about it.
+   */
+  async refreshRoster(): Promise<AddyRoster> {
+    const relay = this.relay
+    const addyd = this.addyd
+    const account = this.account
+    if (!relay || !addyd || !account) {
+      return { devices: [], stillListed: false, problem: 'not attached' }
+    }
+    const bytes = await relay.roster()
+    // `selfListed`, not `stillListed`: the sidecar's name for it. Getting this
+    // wrong reads as `undefined`, which is falsy — and a falsy answer here is
+    // "this device has been revoked", which is the one conclusion that must
+    // never be reached by a typo.
+    const verified = await addyd.send<{
+      devices: { pubSign: string; pubEnc: string; epoch: number; mnemonicAdded: boolean }[]
+      selfListed: boolean
+      head: string
+      headSeq: number
+    }>('verifyRoster', {
+      chain: bytes,
+      rootSignPub: account.rootSignPub ?? '',
+      epoch1Sign: account.epoch1SignPub ?? ''
+    })
+
+    const me = await addyd.send<{ devicePub: string }>('whoami', {})
+    this.roster = verified.devices
+      .map((d) => d.pubSign)
+      .filter((id) => id !== me.devicePub)
+    return {
+      devices: verified.devices,
+      stillListed: verified.selfListed,
+      head: verified.head,
+      headSeq: verified.headSeq,
+      self: me.devicePub
+    }
   }
 
   /**

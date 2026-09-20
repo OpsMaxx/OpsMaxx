@@ -20,10 +20,10 @@ import { join } from 'node:path'
 /**
  * Modules with their own activity-bar button.
  *
- * Four read modules — Docker, Kubernetes, CI/CD and local processes — are
- * reached from the rail rather than from the Monitoring tab strip, because each
- * is a different SUBJECT rather than another fact about the estate. The full
- * argument is on PROMOTED_MODULE_IDS.
+ * Five read modules — Docker, Kubernetes, CI/CD, local processes and sync &
+ * devices — are reached from the rail rather than from the Monitoring tab
+ * strip, because each is a different SUBJECT rather than another fact about the
+ * estate. The full argument is on PROMOTED_MODULE_IDS.
  *
  * What can go quietly wrong, and is therefore what this file is about:
  *
@@ -65,10 +65,24 @@ beforeEach(() => {
 })
 
 describe('which modules are promoted', () => {
-  it('promotes exactly the four that are a different subject', () => {
-    // Pinned as an exact list, the way OPERATE_MODULE_IDS is: a fifth added by
+  it('promotes exactly the five that are a different subject', () => {
+    // Pinned as an exact list, the way OPERATE_MODULE_IDS is: a sixth added by
     // habit rather than by argument should be a failing test, not a wider rail.
-    expect([...PROMOTED_MODULE_IDS].sort()).toEqual(['cicd', 'docker', 'kubernetes', 'processes'])
+    //
+    // `addy` is the fifth and it passes the test this list is for more plainly
+    // than any of the other four: Monitoring's subject is the estate, and not
+    // one estate host appears on that panel. Its rows are the user's OWN
+    // machines and its numbers are about an account on a relay. It is also the
+    // module with the strongest reason to be reachable in one press -- it had
+    // no nav entry at all, and its only door was three headings down the
+    // Security page of Settings, which is the defect it was promoted to fix.
+    expect([...PROMOTED_MODULE_IDS].sort()).toEqual([
+      'addy',
+      'cicd',
+      'docker',
+      'kubernetes',
+      'processes'
+    ])
   })
 
   it('promotes only read modules', () => {
@@ -117,10 +131,13 @@ describe('which modules are promoted', () => {
 
 describe('the rail buttons', () => {
   it('shows a button for a promoted module that is on', () => {
-    // docker and kubernetes ship on; cicd and processes ship off.
+    // docker, kubernetes and addy ship on; cicd and processes ship off.
     render(<ActivityBar />)
     expect(screen.getByTitle(/^Docker —/)).toBeTruthy()
     expect(screen.getByTitle(/^Kubernetes —/)).toBeTruthy()
+    // The whole point of shipping it on: the feature had no nav entry at all,
+    // so a fresh install must arrive with this button already there.
+    expect(screen.getByTitle(/^Sync & devices —/)).toBeTruthy()
   })
 
   it('shows no button for a promoted module that is off', () => {
@@ -184,7 +201,7 @@ describe('the rail buttons', () => {
     //
     // The rail is a fixed column inside `.app-body { overflow: hidden }` and the
     // window minimum is 640px tall, leaving 576px for it. Eleven buttons needed
-    // about 520px and fit. Four promoted icons take it to fifteen and about 696px,
+    // about 520px and fit. The promoted icons take it to sixteen and past 700px,
     // so 120px fell off the BOTTOM -- where Report a bug and Settings live, the
     // latter being the only route to the page that switches a module back off.
     //
@@ -195,14 +212,21 @@ describe('the rail buttons', () => {
     useApp.setState((st) => ({
       settings: {
         ...st.settings,
-        modules: { ...st.settings.modules, docker: true, kubernetes: true, cicd: true, processes: true }
+        modules: {
+          ...st.settings.modules,
+          docker: true,
+          kubernetes: true,
+          cicd: true,
+          processes: true,
+          addy: true
+        }
       }
     }))
     const { container } = render(<ActivityBar />)
     const scroll = container.querySelector('.activity-scroll')
     expect(scroll, 'the rail has no scrolling section').toBeTruthy()
 
-    // All four promoted icons are inside it, so a cramped window scrolls them.
+    // All the promoted icons are inside it, so a cramped window scrolls them.
     expect(scroll!.querySelectorAll('button').length).toBeGreaterThanOrEqual(12)
 
     // And the two that must never scroll away are outside it.

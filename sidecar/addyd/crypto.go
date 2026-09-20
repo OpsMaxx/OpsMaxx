@@ -671,6 +671,12 @@ func handleCreateAccount(req Request) (any, error) {
 		// mnemonic that leaks the day something can ask.
 		"mnemonic":    acct.Mnemonic,
 		"rootSignPub": hex.EncodeToString(acct.Root.Sign.Public().(ed25519.PublicKey)),
+		// EPOCH 1'S SIGNING PUBLIC HALF, returned for the same reason as the
+		// root's and it was missing. `verifyRoster` takes both FROM THE CALLER
+		// and never from the server -- a chain verified against a key the
+		// server supplied is not verified -- so a client that cannot record
+		// this one at mint time can never verify its own roster afterwards.
+		"epoch1SignPub": hex.EncodeToString(acct.Epoch.Sign.Public().(ed25519.PublicKey)),
 		// For the keychain. The parent stores these under the machine-only
 		// prefix, so they cannot ride in a backup.
 		"secrets": map[string]string{
