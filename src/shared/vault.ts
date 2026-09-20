@@ -120,6 +120,23 @@ export interface VaultStatus {
   unlocked: boolean
   stage: VaultStage
   entryCount: number
+  /**
+   * The file is there and cannot be read as a vault.
+   *
+   * Distinct from `exists: false`, and the distinction is the whole reason
+   * this field exists. `readFile` swallows a parse failure and answers null,
+   * which put the app in a state with no way out and two contradictory
+   * sentences in it: unlocking said "No vault has been created yet" while
+   * creating said "A vault already exists on this machine". Both are the
+   * truth from where they were standing, and neither told the user what had
+   * happened or what to do about it.
+   *
+   * Nothing is lost when this is true — `vaultCreate` refuses while the file
+   * is present, so a damaged vault cannot be overwritten by a new one. It is
+   * a dead end, not a deletion, and the remedy is a backup or moving the file
+   * aside.
+   */
+  damaged?: boolean
 }
 
 export interface VaultResult {

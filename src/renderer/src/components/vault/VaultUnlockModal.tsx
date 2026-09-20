@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Eye, EyeOff, Fingerprint, Lock, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, Eye, EyeOff, Fingerprint, Lock, ShieldCheck } from 'lucide-react'
 import { Modal } from '../common/Modal'
 import { useApp } from '../../store/app'
 import { useVault } from '../../store/vault'
@@ -52,6 +52,7 @@ export function VaultUnlockModal(): React.JSX.Element | null {
   const error = useVault((s) => s.error)
   const clearError = useVault((s) => s.clearError)
   const exists = useVault((s) => s.exists)
+  const damaged = useVault((s) => s.damaged)
   const refresh = useVault((s) => s.refresh)
   const bioAvailable = useVault((s) => s.bioAvailable)
   const bioEnabled = useVault((s) => s.bioEnabled)
@@ -169,10 +170,45 @@ export function VaultUnlockModal(): React.JSX.Element | null {
 
   return (
     <Modal
-      title={checking ? 'Vault' : creating ? 'Create your vault' : 'Vault locked'}
-      subtitle={reason}
+      title={
+        damaged
+          ? 'Vault file unreadable'
+          : checking
+            ? 'Vault'
+            : creating
+              ? 'Create your vault'
+              : 'Vault locked'
+      }
+      subtitle={damaged ? undefined : reason}
       onClose={() => close(false)}
     >
+      {/* NO PASSWORD FIELD. The file is there and cannot be parsed, so every
+          password is the wrong one and a form that invites another attempt is
+          an instruction to do something that cannot work. What used to be here
+          was worse than that: unlocking answered "No vault has been created
+          yet" while creating answered "A vault already exists on this
+          machine", each true from where it stood and together a dead end.
+          Nothing is lost — `vaultCreate` refuses while the file is present, so
+          this cannot be overwritten by a new vault. That is the first thing
+          the sentence says, because it is the thing a person wants to know. */}
+      {damaged ? (
+        <div className="col" style={{ gap: 10 }}>
+          <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+            <AlertTriangle size={18} style={{ color: 'var(--danger)', marginTop: 2 }} />
+            <div className="s-desc">
+              Your vault is still on this machine and nothing has been deleted — but the file
+              cannot be read, so no master password will open it. Restore it from a backup, or
+              move it aside to start a new vault.
+            </div>
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn primary" onClick={() => close(false)}>
+              Close
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
       <div className="row" style={{ gap: 10, alignItems: 'flex-start', marginBottom: 12 }}>
         {creating ? (
           <ShieldCheck size={18} style={{ color: 'var(--accent-ink)', marginTop: 2 }} />
@@ -270,6 +306,8 @@ export function VaultUnlockModal(): React.JSX.Element | null {
           {checking ? 'Checking…' : creating ? 'Create vault and continue' : 'Unlock and continue'}
         </button>
       </div>
+        </>
+      )}
     </Modal>
   )
 }

@@ -97,6 +97,19 @@ function isCurrentKdf(params: KdfParams): boolean {
   return params.N === KDF.N && params.r === KDF.r && params.p === KDF.p
 }
 
+/**
+ * Present but unreadable, which is not the same as absent.
+ *
+ * `readFile` answers null for both, and that collapse is what produced a state
+ * the user could not leave: `vaultUnlock` said "No vault has been created yet"
+ * while `vaultCreate` said "A vault already exists on this machine", and
+ * neither named the file or said what had happened.
+ */
+function vaultFileDamaged(): boolean {
+  if (!existsSync(FILE)) return false
+  return readFile() === null
+}
+
 function readFile(): VaultFile | null {
   try {
     if (!existsSync(FILE)) return null
@@ -130,7 +143,17 @@ function decrypt(file: VaultFile, k: Buffer): VaultEntry[] {
 }
 
 export function vaultStatus(): VaultStatus {
-  return { exists: existsSync(FILE), unlocked: key !== null, stage, entryCount: cache?.length ?? 0 }
+  const status: VaultStatus = {
+    exists: existsSync(FILE),
+    unlocked: key !== null,
+    stage,
+    entryCount: cache?.length ?? 0
+  }
+  // Only asked while locked. Once the vault is open the file parsed, and
+  // re-reading it on every status poll would be a file read per poll for an
+  // answer that cannot have changed.
+  if (status.exists && !status.unlocked && vaultFileDamaged()) status.damaged = true
+  return status
 }
 
 export async function vaultCreate(password: string): Promise<VaultResult> {
@@ -154,7 +177,22 @@ export async function vaultCreate(password: string): Promise<VaultResult> {
 
 export async function vaultUnlock(password: string): Promise<VaultResult> {
   const file = readFile()
-  if (!file) return { ok: false, error: 'No vault has been created yet.' }
+  if (!file) {
+    // The file being THERE and unreadable is a different problem from there
+    // being no vault, and it needs a different sentence: no password will ever
+    // open this, so telling the user to try again is telling them to do
+    // something that cannot work.
+    if (existsSync(FILE)) {
+      return {
+        ok: false,
+        error:
+          `The vault file could not be read: ${FILE}. No master password will open it. ` +
+          'Restore it from a backup, or move that file aside to start a new vault — ' +
+          'nothing overwrites it while it is there.'
+      }
+    }
+    return { ok: false, error: 'No vault has been created yet.' }
+  }
   // Captured before anything can change it. See the catch at the end.
   const wasOpen = key !== null
   try {

@@ -44,6 +44,9 @@ interface VaultState {
    * "your vault is gone". Nobody knows yet is not the same as there isn't one.
    */
   exists: boolean | null
+  /** The file is there and unreadable. No password will open it, so the
+   *  unlock form must not be the thing on screen. */
+  damaged: boolean
   /**
    * Whether the entries are READABLE here — which is `stage === 'open'`, and
    * deliberately not main's `unlocked`.
@@ -97,6 +100,7 @@ interface VaultState {
 // Entries only ever live here while the vault is unlocked; locking drops them.
 export const useVault = create<VaultState>((set, get) => ({
   exists: null,
+  damaged: false,
   unlocked: false,
   stage: 'locked',
   entries: [],
@@ -162,7 +166,7 @@ export const useVault = create<VaultState>((set, get) => ({
     // `unlocked: true` here would light up every picker and sidebar as though
     // the entries were in hand.
     const open = st.stage === 'open'
-    set({ exists: st.exists, unlocked: open, stage: st.stage })
+    set({ exists: st.exists, damaged: st.damaged === true, unlocked: open, stage: st.stage })
     if (open) {
       const r = await window.opsmaxx?.vault.list()
       if (r?.ok && r.entries) set({ entries: r.entries })
