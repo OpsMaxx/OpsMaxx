@@ -111,7 +111,22 @@ export async function resolveConflict(
   id: number,
   collection: string,
   chosen: unknown,
-  counter: number
+  counter: number,
+  /**
+   * The winner's current ETag, and it is REQUIRED for this to work at all.
+   *
+   * Without it this sent an unconditional PUT over an object that exists, and
+   * the relay refuses exactly that — `ErrObjectExists`, 409, deliberately
+   * distinct from a tag mismatch. So choosing a merged copy, which is the
+   * commonest right answer when two server lists differ by one entry, failed
+   * every time. The user pressed save, the list did not change, and nothing
+   * said why.
+   *
+   * It also does the job a conditional write is for: if another device wrote
+   * between the chooser opening and the user deciding, this is refused rather
+   * than silently flattening that write.
+   */
+  ifMatch: string
 ): Promise<void> {
   const payload = Buffer.from(JSON.stringify(chosen), 'utf8')
   const { sealed } = await deps.addyd.send<{ sealed: string }>('seal', {
@@ -122,7 +137,13 @@ export async function resolveConflict(
     counter,
     payload: payload.toString('base64')
   })
-  await deps.relay.putObject(collection, deps.epoch(), counter, Buffer.from(sealed, 'base64'))
+  await deps.relay.putObject(
+    collection,
+    deps.epoch(),
+    counter,
+    Buffer.from(sealed, 'base64'),
+    ifMatch
+  )
 
   const resp = await deps.relay.request('POST', `/v1/conflicts/${id}/resolve`)
   if (!resp.ok && resp.status !== 404) {

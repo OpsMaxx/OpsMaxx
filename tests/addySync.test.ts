@@ -128,7 +128,10 @@ function deps(relay: ReturnType<typeof fakeRelay>): Parameters<typeof syncOnce>[
     addyd: fakeSidecar() as never,
     relay: relay as never,
     epoch: () => 1,
-    applied
+    applied,
+    // Entries agreed with another account are discarded rather than trusted;
+    // every test in this file is the same account unless it says otherwise.
+    accountId: () => 'acct-under-test'
   }
 }
 
@@ -454,6 +457,33 @@ describe('a relay that serves an old copy back', () => {
     // The user's edit is still on disk. Adopting the archive would have
     // reinstated a removed SSH host key, or a deleted server.
     expect(readBlob().servers).toEqual([{ id: 's1' }, { id: 'added-here' }])
+  })
+})
+
+describe('a state agreed with a different account', () => {
+  it('is discarded rather than trusted', async () => {
+    // The whole safety of a device's first sync is the `!known` branch: adopt
+    // the account, keep the local copy as a conflict. A stale entry from a
+    // previous account — whose `localHash` still matches an untouched local
+    // file — makes `localChanged` false, so the pass takes the `pulled` branch
+    // instead and the account's copy overwrites the local estate with nothing
+    // kept. Reached by unpairing and joining a different account with the
+    // local files untouched in between.
+    writeBlob({ servers: [{ id: 'mine' }] })
+    const relay = fakeRelay()
+    await syncOnce(deps(relay))
+
+    // Same machine, same untouched files, a different account's relay.
+    const other = fakeRelay()
+    seeded(other, 'servers', [{ id: 'theirs' }])
+    const elsewhere = { ...deps(other), accountId: () => 'a-different-account' }
+
+    const r = await syncOnce(elsewhere)
+
+    // A conflict, not a silent pull: the local estate survives on the relay
+    // as a copy the user can choose.
+    expect(r.outcomes.servers).toBe('conflicted')
+    expect(other.conflicts.map((c) => c.name)).toContain('servers')
   })
 })
 

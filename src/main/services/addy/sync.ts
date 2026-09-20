@@ -57,6 +57,23 @@ interface CollectionState {
 
 interface SyncState {
   version: 1
+  /**
+   * The account these agreements were made with.
+   *
+   * NOTHING TIED AN ENTRY TO AN ACCOUNT, and the whole safety of a device's
+   * first sync is the `!known` branch: adopt the account, keep the local copy
+   * as a conflict. A stale entry from a previous account, whose `localHash`
+   * still matches an untouched local file, makes `localChanged` false — so the
+   * pass takes the `pulled` branch instead and the account's copy overwrites
+   * the local estate with nothing kept.
+   *
+   * Reached by unpairing and joining a different account, or by recovering
+   * onto one, with the local files untouched in between. Absent on a state
+   * written before this field existed, which is treated the same as a
+   * mismatch: discarded, because a device that cannot say which account it
+   * agreed with has not usefully agreed.
+   */
+  accountId?: string
   /** Keyed by collection name. Absent means never synced, which is a state. */
   collections: Record<string, CollectionState>
 }
@@ -70,20 +87,26 @@ export const SYNC_STATE_FILE = 'opsmaxx-addy-sync.json'
 
 const statePath = (): string => join(app.getPath('userData'), SYNC_STATE_FILE)
 
-function loadState(): SyncState {
+function loadState(forAccount?: string): SyncState {
   try {
     const path = statePath()
-    if (!existsSync(path)) return { version: 1, collections: {} }
+    if (!existsSync(path)) return { version: 1, collections: {}, accountId: forAccount }
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as SyncState
     if (parsed?.version !== 1 || typeof parsed.collections !== 'object') {
-      return { version: 1, collections: {} }
+      return { version: 1, collections: {}, accountId: forAccount }
+    }
+    // Agreed with somebody else, or with nobody nameable. Starting over is the
+    // safe direction: every difference becomes a conflict the user is shown,
+    // rather than a silent pull over data this device never offered.
+    if (forAccount !== undefined && parsed.accountId !== forAccount) {
+      return { version: 1, collections: {}, accountId: forAccount }
     }
     return parsed
   } catch {
     // A damaged note means this device does not know what it has already
     // agreed to — which is exactly the state a fresh device is in, and that
     // state is handled: it adopts the relay's copy rather than overwriting it.
-    return { version: 1, collections: {} }
+    return { version: 1, collections: {}, accountId: forAccount }
   }
 }
 
@@ -156,6 +179,9 @@ export interface SyncDeps {
   /** Told which collections changed on disk, so the renderer can reload them
    *  before it writes its own stale copy back over the top. */
   applied(collections: SyncedCollection[]): void
+  /** Which account this pass is for. Entries agreed with another one are
+   *  discarded rather than trusted — see `SyncState.accountId`. */
+  accountId(): string
 }
 
 /** The schema every object this version writes declares. Bumped when the shape
@@ -176,7 +202,7 @@ function versionString(): string {
 export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
   const startedAt = Date.now()
   const forgetsAtStart = forgetCount
-  const state = loadState()
+  const state = loadState(deps.accountId())
   const result: SyncResult = { at: startedAt, outcomes: {}, carried: 0, conflicts: [] }
   const changed: SyncedCollection[] = []
 

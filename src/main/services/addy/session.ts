@@ -24,6 +24,7 @@ import {
 } from '../../../shared/addy'
 import { app } from 'electron'
 import { counterFloor, forgetSyncState, syncOnce, type SyncResult } from './sync'
+import { SOURCES } from './collections'
 import { runRevocationWipe } from './revoke'
 import { deleteAllData } from '../backup'
 import { addyTarget } from './target'
@@ -1147,7 +1148,8 @@ class AddySession {
         addyd: this.addyd!,
         relay: this.relay,
         epoch: () => this.account!.epoch,
-        applied: (collections) => this.appliedCb?.(collections)
+        applied: (collections) => this.appliedCb?.(collections),
+        accountId: () => this.account!.accountId
       })
       this.lastSync = result
       this.carried = [...this.carried, result.carried].slice(-12)
@@ -1885,7 +1887,29 @@ class AddySession {
       })
       counter = opened.counter + 1
     }
-    await resolveConflict(deps, id, collection, chosen, counter)
+    await resolveConflict(deps, id, collection, chosen, counter, stored?.etag ?? '')
+
+    /**
+     * AND PUT IT ON THIS MACHINE, which nothing did.
+     *
+     * The resolution went to the relay and stopped there: no local write, no
+     * state entry, no renderer notification. So the merged list the user had
+     * just built by hand did not appear on the screen they built it on — for
+     * up to five minutes, and only if nothing made `localChanged` true in the
+     * meantime. The obvious next move is to edit it by hand, which makes
+     * `localChanged` true and turns the next pass into a fresh conflict
+     * against their own merge.
+     */
+    const source = SOURCES[collection as SyncedCollection]
+    if (source) {
+      source.write(Buffer.from(JSON.stringify(chosen), 'utf8'))
+      if (source.inRendererStore) this.appliedCb?.([collection as SyncedCollection])
+    }
+    // The next pass reconciles the counters and the ETag from scratch rather
+    // than from a record written here, which would be a second place the
+    // bookkeeping is done and a second place to get it wrong.
+    forgetSyncState()
+    void this.syncNow().catch(() => undefined)
   }
 
   async discardConflict(id: number): Promise<void> {
