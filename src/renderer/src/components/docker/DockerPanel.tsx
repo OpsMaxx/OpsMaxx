@@ -159,6 +159,103 @@ function mergeNetworks(
 /** Not a server id: no server can have it, because ids are UUIDs. */
 const LOCAL_ID = 'local'
 
+/** What a log pane shows, and the two choices that produced it. */
+type LogPaneState = {
+  name: string
+  ref: string
+  output: string
+  lines: number
+  timestamps: boolean
+}
+
+const DEFAULT_LOG_LINES = 200
+
+/**
+ * One container's logs, rendered either under its own row or in the panel at
+ * the bottom. Identical markup both times: the difference between glancing at
+ * it here and reading it properly down there is where it is mounted, not what
+ * it says.
+ *
+ * Lines and timestamps belong to the PANE, not to the panel. They were panel
+ * state read once at fetch time, so changing either left the output it
+ * produced sitting there unchanged — a control that looked like it reloaded
+ * and did not. With several panes open that would have been three selects
+ * disagreeing about one number.
+ */
+function LogPane({
+  pane,
+  inline,
+  onChange,
+  onPopOut,
+  onDock,
+  onClose
+}: {
+  pane: LogPaneState
+  inline?: boolean
+  onChange: (next: Partial<Pick<LogPaneState, 'lines' | 'timestamps'>>) => void
+  onPopOut?: () => void
+  onDock?: () => void
+  onClose: () => void
+}): React.JSX.Element {
+  return (
+    <div style={inline ? { paddingBottom: 6 } : undefined}>
+      <div
+        className="row muted"
+        style={{ fontSize: 11, marginTop: inline ? 4 : 10, gap: 8, alignItems: 'center' }}
+      >
+        <span className="grow">Logs · {pane.name}</span>
+        <select
+          className="input"
+          style={{ maxWidth: 110 }}
+          value={pane.lines}
+          onChange={(e) => onChange({ lines: Number(e.target.value) })}
+        >
+          <option value={200}>200 lines</option>
+          <option value={1000}>1000 lines</option>
+          <option value={5000}>5000 lines</option>
+        </select>
+        <label className="row" style={{ gap: 4, alignItems: 'center' }}>
+          <input
+            type="checkbox"
+            checked={pane.timestamps}
+            onChange={(e) => onChange({ timestamps: e.target.checked })}
+          />
+          Timestamps
+        </label>
+        {inline && onPopOut && (
+          <button
+            className="btn ghost sm"
+            title="Read this in the larger panel at the bottom"
+            onClick={onPopOut}
+          >
+            Pop out
+          </button>
+        )}
+        {!inline && onDock && (
+          <button
+            className="btn ghost sm"
+            title="Put this back under its container's row"
+            onClick={onDock}
+          >
+            Dock
+          </button>
+        )}
+        <button className="btn ghost sm" onClick={onClose}>
+          Close
+        </button>
+      </div>
+      {/* Inline keeps .bc-out's own 26px indent, which reads as "this belongs
+          to the row above"; the bottom panel owns its width and cancels it. */}
+      <pre
+        className="bc-out"
+        style={inline ? { maxHeight: 220 } : { marginLeft: 0, maxHeight: 300 }}
+      >
+        {pane.output}
+      </pre>
+    </div>
+  )
+}
+
 export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Element {
   const [serverId, setServerId] = useState<string>('')
   // The package manager, from the facts the sampler already collects. Absent
@@ -167,9 +264,11 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
   const allFacts = useFleet((st) => st.facts)
   const [probe, setProbe] = useState<DockerProbe | null>(null)
   const [loading, setLoading] = useState(false)
-  const [logs, setLogs] = useState<{ name: string; output: string } | null>(null)
-  const [logLines, setLogLines] = useState(200)
-  const [logTimestamps, setLogTimestamps] = useState(false)
+  // Keyed by container id — the key the rows already carry — so several
+  // containers can be open at once and every pane knows its own row.
+  const [logs, setLogs] = useState<Record<string, LogPaneState>>({})
+  // The one pane the user asked to read in the big panel at the bottom instead.
+  const [poppedOut, setPoppedOut] = useState<string | null>(null)
   // Sticky per panel: an operator who knows this account is not in the docker
   // group should not pay a failed round trip on every refresh.
   const [useSudo, setUseSudo] = useState(false)
@@ -303,7 +402,8 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
   const clearReads = (): void => {
     generation.current++
     setReclaimResult(null)
-    setLogs(null)
+    setLogs({})
+    setPoppedOut(null)
     setDisk(null)
     setDiskItems(null)
     setStats(null)
@@ -352,26 +452,59 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
     }
   }
 
+  const closeLogs = (id: string): void => {
+    setLogs((m) => Object.fromEntries(Object.entries(m).filter(([k]) => k !== id)))
+    setPoppedOut((cur) => (cur === id ? null : cur))
+  }
+
+  /** Reads one pane's logs with the choices that pane is currently showing. */
+  const runLogs = async (id: string, pane: LogPaneState): Promise<void> => {
+    setLogs((m) => ({ ...m, [id]: { ...pane, output: 'Loading…' } }))
+    const gen = generation.current
+    // A pane the user closed while this was in flight does not come back: the
+    // answer is written only if its key is still there.
+    const write = (output: string): void =>
+      setLogs((m) => (m[id] ? { ...m, [id]: { ...pane, output } } : m))
+    try {
+      const r = await bridge()?.logs?.(targetCfg(), pane.ref, pane.lines, {
+        sudo: useSudo,
+        timestamps: pane.timestamps
+      })
+      if (generation.current !== gen) return
+      write(r?.output || r?.error || 'No output.')
+    } catch (e) {
+      if (generation.current !== gen) return
+      write(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   const openLogs = async (c: DockerContainer): Promise<void> => {
     if (!hasTarget) return
+    // The same button closes what it opened. An expander that only ever
+    // expands is the next complaint.
+    if (logs[c.id]) {
+      closeLogs(c.id)
+      return
+    }
+    const pane: LogPaneState = {
+      name: c.name,
+      ref: refOf(c),
+      output: '',
+      lines: DEFAULT_LOG_LINES,
+      timestamps: false
+    }
     // `docker:logs` is one of the handlers that can reject: the builder refuses
     // a reference it cannot prove safe rather than escaping it. Asking first
     // turns an unhandled rejection and a pane stuck on "Loading…" into a
     // sentence saying what happened.
-    if (!validateContainerRef(refOf(c))) {
-      setLogs({ name: c.name, output: 'This container has an id logs cannot be requested for safely.' })
+    if (!validateContainerRef(pane.ref)) {
+      setLogs((m) => ({
+        ...m,
+        [c.id]: { ...pane, output: 'This container has an id logs cannot be requested for safely.' }
+      }))
       return
     }
-    setLogs({ name: c.name, output: 'Loading…' })
-    try {
-      const r = await bridge()?.logs?.(targetCfg(), refOf(c), logLines, {
-        sudo: useSudo,
-        timestamps: logTimestamps
-      })
-      setLogs({ name: c.name, output: r?.output || r?.error || 'No output.' })
-    } catch (e) {
-      setLogs({ name: c.name, output: e instanceof Error ? e.message : String(e) })
-    }
+    await runLogs(c.id, pane)
   }
 
   const loadDisk = async (): Promise<void> => {
@@ -1099,6 +1232,7 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
               {g.containers.map((c) => {
                 const stat = stats?.[c.name]
                 const open = detail?.id === c.id
+                const pane = logs[c.id]
                 return (
                   <div key={c.id}>
                     <div className="cron-row">
@@ -1121,7 +1255,12 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
                       >
                         <Info size={13} />
                       </button>
-                      <button className="icon-btn sm" title={`Logs for ${c.name}`} onClick={() => void openLogs(c)}>
+                      <button
+                        className="icon-btn sm"
+                        aria-expanded={!!pane}
+                        title={pane ? `Close the logs for ${c.name}` : `Logs for ${c.name}`}
+                        onClick={() => void openLogs(c)}
+                      >
                         <ScrollText size={13} />
                       </button>
                       {actionButtons(c)}
@@ -1159,6 +1298,19 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
                             ? (ref) => bridge()!.scanImage!(targetCfg(), ref)
                             : null
                         }
+                      />
+                    )}
+
+                    {/* Under the row it belongs to, not at the foot of the
+                        panel: clicking a button should change something the
+                        eye can already see. */}
+                    {pane && poppedOut !== c.id && (
+                      <LogPane
+                        pane={pane}
+                        inline
+                        onChange={(next) => void runLogs(c.id, { ...pane, ...next })}
+                        onPopOut={() => setPoppedOut(c.id)}
+                        onClose={() => closeLogs(c.id)}
                       />
                     )}
                   </div>
@@ -1259,36 +1411,15 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
         </div>
       )}
 
-      {logs && (
-        <>
-          <div className="row muted" style={{ fontSize: 11, marginTop: 10, gap: 8, alignItems: 'center' }}>
-            <span className="grow">Logs · {logs.name}</span>
-            <select
-              className="input"
-              style={{ maxWidth: 110 }}
-              value={logLines}
-              onChange={(e) => setLogLines(Number(e.target.value))}
-            >
-              <option value={200}>200 lines</option>
-              <option value={1000}>1000 lines</option>
-              <option value={5000}>5000 lines</option>
-            </select>
-            <label className="row" style={{ gap: 4, alignItems: 'center' }}>
-              <input
-                type="checkbox"
-                checked={logTimestamps}
-                onChange={(e) => setLogTimestamps(e.target.checked)}
-              />
-              Timestamps
-            </label>
-            <button className="btn ghost sm" onClick={() => setLogs(null)}>
-              Close
-            </button>
-          </div>
-          <pre className="bc-out" style={{ marginLeft: 0, maxHeight: 300 }}>
-            {logs.output}
-          </pre>
-        </>
+      {/* Only what the user explicitly popped out lands down here now. Every
+          other pane stays attached to the row it was opened from. */}
+      {poppedOut && logs[poppedOut] && (
+        <LogPane
+          pane={logs[poppedOut]}
+          onChange={(next) => void runLogs(poppedOut, { ...logs[poppedOut], ...next })}
+          onDock={() => setPoppedOut(null)}
+          onClose={() => closeLogs(poppedOut)}
+        />
       )}
     </div>
   )
