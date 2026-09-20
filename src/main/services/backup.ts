@@ -402,6 +402,11 @@ export const TARGETS_FILE = 'opsmaxx-backup-targets.json'
 export const ALL_DATA_FILES = [
   'opsmaxx-data.json',
   'opsmaxx-secrets.json',
+  // When each machine-only grant was first made. Not a secret — which is why
+  // it is beside opsmaxx-secrets.json rather than inside it, where every value
+  // is keychain-sealed and `exportSecrets` walks the shape — but it is a
+  // record of what this person authorised, so "delete everything" removes it.
+  'opsmaxx-secret-grants.json',
   'opsmaxx-vault.json',
   'opsmaxx-wslocks.json',
   'opsmaxx-known-hosts.json',
@@ -409,6 +414,20 @@ export const ALL_DATA_FILES = [
   'opsmaxx-mcp-sessions.json',
   'opsmaxx-ai-policy.json',
   'opsmaxx-ai-audit.jsonl',
+  // FOUND BY DERIVING THE LIST RATHER THAN READING IT. Both of these were
+  // written to userData and in neither list, so "delete everything" left them
+  // on disk — the same failure the eleven named below were found in, and found
+  // the same way.
+  //
+  // The OAuth store is the serious one: access and refresh tokens minted for
+  // MCP clients, plus the consents behind them. A token that outlives a wipe is
+  // a credential the user believes they destroyed.
+  //
+  // The debug trace is off by default and only exists after an explicit
+  // switch, but what it holds is a record of what the app did on this person's
+  // machine, redaction pass or not.
+  'opsmaxx-mcp-oauth.json',
+  'opsmaxx-debug.jsonl',
   // The other three append-only logs, all three of which this list predated.
   // What they hold is the argument: local shells with their paths and cwds,
   // every approval with the hostnames and commands it authorised, and every

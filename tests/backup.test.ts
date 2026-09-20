@@ -15,7 +15,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { randomBytes, scrypt, createCipheriv } from 'node:crypto'
-import { basename, join } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app } from 'electron'
 import {
@@ -54,16 +54,19 @@ const WRITES_TO_USERDATA = [
   'opsmaxx-credproxy-audit.jsonl',
   'opsmaxx-credproxy.json',
   'opsmaxx-data.json',
+  'opsmaxx-debug.jsonl',
   'opsmaxx-env-secrets.json',
   'opsmaxx-job-approvals.jsonl',
   'opsmaxx-known-hosts.json',
   'opsmaxx-local-sessions.jsonl',
   'opsmaxx-mcp-config.json',
+  'opsmaxx-mcp-oauth.json',
   'opsmaxx-mcp-sessions.json',
   'opsmaxx-processes.json',
   'opsmaxx-rdp-certs.json',
   'opsmaxx-rules.json',
   'opsmaxx-runbooks.json',
+  'opsmaxx-secret-grants.json',
   'opsmaxx-secrets.json',
   'opsmaxx-startup.json',
   'opsmaxx-vault-bio.json',
@@ -80,6 +83,53 @@ const WRITES_TO_USERDATA = [
 const KEPT_ON_PURPOSE = ['instance-id', 'opsmaxx-startup.json', 'update-prefs.json']
 
 const EXPECTED_DATA_FILES = WRITES_TO_USERDATA.filter((f) => !KEPT_ON_PURPOSE.includes(f))
+
+/**
+ * The list above, DERIVED, so a new file cannot slip past it.
+ *
+ * `WRITES_TO_USERDATA` is hand-maintained — the comment above it even prints
+ * the grep to run — and a hand-maintained list of what the code does is a list
+ * that is correct until the next commit. It was already wrong twice over when
+ * this was added: `opsmaxx-mcp-oauth.json`, which holds MCP access and refresh
+ * tokens, and `opsmaxx-debug.jsonl` were both written to userData and named in
+ * neither list, so "delete everything" left them on disk. That is the same
+ * failure as the eleven the comment above records, found the same way, and
+ * that is twice too many.
+ *
+ * So this runs the grep. It only catches the literal form
+ * `join(app.getPath('userData'), 'name')` — several files are built through a
+ * constant or a template and are invisible to it — which is why it ADDS to the
+ * hand list rather than replacing it. A name it finds must be accounted for;
+ * a name it cannot see is still the author's job.
+ */
+function literalUserDataNames(): string[] {
+  const root = resolve(__dirname, '..', 'src', 'main')
+  const out = new Set<string>()
+  const walk = (dir: string): void => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, e.name)
+      if (e.isDirectory()) walk(full)
+      else if (e.name.endsWith('.ts')) {
+        const src = readFileSync(full, 'utf8')
+        for (const m of src.matchAll(/getPath\('userData'\),\s*'([^']+)'/g)) out.add(m[1])
+      }
+    }
+  }
+  walk(root)
+  // Only files. Directories are the other pair of lists below.
+  return [...out].filter((n) => n.includes('.'))
+}
+
+describe('the hand-maintained userData list', () => {
+  it('names every file the source literally writes there', () => {
+    // If this fails, a file was added to src/main and to neither list. Put it
+    // in ALL_DATA_FILES if it is about the user, or in KEPT_ON_PURPOSE if
+    // deleting it only changes how the app behaves — and say which in the
+    // comment beside it. The one thing not to do is add it here alone.
+    const missing = literalUserDataNames().filter((n) => !WRITES_TO_USERDATA.includes(n))
+    expect(missing, 'written to userData and in neither list').toEqual([])
+  })
+})
 
 // The same pair of lists for DIRECTORIES, and for the same reason. The wipe had
 // none of these: it walked files only, so the traffic inspector's root CA

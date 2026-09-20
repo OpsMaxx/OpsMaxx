@@ -37,6 +37,7 @@ import { useOnboarding } from '../../store/onboarding'
 import { SshSessions } from './SshSessions'
 import { WebhookAlertSettings } from './WebhookAlertSettings'
 import { CredProxyPanel } from './CredProxyPanel'
+import { MachineGrants } from './MachineGrants'
 import { alertCoverageText } from './alertCoverage'
 import { MODULES, isPromotedModule, moduleEnabled, type ModuleDef } from '../../../../shared/modules'
 
@@ -1423,6 +1424,20 @@ export function Settings(): React.JSX.Element {
                 checked={settings.vaultAutoBiometricPrompt}
                 onChange={(v) => setSettings({ vaultAutoBiometricPrompt: v })}
               />
+            </div>
+          )}
+
+          {/* Filed directly under the vault, because this is the list of what
+              the vault is NOT protecting, and the two are only meaningful
+              next to each other. */}
+          {section === 'security' && (
+            <div className="settings-section">
+              <h2>Works without your master password</h2>
+              <div className="sub">
+                Standing permissions that let this machine keep working while nobody is here — and
+                the only place to take one back.
+              </div>
+              <MachineGrants />
             </div>
           )}
 

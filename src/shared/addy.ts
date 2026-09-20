@@ -82,6 +82,26 @@ export const NOT_SYNCED: Readonly<Record<string, string>> = {
   settings: 'the cosmetic subset is the T2 public profile; the rest is per-device',
   theme: 'carried in the T2 public profile so a new device looks right before pairing',
   version: 'a local on-disk seed marker, not user data',
+  // A machine-only grant means "this secret is readable on THIS machine
+  // without the master password", and the secret it names is excluded from
+  // every export precisely so it cannot travel. Syncing the record of such a
+  // grant would carry an authorisation to a device where the thing it
+  // authorises does not exist — a standing permission for nothing, and on the
+  // new device an entry no revoke there can act on.
+  secretGrants: 'when each machine-only grant was made; the grant is bound to one machine',
+  // Both of these were written to userData and named in NO list until now —
+  // not the wipe list, not this one. They surfaced together when the wipe list
+  // was derived from the source rather than maintained by hand.
+  //
+  // The OAuth store holds live access and refresh tokens minted for MCP
+  // clients on this machine, plus the consents behind them. Syncing it would
+  // carry working credentials to a second device and hand it sessions nobody
+  // there consented to.
+  mcpOauth: 'live OAuth tokens and consents minted for this machine; syncing them would copy credentials',
+  // A trace of what the app did here, recorded only after an explicit switch.
+  // It is about one machine's behaviour and belongs to the bug report it was
+  // started for.
+  debug: 'an opt-in local trace of this machine; not user data to carry anywhere',
 
   runbooks:
     'UNDECIDED: user-authored notes about their own estate, unreproducible, and currently lost on a device wipe',

@@ -93,8 +93,14 @@ describe('what must NOT clear it', () => {
     // ...and it reaches the handler at all, which needed the report threading
     // through `onRun` — the line of log text it used to get said nothing a
     // caller could act on.
-    expect(SRC('src/main/services/backup.ts')).toContain(
-      'handlers.onRun?.(describeRun(r), r)'
+    // Matched WITHOUT the receiver's name. What must survive is the report
+    // being threaded through as the second argument — the line of log text it
+    // used to get said nothing a caller could act on. Pinning `handlers.` as
+    // well made this fail when the handlers moved to module scope so that an
+    // unlock could raise the same tick, which is a rename rather than a
+    // regression.
+    expect(SRC('src/main/services/backup.ts')).toMatch(
+      /\.onRun\?\.\(describeRun\(r\), r\)/
     )
   })
 })
