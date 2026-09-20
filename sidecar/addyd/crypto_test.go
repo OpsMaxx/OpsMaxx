@@ -1185,3 +1185,110 @@ func TestARevokedDeviceCannotForgeAnEpochHandoff(t *testing.T) {
 		t.Fatalf("the genuine handoff was refused too: %v", err)
 	}
 }
+
+// A RELAY THAT WITHHOLDS THE NEWEST ENTRIES.
+//
+// The cheapest attack a relay has, and for a long time nothing here could see
+// it: serve every device the chain up to entry N-1 and keep entry N. If entry
+// N is the one that revoked a device, that device is back in everybody's peer
+// list — receiving clipboards, accepting files, and never wiping, because
+// `selfListed` says it is still a member.
+//
+// Nothing about the shorter chain is malformed. It verifies perfectly, because
+// a prefix of a valid chain is a valid chain. The only thing that can tell the
+// difference is a device that remembers how far it got last time, which is
+// what `Pin` is for — and what the client never supplied.
+func TestAWithheldEntryIsCaughtByThePin(t *testing.T) {
+	keys.reset()
+	t.Cleanup(keys.reset)
+
+	run := func(h func(Request) (any, error), m string, p map[string]any) map[string]any {
+		t.Helper()
+		v, err := h(Request{Method: m, Params: params(t, p)})
+		if err != nil {
+			t.Fatalf("%s: %v", m, err)
+		}
+		return v.(map[string]any)
+	}
+
+	minted := run(handleCreateAccount, "createAccount", map[string]any{"label": "laptop"})
+	genesis := minted["genesis"].(string)
+	verify := func(chain string, pin map[string]any) (map[string]any, error) {
+		p := map[string]any{
+			"chain": chain, "rootSignPub": minted["rootSignPub"], "epoch1Sign": minted["epoch1SignPub"],
+		}
+		for k, v := range pin {
+			p[k] = v
+		}
+		v, err := handleVerifyRoster(Request{Method: "verifyRoster", Params: params(t, p)})
+		if err != nil {
+			return nil, err
+		}
+		return v.(map[string]any), nil
+	}
+
+	// A second device, then its revocation: the entry a relay would most like
+	// to lose.
+	peerSign, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peerEnc, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	one, _ := verify(genesis, nil)
+	added := run(handleAddDevice, "addDevice", map[string]any{
+		"headEntry": one["headEntry"], "headSeq": one["headSeq"], "epoch": uint64(1),
+		"pubSign": hex.EncodeToString(peerSign),
+		"pubEnc":  hex.EncodeToString(peerEnc.PublicKey().Bytes()),
+		"label":   "desktop",
+	})
+	gw, _ := base64.StdEncoding.DecodeString(genesis)
+	aw, _ := base64.StdEncoding.DecodeString(added["entry"].(string))
+	twoChain := base64.StdEncoding.EncodeToString(append(gw, aw...))
+
+	two, _ := verify(twoChain, nil)
+	revoked := run(handleRevokeDevice, "revokeDevice", map[string]any{
+		"headEntry": two["headEntry"], "headSeq": two["headSeq"], "epoch": uint64(1),
+		"pubSign": hex.EncodeToString(peerSign),
+		"pubEnc":  hex.EncodeToString(peerEnc.PublicKey().Bytes()),
+	})
+	rw, _ := base64.StdEncoding.DecodeString(revoked["entry"].(string))
+	full := base64.StdEncoding.EncodeToString(append(append(gw, aw...), rw...))
+
+	// This device has seen the whole chain, so it pins the revoke.
+	after, err := verify(full, nil)
+	if err != nil {
+		t.Fatalf("the full chain does not verify: %v", err)
+	}
+	if n := len(after["devices"].([]map[string]any)); n != 1 {
+		t.Fatalf("after the revoke the roster holds %d devices", n)
+	}
+	pin := map[string]any{
+		"havePin": true, "pinnedSeq": after["headSeq"], "pinnedHead": after["head"],
+	}
+
+	// ---- and now the relay drops the last entry --------------------------
+	// WITHOUT the pin this is accepted, and the revoked device is back. That
+	// is asserted too, so the test cannot pass by refusing everything.
+	unpinned, err := verify(twoChain, nil)
+	if err != nil {
+		t.Fatalf("a truncated chain should still verify on its own terms: %v", err)
+	}
+	if n := len(unpinned["devices"].([]map[string]any)); n != 2 {
+		t.Fatalf("the truncated chain holds %d devices; the attack is not set up", n)
+	}
+
+	if _, err := verify(twoChain, pin); err == nil {
+		t.Fatal("a chain missing the revoke was accepted by a device that had already seen it")
+	} else if !strings.Contains(err.Error(), "rewound") && !strings.Contains(err.Error(), "seen") {
+		t.Fatalf("refused, but not as a rollback: %v", err)
+	}
+
+	// And the honest chain still passes against the same pin, or the pin
+	// would simply be a way to stop syncing.
+	if _, err := verify(full, pin); err != nil {
+		t.Fatalf("the full chain was refused against its own pin: %v", err)
+	}
+}

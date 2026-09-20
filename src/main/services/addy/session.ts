@@ -722,6 +722,12 @@ class AddySession {
     if (!relay || !addyd || !account) {
       return { devices: [], stillListed: false, problem: 'not attached' }
     }
+    const saved = loadEnrolment()
+    const pin =
+      saved?.pinSeq !== undefined && saved.pinHead
+        ? { seq: saved.pinSeq, head: saved.pinHead }
+        : null
+
     const bytes = await relay.roster()
     // `selfListed`, not `stillListed`: the sidecar's name for it. Getting this
     // wrong reads as `undefined`, which is falsy — and a falsy answer here is
@@ -745,7 +751,13 @@ class AddySession {
     }>('verifyRoster', {
       chain: bytes,
       rootSignPub: account.rootSignPub ?? '',
-      epoch1Sign: account.epoch1SignPub ?? ''
+      epoch1Sign: account.epoch1SignPub ?? '',
+      // THE PIN, which nothing supplied. `VerifyChain` raises "rewound" and
+      // "forked" only when it is given one, so without this a relay could
+      // withhold the newest entries and every device verified the shorter
+      // chain without complaint — including a chain missing the entry that
+      // revoked a device, which puts that device back in everyone's peer list.
+      ...(pin ? { havePin: true, pinnedSeq: pin.seq, pinnedHead: pin.head } : {})
     })
 
     // A ROTATION ANNOUNCES ITSELF HERE. The chain's epoch moved and this
@@ -793,6 +805,20 @@ class AddySession {
       self: me.devicePub
     }
     this.lastRoster = roster
+
+    /**
+     * MOVE THE PIN FORWARD, and only forward.
+     *
+     * Recorded after a verification that passed, so the entry pinned is one
+     * this device checked rather than one it was handed. Never moved back: a
+     * shorter chain has already been refused by the verifier above, and
+     * writing a lower sequence here would undo the refusal for every launch
+     * afterwards.
+     */
+    if (saved && verified.headSeq > (saved.pinSeq ?? -1)) {
+      saveEnrolment({ ...saved, pinSeq: verified.headSeq, pinHead: verified.head })
+    }
+
     this.announce()
     return roster
   }

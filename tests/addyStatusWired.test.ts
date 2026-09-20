@@ -644,3 +644,35 @@ describe('recovery lands on the current epoch or refuses', () => {
     expect(SESSION).toMatch(/account:\$\{opened\.epoch\}/)
   })
 })
+
+/**
+ * The pin that nothing supplied.
+ *
+ * `VerifyChain` raises "rewound" and "forked" only when it is given a `Pin`.
+ * The request shape accepted one; the one caller passed `chain`,
+ * `rootSignPub`, `epoch1Sign` and nothing else. So the cheapest attack a relay
+ * has — serve everyone the chain up to entry N-1 and keep entry N — was
+ * undetectable. If entry N is a revocation, the removed device is back in
+ * every peer list, receiving clipboards and accepting files.
+ */
+describe('a withheld roster entry is detectable', () => {
+  it('the pin is supplied on every verification', () => {
+    expect(SESSION).toMatch(/havePin: true/)
+    expect(SESSION).toMatch(/pinnedSeq: pin\.seq/)
+  })
+
+  it('and it is on disk, or it is nothing', () => {
+    // Held only in memory it dies on quit, which is the moment a rollback is
+    // easiest: a device that has just started has no history to contradict.
+    const ENROL = read('src/main/services/addy/enrolment.ts')
+    expect(ENROL).toMatch(/pinSeq\?: number/)
+    expect(ENROL).toMatch(/pinHead\?: string/)
+    expect(SESSION).toMatch(/pinSeq: verified\.headSeq/)
+  })
+
+  it('only ever moves forward', () => {
+    // A shorter chain has already been refused by the verifier; writing a
+    // lower sequence would undo that refusal for every launch afterwards.
+    expect(SESSION).toMatch(/verified\.headSeq > \(saved\.pinSeq \?\? -1\)/)
+  })
+})

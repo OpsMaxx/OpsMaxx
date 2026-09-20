@@ -50,6 +50,24 @@ export interface AddyEnrolment {
   /** Development relays present a self-signed certificate. Carried here so a
    *  resume does not quietly become strict — or quietly stay lax. */
   insecureTLS?: boolean
+  /**
+   * The furthest point in the roster this device has verified: the sequence
+   * number and the hash of the entry at it.
+   *
+   * THE ANTI-ROLLBACK ANCHOR, and it has to be on disk or it is nothing. The
+   * verifier raises "rewound" and "forked" only when it is given a pin, and
+   * nothing gave it one — so a relay could simply withhold the newest entries
+   * and every device would verify a shorter chain quite happily. Withhold the
+   * one that revoked a device and that device is back in everybody's peer
+   * list, receiving clipboards and accepting files.
+   *
+   * Absent on an enrolment written before this existed, and on the first
+   * verification of a fresh one. That is the only honest starting state: a
+   * device with no history cannot detect a rollback, which is why it records
+   * one at the first opportunity.
+   */
+  pinSeq?: number
+  pinHead?: string
   /** When this machine joined, for the panel to show. */
   at: string
 }
