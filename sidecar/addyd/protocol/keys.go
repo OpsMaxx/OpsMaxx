@@ -186,8 +186,16 @@ func DeriveEpoch(ak []byte, acct AccountID, epoch uint64) (*EpochKeys, error) {
 	}
 
 	return &EpochKeys{
-		Epoch:    epoch,
-		AK:       ak,
+		Epoch: epoch,
+		// COPIED, not aliased. A caller that hands in a decoded buffer and
+		// then wipes it -- which is the right thing for a caller to do with
+		// key material it no longer needs -- would otherwise zero the AK
+		// inside this struct along with it. The symptom is silent and
+		// delayed: every derived key is already computed and correct, so the
+		// keys keep working, and only the operations that use AK ITSELF as a
+		// binding fail -- an epoch handoff that cannot be opened by the device
+		// it was sealed for, long after the load that broke it.
+		AK:       append([]byte(nil), ak...),
 		Sign:     ed25519.NewKeyFromSeed(signSeed),
 		SignSeed: signSeed,
 		Enc:      enc,

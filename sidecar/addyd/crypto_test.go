@@ -853,3 +853,170 @@ func TestARotationRefusesTheWrongCredentials(t *testing.T) {
 		t.Fatalf("refused for the wrong reason: %v", err)
 	}
 }
+
+// A second device following a rotation it did not perform.
+//
+// THE FAILURE THIS EXISTS AGAINST is silent and total: the rotating machine
+// re-seals every collection under the new epoch, and a device that never reads
+// its handoff holds only the old key. From that moment every object it fetches
+// fails to open — an AEAD error on every collection at once, on a machine that
+// did nothing wrong, whose user reasonably concludes sync is broken.
+//
+// Both roles run in one process with the vault swapped, the same way the
+// pairing test does: a test where both ends shared a key would pass while the
+// handoff was sealed to nobody in particular.
+func TestASecondDeviceFollowsARotation(t *testing.T) {
+	keys.reset()
+	t.Cleanup(keys.reset)
+
+	rotator := keys
+	follower := &vault{epochs: map[uint64]*protocol.EpochKeys{}}
+	as := func(v *vault) { keys = v }
+	t.Cleanup(func() { keys = rotator })
+
+	run := func(h func(Request) (any, error), method string, p map[string]any) map[string]any {
+		t.Helper()
+		v, err := h(Request{Method: method, Params: params(t, p)})
+		if err != nil {
+			t.Fatalf("%s: %v", method, err)
+		}
+		return v.(map[string]any)
+	}
+
+	minted := run(handleCreateAccount, "createAccount", map[string]any{"label": "rotator"})
+	secrets := minted["secrets"].(map[string]string)
+	genesis := minted["genesis"].(string)
+
+	// The follower: a second device on the account, holding epoch 1 like any
+	// paired device does.
+	as(follower)
+	followerDev := run(handleCreateAccount, "createAccount", map[string]any{"label": "follower"})
+	_ = followerDev
+	keys.reset()
+	run(handleLoad, "load", map[string]any{
+		"accountId":      minted["accountId"],
+		"deviceSignSeed": followerDev["secrets"].(map[string]string)["deviceSignSeed"],
+		"deviceEncKey":   followerDev["secrets"].(map[string]string)["deviceEncKey"],
+		"epochKeys":      map[string]any{"1": secrets["akSeed"]},
+		"rootSignPub":    minted["rootSignPub"],
+	})
+	self := run(handleFingerprintSelf, "fingerprintSelf", map[string]any{})
+	followerFingerprint := self["fingerprint"].(string)
+	// Its public halves, as the roster would carry them.
+	who := run(handleWhoami, "whoami", map[string]any{})
+
+	// Put it on the chain, so the rotation seals a handoff for it.
+	as(rotator)
+	before := run(handleVerifyRoster, "verifyRoster", map[string]any{
+		"chain": genesis, "rootSignPub": minted["rootSignPub"], "epoch1Sign": minted["epoch1SignPub"],
+	})
+	added := run(handleAddDevice, "addDevice", map[string]any{
+		"headEntry": before["headEntry"], "headSeq": before["headSeq"], "epoch": uint64(1),
+		"pubSign": who["devicePub"], "pubEnc": who["deviceEnc"], "label": "follower",
+	})
+	gw, _ := base64.StdEncoding.DecodeString(genesis)
+	aw, _ := base64.StdEncoding.DecodeString(added["entry"].(string))
+	chain := base64.StdEncoding.EncodeToString(append(gw, aw...))
+
+	rot := run(handleRotateEpoch, "rotateEpoch", map[string]any{
+		"kind": "hygiene", "chain": chain,
+		"rootSignPub": minted["rootSignPub"], "epoch1Sign": minted["epoch1SignPub"],
+	})
+	handoffs := rot["handoffs"].(map[string]string)
+	mine, ok := handoffs[followerFingerprint]
+	if !ok {
+		t.Fatalf("no handoff was sealed for the follower; got %d for other keys", len(handoffs))
+	}
+
+	// Something the follower could not otherwise read: sealed by the rotator
+	// under the NEW epoch.
+	sealed := run(handleSeal, "seal", map[string]any{
+		"collection": "servers", "epoch": rot["epoch"], "schema": 1,
+		"writerVersion": "test", "counter": uint64(1),
+		"payload": base64.StdEncoding.EncodeToString([]byte("after the rotation")),
+	})
+
+	// ---- the follower catches up ----------------------------------------
+	as(follower)
+	// Before adopting, it cannot read a thing. This is the exact symptom the
+	// handler exists to prevent, asserted so the test cannot pass vacuously.
+	if _, err := handleOpen(Request{Method: "open", Params: params(t, map[string]any{
+		"collection": "servers", "epoch": rot["epoch"], "sealed": sealed["sealed"],
+		"knownSchema": 1, "seenCounter": uint64(0),
+	})}); err == nil {
+		t.Fatal("the follower read the new epoch's object without adopting the key")
+	}
+
+	adopted := run(handleAdoptEpoch, "adoptEpoch", map[string]any{
+		"epoch": rot["epoch"], "counter": uint64(1),
+		"handoff": mine, "transition": rot["entry"], "chained": false,
+	})
+	if adopted["epoch"] != rot["epoch"] {
+		t.Fatalf("adopted epoch %v, not %v", adopted["epoch"], rot["epoch"])
+	}
+	// And the parent is handed the seed, or the device is locked out on its
+	// next launch by the very operation meant to keep it in.
+	if adopted["secrets"].(map[string]string)["akSeed"] == "" {
+		t.Fatal("adopting an epoch returned no key for the parent to store")
+	}
+
+	opened := run(handleOpen, "open", map[string]any{
+		"collection": "servers", "epoch": rot["epoch"], "sealed": sealed["sealed"],
+		"knownSchema": 1, "seenCounter": uint64(0),
+	})
+	got, _ := base64.StdEncoding.DecodeString(opened["payload"].(string))
+	if string(got) != "after the rotation" {
+		t.Fatalf("the follower read %q", got)
+	}
+}
+
+// The epoch key survives the load that created it.
+//
+// `load` decodes the AK from base64 and wipes the buffer afterwards, which is
+// the right thing for a caller to do with key material it no longer needs.
+// `DeriveEpoch` used to KEEP that buffer as `EpochKeys.AK`, so every resumed
+// device held an all-zero AK.
+//
+// The failure was silent and delayed, which is why it wants a test of its own:
+// every key derived FROM the AK is computed during the load and is correct, so
+// sealing, opening and signing all went on working. Only the operations that
+// use AK itself as a binding broke — an epoch handoff that the device it was
+// sealed for cannot open — and that is weeks away from the load that caused
+// it, on a machine that has been fine the whole time.
+func TestALoadedEpochKeyIsNotWipedByItsOwnLoad(t *testing.T) {
+	keys.reset()
+	t.Cleanup(keys.reset)
+
+	minted, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{"label": "laptop"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acct := minted.(map[string]any)
+	secrets := acct["secrets"].(map[string]string)
+
+	keys.reset()
+	if _, err := handleLoad(Request{Method: "load", Params: params(t, map[string]any{
+		"accountId": acct["accountId"], "deviceSignSeed": secrets["deviceSignSeed"],
+		"deviceEncKey": secrets["deviceEncKey"],
+		"epochKeys":    map[string]any{"1": secrets["akSeed"]},
+		"rootSignPub":  acct["rootSignPub"],
+	})}); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	keys.mu.RLock()
+	ak := append([]byte(nil), keys.epochs[1].AK...)
+	keys.mu.RUnlock()
+
+	if len(ak) != 32 {
+		t.Fatalf("the loaded epoch key is %d bytes", len(ak))
+	}
+	if bytes.Equal(ak, make([]byte, 32)) {
+		t.Fatal("the loaded epoch key is all zeroes: the load wiped the buffer it was kept in")
+	}
+	// And it is the key that was minted, not merely something non-zero.
+	want, _ := base64.StdEncoding.DecodeString(secrets["akSeed"])
+	if !bytes.Equal(ak, want) {
+		t.Fatal("the loaded epoch key is not the one that was stored")
+	}
+}

@@ -746,6 +746,11 @@ func handleWhoami(Request) (any, error) {
 	return map[string]any{
 		"accountId": keys.account.String(),
 		"devicePub": hex.EncodeToString(keys.device.Sign.Public().(ed25519.PublicKey)),
+		// The encryption half too. Public, and needed by anything that writes
+		// this device into a roster entry — which previously meant the caller
+		// had to have learned it from a pairing and kept it, so a device that
+		// had only ever resumed did not know its own.
+		"deviceEnc": hex.EncodeToString(keys.device.Enc.PublicKey().Bytes()),
 		"epochs":    epochNumbers(keys.epochs),
 	}, nil
 }
@@ -1402,6 +1407,14 @@ func handleRotateEpoch(req Request) (any, error) {
 		"epoch":        rot.NewKeys.Epoch,
 		"epochSignPub": hex.EncodeToString(rot.NewKeys.Sign.Public().(ed25519.PublicKey)),
 		"handoffs":     handoffs,
+		// The new seed goes back to the parent so it survives a restart. The
+		// keychain is the only durable store here, and a device that rotated
+		// the account and then forgot the key it rotated TO would be locked
+		// out of its own estate on its next launch — by the one operation
+		// whose whole purpose was keeping it in.
+		"secrets": map[string]string{
+			"akSeed": base64.StdEncoding.EncodeToString(rot.NewKeys.AK),
+		},
 	}
 
 	// The chained handoff, hygiene only — and refused by the reader as well as
@@ -1468,4 +1481,181 @@ func lastEntry(chain []byte) (*protocol.Entry, error) {
 		return nil, errors.New("the chain is empty")
 	}
 	return &last, nil
+}
+
+type adoptEpochRequest struct {
+	// The epoch being adopted, and the handoff sealed for it.
+	Epoch   uint64 `json:"epoch"`
+	Counter uint64 `json:"counter"`
+	Handoff string `json:"handoff"`
+	// The transition entry that announced this epoch, base64 of the wire
+	// entry. REQUIRED, and not decoration: it carries the flag that says
+	// whether this was a revocation, and a chained handoff must be refused for
+	// one of those even if the relay is happy to serve it.
+	Transition string `json:"transition"`
+	// Whether this is the CHAINED handoff — sealed under the previous epoch's
+	// own key so any device holding it can catch up — or one sealed to this
+	// device in particular.
+	Chained bool `json:"chained"`
+}
+
+// handleAdoptEpoch takes the new epoch key after somebody else rotated.
+//
+// WITHOUT THIS A ROTATION LOCKS EVERY OTHER DEVICE OUT. The rotating device
+// re-seals every collection under n+1 and publishes a handoff per survivor;
+// a device that cannot read its handoff holds only AK_n, and every object it
+// fetches from then on is sealed under a key it does not have. The symptom is
+// an AEAD failure on every collection at once, on a machine that did nothing
+// wrong.
+//
+// Both refusals below are enforced HERE as well as by whoever wrote the
+// object, because the writer is not always honest: a relay that kept the
+// chained handoff from a hygiene rotation and served it against a later
+// revocation transition would hand a revoked device exactly what the
+// revocation took away.
+func handleAdoptEpoch(req Request) (any, error) {
+	var in adoptEpochRequest
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+	if in.Epoch == 0 {
+		return nil, codedf(ErrConfigInvalid, "an epoch is required")
+	}
+	obj, err := base64.StdEncoding.DecodeString(in.Handoff)
+	if err != nil || len(obj) == 0 {
+		return nil, codedf(ErrConfigInvalid, "the handoff is base64 of the sealed object")
+	}
+	transWire, err := base64.StdEncoding.DecodeString(in.Transition)
+	if err != nil || len(transWire) == 0 {
+		return nil, codedf(ErrConfigInvalid, "the transition entry is base64 of the wire entry")
+	}
+	transition, _, err := protocol.DecodeEntry(transWire)
+	if err != nil {
+		return nil, wrapCoded(ErrRosterInvalid, err, "reading the transition entry")
+	}
+	if transition.Epoch != in.Epoch {
+		return nil, codedf(
+			ErrRosterInvalid,
+			"that transition announces epoch %d, not %d",
+			transition.Epoch, in.Epoch,
+		)
+	}
+
+	keys.mu.RLock()
+	acct := keys.account
+	device := keys.device
+	loaded := keys.loaded
+	previous := keys.epochs[in.Epoch-1]
+	keys.mu.RUnlock()
+	if !loaded || device == nil {
+		return nil, codedf(ErrNotPaired, "no account is loaded")
+	}
+	if previous == nil {
+		// The device missed an epoch. It cannot catch up from here — the
+		// binding is the previous key and it does not have it — and the honest
+		// remedy is pairing again or recovering, not a handoff it can open.
+		return nil, codedf(
+			ErrNotPaired,
+			"this device does not hold epoch %d, so it cannot follow the change to %d",
+			in.Epoch-1, in.Epoch,
+		)
+	}
+
+	var h *protocol.Handoff
+	if in.Chained {
+		// Refused for a revocation rotation, by the reader as well as the
+		// writer — see the note above.
+		h, err = protocol.ReadChainedHandoff(obj, transition, acct, in.Counter, previous)
+	} else {
+		// Sealed to THIS device, and bound to the previous epoch key: a party
+		// that can read the roster's public encryption keys, and is not
+		// already a member holding AK_n, cannot mint one.
+		h, err = protocol.OpenHandoff(obj, acct, in.Epoch, in.Counter, device.Enc, previous.AK)
+	}
+	if err != nil {
+		return nil, wrapCoded(ErrPairingRefused, err, "opening the epoch handoff")
+	}
+
+	epochKeys, err := protocol.DeriveEpoch(h.AKSeed, acct, in.Epoch)
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "deriving the epoch key")
+	}
+
+	keys.mu.Lock()
+	// BOTH ARE KEPT. Objects re-sealed under n+1 land before the transition
+	// entry does, so a device that has just adopted still needs n to read
+	// anything that has not moved yet — which is the reason `epochs` is a map
+	// rather than one key.
+	keys.epochs[in.Epoch] = epochKeys
+	keys.mu.Unlock()
+
+	return map[string]any{
+		"epoch":        in.Epoch,
+		"epochSignPub": hex.EncodeToString(epochKeys.Sign.Public().(ed25519.PublicKey)),
+		// The AK seed goes back to the parent so it survives a restart: the
+		// keychain is the only thing here with durable storage, and a device
+		// that adopted an epoch and forgot it on quit would be locked out on
+		// its next launch for exactly the reason this handler exists.
+		"secrets": map[string]string{
+			"akSeed": base64.StdEncoding.EncodeToString(h.AKSeed),
+		},
+	}, nil
+}
+
+// fingerprintOf is how a handoff object is named for its recipient: the
+// device's signing key as lowercase hex, matching what the rotating device
+// used. Exposed so the parent can ask for its own without knowing the shape.
+func handleFingerprintSelf(Request) (any, error) {
+	keys.mu.RLock()
+	device := keys.device
+	keys.mu.RUnlock()
+	if device == nil {
+		return nil, codedf(ErrNotPaired, "no account is loaded")
+	}
+	return map[string]any{
+		"fingerprint": hex.EncodeToString(device.Sign.Public().(ed25519.PublicKey)),
+	}, nil
+}
+
+type findTransitionRequest struct {
+	Chain string `json:"chain"`
+	Epoch uint64 `json:"epoch"`
+}
+
+// handleFindTransition pulls one transition entry out of a chain, verbatim.
+//
+// PARSED HERE rather than in the parent, because the parent has no entry
+// decoder and writing a second one is how two implementations come to disagree
+// about a wire format — the failure mode being an AEAD tag that does not
+// verify on somebody else's machine.
+//
+// It does NOT verify the chain: `adoptEpoch` checks the entry it is handed
+// against the epoch it was asked for, and the handoff will not open under a
+// forged one anyway. What this is, is a decoder.
+func handleFindTransition(req Request) (any, error) {
+	var in findTransitionRequest
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+	chain, err := base64.StdEncoding.DecodeString(in.Chain)
+	if err != nil {
+		return nil, codedf(ErrConfigInvalid, "the chain is base64 of the roster")
+	}
+	rest := chain
+	for len(rest) > 0 {
+		before := len(rest)
+		e, next, err := protocol.DecodeEntry(rest)
+		if err != nil {
+			return nil, wrapCoded(ErrRosterInvalid, err, "reading the chain")
+		}
+		if e.Op == protocol.OpEpoch && e.Epoch == in.Epoch {
+			return map[string]any{
+				"entry": base64.StdEncoding.EncodeToString(rest[:before-len(next)]),
+			}, nil
+		}
+		rest = next
+	}
+	// Absent rather than an error: an account that has never rotated has no
+	// transition for any epoch, and that is not a problem to report.
+	return map[string]any{"entry": nil}, nil
 }

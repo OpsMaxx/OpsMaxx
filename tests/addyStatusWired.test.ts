@@ -376,3 +376,59 @@ describe('the account key can be changed', () => {
     expect(PANEL).toMatch(/addy\.rotate\('revocation'/)
   })
 })
+
+/**
+ * A rotation that nobody else can follow locks the account.
+ *
+ * The rotating machine re-seals every collection under the new epoch and
+ * publishes a handoff per surviving device. A device that never reads its
+ * handoff holds only the old key, and from that moment every object it fetches
+ * fails to open — an AEAD error on every collection at once, on a machine that
+ * did nothing wrong. So the re-key shipped an hour ago was, on its own, a way
+ * to lock every other device out of the account.
+ */
+describe('other devices follow a rotation', () => {
+  it('the sidecar can adopt an epoch it did not mint', () => {
+    const CRYPTO = readFileSync(join(ROOT, 'sidecar/addyd/crypto.go'), 'utf8')
+    expect(CRYPTO).toMatch(/func handleAdoptEpoch/)
+    // Refused for a revocation by the READER as well as the writer: a relay
+    // that kept the chained handoff from a hygiene rotation and served it
+    // against a later revocation would hand a revoked device exactly what the
+    // revocation took away.
+    expect(CRYPTO).toMatch(/ReadChainedHandoff/)
+  })
+
+  it('the session notices and walks forward', () => {
+    expect(SESSION).toMatch(/private async followRotation\(/)
+    // From refreshRoster, because the roster is where a rotation announces
+    // itself — the transition entry moves the chain's epoch.
+    expect(SESSION).toMatch(/followRotation\(chainEpoch\)/)
+  })
+
+  it('stores the adopted key, or the device is locked out on its next launch', () => {
+    expect(SESSION).toMatch(/account:\$\{next\}/)
+    // And the resume path loads every epoch this device holds, not just the
+    // newest: objects re-sealed under n+1 land before the transition does, so
+    // a device that has just caught up still needs n.
+    expect(SESSION).toMatch(/for \(let n = 2; n <= saved\.epoch; n\+\+\)/)
+  })
+
+  it('the rotating device keeps the key it rotated to', () => {
+    // Stored BEFORE any of the writes. A crash after the first PUT and before
+    // this would leave the relay carrying objects this device cannot read —
+    // the one failure worse than not rotating at all.
+    const rotate = SESSION.slice(SESSION.indexOf('async rotateEpoch('))
+    const store = rotate.indexOf('account:${prepared.epoch}')
+    const firstWrite = rotate.indexOf('for (const name of SYNCED_COLLECTIONS)')
+    expect(store).toBeGreaterThan(-1)
+    expect(store).toBeLessThan(firstWrite)
+  })
+
+  it('pairs a new device into the CURRENT epoch, not epoch 1', () => {
+    // The unsuffixed keychain name still holds the original key after a
+    // rotation. Handing that to a joining device would pair it into an epoch
+    // the account has moved off: it would see the roster and be unable to read
+    // a single object.
+    expect(SESSION).toMatch(/account\.epoch > 1/)
+  })
+})

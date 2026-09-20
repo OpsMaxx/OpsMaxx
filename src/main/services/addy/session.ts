@@ -352,6 +352,27 @@ class AddySession {
       deviceEncKey: loadAddySecret('device', `${saved.accountId}:device-enc`),
       akSeed: loadAddySecret('account', `${saved.accountId}:account`)
     }
+    /**
+     * EVERY EPOCH THIS DEVICE HOLDS, not just the current one.
+     *
+     * Epoch 1 lives under the unsuffixed name — it was written before there
+     * was any other kind — and each rotation this device followed added its
+     * own. Loading only the newest would lose the ability to read anything
+     * that has not been re-sealed yet, which is a real window: the rotating
+     * device writes the new objects before the transition entry, but nothing
+     * makes the two atomic.
+     *
+     * A gap in the middle is not fatal here, because the objects that matter
+     * are the current epoch's — it is reported by what fails to open rather
+     * than by refusing to start, which would take a working device offline
+     * over a key it may never need.
+     */
+    const epochKeys: Record<number, string> = {}
+    if (keys.akSeed) epochKeys[1] = keys.akSeed
+    for (let n = 2; n <= saved.epoch; n++) {
+      const seed = loadAddySecret('account', `${saved.accountId}:account:${n}`)
+      if (seed) epochKeys[n] = seed
+    }
     if (!keys.deviceSignSeed || !keys.deviceEncKey || !keys.akSeed) {
       return {
         resumed: false,
@@ -374,7 +395,7 @@ class AddySession {
         {
           deviceSignSeed: keys.deviceSignSeed,
           deviceEncKey: keys.deviceEncKey,
-          epochKeys: { [saved.epoch]: keys.akSeed }
+          epochKeys
         },
         log
       )
@@ -479,7 +500,14 @@ class AddySession {
 
     // The head THIS device verified, never the relay's word for it.
     const before = await this.refreshRoster()
-    const akSeed = loadAddySecret('account', `${account.accountId}:account`)
+    // THE CURRENT EPOCH'S KEY, not epoch 1's. After a rotation the unsuffixed
+    // name still holds the original, and handing that to a joining device
+    // would pair it into an epoch the account has moved off — it would see
+    // the roster and be unable to read a single object.
+    const akSeed =
+      account.epoch > 1
+        ? loadAddySecret('account', `${account.accountId}:account:${account.epoch}`)
+        : loadAddySecret('account', `${account.accountId}:account`)
     if (!akSeed) {
       throw new AddyError('config-invalid', 'this device cannot read its own account key')
     }
@@ -687,11 +715,24 @@ class AddySession {
       head: string
       headEntry: string
       headSeq: number
+      /** The epoch the chain ENDS in. A rotation moves it, which is how a
+       *  device that was not consulted finds out one happened. */
+      epoch: number
     }>('verifyRoster', {
       chain: bytes,
       rootSignPub: account.rootSignPub ?? '',
       epoch1Sign: account.epoch1SignPub ?? ''
     })
+
+    // A ROTATION ANNOUNCES ITSELF HERE. The chain's epoch moved and this
+    // device has not; everything it reads from now on is sealed under a key it
+    // does not hold unless it follows. Walked one step at a time, because each
+    // handoff is bound to the key of the epoch before it.
+    let chainEpoch = verified.epoch
+    while (chainEpoch > (this.account?.epoch ?? 0)) {
+      if (!(await this.followRotation(chainEpoch).catch(() => false))) break
+    }
+    chainEpoch = verified.epoch
 
     const me = await addyd.send<{ devicePub: string }>('whoami', {})
     this.roster = verified.devices
@@ -1056,6 +1097,89 @@ class AddySession {
   }
 
   /**
+   * Follow a rotation somebody else performed.
+   *
+   * WITHOUT THIS A RE-KEY LOCKS EVERY OTHER DEVICE OUT. The rotating machine
+   * re-seals every collection under the new epoch and publishes a handoff per
+   * surviving device; a device that never reads its handoff holds only the old
+   * key, and from that moment every object it fetches is sealed under one it
+   * does not have. The symptom is an AEAD failure on every collection at once,
+   * on a machine that did nothing wrong — and the user's reasonable conclusion
+   * is that sync is broken.
+   *
+   * Called from `refreshRoster`, because the roster is where a rotation
+   * announces itself: the transition entry moves the chain's epoch, and this
+   * device notices it has fallen behind at the same moment it learns anything
+   * else about the account.
+   *
+   * Returns false when there is nothing to do, or when the handoff is not
+   * there yet — which is an ordinary race rather than a failure: the rotating
+   * device writes the handoffs before the transition, but the relay is
+   * eventually consistent and a read can land between them.
+   */
+  private async followRotation(toEpoch: number): Promise<boolean> {
+    const addyd = this.addyd
+    const relay = this.relay
+    const account = this.account
+    if (!addyd || !relay || !account || toEpoch <= account.epoch) return false
+
+    // ONE STEP AT A TIME. The handoff for epoch n+1 is bound to the key for
+    // epoch n, so a device two behind has to walk, and a device that missed
+    // one entirely cannot — it is told so rather than handed something that
+    // looks like a key.
+    const next = account.epoch + 1
+    const transition = await relay.transitionFor(next)
+    if (!transition) return false
+
+    const self = await addyd.send<{ fingerprint: string }>('fingerprintSelf')
+    // Mine first, the chained one second. A revocation publishes only the
+    // first, and the sidecar refuses the second for one anyway — so the order
+    // is about what is likeliest to be there, not about what is allowed.
+    const mine = await relay.getObject(`handoff:${self.fingerprint}`, next)
+    const chained = mine ? null : await relay.getObject('handoff', next)
+    const object = mine ?? chained
+    if (!object) return false
+
+    const adopted = await addyd.send<{
+      epoch: number
+      epochSignPub: string
+      secrets: { akSeed: string }
+    }>('adoptEpoch', {
+      epoch: next,
+      counter: 1,
+      handoff: object.body.toString('base64'),
+      transition,
+      chained: !mine
+    })
+
+    // STORED BEFORE THE ACCOUNT MOVES. A device that adopted an epoch and
+    // forgot it on quit is locked out on its next launch for exactly the
+    // reason this whole method exists, and the keychain is the only thing
+    // here with durable storage.
+    if (!storeAddySecret('account', `${account.accountId}:account:${next}`, adopted.secrets.akSeed)) {
+      throw new AddyError(
+        'config-invalid',
+        'this machine has no usable keychain, so the new account key cannot be stored.'
+      )
+    }
+
+    this.account = { ...account, epoch: adopted.epoch }
+    saveEnrolment({
+      baseURL: account.baseURL,
+      accountId: account.accountId,
+      epoch: adopted.epoch,
+      rootSignPub: account.rootSignPub ?? '',
+      epoch1SignPub: account.epoch1SignPub ?? '',
+      spki: loadEnrolment()?.spki ?? '',
+      insecureTLS: this.insecureTLS
+    })
+    // Every pinned ETag and counter was against the old epoch's objects. The
+    // next pass reconciles from scratch, which is what should happen.
+    forgetSyncState()
+    return true
+  }
+
+  /**
    * Move the account to a new epoch key.
    *
    * TWO KINDS, AND THEY ARE NOT DEGREES OF THE SAME THING.
@@ -1097,6 +1221,7 @@ class AddySession {
       handoffs: Record<string, string>
       chained?: string
       escrow?: string
+      secrets: { akSeed: string }
       seq: number
       entry: string
     }>('rotateEpoch', {
@@ -1106,6 +1231,26 @@ class AddySession {
       epoch1Sign: account.epoch1SignPub ?? '',
       ...(mnemonic ? { mnemonic } : {})
     })
+
+    // 0. THE KEY ITSELF, BEFORE ANY OF THE WRITES.
+    //
+    // The keychain is the only durable store on this machine, and everything
+    // below re-seals the account's data under a key the sidecar is holding in
+    // memory. A crash after the first PUT and before this would leave the
+    // relay carrying objects this device cannot read on its next launch —
+    // the one failure mode worse than not rotating at all.
+    if (
+      !storeAddySecret(
+        'account',
+        `${account.accountId}:account:${prepared.epoch}`,
+        prepared.secrets.akSeed
+      )
+    ) {
+      throw new AddyError(
+        'config-invalid',
+        'this machine has no usable keychain, so the new account key cannot be stored. Nothing was rotated.'
+      )
+    }
 
     // 1. EVERY COLLECTION, UNDER THE NEW EPOCH, BEFORE ANYTHING ELSE.
     //
