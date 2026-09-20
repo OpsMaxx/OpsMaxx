@@ -140,6 +140,7 @@ describe('the hand-maintained userData list', () => {
 // inspector replaced. (Its private key was never here; setSecret seals that into
 // opsmaxx-secrets.json, which the file list above already covered.)
 const DIRS_UNDER_USERDATA = [
+  'addy-transfers',
   'external-edit',
   'fish',
   'inspect',

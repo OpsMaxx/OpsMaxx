@@ -592,3 +592,28 @@
   background: var(--input-bg, #12151c);
   color: inherit;
 }
+
+/* Files that have arrived, listed rather than opened. */
+.addy-arrived {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.addy-arrived li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.addy-arrived .fine {
+  margin-right: auto;
+}
+
+.addy-transfers .addy-revoke-confirm {
+  flex-direction: column;
+  align-items: stretch;
+}

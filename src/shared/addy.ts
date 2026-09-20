@@ -95,6 +95,11 @@ export const NOT_SYNCED: Readonly<Record<string, string>> = {
   // device's idea of what it had already done, which is how a machine that has
   // been off for a week decides it is up to date.
   addySync: 'one device\'s record of what it has already synced; per-device by definition',
+  // Files another device SENT to this one, waiting to be collected. They
+  // arrived here deliberately, for this machine, and syncing them would send
+  // every transfer to every device — which is the opposite of what picking a
+  // recipient meant.
+  addyTransfers: 'files sent to this device in particular; syncing them would undo the choice of recipient',
   // A machine-only grant means "this secret is readable on THIS machine
   // without the master password", and the secret it names is excluded from
   // every export precisely so it cannot travel. Syncing the record of such a
@@ -167,6 +172,25 @@ export const NOT_SYNCED: Readonly<Record<string, string>> = {
  * backup are not modules either.
  */
 export const ADDY_MODULE_IDS = ['addyClipboard', 'addyTransfer'] as const
+
+/**
+ * NEITHER OF THESE IS A REGISTERED MODULE, and this constant is the record of
+ * a decision rather than a list of ids in use.
+ *
+ * Both surfaces shipped, and both are gated — just not by the module registry:
+ *
+ *  - the clipboard is gated by a SETTING, because what it actually costs is
+ *    two global shortcuts taken from every application on the machine, and the
+ *    switch has to say that where somebody will read it. A module toggle in
+ *    Settings plus a shortcut warning on the panel would be two switches for
+ *    one thing, and the one people find would be the one without the warning.
+ *  - file transfer is a row on a panel that is already behind the `addy`
+ *    module. A module inside a module buys nothing.
+ *
+ * Kept, rather than deleted, because "we decided against it" and "nobody has
+ * got to it" look identical once the names are gone — which is the same
+ * argument NOT_SYNCED makes about reasons.
+ */
 
 /**
  * Error codes `addyd` may emit.
@@ -279,4 +303,22 @@ export interface AddyStatusSnapshot {
   /** Omitted, not empty, until a roster has been verified on this device. */
   devices?: AddyStatusDevice[]
   sync: AddyStatusSync
+}
+
+/**
+ * One file that has arrived on this device and is sitting in quarantine.
+ *
+ * Declared here so the renderer can name it without importing a main module.
+ * `path` is on THIS machine — it is what the reveal-in-folder action needs —
+ * and nothing in the renderer ever reads the file itself.
+ */
+export interface ArrivedTransfer {
+  id: string
+  name: string
+  size: number
+  path: string
+  /** The sending device's `pub_sign`, hex. Empty for a file read back off
+   *  disk, where the sender is no longer recorded. */
+  from: string
+  at: number
 }

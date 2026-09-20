@@ -493,6 +493,11 @@ export const ALL_DATA_FILES = [
 // inspect.ts.) Nor did `external-edit/` go, and that is whole remote file
 // contents in plain text.
 export const ALL_DATA_DIRS = [
+  // Files another of the user's devices sent here, sitting in quarantine
+  // until the sweep takes them. Whole file contents, written by a machine
+  // other than this one — a "delete everything" that left them would leave
+  // exactly the kind of thing somebody would expect it to remove.
+  'addy-transfers',
   // The inspector's certificate authority, public half: the CERTIFICATE — the
   // one the user may have installed into the OS trust store, so a wipe that
   // leaves it behind leaves the artefact that matching trust decision points at

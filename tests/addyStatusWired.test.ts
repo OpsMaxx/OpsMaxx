@@ -432,3 +432,81 @@ describe('other devices follow a rotation', () => {
     expect(SESSION).toMatch(/account\.epoch > 1/)
   })
 })
+
+/**
+ * Files, and the pointer/payload split.
+ *
+ * `ADDY_MODULE_IDS` named `addyTransfer` and nothing implemented it, so the
+ * clipboard's own refusal — "Files and images are sent as transfers" — pointed
+ * at a feature that did not exist.
+ */
+describe('a file can be sent to another device', () => {
+  it('puts the bytes in the object store and a pointer in the mailbox', () => {
+    const T = read('src/main/services/addy/transfer.ts')
+    expect(T).toMatch(/putObject\(/)
+    expect(T).toMatch(/'\/v1\/mail'/)
+    // And in that order. A notice that arrives before the object exists is a
+    // recipient fetching a 404 and reporting a failure for a transfer that is
+    // about to work.
+    expect(T.indexOf('putObject(')).toBeLessThan(T.indexOf("'/v1/mail'"))
+  })
+
+  it('checks the digest before writing anything to disk', () => {
+    // The AEAD proves nobody without the key altered the bytes. The digest
+    // proves they are all of them.
+    const T = read('src/main/services/addy/transfer.ts')
+    const check = T.indexOf('arrived incomplete')
+    const write = T.indexOf('writeFileSync(')
+    expect(check).toBeGreaterThan(-1)
+    expect(check).toBeLessThan(write)
+  })
+
+  it('does not let a sender choose where its file lands', () => {
+    // A file called `../../.bashrc` should not be able to address anything
+    // outside the quarantine, and two transfers of `report.pdf` must not
+    // overwrite each other.
+    const T = read('src/main/services/addy/transfer.ts')
+    expect(T).toMatch(/basename\(notice\.name\)/)
+    expect(T).toMatch(/join\(dir, notice\.id\)/)
+  })
+
+  it('sweeps quarantine rather than keeping everything for ever', () => {
+    const T = read('src/main/services/addy/transfer.ts')
+    expect(T).toMatch(/export function sweepQuarantine/)
+    expect(SESSION).toMatch(/sweepQuarantine\(\)/)
+  })
+
+  it('and every layer above it is connected', () => {
+    expect(SESSION).toMatch(/async sendFile\(/)
+    expect(MAIN).toMatch(/ipcMain\.handle\('addy:sendFile'/)
+    expect(PRELOAD).toMatch(/invoke\('addy:sendFile'/)
+    const PANEL = read('src/renderer/src/components/addy/AddyPanel.tsx')
+    expect(PANEL).toMatch(/addy\.sendFile\(/)
+  })
+
+  it('is deleted by "delete everything", and never synced', () => {
+    // Whole file contents, written by a machine other than this one.
+    expect(read('src/main/services/backup.ts')).toMatch(/'addy-transfers'/)
+    expect(read('src/shared/addy.ts')).toMatch(/addyTransfers:/)
+  })
+})
+
+/**
+ * A request signature has to be over what the far end checks.
+ *
+ * The relay verifies against Go's `r.URL.Path`, which is percent-DECODED. The
+ * client signed the ESCAPED path, so any object name containing a character
+ * `encodeURIComponent` escapes was signed one way and verified another. With
+ * only `servers` and `escrow` in play nothing escaped and it never showed; the
+ * first name with a colon in it produced a 401 that reads exactly like a bad
+ * token, on a request whose token was fine.
+ */
+describe('object names that need escaping still authenticate', () => {
+  it('signs the decoded path while sending the escaped one', () => {
+    const RELAY = read('src/main/services/addy/relay.ts')
+    expect(RELAY).toMatch(/decodeURIComponent\(raw\)/)
+    // The URL itself stays escaped, or a name with a slash in it would
+    // address a different route entirely.
+    expect(RELAY).toMatch(/encodeURIComponent\(name\)/)
+  })
+})

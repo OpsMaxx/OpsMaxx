@@ -287,7 +287,12 @@ export interface ProviderDetectionResult {
   error?: string
 }
 
-import type { AddyPairingConfirmation, AddyStatusSnapshot, ConflictCopy } from '../shared/addy'
+import type {
+  AddyPairingConfirmation,
+  AddyStatusSnapshot,
+  ArrivedTransfer,
+  ConflictCopy
+} from '../shared/addy'
 import type { ProvisionManifest, ProvisionPlan } from '../shared/provision'
 import type {
   AgentApprovalRequest,
@@ -458,6 +463,21 @@ const api = {
      *  account yet, however the setting is set. */
     setClipboardShortcuts: (wanted: boolean): Promise<boolean> =>
       ipcRenderer.invoke('addy:setClipboardShortcuts', wanted),
+    /** Send one file to one device on this account. The bytes are sealed and
+     *  go to the object store; the mailbox carries a pointer. */
+    sendFile: (path: string, toDevice: string): Promise<{ id: string; name: string; size: number }> =>
+      ipcRenderer.invoke('addy:sendFile', path, toDevice),
+    /** Collect whatever has been sent to this device, into quarantine. */
+    collectFiles: (): Promise<ArrivedTransfer[]> => ipcRenderer.invoke('addy:collectFiles'),
+    /** What is sitting in quarantine now. */
+    pendingFiles: (): Promise<ArrivedTransfer[]> => ipcRenderer.invoke('addy:pendingFiles'),
+    /** Delete one arrived transfer. */
+    discardTransfer: (id: string): Promise<void> =>
+      ipcRenderer.invoke('addy:discardTransfer', id),
+    /** Show it in the file manager. Never opens it: an arriving file was
+     *  written by another machine. */
+    revealTransfer: (path: string): Promise<void> =>
+      ipcRenderer.invoke('addy:revealTransfer', path),
     /** Move the account to a new epoch key. `revocation` is a response to
      *  compromise and needs the recovery phrase; `hygiene` is routine, is
      *  signed by the current epoch key, and refuses a phrase it does not

@@ -27,6 +27,13 @@ import { forgetSyncState, syncOnce, type SyncResult } from './sync'
 import { addyTarget } from './target'
 import type { BackupTarget } from '../backupTargets'
 import {
+  collectFiles,
+  sendFile,
+  sweepQuarantine,
+  type ArrivedFile,
+  type TransferDeps
+} from './transfer'
+import {
   applySealedClipboard,
   receiveClipboard,
   sendClipboard,
@@ -1032,6 +1039,13 @@ class AddySession {
       })
       this.lastSync = result
       this.carried = [...this.carried, result.carried].slice(-12)
+      // Files ride the same pass. They are not collections and never go
+      // through the engine above — a transfer is a one-off with a recipient,
+      // not a document two devices both own — but "has anything arrived for
+      // me" is the same question at the same moment, and giving it its own
+      // timer would be a second schedule to reason about.
+      await this.collectFiles().catch(() => undefined)
+      sweepQuarantine()
       return result
     } finally {
       this.syncing = false
@@ -1535,6 +1549,28 @@ class AddySession {
       epoch: () => this.account!.epoch,
       passphraseLength: () => passphraseLength
     })
+  }
+
+  // -------------------------------------------------------------------------
+  // Files
+  // -------------------------------------------------------------------------
+
+  /** Sends one file to one device on this account. */
+  async sendFile(path: string, toDevice: string): Promise<{ id: string; name: string; size: number }> {
+    return sendFile(this.transferDeps(), path, toDevice)
+  }
+
+  /** Collects whatever has been sent to this device, into quarantine. */
+  async collectFiles(): Promise<ArrivedFile[]> {
+    if (!this.attached || !this.relay?.token) return []
+    const arrived = await collectFiles(this.transferDeps())
+    if (arrived.length > 0) this.announce()
+    return arrived
+  }
+
+  private transferDeps(): TransferDeps {
+    const base = this.deps()
+    return { ...base, peers: () => this.roster }
   }
 
   /** Empty rather than throwing when unattached.

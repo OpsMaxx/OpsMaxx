@@ -215,7 +215,29 @@ export class RelayClient {
     body?: unknown,
     extraHeaders: Record<string, string> = {}
   ): Promise<Response> {
-    const path = pathWithQuery.split('?')[0]
+    /**
+     * SIGNED OVER THE DECODED PATH, because that is what the far end checks.
+     *
+     * The relay verifies against Go's `r.URL.Path`, which is percent-DECODED
+     * — so a name containing anything `encodeURIComponent` escapes is signed
+     * one way and verified another. With only `servers` and `escrow` in play
+     * nothing escaped and it never showed; the first object name with a colon
+     * in it (`transfer:<id>`) produced a 401 that reads exactly like a bad
+     * token, on a request whose token was fine.
+     *
+     * Decoded here rather than by dropping the encoding from the URL: the URL
+     * must stay escaped or a name with a `/` in it would address a different
+     * route entirely.
+     */
+    const raw = pathWithQuery.split('?')[0]
+    let path: string
+    try {
+      path = decodeURIComponent(raw)
+    } catch {
+      // A malformed escape is not something to sign a guess about. Sent as-is
+      // so the relay refuses it, rather than silently signing something else.
+      path = raw
+    }
     const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body), 'utf8')
     const { nonce, signature } = await this.signed(method, path, payload)
 

@@ -335,6 +335,7 @@ import { vaultWaiting } from './services/vaultWaiting'
 import { clearRevocation, revocationState } from './services/addy/revoke'
 import { sshAgent } from './services/sshAgent/service'
 import { addySession } from './services/addy/session'
+import { discardTransfer, pendingFiles } from './services/addy/transfer'
 import type { PairingConfirmation } from './services/addy/pairing'
 import { previewBitwardenImport } from './services/import/bitwarden'
 import { apply as applyProvision, preview as previewProvision } from './services/provision'
@@ -4752,6 +4753,25 @@ addySession.onApplied((collections) => {
 // which is the same shape every other broadcast in this file uses.
 addySession.watch((snapshot) => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('addy:status', snapshot)
+})
+
+// Files, to one of your own devices. The bytes go into the object store
+// sealed; the mailbox carries a pointer — see services/addy/transfer.ts for
+// why that split is not an optimisation.
+ipcMain.handle('addy:sendFile', (_e, path: string, toDevice: string) =>
+  addySession.sendFile(path, toDevice)
+)
+ipcMain.handle('addy:collectFiles', () => addySession.collectFiles())
+ipcMain.handle('addy:pendingFiles', () => pendingFiles())
+ipcMain.handle('addy:discardTransfer', (_e, id: string) => {
+  discardTransfer(id)
+})
+// Shown in the file manager rather than opened. An arriving file was written
+// by another machine, and "one of your own devices" is exactly the belief that
+// makes opening it automatically a bad idea — a device on the roster is a
+// device somebody could have paired.
+ipcMain.handle('addy:revealTransfer', (_e, path: string) => {
+  shell.showItemInFolder(path)
 })
 
 // The clipboard, on an explicit keystroke rather than by mirroring. See

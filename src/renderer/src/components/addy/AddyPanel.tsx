@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   AlertTriangle,
   Check,
   Circle,
   CircleDot,
   Clock,
+  FileDown,
+  FileUp,
   HelpCircle,
   Laptop,
   Loader2,
@@ -20,6 +22,7 @@ import { Sparkline } from '../common/Sparkline'
 import { useApp } from '../../store/app'
 import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
+import type { ArrivedTransfer } from '../../../../shared/addy'
 import { AddySetup } from './AddySetup'
 import {
   addyJourney,
@@ -190,11 +193,115 @@ export function AddyPanel(): React.JSX.Element {
       {/* Offered only once there is somewhere to send to. On a one-device
           account the shortcuts would be taken from every application on the
           machine in exchange for nothing at all. */}
+      {status?.enrolled && <Transfers devices={status.devices} />}
       {status?.enrolled && <RekeyRow />}
       {status?.enrolled && <ClipboardShortcuts />}
 
       <AddyProblems status={status} />
     </PanelShell>
+  )
+}
+
+/**
+ * Sending a file to one of your own machines, and what has arrived here.
+ *
+ * ONE RECIPIENT, CHOSEN. Not "send to all my devices": a file has a reason and
+ * the reason is usually one machine, and a transfer that fans out is one that
+ * puts a copy of whatever it was on every laptop the user owns, including the
+ * one in an office they are not sitting in.
+ *
+ * Arrived files are LISTED, never opened. They were written by another
+ * machine, and "another of my own devices" is exactly the belief that makes an
+ * automatic open dangerous — a device on the roster is a device somebody could
+ * have paired, which is why recovery ends by asking the user to read that
+ * list. So this offers the folder, and the sweep takes anything left after a
+ * week.
+ */
+function Transfers({ devices }: { devices?: AddyDevice[] }): React.JSX.Element | null {
+  const [arrived, setArrived] = useState<ArrivedTransfer[]>([])
+  const [busy, setBusy] = useState(false)
+  const others = (devices ?? []).filter((d) => !d.self && d.revoked !== true)
+
+  useEffect(() => {
+    // Optional call, like every other bridge read on this screen. A window
+    // whose preload predates this method — a dev server that was not
+    // restarted, or a window that outlived an update — must render the panel
+    // without it rather than take the whole screen down.
+    void window.opsmaxx?.addy.pendingFiles?.().then(setArrived, () => undefined)
+  }, [])
+
+  const send = async (to: string): Promise<void> => {
+    const picked = await window.opsmaxx?.dialog?.openUpload?.()
+    if (!picked || picked.length === 0) return
+    setBusy(true)
+    try {
+      // One at a time, and reported per file. A batch that half-succeeded and
+      // said "sent" would be the worst of both.
+      for (const path of picked) {
+        const r = await window.opsmaxx!.addy.sendFile(path, to)
+        toast(`Sent ${r.name}`, 'ok')
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : String(err), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Nothing to send to and nothing received: the row would be a control with
+  // no possible outcome.
+  if (others.length === 0 && arrived.length === 0) return null
+
+  return (
+    <div className="setting-row addy-transfers">
+      <div className="s-info">
+        <div className="s-title">Files</div>
+        <div className="s-desc">
+          Send a file to one of your other machines. It is sealed before it leaves and the relay
+          cannot read it; it waits there if that machine is asleep. Anything sent here lands in a
+          folder OpsMaxx keeps and is deleted after a week.
+        </div>
+        {arrived.length > 0 && (
+          <ul className="addy-arrived">
+            {arrived.map((f) => (
+              <li key={f.id + f.name}>
+                <FileDown size={13} aria-hidden />
+                <span className="strong">{f.name}</span>
+                <span className="fine">{Math.max(1, Math.round(f.size / 1024))} KB</span>
+                <button
+                  className="btn ghost size-24"
+                  onClick={() => void window.opsmaxx?.addy.revealTransfer?.(f.path)}
+                >
+                  Show
+                </button>
+                <button
+                  className="btn ghost size-24"
+                  onClick={() => {
+                    void window.opsmaxx?.addy.discardTransfer?.(f.id)?.then(() => {
+                      setArrived((all) => all.filter((x) => x.id !== f.id))
+                    })
+                  }}
+                >
+                  Delete
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <span className="addy-revoke-confirm">
+        {others.map((d) => (
+          <button
+            key={d.id}
+            className="btn ghost size-24"
+            disabled={busy}
+            onClick={() => void send(d.id)}
+          >
+            {busy ? <Loader2 size={13} className="spin" /> : <FileUp size={13} />} Send to {d.label}
+          </button>
+        ))}
+      </span>
+    </div>
   )
 }
 
