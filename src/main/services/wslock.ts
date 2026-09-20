@@ -19,18 +19,61 @@ import { atomicWriteFileSync } from './atomicWrite'
 // value, including why it is not the vault's 12, is in that file.
 
 const FILE = join(app.getPath('userData'), 'opsmaxx-wslocks.json')
-const KDF = { N: 32768, r: 8, p: 1, keylen: 32, maxmem: 96 * 1024 * 1024 }
+
+// The same parameters as the vault, and for the same reason: OWASP lists
+// N=2^15 as adequate only at p=3, so the p=1 this used to run at was about a
+// third of the intended work factor.
+//
+// WHY A VERIFIER THAT GUARDS NOTHING IS WORTH HARDENING. This gates the UI and
+// says so above; an attacker holding this file can already read the workspace's
+// servers out of opsmaxx-data.json without touching it, so cracking it wins
+// them nothing they did not have. The exposure is the PASSWORD, not the
+// workspace: people reuse them, and the one protecting a workspace here may be
+// the one protecting the vault next door, or an account on one of the hosts
+// inside it. A cheap verifier for a low-value door is still a cheap oracle for
+// a password that opens expensive ones.
+const KDF = { N: 32768, r: 8, p: 3, keylen: 32, maxmem: 96 * 1024 * 1024 }
+
+// What locks written before the parameters were raised used. A lock records
+// the parameters it was written with, so an existing one still verifies; it is
+// re-derived at the current settings the next time it is entered correctly.
+//
+// This file recorded NO parameters before now, which is why raising the value
+// alone would not have been a hardening but a lockout: every stored verifier
+// would have stopped matching the password that produced it, with no way to
+// tell that from a wrong password.
+const LEGACY_KDF = { N: 32768, r: 8, p: 1, keylen: 32, maxmem: 96 * 1024 * 1024 }
+
+interface KdfParams {
+  N: number
+  r: number
+  p: number
+}
 
 interface Lock {
   salt: string
   hash: string
+  // Absent on locks written before this existed, which means LEGACY_KDF.
+  kdf?: KdfParams
+}
+
+function kdfOf(lock: Lock): KdfParams {
+  return lock.kdf ?? { N: LEGACY_KDF.N, r: LEGACY_KDF.r, p: LEGACY_KDF.p }
+}
+
+function isCurrentKdf(k: KdfParams): boolean {
+  return k.N === KDF.N && k.r === KDF.r && k.p === KDF.p
 }
 type LockMap = Record<string, Lock>
 
-function derive(password: string, salt: Buffer): Promise<Buffer> {
+function derive(password: string, salt: Buffer, params: KdfParams = KDF): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    scrypt(password, salt, KDF.keylen, { N: KDF.N, r: KDF.r, p: KDF.p, maxmem: KDF.maxmem }, (err, dk) =>
-      err ? reject(err) : resolve(dk as Buffer)
+    scrypt(
+      password,
+      salt,
+      KDF.keylen,
+      { N: params.N, r: params.r, p: params.p, maxmem: KDF.maxmem },
+      (err, dk) => (err ? reject(err) : resolve(dk as Buffer))
     )
   })
 }
@@ -56,9 +99,40 @@ export async function wsLockVerify(id: string, password: string): Promise<boolea
   const lock = read()[id]
   if (!lock) return true // no password set — nothing to check
   try {
-    const got = await derive(password, Buffer.from(lock.salt, 'base64'))
+    const salt = Buffer.from(lock.salt, 'base64')
+    const stored = kdfOf(lock)
+    const got = await derive(password, salt, stored)
     const want = Buffer.from(lock.hash, 'base64')
-    return got.length === want.length && timingSafeEqual(got, want)
+    if (!(got.length === want.length && timingSafeEqual(got, want))) return false
+
+    // Upgrade a lock written at the old work factor, now that the password is
+    // in hand and known correct — the only moment it can be re-derived. Silent
+    // because the user has nothing to decide, and best-effort because failing
+    // to upgrade is not a reason to reject a password that was right.
+    //
+    // Re-read rather than reusing the map above: verifying is slow by design,
+    // and a set or a remove for another workspace can land while it runs.
+    if (!isCurrentKdf(stored)) {
+      try {
+        const upgraded = await derive(password, salt, KDF)
+        const fresh = read()
+        const still = fresh[id]
+        // Only if it is the same verifier we just checked. A password changed
+        // underneath us has already been written at the current parameters,
+        // and overwriting it here would put the OLD password back.
+        if (still && still.hash === lock.hash && still.salt === lock.salt) {
+          fresh[id] = {
+            salt: lock.salt,
+            hash: upgraded.toString('base64'),
+            kdf: { N: KDF.N, r: KDF.r, p: KDF.p }
+          }
+          write(fresh)
+        }
+      } catch {
+        /* leave the lock on the parameters it already had */
+      }
+    }
+    return true
   } catch {
     return false
   }
@@ -81,7 +155,11 @@ export async function wsLockSet(
   try {
     const salt = randomBytes(16)
     const hash = await derive(password, salt)
-    map[id] = { salt: salt.toString('base64'), hash: hash.toString('base64') }
+    map[id] = {
+      salt: salt.toString('base64'),
+      hash: hash.toString('base64'),
+      kdf: { N: KDF.N, r: KDF.r, p: KDF.p }
+    }
     write(map)
     return { ok: true }
   } catch (err) {
