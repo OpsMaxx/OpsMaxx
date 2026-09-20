@@ -30,6 +30,15 @@ export interface P2PDeps {
    *  than fetched here because asking would mean this layer holding a session
    *  token. */
   iceServers: unknown[]
+  /** The key-holding sidecar. Signing and verifying happen there; this module
+   *  never sees a key, and `--rtc` never sees one either. */
+  crypto: AddySidecar
+  /** The epoch and the verified roster head this device is on. */
+  epoch: number
+  rosterHead: string
+  /** Every device currently on the roster, hex. A signature only means
+   *  something if the key it verifies against is a member. */
+  members(): string[]
 }
 
 interface SignalEnvelope {
@@ -41,17 +50,23 @@ interface SignalEnvelope {
    *
    * Carried in the ENVELOPE because the relay does not add it: a signal frame
    * is opaque to the server by design, which is what stops it learning which
-   * devices are negotiating with which. The cost is that the answerer has to
-   * be told whom to answer, and the teller is the caller.
+   * devices are negotiating with which.
    *
-   * It is therefore claimable: a device on this account could put another
-   * device's key here and misdirect an answer. The consequence is bounded and
-   * worth stating -- everyone who can publish a frame is already a device on
-   * the user's own account, and the data channel carries nothing but payloads
-   * sealed to a specific device, which a misdirected peer cannot open. It
-   * wastes a negotiation; it does not leak one.
+   * IT USED TO BE A CLAIM AND IS NOW A PROOF. `signature` below covers the
+   * SDP's DTLS fingerprint under this device's key, so naming somebody else
+   * here produces a signature that does not verify against their roster key.
    */
   from: string
+  /** Ed25519 over `protocol.Signal`, hex. */
+  signature: string
+  /** The signer's nonce, and the nonce of the offer an answer replies to. */
+  deviceNonce: string
+  peerNonce: string
+  ts: number
+  /** The signer's verified roster head, so each end notices immediately that
+   *  the other is on a different view of the chain — which is what a forked
+   *  roster looks like from the inside. */
+  rosterHead: string
 }
 
 /**
@@ -73,14 +88,32 @@ export async function dialPeer(
     iceServers: deps.iceServers
   })
 
-  await publishSignal(deps, peerDeviceHex, {
+  const sent = await signAndPublish(deps, peerDeviceHex, {
     session,
     kind: 'offer',
     sdp: offer.sdp,
     from: deps.selfDeviceHex
   })
 
-  const answer = await waitForSignal(deps, (e) => e.session === session && e.kind === 'answer', timeoutMs)
+  // The answer has to be SIGNED BY THE DEVICE WE DIALLED and has to quote our
+  // own nonce, so a relay cannot answer on its behalf and cannot replay an
+  // answer from an earlier session.
+  const answer = await waitForSignal(
+    deps,
+    (e) =>
+      e.session === session &&
+      e.kind === 'answer' &&
+      e.from === peerDeviceHex &&
+      e.peerNonce === sent.deviceNonce,
+    timeoutMs
+  )
+  if (answer && !(await verifySignal(deps, answer, sent.deviceNonce))) {
+    await deps.rtc.send('rtcClose', { sessionId: session }).catch(() => undefined)
+    throw new AddyError(
+      'peer-unreachable',
+      'the answer to this call was not signed by the device it claims to be from'
+    )
+  }
   if (!answer) {
     await deps.rtc.send('rtcClose', { sessionId: session }).catch(() => undefined)
     throw new AddyError(
@@ -112,6 +145,15 @@ export async function answerPeer(deps: P2PDeps, waitMs = 5000): Promise<string |
   const offer = await waitForSignal(deps, (e) => e.kind === 'offer', waitMs)
   if (!offer) return null
 
+  // BEFORE ANY OF IT REACHES PION. An unsigned offer is one the relay could
+  // have written, pointing at a certificate it holds — and answering it hands
+  // that relay a data channel. Dropped silently: a frame that does not verify
+  // is not something to report to the user, it is noise on a public mailbox.
+  //
+  // `'00'.repeat(32)` because an offer answers nothing, so it quotes no nonce
+  // of ours.
+  if (!(await verifySignal(deps, offer, '00'.repeat(32)))) return null
+
   const answer = await deps.rtc.send<{ sdp: string }>('rtcAnswer', {
     sessionId: offer.session,
     sdp: offer.sdp,
@@ -127,17 +169,90 @@ export async function answerPeer(deps: P2PDeps, waitMs = 5000): Promise<string |
     await deps.rtc.send('rtcClose', { sessionId: offer.session }).catch(() => undefined)
     return null
   }
-  await publishSignal(deps, offer.from, {
-    session: offer.session,
-    kind: 'answer',
-    sdp: answer.sdp,
-    from: deps.selfDeviceHex
-  })
+  // Signed back, quoting the offer's nonce so the dialling device can tell
+  // this answer from a replayed one.
+  await signAndPublish(
+    deps,
+    offer.from,
+    { session: offer.session, kind: 'answer', sdp: answer.sdp, from: deps.selfDeviceHex },
+    offer.deviceNonce
+  )
   return offer.session
 }
 
 export async function closeSession(deps: P2PDeps, session: string): Promise<void> {
   await deps.rtc.send('rtcClose', { sessionId: session }).catch(() => undefined)
+}
+
+/**
+ * Signs a description and publishes it.
+ *
+ * THE DTLS FINGERPRINT IS THE POINT, and `protocol.Signal` said so in its own
+ * comment while nothing called it: without the fingerprint inside a signature,
+ * a relay that carries the offer substitutes its own certificate and reads the
+ * data channel. It does not need to break any crypto — it needs the
+ * fingerprint to be unsigned, which it was, on every session.
+ */
+async function signAndPublish(
+  deps: P2PDeps,
+  to: string,
+  base: Omit<SignalEnvelope, 'signature' | 'deviceNonce' | 'peerNonce' | 'ts' | 'rosterHead'>,
+  peerNonce = '00'.repeat(32)
+): Promise<SignalEnvelope> {
+  const signed = await deps.crypto.send<{
+    signature: string
+    deviceNonce: string
+    ts: number
+  }>('signSignal', {
+    epoch: deps.epoch,
+    peerPubSign: to,
+    sdp: base.sdp,
+    rosterHead: deps.rosterHead,
+    peerNonce
+  })
+  const envelope: SignalEnvelope = {
+    ...base,
+    signature: signed.signature,
+    deviceNonce: signed.deviceNonce,
+    peerNonce,
+    ts: signed.ts,
+    rosterHead: deps.rosterHead
+  }
+  await publishSignal(deps, to, envelope)
+  return envelope
+}
+
+/**
+ * Checks a description before anything parses it for real.
+ *
+ * Two questions, and both have to be yes: is the signer a device on the roster
+ * this machine verified, and does the signature cover the fingerprint in the
+ * SDP that is about to be used? The second is taken from the description
+ * itself rather than from the envelope, so a relay that rewrites the
+ * certificate has to rewrite the value the signature covers.
+ */
+async function verifySignal(deps: P2PDeps, envelope: SignalEnvelope, selfNonce: string): Promise<boolean> {
+  if (!envelope.from || !deps.members().includes(envelope.from)) return false
+  if (envelope.peerNonce !== selfNonce) return false
+  try {
+    await deps.crypto.send('verifySignal', {
+      epoch: deps.epoch,
+      // The recipient, as the signer named it: us. And separately, whose
+      // signature to check it against — which must be a roster member, asserted
+      // above.
+      peerPubSign: deps.selfDeviceHex,
+      signerPubSign: envelope.from,
+      sdp: envelope.sdp,
+      rosterHead: envelope.rosterHead,
+      deviceNonce: envelope.deviceNonce,
+      peerNonce: envelope.peerNonce,
+      ts: envelope.ts,
+      signature: envelope.signature
+    })
+    return true
+  } catch {
+    return false
+  }
 }
 
 async function publishSignal(deps: P2PDeps, to: string, envelope: SignalEnvelope): Promise<void> {

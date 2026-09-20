@@ -41,7 +41,7 @@ import {
   sendClipboard,
   type ClipboardDeps
 } from './clipboard'
-import { answerPeer, closeSession, dialPeer } from './p2p'
+import { answerPeer, closeSession, dialPeer, type P2PDeps } from './p2p'
 
 /**
  * The live connection to an addy account: one sidecar, one relay client.
@@ -880,6 +880,28 @@ class AddySession {
    * asking. No credentials is a degraded mode rather than a failure — host and
    * server-reflexive candidates only — so this never throws.
    */
+  /**
+   * What the signalling layer needs, in one place.
+   *
+   * `crypto` is here because a signal is SIGNED now, and only `--crypto` holds
+   * a device key — the `--rtc` process still never sees one. `members` is here
+   * because a signature means nothing unless the key it verifies against is on
+   * the roster this device checked: an attacker who can publish a frame can
+   * also sign one with a key of their own.
+   */
+  private p2pDeps(rtc: AddySidecar, iceServers: unknown[], selfDeviceHex: string): P2PDeps {
+    return {
+      rtc,
+      relay: this.relay!,
+      iceServers,
+      selfDeviceHex,
+      crypto: this.addyd!,
+      epoch: this.account!.epoch,
+      rosterHead: this.lastRoster?.head ?? '',
+      members: () => this.roster
+    }
+  }
+
   private async iceServers(): Promise<unknown[]> {
     try {
       const resp = await this.relay!.request('GET', '/v1/turn')
@@ -935,12 +957,11 @@ class AddySession {
     void (async () => {
       while (!stop.signal.aborted && this.attached) {
         try {
-          const deps = {
+          const deps = this.p2pDeps(
             rtc,
-            relay: this.relay!,
-            iceServers: await this.iceServers(),
-            selfDeviceHex: (await this.addyd!.send<{ devicePub: string }>('whoami')).devicePub
-          }
+            await this.iceServers(),
+            (await this.addyd!.send<{ devicePub: string }>('whoami')).devicePub
+          )
           const session = await answerPeer(deps)
           if (!session) continue
           try {
@@ -985,7 +1006,7 @@ class AddySession {
         const iceServers = await this.iceServers()
 
         const { devicePub } = await this.addyd.send<{ devicePub: string }>('whoami')
-        const deps = { rtc, relay: this.relay!, iceServers, selfDeviceHex: devicePub }
+        const deps = this.p2pDeps(rtc, iceServers, devicePub)
 
         let dialled: string | null = null
         try {

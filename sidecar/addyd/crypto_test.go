@@ -1292,3 +1292,97 @@ func TestAWithheldEntryIsCaughtByThePin(t *testing.T) {
 		t.Fatalf("the full chain was refused against its own pin: %v", err)
 	}
 }
+
+// A SIGNED SESSION DESCRIPTION, and what it refuses.
+//
+// `protocol.Signal` binds the DTLS fingerprint and says why in its own
+// comment: without it inside the signature a relay substitutes its own
+// certificate and reads the data channel. It does not have to break anything —
+// it needs the fingerprint to be unsigned. It was, on every session, because
+// `Signal` was written, exported, and referenced by nothing outside its own
+// file.
+func TestASignalIsBoundToItsCertificate(t *testing.T) {
+	keys.reset()
+	t.Cleanup(keys.reset)
+
+	run := func(h func(Request) (any, error), m string, p map[string]any) map[string]any {
+		t.Helper()
+		v, err := h(Request{Method: m, Params: params(t, p)})
+		if err != nil {
+			t.Fatalf("%s: %v", m, err)
+		}
+		return v.(map[string]any)
+	}
+
+	minted := run(handleCreateAccount, "createAccount", map[string]any{"label": "caller"})
+	me := run(handleWhoami, "whoami", map[string]any{})
+	head := hex.EncodeToString(make([]byte, 32))
+
+	const mine = "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\n" +
+		"a=fingerprint:sha-256 " +
+		"AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:" +
+		"AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99\r\n"
+
+	// A peer to sign to. Its identity does not matter for this test beyond
+	// being a well-formed key.
+	peerPub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	signed := run(handleSignSignal, "signSignal", map[string]any{
+		"epoch": uint64(1), "peerPubSign": hex.EncodeToString(peerPub),
+		"sdp": mine, "rosterHead": head,
+	})
+
+	verify := func(sdp string) error {
+		_, err := handleVerifySignal(Request{Method: "verifySignal", Params: params(t, map[string]any{
+			"epoch": uint64(1),
+			// The RECIPIENT, as the signer named it — and separately the
+			// signer's own key to check the signature against.
+			"peerPubSign":   hex.EncodeToString(peerPub),
+			"signerPubSign": me["devicePub"],
+			"sdp":           sdp,
+			"rosterHead":    head,
+			"deviceNonce":   signed["deviceNonce"],
+			"peerNonce":     hex.EncodeToString(make([]byte, 32)),
+			"ts":            signed["ts"],
+			"signature":     signed["signature"],
+		})})
+		return err
+	}
+
+	if err := verify(mine); err != nil {
+		t.Fatalf("a description verified against its own signature: %v", err)
+	}
+
+	// THE ATTACK. Same SDP, one certificate swapped — which is precisely what
+	// a relay in the middle does, because it must offer a certificate it holds
+	// the key for.
+	swapped := strings.Replace(mine, "AA:BB:CC", "11:22:33", 1)
+	if err := verify(swapped); err == nil {
+		t.Fatal("a session description with a substituted DTLS fingerprint verified")
+	}
+
+	// And a description with no fingerprint at all is refused rather than
+	// treated as having an empty one — which would make every signature verify
+	// against every certificate.
+	if err := verify("v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\n"); err == nil {
+		t.Fatal("a description with no fingerprint verified")
+	}
+
+	// A different roster head is refused too: it is inside the signature, so
+	// two devices on different views of the chain cannot negotiate without
+	// noticing.
+	_, err = handleVerifySignal(Request{Method: "verifySignal", Params: params(t, map[string]any{
+		"epoch": uint64(1), "peerPubSign": hex.EncodeToString(peerPub),
+		"signerPubSign": me["devicePub"], "sdp": mine,
+		"rosterHead":  hex.EncodeToString(bytes.Repeat([]byte{1}, 32)),
+		"deviceNonce": signed["deviceNonce"], "peerNonce": hex.EncodeToString(make([]byte, 32)),
+		"ts": signed["ts"], "signature": signed["signature"],
+	})})
+	if err == nil {
+		t.Fatal("a signal verified against a different roster head")
+	}
+	_ = minted
+}

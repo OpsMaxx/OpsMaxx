@@ -1743,3 +1743,193 @@ func handleFingerprintSelf(Request) (any, error) {
 		"fingerprint": hex.EncodeToString(device.Sign.Public().(ed25519.PublicKey)),
 	}, nil
 }
+
+// ---------------------------------------------------------------------------
+// Signalling
+// ---------------------------------------------------------------------------
+//
+// THE DTLS FINGERPRINT IS THE POINT, and `protocol.Signal` says so in its own
+// comment: without it inside a signature, a relay that carries the offer
+// substitutes its own certificate and reads the data channel. It does not need
+// to break anything -- it needs the fingerprint to be unsigned, which it was.
+// `Signal` was written, exported, and referenced by nothing outside its own
+// file.
+//
+// Both halves live in --crypto because only --crypto holds a device key. The
+// SDP is parsed here, which is the one thing worth flagging: this process
+// takes a string from the network and scans it for one attribute. That is a
+// line scan and a hex decode, not a session-description parser -- the pion
+// stack that does the real parsing stays in --rtc, where it belongs, and a
+// malformed SDP fails this lookup rather than reaching anything stateful.
+
+// fingerprintFromSDP pulls the SHA-256 DTLS fingerprint out of a session
+// description. `a=fingerprint:sha-256 AB:CD:...` -- colon-separated hex, and
+// the case is not guaranteed.
+func fingerprintFromSDP(sdp string) ([]byte, error) {
+	for _, line := range strings.Split(sdp, "\n") {
+		line = strings.TrimSpace(line)
+		const prefix = "a=fingerprint:sha-256 "
+		if !strings.HasPrefix(strings.ToLower(line), strings.ToLower(prefix)) {
+			continue
+		}
+		hexPart := strings.ReplaceAll(strings.ToLower(line[len(prefix):]), ":", "")
+		raw, err := hex.DecodeString(hexPart)
+		if err != nil || len(raw) != 32 {
+			return nil, errors.New("the DTLS fingerprint is not 32 bytes of hex")
+		}
+		return raw, nil
+	}
+	// Refused rather than defaulted. A session description with no fingerprint
+	// cannot be authenticated at all, and signing a zero one would make every
+	// signature verify against every certificate.
+	return nil, errors.New("that session description carries no SHA-256 DTLS fingerprint")
+}
+
+type signalRequest struct {
+	Epoch uint64 `json:"epoch"`
+	// Hex, the peer's DK_sign public half, from the roster THIS device
+	// verified.
+	PeerPubSign string `json:"peerPubSign"`
+	// The session description this signature covers. Its fingerprint is what
+	// binds the signature to the certificate that will be used.
+	SDP string `json:"sdp"`
+	// Hex, the roster head this device has verified, so each end notices
+	// immediately that the other is on a different view of the chain -- which
+	// is what a forked roster looks like from the inside.
+	RosterHead string `json:"rosterHead"`
+	// Hex. On an offer the peer's nonce is 32 zero bytes; on an answer it is
+	// the nonce from the offer being answered.
+	DeviceNonce string `json:"deviceNonce"`
+	PeerNonce   string `json:"peerNonce"`
+	// Verification only. `SignerPubSign` is whose signature this is; see the
+	// note where it is used for why it is not the same field as PeerPubSign.
+	TS            uint64 `json:"ts"`
+	Signature     string `json:"signature"`
+	SignerPubSign string `json:"signerPubSign"`
+}
+
+func (in signalRequest) build() (*protocol.Signal, error) {
+	peer, err := hex.DecodeString(in.PeerPubSign)
+	if err != nil || len(peer) != ed25519.PublicKeySize {
+		return nil, codedf(ErrConfigInvalid, "peerPubSign is 32 bytes of hex")
+	}
+	head, err := hex.DecodeString(in.RosterHead)
+	if err != nil || len(head) != 32 {
+		return nil, codedf(ErrConfigInvalid, "rosterHead is 32 bytes of hex")
+	}
+	deviceNonce, err := hex.DecodeString(in.DeviceNonce)
+	if err != nil || len(deviceNonce) != 32 {
+		return nil, codedf(ErrConfigInvalid, "deviceNonce is 32 bytes of hex")
+	}
+	peerNonce, err := hex.DecodeString(in.PeerNonce)
+	if err != nil || len(peerNonce) != 32 {
+		return nil, codedf(ErrConfigInvalid, "peerNonce is 32 bytes of hex")
+	}
+	fp, err := fingerprintFromSDP(in.SDP)
+	if err != nil {
+		return nil, wrapCoded(ErrConfigInvalid, err, "reading the session description")
+	}
+
+	keys.mu.RLock()
+	acct := keys.account
+	loaded := keys.loaded
+	keys.mu.RUnlock()
+	if !loaded {
+		return nil, codedf(ErrNotPaired, "no account is loaded")
+	}
+
+	return &protocol.Signal{
+		AccountID:       acct,
+		Epoch:           in.Epoch,
+		DeviceNonce:     deviceNonce,
+		PeerNonce:       peerNonce,
+		PeerPubSign:     peer,
+		DTLSFingerprint: fp,
+		RosterHead:      head,
+		TS:              in.TS,
+	}, nil
+}
+
+func handleSignSignal(req Request) (any, error) {
+	var in signalRequest
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+	if in.DeviceNonce == "" {
+		nonce, err := protocol.Nonce()
+		if err != nil {
+			return nil, wrapCoded(ErrInternal, err, "drawing a nonce")
+		}
+		in.DeviceNonce = hex.EncodeToString(nonce)
+	}
+	if in.PeerNonce == "" {
+		// An offer answers nothing, so there is no peer nonce yet. Zeroes
+		// rather than an absent field: the encoding is fixed-width and a
+		// missing value would shift every field after it.
+		in.PeerNonce = hex.EncodeToString(make([]byte, 32))
+	}
+	in.TS = uint64(time.Now().UnixMilli())
+
+	signal, err := in.build()
+	if err != nil {
+		return nil, err
+	}
+
+	keys.mu.RLock()
+	device := keys.device
+	keys.mu.RUnlock()
+	if device == nil {
+		return nil, codedf(ErrNotPaired, "no account is loaded")
+	}
+
+	sig, err := protocol.Sign(device.Sign, *signal)
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "signing the signal")
+	}
+	return map[string]any{
+		"signature":   hex.EncodeToString(sig),
+		"deviceNonce": in.DeviceNonce,
+		"ts":          in.TS,
+		"fingerprint": hex.EncodeToString(signal.DTLSFingerprint),
+	}, nil
+}
+
+// handleVerifySignal checks a signal against the SDP it arrived with.
+//
+// The SDP is passed in so the fingerprint is taken from the description this
+// device is ABOUT TO USE, not from anything the envelope claims. A relay that
+// rewrites the certificate has to rewrite the fingerprint in the SDP with it,
+// and that is the value the signature covers.
+func handleVerifySignal(req Request) (any, error) {
+	var in signalRequest
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+	signal, err := in.build()
+	if err != nil {
+		return nil, err
+	}
+	sig, err := hex.DecodeString(in.Signature)
+	if err != nil || len(sig) != ed25519.SignatureSize {
+		return nil, codedf(ErrConfigInvalid, "signature is 64 bytes of hex")
+	}
+	// TWO DIFFERENT KEYS, and conflating them is why this refused everything
+	// on the first attempt.
+	//
+	// `Signal.PeerPubSign` is the RECIPIENT as the signer named it — so when
+	// verifying, that field is this device's own key, because we are the
+	// recipient. The key the signature is checked against is the SIGNER's, and
+	// it has to come from the roster this device verified rather than from the
+	// envelope, or the envelope would be vouching for itself.
+	signerRaw, err := hex.DecodeString(in.SignerPubSign)
+	if err != nil || len(signerRaw) != ed25519.PublicKeySize {
+		return nil, codedf(ErrConfigInvalid, "signerPubSign is 32 bytes of hex")
+	}
+	if err := protocol.Verify(ed25519.PublicKey(signerRaw), *signal, sig); err != nil {
+		return nil, wrapCoded(
+			ErrPeerUnreachable, err,
+			"this session description was not signed by the device it claims to be from",
+		)
+	}
+	return map[string]any{"ok": true, "fingerprint": hex.EncodeToString(signal.DTLSFingerprint)}, nil
+}

@@ -700,3 +700,57 @@ describe('the relay is checked, not just written down', () => {
     expect(C).toMatch(/peers\.has\(m\.fromDevice\)/)
   })
 })
+
+/**
+ * WebRTC signalling was entirely unsigned.
+ *
+ * `protocol.Signal` binds the DTLS fingerprint and states the case in its own
+ * comment: *without it inside the signature a malicious relay substitutes its
+ * own certificate and reads the clipboard, the files and everything else on
+ * the data channel.* It was written, exported, and referenced by nothing
+ * outside its own file — the sixth control in this module implemented and
+ * never reached.
+ *
+ * So the relay was an unconditional man-in-the-middle on every P2P session.
+ * Bounded, because payloads are sealed under the epoch key before they reach
+ * `--rtc`, so it yielded ciphertext plus the ability to drop, reorder and
+ * replay — and the ability to point pion's DTLS stack at an endpoint of its
+ * choosing.
+ */
+describe('a session description is signed', () => {
+  it('the sidecar signs and verifies one', () => {
+    const CRYPTO = readFileSync(join(ROOT, 'sidecar/addyd/crypto.go'), 'utf8')
+    expect(CRYPTO).toMatch(/func handleSignSignal/)
+    expect(CRYPTO).toMatch(/func handleVerifySignal/)
+    // Bound to the fingerprint in the SDP that is about to be used, not to
+    // anything the envelope claims.
+    expect(CRYPTO).toMatch(/func fingerprintFromSDP/)
+    // And a description with no fingerprint is refused rather than treated as
+    // having an empty one, which would make every signature verify against
+    // every certificate.
+    expect(CRYPTO).toMatch(/carries no SHA-256 DTLS fingerprint/)
+  })
+
+  it('both directions are checked, before pion sees anything', () => {
+    const P2P = read('src/main/services/addy/p2p.ts')
+    expect(P2P).toMatch(/async function signAndPublish/)
+    expect(P2P).toMatch(/async function verifySignal/)
+    // The offer is verified BEFORE it is answered: answering an unsigned offer
+    // hands a data channel to whoever wrote it.
+    const answer = P2P.slice(P2P.indexOf('export async function answerPeer'))
+    expect(answer.indexOf('verifySignal(')).toBeLessThan(answer.indexOf("'rtcAnswer'"))
+  })
+
+  it('the signer has to be on the roster this device verified', () => {
+    // A signature proves who wrote it, not that they belong. Anyone who can
+    // publish a frame can sign one with a key of their own.
+    const P2P = read('src/main/services/addy/p2p.ts')
+    expect(P2P).toMatch(/deps\.members\(\)\.includes\(envelope\.from\)/)
+  })
+
+  it('and an answer has to quote the nonce of the offer it answers', () => {
+    // Otherwise a relay replays an answer from an earlier session.
+    const P2P = read('src/main/services/addy/p2p.ts')
+    expect(P2P).toMatch(/e\.peerNonce === sent\.deviceNonce/)
+  })
+})
