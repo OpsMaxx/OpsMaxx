@@ -53,10 +53,22 @@ export function AddySetup(): React.JSX.Element | null {
   const [phrase, setPhrase] = useState<string | null>(null)
   const [wroteItDown, setWroteItDown] = useState(false)
   const [done, setDone] = useState(false)
-  /** Recovering rather than creating. A mode, not a second screen: the relay
-   *  address and the device name are the same two questions either way, and
-   *  asking them twice in two places is how they get answered differently. */
-  const [mode, setMode] = useState<'create' | 'recover'>('create')
+  /**
+   * WHICH OF THE THREE THINGS THIS MACHINE IS, and it starts as none of them.
+   *
+   * It used to start on `create`, which put an invite field on the screen of
+   * every machine that had no account — including the second one, which must
+   * never be given an invite. An invite does not add a device: it starts a
+   * separate sync group with its own key that cannot see the first, and the
+   * relay refuses a second one now anyway. Somebody who owns this product
+   * asked how to mint an invite for their second machine, which is what a
+   * default-selected invite field asks them to do.
+   *
+   * So nothing is selected until the fork has been read. A mode rather than
+   * three screens, because the relay address is the same question in all
+   * three and asking it in three places is how it gets answered differently.
+   */
+  const [mode, setMode] = useState<'create' | 'join' | 'recover' | null>(null)
   const [mnemonic, setMnemonic] = useState('')
 
   /**
@@ -80,15 +92,94 @@ export function AddySetup(): React.JSX.Element | null {
   const [recovered, setRecovered] = useState<{ devices: number } | null>(null)
 
   /**
-   * Nothing in flight, and this device is already on an account: there is
-   * nothing here to offer.
+   * Nothing in flight, and this device is already on an account.
+   *
+   * THIS USED TO RETURN NULL, and returning null is how adding a second
+   * machine became impossible. `AddySetup` is the only mount of
+   * `PairingPanel` in the whole renderer, and it only reached it in the
+   * `done` branch — the seconds between writing down a recovery phrase and
+   * navigating away. Close that screen, or restart the app, and nothing
+   * anywhere could show a pairing code again. The only thing the product
+   * still offered was another invite, which is not a way to add a device: it
+   * starts a second sync group with its own key that cannot see the first.
+   *
+   * So an enrolled machine gets the other half of pairing instead of an empty
+   * space. No account is minted here, which was the whole point of the old
+   * guard, and both doors — the panel and Settings — get it at once.
    *
    * Checked AFTER every hook, or this would be a conditional hook call. Every
-   * clause is a piece of state this component owns, which is the whole point —
-   * no outside signal can close this screen while it is mid-flow.
+   * clause of `midFlow` is state this component owns, which is the whole point
+   * — no outside signal can close this screen while it is mid-flow.
    */
   const midFlow = busy || phrase !== null || recovered !== null
-  if (status?.enrolled === true && !midFlow) return null
+  if (status?.enrolled === true && !midFlow) {
+    // The relay this device actually attached to, not what happens to be in
+    // settings: a machine that joined by pairing was enrolled by the sidecar,
+    // and the setting is the weaker of the two answers.
+    const attached = status.relayURL ?? relayURL
+    return (
+      <div className="addy-setup">
+        <h3>Add another device</h3>
+        <div className="setting-desc">
+          A second machine joins by <strong>pairing</strong> with this one. It needs no invite, and
+          nothing from whoever runs the relay. Both machines have to be open at the same time:
+          this one shows a code, the other types it, and you check that the same seven emoji
+          appear on both.
+        </div>
+        {/* THE OTHER MACHINE CANNOT GUESS THE RELAY ADDRESS, and nothing else
+            in the product tells it. Pairing frames go through the relay, so
+            the joining device needs this before it needs anything else —
+            which made "where does the address come from" the first wall a
+            second machine hit, before it even got to the code. */}
+        <div className="addy-handoff">
+          <span>
+            On the other machine, pick <strong>I already use OpsMaxx on another machine</strong>,
+            and give it this relay address:
+          </span>
+          <div className="addy-handoff-row">
+            <code>{attached || 'not recorded on this device'}</code>
+            {attached && (
+              <button
+                className="btn"
+                aria-label="Copy the relay address"
+                onClick={() => {
+                  void navigator.clipboard.writeText(attached)
+                  toast('Relay address copied')
+                }}
+              >
+                <Copy size={14} />
+              </button>
+            )}
+          </div>
+        </div>
+        {/* Named, because the panel below offers both directions and only one
+            of them is this machine's. The device holding the account is the
+            one that hands the key over, so it is always the one that shows. */}
+        {attached ? (
+          <>
+            {/* Named, because the panel below offers both directions and only
+                one of them is this machine's. The device holding the account
+                is the one that hands the key over, so it is always the one
+                that shows. */}
+            <div className="setting-desc">
+              This machine is the one with the account, so it is the one that{' '}
+              <strong>shows</strong> a code.
+            </div>
+            <PairingPanel baseURL={attached} />
+          </>
+        ) : (
+          // Pairing frames go through the relay, so with no address there is
+          // nothing to offer — and offering it anyway would start a pairing
+          // against an empty URL and fail on a screen that had promised it
+          // would work.
+          <div className="setting-desc">
+            This device is on an account but has no relay address recorded, so it cannot start a
+            pairing. Open <strong>Sync now</strong> above, or set the address in Settings.
+          </div>
+        )}
+      </div>
+    )
+  }
 
   const create = async (): Promise<void> => {
     setBusy(true)
@@ -208,10 +299,31 @@ export function AddySetup(): React.JSX.Element | null {
   if (done) {
     return (
       <div className="addy-setup">
-        {/* PairingPanel says this itself, beside the two buttons it belongs
-            to. Saying it here as well produced two consecutive paragraphs
-            making the same point in different words, which reads as two
-            requirements rather than one. */}
+        <h3>Add another device</h3>
+        {/* PairingPanel says the "both machines open" part itself, beside the
+            two buttons it belongs to. What it cannot say is the relay
+            address, which the other machine needs before it can be reached at
+            all — and this is the last moment the address is certainly on
+            screen. */}
+        <div className="addy-handoff">
+          <span>
+            On the other machine, pick <strong>I already use OpsMaxx on another machine</strong>,
+            and give it this relay address:
+          </span>
+          <div className="addy-handoff-row">
+            <code>{url.trim()}</code>
+            <button
+              className="btn"
+              aria-label="Copy the relay address"
+              onClick={() => {
+                void navigator.clipboard.writeText(url.trim())
+                toast('Relay address copied')
+              }}
+            >
+              <Copy size={14} />
+            </button>
+          </div>
+        </div>
         <PairingPanel baseURL={url.trim()} />
       </div>
     )
@@ -224,41 +336,114 @@ export function AddySetup(): React.JSX.Element | null {
         any of it — every object is sealed before it leaves, and the server holds no key.
       </div>
 
-      <label className="addy-field">
-        <span>Relay address</span>
-        <input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://relay.example"
-          spellCheck={false}
-        />
-      </label>
-
-      {/* One control, two flows. A separate "recover" screen would ask the
-          relay address and the device name a second time, in a second place,
-          which is how the two get answered differently. */}
-      <div className="addy-mode">
+      {/* THE FORK, FIRST AND BEFORE ANY FIELD.
+          The question a person arrives with is "how do I get my stuff onto
+          this machine", and the product used to answer it with a form whose
+          first field was an invite. That is the right answer for exactly one
+          machine — the first — and the wrong one for every machine after it,
+          which is most of them. So the fork is the screen until it is
+          answered, and joining an account you already have sits level with
+          creating one rather than behind it. */}
+      <div className="addy-fork" role="group" aria-labelledby="addy-fork-q">
+        <div className="addy-fork-q" id="addy-fork-q">
+          Which of these is this machine?
+        </div>
         <button
-          className={clsx('btn ghost size-24', mode === 'create' && 'on')}
+          type="button"
+          className={clsx('addy-choice', mode === 'create' && 'on')}
           aria-pressed={mode === 'create'}
           onClick={() => {
             setMode('create')
             setError(null)
           }}
         >
-          Create an account
+          <strong>This is my first device</strong>
+          <small>
+            Nothing of mine is on this relay yet. Creates the account — the only step in the whole
+            product that needs an invite.
+          </small>
         </button>
         <button
-          className={clsx('btn ghost size-24', mode === 'recover' && 'on')}
+          type="button"
+          className={clsx('addy-choice', mode === 'join' && 'on')}
+          aria-pressed={mode === 'join'}
+          onClick={() => {
+            setMode('join')
+            setError(null)
+          }}
+        >
+          <strong>I already use OpsMaxx on another machine</strong>
+          <small>
+            Joins the account that machine already has, by pairing with it. No invite, and nothing
+            to ask anybody for.
+          </small>
+        </button>
+        <button
+          type="button"
+          className={clsx('addy-choice', mode === 'recover' && 'on')}
           aria-pressed={mode === 'recover'}
           onClick={() => {
             setMode('recover')
             setError(null)
           }}
         >
-          I have a recovery phrase
+          <strong>My other devices are gone</strong>
+          <small>
+            Back in with the twelve words you wrote down. This is the only way in when there is no
+            other machine left to pair with.
+          </small>
         </button>
       </div>
+
+      {mode !== null && (
+        <label className="addy-field">
+          <span>Relay address</span>
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://relay.example"
+            spellCheck={false}
+          />
+          {/* The second machine has no way to know this, and being asked for
+              it cold — with no hint that it is written down somewhere — was
+              the first wall it hit. */}
+          {mode === 'join' && (
+            <small>
+              The same address the other machine uses. It is shown there, under{' '}
+              <strong>Account → Add another device</strong>, with a button to copy it.
+            </small>
+          )}
+        </label>
+      )}
+
+      {mode === 'join' && (
+        <div className="addy-steps">
+          {/* IT STARTS ON THE OTHER MACHINE, and saying so is most of the
+              fix. Nothing this machine can press begins a pairing: the
+              device holding the account is the one that hands the key over,
+              so it is the one that shows a code, always. */}
+          <strong>Start on the machine you already use.</strong>
+          <ol>
+            <li>
+              Open <strong>Account</strong> in OpsMaxx there and find <strong>Add another
+              device</strong>.
+            </li>
+            <li>
+              Choose <strong>Show a code on this device</strong>. It shows a code and a pairing id
+              and keeps them on screen while it waits.
+            </li>
+            <li>
+              Type both of them in below, then compare the seven emoji. Leave both machines open —
+              the code only works while that window is.
+            </li>
+          </ol>
+          {url.trim() ? (
+            <PairingPanel baseURL={url.trim()} />
+          ) : (
+            <div className="setting-desc">Fill in the relay address above to go on.</div>
+          )}
+        </div>
+      )}
 
       {mode === 'recover' && (
         <label className="addy-field">
@@ -317,11 +502,18 @@ export function AddySetup(): React.JSX.Element | null {
       </label>
       )}
 
-      <label className="addy-field">
-        <span>What to call this device</span>
-        <input value={label} onChange={(e) => setLabel(e.target.value)} spellCheck={false} />
-        <small>Shown in the device list on every device of this account.</small>
-      </label>
+      {/* Not on the joining path. Nothing on that path carries a label: the
+          joining device's name is sealed into the roster entry by the machine
+          that shows the code, from what the sidecar chose, and the pairing IPC
+          has no argument for it. A field here would be a question whose answer
+          is thrown away. */}
+      {(mode === 'create' || mode === 'recover') && (
+        <label className="addy-field">
+          <span>What to call this device</span>
+          <input value={label} onChange={(e) => setLabel(e.target.value)} spellCheck={false} />
+          <small>Shown in the device list on every device of this account.</small>
+        </label>
+      )}
 
       {error && (
         <div className="addy-problem" role="alert">
@@ -330,7 +522,7 @@ export function AddySetup(): React.JSX.Element | null {
         </div>
       )}
 
-      {mode === 'create' ? (
+      {mode === 'create' && (
         <button
           className="btn"
           disabled={busy || !url.trim() || !invite.trim() || !label.trim()}
@@ -339,7 +531,11 @@ export function AddySetup(): React.JSX.Element | null {
           {busy ? <Loader2 size={14} className="spin" /> : <Server size={14} />}
           {busy ? ' Creating…' : ' Create an account on this relay'}
         </button>
-      ) : (
+      )}
+      {/* The joining path has no button of its own: `PairingPanel` above owns
+          the whole exchange, and the only thing that finishes it is comparing
+          the emoji. */}
+      {mode === 'recover' && (
         <button
           className="btn"
           // Twelve words, and the count is checked here rather than by the

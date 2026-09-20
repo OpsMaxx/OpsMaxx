@@ -159,11 +159,33 @@ class AddySession {
   ): Promise<void> {
     await this.detach()
     const addyd = await openAddyd('--crypto', log)
+    // ROOTSIGNPUB IS REQUIRED AND WAS NEVER SENT, and it cost every relaunch.
+    //
+    // `handleLoad` in the sidecar (crypto.go:160) refuses a load without it —
+    // "rootSignPub is 32 bytes of hex" — because a device cannot verify a
+    // root-signed roster entry without it, and those are exactly the entries
+    // that authorise an epoch change. This call sent four of the five fields.
+    //
+    // So `attach` threw on every path that uses it, which is every path after
+    // the first: `resume` at launch returned `{resumed:false}`, the engine
+    // never started, `beginPairing` answered "no account is loaded", and the
+    // panel showed an enrolled device that could not sync and could not add a
+    // second machine. Create an account, quit, reopen — and the product was
+    // finished. It survived because every existing test stubs the sidecar, and
+    // a stub cannot refuse a field it was never told about.
+    if (account.rootSignPub === undefined || account.rootSignPub === '') {
+      throw new AddyError(
+        'config-invalid',
+        'this device has no record of the account\u2019s root signing key, so it cannot verify its own device list. ' +
+          'Recover the account from your twelve-word phrase on this machine, or pair it again from a device that works.'
+      )
+    }
     await addyd.send('load', {
       accountId: account.accountId,
       deviceSignSeed: keys.deviceSignSeed,
       deviceEncKey: keys.deviceEncKey,
-      epochKeys: keys.epochKeys
+      epochKeys: keys.epochKeys,
+      rootSignPub: account.rootSignPub
     })
     this.addyd = addyd
     this.relay = new RelayClient(

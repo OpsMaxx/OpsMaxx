@@ -566,18 +566,112 @@
   text-align: right;
 }
 
-/* Create-or-recover, as two buttons rather than two screens. The relay
-   address and the device name are the same two questions either way, and
-   asking them in two places is how they get answered differently. */
-.addy-mode {
-  display: flex;
+/* The fork: first device, joining one that exists, or recovering. Three modes
+   rather than three screens — the relay address is the same question in all
+   three, and asking it in three places is how it gets answered differently.
+
+   STACKED AND FULL WIDTH, not a row of chips. A chip row fits only a label,
+   and a label is exactly what fails here: "Create an account" and "Pair"
+   read as equals to somebody who already knows the difference, which is the
+   one person who does not need the screen. Each choice carries the sentence
+   that tells you whether it is yours. */
+.addy-fork {
+  display: grid;
   gap: 6px;
-  margin-bottom: 10px;
+  margin: 14px 0;
 }
 
-.addy-mode .btn.on {
+.addy-fork-q {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.addy-choice {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.addy-choice strong {
+  display: block;
+  font-size: 13px;
+}
+
+.addy-choice small {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+.addy-choice.on {
+  border-color: var(--accent, #4d8dff);
   background: var(--accent-soft, rgba(80, 140, 255, 0.16));
-  color: var(--accent, #4d8dff);
+}
+
+/* What to do on the OTHER machine, which is where this one's setup starts.
+   Numbered, because it is a procedure across two computers and the order is
+   the part people get wrong. */
+.addy-steps {
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.addy-steps ol {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.addy-steps li {
+  margin: 4px 0;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+/* The relay address, handed over. Selectable and monospaced because it gets
+   read out loud or typed by hand as often as it gets copied. */
+.addy-handoff {
+  margin: 12px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.addy-handoff-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* `.addy-setup .btn` carries its own margins for the stacked buttons on the
+   create path; in a row laid out by `gap` they read as a stray indent. */
+.addy-handoff-row .btn {
+  margin: 0;
+}
+
+.addy-handoff-row code {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-all;
+  user-select: text;
 }
 
 .addy-phrase-input {

@@ -27,10 +27,35 @@ beforeEach(() => {
   })
 })
 
+/**
+ * The invite field is on the first-device path, and that path is a choice now
+ * rather than the default.
+ *
+ * It used to be the screen: relay address, invite, device name, on every
+ * machine with no account. An invite is right for exactly one machine in an
+ * account and wrong for every one after it, and having it there by default is
+ * how somebody who owns this product went looking for an invite to mint for
+ * his second laptop. So each of these opens the path first — which is also
+ * the only honest way to test the field, since that is now what a person does.
+ */
+async function firstDevicePath(): Promise<HTMLElement> {
+  render(<AddySetup />)
+  fireEvent.click(await screen.findByRole('button', { name: /first device/i }))
+  return screen.getByPlaceholderText('https://relay.example')
+}
+
 describe('the invite field', () => {
-  it('points at the console for the relay the user typed', async () => {
+  it('is not on screen until this machine says it is the first one', async () => {
+    // The fork's whole purpose. A second machine must never be handed an
+    // invite: spending one does not add a device, it starts a separate sync
+    // group with its own key that cannot see the first.
     render(<AddySetup />)
-    const relay = await screen.findByPlaceholderText('https://relay.example')
+    await screen.findByRole('button', { name: /first device/i })
+    expect(screen.queryByPlaceholderText('https://relay.example')).toBeNull()
+  })
+
+  it('points at the console for the relay the user typed', async () => {
+    const relay = await firstDevicePath()
     fireEvent.change(relay, { target: { value: 'https://addy.example.com' } })
 
     const link = screen.getByText('addy.example.com/admin')
@@ -43,8 +68,7 @@ describe('the invite field', () => {
     // an arbitrary page inside an Electron window that has this preload on it.
     const opened = vi.fn()
     vi.stubGlobal('open', opened)
-    render(<AddySetup />)
-    fireEvent.change(await screen.findByPlaceholderText('https://relay.example'), {
+    fireEvent.change(await firstDevicePath(), {
       target: { value: 'https://addy.example.com' }
     })
 
@@ -57,17 +81,13 @@ describe('the invite field', () => {
     // Built from what was typed rather than probed, because a relay started
     // without the provider flags serves no console — and asking would be an
     // unauthenticated request on every keystroke.
-    render(<AddySetup />)
-    fireEvent.change(await screen.findByPlaceholderText('https://relay.example'), {
-      target: { value: 'not-a-url' }
-    })
+    fireEvent.change(await firstDevicePath(), { target: { value: 'not-a-url' } })
     expect(screen.queryByText(/\/admin$/)).toBeNull()
     expect(screen.getByText(/Ask whoever runs the relay/)).toBeTruthy()
   })
 
   it('does not tell anybody to run a command', async () => {
-    render(<AddySetup />)
-    await screen.findByPlaceholderText('https://relay.example')
+    await firstDevicePath()
     expect(screen.queryByText(/addy invite/)).toBeNull()
   })
 })

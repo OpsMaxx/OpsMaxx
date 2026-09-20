@@ -191,13 +191,57 @@ describe('what the panel says on a build with no sync', () => {
     expect(screen.getByText(/cannot read the device list/)).toBeTruthy()
   })
 
-  it('still shows the way in', () => {
+  it('still shows the way in, and it is a fork rather than one door', () => {
     // The other half of the report: there was no way in at all. The setup flow
     // is embedded rather than copied — AddySetup owns the recovery phrase, and
     // a second implementation of a screen shown once is how somebody ends up
     // with an account nobody can recover.
+    //
+    // ASSERTED AS THREE DOORS, not as three sentences. The wording will be
+    // edited again; what must not go missing is that a machine with no account
+    // can say it already has one somewhere else. This screen used to offer
+    // "create an account" and "I have a recovery phrase" and nothing between
+    // them, so the owner of this product went looking for an invite to mint
+    // for his second laptop — which is the one thing that must never be done.
+    const { container } = render(<AddyPanel />)
+    expect(container.querySelectorAll('.addy-choice').length).toBe(3)
+  })
+
+  it('preselects none of them, because the preselected one was the invite', () => {
+    // An invite field on screen by default answers "how do I get my data onto
+    // this machine" with the answer that is right for exactly one machine in
+    // an account and wrong for every one after it.
     render(<AddyPanel />)
+    expect(screen.queryByText(/Create an account on this relay/)).toBeNull()
+    expect(screen.queryByText(/Start on the machine you already use/)).toBeNull()
+    expect(screen.queryByText(/Recover this account/)).toBeNull()
+  })
+
+  it('opens the first-device path when that is what this machine is', () => {
+    render(<AddyPanel />)
+    fireEvent.click(screen.getByRole('button', { name: /first device/i }))
     expect(screen.getByText(/Create an account on this relay/)).toBeTruthy()
+  })
+
+  it('lets a machine with no account say it already has one elsewhere', () => {
+    // THE DOOR THAT DID NOT EXIST. Every device after the first joins by
+    // pairing, and nothing on this screen used to admit that pairing was a
+    // thing a person with no account could do.
+    render(<AddyPanel />)
+    fireEvent.click(
+      screen.getByRole('button', { name: /already use OpsMaxx on another machine/i })
+    )
+    expect(screen.getByText(/Start on the machine you already use/)).toBeTruthy()
+    // And it does not ask for an invite on the way, which is the whole point.
+    expect(screen.queryByText(/Create an account on this relay/)).toBeNull()
+  })
+
+  it('offers recovery to a machine whose other devices are gone', () => {
+    // The path people reach for in a panic. It must be on the first screen,
+    // not behind the one they would only find after setting something up.
+    render(<AddyPanel />)
+    fireEvent.click(screen.getByRole('button', { name: /devices are gone/i }))
+    expect(screen.getByText(/Recover this account/)).toBeTruthy()
   })
 })
 
@@ -232,6 +276,29 @@ describe('what it says once main can answer', () => {
     render(<AddyPanel />)
     await screen.findByText('work laptop')
     expect(screen.queryByText(/Create an account on this relay/)).toBeNull()
+  })
+
+  it('gives a machine that HAS an account a way to add the next one', async () => {
+    // THE REGRESSION THIS ROUND CAME FROM, and nothing tested it.
+    //
+    // `AddySetup` is the renderer's ONLY mount of `PairingPanel`, and it used
+    // to return null the moment a device was enrolled. Pairing was therefore
+    // reachable for exactly as long as the screen shown immediately after an
+    // account was created stayed open — close it or restart, and no screen
+    // anywhere in the app could show a pairing code again. The only thing the
+    // product still offered was another invite, which does not add a device:
+    // it starts a second sync group with its own key that cannot see the
+    // first. That is why the owner asked how to mint one for machine B.
+    //
+    // The button is the assertion, not the prose around it: a door that is
+    // described and not rendered is the defect, twice over now.
+    stubStatus(healthy())
+    const { container } = render(<AddyPanel />)
+    await screen.findByText('work laptop')
+    expect(await screen.findByRole('button', { name: /Show a code on this device/ })).toBeTruthy()
+    // And the relay address it has to hand the other machine, which nothing
+    // else in the product tells that machine.
+    expect(container.textContent).toContain('https://relay.example')
   })
 
   it('raises an attention tile only when something is actually wrong', async () => {

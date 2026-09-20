@@ -304,7 +304,13 @@ describe('an account can be recovered from the phrase', () => {
     expect(PRELOAD).toMatch(/invoke\('addy:recover'/)
     const SETUP = read('src/renderer/src/components/addy/AddySetup.tsx')
     expect(SETUP).toMatch(/addy\.recover\(/)
-    expect(SETUP).toMatch(/I have a recovery phrase/)
+    // The DOOR, asserted as the mode the screen switches into rather than as
+    // the words on the button. The wording moved — the choice now says "My
+    // other devices are gone", which is the state a person recovering is
+    // actually in — and pinning the old sentence would have made the fix that
+    // put recovery on the first screen look like a regression.
+    expect(SETUP).toMatch(/setMode\('recover'\)/)
+    expect(SETUP).toMatch(/Recover this account/)
   })
 
   it('drops the root key whether it worked or not', () => {
