@@ -139,6 +139,21 @@ export function parseAddyLink(raw: string): { link: AddyLink } | { reason: strin
   }
 }
 
+/**
+ * The link a machine showing a pairing code hands to the machine typing it.
+ *
+ * It carries the relay address as well as the two halves, because the second
+ * machine knows neither — and being told "paste the link" when nothing
+ * produces one is worse than being told to type two codes.
+ */
+export function addyPairLink(relay: string, code: string, pairingId: string): string {
+  const r = new URL(relay)
+  return (
+    `${ADDY_LINK_SCHEME}://pair?relay=${encodeURIComponent(`${r.protocol}//${r.host}`)}` +
+    `&code=${encodeURIComponent(code)}&id=${encodeURIComponent(pairingId)}`
+  )
+}
+
 /** Build the link a relay console hands out. The inverse of the parser, kept
  *  beside it so the two cannot drift. */
 export function addyInviteLink(relay: string, invite: string): string {
