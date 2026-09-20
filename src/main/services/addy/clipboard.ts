@@ -85,6 +85,27 @@ export async function sendClipboard(deps: ClipboardDeps): Promise<{ sent: number
   }
 
   const identity = identifyText(text)
+
+  // WHAT THIS DEVICE JUST RECEIVED IS NOT WORTH SENDING BACK.
+  //
+  // The echo flag was armed on every receive and consulted by nothing, which
+  // made the arming decoration. It matters on the send side even with an
+  // explicit keystroke: press receive and then send within the suppressor's
+  // window — which is exactly what somebody does while checking the feature
+  // works — and the other device is handed back the string it just sent, as
+  // though it had come from here.
+  //
+  // The window is short and the check CONSUMES the arming, both by design:
+  // the same text copied again later is a real event and must be sent. So
+  // this suppresses the immediate bounce and nothing else, which is all it
+  // should do.
+  if (isOwnEcho(identity.hash)) {
+    return {
+      sent: 0,
+      skipped: 'That is what this device just received. It is already on the other machine.'
+    }
+  }
+
   if (identity.size > MAX_CLIPBOARD_BYTES) {
     return {
       sent: 0,
@@ -199,10 +220,13 @@ export async function applySealedClipboard(
   return payload.identity
 }
 
-/** Whether a clipboard read is our own write coming back. Exposed so a future
- *  watcher can consult it; the explicit-send design does not need it today,
- *  and it is here because arming without a consumer is a bug waiting to be
- *  reintroduced. */
+/** Whether a clipboard read is our own write coming back.
+ *
+ *  Consulted by `sendClipboard` above, and exported for a future watcher that
+ *  will need the same question answered before it forwards anything. It used
+ *  to be exported and called from nowhere, with a comment explaining why that
+ *  was fine — which is the shape of every dead feature found in this module,
+ *  so it now has a caller. */
 export function isOwnEcho(hash: string): boolean {
   return echo.shouldIgnore(hash)
 }
