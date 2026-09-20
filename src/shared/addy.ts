@@ -88,6 +88,13 @@ export const NOT_SYNCED: Readonly<Record<string, string>> = {
   // THIS device joined. Syncing it would also be circular — it is the note
   // that tells a device how to reach the thing that would carry it.
   addy: 'this device\'s note of which relay it joined; per-device, and the route to sync itself',
+  // WHAT THIS MACHINE HAS ALREADY AGREED TO: per collection, the relay ETag it
+  // last matched, the highest counter it has seen and a hash of its own copy
+  // at that moment. Per-device by definition — it is one device's record of
+  // its own history — and syncing it would have every device adopt every other
+  // device's idea of what it had already done, which is how a machine that has
+  // been off for a week decides it is up to date.
+  addySync: 'one device\'s record of what it has already synced; per-device by definition',
   // A machine-only grant means "this secret is readable on THIS machine
   // without the master password", and the secret it names is excluded from
   // every export precisely so it cannot travel. Syncing the record of such a

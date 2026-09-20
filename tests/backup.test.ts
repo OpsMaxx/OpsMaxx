@@ -48,6 +48,7 @@ import { vpnRunRoot, vpnStateRoot } from '../src/main/services/vpn/runDir'
 // number in a comment is the thing that goes stale first.
 const WRITES_TO_USERDATA = [
   'instance-id',
+  'opsmaxx-addy-sync.json',
   'opsmaxx-addy.json',
   'opsmaxx-ai-audit.jsonl',
   'opsmaxx-ai-policy.json',

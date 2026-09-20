@@ -406,6 +406,11 @@ export const ALL_DATA_FILES = [
   // machine-only prefix. It is still a record of what this person belongs to,
   // so "delete everything" removes it.
   'opsmaxx-addy.json',
+  // Per collection, what this device has already agreed to with the relay: an
+  // ETag, a counter and a hash of its own copy. No content and no key, but it
+  // is this machine's sync history, and a "delete everything" that leaves it
+  // behind leaves the next install convinced it is already up to date.
+  'opsmaxx-addy-sync.json',
   'opsmaxx-secrets.json',
   // When each machine-only grant was first made. Not a secret — which is why
   // it is beside opsmaxx-secrets.json rather than inside it, where every value

@@ -16,7 +16,8 @@ import {
   resolveConflict,
   type ConflictDeps
 } from './conflicts'
-import type { AddyStatusSnapshot, ConflictCopy } from '../../../shared/addy'
+import type { AddyStatusSnapshot, ConflictCopy, SyncedCollection } from '../../../shared/addy'
+import { forgetSyncState, syncOnce, type SyncResult } from './sync'
 import { receiveClipboard, sendClipboard, type ClipboardDeps } from './clipboard'
 import { closeSession, dialPeer } from './p2p'
 
@@ -97,6 +98,20 @@ class AddySession {
    *  initialised to `[]`. */
   private lastRoster: AddyRoster | null = null
   private watchers = new Set<(s: AddyStatusSnapshot) => void>()
+  /** Told which collections changed on disk, so the renderer can reload them
+   *  before writing its own stale copy back over the top. */
+  private appliedCb: ((collections: SyncedCollection[]) => void) | null = null
+
+  /** The last pass, or null when none has run in this process. */
+  private lastSync: SyncResult | null = null
+  /** Objects carried per pass, oldest first. Bounded, because it is a
+   *  sparkline and not a log. */
+  private carried: number[] = []
+  /** True only while a pass is actually in flight — the panel's "syncing now",
+   *  and the guard that stops two passes racing each other into conflict
+   *  copies neither user caused. */
+  private syncing = false
+  private syncTimer: NodeJS.Timeout | null = null
 
   /** True once a device is attached to an account and the sidecar is up. */
   get attached(): boolean {
@@ -134,6 +149,10 @@ class AddySession {
    *  at quit: nothing addyd holds is on disk, so stopping it IS the
    *  remediation rather than a step towards one. */
   async detach(): Promise<void> {
+    // First, and before the sidecar goes: a pass that starts against a closed
+    // sidecar fails every collection, and the failure would be recorded as the
+    // account's state rather than as a shutdown.
+    this.stopSync()
     await this.cancelPairing()
     const rtc = this.rtc
     this.rtc = null
@@ -289,6 +308,11 @@ class AddySession {
       spki,
       insecureTLS: this.insecureTLS
     })
+    // A token is exactly what the engine was waiting for. Started here rather
+    // than at each call site, because every path that ends with this device
+    // authenticated — launch, minting, joining — should end with it syncing,
+    // and three call sites is three chances to forget one.
+    this.startSync()
   }
 
   /**
@@ -482,6 +506,12 @@ class AddySession {
 
     await this.cancelPairing()
     const after = await this.refreshRoster()
+    // Push now rather than at the next tick. The device that just joined logs
+    // in and syncs within seconds, and if this account's collections have
+    // never been uploaded it finds an empty relay and adopts nothing — so the
+    // promise the pairing screen just made would take up to five minutes to
+    // come true for no reason.
+    void this.syncNow().catch(() => undefined)
     return { devices: after.devices.length }
   }
 
@@ -803,16 +833,120 @@ class AddySession {
           }
         : {}),
       sync: {
-        // FALSE, and it will stay false until there is an engine. The panel
-        // reads every other figure through this one.
-        running: false,
+        // The timer is running, which is what "there is an engine" means. Not
+        // `this.syncing` — that is true for the second or two a pass takes,
+        // and a flag the panel reads every other figure through must not blink
+        // off between passes.
+        running: this.syncTimer !== null,
         // A token means this device authenticated to the relay, which is the
-        // strongest connection claim this build can make honestly.
+        // strongest connection claim that can be made without a round trip.
         connected: !!this.relay?.token,
-        lastSyncAt: null,
-        conflicts: (await this.conflicts()).length
+        // Null until a pass has actually completed in this process. NOT
+        // `Date.now()`, and not the time the app started.
+        lastSyncAt: this.lastSync?.at ?? null,
+        ...(this.lastSync?.error
+          ? {
+              error: {
+                message: `${this.lastSync.error.collection}: ${this.lastSync.error.message}`,
+                at: this.lastSync.at,
+                ...(this.lastSync.error.code ? { code: this.lastSync.error.code } : {})
+              }
+            }
+          : {}),
+        conflicts: (await this.conflicts()).length,
+        // Omitted rather than sent flat: a flat line is a claim that nothing
+        // synced, and before the first pass nothing is known either way.
+        ...(this.carried.length > 0 ? { history: this.carried } : {})
       }
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // The engine
+  // -------------------------------------------------------------------------
+
+  /**
+   * How often a pass runs on its own.
+   *
+   * Five minutes, and it is a floor rather than a target: a pass over sixteen
+   * collections that have not changed is sixteen conditional GETs, which is
+   * cheap but not free, and nothing in this product is worth a relay round
+   * trip every thirty seconds. The cases that need to be prompt — a device
+   * just paired, the app just started, the user pressed Sync — all call
+   * `syncNow()` directly rather than waiting for this.
+   */
+  private static readonly SYNC_EVERY_MS = 5 * 60_000
+
+  /** Told which collections changed on disk. Registered once, by main. */
+  onApplied(cb: (collections: SyncedCollection[]) => void): void {
+    this.appliedCb = cb
+  }
+
+  /**
+   * One pass, now.
+   *
+   * Refuses to start a second while one is running rather than queueing it:
+   * two passes over the same account race each other into conflict copies that
+   * neither device's user caused, and the second pass would have nothing new
+   * to say anyway.
+   */
+  async syncNow(): Promise<SyncResult | null> {
+    if (this.syncing) return null
+    if (!this.attached || !this.relay?.token) return null
+    this.syncing = true
+    this.announce()
+    try {
+      const result = await syncOnce({
+        addyd: this.addyd!,
+        relay: this.relay,
+        epoch: () => this.account!.epoch,
+        applied: (collections) => this.appliedCb?.(collections)
+      })
+      this.lastSync = result
+      this.carried = [...this.carried, result.carried].slice(-12)
+      return result
+    } finally {
+      this.syncing = false
+      this.announce()
+    }
+  }
+
+  /**
+   * Start the timer, and take one pass immediately.
+   *
+   * The immediate pass is the point. A device that has been off for a week
+   * should not show a week-old estate for five minutes because a timer has to
+   * tick first — and it is the moment a newly paired device gets everything,
+   * which is the whole promise the pairing screen just made.
+   */
+  startSync(): void {
+    if (this.syncTimer) return
+    this.syncTimer = setInterval(() => {
+      void this.syncNow().catch(() => undefined)
+    }, AddySession.SYNC_EVERY_MS)
+    // Unref'd: a sync timer must never be the reason the process stays alive
+    // through a quit.
+    this.syncTimer.unref?.()
+    void this.syncNow().catch(() => undefined)
+  }
+
+  stopSync(): void {
+    if (!this.syncTimer) return
+    clearInterval(this.syncTimer)
+    this.syncTimer = null
+  }
+
+  /**
+   * Forget every agreement and take everything again from the relay.
+   *
+   * The escape hatch the design asks for, and it is not a destructive one:
+   * with no state, every collection where the two copies differ becomes a
+   * conflict the user is shown, rather than a silent overwrite in either
+   * direction. That is why it is safe to offer at all.
+   */
+  async resyncEverything(): Promise<SyncResult | null> {
+    forgetSyncState()
+    return this.syncNow()
   }
 
   /** Pushed to the renderer whenever any of the above changes, so the panel

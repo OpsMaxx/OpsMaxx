@@ -453,6 +453,11 @@ const api = {
      *  the Sync & devices panel renders; see shared/addy.ts for the shape and
      *  for why absence is a state rather than a zero. */
     status: (): Promise<AddyStatusSnapshot> => ipcRenderer.invoke('addy:status'),
+    /** One sync pass, now. Resolves with what each collection did, or `null`
+     *  when a pass was already running or this device is not attached. */
+    syncNow: (): Promise<unknown> => ipcRenderer.invoke('addy:syncNow'),
+    /** Forget every agreement and take everything again from the relay. */
+    resync: (): Promise<unknown> => ipcRenderer.invoke('addy:resync'),
     /** Pushed whenever any of that changes. Returns the unsubscribe. */
     onStatus: (cb: (s: AddyStatusSnapshot) => void): (() => void) => {
       const h = (_e: unknown, s: AddyStatusSnapshot): void => cb(s)
@@ -1932,7 +1937,25 @@ const api = {
   },
   data: {
     load: <T>(): Promise<T | null> => ipcRenderer.invoke('data:load'),
-    save: (data: unknown): Promise<void> => ipcRenderer.invoke('data:save', data)
+    save: (data: unknown): Promise<void> => ipcRenderer.invoke('data:save', data),
+    /**
+     * Somebody other than this window changed the blob on disk.
+     *
+     * Today that is addy's sync engine and nothing else. The renderer holds
+     * the whole blob in memory and writes all of it on every change, so a
+     * file-level change it is not told about survives exactly until the next
+     * keystroke — which looks like a sync that silently did nothing.
+     *
+     * The payload names which collections changed, so the store reloads those
+     * and leaves the window's own state — tabs, panes, the active workspace —
+     * alone. Those are deliberately not synced, and a blanket reload would
+     * rearrange somebody's screen because another machine added a server.
+     */
+    onExternalChange: (cb: (collections: string[]) => void): (() => void) => {
+      const h = (_e: unknown, collections: string[]): void => cb(collections)
+      ipcRenderer.on('data:external-change', h)
+      return () => ipcRenderer.removeListener('data:external-change', h)
+    }
   },
   aiPolicy: {
     listGroups: (): Promise<AccessGroup[]> => ipcRenderer.invoke('aiPolicy:listGroups'),

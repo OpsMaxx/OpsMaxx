@@ -246,6 +246,57 @@ async function hydrate(): Promise<void> {
       timer = setTimeout(save, 400)
     }
   })
+
+  /**
+   * Somebody else changed the file. Take the named collections back in.
+   *
+   * Addy's sync engine writes inbound copies straight into
+   * `opsmaxx-data.json`, which THIS store owns: it holds the blob in memory
+   * and writes all of it 400ms after any change. So without this, a server
+   * that arrived from another machine would be overwritten by the next
+   * keystroke in this window and the sync would look like it had silently
+   * failed.
+   *
+   * Only the named keys, and only the ones this store actually holds. A
+   * blanket `replaceAll` would restore tabs, panes and the active workspace
+   * too — all deliberately NOT synced — so another machine adding a server
+   * would rearrange somebody's screen.
+   */
+  window.opsmaxx?.data?.onExternalChange?.((collections) => {
+    void applyExternal(collections)
+  })
+}
+
+/** The store keys an inbound collection can land in. A collection not in here
+ *  lives somewhere else on disk and needs no reload — `vault`, `knownHosts`
+ *  and `env` are read from their own files by the code that uses them. */
+const STORE_KEYS = new Set([
+  'workspaces',
+  'monitorGroups',
+  'folders',
+  'servers',
+  'vpns',
+  'tunnels',
+  'databases',
+  'apiCollections',
+  'apiWorkspace',
+  'httpChecks',
+  'cicdConnections'
+])
+
+async function applyExternal(collections: string[]): Promise<void> {
+  const wanted = collections.filter((c) => STORE_KEYS.has(c))
+  if (wanted.length === 0) return
+  const saved = await window.opsmaxx?.data.load<Record<string, unknown>>()
+  if (!saved) return
+  const patch: Record<string, unknown> = {}
+  for (const key of wanted) {
+    // Present-check rather than `?? []`: a key the file does not carry is one
+    // this build has never written, and replacing live state with an empty
+    // array on the strength of that is how a sync deletes somebody's servers.
+    if (key in saved) patch[key] = saved[key]
+  }
+  if (Object.keys(patch).length > 0) useApp.setState(patch as never)
 }
 
 function save(): Promise<void> {

@@ -4710,6 +4710,23 @@ ipcMain.handle('addy:finishJoin', () => addySession.finishJoin())
 // handler exists — deliberately, so the screen was honest while the engine
 // behind it was written. This is the line that turns it on.
 ipcMain.handle('addy:status', () => addySession.status())
+// One pass, now. The panel's Sync button, and what the engine's own timer
+// calls between times.
+ipcMain.handle('addy:syncNow', () => addySession.syncNow())
+// The escape hatch: forget every agreement and take everything again. Safe to
+// offer because with no state a difference becomes a conflict the user is
+// shown, never a silent overwrite in either direction.
+ipcMain.handle('addy:resync', () => addySession.resyncEverything())
+// WHEN SYNC WRITES TO DISK, THE RENDERER HAS TO BE TOLD. Eleven of the sixteen
+// collections live inside `opsmaxx-data.json`, which the renderer holds in a
+// zustand store and writes in full on every change — so an inbound copy
+// written to that file and not announced would be overwritten by the next
+// keystroke, and the sync would look like it had silently failed.
+addySession.onApplied((collections) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('data:external-change', collections)
+  }
+})
 // And pushed on change, so the panel does not poll a sidecar on a timer to
 // learn that nothing happened. Registered once at startup rather than per
 // window: `watch` holds one callback and the send is guarded on a live window,

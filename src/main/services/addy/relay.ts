@@ -292,6 +292,28 @@ export class RelayClient {
   }
 
   /**
+   * Hands over a copy whose conditional PUT lost, still sealed.
+   *
+   * Called by the LOSER, immediately after its 409, and that timing is the
+   * whole point: those bytes exist nowhere else at that moment, and a client
+   * that simply gave up on the 409 would throw away the edit somebody made.
+   * The relay stores the ciphertext, records which device wrote it and when,
+   * and cannot read a byte of it — deciding between the copies needs the epoch
+   * key, so it happens in the chooser and never here.
+   */
+  async keepConflict(name: string, epoch: number, counter: number, sealed: Buffer): Promise<void> {
+    const resp = await this.request('POST', `/v1/obj/${encodeURIComponent(name)}/conflict`, {
+      epoch,
+      counter,
+      body: sealed.toString('base64')
+    })
+    if (resp.status === 507) {
+      throw new AddyError('quota-exceeded', `the relay has no room to keep a copy of ${name}`)
+    }
+    if (!resp.ok) throw await relayError(resp, `keeping a conflict copy of ${name}`)
+  }
+
+  /**
    * Append one entry to the roster.
    *
    * The server checks contiguity and NOTHING else — it holds no key and does
