@@ -9,7 +9,7 @@ import {
   receive,
   type PairingConfirmation
 } from './pairing'
-import { RelayClient } from './relay'
+import { RelayClient, whyFetchFailed} from './relay'
 import {
   discardConflict,
   listConflicts,
@@ -243,7 +243,13 @@ class AddySession {
     // get two of them and a port that never closes.
     await this.detach()
     const r = await this.resume()
-    if (r.resumed && this.account !== null) return { ok: true }
+    // ATTACHED IS NOT CONNECTED. `resume` reports `resumed: true` for a
+    // session that loaded its keys and then failed to log in — a deliberately
+    // useful state, because the panel can still name the relay. But it is not
+    // what "Try again" was pressed for, and reporting success there told
+    // somebody the problem was fixed while the banner behind the toast still
+    // said it was not. The token is the thing that distinguishes them.
+    if (r.resumed && this.account !== null && this.account.token !== '') return { ok: true }
     return { ok: false, problem: r.problem ?? this.lastProblem ?? 'This device could not reach the relay.' }
   }
 
@@ -412,7 +418,7 @@ class AddySession {
     }).catch((err: unknown) => {
       throw new AddyError(
         'relay-unreachable',
-        `could not reach ${relay}: ${err instanceof Error ? err.message : String(err)}`
+        `could not reach ${relay}: ${whyFetchFailed(err)}`
       )
     })
 
@@ -1348,7 +1354,23 @@ class AddySession {
               }
             }
           : {}),
-        conflicts: (await this.conflicts()).length,
+        // A NETWORK CALL INSIDE THE ONE FUNCTION WRITTEN TO SURVIVE BEING
+        // OFFLINE. `conflicts()` reaches the relay, so `status()` threw
+        // whenever the relay was down — and every other line here is built to
+        // answer from what this device already knows.
+        //
+        // The effect was worse than a missing number. The snapshot carries the
+        // `problem` field and the Try again button that exist FOR the offline
+        // case, and neither could ever render, because the call that would
+        // have carried them threw first. A count nobody can read is not worth
+        // the screen it takes down.
+        //
+        // Zero on failure, not a guess: the conflicts are still on the relay
+        // and the next successful status reports them. What must not happen is
+        // the panel disappearing.
+        conflicts: await this.conflicts()
+          .then((c) => c.length)
+          .catch(() => 0),
         // Omitted rather than sent flat: a flat line is a claim that nothing
         // synced, and before the first pass nothing is known either way.
         ...(this.carried.length > 0 ? { history: this.carried } : {})

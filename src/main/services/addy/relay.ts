@@ -33,6 +33,36 @@ interface SignedHeaders {
   signature: string
 }
 
+/**
+ * Why a fetch failed, in words, including the ones Node hides.
+ *
+ * `fetch` rejects with a TypeError whose `message` is "fetch failed" — or, for
+ * several transport errors, EMPTY — and puts the reason a person could act on
+ * in `cause`: ECONNREFUSED, ENOTFOUND, a TLS mismatch. Reading only `message`
+ * produced "could not reach https://relay.example: " with nothing after the
+ * colon, which tells somebody there is a problem and refuses to say what.
+ */
+export function whyFetchFailed(err: unknown): string {
+  const parts: string[] = []
+  let cur: unknown = err
+  for (let depth = 0; depth < 4 && cur !== null && cur !== undefined; depth++) {
+    if (cur instanceof Error) {
+      const m = cur.message.trim()
+      if (m !== '' && !parts.includes(m)) parts.push(m)
+      const code = (cur as { code?: unknown }).code
+      if (typeof code === 'string' && !parts.includes(code)) parts.push(code)
+      cur = (cur as { cause?: unknown }).cause
+      continue
+    }
+    const t = String(cur).trim()
+    if (t !== '' && t !== '[object Object]' && !parts.includes(t)) parts.push(t)
+    break
+  }
+  // Never empty. "the connection failed with no reason given" is still a
+  // sentence somebody can report; a bare colon is not.
+  return parts.length > 0 ? parts.join(' — ') : 'the connection failed with no reason given'
+}
+
 export class RelayClient {
   constructor(
     private cfg: RelayConfig,
@@ -262,7 +292,7 @@ export class RelayClient {
       // own code so a caller can retry rather than alarm.
       throw new AddyError(
         'relay-unreachable',
-        `could not reach ${this.cfg.baseURL}: ${err instanceof Error ? err.message : String(err)}`
+        `could not reach ${this.cfg.baseURL}: ${whyFetchFailed(err)}`
       )
     }
 
