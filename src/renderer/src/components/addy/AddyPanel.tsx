@@ -217,6 +217,7 @@ export function AddyPanel(): React.JSX.Element {
           machine in exchange for nothing at all. */}
       {status?.enrolled && <Transfers devices={status.devices} />}
       {status?.enrolled && <RekeyRow />}
+      {status?.enrolled && <LeaveRow relay={relay} devices={status.devices?.length ?? null} />}
       {status?.enrolled && <ClipboardShortcuts />}
 
       <AddyProblems status={status} />
@@ -429,6 +430,95 @@ function RekeyRow(): React.JSX.Element {
  * sync" and letting the user find out the next time they press the
  * combination somewhere else.
  */
+/**
+ * Take this device off the account.
+ *
+ * LEAVING IS NOT REVOKING, and saying so is most of this control's job.
+ * Revoking is signed, tells the other devices, and wipes the machine it names.
+ * Leaving is local: this device forgets its own keys and stops syncing, the
+ * other devices carry on without noticing, and this one stays in their roster
+ * until somebody there removes it. A person who leaves believing they have
+ * removed themselves has the wrong model of what just happened.
+ *
+ * Two presses, and the second one is where the irreversible part is named. The
+ * same shape as RevokeButton, for the same reason: the sentence has to be in
+ * front of somebody before they act, not after.
+ */
+function LeaveRow({
+  relay,
+  devices
+}: {
+  relay: string | null
+  devices: number | null
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  // THE LAST DEVICE IS THE DANGEROUS CASE. With another device on the account
+  // the data is still reachable from it; with only this one, the recovery
+  // phrase is the only way back and the relay cannot help — it holds no key.
+  const alone = devices !== null && devices <= 1
+
+  const run = (): void => {
+    setBusy(true)
+    void window.opsmaxx?.addy
+      ?.leave()
+      .then((r) => {
+        toast(
+          r.left ? 'This device has left the account.' : 'This device was not on an account.',
+          'success'
+        )
+        setOpen(false)
+      })
+      .catch((err: unknown) => toast(err instanceof Error ? err.message : String(err), 'error'))
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <div className="setting-row">
+      <div className="s-info">
+        <div className="s-title">Leave this account</div>
+        <div className="s-desc">
+          Stops sync on this machine and forgets the keys it holds. Your servers, workspaces,
+          tunnels and vault stay exactly as they are here — what goes is this device&apos;s ability
+          to read anything further from {relay ?? 'the relay'}.
+          {open && (
+            <>
+              <br />
+              This does not remove the device from the account: the other machines are not told, and
+              this one stays in their device list until somebody there removes it.
+              <br />
+              {alone ? (
+                <strong>
+                  This is the only device on the account. After this, the twelve-word recovery
+                  phrase is the only way back into it — the relay holds no key and cannot help.
+                </strong>
+              ) : (
+                <>Nothing changes for the other devices; they keep syncing with each other.</>
+              )}
+              <br />
+              Joining again — this relay or a different one — starts from the setup screen.
+            </>
+          )}
+        </div>
+      </div>
+      {open ? (
+        <span className="addy-revoke-confirm">
+          <button className="btn ghost size-24" disabled={busy} onClick={() => setOpen(false)}>
+            Cancel
+          </button>
+          <button className="btn danger size-24" disabled={busy} onClick={run}>
+            {busy ? <Loader2 size={13} className="spin" /> : null} Leave the account
+          </button>
+        </span>
+      ) : (
+        <button className="btn ghost size-24" onClick={() => setOpen(true)}>
+          Leave
+        </button>
+      )}
+    </div>
+  )
+}
+
 function ClipboardShortcuts(): React.JSX.Element {
   const on = useApp((s) => s.settings.addyClipboardShortcuts === true)
   const setSettings = useApp((s) => s.setSettings)

@@ -524,6 +524,8 @@ const api = {
     syncNow: (): Promise<unknown> => ipcRenderer.invoke('addy:syncNow'),
     /** Forget every agreement and take everything again from the relay. */
     resync: (): Promise<unknown> => ipcRenderer.invoke('addy:resync'),
+    leave: (): Promise<{ left: boolean; accountId: string | null }> =>
+      ipcRenderer.invoke('addy:leave'),
     /** Pushed whenever any of that changes. Returns the unsubscribe. */
     onStatus: (cb: (s: AddyStatusSnapshot) => void): (() => void) => {
       const h = (_e: unknown, s: AddyStatusSnapshot): void => cb(s)

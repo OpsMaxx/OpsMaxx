@@ -4750,6 +4750,11 @@ ipcMain.handle('addy:syncNow', () => addySession.syncNow())
 // offer because with no state a difference becomes a conflict the user is
 // shown, never a silent overwrite in either direction.
 ipcMain.handle('addy:resync', () => addySession.resyncEverything())
+// Leaving is LOCAL AND UNSIGNED: this device forgets its own keys and stops
+// syncing, and the other devices on the account never hear about it. It is
+// deliberately not revocation, which is signed, tells the others, and wipes
+// the machine it names.
+ipcMain.handle('addy:leave', () => addySession.leaveAccount())
 // WHEN SYNC WRITES TO DISK, THE RENDERER HAS TO BE TOLD. Eleven of the sixteen
 // collections live inside `opsmaxx-data.json`, which the renderer holds in a
 // zustand store and writes in full on every change — so an inbound copy

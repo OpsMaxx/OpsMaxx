@@ -1,6 +1,6 @@
 import { AddyError, openAddyd, type AddySidecar } from './sidecar'
 import { forgetAddySecret, storeAddySecret, loadAddySecret } from './keys'
-import { loadEnrolment, saveEnrolment } from './enrolment'
+import { loadEnrolment, saveEnrolment, forgetEnrolment } from './enrolment'
 import {
   beginPairing,
   forgetPairing,
@@ -186,6 +186,61 @@ class AddySession {
     this.relay = null
     this.account = null
     await held?.close()
+  }
+
+  /**
+   * Takes this device off the account it is on, and leaves the account alone.
+   *
+   * LEAVING IS NOT REVOKING, and the difference is the whole design of this.
+   * Revoking is a signed entry in the roster that tells the OTHER devices to
+   * stop trusting one of them, and it wipes the machine it names. Leaving is
+   * local: this device stops syncing and forgets its own keys, and every other
+   * device carries on without noticing. Nothing is signed, nothing is
+   * published, and this device stays in the roster until somebody with another
+   * device revokes it — which is worth saying out loud on the screen, because
+   * "I left" and "I am no longer on the account" are not the same sentence.
+   *
+   * WHAT IS DESTROYED IS THE KEY MATERIAL, NOT THE DATA. The servers,
+   * workspaces, tunnels and vault entries on this machine are local objects
+   * that happened to be synced; they stay exactly as they are. What goes is
+   * this device's ability to read anything further from the relay, and — if
+   * this was the only device and the phrase is gone — the account's contents
+   * with it, because the relay holds no key. That sentence belongs in front of
+   * the person before they press anything, not in here.
+   *
+   * The order matters. Sync stops first, because a pass that is already in
+   * flight would otherwise write state back after it has been forgotten — the
+   * same shape as the forget-counter guard the engine already carries. The
+   * sidecar goes next, so nothing can sign with a key that is about to be
+   * deleted. The keychain entries go last, because they are the only step that
+   * cannot be undone by trying again.
+   */
+  async leaveAccount(): Promise<{ left: boolean; accountId: string | null }> {
+    const held = loadEnrolment()
+    if (held === null) {
+      // Nothing to leave. Reported rather than thrown: a second press, or two
+      // windows, must not produce an error dialog for a state the user was
+      // asking for anyway.
+      return { left: false, accountId: null }
+    }
+
+    await this.detach()
+
+    // Every secret this device holds for that account, by the same kinds the
+    // machine-only test pins. Each is deleted by scope, so an account this
+    // device was never on is untouched.
+    forgetAddySecret('device', `${held.accountId}:device`)
+    forgetAddySecret('device', `${held.accountId}:device-enc`)
+    forgetAddySecret('account', `${held.accountId}:account`)
+    for (let epoch = 1; epoch <= Math.max(1, held.epoch); epoch++) {
+      forgetAddySecret('account', `${held.accountId}:account:${epoch}`)
+    }
+    forgetAddySecret('root', `${held.accountId}:root`)
+
+    forgetSyncState()
+    forgetEnrolment()
+
+    return { left: true, accountId: held.accountId }
   }
 
   /**
