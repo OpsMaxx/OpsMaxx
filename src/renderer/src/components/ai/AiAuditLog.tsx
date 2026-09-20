@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Download } from 'lucide-react'
-import type { AuditEntry } from '../../../../shared/mcp'
+import type { AuditEntry, AuditIntegrity } from '../../../../shared/mcp'
 import { clsx } from '../../lib/format'
 import { toast } from '../../store/toast'
 import { auditExport, auditOutcome } from './auditOutcome'
@@ -37,6 +37,7 @@ function endOfLocalDay(dateStr: string): number {
 export function AiAuditLog(): React.JSX.Element {
   const [entries, setEntries] = useState<AuditEntry[]>([])
   const [appendFailure, setAppendFailure] = useState<string | null>(null)
+  const [integrity, setIntegrity] = useState<AuditIntegrity | null>(null)
   const [search, setSearch] = useState('')
   const [workspace, setWorkspace] = useState(ALL)
   const [server, setServer] = useState(ALL)
@@ -51,6 +52,10 @@ export function AiAuditLog(): React.JSX.Element {
     // view for an install whose audit file is a symlink is indistinguishable
     // from the view for an install where nothing happened today.
     void window.opsmaxx?.aiMcp.auditFailure?.().then((f) => setAppendFailure(f ?? null))
+    // And whether what IS written still matches the chain it was written into.
+    // The two are different questions: one is about rows that never arrived,
+    // this is about rows that arrived and then changed.
+    void window.opsmaxx?.aiMcp.auditIntegrity?.().then((v) => setIntegrity(v ?? null))
   }
   useEffect(() => {
     load()
@@ -108,6 +113,25 @@ export function AiAuditLog(): React.JSX.Element {
         Every AI action OpsMaxx processed, whether allowed, approved, denied or failed. Never
         includes passwords, keys or other secrets.
       </div>
+
+      {integrity?.state === 'broken' && (
+        <div
+          role="alert"
+          style={{
+            border: '1px solid var(--danger)',
+            background: 'var(--danger-soft)',
+            borderRadius: 6,
+            padding: '10px 12px',
+            marginBottom: 12,
+            fontSize: 'var(--fs-sm)'
+          }}
+        >
+          <strong>This log has been altered since it was written.</strong> Entries are
+          hash-chained and the most recent one is recorded outside the file; they no longer
+          agree. Treat what is below as unreliable.
+          <div style={{ marginTop: 6, color: 'var(--text-muted)' }}>{integrity.reason}</div>
+        </div>
+      )}
 
       {appendFailure && (
         <div

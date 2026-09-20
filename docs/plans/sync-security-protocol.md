@@ -287,7 +287,7 @@ quiet. The main-process half already remembered why; nothing read it. It is now
 surfaced above the list, and above the empty state — because "No AI activity
 recorded yet" is a claim about the servers and the true one is about the file.
 
-**Not tamper-evident — NOT DONE.** `opsmaxx-ai-audit.jsonl` is plain 0600
+**Not tamper-evident — fixed.** `opsmaxx-ai-audit.jsonl` is plain 0600
 JSONL; anyone running as the user can rewrite or truncate it undetected. The
 right primitive is already in the repo: the addy roster is `prev_hash`-chained
 and signature-verified. The protocol detail that matters is that a hash chain
@@ -295,8 +295,29 @@ detects **rewriting** but not **truncation** — a truncated chain is still
 internally valid — so it needs a head pin `(seq, hash)` somewhere the log's own
 writer cannot quietly edit, which means the OS secure store, alongside the
 device keys. That is the identical construction to addy's `(pinSeq, pinHead)`
-anti-rollback pin, against the identical attack. Deletion-and-restart stays
-possible; the pin makes it *detectable*, and that is the honest ceiling.
+anti-rollback pin, against the identical attack.
+
+Shipped as: every row carries its predecessor's hash and a hash of itself, and
+the head `(seq, hash, floorSeq)` is pinned in the OS secure store. The
+predecessor hash is carried *in the row* rather than only recomputed from the
+neighbour while walking, because the oldest row still present has no surviving
+neighbour — retention removed it — and a check that skips the first row is a
+check that invites every edit to be made there. `floorSeq` exists because
+retention legitimately removes rows from the front, and without it a prune and a
+front-truncation are the same event; the retention sweep is the only thing that
+moves it.
+
+Two states that must not read as tampering, and do not: an install whose rows
+predate the chain reports `unknown` rather than `broken`, and a log with old
+unchained rows underneath new chained ones verifies, reporting how many rows it
+did not vouch for.
+
+The ceiling, stated in SECURITY.md rather than implied: the pin is in the
+user's own keychain and anything running as the user can reach it. This is
+tamper-evident, not tamper-proof. What it buys is that rewriting history stops
+being "edit a text file" and becomes "edit a text file, recompute a chain, and
+rewrite a keychain entry". Proof would mean shipping the rows off the machine,
+which is a different feature with a different threat model.
 
 ### 4.3 Hardware-backed keys — FIXED
 

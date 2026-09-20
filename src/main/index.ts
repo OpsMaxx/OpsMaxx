@@ -75,7 +75,7 @@ import {
 import { buildDebugBundle, saveDebugBundle } from './services/debugBundle'
 import { mayOpenExternally } from '../shared/externalUrl'
 import type { DiagnosticsCrash } from '../shared/diagnostics'
-import { AUDIT_LOG_PATH } from './services/auditLog'
+import { AUDIT_LOG_PATH, refreshAuditFloor } from './services/auditLog'
 import { LOCAL_SESSION_LOG_PATH } from './services/localSessionLog'
 import { APPROVAL_LOG_PATH } from './services/approvalLog'
 import {
@@ -475,7 +475,7 @@ import {
   forgetSessionKey,
   biometricUnlock
 } from './services/biometrics'
-import { listAudit, auditAppendFailure } from './services/auditLog'
+import { listAudit, auditAppendFailure, verifyAuditLog } from './services/auditLog'
 import { recordJobApproval } from './services/approvalLog'
 import { planCronEditOnHost, writeCronEdit } from './services/cronEdit'
 import {
@@ -1729,6 +1729,11 @@ function startHistory(): void {
       ]) {
         const dropped = pruneJsonl(f)
         if (dropped !== null) console.log(`[retention] ${f}: dropped ${dropped} lines`)
+        // The audit log is hash-chained and its first surviving row is pinned,
+        // so retention has to say it was retention. A front-truncation that
+        // does not come through here is reported as entries missing from the
+        // start, which is exactly what this one is — only legitimate.
+        if (dropped !== null && f === AUDIT_LOG_PATH) refreshAuditFloor()
       }
     }
     pass()
@@ -5846,6 +5851,7 @@ ipcMain.handle('aiMcp:listAudit', (_e, limit?: number) => listAudit(limit))
  * later either way.
  */
 ipcMain.handle('aiMcp:auditFailure', () => auditAppendFailure())
+ipcMain.handle('aiMcp:auditIntegrity', () => verifyAuditLog())
 
 // Teardown became asynchronous when VPN engines arrived: they are separate
 // processes and killing them is not instantaneous. The order below is the

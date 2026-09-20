@@ -225,6 +225,7 @@ import type {
   McpAgentSession,
   ApprovalRequest,
   AuditEntry,
+  AuditIntegrity,
   CliPairingRequest
 } from '../shared/mcp'
 
@@ -2141,6 +2142,8 @@ const api = {
     // Read alongside listAudit, not folded into it: a refused append leaves the
     // view looking quiet rather than broken, and only the audit view cares.
     auditFailure: (): Promise<string | null> => ipcRenderer.invoke('aiMcp:auditFailure'),
+    // Whether the rows below still match the chain they were written into.
+    auditIntegrity: (): Promise<AuditIntegrity> => ipcRenderer.invoke('aiMcp:auditIntegrity'),
     onApprovalEvent: (
       cb: (e: { type: 'created' | 'resolved' | 'extended'; request: ApprovalRequest }) => void
     ): (() => void) => {

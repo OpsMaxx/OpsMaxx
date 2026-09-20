@@ -520,6 +520,19 @@ export interface AuditEntry {
   error?: string
 }
 
+/**
+ * Whether the audit log still matches its own hash chain.
+ *
+ * `unknown` is a real answer, not a soft failure: a fresh install has no head
+ * pinned yet, and every install that predates the chain carries rows that
+ * cannot be checked. Reporting either as tampering would make the indicator
+ * worthless on the day it shipped.
+ */
+export type AuditIntegrity =
+  | { state: 'ok'; rows: number; unverifiable: number }
+  | { state: 'unknown'; reason: string }
+  | { state: 'broken'; reason: string }
+
 export interface PolicyState {
   /**
    * 1 — assignments were the grant, and the session's group only capped it.
