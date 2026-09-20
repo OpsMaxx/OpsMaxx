@@ -322,3 +322,21 @@ export interface ArrivedTransfer {
   from: string
   at: number
 }
+
+/**
+ * Whether the two global clipboard shortcuts are actually held.
+ *
+ * `held` is what the OS granted, not what the user asked for. A global
+ * shortcut can be refused because another application already has it —
+ * `Cmd/Ctrl+Shift+C` is the developer tools in every browser — and a switch
+ * reading "on" over a combination nothing holds is indistinguishable from one
+ * that works, which is the shape of a feature people conclude is broken.
+ */
+export interface ClipboardShortcutState {
+  held: boolean
+  /** Combinations another application already holds. */
+  blocked: string[]
+  /** False when this device is not on an account, where nothing is held
+   *  whatever the setting says. */
+  attached: boolean
+}

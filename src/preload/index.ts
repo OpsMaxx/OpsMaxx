@@ -289,6 +289,7 @@ export interface ProviderDetectionResult {
 
 import type {
   AddyPairingConfirmation,
+  ClipboardShortcutState,
   AddyStatusSnapshot,
   ArrivedTransfer,
   ConflictCopy
@@ -461,8 +462,16 @@ const api = {
     /** Hold or release the two global clipboard shortcuts. Resolves with
      *  whether they are held — which is false when this device is not on an
      *  account yet, however the setting is set. */
-    setClipboardShortcuts: (wanted: boolean): Promise<boolean> =>
+    setClipboardShortcuts: (wanted: boolean): Promise<ClipboardShortcutState> =>
       ipcRenderer.invoke('addy:setClipboardShortcuts', wanted),
+    /** Whether the two combinations are actually held, and which of them
+     *  another application already has. */
+    clipboardShortcutState: (): Promise<ClipboardShortcutState> =>
+      ipcRenderer.invoke('addy:clipboardShortcutState'),
+    /** Run the revocation wipe again after one that failed. Returns the new
+     *  tombstone, so the screen shows this attempt's reason rather than the
+     *  previous one's. */
+    retryWipe: (): Promise<unknown> => ipcRenderer.invoke('addy:retryWipe'),
     /** Pushed when this device is removed from the account and wipes itself,
      *  so the window blocks without waiting for a relaunch. */
     onRevoked: (cb: (t: unknown) => void): (() => void) => {

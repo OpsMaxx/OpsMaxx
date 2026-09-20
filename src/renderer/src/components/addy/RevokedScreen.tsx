@@ -19,12 +19,17 @@ import type { AddyRevocation } from '../../../../preload'
  */
 export function RevokedScreen({
   state,
-  onClear
+  onClear,
+  onRetry
 }: {
   state: AddyRevocation
   onClear: () => Promise<void>
+  /** Run the deletion again. Only reachable from `failed`, where the previous
+   *  attempt left files behind and the app is otherwise unusable. */
+  onRetry: () => Promise<void>
 }): React.JSX.Element {
   const [clearing, setClearing] = useState(false)
+  const [retrying, setRetrying] = useState(false)
 
   const when = state.at ? new Date(state.at).toLocaleString() : 'an unknown time'
   const failed = state.stage === 'failed'
@@ -57,7 +62,30 @@ export function RevokedScreen({
                   only one who can act on it, and "something went wrong" would
                   leave them unable to. */}
               <p>{state.error ?? 'No reason was recorded.'}</p>
-              <p>Closing anything still using those files and reopening OpsMaxx will try again.</p>
+              <p>
+                Close anything still using those files — an editor, a terminal, a backup tool —
+                and try again. OpsMaxx cannot be used on this computer until this finishes.
+              </p>
+              {/* THE DEAD END THIS FIXES. `failed` offered no action at all:
+                  the only button on the screen renders on `wiped`, so a retry
+                  that kept failing left the app bricked with nothing to press
+                  and no way to try again short of quitting and relaunching. */}
+              <button
+                className="btn"
+                disabled={retrying}
+                onClick={() => {
+                  setRetrying(true)
+                  void onRetry().finally(() => setRetrying(false))
+                }}
+              >
+                {retrying ? (
+                  <>
+                    <Loader2 size={14} className="spin" aria-hidden /> Trying again…
+                  </>
+                ) : (
+                  'Try deleting again'
+                )}
+              </button>
             </div>
           </div>
         )}

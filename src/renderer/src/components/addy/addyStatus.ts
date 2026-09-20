@@ -209,7 +209,11 @@ export function addyJourney(
       ? {
           key: 'account',
           title: 'An account on a relay',
-          detail: `An account was created from this device on ${relay}. This build cannot tell whether that enrolment is still in place — the relay address is remembered here, the enrolment is not.`,
+          // Reached only when main reported `enrolled: false`, which is
+          // authoritative and works offline — it reads a note on disk. The
+          // build knows perfectly well; it said no. Blaming the build sent
+          // people looking for an update.
+          detail: `This device is not on an account. The address of the relay it last used, ${relay}, is remembered here.`,
           state: supported ? 'now' : 'unknown'
         }
       : {
@@ -254,7 +258,12 @@ export function addyJourney(
         ? {
             key: 'pair',
             title: 'A second device pairs with it',
-            detail: 'The account exists, but this build does not report who else is on it.',
+            // The ordinary cause is that the roster has not arrived yet: it is
+            // read from the relay and held in memory, so an enrolled device
+            // that launched offline is exactly here. Telling that person the
+            // feature is half-built is the single most misleading string on
+            // this screen, and it is the state a sysadmin lands in most often.
+            detail: `Waiting for the device list${relay ? ` from ${relay}` : ''}. It arrives the next time this device reaches the relay.`,
             state: 'unknown'
           }
         : others > 0

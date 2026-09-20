@@ -25,7 +25,7 @@ import {
 import { app } from 'electron'
 import { counterFloor, forgetSyncState, syncOnce, type SyncResult } from './sync'
 import { SOURCES } from './collections'
-import { runRevocationWipe } from './revoke'
+import { revocationState, runRevocationWipe } from './revoke'
 import { deleteAllData } from '../backup'
 import { addyTarget } from './target'
 import type { BackupTarget } from '../backupTargets'
@@ -1273,6 +1273,27 @@ class AddySession {
       .finally(() => {
         this.wiping = false
       })
+  }
+
+  /**
+   * Run the wipe again, for a device whose first attempt left files behind.
+   *
+   * `runRevocationWipe` is idempotent and retries a `failed` attempt by
+   * design — the usual cause is a file held open by something that has since
+   * exited — so this is the same call, reachable from the screen rather than
+   * only from a relaunch.
+   */
+  async retryRevocationWipe(): Promise<unknown> {
+    const existing = revocationState()
+    if (!existing || existing.stage === 'wiped') return existing
+    return runRevocationWipe(existing, {
+      closeSessions: async () => {
+        this.stopSync()
+        this.stopAnswering()
+        await this.detach().catch(() => undefined)
+      },
+      wipe: () => deleteAllData()
+    })
   }
 
   /** Pushed to the renderer whenever any of the above changes, so the panel

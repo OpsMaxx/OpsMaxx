@@ -167,6 +167,12 @@ export default function App(): React.JSX.Element {
           await window.opsmaxx?.addy.clearRevocation()
           setRevocation(null)
         }}
+        onRetry={async () => {
+          // Re-runs the deletion and takes back whatever it reports, so a
+          // second failure shows its own reason rather than the first one's.
+          const next = await window.opsmaxx?.addy.retryWipe?.()
+          if (next) setRevocation(next as never)
+        }}
       />
     )
   }

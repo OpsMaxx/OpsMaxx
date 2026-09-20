@@ -76,12 +76,19 @@ describe('the journey', () => {
   })
 
   it('says what a remembered relay does and does not prove', () => {
-    // `settings.addyRelayURL` survives a restart and an enrolment currently
-    // does not, so the relay address is evidence that an account was made here
-    // and evidence of nothing else. Saying more would be the lie.
+    // `settings.addyRelayURL` survives a restart, so the relay address is
+    // evidence that an account was made from this machine and evidence of
+    // nothing else.
+    //
+    // It used to say "this build cannot tell whether that enrolment is still
+    // in place" — reached only when main reported `enrolled: false`, which is
+    // authoritative and works offline because it reads a note on disk. The
+    // build knew; it said no. Blaming the build sent people looking for an
+    // update.
     const step = addyJourney(null, false, 'https://relay.example')[0]
     expect(step.detail).toContain('relay.example')
-    expect(step.detail).toMatch(/cannot tell whether that enrolment is still in place/)
+    expect(step.detail).toMatch(/not on an account/)
+    expect(step.detail).not.toMatch(/this build/i)
   })
 
   it('ticks the whole journey when everything really is working', () => {
@@ -179,9 +186,9 @@ describe('what the panel says on a build with no sync', () => {
     expect(screen.queryByRole('button', { name: /Refresh/ })).toBeNull()
   })
 
-  it('tells the reader the roster is unread rather than empty', () => {
+  it('tells the reader the device list is unread rather than empty', () => {
     render(<AddyPanel />)
-    expect(screen.getByText(/cannot read the device roster/)).toBeTruthy()
+    expect(screen.getByText(/cannot read the device list/)).toBeTruthy()
   })
 
   it('still shows the way in', () => {
@@ -304,6 +311,54 @@ describe('every part of this is reachable', () => {
     }
     // And the panel itself, which is the export the whole change exists for.
     expect(all).toContain('<AddyPanel />')
+  })
+})
+
+describe('the clipboard shortcut switch', () => {
+  const enrolledStatus = (): AddyStatus => ({
+    enrolled: true,
+    relayURL: 'https://relay.example',
+    accountId: 'aad42aad5b51c8d31d31b3f529a312e2',
+    devices: [{ id: 'aa', label: 'laptop', self: true, lastSeen: null, addedAt: null }],
+    sync: { running: true, connected: true, lastSyncAt: Date.now(), conflicts: 0 }
+  })
+
+  it('says so when another application already holds the combination', async () => {
+    // `register` returns false when something else has it, and both callers
+    // threw that answer away — so a switch reading "on" over two shortcuts
+    // nothing held looked exactly like one that worked. Cmd/Ctrl+Shift+C is
+    // the developer tools in every browser, so this is the common case.
+    const { useApp } = await import('../src/renderer/src/store/app')
+    useApp.getState().setSettings({ addyClipboardShortcuts: true })
+    stubBridge({
+      addy: {
+        status: vi.fn().mockResolvedValue(enrolledStatus()),
+        clipboardShortcutState: vi
+          .fn()
+          .mockResolvedValue({ held: true, blocked: ['CommandOrControl+Shift+C'], attached: true })
+      }
+    })
+
+    render(<AddyPanel />)
+
+    await waitFor(() =>
+      expect(screen.getByText(/Another application already holds/)).toBeTruthy()
+    )
+  })
+
+  it('says nothing when they are held', async () => {
+    const { useApp } = await import('../src/renderer/src/store/app')
+    useApp.getState().setSettings({ addyClipboardShortcuts: true })
+    stubBridge({
+      addy: {
+        status: vi.fn().mockResolvedValue(enrolledStatus()),
+        clipboardShortcutState: vi.fn().mockResolvedValue({ held: true, blocked: [], attached: true })
+      }
+    })
+
+    render(<AddyPanel />)
+    await screen.findByText(/Send and receive the clipboard/)
+    expect(screen.queryByText(/Another application already holds/)).toBeNull()
   })
 })
 

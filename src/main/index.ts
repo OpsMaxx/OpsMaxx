@@ -4674,6 +4674,10 @@ ipcMain.handle('sshAgent:resolve', (_e, id: string, decision: AgentDecision) =>
 ipcMain.handle('sshAgent:pending', () => sshAgent.pending())
 
 ipcMain.handle('addy:revocation', () => revocationState())
+// A wipe that failed left the app with nothing to press: the only button on
+// that screen renders once the deletion has finished, so a retry that kept
+// failing bricked the machine until somebody quit and relaunched.
+ipcMain.handle('addy:retryWipe', () => addySession.retryRevocationWipe())
 // PUSHED, not only polled at startup. A device removed while its window is
 // open wipes itself there and then; without this the app carries on looking
 // normal over a deleted estate until somebody relaunches it, which for a
@@ -4850,6 +4854,7 @@ export function updateClipboardShortcuts(wanted: boolean): void {
     globalShortcut.unregister(CLIPBOARD_SHORTCUTS.send)
     globalShortcut.unregister(CLIPBOARD_SHORTCUTS.receive)
     shortcutsHeld = false
+    clipboardShortcutsBlocked = []
     return
   }
 
@@ -4879,11 +4884,28 @@ export function updateClipboardShortcuts(wanted: boolean): void {
     taken.push(CLIPBOARD_SHORTCUTS.receive)
   }
 
+  /**
+   * WHAT IS ACTUALLY HELD, not what was asked for.
+   *
+   * This used to set `shortcutsHeld = true` unconditionally and log the
+   * failures to a console nobody reads — which is the exact thing the comment
+   * at the top of this section argues against: *"a shortcut that silently does
+   * nothing is worse than one the user is told to change"*. It then did the
+   * ignoring it warned about, for the combination most likely to be taken:
+   * `Cmd/Ctrl+Shift+C` is the developer tools in every browser.
+   *
+   * `shortcutsHeld` stays true when EITHER registered, because the release
+   * path has to unregister whatever did. What the user is told is `blocked`.
+   */
   shortcutsHeld = true
+  clipboardShortcutsBlocked = taken
   if (taken.length > 0) {
     console.warn('[addy] another application already holds:', taken.join(', '))
   }
 }
+
+/** Combinations another application already holds, for the switch to say so. */
+let clipboardShortcutsBlocked: string[] = []
 
 /** Re-evaluate both conditions and hold or release accordingly. */
 export function refreshClipboardShortcuts(): void {
@@ -4904,8 +4926,25 @@ export function refreshClipboardShortcuts(): void {
 ipcMain.handle('addy:setClipboardShortcuts', (_e, wanted: boolean) => {
   clipboardShortcutsWanted = wanted === true
   refreshClipboardShortcuts()
-  return shortcutsHeld
+  return clipboardShortcutState()
 })
+
+/** What the switch should say under itself. Both callers threw the old
+ *  boolean away, so a switch reading "on" over two shortcuts nothing held was
+ *  indistinguishable from one that worked. */
+function clipboardShortcutState(): {
+  held: boolean
+  blocked: string[]
+  attached: boolean
+} {
+  return {
+    held: shortcutsHeld,
+    blocked: clipboardShortcutsBlocked,
+    attached: addySession.attached
+  }
+}
+
+ipcMain.handle('addy:clipboardShortcutState', () => clipboardShortcutState())
 
 /**
  * The relay as a backup destination, registered rather than imported.

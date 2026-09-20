@@ -144,6 +144,8 @@ async function hydrate(): Promise<void> {
   // shortcuts on last week has them silently off on every subsequent launch.
   // `=== true` rather than `!== false`: the default is OFF, because these are
   // taken from every application on the machine.
+  // The answer says what was actually held, and the panel asks for it
+  // separately — this push only states the wish.
   void window.opsmaxx?.addy?.setClipboardShortcuts?.(
     useApp.getState().settings.addyClipboardShortcuts === true
   )

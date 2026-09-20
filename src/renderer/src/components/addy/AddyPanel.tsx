@@ -22,7 +22,7 @@ import { Sparkline } from '../common/Sparkline'
 import { useApp } from '../../store/app'
 import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
-import type { ArrivedTransfer } from '../../../../shared/addy'
+import type { ArrivedTransfer, ClipboardShortcutState } from '../../../../shared/addy'
 import { AddySetup } from './AddySetup'
 import {
   addyJourney,
@@ -352,7 +352,13 @@ function RekeyRow(): React.JSX.Element {
       .opsmaxx!.addy.rotate('revocation', phrase.trim())
       .then(
         (r) => {
-          toast(`Re-keyed: epoch ${r.epoch}, ${r.resealed} collections re-sealed`, 'ok')
+          // "epoch" and "collections" are both protocol words. What a person
+          // needs to know is that it worked, how much moved, and that their
+          // other machines are not broken by it.
+          toast(
+            `The account key was changed. ${r.resealed} ${r.resealed === 1 ? 'item was' : 'items were'} re-sealed under the new one — your other devices pick it up the next time they sync.`,
+            'ok'
+          )
           setPhrase('')
           setOpen(false)
         },
@@ -426,6 +432,15 @@ function RekeyRow(): React.JSX.Element {
 function ClipboardShortcuts(): React.JSX.Element {
   const on = useApp((s) => s.settings.addyClipboardShortcuts === true)
   const setSettings = useApp((s) => s.setSettings)
+  const [state, setState] = useState<ClipboardShortcutState | null>(null)
+
+  // ASKED, because the setting is a request and not an outcome. `register`
+  // returns false when another application already holds a combination, and
+  // both callers used to throw that answer away — so a switch reading "on"
+  // over two shortcuts nothing held looked exactly like one that worked.
+  useEffect(() => {
+    void window.opsmaxx?.addy.clipboardShortcutState?.().then(setState, () => undefined)
+  }, [on])
 
   // The app's own switch row, same as the credential proxy's. A second
   // grammar for "a setting with a title and a consequence" is how a screen
@@ -451,6 +466,33 @@ function ClipboardShortcuts(): React.JSX.Element {
         aria-label="Send and receive the clipboard with a keystroke"
         onClick={() => setSettings({ addyClipboardShortcuts: !on })}
       />
+      {/* `held` is true when EITHER combination registered, because the
+          release path has to unregister whatever did — so a blocked one is
+          exactly the case to warn about and `!held` alone would miss it. */}
+      {on && state && (state.blocked.length > 0 || !state.held) && (
+        <div className="addy-note" role="status">
+          <AlertTriangle size={15} aria-hidden />
+          <div>
+            {state.blocked.length > 0 ? (
+              <>
+                <strong>Another application already holds {state.blocked.join(' and ')}.</strong>
+                <div className="setting-desc">
+                  Close it, or quit whatever has the combination, and switch this off and on again.
+                </div>
+              </>
+            ) : !state.attached ? (
+              <>
+                <strong>Not active until this device reaches the relay.</strong>
+                <div className="setting-desc">
+                  There is nowhere to send a clipboard to until then.
+                </div>
+              </>
+            ) : (
+              <strong>The shortcuts could not be registered.</strong>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -514,7 +556,7 @@ function AddyKpis({
             ? devices.some((d) => d.self)
               ? 'including this one'
               : 'on this account'
-            : 'roster not reported'}
+            : 'not read yet'}
         </div>
       </div>
 
@@ -534,6 +576,12 @@ function AddyKpis({
         {sync?.history !== undefined && sync.history.length > 1 && (
           <div className="kpi-spark">
             <Sparkline data={sync.history} height={18} />
+            {/* LABELLED. An unlabelled chart with no units is decoration on a
+                panel whose whole argument is that it does not show numbers
+                nobody measured. */}
+            <span className="fine">
+              things carried, last {sync.history.length} passes
+            </span>
           </div>
         )}
         <div className="kpi-sub">
@@ -645,8 +693,8 @@ function AddyDevices({
         title="Not reported"
         message={
           supported
-            ? 'This build did not return a device list. Nothing is wrong with the account — the roster is simply not being read yet.'
-            : 'This build cannot read the device roster. Pairing still works; what is missing is the readout of what came of it.'
+            ? 'Waiting for the device list from the relay. It arrives the next time this device reaches it — nothing is wrong with the account.'
+            : 'This build cannot read the device list. Pairing still works; what is missing is the readout of what came of it.'
         }
       />
     )
@@ -697,8 +745,8 @@ function AddyDevices({
           be there, and it was uniformly false. */}
       <caption className="fine addy-devices-note">
         The relay does not report when each device was last seen, so that is
-        not shown. What is here comes from the roster, which this device
-        verified itself.
+        not shown. What is here comes from the signed device list, which this
+        device verified itself.
       </caption>
     </table>
   )
