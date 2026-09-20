@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import {
   Activity,
   Boxes,
@@ -212,6 +212,66 @@ function EventRows({ events }: { events: K8sEvent[] }): React.JSX.Element {
   )
 }
 
+/** The key a pod's row — and the log pane under it — are both addressed by. */
+const podKey = (p: { namespace: string; name: string }): string => `${p.namespace}/${p.name}`
+
+/**
+ * One pod's logs, rendered either under its own row or in the panel at the
+ * bottom. Identical markup both times: the difference between glancing at it
+ * here and reading it properly down there is where it is mounted, not what it
+ * says.
+ */
+function LogPane({
+  entry,
+  inline,
+  onPopOut,
+  onDock,
+  onClose
+}: {
+  entry: { pod: string; output: string }
+  inline?: boolean
+  onPopOut?: () => void
+  onDock?: () => void
+  onClose: () => void
+}): React.JSX.Element {
+  return (
+    <div style={inline ? { paddingBottom: 6 } : undefined}>
+      <div className="row muted" style={{ fontSize: 11, marginTop: inline ? 4 : 10 }}>
+        <span className="grow">Logs · {entry.pod}</span>
+        {inline && onPopOut && (
+          <button
+            className="btn ghost sm"
+            title="Read this in the larger panel at the bottom"
+            onClick={onPopOut}
+          >
+            Pop out
+          </button>
+        )}
+        {!inline && onDock && (
+          <button
+            className="btn ghost sm"
+            title="Put this back under its pod’s row"
+            onClick={onDock}
+          >
+            Dock
+          </button>
+        )}
+        <button className="btn ghost sm" onClick={onClose}>
+          Close
+        </button>
+      </div>
+      {/* Inline keeps .bc-out's own 26px indent, which reads as "this belongs
+          to the row above"; the bottom panel owns its width and cancels it. */}
+      <pre
+        className="bc-out"
+        style={inline ? { maxHeight: 220 } : { marginLeft: 0, maxHeight: 300 }}
+      >
+        {entry.output}
+      </pre>
+    </div>
+  )
+}
+
 function readEmpty<T>(r: K8sRead<T>): boolean {
   return r.ok && r.items.length === 0
 }
@@ -244,7 +304,11 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
     if (!probe.namespaces.includes(namespace)) setNamespace('')
   }, [probe, namespace])
   const [loading, setLoading] = useState(false)
-  const [logs, setLogs] = useState<{ pod: string; output: string } | null>(null)
+  // Keyed by `${namespace}/${name}` — the same key the pod rows are keyed by —
+  // so several pods can be open at once and every pane knows its own row.
+  const [logs, setLogs] = useState<Record<string, { pod: string; output: string }>>({})
+  // The one pane the user asked to read in the big panel at the bottom instead.
+  const [poppedOut, setPoppedOut] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
 
   // Item 40's watch list. Keyed on the CONTEXT rather than the server, because
@@ -382,7 +446,8 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   const load = async (ctx?: string, ns?: string): Promise<void> => {
     if (!hasTarget) return
     setLoading(true)
-    setLogs(null)
+    setLogs({})
+    setPoppedOut(null)
     setDiag(null)
     try {
       const r = await withVaultUnlock(
@@ -660,20 +725,34 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
     }
   }
 
+  const closeLogs = (key: string): void => {
+    setLogs((m) => Object.fromEntries(Object.entries(m).filter(([k]) => k !== key)))
+    setPoppedOut((cur) => (cur === key ? null : cur))
+  }
+
   const openLogs = async (p: K8sPod): Promise<void> => {
     if (!hasTarget) return
+    const key = podKey(p)
+    // The same button closes what it opened. An expander that only ever
+    // expands is the next complaint.
+    if (logs[key]) {
+      closeLogs(key)
+      return
+    }
+    const write = (output: string): void =>
+      setLogs((m) => ({ ...m, [key]: { pod: p.name, output } }))
     // buildK8sLogsCommand refuses a name it cannot prove safe rather than
     // escaping it, so asking first turns a rejected invoke into a sentence.
     if (!validatePodName(p.name)) {
-      setLogs({ pod: p.name, output: 'This pod has a name logs cannot be requested for safely.' })
+      write('This pod has a name logs cannot be requested for safely.')
       return
     }
-    setLogs({ pod: p.name, output: 'Loading…' })
+    write('Loading…')
     try {
       const r = await bridge().logs?.(targetCfg(), p.namespace, p.name, 200, context || undefined)
-      setLogs({ pod: p.name, output: r?.output || r?.error || 'No output.' })
+      write(r?.output || r?.error || 'No output.')
     } catch (e) {
-      setLogs({ pod: p.name, output: e instanceof Error ? e.message : String(e) })
+      write(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -842,7 +921,8 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
           onChange={(e) => {
             setServerId(e.target.value)
             setProbe(null)
-            setLogs(null)
+            setLogs({})
+            setPoppedOut(null)
             setDiag(null)
             setOverview(null)
             setUsage(null)
@@ -1054,66 +1134,88 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                 </div>
               )}
 
-              {pods.map((p) => (
-                <div key={`${p.namespace}/${p.name}`} className="cron-row">
-                  <span className={clsx('chip', podTone(p))}>{p.status}</span>
-                  <span className="mono cron-when">{p.ready}</span>
-                  <span className="faint cron-desc">{p.namespace}</span>
-                  <span
-                    className="mono grow cron-cmd"
-                    title={`${p.name} on ${p.node || 'unscheduled'}`}
-                  >
-                    {p.name}
-                  </span>
-                  {p.restarts > 0 && (
-                    <span className={clsx('chip', p.restarts > 5 ? 'danger' : 'warn')}>
-                      {p.restarts} restart{p.restarts === 1 ? '' : 's'}
-                    </span>
-                  )}
-                  {/* First, and to the left of the log button, because it is
-                      what you actually want: a CrashLoopBackOff pod's CURRENT
-                      logs are usually empty and its events are the story. */}
-                  <button
-                    className="icon-btn sm"
-                    title="Describe, events, and the PREVIOUS container's logs — why this pod is unhealthy"
-                    onClick={() => void diagnose(p)}
-                  >
-                    <Siren size={13} />
-                  </button>
-                  <button
-                    className="icon-btn sm"
-                    title="Last 200 log lines from the running containers"
-                    onClick={() => void openLogs(p)}
-                  >
-                    <ScrollText size={13} />
-                  </button>
-                  {/* Last, and deliberately the least prominent of the three.
-                      The two beside it answer questions; this one runs code. */}
-                  <button
-                    className="icon-btn sm"
-                    // Server-only, and it says so rather than doing nothing: the
-                    // approval is minted against a saved server's id and main
-                    // re-derives the command from it. Extending that consent
-                    // record to a target that is not a server is its own
-                    // decision, not a side effect of a dropdown option.
-                    disabled={localSelected}
-                    title={
-                      localSelected
-                        ? 'Running a command in a pod is available for a saved server, because the confirmation is recorded against one. Use a local terminal for this cluster.'
-                        : 'Run one command inside this pod — arbitrary code, behind a typed confirmation'
-                    }
-                    onClick={() => {
-                      setExecResult(null)
-                      setExecCommand('')
-                      setExecContainer('')
-                      setExecPhrase('')
-                      setExecFor(p)
-                    }}
-                  >
-                    <SquareTerminal size={13} />
-                  </button>
-                </div>
-              ))}
+              {pods.map((p) => {
+                const key = podKey(p)
+                const entry = logs[key]
+                return (
+                  <Fragment key={key}>
+                    <div className="cron-row">
+                      <span className={clsx('chip', podTone(p))}>{p.status}</span>
+                      <span className="mono cron-when">{p.ready}</span>
+                      <span className="faint cron-desc">{p.namespace}</span>
+                      <span
+                        className="mono grow cron-cmd"
+                        title={`${p.name} on ${p.node || 'unscheduled'}`}
+                      >
+                        {p.name}
+                      </span>
+                      {p.restarts > 0 && (
+                        <span className={clsx('chip', p.restarts > 5 ? 'danger' : 'warn')}>
+                          {p.restarts} restart{p.restarts === 1 ? '' : 's'}
+                        </span>
+                      )}
+                      {/* First, and to the left of the log button, because it is
+                          what you actually want: a CrashLoopBackOff pod's CURRENT
+                          logs are usually empty and its events are the story. */}
+                      <button
+                        className="icon-btn sm"
+                        title="Describe, events, and the PREVIOUS container's logs — why this pod is unhealthy"
+                        onClick={() => void diagnose(p)}
+                      >
+                        <Siren size={13} />
+                      </button>
+                      <button
+                        className="icon-btn sm"
+                        aria-expanded={!!entry}
+                        title={
+                          entry
+                            ? 'Close the logs for this pod'
+                            : 'Last 200 log lines from the running containers'
+                        }
+                        onClick={() => void openLogs(p)}
+                      >
+                        <ScrollText size={13} />
+                      </button>
+                      {/* Last, and deliberately the least prominent of the three.
+                          The two beside it answer questions; this one runs code. */}
+                      <button
+                        className="icon-btn sm"
+                        // Server-only, and it says so rather than doing nothing: the
+                        // approval is minted against a saved server's id and main
+                        // re-derives the command from it. Extending that consent
+                        // record to a target that is not a server is its own
+                        // decision, not a side effect of a dropdown option.
+                        disabled={localSelected}
+                        title={
+                          localSelected
+                            ? 'Running a command in a pod is available for a saved server, because the confirmation is recorded against one. Use a local terminal for this cluster.'
+                            : 'Run one command inside this pod — arbitrary code, behind a typed confirmation'
+                        }
+                        onClick={() => {
+                          setExecResult(null)
+                          setExecCommand('')
+                          setExecContainer('')
+                          setExecPhrase('')
+                          setExecFor(p)
+                        }}
+                      >
+                        <SquareTerminal size={13} />
+                      </button>
+                    </div>
+                    {/* Under the row it belongs to, not at the foot of the
+                        panel: clicking a button should change something the
+                        eye can already see. */}
+                    {entry && poppedOut !== key && (
+                      <LogPane
+                        entry={entry}
+                        inline
+                        onPopOut={() => setPoppedOut(key)}
+                        onClose={() => closeLogs(key)}
+                      />
+                    )}
+                  </Fragment>
+                )
+              })}
             </>
           )}
 
@@ -2064,18 +2166,14 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         </>
       )}
 
-      {logs && (
-        <>
-          <div className="row muted" style={{ fontSize: 11, marginTop: 10 }}>
-            <span className="grow">Logs · {logs.pod}</span>
-            <button className="btn ghost sm" onClick={() => setLogs(null)}>
-              Close
-            </button>
-          </div>
-          <pre className="bc-out" style={{ marginLeft: 0, maxHeight: 300 }}>
-            {logs.output}
-          </pre>
-        </>
+      {/* Only what the user explicitly popped out lands down here now. Every
+          other pane stays attached to the row it was opened from. */}
+      {poppedOut && logs[poppedOut] && (
+        <LogPane
+          entry={logs[poppedOut]}
+          onDock={() => setPoppedOut(null)}
+          onClose={() => closeLogs(poppedOut)}
+        />
       )}
     </div>
   )
