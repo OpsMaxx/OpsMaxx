@@ -1,8 +1,9 @@
 // Must come first: redirects userData for portable builds before any
 // service module resolves its file paths.
 import './portable'
+import { parseAddyLink, ADDY_LINK_SCHEME, type AddyLink } from '../shared/addyLink'
 import { app, shell, BrowserWindow, globalShortcut, ipcMain, nativeTheme, dialog, session, Menu, Notification, powerMonitor, webContents } from 'electron'
-import { join } from 'node:path'
+import { join, resolve} from 'node:path'
 import { readFileSync, existsSync, writeFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { randomBytes, randomUUID } from 'node:crypto'
@@ -4755,6 +4756,17 @@ ipcMain.handle('addy:resync', () => addySession.resyncEverything())
 // deliberately not revocation, which is signed, tells the others, and wipes
 // the machine it names.
 ipcMain.handle('addy:leave', () => addySession.leaveAccount())
+// Try again without quitting. Every way of failing to attach used to have
+// exactly one remedy — restart OpsMaxx — and nothing said so.
+ipcMain.handle('addy:reconnect', () => addySession.reconnect())
+// Pausing and leaving are different decisions; the product only had the
+// loud one, so somebody who wanted to stop for an hour had to destroy
+// this device's keys to do it.
+ipcMain.handle('addy:pauseSync', () => {
+  addySession.pauseSync()
+  return { ok: true }
+})
+ipcMain.handle('addy:resumeSync', () => addySession.resumeSync())
 // WHEN SYNC WRITES TO DISK, THE RENDERER HAS TO BE TOLD. Eleven of the sixteen
 // collections live inside `opsmaxx-data.json`, which the renderer holds in a
 // zustand store and writes in full on every change — so an inbound copy
@@ -5957,17 +5969,83 @@ function installMenu(): void {
 
 // A second instance would share the same data files and silently clobber the
 // first one's state — last writer wins. Focus the existing window instead.
+/**
+ * `opsmaxx://` links, and the one rule that makes them safe.
+ *
+ * A NEW MACHINE CANNOT JOIN A RELAY IT CANNOT NAME. Nothing on a fresh install
+ * knows the relay's address, so the person was expected to remember it and
+ * type it correctly before anything else could happen. A link carries the
+ * address and the invite together.
+ *
+ * THE LINK NEVER ACTS. It is parsed, checked, and handed to the renderer to
+ * FILL A FORM that a person then presses. Anything else would mean a link you
+ * could be sent that joins you to somebody's relay, and an invite is a bearer
+ * token — the check is in `parseAddyLink`, and this file's job is only to
+ * deliver what survived it.
+ */
+const pendingLink: { link: AddyLink | null } = { link: null }
+
+function deliverLink(raw: string): void {
+  const parsed = parseAddyLink(raw)
+  if ('reason' in parsed) {
+    // Refused out loud rather than dropped. A link that does nothing and says
+    // nothing is indistinguishable from a broken app.
+    console.warn('[addy] link refused:', parsed.reason)
+    mainWindow?.webContents.send('addy:linkRefused', parsed.reason)
+    return
+  }
+  // Held if the window is not up yet: on a cold start the OS hands us the URL
+  // before there is anything to show it in, and dropping it means the person
+  // clicks a link and watches the app open on the wrong screen.
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    pendingLink.link = parsed.link
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.focus()
+  mainWindow.webContents.send('addy:link', parsed.link)
+}
+
+/** The first `opsmaxx://` argument in an argv, for Windows and Linux, where a
+ *  link arrives as a command-line argument rather than as an event. */
+function linkInArgv(argv: string[]): string | undefined {
+  return argv.find((a) => a.startsWith(`${ADDY_LINK_SCHEME}://`))
+}
+
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_e, argv) => {
+    // A link clicked while the app is already running arrives HERE on Windows
+    // and Linux, as argv of the instance that just lost the lock. Handling it
+    // only at launch would mean links working exactly once per session.
+    const raw = linkInArgv(argv)
+    if (raw) deliverLink(raw)
     if (!mainWindow || mainWindow.isDestroyed()) return
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.focus()
   })
 }
 
+// macOS delivers links as an event, at any time, including before `ready`.
+app.on('open-url', (event, url) => {
+  event.preventDefault()
+  deliverLink(url)
+})
+
 app.whenReady().then(() => {
+  // Registered every launch rather than once at install: a user who installs
+  // two builds, or moves the app, leaves the registration pointing at a path
+  // that is no longer this one.
+  if (process.defaultApp) {
+    // In development the executable is Electron itself, so the registration
+    // has to name the script too or the OS launches a bare Electron.
+    if (process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient(ADDY_LINK_SCHEME, process.execPath, [resolve(process.argv[1])])
+    }
+  } else {
+    app.setAsDefaultProtocolClient(ADDY_LINK_SCHEME)
+  }
   installCsp()
   // Only the instance that won the single-instance lock gets here, which is the
   // whole reason the store is opened from inside whenReady rather than at

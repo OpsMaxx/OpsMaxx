@@ -298,6 +298,21 @@ export interface AddyStatusSync {
 
 export interface AddyStatusSnapshot {
   enrolled: boolean
+  /**
+   * Why this device is not attached, when it is enrolled and something stopped
+   * it attaching anyway.
+   *
+   * THE PANEL USED TO SAY "nothing is wrong with the account" IN EXACTLY THE
+   * CASE SOMETHING WAS. `resume()` runs at launch and can fail for reasons the
+   * user can act on — the keychain refusing the device keys after an update,
+   * the relay presenting a different TLS key than the one recorded at join,
+   * the relay being down — and every one of them was reported to a console log
+   * and nowhere else. What the person saw was Sync: Off, engine not running,
+   * and a sentence telling them to wait for something that was never coming.
+   *
+   * Absent when the device is attached, or when it has simply not been set up.
+   */
+  problem?: string
   relayURL?: string
   accountId?: string
   /** Omitted, not empty, until a roster has been verified on this device. */

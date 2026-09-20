@@ -217,6 +217,7 @@ export function AddyPanel(): React.JSX.Element {
           machine in exchange for nothing at all. */}
       {status?.enrolled && <Transfers devices={status.devices} />}
       {status?.enrolled && <RekeyRow />}
+      {status?.enrolled && <PauseRow running={status.sync?.running === true} />}
       {status?.enrolled && <LeaveRow relay={relay} devices={status.devices?.length ?? null} />}
       {status?.enrolled && <ClipboardShortcuts />}
 
@@ -444,6 +445,57 @@ function RekeyRow(): React.JSX.Element {
  * same shape as RevokeButton, for the same reason: the sentence has to be in
  * front of somebody before they act, not after.
  */
+/**
+ * Stop carrying data, without leaving the account.
+ *
+ * THE PRODUCT ONLY HAD THE LOUD OPTION. Pausing is for a metered connection, a
+ * machine about to be lent to somebody, or a person who wants to look at a
+ * conflict before more arrives. Leaving destroys this device's keys and cannot
+ * be undone without pairing again. Offering only the second means somebody who
+ * wanted the first takes it — so this sits ABOVE Leave, where the quieter
+ * answer is read first.
+ *
+ * It lasts this run. A pause that survived a restart would be a switch people
+ * forget they flipped, and its symptom is silence.
+ */
+function PauseRow({ running }: { running: boolean }): React.JSX.Element {
+  const [busy, setBusy] = useState(false)
+  const act = (): void => {
+    setBusy(true)
+    const api = window.opsmaxx?.addy
+    const p = running ? api?.pauseSync() : api?.resumeSync()
+    void Promise.resolve(p)
+      .then((r) => {
+        const okay = r === undefined || r.ok
+        toast(
+          okay
+            ? running
+              ? 'Sync paused. It starts again next time OpsMaxx opens.'
+              : 'Sync running.'
+            : ((r as { problem?: string }).problem ?? 'Could not start sync.'),
+          okay ? 'ok' : 'error'
+        )
+      })
+      .catch((err: unknown) => toast(err instanceof Error ? err.message : String(err), 'error'))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <div className="setting-row">
+      <div className="s-info">
+        <div className="s-title">{running ? 'Pause sync' : 'Resume sync'}</div>
+        <div className="s-desc">
+          {running
+            ? 'Stops carrying data between your devices without leaving the account. Your keys stay, the other devices are not told, and sync starts again the next time OpsMaxx opens.'
+            : 'Nothing is being carried between your devices right now. Your account and keys are untouched.'}
+        </div>
+      </div>
+      <button className="btn ghost size-24" disabled={busy} onClick={act}>
+        {busy ? <Loader2 size={13} className="spin" /> : null} {running ? 'Pause' : 'Resume'}
+      </button>
+    </div>
+  )
+}
+
 function LeaveRow({
   relay,
   devices
@@ -911,13 +963,52 @@ function RevokeButton({
 }
 
 /** Whatever is wrong, said once, below the thing it is wrong about. */
+/**
+ * Try again, without quitting.
+ *
+ * Every failure to attach had exactly one remedy — restart OpsMaxx — and
+ * nothing on the screen said so. A relay down for a minute, or a laptop woken
+ * on a different network, cost a restart.
+ */
+function ReconnectButton(): React.JSX.Element {
+  const [busy, setBusy] = useState(false)
+  return (
+    <button
+      className="btn ghost size-24"
+      disabled={busy}
+      onClick={() => {
+        setBusy(true)
+        void window.opsmaxx?.addy
+          ?.reconnect()
+          .then((r) => toast(r.ok ? 'Connected.' : (r.problem ?? 'Still not connected.'), r.ok ? 'ok' : 'error'))
+          .catch((err: unknown) => toast(err instanceof Error ? err.message : String(err), 'error'))
+          .finally(() => setBusy(false))
+      }}
+    >
+      {busy ? <Loader2 size={13} className="spin" /> : null} Try again
+    </button>
+  )
+}
+
 function AddyProblems({ status }: { status: AddyStatus | null }): React.JSX.Element | null {
   const sync = status?.sync
   if (sync === undefined) return null
   const conflicts = sync.conflicts
-  if (sync.error === undefined && conflicts === 0) return null
+  // THE REASON THIS DEVICE IS NOT ATTACHED BELONGS AT THE TOP OF THE PANEL.
+  // It used to reach a console log and nowhere else, so a machine that was
+  // enrolled and could not sign in showed ACCOUNT On, SYNC Off, and a line
+  // telling the person to wait for something that was never coming.
+  const problem = status?.problem
+  if (sync.error === undefined && conflicts === 0 && problem === undefined) return null
   return (
     <div className="addy-problems">
+      {problem !== undefined && (
+        <div className="addy-problem" role="alert">
+          <AlertTriangle size={15} aria-hidden />
+          <span>{problem}</span>
+          <ReconnectButton />
+        </div>
+      )}
       {sync.error !== undefined && (
         <div className="addy-problem" role="alert">
           <AlertTriangle size={15} aria-hidden />

@@ -96,16 +96,52 @@ export function saveEnrolment(e: Omit<AddyEnrolment, 'at'> & { at?: string }): v
  *  throw: the remedy is the same as having none — set up again — and a crash
  *  at launch is not a remedy at all. */
 export function loadEnrolment(): AddyEnrolment | null {
+  return readEnrolment().enrolment
+}
+
+/**
+ * The enrolment, AND whether the answer is "there is none" or "it is there and
+ * this process cannot read it".
+ *
+ * THOSE TWO ARE NOT THE SAME STATE AND THE PRODUCT TREATED THEM AS ONE. A file
+ * present but unreadable — the wrong ACL after an installer ran elevated, a
+ * truncated write, a disk error — returned the same `null` as a machine that
+ * has never synced. The app then offered to set up an account this device
+ * already has, and `leaveAccount` reported there was nothing to leave while a
+ * live session was still running.
+ *
+ * `loadEnrolment` keeps the plain answer, because most callers genuinely only
+ * need "do I have one". Anything that TELLS THE USER something should use this
+ * one, so the sentence can be "this machine is enrolled and the record cannot
+ * be read" rather than "set up addy".
+ */
+export function readEnrolment(): { enrolment: AddyEnrolment | null; unreadable?: string } {
+  const path = FILE()
   try {
-    const path = FILE()
-    if (!existsSync(path)) return null
+    if (!existsSync(path)) return { enrolment: null }
+  } catch (err) {
+    // Even the existence check can throw, on a path this process may not
+    // traverse. Reported, not swallowed into "no account".
+    return { enrolment: null, unreadable: `${path} cannot be reached: ${String(err)}` }
+  }
+  try {
     const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
-    if (!parsed || typeof parsed !== 'object') return null
+    if (!parsed || typeof parsed !== 'object') {
+      return { enrolment: null, unreadable: `${path} is not an enrolment record.` }
+    }
     const e = parsed as AddyEnrolment
-    if (typeof e.baseURL !== 'string' || typeof e.accountId !== 'string') return null
-    return e
-  } catch {
-    return null
+    if (typeof e.baseURL !== 'string' || typeof e.accountId !== 'string') {
+      return { enrolment: null, unreadable: `${path} is missing the relay or the account id.` }
+    }
+    return { enrolment: e }
+  } catch (err) {
+    return {
+      enrolment: null,
+      unreadable:
+        `${path} exists but cannot be read: ${err instanceof Error ? err.message : String(err)}. ` +
+        `This machine may still be enrolled — do not set up a new account until this is resolved, ` +
+        `or you will end up with two sets of devices that cannot see each other.`
+    }
   }
 }
 

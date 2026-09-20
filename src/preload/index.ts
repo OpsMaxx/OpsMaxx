@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, clipboard, webUtils } from 'electron'
+import type { AddyLink } from '../shared/addyLink'
 import type { IpcRendererEvent } from 'electron'
 import type { AutoStartSettings, AutoStartState } from '../shared/autostart'
 import type { UnitDraft, UserUnitsReading } from '../shared/userUnits'
@@ -526,6 +527,24 @@ const api = {
     resync: (): Promise<unknown> => ipcRenderer.invoke('addy:resync'),
     leave: (): Promise<{ left: boolean; accountId: string | null }> =>
       ipcRenderer.invoke('addy:leave'),
+    /** Try again without quitting. */
+    reconnect: (): Promise<{ ok: boolean; problem?: string }> =>
+      ipcRenderer.invoke('addy:reconnect'),
+    /** Stop carrying data without leaving the account. Lasts this run. */
+    pauseSync: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('addy:pauseSync'),
+    resumeSync: (): Promise<{ ok: boolean; problem?: string }> =>
+      ipcRenderer.invoke('addy:resumeSync'),
+    /** A link the OS handed us. It FILLS A FORM; it never acts. */
+    onLink: (cb: (l: AddyLink) => void): (() => void) => {
+      const h = (_e: unknown, l: AddyLink): void => cb(l)
+      ipcRenderer.on('addy:link', h)
+      return () => ipcRenderer.removeListener('addy:link', h)
+    },
+    onLinkRefused: (cb: (reason: string) => void): (() => void) => {
+      const h = (_e: unknown, r: string): void => cb(r)
+      ipcRenderer.on('addy:linkRefused', h)
+      return () => ipcRenderer.removeListener('addy:linkRefused', h)
+    },
     /** Pushed whenever any of that changes. Returns the unsubscribe. */
     onStatus: (cb: (s: AddyStatusSnapshot) => void): (() => void) => {
       const h = (_e: unknown, s: AddyStatusSnapshot): void => cb(s)

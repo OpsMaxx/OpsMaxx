@@ -1,6 +1,6 @@
 import { AddyError, openAddyd, type AddySidecar } from './sidecar'
 import { forgetAddySecret, storeAddySecret, loadAddySecret } from './keys'
-import { loadEnrolment, saveEnrolment, forgetEnrolment } from './enrolment'
+import { loadEnrolment, readEnrolment, saveEnrolment, forgetEnrolment } from './enrolment'
 import {
   beginPairing,
   forgetPairing,
@@ -120,6 +120,11 @@ class AddySession {
    *  the panel renders the two differently on purpose, so this must never be
    *  initialised to `[]`. */
   private lastRoster: AddyRoster | null = null
+
+  /** The last reason this device could not attach, for the panel to show.
+   *  Cleared on a successful attach: a banner explaining a failure that has
+   *  since been fixed is worse than none. */
+  private lastProblem: string | null = null
   private watchers = new Set<(s: AddyStatusSnapshot) => void>()
   /** Told which collections changed on disk, so the renderer can reload them
    *  before writing its own stale copy back over the top. */
@@ -185,7 +190,68 @@ class AddySession {
     this.addyd = null
     this.relay = null
     this.account = null
+    // THE ROSTER OUTLIVED THE SESSION AND NOTHING CLEARED IT. `lastRoster` was
+    // written by `refreshRoster` and removed by nothing, so a device that had
+    // detached — or left the account entirely — went on rendering the device
+    // table of an account it was no longer on, with "including this one"
+    // beside a count that was no longer true. A stale list of somebody's
+    // machines is worse than no list.
+    this.lastRoster = null
     await held?.close()
+  }
+
+  /**
+   * Try again, without quitting the app.
+   *
+   * `startSync` had ONE caller — the end of `loginAndRecord` — and the only
+   * thing that calls that at launch is `resume`. So every way of failing to
+   * attach put the device in a state whose single remedy was restarting
+   * OpsMaxx, and nothing on the screen said so. A relay that was down for a
+   * minute cost a restart; a laptop that woke on a different network cost a
+   * restart.
+   *
+   * This is the same work `resume` does, made available at any time. It is
+   * deliberately the WHOLE path rather than a bare `startSync`: a session that
+   * failed to log in has no token, and starting a timer against it would
+   * produce a pass that fails every collection and records that as the
+   * account's state.
+   */
+  async reconnect(): Promise<{ ok: boolean; problem?: string }> {
+    // Torn down first. Reconnecting on top of a half-open sidecar is how you
+    // get two of them and a port that never closes.
+    await this.detach()
+    const r = await this.resume()
+    if (r.resumed && this.account !== null) return { ok: true }
+    return { ok: false, problem: r.problem ?? this.lastProblem ?? 'This device could not reach the relay.' }
+  }
+
+  /**
+   * Stop carrying data, without leaving the account.
+   *
+   * THESE ARE DIFFERENT DECISIONS AND THE PRODUCT ONLY HAD THE LOUD ONE.
+   * Pausing is for a metered connection, a machine about to be handed to
+   * somebody for an hour, or a person who wants to look at a conflict before
+   * more arrives. Leaving destroys this device's keys and cannot be undone
+   * without pairing again. Offering only the second means somebody who wanted
+   * the first takes it.
+   *
+   * Paused is a fact about this run, not a setting: the engine starts again on
+   * the next launch. A pause that survived a restart would be a switch people
+   * forget they flipped, and the symptom is silence.
+   */
+  pauseSync(): void {
+    this.stopSync()
+  }
+
+  /** Start carrying data again after a pause. Refuses when there is no
+   *  session to carry it over, because a timer without a token fails every
+   *  collection and records the failure as the account's state. */
+  resumeSync(): { ok: boolean; problem?: string } {
+    if (this.account === null || this.account.token === '') {
+      return { ok: false, problem: 'This device is not signed in to the relay yet.' }
+    }
+    this.startSync()
+    return { ok: true }
   }
 
   /**
@@ -216,31 +282,53 @@ class AddySession {
    * cannot be undone by trying again.
    */
   async leaveAccount(): Promise<{ left: boolean; accountId: string | null }> {
+    // TAKE WHATEVER IS ACTUALLY HERE, FROM EITHER SOURCE.
+    //
+    // The record and the live session can disagree, and this returned early
+    // whenever the record was missing — so a device that was attached but had
+    // no record was told "This device was not on an account" while the panel
+    // beside the toast still read ACCOUNT: On, and the session went on
+    // running. Leaving has to act on the union of the two, or the one state
+    // the user most needs it for is the one it refuses.
     const held = loadEnrolment()
-    if (held === null) {
-      // Nothing to leave. Reported rather than thrown: a second press, or two
-      // windows, must not produce an error dialog for a state the user was
-      // asking for anyway.
+    const accountId = held?.accountId ?? this.account?.accountId ?? null
+    const wasHere = held !== null || this.account !== null
+
+    // Unconditional, and before anything is forgotten. A live sidecar holding
+    // keys is the thing being left, whether or not a file on disk agrees that
+    // it exists.
+    await this.detach()
+
+    if (accountId === null) {
+      // Genuinely nothing here: no record, no session. Reported rather than
+      // thrown, because a second press must not produce an error dialog for
+      // the state the user was asking for.
+      forgetSyncState()
+      forgetEnrolment()
       return { left: false, accountId: null }
     }
-
-    await this.detach()
 
     // Every secret this device holds for that account, by the same kinds the
     // machine-only test pins. Each is deleted by scope, so an account this
     // device was never on is untouched.
-    forgetAddySecret('device', `${held.accountId}:device`)
-    forgetAddySecret('device', `${held.accountId}:device-enc`)
-    forgetAddySecret('account', `${held.accountId}:account`)
-    for (let epoch = 1; epoch <= Math.max(1, held.epoch); epoch++) {
-      forgetAddySecret('account', `${held.accountId}:account:${epoch}`)
+    forgetAddySecret('device', `${accountId}:device`)
+    forgetAddySecret('device', `${accountId}:device-enc`)
+    forgetAddySecret('account', `${accountId}:account`)
+    // Every epoch this device followed, not just the current one. The record
+    // is the only thing that knows how many there were, so with no record we
+    // sweep a generous range rather than leave keys behind on a machine the
+    // user believes they have detached.
+    const epochs = Math.max(1, held?.epoch ?? this.account?.epoch ?? 1)
+    for (let epoch = 1; epoch <= epochs + 8; epoch++) {
+      forgetAddySecret('account', `${accountId}:account:${epoch}`)
     }
-    forgetAddySecret('root', `${held.accountId}:root`)
+    forgetAddySecret('root', `${accountId}:root`)
 
     forgetSyncState()
     forgetEnrolment()
+    this.lastProblem = null
 
-    return { left: true, accountId: held.accountId }
+    return { left: wasHere, accountId }
   }
 
   /**
@@ -351,9 +439,39 @@ class AddySession {
     //
     // Not fatal if it fails. The account IS registered and the keys ARE
     // stored by this point, so throwing would leave the user holding a
-    // recovery phrase for an account the app then claims not to have. The
-    // enrolment is recorded either way and the next resume tries again.
-    await this.loginAndRecord().catch(() => undefined)
+    // recovery phrase for an account the app then claims not to have.
+    //
+    // THE SENTENCE THAT USED TO FOLLOW WAS FALSE, and it cost a working
+    // account. It said "the enrolment is recorded either way and the next
+    // resume tries again" — but `saveEnrolment` is INSIDE `loginAndRecord`,
+    // so a login that threw recorded nothing, and `resume` never runs again
+    // because it only runs when a record already exists. The result was a
+    // session that reported itself enrolled from `this.account`, with the
+    // engine off, the roster never read, and no record to come back to: every
+    // value on the owner's screen, from this one swallowed error.
+    //
+    // So the record is now genuinely written either way. The pin is empty
+    // because `spki` only exists after a login — the comparison in
+    // `loginAndRecord` already guards on `known?.spki &&`, so an empty pin
+    // means "not pinned yet" rather than "pinned to nothing", and the next
+    // successful login writes the real one.
+    try {
+      await this.loginAndRecord()
+    } catch (err) {
+      saveEnrolment({
+        baseURL: relay,
+        accountId: minted.accountId,
+        epoch: minted.epoch,
+        rootSignPub: minted.rootSignPub,
+        epoch1SignPub: minted.epoch1SignPub,
+        spki: '',
+        insecureTLS: this.insecureTLS
+      })
+      this.lastProblem =
+        `The account was created on ${relay}, but this device could not finish signing in to it: ` +
+        `${err instanceof Error ? err.message : String(err)}. The account and your recovery phrase ` +
+        `are safe. Sync starts the next time this device reaches the relay.`
+    }
 
     return { accountId: minted.accountId, mnemonic: minted.mnemonic }
   }
@@ -402,6 +520,8 @@ class AddySession {
       )
     }
 
+    // Attached. Whatever stopped it last time no longer applies.
+    this.lastProblem = null
     this.account = { ...account, token }
     saveEnrolment({
       baseURL: account.baseURL,
@@ -465,11 +585,11 @@ class AddySession {
       if (seed) epochKeys[n] = seed
     }
     if (!keys.deviceSignSeed || !keys.deviceEncKey || !keys.akSeed) {
-      return {
-        resumed: false,
-        problem:
-          'this machine is enrolled on a relay but its keys cannot be read from the keychain.'
-      }
+      this.lastProblem =
+        'This machine is enrolled on a relay, but its keys cannot be read from the keychain. ' +
+        'On macOS an update can change which signature the keychain trusts; unlocking the ' +
+        'login keychain and restarting OpsMaxx is the usual fix.'
+      return { resumed: false, problem: this.lastProblem }
     }
 
     this.insecureTLS = saved.insecureTLS === true
@@ -511,11 +631,15 @@ class AddySession {
       // Attached-but-not-logged-in is a real and useful state: the sidecar is
       // up and the keys are loaded, so the panel can say which relay this
       // machine belongs to even while that relay is unreachable.
+      // Kept for the panel, not just returned to a caller that logs it. This
+      // is the branch a changed TLS key and an unreachable relay both land in,
+      // and both are things the person can act on once they are told.
+      this.lastProblem = err instanceof Error ? err.message : String(err)
       return {
         resumed: this.attached,
         accountId: saved.accountId,
         baseURL: saved.baseURL,
-        problem: err instanceof Error ? err.message : String(err)
+        problem: this.lastProblem
       }
     }
   }
@@ -1137,7 +1261,11 @@ class AddySession {
    * for people who have never opened addy.
    */
   async status(): Promise<AddyStatusSnapshot> {
-    const enrolment = this.account ? null : loadEnrolment()
+    // Read rather than loaded, so "there is no record" and "the record is
+    // there and unreadable" can be told apart — and the second one is said
+    // out loud instead of being reported as a machine that never synced.
+    const read = readEnrolment()
+    const enrolment = this.account ? null : read.enrolment
     const relayURL = this.account?.baseURL ?? enrolment?.baseURL
     const accountId = this.account?.accountId ?? enrolment?.accountId
     const roster = this.lastRoster
@@ -1148,6 +1276,16 @@ class AddySession {
       // narrower would report a laptop with no network as never having set
       // addy up, and offer it the "create an account" flow it must not take.
       enrolled: !!accountId,
+      // REPORTED WHENEVER IT IS SET, not only while detached.
+      //
+      // Gating this on `this.account === null` hid the reason in precisely the
+      // case that needed it: a session that attached and then failed to log in
+      // HAS an account object, so the panel showed "On", "enrolled", engine
+      // off, and no explanation at all. `lastProblem` is cleared the moment a
+      // login succeeds, so a stale banner cannot outlive the fault it names.
+      ...(this.lastProblem || read.unreadable
+        ? { problem: this.lastProblem ?? read.unreadable }
+        : {}),
       ...(relayURL ? { relayURL } : {}),
       ...(accountId ? { accountId } : {}),
       ...(roster

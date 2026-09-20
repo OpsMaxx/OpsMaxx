@@ -110,6 +110,20 @@ asarUnpack:
   - 'out/cli/**'
   - 'bin/**'
 
+# `opsmaxx://` links, which is how a relay address and an invite reach a second
+# machine without anybody retyping either. Declared per platform because each
+# OS learns the scheme a different way: macOS from CFBundleURLTypes in the
+# bundle, Windows from a registry key the installer writes, Linux from the
+# MimeType line in the .desktop file.
+#
+# The app still calls setAsDefaultProtocolClient at every launch — this is what
+# makes a link clickable before the app has ever run, and that is what makes it
+# work for the machine that has nothing set up yet.
+protocols:
+  - name: OpsMaxx sync link
+    schemes:
+      - opsmaxx
+
 win:
   icon: build/icon.ico
   target:
