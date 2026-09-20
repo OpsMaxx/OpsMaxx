@@ -4712,6 +4712,10 @@ ipcMain.handle('addy:finishJoin', () => addySession.finishJoin())
 ipcMain.handle('addy:status', () => addySession.status())
 // One pass, now. The panel's Sync button, and what the engine's own timer
 // calls between times.
+// Remove another device. The actor side of a revocation, which did not exist:
+// `services/addy/revoke.ts` implemented what a revoked device does to itself
+// and nothing authored the entry that made it happen.
+ipcMain.handle('addy:revokeDevice', (_e, pubSign: string) => addySession.revokeDevice(pubSign))
 ipcMain.handle('addy:syncNow', () => addySession.syncNow())
 // The escape hatch: forget every agreement and take everything again. Safe to
 // offer because with no state a difference becomes a conflict the user is

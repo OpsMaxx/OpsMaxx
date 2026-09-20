@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"crypto/ecdh"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
 	"github.com/opsmaxx/opsmaxx/sidecar/addyd/pair"
@@ -462,5 +465,116 @@ func TestPairingPutsTheSecondDeviceOnTheRoster(t *testing.T) {
 	}
 	if listed, _ := joinerView["selfListed"].(bool); !listed {
 		t.Fatal("the joining device is not listed in the roster it just verified")
+	}
+}
+
+// Taking a device back off the account.
+//
+// The entry `revoke.ts` has been waiting for since it was written. What makes
+// it worth a test beyond "an entry came back" is the two refusals: a revoke
+// that names a substituted encryption key would be a way to REWRITE a live
+// device's key, and a device that revokes itself wipes the machine the user is
+// sitting at, one press away, on a list where one row is "this device".
+func TestRevokingADeviceRemovesItAndRefusesSelfRevocation(t *testing.T) {
+	keys.reset()
+	t.Cleanup(keys.reset)
+
+	run := func(h func(Request) (any, error), method string, p map[string]any) map[string]any {
+		t.Helper()
+		v, err := h(Request{Method: method, Params: params(t, p)})
+		return result(t, v, err)
+	}
+
+	minted := run(handleCreateAccount, "createAccount", map[string]any{"label": "laptop"})
+	genesis := minted["genesis"].(string)
+	verify := func(chain string) map[string]any {
+		t.Helper()
+		return run(handleVerifyRoster, "verifyRoster", map[string]any{
+			"chain": chain, "rootSignPub": minted["rootSignPub"], "epoch1Sign": minted["epoch1SignPub"],
+		})
+	}
+
+	// A second device on the chain, authored the way pairing authors it.
+	peerSign, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peerEnc, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := verify(genesis)
+	added := run(handleAddDevice, "addDevice", map[string]any{
+		"headEntry": before["headEntry"], "headSeq": before["headSeq"], "epoch": uint64(1),
+		"pubSign": hex.EncodeToString(peerSign),
+		"pubEnc":  hex.EncodeToString(peerEnc.PublicKey().Bytes()),
+		"label":   "desktop",
+	})
+	genesisWire, _ := base64.StdEncoding.DecodeString(genesis)
+	addWire, _ := base64.StdEncoding.DecodeString(added["entry"].(string))
+	two := base64.StdEncoding.EncodeToString(append(genesisWire, addWire...))
+
+	withBoth := verify(two)
+	if n := len(withBoth["devices"].([]map[string]any)); n != 2 {
+		t.Fatalf("the chain holds %d devices before the revoke", n)
+	}
+
+	// ---- the revoke ------------------------------------------------------
+	revoked := run(handleRevokeDevice, "revokeDevice", map[string]any{
+		"headEntry": withBoth["headEntry"], "headSeq": withBoth["headSeq"], "epoch": uint64(1),
+		"pubSign": hex.EncodeToString(peerSign),
+		"pubEnc":  hex.EncodeToString(peerEnc.PublicKey().Bytes()),
+	})
+	revWire, _ := base64.StdEncoding.DecodeString(revoked["entry"].(string))
+	three := base64.StdEncoding.EncodeToString(append(append(genesisWire, addWire...), revWire...))
+
+	after := verify(three)
+	devices := after["devices"].([]map[string]any)
+	if len(devices) != 1 {
+		t.Fatalf("after the revoke the chain holds %d devices", len(devices))
+	}
+	// The verifier applies revocations as it walks, so the removed device is
+	// ABSENT rather than flagged — there is no field a forged entry could set
+	// to claim otherwise.
+	if devices[0]["pubSign"] == hex.EncodeToString(peerSign) {
+		t.Fatal("the revoked device is the one still listed")
+	}
+	if listed, _ := after["selfListed"].(bool); !listed {
+		t.Fatal("the revoking device removed itself")
+	}
+
+	// ---- and the two refusals -------------------------------------------
+	_, err = handleRevokeDevice(Request{Method: "revokeDevice", Params: params(t, map[string]any{
+		"headEntry": after["headEntry"], "headSeq": after["headSeq"], "epoch": uint64(1),
+		"pubSign": devices[0]["pubSign"],
+		"pubEnc":  devices[0]["pubEnc"],
+	})})
+	if err == nil {
+		t.Fatal("a device was allowed to revoke itself, which wipes the machine the user is on")
+	}
+	if !strings.Contains(err.Error(), "cannot revoke itself") {
+		t.Fatalf("self-revocation was refused for the wrong reason: %v", err)
+	}
+
+	// A revoke naming a DIFFERENT encryption key than the chain has. Refused
+	// by the verifier rather than here, because otherwise "revoke" would be a
+	// way to rewrite a live device's encryption key — so what this asserts is
+	// that such an entry does not verify, not that it cannot be authored.
+	other, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := run(handleRevokeDevice, "revokeDevice", map[string]any{
+		"headEntry": withBoth["headEntry"], "headSeq": withBoth["headSeq"], "epoch": uint64(1),
+		"pubSign": hex.EncodeToString(peerSign),
+		"pubEnc":  hex.EncodeToString(other.PublicKey().Bytes()),
+	})
+	badWire, _ := base64.StdEncoding.DecodeString(bad["entry"].(string))
+	_, err = handleVerifyRoster(Request{Method: "verifyRoster", Params: params(t, map[string]any{
+		"chain":       base64.StdEncoding.EncodeToString(append(append(genesisWire, addWire...), badWire...)),
+		"rootSignPub": minted["rootSignPub"], "epoch1Sign": minted["epoch1SignPub"],
+	})})
+	if err == nil {
+		t.Fatal("a revoke with a substituted encryption key verified")
 	}
 }

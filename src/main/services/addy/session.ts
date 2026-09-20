@@ -1050,6 +1050,60 @@ class AddySession {
   }
 
   /**
+   * Remove another device from the account.
+   *
+   * THE ACTOR SIDE, which did not exist. `services/addy/revoke.ts` implements
+   * what a revoked device does to itself — reads the roster, finds itself
+   * absent, wipes and shows a blocking screen — and nothing anywhere authored
+   * the entry that makes that happen. A user could see the devices on their
+   * account and had no way to remove one, which for a lost laptop is the
+   * single call they most need.
+   *
+   * SOFT, and the distinction is not a detail. This removes the device from
+   * the roster: every other device stops sealing to it, the relay stops
+   * accepting it once it re-reads the chain, and it wipes itself on next
+   * launch. It does NOT take back the epoch key, so a machine that is stolen
+   * rather than merely retired also needs a re-key — which is a separate call
+   * with a different signer, because a rotation the revoked device could
+   * follow would be worse than no rotation at all.
+   *
+   * Both halves come from the roster THIS device verified, never from the
+   * relay: the encryption key is part of the entry and a revoke naming a
+   * substituted one is refused, because otherwise "revoke" would be a way to
+   * rewrite a live device's encryption key.
+   */
+  async revokeDevice(pubSign: string): Promise<{ devices: number }> {
+    const addyd = this.addyd
+    const relay = this.relay
+    const account = this.account
+    if (!addyd || !relay || !account) {
+      throw new AddyError('not-paired', 'this device is not attached to an addy account')
+    }
+
+    const before = await this.refreshRoster()
+    const target = before.devices.find((d) => d.pubSign === pubSign)
+    if (!target) {
+      // Already gone, or never there. Reported rather than written: appending
+      // a revoke for a device the chain does not list produces an entry every
+      // verifier refuses, and the account would be stuck on a head nobody
+      // accepts.
+      throw new AddyError('config-invalid', 'that device is not on this account')
+    }
+
+    const entry = await addyd.send<{ seq: number; entry: string }>('revokeDevice', {
+      headEntry: before.headEntry ?? '',
+      headSeq: before.headSeq ?? 0,
+      epoch: account.epoch,
+      pubSign: target.pubSign,
+      pubEnc: target.pubEnc
+    })
+    await relay.appendRoster(entry.seq, entry.entry)
+
+    const after = await this.refreshRoster()
+    return { devices: after.devices.length }
+  }
+
+  /**
    * A backup destination that writes to this account's relay.
    *
    * Built per call rather than held, because the epoch can change between two

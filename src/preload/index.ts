@@ -458,6 +458,11 @@ const api = {
      *  account yet, however the setting is set. */
     setClipboardShortcuts: (wanted: boolean): Promise<boolean> =>
       ipcRenderer.invoke('addy:setClipboardShortcuts', wanted),
+    /** Remove another device from the account. Not this one: a device that
+     *  revoked itself would wipe on its next launch, which is not undoable
+     *  and is almost certainly a misclick. */
+    revokeDevice: (pubSign: string): Promise<{ devices: number }> =>
+      ipcRenderer.invoke('addy:revokeDevice', pubSign),
     /** One sync pass, now. Resolves with what each collection did, or `null`
      *  when a pass was already running or this device is not attached. */
     syncNow: (): Promise<unknown> => ipcRenderer.invoke('addy:syncNow'),

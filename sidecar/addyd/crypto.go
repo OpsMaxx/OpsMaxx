@@ -826,3 +826,120 @@ func handleCreateAccount(req Request) (any, error) {
 		"epoch":   uint64(1),
 	}, nil
 }
+
+type revokeDeviceRequest struct {
+	// The chain head this entry follows, base64 of the wire entry — so its
+	// hash and sequence come from the chain THIS device verified rather than
+	// from anything the relay asserted.
+	HeadEntry string `json:"headEntry"`
+	HeadSeq   uint64 `json:"headSeq"`
+	Epoch     uint64 `json:"epoch"`
+	// Hex, BOTH HALVES, from the verified roster.
+	//
+	// The encryption key is not redundant. A revoke naming a substituted
+	// pub_enc is refused by the verifier, because otherwise "revoke" would be
+	// a way to rewrite a live device's encryption key — so the caller has to
+	// supply the pair as the chain has them, and supplying them from the
+	// roster it verified is the only way to get that right.
+	PubSign string `json:"pubSign"`
+	PubEnc  string `json:"pubEnc"`
+}
+
+// handleRevokeDevice authors the entry that removes a device from the account.
+//
+// THE SOFT HALF, and it is worth being exact about what it does and does not
+// do. It removes the device from the roster, so every other device stops
+// sealing to it, the relay stops accepting its signatures once it re-reads the
+// chain, and the device itself wipes on its next launch. What it does NOT do
+// is take back AK_n: the revoked machine still holds the epoch key and can
+// still open every object sealed under it that it already has, or that it
+// captured.
+//
+// That is why a revocation for a LOST OR STOLEN device is a revoke plus a
+// re-key, and why the two are separate calls with separate signers. Conflating
+// them would produce exactly the hole the chained-rotation comment in
+// protocol/rotate.go describes: a rotation the revoked device can follow.
+func handleRevokeDevice(req Request) (any, error) {
+	var in revokeDeviceRequest
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+	pubSign, err := hex.DecodeString(in.PubSign)
+	if err != nil || len(pubSign) != ed25519.PublicKeySize {
+		return nil, codedf(ErrConfigInvalid, "pubSign is 32 bytes of hex")
+	}
+	pubEnc, err := hex.DecodeString(in.PubEnc)
+	if err != nil || len(pubEnc) != 32 {
+		return nil, codedf(ErrConfigInvalid, "pubEnc is 32 bytes of hex")
+	}
+	headWire, err := base64.StdEncoding.DecodeString(in.HeadEntry)
+	if err != nil || len(headWire) == 0 {
+		return nil, codedf(ErrConfigInvalid, "headEntry is base64 of the chain head")
+	}
+
+	keys.mu.RLock()
+	acct := keys.account
+	epoch, haveEpoch := keys.epochs[in.Epoch]
+	device := keys.device
+	loaded := keys.loaded
+	keys.mu.RUnlock()
+	if !loaded || !haveEpoch {
+		return nil, codedf(ErrNotPaired, "no account is loaded for that epoch")
+	}
+
+	// REFUSED HERE rather than left to the verifier. A device that revokes
+	// itself produces a chain in which it is absent, which is valid — and the
+	// next thing that happens is this machine wipes itself on relaunch,
+	// because that is what "not in the roster" means. It is almost certainly a
+	// misclick on a list where one row is "this device", and it is not
+	// undoable.
+	if device != nil && ed25519.PublicKey(pubSign).Equal(device.Sign.Public().(ed25519.PublicKey)) {
+		return nil, codedf(
+			ErrConfigInvalid,
+			"a device cannot revoke itself; do it from another device on the account",
+		)
+	}
+
+	head, _, err := protocol.DecodeEntry(headWire)
+	if err != nil {
+		return nil, wrapCoded(ErrRosterInvalid, err, "reading the chain head")
+	}
+	prev, err := head.Hash()
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "hashing the chain head")
+	}
+	nonce, err := protocol.Nonce()
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "drawing a nonce")
+	}
+
+	e := protocol.Entry{
+		AccountID: acct,
+		Epoch:     in.Epoch,
+		Seq:       in.HeadSeq + 1,
+		PrevHash:  prev,
+		Op:        protocol.OpRevoke,
+		Signer:    protocol.SignerAK,
+		Nonce:     nonce,
+		PubSign:   pubSign,
+		PubEnc:    pubEnc,
+		// EMPTY, and the verifier refuses anything else: there is nothing to
+		// name in a removal, so a payload here would be a covert channel in
+		// bytes the server stores verbatim and cannot read.
+		LabelCT: nil,
+		TS:      uint64(time.Now().UnixMilli()),
+	}
+	body, err := e.Encode()
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "encoding the entry")
+	}
+	e.Sig = ed25519.Sign(epoch.Sign, body)
+	wire, err := e.Wire()
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "encoding the entry")
+	}
+	return map[string]any{
+		"seq":   e.Seq,
+		"entry": base64.StdEncoding.EncodeToString(wire),
+	}, nil
+}

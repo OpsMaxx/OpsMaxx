@@ -549,3 +549,19 @@
 .addy-problems {
   margin-top: var(--sp-3);
 }
+
+/* Removing a device: the confirmation sits in the row rather than in a modal.
+   A modal for this would cover the list the user is reading to decide WHICH
+   device to remove, which is the one thing they need on screen. */
+.addy-revoke-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.addy-revoke-confirm .fine {
+  max-width: 34ch;
+  text-align: right;
+}

@@ -220,3 +220,42 @@ describe('the direct path has both halves', () => {
     expect(SESSION).toMatch(/this\.stopAnswering\(\)/)
   })
 })
+
+/**
+ * A revocation had a victim and no actor.
+ *
+ * `services/addy/revoke.ts` implements what a revoked device does to ITSELF:
+ * reads the roster, finds itself absent, closes its sessions, wipes every data
+ * file and shows a blocking screen. It is careful, it is tested, and nothing
+ * anywhere authored the roster entry that triggers it — so a user could see
+ * the devices on their account and had no way to remove one, which for a lost
+ * laptop is the single call they most need.
+ */
+describe('a device can be taken off the account', () => {
+  it('the sidecar authors the entry', () => {
+    const CRYPTO = readFileSync(join(ROOT, 'sidecar/addyd/crypto.go'), 'utf8')
+    expect(CRYPTO).toMatch(/func handleRevokeDevice/)
+    expect(CRYPTO).toMatch(/protocol\.OpRevoke/)
+    const MAINGO = readFileSync(join(ROOT, 'sidecar/addyd/main.go'), 'utf8')
+    expect(MAINGO).toMatch(/"revokeDevice":/)
+  })
+
+  it('and every layer above it is connected', () => {
+    expect(SESSION).toMatch(/async revokeDevice\(/)
+    expect(MAIN).toMatch(/ipcMain\.handle\('addy:revokeDevice'/)
+    expect(PRELOAD).toMatch(/invoke\('addy:revokeDevice'/)
+    const PANEL = read('src/renderer/src/components/addy/AddyPanel.tsx')
+    expect(PANEL).toMatch(/revokeDevice\(/)
+  })
+
+  it('refuses to let a device revoke itself', () => {
+    // That is a wipe of the machine the user is sitting at, one press away, on
+    // a list where one row is "this device". Refused in the sidecar, so no
+    // caller can reach it by skipping a UI guard — and the panel does not
+    // offer the button on that row either.
+    const CRYPTO = readFileSync(join(ROOT, 'sidecar/addyd/crypto.go'), 'utf8')
+    expect(CRYPTO).toMatch(/cannot revoke itself/)
+    const PANEL = read('src/renderer/src/components/addy/AddyPanel.tsx')
+    expect(PANEL).toMatch(/!d\.self && d\.revoked !== true/)
+  })
+})

@@ -18,6 +18,7 @@ import { PanelShell, NoteWhy } from '../monitor/PanelShell'
 import { EmptyState } from '../common/EmptyState'
 import { Sparkline } from '../common/Sparkline'
 import { useApp } from '../../store/app'
+import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
 import { AddySetup } from './AddySetup'
 import {
@@ -184,7 +185,7 @@ export function AddyPanel(): React.JSX.Element {
       )}
 
       <h3 className="ui-section-title addy-h">Devices</h3>
-      <AddyDevices devices={status?.devices} supported={supported} />
+      <AddyDevices devices={status?.devices} supported={supported} onChanged={refresh} />
 
       {/* Offered only once there is somewhere to send to. On a one-device
           account the shortcuts would be taken from every application on the
@@ -415,10 +416,13 @@ function JourneyStep({ step }: { step: AddyStep }): React.JSX.Element {
  */
 function AddyDevices({
   devices,
-  supported
+  supported,
+  onChanged
 }: {
   devices: AddyDevice[] | undefined
   supported: boolean
+  /** Re-read the status once the roster has changed under us. */
+  onChanged: () => void
 }): React.JSX.Element {
   if (devices === undefined) {
     return (
@@ -449,6 +453,7 @@ function AddyDevices({
           <th>Device</th>
           <th>Last seen</th>
           <th>Added</th>
+          <th />
         </tr>
       </thead>
       <tbody>
@@ -464,10 +469,86 @@ function AddyDevices({
                 is not "0s ago", which is what a zero would print. */}
             <td>{d.lastSeen === null ? 'never' : `${ago(d.lastSeen)} ago`}</td>
             <td>{d.addedAt === null ? '—' : `${ago(d.addedAt)} ago`}</td>
+            <td className="right">
+              {/* Never on this device's own row. A device that revoked itself
+                  would wipe on its next launch, and that is not undoable — on
+                  a list where one row is "this device", it is a misclick
+                  waiting to happen rather than a choice anyone makes. */}
+              {!d.self && d.revoked !== true && (
+                <RevokeButton id={d.id} label={d.label} onDone={onChanged} />
+              )}
+            </td>
           </tr>
         ))}
       </tbody>
     </table>
+  )
+}
+
+/**
+ * Removing a device, with the consequence said before it happens.
+ *
+ * TWO PRESSES, and the second one names the machine. This is not reversible —
+ * the chain is append-only, so re-adding means pairing that device again from
+ * scratch — and it takes effect on the far machine by WIPING it: everything
+ * this app stores there is deleted on its next launch. A single button on a
+ * row is not enough consent for that.
+ *
+ * What it does not claim: the epoch key. A revoked device keeps AK_n and can
+ * still open anything it already holds. For a retired machine that is fine;
+ * for a stolen one the honest answer is a re-key, and saying so here is better
+ * than a confirmation that implies more than it does.
+ */
+function RevokeButton({
+  id,
+  label,
+  onDone
+}: {
+  id: string
+  label: string
+  onDone: () => void
+}): React.JSX.Element {
+  const [arming, setArming] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  if (!arming) {
+    return (
+      <button className="btn ghost danger size-24" onClick={() => setArming(true)}>
+        Remove
+      </button>
+    )
+  }
+  return (
+    <span className="addy-revoke-confirm">
+      <span className="fine">
+        Remove <strong>{label}</strong>? Everything OpsMaxx stores on it is deleted the next time it
+        opens, and adding it back means pairing it again.
+      </span>
+      <button className="btn ghost size-24" disabled={busy} onClick={() => setArming(false)}>
+        Cancel
+      </button>
+      <button
+        className="btn danger size-24"
+        disabled={busy}
+        onClick={() => {
+          setBusy(true)
+          void window.opsmaxx!.addy.revokeDevice(id).then(
+            () => {
+              toast(`${label} was removed from the account`, 'ok')
+              setArming(false)
+              setBusy(false)
+              onDone()
+            },
+            (err: unknown) => {
+              toast(err instanceof Error ? err.message : String(err), 'error')
+              setBusy(false)
+            }
+          )
+        }}
+      >
+        {busy ? <Loader2 size={13} className="spin" /> : null} Remove it
+      </button>
+    </span>
   )
 }
 
