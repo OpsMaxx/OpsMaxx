@@ -315,6 +315,26 @@ describe('filters', () => {
 
 const NOW = Date.now()
 
+/**
+ * Midday on the previous CALENDAR day.
+ *
+ * This was `NOW - 26 * 3_600_000`, which is yesterday only if the tests happen
+ * to run after 02:00. CI ran at 00:53 and twenty-six hours back landed two
+ * days earlier, so the heading read "Fri, Sep 18" and the run went red — on a
+ * suite that was green locally at 04:44 for no better reason than the hour.
+ *
+ * `dayLabel` compares `toDateString()`, so the honest fixture is a calendar
+ * day rather than a duration. Midday because it is the furthest point from
+ * both boundaries: no hour of the day, and no daylight-saving shift, can move
+ * it onto a neighbouring date.
+ */
+const YESTERDAY = (() => {
+  const d = new Date(NOW)
+  d.setDate(d.getDate() - 1)
+  d.setHours(12, 0, 0, 0)
+  return d.getTime()
+})()
+
 /** The sampler event that made this screen unreadable, N times over. */
 function burst(n: number, over: Partial<ChangeLogEntry> = {}): ChangeLogEntry[] {
   return Array.from({ length: n }, (_, i) =>
@@ -535,7 +555,7 @@ describe('time a person can read', () => {
       page({
         entries: [
           entry({ id: 'now', ts: NOW, summary: 'today thing' }),
-          entry({ id: 'yst', ts: NOW - 26 * 3_600_000, summary: 'yesterday thing' })
+          entry({ id: 'yst', ts: YESTERDAY, summary: 'yesterday thing' })
         ]
       })
     )
