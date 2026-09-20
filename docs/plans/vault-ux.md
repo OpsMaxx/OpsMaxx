@@ -80,12 +80,23 @@ had counted says nothing at all.
 | CI/CD polling | throws, backs off, retries for ever; error never self-clears | **Panel only** — nothing global |
 | Detached job polling | **parks** and resumes at the same byte offset | Yes |
 | Credential proxy | parks and refuses; never forwards unauthenticated | Yes |
-| VPN autostart | fails; id recorded for retry | **No** — `console.error` and an in-memory Set |
+| VPN autostart | fails; id recorded for retry | **Panel only** — corrected, see below |
 | **ssh-agent signing** | `identities()` returns `[]`; every signature refused | **No affordance at all** |
 
-The last row is the worst of them: a key silently vanishing from the agent is
-precisely the support-ticket shape the module warns about for unparseable keys,
-and the locked case has no equivalent.
+**Corrected again on implementation.** VPN autostart is not silent: its
+vault-locked branch goes through `fail()`, which publishes `{state: 'error',
+errorCode: 'vault-locked'}` to the renderer, and the VPN panel renders an
+"Unlock vault" action that retries the start. It is panel-level, the same class
+as CI — not the silent one this table first claimed. The `console.error` and
+the in-memory Set are the *other* branch, for failures that are not the vault.
+
+**ssh-agent was the only surface with no affordance anywhere, and it was worse
+than silence.** `identities()` reads through `vaultEntriesForResolve`, which
+answers nothing while locked, so every key vanished from the panel and it said
+*"No SSH keys in the vault yet"* — telling the user to add keys they already
+have, while `canSign()` refused every signature and `git push` fell back to
+`~/.ssh` without explanation. Fixed: the panel now says the vault is locked,
+that the keys are still there, and offers the unlock.
 
 ## 5. The recommendation
 
@@ -106,11 +117,15 @@ not *what is protected*.
 
 ### 5.2 Three small wires that are missing
 
-- **Backup is not a member of `resumeChecksAfterUnlock`.** It has four members
-  today; a fifth `void backupTick()` makes a skipped destination run on the
-  unlock instead of up to five minutes later.
-- **VPN autostart reports to nobody.** The retry exists; the telling does not.
-- **ssh-agent has no locked-state affordance.** It should say why it is inert.
+- **Backup is not a member of `resumeChecksAfterUnlock`.** DONE — it is the
+  fifth now, so a skipped destination runs on the unlock rather than up to five
+  minutes later. Still the same due check: a destination that is not due does
+  not run, and a skipped one was never marked as attempted so its schedule is
+  intact.
+- ~~**VPN autostart reports to nobody.**~~ Wrong — it reports to the VPN panel.
+  See §4.
+- **ssh-agent has no locked-state affordance.** DONE — it claimed the vault was
+  empty. It now says the vault is locked and offers the unlock.
 
 ### 5.3 Make standing machine grants visible
 

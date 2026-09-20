@@ -328,7 +328,8 @@ import {
   machinePassphraseId,
   MIN_PASSPHRASE as BACKUP_MIN_PASSPHRASE,
   startBackupSchedule,
-  stopBackupSchedule
+  stopBackupSchedule,
+  backupResumeAfterUnlock
 } from './services/backup'
 import { clearRevocation, revocationState } from './services/addy/revoke'
 import { sshAgent } from './services/sshAgent/service'
@@ -5190,6 +5191,12 @@ const resumeChecksAfterUnlock = (r: { ok: boolean }): { ok: boolean } => {
     // re-reads that account, but an unlock from anywhere else — the sidebar,
     // Settings, another window — reaches only this hub.
     cicd.resumeAfterVaultUnlock()
+    // And the fifth. A destination whose passphrase is in the vault is skipped
+    // while the vault is shut, and without this it waits up to five minutes
+    // for the next tick — so "Backups paused" stays on the status bar after
+    // the user has already done the one thing that clears it, which reads as
+    // the unlock not having worked.
+    backupResumeAfterUnlock()
   }
   return r
 }

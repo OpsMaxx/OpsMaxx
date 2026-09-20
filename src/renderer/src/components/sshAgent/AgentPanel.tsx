@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, Check, Copy, KeyRound } from 'lucide-react'
 import { useApp } from '../../store/app'
+import { useVault } from '../../store/vault'
+import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import { toast } from '../../store/toast'
 import type { AgentIdentity, AgentStatus, ApprovalScope } from '../../../../shared/sshAgentHost'
 
@@ -18,6 +20,10 @@ export function AgentPanel(): React.JSX.Element {
   const [status, setStatus] = useState<AgentStatus>({ running: false, identities: 0 })
   const [keys, setKeys] = useState<AgentIdentity[]>([])
   const [copied, setCopied] = useState(false)
+  // `unlocked` is true in both `open` and `secured`, which is the right
+  // question here: the agent resolves through `vaultEntriesForResolve`, so it
+  // keeps working while secured and only goes inert on a full lock.
+  const vaultLocked = useVault((s) => s.exists === true && !s.unlocked)
 
   const refresh = useCallback(async () => {
     const bridge = window.opsmaxx?.sshAgent
@@ -101,11 +107,28 @@ export function AgentPanel(): React.JSX.Element {
         <div className="setting-label">
           <KeyRound size={14} aria-hidden /> Keys it can offer
         </div>
-        {keys.length === 0 && (
-          <div className="setting-desc">
-            No SSH keys in the vault yet. Add one with its private key and it appears here.
-          </div>
-        )}
+        {/* A LOCKED VAULT IS NOT AN EMPTY ONE.
+            `identities()` reads through `vaultEntriesForResolve`, which
+            answers nothing while the vault is locked — so every key vanished
+            from this list and the panel said "No SSH keys in the vault yet",
+            telling the user to add keys they already have. The agent is inert
+            at the same time: `canSign()` refuses every signature, so `git
+            push` silently falls back to ~/.ssh and the feature looks broken.
+            Nothing here said the vault was the reason. */}
+        {keys.length === 0 &&
+          (vaultLocked ? (
+            <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+              <div className="setting-desc grow">
+                The vault is locked, so the agent has no keys to offer and is refusing to sign.
+                Your keys are still there.
+              </div>
+              <UnlockVaultButton reason="Unlocking lets the SSH agent offer your keys again." />
+            </div>
+          ) : (
+            <div className="setting-desc">
+              No SSH keys in the vault yet. Add one with its private key and it appears here.
+            </div>
+          ))}
         {usable.map((k) => (
           <div key={k.entryId} className="agent-panel-key">
             <span>{k.name}</span>

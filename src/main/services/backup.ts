@@ -1393,19 +1393,47 @@ export interface ScheduleHandlers {
   onNewSkip?: (info: { destinationId: string; destinationName: string; reason: string }) => void
 }
 
+/** Kept so a tick raised from outside the interval reports the same way. */
+let scheduleHandlers: ScheduleHandlers = {}
+
+function tickAndReport(): void {
+  void backupTick()
+    .then(({ ran, newlyFailing, newlySkipped }) => {
+      for (const r of ran) scheduleHandlers.onRun?.(describeRun(r), r)
+      for (const r of newlyFailing) scheduleHandlers.onNewFailure?.(r)
+      for (const s of newlySkipped) scheduleHandlers.onNewSkip?.(s)
+    })
+    .catch((err: unknown) => {
+      console.error('[backup] scheduled run failed:', err)
+    })
+}
+
+/**
+ * Run the due check now, because the vault just opened.
+ *
+ * The fifth member of the family `resumeChecksAfterUnlock` holds. A
+ * destination whose passphrase lives in the vault is SKIPPED while the vault
+ * is shut — deliberately, an unattended run must not raise a dialog — and
+ * without this it then waits up to TICK_MS for the next interval. Five minutes
+ * of "Backups paused" after the user has already done the one thing that fixes
+ * it reads as the unlock not having worked.
+ *
+ * Nothing is forced: this is the same due check the timer runs, so a
+ * destination that is not due still does not run. A skipped destination was
+ * never marked as attempted (see `backupTick`), so its schedule is intact and
+ * it is simply due now.
+ *
+ * Safe before `startBackupSchedule`: the handlers default to empty and a tick
+ * with nobody listening still performs the backup.
+ */
+export function backupResumeAfterUnlock(): void {
+  tickAndReport()
+}
+
 export function startBackupSchedule(handlers: ScheduleHandlers = {}): void {
   if (scheduleTimer) return
-  scheduleTimer = setInterval(() => {
-    void backupTick()
-      .then(({ ran, newlyFailing, newlySkipped }) => {
-        for (const r of ran) handlers.onRun?.(describeRun(r), r)
-        for (const r of newlyFailing) handlers.onNewFailure?.(r)
-        for (const s of newlySkipped) handlers.onNewSkip?.(s)
-      })
-      .catch((err: unknown) => {
-        console.error('[backup] scheduled run failed:', err)
-      })
-  }, TICK_MS)
+  scheduleHandlers = handlers
+  scheduleTimer = setInterval(tickAndReport, TICK_MS)
   // Never hold the process open for a backup that is not due.
   scheduleTimer.unref?.()
 }
