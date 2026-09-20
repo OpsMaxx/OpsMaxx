@@ -18,6 +18,8 @@ import {
 } from './conflicts'
 import type { AddyStatusSnapshot, ConflictCopy, SyncedCollection } from '../../../shared/addy'
 import { forgetSyncState, syncOnce, type SyncResult } from './sync'
+import { addyTarget } from './target'
+import type { BackupTarget } from '../backupTargets'
 import { receiveClipboard, sendClipboard, type ClipboardDeps } from './clipboard'
 import { closeSession, dialPeer } from './p2p'
 
@@ -966,6 +968,28 @@ class AddySession {
       // The panel keeps the last good answer and its own Refresh still works.
       () => undefined
     )
+  }
+
+  /**
+   * A backup destination that writes to this account's relay.
+   *
+   * Built per call rather than held, because the epoch can change between two
+   * backups and a target holding a stale one would seal the second bundle
+   * under a key the account has moved off. `addyTarget` reads it through the
+   * `epoch()` function for the same reason.
+   *
+   * Returns null when this device is not attached — which is a state, not a
+   * failure: the destination dialog says so and points at the Sync & devices
+   * page, rather than reporting a relay error for a relay nobody chose.
+   */
+  backupTarget(passphraseLength: number): BackupTarget | null {
+    if (!this.attached || !this.relay) return null
+    return addyTarget({
+      addyd: this.addyd!,
+      relay: this.relay,
+      epoch: () => this.account!.epoch,
+      passphraseLength: () => passphraseLength
+    })
   }
 
   /** Empty rather than throwing when unattached.

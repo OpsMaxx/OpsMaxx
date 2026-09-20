@@ -341,7 +341,7 @@ import { apply as applyProvision, preview as previewProvision } from './services
 import type { ApplyOptions as ProvisionApplyOptions } from './services/provision'
 import type { BitwardenSource } from './services/import/bitwarden'
 import type { AgentDecision, SshAgentSettings } from '../shared/sshAgentHost'
-import { databaseDumpTarget, dumpableDatabases } from './services/backupTargets'
+import { databaseDumpTarget, dumpableDatabases, registerAddyTarget } from './services/backupTargets'
 import { BACKUP_STAGE_LABEL } from '../shared/backup'
 import type { BackupDestination, BackupRunReport, DumpRunReport } from '../shared/backup'
 import {
@@ -4849,6 +4849,29 @@ ipcMain.handle('addy:setClipboardShortcuts', (_e, wanted: boolean) => {
   clipboardShortcutsWanted = wanted === true
   refreshClipboardShortcuts()
   return shortcutsHeld
+})
+
+/**
+ * The relay as a backup destination, registered rather than imported.
+ *
+ * `addyTarget` was written, tested and reachable from nowhere: there was no
+ * `kind: 'addy'` destination to open and no case in `openTarget`, so a user
+ * could not create one. It exists now, and this is the line that makes it
+ * buildable — see registerAddyTarget for why the driver table does not import
+ * the addy session itself.
+ *
+ * Returning null is what a machine that has not joined an account looks like,
+ * and `openTarget` turns that into a sentence pointing at the right page
+ * rather than a relay error for a relay nobody chose.
+ */
+registerAddyTarget((_dest, passphraseLength) => {
+  const target = addySession.backupTarget(passphraseLength)
+  if (!target) {
+    throw new Error(
+      'This device is not on an addy account, so there is nowhere to send a backup. Join or create an account on the Sync & devices page first.'
+    )
+  }
+  return target
 })
 
 // And whenever the session's attachment changes. `watch` fires on every status

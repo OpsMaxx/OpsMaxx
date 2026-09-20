@@ -43,6 +43,10 @@ function blank(kind: BackupDestinationKind): BackupDestination {
   const base = { id: uid(), name: '', keep: 0, everyHours: 0, restoreTest: true }
   if (kind === 'local') return { ...base, kind: 'local', directory: '' }
   if (kind === 'sftp') return { ...base, kind: 'sftp', serverId: '', directory: '' }
+  // Nothing to configure. The relay, the account and the TLS pin are the
+  // enrolment this device already has — asking for them again would be asking
+  // the user to retype something they cannot get wrong twice.
+  if (kind === 'addy') return { ...base, kind: 'addy' }
   return {
     ...base,
     kind: 's3',
@@ -278,6 +282,7 @@ export function BackupDestinations(): React.JSX.Element {
                 {dest.kind === 'sftp' &&
                   `${servers.find((s) => s.id === dest.serverId)?.name ?? 'a server that no longer exists'}:${dest.directory}`}
                 {dest.kind === 's3' && `${dest.bucket}/${dest.prefix} at ${dest.endpoint}`}
+                {dest.kind === 'addy' && 'the relay this device is enrolled on'}
               </div>
               <div className="s-desc">
                 {dest.everyHours > 0 ? `Every ${dest.everyHours}h` : 'Manual only'} ·{' '}
@@ -579,6 +584,18 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
           <div className="s-desc" style={{ marginBottom: 6 }}>
             Uploads over that server&apos;s existing credentials — this destination stores none of
             its own, and an unattended run refuses an unknown host key rather than asking.
+          </div>
+        )}
+
+        {dest.kind === 'addy' && (
+          <div className="s-desc" style={{ marginBottom: 6 }}>
+            Writes to the relay this device is already enrolled on. There is nothing to configure
+            and no credential to store: it authenticates with this device&apos;s own key, and the
+            relay address and account come from the enrolment.
+            <br />
+            The bundle is encrypted with the passphrase like every other destination, and sealed a
+            second time under your account key on the way out — so the relay holds something it
+            cannot read even if the passphrase leaks.
           </div>
         )}
 

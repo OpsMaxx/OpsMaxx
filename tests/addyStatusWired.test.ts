@@ -136,3 +136,48 @@ describe('the clipboard shortcuts are actually registered', () => {
     expect(PANEL).toMatch(/addyClipboardShortcuts/)
   })
 })
+
+/**
+ * The backup destination that could not be created.
+ *
+ * `addyTarget` was written, carried its four preconditions, had its own test
+ * file — and there was no `kind: 'addy'` destination to open and no case in
+ * `openTarget`. The only reference to it in the whole repository outside its
+ * own file was that test. So "back up to your relay" did not exist in the
+ * product, and the test suite was green over it.
+ *
+ * Same shape as the clipboard above, found the same way: by asking which
+ * exported functions nothing outside their own file and their own test calls.
+ */
+describe('the relay is a backup destination you can actually choose', () => {
+  it('is a kind the shared contract knows about', () => {
+    const BACKUP = read('src/shared/backup.ts')
+    expect(BACKUP).toMatch(/BACKUP_DESTINATION_KINDS = \[[^\]]*'addy'/)
+    expect(BACKUP).toMatch(/interface AddyBackupDestination/)
+  })
+
+  it('has a case in the driver table, and a factory that supplies it', () => {
+    const TARGETS = read('src/main/services/backupTargets.ts')
+    expect(TARGETS).toMatch(/case 'addy'/)
+    // Registered rather than imported, so the driver table does not depend on
+    // a feature most installs never turn on — and so there is no cycle with
+    // services/addy/target.ts, which imports this file.
+    expect(TARGETS).toMatch(/export function registerAddyTarget/)
+    expect(MAIN).toMatch(/registerAddyTarget\(/)
+    expect(SESSION).toMatch(/backupTarget\(/)
+  })
+
+  it('says what it is rather than failing at the first scheduled run', () => {
+    // A destination that accepts configuration and then fails every run is one
+    // somebody discovers when they need a restore.
+    const TARGETS = read('src/main/services/backupTargets.ts')
+    expect(TARGETS).toMatch(/not on an addy account/)
+  })
+
+  it('can be created from the panel', () => {
+    // The kind list drives the buttons, so a kind with no `blank()` case would
+    // offer a button that builds a malformed destination.
+    const PANEL = read('src/renderer/src/components/settings/BackupDestinations.tsx')
+    expect(PANEL).toMatch(/kind === 'addy'/)
+  })
+})

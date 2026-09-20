@@ -74,7 +74,7 @@ export interface BackupResult {
  */
 export type BackupSkipCode = 'vault-locked' | 'no-passphrase' | 'other'
 
-export const BACKUP_DESTINATION_KINDS = ['local', 'sftp', 's3'] as const
+export const BACKUP_DESTINATION_KINDS = ['local', 'sftp', 's3', 'addy'] as const
 export type BackupDestinationKind = (typeof BACKUP_DESTINATION_KINDS)[number]
 
 interface BackupDestinationBase {
@@ -182,15 +182,39 @@ export interface S3BackupDestination extends BackupDestinationBase {
   pathStyle: boolean
 }
 
+/**
+ * The addy relay this machine is already enrolled on.
+ *
+ * NO CONFIGURATION OF ITS OWN, and that is the point of it: the relay
+ * address, the account and the TLS pin are the enrolment this device already
+ * has, so a destination that asked for them again would be asking the user to
+ * retype something they cannot get wrong twice. One account, one destination.
+ *
+ * Nor does it hold a credential. Every other off-site destination needs one —
+ * an SSH server, an access key — and this one authenticates with the device
+ * key already in the keychain. There is therefore nothing here that could be
+ * put inside the bundle this destination receives, which is the trap the S3
+ * destination's `vaultEntryId` comment describes.
+ *
+ * The bundle is sealed A SECOND TIME on the way out, under the epoch's profile
+ * key, so the relay holds ciphertext it cannot read even if the passphrase
+ * leaks. See services/addy/target.ts for the four preconditions that carries.
+ */
+export interface AddyBackupDestination extends BackupDestinationBase {
+  kind: 'addy'
+}
+
 export type BackupDestination =
   | LocalBackupDestination
   | SftpBackupDestination
   | S3BackupDestination
+  | AddyBackupDestination
 
 export const BACKUP_DESTINATION_LABEL: Record<BackupDestinationKind, string> = {
   local: 'Local directory',
   sftp: 'SFTP server',
-  s3: 'S3-compatible storage'
+  s3: 'S3-compatible storage',
+  addy: 'Your addy relay'
 }
 
 /**
@@ -206,7 +230,16 @@ export const BACKUP_DESTINATION_EXPOSURE: Record<BackupDestinationKind, string> 
   local:
     'Every credential in this app, your vault and your trusted host keys will be written to this directory as an encrypted file. Anyone who can read the directory and guess the passphrase has all of it. A synced folder (Dropbox, OneDrive, iCloud) copies it onward.',
   sftp: 'Every credential in this app, your vault and your trusted host keys will be uploaded to this server as an encrypted file. Anyone with an account there that can read the directory holds your secrets, offline, for as long as the file exists.',
-  s3: 'Every credential in this app, your vault and your trusted host keys will be uploaded to this bucket as an encrypted file. A bucket that is public, or whose keys leak, hands over the whole file — the passphrase is then the only thing left between someone and your estate.'
+  s3: 'Every credential in this app, your vault and your trusted host keys will be uploaded to this bucket as an encrypted file. A bucket that is public, or whose keys leak, hands over the whole file — the passphrase is then the only thing left between someone and your estate.',
+  // Deliberately NOT the same sentence as the other three, because the trade
+  // is genuinely different and saying otherwise would be the false comfort
+  // this table exists to avoid. The bundle is encrypted with the passphrase
+  // like every other destination AND sealed again under the account's epoch
+  // key on the way out, so the passphrase is not the only thing between an
+  // attacker and the estate. What has not changed: the relay is a machine you
+  // run, and somebody who takes that machine AND learns the passphrase AND
+  // holds a device key of this account has all of it.
+  addy: 'Every credential in this app, your vault and your trusted host keys will be uploaded to your relay as an encrypted file, sealed a second time under your account key — so the relay itself cannot read it even with the passphrase. Someone who holds one of your enrolled devices and the passphrase has all of it.'
 }
 
 /**

@@ -851,7 +851,11 @@ export async function runBackupToDestination(
 
   let target: BackupTarget
   try {
-    target = await openTarget(dest, opts)
+    // The length travels with the request, not the passphrase. An addy
+    // destination refuses one shorter than its precondition, and it has to
+    // check rather than trust the guard above — a precondition asserted at one
+    // call site is one the next call site does not have.
+    target = await openTarget(dest, { ...opts, passphraseLength: password.length })
   } catch (err) {
     return fail(report, 'write', err)
   }

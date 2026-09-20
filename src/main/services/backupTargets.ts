@@ -9,6 +9,7 @@ import { loadData } from './store'
 import type {
   BackupDestination,
   BackupGeneration,
+  AddyBackupDestination,
   DumpEngine,
   DumpTarget,
   LocalBackupDestination,
@@ -629,6 +630,41 @@ export interface TargetDeps {
   sftpIo?: (dest: SftpBackupDestination) => Promise<SftpIo>
   fetchImpl?: FetchLike
   credentials?: (dest: S3BackupDestination) => S3Credentials
+  /**
+   * How long the passphrase for this run is, when a run is what opened the
+   * target. Absent for a list or a browse, which have no bundle.
+   *
+   * Only the addy destination reads it, and only to REFUSE: that destination
+   * ships behind a precondition that `MIN_PASSPHRASE` is at least 12, and a
+   * shorter passphrase reaching it would mean the constant had been lowered
+   * under it. Checked there rather than trusted from here, because a
+   * precondition asserted at one call site is one the next call site does not
+   * have.
+   */
+  passphraseLength?: number
+}
+
+/**
+ * How an `addy` destination is built, supplied once at startup.
+ *
+ * A REGISTRATION RATHER THAN AN IMPORT, and the reason is layering: this
+ * module is the backup system's driver table and knows nothing about accounts,
+ * sidecars or relays. Importing the addy session here would make every backup
+ * destination depend on a feature most installs never turn on, and would put a
+ * cycle between the two — `services/addy/target.ts` already imports this file
+ * for `BackupTarget` and `sha256`.
+ *
+ * Null until main registers it, which is also the honest answer for a machine
+ * that is not on an account: see the refusal in `openTarget`.
+ */
+let addyTargetFactory:
+  | ((dest: AddyBackupDestination, passphraseLength: number) => BackupTarget)
+  | null = null
+
+export function registerAddyTarget(
+  factory: ((dest: AddyBackupDestination, passphraseLength: number) => BackupTarget) | null
+): void {
+  addyTargetFactory = factory
 }
 
 export async function openTarget(dest: BackupDestination, deps: TargetDeps = {}): Promise<BackupTarget> {
@@ -654,6 +690,17 @@ export async function openTarget(dest: BackupDestination, deps: TargetDeps = {})
         ((url: string, init: { method: string; headers: Record<string, string>; body?: Buffer }) =>
           fetch(url, init as RequestInit))
       return s3TargetFrom(dest, creds, f)
+    }
+    case 'addy': {
+      if (!addyTargetFactory) {
+        // Said as a state rather than as a failure. This is what a machine
+        // that has not joined an account looks like, and the remedy is on the
+        // Sync & devices panel rather than in this dialog.
+        throw new Error(
+          'This device is not on an addy account, so there is nowhere to send a backup. Join or create an account on the Sync & devices page first.'
+        )
+      }
+      return addyTargetFactory(dest, deps.passphraseLength ?? 0)
     }
   }
 }
