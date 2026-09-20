@@ -458,6 +458,15 @@ const api = {
      *  account yet, however the setting is set. */
     setClipboardShortcuts: (wanted: boolean): Promise<boolean> =>
       ipcRenderer.invoke('addy:setClipboardShortcuts', wanted),
+    /** Move the account to a new epoch key. `revocation` is a response to
+     *  compromise and needs the recovery phrase; `hygiene` is routine, is
+     *  signed by the current epoch key, and refuses a phrase it does not
+     *  need. */
+    rotate: (
+      kind: 'hygiene' | 'revocation',
+      mnemonic?: string
+    ): Promise<{ epoch: number; resealed: number }> =>
+      ipcRenderer.invoke('addy:rotate', kind, mnemonic),
     /** Rejoin an account with the twelve-word phrase and nothing else. Mints
      *  fresh device keys — the phrase never carried them — and writes a
      *  root-signed roster entry, which is what marks this device as one added

@@ -4712,6 +4712,13 @@ ipcMain.handle('addy:finishJoin', () => addySession.finishJoin())
 ipcMain.handle('addy:status', () => addySession.status())
 // One pass, now. The panel's Sync button, and what the engine's own timer
 // calls between times.
+// Moving the account to a new epoch key. `revocation` needs the recovery
+// phrase, because the compromised key must not authorise the escape from
+// itself — see services/addy/session.ts for the order the writes happen in.
+ipcMain.handle('addy:rotate', (_e, kind: 'hygiene' | 'revocation', mnemonic?: string) =>
+  addySession.rotateEpoch(kind, mnemonic)
+)
+
 // Getting back in with nothing but the twelve words. The path nobody takes
 // until every device is gone, which is why it exists before anyone needs it.
 ipcMain.handle(

@@ -668,3 +668,188 @@ func TestRecoveryRefusesAnEscrowForAnotherAccount(t *testing.T) {
 		t.Fatalf("a relay-supplied escrow was blamed on the user's phrase: %v", err)
 	}
 }
+
+// Rotating the epoch, and the two kinds staying two kinds.
+//
+// A rotation is the only operation in the protocol where getting the SIGNER
+// wrong produces something that still works and is worthless: a revocation
+// signed by AK_n is one the revoked device could have signed itself, and a
+// chained handoff on a revocation carries that device straight through to the
+// new key. Both are refused, by construction and independently by the
+// verifier, and both are asserted here.
+func TestRotatingTheEpoch(t *testing.T) {
+	keys.reset()
+	t.Cleanup(func() {
+		keys.reset()
+		_, _ = handleRecoverForget(Request{Method: "recoverForget"})
+	})
+
+	minted, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{
+		"label": "laptop",
+	})})
+	if err != nil {
+		t.Fatalf("createAccount: %v", err)
+	}
+	acct := minted.(map[string]any)
+	genesis := acct["genesis"].(string)
+
+	rotate := func(kind, phrase string) (map[string]any, error) {
+		p := map[string]any{
+			"kind": kind, "chain": genesis,
+			"rootSignPub": acct["rootSignPub"], "epoch1Sign": acct["epoch1SignPub"],
+		}
+		if phrase != "" {
+			p["mnemonic"] = phrase
+		}
+		v, err := handleRotateEpoch(Request{Method: "rotateEpoch", Params: params(t, p)})
+		if err != nil {
+			return nil, err
+		}
+		return v.(map[string]any), nil
+	}
+
+	// ---- a routine rotation ---------------------------------------------
+	hyg, err := rotate("hygiene", "")
+	if err != nil {
+		t.Fatalf("a hygiene rotation: %v", err)
+	}
+	if hyg["epoch"].(uint64) != 2 {
+		t.Fatalf("the new epoch is %v", hyg["epoch"])
+	}
+	// It MAY chain, and this one does: that is how a device that was asleep
+	// catches up without re-pairing.
+	if hyg["chained"] == nil {
+		t.Fatal("a hygiene rotation published no chained handoff")
+	}
+	// One sealed handoff per surviving device, so a device that cannot read
+	// the chained one still gets the key.
+	if n := len(hyg["handoffs"].(map[string]string)); n != 1 {
+		t.Fatalf("%d handoffs for 1 device", n)
+	}
+	// And it does NOT re-seal the escrow, because RK is not in hand. Said
+	// rather than assumed: it is the reason recovery fetches the newest escrow
+	// it can rather than assuming epoch 1's is current.
+	if hyg["escrow"] != nil {
+		t.Fatal("a hygiene rotation re-sealed the escrow without the root key")
+	}
+
+	// The transition verifies as part of the chain, under epoch 1's key —
+	// a hygiene rotation is checked with the key of the epoch BEFORE the one
+	// it names, and getting that off by one produces a chain that verifies on
+	// the author's machine and nowhere else.
+	genesisWire, _ := base64.StdEncoding.DecodeString(genesis)
+	hygWire, _ := base64.StdEncoding.DecodeString(hyg["entry"].(string))
+	after, err := handleVerifyRoster(Request{Method: "verifyRoster", Params: params(t, map[string]any{
+		"chain":       base64.StdEncoding.EncodeToString(append(genesisWire, hygWire...)),
+		"rootSignPub": acct["rootSignPub"], "epoch1Sign": acct["epoch1SignPub"],
+	})})
+	if err != nil {
+		t.Fatalf("the rotated chain does not verify: %v", err)
+	}
+	if e := after.(map[string]any)["epoch"].(uint64); e != 2 {
+		t.Fatalf("the verified chain ends in epoch %d", e)
+	}
+
+	// ---- and one that is a response to compromise ------------------------
+	keys.reset()
+	minted2, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{"label": "laptop"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acct = minted2.(map[string]any)
+	genesis = acct["genesis"].(string)
+
+	rev, err := rotate("revocation", acct["mnemonic"].(string))
+	if err != nil {
+		t.Fatalf("a revocation rotation: %v", err)
+	}
+	// IT MUST NOT CHAIN. The revoked device still holds AK_n, and a chained
+	// handoff is sealed under exactly that — it would carry the device the
+	// rotation exists to exclude.
+	if rev["chained"] != nil {
+		t.Fatal("a revocation rotation published a chained handoff, which the revoked device can open")
+	}
+	// It DOES re-seal the escrow, because RK is in hand — and without that a
+	// re-key would leave the recovery phrase opening a key the account has
+	// moved off.
+	if rev["escrow"] == nil {
+		t.Fatal("a revocation rotation did not re-seal the escrow")
+	}
+
+	genesisWire, _ = base64.StdEncoding.DecodeString(genesis)
+	revWire, _ := base64.StdEncoding.DecodeString(rev["entry"].(string))
+	if _, err := handleVerifyRoster(Request{Method: "verifyRoster", Params: params(t, map[string]any{
+		"chain":       base64.StdEncoding.EncodeToString(append(genesisWire, revWire...)),
+		"rootSignPub": acct["rootSignPub"], "epoch1Sign": acct["epoch1SignPub"],
+	})}); err != nil {
+		t.Fatalf("the re-keyed chain does not verify: %v", err)
+	}
+}
+
+func TestARotationRefusesTheWrongCredentials(t *testing.T) {
+	keys.reset()
+	t.Cleanup(keys.reset)
+
+	minted, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{"label": "laptop"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acct := minted.(map[string]any)
+	base := map[string]any{
+		"chain": acct["genesis"], "rootSignPub": acct["rootSignPub"], "epoch1Sign": acct["epoch1SignPub"],
+	}
+	call := func(over map[string]any) error {
+		p := map[string]any{}
+		for k, v := range base {
+			p[k] = v
+		}
+		for k, v := range over {
+			p[k] = v
+		}
+		_, err := handleRotateEpoch(Request{Method: "rotateEpoch", Params: params(t, p)})
+		return err
+	}
+
+	// A re-key without the phrase. AK_n must not authorise the escape from
+	// itself — a device about to be revoked holds it.
+	//
+	// Matched on the REASON, not on the words "recovery phrase": removing the
+	// check entirely still produces "that is not a valid recovery phrase" when
+	// the empty string reaches the BIP39 parser, so a looser assertion here
+	// passed over the guard being deleted. Found by deleting it.
+	if err := call(map[string]any{"kind": "revocation"}); err == nil {
+		t.Fatal("a revocation rotation was allowed without the recovery phrase")
+	} else if !strings.Contains(err.Error(), "must not authorise the escape from itself") {
+		t.Fatalf("refused for the wrong reason: %v", err)
+	}
+
+	// A routine rotation WITH the phrase. Refused rather than ignored:
+	// accepting it teaches people to type the phrase for routine work, and a
+	// phrase typed often is a phrase that ends up somewhere.
+	if err := call(map[string]any{"kind": "hygiene", "mnemonic": acct["mnemonic"]}); err == nil {
+		t.Fatal("a routine rotation took the recovery phrase")
+	}
+
+	// Somebody else's phrase. Named as such, rather than reported as a
+	// signature failure that would send them to retype a correct card.
+	other, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{"label": "other"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys.reset()
+	if _, err := handleLoad(Request{Method: "load", Params: params(t, map[string]any{
+		"accountId": acct["accountId"], "deviceSignSeed": acct["secrets"].(map[string]string)["deviceSignSeed"],
+		"deviceEncKey": acct["secrets"].(map[string]string)["deviceEncKey"],
+		"epochKeys":    map[string]any{"1": acct["secrets"].(map[string]string)["akSeed"]},
+		"rootSignPub":  acct["rootSignPub"],
+	})}); err != nil {
+		t.Fatalf("reloading the first account: %v", err)
+	}
+	err = call(map[string]any{"kind": "revocation", "mnemonic": other.(map[string]any)["mnemonic"]})
+	if err == nil {
+		t.Fatal("another account's recovery phrase rotated this one")
+	}
+	if !strings.Contains(err.Error(), "different account") {
+		t.Fatalf("refused for the wrong reason: %v", err)
+	}
+}

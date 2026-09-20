@@ -1032,14 +1032,29 @@ func handleRecoverIdentity(req Request) (any, error) {
 
 // recovery holds RK between the two halves of a recovery, and nowhere else.
 var recovery struct {
-	mu    sync.Mutex
-	root  *protocol.RootKeys
-	label string
+	mu   sync.Mutex
+	root *protocol.RootKeys
+	// AK_1's signing public half, learned from epoch 1's escrow and remembered
+	// across the second call.
+	//
+	// Needed because the GENESIS entry is AK-signed at epoch 1, so a chain
+	// cannot be verified without it — and an account that has rotated keeps
+	// its current key in a LATER escrow. So recovery opens epoch 1's escrow
+	// first whatever the account's epoch is: that one is what makes the chain
+	// checkable, and the later one is what makes the account usable.
+	epoch1Sign ed25519.PublicKey
+	label      string
 }
 
 type recoverOpenRequest struct {
 	// The escrow object, base64, as the relay serves it.
 	Escrow string `json:"escrow"`
+	// Which epoch's escrow this is. Zero means epoch 1, which is where an
+	// account that has never rotated keeps its only one — and where a caller
+	// that has not yet been told otherwise has to start, because the current
+	// epoch is not knowable until the chain has been verified, and the chain
+	// cannot be verified without an epoch key.
+	Epoch uint64 `json:"epoch"`
 	// The roster chain, base64, as the relay serves it.
 	Chain string `json:"chain"`
 }
@@ -1068,9 +1083,15 @@ func handleRecoverOpen(req Request) (any, error) {
 		return nil, codedf(ErrConfigInvalid, "the chain is base64 of the roster")
 	}
 
-	// The escrow is sealed at epoch 1, counter 1, to RK_enc. `seenCounter` 0
-	// because a recovering device has seen nothing — it is recovering.
-	esc, err := protocol.OpenEscrow(sealed, root.AccountID, 1, 1, root.Enc, 0)
+	// Sealed to RK_enc at its own epoch, counter 1 — each (name, epoch) pair
+	// is a distinct object on the relay and starts its own count.
+	// `seenCounter` 0 because a recovering device has seen nothing; it is
+	// recovering.
+	askEpoch := in.Epoch
+	if askEpoch == 0 {
+		askEpoch = 1
+	}
+	esc, err := protocol.OpenEscrow(sealed, root.AccountID, askEpoch, 1, root.Enc, 0)
 	if err != nil {
 		// A refusal here is the relay handing over an escrow for a different
 		// account, or a corrupted one. Either way the phrase is not at fault
@@ -1098,9 +1119,24 @@ func handleRecoverOpen(req Request) (any, error) {
 	if err != nil {
 		return nil, wrapCoded(ErrInternal, err, "hashing the escrowed head")
 	}
+	recovery.mu.Lock()
+	if esc.Epoch == 1 {
+		recovery.epoch1Sign = epochKeys.Sign.Public().(ed25519.PublicKey)
+	}
+	epoch1Sign := recovery.epoch1Sign
+	recovery.mu.Unlock()
+	if epoch1Sign == nil {
+		// Reached only by a caller that skipped epoch 1's escrow. Said as a
+		// sequencing error rather than as a verification failure, because the
+		// chain is fine and the caller is simply asking in the wrong order.
+		return nil, codedf(
+			ErrConfigInvalid,
+			"open epoch 1's escrow first; the genesis entry cannot be verified without its key",
+		)
+	}
 	verified, err := protocol.VerifyChain(
 		chain, root.AccountID, root.Sign.Public().(ed25519.PublicKey),
-		epochKeys.Sign.Public().(ed25519.PublicKey),
+		epoch1Sign,
 		&protocol.Pin{Seq: head.Seq, Hash: headHash},
 	)
 	if err != nil {
@@ -1109,17 +1145,28 @@ func handleRecoverOpen(req Request) (any, error) {
 
 	keys.mu.Lock()
 	device := keys.device
-	keys.epochs[verified.Epoch] = epochKeys
-	if verified.Epoch != esc.Epoch {
-		// A rotation happened after the escrow was written. The escrowed key
-		// is still needed to read anything sealed under the older epoch, so
-		// both are held — the same reason `epochs` is a map rather than one
-		// key.
-		keys.epochs[esc.Epoch] = epochKeys
-	}
+	// UNDER THE EPOCH IT BELONGS TO, and only that one. An escrow written at
+	// epoch n carries AK_n; filing it under the chain's current epoch as well
+	// would mean sealing future writes under a key the account has moved off,
+	// and every other device would refuse to open them.
+	keys.epochs[esc.Epoch] = epochKeys
 	keys.mu.Unlock()
 	if device == nil {
 		return nil, codedf(ErrNotPaired, "no recovery is in progress; start with the phrase")
+	}
+
+	// A rotation happened after this escrow was written, so the key just
+	// recovered reads history and nothing current. The caller is told which
+	// epoch's escrow to fetch next rather than being handed a key that looks
+	// usable and is not — the account's own escrow object is re-sealed at
+	// every rotation for exactly this.
+	if verified.Epoch > esc.Epoch {
+		return map[string]any{
+			"accountId": root.AccountID.String(),
+			"epoch":     esc.Epoch,
+			"needEpoch": verified.Epoch,
+			"devices":   len(verified.Devices),
+		}, nil
 	}
 
 	// This device's way back onto the roster, SIGNED BY THE ROOT KEY.
@@ -1186,7 +1233,239 @@ func handleRecoverOpen(req Request) (any, error) {
 func handleRecoverForget(Request) (any, error) {
 	recovery.mu.Lock()
 	recovery.root = nil
+	recovery.epoch1Sign = nil
 	recovery.label = ""
 	recovery.mu.Unlock()
 	return map[string]any{"ok": true}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Epoch rotation
+// ---------------------------------------------------------------------------
+//
+// TWO KINDS, AND CONFLATING THEM IS THE BUG WAITING TO HAPPEN.
+//
+//   - HYGIENE is routine. AK_n signs it, and it MAY publish a chained handoff
+//     so an offline device catches up through the chain without re-pairing.
+//   - REVOCATION is a response to compromise. RK signs it, it MUST NOT chain,
+//     and AK_{n+1} is sealed individually to each surviving device. Chaining
+//     would carry the revoked device along with everyone else, which is the
+//     exact thing the rotation exists to prevent.
+//
+// The order of the writes is normative and the CALLER owns them, because only
+// the caller can talk to the relay: re-seal every collection under n+1 first,
+// write the escrow, seal the handoffs, append the transition entry, and only
+// then delete the old epoch's objects. Any other order has a window in which a
+// device reading the chain finds an epoch whose objects do not exist yet. A
+// crash between any two steps leaves the account usable at epoch n, which is
+// the only acceptable failure mode.
+
+type rotateEpochRequest struct {
+	// "hygiene" or "revocation". Spelled out rather than a boolean: `rotate(true)`
+	// at a call site says nothing about which of the two it is.
+	Kind string `json:"kind"`
+	// The roster as the relay serves it, base64. Verified here before anything
+	// is signed — a rotation built on a chain this device has not checked is a
+	// rotation onto whatever head the relay preferred.
+	Chain string `json:"chain"`
+	// Hex, the keys this device pinned at enrolment. Never from the relay.
+	RootSignPub string `json:"rootSignPub"`
+	Epoch1Sign  string `json:"epoch1Sign"`
+	// The twelve words. REQUIRED for a revocation and refused for a hygiene
+	// rotation: RK is what signs the escape from a compromised epoch key, and
+	// asking for it when it is not needed trains people to type it.
+	Mnemonic string `json:"mnemonic"`
+}
+
+func handleRotateEpoch(req Request) (any, error) {
+	var in rotateEpochRequest
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+
+	var kind protocol.RotationKind
+	switch in.Kind {
+	case "hygiene":
+		kind = protocol.Hygiene
+	case "revocation":
+		kind = protocol.Revocation
+	default:
+		return nil, codedf(ErrConfigInvalid, `kind is "hygiene" or "revocation"`)
+	}
+
+	chain, err := base64.StdEncoding.DecodeString(in.Chain)
+	if err != nil || len(chain) == 0 {
+		return nil, codedf(ErrConfigInvalid, "the chain is base64 of the roster")
+	}
+	rootPub, err := hex.DecodeString(in.RootSignPub)
+	if err != nil || len(rootPub) != ed25519.PublicKeySize {
+		return nil, codedf(ErrConfigInvalid, "rootSignPub is 32 bytes of hex")
+	}
+	epoch1, err := hex.DecodeString(in.Epoch1Sign)
+	if err != nil || len(epoch1) != ed25519.PublicKeySize {
+		return nil, codedf(ErrConfigInvalid, "epoch1Sign is 32 bytes of hex")
+	}
+
+	keys.mu.RLock()
+	acct := keys.account
+	device := keys.device
+	loaded := keys.loaded
+	held := make(map[uint64]*protocol.EpochKeys, len(keys.epochs))
+	for k, v := range keys.epochs {
+		held[k] = v
+	}
+	keys.mu.RUnlock()
+	if !loaded || device == nil {
+		return nil, codedf(ErrNotPaired, "no account is loaded")
+	}
+
+	verified, err := protocol.VerifyChain(
+		chain, acct, ed25519.PublicKey(rootPub), ed25519.PublicKey(epoch1), nil,
+	)
+	if err != nil {
+		return nil, wrapCoded(ErrRosterInvalid, err, "verifying the roster before rotating it")
+	}
+	current, haveCurrent := held[verified.Epoch]
+	if !haveCurrent {
+		return nil, codedf(
+			ErrNotPaired,
+			"this device does not hold epoch %d, so it cannot rotate away from it",
+			verified.Epoch,
+		)
+	}
+
+	// The head entry, decoded from the chain rather than taken on trust: the
+	// transition chains to it, and `PrepareRotation` hashes it itself.
+	prev, err := lastEntry(chain)
+	if err != nil {
+		return nil, wrapCoded(ErrRosterInvalid, err, "reading the chain head")
+	}
+
+	var signer ed25519.PrivateKey
+	var root *protocol.RootKeys
+	if kind == protocol.Revocation {
+		if strings.TrimSpace(in.Mnemonic) == "" {
+			return nil, codedf(
+				ErrConfigInvalid,
+				"a re-key needs the recovery phrase: the compromised epoch key must not authorise the escape from itself",
+			)
+		}
+		phrase := strings.Join(strings.Fields(strings.ToLower(in.Mnemonic)), " ")
+		root, err = protocol.RootFromMnemonic(phrase)
+		if err != nil {
+			return nil, codedf(ErrConfigInvalid, "that is not a valid recovery phrase")
+		}
+		if root.AccountID != acct {
+			// A phrase for a different account. Named as such rather than
+			// reported as a signature failure, which would send somebody to
+			// retype a card that is correct for something else.
+			return nil, codedf(ErrConfigInvalid, "that recovery phrase is for a different account")
+		}
+		signer = root.Sign
+	} else {
+		if strings.TrimSpace(in.Mnemonic) != "" {
+			// Refused rather than ignored. Accepting it here would teach
+			// people to type the phrase for a routine operation, and a phrase
+			// typed often is a phrase that ends up somewhere.
+			return nil, codedf(
+				ErrConfigInvalid,
+				"a routine rotation does not need the recovery phrase and will not take one",
+			)
+		}
+		signer = current.Sign
+	}
+
+	rot, err := protocol.PrepareRotation(kind, acct, verified, *prev, signer, ed25519.PublicKey(rootPub))
+	if err != nil {
+		return nil, wrapCoded(ErrConfigInvalid, err, "preparing the rotation")
+	}
+
+	// One handoff per SURVIVING device, sealed to that device and bound to the
+	// previous epoch key — so a party that can read the roster's public
+	// encryption keys, and is not already a member holding AK_n, cannot mint
+	// one.
+	headWire, err := prev.Wire()
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "encoding the chain head")
+	}
+	handoffs := map[string]string{}
+	for _, d := range verified.Devices {
+		if err := rot.SealTo(d, acct, 1, rootPub, headWire, current.AK); err != nil {
+			return nil, wrapCoded(ErrInternal, err, "sealing the new epoch key to a device")
+		}
+	}
+	for fp, obj := range rot.Handoffs {
+		handoffs[fp] = base64.StdEncoding.EncodeToString(obj)
+	}
+
+	out := map[string]any{
+		"epoch":        rot.NewKeys.Epoch,
+		"epochSignPub": hex.EncodeToString(rot.NewKeys.Sign.Public().(ed25519.PublicKey)),
+		"handoffs":     handoffs,
+	}
+
+	// The chained handoff, hygiene only — and refused by the reader as well as
+	// the writer, because a server that kept one from a hygiene rotation and
+	// served it against a later revocation would hand the revoked device
+	// exactly what the revocation took away.
+	if kind == protocol.Hygiene {
+		chained, err := rot.ChainedHandoff(acct, 1, current, rootPub, headWire)
+		if err != nil {
+			return nil, wrapCoded(ErrInternal, err, "sealing the chained handoff")
+		}
+		out["chained"] = base64.StdEncoding.EncodeToString(chained)
+	}
+
+	// The escrow, re-sealed at the new epoch. WITHOUT THIS A ROTATION BREAKS
+	// RECOVERY: the phrase would open epoch 1's escrow and find a key the
+	// account has moved off, and there would be no way back to the current
+	// one. Only a revocation can write it, because only then is RK in hand —
+	// which is the honest reason a hygiene rotation leaves the old escrow
+	// standing and a recovering device is told to fetch the newest it can.
+	if root != nil {
+		escrow, err := protocol.SealEscrow(protocol.Escrow{
+			AccountID: acct,
+			Epoch:     rot.NewKeys.Epoch,
+			Counter:   1,
+			AKSeed:    rot.NewKeys.AK,
+			HeadEntry: headWire,
+		}, root.Enc.PublicKey())
+		if err != nil {
+			return nil, wrapCoded(ErrInternal, err, "re-sealing the escrow")
+		}
+		out["escrow"] = base64.StdEncoding.EncodeToString(escrow)
+	}
+
+	// HELD, so the caller can re-seal every collection under it before the
+	// transition entry is appended — which is the order the whole thing
+	// depends on. The entry is returned to be appended LAST.
+	keys.mu.Lock()
+	keys.epochs[rot.NewKeys.Epoch] = rot.NewKeys
+	keys.mu.Unlock()
+
+	wire, err := rot.Entry.Wire()
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "encoding the transition")
+	}
+	out["seq"] = rot.Entry.Seq
+	out["entry"] = base64.StdEncoding.EncodeToString(wire)
+	return out, nil
+}
+
+// lastEntry returns the final entry of a chain, decoded.
+func lastEntry(chain []byte) (*protocol.Entry, error) {
+	var last protocol.Entry
+	rest := chain
+	found := false
+	for len(rest) > 0 {
+		e, next, err := protocol.DecodeEntry(rest)
+		if err != nil {
+			return nil, err
+		}
+		last, rest, found = e, next, true
+	}
+	if !found {
+		return nil, errors.New("the chain is empty")
+	}
+	return &last, nil
 }

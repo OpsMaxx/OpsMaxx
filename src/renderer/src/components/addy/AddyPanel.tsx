@@ -190,10 +190,95 @@ export function AddyPanel(): React.JSX.Element {
       {/* Offered only once there is somewhere to send to. On a one-device
           account the shortcuts would be taken from every application on the
           machine in exchange for nothing at all. */}
+      {status?.enrolled && <RekeyRow />}
       {status?.enrolled && <ClipboardShortcuts />}
 
       <AddyProblems status={status} />
     </PanelShell>
+  )
+}
+
+/**
+ * Changing the key the account's data is sealed under.
+ *
+ * THE OTHER HALF OF REMOVING A DEVICE, and the panel says so rather than
+ * leaving somebody to work it out. Taking a machine off the roster stops it
+ * receiving anything new; it does NOT take back the key it already has, so a
+ * laptop that was stolen rather than retired can still read everything it
+ * captured before it went. A re-key is what changes that.
+ *
+ * It asks for the recovery phrase, and that is not friction for its own sake:
+ * the key being replaced is the one the removed device is holding, so signing
+ * the replacement with it would let that device follow the rotation straight
+ * through. The root key is the only thing it does not have.
+ */
+function RekeyRow(): React.JSX.Element {
+  const [phrase, setPhrase] = useState('')
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const run = (): void => {
+    setBusy(true)
+    void window
+      .opsmaxx!.addy.rotate('revocation', phrase.trim())
+      .then(
+        (r) => {
+          toast(`Re-keyed: epoch ${r.epoch}, ${r.resealed} collections re-sealed`, 'ok')
+          setPhrase('')
+          setOpen(false)
+        },
+        (err: unknown) => toast(err instanceof Error ? err.message : String(err), 'error')
+      )
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <div className="setting-row">
+      <div className="s-info">
+        <div className="s-title">Change the account key</div>
+        <div className="s-desc">
+          Removing a device stops it receiving anything new. It does not take back the key that
+          device already has, so a machine that was <strong>stolen</strong> rather than retired can
+          still read everything it had. This replaces that key and re-seals every collection under
+          the new one.
+          {open && (
+            <>
+              <br />
+              It needs your recovery phrase. The key being replaced is the one the removed device is
+              holding, so it cannot be the one that signs the replacement.
+            </>
+          )}
+        </div>
+        {open && (
+          <textarea
+            className="addy-phrase-input"
+            value={phrase}
+            onChange={(e) => setPhrase(e.target.value)}
+            spellCheck={false}
+            rows={2}
+            placeholder="The twelve words, in order"
+          />
+        )}
+      </div>
+      {open ? (
+        <span className="addy-revoke-confirm">
+          <button className="btn ghost size-24" disabled={busy} onClick={() => setOpen(false)}>
+            Cancel
+          </button>
+          <button
+            className="btn size-24"
+            disabled={busy || phrase.trim().split(/\s+/).length !== 12}
+            onClick={run}
+          >
+            {busy ? <Loader2 size={13} className="spin" /> : null} Re-key the account
+          </button>
+        </span>
+      ) : (
+        <button className="btn ghost size-24" onClick={() => setOpen(true)}>
+          Change it
+        </button>
+      )}
+    </div>
   )
 }
 

@@ -16,7 +16,13 @@ import {
   resolveConflict,
   type ConflictDeps
 } from './conflicts'
-import type { AddyStatusSnapshot, ConflictCopy, SyncedCollection } from '../../../shared/addy'
+import {
+  SYNCED_COLLECTIONS,
+  type AddyStatusSnapshot,
+  type ConflictCopy,
+  type SyncedCollection
+} from '../../../shared/addy'
+import { app } from 'electron'
 import { forgetSyncState, syncOnce, type SyncResult } from './sync'
 import { addyTarget } from './target'
 import type { BackupTarget } from '../backupTargets'
@@ -1047,6 +1053,136 @@ class AddySession {
       // The panel keeps the last good answer and its own Refresh still works.
       () => undefined
     )
+  }
+
+  /**
+   * Move the account to a new epoch key.
+   *
+   * TWO KINDS, AND THEY ARE NOT DEGREES OF THE SAME THING.
+   *
+   *  - `hygiene` is routine. The current epoch key signs it, and it publishes
+   *    a chained handoff so a device that was asleep catches up through the
+   *    chain without re-pairing.
+   *  - `revocation` is a response to compromise, and it needs the recovery
+   *    phrase. The compromised epoch key must not authorise the escape from
+   *    itself — a device about to be removed is holding it — so the root key
+   *    signs, nothing chains, and the new key is sealed individually to each
+   *    surviving device.
+   *
+   * THE ORDER OF THE WRITES IS NORMATIVE and it is owned here, because only
+   * this side can talk to the relay: re-seal every collection under n+1 first,
+   * write the escrow, publish the handoffs, append the transition entry, and
+   * only then let the old objects go. Any other order leaves a window in which
+   * a device reading the chain finds an epoch whose objects do not exist yet.
+   *
+   * A crash between any two steps leaves the account usable at epoch n, which
+   * is the only acceptable failure mode — and is why the transition entry is
+   * last. Until it is appended, nothing has moved.
+   */
+  async rotateEpoch(
+    kind: 'hygiene' | 'revocation',
+    mnemonic?: string
+  ): Promise<{ epoch: number; resealed: number }> {
+    const addyd = this.addyd
+    const relay = this.relay
+    const account = this.account
+    if (!addyd || !relay || !account) {
+      throw new AddyError('not-paired', 'this device is not attached to an addy account')
+    }
+
+    const chain = await relay.roster()
+    const prepared = await addyd.send<{
+      epoch: number
+      epochSignPub: string
+      handoffs: Record<string, string>
+      chained?: string
+      escrow?: string
+      seq: number
+      entry: string
+    }>('rotateEpoch', {
+      kind,
+      chain,
+      rootSignPub: account.rootSignPub ?? '',
+      epoch1Sign: account.epoch1SignPub ?? '',
+      ...(mnemonic ? { mnemonic } : {})
+    })
+
+    // 1. EVERY COLLECTION, UNDER THE NEW EPOCH, BEFORE ANYTHING ELSE.
+    //
+    // Read under the old key and written under the new one, object by object.
+    // A collection missed here is one that becomes unreadable the moment the
+    // transition lands, which is the permanent data loss this ordering exists
+    // to prevent — so a failure stops the whole rotation rather than carrying
+    // on with a partial one.
+    let resealed = 0
+    for (const name of SYNCED_COLLECTIONS) {
+      const existing = await relay.getObject(name, account.epoch)
+      if (!existing) continue
+      const opened = await addyd.send<{ payload: string; counter: number }>('open', {
+        collection: name,
+        epoch: account.epoch,
+        sealed: existing.body.toString('base64'),
+        knownSchema: 1,
+        seenCounter: 0
+      })
+      const sealed = await addyd.send<{ sealed: string }>('seal', {
+        collection: name,
+        epoch: prepared.epoch,
+        schema: 1,
+        writerVersion: `opsmaxx/${app.getVersion?.() ?? '0'}`,
+        counter: opened.counter,
+        payload: opened.payload
+      })
+      await relay.putObject(
+        name,
+        prepared.epoch,
+        opened.counter,
+        Buffer.from(sealed.sealed, 'base64')
+      )
+      resealed++
+    }
+
+    // 2. The escrow, so the recovery phrase still opens the CURRENT key. A
+    //    re-key that skipped this would leave the card opening an epoch the
+    //    account had moved off, which is a recovery that appears to work and
+    //    hands back nothing usable.
+    if (prepared.escrow) {
+      await relay.putObject('escrow', prepared.epoch, 1, Buffer.from(prepared.escrow, 'base64'))
+    }
+
+    // 3. The handoffs: one per surviving device, plus the chained one for a
+    //    hygiene rotation. Named by the recipient's key fingerprint, so a
+    //    device fetches only its own.
+    for (const [fingerprint, sealed] of Object.entries(prepared.handoffs)) {
+      await relay.putObject(
+        `handoff:${fingerprint}`,
+        prepared.epoch,
+        1,
+        Buffer.from(sealed, 'base64')
+      )
+    }
+    if (prepared.chained) {
+      await relay.putObject('handoff', prepared.epoch, 1, Buffer.from(prepared.chained, 'base64'))
+    }
+
+    // 4. And only now the transition. Everything the new epoch needs is
+    //    already there, so the first device to read this entry finds an epoch
+    //    that works.
+    await relay.appendRoster(prepared.seq, prepared.entry)
+
+    this.account = {
+      ...account,
+      epoch: prepared.epoch,
+      ...(prepared.epoch === 1 ? { epoch1SignPub: prepared.epochSignPub } : {})
+    }
+    await this.refreshRoster()
+    // The sync state pins per-collection ETags and counters against the old
+    // epoch's objects, none of which apply now. Forgetting it makes the next
+    // pass reconcile from scratch, which is exactly what should happen.
+    forgetSyncState()
+    void this.syncNow().catch(() => undefined)
+
+    return { epoch: prepared.epoch, resealed }
   }
 
   /**

@@ -321,3 +321,58 @@ describe('an account can be recovered from the phrase', () => {
     expect(SETUP).toMatch(/Check the device list/)
   })
 })
+
+/**
+ * Re-keying: the other half of removing a device.
+ *
+ * Taking a machine off the roster stops it receiving anything new. It does NOT
+ * take back the epoch key that machine is already holding, so a laptop that
+ * was stolen rather than retired can still read everything it captured. The
+ * re-key is what changes that, and without it the revocation UI would be
+ * promising something it does not do.
+ */
+describe('the account key can be changed', () => {
+  it('the sidecar prepares both kinds and keeps them apart', () => {
+    const CRYPTO = readFileSync(join(ROOT, 'sidecar/addyd/crypto.go'), 'utf8')
+    expect(CRYPTO).toMatch(/func handleRotateEpoch/)
+    // A revocation rotation must NOT publish a chained handoff: it is sealed
+    // under the old key, which is exactly what the removed device holds.
+    expect(CRYPTO).toMatch(/if kind == protocol\.Hygiene \{/)
+    // And it must not be signed by that key either.
+    expect(CRYPTO).toMatch(/must not authorise the escape from itself/)
+  })
+
+  it('writes in the order the protocol requires', () => {
+    // Collections re-sealed first, escrow second, handoffs third, the
+    // transition LAST. Any other order leaves a window in which a device
+    // reading the chain finds an epoch whose objects do not exist yet — and
+    // the transition being last is what makes a crash leave the account
+    // usable at the old epoch rather than at neither.
+    const rotate = SESSION.slice(SESSION.indexOf('async rotateEpoch('))
+    const body = rotate.slice(0, rotate.indexOf('\n  /**', 10))
+    const reseal = body.indexOf('for (const name of SYNCED_COLLECTIONS)')
+    const escrow = body.indexOf("putObject('escrow'")
+    const handoff = body.indexOf('handoff:')
+    const transition = body.indexOf('appendRoster(')
+    expect(reseal, 'collections are not re-sealed').toBeGreaterThan(-1)
+    expect(escrow, 'the escrow is not re-sealed').toBeGreaterThan(reseal)
+    expect(handoff, 'no handoffs are published').toBeGreaterThan(escrow)
+    expect(transition, 'the transition is not appended last').toBeGreaterThan(handoff)
+  })
+
+  it('re-seals the escrow, or recovery silently stops working', () => {
+    // The card would go on opening an epoch the account has moved off: a
+    // recovery that appears to succeed and hands back a key that reads
+    // nothing current.
+    expect(SESSION).toMatch(/prepared\.escrow/)
+    const CRYPTO = readFileSync(join(ROOT, 'sidecar/addyd/crypto.go'), 'utf8')
+    expect(CRYPTO).toMatch(/needEpoch/)
+  })
+
+  it('and every layer above it is connected', () => {
+    expect(MAIN).toMatch(/ipcMain\.handle\('addy:rotate'/)
+    expect(PRELOAD).toMatch(/invoke\('addy:rotate'/)
+    const PANEL = read('src/renderer/src/components/addy/AddyPanel.tsx')
+    expect(PANEL).toMatch(/addy\.rotate\('revocation'/)
+  })
+})
