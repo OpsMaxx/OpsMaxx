@@ -98,6 +98,18 @@ export function envSecretRefsForServer(serverId: string): EnvSecretRef[] {
   return load().filter((r) => r.serverId === serverId)
 }
 
+/**
+ * The file was replaced underneath this process — sync carries it.
+ *
+ * `null` rather than `[]`: the two mean different things to `load()`, and the
+ * whole point is that the next read comes off disk. Left cached, a stale copy
+ * is not only served but WRITTEN BACK, because `registerEnvSecret` saves the
+ * cache plus one entry.
+ */
+export function envSecretsExternalChange(): void {
+  cache = null
+}
+
 /** Test seam. */
 export function resetEnvSecretsForTests(): void {
   cache = []

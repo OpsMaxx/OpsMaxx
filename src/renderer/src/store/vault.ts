@@ -326,10 +326,21 @@ export function startVaultLockWatch(): () => void {
     clear('locked')
     toast('Vault locked — enter your master password to open it again', 'info')
   })
+  // Same thing to the data, a different thing to say about it: nothing timed
+  // out and nothing is wrong with this machine. Sync brought another of the
+  // user's devices' vaults, and the password that opens it is that device's.
+  const offReplaced = bridgeOn('vault.onReplaced', window.opsmaxx?.vault?.onReplaced, () => {
+    clear('locked')
+    toast(
+      'Vault replaced by sync — unlock it with the master password from your other device',
+      'info'
+    )
+  })
 
   return () => {
     offSecured()
     offLocked()
+    offReplaced()
     watching = false
   }
 }

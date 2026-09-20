@@ -167,11 +167,14 @@ describe('a machine with nothing', () => {
   it('takes the account rather than pushing its own emptiness over it', async () => {
     const relay = fakeRelay()
     seeded(relay, 'servers', [{ id: 's1', name: 'web-01' }])
+    // `status: 'offline'` on every assertion below is the servers source, not
+    // the engine: a connection belongs to the machine that holds it, so an
+    // arriving server lands disconnected. See collections.ts's serversSource.
 
     const r = await syncOnce(deps(relay))
 
     expect(r.outcomes.servers).toBe('adopted')
-    expect(readBlob().servers).toEqual([{ id: 's1', name: 'web-01' }])
+    expect(readBlob().servers).toEqual([{ id: 's1', name: 'web-01', status: 'offline' }])
   })
 
   it('pushes nothing at all when it has nothing', async () => {
@@ -273,7 +276,7 @@ describe('a machine with data and an empty account', () => {
 
     expect(r.outcomes.servers).toBe('adopted')
     expect(relay.conflicts).toEqual([])
-    expect(readBlob().servers).toEqual([{ id: 'the-account' }])
+    expect(readBlob().servers).toEqual([{ id: 'the-account', status: 'offline' }])
   })
 })
 
@@ -288,7 +291,7 @@ describe('both sides have a copy and this device has never synced', () => {
     expect(r.outcomes.servers).toBe('conflicted')
     // The account wins, because it is the copy the rest of the devices agree
     // on — one story rather than two.
-    expect(readBlob().servers).toEqual([{ id: 'from-the-account' }])
+    expect(readBlob().servers).toEqual([{ id: 'from-the-account', status: 'offline' }])
     // And nothing was destroyed. These bytes existed nowhere else.
     expect(relay.conflicts.map((c) => c.name)).toContain('servers')
   })
@@ -338,7 +341,10 @@ describe('once the two sides agree', () => {
     const r = await syncOnce(deps(relay))
 
     expect(r.outcomes.servers).toBe('pulled')
-    expect(readBlob().servers).toEqual([{ id: 's1' }, { id: 'from-elsewhere' }])
+    expect(readBlob().servers).toEqual([
+      { id: 's1', status: 'offline' },
+      { id: 'from-elsewhere', status: 'offline' }
+    ])
   })
 
   it('keeps both when both changed', async () => {

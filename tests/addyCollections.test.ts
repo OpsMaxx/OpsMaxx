@@ -77,8 +77,13 @@ describe('the collection registry', () => {
     // the renderer means the next keystroke in that window overwrites the
     // inbound copy — a sync that looks like it silently did nothing.
     expect(SOURCES.servers!.inRendererStore).toBe(true)
-    // And the ones that are not: these are read from their own files by the
-    // code that uses them, so there is no in-memory copy to go stale.
+    // And the ones that are not. This flag is about the RENDERER only, and
+    // reading it as "so nothing holds these in memory" is what let a pulled
+    // vault sit on disk unseen for a whole session: `services/vault.ts` reads
+    // its file once, at unlock, and `envSecretRegistry` caches its own. Both
+    // are told separately, from the `onApplied` handler in main — see
+    // `vaultExternalChange` and `envSecretsExternalChange`. `knownHosts` is
+    // the only one of the three that really does re-read every call.
     expect(SOURCES.vault!.inRendererStore).toBeFalsy()
     expect(SOURCES.knownHosts!.inRendererStore).toBeFalsy()
   })

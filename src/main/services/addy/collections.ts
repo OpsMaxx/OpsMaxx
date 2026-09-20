@@ -151,6 +151,54 @@ function wholeFile(name: string): CollectionSource {
   }
 }
 
+/**
+ * `servers`, arriving disconnected.
+ *
+ * `Server.status` is live state about a socket THIS machine holds. It sits on
+ * the server record because that is where the sidebar draws it from, and the
+ * record is saved into `opsmaxx-data.json` — which is how a connection ended
+ * up inside a synced collection without anyone deciding it should be.
+ *
+ * A second device imported the estate and every indicator was green while
+ * nothing was connected and monitoring was empty. Those were the first
+ * device's sockets, drawn on the second device's screen, and a status
+ * indicator that is green for a machine you have never dialled is worse than
+ * none: the one widget whose whole job is "is this up" answering confidently
+ * and wrongly.
+ *
+ * `offline` rather than absent, because the type has four states and none of
+ * them means "no opinion" — and because it is the true one for a machine this
+ * process has no connection to, which is what it has a moment after a sync.
+ *
+ * Only the WRITE side. Stripping the field on `read()` as well would stop a
+ * connect and a disconnect churning the collection, but it would also make
+ * this device's payload permanently unequal to the one every device on an
+ * older build pushes — and the engine compares bytes, so that is a conflict
+ * copy per pass for as long as the fleet is mixed.
+ * ponytail: status still travels outbound; strip on read too once no shipped
+ * build sends it.
+ */
+function serversSource(): CollectionSource {
+  const inner = blobKey('servers')
+  return {
+    inRendererStore: true,
+    read: () => inner.read(),
+    write(body: Buffer): void {
+      const value: unknown = JSON.parse(body.toString('utf8'))
+      // Not an array is not this function's problem to fix: `blobKey.write`
+      // parses it too and the file it lands in is the one every panel reads,
+      // so a shape nobody expects should arrive intact and be found, not be
+      // quietly reshaped here.
+      if (!Array.isArray(value)) {
+        inner.write(body)
+        return
+      }
+      const landed = value.map((sv) => ({ ...(sv as Record<string, unknown>), status: 'offline' }))
+      inner.write(Buffer.from(JSON.stringify(landed), 'utf8'))
+    }
+  }
+}
+
 export const SOURCES: Partial<Record<SyncedCollection, CollectionSource>> = {
   apiCollections: blobKey('apiCollections'),
   apiWorkspace: blobKey('apiWorkspace'),
@@ -159,7 +207,7 @@ export const SOURCES: Partial<Record<SyncedCollection, CollectionSource>> = {
   folders: blobKey('folders'),
   httpChecks: blobKey('httpChecks'),
   monitorGroups: blobKey('monitorGroups'),
-  servers: blobKey('servers'),
+  servers: serversSource(),
   tunnels: blobKey('tunnels'),
   vpns: blobKey('vpns'),
   workspaces: blobKey('workspaces'),

@@ -201,7 +201,8 @@ import {
   vaultSave,
   vaultChangePassword,
   vaultDestroy,
-  vaultDispose
+  vaultDispose,
+  vaultExternalChange
 } from './services/vault'
 import type { VaultEntry, VaultResult } from '../shared/vault'
 import { VAULT_LOCKED } from '../shared/vault'
@@ -375,7 +376,7 @@ import {
   resolveVaultField,
   type SecretBlob
 } from './services/credentialResolver'
-import { registerEnvSecret } from './services/envSecretRegistry'
+import { registerEnvSecret, envSecretsExternalChange } from './services/envSecretRegistry'
 import {
   CredProxy,
   CRED_PROXY_AUDIT_FILE,
@@ -4775,6 +4776,32 @@ ipcMain.handle('addy:resumeSync', () => addySession.resumeSync())
 addySession.onApplied((collections) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('data:external-change', collections)
+  }
+  /**
+   * AND THE THREE THAT ARE NOT THE RENDERER'S.
+   *
+   * `vault`, `env` and `knownHosts` live in their own files, which was read as
+   * "so there is no in-memory copy to go stale" — true of `knownHosts`, which
+   * reads its file on every call, and false of the other two.
+   *
+   * The vault is the one that cost something. It reads its file once, at
+   * unlock, and serves the decrypted copy for the rest of the session: a
+   * pulled vault was invisible until the app restarted, so a second device
+   * imported a whole estate it could log in to nothing on and whose monitoring
+   * stayed empty, because the sampler skips a target whose credential it
+   * cannot resolve. And the next vault save would have sealed the copy it was
+   * still holding back over the file, for the following pass to push as the
+   * account's winner.
+   */
+  if (collections.includes('env')) envSecretsExternalChange()
+  if (collections.includes('vault')) {
+    const { relocked } = vaultExternalChange()
+    if (relocked) {
+      // It unwraps a key that no longer opens this file, so a biometric unlock
+      // would now fail in a way that looks like the sensor's fault.
+      forgetSessionKey()
+      notifyRenderer('vault:replaced')
+    }
   }
 })
 // And pushed on change, so the panel does not poll a sidecar on a timer to

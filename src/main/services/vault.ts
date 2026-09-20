@@ -350,6 +350,58 @@ export function vaultLock(): VaultResult {
 }
 
 /**
+ * The file was replaced underneath this process.
+ *
+ * ONLY SYNC DOES THIS. `opsmaxx-vault.json` is carried as an opaque collection
+ * — see services/addy/collections.ts — so another device's copy can land on
+ * disk while this module is holding a key, a salt and a decrypted `cache` for
+ * the copy that was there a moment ago. Every other writer of this file is in
+ * here and goes through `writeEncrypted`.
+ *
+ * Unannounced, that was two defects rather than one:
+ *
+ *   The read. `vaultList` and `vaultEntriesForResolve` both serve `cache`, so
+ *   the pulled credentials were invisible for the rest of the session. The
+ *   second device imported an estate it could log in to nothing on, and its
+ *   monitoring stayed empty because the sampler skips a target whose
+ *   credential it cannot resolve.
+ *
+ *   The write, which is worse. `vaultSave` re-encrypts `cache` under the key
+ *   and salt still held and replaces the file — so ONE edit after a pull put
+ *   the old vault back over the new one, and the next sync pass saw a local
+ *   change with no remote one and pushed it as the account's winner. Every
+ *   other device's credentials, gone, from a save.
+ *
+ * The key is tried against the arriving copy first, because two devices that
+ * share a vault's lineage share its salt: same file, or the same master
+ * password over a copy that descends from the same `vaultCreate`, and this is
+ * a content change and nothing more. A copy it cannot open is a different
+ * vault, and there is no honest state for this process but locked.
+ */
+export function vaultExternalChange(): { relocked: boolean } {
+  // Nothing held, nothing to invalidate. `cache` is null whenever `key` is,
+  // and the next unlock reads the file — which is the copy that just arrived.
+  if (!key) return { relocked: false }
+
+  const file = readFile()
+  if (file) {
+    try {
+      const entries = decrypt(file, key)
+      cache = entries
+      // The salt travels inside the file, and a save has to seal against the
+      // one the file actually carries or the next reader is locked out of a
+      // vault whose password is correct.
+      salt = Buffer.from(file.salt, 'base64')
+      return { relocked: false }
+    } catch {
+      /* not a copy this key opens — fall through */
+    }
+  }
+  vaultLock()
+  return { relocked: true }
+}
+
+/**
  * The human read, over IPC. Refuses unless the vault is fully open.
  *
  * The guard comes BEFORE the touch. It used to come after, which armed an idle

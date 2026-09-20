@@ -1997,6 +1997,21 @@ const api = {
       ipcRenderer.on('vault:secured', h)
       return () => ipcRenderer.removeListener('vault:secured', h)
     },
+    /**
+     * Sync replaced the vault file with a copy this device's key cannot open.
+     *
+     * A third channel rather than a flag on `vault:auto-locked`, for the same
+     * reason `onSecured` is a channel rather than a flag on it: the renderer
+     * does the same thing to the data and has to say something different about
+     * it. "Locked after inactivity" sends a user looking for a timeout they
+     * did not set; what happened is that another of their devices' vaults
+     * arrived and it opens with THAT device's master password.
+     */
+    onReplaced: (cb: () => void): (() => void) => {
+      const h = (): void => cb()
+      ipcRenderer.on('vault:replaced', h)
+      return () => ipcRenderer.removeListener('vault:replaced', h)
+    },
     bioDisable: (): Promise<VaultResult> => ipcRenderer.invoke('vault:bio-disable'),
     bioUnlock: (): Promise<VaultResult> => ipcRenderer.invoke('vault:bio-unlock')
   },
