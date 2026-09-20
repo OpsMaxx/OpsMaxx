@@ -259,3 +259,65 @@ describe('a device can be taken off the account', () => {
     expect(PANEL).toMatch(/!d\.self && d\.revoked !== true/)
   })
 })
+
+/**
+ * Recovery: the path nobody takes until everything has gone wrong.
+ *
+ * There is no second chance to discover it does not work — by the time anyone
+ * needs it, every device is already gone. So it is wired before anyone needs
+ * it, and the wiring is checked here for the same reason the rest of this file
+ * exists: a `recoverFromPhrase` nobody can reach is exactly as useful as not
+ * having written it.
+ */
+describe('an account can be recovered from the phrase', () => {
+  it('the sidecar has both halves and can forget the root key', () => {
+    const CRYPTO = readFileSync(join(ROOT, 'sidecar/addyd/crypto.go'), 'utf8')
+    for (const h of ['handleRecoverIdentity', 'handleRecoverOpen', 'handleRecoverForget']) {
+      expect(CRYPTO, `${h} is missing`).toMatch(new RegExp(`func ${h}`))
+    }
+    const MAINGO = readFileSync(join(ROOT, 'sidecar/addyd/main.go'), 'utf8')
+    expect(MAINGO).toMatch(/"recoverIdentity":/)
+    expect(MAINGO).toMatch(/"recoverOpen":/)
+  })
+
+  it('writes a ROOT-signed entry, not an epoch-signed one', () => {
+    // The distinction a verifier uses to tell a recovery from an ordinary
+    // pairing, and what `mnemonicAdded` surfaces to somebody reviewing their
+    // devices. An AK-signed entry would be indistinguishable from one written
+    // by any device that already held the epoch key — including a revoked one.
+    const CRYPTO = readFileSync(join(ROOT, 'sidecar/addyd/crypto.go'), 'utf8')
+    expect(CRYPTO).toMatch(/Signer:\s+protocol\.SignerRK/)
+  })
+
+  it('verifies the roster against the escrow rather than the relay', () => {
+    // The escrow carries the head entry as the account committed it, so the
+    // chain is checked against a pin the relay never saw. A recovering device
+    // has nothing else to compare against, which is exactly when serving it a
+    // truncated roster would be most worth trying.
+    const CRYPTO = readFileSync(join(ROOT, 'sidecar/addyd/crypto.go'), 'utf8')
+    expect(CRYPTO).toMatch(/protocol\.Pin\{Seq: head\.Seq, Hash: headHash\}/)
+  })
+
+  it('and every layer above it is connected', () => {
+    expect(SESSION).toMatch(/async recoverFromPhrase\(/)
+    expect(MAIN).toMatch(/ipcMain\.handle\(\s*'addy:recover'/)
+    expect(PRELOAD).toMatch(/invoke\('addy:recover'/)
+    const SETUP = read('src/renderer/src/components/addy/AddySetup.tsx')
+    expect(SETUP).toMatch(/addy\.recover\(/)
+    expect(SETUP).toMatch(/I have a recovery phrase/)
+  })
+
+  it('drops the root key whether it worked or not', () => {
+    // RK opens the escrow and authorises an epoch change: it is the whole
+    // estate, and a process still holding it after recovery has no use for it.
+    expect(SESSION).toMatch(/recoverForget/)
+  })
+
+  it('ends on a device review rather than on a success message', () => {
+    // Anyone who read the card can do what was just done. The moment a person
+    // is most able to notice a device they do not recognise is the moment they
+    // have just been handed the list.
+    const SETUP = read('src/renderer/src/components/addy/AddySetup.tsx')
+    expect(SETUP).toMatch(/Check the device list/)
+  })
+})

@@ -943,3 +943,250 @@ func handleRevokeDevice(req Request) (any, error) {
 		"entry": base64.StdEncoding.EncodeToString(wire),
 	}, nil
 }
+
+// ---------------------------------------------------------------------------
+// Recovery, from the twelve words and nothing else
+// ---------------------------------------------------------------------------
+//
+// TWO CALLS, AND THE SPLIT IS FORCED BY THE ORDER THINGS ARE KNOWABLE IN. The
+// escrow blob lives on the relay under the account's own name, and reading it
+// needs a session — so the parent has to know the account id, and hold a
+// device key it can sign a login with, BEFORE it can fetch the thing that
+// tells it anything else. `recoverIdentity` answers exactly that much;
+// `recoverOpen` does the rest once the bytes are in hand.
+//
+// What recovery is NOT: a second way in that skips the roster. The escrow
+// carries the head entry as the account committed it, so the chain fetched
+// from the relay is verified against a pin the relay never saw — a relay that
+// served a truncated or forged chain to a recovering device is caught here,
+// which is the moment it would be most worth trying.
+
+type recoverIdentityRequest struct {
+	// The twelve words. Whitespace is the user's problem to get wrong and
+	// ours to forgive, so it is normalised before validation.
+	Mnemonic string `json:"mnemonic"`
+	// What this machine will be called on the roster it is about to rejoin.
+	Label string `json:"label"`
+}
+
+// handleRecoverIdentity turns the phrase into an account id and a fresh device.
+//
+// The device keys are MINTED, not recovered: the phrase does not carry them
+// and never did, because a device key that could be re-derived from something
+// written on a card would make the card sufficient to impersonate a machine.
+// So a recovered device is a NEW device that the root key vouches for, which
+// is also why recovery ends with a roster entry rather than with a claim.
+func handleRecoverIdentity(req Request) (any, error) {
+	var in recoverIdentityRequest
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(in.Label) == "" {
+		return nil, codedf(ErrConfigInvalid, "a label is required, so the roster can name this device")
+	}
+	phrase := strings.Join(strings.Fields(strings.ToLower(in.Mnemonic)), " ")
+	root, err := protocol.RootFromMnemonic(phrase)
+	if err != nil {
+		// The phrase, not the error, is what is wrong — and the message must
+		// not echo any of it back: this process redacts recovery phrases out
+		// of its own log for the same reason.
+		return nil, codedf(ErrConfigInvalid, "that is not a valid recovery phrase")
+	}
+
+	dev, err := protocol.NewDeviceKeys()
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "minting this device's keys")
+	}
+
+	keys.mu.Lock()
+	keys.account = root.AccountID
+	keys.device = dev
+	keys.rootSignPub = root.Sign.Public().(ed25519.PublicKey)
+	keys.epochs = map[uint64]*protocol.EpochKeys{}
+	// LOADED, so `signLogin` works on the very next call — which is the whole
+	// point of this being the first half. NOT loaded with an epoch key: there
+	// is none until the escrow opens, and a caller that tried to seal now
+	// would be told so rather than sealing under something invented.
+	keys.loaded = true
+	keys.mu.Unlock()
+
+	// Held for the second call rather than handed to the parent. RK_enc opens
+	// the escrow and RK_sign authorises an epoch change; the parent has a
+	// keychain but no reason to hold the keys to the whole estate, and a value
+	// that crosses the pipe is a value in a log the day somebody adds one.
+	recovery.mu.Lock()
+	recovery.root = root
+	recovery.label = in.Label
+	recovery.mu.Unlock()
+
+	return map[string]any{
+		"accountId":   root.AccountID.String(),
+		"rootSignPub": hex.EncodeToString(root.Sign.Public().(ed25519.PublicKey)),
+		"devicePub":   hex.EncodeToString(dev.Sign.Public().(ed25519.PublicKey)),
+		"secrets": map[string]string{
+			"deviceSignSeed": base64.StdEncoding.EncodeToString(dev.SignSeed),
+			"deviceEncKey":   base64.StdEncoding.EncodeToString(dev.Enc.Bytes()),
+		},
+	}, nil
+}
+
+// recovery holds RK between the two halves of a recovery, and nowhere else.
+var recovery struct {
+	mu    sync.Mutex
+	root  *protocol.RootKeys
+	label string
+}
+
+type recoverOpenRequest struct {
+	// The escrow object, base64, as the relay serves it.
+	Escrow string `json:"escrow"`
+	// The roster chain, base64, as the relay serves it.
+	Chain string `json:"chain"`
+}
+
+// handleRecoverOpen opens the escrow and authors this device's way back in.
+func handleRecoverOpen(req Request) (any, error) {
+	var in recoverOpenRequest
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+
+	recovery.mu.Lock()
+	root := recovery.root
+	label := recovery.label
+	recovery.mu.Unlock()
+	if root == nil {
+		return nil, codedf(ErrConfigInvalid, "no recovery is in progress; start with the phrase")
+	}
+
+	sealed, err := base64.StdEncoding.DecodeString(in.Escrow)
+	if err != nil || len(sealed) == 0 {
+		return nil, codedf(ErrConfigInvalid, "the escrow is base64 of the sealed object")
+	}
+	chain, err := base64.StdEncoding.DecodeString(in.Chain)
+	if err != nil || len(chain) == 0 {
+		return nil, codedf(ErrConfigInvalid, "the chain is base64 of the roster")
+	}
+
+	// The escrow is sealed at epoch 1, counter 1, to RK_enc. `seenCounter` 0
+	// because a recovering device has seen nothing — it is recovering.
+	esc, err := protocol.OpenEscrow(sealed, root.AccountID, 1, 1, root.Enc, 0)
+	if err != nil {
+		// A refusal here is the relay handing over an escrow for a different
+		// account, or a corrupted one. Either way the phrase is not at fault
+		// and saying "wrong phrase" would send somebody to hunt for a card
+		// that is fine.
+		return nil, wrapCoded(ErrPairingRefused, err, "opening the escrow for this account")
+	}
+
+	epochKeys, err := protocol.DeriveEpoch(esc.AKSeed, esc.AccountID, esc.Epoch)
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "deriving the epoch key")
+	}
+
+	// THE CHAIN, VERIFIED AGAINST THE ESCROW'S OWN HEAD. The pin comes from a
+	// blob the account sealed to itself, so a relay that serves a truncated
+	// chain — dropping the entry that revoked a device it would rather stayed
+	// — is caught. This is the moment that attack is most worth trying, and it
+	// is the reason the escrow carries the whole head entry rather than a
+	// hash: a recovering device has nothing else to compare against.
+	head, _, err := protocol.DecodeEntry(esc.HeadEntry)
+	if err != nil {
+		return nil, wrapCoded(ErrRosterInvalid, err, "reading the escrowed head")
+	}
+	headHash, err := head.Hash()
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "hashing the escrowed head")
+	}
+	verified, err := protocol.VerifyChain(
+		chain, root.AccountID, root.Sign.Public().(ed25519.PublicKey),
+		epochKeys.Sign.Public().(ed25519.PublicKey),
+		&protocol.Pin{Seq: head.Seq, Hash: headHash},
+	)
+	if err != nil {
+		return nil, wrapCoded(ErrRosterInvalid, err, "verifying the roster against the escrowed head")
+	}
+
+	keys.mu.Lock()
+	device := keys.device
+	keys.epochs[verified.Epoch] = epochKeys
+	if verified.Epoch != esc.Epoch {
+		// A rotation happened after the escrow was written. The escrowed key
+		// is still needed to read anything sealed under the older epoch, so
+		// both are held — the same reason `epochs` is a map rather than one
+		// key.
+		keys.epochs[esc.Epoch] = epochKeys
+	}
+	keys.mu.Unlock()
+	if device == nil {
+		return nil, codedf(ErrNotPaired, "no recovery is in progress; start with the phrase")
+	}
+
+	// This device's way back onto the roster, SIGNED BY THE ROOT KEY.
+	//
+	// Not by AK_n, even though this process now holds it. The root key is
+	// what the phrase proves possession of, and an entry signed by AK_n would
+	// be indistinguishable from one written by any device that already had it
+	// — including a revoked one. A verifier can tell a recovery from an
+	// ordinary pairing by the signer, and `mnemonicAdded` on the device list
+	// is that distinction surfaced to a person reviewing their devices.
+	pubSign := device.Sign.Public().(ed25519.PublicKey)
+	pubEnc := device.Enc.PublicKey().Bytes()
+	labelCT, err := protocol.SealLabel(label, root.AccountID, verified.Epoch, pubSign, epochKeys.Profile)
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "sealing the label")
+	}
+	nonce, err := protocol.Nonce()
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "drawing a nonce")
+	}
+	e := protocol.Entry{
+		AccountID: root.AccountID,
+		Epoch:     verified.Epoch,
+		Seq:       verified.HeadSeq + 1,
+		PrevHash:  verified.Head,
+		Op:        protocol.OpAdd,
+		Signer:    protocol.SignerRK,
+		Nonce:     nonce,
+		PubSign:   pubSign,
+		PubEnc:    pubEnc,
+		LabelCT:   labelCT,
+		TS:        uint64(time.Now().UnixMilli()),
+	}
+	body, err := e.Encode()
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "encoding the entry")
+	}
+	e.Sig = ed25519.Sign(root.Sign, body)
+	wire, err := e.Wire()
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "encoding the entry")
+	}
+
+	return map[string]any{
+		"accountId":     root.AccountID.String(),
+		"epoch":         verified.Epoch,
+		"rootSignPub":   hex.EncodeToString(root.Sign.Public().(ed25519.PublicKey)),
+		"epoch1SignPub": hex.EncodeToString(epochKeys.Sign.Public().(ed25519.PublicKey)),
+		// What the user has to look at before this is over. Recovery is the one
+		// path where the honest next question is "is everything on this list
+		// still yours", because whoever else read the card is on it too.
+		"devices": len(verified.Devices),
+		"seq":     e.Seq,
+		"entry":   base64.StdEncoding.EncodeToString(wire),
+		"secrets": map[string]string{
+			"akSeed": base64.StdEncoding.EncodeToString(esc.AKSeed),
+		},
+	}, nil
+}
+
+// handleRecoverForget drops RK the moment recovery is over, successfully or
+// not. Held any longer it is the whole estate sitting in a process that has no
+// further use for it.
+func handleRecoverForget(Request) (any, error) {
+	recovery.mu.Lock()
+	recovery.root = nil
+	recovery.label = ""
+	recovery.mu.Unlock()
+	return map[string]any{"ok": true}, nil
+}

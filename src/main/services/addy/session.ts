@@ -1050,6 +1050,137 @@ class AddySession {
   }
 
   /**
+   * Get back in with nothing but the twelve words.
+   *
+   * THE PATH NOBODY TAKES UNTIL EVERYTHING HAS GONE WRONG. Every device lost,
+   * stolen or dead; the only thing left is the card the user wrote the phrase
+   * on. There is no second chance to find out it does not work, which is why
+   * both halves of it are tested in the sidecar against a real account.
+   *
+   * TWO SIDECAR CALLS, and the split is forced rather than chosen: the escrow
+   * lives on the relay under the account's own name and reading it needs a
+   * session, so this device must know the account id and hold a signing key
+   * BEFORE it can fetch the thing that tells it everything else.
+   *
+   * The device keys are MINTED, not recovered. The phrase never carried them,
+   * because a device key that could be re-derived from something printed on a
+   * card would make the card enough to impersonate a machine. So this is a NEW
+   * device that the root key vouches for, and the entry it writes is
+   * root-signed — which is what a person reviewing their devices later sees as
+   * "added with the recovery phrase".
+   */
+  async recoverFromPhrase(
+    baseURL: string,
+    mnemonic: string,
+    label: string,
+    insecureTLS = false
+  ): Promise<{ accountId: string; devices: number }> {
+    const relay = baseURL.replace(/\/+$/, '')
+    if (!relay.startsWith('https://')) {
+      throw new AddyError('config-invalid', 'a relay address must be https://')
+    }
+
+    await this.detach()
+    this.insecureTLS = insecureTLS
+    const addyd = await openAddyd('--crypto')
+    this.addyd = addyd
+
+    try {
+      const identity = await addyd.send<{
+        accountId: string
+        rootSignPub: string
+        devicePub: string
+        secrets: { deviceSignSeed: string; deviceEncKey: string }
+      }>('recoverIdentity', { mnemonic, label })
+
+      // Stored before the network, unlike `createAccount` which stores after
+      // it — and the asymmetry is the point. There, a failure means an account
+      // that does not exist and keys worth discarding. Here the account
+      // already exists and these keys are the only ones this machine will ever
+      // have for it: a relay that goes down between the login and the roster
+      // append must not cost the user their one recovery attempt.
+      for (const [scope, value] of [
+        ['device', identity.secrets.deviceSignSeed],
+        ['device-enc', identity.secrets.deviceEncKey]
+      ] as const) {
+        if (!storeAddySecret('device', `${identity.accountId}:${scope}`, value)) {
+          throw new AddyError(
+            'config-invalid',
+            'this machine has no usable keychain, so the recovered keys cannot be stored. Nothing was kept.'
+          )
+        }
+      }
+
+      this.account = {
+        baseURL: relay,
+        token: '',
+        accountId: identity.accountId,
+        epoch: 1,
+        rootSignPub: identity.rootSignPub
+      }
+      this.relay = new RelayClient({ baseURL: relay, token: '', insecureTLS }, addyd)
+      const { token } = await this.relay.login()
+      this.account = { ...this.account, token }
+
+      // The escrow, then the chain. Both are fetched before either is trusted:
+      // the escrow carries the head entry as the ACCOUNT committed it, so the
+      // chain is verified against a pin the relay never saw — which is what
+      // catches a relay serving a truncated roster to a device that has
+      // nothing else to compare against, at the moment that is most worth
+      // trying.
+      const escrowObj = await this.relay.getObject('escrow', 1)
+      if (!escrowObj) {
+        throw new AddyError(
+          'not-paired',
+          'this relay has no escrow for that account, so there is nothing to recover from here. Check the relay address.'
+        )
+      }
+      const chain = await this.relay.roster()
+
+      const opened = await addyd.send<{
+        accountId: string
+        epoch: number
+        rootSignPub: string
+        epoch1SignPub: string
+        devices: number
+        seq: number
+        entry: string
+        secrets: { akSeed: string }
+      }>('recoverOpen', {
+        escrow: escrowObj.body.toString('base64'),
+        chain
+      })
+
+      if (!storeAddySecret('account', `${opened.accountId}:account`, opened.secrets.akSeed)) {
+        throw new AddyError(
+          'config-invalid',
+          'this machine has no usable keychain, so the account key cannot be stored. Nothing was kept.'
+        )
+      }
+
+      await this.relay.appendRoster(opened.seq, opened.entry)
+
+      this.account = {
+        ...this.account,
+        epoch: opened.epoch,
+        rootSignPub: opened.rootSignPub,
+        epoch1SignPub: opened.epoch1SignPub
+      }
+      // Re-logs in and writes the enrolment, so this survives a restart like
+      // any other attachment — and starts the engine, which is what actually
+      // brings the estate back onto this machine.
+      await this.loginAndRecord()
+      const after = await this.refreshRoster()
+      return { accountId: opened.accountId, devices: after.devices.length }
+    } finally {
+      // RK is the whole estate. It is dropped whether this worked or not,
+      // because a process holding it after it has no further use for it is
+      // the one thing a recovery must not leave behind.
+      await addyd.send('recoverForget').catch(() => undefined)
+    }
+  }
+
+  /**
    * Remove another device from the account.
    *
    * THE ACTOR SIDE, which did not exist. `services/addy/revoke.ts` implements

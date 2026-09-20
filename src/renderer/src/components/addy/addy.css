@@ -565,3 +565,30 @@
   max-width: 34ch;
   text-align: right;
 }
+
+/* Create-or-recover, as two buttons rather than two screens. The relay
+   address and the device name are the same two questions either way, and
+   asking them in two places is how they get answered differently. */
+.addy-mode {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.addy-mode .btn.on {
+  background: var(--accent-soft, rgba(80, 140, 255, 0.16));
+  color: var(--accent, #4d8dff);
+}
+
+.addy-phrase-input {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #2a2f3a);
+  background: var(--input-bg, #12151c);
+  color: inherit;
+}

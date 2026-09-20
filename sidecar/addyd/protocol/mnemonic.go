@@ -36,6 +36,22 @@ func newMnemonic() (string, error) {
 	return m, nil
 }
 
+// RootFromMnemonic is recovery's one entry point into the key hierarchy.
+//
+// Exported where `mnemonicSeed` is not, and the difference is deliberate: a
+// caller outside this package has no business holding the BIP39 seed. The seed
+// derives RK_sign AND RK_enc, so handing it out would hand out the ability to
+// authorise an epoch change and to open the escrow, which is the whole estate.
+// A recovering device needs the keys; it never needs the material they came
+// from.
+func RootFromMnemonic(mnemonic string) (*RootKeys, error) {
+	seed, err := mnemonicSeed(mnemonic)
+	if err != nil {
+		return nil, err
+	}
+	return DeriveRoot(seed)
+}
+
 func mnemonicSeed(mnemonic string) ([]byte, error) {
 	if !bip39.IsMnemonicValid(mnemonic) {
 		return nil, fmt.Errorf("protocol: that is not a valid recovery phrase")

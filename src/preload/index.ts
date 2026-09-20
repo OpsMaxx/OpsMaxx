@@ -458,6 +458,17 @@ const api = {
      *  account yet, however the setting is set. */
     setClipboardShortcuts: (wanted: boolean): Promise<boolean> =>
       ipcRenderer.invoke('addy:setClipboardShortcuts', wanted),
+    /** Rejoin an account with the twelve-word phrase and nothing else. Mints
+     *  fresh device keys — the phrase never carried them — and writes a
+     *  root-signed roster entry, which is what marks this device as one added
+     *  with the recovery phrase. */
+    recover: (
+      baseURL: string,
+      mnemonic: string,
+      label: string,
+      insecureTLS?: boolean
+    ): Promise<{ accountId: string; devices: number }> =>
+      ipcRenderer.invoke('addy:recover', baseURL, mnemonic, label, insecureTLS),
     /** Remove another device from the account. Not this one: a device that
      *  revoked itself would wipe on its next launch, which is not undoable
      *  and is almost certainly a misclick. */

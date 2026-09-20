@@ -487,3 +487,184 @@ func TestTheRosterHeadCanBeFedStraightBackIn(t *testing.T) {
 		t.Fatalf("the head from verifyRoster was not one addDevice could read: %v", err)
 	}
 }
+
+// Getting back in with nothing but the twelve words.
+//
+// THE PATH NOBODY TAKES UNTIL EVERYTHING HAS GONE WRONG, which is exactly why
+// it has to be tested rather than reasoned about: a recovery that does not
+// work is discovered by somebody who has already lost every device, and there
+// is no second chance to find out.
+//
+// The device keys are deliberately NOT recovered. The phrase does not carry
+// them, because a device key re-derivable from something printed on a card
+// would make the card sufficient to impersonate a machine. So a recovered
+// device is a new device the root key vouches for — and this asserts that the
+// entry it authors is ROOT-signed, which is what a person reviewing their
+// devices sees as "added with the recovery phrase".
+func TestRecoveringAnAccountFromThePhraseAlone(t *testing.T) {
+	keys.reset()
+	t.Cleanup(func() {
+		keys.reset()
+		_, _ = handleRecoverForget(Request{Method: "recoverForget"})
+	})
+
+	minted, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{
+		"label": "the laptop that is now at the bottom of a canal",
+	})})
+	if err != nil {
+		t.Fatalf("createAccount: %v", err)
+	}
+	acct := minted.(map[string]any)
+	phrase := acct["mnemonic"].(string)
+	genesis := acct["genesis"].(string)
+	escrow := acct["escrow"].(string)
+
+	// EVERYTHING GONE. Not a fresh process — the same one with its keys
+	// zeroed, which is the closest this test can get to a new machine and is
+	// strictly harder: a handler that read a leftover field would pass on a
+	// new process and fail here.
+	keys.reset()
+
+	id, err := handleRecoverIdentity(Request{Method: "recoverIdentity", Params: params(t, map[string]any{
+		"mnemonic": "  " + strings.ToUpper(phrase) + "  ",
+		"label":    "the replacement",
+	})})
+	if err != nil {
+		t.Fatalf("recoverIdentity: %v", err)
+	}
+	identity := id.(map[string]any)
+
+	// The account id comes from the PHRASE, not from anything a server said.
+	// If this were wrong, recovery would fetch another account's escrow and
+	// fail with an AEAD error that names nothing.
+	if identity["accountId"] != acct["accountId"] {
+		t.Fatalf("the phrase named account %v, not %v", identity["accountId"], acct["accountId"])
+	}
+	// And a device key it can sign a login with, immediately — which is the
+	// only reason recovery is two calls: the escrow cannot be fetched without
+	// a session, and a session cannot be had without a key.
+	if _, err := handleSignLogin(Request{Method: "signLogin", Params: params(t, map[string]any{
+		"serverNonce": hex.EncodeToString(make([]byte, 32)),
+		"serverSPKI":  hex.EncodeToString(make([]byte, 32)),
+	})}); err != nil {
+		t.Fatalf("a recovering device could not sign a login: %v", err)
+	}
+
+	opened, err := handleRecoverOpen(Request{Method: "recoverOpen", Params: params(t, map[string]any{
+		"escrow": escrow,
+		"chain":  genesis,
+	})})
+	if err != nil {
+		t.Fatalf("recoverOpen: %v", err)
+	}
+	back := opened.(map[string]any)
+	if back["epoch1SignPub"] != acct["epoch1SignPub"] {
+		t.Fatal("the escrow gave a different epoch key than the account was minted with")
+	}
+	if n, _ := back["devices"].(int); n != 1 {
+		t.Fatalf("the recovered roster holds %d devices", n)
+	}
+
+	// The entry is root-signed, and the chain says so. A verifier can tell a
+	// recovery from an ordinary pairing by the signer alone, which is what
+	// stops a device that merely HAD AK_n from claiming to be one.
+	genesisWire, _ := base64.StdEncoding.DecodeString(genesis)
+	entryWire, _ := base64.StdEncoding.DecodeString(back["entry"].(string))
+	chain := base64.StdEncoding.EncodeToString(append(genesisWire, entryWire...))
+
+	verified, err := handleVerifyRoster(Request{Method: "verifyRoster", Params: params(t, map[string]any{
+		"chain": chain, "rootSignPub": acct["rootSignPub"], "epoch1Sign": acct["epoch1SignPub"],
+	})})
+	if err != nil {
+		t.Fatalf("the recovered chain does not verify: %v", err)
+	}
+	v := verified.(map[string]any)
+	devices := v["devices"].([]map[string]any)
+	if len(devices) != 2 {
+		t.Fatalf("after recovery the roster holds %d devices", len(devices))
+	}
+	if listed, _ := v["selfListed"].(bool); !listed {
+		t.Fatal("the recovered device is not on the roster it just authored itself onto")
+	}
+	var recoveredRow map[string]any
+	for _, d := range devices {
+		if d["pubSign"] == identity["devicePub"] {
+			recoveredRow = d
+		}
+	}
+	if recoveredRow == nil {
+		t.Fatal("the recovered device's key is not the one on the roster")
+	}
+	if added, _ := recoveredRow["mnemonicAdded"].(bool); !added {
+		t.Fatal("the recovered device is not marked as added with the recovery phrase")
+	}
+
+	// And it can read the account's data, which is the point of all of it.
+	if _, err := handleSeal(Request{Method: "seal", Params: params(t, map[string]any{
+		"collection": "servers", "epoch": uint64(1), "schema": 1,
+		"writerVersion": "test", "counter": uint64(1),
+		"payload": base64.StdEncoding.EncodeToString([]byte("back")),
+	})}); err != nil {
+		t.Fatalf("a recovered device could not seal: %v", err)
+	}
+}
+
+func TestAMistypedPhraseIsRefusedWithoutEchoingIt(t *testing.T) {
+	keys.reset()
+	t.Cleanup(keys.reset)
+
+	_, err := handleRecoverIdentity(Request{Method: "recoverIdentity", Params: params(t, map[string]any{
+		"mnemonic": "cattle regret sponsor buffalo fossil cage barely gate detail elephant taxi wrongword",
+		"label":    "the replacement",
+	})})
+	if err == nil {
+		t.Fatal("an invalid phrase was accepted")
+	}
+	// NOT ECHOED. A recovery phrase is a bearer token for the entire estate,
+	// and this process redacts it out of its own log — an error message that
+	// quoted it back would put it in the parent's log instead.
+	if strings.Contains(err.Error(), "wrongword") || strings.Contains(err.Error(), "cattle") {
+		t.Fatalf("the refusal echoed the phrase back: %v", err)
+	}
+}
+
+func TestRecoveryRefusesAnEscrowForAnotherAccount(t *testing.T) {
+	keys.reset()
+	t.Cleanup(func() {
+		keys.reset()
+		_, _ = handleRecoverForget(Request{Method: "recoverForget"})
+	})
+
+	mine, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{"label": "mine"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := mine.(map[string]any)
+	keys.reset()
+	theirs, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{"label": "theirs"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := theirs.(map[string]any)
+	keys.reset()
+
+	if _, err := handleRecoverIdentity(Request{Method: "recoverIdentity", Params: params(t, map[string]any{
+		"mnemonic": a["mnemonic"], "label": "the replacement",
+	})}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The relay handing over somebody else's escrow, which it can do: it holds
+	// both and cannot read either. Refused as a REFUSAL rather than reported
+	// as a bad phrase, because the card is fine and sending the user to hunt
+	// for a better one would waste the worst afternoon of their year.
+	_, err = handleRecoverOpen(Request{Method: "recoverOpen", Params: params(t, map[string]any{
+		"escrow": b["escrow"], "chain": b["genesis"],
+	})})
+	if err == nil {
+		t.Fatal("an escrow belonging to another account was opened")
+	}
+	if strings.Contains(err.Error(), "recovery phrase") {
+		t.Fatalf("a relay-supplied escrow was blamed on the user's phrase: %v", err)
+	}
+}

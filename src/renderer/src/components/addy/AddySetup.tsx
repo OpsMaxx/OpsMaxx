@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { AlertTriangle, Check, Copy, Loader2, Server } from 'lucide-react'
+import { AlertTriangle, Check, Copy, KeyRound, Loader2, Server } from 'lucide-react'
 import { useApp } from '../../store/app'
+import { clsx } from '../../lib/format'
 import { toast } from '../../store/toast'
 import { PairingPanel } from './PairingPanel'
 
@@ -24,6 +25,12 @@ export function AddySetup(): React.JSX.Element {
   const [phrase, setPhrase] = useState<string | null>(null)
   const [wroteItDown, setWroteItDown] = useState(false)
   const [done, setDone] = useState(false)
+  /** Recovering rather than creating. A mode, not a second screen: the relay
+   *  address and the device name are the same two questions either way, and
+   *  asking them twice in two places is how they get answered differently. */
+  const [mode, setMode] = useState<'create' | 'recover'>('create')
+  const [mnemonic, setMnemonic] = useState('')
+  const [recovered, setRecovered] = useState<{ devices: number } | null>(null)
 
   const create = async (): Promise<void> => {
     setBusy(true)
@@ -38,6 +45,60 @@ export function AddySetup(): React.JSX.Element {
     } finally {
       setBusy(false)
     }
+  }
+
+  /**
+   * Back in with the twelve words.
+   *
+   * Ends on a REVIEW rather than on a success message, and that is the whole
+   * difference between this and pairing. Whoever else has read the card is on
+   * the roster too, and the moment a person is most able to notice a device
+   * they do not recognise is the moment they have just listed them all. So the
+   * last thing recovery says is a count and a question, not "done".
+   */
+  const recover = async (): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await window.opsmaxx!.addy.recover(url.trim(), mnemonic.trim(), label.trim())
+      setSettings({ addyRelayURL: url.trim() })
+      setRecovered({ devices: result.devices })
+      toast('This device is back on the account', 'ok')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (recovered) {
+    return (
+      <div className="addy-setup">
+        <h3>You are back in</h3>
+        <div className="setting-desc">
+          Your data is being brought back onto this machine now. It is on the account as{' '}
+          <strong>{label.trim()}</strong>.
+        </div>
+        {/* THE REVIEW, and it is not a formality. Anyone who read the card can
+            do exactly what was just done, so the device list is the only place
+            that would show it — and this is the one moment a person has just
+            been given a reason to read it. */}
+        <div className="addy-note" role="status">
+          <AlertTriangle size={15} aria-hidden />
+          <div>
+            <strong>
+              Check the device list: {recovered.devices}{' '}
+              {recovered.devices === 1 ? 'device is' : 'devices are'} on this account.
+            </strong>
+            <div className="setting-desc">
+              Anyone who has read your recovery phrase could have added one the same way you just
+              did. Remove anything you do not recognise — and if the phrase has been seen by
+              somebody else, treat every device on the list as theirs too.
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   // Step 2: the phrase. Nothing else is on screen, because anything else is
@@ -115,6 +176,51 @@ export function AddySetup(): React.JSX.Element {
         />
       </label>
 
+      {/* One control, two flows. A separate "recover" screen would ask the
+          relay address and the device name a second time, in a second place,
+          which is how the two get answered differently. */}
+      <div className="addy-mode">
+        <button
+          className={clsx('btn ghost size-24', mode === 'create' && 'on')}
+          aria-pressed={mode === 'create'}
+          onClick={() => {
+            setMode('create')
+            setError(null)
+          }}
+        >
+          Create an account
+        </button>
+        <button
+          className={clsx('btn ghost size-24', mode === 'recover' && 'on')}
+          aria-pressed={mode === 'recover'}
+          onClick={() => {
+            setMode('recover')
+            setError(null)
+          }}
+        >
+          I have a recovery phrase
+        </button>
+      </div>
+
+      {mode === 'recover' && (
+        <label className="addy-field">
+          <span>Recovery phrase</span>
+          <textarea
+            className="addy-phrase-input"
+            value={mnemonic}
+            onChange={(e) => setMnemonic(e.target.value)}
+            spellCheck={false}
+            rows={3}
+            placeholder="The twelve words, in order, separated by spaces"
+          />
+          <small>
+            Case and extra spaces do not matter. This is the only way back into an account whose
+            devices are all gone — it does not create a new one, and it does not need an invite.
+          </small>
+        </label>
+      )}
+
+      {mode === 'create' && (
       <label className="addy-field">
         <span>Invite</span>
         <input value={invite} onChange={(e) => setInvite(e.target.value)} spellCheck={false} />
@@ -124,6 +230,7 @@ export function AddySetup(): React.JSX.Element {
           The person running the relay mints one with <code>addy invite</code>. It works once.
         </small>
       </label>
+      )}
 
       <label className="addy-field">
         <span>What to call this device</span>
@@ -138,14 +245,28 @@ export function AddySetup(): React.JSX.Element {
         </div>
       )}
 
-      <button
-        className="btn"
-        disabled={busy || !url.trim() || !invite.trim() || !label.trim()}
-        onClick={() => void create()}
-      >
-        {busy ? <Loader2 size={14} className="spin" /> : <Server size={14} />}
-        {busy ? ' Creating…' : ' Create an account on this relay'}
-      </button>
+      {mode === 'create' ? (
+        <button
+          className="btn"
+          disabled={busy || !url.trim() || !invite.trim() || !label.trim()}
+          onClick={() => void create()}
+        >
+          {busy ? <Loader2 size={14} className="spin" /> : <Server size={14} />}
+          {busy ? ' Creating…' : ' Create an account on this relay'}
+        </button>
+      ) : (
+        <button
+          className="btn"
+          // Twelve words, and the count is checked here rather than by the
+          // sidecar refusing: somebody who pasted eleven should be told that,
+          // not told their phrase is invalid.
+          disabled={busy || !url.trim() || !label.trim() || mnemonic.trim().split(/\s+/).length !== 12}
+          onClick={() => void recover()}
+        >
+          {busy ? <Loader2 size={14} className="spin" /> : <KeyRound size={14} />}
+          {busy ? ' Getting you back in…' : ' Recover this account'}
+        </button>
+      )}
     </div>
   )
 }
