@@ -321,6 +321,31 @@ class AddySession {
     const relay = this.relay
     if (!account || !relay) return
     const { token, spki } = await relay.login()
+
+    /**
+     * AND THE PIN IS COMPARED, which is what it was recorded for.
+     *
+     * `LoginResult.spki` is documented as "kept so a later reconnect can
+     * notice it changed". Nothing compared it. Every hit on `spki` in this
+     * codebase was a computation or a WRITE — so a login simply overwrote the
+     * stored pin with whatever the server presented that morning, and a
+     * changed key was adopted in silence. A pin that is only ever written is
+     * not a pin, it is a note.
+     *
+     * Refused rather than warned. The login signature is bound to this value,
+     * so a different one means either the operator replaced the relay's
+     * certificate or somebody is between this device and it, and a client
+     * cannot tell those apart. The remedy for the first is the same either
+     * way: forget the enrolment and join again deliberately.
+     */
+    const known = loadEnrolment()
+    if (known?.spki && known.spki !== spki) {
+      throw new AddyError(
+        'relay-unreachable',
+        `the relay at ${account.baseURL} is presenting a different TLS key than the one this device recorded when it joined. Either its certificate was replaced, or something is between you and it. Nothing was sent.`
+      )
+    }
+
     this.account = { ...account, token }
     saveEnrolment({
       baseURL: account.baseURL,
@@ -329,7 +354,8 @@ class AddySession {
       rootSignPub: account.rootSignPub ?? '',
       epoch1SignPub: account.epoch1SignPub ?? '',
       spki,
-      insecureTLS: this.insecureTLS
+      insecureTLS: this.insecureTLS,
+      ...(known?.pinSeq !== undefined ? { pinSeq: known.pinSeq, pinHead: known.pinHead } : {})
     })
     // A token is exactly what the engine was waiting for. Started here rather
     // than at each call site, because every path that ends with this device

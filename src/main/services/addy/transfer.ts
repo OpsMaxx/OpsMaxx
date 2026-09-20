@@ -193,7 +193,24 @@ export async function collectFiles(deps: TransferDeps): Promise<ArrivedFile[]> {
   const { messages } = (await resp.json()) as {
     messages: { id: number; fromDevice: string; kind: string; sealed: string }[]
   }
-  const notices = messages.filter((m) => m.kind === TRANSFER_KIND)
+  /**
+   * ONLY FROM A DEVICE THAT IS STILL ON THE ROSTER.
+   *
+   * Opening a notice proves someone holding this epoch's key sealed it under
+   * the right collection name. That is a weaker statement than it looks: a
+   * device that was removed and not re-keyed is still someone holding that
+   * key. Without this filter, such a device could go on delivering files to
+   * every machine on the account — and a file arriving from "one of your own
+   * devices" is exactly the belief this feature asks the user to act on.
+   *
+   * The sender is the relay's word for it, which is why this is a filter and
+   * not a proof: a relay can relabel a row. What it buys is that the relay
+   * must now name a CURRENT member, so a removed device cannot deliver under
+   * its own identity, and the label shown to the user is at least a device
+   * that exists on the account.
+   */
+  const peers = new Set(deps.peers())
+  const notices = messages.filter((m) => m.kind === TRANSFER_KIND && peers.has(m.fromDevice))
   if (notices.length === 0) return []
 
   const { devicePub } = await deps.addyd.send<{ devicePub: string }>('whoami')

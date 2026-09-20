@@ -172,7 +172,11 @@ export async function receiveClipboard(
     messages: { id: number; fromDevice: string; kind: string; sealed: string }[]
   }
 
-  const clips = messages.filter((m) => m.kind === CLIPBOARD_KIND)
+  // FROM A CURRENT MEMBER ONLY — see the note in transfer.ts. Opening proves
+  // somebody holding this epoch's key sealed it, and a device removed without
+  // a re-key is still somebody holding that key.
+  const peers = new Set(deps.peers())
+  const clips = messages.filter((m) => m.kind === CLIPBOARD_KIND && peers.has(m.fromDevice))
   if (clips.length === 0) return { applied: false, reason: 'Nothing has been sent to this device.' }
 
   const newest = clips[clips.length - 1]

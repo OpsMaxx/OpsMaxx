@@ -155,6 +155,35 @@ describe('a transfer id that tries to escape the quarantine', () => {
   })
 })
 
+describe('who a file came from', () => {
+  it('is ignored when the sender is not on the roster any more', async () => {
+    // Opening the notice proves someone holding THIS EPOCH'S KEY sealed it —
+    // which a device that was removed and not re-keyed still is. Without this
+    // filter such a device goes on delivering files to every machine on the
+    // account, and "one of your own devices" is exactly the belief this
+    // feature asks the user to act on.
+    const bytes = Buffer.from('x', 'utf8')
+    const relay = relayWith(
+      { id: 'abcd1234abcd1234', name: 'f.txt', size: 1, sha256: await sha(bytes), sentAt: 1 },
+      bytes
+    )
+    const noPeers = { ...deps(relay), peers: () => [] }
+
+    expect(await collectFiles(noPeers)).toEqual([])
+  })
+
+  it('and accepted when they are', async () => {
+    // The other half, or the filter would be indistinguishable from a feature
+    // that never delivers.
+    const bytes = Buffer.from('x', 'utf8')
+    const relay = relayWith(
+      { id: 'abcd1234abcd5678', name: 'f.txt', size: 1, sha256: await sha(bytes), sentAt: 1 },
+      bytes
+    )
+    expect(await collectFiles(deps(relay))).toHaveLength(1)
+  })
+})
+
 describe('the sweep', () => {
   it('leaves a fresh transfer alone and takes an old one', async () => {
     const bytes = Buffer.from('x', 'utf8')

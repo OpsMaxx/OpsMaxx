@@ -676,3 +676,27 @@ describe('a withheld roster entry is detectable', () => {
     expect(SESSION).toMatch(/verified\.headSeq > \(saved\.pinSeq \?\? -1\)/)
   })
 })
+
+/**
+ * Two controls that were recorded and never used.
+ */
+describe('the relay is checked, not just written down', () => {
+  it('the TLS pin is compared on every login', () => {
+    // `LoginResult.spki` is documented as "kept so a later reconnect can
+    // notice it changed". Every reference to it was a computation or a write,
+    // so a login overwrote the stored pin with whatever the server presented
+    // and a changed key was adopted in silence. A pin that is only ever
+    // written is a note, not a pin.
+    expect(SESSION).toMatch(/known\?\.spki && known\.spki !== spki/)
+    expect(SESSION).toMatch(/presenting a different TLS key/)
+  })
+
+  it('inbound mail has to come from a device still on the roster', () => {
+    // Opening proves somebody holding this epoch's key sealed it — which a
+    // device removed without a re-key still is.
+    const T = read('src/main/services/addy/transfer.ts')
+    const C = read('src/main/services/addy/clipboard.ts')
+    expect(T).toMatch(/peers\.has\(m\.fromDevice\)/)
+    expect(C).toMatch(/peers\.has\(m\.fromDevice\)/)
+  })
+})
