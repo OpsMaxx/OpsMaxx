@@ -39,15 +39,28 @@ const conflict = (over: Record<string, unknown> = {}): Record<string, unknown> =
 const resolveConflict = vi.fn().mockResolvedValue(undefined)
 const discardConflict = vi.fn().mockResolvedValue(undefined)
 
-function withConflicts(list: unknown[]): void {
+function withConflicts(list: unknown[], devices?: unknown[]): void {
   stubBridge({
     addy: {
       conflicts: vi.fn().mockResolvedValue(list),
       resolveConflict,
-      discardConflict
+      discardConflict,
+      // Optional on purpose: every other call here is, and the chooser has to
+      // render on a window whose preload predates this one. The tests that do
+      // not pass devices are that case.
+      ...(devices ? { status: vi.fn().mockResolvedValue({ devices }) } : {})
     }
   })
 }
+
+const device = (id: string, over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  id,
+  label: 'a paired device',
+  self: false,
+  lastSeen: null,
+  addedAt: null,
+  ...over
+})
 
 beforeEach(() => {
   resolveConflict.mockClear()
@@ -63,6 +76,20 @@ describe('the way out', () => {
 
     // Gone from the screen, and nothing was written: the copy stays on the
     // relay and the panel's attention tile keeps counting it.
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(resolveConflict).not.toHaveBeenCalled()
+    expect(discardConflict).not.toHaveBeenCalled()
+  })
+
+  it('can be left for later with Escape, which writes nothing either', async () => {
+    // `aria-modal` with no dismissal from the keyboard is a trap, and the
+    // three buttons that DO dismiss it all destroy a copy.
+    withConflicts([conflict()])
+    render(<ConflictChooser />)
+    await screen.findByRole('dialog')
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(resolveConflict).not.toHaveBeenCalled()
     expect(discardConflict).not.toHaveBeenCalled()
@@ -93,6 +120,66 @@ describe('what it says before you press anything', () => {
     render(<ConflictChooser />)
     expect(await screen.findByRole('button', { name: /delete the other copy/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Replace it with the other copy/ })).toBeTruthy()
+  })
+
+  it('says which of the two the app is already using', async () => {
+    // The winner is on disk here before the loser is ever published --
+    // `sync.ts` writes it and then keeps the local copy as a conflict -- so
+    // "keep this one" changes nothing anywhere and "replace it" changes what
+    // the user sees. Neither was said, and the pane was headed "What is on
+    // the relay now", which is a place the reader cannot look at.
+    withConflicts([conflict()])
+    render(<ConflictChooser />)
+    // Twice on purpose: the pane it heads, and the sentence above that points
+    // at it. The heading is the one asserted here.
+    expect(await screen.findByText('In use now', { selector: 'h3 span' })).toBeTruthy()
+    expect(screen.getByText(/already using the version marked/)).toBeTruthy()
+  })
+
+  it('says that nothing has been written yet', async () => {
+    // "You are about to lose something" and "both are kept and one is active"
+    // are very different sentences, and until a button is pressed it is the
+    // second one.
+    withConflicts([conflict()])
+    render(<ConflictChooser />)
+    expect(await screen.findByText(/Nothing is lost yet/)).toBeTruthy()
+  })
+})
+
+describe('which machine each version came from', () => {
+  it('names this machine rather than blaming another one', async () => {
+    // THE COMMONEST CASE, AND IT WAS BACKWARDS. The first sync after pairing
+    // takes sync.ts's `!known` branch: this machine adopts the account's copy
+    // and the copy set aside is ITS OWN. The dialog called it "The copy from
+    // another device".
+    const me = 'aa'.repeat(32)
+    withConflicts([conflict({ device: me })], [device(me, { self: true })])
+    render(<ConflictChooser />)
+    expect(await screen.findByText(/made by this machine/)).toBeTruthy()
+    expect(screen.queryByText(/from another device/)).toBeNull()
+  })
+
+  it('names the other device from the roster, with its key', async () => {
+    const other = 'bb'.repeat(32)
+    withConflicts(
+      [conflict({ device: other })],
+      [device('aa'.repeat(32), { self: true }), device(other, { label: 'desktop' })]
+    )
+    render(<ConflictChooser />)
+    expect(await screen.findByText(/made by desktop \(bbbbbbbb\)/)).toBeTruthy()
+  })
+
+  it('says a device has left the account rather than inventing a name for it', async () => {
+    withConflicts([conflict({ device: 'cc'.repeat(32) })], [device('aa'.repeat(32), { self: true })])
+    render(<ConflictChooser />)
+    expect(await screen.findByText(/no longer on this account \(cccccccc\)/)).toBeTruthy()
+  })
+
+  it('claims nothing when the roster is not available', async () => {
+    // No `status` on the bridge. An unnamed key beats a wrong machine.
+    withConflicts([conflict({ device: 'dd'.repeat(32) })])
+    render(<ConflictChooser />)
+    expect(await screen.findByText(/made by the device dddddddd/)).toBeTruthy()
   })
 })
 

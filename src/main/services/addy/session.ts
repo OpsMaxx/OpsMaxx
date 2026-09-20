@@ -780,7 +780,28 @@ class AddySession {
    * lands. The reverse — listed but keyless — would be a device the account
    * vouches for that cannot prove anything.
    */
-  async completePairing(confirmation: PairingConfirmation): Promise<{ devices: number }> {
+  async completePairing(
+    confirmation: PairingConfirmation,
+    /**
+     * What to call the machine being added.
+     *
+     * IT HAS TO COME FROM HERE, AND IT IS PERMANENT. The label is sealed into
+     * the roster entry that adds the device, and roster entries are immutable
+     * — so whatever is written at this instant is that machine's name for the
+     * life of the account, unless a rename collection is added later.
+     *
+     * The joiner cannot supply it: the sidecar returns `self` only to the
+     * JOINING device, and the initiator's confirmation never carried it, so
+     * `confirmation.self?.label` was always undefined and the `??` behind it
+     * sealed a constant. Every device this product has ever paired is called
+     * "a paired device", including the second and third on the same account —
+     * two identical rows, one of which has a button that wipes a laptop.
+     *
+     * So the person doing the pairing types it. They are the one standing at
+     * both machines, which is what pairing means.
+     */
+    label?: string
+  ): Promise<{ devices: number }> {
     const addyd = this.addyd
     const relay = this.relay
     const account = this.account
@@ -853,7 +874,11 @@ class AddySession {
       pubEnc: peerPubEnc,
       // The pseudonym the joining device chose for itself, sealed into the
       // entry so only devices holding this epoch's profile key can read it.
-      label: confirmation.self?.label ?? 'a paired device'
+      // THE FALLBACK IS UNIQUE, not a constant. If nobody types a name the
+      // device is still distinguishable from its siblings by the first bytes
+      // of its own signing key — which is what the panel shows beside it and
+      // what the revoke confirmation names. A shared name is not a name.
+      label: label?.trim() || confirmation.self?.label || `device ${peerPubSign.slice(0, 8)}`
     })
     await relay.appendRoster(entry.seq, entry.entry)
 

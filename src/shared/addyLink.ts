@@ -121,9 +121,22 @@ export function parseAddyLink(raw: string): { link: AddyLink } | { reason: strin
     return { reason: 'The pairing id in that link is not shaped like one.' }
   }
 
-  if (action === 'sync' && invite === undefined) {
-    return { reason: 'That link has no invite in it.' }
-  }
+  // A SYNC LINK WITH NO INVITE IS THE USEFUL ONE FOR A SECOND MACHINE, and
+  // refusing it closed the only door the relay could honestly open.
+  //
+  // The step that actually blocks people is not the invite — it is that the
+  // joining machine is asked for the relay's address before it will show
+  // anything, and nothing on that machine knows it. An invite cannot help
+  // there: a fresh invite spent on a second machine starts a SEPARATE sync
+  // group that syncs with nothing, which is the disaster the console warns
+  // about. A pairing link needs a code only a machine holding the account key
+  // can mint, so the server cannot produce one either.
+  //
+  // What the server can hand over is its own address, and that is not a
+  // credential — it is on the page already and in the browser's URL bar. So a
+  // relay-only link is allowed, and it does exactly one thing: opens the app
+  // with the address filled in, on the screen where the person chooses how
+  // this machine joins. They still choose, and they still pair.
   if (action === 'pair' && (code === undefined || pairingId === undefined)) {
     return { reason: 'A pairing link needs both a code and a pairing id.' }
   }
@@ -137,6 +150,14 @@ export function parseAddyLink(raw: string): { link: AddyLink } | { reason: strin
       ...(pairingId ? { pairingId } : {})
     }
   }
+}
+
+/** The link a console hands a second machine: the relay's address and nothing
+ *  else. Not a credential — it is in the browser's URL bar already — and it
+ *  opens the app on the screen where the person says how this machine joins. */
+export function addyRelayLink(relay: string): string {
+  const r = new URL(relay)
+  return `${ADDY_LINK_SCHEME}://sync?relay=${encodeURIComponent(`${r.protocol}//${r.host}`)}`
 }
 
 /**

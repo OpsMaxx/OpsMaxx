@@ -253,8 +253,51 @@ describe('what it says once main can answer', () => {
     stubStatus(healthy())
     render(<AddyPanel />)
     expect(await screen.findByText('work laptop')).toBeTruthy()
-    expect(screen.getByText('This device')).toBeTruthy()
+    // The CHIP, specifically. The note under the table names the chip too, in
+    // the sentence that tells somebody to go and read the same fingerprint on
+    // the other machine, so a bare text match now finds two.
+    expect(screen.getByText('This device', { selector: '.chip' })).toBeTruthy()
     expect(screen.getByText('desktop')).toBeTruthy()
+  })
+
+  it('shows a key fingerprint on every device, because the names need not differ', async () => {
+    // A device's label is sealed into its roster entry when it is paired, and
+    // `completePairing` seals a constant: `confirmation.self?.label` is set by
+    // nothing in either process, so every device this build pairs is called
+    // "a paired device". Two of them make two identical rows, one of which
+    // carries a button that wipes a laptop.
+    const same = healthy()
+    same.devices = [
+      { id: 'aa11bb22cc33', label: 'a paired device', self: true, lastSeen: null, addedAt: null },
+      { id: 'dd44ee55ff66', label: 'a paired device', self: false, lastSeen: null, addedAt: null }
+    ]
+    stubStatus(same)
+    render(<AddyPanel />)
+    expect(await screen.findByText('aa11bb22')).toBeTruthy()
+    expect(screen.getByText('dd44ee55')).toBeTruthy()
+  })
+
+  it('names the key in the confirmation that wipes a machine', async () => {
+    // "Remove a paired device?" names nothing when two rows say that.
+    const same = healthy()
+    same.devices = [
+      { id: 'aa11bb22cc33', label: 'a paired device', self: true, lastSeen: null, addedAt: null },
+      { id: 'dd44ee55ff66', label: 'a paired device', self: false, lastSeen: null, addedAt: null }
+    ]
+    stubStatus(same)
+    render(<AddyPanel />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }))
+    expect(screen.getByText('dd44ee55', { selector: 'code' })).toBeTruthy()
+  })
+
+  it('answers "which device is the main one" rather than offering a picker', async () => {
+    // Every device holds the same account key and any of them can show a
+    // pairing code, so a primary would be a single point of failure that the
+    // recovery phrase already replaces. The list is where somebody goes
+    // looking for the setting, so the list is where the answer belongs.
+    stubStatus(healthy())
+    render(<AddyPanel />)
+    expect(await screen.findByText(/There is no main device to choose/)).toBeTruthy()
   })
 
   it('does not claim to know when a device was last seen', async () => {

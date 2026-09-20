@@ -167,6 +167,10 @@
   display: flex;
   justify-content: space-between;
   gap: 8px;
+  /* The left half now names the machine that made the copy, which is as long
+     as a device name plus eight hex characters. Unwrapped it squeezed the
+     timestamp to one character per line in a narrow window. */
+  flex-wrap: wrap;
 }
 
 .conflict-when {
@@ -540,6 +544,24 @@
   color: var(--text-faint);
 }
 
+/* The key fingerprint, which on this table is the identity and not decoration.
+   Muted rather than faint because it is the line somebody reads to decide
+   WHICH machine a Remove button wipes -- `--text-muted` clears AA on both
+   grounds, and this is content, not a caption. Monospace so eight hex
+   characters can be compared against the same eight on another screen without
+   a proportional font pairing off c/e and 0/8. */
+.addy-device-fp {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.addy-devices td .addy-device-fp {
+  margin-top: 2px;
+}
+
 /* Still listed, and visibly finished with. Dropping a revoked device would
    remove the only evidence on this machine that a revocation happened. */
 .addy-device-revoked td {
@@ -725,4 +747,17 @@
   caption-side: bottom;
   text-align: left;
   padding-top: 8px;
+}
+
+/* Three separate notes, not one block: what the order means, what the
+   fingerprint is for, and why there is no main device to pick. Run together
+   they read as a disclaimer and get skipped. `max-width` so the line does not
+   run the width of a maximised window, where prose stops being readable. */
+.addy-devices-note p {
+  margin: 0 0 6px;
+  max-width: 68ch;
+}
+
+.addy-devices-note p:last-child {
+  margin-bottom: 0;
 }

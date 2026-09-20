@@ -321,7 +321,11 @@ function Transfers({ devices }: { devices?: AddyDevice[] }): React.JSX.Element |
             disabled={busy}
             onClick={() => void send(d.id)}
           >
-            {busy ? <Loader2 size={13} className="spin" /> : <FileUp size={13} />} Send to {d.label}
+            {/* The key as well, for the same reason the device table shows it:
+                two of these buttons can otherwise read identically, and the
+                file goes to whichever machine the user did not mean. */}
+            {busy ? <Loader2 size={13} className="spin" /> : <FileUp size={13} />} Send to{' '}
+            {d.label} ({fingerprint(d.id)})
           </button>
         ))}
       </span>
@@ -819,12 +823,43 @@ function JourneyStep({ step }: { step: AddyStep }): React.JSX.Element {
 }
 
 /**
+ * The start of a device's `pub_sign`, which is the only thing on its row that
+ * is certainly different from every other row.
+ *
+ * THE NAME IS NOT, AND THAT IS NOT AN ENCRYPTION FAILURE. A device's label is
+ * sealed into its roster entry when it is paired and roster entries are
+ * immutable, so the name is fixed at that moment — and the moment writes a
+ * constant. `completePairing` seals `confirmation.self?.label ?? 'a paired
+ * device'`; `self` is declared optional on `PairingConfirmation` and is set by
+ * nothing, in either process. So every device this build pairs is called the
+ * same three words, the sidecar opens that label perfectly, and a third
+ * machine puts two identical rows on this table — one of which carries a
+ * button that wipes a laptop.
+ *
+ * Eight hex characters, the same slice main falls back to when the sidecar
+ * genuinely cannot open a label, so the two agree instead of offering a person
+ * two different short forms of one key. It is stable for the life of the
+ * device and the same characters appear beside "This device" on the machine
+ * itself, which is what makes it usable as a name: you can go and look.
+ */
+function fingerprint(id: string): string {
+  return id.slice(0, 8)
+}
+
+/**
  * The roster.
  *
  * Three renderings, and the third is the one that matters: `undefined` means
  * main did not tell us, `[]` means the account really has no devices on it, and
  * those are different sentences. Collapsing them is how a screen comes to say
  * "0 devices" about an account with four.
+ *
+ * WHAT THE ORDER MEANS, since the table has no other axis: `devices` is the
+ * verified chain's live set in append order — `VerifyChain` walks the entries
+ * and splices out revoked ones — so it is the order the machines joined, and
+ * the last row is the one added most recently. That is a fact this device
+ * checked itself, unlike anything about when a device was last used, which
+ * the relay does not record at all.
  */
 function AddyDevices({
   devices,
@@ -870,9 +905,14 @@ function AddyDevices({
         {devices.map((d) => (
           <tr key={d.id} className={clsx(d.revoked === true && 'addy-device-revoked')}>
             <td className="strong">
-              <Laptop size={13} aria-hidden /> {d.label}
+              <Laptop size={13} aria-hidden />{' '}
+              <span className="addy-device-name">{d.label}</span>
               {d.self && <span className="chip info">This device</span>}
               {d.revoked === true && <span className="chip danger">Revoked</span>}
+              {/* Under the name rather than beside it: it is what you read
+                  when the name did not settle it, and a row that leads with
+                  a key is a row nobody scans. */}
+              <div className="addy-device-fp">{fingerprint(d.id)}</div>
             </td>
             <td className="right">
               {/* Never on this device's own row. A device that revoked itself
@@ -894,9 +934,30 @@ function AddyDevices({
           That is the column a sysadmin scans to spot a machine that should not
           be there, and it was uniformly false. */}
       <caption className="fine addy-devices-note">
-        The relay does not report when each device was last seen, so that is
-        not shown. What is here comes from the signed device list, which this
-        device verified itself.
+        <p>
+          In the order they joined the account — the newest is last. The relay does not report
+          when each device was last seen, so that is not shown. What is here comes from the
+          signed device list, which this device verified itself.
+        </p>
+        {/* THE ONLY THING ON A ROW THAT IS RELIABLY UNIQUE, and the sentence
+            that turns it into a name: you can walk to the other machine and
+            read the same characters there. Without this the fingerprint is
+            noise, and two devices called the same thing stay that way. */}
+        <p>
+          The characters under each name are the start of that device&rsquo;s key. They are how to
+          tell two machines apart when the names read alike — the same characters appear on the
+          machine itself, beside <em>This device</em>.
+        </p>
+        {/* ASKED FOR AS "pick a primary device", AND THE ANSWER IS THAT THERE
+            IS NOTHING TO PICK. Every device holds the same account key and any
+            of them can show a pairing code; a primary would be a single point
+            of failure that the recovery phrase already replaces. Said here
+            because this list is where somebody goes looking for the setting. */}
+        <p>
+          There is no main device to choose. Every device on this list holds the same account key
+          and any of them can add the next one — including this one, from{' '}
+          <em>Add another device</em> above.
+        </p>
       </caption>
     </table>
   )
@@ -938,7 +999,12 @@ function RevokeButton({
   return (
     <span className="addy-revoke-confirm">
       <span className="fine">
-        Remove <strong>{label}</strong>? Everything OpsMaxx stores on it is deleted the next time it
+        {/* THE KEY, NOT ONLY THE NAME. Two devices can carry the same name —
+            see `fingerprint` — and this sentence is the last thing shown
+            before a laptop is wiped. Naming a thing two rows share is not
+            naming it. */}
+        Remove <strong>{label}</strong> (<code className="addy-device-fp">{fingerprint(id)}</code>)?
+        Everything OpsMaxx stores on it is deleted the next time it
         opens <strong>and reaches the relay</strong> — a machine kept offline never hears, which is
         why a stolen one also needs the account key changed. Adding it back means pairing it again.
       </span>

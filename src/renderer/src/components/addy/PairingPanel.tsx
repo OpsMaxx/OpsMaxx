@@ -72,6 +72,8 @@ export function PairingPanel({
   const [code, setCode] = useState('')
   const [pairingId, setPairingId] = useState('')
   const [typedTicket, setTypedTicket] = useState('')
+  // What the machine being added will be called, permanently.
+  const [newLabel, setNewLabel] = useState('')
   // One string, split again by `splitTicket` on the other machine.
   const ticket = `${code}.${pairingId}`
   const pairLink = addyPairLink(baseURL, code, pairingId)
@@ -123,6 +125,7 @@ export function PairingPanel({
    *  stale code in a field is a code somebody will try to use. */
   const reset = (): void => {
     setTypedTicket('')
+    setNewLabel('')
     setConfirmation(null)
     setError(null)
     setStage('choose')
@@ -202,7 +205,7 @@ export function PairingPanel({
       } else {
         // This device showed the code: hand the key over, add them to the
         // roster.
-        await window.opsmaxx!.addy.completePairing(confirmation)
+        await window.opsmaxx!.addy.completePairing(confirmation, newLabel)
       }
       active.current = false
       setStage('done')
@@ -245,6 +248,28 @@ export function PairingPanel({
           Compare them with the other device before answering. If they differ, something is between
           you.
         </p>
+        {/* NAMED HERE BECAUSE IT CANNOT BE NAMED LATER. The label is sealed
+            into the roster entry that adds the device, and roster entries are
+            immutable — this instant is the only chance. Shown only to the
+            machine doing the adding: the joiner does not write the entry.
+
+            Empty is allowed. The fallback is the first bytes of that device's
+            own signing key, which is unique; what it must never be again is a
+            constant, because two rows reading "a paired device" is two rows
+            with the same name and one of them has a button that wipes a
+            laptop. */}
+        {!confirmation.self && (
+          <label className="pair-field">
+            <span>What is the other machine called?</span>
+            <input
+              value={newLabel}
+              onChange={(e) => setNewLabel(e.target.value)}
+              spellCheck={false}
+              maxLength={60}
+              placeholder="Work laptop"
+            />
+          </label>
+        )}
         <div className="pair-actions">
           {/* Refuse first and focused: the expensive mistake is confirming a
               pairing that is not the one you think it is, and it is not

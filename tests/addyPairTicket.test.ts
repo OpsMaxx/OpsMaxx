@@ -71,3 +71,41 @@ describe('the pairing panel is not a dead end and the link is consumed', () => {
     expect(effect.slice(0, 500), 'the link handler joins by itself').not.toMatch(/joinPairing\(/)
   })
 })
+
+describe('a paired device gets a name that is actually its own', () => {
+  const session = readFileSync(
+    join(__dirname, '..', 'src', 'main', 'services', 'addy', 'session.ts'),
+    'utf8'
+  )
+  const panel = readFileSync(
+    join(__dirname, '..', 'src', 'renderer', 'src', 'components', 'addy', 'PairingPanel.tsx'),
+    'utf8'
+  )
+
+  it('never seals a constant as the label', () => {
+    // `confirmation.self` is returned by the sidecar ONLY to the joining
+    // device, and the initiator writes the roster entry — so
+    // `confirmation.self?.label` was always undefined and the `??` behind it
+    // sealed the string "a paired device" into an immutable entry. Every
+    // device this product ever paired had that name, including siblings on one
+    // account: two identical rows, one with a button that wipes a laptop.
+    const at = session.indexOf('label: label?.trim()')
+    expect(at, 'the label is no longer built where the fix was made').toBeGreaterThan(-1)
+    const line = session.slice(at, at + 200)
+    expect(line, 'the fallback is a constant again').not.toMatch(/'a paired device'/)
+    expect(line, 'the fallback is not derived from that device’s own key').toMatch(/pubSign/i)
+  })
+
+  it('asks the person doing the pairing, because nothing else can', () => {
+    expect(panel, 'no field for the name').toContain('newLabel')
+    expect(panel, 'the name is not sent with the confirmation').toMatch(
+      /completePairing\(confirmation, newLabel\)/
+    )
+    // Only the machine writing the entry is asked; the joiner does not write
+    // one and has nothing to name.
+    const field = panel.slice(panel.indexOf('{!confirmation.self && ('))
+    expect(field.slice(0, 400), 'the joiner is asked for a name it cannot use').toContain(
+      'What is the other machine called?'
+    )
+  })
+})

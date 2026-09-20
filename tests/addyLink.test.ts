@@ -31,7 +31,6 @@ describe('opsmaxx:// links', () => {
   const refused: [string, string][] = [
     ['https://addy.opsmaxx.dev/console', 'an ordinary web link is not a sync link'],
     ['opsmaxx://sync?invite=' + 'a'.repeat(43), 'no relay: nothing to join'],
-    ['opsmaxx://sync?relay=https%3A%2F%2Faddy.opsmaxx.dev', 'no invite'],
     [
       'opsmaxx://sync?relay=http%3A%2F%2Faddy.opsmaxx.dev&invite=' + 'a'.repeat(43),
       'plain http off-loopback: the invite is readable on the wire'
@@ -62,6 +61,22 @@ describe('opsmaxx:// links', () => {
       if ('reason' in r) expect(r.reason.length, 'refused without saying why').toBeGreaterThan(10)
     })
   }
+
+  it('allows a relay-only link, which is the one a second machine needs', () => {
+    // The blocker for a joining machine is the ADDRESS, not the invite: an
+    // invite spent on a second machine starts a separate sync group that syncs
+    // with nothing. The address is not a credential — it is in the browser's
+    // URL bar — and the link only fills the field.
+    const r = parseAddyLink('opsmaxx://sync?relay=https%3A%2F%2Faddy.opsmaxx.dev')
+    expect('link' in r, 'a relay-only link was refused, closing the only door the server can open').toBe(true)
+    if (!('link' in r)) return
+    expect(r.link.relay).toBe('https://addy.opsmaxx.dev')
+    expect(r.link.invite, 'an invite appeared from nowhere').toBeUndefined()
+  })
+
+  it('still refuses an invite that is not shaped like one, even relay-only', () => {
+    expect('reason' in parseAddyLink('opsmaxx://sync?relay=https%3A%2F%2Fa.example&invite=no spaces')).toBe(true)
+  })
 
   it('allows a loopback relay over http, because a dev relay is self-signed there', () => {
     const r = parseAddyLink('opsmaxx://sync?relay=http%3A%2F%2F127.0.0.1%3A8443&invite=' + 'c'.repeat(43))

@@ -4715,8 +4715,8 @@ ipcMain.handle('addy:cancelPairing', () => addySession.cancelPairing())
 // The two calls that make a pairing real. Until these existed, "They match"
 // called cancelPairing and toasted "Device added" over an account that still
 // had one device in it.
-ipcMain.handle('addy:completePairing', (_e, confirmation: PairingConfirmation) =>
-  addySession.completePairing(confirmation)
+ipcMain.handle('addy:completePairing', (_e, confirmation: PairingConfirmation, label?: string) =>
+  addySession.completePairing(confirmation, label)
 )
 ipcMain.handle('addy:finishJoin', () => addySession.finishJoin())
 

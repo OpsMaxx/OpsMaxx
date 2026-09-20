@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AlertTriangle, Check, Copy, KeyRound, Loader2, Server } from 'lucide-react'
 import { useApp } from '../../store/app'
 import { clsx } from '../../lib/format'
@@ -69,6 +69,35 @@ export function AddySetup(): React.JSX.Element | null {
    * three and asking it in three places is how it gets answered differently.
    */
   const [mode, setMode] = useState<'create' | 'join' | 'recover' | null>(null)
+
+  /**
+   * A link the OS handed us, which is how a second machine learns the relay's
+   * address without anybody reading it aloud.
+   *
+   * THE ADDRESS IS THE STEP THAT BLOCKS PEOPLE. This screen will not go on
+   * until the relay is filled in, and nothing on a fresh machine knows it —
+   * so the console can hand over a link carrying just that. It is not a
+   * credential; it is in the browser's URL bar on the other machine.
+   *
+   * It FILLS FIELDS AND NOTHING ELSE. An invite in the link fills the invite
+   * box; it is not spent. No mode is chosen for the reader either, because
+   * which of the three things this machine is remains theirs to say — and
+   * choosing `create` for somebody holding a second machine is the exact
+   * mistake this fork exists to prevent.
+   */
+  useEffect(() => {
+    const off = window.opsmaxx?.addy?.onLink?.((l) => {
+      if (l.action !== 'sync') return
+      setUrl(l.relay)
+      if (l.invite !== undefined) setInvite(l.invite)
+      toast(
+        l.invite === undefined
+          ? `Relay address filled in: ${l.relay}. Choose how this machine joins.`
+          : `Invite and relay filled in from the link.`
+      )
+    })
+    return () => off?.()
+  }, [])
   const [mnemonic, setMnemonic] = useState('')
 
   /**

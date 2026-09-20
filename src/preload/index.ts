@@ -449,8 +449,10 @@ const api = {
 
     /** Finish the pairing this device started: hand over the account key and
      *  write the roster entry that adds the other device. */
-    completePairing: (confirmation: unknown): Promise<{ devices: number }> =>
-      ipcRenderer.invoke('addy:completePairing', confirmation),
+    /** `label` is what the added machine will be called, permanently: it is
+     *  sealed into an immutable roster entry. */
+    completePairing: (confirmation: unknown, label?: string): Promise<{ devices: number }> =>
+      ipcRenderer.invoke('addy:completePairing', confirmation, label),
 
     /** Finish the pairing this device JOINED: take the account key, store it,
      *  and attach. */
