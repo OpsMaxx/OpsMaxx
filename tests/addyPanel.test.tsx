@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { stubBridge } from './setup/renderer'
+import { useToasts } from '../src/renderer/src/store/toast'
 import { AddyPanel } from '../src/renderer/src/components/addy/AddyPanel'
 import { addyJourney, ago, type AddyStatus, type AddySync } from '../src/renderer/src/components/addy/addyStatus'
 import { duration } from '../src/renderer/src/lib/format'
@@ -103,6 +104,26 @@ describe('the journey', () => {
     expect(steps.find((s) => s.key === 'current')!.detail).toContain('2 changes')
   })
 
+  it('does not tick "in sync" over a pass that failed', () => {
+    // `lastSyncAt` is set when a pass STARTS, so a failed pass still leaves a
+    // non-null timestamp. The last step rendered a green tick and "Everything
+    // this device knows about has been carried" directly above a band saying
+    // the last sync failed and why — two contradictory statements on one
+    // screen, with the tick on the reassuring one.
+    const broken = healthy()
+    broken.sync = {
+      running: true,
+      connected: true,
+      lastSyncAt: Date.now(),
+      conflicts: 0,
+      error: { message: 'servers: the relay refused the token', at: Date.now() }
+    }
+    const steps = addyJourney(broken, true, undefined)
+    const last = steps.find((s) => s.key === 'current')!
+    expect(last.state).not.toBe('done')
+    expect(last.detail).toMatch(/failed/)
+  })
+
   it('does not tick "in sync" off an engine that is not running', () => {
     const stopped = healthy()
     stopped.sync = { running: false, connected: false, lastSyncAt: null, conflicts: 0 }
@@ -185,12 +206,18 @@ describe('what it says once main can answer', () => {
     expect(screen.getByText('desktop')).toBeTruthy()
   })
 
-  it('renders a device the relay has never seen as never, not as now', async () => {
-    // `lastSeen: null` through a duration formatter is "0s ago", which is the
-    // exact opposite of what it means.
+  it('does not claim to know when a device was last seen', async () => {
+    // This used to assert the opposite, and the opposite was a falsehood on
+    // every row of every account. `lastSeen` is `null` because the RELAY does
+    // not report it — the shared contract says so — and null is "unknown", not
+    // "never". Rendering it as "never" told a sysadmin that the machine they
+    // were looking at had never been seen, in the one column they scan to spot
+    // a device that should not be there.
     stubStatus(healthy())
     render(<AddyPanel />)
-    expect(await screen.findByText('never')).toBeTruthy()
+    await screen.findByText(/does not report when each device was last seen/)
+    expect(screen.queryByText('never')).toBeNull()
+    // The note under the table is where it is said, once.
   })
 
   it('does not offer to create a second account beside the one that exists', async () => {
@@ -320,6 +347,35 @@ describe('the Sync now button', () => {
     render(<AddyPanel />)
     await waitFor(() => expect(screen.queryByRole('button', { name: /Refresh/ })).toBeTruthy())
     expect(screen.queryByRole('button', { name: /Sync now/ })).toBeNull()
+  })
+
+  it('says so when a pass could not run at all', async () => {
+    // Main returns null when this device is enrolled but not logged in —
+    // offline, an expired token, a sidecar that did not start. The button
+    // blinked and changed nothing, and the screen was identical afterwards.
+    const syncNow = vi.fn().mockResolvedValue(null)
+    stubBridge({ addy: { status: vi.fn().mockResolvedValue(enrolled()), syncNow } })
+
+    render(<AddyPanel />)
+    fireEvent.click(await screen.findByRole('button', { name: /Sync now/ }))
+
+    // The toast store, because the toast host is not mounted in this test —
+    // asserting on the DOM here would be asserting on the harness.
+    await waitFor(() =>
+      expect(useToasts.getState().toasts.some((t) => /not connected to the relay/.test(t.message))).toBe(true)
+    )
+  })
+
+  it('says what went wrong when a pass threw', async () => {
+    const syncNow = vi.fn().mockRejectedValue(new Error('the relay refused the token'))
+    stubBridge({ addy: { status: vi.fn().mockResolvedValue(enrolled()), syncNow } })
+
+    render(<AddyPanel />)
+    fireEvent.click(await screen.findByRole('button', { name: /Sync now/ }))
+
+    await waitFor(() =>
+      expect(useToasts.getState().toasts.some((t) => /refused the token/.test(t.message))).toBe(true)
+    )
   })
 
   it('re-reads even when the pass failed', async () => {

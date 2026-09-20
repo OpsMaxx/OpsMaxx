@@ -88,7 +88,18 @@ export function AddyPanel(): React.JSX.Element {
   const syncNow = async (): Promise<void> => {
     setSyncing(true)
     try {
-      await window.opsmaxx?.addy.syncNow()
+      const result = await window.opsmaxx?.addy.syncNow()
+      // NULL IS A REAL ANSWER AND IT WAS SWALLOWED. Main returns it when this
+      // device is enrolled but not logged in — offline, an expired token, a
+      // sidecar that did not start — and the button then blinked and changed
+      // nothing at all. The comment on the button claims it is withheld
+      // wherever its only outcome is an error; it is gated on `enrolled`,
+      // which does not cover this.
+      if (result === null) {
+        toast('This device is not connected to the relay right now, so nothing was synced.', 'error')
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : String(err), 'error')
     } finally {
       setSyncing(false)
       refresh()
@@ -654,8 +665,6 @@ function AddyDevices({
       <thead>
         <tr>
           <th>Device</th>
-          <th>Last seen</th>
-          <th>Added</th>
           <th />
         </tr>
       </thead>
@@ -667,11 +676,6 @@ function AddyDevices({
               {d.self && <span className="chip info">This device</span>}
               {d.revoked === true && <span className="chip danger">Revoked</span>}
             </td>
-            {/* `null` is "the relay has never seen it", which is a real state
-                for a device that paired and has not been opened since — and it
-                is not "0s ago", which is what a zero would print. */}
-            <td>{d.lastSeen === null ? 'never' : `${ago(d.lastSeen)} ago`}</td>
-            <td>{d.addedAt === null ? '—' : `${ago(d.addedAt)} ago`}</td>
             <td className="right">
               {/* Never on this device's own row. A device that revoked itself
                   would wipe on its next launch, and that is not undoable — on
@@ -684,6 +688,18 @@ function AddyDevices({
           </tr>
         ))}
       </tbody>
+      {/* SAID ONCE, rather than printed as a falsehood on every row.
+          `lastSeen` and `addedAt` are `null` because the relay reports
+          neither — the shared contract says so in as many words — and the
+          columns rendered that null as "never". So every device on every
+          account, including the one being looked at, read "Last seen: never".
+          That is the column a sysadmin scans to spot a machine that should not
+          be there, and it was uniformly false. */}
+      <caption className="fine addy-devices-note">
+        The relay does not report when each device was last seen, so that is
+        not shown. What is here comes from the roster, which this device
+        verified itself.
+      </caption>
     </table>
   )
 }
@@ -725,7 +741,8 @@ function RevokeButton({
     <span className="addy-revoke-confirm">
       <span className="fine">
         Remove <strong>{label}</strong>? Everything OpsMaxx stores on it is deleted the next time it
-        opens, and adding it back means pairing it again.
+        opens <strong>and reaches the relay</strong> — a machine kept offline never hears, which is
+        why a stolen one also needs the account key changed. Adding it back means pairing it again.
       </span>
       <button className="btn ghost size-24" disabled={busy} onClick={() => setArming(false)}>
         Cancel

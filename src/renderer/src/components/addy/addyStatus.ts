@@ -304,7 +304,23 @@ export function addyJourney(
         detail: 'Nothing can be said about this until sync runs.',
         state: 'unknown'
       }
-    : sync.conflicts > 0
+    : sync.error !== undefined
+      ? {
+          // BEFORE THE TICK, and this branch did not exist.
+          //
+          // `lastSyncAt` is set when a pass STARTS, so a pass that failed
+          // still leaves a non-null timestamp — and the last step rendered
+          // "Everything this device knows about has been carried", with a
+          // green tick, directly above a band saying the last sync failed and
+          // why. Two contradictory statements on one screen, and the
+          // reassuring one had the tick.
+          key: 'current',
+          title: 'Both devices agree',
+          detail:
+            'The last pass failed, so some changes have not been carried. The reason is below.',
+          state: 'now'
+        }
+      : sync.conflicts > 0
       ? {
           key: 'current',
           title: 'Both devices agree',
