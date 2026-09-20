@@ -515,8 +515,16 @@ function LeaveRow({
     void window.opsmaxx?.addy
       ?.leave()
       .then((r) => {
+        // WHICH OF THE TWO HAPPENED MATTERS. Removing itself from the device
+        // list needs the relay, and leaving deliberately works without it — so
+        // a person who left offline is still listed on their other machines
+        // and should hear that from here rather than discover it there.
         toast(
-          r.left ? 'This device has left the account.' : 'This device was not on an account.',
+          !r.left
+            ? 'This device was not on an account.'
+            : r.removedFromRoster === true
+              ? 'This device has left the account and removed itself from your device list.'
+              : 'This device has left the account. It could not reach the relay to remove itself, so your other devices still list it — remove it from one of them.',
           'ok'
         )
         setOpen(false)

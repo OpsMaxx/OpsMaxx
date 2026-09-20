@@ -25,9 +25,14 @@ describe('leaving an account is wired end to end', () => {
   const panel = read('src', 'renderer', 'src', 'components', 'addy', 'AddyPanel.tsx')
 
   it('the session forgets every kind of secret it holds for the account', () => {
-    const body = session.slice(session.indexOf('async leaveAccount('))
-    expect(body.length, 'the parser is wrong, not the code').toBeGreaterThan(400)
-    const fn = body.slice(0, body.indexOf('\n  }'))
+    const from = session.slice(session.indexOf('async leaveAccount('))
+    expect(from.length, 'the parser is wrong, not the code').toBeGreaterThan(400)
+    // To the NEXT member, not to the first `\n  }` — the return type is a
+    // multi-line object literal and its closing brace matched, so the slice
+    // stopped before the body and every assertion below passed over nothing.
+    const end = from.slice(1).search(/\n {2}(?:\/\*\*|(?:async |private |)[A-Za-z_]\w*\()/)
+    const fn = end > 0 ? from.slice(0, end) : from
+    expect(fn.length, 'the parser is wrong, not the code: body not found').toBeGreaterThan(600)
     // Each kind the machine-only contract names. Leaving one behind leaves a
     // key on the disk of a machine the user believes they have detached.
     for (const scope of [':device', ':device-enc', ':account', ':root']) {
@@ -43,6 +48,32 @@ describe('leaving an account is wired end to end', () => {
     // writes it back afterwards.
     expect(fn.indexOf('detach()'), 'detach must come before the forgetting').toBeLessThan(
       fn.indexOf('forgetSyncState()')
+    )
+  })
+
+  it('removes this device from the signed device list before it forgets how', () => {
+    const from = session.slice(session.indexOf('async leaveAccount('))
+    const end = from.slice(1).search(/\n {2}(?:\/\*\*|(?:async |private |)[A-Za-z_]\w*\()/)
+    const fn = end > 0 ? from.slice(0, end) : from
+    expect(fn.length, 'the parser is wrong, not the code').toBeGreaterThan(600)
+
+    // LEAVING WITHOUT THIS LEAKS AN ENTRY PER CYCLE. Leave and re-join by
+    // pairing a few times and the account carries a dead entry each time —
+    // machines the others still believe are on the account and will seal data
+    // to. This device holds its own signing key right up to the moment it
+    // forgets it, so it is the one that can remove itself cheaply.
+    expect(fn, 'leaving never removes this device from the roster').toContain('revokeDevice(')
+
+    // Before the detach, because it needs the sidecar and the session.
+    expect(
+      fn.indexOf('revokeDevice('),
+      'the removal is attempted after detach(), when the keys it needs are gone'
+    ).toBeLessThan(fn.indexOf('await this.detach()'))
+
+    // And it must not stop somebody leaving while the relay is down, which is
+    // half of what leaving is for.
+    expect(fn, 'a failed removal is not caught, so leaving fails when the relay is down').toMatch(
+      /catch\s*\{/
     )
   })
 

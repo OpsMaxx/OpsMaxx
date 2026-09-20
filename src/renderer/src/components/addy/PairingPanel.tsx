@@ -19,7 +19,22 @@ import type { AddyPairingConfirmation } from '../../../../shared/addy'
 
 type Stage = 'choose' | 'showing' | 'joining' | 'compare' | 'done' | 'failed'
 
-export function PairingPanel({ baseURL }: { baseURL: string }): React.JSX.Element {
+/**
+ * `canShow` — whether this machine is able to BE the one holding the code.
+ *
+ * `beginPairing` loads the account's keys to mint a rendezvous, so a machine
+ * with no account cannot do it and answers "no account is loaded". The button
+ * was offered anyway, on the one screen where it is guaranteed to fail: the
+ * setup screen of a machine that has nothing. Both halves of the exchange were
+ * on offer and only one of them could ever work.
+ */
+export function PairingPanel({
+  baseURL,
+  canShow = true
+}: {
+  baseURL: string
+  canShow?: boolean
+}): React.JSX.Element {
   const [stage, setStage] = useState<Stage>('choose')
   const [code, setCode] = useState('')
   const [pairingId, setPairingId] = useState('')
@@ -170,14 +185,17 @@ export function PairingPanel({ baseURL }: { baseURL: string }): React.JSX.Elemen
       {stage === 'choose' && (
         <>
           <div className="setting-desc">
-            Adding a device needs both devices open at the same time. One shows a code, the other
-            types it, and you compare seven emoji.
+            {canShow
+              ? 'Adding a device needs both devices open at the same time. One shows a code, the other types it, and you compare seven emoji.'
+              : 'This machine has no account yet, so it is the one that TYPES the code. Start on the machine you already use: open Account there, choose Add another device, and it will show you a code and a pairing id.'}
           </div>
           <div className="pair-actions">
-            <button className="btn" onClick={() => void start()}>
-              <Smartphone size={14} /> Show a code on this device
-            </button>
-            <button className="btn" onClick={() => setStage('joining')}>
+            {canShow && (
+              <button className="btn" onClick={() => void start()}>
+                <Smartphone size={14} /> Show a code on this device
+              </button>
+            )}
+            <button className={canShow ? 'btn' : 'btn primary'} onClick={() => setStage('joining')}>
               Type a code from another device
             </button>
           </div>

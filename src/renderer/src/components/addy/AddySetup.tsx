@@ -438,7 +438,11 @@ export function AddySetup(): React.JSX.Element | null {
             </li>
           </ol>
           {url.trim() ? (
-            <PairingPanel baseURL={url.trim()} />
+            // THIS MACHINE HAS NO ACCOUNT, so it cannot be the one that shows
+            // the code — `beginPairing` loads the account's keys to mint a
+            // rendezvous and answers "no account is loaded" without them. The
+            // button was offered on the one screen where it could only fail.
+            <PairingPanel baseURL={url.trim()} canShow={false} />
           ) : (
             <div className="setting-desc">Fill in the relay address above to go on.</div>
           )}

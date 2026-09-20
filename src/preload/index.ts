@@ -525,7 +525,7 @@ const api = {
     syncNow: (): Promise<unknown> => ipcRenderer.invoke('addy:syncNow'),
     /** Forget every agreement and take everything again from the relay. */
     resync: (): Promise<unknown> => ipcRenderer.invoke('addy:resync'),
-    leave: (): Promise<{ left: boolean; accountId: string | null }> =>
+    leave: (): Promise<{ left: boolean; accountId: string | null; removedFromRoster?: boolean }> =>
       ipcRenderer.invoke('addy:leave'),
     /** Try again without quitting. */
     reconnect: (): Promise<{ ok: boolean; problem?: string }> =>

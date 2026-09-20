@@ -309,7 +309,14 @@ class AddySession {
    * deleted. The keychain entries go last, because they are the only step that
    * cannot be undone by trying again.
    */
-  async leaveAccount(): Promise<{ left: boolean; accountId: string | null }> {
+  async leaveAccount(): Promise<{
+    left: boolean
+    accountId: string | null
+    /** Whether this device also removed its own entry from the signed device
+     *  list. False when the relay could not be reached — the entry is then
+     *  stale and another device can remove it. */
+    removedFromRoster?: boolean
+  }> {
     // TAKE WHATEVER IS ACTUALLY HERE, FROM EITHER SOURCE.
     //
     // The record and the live session can disagree, and this returned early
@@ -322,6 +329,37 @@ class AddySession {
     const accountId = held?.accountId ?? this.account?.accountId ?? null
     const wasHere = held !== null || this.account !== null
 
+    // TAKE THIS DEVICE OUT OF THE ROSTER WHILE IT STILL CAN.
+    //
+    // Leaving is local, so nothing used to be published — and the entry for
+    // this machine stayed in the signed device list for ever. Leave and
+    // re-join by pairing a few times and the account accumulates a dead entry
+    // per cycle, each one a device the other machines still believe is on the
+    // account and will seal data to.
+    //
+    // This device holds its own signing key right up to the moment it forgets
+    // it, so removing itself is something it can do and only it can do
+    // cheaply: anyone else would need a working machine and a deliberate act.
+    // Done BEFORE the detach, because it needs the sidecar and the session.
+    //
+    // Best effort, and quiet about failing. The relay may be down, and leaving
+    // must work offline — that is half of what it is for. The entry is then
+    // stale and another device can remove it, which is exactly the situation
+    // that existed before this and is no worse for having tried.
+    let removedFromRoster = false
+    if (this.account !== null && this.addyd !== null && this.relay !== null) {
+      try {
+        const self = this.lastRoster?.self ?? (await this.refreshRoster()).self
+        if (typeof self === 'string' && self !== '') {
+          await this.revokeDevice(self)
+          removedFromRoster = true
+        }
+      } catch {
+        // Reported through the return value, not thrown: a device that cannot
+        // reach the relay must still be able to leave.
+      }
+    }
+
     // Unconditional, and before anything is forgotten. A live sidecar holding
     // keys is the thing being left, whether or not a file on disk agrees that
     // it exists.
@@ -333,7 +371,7 @@ class AddySession {
       // the state the user was asking for.
       forgetSyncState()
       forgetEnrolment()
-      return { left: false, accountId: null }
+      return { left: false, accountId: null, removedFromRoster: false }
     }
 
     // Every secret this device holds for that account, by the same kinds the
@@ -356,7 +394,7 @@ class AddySession {
     forgetEnrolment()
     this.lastProblem = null
 
-    return { left: wasHere, accountId }
+    return { left: wasHere, accountId, removedFromRoster }
   }
 
   /**
