@@ -460,6 +460,68 @@ describe('a relay that serves an old copy back', () => {
   })
 })
 
+describe('a conflict that is not one', () => {
+  it('does not publish a copy when both sides hold the same bytes', async () => {
+    // Reached when a pass is interrupted: collections land on disk, the state
+    // entry does not, and the next pass sees a local change AND a remote
+    // change over two payloads that are identical. Asking somebody to choose
+    // between a thing and itself is the fastest way to teach them the chooser
+    // is noise — and the chooser is the only thing that makes
+    // last-writer-wins acceptable.
+    writeBlob({ servers: [{ id: 's1' }] })
+    const relay = fakeRelay()
+    await syncOnce(deps(relay))
+
+    // Both sides move to the SAME new value, independently — which is what
+    // two devices agreeing looks like from here.
+    const agreed = [{ id: 's1' }, { id: 's2' }]
+    writeBlob({ servers: agreed })
+    seeded(relay, 'servers', agreed, 2)
+
+    const r = await syncOnce(deps(relay))
+
+    expect(r.outcomes.servers).toBe('unchanged')
+    expect(relay.conflicts).toEqual([])
+  })
+
+  it('does not republish the same conflict every pass when the write fails', async () => {
+    // The loser is preserved BEFORE anything is overwritten, which is the
+    // right order — so a write that then fails leaves no state entry, and the
+    // next pass sees the identical situation. Twelve copies an hour until the
+    // relay starts answering 507, after which the loser genuinely is
+    // discarded.
+    writeBlob({ servers: [{ id: 's1' }] })
+    const relay = fakeRelay()
+    await syncOnce(deps(relay))
+
+    writeBlob({ servers: [{ id: 's1' }, { id: 'here' }] })
+    seeded(relay, 'servers', [{ id: 's1' }, { id: 'there' }], 2)
+
+    // A source whose write always fails, as a full disk does.
+    const broken = {
+      ...deps(relay),
+      relay: relay as never
+    }
+    const { SOURCES } = await import('../src/main/services/addy/collections')
+    const real = SOURCES.servers!
+    SOURCES.servers = {
+      read: () => real.read(),
+      write: () => {
+        throw new Error('the disk is full')
+      },
+      inRendererStore: true
+    }
+    try {
+      await syncOnce(broken)
+      expect(relay.conflicts.length).toBe(1)
+      await syncOnce(broken)
+      expect(relay.conflicts.length, 'a second copy of the same conflict').toBe(1)
+    } finally {
+      SOURCES.servers = real
+    }
+  })
+})
+
 describe('a state agreed with a different account', () => {
   it('is discarded rather than trusted', async () => {
     // The whole safety of a device's first sync is the `!known` branch: adopt

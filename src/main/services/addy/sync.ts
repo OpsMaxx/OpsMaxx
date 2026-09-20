@@ -53,6 +53,18 @@ interface CollectionState {
   localHash: string
   /** Epoch ms of the last agreement. */
   at: number
+  /**
+   * The remote ETag a conflict copy was last kept for.
+   *
+   * Recorded so the same conflict is not published again on every pass. The
+   * ordering in `conflictWithRemote` is deliberate — the loser is preserved
+   * BEFORE anything is overwritten — so a write that then fails leaves no
+   * state entry, and the next pass sees the identical situation and keeps
+   * another copy. A collection whose remote payload this build cannot parse
+   * produced twelve an hour until the relay started answering 507, after
+   * which the loser genuinely was discarded.
+   */
+  conflictedEtag?: string
 }
 
 interface SyncState {
@@ -464,7 +476,32 @@ async function conflictWithRemote(
   // number — after which its own next push is refused as a rollback by every
   // other device.
   const opened = await openObject(deps, name, epoch, fresh.body, state.collections[name]?.counter ?? 0)
-  await keepAsConflict(deps, name, epoch, opened.counter + 1, local)
+
+  // IDENTICAL COPIES ARE NOT A CONFLICT. A pass that was interrupted leaves
+  // collections on disk with no state entry, so the next one sees a local
+  // change and a remote change and lands here over two payloads that are the
+  // same bytes. Publishing a copy of the winner, and asking the user to choose
+  // between a thing and itself, is the fastest way to teach somebody that the
+  // chooser is noise — and the chooser is the only thing that makes
+  // last-writer-wins acceptable.
+  if (opened.payload.equals(local)) {
+    state.collections[name] = {
+      etag: fresh.etag,
+      counter: Math.max(opened.counter, state.collections[name]?.counter ?? 0),
+      localHash: hash(local),
+      at: Date.now()
+    }
+    return 'unchanged'
+  }
+
+  // Not again for the same remote copy. See `conflictedEtag`.
+  if (state.collections[name]?.conflictedEtag !== fresh.etag) {
+    await keepAsConflict(deps, name, epoch, opened.counter + 1, local)
+    state.collections[name] = {
+      ...(state.collections[name] ?? { etag: '', counter: 0, localHash: '', at: 0 }),
+      conflictedEtag: fresh.etag
+    }
+  }
   source.write(opened.payload)
   state.collections[name] = {
     etag: fresh.etag,
