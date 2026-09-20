@@ -342,6 +342,16 @@ is exactly what we are trying not to raise for a key no passphrase would help
 with. Our own agent still refuses smartcard opcodes; that is OpsMaxx as a
 server, this is OpsMaxx as a client.
 
+**What is verified, and what is not.** The detector is checked against real
+`ssh-keygen` output — ed25519, RSA and an encrypted ed25519 — and the routing is
+checked end to end through `openChain`: an `sk-` identity fails with
+`agentForHop`'s resolution error and an ordinary key does not, which is a
+message only the agent path can produce. **Whether a real YubiKey then
+authenticates is untested**, and cannot be tested on the machine this was
+written on: `ssh-keygen -t ed25519-sk` reports "No FIDO SecurityKeyProvider
+specified" because no authenticator is attached. The signing round trip is the
+one thing worth trying by hand before trusting this.
+
 **sshid.io is deliberately not matched.** Device-bound passkey, public half
 published, administrator pastes it into `authorized_keys`. It needs a hosted
 page to publish to. We do not have one and are not building one.
@@ -417,7 +427,32 @@ say when you will need it, at the point it is first shown.
 
 ---
 
-## 5. A note on DocGov
+## 5. How this was verified
+
+Beyond the suite — 10,307 tests, including the guard tests each change moved
+rather than silenced — two things were checked outside it, because unit tests
+could not settle them.
+
+**The estate at rest, in real Electron against the real macOS keychain.** A
+harness run under `npx electron` — not `ELECTRON_RUN_AS_NODE`, which has no
+`safeStorage`, and not a mocked cipher, which proves nothing about a keychain —
+took a plaintext `opsmaxx-data.json` of the shape an existing install has. It
+confirmed: the estate loads identically after migration; the primary and the
+`.bak` are both unreadable as text afterwards; `settings` and `tabs` survive —
+the keys with no relay copy, the ones destroyed the last time the
+corrupt-versus-absent distinction was lost; a save/load round trip works; and
+an undecryptable file reads as *nothing* while still reporting as *present*,
+which is the answer sync uses to decide whether to overwrite. Eleven checks, no
+failures.
+
+**The `sk-` routing, through the real connect path**, as described in 4.3.
+
+Not verified, and said here rather than left to be discovered: a hardware key
+actually signing, and the per-item merge against two real devices over a real
+relay. The merge is covered by unit tests on both the merge function and the
+sync engine, including every case in which it refuses to decide.
+
+## 6. A note on DocGov
 
 `.claude/rules/documentation.md` requires new documentation to be created
 through `docgov create`, and its class checked with `docgov whatis`. **The
