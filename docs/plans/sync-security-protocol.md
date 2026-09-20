@@ -346,7 +346,7 @@ server, this is OpsMaxx as a client.
 published, administrator pastes it into `authorized_keys`. It needs a hosted
 page to publish to. We do not have one and are not building one.
 
-### 4.4 Sync granularity is whole-collection — NOT DONE
+### 4.4 Sync granularity was whole-collection — fixed, by a different route
 
 Last-writer-wins per collection, the loser kept as a conflict copy. The sync
 unit is the whole `servers` array, so adding a host on the laptop while
@@ -359,25 +359,42 @@ array is written without the entry. Merging item-wise without tombstones would
 resurrect every delete, which is precisely why blob-LWW was chosen. The only
 tombstone in the repo is the device-revocation record, not a sync marker.
 
-**The shape.** `{id, updatedAt, deletedAt}` per item inside the sealed
-plaintext, merged item-wise, with the chooser kept for genuine same-item
-concurrent edits. The migration mechanism exists — the sealed plaintext already
-carries `{schema, writerVersion, counter}`, and an older client seeing a newer
-schema goes read-only rather than degraded.
+**The design that was planned, and why it was not built.** The obvious shape is
+`{id, updatedAt, deletedAt}` per record inside the sealed payload, merged
+item-wise. It costs a schema bump, which puts every device on an older build
+into read-only by `ErrSchemaTooNew` until it updates, and it needs tombstones,
+because a delete is expressed by absence and an item-wise merge without them
+resurrects every one. The byte-equality note in `serversSource` made it look
+worse still.
 
-**And the constraint that makes it a two-release job.** The `serversSource`
-comment explains why the `status` strip is applied on write only: stripping on
-read as well would make this device's payload permanently unequal to the one
-every device on an older build pushes, and **the engine compares bytes**, so
-that is a conflict copy per pass for as long as the fleet is mixed. Per-item
-metadata changes the bytes of every collection. A naive rollout therefore
-produces a conflict copy every five minutes between any two devices on
-different versions — worse than the friction it set out to remove. New clients
-must keep emitting the old byte shape until the schema gate says the account
-has upgraded.
+**What was built instead: a three-way merge.** None of that is necessary if the
+common ancestor is available, and it is — the last state this device agreed
+with the relay about. With an ancestor, "absent here and present there" stops
+being ambiguous: it is a delete if the ancestor had it and an add if it did not.
+That is an ordinary three-way merge, and **the payload on the wire does not
+change at all**. No schema bump, no tombstones, no read-only period, no
+migration; a device on an older build reads a merged collection exactly as it
+reads any other.
 
-Deferred on purpose. It changes a wire format the sidecar and the client both
-parse, and it should not share a branch with anything else.
+The ancestor is kept as a fingerprint per id, not as the records. It answers
+both questions the merge asks — was this record present, and has it changed —
+and nothing else, so `opsmaxx-addy-sync.json` does not become a second
+plaintext copy of the estate sitting beside the sealed one. Ids are generated
+and opaque; no hostname, username or label is in it.
+
+**What it refuses to decide**, all of which still go to the conflict copy and
+the chooser, unchanged: a record both devices changed differently, a record
+edited on one side and deleted on the other, a payload that is not a list of
+identified records (`apiWorkspace` is an object), duplicate ids, and a
+collection with no recorded ancestor. The aim was to stop asking a person about
+edits that do not overlap, not to start guessing about edits that do.
+
+Two smaller things fell out. Identical payloads on both sides are two devices
+agreeing, not a merge — they short-circuit to `unchanged` rather than burning a
+revision to record that nothing happened. And `merged` had to join `pulled`,
+`adopted` and `conflicted` in the list of outcomes the renderer is told about:
+a merge writes to disk, and a renderer that is not told goes on holding the
+pre-merge copy and saves it back over the top.
 
 ### 4.5 Two smaller inconsistencies — one FIXED, one a workflow note
 

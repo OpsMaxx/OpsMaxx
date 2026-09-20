@@ -6,6 +6,7 @@ import { atomicWriteFileSync } from '../atomicWrite'
 import { AddyError, type AddySidecar } from './sidecar'
 import type { RelayClient } from './relay'
 import { SOURCES, type CollectionSource } from './collections'
+import { baseOf, mergeCollections, type Base } from './merge'
 import { SYNCED_COLLECTIONS, type SyncedCollection } from '../../../shared/addy'
 
 /**
@@ -53,6 +54,22 @@ interface CollectionState {
   localHash: string
   /** Epoch ms of the last agreement. */
   at: number
+  /**
+   * Per record, a fingerprint of it as it stood at that agreement.
+   *
+   * The COMMON ANCESTOR, and the whole reason a both-sides-changed pass can be
+   * merged rather than handed to a person. Without it, "absent here and present
+   * there" is ambiguous between a delete and an add, which is why the unit of
+   * sync was the whole collection. Fingerprints rather than the records
+   * themselves so this file does not become a second, plaintext copy of the
+   * estate beside the sealed one -- ids are generated and opaque, and no
+   * hostname, username or label is in here.
+   *
+   * Absent for a collection that is not a list of identified records, and on
+   * state written before this existed. Both mean the same thing to the merge:
+   * do not try, use the chooser.
+   */
+  base?: Base
   /**
    * The remote ETag a conflict copy was last kept for.
    *
@@ -166,6 +183,8 @@ export type CollectionOutcome =
   | 'pushed'
   | 'pulled'
   | 'adopted'
+  /** Both sides changed, and the changes did not overlap. */
+  | 'merged'
   | 'conflicted'
   | 'skipped'
   | 'failed'
@@ -229,7 +248,8 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
     try {
       const outcome = await syncCollection(deps, name, source, state)
       result.outcomes[name] = outcome
-      if (outcome === 'pushed' || outcome === 'pulled' || outcome === 'adopted') result.carried++
+      if (outcome === 'pushed' || outcome === 'pulled' || outcome === 'adopted' || outcome === 'merged')
+        result.carried++
       // `conflicted` BELONGS HERE, and leaving it out was deterministic data
       // loss rather than a race.
       //
@@ -242,7 +262,16 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
       // copy as the account's winner. The other device's work was gone from
       // every screen, surviving only as a conflict copy nobody had been told
       // to look at, and the panel reported success throughout.
-      if (outcome === 'pulled' || outcome === 'adopted' || outcome === 'conflicted') {
+      // `merged` belongs here for the same reason `conflicted` does, and with
+      // the same consequence if it is left out: a merge writes the merged copy
+      // to disk, so a renderer that is not told goes on holding the pre-merge
+      // one and saves it back over the top on its next write.
+      if (
+        outcome === 'pulled' ||
+        outcome === 'adopted' ||
+        outcome === 'merged' ||
+        outcome === 'conflicted'
+      ) {
         changed.push(name)
       }
       if (outcome === 'conflicted') result.conflicts.push(name)
@@ -322,6 +351,7 @@ async function syncCollection(
       etag: remote.etag,
       counter: opened.counter,
       localHash: hash(opened.payload),
+      base: baseOf(opened.payload) ?? undefined,
       at: Date.now()
     }
     return 'adopted'
@@ -342,7 +372,8 @@ async function syncCollection(
     const counter = (known?.counter ?? 0) + 1
     try {
       const etag = await putSealed(deps, name, epoch, counter, local)
-      state.collections[name] = { etag, counter, localHash: hash(local), at: Date.now() }
+      state.collections[name] = { etag, counter, localHash: hash(local),
+ base: baseOf(local) ?? undefined, at: Date.now() }
       return 'pushed'
     } catch (err) {
       // A CREATE RACE, not a lost write. The relay refuses an unconditional
@@ -378,6 +409,7 @@ async function syncCollection(
         etag: there.etag,
         counter: opened.counter,
         localHash: hash(opened.payload),
+        base: baseOf(opened.payload) ?? undefined,
         at: Date.now()
       }
       return 'adopted'
@@ -389,6 +421,7 @@ async function syncCollection(
         etag: there.etag,
         counter: opened.counter,
         localHash: hash(opened.payload),
+        base: baseOf(opened.payload) ?? undefined,
         at: Date.now()
       }
       return 'conflicted'
@@ -398,6 +431,7 @@ async function syncCollection(
       etag: there.etag,
       counter: opened.counter,
       localHash: hash(body),
+      base: baseOf(body) ?? undefined,
       at: Date.now()
     }
     return 'unchanged'
@@ -412,14 +446,15 @@ async function syncCollection(
     const counter = known.counter + 1
     try {
       const etag = await putSealed(deps, name, epoch, counter, body, known.etag)
-      state.collections[name] = { etag, counter, localHash: hash(body), at: Date.now() }
+      state.collections[name] = { etag, counter, localHash: hash(body),
+ base: baseOf(body) ?? undefined, at: Date.now() }
       return 'pushed'
     } catch (err) {
       // Somebody wrote between the GET above and this PUT. The conditional
       // write is what caught it; the remedy is the same as the both-changed
       // case below, so fall into it rather than losing the edit.
       if (!(err instanceof AddyError) || !/written by another device/.test(err.message)) throw err
-      return conflictWithRemote(deps, name, epoch, source, state, body)
+      return mergeOrConflict(deps, name, epoch, source, state, body, known)
     }
   }
 
@@ -430,13 +465,95 @@ async function syncCollection(
       etag: there.etag,
       counter: opened.counter,
       localHash: hash(opened.payload),
+      base: baseOf(opened.payload) ?? undefined,
       at: Date.now()
     }
     return 'pulled'
   }
 
-  // Both. LAST WRITER WINS, and the writer that lost keeps its copy.
-  return conflictWithRemote(deps, name, epoch, source, state, body)
+  // Both. Try to merge; last writer wins only if that is refused.
+  return mergeOrConflict(deps, name, epoch, source, state, body, known)
+}
+
+/**
+ * Both sides changed. Merge if the changes do not overlap, ask a person if they
+ * do.
+ *
+ * The old behaviour was the `conflictWithRemote` below unconditionally, which
+ * is correct and is a lot to ask: one person with three devices gets a chooser
+ * for adding a host here while deleting an unrelated one there, and the entry
+ * in sync.ts's own comment — "these differ in one entry and I want both" — was
+ * the commonest right answer, which means it was the commonest answer a person
+ * was being made to give by hand.
+ *
+ * The merge decides nothing ambiguous. A record both devices changed
+ * differently, a record edited on one side and deleted on the other, a payload
+ * that is not a list of identified records, or no recorded ancestor: every one
+ * of those still goes to the conflict copy and the chooser. Nothing is
+ * destroyed on either path.
+ *
+ * The merged payload is an ordinary collection — no new fields, no schema bump
+ * — so a device on an older build reads it exactly as it reads any other. That
+ * is deliberate: per-record `updatedAt`/`deletedAt` on the wire would have put
+ * every older device into read-only by `ErrSchemaTooNew`, to obtain an ancestor
+ * this device already had.
+ */
+async function mergeOrConflict(
+  deps: SyncDeps,
+  name: SyncedCollection,
+  epoch: number,
+  source: CollectionSource,
+  state: SyncState,
+  body: Buffer,
+  known: CollectionState
+): Promise<CollectionOutcome> {
+  // The freshest remote, not the one from the top of the pass: a write may have
+  // landed in between, and merging against a copy that is already stale would
+  // push a result that silently drops it.
+  const fresh = await deps.relay.getObject(name, epoch)
+  if (!fresh) return conflictWithRemote(deps, name, epoch, source, state, body)
+
+  let opened
+  try {
+    opened = await openObject(deps, name, epoch, fresh.body, known.counter)
+  } catch {
+    // Cannot read the remote at all. That is the chooser's problem, not the
+    // merge's, and conflictWithRemote already handles it without losing a copy.
+    return conflictWithRemote(deps, name, epoch, source, state, body)
+  }
+
+  // Identical bytes are two devices agreeing, not a merge and not a conflict.
+  // Reached when a pass is interrupted — collections land on disk, the state
+  // entry does not — and writing a new counter for it would burn a revision to
+  // record that nothing happened.
+  if (opened.payload.equals(body)) {
+    state.collections[name] = {
+      etag: fresh.etag,
+      counter: opened.counter,
+      localHash: hash(body),
+      base: baseOf(body) ?? undefined,
+      at: Date.now()
+    }
+    return 'unchanged'
+  }
+
+  const merged = mergeCollections(known.base, body, opened.payload)
+  if (!merged) return conflictWithRemote(deps, name, epoch, source, state, body)
+
+  // Nothing is overwritten until the merged copy is on the relay. A write that
+  // fails here leaves both sides exactly as they were, and the next pass sees
+  // the same situation rather than a half-applied merge.
+  const counter = Math.max(opened.counter, known.counter) + 1
+  const etag = await putSealed(deps, name, epoch, counter, merged.merged, fresh.etag)
+  source.write(merged.merged)
+  state.collections[name] = {
+    etag,
+    counter,
+    localHash: hash(merged.merged),
+    base: baseOf(merged.merged) ?? undefined,
+    at: Date.now()
+  }
+  return 'merged'
 }
 
 /**
@@ -462,7 +579,8 @@ async function conflictWithRemote(
     // It went away between the two reads. Nothing to conflict with.
     const counter = (state.collections[name]?.counter ?? 0) + 1
     const etag = await putSealed(deps, name, epoch, counter, local)
-    state.collections[name] = { etag, counter, localHash: hash(local), at: Date.now() }
+    state.collections[name] = { etag, counter, localHash: hash(local),
+ base: baseOf(local) ?? undefined, at: Date.now() }
     return 'pushed'
   }
   // THE FLOOR THIS DEVICE ALREADY HAS, not 0.
@@ -489,6 +607,7 @@ async function conflictWithRemote(
       etag: fresh.etag,
       counter: Math.max(opened.counter, state.collections[name]?.counter ?? 0),
       localHash: hash(local),
+      base: baseOf(local) ?? undefined,
       at: Date.now()
     }
     return 'unchanged'
@@ -510,6 +629,7 @@ async function conflictWithRemote(
     // check above just refused.
     counter: Math.max(opened.counter, state.collections[name]?.counter ?? 0),
     localHash: hash(opened.payload),
+    base: baseOf(opened.payload) ?? undefined,
     at: Date.now()
   }
   return 'conflicted'

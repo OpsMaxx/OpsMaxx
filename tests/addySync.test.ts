@@ -366,23 +366,67 @@ describe('once the two sides agree', () => {
     ])
   })
 
-  it('keeps both when both changed', async () => {
+  it('merges when both changed and the changes do not overlap', async () => {
+    // This used to be a conflict copy and a chooser, and the answer a person
+    // gave was always the same one: "these differ in one entry and I want
+    // both". Adding a server on the laptop while adding a different one on the
+    // phone is not an ambiguity, and it should not cost anybody a decision.
     const relay = await settled()
     writeBlob({ servers: [{ id: 's1' }, { id: 'added-here' }] })
     seeded(relay, 'servers', [{ id: 's1' }, { id: 'added-there' }], 2)
 
     const r = await syncOnce(deps(relay))
 
+    expect(r.outcomes.servers).toBe('merged')
+    expect(r.conflicts).toEqual([])
+    expect(relay.conflicts).toEqual([])
+    expect(readBlob().servers).toEqual([
+      { id: 's1', status: 'offline' },
+      { id: 'added-here', status: 'offline' },
+      { id: 'added-there', status: 'offline' }
+    ])
+  })
+
+  it('still keeps both, and asks, when the two changes DO overlap', async () => {
+    // The merge decides nothing ambiguous. One record renamed two ways is a
+    // question for a person, and the old machinery is what answers it —
+    // nothing is destroyed on either path.
+    const relay = await settled()
+    writeBlob({ servers: [{ id: 's1', name: 'mine' }] })
+    seeded(relay, 'servers', [{ id: 's1', name: 'theirs' }], 2)
+
+    const r = await syncOnce(deps(relay))
+
     expect(r.outcomes.servers).toBe('conflicted')
     expect(r.conflicts).toContain('servers')
-    // The local edit survives, sealed, on the relay. Without this the person
-    // who added a server on their laptop loses it with no error.
     const kept = relay.conflicts.find((c) => c.name === 'servers')
     expect(kept).toBeTruthy()
     const inner = JSON.parse(kept!.body.toString('utf8'))
     expect(JSON.parse(Buffer.from(inner.payload, 'base64').toString('utf8'))).toEqual([
-      { id: 's1' },
-      { id: 'added-here' }
+      { id: 's1', name: 'mine' }
+    ])
+  })
+
+  it('honours a delete from the other device rather than resurrecting it', async () => {
+    // The reason the merge needs an ancestor. Without one, "absent there,
+    // present here" cannot be told from "added here", and every delete would
+    // come back on the next pass.
+    // Settled on BOTH records, so s2 is in the ancestor. That is what makes
+    // its absence on the other side a delete rather than an add here — the
+    // distinction the whole three-way merge turns on.
+    writeBlob({ servers: [{ id: 's1' }, { id: 's2' }] })
+    const relay = fakeRelay()
+    await syncOnce(deps(relay))
+
+    writeBlob({ servers: [{ id: 's1' }, { id: 's2' }, { id: 'added-here' }] })
+    seeded(relay, 'servers', [{ id: 's1' }], 2)
+
+    const r = await syncOnce(deps(relay))
+
+    expect(r.outcomes.servers).toBe('merged')
+    expect(readBlob().servers).toEqual([
+      { id: 's1', status: 'offline' },
+      { id: 'added-here', status: 'offline' }
     ])
   })
 })
@@ -522,8 +566,11 @@ describe('a conflict that is not one', () => {
     const relay = fakeRelay()
     await syncOnce(deps(relay))
 
-    writeBlob({ servers: [{ id: 's1' }, { id: 'here' }] })
-    seeded(relay, 'servers', [{ id: 's1' }, { id: 'there' }], 2)
+    // An OVERLAPPING change, so this is still a conflict rather than a merge:
+    // the same record renamed two ways is the case the chooser exists for, and
+    // it is the case this test is about.
+    writeBlob({ servers: [{ id: 's1', name: 'mine' }] })
+    seeded(relay, 'servers', [{ id: 's1', name: 'theirs' }], 2)
 
     // A source whose write always fails, as a full disk does.
     const broken = {
