@@ -947,9 +947,19 @@ func TestASecondDeviceFollowsARotation(t *testing.T) {
 		t.Fatal("the follower read the new epoch's object without adopting the key")
 	}
 
+	// The CHAIN, not a transition entry on its own. `Adopt` verifies it,
+	// pins it against the handoff's own head, checks it reached the epoch
+	// claimed, and checks the key carried is the one the chain names — which
+	// is what stops a revoked device sealing a handoff with an AK of its
+	// choosing to a surviving device.
+	gw2, _ := base64.StdEncoding.DecodeString(chain)
+	rw, _ := base64.StdEncoding.DecodeString(rot["entry"].(string))
+	rotated := base64.StdEncoding.EncodeToString(append(gw2, rw...))
+
 	adopted := run(handleAdoptEpoch, "adoptEpoch", map[string]any{
 		"epoch": rot["epoch"], "counter": uint64(1),
-		"handoff": mine, "transition": rot["entry"], "chained": false,
+		"handoff": mine, "chain": rotated, "epoch1Sign": minted["epoch1SignPub"],
+		"chained": false,
 	})
 	if adopted["epoch"] != rot["epoch"] {
 		t.Fatalf("adopted epoch %v, not %v", adopted["epoch"], rot["epoch"])
@@ -1018,5 +1028,160 @@ func TestALoadedEpochKeyIsNotWipedByItsOwnLoad(t *testing.T) {
 	want, _ := base64.StdEncoding.DecodeString(secrets["akSeed"])
 	if !bytes.Equal(ak, want) {
 		t.Fatal("the loaded epoch key is not the one that was stored")
+	}
+}
+
+// A REVOKED DEVICE CANNOT SEAL ITSELF BACK IN.
+//
+// This is the attack that made the re-key worthless, and it needs no forged
+// signature and no relay bug beyond the one the threat model already grants:
+// a relay may serve whatever it likes.
+//
+// A removed device still holds AK_n. That is the entire premise of re-keying —
+// the revocation entry stops it receiving anything new, and the rotation is
+// what takes the old key's value away. But AK_n is also the BINDING that
+// `SealHandoff` takes. So the removed device can mint a handoff for epoch n+1
+// carrying an AK seed of its own choosing, sealed to a surviving device's
+// public encryption key, which is on the public roster. Every input is one it
+// already has.
+//
+// If the survivor adopts that, it derives the attacker's key, persists it, and
+// re-seals the whole estate under it — and the attacker reads everything from
+// then on. The rotation is void against the only device it exists to defend
+// against.
+//
+// What stops it is comparing the derived key against the one the CHAIN names.
+// The attacker cannot move that: naming a different epoch key needs a
+// transition entry, and a transition is signed by the root key for a
+// revocation rotation.
+func TestARevokedDeviceCannotForgeAnEpochHandoff(t *testing.T) {
+	keys.reset()
+	t.Cleanup(keys.reset)
+
+	rotator := keys
+	survivor := &vault{epochs: map[uint64]*protocol.EpochKeys{}}
+	as := func(v *vault) { keys = v }
+	t.Cleanup(func() { keys = rotator })
+
+	run := func(h func(Request) (any, error), method string, p map[string]any) map[string]any {
+		t.Helper()
+		v, err := h(Request{Method: method, Params: params(t, p)})
+		if err != nil {
+			t.Fatalf("%s: %v", method, err)
+		}
+		return v.(map[string]any)
+	}
+
+	minted := run(handleCreateAccount, "createAccount", map[string]any{"label": "rotator"})
+	secrets := minted["secrets"].(map[string]string)
+	genesis := minted["genesis"].(string)
+	acctID := minted["accountId"].(string)
+
+	// The survivor, holding epoch 1 like any paired device.
+	as(survivor)
+	theirs := run(handleCreateAccount, "createAccount", map[string]any{"label": "survivor"})
+	keys.reset()
+	run(handleLoad, "load", map[string]any{
+		"accountId":      acctID,
+		"deviceSignSeed": theirs["secrets"].(map[string]string)["deviceSignSeed"],
+		"deviceEncKey":   theirs["secrets"].(map[string]string)["deviceEncKey"],
+		"epochKeys":      map[string]any{"1": secrets["akSeed"]},
+		"rootSignPub":    minted["rootSignPub"],
+	})
+	who := run(handleWhoami, "whoami", map[string]any{})
+	survivorEncHex := who["deviceEnc"].(string)
+
+	// Put the survivor on the chain.
+	as(rotator)
+	before := run(handleVerifyRoster, "verifyRoster", map[string]any{
+		"chain": genesis, "rootSignPub": minted["rootSignPub"], "epoch1Sign": minted["epoch1SignPub"],
+	})
+	added := run(handleAddDevice, "addDevice", map[string]any{
+		"headEntry": before["headEntry"], "headSeq": before["headSeq"], "epoch": uint64(1),
+		"pubSign": who["devicePub"], "pubEnc": survivorEncHex, "label": "survivor",
+	})
+	gw, _ := base64.StdEncoding.DecodeString(genesis)
+	aw, _ := base64.StdEncoding.DecodeString(added["entry"].(string))
+	chain := base64.StdEncoding.EncodeToString(append(gw, aw...))
+
+	// A genuine rotation to epoch 2.
+	rot := run(handleRotateEpoch, "rotateEpoch", map[string]any{
+		"kind": "hygiene", "chain": chain,
+		"rootSignPub": minted["rootSignPub"], "epoch1Sign": minted["epoch1SignPub"],
+	})
+	cw, _ := base64.StdEncoding.DecodeString(chain)
+	rw, _ := base64.StdEncoding.DecodeString(rot["entry"].(string))
+	rotated := base64.StdEncoding.EncodeToString(append(cw, rw...))
+
+	// ---- the forgery -----------------------------------------------------
+	// Built with nothing but what a removed device has: AK_1 (the binding),
+	// the account id, the public root key, the head entry from the chain, and
+	// the survivor's public encryption key off the roster.
+	var acct protocol.AccountID
+	raw, _ := hex.DecodeString(acctID)
+	copy(acct[:], raw)
+
+	akSeed, _ := base64.StdEncoding.DecodeString(secrets["akSeed"])
+	oldEpoch, err := protocol.DeriveEpoch(akSeed, acct, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attackerAK := make([]byte, 32)
+	if _, err := rand.Read(attackerAK); err != nil {
+		t.Fatal(err)
+	}
+	encRaw, _ := hex.DecodeString(survivorEncHex)
+	survivorEnc, err := ecdh.X25519().NewPublicKey(encRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootRaw, _ := hex.DecodeString(minted["rootSignPub"].(string))
+	headWire, _ := base64.StdEncoding.DecodeString(added["entry"].(string))
+
+	forged, err := protocol.SealHandoff(protocol.Handoff{
+		AccountID:   acct,
+		Epoch:       2,
+		Counter:     1,
+		AKSeed:      attackerAK,
+		RootSignPub: rootRaw,
+		HeadEntry:   headWire,
+	}, survivorEnc, oldEpoch.AK)
+	if err != nil {
+		// If this fails the attack is not even constructible, which would
+		// make the test vacuous — so it is a fatal, not a skip.
+		t.Fatalf("the forged handoff could not be built, so this test proves nothing: %v", err)
+	}
+
+	// ---- and the survivor refuses it -------------------------------------
+	as(survivor)
+	_, err = handleAdoptEpoch(Request{Method: "adoptEpoch", Params: params(t, map[string]any{
+		"epoch": uint64(2), "counter": uint64(1),
+		"handoff":    base64.StdEncoding.EncodeToString(forged),
+		"chain":      rotated,
+		"epoch1Sign": minted["epoch1SignPub"],
+		"chained":    false,
+	})})
+	if err == nil {
+		t.Fatal("a revoked device's forged handoff was adopted; the re-key is void")
+	}
+	if !strings.Contains(err.Error(), "the chain does not name") {
+		t.Fatalf("it was refused, but not for the reason that matters: %v", err)
+	}
+
+	// And the GENUINE handoff for the same epoch is still accepted, or the
+	// check above would be indistinguishable from refusing everything.
+	self := run(handleFingerprintSelf, "fingerprintSelf", map[string]any{})
+	real, ok := rot["handoffs"].(map[string]string)[self["fingerprint"].(string)]
+	if !ok {
+		t.Fatal("no genuine handoff was sealed for the survivor")
+	}
+	if _, err := handleAdoptEpoch(Request{Method: "adoptEpoch", Params: params(t, map[string]any{
+		"epoch": uint64(2), "counter": uint64(1),
+		"handoff":    real,
+		"chain":      rotated,
+		"epoch1Sign": minted["epoch1SignPub"],
+		"chained":    false,
+	})}); err != nil {
+		t.Fatalf("the genuine handoff was refused too: %v", err)
 	}
 }

@@ -1241,8 +1241,13 @@ class AddySession {
     // one entirely cannot — it is told so rather than handed something that
     // looks like a key.
     const next = account.epoch + 1
-    const transition = await relay.transitionFor(next)
-    if (!transition) return false
+
+    // THE WHOLE CHAIN, ONCE. It used to fetch a single transition entry in a
+    // second, independent request and hand that to the sidecar unverified —
+    // so the flag saying "this was a revocation", which is what refuses a
+    // chained handoff, was the relay's word rather than the account's. The
+    // sidecar now verifies the chain and reads the transition out of it.
+    const chain = await relay.roster()
 
     const self = await addyd.send<{ fingerprint: string }>('fingerprintSelf')
     // Mine first, the chained one second. A revocation publishes only the
@@ -1261,7 +1266,10 @@ class AddySession {
       epoch: next,
       counter: 1,
       handoff: object.body.toString('base64'),
-      transition,
+      chain,
+      // Pinned at enrolment, never from a relay response. The genesis entry is
+      // signed by this key, so without it no chain verifies at all.
+      epoch1Sign: account.epoch1SignPub ?? '',
       chained: !mine
     })
 

@@ -314,27 +314,6 @@ export class RelayClient {
   }
 
   /**
-   * The transition entry that announced one epoch, from the roster.
-   *
-   * Fetched as bytes and returned verbatim, because the sidecar needs the
-   * entry ITSELF rather than a summary of it: the flag saying whether this was
-   * a revocation lives in it, and a chained handoff must be refused for one of
-   * those. A caller that passed along "it was a revocation, honestly" would be
-   * passing along the relay's word for the one thing the relay must not decide.
-   *
-   * Null when the chain has no such transition, which is the ordinary state
-   * for an account that has never rotated.
-   */
-  async transitionFor(epoch: number): Promise<string | null> {
-    const chain = Buffer.from(await this.roster(), 'base64')
-    const found = await this.addyd.send<{ entry: string | null }>('findTransition', {
-      chain: chain.toString('base64'),
-      epoch
-    })
-    return found.entry
-  }
-
-  /**
    * Hands over a copy whose conditional PUT lost, still sealed.
    *
    * Called by the LOSER, immediately after its 409, and that timing is the

@@ -398,6 +398,30 @@ describe('other devices follow a rotation', () => {
     expect(CRYPTO).toMatch(/ReadChainedHandoff/)
   })
 
+  it('binds the adopted key to the chain, or a re-key revokes nothing', () => {
+    // A removed device still holds AK_n — that is the premise of re-keying —
+    // and AK_n is the binding `SealHandoff` takes. So it can mint a handoff
+    // for the next epoch carrying a key of its own choosing, sealed to a
+    // survivor's public key off the roster. Comparing the derived key against
+    // the one the CHAIN names is the only thing that stops it.
+    const CRYPTO = readFileSync(join(ROOT, 'sidecar/addyd/crypto.go'), 'utf8')
+    expect(CRYPTO).toMatch(/bytes\.Equal\(pinned\.EpochSign/)
+    // And the chain is pinned against the handoff's OWN head entry, so a
+    // truncated chain — one stopping just before a revoke — is caught.
+    expect(CRYPTO).toMatch(/protocol\.Pin\{Seq: head\.Seq, Hash: headHash\}/)
+  })
+
+  it('reads the transition out of the verified chain, not from the relay', () => {
+    // The flag saying "this was a revocation" is what refuses a chained
+    // handoff. Fetched as a lone unverified entry, it was the relay's word —
+    // and an attacker supplying Flags = 0 turned the refusal off.
+    const CRYPTO = readFileSync(join(ROOT, 'sidecar/addyd/crypto.go'), 'utf8')
+    expect(CRYPTO).toMatch(/func transitionIn/)
+    expect(CRYPTO).not.toMatch(/handleFindTransition/)
+    expect(SESSION).not.toMatch(/transitionFor\(/)
+    expect(SESSION).toMatch(/epoch1Sign: account\.epoch1SignPub/)
+  })
+
   it('the session notices and walks forward', () => {
     expect(SESSION).toMatch(/private async followRotation\(/)
     // From refreshRoster, because the roster is where a rotation announces

@@ -202,7 +202,6 @@ var cryptoMethods = map[string]func(Request) (any, error){
 	"recoverForget":   handleRecoverForget,
 	"rotateEpoch":     handleRotateEpoch,
 	"adoptEpoch":      handleAdoptEpoch,
-	"findTransition":  handleFindTransition,
 	"fingerprintSelf": handleFingerprintSelf,
 	"fingerprint":     handleFingerprint,
 	"signRequest":     handleSignRequest,
