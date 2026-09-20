@@ -604,3 +604,43 @@ describe('a removed device wipes itself', () => {
     expect(read('src/renderer/src/App.tsx')).toMatch(/onRevoked\?\.\(/)
   })
 })
+
+/**
+ * Recovering onto the wrong epoch.
+ *
+ * Two separate ways the one path a person takes when everything else is gone
+ * could hand them back a key that is worse than useless.
+ */
+describe('recovery lands on the current epoch or refuses', () => {
+  it('fetches the later escrow instead of throwing', () => {
+    // `recoverOpen` reports `needEpoch` when the chain is ahead of the escrow
+    // it was given. The caller destructured `secrets.akSeed` off a response
+    // that carries no secrets, so recovering ANY account that had ever been
+    // re-keyed threw outright.
+    expect(SESSION).toMatch(/opened\.needEpoch !== undefined/)
+    expect(SESSION).toMatch(/getObject\('escrow', opened\.needEpoch\)/)
+  })
+
+  it('refuses a chain that stops before an escrow the relay is holding', () => {
+    // The pin comes from the escrow the RELAY chose to serve, so it can pick
+    // the one whose head matches its truncation point: epoch 1's escrow plus
+    // a chain cut back to genesis verifies perfectly, and puts the user on the
+    // key every revoked device still holds. An escrow one epoch past the
+    // chain's end is proof the account rotated.
+    expect(SESSION).toMatch(/getObject\('escrow', opened\.epoch \+ 1\)/)
+    expect(SESSION).toMatch(/roster-rewound/)
+  })
+
+  it('will not fall back to the older key when the current escrow is missing', () => {
+    // Falling back would re-seal the estate under exactly what the re-key was
+    // performed to retire.
+    expect(SESSION).toMatch(/Recovering onto the older key would undo the re-key/)
+  })
+
+  it('files the recovered key under its own epoch', () => {
+    // The unsuffixed keychain name is epoch 1's by convention. A rotated
+    // account's key stored there comes back after a restart filed as epoch
+    // 1's, sealing things no other device can read.
+    expect(SESSION).toMatch(/account:\$\{opened\.epoch\}/)
+  })
+})

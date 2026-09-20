@@ -1539,21 +1539,103 @@ class AddySession {
       }
       const chain = await this.relay.roster()
 
-      const opened = await addyd.send<{
+      type Opened = {
         accountId: string
         epoch: number
         rootSignPub: string
         epoch1SignPub: string
         devices: number
+        /** Present INSTEAD of the rest when the chain is ahead of the escrow
+         *  that was opened: this one reads history and nothing current. */
+        needEpoch?: number
         seq: number
         entry: string
         secrets: { akSeed: string }
-      }>('recoverOpen', {
+      }
+
+      /**
+       * EPOCH 1 FIRST, WHATEVER THE ACCOUNT'S EPOCH IS.
+       *
+       * The genesis entry is signed by AK_1, so epoch 1's escrow is the only
+       * thing that makes the chain checkable at all — and an account that has
+       * rotated keeps its CURRENT key in a later escrow. So recovery opens
+       * both: the first to verify, the second to be usable.
+       *
+       * This loop did not exist. `recoverOpen` reported `needEpoch` and the
+       * caller destructured `secrets.akSeed` off a response that does not
+       * carry one, so recovering any account that had ever been re-keyed
+       * threw — on the one path a person takes when everything else is
+       * already gone.
+       */
+      let opened = await addyd.send<Opened>('recoverOpen', {
         escrow: escrowObj.body.toString('base64'),
+        epoch: 1,
         chain
       })
 
-      if (!storeAddySecret('account', `${opened.accountId}:account`, opened.secrets.akSeed)) {
+      if (opened.needEpoch !== undefined) {
+        const current = await this.relay.getObject('escrow', opened.needEpoch)
+        if (!current) {
+          // The chain says the account rotated and the relay has no escrow
+          // for the epoch it rotated to. Refused rather than falling back to
+          // epoch 1's key, which is the key every revoked device still holds:
+          // a recovery that quietly lands on it would re-seal the estate
+          // under exactly what the re-key was performed to retire.
+          throw new AddyError(
+            'roster-invalid',
+            `this account is on epoch ${opened.needEpoch} and the relay has no escrow for it. Recovering onto the older key would undo the re-key, so this stops here.`
+          )
+        }
+        opened = await addyd.send<Opened>('recoverOpen', {
+          escrow: current.body.toString('base64'),
+          epoch: opened.needEpoch,
+          chain
+        })
+        if (opened.needEpoch !== undefined) {
+          throw new AddyError('roster-invalid', 'the relay will not serve this account\'s current escrow')
+        }
+      }
+
+      /**
+       * AND CHECK NOBODY IS ROLLING US BACK.
+       *
+       * The chain is pinned against the escrow's own head — but the relay
+       * chose which escrow to serve, so it can pick the one whose head
+       * matches its truncation point. Serve epoch 1's escrow and a chain cut
+       * back to the genesis entry, and everything verifies: a prefix of a
+       * valid chain is a valid chain. The user, typing their own recovery
+       * phrase, lands on the epoch key that every revoked device and every
+       * retired epoch still holds, and proceeds to re-seal the estate under
+       * it.
+       *
+       * An escrow one epoch past the chain's end is proof that happened: the
+       * account only writes one when it rotates. The relay must now hide that
+       * too — and hiding it breaks recovery visibly for anyone who really did
+       * re-key, rather than silently downgrading someone who did.
+       *
+       * This is a bound, not a cure. A device recovering from nothing has no
+       * prior state to compare against, which is why the design's printable
+       * card carries the roster head and the device count: the person is the
+       * last check, and §6 of the review screen is where they make it.
+       */
+      const ahead = await this.relay.getObject('escrow', opened.epoch + 1).catch(() => null)
+      if (ahead) {
+        throw new AddyError(
+          'roster-rewound',
+          `this relay served a roster ending at epoch ${opened.epoch} while holding an escrow for epoch ${opened.epoch + 1}. That is a rolled-back account, not a recovery, and nothing was changed.`
+        )
+      }
+
+      // UNDER ITS OWN EPOCH. The unsuffixed name is epoch 1's by convention —
+      // it was written before any other kind existed — so a recovery onto a
+      // rotated account that stored its key there would come back after a
+      // restart with the current key filed as epoch 1's, and seal nothing
+      // anyone could read.
+      const keyName =
+        opened.epoch > 1
+          ? `${opened.accountId}:account:${opened.epoch}`
+          : `${opened.accountId}:account`
+      if (!storeAddySecret('account', keyName, opened.secrets.akSeed)) {
         throw new AddyError(
           'config-invalid',
           'this machine has no usable keychain, so the account key cannot be stored. Nothing was kept.'
