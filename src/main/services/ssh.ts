@@ -12,7 +12,7 @@ import { verifyHostKey } from './knownhosts'
 // Names only, and only for an error message: a hop is addressed by the
 // friendly name of a saved server, so that is what a failure has to say.
 import { getCachedServer } from './mcpDataCache'
-import { isEncryptedPrivateKey, defaultIdentityPath } from './sshKeys'
+import { isEncryptedPrivateKey, isSecurityKeyPrivateKey, defaultIdentityPath } from './sshKeys'
 import {
   assertCertificateUsable,
   certificateAuthHandler,
@@ -145,6 +145,23 @@ function readKeyFile(path: string, hop: SshHop): string {
   return key
 }
 
+/**
+ * Resolve the agent for this hop, or say why we could not.
+ *
+ * Shared by the explicit `agent` auth mode and by the `sk-` redirect below, so
+ * a hardware key reaches exactly the agent a user's own `ssh` would use rather
+ * than a second guess at the same question.
+ */
+function agentAuth(hop: SshHop): Partial<ConnectConfig> {
+  const { agent, error } = agentForHop(hop.agentSocket, {
+    env: process.env,
+    home: homedir(),
+    platform: process.platform
+  })
+  if (error) throw new Error(error)
+  return { agent }
+}
+
 function authFor(hop: SshHop): Partial<ConnectConfig> {
   switch (hop.auth) {
     case 'password':
@@ -165,13 +182,7 @@ function authFor(hop: SshHop): Partial<ConnectConfig> {
        * find is a thing the user can fix, and reporting it as a generic auth
        * failure sends them to check their username instead.
        */
-      const { agent, error } = agentForHop(hop.agentSocket, {
-        env: process.env,
-        home: homedir(),
-        platform: process.platform
-      })
-      if (error) throw new Error(error)
-      return { agent }
+      return agentAuth(hop)
     }
     case 'certificate': {
       /**
@@ -192,12 +203,42 @@ function authFor(hop: SshHop): Partial<ConnectConfig> {
       if (!hop.certificate) throw new Error('No certificate was supplied for this connection.')
       const cert = parseOpenSshCertificate(hop.certificate)
       assertCertificateUsable(cert)
-      const key = certificateKey(loadPrivateKey(hop), cert, hop.passphrase)
+      const certKeyFile = loadPrivateKey(hop)
+      if (isSecurityKeyPrivateKey(certKeyFile.slice(0, 512))) {
+        // Not routed to the agent like the plain-key case: a certificate is
+        // presented INSTEAD of the registered key, and certificateAuthHandler
+        // needs a signer we do not have for a handle. Say which of the two
+        // things is unsupported rather than letting certificateKey throw
+        // about a key it could not parse.
+        throw new Error(
+          'This connection uses an OpenSSH certificate over a hardware-backed (FIDO2) key, which OpsMaxx cannot sign. Set the connection to use an SSH agent instead.'
+        )
+      }
+      const key = certificateKey(certKeyFile, cert, hop.passphrase)
       return { authHandler: certificateAuthHandler(hop.username, key) as never }
     }
     case 'key':
-    default:
-      return { privateKey: loadPrivateKey(hop), passphrase: hop.passphrase }
+    default: {
+      const key = loadPrivateKey(hop)
+      /**
+       * A FIDO2 key is signed by the authenticator, not by us.
+       *
+       * `sk-ssh-ed25519@openssh.com` and its ECDSA sibling hold a credential
+       * handle, not a private key — signing is a CTAP2 assertion and a touch.
+       * ssh2 cannot do it, and `DEFAULT_IDENTITIES` offers `id_ed25519_sk` and
+       * `id_ecdsa_sk`, so a user whose only key is a YubiKey was offered that
+       * key by us and then told "All configured authentication methods
+       * failed".
+       *
+       * The system agent already does this properly on macOS and Linux,
+       * including the touch prompt, so the key is handed to it rather than
+       * linking libfido2 to re-implement it here. Nothing about our OWN agent
+       * changes: sshAgent/agent.ts still refuses smartcard opcodes, which is
+       * us as a server and this is us as a client.
+       */
+      if (isSecurityKeyPrivateKey(key.slice(0, 512))) return agentAuth(hop)
+      return { privateKey: key, passphrase: hop.passphrase }
+    }
   }
 }
 

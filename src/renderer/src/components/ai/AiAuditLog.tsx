@@ -118,7 +118,7 @@ export function AiAuditLog(): React.JSX.Element {
             borderRadius: 6,
             padding: '10px 12px',
             marginBottom: 12,
-            fontSize: 13
+            fontSize: 'var(--fs-sm)'
           }}
         >
           <strong>This log has stopped recording.</strong> New AI actions are not being written to

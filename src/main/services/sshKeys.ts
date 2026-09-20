@@ -58,6 +58,55 @@ export function isEncryptedPrivateKey(head: string): boolean {
   }
 }
 
+/**
+ * Whether this is a FIDO2 / hardware-backed key, given the start of the file.
+ *
+ * `sk-ssh-ed25519@openssh.com` and `sk-ecdsa-sha2-nistp256@openssh.com` files
+ * are not private keys. They hold a CREDENTIAL HANDLE and an application
+ * string; the private half never leaves the authenticator, and producing a
+ * signature means a FIDO2 `authenticatorGetAssertion` and a touch. ssh2 has no
+ * path to that, so handing one to it as `privateKey` fails as
+ * "All configured authentication methods failed" — the same message a wrong
+ * username gives, which is where it sends the user to look.
+ *
+ * `DEFAULT_IDENTITIES` lists `id_ecdsa_sk` and `id_ed25519_sk`, so OpsMaxx
+ * OFFERS these keys to anyone who has one and no explicit IdentityFile. This
+ * is what makes the offer honest.
+ *
+ * The key type is read from the file rather than the name, because the name is
+ * a convention and `IdentityFile` may point anywhere. OpenSSH's v1 container
+ * keeps the public key in the clear even when the private half is encrypted,
+ * so the type is legible without a passphrase:
+ *
+ *   "openssh-key-v1\0" | string ciphername | string kdfname | string kdfopts
+ *                       | uint32 nkeys      | string pubkey0 { string keytype ... }
+ */
+export function isSecurityKeyPrivateKey(head: string): boolean {
+  if (!head.includes('OPENSSH PRIVATE KEY')) return false
+  try {
+    const body = head.slice(head.indexOf('-----\n') + 6).replace(/\s+/g, '')
+    const buf = Buffer.from(body, 'base64')
+    if (buf.subarray(0, OPENSSH_MAGIC.length).toString('binary') !== OPENSSH_MAGIC) return false
+    let at = OPENSSH_MAGIC.length
+    // ciphername, kdfname, kdfoptions.
+    for (let i = 0; i < 3; i++) {
+      if (at + 4 > buf.length) return false
+      at += 4 + buf.readUInt32BE(at)
+    }
+    at += 4 // nkeys
+    if (at + 8 > buf.length) return false
+    at += 4 // the public key blob's own length
+    const typeLen = buf.readUInt32BE(at)
+    if (typeLen <= 0 || typeLen > 64 || at + 4 + typeLen > buf.length) return false
+    return buf.subarray(at + 4, at + 4 + typeLen).toString('utf8').startsWith('sk-')
+  } catch {
+    // Unparseable means unknown, and the cost of guessing wrong here is
+    // refusing a key that works. Same call as isEncryptedPrivateKey: let the
+    // ordinary path run and let a real error come back from the server.
+    return false
+  }
+}
+
 // Only the header is needed to tell a private key from a .pub, a config file or
 // a socket, so read a prefix rather than pulling whole key files into memory.
 function readPrefix(path: string, bytes: number): string {
@@ -85,6 +134,13 @@ function algorithmFromPub(privatePath: string): string | null {
   if (!existsSync(pub)) return null
   try {
     const first = readFileSync(pub, 'utf8').trim().split(/\s+/)[0] ?? ''
+    // `sk-` first: the hardware variants are spelled
+    // `sk-ssh-ed25519@openssh.com`, so the ssh-/ecdsa- test below rejects them
+    // and the key listed with no algorithm at all.
+    if (first.startsWith('sk-')) {
+      const base = first.replace(/^sk-/, '').replace(/@openssh\.com$/, '')
+      return `${base.replace(/^ssh-/, '').replace(/^ecdsa-sha2-/, 'ECDSA ').toUpperCase()} (SECURITY KEY)`
+    }
     if (!first.startsWith('ssh-') && !first.startsWith('ecdsa-')) return null
     return first.replace(/^ssh-/, '').replace(/^ecdsa-sha2-/, 'ECDSA ').toUpperCase()
   } catch {
