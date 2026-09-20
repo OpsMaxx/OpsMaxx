@@ -617,3 +617,18 @@
   flex-direction: column;
   align-items: stretch;
 }
+
+/* THE DEVICE TABLE'S NOTE IS A FOOTNOTE, AND A <caption> IS NOT ONE BY
+   DEFAULT.
+   With no rule at all it took the browser's defaults, which are `text-align:
+   center` and `caption-side: top` — so an explanation of what the table does
+   not show rendered centred, in a narrow ragged column, ABOVE the DEVICE
+   header it was explaining. It read as a heading for the section rather than
+   as a note about the rows.
+   Bottom and left, so it sits under the thing it qualifies and shares the
+   alignment of every other line of prose on the panel. */
+.addy-devices-note {
+  caption-side: bottom;
+  text-align: left;
+  padding-top: 8px;
+}

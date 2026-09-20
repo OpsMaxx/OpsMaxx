@@ -208,10 +208,10 @@ export function AddySetup(): React.JSX.Element | null {
   if (done) {
     return (
       <div className="addy-setup">
-        <div className="setting-desc">
-          This device is on the account. Add another by pairing them — both have to be open at the
-          same time.
-        </div>
+        {/* PairingPanel says this itself, beside the two buttons it belongs
+            to. Saying it here as well produced two consecutive paragraphs
+            making the same point in different words, which reads as two
+            requirements rather than one. */}
         <PairingPanel baseURL={url.trim()} />
       </div>
     )

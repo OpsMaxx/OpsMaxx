@@ -343,7 +343,22 @@ export function addyJourney(
             detail: 'Nothing has synced yet.',
             state: 'todo'
           }
-        : { key: 'current', title: 'Both devices agree', detail: 'Everything this device knows about has been carried.', state: 'done' }
+        : others === 0
+          ? {
+              // "BOTH DEVICES AGREE — DONE" WITH ONE DEVICE IS A FALSE CLAIM.
+              // There is no second device to agree with, so the thing the step
+              // names has not happened; what has happened is that this device
+              // reached the relay. Rendering it green made the checklist say
+              // the setup was finished while the step above it was still the
+              // one asking for a second device — a list where the later item
+              // is complete and the earlier one is not.
+              key: 'current',
+              title: 'Both devices agree',
+              detail:
+                'Only this device is on the account, so there is nothing to agree with yet. Everything it knows about has been carried to the relay and is waiting there.',
+              state: 'todo'
+            }
+          : { key: 'current', title: 'Both devices agree', detail: 'Everything this device knows about has been carried.', state: 'done' }
 
   return [account, device, pair, syncStep, current]
 }

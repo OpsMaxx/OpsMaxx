@@ -494,10 +494,28 @@ export function FleetMonitor(): React.JSX.Element {
     setGroupDrop(null)
   }
 
+  // TWO PROMOTED PANELS ARE NOT ABOUT SERVERS AT ALL, and this early return
+  // used to swallow both.
+  //
+  // `addy` is this app's own account on a relay — it takes no `servers` prop
+  // and there is no estate host anywhere on it. `processes` is this machine.
+  // Neither needs a server to have anything to say, and both are reached from
+  // the activity bar rather than the tab strip.
+  //
+  // So on a FRESH INSTALL, pressing Sync returned "Nothing to monitor — add a
+  // server to start streaming live CPU, memory, disk and network metrics".
+  // That is the wrong question answered with the wrong remedy, and it is the
+  // state every new machine starts in: the one panel that would enrol the
+  // machine, pair it with an existing one, or recover it from a phrase, was
+  // unreachable until the user added an unrelated server. The rail button was
+  // lit and the sidebar header said SYNC & DEVICES above it, so the app
+  // disagreed with itself on screen.
+  const needsAServer = activeTab !== 'addy' && activeTab !== 'processes'
+
   // Covers both rails, because both are empty for the same reason and neither
   // has anything useful to show first. The message names the rail so the
   // activity-bar icon the user just pressed is the one being answered.
-  if (servers.length === 0) {
+  if (servers.length === 0 && needsAServer) {
     return (
       <div className="panel-body">
         <EmptyState
