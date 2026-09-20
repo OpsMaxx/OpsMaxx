@@ -36,6 +36,7 @@ function endOfLocalDay(dateStr: string): number {
 
 export function AiAuditLog(): React.JSX.Element {
   const [entries, setEntries] = useState<AuditEntry[]>([])
+  const [appendFailure, setAppendFailure] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [workspace, setWorkspace] = useState(ALL)
   const [server, setServer] = useState(ALL)
@@ -44,6 +45,12 @@ export function AiAuditLog(): React.JSX.Element {
 
   const load = (): void => {
     void window.opsmaxx?.aiMcp.listAudit(FETCH_LIMIT).then((e) => setEntries(e ?? []))
+    // Separately, because the rows below are the ones that were written and
+    // this is about the ones that were not. A log that has stopped accepting
+    // appends still lists everything it accepted before, so without this the
+    // view for an install whose audit file is a symlink is indistinguishable
+    // from the view for an install where nothing happened today.
+    void window.opsmaxx?.aiMcp.auditFailure?.().then((f) => setAppendFailure(f ?? null))
   }
   useEffect(() => {
     load()
@@ -101,6 +108,27 @@ export function AiAuditLog(): React.JSX.Element {
         Every AI action OpsMaxx processed, whether allowed, approved, denied or failed. Never
         includes passwords, keys or other secrets.
       </div>
+
+      {appendFailure && (
+        <div
+          role="alert"
+          style={{
+            border: '1px solid var(--danger)',
+            background: 'var(--danger-soft)',
+            borderRadius: 6,
+            padding: '10px 12px',
+            marginBottom: 12,
+            fontSize: 13
+          }}
+        >
+          <strong>This log has stopped recording.</strong> New AI actions are not being written to
+          it, so the entries below are not a complete record. Everything else about OpsMaxx is
+          working normally.
+          <div style={{ marginTop: 6, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+            {appendFailure}
+          </div>
+        </div>
+      )}
 
       {entries.length === 0 && <div className="s-desc">No AI activity recorded yet.</div>}
 

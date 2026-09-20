@@ -475,7 +475,7 @@ import {
   forgetSessionKey,
   biometricUnlock
 } from './services/biometrics'
-import { listAudit } from './services/auditLog'
+import { listAudit, auditAppendFailure } from './services/auditLog'
 import { recordJobApproval } from './services/approvalLog'
 import { planCronEditOnHost, writeCronEdit } from './services/cronEdit'
 import {
@@ -5829,6 +5829,23 @@ onCliPairingEvent((e) => {
 
 // ---- AI & MCP: audit log ----
 ipcMain.handle('aiMcp:listAudit', (_e, limit?: number) => listAudit(limit))
+/**
+ * Why audit appends are failing, if they are.
+ *
+ * `appendLogLine` refuses a symlink at the audit path, and a file owned by
+ * another uid. Both refusals are right and both are silent: an install in
+ * either state writes zero rows from then on while `listAudit` keeps returning
+ * the rows from before, so the audit view does not look broken, it looks quiet.
+ * That is the wrong failure mode for the one file SECURITY.md offers as the
+ * record of what an AI agent did on somebody's servers.
+ *
+ * Its own channel rather than a second field on `aiMcp:listAudit`, because the
+ * other caller of that one is ApprovalDialog, which counts rows inside a window
+ * and has no use for this. The audit view asks for both in the same poll, so a
+ * reason that clears between the two calls is gone from the screen five seconds
+ * later either way.
+ */
+ipcMain.handle('aiMcp:auditFailure', () => auditAppendFailure())
 
 // Teardown became asynchronous when VPN engines arrived: they are separate
 // processes and killing them is not instantaneous. The order below is the

@@ -2138,6 +2138,9 @@ const api = {
     extendApproval: (id: string, seconds: number): Promise<boolean> =>
       ipcRenderer.invoke('aiMcp:extendApproval', id, seconds),
     listAudit: (limit?: number): Promise<AuditEntry[]> => ipcRenderer.invoke('aiMcp:listAudit', limit),
+    // Read alongside listAudit, not folded into it: a refused append leaves the
+    // view looking quiet rather than broken, and only the audit view cares.
+    auditFailure: (): Promise<string | null> => ipcRenderer.invoke('aiMcp:auditFailure'),
     onApprovalEvent: (
       cb: (e: { type: 'created' | 'resolved' | 'extended'; request: ApprovalRequest }) => void
     ): (() => void) => {
