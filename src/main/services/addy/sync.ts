@@ -93,6 +93,38 @@ function saveState(state: SyncState): void {
 
 const hash = (b: Buffer): string => createHash('sha256').update(b).digest('hex')
 
+/**
+ * Whether a payload is a collection with nothing in it.
+ *
+ * THE FRESH-INSTALL PROBLEM, and the reason `read()` returning null is not
+ * enough on its own. The renderer writes ALL eleven of its keys on its first
+ * save — `hydrate()` calls `save()` when it finds no valid data file — so from
+ * a fresh install's first second the blob holds `servers: []`, `workspaces:
+ * []`, `apiWorkspace: {}` and the rest. The absent-vs-empty distinction this
+ * engine is built on therefore never fires for any of them in production.
+ *
+ * It is only ambiguous ONCE. A device that has never agreed with the account
+ * about a collection cannot tell "I am new" from "I emptied this"; a device
+ * that has agreed can, because the difference is recorded. So emptiness is
+ * discounted exactly on first contact and never again — which leaves
+ * "deleting your last server is a real edit" true, as it must be.
+ */
+function isEmptyish(body: Buffer): boolean {
+  const text = body.toString('utf8').trim()
+  if (text === '' || text === '[]' || text === '{}' || text === 'null') return true
+  try {
+    const value: unknown = JSON.parse(text)
+    if (Array.isArray(value)) return value.length === 0
+    if (value && typeof value === 'object') return Object.keys(value).length === 0
+    return value === null
+  } catch {
+    // Not JSON — one of the whole-file collections. Its emptiness is not
+    // something this function can judge, and guessing would be worse than
+    // treating it as real.
+    return false
+  }
+}
+
 /** What one collection did in one pass, for the panel and for the log. */
 export type CollectionOutcome =
   | 'unchanged'
@@ -142,8 +174,10 @@ function versionString(): string {
  * into conflict copies that neither device's user caused.
  */
 export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
+  const startedAt = Date.now()
+  const forgetsAtStart = forgetCount
   const state = loadState()
-  const result: SyncResult = { at: Date.now(), outcomes: {}, carried: 0, conflicts: [] }
+  const result: SyncResult = { at: startedAt, outcomes: {}, carried: 0, conflicts: [] }
   const changed: SyncedCollection[] = []
 
   for (const name of SYNCED_COLLECTIONS) {
@@ -203,6 +237,14 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
    * and is the safe direction.
    */
   try {
+    if (forgetCount !== forgetsAtStart) {
+      // Somebody cleared the state while this pass was running — a rotation,
+      // a catch-up, or the user's own "resync everything". Writing now would
+      // put back exactly what they meant to discard, and the entries are
+      // stale by definition: they were agreed under an epoch or an account
+      // this device has since moved off.
+      throw new AddyError('config-invalid', 'the sync state was reset while this pass was running')
+    }
     saveState(state)
   } catch (err) {
     if (!result.error) {
@@ -249,10 +291,31 @@ async function syncCollection(
 
   // -- The account has nothing. Send what this machine has. ------------------
   if (local && !remote) {
+    // UNLESS IT IS NOTHING, AND THIS DEVICE HAS NEVER AGREED TO ANYTHING.
+    //
+    // A fresh install's empty list would otherwise become the account's value
+    // for any collection the account has not carried yet — and the device
+    // that DOES have that data then hits the `!known` branch below, adopts the
+    // empty object, and demotes its real contents to a conflict copy. The user
+    // opens the machine they actually work on and their HTTP workspace is
+    // gone, recoverable only through a chooser they have to know to open.
+    if (!known && isEmptyish(local)) return 'unchanged'
+
     const counter = (known?.counter ?? 0) + 1
-    const etag = await putSealed(deps, name, epoch, counter, local)
-    state.collections[name] = { etag, counter, localHash: hash(local), at: Date.now() }
-    return 'pushed'
+    try {
+      const etag = await putSealed(deps, name, epoch, counter, local)
+      state.collections[name] = { etag, counter, localHash: hash(local), at: Date.now() }
+      return 'pushed'
+    } catch (err) {
+      // A CREATE RACE, not a lost write. The relay refuses an unconditional
+      // PUT over an object that already exists — checked against a running
+      // relay, not inferred — so two devices creating the same collection at
+      // once means the second is told, rather than silently overwriting the
+      // first. Routed into the conflict path so this pass resolves it, instead
+      // of failing the collection and healing on the next one.
+      if (!(err instanceof AddyError) || !/written by another device/.test(err.message)) throw err
+      return conflictWithRemote(deps, name, epoch, source, state, local)
+    }
   }
 
   // -- Both sides have a copy. ----------------------------------------------
@@ -267,6 +330,20 @@ async function syncCollection(
   // offered the choice rather than having it made for them.
   if (!known) {
     const opened = await openObject(deps, name, epoch, there.body, 0)
+    // An empty local value on first contact is a fresh install, not an edit
+    // somebody made. Adopting without keeping a conflict copy is what stops a
+    // new device handing the user one chooser per populated collection before
+    // the chooser means anything.
+    if (isEmptyish(body) && !opened.payload.equals(body)) {
+      source.write(opened.payload)
+      state.collections[name] = {
+        etag: there.etag,
+        counter: opened.counter,
+        localHash: hash(opened.payload),
+        at: Date.now()
+      }
+      return 'adopted'
+    }
     if (!opened.payload.equals(body)) {
       await keepAsConflict(deps, name, epoch, opened.counter + 1, body)
       source.write(opened.payload)
@@ -450,4 +527,23 @@ export function counterFloor(collection: string): number {
  *  a deliberate "resync everything". */
 export function forgetSyncState(): void {
   saveState({ version: 1, collections: {} })
+  forgetCount++
 }
+
+/**
+ * When the state was last deliberately forgotten.
+ *
+ * A PASS THAT IS ALREADY RUNNING MUST NOT UNDO IT. `syncOnce` loads the state
+ * at the start and writes the whole thing back at the end, so a rotation, a
+ * catch-up or a resync that clears it mid-pass was silently resurrected
+ * seconds later — and the resurrection is what turned a recoverable conflict
+ * into silent loss: with the forget in place the next pass would have hit the
+ * `!known` branch and kept both copies, and with it undone it took the
+ * `pulled` branch and overwrote the local one.
+ *
+ * A COUNTER rather than a timestamp, and the difference matters: a forget and
+ * the start of a pass land in the same millisecond often enough that a
+ * timestamp cannot tell "cleared just before this began" — which is the
+ * ordinary resync — from "cleared while it ran". A counter can.
+ */
+let forgetCount = 0

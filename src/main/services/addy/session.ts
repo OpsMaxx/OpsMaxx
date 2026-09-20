@@ -1204,6 +1204,16 @@ class AddySession {
    */
   async resyncEverything(): Promise<SyncResult | null> {
     forgetSyncState()
+    // WAIT FOR ANY PASS ALREADY RUNNING, rather than returning null.
+    //
+    // `syncNow` refuses to start a second pass, so clicking this while one was
+    // in flight cleared the file, had the running pass decline to write over
+    // it, and then ran nothing — the escape hatch the whole design leans on
+    // was a no-op, and the panel had a `null` to render. The user's second
+    // click, a second after their first, hit it every time.
+    for (let waited = 0; this.syncing && waited < 30_000; waited += 250) {
+      await new Promise((r) => setTimeout(r, 250))
+    }
     return this.syncNow()
   }
 

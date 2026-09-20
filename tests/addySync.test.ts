@@ -215,16 +215,62 @@ describe('a machine with nothing', () => {
 })
 
 describe('a machine with data and an empty account', () => {
-  it('pushes, and an empty list is data', async () => {
-    // Deleting your last server is an edit somebody made. Treating `[]` as
-    // "nothing to send" would make that edit unsyncable for ever.
-    writeBlob({ servers: [] })
+  it('pushes what it has', async () => {
+    writeBlob({ servers: [{ id: 's1' }] })
     const relay = fakeRelay()
 
     const r = await syncOnce(deps(relay))
 
     expect(r.outcomes.servers).toBe('pushed')
     expect(relay.objects.has('servers')).toBe(true)
+  })
+
+  it('does NOT push an empty list it has never agreed about', async () => {
+    // The renderer writes all eleven of its keys on its first save, so from a
+    // fresh install's first second the blob holds `servers: []` and the rest.
+    // Pushed, that emptiness becomes the account's value for any collection
+    // the account has not carried yet — and the device that DOES have the data
+    // then adopts the empty object and demotes its real contents to a conflict
+    // copy. The user opens the machine they work on and their HTTP workspace
+    // is gone, recoverable only through a chooser they have to know to open.
+    writeBlob({ servers: [], apiWorkspace: {} })
+    const relay = fakeRelay()
+
+    const r = await syncOnce(deps(relay))
+
+    expect(r.outcomes.servers).toBe('unchanged')
+    expect(r.outcomes.apiWorkspace).toBe('unchanged')
+    expect(relay.objects.size).toBe(0)
+  })
+
+  it('DOES push an empty list once it has agreed about that collection', async () => {
+    // Deleting your last server is an edit somebody made, and it has to reach
+    // the other machines. The ambiguity exists exactly once — a device that
+    // has agreed with the account can tell "I am new" from "I emptied this",
+    // because the difference is recorded.
+    writeBlob({ servers: [{ id: 's1' }] })
+    const relay = fakeRelay()
+    await syncOnce(deps(relay))
+
+    writeBlob({ servers: [] })
+    const r = await syncOnce(deps(relay))
+
+    expect(r.outcomes.servers).toBe('pushed')
+  })
+
+  it('adopts without a conflict copy when its own copy is empty', async () => {
+    // A new device paired to an established account would otherwise be handed
+    // one conflict — "your empty list" against "your estate" — per populated
+    // collection, before the chooser means anything.
+    writeBlob({ servers: [] })
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 'the-account' }])
+
+    const r = await syncOnce(deps(relay))
+
+    expect(r.outcomes.servers).toBe('adopted')
+    expect(relay.conflicts).toEqual([])
+    expect(readBlob().servers).toEqual([{ id: 'the-account' }])
   })
 })
 
@@ -408,6 +454,37 @@ describe('a relay that serves an old copy back', () => {
     // The user's edit is still on disk. Adopting the archive would have
     // reinstated a removed SSH host key, or a deleted server.
     expect(readBlob().servers).toEqual([{ id: 's1' }, { id: 'added-here' }])
+  })
+})
+
+describe('a state cleared while a pass is running', () => {
+  it('is not put back by that pass', async () => {
+    // `syncOnce` loads the state at the start and writes the whole thing back
+    // at the end, so a rotation, a catch-up or the user's own resync that
+    // cleared it mid-pass was silently resurrected seconds later. The
+    // resurrection is what turned a recoverable conflict into silent loss:
+    // with the forget standing, the next pass hits the `!known` branch and
+    // keeps both copies; with it undone, it takes the `pulled` branch and
+    // overwrites the local one.
+    writeBlob({ servers: [{ id: 's1' }] })
+    const relay = fakeRelay()
+    await syncOnce(deps(relay))
+    expect(existsSync(join(userData, SYNC_STATE_FILE))).toBe(true)
+
+    // A pass that is slow enough for something else to happen during it.
+    const slow = {
+      ...relay,
+      getObject: async (name: string) => {
+        if (name === 'servers') forgetSyncState()
+        return relay.getObject(name)
+      }
+    }
+    await syncOnce(deps(slow as never))
+
+    // The state file is the empty one the forget wrote, not the map the pass
+    // was holding.
+    const saved = JSON.parse(readFileSync(join(userData, SYNC_STATE_FILE), 'utf8'))
+    expect(Object.keys(saved.collections)).toEqual([])
   })
 })
 
