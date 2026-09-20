@@ -459,7 +459,7 @@ func TestPairingPutsTheSecondDeviceOnTheRoster(t *testing.T) {
 	// member of this account and the signed chain says so. Verified with the
 	// keys the HANDOFF carried, never with the ones the initiator happens to
 	// have in the same process -- that distinction is the whole test.
-	joinerView := verify(chain, accepted["rootSignPub"], accepted["epoch1SignPub"])
+	joinerView := verify(chain, accepted["rootSignPub"], accepted["epochSignPub"])
 	if n := len(joinerView["devices"].([]map[string]any)); n != 2 {
 		t.Fatalf("the joiner reads %d device(s) from the chain", n)
 	}

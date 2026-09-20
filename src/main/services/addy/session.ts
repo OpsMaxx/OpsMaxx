@@ -1,5 +1,5 @@
 import { AddyError, openAddyd, type AddySidecar } from './sidecar'
-import { storeAddySecret, loadAddySecret } from './keys'
+import { forgetAddySecret, storeAddySecret, loadAddySecret } from './keys'
 import { loadEnrolment, saveEnrolment } from './enrolment'
 import {
   beginPairing,
@@ -582,7 +582,22 @@ class AddySession {
       handoff: sealed.handoff,
       epoch: account.epoch,
       counter,
-      accountId: account.accountId
+      accountId: account.accountId,
+      /**
+       * AK_1's signing key, which the joiner cannot derive and cannot do
+       * without.
+       *
+       * The genesis entry is signed by it and nothing in a chain establishes
+       * it, so a device that does not have this can never verify its own
+       * roster. It used to take whatever epoch key the handoff carried and
+       * file it under this name — correct only for an account that has never
+       * rotated, and a bricked device for one that has.
+       *
+       * Public, so carrying it in the frame costs nothing, and it is
+       * SELF-VALIDATING: the joiner verifies the chain with it immediately,
+       * and a wrong value fails that verification rather than being trusted.
+       */
+      epoch1SignPub: account.epoch1SignPub ?? ''
     })
 
     const entry = await addyd.send<{ seq: number; entry: string }>('addDevice', {
@@ -625,7 +640,13 @@ class AddySession {
     const ctx = this.joinContext
     if (!addyd || !ctx) throw new AddyError('config-invalid', 'no join is in progress')
 
-    const sealed = await receive<{ handoff: string; counter: number; epoch: number; accountId: string }>(
+    const sealed = await receive<{
+      handoff: string
+      counter: number
+      epoch: number
+      accountId: string
+      epoch1SignPub?: string
+    }>(
       { addyd, baseURL: ctx.baseURL },
       ctx.pairingId,
       'joiner',
@@ -635,7 +656,7 @@ class AddySession {
       accountId: string
       epoch: number
       rootSignPub: string
-      epoch1SignPub: string
+      epochSignPub: string
       headEntry: string
       devicePubSign: string
       devicePubEnc: string
@@ -669,14 +690,25 @@ class AddySession {
       accountId: accepted.accountId,
       epoch: accepted.epoch,
       rootSignPub: accepted.rootSignPub,
-      epoch1SignPub: accepted.epoch1SignPub
+      // From the frame when the account has rotated, and from the handoff's
+      // own key only when this IS epoch 1 — where they are the same thing.
+      epoch1SignPub:
+        accepted.epoch === 1 ? accepted.epochSignPub : (sealed.epoch1SignPub ?? '')
     }
     this.relay = new RelayClient(
       { baseURL: ctx.baseURL, token: '', insecureTLS: this.insecureTLS },
       addyd
     )
     await this.loginAndRecord()
-    await this.refreshRoster().catch(() => undefined)
+    /**
+     * NOT SWALLOWED. This is the first time the new device verifies the chain
+     * under the keys it was just handed, and it is the only check that they
+     * are the right ones — a wrong `epoch1SignPub` produces a device that
+     * pairs successfully, reports success, and can never read its own roster
+     * again. Failing here says so while the user is still on the screen that
+     * caused it.
+     */
+    await this.refreshRoster()
     this.joinContext = null
     return { accountId: accepted.accountId }
   }
@@ -1555,6 +1587,29 @@ class AddySession {
       ...(prepared.epoch === 1 ? { epoch1SignPub: prepared.epochSignPub } : {})
     }
     await this.refreshRoster()
+
+    /**
+     * AND LET THE OLD KEYS GO, which nothing did.
+     *
+     * `forgetAddySecret` existed and had no callers, so every epoch key this
+     * device had ever held stayed in the keychain and `resume` loaded all of
+     * them on every launch. A machine seized five rotations later yielded
+     * AK_1 through AK_5 and opened every object the relay had ever stored —
+     * so a re-key never shrank the blast radius it was performed to shrink,
+     * which is the only reason to perform one.
+     *
+     * A REVOCATION only. A hygiene rotation is routine and an offline device
+     * may still be catching up through a chained handoff bound to the
+     * previous key; dropping it there would strand that device for the sake
+     * of a threat the rotation was not answering. A revocation is the
+     * response to compromise, and the whole point is that the old key stops
+     * being useful to anybody — including this machine.
+     */
+    if (kind === 'revocation') {
+      for (let n = 1; n < prepared.epoch; n++) {
+        forgetAddySecret('account', n === 1 ? `${account.accountId}:account` : `${account.accountId}:account:${n}`)
+      }
+    }
     // The sync state pins per-collection ETags and counters against the old
     // epoch's objects, none of which apply now. Forgetting it makes the next
     // pass reconcile from scratch, which is exactly what should happen.

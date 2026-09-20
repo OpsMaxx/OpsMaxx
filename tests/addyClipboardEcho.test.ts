@@ -20,9 +20,8 @@ vi.mock('electron', () => ({
   clipboard: { readText: () => clip.read(), writeText: (t: string) => clip.write(t) }
 }))
 
-const { sendClipboard, applySealedClipboard, MAX_CLIPBOARD_BYTES } = await import(
-  '../src/main/services/addy/clipboard'
-)
+const { sendClipboard, receiveClipboard, applySealedClipboard, MAX_CLIPBOARD_BYTES } =
+  await import('../src/main/services/addy/clipboard')
 // The real identity hash, so the suppressor sees exactly what it would in the
 // app — a test that invented its own hash would agree with itself and with
 // nothing else.
@@ -56,16 +55,40 @@ const deps = {
 }
 
 /** What `applySealedClipboard` takes: the payload this fake seal produces. */
-const sealedOf = (text: string): string =>
+const sealedOf = (text: string, sentAt = Date.now()): string =>
   Buffer.from(
     JSON.stringify({
       kind: 'text',
       text,
       identity: { hash: hashOf(text), size: Buffer.byteLength(text) },
-      sentAt: Date.now()
+      sentAt
     }),
     'utf8'
   ).toString('base64')
+
+/** The deps, with a mailbox the relay is serving. */
+function depsWithMail(messages: { id: number; sealed: string }[]): typeof deps {
+  return {
+    ...deps,
+    relay: {
+      request: async (_m: string, path: string) => {
+        if (path === '/v1/mail') {
+          return {
+            ok: true,
+            json: async () => ({
+              messages: messages.map((m) => ({
+                ...m,
+                fromDevice: 'bb'.repeat(32),
+                kind: 'clipboard'
+              }))
+            })
+          }
+        }
+        return { ok: true, json: async () => ({}) }
+      }
+    } as never
+  }
+}
 
 function hashOf(text: string): string {
   return identifyText(text).hash
@@ -74,6 +97,76 @@ function hashOf(text: string): string {
 beforeEach(() => {
   posted.length = 0
   clip.text = ''
+})
+
+describe('a clipboard the relay held on to', () => {
+  it('is not pasted when it is stale', async () => {
+    // "Newest" was the last element of the array THE RELAY returned, in the
+    // relay's order, with the rollback check disabled and `sentAt` written
+    // into every payload and read by nothing. So a relay could keep any
+    // clipboard row it had ever carried and serve it as current: the user
+    // presses receive expecting the URL they just copied and pastes last
+    // week's password into whatever has focus.
+    const old = sealedOf('last week: hunter2', Date.now() - 8 * 24 * 60 * 60_000)
+    const r = await receiveClipboard(depsWithMail([{ id: 1, sealed: old }]))
+
+    expect(r.applied).toBe(false)
+    expect(r.reason).toMatch(/minutes old/)
+    expect(clip.read()).toBe('')
+  })
+
+  it('takes the newest by its OWN timestamp, not the relay ordering', async () => {
+    // `sentAt` is inside the seal, so it is the sender's claim. The order of
+    // the array is the relay's to pick.
+    const recent = sealedOf('the one I just copied', Date.now() - 1000)
+    const older = sealedOf('an older one', Date.now() - 5 * 60_000)
+    // Served newest-first, which is the wrong way round for "take the last".
+    const r = await receiveClipboard(
+      depsWithMail([
+        { id: 1, sealed: recent },
+        { id: 2, sealed: older }
+      ])
+    )
+
+    expect(r.applied).toBe(true)
+    expect(clip.read()).toBe('the one I just copied')
+  })
+
+  it('applies a fresh one', async () => {
+    const r = await receiveClipboard(
+      depsWithMail([{ id: 1, sealed: sealedOf('fresh', Date.now()) }])
+    )
+    expect(r.applied).toBe(true)
+    expect(clip.read()).toBe('fresh')
+  })
+})
+
+describe('an echo flag armed by somebody else', () => {
+  it('cannot suppress a send the user did not receive', async () => {
+    // The flag was armed straight from `payload.identity.hash`, which the
+    // SENDER chooses. So a peer could arm this device's suppressor with the
+    // hash of something the user was about to copy, and their next send would
+    // be refused with "that is what this device just received" — a one-shot
+    // denial with a misleading reason.
+    const lying = Buffer.from(
+      JSON.stringify({
+        kind: 'text',
+        text: 'what was actually sent',
+        // The hash of something else entirely.
+        identity: { hash: hashOf('what the user is about to copy'), size: 22 },
+        sentAt: Date.now()
+      }),
+      'utf8'
+    ).toString('base64')
+
+    await applySealedClipboard(deps, lying)
+
+    // The user copies the thing the sender tried to pre-suppress.
+    clip.write('what the user is about to copy')
+    const r = await sendClipboard(deps)
+
+    expect(r.sent, 'a peer suppressed a send it had no part in').toBe(1)
+  })
 })
 
 describe('sending back what was just received', () => {

@@ -754,3 +754,51 @@ describe('a session description is signed', () => {
     expect(P2P).toMatch(/e\.peerNonce === sent\.deviceNonce/)
   })
 })
+
+/**
+ * Five smaller findings, each a control that existed and was unused.
+ */
+describe('the low-severity set', () => {
+  it('a re-key drops the keys it rotated away from', () => {
+    // `forgetAddySecret` had no callers, so every epoch key this device had
+    // ever held stayed in the keychain and `resume` loaded all of them. A
+    // machine seized five rotations later yielded AK_1..AK_5 and opened every
+    // object the relay had ever stored — a re-key that never shrank the blast
+    // radius it was performed to shrink.
+    expect(SESSION).toMatch(/forgetAddySecret\('account'/)
+    // A REVOCATION only: an offline device may still be catching up through a
+    // chained handoff bound to the previous key, and a hygiene rotation is not
+    // answering a threat that justifies stranding it.
+    expect(SESSION).toMatch(/if \(kind === 'revocation'\)/)
+  })
+
+  it('a chain is verified against the root key this vault pinned', () => {
+    // The parameter comes from the enrolment file and never from a relay, so
+    // this is defence in depth — but the vault has its own copy two fields
+    // away and was not consulting it.
+    const CRYPTO = readFileSync(join(ROOT, 'sidecar/addyd/crypto.go'), 'utf8')
+    expect(CRYPTO).toMatch(/not the root key this device recorded/)
+  })
+
+  it('a device pairing into a rotated account gets the real epoch-1 key', () => {
+    // `pairAccept` returned whatever epoch key the handoff carried and called
+    // it `epoch1SignPub`. Correct only for an account that has never rotated;
+    // for one that has, the joining device records AK_n as epoch 1's and can
+    // never verify its own roster again, because the genesis entry is signed
+    // by AK_1 and nothing in a chain establishes it. Fails closed, and bricks
+    // the device it just added.
+    const PAIRING = readFileSync(join(ROOT, 'sidecar/addyd/pairing.go'), 'utf8')
+    expect(PAIRING).toMatch(/"epochSignPub":/)
+    expect(PAIRING).not.toMatch(/"epoch1SignPub":/)
+    expect(SESSION).toMatch(/epoch1SignPub: account\.epoch1SignPub \?\? ''/)
+  })
+
+  it('and a join that cannot verify its own roster fails loudly', () => {
+    // It was `.catch(() => undefined)`, so a device with the wrong key paired
+    // successfully, reported success, and could never read the account again.
+    const join = SESSION.slice(SESSION.indexOf('async finishJoin('))
+    const body = join.slice(0, join.indexOf('\n  /**', 10))
+    expect(body).toMatch(/await this\.refreshRoster\(\)\n/)
+    expect(body).not.toMatch(/refreshRoster\(\)\.catch/)
+  })
+})

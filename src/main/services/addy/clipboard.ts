@@ -54,6 +54,23 @@ export interface ClipboardDeps {
   tryDirect?(peerHex: string, sealed: string): Promise<boolean>
 }
 
+/**
+ * How old a clipboard may be and still be what somebody is reaching for.
+ *
+ * "Newest" was `clips[clips.length - 1]` — the last element of the array THE
+ * RELAY returned, in the relay's order — with the rollback check disabled and
+ * `sentAt` written into every payload and read by nothing. So a relay could
+ * keep any clipboard row it had ever carried and serve it as current: the
+ * user presses receive expecting the URL they just copied, and pastes last
+ * week's password into whatever has focus.
+ *
+ * `sentAt` is INSIDE the sealed payload, so it is the sender's own claim and
+ * not the relay's. Ten minutes is generous for "I copied that on the other
+ * machine a moment ago" and short enough that nothing stale is applied
+ * silently.
+ */
+const MAX_CLIPBOARD_AGE_MS = 10 * 60_000
+
 /** One clipboard payload, as it crosses the wire. Sealed before it leaves. */
 interface ClipboardPayload {
   kind: 'text'
@@ -179,15 +196,50 @@ export async function receiveClipboard(
   const clips = messages.filter((m) => m.kind === CLIPBOARD_KIND && peers.has(m.fromDevice))
   if (clips.length === 0) return { applied: false, reason: 'Nothing has been sent to this device.' }
 
-  const newest = clips[clips.length - 1]
-  await applySealedClipboard(deps, newest.sealed)
+  /**
+   * THE NEWEST BY ITS OWN TIMESTAMP, not by the relay's ordering.
+   *
+   * Opened before one is chosen, because the only trustworthy `sentAt` is the
+   * one inside the seal — the array's order is the relay's to pick.
+   */
+  const opened: { id: number; from: string; payload: ClipboardPayload }[] = []
+  for (const m of clips) {
+    try {
+      opened.push({ id: m.id, from: m.fromDevice, payload: await openClipboard(deps, m.sealed) })
+    } catch {
+      // A payload this device cannot open is one to acknowledge and forget
+      // rather than retry for ever — it was sealed under an epoch this device
+      // no longer holds, or to another device entirely.
+    }
+  }
+  opened.sort((a, b) => (a.payload.sentAt ?? 0) - (b.payload.sentAt ?? 0))
+  const newest = opened[opened.length - 1]
+
+  if (!newest) {
+    await deps.relay.request('POST', '/v1/mail/ack', { ids: clips.map((m) => m.id) })
+    return { applied: false, reason: 'Nothing that could be opened on this device.' }
+  }
+
+  const age = Date.now() - (newest.payload.sentAt ?? 0)
+  if (age > MAX_CLIPBOARD_AGE_MS) {
+    // Acknowledged, so it stops being offered — but NOT applied. Writing a
+    // week-old clipboard into whatever has focus is the one outcome this
+    // check exists to prevent, and it happens silently.
+    await deps.relay.request('POST', '/v1/mail/ack', { ids: clips.map((m) => m.id) })
+    return {
+      applied: false,
+      reason: `The newest thing sent to this device is ${Math.round(age / 60_000)} minutes old, so it was not pasted. Send it again from the other machine.`
+    }
+  }
+
+  applyOpenedClipboard(newest.payload)
 
   // Acknowledge everything, not just the one applied. The rest are older
   // clipboard entries nobody is going to want, and leaving them means the next
   // receive has the same backlog.
   await deps.relay.request('POST', '/v1/mail/ack', { ids: clips.map((m) => m.id) })
 
-  return { applied: true, from: newest.fromDevice }
+  return { applied: true, from: newest.from }
 }
 
 /**
@@ -203,25 +255,40 @@ export async function applySealedClipboard(
   deps: ClipboardDeps,
   sealed: string
 ): Promise<ClipboardIdentity> {
+  return applyOpenedClipboard(await openClipboard(deps, sealed))
+}
+
+/** Opens one sealed clipboard payload without applying it. */
+async function openClipboard(deps: ClipboardDeps, sealed: string): Promise<ClipboardPayload> {
   const opened = await deps.addyd.send<{ payload: string }>('open', {
     collection: `${CLIPBOARD_KIND}:${await selfDevice(deps)}`,
     epoch: deps.epoch(),
     sealed,
     knownSchema: 1,
     // Clipboard entries are not a document with a history, so there is no
-    // rollback to enforce: every one is newer than the last by construction
-    // and applying an older one is what "receive" sometimes means.
+    // rollback to enforce by counter: every one is newer than the last by
+    // construction. Freshness is checked on `sentAt` instead, which is inside
+    // the seal and therefore the sender's claim rather than the relay's.
     seenCounter: 0
   })
-  const payload = JSON.parse(Buffer.from(opened.payload, 'base64').toString('utf8')) as ClipboardPayload
+  return JSON.parse(Buffer.from(opened.payload, 'base64').toString('utf8')) as ClipboardPayload
+}
+
+function applyOpenedClipboard(payload: ClipboardPayload): ClipboardIdentity {
+  // THE HASH IS RECOMPUTED, not taken from the payload. It was armed straight
+  // from `payload.identity.hash`, which the sender chose — so a peer could arm
+  // this device's echo suppressor with the hash of something the user was
+  // about to copy, and their next send would be refused with "that is what
+  // this device just received".
+  const identity = identifyText(payload.text)
 
   // ARMED BEFORE THE WRITE, not after. The platform's change notification can
   // arrive before the write call returns, and a flag set afterwards would miss
   // its own event -- which is a loop between two devices that each re-send
   // what the other just pasted.
-  echo.arm(payload.identity.hash)
+  echo.arm(identity.hash)
   clipboard.writeText(payload.text)
-  return payload.identity
+  return identity
 }
 
 /** Whether a clipboard read is our own write coming back.

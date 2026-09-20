@@ -472,11 +472,19 @@ func handlePairAccept(req Request) (any, error) {
 	keys.mu.Unlock()
 
 	return map[string]any{
-		"accountId":     h.AccountID.String(),
-		"epoch":         h.Epoch,
-		"rootSignPub":   hex.EncodeToString(h.RootSignPub),
-		"epoch1SignPub": hex.EncodeToString(epochKeys.Sign.Public().(ed25519.PublicKey)),
-		"headEntry":     base64.StdEncoding.EncodeToString(h.HeadEntry),
+		"accountId":   h.AccountID.String(),
+		"epoch":       h.Epoch,
+		"rootSignPub": hex.EncodeToString(h.RootSignPub),
+		// THE KEY FOR THE EPOCH THIS HANDOFF CARRIES, named for what it is.
+		//
+		// It was called `epoch1SignPub` unconditionally, and the parent stored
+		// it under that name — so a device pairing into an account that had
+		// rotated recorded AK_n's key as epoch 1's and could never verify its
+		// own roster again, because the genesis entry is signed by AK_1 and
+		// nothing in a chain establishes it. Fails closed, and bricks the
+		// device it just added.
+		"epochSignPub": hex.EncodeToString(epochKeys.Sign.Public().(ed25519.PublicKey)),
+		"headEntry":    base64.StdEncoding.EncodeToString(h.HeadEntry),
 		// THE JOINER'S OWN PUBLIC HALVES, so the initiator can write the
 		// roster entry that adds this device. Without them the pairing
 		// completes cryptographically and the account never learns the device

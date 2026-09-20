@@ -454,9 +454,24 @@ func handleVerifyRoster(req Request) (any, error) {
 	acct := keys.account
 	self := keys.device
 	loaded := keys.loaded
+	pinnedRoot := keys.rootSignPub
 	keys.mu.RUnlock()
 	if !loaded {
 		return nil, codedf(ErrNotPaired, "no account is loaded")
+	}
+
+	// CROSS-CHECKED AGAINST WHAT THIS VAULT PINNED. The root key arrives as a
+	// parameter because the parent holds the enrolment, and that is fine — it
+	// comes from the enrolment file and never from a relay response. But this
+	// process has its own copy, recorded at mint, at pairing or at recovery,
+	// and a disagreement between them is not something to verify a chain
+	// through: it means the parent is passing something it did not get from
+	// where it thinks.
+	if len(pinnedRoot) == ed25519.PublicKeySize && !bytes.Equal(pinnedRoot, rootPub) {
+		return nil, codedf(
+			ErrConfigInvalid,
+			"that is not the root key this device recorded for this account",
+		)
 	}
 
 	v, err := protocol.VerifyChain(chain, acct, rootPub, epoch1, pin)
