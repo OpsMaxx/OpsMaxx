@@ -73,6 +73,22 @@ export interface TransferDeps {
 
 const quarantine = (): string => join(app.getPath('userData'), TRANSFER_DIR)
 
+/**
+ * A transfer id, as this code mints them: 24 lowercase hex characters.
+ *
+ * VALIDATED ON ARRIVAL, not merely on the way out. The id comes out of a
+ * decrypted notice written by another machine, and it is used to build a
+ * directory path — so an id of `../../../../.ssh` and a name of
+ * `authorized_keys` writes an SSH key into the user's home directory at mode
+ * 0600, which is exactly the mode sshd insists on.
+ *
+ * The sender holding the epoch key is not a reason to trust the id. It is the
+ * reason to check it: a revoked-but-not-re-keyed device still holds that key,
+ * and an arriving file is the one artefact this feature asks the user to make
+ * a trust judgement about.
+ */
+const TRANSFER_ID = /^[0-9a-f]{8,64}$/
+
 /** The object name the bytes live under. Includes the recipient, so two
  *  transfers of the same file to two devices do not collide. */
 function objectName(id: string): string {
@@ -199,6 +215,14 @@ export async function collectFiles(deps: TransferDeps): Promise<ArrivedFile[]> {
         Buffer.from(opened.payload, 'base64').toString('utf8')
       ) as TransferNotice
 
+      // BEFORE THE ID IS USED FOR ANYTHING. It addresses both a relay object
+      // and a local directory, and the local one is the dangerous half — see
+      // TRANSFER_ID. Refused rather than sanitised, because there is no
+      // legitimate id this rejects: every one this code mints is hex.
+      if (typeof notice.id !== 'string' || !TRANSFER_ID.test(notice.id)) {
+        throw new AddyError('config-invalid', 'a transfer arrived with an id this build will not use')
+      }
+
       const object = await deps.relay.getObject(objectName(notice.id), deps.epoch())
       if (!object) {
         // The bytes are not there. NOT acknowledged, so the next collection
@@ -225,7 +249,10 @@ export async function collectFiles(deps: TransferDeps): Promise<ArrivedFile[]> {
       // Named by the transfer, not by the sender's filename alone: a file
       // called `.bashrc` should not be able to choose where it lands, and two
       // transfers of `report.pdf` should not overwrite each other.
-      const folder = join(dir, notice.id)
+      // `basename` as well as the check above, and not instead of it: two
+      // independent reasons this cannot escape the quarantine is the right
+      // number for a path built from a remote string.
+      const folder = join(dir, basename(notice.id))
       mkdirSync(folder, { recursive: true })
       const safe = basename(notice.name).replace(/[/\\]/g, '_') || 'file'
       const full = join(folder, safe)

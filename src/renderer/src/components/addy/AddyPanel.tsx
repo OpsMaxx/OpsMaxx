@@ -180,12 +180,23 @@ export function AddyPanel(): React.JSX.Element {
           only while step one is where the reader is: once a device is enrolled,
           a "create an account" form on the same screen as the account is an
           invitation to mint a second one by accident. */}
-      {steps[0].state !== 'done' && (
-        <div className="addy-setup-slot">
-          <h3 className="ui-section-title addy-h">Start here</h3>
-          <AddySetup />
-        </div>
-      )}
+      {/* ALWAYS MOUNTED, and the guard is a prop rather than this condition.
+          It used to be `steps[0].state !== 'done'`, which unmounted this the
+          instant the account existed — and `createAccount` logs in, which
+          starts the engine, which pushes `enrolled: true` BEFORE it returns
+          the recovery phrase. The slot went away while the renderer was still
+          awaiting the words, and they were never shown or vanished while
+          somebody was writing them down. See AddySetup for the rest of it.
+
+          `AddySetup` reads the status itself and renders null when this device
+          is enrolled and nothing is in flight, so the "do not offer to mint a
+          second account" intent is intact — just decided by the component that
+          knows, and applied at the Settings door too, which had no guard at
+          all. */}
+      <div className="addy-setup-slot">
+        {steps[0].state !== 'done' && <h3 className="ui-section-title addy-h">Start here</h3>}
+        <AddySetup />
+      </div>
 
       <h3 className="ui-section-title addy-h">Devices</h3>
       <AddyDevices devices={status?.devices} supported={supported} onChanged={refresh} />

@@ -4,6 +4,7 @@ import { useApp } from '../../store/app'
 import { clsx } from '../../lib/format'
 import { toast } from '../../store/toast'
 import { PairingPanel } from './PairingPanel'
+import { useAddyStatus } from './addyStatus'
 
 /**
  * Getting onto a relay for the first time.
@@ -13,7 +14,34 @@ import { PairingPanel } from './PairingPanel'
  * show it again. So it gets its own screen, it cannot be skipped by clicking
  * past, and the button that dismisses it says what it means rather than "OK".
  */
-export function AddySetup(): React.JSX.Element {
+/**
+ * THE MOUNT GUARD LIVES HERE, and moving it here fixed a way to lose an
+ * account for ever.
+ *
+ * It used to live at the call site: the panel rendered this only while the
+ * journey's first step was not `done`, to avoid offering to mint a second
+ * account next to an account that exists. Correct intent, fatal placement.
+ *
+ * `createAccount` logs in before it returns, logging in starts the sync
+ * engine, and the engine's first act is to push a status saying `enrolled:
+ * true`. That push crosses IPC while the renderer is still awaiting the very
+ * call that will hand back the twelve words — so the slot unmounted, this
+ * component's state went with it, and the phrase either never rendered or
+ * vanished while somebody was copying it onto paper. Nothing else on the
+ * machine keeps it. The account was unrecoverable from the moment it was made.
+ *
+ * So the guard is a prop and the decision is made in here, where the flow
+ * knows whether it is finished. `enrolled` closes the door only when nothing
+ * is in progress.
+ */
+export function AddySetup(): React.JSX.Element | null {
+  // Read here rather than taken as a prop, so BOTH call sites — the panel and
+  // the Security page in Settings — get the same guard without either having
+  // to remember to pass it. The Settings one had no guard at all, which made
+  // it a second door to minting an account on a machine that already has one,
+  // and `createAccount` overwrites the enrolment, so that silently took the
+  // device off the first account.
+  const { status } = useAddyStatus()
   const relayURL = useApp((s) => s.settings.addyRelayURL ?? '')
   const setSettings = useApp((s) => s.setSettings)
 
@@ -31,6 +59,17 @@ export function AddySetup(): React.JSX.Element {
   const [mode, setMode] = useState<'create' | 'recover'>('create')
   const [mnemonic, setMnemonic] = useState('')
   const [recovered, setRecovered] = useState<{ devices: number } | null>(null)
+
+  /**
+   * Nothing in flight, and this device is already on an account: there is
+   * nothing here to offer.
+   *
+   * Checked AFTER every hook, or this would be a conditional hook call. Every
+   * clause is a piece of state this component owns, which is the whole point —
+   * no outside signal can close this screen while it is mid-flow.
+   */
+  const midFlow = busy || phrase !== null || recovered !== null
+  if (status?.enrolled === true && !midFlow) return null
 
   const create = async (): Promise<void> => {
     setBusy(true)

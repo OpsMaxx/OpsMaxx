@@ -462,12 +462,20 @@ describe('a file can be sent to another device', () => {
   })
 
   it('does not let a sender choose where its file lands', () => {
-    // A file called `../../.bashrc` should not be able to address anything
-    // outside the quarantine, and two transfers of `report.pdf` must not
-    // overwrite each other.
+    // BOTH halves of the path, and this assertion used to check only one.
+    //
+    // The filename was sanitised and the transfer ID was not — and the ID is
+    // what builds the directory, under `mkdirSync(..., {recursive: true})`.
+    // An id of `../../../../.ssh` with a name of `authorized_keys` wrote an
+    // SSH key into the user's home directory at mode 0600, which is the mode
+    // sshd requires. The notice comes from another machine; holding the epoch
+    // key is not a reason to trust it, it is the reason to check it.
     const T = read('src/main/services/addy/transfer.ts')
     expect(T).toMatch(/basename\(notice\.name\)/)
-    expect(T).toMatch(/join\(dir, notice\.id\)/)
+    expect(T).toMatch(/TRANSFER_ID\.test\(notice\.id\)/)
+    expect(T).toMatch(/join\(dir, basename\(notice\.id\)\)/)
+    // And the id is never used unchecked for the relay object either.
+    expect(T).not.toMatch(/join\(dir, notice\.id\)/)
   })
 
   it('sweeps quarantine rather than keeping everything for ever', () => {

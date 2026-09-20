@@ -1495,6 +1495,14 @@ export function Settings(): React.JSX.Element {
                 A relay you run yourself, which carries your data between your devices and cannot
                 read any of it.
               </div>
+              {/* GUARDED, like the panel's. Unguarded, this was a second door
+                  to minting an account on a machine that already has one —
+                  and `createAccount` overwrites the account and the enrolment
+                  file, so it silently takes the device off the first one. */}
+              {/* Guards itself now. Unguarded, this was a second door to
+                  minting an account on a machine that already has one — and
+                  `createAccount` overwrites the account and the enrolment
+                  file, so it silently took the device off the first one. */}
               <AddySetup />
 
               <h3>Import from another password manager</h3>
