@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, beforeEach, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { stubBridge } from './setup/renderer'
@@ -277,5 +277,60 @@ describe('every part of this is reachable', () => {
     }
     // And the panel itself, which is the export the whole change exists for.
     expect(all).toContain('<AddyPanel />')
+  })
+})
+
+describe('the Sync now button', () => {
+  const enrolled = (over: Partial<AddyStatus> = {}): AddyStatus => ({
+    enrolled: true,
+    relayURL: 'https://relay.example',
+    accountId: 'aad42aad5b51c8d31d31b3f529a312e2',
+    devices: [{ id: 'aa', label: 'laptop', self: true, lastSeen: null, addedAt: null }],
+    sync: { running: true, connected: true, lastSyncAt: Date.now(), conflicts: 0 },
+    ...over
+  })
+
+  it('runs a pass and re-reads the status afterwards', async () => {
+    // Both halves. A pass that is not followed by a read leaves the screen
+    // showing the numbers from before it — which is the one thing somebody
+    // pressing this button is trying to find out.
+    const syncNow = vi.fn().mockResolvedValue({ carried: 3 })
+    const status = vi.fn().mockResolvedValue(enrolled())
+    stubBridge({ addy: { status, syncNow } })
+
+    render(<AddyPanel />)
+    const button = await screen.findByRole('button', { name: /Sync now/ })
+    fireEvent.click(button)
+
+    await waitFor(() => expect(syncNow).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(status.mock.calls.length).toBeGreaterThan(1))
+  })
+
+  it('is not offered to a machine that is not on an account', async () => {
+    // Its only possible outcome there is an error, and the journey below
+    // already says what to do instead.
+    stubBridge({
+      addy: {
+        status: vi.fn().mockResolvedValue({
+          enrolled: false,
+          sync: { running: false, connected: false, lastSyncAt: null, conflicts: 0 }
+        })
+      }
+    })
+    render(<AddyPanel />)
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Refresh/ })).toBeTruthy())
+    expect(screen.queryByRole('button', { name: /Sync now/ })).toBeNull()
+  })
+
+  it('re-reads even when the pass failed', async () => {
+    // A failed pass changed the status too, and the error band is what has to
+    // say so — not a button that silently went back to normal.
+    const syncNow = vi.fn().mockRejectedValue(new Error('the relay hated it'))
+    const status = vi.fn().mockResolvedValue(enrolled())
+    stubBridge({ addy: { status, syncNow } })
+
+    render(<AddyPanel />)
+    fireEvent.click(await screen.findByRole('button', { name: /Sync now/ }))
+    await waitFor(() => expect(status.mock.calls.length).toBeGreaterThan(1))
   })
 })

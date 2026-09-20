@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   AlertTriangle,
   Check,
@@ -6,6 +7,7 @@ import {
   Clock,
   HelpCircle,
   Laptop,
+  Loader2,
   MonitorSmartphone,
   RefreshCw,
   Satellite,
@@ -65,6 +67,29 @@ import {
  */
 export function AddyPanel(): React.JSX.Element {
   const { status, supported, error, refresh } = useAddyStatus()
+  const [syncing, setSyncing] = useState(false)
+
+  /**
+   * A pass, now, rather than at the next tick.
+   *
+   * The engine runs on its own every five minutes, so this button is not how
+   * sync works — it is how somebody finds out whether it does. "I changed
+   * something on the other machine, is it here yet" is the question this
+   * screen exists to answer, and a five-minute wait is not an answer.
+   *
+   * `refresh()` afterwards even on failure: a pass that failed changed the
+   * status too, and it is the error band rather than this button that has to
+   * say so.
+   */
+  const syncNow = async (): Promise<void> => {
+    setSyncing(true)
+    try {
+      await window.opsmaxx?.addy.syncNow()
+    } finally {
+      setSyncing(false)
+      refresh()
+    }
+  }
   const relaySetting = useApp((s) => s.settings.addyRelayURL)
   const steps = addyJourney(status, supported, relaySetting)
   const relay = relayHost(status?.relayURL ?? relaySetting)
@@ -89,9 +114,25 @@ export function AddyPanel(): React.JSX.Element {
       }
       actions={
         supported ? (
-          <button className="btn ghost" onClick={refresh}>
-            <RefreshCw size={14} /> Refresh
-          </button>
+          <>
+            {/* Only once this device is on an account. A "Sync now" on a
+                machine with no account is a button whose only possible outcome
+                is an error, and the journey below already says what to do
+                instead. */}
+            {status?.enrolled && (
+              <button className="btn ghost" disabled={syncing} onClick={() => void syncNow()}>
+                {syncing ? (
+                  <Loader2 size={14} className="spin" />
+                ) : (
+                  <RefreshCw size={14} />
+                )}
+                {syncing ? ' Syncing…' : ' Sync now'}
+              </button>
+            )}
+            <button className="btn ghost" onClick={refresh}>
+              <RefreshCw size={14} /> Refresh
+            </button>
+          </>
         ) : undefined
       }
       className="addy-panel"
