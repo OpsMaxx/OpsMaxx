@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import type { Dirent } from 'node:fs'
-import { homedir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { homedir, userInfo } from 'node:os'
+import { basename, dirname, join, sep } from 'node:path'
 import type {
   FrpSpec,
   OpenVpnSpec,
@@ -15,7 +15,7 @@ import type {
 import { isVaultLockedError } from '../credentialResolver'
 import { openVpnRegistryPaths, winProgramRoots } from './binaries'
 import { toVpnResult, VpnError } from './errors'
-import { parseVpnConfig } from './parsers'
+import { detectVpnKind, parseVpnConfig } from './parsers'
 import { deleteVpnSecrets as dropVpnSecrets, stageImportedSecrets } from './vaultBridge'
 import type { StagedVpnSecretRefs } from './vaultBridge'
 
@@ -35,10 +35,42 @@ import type { StagedVpnSecretRefs } from './vaultBridge'
 // IPC calls, for as long as the user leaves the dialog open — and the parse is
 // pure and cheap, so the only thing caching would buy is that risk.
 
+/** What the import dialogs call each kind, for the one message that has to name
+ *  a different one than the user picked. */
+const KIND_LABEL: Record<VpnKind, string> = {
+  wireguard: 'WireGuard',
+  openvpn: 'OpenVPN',
+  frp: 'frp',
+  ngrok: 'ngrok',
+  tailscale: 'Tailscale'
+}
+
 /** Parse and report. Never stores anything, never returns key material. */
 export function vpnImport(kind: VpnKind, text: string, baseDir?: string): VpnImportResult {
   try {
     const parsed = parseVpnConfig(kind, text, { baseDir })
+    // A WireGuard .conf dropped into the OpenVPN dialog used to fail with
+    // "This profile carries no certificate authority" — true of the bytes, and
+    // an answer to a question nobody asked, because the file is not an OpenVPN
+    // profile at all. `detectVpnKind` existed for exactly this and had no
+    // caller; here is the one place every path (paste, drop, chooser and the
+    // discovery scan) goes through, so it only has to be said once.
+    //
+    // Only when nothing was REJECTED: a rejected directive is a real finding
+    // about the file the user actually handed over, and it outranks a guess
+    // about which dialog they should have used.
+    if (!parsed.ok && !parsed.stripped.some((d) => d.severity === 'rejected')) {
+      const looksLike = detectVpnKind(text)
+      if (looksLike && looksLike !== kind) {
+        return {
+          ok: false,
+          error: `This looks like a ${KIND_LABEL[looksLike]} configuration rather than ${KIND_LABEL[kind]}. Import it with the Import ${KIND_LABEL[looksLike]} button instead.`,
+          errorCode: 'unsupported',
+          stripped: parsed.stripped,
+          warnings: parsed.warnings
+        }
+      }
+    }
     // Drop `secrets` on the floor: the internal type carries it, the wire type
     // does not, and this is the one place the two meet.
     const { secrets: _secrets, ...wire } = parsed
@@ -121,7 +153,7 @@ interface ScanDir {
  * executing their bundled binary, which `otherVpnClients` in binaries.ts
  * declines to do and says why.
  */
-async function profileDirs(kinds: DiscoveredVpnProfile['kind'][]): Promise<ScanDir[]> {
+export async function profileDirs(kinds: DiscoveredVpnProfile['kind'][]): Promise<ScanDir[]> {
   const home = homedir()
   const out: ScanDir[] = []
   const add = (kind: DiscoveredVpnProfile['kind'], ...dirs: string[]): void => {
@@ -158,6 +190,7 @@ async function profileDirs(kinds: DiscoveredVpnProfile['kind'][]): Promise<ScanD
       join(programData, 'WireGuard', 'Configurations')
     )
   } else if (process.platform === 'darwin') {
+    const tunnelblick = '/Library/Application Support/Tunnelblick'
     add(
       'openvpn',
       join(home, 'Library', 'Application Support', 'OpenVPN Connect', 'profiles'),
@@ -165,8 +198,21 @@ async function profileDirs(kinds: DiscoveredVpnProfile['kind'][]): Promise<ScanD
       // named `Work.tblk` with the real config a few levels inside it. See
       // `filesIn` for the one place that is special-cased.
       join(home, 'Library', 'Application Support', 'Tunnelblick', 'Configurations'),
+      // And it MOVES them out of there. "Secure" configurations — the default
+      // for every configuration Tunnelblick installs — live in a root-owned
+      // tree under /Library instead, per-user or shared. Scanning only the
+      // per-user Configurations folder meant the ordinary Tunnelblick user
+      // found nothing at all; `deniedEntry` covers the case where those
+      // directories are readable only by root.
+      join(tunnelblick, 'Users', userInfo().username),
+      join(tunnelblick, 'Shared'),
       join(home, 'Library', 'Application Support', 'Viscosity', 'OpenVPN'),
       join(home, '.config', 'openvpn'),
+      // Where a profile emailed by an administrator actually lands, and the
+      // one directory a person who has never installed a VPN client will have
+      // put it in.
+      join(home, 'Downloads'),
+      join(home, '.openvpn'),
       '/etc/openvpn'
     )
     // Both Homebrew prefixes, because `wg-quick` reads whichever one it was
@@ -175,6 +221,10 @@ async function profileDirs(kinds: DiscoveredVpnProfile['kind'][]): Promise<ScanD
       'wireguard',
       '/opt/homebrew/etc/wireguard',
       '/usr/local/etc/wireguard',
+      // `wg-quick up <name>` resolves <name> here on macOS exactly as it does
+      // on Linux. It was in the Linux branch and missing from this one, so a
+      // macOS tunnel set up by hand was invisible.
+      '/etc/wireguard',
       join(home, '.config', 'wireguard')
     )
   } else {
@@ -195,6 +245,54 @@ async function profileDirs(kinds: DiscoveredVpnProfile['kind'][]): Promise<ScanD
     seen.add(key)
     return true
   })
+}
+
+/**
+ * Profile stores OpsMaxx cannot read, and the reason.
+ *
+ * Listed rather than scanned. Both of these hold real profiles and neither can
+ * be opened by anything but the app that wrote it, so a scan that simply found
+ * nothing in them would read as OpsMaxx having missed the profiles the user can
+ * see in another window. Same shape as the DPAPI entry in `readProfile`: the
+ * dialog lists it with its reason and no Import button.
+ *
+ * A directory that is not there produces nothing, so this is a list of places
+ * to look and not a claim about which app is installed.
+ */
+interface NoteDir extends ScanDir {
+  /** Shown in place of the path; the whole point of the entry. */
+  note: string
+}
+
+export function noteDirs(kinds: DiscoveredVpnProfile['kind'][]): NoteDir[] {
+  const home = homedir()
+  const out: NoteDir[] = []
+  const connect =
+    'OpenVPN Connect 3 keeps imported profiles in its own database rather than as files, and that database is not a format OpsMaxx can read. Export the profile from OpenVPN Connect, or import the original .ovpn file here.'
+
+  if (kinds.includes('openvpn')) {
+    if (process.platform === 'darwin') {
+      out.push({
+        kind: 'openvpn',
+        dir: join(home, 'Library', 'Application Support', 'OpenVPN Connect'),
+        note: connect
+      })
+    } else if (process.platform === 'win32') {
+      const appData = process.env.APPDATA ?? join(home, 'AppData', 'Roaming')
+      out.push({ kind: 'openvpn', dir: join(appData, 'OpenVPN Connect'), note: connect })
+    }
+  }
+  if (kinds.includes('wireguard') && process.platform === 'darwin') {
+    out.push({
+      kind: 'wireguard',
+      // The App Store build is sandboxed and keeps its tunnels in the login
+      // keychain, not in this container — the container only proves the app is
+      // installed. Nothing here is readable by design, so nothing is attempted.
+      dir: join(home, 'Library', 'Containers', 'com.wireguard.macos'),
+      note: 'The WireGuard app from the App Store stores its tunnels where only it can read them. Export a tunnel from WireGuard, then import the .conf file here.'
+    })
+  }
+  return out
 }
 
 /** Anything larger is not a profile. A `.ovpn` with every certificate inline
@@ -311,6 +409,26 @@ async function runScan(
       if (entry) push(entry)
     }
   }
+
+  // Last, and only for a store that gave up nothing. The note exists so an
+  // unreadable store is not met with silence — but OpenVPN Connect 2 wrote
+  // plain `.ovpn` files into the same tree that 3 keeps its database in, so on
+  // a machine that has those files there is nothing to explain and the note
+  // would just be noise beside the profiles it is claiming cannot be read.
+  for (const { dir, kind, note } of noteDirs(kinds)) {
+    // And only when the directory is actually there: this is about a store this
+    // machine has, not a lecture about software it has never run.
+    const st = await stat(dir).catch(() => null)
+    if (!st?.isDirectory()) continue
+    const prefix = `${dir.toLowerCase()}${sep}`
+    if (profiles.some((p) => p.sourcePath.toLowerCase().startsWith(prefix))) continue
+    push({
+      kind,
+      sourcePath: dir,
+      name: basename(dir),
+      report: { ok: false, error: note, errorCode: 'unsupported', stripped: [], warnings: [] }
+    })
+  }
   return { profiles, complete: true }
 }
 
@@ -337,11 +455,39 @@ function deniedEntry(
   }
 }
 
-async function readProfile(
+/**
+ * The name a bundled profile actually has.
+ *
+ * Tunnelblick and Viscosity both keep a profile as a DIRECTORY named after it —
+ * `Work.tblk`, `Work.visc` — with the config inside always called `config.ovpn`
+ * or `config.conf`. Taking the file's stem therefore listed every profile from
+ * either client as "config", which is no name at all once there are two of
+ * them. The directory is where the name lives, so read it from there.
+ */
+/** Viscosity numbers its connection folders — `OpenVPN/3/config.conf` — and
+ *  keeps the name the user gave the connection in a comment at the top of the
+ *  file. Without reading it the profile is called "3", or before that "config".
+ */
+const VISCOSITY_NAME = /^#\s*viscosity\s+name\s+(.+)$/im
+
+export function bundleName(file: string): string | null {
+  const parts = dirname(file).split(/[\\/]/)
+  while (parts.length > 0) {
+    const seg = parts.pop() as string
+    // Tunnelblick's config sits at `Work.tblk/Contents/Resources/config.ovpn`,
+    // so the two wrapper directories are stepped over rather than named.
+    if (!seg || /^(contents|resources)$/i.test(seg)) continue
+    const stem = seg.replace(/\.(tblk|visc|ovpn|conf)$/i, '')
+    return stem || null
+  }
+  return null
+}
+
+export async function readProfile(
   file: string,
   kind: DiscoveredVpnProfile['kind']
 ): Promise<DiscoveredVpnProfile | null> {
-  const name = basename(file).replace(/\.(ovpn|conf|conf\.dpapi)$/i, '')
+  const stem = basename(file).replace(/\.(ovpn|conf|conf\.dpapi)$/i, '')
   // The official Windows WireGuard client encrypts every tunnel it stores
   // with DPAPI, bound to the LocalSystem account. There is no key to ask for
   // and nothing to parse, so this is listed with the reason rather than read
@@ -350,7 +496,7 @@ async function readProfile(
     return {
       kind,
       sourcePath: file,
-      name,
+      name: stem,
       report: {
         ok: false,
         error:
@@ -370,6 +516,14 @@ async function readProfile(
     if (isDenied(e)) return deniedEntry(kind, file, false)
     return null
   }
+  // What this profile is actually called. The file's own stem first, because
+  // that is what the user named it — except when the stem is `config`, which is
+  // what BOTH Tunnelblick and Viscosity call the file inside a per-profile
+  // folder, so every profile from either client was listed as "config".
+  const name =
+    VISCOSITY_NAME.exec(text)?.[1]?.trim() ||
+    (/^config$/i.test(stem) ? bundleName(file) : null) ||
+    stem
   // `dirname`, so a path-form `ca ca.crt` resolves against the directory the
   // profile actually lives in — which is the normal shape of a Community
   // config and would otherwise be rejected (E37).
@@ -465,7 +619,12 @@ export async function vpnCommitImportFile(
   }
   const res = await vpnCommitImport(name, workspaceId, kind, text, dirname(sourcePath))
   // Recorded on the spec so the next scan knows this file has been taken.
-  if (res.ok && res.spec?.kind === 'openvpn') {
+  //
+  // BOTH discoverable kinds. It used to be OpenVPN alone, and the scan
+  // de-duplicates by source path, so every WireGuard tunnel on the machine was
+  // offered again on every scan and "Import all" added another copy of it each
+  // time it was pressed.
+  if (res.ok && (res.spec?.kind === 'openvpn' || res.spec?.kind === 'wireguard')) {
     return { ...res, spec: { ...res.spec, sourcePath } }
   }
   return res

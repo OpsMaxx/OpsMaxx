@@ -803,6 +803,51 @@ export function vpnRetryVaultBlockedAutostarts(): void {
   }
 }
 
+/**
+ * A `vpns` collection arrived from another device. Stop what it deleted.
+ *
+ * DELETING A PROFILE IS A STOP FIRST. The local delete path in
+ * `components/vpn/useVpnProfiles.tsx` stops the tunnel and CANCELS the delete
+ * if the engine will not die, because dropping the profile, its status and its
+ * vault key material while the tunnel kept its routes left a live VPN under a
+ * "deleted" toast with nothing on screen able to stop it.
+ *
+ * Sync reaches that same state through a door that guard does not cover. The
+ * engine writes the collection to disk and the renderer reloads it, and
+ * nothing in between speaks to this file: the tunnel stays `connected`, the
+ * supervisor keeps restarting it, its routes stay up — and `vpnList()`
+ * synthesises from `vpnProfiles()`, so the row vanishes and the Stop button
+ * with it. The vault entry syncs away in the same pass, so it cannot even be
+ * restarted to be stopped.
+ *
+ * Only an id that is GONE. A profile being edited on the other device keeps
+ * its id and arrives as a change, not a deletion, and stopping somebody's
+ * tunnel because they renamed it on a laptop is the bug this would be
+ * replacing. `force`, because there is no delete left to cancel: the profile
+ * has already gone everywhere, and a tunnel we decline to kill is one nothing
+ * can reach again.
+ */
+export function vpnProfilesExternalChange(): void {
+  const known = new Set(vpnProfiles().map((p) => p.id))
+  for (const id of [...live.keys()]) {
+    if (known.has(id)) continue
+    const name = live.get(id)?.profile.name ?? id
+    void vpnStop(id, { force: true })
+      .then((r) => {
+        // Kept on a failure: the status and the last log are the only record
+        // that a tunnel this app can no longer name is still up, and the
+        // error they carry is what the user is owed.
+        if (!r.ok) {
+          console.error(`[vpn] ${name} was deleted on another device but would not stop:`, r.error)
+          return
+        }
+        bus.forget(id)
+        lastLogs.delete(id)
+      })
+      .catch((e) => console.error(`[vpn] stopping deleted profile ${name} failed:`, e))
+  }
+}
+
 /** Quit path. Raced against a hard timeout by the caller, so it must be safe
  *  to abandon halfway. */
 export async function vpnDisposeAll(): Promise<void> {

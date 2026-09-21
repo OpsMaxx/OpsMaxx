@@ -224,6 +224,7 @@ import {
   vpnLogs,
   vpnProbe,
   vpnProfiles,
+  vpnProfilesExternalChange,
   vpnReload,
   vpnRetryVaultBlockedAutostarts,
   vpnSetCadence,
@@ -4810,6 +4811,17 @@ addySession.onApplied((collections) => {
    * still holding back over the file, for the following pass to push as the
    * account's winner.
    */
+  /**
+   * AND THE ONE THAT IS RUNNING SOMETHING.
+   *
+   * `vpns` is in the renderer's store, so the line above redraws the list —
+   * and a profile deleted on another device is now a tunnel this process is
+   * still supervising, with its routes up, that no longer appears in that
+   * list and has no Stop button anywhere. Told before `vault`, which may
+   * relock: stopping needs no secret, and a tunnel whose profile has gone
+   * should not wait on one.
+   */
+  if (collections.includes('vpns')) vpnProfilesExternalChange()
   if (collections.includes('env')) envSecretsExternalChange()
   if (collections.includes('vault')) {
     const { relocked } = vaultExternalChange()

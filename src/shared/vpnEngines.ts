@@ -55,3 +55,30 @@ export function isEngineBundledOn(name: string, platform: NodeJS.Platform): bool
 export function userSuppliesEngine(name: string, platform: NodeJS.Platform | null): boolean {
   return platform !== null && !isEngineBundledOn(name, platform)
 }
+
+/**
+ * The binary that implements each VPN kind.
+ *
+ * Everything above is keyed by binary name, because that is what the resolver
+ * looks for; the renderer only ever holds a `VpnKind`. `tailscale` and `ngrok`
+ * are absent deliberately — OpsMaxx starts neither, so there is no engine of
+ * ours for them to be missing.
+ */
+const KIND_BINARY: Record<string, string> = {
+  wireguard: 'opsmaxx-netd',
+  openvpn: 'openvpn',
+  frp: 'frpc'
+}
+
+/**
+ * Whether the engine for `kind` is one OpsMaxx ships on this platform — so a
+ * missing one is a damaged install rather than something to go and fetch.
+ *
+ * `null` platform answers false for the same reason `userSuppliesEngine` does:
+ * the renderer learns the platform over IPC, and withholding a button for one
+ * frame is recoverable while offering the wrong one is not.
+ */
+export function engineForKindIsBundled(kind: string, platform: NodeJS.Platform | null): boolean {
+  const name = KIND_BINARY[kind]
+  return name !== undefined && platform !== null && isEngineBundledOn(name, platform)
+}

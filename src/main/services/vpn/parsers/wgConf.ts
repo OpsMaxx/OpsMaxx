@@ -267,11 +267,18 @@ function build(text: string, opts: WgParseOptions, ctx: Ctx): VpnImportResultInt
     const publicKey = pubEntry.value.trim()
 
     const endpointEntry = section.values.get('endpoint')
+    // A peer with no Endpoint is one this side cannot dial — the other end
+    // dials in. That is ordinary in hub-and-spoke and on a LAN, and failing the
+    // whole file over it threw away every peer that WAS dialable along with it.
+    // Dropped with a report instead, so the profile still imports and the user
+    // is told which peer is missing rather than being handed nothing.
     if (!endpointEntry) {
-      throw new VpnError(
-        'config-invalid',
-        `The [Peer] with public key ${publicKey} has no Endpoint, so there is no address to dial.`
+      drop(
+        ctx,
+        'Peer',
+        `The peer with public key ${publicKey} has no Endpoint, so OpsMaxx cannot dial it. The rest of the profile was imported without it.`
       )
+      continue
     }
     if (!parseVpnEndpoint(endpointEntry.value)) {
       invalid(endpointEntry.line, endpointEntry.raw, 'Endpoint must be host:port or [v6]:port.')
@@ -323,6 +330,13 @@ function build(text: string, opts: WgParseOptions, ctx: Ctx): VpnImportResultInt
     }
 
     peers.push(peer)
+  }
+
+  if (peers.length === 0) {
+    throw new VpnError(
+      'config-invalid',
+      'No [Peer] in this file has an Endpoint, so there is no address to dial.'
+    )
   }
 
   // ------------------------------------------------------------ warnings

@@ -70,6 +70,16 @@ export interface WireGuardSpec {
   listeners: VpnListener[]
   // Kept so the import report can be shown again later, not just once.
   strippedDirectives?: StrippedDirective[]
+  /**
+   * The `.conf` this profile was auto-discovered from, absent for one that was
+   * pasted or dropped in. Exactly the field OpenVpnSpec carries and for exactly
+   * the same reason — see the note there.
+   *
+   * It was missing here, and the scan de-duplicates by source path, so every
+   * discovered WireGuard tunnel was offered again on every scan and "Import
+   * all" produced a second copy of it each time it was pressed.
+   */
+  sourcePath?: string
 }
 
 export type OpenVpnAuthMode = 'none' | 'userpass' | 'userpass-otp'
@@ -656,12 +666,28 @@ export interface VpnEngineInfo {
    * Things worth knowing before starting a tunnel, none of which prevent one.
    *
    * Two observations go in here: other VPN clients installed on this machine,
-   * and tunnel interfaces that already have an address. Both are cheap and
-   * both are advisory — OpsMaxx cannot tell which application owns an
-   * interface, whether it is the same network, or whether the two would
-   * actually fight, and two tunnels to different networks coexist perfectly
-   * well. So this is shown and never enforced: nothing refuses a start or
-   * tries to take an interface over on the strength of it.
+   * and tunnel interfaces that already carry a ROUTABLE address — not an
+   * `internal` one, not `fe80::/10`, not `169.254.0.0/16`. The narrower
+   * predicate is not a detail: on macOS utun0–utun5 routinely hold nothing but
+   * IPv6 link-local from iCloud Private Relay, AWDL and Continuity, so "has an
+   * address" reported six interfaces that were not tunnels at all.
+   *
+   * Both are cheap and both are advisory — OpsMaxx cannot tell which
+   * application owns an interface, whether it is the same network, or whether
+   * the two would actually fight, and two tunnels to different networks coexist
+   * perfectly well. So this is shown and never enforced: nothing refuses a
+   * start or tries to take an interface over on the strength of it.
+   *
+   * READ IT ASYMMETRICALLY, and this is the half a caller will get wrong. The
+   * interface half comes from `os.networkInterfaces()`, which does not expose a
+   * NetworkExtension tunnel at all — the common shape of a macOS VPN, and
+   * measured absent here while `ifconfig` showed the tunnel live. So a NAME in
+   * this list means a tunnel really is up; an EMPTY list means only that none
+   * was visible, and is never an all-clear. Nothing may render "no other VPN is
+   * running" from it. The measurements and the reasoning are in
+   * `activeTunnelInterfaces` in main/services/vpn/binaries.ts, under the
+   * heading "AN EMPTY RESULT IS NOT EVIDENCE THAT NOTHING IS RUNNING"; they are
+   * not repeated here.
    */
   advisories?: string[]
 }

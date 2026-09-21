@@ -154,7 +154,9 @@ describe('malformed files', () => {
     ['bad-no-peer.conf', 'no [Peer]'],
     ['bad-base64.conf', 'base64'],
     ['bad-endpoint.conf', 'host:port'],
-    ['bad-no-endpoint.conf', 'no Endpoint']
+    // One peer, and it has no Endpoint, so nothing in the file is dialable.
+    // A file with a mix keeps the peers that are — see tests/vpnImportDefects.
+    ['bad-no-endpoint.conf', 'No [Peer] in this file has an Endpoint']
   ])('%s fails with config-invalid', (file, needle) => {
     const r = parse(file)
     expect(r.ok).toBe(false)

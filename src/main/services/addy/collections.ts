@@ -5,6 +5,7 @@ import { atomicWriteFileSync } from '../atomicWrite'
 import { dataFileExists, loadData, saveData } from '../store'
 import { AddyError } from './sidecar'
 import { SYNCED_COLLECTIONS, type SyncedCollection } from '../../../shared/addy'
+import { isReverseProxyKind, type VpnKind } from '../../../shared/vpn'
 
 /**
  * Where each synced collection actually lives on this machine.
@@ -199,6 +200,110 @@ function serversSource(): CollectionSource {
   }
 }
 
+/**
+ * `vpns`, arriving without the parts that belong to the machine that sent it.
+ *
+ * Same shape and same reason as `serversSource()` above, applied to fields
+ * that are not live state but are still nobody's business but one computer's.
+ *
+ * `OpenVpnSpec.binaryPath` is an absolute path on the machine whose form it
+ * was typed into, and the OpenVPN driver treats its mere presence as the
+ * user's confirmed choice — so `resolveEngineBinary` short-circuits on it and
+ * never looks at the engine OpsMaxx ships. Across a mixed fleet that is a
+ * refusal quoting somebody else's disk: a Windows user told
+ * `/opt/homebrew/bin/openvpn` "does not exist", with no mention of installing
+ * OpenVPN; a Mac user told `C:\Program Files\...` "is a relative path, which
+ * depends on the working directory". Both bypassed a bundled engine that
+ * would have worked. Absent is not a downgrade — it is the auto-detect that
+ * is correct on every machine.
+ *
+ * `OpenVpnSpec.sourcePath` is the `.ovpn` file a profile was discovered from,
+ * and it exists to make a RE-SCAN idempotent: the file is still on disk, so it
+ * turns up again and is skipped because this field names it. A path from
+ * another machine names nothing here, so all it can do is suppress nothing and
+ * show a stranger's home directory in this machine's import report.
+ *
+ * `autoStart` on a reverse proxy is the security one. `vpnStartup` starts
+ * every `autoStart` profile at launch, and for frp and ngrok starting means
+ * publishing THIS machine's localhost port — with ngrok, to the public
+ * internet. The consent gate that `start()` refuses without,
+ * `acknowledgedExposure`, is a tick about one machine's ports, and it crosses
+ * in the same record. So the second computer opened a port on a decision its
+ * owner made about the first one, unattended, at login. Stripped for frp and
+ * ngrok only: `autoStart` on a WireGuard or OpenVPN profile publishes nothing
+ * and is a preference that should travel.
+ *
+ * Only the WRITE side, for the reason `serversSource()` sets out at length —
+ * the engine compares bytes, and a read-side strip would be a conflict copy
+ * per pass for as long as any device runs an older build.
+ *
+ * A STRIPPED COPY DOES NOT PROPAGATE BY ITSELF, and it is worth being exact
+ * about why, because the obvious reading is wrong. `writeBack` in sync.ts
+ * records `localHash` from what the source reads back AFTER the transform, not
+ * from the payload it was handed — so the next pass sees `localChanged` false
+ * and the outcome is `unchanged`. That is the whole of what commit 3137a839
+ * fixed: recording the payload instead turned every transforming source into a
+ * clobber loop, one per sync interval, which is how every server on every
+ * device went grey. So the device that stripped a field sits on its stripped
+ * copy quietly, and the device that set the field keeps it indefinitely.
+ *
+ * What it costs is still real, and it is not what it costs for `Server.status`,
+ * because these are saved settings rather than live state. The collection syncs
+ * WHOLE: the first genuine local edit anywhere in `vpns` on the stripped device
+ * — renaming one unrelated profile is enough — pushes its copy of every
+ * profile, and that is the pass where the other machine's `binaryPath`
+ * override, or its frp `autoStart`, goes. Not immediately, and not on a timer;
+ * on somebody's next edit. Off and auto-detect are the safe directions to lose
+ * them in, which is why this is the trade taken.
+ * ponytail: the honest fix is a machine-local override beside `settings`, which
+ * is not synced. Do that when someone needs an engine path that sticks — and
+ * put `TailscaleSpec.hostname` there at the same time. It is the strongest
+ * remaining candidate and is deliberately NOT stripped here: it is the name
+ * this node takes on the tailnet, two devices sharing it is a real collision,
+ * but it is also a name the user chose, absent means the sidecar invents one,
+ * and silently renaming somebody's node is its own bug. It needs the local
+ * store, not a strip.
+ */
+function vpnsSource(): CollectionSource {
+  const inner = blobKey('vpns')
+  return {
+    inRendererStore: true,
+    read: () => inner.read(),
+    write(body: Buffer): void {
+      const value: unknown = JSON.parse(body.toString('utf8'))
+      // Not an array is not this function's problem to fix — see
+      // `serversSource()`.
+      if (!Array.isArray(value)) {
+        inner.write(body)
+        return
+      }
+      inner.write(Buffer.from(JSON.stringify(value.map(landProfile)), 'utf8'))
+    }
+  }
+}
+
+/** One profile, with this machine's answer to the machine-specific fields.
+ *  A shape that is not a profile is passed through untouched: it belongs in
+ *  the file where somebody can find it, not quietly reshaped here. */
+function landProfile(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return raw
+  const profile = { ...(raw as Record<string, unknown>) }
+  const spec = profile.spec
+  if (!spec || typeof spec !== 'object') return profile
+  const kind = (spec as { kind?: unknown }).kind
+  if (kind === 'openvpn') {
+    const landed = { ...(spec as Record<string, unknown>) }
+    delete landed.binaryPath
+    delete landed.sourcePath
+    profile.spec = landed
+  }
+  // Via the shared predicate rather than `kind === 'frp' || kind === 'ngrok'`,
+  // which is the spelling shared/vpn.ts says goes wrong the moment a third
+  // reverse proxy is added.
+  if (typeof kind === 'string' && isReverseProxyKind(kind as VpnKind)) profile.autoStart = false
+  return profile
+}
+
 export const SOURCES: Partial<Record<SyncedCollection, CollectionSource>> = {
   apiCollections: blobKey('apiCollections'),
   apiWorkspace: blobKey('apiWorkspace'),
@@ -209,7 +314,7 @@ export const SOURCES: Partial<Record<SyncedCollection, CollectionSource>> = {
   monitorGroups: blobKey('monitorGroups'),
   servers: serversSource(),
   tunnels: blobKey('tunnels'),
-  vpns: blobKey('vpns'),
+  vpns: vpnsSource(),
   workspaces: blobKey('workspaces'),
 
   // Opaque. Already ciphertext under the master password, and the recovery

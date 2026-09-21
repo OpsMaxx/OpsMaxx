@@ -302,6 +302,10 @@ interface Ctx {
   authUserPass: boolean
   staticChallenge?: { text: string; echo: boolean }
   redirectGatewayRequested: boolean
+  // Emitted once at the end rather than where it was seen, because two
+  // spellings of the same check (`remote-cert-tls` and the pre-2.5
+  // `ns-cert-type`) can both appear in one file.
+  remoteCertTls: boolean
   keyDirection?: string
   carriesIpv6: boolean
   usesTcp: boolean
@@ -420,7 +424,19 @@ function tryRealpath(p: string): string | null {
 function readContained(ctx: Ctx, p: string, lineNo: number, raw: string, directive: string): Buffer {
   const escape = ruleById('path-escape')
   const base = ctx.baseDir
-  if (!base) reject(ctx, escape, lineNo, raw, directive)
+  // No import folder is NOT a path escape, and reporting it as one was a lie
+  // about the commonest `.ovpn` shape there is: an easy-rsa bundle naming
+  // `ca ca.crt` beside itself points INSIDE its folder, not outside it. What
+  // is actually wrong is that pasted text arrives without the folder the file
+  // came from, so there is no folder to resolve the name against — and unlike
+  // a security refusal, that is something the user can fix, so say how.
+  if (!base) {
+    invalid(
+      lineNo,
+      raw,
+      `"${p}" is a separate file kept beside the profile, and pasted text does not carry it. Drop the .ovpn file in or use "Choose file", so the files next to it can be read — or paste that file's contents into a <${directive}> block.`
+    )
+  }
   if (isAbsolute(p) || p.startsWith('/') || /^[A-Za-z]:/.test(p) || p.startsWith('\\\\')) {
     reject(ctx, escape, lineNo, raw, directive)
   }
@@ -475,6 +491,7 @@ export function parseOvpn(text: string, baseDir?: string, opts: OvpnParseOptions
     baseDir,
     authUserPass: false,
     redirectGatewayRequested: false,
+    remoteCertTls: false,
     carriesIpv6: false,
     usesTcp: false
   }
@@ -506,11 +523,25 @@ function build(text: string, ctx: Ctx, opts: OvpnParseOptions): VpnImportResultI
   let openTagLine = 0
   let openTagRaw = ''
   let buf: string[] = []
+  // `<connection>` is collected separately from the inline tags: its body is
+  // directives, not key material, so it is not run through `checkMaterial`.
+  let connLine = 0
+  let connBuf: ConnLine[] | null = null
 
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i]
     const lineNo = i + 1
     const line = raw.trim()
+
+    if (connBuf) {
+      if (line === '</connection>') {
+        connection(ctx, connBuf, connLine)
+        connBuf = null
+        continue
+      }
+      connBuf.push({ line, lineNo, raw })
+      continue
+    }
 
     if (openTag) {
       if (line === `</${openTag}>`) {
@@ -534,6 +565,11 @@ function build(text: string, ctx: Ctx, opts: OvpnParseOptions): VpnImportResultI
     if (tag) {
       if (tag[1]) invalid(lineNo, raw, `a closing </${tag[2]}> with no opening tag.`)
       const name = tag[2].toLowerCase()
+      if (name === 'connection') {
+        connLine = lineNo
+        connBuf = []
+        continue
+      }
       if (!INLINE_TAG_SET.has(name)) reject(ctx, ruleById('inline-unknown'), lineNo, raw, name)
       openTag = name
       openTagLine = lineNo
@@ -548,7 +584,109 @@ function build(text: string, ctx: Ctx, opts: OvpnParseOptions): VpnImportResultI
   if (openTag) {
     throw new VpnError('config-invalid', `The <${openTag}> block opened on line ${openTagLine} is never closed.`)
   }
+  if (connBuf) {
+    throw new VpnError('config-invalid', `The <connection> block opened on line ${connLine} is never closed.`)
+  }
   return finish(ctx, opts)
+}
+
+interface ConnLine {
+  line: string
+  lineNo: number
+  raw: string
+}
+
+/**
+ * One `<connection>` block: an alternative server.
+ *
+ * This is OpenVPN's own documented multi-remote syntax and several commercial
+ * providers ship nothing else, so treating the tag as an unknown inline block
+ * failed the whole import of perfectly ordinary profiles with a sentence about
+ * certificates and keys that had nothing to do with what was wrong.
+ *
+ * Only the server address is carried over, flattened into an ordinary `remote`
+ * line — openvpn tries several `remote` entries in turn, which is the part of a
+ * connection block anybody is relying on. The other per-connection settings are
+ * NOT promoted to the top level, because there they would apply to every server
+ * rather than the one they were written under; they are dropped by name so the
+ * report says which ones.
+ *
+ * The reject list still runs over every line inside. A `<connection>` block is
+ * not a way to smuggle `up` past it.
+ */
+function connection(ctx: Ctx, lines: ConnLine[], openLine: number): void {
+  let host: string | null = null
+  let port = 1194
+  let proto = ctx.globalProto ?? 'udp'
+
+  for (const { line, lineNo, raw } of lines) {
+    if (!line || line.startsWith('#') || line.startsWith(';')) continue
+    const tokens = tokenize(line, lineNo, raw)
+    if (tokens.length === 0) continue
+    const name = normaliseDirective(tokens[0])
+    const rule = ovpnRejectRuleFor(name)
+    if (rule) reject(ctx, rule, lineNo, raw, name)
+    checkSafe(ctx, tokens, lineNo, raw)
+    const args = tokens.slice(1)
+
+    if (name === 'remote') {
+      const h = args[0] ?? ''
+      if (!HOSTISH.test(h)) {
+        drop(ctx, 'connection', `"${h}" is not a server name or address.`)
+        continue
+      }
+      if (args.length > 1) {
+        const n = intIn(args[1], 1, 65535)
+        if (n === null) {
+          drop(ctx, 'connection', `"${args[1]}" is not a port.`)
+          continue
+        }
+        port = n
+      }
+      if (args.length > 2) {
+        const p = args[2].toLowerCase()
+        if (!PROTOS.has(p)) {
+          drop(ctx, 'connection', `"${args[2]}" is not a protocol OpenVPN accepts.`)
+          continue
+        }
+        proto = p
+      }
+      host = h
+      continue
+    }
+
+    if (name === 'proto') {
+      const p = (args[0] ?? '').toLowerCase()
+      if (!PROTOS.has(p)) drop(ctx, 'connection', `"${args.join(' ')}" is not a protocol OpenVPN accepts.`)
+      else proto = p
+      continue
+    }
+
+    if (name === 'port') {
+      const n = intIn(args[0] ?? '', 1, 65535)
+      if (n === null) drop(ctx, 'connection', `"${args[0] ?? ''}" is not a port.`)
+      else port = n
+      continue
+    }
+
+    drop(
+      ctx,
+      name,
+      'Only the server address inside a <connection> block is carried over. Written at the top of the file this setting would apply to every server, not just the one it was listed under.'
+    )
+  }
+
+  if (!host) {
+    return drop(
+      ctx,
+      'connection',
+      `The <connection> block on line ${openLine} names no server, so there was no alternative address to carry over.`
+    )
+  }
+  if (proto.startsWith('tcp')) ctx.usesTcp = true
+  if (proto.endsWith('6') || host.includes(':')) ctx.carriesIpv6 = true
+  ctx.remotes.push({ host, port, proto })
+  emit(ctx, 'remote', host, String(port), proto)
 }
 
 function directive(ctx: Ctx, tokens: string[], lineNo: number, raw: string): void {
@@ -636,11 +774,70 @@ function directive(ctx: Ctx, tokens: string[], lineNo: number, raw: string): voi
       return emit(ctx, name, String(n))
     }
 
+    // ------------------------------------------ who the server has to be
+    //
+    // The three below used to fall through the switch into "Not a setting
+    // OpsMaxx carries over". They are SERVER IDENTITY checks, which is the one
+    // direction a dropped directive must never go — every other drop makes the
+    // profile refuse to do something, and dropping one of these makes it ACCEPT
+    // a server the profile was written to reject. Handled explicitly, the way
+    // `crl-verify` already is, so the report says what the profile no longer
+    // checks instead of saying nothing.
+
     case 'remote-cert-tls': {
       if (args.length !== 1 || args[0].toLowerCase() !== 'server') {
         return drop(ctx, name, 'A client profile may only require the peer to present a server certificate.')
       }
-      return emit(ctx, name, 'server')
+      ctx.remoteCertTls = true
+      return
+    }
+
+    case 'ns-cert-type': {
+      // OpenVPN dropped ns-cert-type in 2.5, so re-emitting it would make the
+      // engine refuse to start on the line that was protecting the user.
+      // `remote-cert-tls server` is its replacement and checks the same thing,
+      // so the check is carried over and only the spelling is not.
+      if (args.length !== 1 || args[0].toLowerCase() !== 'server') {
+        return drop(
+          ctx,
+          name,
+          'A client profile may only require the peer to present a server certificate. This profile no longer checks what kind of certificate the server presents.'
+        )
+      }
+      ctx.remoteCertTls = true
+      return drop(
+        ctx,
+        name,
+        'ns-cert-type was removed from OpenVPN in 2.5. The same check is carried over as remote-cert-tls server, so the server still has to present a server certificate.'
+      )
+    }
+
+    case 'remote-cert-eku': {
+      // Carried over as written. It names an extended key usage the server's
+      // certificate must carry — an OID or an OpenSSL name, nothing to resolve
+      // and nothing to run.
+      const v = args.join(' ')
+      if (args.length === 0 || v.length > 128 || !/^[A-Za-z0-9 .,_-]+$/.test(v)) {
+        return drop(
+          ctx,
+          name,
+          'Expected an extended key usage such as "TLS Web Server Authentication". This profile no longer checks the server certificate’s key usage, so any certificate the authority issued is accepted.'
+        )
+      }
+      return emit(ctx, name, v)
+    }
+
+    case 'tls-remote': {
+      // Removed in OpenVPN 2.4, and not translatable: it matched the whole
+      // subject DN or a prefix of it, with rules that changed between 2.2 and
+      // 2.3. Inventing a `verify-x509-name` from it could pin the wrong name,
+      // which looks like it works right up until the day it matters. So it is
+      // dropped, with what that costs said out loud.
+      return drop(
+        ctx,
+        name,
+        'tls-remote was removed from OpenVPN in 2.4 and cannot be carried over. It pinned the server certificate’s name, so this profile now accepts any server certificate the authority issued. Add a verify-x509-name line if that is not good enough.'
+      )
     }
 
     case 'verify-x509-name': {
@@ -917,6 +1114,7 @@ function finish(ctx: Ctx, opts: OvpnParseOptions): VpnImportResultInternal {
     '# The import report lists everything that was dropped or rejected.'
   ]
   body.push(...ctx.out)
+  if (ctx.remoteCertTls) body.push('remote-cert-tls server')
   if (ctx.keyDirection !== undefined) body.push(`key-direction ${ctx.keyDirection}`)
   for (const tag of INLINE_TAGS) {
     const content = ctx.inline.get(tag)

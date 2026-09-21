@@ -7,7 +7,7 @@ import { bytes, clsx } from '../../lib/format'
 import { bridgeHas } from '../../lib/bridge'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import { isVpnRunning } from '../../../../shared/vpn'
-import { userSuppliesEngine } from '../../../../shared/vpnEngines'
+import { engineForKindIsBundled, userSuppliesEngine } from '../../../../shared/vpnEngines'
 import type {
   FrpProxy,
   ImportableVpnKind,
@@ -101,6 +101,28 @@ function vaultLoss(profile: VpnProfile): string {
 
 const OPENVPN_DOWNLOAD = 'https://openvpn.net/community-downloads/'
 
+/** Where a damaged install is repaired from. Reaching for this is not the
+ *  user having failed to install something: the engine shipped inside the app
+ *  and is not on disk any more, which in practice means antivirus took it. */
+const OPSMAXX_DOWNLOAD = 'https://opsmaxx.dev'
+
+/** What a missing *bundled* engine says on the row, in place of the message
+ *  main composed.
+ *
+ *  For WireGuard and frp that message is "The program that runs this tunnel
+ *  could not be found." followed, under Details, by `run
+ *  scripts/build-sidecar.sh` — an instruction for whoever builds OpsMaxx, in
+ *  front of somebody whose antivirus quarantined a file. With a disabled Start
+ *  and no button beside it, that row told the user nothing they could act on.
+ *  (OpenVPN already had a sentence like this one on macOS and Linux; this is
+ *  the same answer for the two engines that never got it.) */
+function bundledEngineMissing(label: string): string {
+  return (
+    `${label} ships inside OpsMaxx, and this copy of it is missing or damaged — ` +
+    'antivirus software sometimes quarantines bundled programs. Reinstalling OpsMaxx puts it back.'
+  )
+}
+
 /** Open a page in the user's browser.
  *
  *  `setWindowOpenHandler` in main/index.ts turns every `window.open` into
@@ -175,8 +197,15 @@ function remedyFor(
     // Offering a download page there would send the reader off to install
     // something they already have.
     case 'binary-missing':
-      return kind === 'openvpn' && userSuppliesEngine('openvpn', platform)
-        ? { label: 'Install OpenVPN', run: () => openExternal(OPENVPN_DOWNLOAD) }
+      if (kind === 'openvpn' && userSuppliesEngine('openvpn', platform)) {
+        return { label: 'Install OpenVPN', run: () => openExternal(OPENVPN_DOWNLOAD) }
+      }
+      // A damaged install is not unfixable, which is what "no button at all"
+      // used to imply. Reinstalling is the actual repair — the same one
+      // `binary-untrusted` has always advised — so it is offered rather than
+      // left for the user to work out from a build-script name under Details.
+      return engineForKindIsBundled(kind, platform)
+        ? { label: 'Reinstall OpsMaxx', run: () => openExternal(OPSMAXX_DOWNLOAD) }
         : undefined
     case 'exposure-unacknowledged':
       return { label: 'Open profile', run: () => r.profile('proxies') }
@@ -548,9 +577,9 @@ export function useVpnProfiles(): VpnProfiles {
     // anywhere else. All true, none of it needed before the user has decided
     // what to do — so the row shows the first sentence and the buttons, and
     // keeps the rest one click away.
-    const engineProblem = headline(
-      engine?.reason ?? `${KIND_LABEL[p.spec.kind]} is not available on this machine.`
-    )
+    const engineProblem = engineForKindIsBundled(p.spec.kind, platform)
+      ? bundledEngineMissing(KIND_LABEL[p.spec.kind])
+      : headline(engine?.reason ?? `${KIND_LABEL[p.spec.kind]} is not available on this machine.`)
     const sub = subtitle(p)
     // Mid-start, and slow enough to be worth escaping from.
     const cancellable =
@@ -693,6 +722,14 @@ export function useVpnProfiles(): VpnProfiles {
                     Set the path
                   </button>
                 </>
+              )}
+              {/* The engine came with the app, so the repair is getting the app
+                  again. A WireGuard user whose sidecar was quarantined had a
+                  disabled Start, a build-script name and no control at all. */}
+              {engineForKindIsBundled(p.spec.kind, platform) && (
+                <button className="btn sm primary" onClick={() => openExternal(OPSMAXX_DOWNLOAD)}>
+                  Reinstall OpsMaxx
+                </button>
               )}
             </div>
             {engine?.reason && engine.reason !== engineProblem && (

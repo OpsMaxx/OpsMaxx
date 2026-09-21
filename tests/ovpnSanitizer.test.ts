@@ -117,12 +117,38 @@ describe('path traversal (E37)', () => {
     }
   })
 
-  it('refuses a path form at all when there is no import folder to contain it', () => {
+  /**
+   * The REFUSAL here is unchanged. The EXPLANATION is not, and the assertion
+   * below moved for that reason alone.
+   *
+   * E37's property is that no file outside the import folder is ever read. A
+   * profile with no import folder has nowhere it is allowed to read from, so it
+   * still reads nothing — `ok` is false, no spec, no key material, exactly as
+   * before. That half is the security property and it is pinned first.
+   *
+   * What was wrong was the code and the words on it. `config-rejected` with
+   * "points outside the folder the profile was imported from" describes a
+   * containment violation, and `ca ca.crt` commits none: it points INSIDE the
+   * folder the profile came from. The folder is what is missing, because pasted
+   * text does not carry one — a missing-input problem, and `config-invalid` is
+   * the code for that. Conflating the two produced a factually false message on
+   * the commonest .ovpn shape there is, with no way forward offered.
+   *
+   * The whole of that case, including the fact that a dropped or chosen file
+   * now does supply the folder, is in tests/vpnImportDefects.test.ts.
+   */
+  it('still reads nothing at all when there is no import folder, and says why', () => {
     const r = parseOvpn('client\ndev tun\nremote vpn.example.com 1194\nca ca.crt\n', undefined, {
       hostHasIpv6: false
     })
+    // The security property, first and on its own: refused, and nothing read.
     expect(r.ok).toBe(false)
-    expect(r.errorCode).toBe('config-rejected')
+    expect(r.spec).toBeUndefined()
+    expect(r.secrets).toBeUndefined()
+    // The part that moved, and it is the UX half.
+    expect(r.errorCode).toBe('config-invalid')
+    expect(r.error).not.toContain('outside the folder')
+    expect(r.error).toContain('pasted text does not carry it')
   })
 
   it('reads key material that stays inside the folder, and inlines it', () => {

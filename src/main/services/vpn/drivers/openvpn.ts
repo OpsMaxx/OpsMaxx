@@ -262,9 +262,15 @@ export function createOpenVpnDriver(opts: OpenVpnDriverOptions = {}): OpenVpnDri
   const crashLoop = opts.crashLoop ?? CRASH_LOOP
   const resolveEngine =
     opts.resolveEngine ??
-    // `binaryPath` reaches a spec only from the profile form: the importer
-    // hard-rejects every path directive in a `.ovpn` file, so its presence
-    // here is the user's own confirmed choice and nobody else's (E44).
+    // `binaryPath` reaches a spec only from THIS machine's profile form, so
+    // its presence here is the user's own confirmed choice and nobody else's
+    // (E44). That rests on TWO doors, not one, and the second was open for a
+    // while: the importer hard-rejects every path directive in a `.ovpn` file,
+    // and `vpnsSource()` in services/addy/collections.ts strips the field off
+    // a profile arriving from another device. Once `vpns` began syncing, a
+    // path typed on a Mac was arriving here as a Windows user's confirmed
+    // choice — quoted back at them as "does not exist", short-circuiting
+    // `resolveEngineBinary` past a bundled engine that would have worked.
     ((spec: OpenVpnSpec) =>
       resolveEngineBinary('openvpn', {
         binaryPath: spec.binaryPath,

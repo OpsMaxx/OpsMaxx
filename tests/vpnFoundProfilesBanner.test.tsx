@@ -146,7 +146,7 @@ describe('the found-profiles offer', () => {
     expect(stored).not.toHaveProperty('vaultEntryId')
   })
 
-  it('stays gone once declined, across a remount', async () => {
+  it('stays gone for the profiles that were declined, across a remount', async () => {
     discoverProfiles.mockResolvedValue([found()])
     const first = render(<FoundProfilesBanner onReview={() => {}} />)
     await screen.findByText(/already on this machine/)
@@ -154,9 +154,34 @@ describe('the found-profiles offer', () => {
     first.unmount()
 
     render(<FoundProfilesBanner onReview={() => {}} />)
-    // And it does not even ask again — a declined offer that still scans every
-    // launch is doing the work for nothing.
+    await waitFor(() => expect(discoverProfiles).toHaveBeenCalledTimes(2))
     expect(screen.queryByText(/already on this machine/)).toBeNull()
+  })
+
+  it('comes back when a profile it has never offered turns up', async () => {
+    // "Not now" is about the profiles on offer at the time. It used to write a
+    // permanent flag with nothing anywhere that cleared it, so one decline hid
+    // the feature for good — including from profiles added the week after.
+    discoverProfiles.mockResolvedValue([found()])
+    const first = render(<FoundProfilesBanner onReview={() => {}} />)
+    await screen.findByText(/already on this machine/)
+    await userEvent.click(screen.getByTitle('Not now'))
+    first.unmount()
+
+    discoverProfiles.mockResolvedValue([found(), found({ sourcePath: '/new.conf', name: 'new', kind: 'wireguard' })])
+    render(<FoundProfilesBanner onReview={() => {}} />)
+    // The new one only — the declined one stays declined.
+    expect(
+      await screen.findByText(/One WireGuard profile is already on this machine/)
+    ).toBeTruthy()
+  })
+
+  it('reads the flag an older build wrote as "nothing in particular was declined"', async () => {
+    localStorage.setItem('opsmaxx.vpn.foundProfiles.dismissed', '1')
+    discoverProfiles.mockResolvedValue([found()])
+    render(<FoundProfilesBanner onReview={() => {}} />)
+    // Otherwise the upgrade inherits a permanent silence it can never undo.
+    expect(await screen.findByText(/already on this machine/)).toBeTruthy()
   })
 
   it('survives a preload older than the renderer', async () => {
@@ -172,7 +197,45 @@ describe('the found-profiles offer', () => {
     const onReview = vi.fn()
     render(<FoundProfilesBanner onReview={onReview} />)
     await userEvent.click(await screen.findByText('Review'))
-    expect(onReview).toHaveBeenCalledOnce()
+    // WITH THE KIND. The dialog shows one kind at a time, so a review that
+    // always opened the OpenVPN one could not show a WireGuard find at all.
+    expect(onReview).toHaveBeenCalledWith('openvpn')
     expect(commitImportFile).not.toHaveBeenCalled()
+  })
+
+  it('offers a review button per kind when it found both', async () => {
+    discoverProfiles.mockResolvedValue([
+      found(),
+      found({ sourcePath: '/etc/wireguard/wg0.conf', name: 'wg0', kind: 'wireguard' })
+    ])
+    const onReview = vi.fn()
+    render(<FoundProfilesBanner onReview={onReview} />)
+    await userEvent.click(await screen.findByText('Review WireGuard'))
+    expect(onReview).toHaveBeenCalledWith('wireguard')
+  })
+
+  it('will not one-press import a profile that had directives stripped out', async () => {
+    // The file's own comment says nothing is stored before its report has been
+    // seen, and then this function committed the lot unread. A profile with an
+    // empty report has nothing to have seen; anything else goes to Review.
+    const dirty = found({
+      sourcePath: '/Users/x/OpenVPN/config/legacy.ovpn',
+      name: 'legacy',
+      report: {
+        ok: true,
+        stripped: [{ directive: 'comp-lzo', reason: 'VORACLE.', severity: 'removed' }],
+        warnings: [],
+        spec: { kind: 'openvpn' }
+      } as unknown as DiscoveredVpnProfile['report']
+    })
+    discoverProfiles.mockResolvedValue([found(), dirty])
+    const onReview = vi.fn()
+    render(<FoundProfilesBanner onReview={onReview} />)
+    await userEvent.click(await screen.findByText('Import all'))
+
+    await waitFor(() => expect(commitImportFile).toHaveBeenCalledTimes(1))
+    expect(commitImportFile.mock.calls[0][3]).toBe('/Users/x/OpenVPN/config/work.ovpn')
+    // And the one it did not import is handed to the screen that shows reports.
+    expect(onReview).toHaveBeenCalledWith('openvpn')
   })
 })

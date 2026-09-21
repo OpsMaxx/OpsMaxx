@@ -53,6 +53,29 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
   const [saving, setSaving] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [readWarnings, setReadWarnings] = useState(false)
+  /**
+   * The folder the config came from, when it came from a file.
+   *
+   * Without it an `.ovpn` that names `ca ca.crt` beside itself — the shape
+   * every easy-rsa and OpenVPN Community bundle has — could not be imported at
+   * all, because there was no folder to resolve the name against. The
+   * containment rule (E37) is unchanged: main reads only inside this folder,
+   * and nothing outside it, ever.
+   *
+   * A browser `File` has no usable path. Electron hands one over through
+   * `webUtils`, which the preload already exposes for SFTP drops, and it works
+   * for the file chooser as well as for a drag. Pasted text has no folder and
+   * gets none — that case is told what is missing instead.
+   */
+  const [baseDir, setBaseDir] = useState<string | undefined>(undefined)
+  /**
+   * A discovered profile the user has picked, waiting on its report.
+   *
+   * Its text never crosses IPC — main reads the file at commit — so this holds
+   * the path and the report main already produced during the scan, and the
+   * ordinary review below does the rest.
+   */
+  const [pending, setPending] = useState<DiscoveredVpnProfile | null>(null)
   // Shown in the card rather than thrown at a toast: the modal stays open on a
   // failed commit, and the card is where there is room for the whole reason
   // next to the button that resolves it.
@@ -71,6 +94,10 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
   // Parsing is pure in main — no process, no network — so re-running it while
   // the user edits costs nothing but IPC. Debounced enough to collapse a paste.
   useEffect(() => {
+    // A discovered profile arrives already parsed: main did it during the scan
+    // and its report is what is on screen. There is nothing to re-parse here,
+    // because the text deliberately never crossed IPC.
+    if (pending) return
     const body = text.trim()
     if (!body) {
       setReport(null)
@@ -80,7 +107,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
     let live = true
     setParsing(true)
     const t = setTimeout(() => {
-      void window.opsmaxx?.vpn.import(kind, body).then((r) => {
+      void window.opsmaxx?.vpn.import(kind, body, baseDir).then((r) => {
         if (!live) return
         setParsing(false)
         setReport(r ?? null)
@@ -96,10 +123,17 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
       live = false
       clearTimeout(t)
     }
-  }, [text, kind])
+  }, [text, kind, baseDir, pending])
 
   const takeFile = useCallback(async (file: File) => {
     const body = await file.text()
+    // Read defensively: an older preload has no `pathFor`, and the answer to
+    // that is an import without a folder — which now says so — rather than a
+    // crash.
+    const sftp = window.opsmaxx?.sftp as { pathFor?: (f: File) => string } | undefined
+    const path = sftp?.pathFor?.(file)
+    setBaseDir(path ? path.replace(/[\\/][^\\/]*$/, '') || undefined : undefined)
+    setPending(null)
     setText(body)
     setNameTouched(true)
     setName((n) => n || file.name.replace(/\.(conf|ovpn|toml|ini)$/i, ''))
@@ -123,7 +157,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
   const status = (): string => {
     if (parsing) return 'Checking this config…'
     if (saving) return 'Importing…'
-    if (!text.trim()) return 'Paste or drop a config to begin.'
+    if (!pending && !text.trim()) return 'Paste or drop a config to begin.'
     if (rejected.length > 0)
       return 'This config was rejected. Remove the directive above, then paste it again.'
     if (blocked || !report?.spec) return report?.error ?? 'This config could not be read.'
@@ -155,7 +189,17 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
     // withVaultUnlock reads the value rather than the declared type.
     const committed = await withVaultUnlock(`Importing ${name.trim()}`, () =>
       Promise.resolve(
-        window.opsmaxx?.vpn.commitImport(name.trim(), workspaceId, kind, text.trim())
+        // A discovered profile is committed BY PATH: main reads the file, so an
+        // inline private key never crosses IPC and a path-form `ca ca.crt`
+        // still resolves against the folder it lives in.
+        pending
+          ? window.opsmaxx?.vpn.commitImportFile(
+              name.trim(),
+              workspaceId,
+              pending.kind,
+              pending.sourcePath
+            )
+          : window.opsmaxx?.vpn.commitImport(name.trim(), workspaceId, kind, text.trim(), baseDir)
       )
     )
     setSaving(false)
@@ -184,6 +228,9 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
       spec
     }
     upsertVpnProfile(profile)
+    // Taken off the offer list: it is imported now, and the next scan skips it
+    // by source path anyway.
+    if (pending) setFound((list) => list.filter((p) => p.sourcePath !== pending.sourcePath))
     // frp is the one kind that is not startable the moment it is imported:
     // every imported proxy arrives with acknowledgedExposure false and start()
     // refuses until each one is ticked. "Press Start to connect" would send the
@@ -215,26 +262,30 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
    * read of a handful of known directories, so it runs when the modal opens
    * rather than behind a button somebody has to know to press.
    *
-   * Only `openvpn`: the other kinds have no installer laying profiles down in
-   * a standard place, so there is nothing to scan for.
+   * For THIS modal's kind. It asked for `openvpn` whatever it was opened as,
+   * so the WireGuard tunnels main can already find were unreachable from every
+   * screen — the banner's Review button opens this dialog, and the dialog only
+   * ever listed OpenVPN. frp has no installer laying configs down in a standard
+   * place, so there is nothing to scan for there.
    *
    * Already-imported profiles are excluded by SOURCE PATH. The file stays on
    * disk and is re-found by every scan, so the path is the identity; a hash of
    * the contents would offer the same profile again the day the user edits the
    * upstream .ovpn.
    */
+  const discoverable = kind === 'openvpn' || kind === 'wireguard'
   const [found, setFound] = useState<DiscoveredVpnProfile[]>([])
-  const [scanning, setScanning] = useState(kind === 'openvpn')
+  const [scanning, setScanning] = useState(discoverable)
   const known = useApp((s) => s.vpns)
 
   useEffect(() => {
-    if (kind !== 'openvpn') return
+    if (!discoverable) return
     let live = true
     const already = known
       .map((profile) => (profile.spec as { sourcePath?: string } | undefined)?.sourcePath)
       .filter((path): path is string => !!path)
     void window.opsmaxx.vpn
-      .discoverProfiles(already)
+      .discoverProfiles(already, [kind as DiscoveredVpnProfile['kind']])
       .then((list) => {
         if (live) setFound(list)
       })
@@ -253,27 +304,28 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind])
 
-  /** Import one of the discovered files. Main reads it, so an inline private
-   *  key never crosses IPC and a path-form `ca ca.crt` still resolves. */
-  const importFound = async (profile: DiscoveredVpnProfile): Promise<void> => {
-    setSaving(true)
+  /**
+   * Put a discovered profile into the review above, rather than importing it.
+   *
+   * It used to commit on the press, which broke this modal's own subtitle —
+   * nothing is saved until you have seen what was stripped out — for the one
+   * path where the report was already sitting in hand, unread. It also never
+   * put the result in the store, so a discovered profile went into the vault
+   * and then vanished from the list.
+   *
+   * Both go away by sending it through the same review the paste path gets:
+   * the footer's Import button is the only thing that commits, and it is the
+   * same `save()` either way.
+   */
+  const chooseFound = (profile: DiscoveredVpnProfile): void => {
+    setPending(profile)
+    setText('')
+    setBaseDir(undefined)
+    setReport(profile.report)
+    setReadWarnings(false)
     setCommitError(null)
-    try {
-      const res = await window.opsmaxx.vpn.commitImportFile(
-        profile.name,
-        workspaceId,
-        kind,
-        profile.sourcePath
-      )
-      if (!res.ok || !res.spec) {
-        setCommitError({ message: res.error ?? 'The profile could not be imported.', vaultLocked: false })
-        return
-      }
-      setFound((list) => list.filter((p) => p.sourcePath !== profile.sourcePath))
-      onClose()
-    } finally {
-      setSaving(false)
-    }
+    setName(profile.name)
+    setNameTouched(true)
   }
 
   if (created) return <VpnProfileForm profile={created} onClose={onClose} />
@@ -296,7 +348,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
             is installed, these are almost certainly what the user came here to
             import, and asking them to find the same file by hand is the
             complaint that produced this. */}
-        {kind === 'openvpn' && (scanning || found.length > 0) && (
+        {discoverable && (scanning || found.length > 0) && (
           <div
             className="col"
             style={{
@@ -338,9 +390,12 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
                   <button
                     className="btn"
                     disabled={!usable || saving}
-                    onClick={() => void importFound(profile)}
+                    // "Review", because this no longer imports anything. The
+                    // Import button in the footer is the one that commits, once
+                    // the report below has been seen.
+                    onClick={() => chooseFound(profile)}
                   >
-                    Import
+                    {pending?.sourcePath === profile.sourcePath ? 'Reviewing' : 'Review'}
                   </button>
                 </div>
               )
@@ -397,7 +452,14 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
             spellCheck={false}
             placeholder={HINT[kind]}
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              // Typing replaces whatever was picked from the list. `baseDir`
+              // deliberately survives an edit: the user chose that folder by
+              // dropping a file out of it, and main still reads nothing
+              // outside it.
+              setPending(null)
+              setText(e.target.value)
+            }}
           />
         </div>
 

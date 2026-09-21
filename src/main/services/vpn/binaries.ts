@@ -236,7 +236,12 @@ export async function otherVpnClients(): Promise<string[]> {
           ['Tunnelblick', '/Applications/Tunnelblick.app'],
           ['Viscosity', '/Applications/Viscosity.app'],
           ['OpenVPN Connect', '/Applications/OpenVPN Connect/OpenVPN Connect.app'],
-          ['OpenVPN Connect', '/Applications/OpenVPN Connect.app']
+          ['OpenVPN Connect', '/Applications/OpenVPN Connect.app'],
+          // The official WireGuard client, which Windows has looked for since
+          // this function was written and macOS did not. It brings no
+          // `openvpn` with it, so it is here for the coexistence warning only
+          // — `openVpnClientSentence` drops it for exactly that reason.
+          ['WireGuard', '/Applications/WireGuard.app']
         ]
       : process.platform === 'win32'
         ? winProgramRoots().flatMap((root): [string, string][] => [
@@ -256,7 +261,27 @@ export async function otherVpnClients(): Promise<string[]> {
 }
 
 /**
- * Tunnel interfaces that already have an address, from `os.networkInterfaces()`
+ * "Tunnelblick is installed, but its copy of OpenVPN belongs to that app", or
+ * empty when no such app is here. Composed once because both ways of failing
+ * to resolve an engine need it — see `resolveSystem`.
+ *
+ * WireGuard is dropped, and only here: it is worth naming as a tunnel client
+ * that may already be up (`coexistenceAdvisories`), but it ships no `openvpn`
+ * at all, so telling someone its copy of OpenVPN belongs to that app names a
+ * file that does not exist and sends them hunting for it.
+ */
+async function openVpnClientSentence(): Promise<string> {
+  const others = (await otherVpnClients()).filter((label) => label !== 'WireGuard')
+  if (!others.length) return ''
+  return (
+    `${others.join(' and ')} ${others.length > 1 ? 'are' : 'is'} installed, but ${
+      others.length > 1 ? 'their' : 'its'
+    } copy of OpenVPN belongs to that app and OpsMaxx does not run it.`
+  )
+}
+
+/**
+ * Tunnel interfaces that already carry traffic, from `os.networkInterfaces()`
  * — no process spawned, no privilege needed.
  *
  * What this DOES tell us: something on this machine already has a tunnel up,
@@ -268,13 +293,67 @@ export async function otherVpnClients(): Promise<string[]> {
  * would actually conflict. Two tunnels to different networks coexist fine.
  * So this is reported and never acted on — nothing here refuses a start or
  * tries to take an interface over.
+ *
+ * ── AN EMPTY RESULT IS NOT EVIDENCE THAT NOTHING IS RUNNING ─────────────────
+ *
+ * This sees exactly what `os.networkInterfaces()` exposes, and on macOS that
+ * is not the same set as `ifconfig`. Measured twice, minutes apart, on a Mac
+ * with a live full-tunnel OpenVPN connection: `ifconfig` showed utun6 with
+ * `inet 10.107.0.60 --> 10.107.0.1` and the 0.0.0.0/1 + 128.0.0.0/1 pair that
+ * is a default route in disguise, while `os.networkInterfaces()` listed
+ * utun0–utun5 and nothing else. utun6 was absent from it entirely. The second
+ * sample had a utun7 instead, and it was absent too.
+ *
+ * The reason is the NetworkExtension framework: the tunnel belongs to
+ * `/usr/libexec/nesessionmanager` rather than to any `openvpn` process, and
+ * that is how OpenVPN Connect v3 and every App Store VPN work on a modern
+ * macOS. So on the platform where the coexistence warning matters most, the
+ * common case is precisely the one this cannot see.
+ *
+ * That makes the honest reading asymmetric, and every caller has to keep it
+ * that way: a NAME here means a tunnel really is up, and an EMPTY LIST means
+ * only that none was visible. Nothing may say "no other VPN is running" on the
+ * strength of it — which is why the caller stays silent on empty rather than
+ * reporting an all-clear.
+ *
+ * Closing the gap needs a different source than the stdlib: `ifconfig`/`netstat
+ * -rn`, or SystemConfiguration. Deliberately not done here — this function's
+ * whole contract is that it spawns nothing and needs no privilege, and trading
+ * that away is a decision for the owner of this module rather than something to
+ * fold into a fix for the false positives.
  */
 export function activeTunnelInterfaces(): string[] {
   const ifaces = networkInterfaces()
   return Object.entries(ifaces)
-    .filter(([name, addrs]) => /^(utun|tun|tap|wg|ppp)\d*/i.test(name) && (addrs?.length ?? 0) > 0)
+    .filter(([name, addrs]) => /^(utun|tun|tap|wg|ppp)\d*/i.test(name) && (addrs ?? []).some(carriesTraffic))
     .map(([name]) => name)
     .sort()
+}
+
+/**
+ * Whether this address means the interface is carrying traffic somewhere.
+ *
+ * "Has any address at all" is not that test, and on macOS it is never true of
+ * nothing: a stock Mac holds utun0 through utun5 open for iCloud Private
+ * Relay, AWDL/Handoff and Continuity, each with a single `fe80::` link-local
+ * address and no route off the machine. Under the old check every macOS user
+ * with an OpenVPN profile was told, permanently and on every render, that
+ * "utun0, utun1, utun2, utun3, utun4, utun5 already have addresses, so
+ * something on this machine has a tunnel up" — an advisory that was false on
+ * every Mac and therefore trained people to ignore the true one. The real
+ * tunnel on the same machine was utun6, `inet 10.107.0.60 --> 10.107.0.1`.
+ *
+ * A routable address is what separates them: link-local (`fe80::/10`, and its
+ * IPv4 equivalent `169.254.0.0/16`, which is what an interface gets when
+ * nothing assigned it one) reaches only the link it is on, and `internal`
+ * marks a loopback that reaches only this host.
+ */
+function carriesTraffic(addr: { address: string; internal: boolean }): boolean {
+  if (addr.internal) return false
+  const a = addr.address.toLowerCase()
+  // fe80:: through febf:: is the whole of fe80::/10, so the first two nibbles
+  // are not enough on their own to decide it.
+  return !/^fe[89ab]/.test(a) && !a.startsWith('169.254.')
 }
 
 // One `reg query` pair and two directory scans per resolve is fine once and
@@ -423,7 +502,19 @@ export async function resolveSystem(
     // this exact file, and silently falling through to a different one would
     // run something they did not choose.
     const problem = await checkExecutable(opts.binaryPath, [dirname(opts.binaryPath), ...roots])
-    if (problem) throw new VpnError('config-invalid', `${opts.binaryPath} ${problem}`)
+    if (problem) {
+      // The same sentence the "nothing was found" branch composes, and for a
+      // more pressing reason. That message is what the UI turns into a "Set
+      // the path" button; someone who presses it and then browses to the
+      // `openvpn` inside Tunnelblick or OpenVPN Connect lands here — so the
+      // one user who has already gone looking for another app's copy was the
+      // only one never told why theirs will not be run.
+      const others = await openVpnClientSentence()
+      throw new VpnError(
+        'config-invalid',
+        [`${opts.binaryPath} ${problem}`, others].filter(Boolean).join(' ')
+      )
+    }
     return describe(kind, opts.binaryPath)
   }
 
@@ -474,14 +565,7 @@ export async function resolveSystem(
   // The distinction the reader needs first: a refused candidate means the
   // program IS installed, and no amount of installing it again will help.
   if (refused.length) parts.push(`Found but not used: ${refused.join('; ')}.`)
-  const others = await otherVpnClients()
-  if (others.length) {
-    parts.push(
-      `${others.join(' and ')} ${others.length > 1 ? 'are' : 'is'} installed, but ${
-        others.length > 1 ? 'their' : 'its'
-      } copy of OpenVPN belongs to that app and OpsMaxx does not run it.`
-    )
-  }
+  parts.push(await openVpnClientSentence())
   parts.push(await installAdvice(name))
   throw new VpnError('binary-missing', parts.filter(Boolean).join(' '))
 }
@@ -619,6 +703,13 @@ async function describe(kind: VpnKind, path: string): Promise<VpnEngineInfo> {
 /** What else on this machine might be in the way. Empty on the ordinary
  *  machine, which is why it is a list and not a flag.
  *
+ *  Empty is also what a machine OpsMaxx cannot see into returns, and the two
+ *  are not distinguishable from here — see `activeTunnelInterfaces`, which is
+ *  blind to a macOS NetworkExtension tunnel and therefore to the way most Macs
+ *  actually run a VPN. So the list says what was found and never that nothing
+ *  is there. The UI renders it only when it is non-empty, which is the right
+ *  shape for that: silence, not an all-clear.
+ *
  *  Deliberately NOT stored on the cached `VpnEngineInfo`: which interfaces
  *  are up changes while the app is open, and a cached "a tunnel is already
  *  running" is wrong within seconds of the user stopping it. Recomputed by
@@ -636,9 +727,16 @@ export async function coexistenceAdvisories(): Promise<string[]> {
   const up = activeTunnelInterfaces()
   if (up.length) {
     out.push(
-      `${up.join(', ')} already ${up.length > 1 ? 'have addresses' : 'has an address'}, ` +
+      `${up.join(', ')} already ${up.length > 1 ? 'carry' : 'carries'} traffic, ` +
         'so something on this machine has a tunnel up. OpsMaxx cannot tell what owns it; ' +
-        'if both claim the default route, the last one to start wins.'
+        'if both claim the default route, the last one to start wins. ' +
+        // Said out loud because the reader is about to draw the wrong
+        // conclusion from a short list. On macOS a VPN run through the system
+        // NetworkExtension — OpenVPN Connect v3, and anything from the App
+        // Store — does not appear here at all, so "one interface listed" must
+        // not be read as "and nothing else".
+        'There may be others it cannot see: a VPN macOS runs for another app ' +
+        'does not appear here.'
     )
   }
   return out
@@ -670,7 +768,16 @@ export async function coexistenceAdvisories(): Promise<string[]> {
  */
 const NOT_THE_ENGINE: Record<string, string> = {
   'openvpnconnect.exe': 'OpenVPN Connect',
-  'ovpnconnect.exe': 'the OpenVPN Connect CLI'
+  'ovpnconnect.exe': 'the OpenVPN Connect CLI',
+  // The same two programs on macOS, where they carry no extension: the app's
+  // executable inside `OpenVPN Connect.app/Contents/MacOS/` is named for the
+  // app, space and all, and its CLI drops the `.exe`. A Mac user reaches for
+  // these for the same reason a Windows user does — detection found nothing
+  // and `/Applications` has something that looks right — and the allowlist
+  // would refuse them anyway, but for "outside /usr, /opt, …", which reads as
+  // a permissions problem rather than as "that is the wrong program".
+  'openvpn connect': 'OpenVPN Connect',
+  ovpnconnect: 'the OpenVPN Connect CLI'
 }
 
 async function checkExecutable(candidate: string, allowedRoots: string[]): Promise<string | null> {
@@ -680,12 +787,20 @@ async function checkExecutable(candidate: string, allowedRoots: string[]): Promi
   // answer does not change with whether the file happens to be readable.
   const named = NOT_THE_ENGINE[basename(candidate).toLowerCase()]
   if (named) {
+    // Where to point instead is the only platform-dependent half: Windows has
+    // no bundled copy to fall back to, so clearing the field there leaves the
+    // user with nothing, while on macOS and Linux it is the answer.
+    const instead =
+      process.platform === 'win32'
+        ? 'Point this at the community `openvpn.exe` — usually ' +
+          'C:\\Program Files\\OpenVPN\\bin\\openvpn.exe — or clear the field to use an ' +
+          'allowlisted system install.'
+        : 'Clear the field to use the copy OpsMaxx ships, or point this at a community ' +
+          '`openvpn` such as the one `brew install openvpn` installs.'
     return (
       `is ${named}, which cannot run tunnels for OpsMaxx. It does not accept openvpn's ` +
       'command line and has no management interface, so credentials could not be handed to it ' +
-      'and a connection would simply time out. Point this at the community `openvpn.exe` — ' +
-      'usually C:\\Program Files\\OpenVPN\\bin\\openvpn.exe — or clear the field to use an ' +
-      'allowlisted system install.'
+      `and a connection would simply time out. ${instead}`
     )
   }
 

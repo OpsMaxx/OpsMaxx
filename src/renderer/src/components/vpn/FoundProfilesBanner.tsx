@@ -25,12 +25,37 @@ import type { DiscoveredVpnProfile } from '../../../../shared/vpn'
  *    is that nothing is stored before that report has been seen. Committing a
  *    profile nobody looked at would break it.
  *
- * So it counts them, and the buttons do the rest.
+ * So it counts them, and the buttons do the rest. "Import all" keeps the second
+ * promise the only way it can be kept in one press: it imports the profiles
+ * whose report is EMPTY — nothing was stripped, so there is nothing to have
+ * seen — and hands the rest to Review, which shows each report before anything
+ * is written. It used to commit the lot, report unread, three lines under a
+ * comment saying it must not.
  */
 
-/** The same idiom as the vault's biometric offer: a one-time offer that must
- *  not come back every launch once it has been declined. */
+/**
+ * What has already been offered and turned down — the source paths, not a flag.
+ *
+ * A bare flag was permanent and had nothing that cleared it: decline once and
+ * the banner never came back, on any machine, for any profile, including ones
+ * added afterwards. "Not now" is about the profiles on offer at the time, so
+ * that is what is remembered, and a profile this machine did not have yet
+ * brings the offer back on its own.
+ */
 const DISMISSED_KEY = 'opsmaxx.vpn.foundProfiles.dismissed'
+
+function dismissedPaths(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DISMISSED_KEY)
+    // '1' is what the old flag wrote. Read as "nothing specific was declined",
+    // so an upgrade re-offers rather than staying silent forever.
+    if (!raw || raw === '1') return new Set()
+    const parsed: unknown = JSON.parse(raw)
+    return new Set(Array.isArray(parsed) ? parsed.filter((p): p is string => typeof p === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
 
 const KIND_LABEL: Record<DiscoveredVpnProfile['kind'], string> = {
   openvpn: 'OpenVPN',
@@ -50,18 +75,20 @@ function summary(found: DiscoveredVpnProfile[]): string {
 export function FoundProfilesBanner({
   onReview
 }: {
-  onReview: () => void
+  /** Opens the import dialog FOR A KIND. It shows one kind at a time, so a
+   *  review that always opened the OpenVPN one could not show a WireGuard
+   *  find at all. */
+  onReview: (kind: DiscoveredVpnProfile['kind']) => void
 }): React.JSX.Element | null {
   const workspaceId = useApp((s) => s.activeId())
   const profiles = useApp((s) => s.vpns)
   const upsertVpnProfile = useApp((s) => s.upsertVpnProfile)
 
   const [found, setFound] = useState<DiscoveredVpnProfile[]>([])
-  const [dismissed, setDismissed] = useState(() => localStorage.getItem(DISMISSED_KEY) === '1')
+  const [declined, setDeclined] = useState(dismissedPaths)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    if (dismissed) return
     // Older preload, newer renderer: degrade to showing nothing rather than
     // taking the screen down.
     if (!bridgeHas(window.opsmaxx?.vpn as Record<string, unknown> | undefined, 'discoverProfiles')) {
@@ -86,21 +113,36 @@ export function FoundProfilesBanner({
     // Once per mount. `profiles` changes as these are imported, and re-running
     // would pull the list out from under the button being pressed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dismissed])
+  }, [])
 
-  if (dismissed || found.length === 0) return null
+  // The scan still runs after a decline: it is what tells us whether anything
+  // NEW has turned up since.
+  const offer = found.filter((p) => !declined.has(p.sourcePath))
+  if (offer.length === 0) return null
 
   const decline = (): void => {
-    localStorage.setItem(DISMISSED_KEY, '1')
-    setDismissed(true)
+    const next = new Set([...declined, ...offer.map((p) => p.sourcePath)])
+    localStorage.setItem(DISMISSED_KEY, JSON.stringify([...next]))
+    setDeclined(next)
   }
 
+  /** The kinds on offer, in the order they were found. One Review button each:
+   *  the import dialog shows one kind at a time, so a single button could only
+   *  ever reach half of a mixed find. */
+  const kinds = [...new Set(offer.map((p) => p.kind))]
+
   const importAll = async (): Promise<void> => {
+    // Only the ones with nothing to report. A profile that had directives
+    // stripped out of it goes to Review, where the report is shown before
+    // anything is stored — which is what the comment at the top of this file
+    // has always said and what this function used not to do.
+    const clean = offer.filter((p) => (p.report.stripped?.length ?? 0) === 0)
+    const toReview = offer.filter((p) => (p.report.stripped?.length ?? 0) > 0)
     setBusy(true)
     let added = 0
     const failed: string[] = []
     try {
-      for (const profile of found) {
+      for (const profile of clean) {
         // Unlock is asked for ONCE, around the whole run: a prompt per profile
         // for a batch the user pressed one button for is how a person learns
         // to click through master-password dialogs.
@@ -145,14 +187,21 @@ export function FoundProfilesBanner({
       }
     } finally {
       setBusy(false)
-      setFound([])
+      setFound((list) => list.filter((p) => !clean.includes(p)))
     }
     // Said out loud either way. A batch that half worked and reported nothing
     // is indistinguishable from one that worked.
     if (added > 0) {
-      toast(`Imported ${added} OpenVPN ${added === 1 ? 'profile' : 'profiles'}.`, 'ok')
+      toast(`Imported ${added} VPN ${added === 1 ? 'profile' : 'profiles'}.`, 'ok')
     }
     if (failed.length > 0) toast(`Could not import: ${failed.join(', ')}.`, 'error')
+    if (toReview.length > 0) {
+      toast(
+        `${toReview.length} ${toReview.length === 1 ? 'profile has' : 'profiles have'} directives OpsMaxx cannot carry over — read what was stripped before importing.`,
+        'ok'
+      )
+      onReview(toReview[0].kind)
+    }
   }
 
   return (
@@ -162,18 +211,25 @@ export function FoundProfilesBanner({
         <div className="s-title">
           {/* "One OpenVPN profile" rather than "a/an OpenVPN profile": the
               article depends on the label, and the label is data. */}
-          {found.length === 1
-            ? `One ${KIND_LABEL[found[0].kind]} profile is already on this machine`
-            : `${found.length} VPN profiles are already on this machine`}
+          {offer.length === 1
+            ? `One ${KIND_LABEL[offer[0].kind]} profile is already on this machine`
+            : `${offer.length} VPN profiles are already on this machine`}
         </div>
         <div className="s-desc">
-          {summary(found)} Importing copies the keys into the vault; the files on disk are not
+          {summary(offer)} Importing copies the keys into the vault; the files on disk are not
           moved or changed.
         </div>
       </div>
-      <button className="btn secondary size-28" onClick={onReview} disabled={busy}>
-        Review
-      </button>
+      {kinds.map((kind) => (
+        <button
+          key={kind}
+          className="btn secondary size-28"
+          onClick={() => onReview(kind)}
+          disabled={busy}
+        >
+          {kinds.length === 1 ? 'Review' : `Review ${KIND_LABEL[kind]}`}
+        </button>
+      ))}
       <button className="btn primary size-28" onClick={() => void importAll()} disabled={busy}>
         {busy ? 'Importing…' : 'Import all'}
       </button>

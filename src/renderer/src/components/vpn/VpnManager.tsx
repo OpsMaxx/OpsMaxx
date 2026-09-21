@@ -73,7 +73,10 @@ export function VpnManager(): React.JSX.Element {
           OpenVPN set up is the case where the empty state is most wrong: it
           says "No VPN profiles" to somebody who has several, a few
           directories away. */}
-      <FoundProfilesBanner onReview={() => importProfile('openvpn')} />
+      {/* The kind comes from the banner: it knows what it found, and the
+          dialog shows one kind at a time, so opening the OpenVPN one for a
+          WireGuard find showed an empty list. */}
+      <FoundProfilesBanner onReview={(kind) => importProfile(kind)} />
 
       {profiles.length === 0 ? (
         <EmptyState
