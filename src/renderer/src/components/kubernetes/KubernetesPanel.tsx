@@ -273,6 +273,78 @@ function LogPane({
   )
 }
 
+
+/** Pure, and at module scope so DiagPane can use it too — it was declared
+ *  inside the component only because nothing outside needed it before. */
+function textBlock(r: K8sTextRead, label: string): React.JSX.Element {
+  return r.ok ? (
+    <pre className="bc-out" style={{ marginLeft: 0, maxHeight: 260 }}>
+      {r.text}
+    </pre>
+  ) : (
+    <Denied read={r} what={label} />
+  )
+}
+
+/**
+ * One pod's diagnosis, rendered under the row it was opened from.
+ *
+ * Mirrors LogPane deliberately — same shape, same Close, same inline indent —
+ * because the two open from adjacent buttons on the same row and reading as
+ * one thing is the point.
+ */
+function DiagPane({
+  entry,
+  onClose
+}: {
+  entry: { pod: string; result: K8sDiagnosis | null; error?: string }
+  onClose: () => void
+}): React.JSX.Element {
+  return (
+    <div style={{ paddingBottom: 6 }}>
+      <div className="row muted" style={{ fontSize: 11, marginTop: 4 }}>
+        <span className="grow">Diagnosis · {entry.pod}</span>
+        <button className="btn ghost sm" onClick={onClose}>
+          Close
+        </button>
+      </div>
+          {entry.error && <div className="s-desc danger">{entry.error}</div>}
+          {!entry.result && !entry.error && (
+            <div className="faint" style={{ fontSize: 12 }}>Reading…</div>
+          )}
+          {entry.result && (
+            <>
+              {/* Events first. They are the answer far more often than the
+                  logs are, and a Pending pod has nothing else at all. */}
+              <div className="s-title" style={{ marginTop: 6 }}>
+                <Activity size={12} /> Events
+              </div>
+              {!entry.result.events.ok ? (
+                <Denied read={entry.result.events} what="Events" />
+              ) : entry.result.events.items.length === 0 ? (
+                <div className="faint" style={{ fontSize: 12 }}>
+                  No events for this pod. They expire after about an hour, so this is not proof
+                  nothing happened.
+                </div>
+              ) : (
+                <EventRows events={entry.result.events.items} />
+              )}
+
+              <div className="s-title" style={{ marginTop: 10 }}>
+                <ScrollText size={12} /> Previous container
+              </div>
+              {textBlock(entry.result.previousLogs, 'Previous container logs')}
+
+              <div className="s-title" style={{ marginTop: 10 }}>
+                <Boxes size={12} /> describe
+              </div>
+              {textBlock(entry.result.describe, 'Describe')}
+            </>
+          )}
+    </div>
+  )
+}
+
 function readEmpty<T>(r: K8sRead<T>): boolean {
   return r.ok && r.items.length === 0
 }
@@ -331,9 +403,19 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   const [usageLoading, setUsageLoading] = useState(false)
   const [alloc, setAlloc] = useState<K8sAllocatableProbe | null>(null)
   const [allocLoading, setAllocLoading] = useState(false)
-  const [diag, setDiag] = useState<{ pod: string; result: K8sDiagnosis | null; error?: string } | null>(
-    null
-  )
+  /**
+   * Keyed by pod, like `logs`, and for the same reason.
+   *
+   * It was a single nullable slot rendered near the foot of the panel — after
+   * the pods list, the workloads, usage and resources views, the node list and
+   * four dialogs. On a cluster with a screenful of pods, pressing the button
+   * changed nothing the eye could see, which is indistinguishable from a dead
+   * button. It is the defect a17c1aa7 fixed for logs; diagnosis was never
+   * migrated, and a second open pod silently replaced the first.
+   */
+  const [diag, setDiag] = useState<
+    Record<string, { pod: string; result: K8sDiagnosis | null; error?: string }>
+  >({})
 
   // The state change, and everything it needs to be deliberate.
   const [resources, setResources] = useState<K8sResources | null>(null)
@@ -454,7 +536,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
     setLoading(true)
     setLogs({})
     setPoppedOut(null)
-    setDiag(null)
+    setDiag({})
     try {
       const r = await withVaultUnlock(
         'Reading this cluster needs the server’s stored credential.',
@@ -739,6 +821,12 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
     setPoppedOut((cur) => (cur === key ? null : cur))
   }
 
+  const closeDiag = (key: string): void =>
+    setDiag((d) => {
+      const { [key]: _gone, ...rest } = d
+      return rest
+    })
+
   const openLogs = async (p: K8sPod): Promise<void> => {
     if (!hasTarget) return
     const key = podKey(p)
@@ -768,21 +856,30 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   /** The first thing anyone runs on a pod that is not Running. */
   const diagnose = async (p: K8sPod): Promise<void> => {
     if (!hasTarget) return
-    if (!validatePodName(p.name) ) {
-      setDiag({ pod: p.name, result: null, error: 'This pod has a name kubectl cannot be asked about safely.' })
+    const key = podKey(p)
+    // A toggle, like the logs button beside it: the thing that opened it is
+    // the obvious thing to close it with.
+    if (diag[key]) {
+      closeDiag(key)
       return
     }
-    setDiag({ pod: p.name, result: null })
+    const put = (v: { pod: string; result: K8sDiagnosis | null; error?: string }): void =>
+      setDiag((d) => ({ ...d, [key]: v }))
+    if (!validatePodName(p.name) ) {
+      put({ pod: p.name, result: null, error: 'This pod has a name kubectl cannot be asked about safely.' })
+      return
+    }
+    put({ pod: p.name, result: null })
     try {
       const fn = bridge().diagnose
       if (!fn) {
-        setDiag({ pod: p.name, result: null, error: NOT_WIRED })
+        put({ pod: p.name, result: null, error: NOT_WIRED })
         return
       }
       const r = await fn(targetCfg(), p.namespace, p.name, context || undefined, 200)
-      setDiag({ pod: p.name, result: r })
+      put({ pod: p.name, result: r })
     } catch (e) {
-      setDiag({ pod: p.name, result: null, error: e instanceof Error ? e.message : String(e) })
+      put({ pod: p.name, result: null, error: e instanceof Error ? e.message : String(e) })
     }
   }
 
@@ -908,15 +1005,6 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
     )
   }
 
-  const textBlock = (r: K8sTextRead, label: string): React.JSX.Element =>
-    r.ok ? (
-      <pre className="bc-out" style={{ marginLeft: 0, maxHeight: 260 }}>
-        {r.text}
-      </pre>
-    ) : (
-      <Denied read={r} what={label} />
-    )
-
   return (
     <div className="bc-panel">
       <div className="row" style={{ gap: 8, alignItems: 'center' }}>
@@ -932,7 +1020,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
             setProbe(null)
             setLogs({})
             setPoppedOut(null)
-            setDiag(null)
+            setDiag({})
             setOverview(null)
             setUsage(null)
             /**
@@ -1180,7 +1268,12 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                           logs are usually empty and its events are the story. */}
                       <button
                         className="icon-btn sm"
-                        title="Describe, events, and the PREVIOUS container's logs — why this pod is unhealthy"
+                        aria-expanded={!!diag[key]}
+                        title={
+                          diag[key]
+                            ? 'Close the diagnosis for this pod'
+                            : "Describe, events, and the PREVIOUS container's logs — why this pod is unhealthy"
+                        }
                         onClick={() => void diagnose(p)}
                       >
                         <Siren size={13} />
@@ -1199,33 +1292,143 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                       </button>
                       {/* Last, and deliberately the least prominent of the three.
                           The two beside it answer questions; this one runs code. */}
-                      <button
-                        className="icon-btn sm"
-                        // Server-only, and it says so rather than doing nothing: the
-                        // approval is minted against a saved server's id and main
-                        // re-derives the command from it. Extending that consent
-                        // record to a target that is not a server is its own
-                        // decision, not a side effect of a dropdown option.
-                        disabled={localSelected}
+                      {/* THE TITLE IS ON THE SPAN, not on the button.
+                          Chromium does not dispatch mouse events to a disabled
+                          control, so its tooltip never fires — and this
+                          button's tooltip is the only thing that explains why
+                          it is disabled. The explanation was unreachable
+                          exactly when it was needed, which is how a
+                          full-opacity, hover-highlighting, silent button came
+                          to read as broken rather than unavailable. */}
+                      <span
                         title={
                           localSelected
                             ? 'Running a command in a pod is available for a saved server, because the confirmation is recorded against one. Use a local terminal for this cluster.'
                             : 'Run one command inside this pod — arbitrary code, behind a typed confirmation'
                         }
-                        onClick={() => {
-                          setExecResult(null)
-                          setExecCommand('')
-                          setExecContainer('')
-                          setExecPhrase('')
-                          setExecFor(p)
-                        }}
+                        style={{ display: 'inline-flex' }}
                       >
-                        <SquareTerminal size={13} />
-                      </button>
+                        <button
+                          className="icon-btn sm"
+                          // Server-only: the approval is minted against a saved
+                          // server's id and main re-derives the command from it.
+                          // Extending that consent record to a target that is not
+                          // a server is its own decision, not a side effect of a
+                          // dropdown option.
+                          disabled={localSelected}
+                          aria-label="Run a command in this pod"
+                          onClick={() => {
+                            setExecResult(null)
+                            setExecCommand('')
+                            setExecContainer('')
+                            setExecPhrase('')
+                            setExecFor(execFor?.name === p.name ? null : p)
+                          }}
+                        >
+                          <SquareTerminal size={13} />
+                        </button>
+                      </span>
                     </div>
                     {/* Under the row it belongs to, not at the foot of the
                         panel: clicking a button should change something the
                         eye can already see. */}
+                    {diag[key] && <DiagPane entry={diag[key]} onClose={() => closeDiag(key)} />}
+                    {execFor?.namespace === p.namespace && execFor?.name === p.name && (
+                      <>
+        <div className="s-card" style={{ marginTop: 8 }}>
+          <div className="s-title">
+            <SquareTerminal size={12} /> Run a command in {execFor.namespace}/{execFor.name}
+          </div>
+          <div className="input-group" style={{ marginTop: 6 }}>
+            <input
+              className="input mono"
+              placeholder="e.g. cat /etc/nginx/nginx.conf"
+              value={execCommand}
+              onChange={(e) => setExecCommand(e.target.value)}
+              autoFocus
+            />
+          </div>
+          {/* Optional, and typed rather than picked from a list: the pod read
+              does not carry container names, and a dropdown built from a guess
+              would be worse than a blank. Left empty, kubectl chooses the
+              default container and names it in the output. */}
+          <div className="input-group" style={{ marginTop: 6 }}>
+            <input
+              className="input mono"
+              placeholder="container (optional — kubectl picks the default and says which)"
+              value={execContainer}
+              onChange={(e) => setExecContainer(e.target.value)}
+            />
+          </div>
+          {execCommand.trim() !== '' && (
+            <>
+              <div className="s-desc danger">
+                <TriangleAlert size={12} /> This runs arbitrary code inside the container. What it
+                can do is whatever that container&rsquo;s own service account and user allow — exec
+                is its own RBAC subresource and this app cannot read what it grants.
+              </div>
+              <div className="s-desc faint">
+                One command, no TTY and no stdin: a program that waits for input will hang until the
+                timeout rather than prompt. This is not a shell session.
+              </div>
+              <div className="input-group" style={{ marginTop: 6 }}>
+                <input
+                  className="input"
+                  placeholder="Type EXEC to run it"
+                  value={execPhrase}
+                  onChange={(e) => setExecPhrase(e.target.value)}
+                />
+              </div>
+            </>
+          )}
+          <div className="row" style={{ gap: 8, marginTop: 8 }}>
+            <button
+              className="btn primary"
+              disabled={execBusy || execCommand.trim() === '' || execPhrase.trim() !== 'EXEC'}
+              onClick={() => void runExec()}
+            >
+              Run
+            </button>
+            <button
+              className="btn ghost"
+              onClick={() => {
+                setExecFor(null)
+                setExecCommand('')
+                setExecContainer('')
+                setExecPhrase('')
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div></>
+                    )}
+                    {execResult?.pod === p.name && (
+                      <div className={clsx('s-desc', execResult.r.ok ? '' : 'danger')}>
+                        <span className="grow">
+                          {execResult.r.ok
+                            ? `${execResult.pod}${
+                                execResult.r.containerExit === null
+                                  ? ''
+                                  : ` — the command exited ${execResult.r.containerExit}`
+                              }`
+                            : `${execResult.pod} — ${
+                                execResult.r.reason ? K8S_FAILURE_HELP[execResult.r.reason] : ''
+                              }`}
+                        </span>
+                        <pre
+                          className="mono"
+                          style={{ marginTop: 4, whiteSpace: 'pre-wrap', maxHeight: 260, overflow: 'auto' }}
+                        >
+                          {execResult.r.ok
+                            ? execResult.r.output || '(the command printed nothing, and worked)'
+                            : execResult.r.detail}
+                        </pre>
+                        <button className="btn ghost sm" onClick={() => setExecResult(null)}>
+                          Close
+                        </button>
+                      </div>
+                    )}
                     {entry && poppedOut !== key && (
                       <LogPane
                         entry={entry}
@@ -2029,100 +2232,12 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         </div>
       )}
 
-      {/* ---- exec ---- */}
-      {execFor && (
-        <div className="s-card" style={{ marginTop: 8 }}>
-          <div className="s-title">
-            <SquareTerminal size={12} /> Run a command in {execFor.namespace}/{execFor.name}
-          </div>
-          <div className="input-group" style={{ marginTop: 6 }}>
-            <input
-              className="input mono"
-              placeholder="e.g. cat /etc/nginx/nginx.conf"
-              value={execCommand}
-              onChange={(e) => setExecCommand(e.target.value)}
-              autoFocus
-            />
-          </div>
-          {/* Optional, and typed rather than picked from a list: the pod read
-              does not carry container names, and a dropdown built from a guess
-              would be worse than a blank. Left empty, kubectl chooses the
-              default container and names it in the output. */}
-          <div className="input-group" style={{ marginTop: 6 }}>
-            <input
-              className="input mono"
-              placeholder="container (optional — kubectl picks the default and says which)"
-              value={execContainer}
-              onChange={(e) => setExecContainer(e.target.value)}
-            />
-          </div>
-          {execCommand.trim() !== '' && (
-            <>
-              <div className="s-desc danger">
-                <TriangleAlert size={12} /> This runs arbitrary code inside the container. What it
-                can do is whatever that container&rsquo;s own service account and user allow — exec
-                is its own RBAC subresource and this app cannot read what it grants.
-              </div>
-              <div className="s-desc faint">
-                One command, no TTY and no stdin: a program that waits for input will hang until the
-                timeout rather than prompt. This is not a shell session.
-              </div>
-              <div className="input-group" style={{ marginTop: 6 }}>
-                <input
-                  className="input"
-                  placeholder="Type EXEC to run it"
-                  value={execPhrase}
-                  onChange={(e) => setExecPhrase(e.target.value)}
-                />
-              </div>
-            </>
-          )}
-          <div className="row" style={{ gap: 8, marginTop: 8 }}>
-            <button
-              className="btn primary"
-              disabled={execBusy || execCommand.trim() === '' || execPhrase.trim() !== 'EXEC'}
-              onClick={() => void runExec()}
-            >
-              Run
-            </button>
-            <button
-              className="btn ghost"
-              onClick={() => {
-                setExecFor(null)
-                setExecCommand('')
-                setExecContainer('')
-                setExecPhrase('')
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      {execResult && (
-        <div className={clsx('s-desc', execResult.r.ok ? '' : 'danger')}>
-          <span className="grow">
-            {execResult.r.ok
-              ? `${execResult.pod}${
-                  execResult.r.containerExit === null
-                    ? ''
-                    : ` — the command exited ${execResult.r.containerExit}`
-                }`
-              : `${execResult.pod} — ${
-                  execResult.r.reason ? K8S_FAILURE_HELP[execResult.r.reason] : ''
-                }`}
-          </span>
-          <pre className="mono" style={{ marginTop: 4, whiteSpace: 'pre-wrap', maxHeight: 260, overflow: 'auto' }}>
-            {execResult.r.ok
-              ? execResult.r.output || '(the command printed nothing, and worked)'
-              : execResult.r.detail}
-          </pre>
-          <button className="btn ghost sm" onClick={() => setExecResult(null)}>
-            Close
-          </button>
-        </div>
-      )}
+      {/* The exec card and its result render under the pod's own row now.
+          They used to sit here, after the pods list, the workloads, usage and
+          resources views, the node list and four dialogs — so pressing the
+          button scrolled nothing and changed nothing visible, which is
+          indistinguishable from a dead button. Same defect a17c1aa7 fixed for
+          logs. */}
 
       {restartResult && (
         <div className={clsx('s-desc', restartResult.r.ok ? '' : 'danger')}>
@@ -2142,51 +2257,9 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         </div>
       )}
 
-      {/* ---- why this pod is unhealthy ---- */}
-      {diag && (
-        <>
-          <div className="row muted" style={{ fontSize: 11, marginTop: 10 }}>
-            <span className="grow">Diagnosis · {diag.pod}</span>
-            <button className="btn ghost sm" onClick={() => setDiag(null)}>
-              Close
-            </button>
-          </div>
-          {diag.error && <div className="s-desc danger">{diag.error}</div>}
-          {!diag.result && !diag.error && (
-            <div className="faint" style={{ fontSize: 12 }}>Reading…</div>
-          )}
-          {diag.result && (
-            <>
-              {/* Events first. They are the answer far more often than the
-                  logs are, and a Pending pod has nothing else at all. */}
-              <div className="s-title" style={{ marginTop: 6 }}>
-                <Activity size={12} /> Events
-              </div>
-              {!diag.result.events.ok ? (
-                <Denied read={diag.result.events} what="Events" />
-              ) : diag.result.events.items.length === 0 ? (
-                <div className="faint" style={{ fontSize: 12 }}>
-                  No events for this pod. They expire after about an hour, so this is not proof
-                  nothing happened.
-                </div>
-              ) : (
-                <EventRows events={diag.result.events.items} />
-              )}
-
-              <div className="s-title" style={{ marginTop: 10 }}>
-                <ScrollText size={12} /> Previous container
-              </div>
-              {textBlock(diag.result.previousLogs, 'Previous container logs')}
-
-              <div className="s-title" style={{ marginTop: 10 }}>
-                <Boxes size={12} /> describe
-              </div>
-              {textBlock(diag.result.describe, 'Describe')}
-            </>
-          )}
-        </>
-      )}
-
+      {/* Diagnosis panes live under their own rows now. Nothing is left at
+          the foot of the panel: a button that changes something 800 lines
+          below the click is indistinguishable from a dead one. */}
       {/* Only what the user explicitly popped out lands down here now. Every
           other pane stays attached to the row it was opened from. */}
       {poppedOut && logs[poppedOut] && (

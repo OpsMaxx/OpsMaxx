@@ -386,6 +386,20 @@ button {
   background: var(--bg-hover);
   color: var(--text);
 }
+/* `.btn:disabled` has existed for ages and this did not, so a disabled icon
+   button was pixel-identical to a live one AND still highlighted on hover.
+   Combined with Chromium never firing a tooltip on a disabled control — which
+   is where the explanation lives — the exec button looked alive, lit up under
+   the pointer, said nothing and did nothing. The `:hover` override has to come
+   after the rule above to win on equal specificity. */
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.icon-btn:disabled:hover {
+  background: none;
+  color: var(--text-muted);
+}
 .icon-btn.active {
   color: var(--accent-ink);
   background: var(--accent-soft);
