@@ -17,6 +17,7 @@ import { useApp } from '../../store/app'
 import { sshHopsFor } from '../../lib/ssh'
 import { LOCAL_TARGET } from '../../../../shared/execTarget'
 import { clsx } from '../../lib/format'
+import { hostChoices, defaultHostId, anyConnected } from '../../lib/hostChoices'
 import {
   DOCKER_FAILURE_HELP,
   buildDockerNetworkPreview,
@@ -319,7 +320,13 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
   // socket the listing just used.
   const usedSudoNow = useSudo || (probe?.ok && probe.usedSudo === true)
 
-  const eligible = useMemo(() => servers.filter((s) => s.status !== 'offline'), [servers])
+  // Every host, not just the dialled ones. `status` is written on the edge of
+  // a connect and never re-asserted, so filtering on it hid servers that were
+  // reachable — and `docker ps` goes over SSH, which dials on demand, so a
+  // live connection was never a precondition for reading one. See
+  // lib/hostChoices.ts.
+  const eligible = useMemo(() => hostChoices(servers), [servers])
+  const startOn = useMemo(() => defaultHostId(servers), [servers])
 
   /**
    * "This machine" as a target.
@@ -338,9 +345,9 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
   // A saved server stays the default when there is one; this machine is the
   // default only when there is nothing else, where the alternative is a dead
   // panel.
-  const selectedId = serverId || eligible[0]?.id || LOCAL_ID
+  const selectedId = serverId || startOn || LOCAL_ID
   const localSelected = selectedId === LOCAL_ID
-  const server = localSelected ? undefined : eligible.find((s) => s.id === selectedId)
+  const server = localSelected ? undefined : servers.find((s) => s.id === selectedId)
   // Docker on this machine is worth offering whether or not any server is
   // online — it is the daemon most developers actually use.
   const hasTarget = localSelected || !!server
@@ -862,6 +869,7 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
             {eligible.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
+                {s.note ? ` — ${s.note}` : ''}
               </option>
             ))}
           </select>
@@ -883,14 +891,17 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
           this machine and is fully usable, so this states both facts rather
           than apologising. Saying only "no server is online" would now be
           false — something IS readable, and it is already selected. */}
-      {eligible.length === 0 && (
+      {/* About whether anything is DIALLED, not about what may be chosen. Every
+          saved host is in the dropdown above either way. */}
+      {!anyConnected(servers) && (
         <div className="panel-empty">
           <p className="panel-empty-title">
-            No server in this workspace is online — showing Docker on this machine.
+            No server in this workspace is connected — showing Docker on this machine.
           </p>
           <p className="panel-empty-body">
-            Connect a server from the sidebar to read one, or press <b>Read containers</b> for the
-            daemon running here.
+            Any saved server can still be picked above — reading one dials it. Connect a server
+            from the sidebar to work on it properly, or press <b>Read containers</b> for the daemon
+            running here.
           </p>
         </div>
       )}

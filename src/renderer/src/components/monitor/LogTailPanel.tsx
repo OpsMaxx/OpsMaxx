@@ -104,7 +104,12 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
   const startedOn = useRef<string[]>([])
   const scroller = useRef<HTMLDivElement | null>(null)
 
-  const eligible = useMemo(() => servers.filter((s) => s.status !== 'offline'), [servers])
+  // NOT filtered by `status`. It is written on the edge of a connect and never
+  // re-asserted, so it reads `offline` for any host this session has not
+  // opened — and what runs here goes over SSH, which dials on demand. Removing
+  // a row for a stale field took away the one action that would refresh it.
+  // See lib/hostChoices.ts.
+  const eligible = servers
   const cfgFor = (s: Server): unknown => ({
     sessionId: `logtail-units-${s.id}`,
     cols: 80,

@@ -17,6 +17,7 @@ import {
 import { sshHopsFor } from '../../lib/ssh'
 import { LOCAL_TARGET } from '../../../../shared/execTarget'
 import { clsx } from '../../lib/format'
+import { hostChoices, defaultHostId, anyConnected } from '../../lib/hostChoices'
 import {
   K8S_FAILURE_HELP,
   k8sRelativeTime,
@@ -402,7 +403,12 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   const [restarting, setRestarting] = useState(false)
   const [restartResult, setRestartResult] = useState<{ name: string; r: K8sRolloutResult } | null>(null)
 
-  const eligible = useMemo(() => servers.filter((s) => s.status !== 'offline'), [servers])
+  // Every host, not just the dialled ones — kubectl goes over SSH and dials on
+  // demand, and `status` is written on the edge of a connect and never
+  // re-asserted, so filtering on it hid reachable servers. See
+  // lib/hostChoices.ts.
+  const eligible = useMemo(() => hostChoices(servers), [servers])
+  const startOn = useMemo(() => defaultHostId(servers), [servers])
 
   /**
    * "This machine" as a target.
@@ -416,9 +422,9 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
    * target can never disagree — with nothing online the browser would render
    * the only option as selected while the state was still ''.
    */
-  const selectedId = serverId || eligible[0]?.id || LOCAL_ID
+  const selectedId = serverId || startOn || LOCAL_ID
   const localSelected = selectedId === LOCAL_ID
-  const server = localSelected ? undefined : eligible.find((s) => s.id === selectedId)
+  const server = localSelected ? undefined : servers.find((s) => s.id === selectedId)
   // A local kubeconfig is the one most developers actually have — kind,
   // minikube, Docker Desktop, or a context pointing at a real cluster.
   const hasTarget = localSelected || !!server
@@ -952,6 +958,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
           {eligible.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
+              {s.note ? ` — ${s.note}` : ''}
             </option>
           ))}
         </select>
@@ -1041,9 +1048,12 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
 
       {/* Not a dead end: with nothing online the panel falls back to this
           machine, so this names both facts rather than only the problem. */}
-      {eligible.length === 0 && (
+      {/* About whether anything is DIALLED. Every saved host is in the
+          dropdown either way, and reading one dials it. */}
+      {!anyConnected(servers) && (
         <div className="s-desc">
-          No server in this workspace is online — reading the kubeconfig on this machine.
+          No server in this workspace is connected — reading the kubeconfig on this machine. Any
+          saved server can still be picked above.
         </div>
       )}
 

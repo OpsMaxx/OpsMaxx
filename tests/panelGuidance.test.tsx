@@ -116,12 +116,17 @@ describe('the panel the complaint named: Docker with nothing read', () => {
 
     // Previously one grey sentence stating the problem and nothing else.
     //
-    // The panel now falls back to this machine when no server is online, so the
-    // sentence has to say that too: "no server is online" alone would be a
-    // half-truth in front of a panel that is about to read something. The step
-    // out — connect a server — is still named, because wanting a server is
+    // The panel now falls back to this machine when no server is connected, so
+    // the sentence has to say that too: "no server is connected" alone would be
+    // a half-truth in front of a panel that is about to read something. The
+    // step out — connect a server — is still named, because wanting a server is
     // still why someone is standing here.
-    expect(screen.getByText(/No server in this workspace is online/)).toBeTruthy()
+    //
+    // "connected", not "online": the dropdown no longer hides a host because
+    // this session has not dialled it, so the sentence is about what is
+    // DIALLED rather than about what exists. Every saved server is still
+    // selectable above, and the body says so.
+    expect(screen.getByText(/No server in this workspace is connected/)).toBeTruthy()
     expect(screen.getByText(/showing Docker on this machine/)).toBeTruthy()
     expect(screen.getByText(/Connect a server from the sidebar/)).toBeTruthy()
   })

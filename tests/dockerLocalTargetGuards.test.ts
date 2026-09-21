@@ -34,7 +34,7 @@ const SERVER_ONLY: Record<string, RegExp> = {
 
 function handlers(): Array<{ name: string; guard: string; body: string }> {
   const out: Array<{ name: string; guard: string; body: string }> = []
-  const re = /const (\w+) = async \([^)]*\): Promise<void> => \{\n([\s\S]*?)\n  \}\n/g
+  const re = /const (\w+) = async \([^)]*\): Promise<void> => \{\n([\s\S]*?)\n {2}\}\n/g
   for (const m of SRC.matchAll(re)) {
     const [, name, body] = m
     const g = body.match(/if \(!(server|hasTarget)\b[^)]*\) return/)

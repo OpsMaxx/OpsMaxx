@@ -131,7 +131,11 @@ export function BroadcastPanel({ servers }: { servers: Server[] }): React.JSX.El
   const eligible = useMemo(
     () =>
       servers.filter(
-        (s) => s.status !== 'offline' && s.rdpOnly !== true && s.sftpOnly !== true
+        // `rdpOnly`/`sftpOnly` stay: those are CAPABILITY facts — such a host
+        // has no shell to broadcast to. `status` is gone, because it says
+        // whether this session has dialled the host, not whether it can be,
+        // and a broadcast dials on demand. See lib/hostChoices.ts.
+        (s) => s.rdpOnly !== true && s.sftpOnly !== true
       ),
     [servers]
   )
