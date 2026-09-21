@@ -329,6 +329,35 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
   return result
 }
 
+/**
+ * Apply an inbound payload and report what ACTUALLY landed on disk.
+ *
+ * A source may transform on the way in — `serversSource` forces every arriving
+ * server to `status: 'offline'`, because a connection belongs to the machine
+ * that holds it and one device's sockets must not appear as green lights on
+ * another's. So the bytes on disk are not always the bytes that came off the
+ * relay, and recording the relay's hash as "what this device now has" is a
+ * claim that is simply false.
+ *
+ * It was false in a way that did not settle. The next pass compared the disk
+ * against that recorded hash, saw a local edit nobody had made, and pushed the
+ * transformed copy back as the account's winner — so the other device pulled
+ * its own servers back as offline, transformed them again, and pushed again.
+ * Every server on every device went grey and stayed grey, one clobber per sync
+ * interval, and the only cure was reconnecting each one by hand.
+ *
+ * Reading back through the source is what makes the record true. It also
+ * generalises: any source that transforms on write gets this right without
+ * knowing about it, which is the property the next one will need.
+ */
+function writeBack(source: CollectionSource, payload: Buffer): Buffer {
+  source.write(payload)
+  // `?? payload` for a source that cannot read its own writes. Recording the
+  // payload is no worse than before, and refusing to sync over it would be.
+  return source.read() ?? payload
+}
+
+
 async function syncCollection(
   deps: SyncDeps,
   name: SyncedCollection,
@@ -346,12 +375,12 @@ async function syncCollection(
   // -- This machine has nothing. Take what the account has. -----------------
   if (!local && remote) {
     const opened = await openObject(deps, name, epoch, remote.body, known?.counter ?? 0)
-    source.write(opened.payload)
+    const landed = writeBack(source, opened.payload)
     state.collections[name] = {
       etag: remote.etag,
       counter: opened.counter,
-      localHash: hash(opened.payload),
-      base: baseOf(opened.payload) ?? undefined,
+      localHash: hash(landed),
+      base: baseOf(landed) ?? undefined,
       at: Date.now()
     }
     return 'adopted'
@@ -404,24 +433,24 @@ async function syncCollection(
     // new device handing the user one chooser per populated collection before
     // the chooser means anything.
     if (isEmptyish(body) && !opened.payload.equals(body)) {
-      source.write(opened.payload)
+      const landed = writeBack(source, opened.payload)
       state.collections[name] = {
         etag: there.etag,
         counter: opened.counter,
-        localHash: hash(opened.payload),
-        base: baseOf(opened.payload) ?? undefined,
+        localHash: hash(landed),
+        base: baseOf(landed) ?? undefined,
         at: Date.now()
       }
       return 'adopted'
     }
     if (!opened.payload.equals(body)) {
       await keepAsConflict(deps, name, epoch, opened.counter + 1, body)
-      source.write(opened.payload)
+      const landed = writeBack(source, opened.payload)
       state.collections[name] = {
         etag: there.etag,
         counter: opened.counter,
-        localHash: hash(opened.payload),
-        base: baseOf(opened.payload) ?? undefined,
+        localHash: hash(landed),
+        base: baseOf(landed) ?? undefined,
         at: Date.now()
       }
       return 'conflicted'
@@ -460,12 +489,12 @@ async function syncCollection(
 
   if (!localChanged && remoteChanged) {
     const opened = await openObject(deps, name, epoch, there.body, known.counter)
-    source.write(opened.payload)
+    const landed = writeBack(source, opened.payload)
     state.collections[name] = {
       etag: there.etag,
       counter: opened.counter,
-      localHash: hash(opened.payload),
-      base: baseOf(opened.payload) ?? undefined,
+      localHash: hash(landed),
+      base: baseOf(landed) ?? undefined,
       at: Date.now()
     }
     return 'pulled'
@@ -545,12 +574,15 @@ async function mergeOrConflict(
   // the same situation rather than a half-applied merge.
   const counter = Math.max(opened.counter, known.counter) + 1
   const etag = await putSealed(deps, name, epoch, counter, merged.merged, fresh.etag)
-  source.write(merged.merged)
+  // What landed, not what was pushed: the relay holds `merged.merged` and this
+  // disk may hold a transformed copy of it, and the record has to describe the
+  // disk it will be compared against next pass.
+  const landed = writeBack(source, merged.merged)
   state.collections[name] = {
     etag,
     counter,
-    localHash: hash(merged.merged),
-    base: baseOf(merged.merged) ?? undefined,
+    localHash: hash(landed),
+    base: baseOf(landed) ?? undefined,
     at: Date.now()
   }
   return 'merged'
@@ -621,15 +653,15 @@ async function conflictWithRemote(
       conflictedEtag: fresh.etag
     }
   }
-  source.write(opened.payload)
+  const landed = writeBack(source, opened.payload)
   state.collections[name] = {
     etag: fresh.etag,
     // NEVER BACKWARDS. The floor is a high-water mark; writing a lower number
     // here would re-enable, for every later pass, exactly the replay the
     // check above just refused.
     counter: Math.max(opened.counter, state.collections[name]?.counter ?? 0),
-    localHash: hash(opened.payload),
-    base: baseOf(opened.payload) ?? undefined,
+    localHash: hash(landed),
+    base: baseOf(landed) ?? undefined,
     at: Date.now()
   }
   return 'conflicted'

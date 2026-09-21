@@ -723,3 +723,69 @@ describe('when something goes wrong', () => {
     expect(relay.conflicts.length).toBeGreaterThan(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+
+describe('a collection whose source rewrites what it is given', () => {
+  // Every server on every device went grey and stayed grey.
+  //
+  // `serversSource` transforms on write: an arriving server lands `offline`,
+  // because a connection belongs to the machine holding it and one device's
+  // sockets must not draw as green lights on another's. That part is right.
+  //
+  // What was wrong is what the engine recorded afterwards. It wrote the
+  // relay's bytes to the source and stored the hash of THOSE bytes as "what
+  // this device now has" — while the source had put something else on disk.
+  // The next pass compared the disk against that hash, found a local edit
+  // nobody had made, and pushed the transformed copy back as the account's
+  // winner. The other device pulled its own servers back as offline,
+  // transformed them again, and pushed again: one clobber per sync interval,
+  // for ever, with reconnecting each server by hand as the only cure.
+
+  it('settles instead of pushing the rewrite back at the account', async () => {
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 's1', name: 'TestServer', status: 'online' }])
+
+    expect((await syncOnce(deps(relay))).outcomes.servers).toBe('adopted')
+    // The transform still happens. A socket on another machine is not a socket
+    // on this one, and that was never the bug.
+    expect(readBlob().servers).toEqual([{ id: 's1', name: 'TestServer', status: 'offline' }])
+
+    // THE ASSERTION THAT MATTERS. Nothing changed on either side, so a second
+    // pass must have nothing to do.
+    const before = relay.objects.get('servers')!.etag
+    expect((await syncOnce(deps(relay))).outcomes.servers).toBe('unchanged')
+    expect(relay.objects.get('servers')!.etag, 'pushed its own rewrite back').toBe(before)
+  })
+
+  it('leaves the other device\'s copy alone, pass after pass', async () => {
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 's1', name: 'TestServer', status: 'online' }])
+    await syncOnce(deps(relay))
+
+    for (let i = 0; i < 4; i++) {
+      expect((await syncOnce(deps(relay))).outcomes.servers, `pass ${i + 2}`).toBe('unchanged')
+    }
+
+    // What the relay holds is still what the device that owns that socket
+    // said, not this device's rewrite of it.
+    const stored = JSON.parse(relay.objects.get('servers')!.body.toString('utf8')) as {
+      payload: string
+    }
+    expect(JSON.parse(Buffer.from(stored.payload, 'base64').toString('utf8'))).toEqual([
+      { id: 's1', name: 'TestServer', status: 'online' }
+    ])
+  })
+
+  it('still notices a real local edit', async () => {
+    // The fix must not buy quiet by going blind. A genuine change here is
+    // still a push.
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 's1', name: 'TestServer', status: 'online' }])
+    await syncOnce(deps(relay))
+    expect((await syncOnce(deps(relay))).outcomes.servers).toBe('unchanged')
+
+    writeBlob({ ...readBlob(), servers: [{ id: 's1', name: 'Renamed Here', status: 'offline' }] })
+    expect((await syncOnce(deps(relay))).outcomes.servers).toBe('pushed')
+  })
+})
