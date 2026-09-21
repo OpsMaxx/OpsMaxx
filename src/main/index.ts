@@ -2222,9 +2222,21 @@ ipcMain.handle('fleet:facts', (_e, serverId: string) => fleetSampler.factsFor(se
 // The security-update LIST, on demand. Not part of the hourly facts sweep --
 // see `HostFactsReader.securityList` for why the counts are sampled and the
 // list is asked for.
-ipcMain.handle('fleet:security-list', (_e, cfg: unknown, scope?: 'security' | 'all') =>
-  hostFactsReader.securityList(onDemandTarget(cfg), scope ?? 'security')
-)
+ipcMain.handle('fleet:security-list', (_e, cfg: unknown, scope?: unknown) => {
+  // NARROWED HERE, not just annotated. `scope?: 'security' | 'all'` was a
+  // compile-time claim, and IPC arguments are structured-clone values with no
+  // runtime type — the same gap the `docker:logs` handler below documents for
+  // `lines`. It is not exploitable today, because the only use downstream is
+  // `scope === 'security' ? '--security ' : ''`, so anything unrecognised
+  // already collapses to the wider listing rather than reaching the command.
+  //
+  // It is narrowed anyway, because that is a property of one ternary in
+  // another file rather than of this boundary, and the next person to touch
+  // that line should not have to know it is load-bearing. Anything that is not
+  // the literal 'all' is the safer, narrower read.
+  const safeScope: 'security' | 'all' = scope === 'all' ? 'all' : 'security'
+  return hostFactsReader.securityList(onDemandTarget(cfg), safeScope)
+})
 // Running kernel against installed kernels — roadmap item 46. Asked for rather
 // than sampled: the hourly sweep already carries the restart flag, and this is
 // the explanation behind it.

