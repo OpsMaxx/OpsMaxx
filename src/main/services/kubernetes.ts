@@ -117,7 +117,10 @@ export class KubernetesReader {
       if (!r.ok && !output.includes('===OPSMAXX-CTX===')) {
         return { ok: false, reason: 'unknown', detail: r.error ?? 'could not reach the server' }
       }
-      return parseK8sOutput(output, r.code ?? null)
+      // The namespace goes to the parser as well as to the command. The
+      // command runs BOTH a cluster-wide and a namespaced pod read, so only
+      // the parser can know which of the two the caller actually asked for.
+      return parseK8sOutput(output, r.code ?? null, namespace)
     } catch (e) {
       return { ok: false, reason: 'unknown', detail: e instanceof Error ? e.message : String(e) }
     }

@@ -579,7 +579,10 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         // Only as many as this panel can see. When pods were listed for one
         // namespace rather than all of them this is an undercount, which is why
         // the plan's sentence is about eviction rather than about the number.
-        podCount: probe?.ok && probe.allNamespaces ? podsOn(n.name) : null,
+        // `scopedTo` as well as `allNamespaces`: a per-node pod count drawn
+        // from a list narrowed to one namespace is not a smaller count, it is
+        // a wrong one.
+        podCount: probe?.ok && probe.allNamespaces && !probe.scopedTo ? podsOn(n.name) : null,
         // Null when the node list has not been read, rather than 0 or 1 — the
         // plan treats an absent count as unanswered and says so, instead of
         // deciding this is or is not the last node on a guess.
@@ -1114,6 +1117,12 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                     one namespace only — this account cannot list across the cluster
                   </span>
                 )}
+                {/* A list narrowed by choice is not the same as a list narrowed
+                    by RBAC, and saying so is the difference between "you picked
+                    this" and "you cannot see the rest". */}
+                {probe.allNamespaces && probe.scopedTo && (
+                  <span className="faint">in {probe.scopedTo}</span>
+                )}
                 <span className="spacer" />
                 {allPods.length > 0 && (
                   <input
@@ -1128,9 +1137,11 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
 
               {allPods.length === 0 && (
                 <div className="faint" style={{ fontSize: 12 }}>
-                  {probe.allNamespaces
-                    ? 'The cluster answered and has no pods.'
-                    : 'No pods in the namespace this account can read.'}
+                  {probe.scopedTo
+                    ? `The cluster answered and has no pods in ${probe.scopedTo}.`
+                    : probe.allNamespaces
+                      ? 'The cluster answered and has no pods.'
+                      : 'No pods in the namespace this account can read.'}
                 </div>
               )}
 

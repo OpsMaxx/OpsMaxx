@@ -118,10 +118,27 @@ export type K8sProbe =
       namespaces: string[]
       pods: K8sPod[]
       /**
-       * True when pods were listed across all namespaces. False when RBAC
-       * limited us to one, which changes what an empty list means.
+       * True when the account CAN list pods across all namespaces. False when
+       * RBAC limited us to one, which changes what an empty list means.
+       *
+       * Deliberately still about the ACCOUNT and not about what `pods` holds:
+       * a user who picks a namespace narrows the list without losing the
+       * permission, and reporting that as "this account cannot list across the
+       * cluster" would turn their own choice into an access warning. What the
+       * list was narrowed to is `scopedTo`.
        */
       allNamespaces: boolean
+      /**
+       * The namespace `pods` was deliberately restricted to, or null for the
+       * whole cluster.
+       *
+       * The namespace selector had no effect on the pod list at all before
+       * this existed: the command ran both reads, and the parser preferred the
+       * `--all-namespaces` one whenever it succeeded — which is every ordinary
+       * admin kubeconfig. The control scoped the overview, usage and resource
+       * reads and silently did nothing to the list underneath it.
+       */
+      scopedTo: string | null
     }
   | {
       ok: false
@@ -516,7 +533,13 @@ function parseContexts(text: string): { contexts: K8sContext[]; current: string 
   return { contexts, current }
 }
 
-export function parseK8sOutput(output: string, exitCode: number | null): K8sProbe {
+export function parseK8sOutput(
+  output: string,
+  exitCode: number | null,
+  /** The namespace the command was built for, so the read that honours it can
+   *  be preferred over the cluster-wide one. */
+  namespace?: string
+): K8sProbe {
   const versionText = (output.split('===OPSMAXX-CTX===')[0] ?? '').trim()
 
   // The version probe is the only one that tells us kubectl exists at all.
@@ -600,7 +623,33 @@ export function parseK8sOutput(output: string, exitCode: number | null): K8sProb
   // a pod. Inventing workloads out of an error message is the exact failure
   // this module exists to prevent, and it is worse than reporting nothing.
   const nsOk = !looksLikeError(nsPodText) && nsPodText.trim() !== ''
-  const pods = allOk ? parsePods(allText) : nsOk ? parsePods(nsPodText) : []
+
+  /**
+   * WHICH READ ANSWERS, and why it is not simply "the widest one that worked".
+   *
+   * The command always runs both: `--all-namespaces` first because an RBAC
+   * denial there is common and falling back is more useful than failing. That
+   * made the cluster-wide read the preferred one unconditionally — correct
+   * when it was written, and wrong once a namespace selector existed, because
+   * on any kubeconfig that can list cluster-wide the user's choice was never
+   * consulted for the pod list.
+   *
+   * So a requested namespace now wins. The cluster-wide text is still the
+   * fallback for it — filtered here rather than discarded, so that an account
+   * whose namespaced read failed still gets the right rows instead of none.
+   */
+  const scoped = namespace && validateNamespace(namespace) ? namespace : null
+  const pods = scoped
+    ? nsOk
+      ? parsePods(nsPodText)
+      : allOk
+        ? parsePods(allText).filter((p) => p.namespace === scoped)
+        : []
+    : allOk
+      ? parsePods(allText)
+      : nsOk
+        ? parsePods(nsPodText)
+        : []
 
   const versionMatch = versionText.match(/"gitVersion"\s*:\s*"([^"]+)"/)
   return {
@@ -610,7 +659,8 @@ export function parseK8sOutput(output: string, exitCode: number | null): K8sProb
     currentContext: current,
     namespaces,
     pods,
-    allNamespaces: allOk
+    allNamespaces: allOk,
+    scopedTo: scoped
   }
 }
 
