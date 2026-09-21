@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { readFile, readdir, realpath, stat } from 'node:fs/promises'
 import { networkInterfaces } from 'node:os'
-import { delimiter, dirname, isAbsolute, join, relative, sep } from 'node:path'
+import { basename, delimiter, dirname, isAbsolute, join, relative, sep } from 'node:path'
 import type { VpnEngineInfo, VpnKind } from '../../../shared/vpn'
 import { isEngineBundledOn } from '../../../shared/vpnEngines'
 import { VpnError } from './errors'
@@ -646,8 +646,48 @@ export async function coexistenceAdvisories(): Promise<string[]> {
 
 /** Returns a sentence describing why the candidate is unacceptable, or null
  *  when it is fine. Phrased as a fragment so callers can prefix the path. */
+/**
+ * Clients that are NOT the engine, however much they look like it.
+ *
+ * OpenVPN Connect is the official GUI client and ships `OpenVPNConnect.exe`
+ * beside a CLI called `ovpnconnect.exe`. Neither takes openvpn's command line.
+ * The driver spawns with `--config`, `--management`, `--management-client`,
+ * `--management-hold`, `--pull-filter` and `--auth-nocache`, and then WAITS for
+ * the tunnel to dial back on a management socket it opened first — that
+ * channel is how a vault credential reaches openvpn without touching a
+ * command line or a file, so it is not optional.
+ *
+ * Nothing checked the name. A hand-typed path to the GUI passed every test
+ * here (absolute, exists, inside Program Files, a non-empty file) and on
+ * Windows this function returns before any of the POSIX checks, so the profile
+ * saved, the engine reported AVAILABLE, and Start produced a UAC prompt, a GUI
+ * window, and sixty seconds later `handshake-timeout` — "openvpn did not
+ * connect within 60s" — which names nothing that happened.
+ *
+ * The scan in `winCandidates` already refuses to OFFER these; this refuses to
+ * accept one typed in by hand, which is the path a user takes precisely when
+ * detection has found nothing and they are looking for something plausible.
+ */
+const NOT_THE_ENGINE: Record<string, string> = {
+  'openvpnconnect.exe': 'OpenVPN Connect',
+  'ovpnconnect.exe': 'the OpenVPN Connect CLI'
+}
+
 async function checkExecutable(candidate: string, allowedRoots: string[]): Promise<string | null> {
   if (!isAbsolute(candidate)) return 'is a relative path, which depends on the working directory.'
+
+  // Before touching the disk: this is about WHICH PROGRAM it is, and the
+  // answer does not change with whether the file happens to be readable.
+  const named = NOT_THE_ENGINE[basename(candidate).toLowerCase()]
+  if (named) {
+    return (
+      `is ${named}, which cannot run tunnels for OpsMaxx. It does not accept openvpn's ` +
+      'command line and has no management interface, so credentials could not be handed to it ' +
+      'and a connection would simply time out. Point this at the community `openvpn.exe` — ' +
+      'usually C:\\Program Files\\OpenVPN\\bin\\openvpn.exe — or clear the field to use an ' +
+      'allowlisted system install.'
+    )
+  }
 
   let real: string
   try {

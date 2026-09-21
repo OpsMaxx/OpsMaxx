@@ -193,6 +193,38 @@ describe('finding openvpn.exe on Windows', () => {
     expect(isVpnError(err) && err.code).toBe('binary-missing')
   })
 
+  it('refuses a hand-typed path to OpenVPN Connect, and says why', async () => {
+    // The test above stops it being OFFERED. This stops it being ACCEPTED,
+    // which is the path a user takes precisely when detection found nothing
+    // and they went looking for something that sounded right.
+    //
+    // Nothing checked the name before. The GUI passed every test — absolute,
+    // exists, inside Program Files, a non-empty file — and on Windows the
+    // POSIX checks are skipped, so the profile saved, the engine reported
+    // AVAILABLE, and Start gave a UAC prompt, a GUI window and then
+    // `handshake-timeout` sixty seconds later, naming nothing that happened.
+    const gui = putExe('Programme', 'OpenVPN Connect', 'OpenVPNConnect.exe')
+
+    const err = await resolveSystem('openvpn', { binaryPath: gui, confirmed: true }).catch((e) => e)
+
+    // `config-invalid`, not `binary-missing`: the binary is right there. What
+    // is wrong is the choice, and telling someone to install what they have
+    // already installed is how this started.
+    expect(isVpnError(err) && err.code).toBe('config-invalid')
+    // It has to name the alternative: "this is wrong" without "this is right"
+    // leaves them where they started.
+    expect(String(err.detail ?? err.message)).toMatch(/openvpn\.exe/)
+    expect(String(err.detail ?? err.message)).toMatch(/OpenVPN Connect/)
+  })
+
+  it('refuses the Connect CLI by name as well, not only by where it was found', async () => {
+    const cli = putExe('Programme', 'OpenVPN', 'bin', 'ovpnconnect.exe')
+
+    const err = await resolveSystem('openvpn', { binaryPath: cli, confirmed: true }).catch((e) => e)
+
+    expect(isVpnError(err) && err.code).toBe('config-invalid')
+  })
+
   it('asks the registry, and accepts what it says even off Program Files', async () => {
     // An install on another drive is invisible to any list of guesses, and
     // HKLM is administrator-only — so a path from it is better evidence than
