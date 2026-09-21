@@ -66,7 +66,30 @@ describe('the buttons say what they will do', () => {
     // Chromium does not dispatch mouse events to a disabled control, so a
     // `title` on the button itself never fires — and that title is the only
     // thing saying WHY it is disabled. It has to sit on a wrapper.
-    const btn = SRC.slice(SRC.indexOf('THE TITLE IS ON THE SPAN'))
-    expect(btn.slice(0, 1200)).toMatch(/<span\s+title=\{/)
+    expect(SRC).toMatch(/<Explain\s+why=\{\s*localSelected/)
+  })
+
+  it('puts no bare title on a button that can be disabled', () => {
+    // The trap, pinned. A `title` beside a `disabled` is a sentence that
+    // disappears at the moment it is worth reading — and if it explains the
+    // disabled state, that is the only moment it was ever for.
+    const bad: number[] = []
+    for (const m of SRC.matchAll(/<button\b[^>]*?>/gs)) {
+      if (m[0].includes('disabled') && /\btitle=/.test(m[0])) {
+        bad.push(SRC.slice(0, m.index).split('\n').length)
+      }
+    }
+    expect(bad, 'these lose their tooltip exactly when it explains something').toEqual([])
+  })
+})
+
+describe('the Explain wrapper', () => {
+  it('exists and says why it is not just a title attribute', () => {
+    const src = readFileSync(
+      resolve(__dirname, '..', 'src/renderer/src/components/common/Explain.tsx'),
+      'utf8'
+    )
+    expect(src).toMatch(/does not dispatch mouse events to a disabled/)
+    expect(src).toMatch(/<span title=\{why\}/)
   })
 })

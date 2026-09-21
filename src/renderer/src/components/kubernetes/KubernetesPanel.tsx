@@ -17,6 +17,7 @@ import {
 import { sshHopsFor } from '../../lib/ssh'
 import { LOCAL_TARGET } from '../../../../shared/execTarget'
 import { clsx } from '../../lib/format'
+import { Explain } from '../common/Explain'
 import { hostChoices, defaultHostId, anyConnected } from '../../lib/hostChoices'
 import {
   K8S_FAILURE_HELP,
@@ -1123,15 +1124,16 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
             ))}
           </select>
         )}
-        <button
-          className="btn"
-          disabled={loading || !hasTarget}
-          title={hasTarget ? `Read Kubernetes on ${targetName}` : 'Choose a host first'}
-          onClick={() => void load(effectiveContext)}
-        >
-          <RefreshCw size={13} className={clsx(loading && 'spin')} />{' '}
-          {probe ? 'Refresh' : 'Read cluster'}
-        </button>
+        <Explain why={hasTarget ? `Read Kubernetes on ${targetName}` : 'Choose a host first'}>
+          <button
+            className="btn"
+            disabled={loading || !hasTarget}
+            onClick={() => void load(effectiveContext)}
+          >
+            <RefreshCw size={13} className={clsx(loading && 'spin')} />{' '}
+            {probe ? 'Refresh' : 'Read cluster'}
+          </button>
+        </Explain>
       </div>
 
       {/* Not a dead end: with nothing online the panel falls back to this
@@ -1292,21 +1294,15 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                       </button>
                       {/* Last, and deliberately the least prominent of the three.
                           The two beside it answer questions; this one runs code. */}
-                      {/* THE TITLE IS ON THE SPAN, not on the button.
-                          Chromium does not dispatch mouse events to a disabled
-                          control, so its tooltip never fires — and this
-                          button's tooltip is the only thing that explains why
-                          it is disabled. The explanation was unreachable
-                          exactly when it was needed, which is how a
-                          full-opacity, hover-highlighting, silent button came
-                          to read as broken rather than unavailable. */}
-                      <span
-                        title={
+                      {/* Explain, not `title`: a disabled button never fires
+                          its own tooltip, and this one's tooltip is the only
+                          thing that says why it is disabled. */}
+                      <Explain
+                        why={
                           localSelected
                             ? 'Running a command in a pod is available for a saved server, because the confirmation is recorded against one. Use a local terminal for this cluster.'
                             : 'Run one command inside this pod — arbitrary code, behind a typed confirmation'
                         }
-                        style={{ display: 'inline-flex' }}
                       >
                         <button
                           className="icon-btn sm"
@@ -1327,7 +1323,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                         >
                           <SquareTerminal size={13} />
                         </button>
-                      </span>
+                      </Explain>
                     </div>
                     {/* Under the row it belongs to, not at the foot of the
                         panel: clicking a button should change something the
@@ -1586,14 +1582,15 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                             Cordon
                           </button>
                         )}
-                        <button
-                          className="btn ghost sm"
-                          disabled={nodeBusy === n.name || drainCheck?.loading === true}
-                          title="Read whether this node can be drained safely. This is a read; nothing moves."
-                          onClick={() => void checkDrain(n.name)}
-                        >
-                          Check drain
-                        </button>
+                        <Explain why="Read whether this node can be drained safely. This is a read; nothing moves.">
+                          <button
+                            className="btn ghost sm"
+                            disabled={nodeBusy === n.name || drainCheck?.loading === true}
+                            onClick={() => void checkDrain(n.name)}
+                          >
+                            Check drain
+                          </button>
+                        </Explain>
                       </div>
                     ))
                   )}
