@@ -273,6 +273,7 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
   // Sticky per panel: an operator who knows this account is not in the docker
   // group should not pay a failed round trip on every refresh.
   const [useSudo, setUseSudo] = useState(false)
+  const [filter, setFilter] = useState('')
   // null = not asked yet. Probed only when a permission failure makes it
   // relevant, so an ordinary host never runs a sudo probe at all.
   const [sudoAvailable, setSudoAvailable] = useState<boolean | null>(null)
@@ -770,7 +771,24 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
     pending.plan.confirmation.kind !== 'type-to-confirm' ||
     phrase.trim() === pending.plan.confirmation.phrase
 
-  const groups = probe?.ok ? groupByComposeProject(probe.containers) : []
+  /**
+   * Filtered BEFORE grouping, so a project with no match disappears with its
+   * header rather than leaving an empty heading behind.
+   *
+   * A host with thirty-five containers across nine compose projects had no way
+   * to find one. The Kubernetes panel beside it has had a pod filter all along;
+   * this is the same control over the same kind of list.
+   */
+  const allContainers = probe?.ok ? probe.containers : []
+  const q = filter.trim().toLowerCase()
+  const shown = q
+    ? allContainers.filter((c) =>
+        // Name, image and project: the three things actually on the row, so
+        // what you can read is what you can search.
+        `${c.name} ${c.image} ${c.composeProject ?? ''}`.toLowerCase().includes(q)
+      )
+    : allContainers
+  const groups = groupByComposeProject(shown)
   const diskTotalReclaimable =
     disk?.ok === true
       ? disk.rows.reduce((sum, r) => sum + (r.reclaimableBytes ?? 0), 0)
@@ -1220,6 +1238,36 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
               })
             }
           />
+
+          {/* Only once there is enough to hunt through. A filter over four rows
+              is furniture. */}
+          {allContainers.length > 8 && (
+            <div
+              className="row muted"
+              style={{ fontSize: 'var(--fs-xs)', marginTop: 8, alignItems: 'center' }}
+            >
+              <span className="grow">
+                {shown.length} of {allContainers.length} container
+                {allContainers.length === 1 ? '' : 's'}
+              </span>
+              <input
+                className="input"
+                style={{ maxWidth: 200 }}
+                placeholder="Filter containers…"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+              />
+            </div>
+          )}
+
+          {/* Said plainly rather than left as an empty panel: with a filter on,
+              "nothing here" is a statement about the filter, not the host. */}
+          {q !== '' && shown.length === 0 && (
+            <div className="faint" style={{ fontSize: 'var(--fs-sm)', marginTop: 8 }}>
+              No container matches “{filter}”. {allContainers.length} are running or stopped on this
+              host.
+            </div>
+          )}
 
           {groups.map((g) => (
             <div key={g.project ?? ' ungrouped'}>

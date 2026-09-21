@@ -933,3 +933,53 @@ describe('DockerPanel — engine upgrade', () => {
     await screen.findByText(/ssh said no/)
   })
 })
+
+describe('finding a container among many', () => {
+  // A host with thirty-five containers across nine compose projects had no way
+  // to find one. The Kubernetes panel beside it has had a pod filter all along.
+  const many: DockerProbe = {
+    ok: true,
+    version: '24.0.7',
+    composeLabels: 'read',
+    containers: Array.from({ length: 12 }, (_, i) => ({
+      id: `id-${i}0123456789ab`,
+      shortId: `id${i}0123`,
+      name: i === 0 ? 'vaultwarden' : `filler-${i}`,
+      image: i === 0 ? 'vaultwarden/server:1.37.0-alpine' : 'alpine:3',
+      state: 'running',
+      status: 'Up 9 days',
+      ports: '',
+      createdAt: '2026-01-01 00:00:00 +0000 UTC',
+      ...(i === 0 ? { composeProject: 'vaultwarden-pm' } : {})
+    }))
+  }
+
+  const openList = async (user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> => {
+    stubBridge({ docker: { list: () => Promise.resolve(many), disk: () => Promise.resolve(DISK) } })
+    render(<DockerPanel servers={[ALPHA]} />)
+    await user.click(btn(/Read containers/))
+    return screen.findByPlaceholderText(/Filter containers/)
+  }
+
+  it('offers a filter once the list is long enough to need one', async () => {
+    const user = userEvent.setup()
+    expect(await openList(user)).toBeTruthy()
+  })
+
+  it('matches on name, image or project — the three things on the row', async () => {
+    const user = userEvent.setup()
+    const box = await openList(user)
+    await user.type(box, 'vaultwarden')
+    await waitFor(() => expect(screen.queryByText('filler-1')).toBeNull())
+    expect(screen.getByText('vaultwarden')).toBeTruthy()
+  })
+
+  it('says nothing matched rather than showing an empty host', async () => {
+    // With a filter on, "nothing here" is a statement about the filter and not
+    // about the machine, and the panel has to say which.
+    const user = userEvent.setup()
+    const box = await openList(user)
+    await user.type(box, 'zzzznotathing')
+    await waitFor(() => expect(screen.getByText(/No container matches/)).toBeTruthy())
+  })
+})
