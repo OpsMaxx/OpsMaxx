@@ -5,6 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, sep } from 'n
 import type { VpnEngineInfo, VpnKind } from '../../../shared/vpn'
 import { isEngineBundledOn } from '../../../shared/vpnEngines'
 import { VpnError } from './errors'
+import { readCommand } from './netstate'
 import {
   BundledBinaryError,
   forgetManifest,
@@ -280,9 +281,129 @@ async function openVpnClientSentence(): Promise<string> {
   )
 }
 
+/** What a tunnel interface is called, on every platform OpsMaxx runs on.
+ *  Shared by the two sources below so they cannot drift into disagreeing
+ *  about which names count. */
+const TUNNEL_NAME = /^(utun|tun|tap|wg|ppp)\d*/i
+
 /**
- * Tunnel interfaces that already carry traffic, from `os.networkInterfaces()`
- * — no process spawned, no privilege needed.
+ * The destinations that mean "this interface is taking the traffic".
+ *
+ * `0/1` + `128.0/1` is a default route in disguise, and it is what a
+ * full-tunnel VPN actually installs: the pair covers the whole address space
+ * at a longer prefix than `default`, so it wins on specificity without ever
+ * replacing the route it is beating. Measured on a Mac with OpenVPN up:
+ *
+ *     0/1        10.107.0.1   UGScg   utun6
+ *     128.0/1    10.107.0.1   UGSc    utun6
+ *
+ * `default` itself is here for the tunnels that do replace it outright.
+ *
+ * A literal set rather than a pattern: `netstat` trims trailing zero octets,
+ * but not on every macOS version, so both spellings of the same two routes
+ * have to be named. Matching the prefix length with a regex instead would
+ * start accepting `64.0/2` and every other partial route a policy VPN adds.
+ */
+const DEFAULT_ROUTE_DESTINATIONS = new Set([
+  'default',
+  '0.0.0.0/0',
+  '0/1',
+  '0.0.0.0/1',
+  '128.0/1',
+  '128.0.0.0/1'
+])
+
+/**
+ * Tunnel interfaces named as the `Netif` of a default route in
+ * `netstat -rn -f inet` output.
+ *
+ * Exported for `tests/vpnTunnelRoutes.test.ts`, which drives it with real
+ * captures rather than with a live machine.
+ *
+ * `routing/darwin.ts` says `netstat -rn` is not used there, and that is still
+ * right for what it is doing: it needs to turn a destination back into a
+ * prefix, and netstat's classful abbreviations ("127" for 127.0.0.0/8) cannot
+ * be. Nothing here reconstructs a prefix. It compares the destination against
+ * a fixed set of spellings and reads the interface column, which the
+ * abbreviation does not touch.
+ *
+ * Never throws: it is on the path of every engine resolve, and a routing table
+ * that does not parse must cost an advisory rather than a VPN connection.
+ */
+export function defaultRouteTunnels(routeTable: string): string[] {
+  const out = new Set<string>()
+  for (const line of routeTable.split(/\r?\n/)) {
+    // Destination, Gateway, Flags, Netif, and Expire — which is the column
+    // that may be missing, so Netif is always the fourth and never the last.
+    const cols = line.trim().split(/\s+/)
+    if (cols.length < 4) continue
+    if (!DEFAULT_ROUTE_DESTINATIONS.has(cols[0])) continue
+    // The `Netif` filter is what keeps the ordinary `default -> en0` that
+    // every networked machine has out of the answer. Without it this would
+    // report a tunnel on every render, which is the same false positive
+    // `carriesTraffic` below was written to kill.
+    if (TUNNEL_NAME.test(cols[3])) out.add(cols[3])
+  }
+  return [...out].sort()
+}
+
+/**
+ * The route read, held briefly.
+ *
+ * `activeTunnelInterfaces` is called from `resolveEngineBinary`, which is a UI
+ * poll, and a subprocess per poll is not acceptable for an advisory.
+ *
+ * Held BRIEFLY and deliberately not for the app run like `winCandidateCache`
+ * below. Which tunnels are up changes while the app is open, and
+ * `coexistenceAdvisories` exists on the promise that it is recomputed rather
+ * than stored — a per-run answer would go on saying "a tunnel is already up"
+ * for the rest of the session after the user stopped it, which is the failure
+ * that comment warns about in as many words. Five seconds is short enough that
+ * nobody reads a stale claim and long enough that a poll is not a spawn.
+ *
+ * The PROMISE is cached, not the value, so two polls that overlap share one
+ * netstat instead of racing to start two. Cleared by `resetBinaryCache()`.
+ */
+const ROUTE_CACHE_MS = 5_000
+let routeCache: { at: number; tunnels: Promise<string[]> } | null = null
+
+function readRouteTunnels(): Promise<string[]> {
+  return readCommand(
+    // Absolute, never a bare name. This module's header says the PATH search
+    // IS the vulnerability, and `elevation/win32.ts` sets the same precedent:
+    // a writable PATH entry ahead of /usr/sbin would otherwise choose what
+    // runs here.
+    '/usr/sbin/netstat',
+    ['-rn', '-f', 'inet'],
+    // Short, because the caller is a poll. `readCommand` never rejects, so a
+    // netstat that is missing, renamed or hung arrives as a non-zero code and
+    // costs the advisory rather than the resolve.
+    { timeoutMs: 2_000 }
+  )
+    .then((res) => (res.code === 0 ? defaultRouteTunnels(res.stdout) : []))
+    // `readCommand` documents that it never rejects and `defaultRouteTunnels`
+    // never throws, so this catches nothing today. It is here because the
+    // promise is CACHED: a rejection would be handed to every caller for the
+    // next five seconds, and the one thing this must not do is fail a resolve.
+    .catch(() => [])
+}
+
+async function routeTunnels(): Promise<string[]> {
+  // macOS only. NetworkExtension is a macOS framework; on Linux and Windows a
+  // tunnel is an ordinary interface the stdlib already sees, so a subprocess
+  // there would buy nothing and `netstat -rn -f inet` is not even the same
+  // command. Read at call time, like the other platform checks in this file,
+  // so the resolver tests that stub `process.platform` still drive it.
+  if (process.platform !== 'darwin') return []
+  const now = Date.now()
+  if (routeCache && now - routeCache.at < ROUTE_CACHE_MS) return routeCache.tunnels
+  routeCache = { at: now, tunnels: readRouteTunnels() }
+  return routeCache.tunnels
+}
+
+/**
+ * Tunnel interfaces that already carry traffic: the ones with a routable
+ * address, plus — on macOS — the ones that own a default route.
  *
  * What this DOES tell us: something on this machine already has a tunnel up,
  * so a second one may fight it for the default route or, on Windows, for the
@@ -294,40 +415,53 @@ async function openVpnClientSentence(): Promise<string> {
  * So this is reported and never acted on — nothing here refuses a start or
  * tries to take an interface over.
  *
- * ── AN EMPTY RESULT IS NOT EVIDENCE THAT NOTHING IS RUNNING ─────────────────
+ * ── WHY THERE ARE TWO SOURCES ───────────────────────────────────────────────
  *
- * This sees exactly what `os.networkInterfaces()` exposes, and on macOS that
- * is not the same set as `ifconfig`. Measured twice, minutes apart, on a Mac
- * with a live full-tunnel OpenVPN connection: `ifconfig` showed utun6 with
- * `inet 10.107.0.60 --> 10.107.0.1` and the 0.0.0.0/1 + 128.0.0.0/1 pair that
- * is a default route in disguise, while `os.networkInterfaces()` listed
- * utun0–utun5 and nothing else. utun6 was absent from it entirely. The second
- * sample had a utun7 instead, and it was absent too.
+ * `os.networkInterfaces()` does not expose a macOS NetworkExtension tunnel.
+ * Measured twice, minutes apart, on a Mac with a live full-tunnel OpenVPN
+ * connection: `ifconfig` showed utun6 with `inet 10.107.0.60 --> 10.107.0.1`
+ * while `os.networkInterfaces()` listed utun0–utun5 and nothing else. utun6
+ * was absent from it entirely. The second sample had a utun7 instead, and it
+ * was absent too.
  *
  * The reason is the NetworkExtension framework: the tunnel belongs to
  * `/usr/libexec/nesessionmanager` rather than to any `openvpn` process, and
  * that is how OpenVPN Connect v3 and every App Store VPN work on a modern
  * macOS. So on the platform where the coexistence warning matters most, the
- * common case is precisely the one this cannot see.
+ * ordinary case was the one this could not see at all.
  *
- * That makes the honest reading asymmetric, and every caller has to keep it
- * that way: a NAME here means a tunnel really is up, and an EMPTY LIST means
- * only that none was visible. Nothing may say "no other VPN is running" on the
+ * The routing table closes that, and is the better signal anyway: the warning's
+ * own sentence is about the default route, and the route is what decides the
+ * fight it describes. The two are MERGED rather than one replacing the other,
+ * because neither is a superset — a tunnel an application runs as its own
+ * process (a plain `openvpn`, `wg-quick`) has an address Node can see, and a
+ * NetworkExtension one has only a route.
+ *
+ * `-f inet` is not a detail. The inet6 table on a stock Mac with NO VPN at all
+ * carries `default -> utun0` through `default -> utun5`, one per iCloud Private
+ * Relay / AWDL / Continuity tunnel — so reading it would resurrect, exactly,
+ * the every-Mac false positive that `carriesTraffic` below was written to kill.
+ * The inet table on that same machine has no tunnel row at all.
+ *
+ * ── AN EMPTY RESULT IS STILL NOT EVIDENCE THAT NOTHING IS RUNNING ───────────
+ *
+ * Narrower than it was, and still true. What remains invisible is a macOS
+ * split-tunnel NetworkExtension VPN: it claims no default route, so the route
+ * table does not name it, and it shows no address, so the stdlib does not
+ * either. Route-based detection cannot be widened to catch it without
+ * reporting a tunnel for every partial route a policy VPN installs.
+ *
+ * So the honest reading stays asymmetric, and every caller has to keep it that
+ * way: a NAME here means a tunnel really is up, and an EMPTY LIST means only
+ * that none was visible. Nothing may say "no other VPN is running" on the
  * strength of it — which is why the caller stays silent on empty rather than
  * reporting an all-clear.
- *
- * Closing the gap needs a different source than the stdlib: `ifconfig`/`netstat
- * -rn`, or SystemConfiguration. Deliberately not done here — this function's
- * whole contract is that it spawns nothing and needs no privilege, and trading
- * that away is a decision for the owner of this module rather than something to
- * fold into a fix for the false positives.
  */
-export function activeTunnelInterfaces(): string[] {
-  const ifaces = networkInterfaces()
-  return Object.entries(ifaces)
-    .filter(([name, addrs]) => /^(utun|tun|tap|wg|ppp)\d*/i.test(name) && (addrs ?? []).some(carriesTraffic))
+export async function activeTunnelInterfaces(): Promise<string[]> {
+  const addressed = Object.entries(networkInterfaces())
+    .filter(([name, addrs]) => TUNNEL_NAME.test(name) && (addrs ?? []).some(carriesTraffic))
     .map(([name]) => name)
-    .sort()
+  return [...new Set([...addressed, ...(await routeTunnels())])].sort()
 }
 
 /**
@@ -410,6 +544,10 @@ const bundledCache = new Map<string, VpnEngineInfo>()
 export function resetBinaryCache(): void {
   bundledCache.clear()
   winCandidateCache = null
+  // The route read too, or a test that sets up a second routing-table fixture
+  // is answered from the first one for five seconds and passes or fails for a
+  // reason that has nothing to do with what it set up.
+  routeCache = null
   // The lifted module holds the parsed manifest now, and a test that swaps
   // fixture trees has to clear both or the second tree is verified against the
   // first tree's hashes.
@@ -565,9 +703,60 @@ export async function resolveSystem(
   // The distinction the reader needs first: a refused candidate means the
   // program IS installed, and no amount of installing it again will help.
   if (refused.length) parts.push(`Found but not used: ${refused.join('; ')}.`)
+  parts.push(loginPathCaveat(name))
   parts.push(await openVpnClientSentence())
   parts.push(await installAdvice(name))
   throw new VpnError('binary-missing', parts.filter(Boolean).join(' '))
+}
+
+/**
+ * Why a copy the user's own terminal finds may still not be found here.
+ *
+ * The PATH search above reads `process.env.PATH`, which is the PATH THIS
+ * PROCESS was started with. A desktop-launched Electron app does not get the
+ * login shell's: on macOS it inherits launchd's, which is frequently just
+ * /usr/bin:/bin. So an openvpn from nix, asdf, or any custom prefix answers
+ * `which openvpn` in a terminal and is invisible to this search — and the app
+ * says "not installed" about a program the user is looking at. That is the
+ * worst shape a bug report takes, so the message names the limitation instead
+ * of leaving someone to deduce it.
+ *
+ * ── AND IS NOT FIXED BY READING THE LOGIN SHELL'S PATH ──────────────────────
+ *
+ * `localExec.ts` already has exactly the helper that would do it —
+ * `resolveLoginPath`, which runs `$SHELL -l -c 'printf %s "$PATH"'` and caches
+ * the answer. Importing it here fails tests/localTerminalNotExposed.test.ts on
+ * two assertions, because this module is inside the import closure that test
+ * keeps free of anything that runs a local command:
+ *
+ *   mcpServer.ts -> cicd/wiring.ts -> httpClient.ts -> netTransport.ts
+ *     -> vpn/manager.ts -> vpn/supervisor.ts -> vpn/binaries.ts
+ *
+ * Lifting the helper into a neutral module would pass that guard — its argv is
+ * fixed and it takes no command from any caller, which is the same property the
+ * `services/cloud` widening is argued from. It still is not worth it. On macOS
+ * and Linux `resolveSystem` is reached only after the BUNDLED openvpn has
+ * already failed its hash or gone missing, and Windows never searches PATH at
+ * all, so the fix would serve a fallback of a fallback while permanently
+ * widening a boundary every future security review has to re-examine. The
+ * sentence below costs nothing and reaches the same user.
+ *
+ * openvpn only, like `installAdvice`, and for the same kind of reason: "Set the
+ * path" is rendered for this engine and no other (see the `engineMissing` block
+ * in useVpnProfiles.tsx), so naming it on a WireGuard or frp failure would
+ * point at a button that is not on the screen.
+ */
+function loginPathCaveat(name: string): string {
+  // Not on Windows, which refuses the PATH search by design (E44) and says so
+  // three lines up. Explaining that a search we did not do used the wrong PATH
+  // would contradict the sentence next to it.
+  if (name !== 'openvpn' || process.platform === 'win32') return ''
+  return (
+    'OpsMaxx searched the PATH it was started with, which is not your login shell’s — ' +
+    'a desktop launcher hands the app the session’s PATH, so an openvpn installed by nix, ' +
+    'asdf or into a custom prefix answers `which openvpn` in a terminal and is not found ' +
+    'here. Use “Set the path” to point at it.'
+  )
 }
 
 /** How to get this engine on THIS machine, in one sentence.
@@ -704,17 +893,18 @@ async function describe(kind: VpnKind, path: string): Promise<VpnEngineInfo> {
  *  machine, which is why it is a list and not a flag.
  *
  *  Empty is also what a machine OpsMaxx cannot see into returns, and the two
- *  are not distinguishable from here — see `activeTunnelInterfaces`, which is
- *  blind to a macOS NetworkExtension tunnel and therefore to the way most Macs
- *  actually run a VPN. So the list says what was found and never that nothing
+ *  are not distinguishable from here — see `activeTunnelInterfaces`, which now
+ *  reads the routing table as well but is still blind to a macOS split-tunnel
+ *  NetworkExtension VPN. So the list says what was found and never that nothing
  *  is there. The UI renders it only when it is non-empty, which is the right
  *  shape for that: silence, not an all-clear.
  *
  *  Deliberately NOT stored on the cached `VpnEngineInfo`: which interfaces
  *  are up changes while the app is open, and a cached "a tunnel is already
  *  running" is wrong within seconds of the user stopping it. Recomputed by
- *  `resolveEngineBinary` on every call instead — two dozen `stat`s and one
- *  synchronous stdlib read. */
+ *  `resolveEngineBinary` on every call instead — two dozen `stat`s, one
+ *  synchronous stdlib read, and a `netstat` held for five seconds so that the
+ *  poll this sits on does not become a spawn. */
 export async function coexistenceAdvisories(): Promise<string[]> {
   const out: string[] = []
   const others = await otherVpnClients()
@@ -724,19 +914,21 @@ export async function coexistenceAdvisories(): Promise<string[]> {
         'Running the same profile in both at once will not work — stop one before starting the other.'
     )
   }
-  const up = activeTunnelInterfaces()
+  const up = await activeTunnelInterfaces()
   if (up.length) {
     out.push(
       `${up.join(', ')} already ${up.length > 1 ? 'carry' : 'carries'} traffic, ` +
         'so something on this machine has a tunnel up. OpsMaxx cannot tell what owns it; ' +
         'if both claim the default route, the last one to start wins. ' +
         // Said out loud because the reader is about to draw the wrong
-        // conclusion from a short list. On macOS a VPN run through the system
-        // NetworkExtension — OpenVPN Connect v3, and anything from the App
-        // Store — does not appear here at all, so "one interface listed" must
-        // not be read as "and nothing else".
-        'There may be others it cannot see: a VPN macOS runs for another app ' +
-        'does not appear here.'
+        // conclusion from a short list. This used to say that a VPN macOS runs
+        // for another app does not appear here at all, which was true until the
+        // routing table was added as a second source and is now the opposite of
+        // true — a stale caveat is worse than none, because it tells the reader
+        // to discount the half of the answer that is usually the better one.
+        // What is genuinely still missing is narrower, and named as such.
+        'There may be others it cannot see: a split-tunnel VPN that claims ' +
+        'neither the default route nor an address of its own does not appear here.'
     )
   }
   return out

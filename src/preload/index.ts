@@ -1747,6 +1747,22 @@ const api = {
     reload: (id: string): Promise<VpnResult> => ipcRenderer.invoke('vpn:reload', id),
     validate: (spec: VpnSpec): Promise<VpnValidation> => ipcRenderer.invoke('vpn:validate', spec),
     probe: (kind: VpnKind): Promise<VpnEngineInfo> => ipcRenderer.invoke('vpn:probe', kind),
+    /**
+     * This machine's own name for a Tailscale node.
+     *
+     * Not on the spec, and not a field the form can just set: the spec syncs,
+     * and a tailnet hostname names ONE device -- so paired machines running one
+     * profile register under one label and Tailscale appends `-1`, `-2`. The
+     * override is stored beside the node key in `vpn-state/`, which never
+     * leaves this machine, so it needs a channel of its own rather than riding
+     * in the profile the way every other field does.
+     */
+    deviceHostname: (id: string): Promise<string | undefined> =>
+      ipcRenderer.invoke('vpn:deviceHostname', id),
+    // Undefined clears it, which is how the profile's own name becomes the
+    // default again.
+    setDeviceHostname: (id: string, name: string | undefined): Promise<VpnResult> =>
+      ipcRenderer.invoke('vpn:setDeviceHostname', id, name),
     // Returns vault refs, never key material: the main-process handler stores
     // the secrets and hands back pointers.
     import: (kind: VpnKind, text: string, baseDir?: string): Promise<VpnImportResult> =>

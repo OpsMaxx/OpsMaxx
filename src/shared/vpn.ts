@@ -262,11 +262,16 @@ export interface FrpConfirmations {
 export interface TailscaleSpec {
   kind: 'tailscale'
   /**
-   * The device name this node takes on the tailnet.
+   * The device name this node takes on the tailnet, ON EVERY PAIRED DEVICE.
    *
    * This node is OURS — a separate device with its own key, not a view of a
    * `tailscaled` the user may also run — so it needs a name of its own in the
    * admin console. Absent means the sidecar picks one.
+   *
+   * It is part of a SYNCED collection, so it is the profile's name everywhere
+   * rather than this machine's. A machine that needs its own name sets the
+   * per-device override instead, and `tailscaleHostname()` is the one function
+   * that decides between them — see it for why both exist.
    */
   hostname?: string
   /**
@@ -680,11 +685,14 @@ export interface VpnEngineInfo {
    *
    * READ IT ASYMMETRICALLY, and this is the half a caller will get wrong. The
    * interface half comes from `os.networkInterfaces()`, which does not expose a
-   * NetworkExtension tunnel at all — the common shape of a macOS VPN, and
-   * measured absent here while `ifconfig` showed the tunnel live. So a NAME in
-   * this list means a tunnel really is up; an EMPTY list means only that none
-   * was visible, and is never an all-clear. Nothing may render "no other VPN is
-   * running" from it. The measurements and the reasoning are in
+   * NetworkExtension tunnel at all — the common shape of a macOS VPN, measured
+   * absent here while `ifconfig` showed the tunnel live. macOS now also reads
+   * the IPv4 route table for a tunnel holding the default route, which covers
+   * that case; a split-tunnel VPN claiming neither the default route nor an
+   * address is still invisible. So a NAME in this list means a tunnel really is
+   * up; an EMPTY list means only that none was visible, and is never an
+   * all-clear. Nothing may render "no other VPN is running" from it. The
+   * measurements and the reasoning are in
    * `activeTunnelInterfaces` in main/services/vpn/binaries.ts, under the
    * heading "AN EMPTY RESULT IS NOT EVIDENCE THAT NOTHING IS RUNNING"; they are
    * not repeated here.
@@ -896,6 +904,54 @@ export function isCidr(s: string): boolean {
   if (!addr.includes(':')) return false
   if (!/^[0-9a-fA-F:.]+$/.test(addr)) return false
   return Number.isInteger(bits) && bits >= 0 && bits <= 128
+}
+
+/**
+ * A name a tailnet will take: letters, digits and dashes, 1-63 characters,
+ * not starting with a dash.
+ *
+ * Exported because THREE places need the same answer — the driver's
+ * `validateConfig`, the per-device override's writer in main, and the form.
+ * Three copies of one regex is three chances for the form to accept a name the
+ * engine later refuses, which strands the profile: the user cannot see what is
+ * wrong from a start failure that says only that the node would not come up.
+ */
+export function isTailscaleHostname(s: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/.test(s)
+}
+
+/**
+ * The name THIS device's node registers under, and the only place that decides.
+ *
+ * ── Why there are two names ────────────────────────────────────────────────
+ *
+ * `TailscaleSpec.hostname` rides in `vpns`, which syncs. A tailnet hostname
+ * identifies one device, so two paired machines running one profile both
+ * register under it and Tailscale disambiguates by appending `-1`, `-2` —
+ * distinct nodes (their keys live in `vpn-state/`, which correctly does not
+ * sync) fighting over one label.
+ *
+ * WORTH KEEPING IN PROPORTION: that suffix is STABLE once the node key
+ * persists, so this is a permanently confusing admin console rather than churn
+ * — both nodes work, and both MagicDNS names resolve. Low urgency, unchanged
+ * correctness. Read it as neither an emergency nor noise.
+ *
+ * The override is stored per device (see `readDeviceHostname` in the driver)
+ * and wins. The synced name stays the default, because it is a name the user
+ * chose and dropping it would hand the node to the sidecar's invention —
+ * renaming somebody's device to fix a different device's problem.
+ *
+ * `undefined` rather than `''` when neither is set: `ts.up` reads absent as
+ * "choose one for me" and an empty string as a name.
+ */
+export function tailscaleHostname(
+  spec: TailscaleSpec,
+  deviceHostname: string | undefined
+): string | undefined {
+  // Trimmed before it counts: a field cleared to spaces is a cleared field, and
+  // treating it as a name would put one on the tailnet.
+  const mine = deviceHostname?.trim()
+  return mine ? mine : spec.hostname
 }
 
 /** "vpn.example.com:51820" / "[2001:db8::1]:51820" -> parts, or null. */

@@ -1,3 +1,5 @@
+import { readFile, writeFile, rm } from 'node:fs/promises'
+import { join } from 'node:path'
 import type {
   TailscaleSpec,
   VpnEngineInfo,
@@ -8,11 +10,12 @@ import type {
   VpnValidation,
   VpnValidationIssue
 } from '../../../../shared/vpn'
+import { isTailscaleHostname, tailscaleHostname } from '../../../../shared/vpn'
 import type { VpnDriver, VpnDriverContext } from '../driver'
 import { VpnError } from '../errors'
 import { resolveBundled } from '../binaries'
 import { openNetdSession, type NetdSession } from '../netdSession'
-import { createStateDir } from '../runDir'
+import { createStateDir, runIdSegment, vpnStateRoot } from '../runDir'
 
 /**
  * Tailscale, running inside the bundled sidecar.
@@ -75,6 +78,92 @@ let engine: VpnEngineInfo | null = null
 
 /** A device list is not a per-second fact. */
 const POLL_MS = 15_000
+
+/**
+ * The durable directory a profile's node identity lives in.
+ *
+ * ONE definition, used by `start()` and by the override below, because they
+ * have to name the same directory. When these drifted the override would sit
+ * in a folder beside the node it was supposed to name, silently doing nothing.
+ */
+const stateKey = (profileId: string): string => `tailscale-${profileId}`
+
+/** The per-device name file, beside the node key. */
+const hostnameFile = (profileId: string, root: string): string =>
+  join(root, runIdSegment(stateKey(profileId)), 'hostname')
+
+/**
+ * This machine's own name for a profile's node, if it set one.
+ *
+ * ── Why it lives here and not in the profile ───────────────────────────────
+ *
+ * `TailscaleSpec.hostname` syncs, and a tailnet hostname names ONE device — so
+ * paired machines running one profile register under one label and Tailscale
+ * appends `-1`, `-2`. The override has to be device-local, and this is the
+ * directory that already is: `NOT_SYNCED.vpnState` classifies `vpn-state/` as
+ * "engine key material, including a tsnet node identity that IS this device on
+ * the tailnet". A per-device NAME belongs beside the per-device node key it
+ * disambiguates, and the two facts about this device stay together.
+ *
+ * Three things fall out of that choice rather than needing to be built:
+ * `ALL_DATA_DIRS` already covers the directory for wipe and backup, the
+ * trust-boundary guardrail needs no new entry, and the value never enters the
+ * synced blob — so unlike a stripped field it does not reach the relay even as
+ * ciphertext.
+ *
+ * NOT in `opsmaxx-data.json`. `save()` in the renderer's persist.ts writes a
+ * fixed object literal, so any key main added to that blob would be destroyed
+ * on the renderer's next save — silent data loss, and no error anywhere.
+ *
+ * `undefined` for absent rather than `''`: absent means this machine has no
+ * opinion, which is what makes the profile's own name the default.
+ */
+export async function readDeviceHostname(
+  profileId: string,
+  root: string = vpnStateRoot()
+): Promise<string | undefined> {
+  try {
+    const name = (await readFile(hostnameFile(profileId, root), 'utf8')).trim()
+    return name || undefined
+  } catch {
+    // Never set, or the directory has not been created yet. Both are "no
+    // opinion", and neither is a reason to fail a start.
+    return undefined
+  }
+}
+
+/**
+ * Set or clear this machine's name for a profile's node.
+ *
+ * Validated here rather than at start. This arrives from the renderer and
+ * becomes a name sent to the sidecar, so a name no tailnet will take has to be
+ * refused where the user is standing — a start that fails later says only that
+ * the node would not come up, which does not point at the field.
+ */
+export async function writeDeviceHostname(
+  profileId: string,
+  name: string | undefined,
+  root: string = vpnStateRoot()
+): Promise<void> {
+  const trimmed = name?.trim()
+  if (!trimmed) {
+    // Cleared, not blanked: an empty file would read back as absent anyway,
+    // and leaving one behind makes "this machine has no override" look like a
+    // setting somebody made.
+    await rm(hostnameFile(profileId, root), { force: true })
+    return
+  }
+  if (!isTailscaleHostname(trimmed)) {
+    throw new VpnError(
+      'config-invalid',
+      'Use letters, digits and dashes — this becomes the device name on your tailnet.'
+    )
+  }
+  // Through createStateDir so the 0700 parent exists and is hardened the same
+  // way the node key's directory is; this file sits in it.
+  const dir = await createStateDir(stateKey(profileId), root)
+  await writeFile(join(dir, 'hostname'), trimmed, 'utf8')
+}
 
 /**
  * Tailscale's own vocabulary, mapped onto this app's.
@@ -177,7 +266,9 @@ export const tailscaleDriver: VpnDriver<TailscaleSpec> = {
     const issues: VpnValidationIssue[] = []
     // Nothing is required. A profile with no fields set is the normal case:
     // the node is created on first start and authorised in a browser.
-    if (spec.hostname !== undefined && !/^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/.test(spec.hostname)) {
+    // The shared rule, so the form and the per-device override cannot accept a
+    // name this would reject.
+    if (spec.hostname !== undefined && !isTailscaleHostname(spec.hostname)) {
       issues.push({
         path: 'hostname',
         severity: 'error',
@@ -246,11 +337,14 @@ export const tailscaleDriver: VpnDriver<TailscaleSpec> = {
        * be inside the run directory and it was not — it was one level up, in
        * the directory that gets emptied.
        */
-      const stateDir = await createStateDir(`tailscale-${profile.id}`)
+      const stateDir = await createStateDir(stateKey(profile.id))
 
       const reply = await session.send<TsStatusReply>('ts.up', {
         tunnelId: profile.id,
-        hostname: profile.spec.hostname,
+        // This machine's name if it set one, else the profile's. Resolved by
+        // the shared function so the form shows the node the user is actually
+        // going to get.
+        hostname: tailscaleHostname(profile.spec, await readDeviceHostname(profile.id)),
         stateDir,
         // An auth key, when the user supplied one through the vault. Absent
         // is the normal path: the node reports an auth URL instead.

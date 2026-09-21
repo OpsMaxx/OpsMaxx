@@ -255,14 +255,31 @@ function serversSource(): CollectionSource {
  * override, or its frp `autoStart`, goes. Not immediately, and not on a timer;
  * on somebody's next edit. Off and auto-detect are the safe directions to lose
  * them in, which is why this is the trade taken.
- * ponytail: the honest fix is a machine-local override beside `settings`, which
- * is not synced. Do that when someone needs an engine path that sticks — and
- * put `TailscaleSpec.hostname` there at the same time. It is the strongest
- * remaining candidate and is deliberately NOT stripped here: it is the name
- * this node takes on the tailnet, two devices sharing it is a real collision,
- * but it is also a name the user chose, absent means the sidecar invents one,
- * and silently renaming somebody's node is its own bug. It needs the local
- * store, not a strip.
+ * ponytail: the honest fix is a machine-local override for the rest of these.
+ * Do that when someone needs an engine path that sticks. NOT beside `settings`
+ * as this note used to say — that is a key of `opsmaxx-data.json`, and `save()`
+ * in the renderer's persist.ts writes a fixed object literal, so any key main
+ * added to that blob is destroyed on the renderer's next save. Silent data
+ * loss, no error anywhere.
+ *
+ * `TailscaleSpec.hostname` IS HANDLED, and is still deliberately not stripped
+ * here. It has a per-device override stored beside the node key it
+ * disambiguates, in `vpn-state/tailscale-<id>/hostname` — see
+ * `readDeviceHostname` in drivers/tailscale.ts, and `tailscaleHostname()` in
+ * shared/vpn.ts, which is the one place that decides which name wins. The
+ * synced `hostname` stays the default, because it is a name the user chose and
+ * dropping it would hand the node to the sidecar's invention.
+ *
+ * That directory was already the right home: `NOT_SYNCED.vpnState` classifies
+ * it as the tsnet node identity that IS this device, `ALL_DATA_DIRS` already
+ * covers it for wipe and backup, and the value never enters the synced blob —
+ * so unlike a stripped field it does not reach the relay even as ciphertext.
+ * No guardrail entry was needed, which is the tell that it belongs there.
+ *
+ * On urgency, so nobody reads this as either an emergency or noise: the `-1`
+ * suffix Tailscale appends is STABLE once the node key persists. Both nodes
+ * work and both MagicDNS names resolve, so what this fixes is a permanently
+ * confusing admin console rather than churn.
  */
 function vpnsSource(): CollectionSource {
   const inner = blobKey('vpns')

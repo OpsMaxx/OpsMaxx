@@ -5,14 +5,34 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 // a check that was cheap and almost right, producing a sentence that was
 // confidently wrong on an ordinary machine.
 
-const { net, present } = vi.hoisted(() => ({
+const { net, present, route, absent } = vi.hoisted(() => ({
   net: { current: {} as Record<string, unknown[]> },
-  present: new Set<string>()
+  present: new Set<string>(),
+  route: { stdout: '' },
+  // "this machine has no openvpn of its own", which is the only state in which
+  // the not-found message is composed at all. Without it the case below passes
+  // or fails on whether the person running the suite happens to have one in
+  // /opt/homebrew/sbin — the same reason `/Applications` is faked.
+  absent: { openvpn: false }
 }))
 
 vi.mock('node:os', async (orig) => {
   const real = await orig<typeof import('node:os')>()
   return { ...real, networkInterfaces: () => net.current }
+})
+
+// The routing table is faked for the same reason `/Applications` is below: the
+// developer's own Mac is not a fixture. `activeTunnelInterfaces` reads
+// `netstat -rn -f inet` on darwin now, so without this every expectation here
+// would depend on whether the person running the suite has a VPN connected.
+// The route half has its own file — tests/vpnTunnelRoutes.test.ts — and these
+// cases are about the address half, so the default is an empty table.
+vi.mock('../src/main/services/vpn/netstate', async (orig) => {
+  const real = await orig<typeof import('../src/main/services/vpn/netstate')>()
+  return {
+    ...real,
+    readCommand: () => Promise.resolve({ code: 0, stdout: route.stdout, stderr: '' })
+  }
 })
 
 // `stat` is faked for `/Applications` and nowhere else.
@@ -36,12 +56,27 @@ vi.mock('node:fs/promises', async (orig) => {
       return present.has(path)
         ? Promise.resolve({ isFile: () => false, isDirectory: () => true, mode: 0o755, size: 0 })
         : Promise.reject(new Error(`ENOENT: ${path}`))
+    },
+    // `checkExecutable` resolves every candidate before it stats it, so this is
+    // where a machine's real openvpn has to be taken away to reach the
+    // not-found branch deterministically.
+    realpath: (p: Parameters<typeof real.realpath>[0], ...rest: unknown[]) => {
+      const path = String(p)
+      if (absent.openvpn && /[/\\]openvpn$/.test(path)) {
+        return Promise.reject(new Error(`ENOENT: ${path}`))
+      }
+      return (real.realpath as (...a: unknown[]) => unknown)(p, ...rest)
     }
   }
 })
 
-const { activeTunnelInterfaces, coexistenceAdvisories, otherVpnClients, resolveSystem } =
-  await import('../src/main/services/vpn/binaries')
+const {
+  activeTunnelInterfaces,
+  coexistenceAdvisories,
+  otherVpnClients,
+  resetBinaryCache,
+  resolveSystem
+} = await import('../src/main/services/vpn/binaries')
 const { isVpnError } = await import('../src/main/services/vpn/errors')
 
 let platformDescriptor: PropertyDescriptor | undefined
@@ -56,6 +91,11 @@ afterEach(() => {
   platformDescriptor = undefined
   net.current = {}
   present.clear()
+  route.stdout = ''
+  absent.openvpn = false
+  // The route read is held for five seconds, which is longer than this whole
+  // file takes to run, so one case's table would otherwise answer the next.
+  resetBinaryCache()
 })
 
 /** One `networkInterfaces()` entry, in the shape Node actually returns. */
@@ -99,33 +139,33 @@ describe('which interfaces count as a tunnel that is up', () => {
     utun5: [v6('fe80::ac31:7bff:fe0d:22c', 19)]
   }
 
-  it('ignores the link-local utuns every Mac holds open', () => {
+  it('ignores the link-local utuns every Mac holds open', async () => {
     net.current = NOISE
-    expect(activeTunnelInterfaces()).toEqual([])
+    expect(await activeTunnelInterfaces()).toEqual([])
   })
 
-  it('reports a tunnel that actually has a route', () => {
+  it('reports a tunnel that actually has a route', async () => {
     net.current = { ...NOISE, utun6: [v4('10.107.0.60')] }
-    expect(activeTunnelInterfaces()).toEqual(['utun6'])
+    expect(await activeTunnelInterfaces()).toEqual(['utun6'])
   })
 
-  it('ignores an interface that only got a self-assigned address', () => {
+  it('ignores an interface that only got a self-assigned address', async () => {
     // 169.254.0.0/16 is what an interface ends up with when nothing assigned
     // it anything — the IPv4 statement of the same "no route" fact.
     net.current = { tun0: [v4('169.254.31.7', '255.255.0.0')] }
-    expect(activeTunnelInterfaces()).toEqual([])
+    expect(await activeTunnelInterfaces()).toEqual([])
   })
 
-  it('ignores a loopback, however it is named', () => {
+  it('ignores a loopback, however it is named', async () => {
     net.current = { tun9: [{ ...v4('127.0.0.2', '255.0.0.0'), internal: true }] }
-    expect(activeTunnelInterfaces()).toEqual([])
+    expect(await activeTunnelInterfaces()).toEqual([])
   })
 
-  it('still counts a routable IPv6 tunnel', () => {
+  it('still counts a routable IPv6 tunnel', async () => {
     // fe80::/10 is fe80 through febf, so rejecting on the first two nibbles
     // alone would take fec0:: and 2001:db8:: with it.
     net.current = { wg0: [v6('2001:db8::1', 0)] }
-    expect(activeTunnelInterfaces()).toEqual(['wg0'])
+    expect(await activeTunnelInterfaces()).toEqual(['wg0'])
   })
 })
 
@@ -217,5 +257,37 @@ describe('a hand-typed path to OpenVPN Connect', () => {
       confirmed: true
     }).catch((e) => e)
     expect(String(err.message)).toContain('is the OpenVPN Connect CLI')
+  })
+})
+
+describe('when no openvpn is anywhere OpsMaxx looks', () => {
+  it('names the login-PATH limitation and the way out of it', async () => {
+    // The bug report this sentence exists to pre-empt: a Finder-launched
+    // Electron app inherits launchd's PATH, not the login shell's, so an
+    // openvpn from nix, asdf or a custom prefix is on `which openvpn` in a
+    // terminal and invisible here. Being told it is "not installed" while
+    // looking at it is the worst shape a report takes.
+    stubPlatform('darwin')
+    absent.openvpn = true
+    const err = await resolveSystem('openvpn').catch((e) => e)
+    expect(isVpnError(err) && err.code).toBe('binary-missing')
+    const said = String(err.message)
+    expect(said).toContain('login shell')
+    expect(said).toContain('which openvpn')
+    // The remedy, spelled the way the button is spelled in useVpnProfiles.tsx.
+    // A caveat with no way out of it is just a longer dead end.
+    expect(said).toContain('Set the path')
+  })
+
+  it('does not blame PATH on Windows, which never searches it', async () => {
+    // Windows refuses a PATH search by design (E44) and already says so. Adding
+    // "your login shell's PATH differs" there would describe a search that
+    // never happened.
+    stubPlatform('win32')
+    absent.openvpn = true
+    const err = await resolveSystem('openvpn').catch((e) => e)
+    const said = String(err.message)
+    expect(said).toContain('does not search PATH on Windows')
+    expect(said).not.toContain('login shell')
   })
 })

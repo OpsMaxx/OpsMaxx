@@ -6,7 +6,7 @@ import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
 import { bridgeHas } from '../../lib/bridge'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
-import { isCidr, isWireGuardKey, parseVpnEndpoint } from '../../../../shared/vpn'
+import { isCidr, isWireGuardKey, parseVpnEndpoint, tailscaleHostname } from '../../../../shared/vpn'
 import { userSuppliesEngine } from '../../../../shared/vpnEngines'
 import type {
   FrpProxy,
@@ -129,6 +129,44 @@ export function VpnProfileForm({ profile, onClose, focus }: VpnProfileFormProps)
   const [pendingKey, setPendingKey] = useState<PendingKey | null>(null)
   const [saving, setSaving] = useState(false)
 
+  /**
+   * This machine's own name for a Tailscale node, held until Save.
+   *
+   * Like `pendingKey` and for the same reason: it does not live on the spec.
+   * The spec syncs, and a tailnet hostname names ONE device — so a per-device
+   * name in there would reach every paired machine and they would all register
+   * under it. It is stored beside the node key in `vpn-state/`, which is a
+   * separate write on a channel of its own, so Cancel has to discard it the way
+   * Cancel discards every other edit.
+   *
+   * `''` is "no override", which is what makes the profile's name the default.
+   */
+  const [deviceName, setDeviceName] = useState('')
+  // What main last told us, so Save writes only when the user actually changed
+  // it — an unconditional write would rewrite the file on every Save and turn
+  // "never set one" into a setting.
+  const storedDeviceName = useRef<string>('')
+  // A load that lands after the user has started typing must not overwrite
+  // them. The window is milliseconds and the cost of losing the edit is that
+  // the name silently reverts on Save.
+  const deviceNameTouched = useRef(false)
+
+  useEffect(() => {
+    if (draft.spec.kind !== 'tailscale') return
+    if (!bridgeHas(window.opsmaxx?.vpn as Record<string, unknown> | undefined, 'deviceHostname')) {
+      return
+    }
+    let live = true
+    void window.opsmaxx?.vpn.deviceHostname(profile.id).then((name) => {
+      if (!live) return
+      storedDeviceName.current = name ?? ''
+      if (!deviceNameTouched.current) setDeviceName(name ?? '')
+    })
+    return () => {
+      live = false
+    }
+  }, [profile.id, draft.spec.kind])
+
   // The validator runs in main against the spec, so it cannot know a key is
   // sitting in this component waiting to be written. Left alone it reports
   // `private-key-missing`, which is an error, which disables Save — and Save is
@@ -179,6 +217,22 @@ export function VpnProfileForm({ profile, onClose, focus }: VpnProfileFormProps)
       } finally {
         setSaving(false)
       }
+    }
+
+    // The per-device name, which is a separate write to a separate store —
+    // `vpn-state/`, not the profile. Before `upsertVpnProfile`, because a
+    // refusal here has to leave the form open with the field still holding
+    // what the user typed; closing first would discard it silently.
+    if (spec.kind === 'tailscale' && deviceName.trim() !== storedDeviceName.current) {
+      const res = await window.opsmaxx?.vpn.setDeviceHostname(
+        draft.id,
+        deviceName.trim() || undefined
+      )
+      if (res && !res.ok) {
+        toast(res.error ?? 'That name could not be saved for this machine.', 'error')
+        return
+      }
+      storedDeviceName.current = deviceName.trim()
     }
 
     upsertVpnProfile({ ...draft, name, spec })
@@ -266,7 +320,17 @@ export function VpnProfileForm({ profile, onClose, focus }: VpnProfileFormProps)
           />
         )}
         {draft.spec.kind === 'tailscale' && (
-          <TailscaleFields spec={draft.spec} issue={byPath} shown={shown} onChange={setSpec} />
+          <TailscaleFields
+            spec={draft.spec}
+            issue={byPath}
+            shown={shown}
+            onChange={setSpec}
+            deviceName={deviceName}
+            onDeviceName={(v) => {
+              deviceNameTouched.current = true
+              setDeviceName(v)
+            }}
+          />
         )}
 
         {stripped.length > 0 && (
@@ -1051,10 +1115,26 @@ interface TailscaleProps {
   issue: IssueMap
   shown: Set<string>
   onChange: (spec: TailscaleSpec) => void
+  /** This machine's own name for the node. Not part of the spec — it is stored
+   *  per device, so it is held and saved separately. */
+  deviceName: string
+  onDeviceName: (v: string) => void
 }
 
-function TailscaleFields({ spec, issue, shown, onChange }: TailscaleProps): React.JSX.Element {
+function TailscaleFields({
+  spec,
+  issue,
+  shown,
+  onChange,
+  deviceName,
+  onDeviceName
+}: TailscaleProps): React.JSX.Element {
   const set = (patch: Partial<TailscaleSpec>): void => onChange({ ...spec, ...patch })
+  // The same function the driver calls, so what this says is what `ts.up` gets.
+  // Two fields where one wins is exactly the place a second implementation of
+  // the rule would drift and start describing a node nobody has.
+  const effective = tailscaleHostname(spec, deviceName)
+  const overridden = effective !== spec.hostname
   return (
     <>
       <div className="field">
@@ -1066,7 +1146,7 @@ function TailscaleFields({ spec, issue, shown, onChange }: TailscaleProps): Reac
       </div>
 
       <label className="field">
-        <span className="field-label">Device name</span>
+        <span className="field-label">Device name, on every computer</span>
         <input
           className="input"
           placeholder="opsmaxx"
@@ -1076,8 +1156,44 @@ function TailscaleFields({ spec, issue, shown, onChange }: TailscaleProps): Reac
         <Issue at="hostname" map={issue} shown={shown} />
         <span className="field-hint">
           How this appears in your tailnet&apos;s device list. Letters, digits and dashes.
+          This one is part of the profile, so it travels to every computer you have
+          paired — and a tailnet name identifies a single device, so if two of them
+          run this profile Tailscale keeps them apart by adding <code>-1</code>,{' '}
+          <code>-2</code>. Give the second computer a name of its own below.
         </span>
       </label>
+
+      <label className="field">
+        <span className="field-label">Name on this computer only</span>
+        <input
+          className="input"
+          placeholder={spec.hostname ?? 'opsmaxx'}
+          value={deviceName}
+          onChange={(e) => onDeviceName(e.target.value)}
+        />
+        <span className="field-hint">
+          Overrides the name above, here and nowhere else. It is stored with this
+          node&apos;s key on this machine and never syncs, so setting it does not
+          rename anybody else&apos;s device. Leave it empty to use the profile&apos;s
+          name.
+        </span>
+      </label>
+
+      <div className="field">
+        {/* What the node will actually be called, spelled out. Two name fields
+            where one wins is a question the user should not have to answer by
+            starting the tunnel and looking at the admin console. */}
+        <span className="field-hint">
+          {effective ? (
+            <>
+              This computer will appear as <code>{effective}</code>
+              {overridden ? ' — the name above is unchanged elsewhere.' : '.'}
+            </>
+          ) : (
+            'No name set, so Tailscale will choose one for this computer.'
+          )}
+        </span>
+      </div>
 
       <label className="row" style={{ gap: 6, alignItems: 'flex-start' }}>
         <input

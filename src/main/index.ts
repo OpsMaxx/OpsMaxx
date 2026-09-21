@@ -243,6 +243,7 @@ import {
   vpnImport
 } from './services/vpn/import'
 import { wireguardDriver } from './services/vpn/drivers/wireguard'
+import { readDeviceHostname, writeDeviceHostname } from './services/vpn/drivers/tailscale'
 import { mintKeypair, storeKeypair } from './services/vpn/keys'
 import {
   allowPinnedHost,
@@ -5302,6 +5303,23 @@ ipcMain.handle('vpn:stop', (_e, id: string, force?: boolean) => vpnStop(id, { fo
 ipcMain.handle('vpn:reload', (_e, id: string) => vpnReload(id))
 ipcMain.handle('vpn:validate', (_e, spec: VpnSpec) => vpnValidate(spec))
 ipcMain.handle('vpn:probe', (_e, kind: VpnKind) => vpnProbe(kind))
+// This machine's own name for a Tailscale node, which is deliberately NOT in
+// the profile: `TailscaleSpec.hostname` syncs, and a tailnet hostname names one
+// device, so paired machines would register under one label. It lives beside
+// the node key in `vpn-state/` -- see readDeviceHostname for the whole reason.
+ipcMain.handle('vpn:deviceHostname', (_e, id: string) => readDeviceHostname(id))
+ipcMain.handle('vpn:setDeviceHostname', async (_e, id: string, name?: string) => {
+  // Answered as a result rather than thrown. The setter validates the name,
+  // and a rejection has to reach the form as a sentence it can show next to
+  // the field -- an IPC throw arrives in the renderer as "Error invoking
+  // remote method", which names neither the field nor the rule.
+  try {
+    await writeDeviceHostname(id, name)
+    return { ok: true as const }
+  } catch (e) {
+    return toVpnResult(e)
+  }
+})
 // Returns a spec plus the stripped-directive report, and nothing else: the
 // key material stays in main until the user commits the import.
 ipcMain.handle('vpn:import', (_e, kind: VpnKind, text: string, baseDir?: string) =>
