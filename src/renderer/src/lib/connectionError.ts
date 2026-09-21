@@ -120,6 +120,18 @@ const ADVICE: Record<ConnectionFault, FaultAdvice> = {
     // There is nothing to correct in a connection that worked.
     edit: false
   },
+  'exited-nonzero': {
+    // The status itself is in the raw text shown underneath, so this does not
+    // repeat it -- and it does not call a non-zero status an error, because
+    // `exit` returns the last command's status and a mistyped command followed
+    // by `exit` is the ordinary way to reach it.
+    cause: 'The shell exited, carrying the status of its last command.',
+    retry: true,
+    // Same reason as `exited`: there is nothing to correct in a connection that
+    // worked. Offering to edit the credentials here is what made an ordinary
+    // exit look like an authentication problem.
+    edit: false
+  },
   unknown: {
     cause: 'OpsMaxx could not tell what went wrong from what the server said.',
     retry: true,
