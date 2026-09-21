@@ -591,7 +591,12 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
    * step exists to make impossible.
    */
   const confirmReclaim = async (): Promise<void> => {
-    if (!server || reclaimPlan === null) return
+    // `hasTarget`, not `server`: `server` is undefined by construction when the
+    // dropdown is on this machine, so guarding on it made every one of these
+    // return on its first line against the local daemon — silently, with no
+    // IPC and nothing in the console. Everything below already goes through
+    // `targetCfg()`, which has handled the local case since it was added.
+    if (!hasTarget || reclaimPlan === null) return
     setReclaimChecking(true)
     const gen = generation.current
     try {
@@ -658,7 +663,10 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
   const running = probe?.ok ? probe.containers.filter((c) => c.state === 'running') : []
 
   const loadStats = async (): Promise<void> => {
-    if (!server || running.length === 0) return
+    // See confirmReclaim: `hasTarget`, not `server`. This is the one the bug
+    // report was about — "CPU & memory" did nothing at all on this machine,
+    // which is also the default target when no saved server is online.
+    if (!hasTarget || running.length === 0) return
     setStatsLoading(true)
     setStatsError(null)
     const gen = generation.current
