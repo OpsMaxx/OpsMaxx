@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Download, FileText, Hammer, KeyRound, Layers, Pencil, Play, RotateCw, TriangleAlert, Undo2 } from 'lucide-react'
+import { Download, FileText, Hammer, KeyRound, Layers, Pencil, Play, RefreshCw, RotateCw, TriangleAlert, Undo2 } from 'lucide-react'
 import { clsx } from '../../lib/format'
 import { jobApprovalFor, planJob } from '../../../../shared/jobs'
 import {
@@ -209,7 +209,29 @@ export function ComposePanel({
     setEditDone(null)
     setLaunched(null)
     try {
-      setList((await bridge()?.list?.(cfg, { sudo })) ?? null)
+      const r = await bridge()?.list?.(cfg, { sudo })
+      // `?? null` swallowed an unwired bridge into "state unchanged": the label
+      // stayed on "Find compose files" and not one pixel moved, which is
+      // indistinguishable from a dead button. Every sibling read in this panel
+      // substitutes a visible sentence instead — see DockerPanel's `loadDisk`.
+      setList(
+        r ?? {
+          ok: false,
+          reason: 'unknown',
+          detail: 'Finding compose files is not wired up in this build.'
+        }
+      )
+    } catch (e) {
+      // There was no catch at all, and the handler is `onClick={() => void
+      // load()}` — so a rejected invoke became an unhandled rejection while
+      // `finally` re-enabled the button, leaving it looking untouched. This
+      // read is budgeted at 60 seconds, so "nothing happened" was also what a
+      // timeout looked like.
+      setList({
+        ok: false,
+        reason: 'unknown',
+        detail: e instanceof Error ? e.message : String(e)
+      })
     } finally {
       setLoading(false)
     }
@@ -414,8 +436,13 @@ export function ComposePanel({
       <div className="row muted" style={{ fontSize: 11, alignItems: 'center' }}>
         <Layers size={12} />
         <span className="grow">Compose projects</span>
+        {/* A spinner, like every other read in this surface. This one searches
+            a bounded set of roots with `find` and is budgeted at 60 seconds —
+            the longest read in the panel and the only one that gave no sign it
+            had started. */}
         <button className="btn ghost sm" disabled={loading} onClick={() => void load()}>
-          {list === null ? 'Find compose files' : 'Refresh'}
+          <RefreshCw size={12} className={clsx(loading && 'spin')} />{' '}
+          {loading ? 'Searching…' : list === null ? 'Find compose files' : 'Refresh'}
         </button>
       </div>
 
