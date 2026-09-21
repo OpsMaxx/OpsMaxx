@@ -51,7 +51,31 @@ export const SEC_MARKERS = {
  * only thing separating them is a line on stderr. Throwing it away would print
  * "no security updates" for a server nobody looked at.
  */
-export function buildSecurityListCommand(): string {
+/**
+ * Which pending updates to list.
+ *
+ * `security` is what this module was written for. `all` exists because the
+ * patch panel showed "10" in its UPDATES column and offered no way to see WHICH
+ * ten — an operator was asked to approve an install across a fleet with the
+ * package list withheld.
+ *
+ * The counts in that column cannot be reused for it: every manager's collector
+ * runs the real listing command and then collapses it to an integer with
+ * `grep -c` IN THE SHELL, so only a number ever crosses the wire. That is a
+ * deliberate trade for an hourly sweep over a whole fleet, and it is the reason
+ * this on-demand channel exists at all.
+ *
+ * On apt the names were already arriving and being thrown away: the command
+ * below lists every `Inst ` line and the parser dropped the ones without
+ * `-security`. On dnf it is the `--security` flag. Neither needed a new
+ * command, a new parser or a new IPC channel.
+ */
+export type UpdateScope = 'security' | 'all'
+
+export function buildSecurityListCommand(scope: UpdateScope = 'security'): string {
+  // dnf only. The apt branch already lists everything and is filtered in
+  // TypeScript; adding a flag there would be a second place to be wrong.
+  const secFlag = scope === 'security' ? '--security ' : ''
   return [
     'SP_APT=$(command -v apt-get 2>/dev/null || true)',
     'SP_DNF=$(command -v dnf 2>/dev/null || true)',
@@ -60,7 +84,7 @@ export function buildSecurityListCommand(): string {
     'if [ -n "$SP_DNF" ] || [ -n "$SP_YUM" ]; then echo dnf; elif [ -n "$SP_APT" ]; then echo apt; else echo none; fi',
     'SP_PMB="$SP_DNF"; [ -z "$SP_PMB" ] && SP_PMB="$SP_YUM"',
     `echo "${SEC_MARKERS.check}"`,
-    'if [ -n "$SP_PMB" ]; then "$SP_PMB" -C -q --security check-update 2>&1 || true',
+    `if [ -n "$SP_PMB" ]; then "$SP_PMB" -C -q ${secFlag}check-update 2>&1 || true`,
     'elif [ -n "$SP_APT" ]; then "$SP_APT" -s -o Debug::NoLocking=true upgrade 2>&1 | grep -E "^(Inst |E: )" || true; fi',
     `echo "${SEC_MARKERS.list}"`,
     '[ -n "$SP_PMB" ] && { "$SP_PMB" -C -q updateinfo list security 2>&1 || true; }',
@@ -184,7 +208,7 @@ export function parseDnfSecurityCheck(text: string): SecurityUpdate[] {
  * in the measured line -- and the archive suffix `-security` is the marker
  * `hostFacts` already counts by.
  */
-export function parseAptSecurityList(text: string): SecurityUpdate[] {
+export function parseAptSecurityList(text: string, scope: UpdateScope = 'security'): SecurityUpdate[] {
   const out: SecurityUpdate[] = []
   for (const raw of text.split('\n')) {
     const line = raw.trim()
@@ -192,7 +216,8 @@ export function parseAptSecurityList(text: string): SecurityUpdate[] {
     const m = /^Inst\s+(\S+)\s+(?:\[([^\]]*)\]\s+)?\((\S+)\s+([^)]*)\)/.exec(line)
     if (m === null) continue
     const [, name, current, candidate, rest] = m
-    if (!/-security\b/.test(rest)) continue
+    // The one line that was hiding every pending package on an apt host.
+    if (scope === 'security' && !/-security\b/.test(rest)) continue
     out.push({
       name,
       candidate,
@@ -314,7 +339,7 @@ const NO_CACHE_RE = /Cache-only enabled but no cache|Failed to download metadata
  * "no security updates" and "nothing here knows how to ask" are different
  * answers, and only one of them is good news.
  */
-export function parseSecurityListOutput(output: string): SecurityListProbe {
+export function parseSecurityListOutput(output: string, scope: UpdateScope = 'security'): SecurityListProbe {
   const manager = block(output, SEC_MARKERS.manager)
   if (manager === '') {
     return { ok: false, detail: 'the host did not say which package manager it has' }
@@ -334,14 +359,17 @@ export function parseSecurityListOutput(output: string): SecurityListProbe {
     }
   }
   if (manager === 'apt') {
-    return { ok: true, listing: aptSecurityListing(parseAptSecurityList(checkText)) }
+    return { ok: true, listing: aptSecurityListing(parseAptSecurityList(checkText, scope)) }
   }
   return {
     ok: true,
     listing: joinDnfSecurity(
       parseDnfSecurityCheck(checkText),
-      parseDnfSecurityList(block(output, SEC_MARKERS.list)),
-      parseDnfAdvisoryCount(block(output, SEC_MARKERS.summary))
+      // Advisories describe SECURITY errata and nothing else. Attaching them to
+      // an all-updates listing would label ordinary version bumps with the
+      // severity of whatever advisory happened to touch the same package.
+      scope === 'security' ? parseDnfSecurityList(block(output, SEC_MARKERS.list)) : [],
+      scope === 'security' ? parseDnfAdvisoryCount(block(output, SEC_MARKERS.summary)) : 0
     )
   }
 }

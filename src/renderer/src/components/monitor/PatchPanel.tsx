@@ -113,6 +113,10 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   // for: it is a fresh SSH read per host, and the counts beside it come from
   // the hourly sample.
   const [secList, setSecList] = useState<{ serverName: string; probe: SecurityListProbe } | null>(null)
+  // Which question the open list is answering. The two buttons share one
+  // result block, so without this the heading would say "security updates"
+  // over a list of every pending package.
+  const [secScope, setSecScope] = useState<'security' | 'all'>('security')
   const [kernel, setKernel] = useState<{
     serverName: string
     report?: KernelReport
@@ -183,15 +187,23 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
     }
   }
 
-  const loadSecurityList = async (serverId: string): Promise<void> => {
+  const loadSecurityList = async (serverId: string, scope: 'security' | 'all' = 'security'): Promise<void> => {
     const server = servers.find((sv) => sv.id === serverId)
     if (!server) return
     setSecLoading(serverId)
     setSecList(null)
+    setSecScope(scope)
     try {
       const call = (
         window.opsmaxx as
-          | { fleet?: { securityList?: (cfg: OnDemandTarget) => Promise<SecurityListProbe> } }
+          | {
+              fleet?: {
+                securityList?: (
+                  cfg: OnDemandTarget,
+                  scope?: 'security' | 'all'
+                ) => Promise<SecurityListProbe>
+              }
+            }
           | undefined
       )?.fleet?.securityList
       setSecList({
@@ -201,7 +213,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
             ? // sshTargetFor for the same reason the kernel read above uses it:
               // a raw Server carries `route`, main reads `hops`, and the chain
               // vanishes silently on a bastion-only host.
-              await call(sshTargetFor(server))
+              await call(sshTargetFor(server), scope)
             : { ok: false, detail: 'This build cannot list security updates. Restart the app to rebuild it.' }
       })
     } catch (e) {
@@ -565,6 +577,24 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                     </td>
                     <td data-col="pending" className="num">
                       <Count count={r.pending} />
+                      {/* The same channel as the security list beside it, with
+                          the filter off. The UPDATES column showed a number and
+                          nothing else, so an operator was asked to approve an
+                          install across a fleet with the package list withheld.
+                          The counts themselves cannot answer it: the collector
+                          runs the real listing command and collapses it to an
+                          integer with `grep -c` in the shell, so only a number
+                          ever crosses the wire. */}
+                      {r.pending.value !== null && r.pending.value > 0 && (
+                        <button
+                          className="btn ghost sm"
+                          aria-label={`Which updates on ${r.serverName}`}
+                          disabled={secLoading === r.serverId}
+                          onClick={() => void loadSecurityList(r.serverId, 'all')}
+                        >
+                          which
+                        </button>
+                      )}
                     </td>
                     <td data-col="security" className="num">
                       <Count count={r.security} />
@@ -632,7 +662,10 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
             )}
             {secList !== null && (
               <div className="bc-controls" style={{ marginTop: 8 }}>
-                <div className="s-title">Security updates on {secList.serverName}</div>
+                <div className="s-title">
+                  {secScope === 'all' ? 'Pending updates' : 'Security updates'} on{' '}
+                  {secList.serverName}
+                </div>
                 {!secList.probe.ok ? (
                   // NOT an empty list. A read that could not happen and a host
                   // with nothing pending are different answers.
@@ -642,12 +675,30 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                     <div className="s-note">{secList.probe.listing.note}</div>
                     <table className="mini-table">
                       <tbody>
-                        {sortBySeverity(secList.probe.listing.updates).map((u) => (
+                        {/* Severity-first only for the security list. An
+                            all-updates listing has no advisories to sort by —
+                            attaching them would label ordinary version bumps
+                            with the severity of whatever errata touched the
+                            same package — so it goes by name, which is what a
+                            reader scanning for one package wants anyway. */}
+                        {(secScope === 'all'
+                          ? [...secList.probe.listing.updates].sort((a, b) =>
+                              a.name.localeCompare(b.name)
+                            )
+                          : sortBySeverity(secList.probe.listing.updates)
+                        ).map((u) => (
                           <tr key={u.name}>
-                            <td>{u.severity === '' ? <span className="faint">—</span> : u.severity}</td>
+                            {secScope === 'security' && (
+                              <td>
+                                {u.severity === '' ? <span className="faint">—</span> : u.severity}
+                              </td>
+                            )}
                             <td className="mono">{u.name}</td>
+                            <td className="mono faint">{u.current === '' ? '—' : u.current}</td>
                             <td className="mono faint">{u.candidate}</td>
-                            <td className="faint">{u.advisories.join(', ')}</td>
+                            {secScope === 'security' && (
+                              <td className="faint">{u.advisories.join(', ')}</td>
+                            )}
                           </tr>
                         ))}
                       </tbody>

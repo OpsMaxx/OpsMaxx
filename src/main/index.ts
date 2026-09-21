@@ -2222,8 +2222,8 @@ ipcMain.handle('fleet:facts', (_e, serverId: string) => fleetSampler.factsFor(se
 // The security-update LIST, on demand. Not part of the hourly facts sweep --
 // see `HostFactsReader.securityList` for why the counts are sampled and the
 // list is asked for.
-ipcMain.handle('fleet:security-list', (_e, cfg: unknown) =>
-  hostFactsReader.securityList(onDemandTarget(cfg))
+ipcMain.handle('fleet:security-list', (_e, cfg: unknown, scope?: 'security' | 'all') =>
+  hostFactsReader.securityList(onDemandTarget(cfg), scope ?? 'security')
 )
 // Running kernel against installed kernels — roadmap item 46. Asked for rather
 // than sampled: the hourly sweep already carries the restart flag, and this is

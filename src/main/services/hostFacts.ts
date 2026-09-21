@@ -27,7 +27,8 @@ import {
 import {
   buildSecurityListCommand,
   parseSecurityListOutput,
-  type SecurityListProbe
+  type SecurityListProbe,
+  type UpdateScope
 } from '../../shared/securityUpdates'
 import { FACTS_STATUS_MARKER, buildHostFactsCommand, parseHostFacts } from '../../shared/hostFacts'
 
@@ -119,15 +120,15 @@ export class HostFactsReader {
    * Same timeout as the collector, and for the same reason: `dnf -C` walks the
    * cached repository set and takes seconds on a host with a dozen repos.
    */
-  async securityList(cfg: unknown): Promise<SecurityListProbe> {
+  async securityList(cfg: unknown, scope: UpdateScope = 'security'): Promise<SecurityListProbe> {
     try {
-      const r = await this.deps.exec(cfg, buildSecurityListCommand(), HOST_FACTS_TIMEOUT_MS)
+      const r = await this.deps.exec(cfg, buildSecurityListCommand(scope), HOST_FACTS_TIMEOUT_MS)
       // A transport failure is not a host answer. "No security updates" for a
       // connection that never opened is the fabrication this file exists to
       // avoid.
       if (!r.ok) return { ok: false, detail: r.error ?? 'could not reach the server' }
       const merged = (r.stderr ?? '') === '' ? (r.stdout ?? '') : `${r.stdout ?? ''}\n${r.stderr}`
-      return parseSecurityListOutput(merged)
+      return parseSecurityListOutput(merged, scope)
     } catch (e) {
       return { ok: false, detail: e instanceof Error ? e.message : String(e) }
     }

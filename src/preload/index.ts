@@ -1453,8 +1453,8 @@ const api = {
       ipcRenderer.invoke('fleet:facts', serverId),
     // The security-update LIST, asked for rather than sampled: the counts come
     // with `facts` every hour, and this is the tens of rows behind them.
-    securityList: (cfg: OnDemandTarget): Promise<SecurityListProbe> =>
-      ipcRenderer.invoke('fleet:security-list', cfg),
+    securityList: (cfg: OnDemandTarget, scope?: 'security' | 'all'): Promise<SecurityListProbe> =>
+      ipcRenderer.invoke('fleet:security-list', cfg, scope),
     /** Running vs installed kernels. Asked for, not sampled. */
     kernel: (cfg: OnDemandTarget): Promise<KernelStatus | { error: string }> =>
       ipcRenderer.invoke('fleet:kernel', cfg),

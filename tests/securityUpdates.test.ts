@@ -267,3 +267,72 @@ describe('one round trip', () => {
     })
   })
 })
+
+describe('listing every pending update, not only the security ones', () => {
+  // The patch panel showed "10" in its UPDATES column and offered no way to see
+  // WHICH ten — an operator was asked to approve an install across a fleet with
+  // the package list withheld.
+  //
+  // The counts cannot answer it. Every manager's collector runs the real
+  // listing command and collapses it to an integer with `grep -c` IN THE
+  // SHELL, so only a number ever crosses the wire. That is a deliberate trade
+  // for an hourly sweep over a whole fleet, and it is why this on-demand
+  // channel exists.
+  //
+  // On apt the names were already arriving and one line threw them away.
+
+  // Built from SEC_MARKERS rather than typed out: a hand-written marker that
+  // no longer matches makes every assertion below vacuously false, which is
+  // how this fixture was wrong the first time.
+  const APT = [
+    SEC_MARKERS.manager,
+    'apt',
+    SEC_MARKERS.check,
+    'Inst libssl3 [3.0.11-1] (3.0.13-1 Debian:12/stable-security [amd64])',
+    'Inst curl [7.88.1-10] (7.88.1-11 Debian:12/stable [amd64])',
+    'Inst tzdata [2024a-1] (2024b-1 Debian:12/stable [all])',
+    SEC_MARKERS.list,
+    SEC_MARKERS.summary
+  ].join('\n')
+
+  it('returns only the security ones by default, as it always did', () => {
+    const probe = parseSecurityListOutput(APT)
+    expect(probe.ok && probe.listing.updates.map((u) => u.name)).toEqual(['libssl3'])
+  })
+
+  it('returns every pending package when asked for all of them', () => {
+    const probe = parseSecurityListOutput(APT, 'all')
+    expect(probe.ok && probe.listing.updates.map((u) => u.name)).toEqual([
+      'libssl3',
+      'curl',
+      'tzdata'
+    ])
+  })
+
+  it('carries both versions, which is what makes the list worth reading', () => {
+    const probe = parseSecurityListOutput(APT, 'all')
+    const curl = probe.ok ? probe.listing.updates.find((u) => u.name === 'curl') : undefined
+    expect(curl?.current).toBe('7.88.1-10')
+    expect(curl?.candidate).toBe('7.88.1-11')
+  })
+
+  it('still refuses to answer for a host with no package manager', () => {
+    // "No updates" and "nothing here knows how to ask" are different answers,
+    // and only one of them is good news. Scope must not change that.
+    const none = [SEC_MARKERS.manager, 'none', SEC_MARKERS.check].join('\n')
+    expect(parseSecurityListOutput(none, 'all').ok).toBe(false)
+  })
+
+  it('asks dnf for everything rather than only security errata', () => {
+    expect(buildSecurityListCommand('all')).not.toMatch(/--security check-update/)
+    expect(buildSecurityListCommand('security')).toMatch(/--security check-update/)
+  })
+
+  it('leaves the apt command alone, because it already lists everything', () => {
+    // The apt branch is filtered in TypeScript. A flag there would be a second
+    // place to be wrong.
+    const apt = /apt-get[^\n]*-s -o Debug::NoLocking=true upgrade/
+    expect(buildSecurityListCommand('all')).toMatch(apt)
+    expect(buildSecurityListCommand('security')).toMatch(apt)
+  })
+})
