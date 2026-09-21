@@ -17,7 +17,7 @@ import { useApp } from '../../store/app'
 import { sshHopsFor } from '../../lib/ssh'
 import { LOCAL_TARGET } from '../../../../shared/execTarget'
 import { clsx } from '../../lib/format'
-import { hostChoices, defaultHostId, anyConnected } from '../../lib/hostChoices'
+import { hostChoices, anyConnected, resolveHostId } from '../../lib/hostChoices'
 import {
   DOCKER_FAILURE_HELP,
   buildDockerNetworkPreview,
@@ -327,7 +327,6 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
   // live connection was never a precondition for reading one. See
   // lib/hostChoices.ts.
   const eligible = useMemo(() => hostChoices(servers), [servers])
-  const startOn = useMemo(() => defaultHostId(servers), [servers])
 
   /**
    * "This machine" as a target.
@@ -361,9 +360,14 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
    * Resolving against the list that exists also fixes the blank `<select>` the
    * same staleness produced, which is what made the promise below — that the
    * dropdown and the target cannot disagree — not quite true.
+   *
+   * The resolution lives in lib/hostChoices.ts rather than here, because the
+   * Kubernetes panel had the identical line and the first version of this
+   * guard broke both the same way: it discarded the LOCAL sentinel as stale,
+   * since the sentinel is by design not a row in `servers`. See resolveHostId,
+   * which states why.
    */
-  const savedId = serverId && servers.some((sv) => sv.id === serverId) ? serverId : ''
-  const selectedId = savedId || startOn || LOCAL_ID
+  const selectedId = resolveHostId(serverId, servers, LOCAL_ID)
   const localSelected = selectedId === LOCAL_ID
   const server = localSelected ? undefined : servers.find((s) => s.id === selectedId)
   // Docker on this machine is worth offering whether or not any server is

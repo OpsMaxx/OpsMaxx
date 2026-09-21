@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { hostChoices, defaultHostId, anyConnected } from '../src/renderer/src/lib/hostChoices'
+import { hostChoices, defaultHostId, anyConnected, resolveHostId } from '../src/renderer/src/lib/hostChoices'
 import type { Server } from '../src/renderer/src/types'
 
 // A server with a live shell open was missing from the Docker dropdown.
@@ -64,5 +64,37 @@ describe('what the empty state is allowed to claim', () => {
     expect(anyConnected([srv('a', 'offline')])).toBe(false)
     expect(anyConnected([srv('a', 'offline'), srv('b', 'idle')])).toBe(true)
     expect(anyConnected([])).toBe(false)
+  })
+})
+
+describe('which host a panel acts on', () => {
+  // "This machine" stopped being selectable on Docker and Kubernetes.
+  //
+  // The staleness guard both panels grew was `servers.some((sv) => sv.id ===
+  // serverId)`, and the local target is deliberately NOT a row in `servers` —
+  // that list is persisted and mirrored into the MCP data cache, so a
+  // pseudo-server would become an agent-addressable target. So the sentinel
+  // failed the guard, was discarded as stale, and `defaultHostId` put the
+  // selection straight back on a saved server. With any server present the
+  // local daemon could not be reached at all.
+  it('keeps the local sentinel, which is not a saved server', () => {
+    expect(resolveHostId('local', [srv('a', 'online')], 'local')).toBe('local')
+  })
+
+  it('still discards an id no saved server matches', () => {
+    // The crash the guard was added for: a stale id makes `servers.find`
+    // return undefined, and the cfg builder reads `.id` off it at render time.
+    expect(resolveHostId('gone', [srv('a', 'online')], 'local')).toBe('a')
+  })
+
+  it('starts on the default when nothing is stored', () => {
+    expect(resolveHostId('', [srv('a', 'offline'), srv('b', 'online')], 'local')).toBe('b')
+  })
+
+  it('falls back to the local sentinel only when there is nothing saved', () => {
+    // Not a preference for the local daemon — the alternative here is a panel
+    // with no selectable target at all.
+    expect(resolveHostId('', [], 'local')).toBe('local')
+    expect(resolveHostId('gone', [], 'local')).toBe('local')
   })
 })

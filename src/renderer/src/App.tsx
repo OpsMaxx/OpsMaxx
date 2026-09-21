@@ -61,13 +61,35 @@ function MainArea(): React.JSX.Element {
   // the renderer, and someone who never opens it should not pay to build it.
   const httpVisited = useRef(false)
   if (onHttp) httpVisited.current = true
+  // The monitor tree is the third exception, and it earns it the most.
+  //
+  // It is not one screen. Docker, Kubernetes, CI/CD and local processes are
+  // separate activity-bar destinations whose panels are all mounted inside it
+  // — see PROMOTED_MODULE_IDS — so unmounting on the way to a terminal threw
+  // away every one of them at once. Reported as Docker and Kubernetes losing
+  // the host that had just been read: the container list came back empty and
+  // Refresh was the only way to get it back.
+  //
+  // Losing a read was the visible half. A log tail stops its remote command on
+  // unmount and a broadcast holds a live fan-out in component state, and
+  // FleetMonitor's own comment already says that a split which unmounted
+  // either would kill a tail or strand a run — it just said it about the rail
+  // split, which is one level below where the unmounting was happening.
+  //
+  // Mounted on first visit, like the HTTP client, not at startup: someone who
+  // never opens the monitor should not build it. The estate polling is not
+  // what this keeps alive — that lives in FleetWatcher at the app root and has
+  // always run whatever is on screen.
+  const onMonitor = activity === 'monitor'
+  const monitorVisited = useRef(false)
+  if (onMonitor) monitorVisited.current = true
 
   return (
     <>
       <div className={clsx('main-host', !onConnections && 'hidden')} aria-hidden={!onConnections}>
         <WorkspacePanel />
       </div>
-      {activity === 'monitor' && <FleetMonitor />}
+      {monitorVisited.current && <FleetMonitor hidden={!onMonitor} />}
       {activity === 'databases' && <DatabaseWorkspace />}
       {/* One view, three tabs: SSH tunnels, VPN and frp reverse proxies. They
           are all "make a remote thing reachable from here", and splitting them

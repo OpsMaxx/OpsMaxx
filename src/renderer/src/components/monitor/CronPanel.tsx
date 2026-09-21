@@ -502,7 +502,7 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
                         one that catches a timer firing into a failing service. */}
                     {e.kind === 'systemd-timer' && (
                       <button
-                        className="btn-ghost sm"
+                        className="btn quiet size-24"
                         disabled={timerLoading === `${h.serverId}:${e.origin}`}
                         onClick={() => void loadTimerHealth(h.serverId, e.origin)}
                       >

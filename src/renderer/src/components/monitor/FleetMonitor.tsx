@@ -246,7 +246,21 @@ function GroupSection({
   )
 }
 
-export function FleetMonitor(): React.JSX.Element {
+/**
+ * `hidden` is the same contract this component already hands OperationsView,
+ * one level up: another destination is showing, so render nothing, but do not
+ * unmount.
+ *
+ * It exists because App.tsx used to mount this tree only while the monitor was
+ * the active destination, so leaving for a terminal and coming back tore down
+ * every panel in it. Reported as Docker and Kubernetes forgetting the host
+ * that had just been read — the container list came back empty and Refresh was
+ * the only way to see it again — and it was never only those two: a log tail
+ * stops its remote command on unmount, a broadcast holds a live fan-out in
+ * component state, and a half-built patch plan is component state as well.
+ * Every one of those was being thrown away by a trip to another icon.
+ */
+export function FleetMonitor({ hidden = false }: { hidden?: boolean }): React.JSX.Element {
   const servers = useWorkspaceServers()
   const openServerTab = useApp((s) => s.openServer)
   const setModal = useApp((s) => s.setModal)
@@ -517,7 +531,7 @@ export function FleetMonitor(): React.JSX.Element {
   // activity-bar icon the user just pressed is the one being answered.
   if (servers.length === 0 && needsAServer) {
     return (
-      <div className="panel-body">
+      <div className="panel-body" style={hidden ? { display: 'none' } : undefined}>
         <EmptyState
           icon={rail === 'operations' ? <Wrench size={26} /> : <Activity size={26} />}
           title={rail === 'operations' ? 'Nothing to operate on' : 'Nothing to monitor'}
@@ -549,7 +563,7 @@ export function FleetMonitor(): React.JSX.Element {
 
   return (
     <>
-    <div className="content" style={rail === 'operations' ? { display: 'none' } : undefined}>
+    <div className="content" style={hidden || rail === 'operations' ? { display: 'none' } : undefined}>
       {/* Sticky, and this is the single change with the most effect on the page.
           `.content` is the scroll container, so the title and the strip used to
           scroll away — one screen down, nothing on screen said which of the
@@ -927,7 +941,7 @@ export function FleetMonitor(): React.JSX.Element {
     <OperationsView
       servers={servers}
       modules={modules}
-      hidden={rail !== 'operations'}
+      hidden={hidden || rail !== 'operations'}
       jobJump={jobComposerJump ?? undefined}
     />
     </>

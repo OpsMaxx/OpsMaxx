@@ -643,3 +643,57 @@ describe('which packages, per host', () => {
     await screen.findByText(/cannot list security updates/)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Whether anyone can tell the list is there.
+// ---------------------------------------------------------------------------
+
+/**
+ * Reported against 0.50.21 as "patches still not showing, just the count is
+ * there" — about the panel that had shipped the package list one release
+ * earlier, behind these buttons. The channel was never broken: the tests above
+ * click it and get the packages back.
+ *
+ * What was broken is that neither button looked like one. "which" was
+ * `.btn.ghost`, whose own stylesheet comment names the problem — "a tertiary
+ * action reads as a label" — and "kernel" was `btn-ghost`, which is not a
+ * class this app defines at all, so it rendered as bare text in a table cell.
+ * The screen read as "10 which" and "kernel": noise beside a number, not
+ * controls.
+ *
+ * `.btn.quiet` is the variant that exists for this — a ghost with an underline
+ * at REST rather than on hover, opted into by buttons that carry words.
+ */
+describe('the affordance on the package list', () => {
+  const quiet = (el: HTMLElement): boolean =>
+    el.classList.contains('btn') && el.classList.contains('quiet')
+
+  it('offers the security list as something that reads as a control', async () => {
+    stubBridge({
+      jobs: { onProgress: () => () => {}, run: vi.fn() },
+      fleet: { securityList: vi.fn(async () => ({ ok: true, listing: { source: 'apt', updates: [], advisories: null, note: '' } })) }
+    })
+    seedFacts({ a: facts({ securityUpdates: 2 }) })
+    render(<PatchPanel servers={[server('a', 'web-1')]} />)
+    expect(quiet(await screen.findByLabelText('Which packages on web-1'))).toBe(true)
+  })
+
+  it('offers the full pending list the same way', async () => {
+    // The column that prompted the report: UPDATES showed a number and
+    // nothing else, so an operator was asked to approve an install with the
+    // package list withheld.
+    stubBridge({ jobs: { onProgress: () => () => {}, run: vi.fn() } })
+    seedFacts({ a: facts({ pendingUpdates: 10, securityUpdates: 0 }) })
+    render(<PatchPanel servers={[server('a', 'web-1')]} />)
+    expect(quiet(await screen.findByLabelText('Which updates on web-1'))).toBe(true)
+  })
+
+  it('renders the kernel button as a button at all', async () => {
+    // `btn-ghost` matched no rule in any stylesheet, so this one had no
+    // border, no background, no height and no pointer cursor.
+    stubBridge({ jobs: { onProgress: () => () => {}, run: vi.fn() } })
+    seedFacts({ a: facts() })
+    render(<PatchPanel servers={[server('a', 'web-1')]} />)
+    expect(quiet(await screen.findByRole('button', { name: 'kernel' }))).toBe(true)
+  })
+})

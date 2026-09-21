@@ -89,7 +89,7 @@ export function EnvValueWrite({
   if (!open) {
     return (
       <button
-        className="btn-ghost"
+        className="btn quiet"
         style={{ fontSize: 11 }}
         onClick={() => void openForm()}
         aria-label={`Set ${name} from the vault`}
@@ -204,7 +204,7 @@ export function EnvValueWrite({
           {busy ? <Loader2 size={11} className="spin" /> : null}
           {busy ? 'Writing' : 'Write'}
         </button>
-        <button className="btn-ghost" style={{ fontSize: 11 }} onClick={() => setOpen(false)} disabled={busy}>
+        <button className="btn quiet" style={{ fontSize: 11 }} onClick={() => setOpen(false)} disabled={busy}>
           Cancel
         </button>
       </div>

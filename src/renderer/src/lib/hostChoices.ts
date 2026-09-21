@@ -78,3 +78,33 @@ export function defaultHostId(servers: Server[]): string | null {
 export function anyConnected(servers: Server[]): boolean {
   return servers.some((s) => CONNECTED.has(s.status))
 }
+
+/**
+ * Which host id a panel should actually act on, given what it has stored.
+ *
+ * Both Docker and Kubernetes hold the selection in component-local state, which
+ * outlives the thing it names: delete the server, or switch to a workspace
+ * without it, and the panel still holds the old id. Resolving here rather than
+ * reading `serverId` straight is what keeps the dropdown and the target from
+ * disagreeing — a stale id matches no `<option>`, so the browser renders the
+ * select blank while the panel believes it has a target.
+ *
+ * THE LOCAL SENTINEL IS A VALID ANSWER AND MUST SURVIVE.
+ *
+ * `localId` is not a row in `servers` — deliberately, because that list is
+ * persisted and mirrored into the MCP data cache, so a pseudo-server would
+ * become an agent-addressable target the moment it was written. The staleness
+ * check was `servers.some(...)` alone, which is false for the sentinel for
+ * exactly that reason, so choosing "This machine" was discarded as stale and
+ * the panel snapped back to `defaultHostId`. Reported as "This machine option
+ * is not getting selected" on both panels: with any saved server present it
+ * was impossible to target the local daemon at all.
+ *
+ * Returns the sentinel only when there is nothing saved to prefer, which is the
+ * fallback that keeps a panel with no servers usable rather than dead.
+ */
+export function resolveHostId(stored: string, servers: Server[], localId: string): string {
+  if (stored === localId) return localId
+  if (stored !== '' && servers.some((s) => s.id === stored)) return stored
+  return defaultHostId(servers) ?? localId
+}

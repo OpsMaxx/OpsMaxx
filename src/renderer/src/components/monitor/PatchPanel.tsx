@@ -587,7 +587,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                           ever crosses the wire. */}
                       {r.pending.value !== null && r.pending.value > 0 && (
                         <button
-                          className="btn ghost sm"
+                          className="btn quiet size-24"
                           aria-label={`Which updates on ${r.serverName}`}
                           disabled={secLoading === r.serverId}
                           onClick={() => void loadSecurityList(r.serverId, 'all')}
@@ -607,7 +607,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                           list for that would imply there is one to fetch. */}
                       {r.security.value !== null && r.security.value > 0 && (
                         <button
-                          className="btn ghost sm"
+                          className="btn quiet size-24"
                           aria-label={`Which packages on ${r.serverName}`}
                           disabled={secLoading === r.serverId}
                           onClick={() => void loadSecurityList(r.serverId)}
@@ -620,7 +620,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                       {/* Asked for rather than sampled. A row shows nothing
                           until somebody wants the explanation. */}
                       <button
-                        className="btn-ghost sm"
+                        className="btn quiet size-24"
                         disabled={kernelLoading === r.serverId}
                         onClick={() => void loadKernel(r.serverId, r.rebootRequired ?? null)}
                       >
