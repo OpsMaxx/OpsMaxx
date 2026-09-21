@@ -4,7 +4,7 @@ import type { Pane, PaneTarget, TabPanes } from '../../store/app'
 import { clsx } from '../../lib/format'
 import { EmptyState } from '../common/EmptyState'
 import { TerminalView } from '../terminal/TerminalView'
-import { localTransport, sshTransport } from '../../lib/transport'
+import { localTransport, sshTransport, containerTransport} from '../../lib/transport'
 import type { TerminalTransport } from '../../lib/transport'
 import type { Server } from '../../types'
 
@@ -46,6 +46,23 @@ export function PaneGrid({ tabId, tp }: { tabId: string; tp: TabPanes }): React.
     }
     const server = servers.find((sv) => sv.id === target.serverId)
     if (!server) return {}
+    // BEFORE the ssh case. A container pane carries a serverId too, so falling
+    // through here would open a shell on the HOST under the container's name —
+    // which is what made adding this target a prerequisite for minting panes
+    // on a container tab at all, rather than a tidy-up afterwards.
+    if (target.kind === 'container') {
+      return server.demo === false
+        ? {
+            transport: containerTransport(
+              server,
+              target.containerRef,
+              setServerStatus,
+              target.sudo ?? false
+            ),
+            server
+          }
+        : { server }
+    }
     // A demo server has no transport: TerminalView falls through to the
     // simulated shell, which is the one case `server` is still passed for.
     return server.demo === false

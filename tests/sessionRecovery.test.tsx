@@ -441,4 +441,23 @@ describe('the failure card', () => {
     expect(SRC).toMatch(/recovery\.attempt/)
     expect(SRC).toMatch(/recovery\.nextInSec/)
   })
+
+  it('actually implements the Enter the scrollback promises', () => {
+    // "Press Enter to reconnect in this tab." is written into the dead
+    // session's own output, and nothing implemented it. Enter worked only
+    // because the card's Reconnect button is autoFocus'd, so a focused button
+    // activated on Enter — and clicking the error text to read it moved focus
+    // into xterm, where Enter went to a closed session and vanished. Nothing
+    // put focus back; the focus effect refuses to while dead. That is the
+    // whole of "it works sometimes".
+    expect(SRC).toMatch(/dead && e\.key === 'Enter'/)
+  })
+
+  it('reconnects through ONE function, so the button and Enter cannot diverge', () => {
+    // The scrollback tells the user those are the same action. Two
+    // implementations of one promise is how it came to be half-true.
+    expect(SRC).toMatch(/const reconnectFromDead = useCallback/)
+    expect(SRC).toMatch(/onReconnect=\{reconnectFromDead\}/)
+    expect(SRC).toMatch(/reconnectFromDead\(\)/)
+  })
 })

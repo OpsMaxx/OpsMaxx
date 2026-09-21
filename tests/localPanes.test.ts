@@ -109,6 +109,44 @@ describe('every tab is born with exactly one pane', () => {
     useApp.getState().openServer('s1')
     expect(splitDirectionOf(useApp.getState().panes, activeTabId())).toBeNull()
   })
+
+  it('mints one for a container shell too, which is how that tab gets a Close', () => {
+    // `openContainerShell` was the one tab-creating action that minted no
+    // panes. With no entry the tab renders through WorkspacePanel's fallback,
+    // which passes no `onClose` — so the session-ended card had no Close
+    // button and the close-on-exit effect had nothing to call. A container
+    // shell could not be dismissed at all; reconnecting was the only way out.
+    useApp.getState().openContainerShell('s1', 'my-container')
+    const tp = useApp.getState().panes[activeTabId()]
+    expect(tp, 'no panes entry, so the tab falls back to the no-onClose render').toBeTruthy()
+    expect(tp.panes).toHaveLength(1)
+  })
+
+  it('gives it a CONTAINER target, not a shell on the host wearing its name', () => {
+    // The trap that made this more than a one-line fix. A container tab is an
+    // `ssh` tab carrying a containerRef, and `initialPanes` mapped every such
+    // tab to `{ kind: 'ssh' }` — so minting panes naively would have opened a
+    // shell on the HOST under the container's name. Silent, and worse than the
+    // missing button.
+    useApp.getState().openContainerShell('s1', 'my-container', true)
+    const tp = useApp.getState().panes[activeTabId()]
+    expect(tp.panes[0].target).toEqual({
+      kind: 'container',
+      serverId: 's1',
+      containerRef: 'my-container',
+      sudo: true
+    })
+  })
+
+  it('leaves an ordinary server tab an ssh target', () => {
+    // The container branch is tested before the ssh one, so this is the half
+    // that proves it did not swallow both.
+    useApp.getState().openServer('s1')
+    expect(useApp.getState().panes[activeTabId()].panes[0].target).toEqual({
+      kind: 'ssh',
+      serverId: 's1'
+    })
+  })
 })
 
 describe('splitPane', () => {

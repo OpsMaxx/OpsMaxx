@@ -70,6 +70,20 @@ export type PaneTarget =
   // member exists to keep `initialPanes` total rather than to be split. See
   // `RdpTab`: half a desktop is not a smaller desktop.
   | { kind: 'rdp'; serverId: string }
+  /**
+   * A shell inside a container on `serverId`.
+   *
+   * Its absence was a real bug rather than an omission. A container tab is an
+   * `ssh` tab carrying a `containerRef`, and `initialPanes` mapped every such
+   * tab to `{ kind: 'ssh' }` — dropping the container. `openContainerShell`
+   * was then the one tab-creating action that minted no panes at all, which
+   * looks like it dodged the problem and instead caused a second one: with no
+   * `panes` entry the tab renders through WorkspacePanel's fallback, which
+   * passes no `onClose`, so the session-ended card had no Close button and the
+   * close-on-exit effect had nothing to call. A container shell could not be
+   * dismissed at all — reconnecting was the only way out of the card.
+   */
+  | { kind: 'container'; serverId: string; containerRef: string; sudo?: boolean }
 
 export interface Pane {
   // Minted by the store when the pane is created and never derived during
@@ -851,7 +865,17 @@ function initialPanes(tab: Tab): TabPanes {
       ? { kind: 'local', shellId: tab.shellId, cwd: tab.cwd }
       : tab.kind === 'rdp'
         ? { kind: 'rdp', serverId: tab.serverId }
-        : { kind: 'ssh', serverId: tab.serverId }
+        : // A container tab is an `ssh` tab with a containerRef, so this has to
+          // be tested before the ssh case or the container is dropped and the
+          // pane opens a shell on the HOST under the container's name.
+          tab.kind === 'ssh' && tab.containerRef
+          ? {
+              kind: 'container',
+              serverId: tab.serverId,
+              containerRef: tab.containerRef,
+              sudo: tab.containerSudo
+            }
+          : { kind: 'ssh', serverId: tab.serverId }
   const pane: Pane = { id: uid('pane'), target }
   return { direction: 'v', panes: [pane], activePaneId: pane.id }
 }
@@ -1327,7 +1351,15 @@ export const useApp = create<AppState>((set, get) => ({
       // would show the host's disk usage under a container's name.
       view: 'terminal'
     }
-    set((s) => ({ tabs: [...s.tabs, tab], activeTabId: tab.id, activity: 'connections' }))
+    set((s) => ({
+      tabs: [...s.tabs, tab],
+      activeTabId: tab.id,
+      activity: 'connections',
+      // Every other tab-creating action does this, and skipping it here is what
+      // left a container shell with no way to close it. See PaneTarget's
+      // `container` member.
+      panes: { ...s.panes, [tab.id]: initialPanes(tab) }
+    }))
   },
 
   openServer: (serverId, view = 'terminal') => {

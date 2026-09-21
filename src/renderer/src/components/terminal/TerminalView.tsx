@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Pencil, RotateCw, Terminal as TerminalIcon, X } from 'lucide-react'
 import { RECOVERY_BUDGET_MS, type RecoveryState } from '../../hooks/useSessionRecovery'
 import { credentialNote, type CredentialShape } from '../../../../shared/credentialShape'
@@ -466,6 +466,27 @@ function RealTerminal({
     onClose()
   }, [dead, onClose, closeOnExit])
 
+  /**
+   * Dial again after the session ended.
+   *
+   * One function for the card's button and for Enter, rather than the button's
+   * inline handler plus a second copy: the scrollback tells the user those are
+   * the same action, and two implementations of one promise is how the promise
+   * came to be half-true in the first place.
+   */
+  const reconnectFromDead = useCallback((): void => {
+    // Clear the flag first: the tab is awake from here on, so a later drop
+    // shows an ordinary reconnect rather than claiming again that it was
+    // restored.
+    if (dormant && tabId) {
+      const owner = Object.entries(useApp.getState().panes).find(([, tp]) =>
+        tp.panes.some((p) => p.id === tabId)
+      )?.[0]
+      wakeTab(owner ?? tabId)
+    }
+    reconnect()
+  }, [dormant, tabId, wakeTab, reconnect])
+
   return (
     <div
       className="terminal-wrap"
@@ -482,6 +503,24 @@ function RealTerminal({
          Tab and the bare modifiers are excluded: moving focus between the
          card's own buttons is not a decision about the session. */
       onKeyDown={(e) => {
+        /* THE SCROLLBACK PROMISES THIS, so it has to be true wherever focus is.
+           "Press Enter to reconnect in this tab." was written into the dead
+           session's own output, and nothing implemented it: Enter worked only
+           because the card's Reconnect button is autoFocus'd, so a focused
+           button activated on Enter. Click the error text to read it — the
+           dead terminal is deliberately still selectable — and focus moved
+           into xterm, where Enter was written to a closed session and vanished.
+           Nothing ever put focus back; the focus effect refuses to while dead.
+           That is the whole of "it works sometimes".
+
+           Handled here rather than by re-focusing the button, because this
+           catches the xterm case too: React's synthetic keydown sees the event
+           bubbling out of the terminal's own textarea. */
+        if (dead && e.key === 'Enter' && !recovery.active) {
+          e.preventDefault()
+          reconnectFromDead()
+          return
+        }
         if (!recovery.active) return
         if (['Tab', 'Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return
         cancelRecovery()
@@ -494,18 +533,7 @@ function RealTerminal({
           transport={transport}
           recovery={recovery}
           onCancelRecovery={cancelRecovery}
-          onReconnect={() => {
-            // Clear the flag first: the tab is awake from here on, so a later
-            // drop shows an ordinary reconnect rather than claiming again that
-            // it was restored.
-            if (dormant && tabId) {
-              const owner = Object.entries(useApp.getState().panes).find(([, tp]) =>
-                tp.panes.some((p) => p.id === tabId)
-              )?.[0]
-              wakeTab(owner ?? tabId)
-            }
-            reconnect()
-          }}
+          onReconnect={reconnectFromDead}
           onClose={onClose}
           closeLabel={closeLabel}
         />
