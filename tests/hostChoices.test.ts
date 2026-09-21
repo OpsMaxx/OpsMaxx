@@ -28,16 +28,16 @@ describe('which hosts a panel offers', () => {
   it('says which are not connected instead of removing them', () => {
     const [a, b] = hostChoices([srv('a', 'offline'), srv('b', 'online')])
     expect(a.note).toBe('not connected')
-    expect(a.connected).toBe(false)
-    expect(b.note).toBe(null)
+    expect(b.note, 'nothing to say about the ordinary case').toBe(null)
   })
 
   it('counts connecting and idle as connected, the way the dropdown always did', () => {
     // The old filter was `!== 'offline'`, so these two were always included.
     // Narrowing that here would be a second bug wearing the fix's clothes.
     for (const s of ['online', 'idle', 'connecting'] as const) {
-      expect(hostChoices([srv('x', s)])[0].connected, s).toBe(true)
+      expect(hostChoices([srv('x', s)])[0].note, s).toBe(null)
     }
+    expect(hostChoices([srv('x', 'offline')])[0].note).toBe('not connected')
   })
 })
 

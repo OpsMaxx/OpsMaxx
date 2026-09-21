@@ -316,6 +316,32 @@ describe('listing every pending update, not only the security ones', () => {
     expect(curl?.candidate).toBe('7.88.1-11')
   })
 
+  it('does not claim advisories it never counted', () => {
+    // `advisories` is "the count the manager reported", and an all-updates
+    // read reports none. Passing 0 instead of null made the note say
+    // "2 package(s) will change, covered by 0 advisories" — on the one screen
+    // this scope was added for.
+    const dnf = [
+      SEC_MARKERS.manager, 'dnf', SEC_MARKERS.check,
+      'curl.x86_64   7.76.1-26.el9_3   baseos',
+      'kernel.x86_64   5.14.0-362.el9   baseos',
+      SEC_MARKERS.list, SEC_MARKERS.summary
+    ].join('\n')
+    const probe = parseSecurityListOutput(dnf, 'all')
+    expect(probe.ok && probe.listing.advisories).toBe(null)
+    expect(probe.ok && probe.listing.note).not.toMatch(/0 advisories/)
+  })
+
+  it('does not call an all-updates list a security list when it is empty', () => {
+    // Reachable whenever the hourly counts and the on-demand list disagree —
+    // a host patched in between shows this under a "Pending updates" heading.
+    const empty = [SEC_MARKERS.manager, 'apt', SEC_MARKERS.check, SEC_MARKERS.list, SEC_MARKERS.summary].join('\n')
+    const all = parseSecurityListOutput(empty, 'all')
+    expect(all.ok && all.listing.note).toMatch(/No pending updates/)
+    const sec = parseSecurityListOutput(empty)
+    expect(sec.ok && sec.listing.note).toMatch(/No security updates/)
+  })
+
   it('still refuses to answer for a host with no package manager', () => {
     // "No updates" and "nothing here knows how to ask" are different answers,
     // and only one of them is good news. Scope must not change that.

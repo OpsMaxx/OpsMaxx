@@ -479,7 +479,14 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   const [execContainer, setExecContainer] = useState('')
   const [execPhrase, setExecPhrase] = useState('')
   const [execBusy, setExecBusy] = useState(false)
-  const [execResult, setExecResult] = useState<{ pod: string; r: K8sExecResult } | null>(null)
+  // `key` is podKey(namespace/name); `pod` is the bare name, kept only for the
+  // sentence the result renders. The two are not interchangeable — see where
+  // this is set.
+  const [execResult, setExecResult] = useState<{
+    key: string
+    pod: string
+    r: K8sExecResult
+  } | null>(null)
 
   const [pending, setPending] = useState<{ plan: K8sRolloutPlan } | null>(null)
   const [phrase, setPhrase] = useState('')
@@ -505,7 +512,24 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
    * target can never disagree — with nothing online the browser would render
    * the only option as selected while the state was still ''.
    */
-  const selectedId = serverId || startOn || LOCAL_ID
+  /**
+   * A STALE `serverId` MUST NOT SURVIVE THIS.
+   *
+   * `serverId` is component-local and outlives the server it names: delete the
+   * server, or switch to a workspace that does not have it, and this still
+   * holds the old id. `servers.find` then returns undefined, `localSelected`
+   * is false, and `targetCfg()` calls `cfgFor(undefined)` — which reads `.id`
+   * and throws. That is a render-time call (the compose panel is handed a cfg
+   * as a prop), so it does not fail a button, it takes the whole panel down
+   * through the error boundary. Reported from 0.50.19 as
+   * "Cannot read properties of undefined (reading 'id')" at cfgFor/targetCfg.
+   *
+   * Resolving against the list that actually exists also fixes the blank
+   * `<select>` the same staleness produced, and restores the promise the
+   * comment below makes: the dropdown and the target cannot disagree.
+   */
+  const savedId = serverId && servers.some((sv) => sv.id === serverId) ? serverId : ''
+  const selectedId = savedId || startOn || LOCAL_ID
   const localSelected = selectedId === LOCAL_ID
   const server = localSelected ? undefined : servers.find((s) => s.id === selectedId)
   // A local kubeconfig is the one most developers actually have — kind,
@@ -538,6 +562,11 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
     setLogs({})
     setPoppedOut(null)
     setDiag({})
+    // Exec too. It is keyed by namespace/name, and that key means nothing
+    // once the cluster underneath it has changed — a result from one
+    // cluster would otherwise render under a same-named pod on the next.
+    setExecFor(null)
+    setExecResult(null)
     try {
       const r = await withVaultUnlock(
         'Reading this cluster needs the server’s stored credential.',
@@ -777,6 +806,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
       }
       if (!b.execPlan || !b.exec) {
         setExecResult({
+          key: podKey(execFor),
           pod: execFor.name,
           r: { ok: false, output: '', containerExit: null, reason: 'unknown', detail: NOT_WIRED }
         })
@@ -796,13 +826,23 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         phrase: execPhrase.trim(),
         confirmedAt: Date.now()
       })
-      setExecResult({ pod: execFor.name, r: await b.exec(targetCfg(), target, approval) })
+      // Keyed by namespace/name, like `diag` and `logs`. A bare name is not an
+      // identity here: two namespaces routinely hold a pod of the same name —
+      // one Helm chart in `staging` and `prod` gives `web-0` twice — and this
+      // list now spans namespaces by default. Matching on name alone rendered
+      // one pod's command output under every same-named pod in the cluster.
+      setExecResult({
+        key: podKey(execFor),
+        pod: execFor.name,
+        r: await b.exec(targetCfg(), target, approval)
+      })
       setExecFor(null)
       setExecCommand('')
       setExecContainer('')
       setExecPhrase('')
     } catch (e) {
       setExecResult({
+        key: podKey(execFor),
         pod: execFor.name,
         r: {
           ok: false,
@@ -1022,6 +1062,8 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
             setLogs({})
             setPoppedOut(null)
             setDiag({})
+            setExecFor(null)
+            setExecResult(null)
             setOverview(null)
             setUsage(null)
             /**
@@ -1219,8 +1261,12 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                 )}
                 {/* A list narrowed by choice is not the same as a list narrowed
                     by RBAC, and saying so is the difference between "you picked
-                    this" and "you cannot see the rest". */}
-                {probe.allNamespaces && probe.scopedTo && (
+                    this" and "you cannot see the rest".
+                    Not gated on `allNamespaces`: the two can both be true — an
+                    account limited to one namespace that then picks it — and
+                    suppressing the chip there left the user's own choice
+                    unnamed in exactly the case where both explanations apply. */}
+                {probe.scopedTo && (
                   <span className="faint">in {probe.scopedTo}</span>
                 )}
                 <span className="spacer" />
@@ -1318,7 +1364,11 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                             setExecCommand('')
                             setExecContainer('')
                             setExecPhrase('')
-                            setExecFor(execFor?.name === p.name ? null : p)
+                            // podKey on both sides. Comparing names alone
+                            // disagreed with the render predicate below, so
+                            // clicking exec on prod/web-0 while staging/web-0
+                            // was open closed that one and opened nothing.
+                            setExecFor(execFor && podKey(execFor) === key ? null : p)
                           }}
                         >
                           <SquareTerminal size={13} />
@@ -1399,7 +1449,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
           </div>
         </div></>
                     )}
-                    {execResult?.pod === p.name && (
+                    {execResult?.key === key && (
                       <div className={clsx('s-desc', execResult.r.ok ? '' : 'danger')}>
                         <span className="grow">
                           {execResult.r.ok

@@ -42,7 +42,22 @@ describe('a pod row owns what its buttons open', () => {
 
   it('renders the exec RESULT inside the row too', () => {
     // It landed below the card, which was itself below everything else.
-    expect(rowBlock()).toMatch(/execResult\?\.pod === p\.name/)
+    //
+    // Matched on podKey, not on the bare name. Two namespaces routinely hold a
+    // pod of the same name — one Helm chart in staging and prod gives `web-0`
+    // twice — and this list spans namespaces, so a name-only match rendered
+    // one pod's command output under every same-named pod in the cluster.
+    expect(rowBlock()).toMatch(/execResult\?\.key === key/)
+    expect(rowBlock(), 'a bare name is not an identity here').not.toMatch(
+      /execResult\?\.pod === p\.name/
+    )
+  })
+
+  it('opens and closes exec on the same identity it renders it with', () => {
+    // The toggle compared names while the render compared namespace+name, so
+    // clicking exec on prod/web-0 while staging/web-0 was open closed that one
+    // and opened nothing — a button that looks dead.
+    expect(rowBlock()).toMatch(/podKey\(execFor\) === key/)
   })
 })
 

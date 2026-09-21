@@ -87,6 +87,29 @@ describe('picking a namespace', () => {
     expect(names(probe)).toEqual(['certify-api', 'datadog', 'fluentbit'])
   })
 
+  it('does NOT claim a namespace is empty when both reads were refused', () => {
+    // An account that can list namespaces but not pods in one of them is the
+    // ordinary multi-tenant case, and it survives the cluster-silent guard
+    // because `kubectl get ns` succeeded. Setting scopedTo there turned "the
+    // cluster said forbidden twice" into "the cluster answered and has no pods
+    // in security" — an affirmative claim about a namespace nobody read.
+    const refused = 'Error from server (Forbidden): pods is forbidden'
+    const probe = parseK8sOutput(out({ all: refused, nsPods: refused }), 0, 'security')
+    expect(probe.ok && probe.pods).toEqual([])
+    expect(probe.ok && probe.scopedTo, 'nothing was narrowed, because nothing was read').toBe(null)
+  })
+
+  it('trims a namespace before using it, on both the command and the filter', () => {
+    // validateNamespace trims before testing, so " security " passes. The
+    // command then interpolated it verbatim — `--namespace= security`, an
+    // empty flag plus a stray positional — and the new filter compared the
+    // untrimmed string, emptying the list it was asked to narrow.
+    expect(buildK8sReadCommand(undefined, ' security ')).toContain('--namespace=security')
+    const probe = parseK8sOutput(out({ all: CLUSTER, nsPods: '' }), 0, ' security ')
+    expect(probe.ok && probe.scopedTo).toBe('security')
+    expect(names(probe)).toEqual(['certify-api'])
+  })
+
   it('asks kubectl for the namespace it was given', () => {
     // The parser can only prefer the namespaced section if the command
     // actually scoped it.

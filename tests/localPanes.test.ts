@@ -138,6 +138,40 @@ describe('every tab is born with exactly one pane', () => {
     })
   })
 
+  it('backfills a tab restored from disk with no panes entry', () => {
+    // Minting at creation fixes new tabs and reaches none of the saved ones.
+    // Container tabs have been written to disk WITHOUT a panes entry for as
+    // long as container shells have existed, so a restore that only filters
+    // leaves every existing user with the bug — no Close button on the
+    // session-ended card, and nothing for the close-on-exit effect to call.
+    // It does not self-heal: reopening the container refocuses that tab.
+    const tab = {
+      id: 'tab-restored',
+      kind: 'ssh' as const,
+      workspaceId: 'ws-default',
+      serverId: 's1',
+      containerRef: 'my-container',
+      title: 'my-container',
+      view: 'terminal' as const
+    }
+    // workspaces/servers included: replaceAll drops a tab whose workspace or
+    // server no longer exists, which is right and would otherwise make this
+    // test pass for the wrong reason.
+    useApp.getState().replaceAll({
+      tabs: [tab],
+      panes: {},
+      activeTabId: tab.id,
+      workspaces: useApp.getState().workspaces,
+      servers: useApp.getState().servers
+    } as never)
+
+    const tp = useApp.getState().panes[tab.id]
+    expect(tp, 'restored with no panes entry, so the fallback renders it with no onClose').toBeTruthy()
+    expect(tp.panes).toHaveLength(1)
+    // And as a CONTAINER, not a shell on its host: initialPanes reads the tab.
+    expect(tp.panes[0].target).toMatchObject({ kind: 'container', containerRef: 'my-container' })
+  })
+
   it('leaves an ordinary server tab an ssh target', () => {
     // The container branch is tested before the ssh one, so this is the half
     // that proves it did not swallow both.

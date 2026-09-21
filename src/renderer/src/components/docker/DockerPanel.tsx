@@ -346,7 +346,24 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
   // A saved server stays the default when there is one; this machine is the
   // default only when there is nothing else, where the alternative is a dead
   // panel.
-  const selectedId = serverId || startOn || LOCAL_ID
+  /**
+   * A STALE `serverId` MUST NOT SURVIVE THIS.
+   *
+   * `serverId` is component-local and outlives the server it names: delete the
+   * server, or switch to a workspace without it, and this still holds the old
+   * id. `servers.find` then returns undefined, `localSelected` is false, and
+   * `targetCfg()` calls `cfgFor(undefined)` — which reads `.id` and throws.
+   * That is a RENDER-time call (ComposePanel is handed a cfg as a prop), so it
+   * does not fail a button, it takes the whole panel down through the error
+   * boundary. Reported from 0.50.19 as "Cannot read properties of undefined
+   * (reading 'id')" at cfgFor/targetCfg/DockerPanel.
+   *
+   * Resolving against the list that exists also fixes the blank `<select>` the
+   * same staleness produced, which is what made the promise below — that the
+   * dropdown and the target cannot disagree — not quite true.
+   */
+  const savedId = serverId && servers.some((sv) => sv.id === serverId) ? serverId : ''
+  const selectedId = savedId || startOn || LOCAL_ID
   const localSelected = selectedId === LOCAL_ID
   const server = localSelected ? undefined : servers.find((s) => s.id === selectedId)
   // Docker on this machine is worth offering whether or not any server is
@@ -1034,12 +1051,19 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
               service has no container at all, which is the one fact nothing on
               this panel could state before. It is a separate read behind a
               button because it costs a bounded filesystem search. */}
-          <ComposePanel
-            server={server}
-            cfg={targetCfg()}
-            containers={probe.containers}
-            sudo={usedSudoNow === true}
-          />
+          {/* Gated on a target, because `cfg` is evaluated HERE — during
+              render, not in a handler. Every other caller of `targetCfg()`
+              sits behind a `hasTarget` guard inside an event handler; this one
+              had nothing. The resolution above should make that unreachable;
+              this is the half that does not depend on it being right. */}
+          {hasTarget && (
+            <ComposePanel
+              server={server}
+              cfg={targetCfg()}
+              containers={probe.containers}
+              sudo={usedSudoNow === true}
+            />
+          )}
 
           {/* Disk. The reclaimable column is the one people came for: it is the
               answer to "the disk is full and I do not know what is using it".

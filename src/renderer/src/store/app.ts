@@ -1024,7 +1024,15 @@ function duplicateOf(tabs: Tab[], servers: Server[], src: Tab, id: UUID): Tab {
     workspaceId: src.workspaceId,
     serverId: src.serverId,
     title: sessionTitle(tabs, src.workspaceId, sameTarget(src), base),
-    view: src.view
+    view: src.view,
+    // A container tab IS an ssh tab carrying these, and dropping them made the
+    // duplicate claim to be a host shell while its copied pane still targeted
+    // the container. `openServer`'s `!t.containerRef` guard then matched it and
+    // focused a shell inside the container for somebody who clicked the server,
+    // which is the exact case that guard exists to prevent.
+    ...(src.kind === 'ssh' && src.containerRef
+      ? { containerRef: src.containerRef, containerSudo: src.containerSudo }
+      : {})
   }
 }
 
@@ -2464,10 +2472,26 @@ export const useApp = create<AppState>((set, get) => ({
             activeTabId: restoredTabs.some((t) => t.id === data.activeTabId)
               ? data.activeTabId
               : (restoredTabs[0]?.id ?? null),
+            /**
+             * Filtered to surviving tabs, and BACKFILLED for any that has no
+             * entry.
+             *
+             * Filtering alone was right while every tab-creating action minted
+             * panes — but `openContainerShell` did not, for as long as
+             * container shells have existed. Those tabs are on disk with no
+             * `panes` entry, and a restore that only filters leaves them that
+             * way: they fall to WorkspacePanel's fallback, which passes no
+             * `onClose`, so the session-ended card has no Close button and the
+             * close-on-exit effect has nothing to call. Minting at creation
+             * fixes new tabs and reaches none of the saved ones, and it does
+             * not self-heal either — reopening the same container refocuses
+             * the existing tab without minting.
+             *
+             * `initialPanes` reads the tab, so a restored container tab gets a
+             * container target rather than a shell on its host.
+             */
             panes: Object.fromEntries(
-              Object.entries(data.panes ?? {}).filter(([id]) =>
-                restoredTabs.some((t) => t.id === id)
-              )
+              restoredTabs.map((t) => [t.id, data.panes?.[t.id] ?? initialPanes(t)])
             ),
             // Never restored: these are shell ids belonging to a process that
             // has exited. A stale one matches nothing, or matches something new.

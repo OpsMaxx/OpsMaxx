@@ -389,7 +389,10 @@ const call = (marker: string, args: string): string =>
  */
 export function buildK8sReadCommand(context?: string, namespace?: string): string {
   const ctx = context && validateContext(context) ? ` --context=${context}` : ''
-  const ns = namespace && validateNamespace(namespace) ? ` --namespace=${namespace}` : ''
+  // `.trim()` for the same reason the parser trims: validateNamespace trims
+  // before testing, so " prod " passes and would otherwise be interpolated
+  // verbatim — `--namespace= prod` is an empty flag plus a stray positional.
+  const ns = namespace && validateNamespace(namespace) ? ` --namespace=${namespace.trim()}` : ''
   const t = T
   const resolve = k8sResolve()
   const k = K
@@ -638,7 +641,23 @@ export function parseK8sOutput(
    * fallback for it — filtered here rather than discarded, so that an account
    * whose namespaced read failed still gets the right rows instead of none.
    */
-  const scoped = namespace && validateNamespace(namespace) ? namespace : null
+  // Trimmed, because `validateNamespace` trims before testing and this value is
+  // now also compared against `p.namespace` below. Without it " prod " passes
+  // validation, is compared untrimmed, matches nothing, and empties a list it
+  // was asked to narrow.
+  const asked = namespace && validateNamespace(namespace) ? namespace.trim() : null
+  /**
+   * `scopedTo` describes a list that was NARROWED, so it may only be set when
+   * there is a list. When both pod reads were refused there is nothing to
+   * narrow, and claiming otherwise turns "the cluster said forbidden twice"
+   * into "the cluster answered and has no pods in prod" — an affirmative
+   * statement about a namespace nobody managed to read.
+   *
+   * That shape is not exotic: an account that can list namespaces but not pods
+   * in one of them is the ordinary multi-tenant case, and it survives the
+   * `clusterSilent` guard above precisely because `kubectl get ns` succeeded.
+   */
+  const scoped = asked && (nsOk || allOk) ? asked : null
   const pods = scoped
     ? nsOk
       ? parsePods(nsPodText)

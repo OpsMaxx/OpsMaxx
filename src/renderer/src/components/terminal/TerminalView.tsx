@@ -156,6 +156,25 @@ function Recovering({
   )
 }
 
+/**
+ * Did this key event come from the terminal, rather than from a control drawn
+ * over it?
+ *
+ * The dead-session card, the find bar and the paste confirmation all live
+ * inside `.terminal-wrap`, so a keydown handler on the wrapper sees their keys
+ * too — and anything focusable in there owns its own Enter.
+ *
+ * A POSITIVE test, not a list of things to exclude. Naming the overlays means
+ * the next one added inherits the bug silently, and it is the kind of list
+ * that is wrong the moment a class is renamed. The terminal is `.xterm-host`
+ * and the wrapper itself, which is where focus sits after a click or a drag on
+ * the dead scrollback; everything else in here is a control.
+ */
+function fromTerminalItself(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return target.closest('.xterm-host') !== null || target.classList.contains('terminal-wrap')
+}
+
 function DeadSession({
   dead,
   transport,
@@ -515,8 +534,20 @@ function RealTerminal({
 
            Handled here rather than by re-focusing the button, because this
            catches the xterm case too: React's synthetic keydown sees the event
-           bubbling out of the terminal's own textarea. */
-        if (dead && e.key === 'Enter' && !recovery.active) {
+           bubbling out of the terminal's own textarea.
+
+           AND THAT REACH IS WHY IT NEEDS A TARGET CHECK. The wrapper contains
+           the whole dead card and the find bar, so an unguarded version stole
+           Enter from every control inside it. The worst case is a rejected
+           credential: `auth` advice is `{retry: false, edit: true}`, so there
+           is no Reconnect button at all, "Edit connection" is the autofocused
+           one, and Enter on it would `preventDefault()` the button's own
+           activation and silently reconnect instead — offering the action the
+           advice table exists to say is known not to work. Same theft for the
+           Close button, the vault-unlock button, and Enter in the find bar,
+           which is reachable while dead precisely because the card advertises
+           that the scrollback is kept. */
+        if (dead && e.key === 'Enter' && !recovery.active && fromTerminalItself(e.target)) {
           e.preventDefault()
           reconnectFromDead()
           return

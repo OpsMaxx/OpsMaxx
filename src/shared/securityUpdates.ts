@@ -278,7 +278,15 @@ export function joinDnfSecurity(
   }
 }
 
-export function aptSecurityListing(updates: SecurityUpdate[]): SecurityListing {
+export function aptSecurityListing(
+  updates: SecurityUpdate[],
+  scope: UpdateScope = 'security'
+): SecurityListing {
+  // The empty sentence used to be hard-coded to "No security updates", which
+  // was then shown under a "Pending updates" heading once the all-updates
+  // scope started using this function. Reachable whenever the hourly counts
+  // and the on-demand list disagree — a host patched in between.
+  const what = scope === 'security' ? 'security updates' : 'pending updates'
   return {
     source: 'apt',
     updates,
@@ -286,7 +294,7 @@ export function aptSecurityListing(updates: SecurityUpdate[]): SecurityListing {
     advisories: null,
     note:
       updates.length === 0
-        ? 'No security updates in the package lists as they stand. apt gives no way to tell that from a server whose lists were never downloaded — both print nothing — so check the cache age beside this before treating it as an all-clear.'
+        ? `No ${what} in the package lists as they stand. apt gives no way to tell that from a server whose lists were never downloaded — both print nothing — so check the cache age beside this before treating it as an all-clear.`
         : `${updates.length} package(s) will change, from the package lists as they stand.`
   }
 }
@@ -359,7 +367,7 @@ export function parseSecurityListOutput(output: string, scope: UpdateScope = 'se
     }
   }
   if (manager === 'apt') {
-    return { ok: true, listing: aptSecurityListing(parseAptSecurityList(checkText, scope)) }
+    return { ok: true, listing: aptSecurityListing(parseAptSecurityList(checkText, scope), scope) }
   }
   return {
     ok: true,
@@ -369,7 +377,13 @@ export function parseSecurityListOutput(output: string, scope: UpdateScope = 'se
       // an all-updates listing would label ordinary version bumps with the
       // severity of whatever advisory happened to touch the same package.
       scope === 'security' ? parseDnfSecurityList(block(output, SEC_MARKERS.list)) : [],
-      scope === 'security' ? parseDnfAdvisoryCount(block(output, SEC_MARKERS.summary)) : 0
+      // NULL, not 0. `advisories` is documented as "when the manager reports
+      // one", the note branches on `=== null` to mean "no count to compare",
+      // and `aptSecurityListing` says "Null, not zero" for the same reason.
+      // Passing 0 made an all-updates read open with "2 package(s) will
+      // change, covered by 0 advisories" — on the one screen this scope was
+      // added for.
+      scope === 'security' ? parseDnfAdvisoryCount(block(output, SEC_MARKERS.summary)) : null
     )
   }
 }

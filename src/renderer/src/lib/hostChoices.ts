@@ -33,9 +33,15 @@ import type { Server } from '../types'
 export interface HostChoice {
   id: string
   name: string
-  /** Appended in the option text, never used to exclude. */
+  /** Appended in the option text, never used to exclude. `null` when the host
+   *  is dialled — there is nothing to say about the ordinary case.
+   *
+   *  Deliberately the ONLY status-derived field here. An earlier draft also
+   *  carried a `connected` boolean that neither consumer read: the option text
+   *  uses `note`, and the empty-state wording asks `anyConnected(servers)`,
+   *  which recomputes from the servers themselves. A second way to ask the
+   *  same question is how the two come to disagree. */
   note: string | null
-  connected: boolean
 }
 
 const CONNECTED = new Set(['online', 'idle', 'connecting'])
@@ -50,8 +56,7 @@ export function hostChoices(servers: Server[]): HostChoice[] {
       // "offline" would be a statement about the host; this is a statement
       // about this app's session with it, which is the only thing `status`
       // actually records.
-      note: connected ? null : 'not connected',
-      connected
+      note: connected ? null : 'not connected'
     }
   })
 }
