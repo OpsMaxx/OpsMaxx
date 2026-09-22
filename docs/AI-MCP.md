@@ -458,9 +458,10 @@ call asks, they show **Approve once** alone, and they never read a remembered gr
   `trigger_run`, `cancel_run` and `rerun_run`;
 - `execute_command` for any command the classifier grades above ordinary, any command the
   policy recognises as running as another user (`classifyCommand`: `sudo`, `doas`, `su`,
-  `pkexec`, `run0`, `runuser`, `systemd-run`, `sudoedit` or `machinectl shell` as the command word
-  of any segment — see docs/AI-SECURITY.md), any command whose command word is computed when it
-  runs (`$(which sudo) reboot`), and, as a further raise, any command with the word
+  `pkexec`, `run0`, `runuser`, `systemd-run`, `sudoedit`, `machinectl shell`, `runas`, `gsudo` or
+  `sudo.exe` as the command word of any segment — see docs/AI-SECURITY.md), any command whose
+  command word the walk cannot read literally (`$(which sudo) reboot`, `{sudo,reboot}`, or nested
+  past three levels), and, as a further raise, any command with the word
   `sudo` anywhere in it. Those are also gated and audited as the `sudo` permission rather than
   `terminal`, so an "Execute terminal commands" grant never reaches them. A false positive only
   means being asked again;

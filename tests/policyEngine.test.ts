@@ -457,7 +457,7 @@ describe('escalation behind grammar, quoting and more wrappers', () => {
   )
 
   // Cannot be named, so cannot be graded: asked about, not refused.
-  it.each(['$(which sudo) reboot', '${SUDO:-sudo} reboot', '`which sudo` reboot', '$HOME/bin/tool --run'])(
+  it.each(['$(which sudo) reboot', '${SUDO:-sudo} reboot', '`which sudo` reboot', '$TOOL --run'])(
     'asks before running %s, whose command word is computed',
     (cmd) => {
       expect(classifyCommand(cmd).computedCommand).toBe(true)
@@ -499,5 +499,93 @@ describe('escalation behind grammar, quoting and more wrappers', () => {
     ['grep -r shadow /var/log/syslog', 'allow']
   ])('leaves %s at %s', (cmd, decision) => {
     expect(evaluateCommand(shadowDenied, cmd).decision).toBe(decision)
+  })
+})
+
+// Security pass #2: the last forms that allowed, and the rule that ends the
+// list -- a command word the walk cannot read literally asks, never allows.
+describe('fail toward ask', () => {
+  const noSudo = group({ terminal: 'allow', sudo: 'deny' })
+  const withSudo = group({ terminal: 'allow', sudo: 'allow' })
+
+  it.each([
+    'case x in *) sudo reboot;; esac',
+    'case $1 in a) ls;; b) sudo reboot;; esac',
+    'f(){ sudo reboot; }; f',
+    'f() { sudo reboot; }; f',
+    'function f { sudo reboot; }; f',
+    'function f() { sudo reboot; }',
+    'coproc sudo reboot',
+    'coproc x { sudo reboot; }',
+    '~/bin/sudo reboot',
+    '$HOME/bin/sudo reboot',
+    '${HOME}/bin/sudo reboot',
+    'runas /user:Administrator "cmd /c shutdown /r"',
+    'runas /savecred /user:admin notepad.exe',
+    'C:\\Windows\\System32\\runas.exe /user:admin whoami',
+    'gsudo net stop spooler',
+    'gsudo.exe whoami',
+    'sudo.exe net stop spooler'
+  ])('denies %s under sudo=deny', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('deny')
+  })
+
+  it.each([
+    'gsudo',
+    'gsudo cmd',
+    'gsudo powershell -NoProfile',
+    'runas /user:Administrator cmd',
+    'runas /user:Administrator "powershell -NoExit"'
+  ])('refuses the elevated shell %s even with sudo=allow', (cmd) => {
+    expect(evaluateCommand(withSudo, cmd).decision).toBe('deny')
+  })
+
+  it.each(['gsudo -k', 'runas', 'runas /?', 'gsudo --help', 'gsudo cmd /c whoami'])('%s is not a shell', (cmd) => {
+    expect(classifyCommand(cmd).isUnrestrictedShell).toBe(false)
+  })
+
+  // Nested deeper than the walk reads: not read, so not allowed.
+  it.each([
+    'eval eval eval eval sudo reboot',
+    'sh -c "eval eval eval sudo reboot"',
+    'eval eval eval eval eval ls'
+  ])('asks rather than allows %s, nested past the walk', (cmd) => {
+    expect(classifyCommand(cmd).computedCommand).toBe(true)
+    expect(evaluateCommand(noSudo, cmd).decision).not.toBe('allow')
+  })
+
+  // Weird but harmless: the walk cannot name the command word, so it asks.
+  it.each([
+    '{sudo,reboot}',
+    '{ls,-la}',
+    '*',
+    '/usr/bin/ec?o hi',
+    '/usr/bin/[e]cho hi',
+    'f(){echo hi;}',
+    '=foo',
+    '$(echo ls)'
+  ])('asks before running %s', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('ask')
+  })
+
+  // Literal command words are untouched by the rule.
+  it.each([
+    '[ -f /etc/hosts ] && echo yes',
+    '[[ -f /etc/hosts ]] && echo yes',
+    '(( 1 + 1 ))',
+    '(cd /tmp && ls)',
+    '(ls)',
+    'for f in a b c; do echo $f; done',
+    'select x in a b; do echo $x; done',
+    'case $x in a) echo a;; *) echo other;; esac',
+    'f() { echo hi; }; f',
+    '~/bin/tool --run',
+    '$HOME/bin/tool --run',
+    'x=1 y=2 env',
+    'echo {a,b}',
+    'ls *.log',
+    'for ((i=0;i<3;i++)); do echo $i; done'
+  ])('still allows %s', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('allow')
   })
 })

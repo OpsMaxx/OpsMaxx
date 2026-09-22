@@ -147,13 +147,37 @@ export interface CommandClassification {
 // `sudo -n` privileged reads never pass through it.
 
 /** Names that run the rest of the line as another user. */
-const ESCALATORS = new Set(['sudo', 'doas', 'su', 'pkexec', 'run0', 'runuser', 'systemd-run'])
+const ESCALATORS = new Set(['sudo', 'doas', 'su', 'pkexec', 'run0', 'runuser', 'systemd-run', 'runas', 'gsudo'])
+
+/**
+ * The same, as a Windows command word: `C:\Windows\System32\runas.exe`,
+ * `gsudo.exe`, and Windows' own `sudo.exe`, whose backslashes `word()` would
+ * otherwise read as shell escapes.
+ */
+const WINDOWS_ESCALATORS = new Set(['runas', 'gsudo', 'sudo'])
+const WINDOWS_SHELLS = new Set(['cmd', 'powershell', 'pwsh'])
 
 /** Shells: with no `-c`, running one is an interactive shell. */
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'mksh', 'ash', 'fish', 'csh', 'tcsh'])
 
-/** Shell grammar that can stand in front of a command in the same segment. */
-const GRAMMAR = new Set(['!', '{', '(', 'if', 'then', 'do', 'else', 'elif', 'while', 'until'])
+/**
+ * Shell grammar that can stand in front of a command in the same segment, and
+ * the words that close a construct (a segment of just `fi` runs nothing).
+ */
+const GRAMMAR = new Set([
+  '!', '{', '}', '(', ')', 'if', 'then', 'do', 'else', 'elif', 'while', 'until', 'fi', 'done', 'esac'
+])
+
+/** `name()`, `name(){`: a function definition in front of its body. */
+const FUNCTION_NAME = /^[A-Za-z_][\w.:-]*\(\)\{?$/
+
+/**
+ * A command word the walk cannot read literally: it still holds shell syntax
+ * -- an expansion, a glob, a brace list, a paren, a redirection -- after
+ * everything it understands has been stepped over. `[` alone is the test
+ * builtin and is literal.
+ */
+const UNREADABLE_WORD = /[(){}$`*?[\]<>]|^=/
 
 /**
  * Wrappers that run the rest of the line as a command, and the short options
@@ -196,6 +220,7 @@ const RUN0_VALUE_FLAGS = [
 ]
 const ESCALATOR_VALUE_FLAGS: Record<string, Set<string>> = {
   sudo: new Set(['-u', '-g', '-C', '-D', '-h', '-p', '-r', '-t', '-U', '-R', '-T']),
+  gsudo: new Set(['-u', '-i', '--user', '--integrity', '--loglevel']),
   doas: new Set(['-u', '-C']),
   pkexec: new Set(['--user']),
   run0: new Set(RUN0_VALUE_FLAGS),
@@ -230,9 +255,26 @@ function stripRunners(tokens: string[], nested: string[]): string[] | null {
   let t = tokens
   for (;;) {
     for (;;) {
-      if (t.length && (GRAMMAR.has(t[0]) || ASSIGNMENT.test(t[0]))) t = t.slice(1)
-      // `(sudo reboot)`: the subshell paren is glued to the command word.
-      else if (t.length && /^\(+./.test(t[0])) t = [t[0].replace(/^\(+/, ''), ...t.slice(1)]
+      if (!t.length) break
+      const w = t[0]
+      // `[[ ... ]]` and `(( ... ))` evaluate an expression and run nothing;
+      // a `$(...)` inside one was already collected by walkCommand. `for` and
+      // `select` headers likewise: their bodies are later segments.
+      if (w === '[[' || w.startsWith('((') || w === 'for' || w === 'select') return []
+      if (GRAMMAR.has(w) || ASSIGNMENT.test(w) || FUNCTION_NAME.test(w)) t = t.slice(1)
+      // `case x in *) sudo reboot`: the header, then the arm's pattern.
+      else if (w === 'case') {
+        const i = t.indexOf('in')
+        t = i < 0 ? [] : t.slice(i + 1)
+      } else if (/^[^()]*\)$/.test(w) && t.length > 1) t = t.slice(1)
+      // `function f { ... }`, `function f() { ... }`
+      else if (w === 'function') t = t.slice(2)
+      // `coproc sudo reboot`, `coproc NAME { sudo reboot; }`
+      else if (w === 'coproc') t = t[2] === '{' ? t.slice(2) : t.slice(1)
+      // `(sudo reboot)`: the subshell paren is glued to the command word, and
+      // `(ls)` glues the closing one on too.
+      else if (/^\(+./.test(w)) t = [w.replace(/^\(+/, ''), ...t.slice(1)]
+      else if (t.length === 1 && /^[^(]+\)+$/.test(w)) t = [w.replace(/\)+$/, '')]
       else break
     }
     const name = t.length ? word(t[0]) : ''
@@ -288,6 +330,10 @@ function runsBareShell(line: string, depth = 0): boolean {
 }
 
 function isBareShell(argv: string[], depth = 0): boolean {
+  // cmd / PowerShell: bare unless told to run something and exit.
+  if (WINDOWS_SHELLS.has(commandName(argv[0]).toLowerCase())) {
+    return !argv.slice(1).some((a) => /^(?:\/c|-c|-command|-file|-encodedcommand)$/i.test(a))
+  }
   if (!SHELLS.has(word(argv[0]))) return false
   const c = argv.indexOf('-c')
   if (c < 0) return true
@@ -295,11 +341,23 @@ function isBareShell(argv: string[], depth = 0): boolean {
 }
 
 /** What the escalator in `argv[0]` runs, and whether it is a shell. */
-function escalation(argv: string[], nested: string[]): { shell: boolean; target: string[] } {
-  const name = word(argv[0])
+function escalation(argv: string[], nested: string[], name = word(argv[0])): { shell: boolean; target: string[] } {
   const valueFlags = ESCALATOR_VALUE_FLAGS[name] ?? new Set<string>()
   // `su --help`, `pkexec --version`: asks the tool about itself, runs nothing.
   if (argv.length === 2 && (argv[1] === '--help' || argv[1] === '--version')) return { shell: false, target: [] }
+  // `runas /user:Administrator "cmd /c ..."`: the options are `/x`, and the
+  // program is one quoted command line. No program is a usage message.
+  if (name === 'runas') {
+    const program = argv.slice(1).filter((a) => !a.startsWith('/'))
+    if (!program.length) return { shell: false, target: [] }
+    const line = program.join(' ')
+    nested.push(line)
+    return { shell: runsBareShell(line), target: [] }
+  }
+  // `gsudo -k` / `-K` clear its credential cache; they run nothing.
+  if (name === 'gsudo' && argv.slice(1).every((a) => a === '-k' || a === '-K')) {
+    return { shell: argv.length === 1, target: [] }
+  }
   // su and runuser take options AFTER the user name too (`su root -c id`), so
   // their whole line is read; the others stop at the first word they run.
   const suLike = name === 'su' || name === 'runuser'
@@ -349,8 +407,8 @@ function escalation(argv: string[], nested: string[]): { shell: boolean; target:
   // su, and runuser without `-u user -- cmd`: the result is that user's shell.
   if (name === 'su') return { shell: true, target: [] }
   if (name === 'runuser') return namedUser && target?.length ? { shell: false, target } : { shell: true, target: [] }
-  // pkexec, run0 and systemd-run with nothing to run start a shell.
-  if (name === 'pkexec' || name === 'run0' || name === 'systemd-run') {
+  // pkexec, run0, systemd-run and gsudo with nothing to run start a shell.
+  if (name === 'pkexec' || name === 'run0' || name === 'systemd-run' || name === 'gsudo') {
     return { shell: !target?.length, target: target ?? [] }
   }
   return { shell: shellFlag, target: target ?? [] }
@@ -381,14 +439,22 @@ function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, '
     head,
     escalated,
     shell,
-    computed: argv.length > 0 && /^[$`]/.test(argv[0]),
+    // FAIL TOWARD ASK. A command word that still holds shell syntax after
+    // everything the walk understands -- `$(which sudo)`, `{sudo,reboot}`,
+    // `f(){sudo` -- is one this code cannot name, so it is reported for
+    // evaluateCommand to ask about rather than guessed at.
+    computed: argv.length > 0 && argv[0] !== '[' && UNREADABLE_WORD.test(argv[0]),
     argv
   })
   // Bounded: every pass consumes at least the command word.
   for (let pass = 0; pass <= MAX_DEPTH * 3; pass++) {
-    const argv = pass === 0 ? t : stripRunners(t, nested)
-    if (!argv?.length) return done([])
-    const name = word(argv[0])
+    const stripped = pass === 0 ? t : stripRunners(t, nested)
+    if (!stripped?.length) return done([])
+    // `$HOME/bin/tool`, `~/bin/tool`: only the home directory is computed, so
+    // the literal basename is judged -- `~/bin/sudo` is still sudo.
+    const argv = [stripped[0].replace(/^(?:\$HOME|\$\{HOME\}|~)(?=\/)/, ''), ...stripped.slice(1)]
+    const windowsName = commandName(argv[0]).toLowerCase()
+    const name = !ESCALATORS.has(word(argv[0])) && WINDOWS_ESCALATORS.has(windowsName) ? windowsName : word(argv[0])
 
     // sudoedit edits its operands as root; they are files, not a command.
     if (name === 'sudoedit') {
@@ -410,7 +476,7 @@ function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, '
     }
     if (ESCALATORS.has(name)) {
       escalated = true
-      const e = escalation(argv, nested)
+      const e = escalation(argv, nested, name)
       if (e.shell) shell = true
       if (!e.target.length) return done([])
       t = e.target
@@ -421,8 +487,9 @@ function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, '
     if (SHELLS.has(name)) {
       const c = argv.indexOf('-c')
       if (c >= 0 && argv[c + 1] !== undefined) nested.push(argv[c + 1])
-      if (escalated && isBareShell(argv)) shell = true
     }
+    // A shell -- POSIX, cmd or PowerShell -- left open as the other user.
+    if (escalated && isBareShell(argv)) shell = true
     if (name === 'eval' && argv.length > 1) nested.push(argv.slice(1).join(' '))
     if (name === 'script') {
       argv.forEach((a, i) => {
@@ -454,6 +521,9 @@ function walkCommand(command: string, visit: (facts: SegmentFacts) => void, dept
     visit({ segment, ...unwrapSegment(tokens, nested) })
   }
   if (depth < MAX_DEPTH) for (const inner of nested) walkCommand(inner, visit, depth + 1)
+  // Nested deeper than the walk goes: whatever is down there was not read, so
+  // it fails toward ask like any other command that cannot be named.
+  else if (nested.length) visit({ segment: '', head: [], escalated: false, shell: false, computed: true, argv: [] })
 }
 
 export function classifyCommand(command: string): CommandClassification {

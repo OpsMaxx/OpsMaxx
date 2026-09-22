@@ -812,7 +812,8 @@ function countSessionActions(sessionId: string): number | null {
 /**
  * Does this command run as another user? ONE detector, the policy's own:
  * classifyCommand finds sudo, doas, su, pkexec, run0, runuser, systemd-run,
- * sudoedit and `machinectl shell` as the command word of any segment, behind
+ * sudoedit, `machinectl shell`, runas, gsudo and sudo.exe as the command word
+ * of any segment, behind
  * grammar, wrappers and backslashes and inside `$(...)`, backticks, `sh -c`
  * and `eval` strings. What the policy allows is
  * still effectiveCommand's decision; this only decides the capability a
@@ -2037,8 +2038,9 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       // command somewhere and this is not the change to discover that in.
       const assessed = assessCommand(command)
       const runsAsRoot = runsAsAnotherUser(command)
-      // A command word computed at run time (`$(which sudo) reboot`) may be
-      // anything, sudo included, so it is never covered by a remembered yes.
+      // A command word the walk cannot read literally (`$(which sudo) reboot`,
+      // `{sudo,reboot}`, nesting past its depth) may be anything, sudo
+      // included, so it is never covered by a remembered yes.
       const computed = classifyCommand(command).computedCommand
       const elevated = check.decision === 'deny' || assessed.risk !== 'ordinary' || runsAsRoot || computed
       // The reason names the rule that fired, in that order, because that is
