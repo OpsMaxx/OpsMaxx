@@ -6185,7 +6185,7 @@ app.whenReady().then(() => {
    * overstated it, and this repo is public.
    */
   setShellIntegrationRoot(app.getPath('userData'))
-syncAccessWriteEnabled(boot)
+  syncAccessWriteEnabled(boot)
   // `true` for boot: a debug session that was already on RESUMES rather than
   // starting fresh, because reproducing a bug can need a restart and a capture
   // that wiped itself on every launch would lose the reproduction it was
@@ -6193,7 +6193,7 @@ syncAccessWriteEnabled(boot)
   // data:save, or the events from app start — the ones that explain a startup
   // bug — are exactly what goes missing.
   syncDebugLog(boot, true)
-syncDriftWatches(boot)
+  syncDriftWatches(boot)
   // Before the MCP server: the bridge asks the manager what is running, and a
   // bridge that answered "nothing" because the manager had not booted would be
   // lying about the state of the user's network. This also reaps any engine a

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useApp } from '../../store/app'
 import { bridgeHas } from '../../lib/bridge'
@@ -143,9 +143,14 @@ export function hostOf(baseUrl: string): string {
  */
 export function useNow(intervalMs = 1000, running = true): number {
   const [now, setNow] = useState(() => Date.now())
+  // Mount already starts from a current value; only a later run is a return
+  // from being hidden and needs the catch-up (and its extra render).
+  const ranBefore = useRef(false)
   useLayoutEffect(() => {
+    const resuming = ranBefore.current
+    ranBefore.current = true
     if (!running) return
-    setNow(Date.now())
+    if (resuming) setNow(Date.now())
     const t = setInterval(() => setNow(Date.now()), intervalMs)
     return () => clearInterval(t)
   }, [intervalMs, running])

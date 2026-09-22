@@ -222,9 +222,12 @@ export function setPrefs(patch: Partial<UpdatePrefs>): UpdatePrefs {
 // Only meaningful once state is 'downloaded', and only where the platform can
 // self-install — the renderer gates the button on both, this is the
 // belt-and-braces backend check for anything that calls it regardless.
-export function installUpdate(): void {
+// Async so a throw from quitAndInstall still rejects the updater:install
+// invoke, as it did when this was a synchronous call on a loaded updater.
+export async function installUpdate(): Promise<void> {
   if (!CAN_AUTO_INSTALL) return
-  void updater().then((u) => u.quitAndInstall())
+  const autoUpdater = await updater()
+  autoUpdater.quitAndInstall()
 }
 
 export function openReleasePage(): void {

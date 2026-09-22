@@ -172,7 +172,11 @@ export default function App(): React.JSX.Element {
   // After the first paint, not before it: that is the whole point of keeping
   // them out of the startup bundle. See deferredView.
   useEffect(() => {
-    const id = requestIdleCallback(() => DEFERRED_VIEWS.forEach((v) => void v.preload()))
+    // With a ceiling: restoring several terminals can keep the renderer busy
+    // long enough that idle never comes before the first click.
+    const id = requestIdleCallback(() => DEFERRED_VIEWS.forEach((v) => void v.preload()), {
+      timeout: 2000
+    })
     return () => cancelIdleCallback(id)
   }, [])
 
