@@ -1072,9 +1072,9 @@ button {
 .statusbar .spacer {
   flex: 1;
 }
-.statusbar .metric b {
-  color: var(--text);
-  font-weight: 600;
+.statusbar .state-dot {
+  /* The item's own gap already spaces it from the icon beside it. */
+  margin-right: 0;
 }
 
 /* ============================= Buttons ============================= */

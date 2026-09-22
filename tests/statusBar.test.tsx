@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { stubBridge } from './setup/renderer'
 import { StatusBar } from '../src/renderer/src/components/layout/StatusBar'
 import { ActivityBar } from '../src/renderer/src/components/layout/ActivityBar'
@@ -115,6 +115,50 @@ describe('StatusBar', () => {
 
     expect(useApp.getState().activity).toBe('settings')
     expect(useNav.getState().settingsSection).toBe('backup')
+  })
+
+  // These three used to be static: "local ok", "Online" and a Bell, drawn with
+  // no data behind them and no handler. A chip that always says "ok" cannot
+  // tell you anything by saying it.
+  it('draws no chip that has no data behind it', () => {
+    stubBridge({})
+
+    render(<StatusBar />)
+
+    expect(document.body.textContent).not.toMatch(/\blocal\b/)
+    expect(document.body.textContent).not.toMatch(/\bok\b/)
+  })
+
+  it('reads the network state from the OS and follows it', () => {
+    stubBridge({})
+    const onLine = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true)
+
+    render(<StatusBar />)
+    expect(document.body.textContent).toContain('Online')
+
+    onLine.mockReturnValue(false)
+    act(() => {
+      window.dispatchEvent(new Event('offline'))
+    })
+    expect(document.body.textContent).toContain('Offline')
+    expect(document.body.textContent).not.toContain('Online')
+    expect(document.querySelector('.statusbar .state-dot.is-alarm')).not.toBeNull()
+
+    act(() => {
+      window.dispatchEvent(new Event('online'))
+    })
+    expect(document.body.textContent).toContain('Online')
+    onLine.mockRestore()
+  })
+
+  it('opens the alert inbox from the bell', () => {
+    stubBridge({})
+
+    render(<StatusBar />)
+    fireEvent.click(screen.getByRole('button', { name: 'Alert inbox' }))
+
+    expect(useApp.getState().activity).toBe('monitor')
+    expect(useNav.getState().monitorTab).toBe('alerts')
   })
 })
 
