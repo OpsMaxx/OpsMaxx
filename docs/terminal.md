@@ -44,8 +44,9 @@ progress bar, and **Clear queue** drops it. **Cancel** stops the running transfe
 
 A download never overwrites anything on this machine. If the folder already has
 a file with that name, the new one is saved as `name (1).ext`. The server picks
-the file names, so separators, `..` and control characters are removed from
-them before anything is written. An upload that would replace files on the
+the file names, so separators, `..`, control characters and invisible
+formatting characters (such as the one that makes `invoice.exe` display as
+`invoice.jpg`) are removed from them before anything is written. An upload that would replace files on the
 server asks first, with **Overwrite**, **Skip** (upload only the others) or
 **Cancel all**.
 

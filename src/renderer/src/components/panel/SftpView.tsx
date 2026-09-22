@@ -647,7 +647,14 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       toast(res?.error ? `Nothing was downloaded — ${res.error}` : 'Nothing was downloaded.', 'error')
   }
 
-  const cancelTransfer = (): void => void window.opsmaxx?.sftp.cancel(key)
+  // Pressed, and not yet answered. Main returns at once even on a stalled link,
+  // so this is normally a flicker — but a button that looks unpressed after a
+  // click invites a second one.
+  const [cancelling, setCancelling] = useState(false)
+  const cancelTransfer = (): void => {
+    setCancelling(true)
+    void window.opsmaxx?.sftp.cancel(key)
+  }
 
   // One transfer at a time: they share the single cached SFTP channel. What
   // arrives meanwhile — a second drop, the Upload button, a Download — waits
@@ -659,6 +666,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
     setRunning(next)
     void (next.kind === 'upload' ? runUpload(next) : runDownload(next)).finally(() => {
       setProgress(null)
+      setCancelling(false)
       setRunning(null)
       refresh.current()
     })
@@ -876,8 +884,8 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
               }}
             />
           </div>
-          <button className="btn ghost sm" onClick={cancelTransfer}>
-            Cancel
+          <button className="btn ghost sm" disabled={cancelling} onClick={cancelTransfer}>
+            {cancelling ? 'Cancelling…' : 'Cancel'}
           </button>
         </div>
       )}

@@ -299,7 +299,7 @@ import {
   localFilesUpload,
   localFilesDownload,
   localFilesCancel,
-  refuse as refuseProtectedPath,
+  refuseDownloadDir,
   setLocalFilesProtectedRoot,
   localFilesWrite
 } from './services/localFiles'
@@ -1554,12 +1554,11 @@ ipcMain.handle('sftp:upload', (e, key: string, localPaths: string[], remoteDir: 
     : sftpUpload(e.sender, key, localPaths, remoteDir)
 )
 ipcMain.handle('sftp:download', (e, key: string, remotePaths: string[], localDir: string) => {
-  if (!downloadDirs.has(localDir)) return { ok: false, error: 'Choose a folder to save into first.' }
-  if (isLocalFileSession(key)) return localFilesDownload(e.sender, key, remotePaths, localDir)
-  // A server's file names are its own choice, and a folder picked by mistake
-  // could be the app's own data directory — where a new file with the right
-  // name is read as configuration. The local half checks this itself.
-  return refuseProtectedPath(localDir) ?? sftpDownload(e.sender, key, remotePaths, localDir)
+  const refused = refuseDownloadDir(localDir, downloadDirs)
+  if (refused) return refused
+  return isLocalFileSession(key)
+    ? localFilesDownload(e.sender, key, remotePaths, localDir)
+    : sftpDownload(e.sender, key, remotePaths, localDir)
 })
 ipcMain.handle('sftp:cancel', (_e, key: string) => {
   localFilesCancel(key)

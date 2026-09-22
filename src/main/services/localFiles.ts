@@ -129,16 +129,25 @@ function isProtected(path: string): boolean {
 const PROTECTED_MESSAGE =
   "This is OpsMaxx's own data directory. It holds the vault, the access policy and the audit log, and is not editable from the Files view."
 
-/**
- * Guard for every path this module takes. Returns a failed result, or null.
- *
- * Exported for the one caller outside this module that writes to this
- * machine: a download from a server into a picked folder, which must not be
- * able to plant a file in the app's own data directory any more than a copy
- * here can.
- */
-export function refuse(...paths: string[]): SftpResult<never> | null {
+/** Guard for every path this module takes. Returns a failed result, or null. */
+function refuse(...paths: string[]): SftpResult<never> | null {
   return paths.some(isProtected) ? { ok: false, error: PROTECTED_MESSAGE } : null
+}
+
+/**
+ * Whether a download may be written into `dir`. Null when it may.
+ *
+ * Two rules, for both halves of the Files view. The folder must be one the
+ * native picker returned (`picked`, kept by main): the renderer names the
+ * destination on every call, so without this it could name any directory on
+ * the disk. And it must not be the app's own data directory, where a new file
+ * with the right name is read as configuration — a server chooses its own file
+ * names, and a folder can be picked by mistake. `refuse` resolves links, so a
+ * picked folder that is a symlink into that directory is refused too.
+ */
+export function refuseDownloadDir(dir: string, picked: ReadonlySet<string>): SftpResult<never> | null {
+  if (!picked.has(dir)) return { ok: false, error: 'Choose a folder to save into first.' }
+  return refuse(dir)
 }
 
 /** Which keys the renderer opened against this machine rather than a server. */
@@ -380,8 +389,9 @@ export async function localFilesDownload(
       await copyWithProgress(from, to, st.size, send, signal)
       saved.push(basename(to))
     } catch (err) {
-      // The empty placeholder reserveLocalFile created is ours to remove.
-      if (to) await rm(to, { force: true })
+      // The empty placeholder reserveLocalFile created is ours to remove. A
+      // failure to remove it must not end the batch.
+      if (to) await rm(to, { force: true }).catch(() => {})
       if (!signal.aborted) failed.push({ name: shown, error: msg(err) })
     }
   }
@@ -443,7 +453,9 @@ function copyWithProgress(
     const fail = (err: Error): void => {
       read.destroy()
       write.destroy()
-      void rm(tmp, { force: true }).finally(() => reject(err))
+      void rm(tmp, { force: true })
+        .catch(() => {})
+        .then(() => reject(err))
     }
     read.on('data', (c: Buffer | string) => {
       transferred += typeof c === 'string' ? Buffer.byteLength(c) : c.length

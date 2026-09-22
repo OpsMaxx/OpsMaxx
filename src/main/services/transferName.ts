@@ -11,23 +11,27 @@ import { open } from 'node:fs/promises'
  * `.` and `..` segments are dropped, and what is left is joined back with `_`.
  * Control characters go; the characters Windows refuses become `_`; trailing
  * dots and spaces, which Windows silently strips, are removed so the name that
- * is written is the name that was checked. A device name (CON, NUL, COM1…)
- * opens the device rather than a file on Windows, so it is prefixed.
+ * is written is the name that was checked. A device name (CON, NUL, COM1,
+ * COM¹, CONIN$…) opens the device rather than a file on Windows, so it is
+ * prefixed.
  *
  * Null when nothing usable is left, rather than an invented name the user
  * would not recognise.
  */
 export function safeLocalName(remote: string): string | null {
   const name = remote
+    // C0 and C1 controls, and format characters: U+202E turns
+    // `invoice\u202Egpj.exe` into what a file manager shows as invoiceexe.jpg,
+    // and zero-width ones make two different names look the same.
     // eslint-disable-next-line no-control-regex -- matching them is the point
-    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/[\u0000-\u001f\u007f-\u009f\p{Cf}]/gu, '')
     .split(/[\\/]+/)
     .filter((s) => s !== '' && s !== '.' && s !== '..')
     .join('_')
     .replace(/[<>:"|?*]/g, '_')
     .replace(/[. ]+$/, '')
   if (name === '' || /^\.+$/.test(name)) return null
-  return /^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(name) ? `_${name}` : name
+  return /^(con|prn|aux|nul|conin\$|conout\$|com[\d¹²³]|lpt[\d¹²³])(\.|$)/i.test(name) ? `_${name}` : name
 }
 
 /**

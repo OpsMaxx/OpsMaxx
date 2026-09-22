@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { WebContents } from 'electron'
@@ -33,7 +33,17 @@ class FakeSftp {
   constructor() {
     this.started = new Promise((r) => (this.markStarted = r))
   }
+  got: string[] = []
+  // The local path turns into a directory and the transfer fails, so removing
+  // the partial throws — the case that used to end the whole batch.
+  poisonGet = false
   fastGet(_remote: string, local: string, _opts: unknown, cb: Cb): void {
+    this.got.push(local)
+    if (this.poisonGet) {
+      rmSync(local, { force: true })
+      mkdirSync(local)
+      return cb(new Error('Failure'))
+    }
     // Half a file, as a real download is when the cancel lands.
     writeFileSync(local, 'partial')
     this.pending.push(cb)
@@ -117,6 +127,18 @@ describe('the names a server chooses', () => {
     expect(safeLocalName('CON.txt')).toBe('_CON.txt')
   })
 
+  it('loses C1 controls and format characters that disguise a name', () => {
+    // U+202E makes this display as invoiceexe.jpg in a file manager.
+    expect(safeLocalName('invoice\u202Egpj.exe')).toBe('invoicegpj.exe')
+    expect(safeLocalName('a\u200Bb\u0085c\u009f.txt')).toBe('abc.txt')
+  })
+
+  it('prefixes every Windows device name', () => {
+    for (const n of ['COM¹', 'lpt³.log', 'CONIN$', 'conout$.txt', 'nul'])
+      expect(safeLocalName(n)).toBe(`_${n}`)
+    expect(safeLocalName('console.log')).toBe('console.log')
+  })
+
   it('refuses a name with nothing left in it', () => {
     for (const n of ['', '.', '..', '...', '/', '\u0001\u0002']) expect(safeLocalName(n)).toBeNull()
   })
@@ -163,6 +185,30 @@ describe('cancelling a download', () => {
     const r = await run
     expect(r.data?.saved).toEqual(['evil'])
     expect(readdirSync(dir)).toEqual(['evil'])
+  })
+})
+
+describe('downloads', () => {
+  // fastGet opens its destination by path with 'w', which follows a symlink
+  // swapped in for the reserved file. It writes to a fresh unpredictable name
+  // instead, which is then renamed over the reservation.
+  it('never hand fastGet the reserved path', async () => {
+    const run = sftpDownload(wc, KEY, ['/srv/report.pdf'], dir)
+    await started()
+    expect(transferCh().got[0]).toMatch(/\.report\.pdf\.opsmaxx-partial-/)
+    transferCh().pending.shift()?.(null)
+    expect((await run).data?.saved).toEqual(['report.pdf'])
+    expect(readFileSync(join(dir, 'report.pdf'), 'utf8')).toBe('partial')
+    expect(readdirSync(dir)).toEqual(['report.pdf'])
+  })
+
+  it('carry on with the batch when a partial file cannot be removed', async () => {
+    const run = sftpDownload(wc, KEY, ['/srv/a.bin', '/srv/b.bin'], dir)
+    await vi.waitFor(() => expect(channels.length).toBeGreaterThan(1))
+    transferCh().poisonGet = true
+    const r = await run
+    expect(transferCh().got).toHaveLength(2)
+    expect(r.data?.failed.map((f) => f.name)).toEqual(['a.bin', 'b.bin'])
   })
 })
 

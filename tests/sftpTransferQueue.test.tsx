@@ -83,6 +83,8 @@ describe('cancel', () => {
 
     act(() => screen.getByText('Cancel').click())
     expect(cancel).toHaveBeenCalledWith('local')
+    // Pressed, and says so until the transfer actually ends.
+    expect((screen.getByText('Cancelling…') as HTMLButtonElement).disabled).toBe(true)
 
     await act(async () => finish({ ok: false, data: { uploaded: [], failed: [], cancelled: true } }))
     // The cleared file never went out.

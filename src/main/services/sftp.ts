@@ -1,8 +1,8 @@
 import type { WebContents } from 'electron'
-import { basename, posix } from 'node:path'
+import { basename, join, posix } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { statSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
+import { rename, rm } from 'node:fs/promises'
 import type { Client, SFTPWrapper, FileEntry } from 'ssh2'
 import { acquire, release, type PooledConnection } from './ssh'
 import { reserveLocalFile, safeLocalName } from './transferName'
@@ -366,16 +366,25 @@ export async function sftpDownload(
         continue
       }
       let target: string | undefined
+      let tmp: string | undefined
       try {
         target = await reserveLocalFile(localDir, name)
+        // fastGet opens its destination by path with 'w', which follows a
+        // symlink. So it writes to a fresh name nobody can predict, and the
+        // finished file is renamed over the placeholder — a rename replaces
+        // whatever is at that path, even a link swapped in meanwhile, rather
+        // than writing through it.
+        tmp = join(localDir, `.${name}.opsmaxx-partial-${randomUUID()}`)
         const send = progressSender(wc, key, remoteName, i + 1, remotePaths.length, 'down')
-        await Promise.race([xfer(ch, 'get', remotePaths[i], target, send), t.stop])
+        await Promise.race([xfer(ch, 'get', remotePaths[i], tmp, send), t.stop])
+        await rename(tmp, target)
         saved.push(basename(target))
       } catch (err) {
-        // A partial local file looks like a finished download, and this one
-        // is ours: reserveLocalFile created it moments ago. Retried because on
-        // Windows fastGet may still hold it open for a moment after a cancel.
-        if (target) await rm(target, { force: true, maxRetries: 3 })
+        // Both files are ours: the placeholder reserveLocalFile created, and
+        // the partial download beside it. Retried because on Windows fastGet
+        // may still hold the partial open for a moment after a cancel, and
+        // guarded because a file that will not go must not end the batch.
+        for (const p of [tmp, target]) if (p) await rm(p, { force: true, maxRetries: 3 }).catch(() => {})
         if (t.cancelled) break
         failed.push({ name: remoteName, error: msg(err) })
       }
