@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { SYNCED_COLLECTIONS, NOT_SYNCED } from '../src/shared/addy'
 import { T2_ALLOWLIST, T2_NAMES, CAPABILITY_GATING_KEYS, validateT2 } from '../src/shared/addyProfile'
+import { TERMINAL_SCHEMES } from '../src/shared/terminalTheme'
 import { ALL_DATA_FILES, ALL_DATA_DIRS } from '../src/main/services/backup'
 
 /**
@@ -221,3 +222,45 @@ function collectionNameFor(file: string): string {
  * They are real entries and the guardrail must see them.
  */
 const FILES_BY_CONSTANT = ['credproxyAudit', 'rules', 'backupTargets']
+
+/**
+ * The fifth key set: an enum that names values from somewhere else.
+ *
+ * `terminalScheme`'s allowed values were wrong in both directions from the day
+ * they were written -- `default`, `gruvbox` and `custom` are ids this app has
+ * never had, while `''`, `gruvbox-dark` and `one-dark` are ids it does have
+ * and were missing. `validateT2` throws rather than drops, so somebody on One
+ * Dark would have had their entire profile rejected.
+ *
+ * It drifted because nothing tied it to the schemes. Restating a list is how
+ * a list goes stale; this derives it, in the same spirit as ALL_DATA_FILES
+ * being pinned against a directory listing above.
+ */
+describe('the terminalScheme enum tracks the schemes that exist', () => {
+  const field = T2_ALLOWLIST.find((f) => f.name === 'terminalScheme')
+
+  it('is an enum', () => {
+    expect(field?.kind).toBe('enum')
+  })
+
+  it('names every built-in scheme, plus the app palette', () => {
+    const allowed = field?.kind === 'enum' ? [...field.values].sort() : []
+    const expected = ['', ...TERMINAL_SCHEMES.map((s) => s.id)].sort()
+    expect(allowed).toEqual(expected)
+  })
+
+  it('accepts what the settings pane can actually store', () => {
+    expect(() => validateT2({ terminalScheme: '' })).not.toThrow()
+    for (const s of TERMINAL_SCHEMES) {
+      expect(() => validateT2({ terminalScheme: s.id })).not.toThrow()
+    }
+  })
+
+  it('still refuses an imported scheme, whose id carries a user string', () => {
+    // Deliberate, and the reason the enum is not a prefix rule: this tier is
+    // stored in the clear, so publishing `imported-<slug of a filename>`
+    // would put something off the user's disk into it. A caller has to decide
+    // what to do instead -- most likely fall back to ''.
+    expect(() => validateT2({ terminalScheme: 'imported-my-theme' })).toThrow()
+  })
+})

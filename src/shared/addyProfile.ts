@@ -50,10 +50,39 @@ export type T2Field =
 export const T2_ALLOWLIST: readonly T2Field[] = [
   { name: 'theme', kind: 'enum', values: ['light', 'dark', 'system'] },
   { name: 'terminalFontSize', kind: 'int', min: 8, max: 32 },
+  /**
+   * The BUILT-IN scheme ids, and `''` for the app palette.
+   *
+   * This list was wrong in both directions from the day it was written: it
+   * named `default`, `gruvbox` and `custom`, none of which are ids this app
+   * has ever had, and omitted `''`, `gruvbox-dark` and `one-dark`, which it
+   * does. `validateT2` THROWS on a value outside the list rather than
+   * dropping it, so somebody on One Dark would have had their whole profile
+   * rejected. Latent so far only because nothing in `src/` imports this file
+   * yet. tests/addyTrustBoundary.test.ts now pins it against TERMINAL_SCHEMES
+   * so it cannot drift again.
+   *
+   * IMPORTED SCHEMES ARE DELIBERATELY ABSENT. Their ids are
+   * `imported-${slug(name)}` -- see terminalTheme.ts -- so the id carries a
+   * string the user typed, by way of a filename. An enum cannot enumerate
+   * that, and the fix is NOT a prefix rule: this tier is stored in the clear,
+   * and widening it to a user-controlled string is a trust-boundary decision,
+   * not a validation detail. Whoever first wires a caller up has to choose
+   * what such a profile does -- most likely fall back to `''` rather than
+   * publish the name of a file on somebody's disk.
+   */
   {
     name: 'terminalScheme',
     kind: 'enum',
-    values: ['default', 'solarized-dark', 'solarized-light', 'nord', 'dracula', 'gruvbox', 'custom'],
+    values: [
+      '',
+      'solarized-dark',
+      'solarized-light',
+      'dracula',
+      'nord',
+      'gruvbox-dark',
+      'one-dark',
+    ],
   },
   { name: 'compactDensity', kind: 'bool' },
   { name: 'dbSchemaWidth', kind: 'int', min: 120, max: 2000 },
