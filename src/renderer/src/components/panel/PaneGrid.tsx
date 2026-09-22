@@ -125,7 +125,7 @@ export function PaneGrid({ tabId, tp }: { tabId: string; tp: TabPanes }): React.
                 position: 'absolute',
                 top: 4,
                 right: 6,
-                zIndex: 15,
+                zIndex: 'var(--z-pane-control)',
                 background: 'var(--bg-panel)'
               }}
               onClick={(e) => {

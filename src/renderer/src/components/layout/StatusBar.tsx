@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { GitBranch, Wifi, Bell, Cpu, AlertTriangle, ShieldAlert } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { GitBranch, Wifi, WifiOff, Bell, AlertTriangle, ShieldAlert } from 'lucide-react'
 import { useApp } from '../../store/app'
 import { offerUnlockForBackups, useBackupRuns } from '../../store/backupRuns'
 import { LABEL, chipValue, useAlerts } from '../../store/alerts'
@@ -51,6 +51,45 @@ function ApprovalChip(): React.JSX.Element | null {
         {fuse.text !== null ? ` · ${fuse.text}` : ''}
       </span>
     </button>
+  )
+}
+
+/**
+ * Whether this machine has a network at all, from `navigator.onLine`.
+ *
+ * Read from the OS, never by reaching out to an endpoint: a probe would be
+ * OpsMaxx phoning somewhere on a timer, and the only thing it could add is
+ * "the internet is reachable", which says nothing about a server on the LAN.
+ * So "Online" means an interface is up, and the tooltip says exactly that.
+ * "Offline" is the reading worth having — every SSH session is about to fail,
+ * and that is the chip telling you why before the terminals do.
+ */
+function NetworkChip(): React.JSX.Element {
+  const [online, setOnline] = useState(() => navigator.onLine)
+  useEffect(() => {
+    const up = (): void => setOnline(true)
+    const down = (): void => setOnline(false)
+    window.addEventListener('online', up)
+    window.addEventListener('offline', down)
+    return () => {
+      window.removeEventListener('online', up)
+      window.removeEventListener('offline', down)
+    }
+  }, [])
+  return (
+    <div
+      className={online ? 'item' : 'item state-alarm'}
+      title={
+        online
+          ? 'A network interface is up. This does not test whether any particular server is reachable.'
+          : 'This machine has no network connection. SSH sessions and background checks will fail until it returns.'
+      }
+    >
+      {/* Shape as well as colour: a disc for up, a square for down. */}
+      <span className={online ? 'state-dot is-ok' : 'state-dot is-alarm'} aria-hidden="true" />
+      {online ? <Wifi size={12} /> : <WifiOff size={12} />}
+      <span>{online ? 'Online' : 'Offline'}</span>
+    </div>
   )
 }
 
@@ -193,19 +232,15 @@ export function StatusBar(): React.JSX.Element {
       )
       )}
       <UpdateIndicator />
-      <div className="item metric">
-        <Cpu size={12} />
-        <span>
-          local <b>ok</b>
-        </span>
-      </div>
-      <div className="item">
-        <Wifi size={12} />
-        <span>Online</span>
-      </div>
-      <div className="item">
-        <Bell size={12} />
-      </div>
+      <NetworkChip />
+      {/* The way into the alert inbox while nothing is alerting. The alert chip
+          above is the way in while something is, so the two never show at
+          once — two buttons to one page is one too many. */}
+      {Object.values(alerts).length === 0 && (
+        <button className="item" aria-label="Alert inbox" title="No active alerts. Click to open the alert inbox." onClick={() => openMonitor('alerts')}>
+          <Bell size={12} />
+        </button>
+      )}
     </div>
   )
 }

@@ -16,7 +16,7 @@
   overflow-y: auto;
   /* Above everything, including the frameless title bar's own drag region:
      there is no window control on this screen that should still work. */
-  z-index: 10000;
+  z-index: var(--z-revoked);
 }
 
 .revoked-card {
@@ -106,7 +106,7 @@
 .conflict-scrim {
   position: fixed;
   inset: 0;
-  z-index: 9000;
+  z-index: var(--z-blocking);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -486,7 +486,7 @@
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text-faint);
-  z-index: 1;
+  z-index: var(--z-raised);
 }
 
 .addy-step.done .addy-step-mark {
