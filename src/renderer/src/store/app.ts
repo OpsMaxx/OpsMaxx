@@ -2621,10 +2621,22 @@ export const useApp = create<AppState>((set, get) => ({
       vpns: (data.vpns ?? s.vpns).filter((v) => !!v && !!v.spec),
       // Merge over defaults so a preference added in a later version is not
       // left undefined when an older save is loaded.
-      // Nothing is forwarding yet at launch, whatever the last save said.
+      // Shape only. `status` is deliberately NOT reset here.
+      //
+      // It used to be, on the reasoning that nothing is forwarding yet at
+      // launch -- true of a load, and this is not only a load. `replaceAll`
+      // is a Partial that the tunnel manager and the database editor both
+      // call to save an ordinary edit, so the reset fired on those too and
+      // marked every running tunnel inactive: editing one tunnel greyed out
+      // the rest, and saving a database edit greyed out all of them.
+      //
+      // Milder than the settings wipe below, because status is live state
+      // that TunnelManager's IPC subscription writes back on its next event.
+      // What it cost in between was TunnelSidebar showing a grey dot against
+      // a forward that was up. The launch reset now lives in persist.ts's
+      // hydrate, which is the only place that actually means it.
       tunnels: (data.tunnels ?? s.tunnels).map((t) => ({
         ...t,
-        status: 'inactive' as const,
         serverId: t.serverId ?? null
       })),
       /**

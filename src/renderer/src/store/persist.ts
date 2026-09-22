@@ -117,6 +117,17 @@ async function hydrate(): Promise<void> {
     void save()
   }
 
+  // Nothing is forwarding yet at launch, whatever the last save said.
+  //
+  // Here rather than inside `replaceAll`, which is where it used to be: that
+  // is a Partial the tunnel manager and the database editor both call to save
+  // an ordinary edit, so a reset living there fired on every save and marked
+  // running tunnels inactive. A load is the only event that means it, and
+  // this is the load.
+  useApp.setState((s) => ({
+    tunnels: s.tunnels.map((t) => ({ ...t, status: 'inactive' as const }))
+  }))
+
   // The main-process lock file decides which workspaces are password
   // protected, so reconcile the freshly-loaded flags against it.
   const lockedIds = await window.opsmaxx?.workspaceLock.ids()

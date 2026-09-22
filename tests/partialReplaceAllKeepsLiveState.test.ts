@@ -76,3 +76,56 @@ describe('a partial replaceAll preserves settings', () => {
     expect(useApp.getState().settings.terminalFontSize).toBe(13)
   })
 })
+
+/**
+ * The same shape, one key further down: a running tunnel stays running.
+ *
+ * `tunnels` does have the `?? s.tunnels` fallback the settings key was
+ * missing, so the list survives. But the `.map` after it forces
+ * `status: 'inactive'` on every tunnel on every call, and status is live
+ * runtime state -- written by `setTunnelStatus` from the IPC subscription in
+ * TunnelManager. So saving a database edit, or editing one tunnel, marked
+ * every running tunnel inactive in the store.
+ *
+ * Milder than the settings wipe: nothing persisted is harmed, since hydrate
+ * forces 'inactive' on load by design, and TunnelManager writes the real
+ * status back on its next event or mount. What it costs in between is a
+ * sidebar (TunnelSidebar.tsx:18 is the only reader of the stored value)
+ * showing a grey dot against a forward that is up.
+ *
+ * The reset belongs to a LOAD -- nothing is forwarding yet at launch,
+ * whatever the last save said. A partial call is not a load, which is what
+ * the branch says.
+ */
+describe('a partial replaceAll preserves live tunnel status', () => {
+  const tunnel = {
+    id: 't1',
+    workspaceId: 'w1',
+    name: 'Postgres',
+    kind: 'local' as const,
+    listenHost: '127.0.0.1',
+    listenPort: 5432,
+    targetHost: '10.0.0.1',
+    targetPort: 5432,
+    serverId: 's1',
+    status: 'active' as const
+  }
+
+  beforeEach(() => {
+    useApp.setState({ tunnels: [{ ...tunnel }] as never, databases: [] })
+  })
+
+  it('keeps a running tunnel running when another collection is saved', () => {
+    useApp.getState().replaceAll({ databases: [] })
+    expect(useApp.getState().tunnels[0].status).toBe('active')
+  })
+
+  it('keeps it when a different tunnel is edited', () => {
+    // TunnelManager saves its own edits as replaceAll({ tunnels }), so this
+    // is the path where one tunnel's edit greyed out every other one.
+    const state = useApp.getState()
+    state.replaceAll({ tunnels: state.tunnels.map((t) => ({ ...t, name: 'Renamed' })) as never })
+    expect(useApp.getState().tunnels[0].name).toBe('Renamed')
+    expect(useApp.getState().tunnels[0].status).toBe('active')
+  })
+})
