@@ -72,9 +72,10 @@ export function SchemePicker({
       }}
     >
       {options.map((o, i) => {
-        // A scheme replaces all sixteen ANSI colours, so its own are exactly
-        // what the terminal will use; only the app palette needs resolving.
-        const ansi = o.scheme?.ansi ?? appAnsi
+        // A scheme's own colours, and the app palette's for any it lacks: a
+        // persisted scheme is not re-validated on load, and a missing key
+        // would otherwise draw a transparent chip.
+        const ansi: Partial<Record<string, string>> = o.scheme?.ansi ?? appAnsi
         const selected = i === current
         return (
           <div
@@ -102,7 +103,7 @@ export function SchemePicker({
               <span className="mono">$ ls</span>
               <span className="scheme-chips">
                 {SAMPLE.map((k) => (
-                  <span key={k} style={{ background: ansi[k] }} />
+                  <span key={k} style={{ background: ansi[k] ?? appAnsi[k] }} />
                 ))}
               </span>
             </div>

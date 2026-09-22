@@ -85,6 +85,24 @@ describe('terminal colour scheme swatches', () => {
     expect(useApp.getState().settings.terminalScheme).toBe('')
   })
 
+  // Settings are not re-validated on load, so an import saved by an older
+  // parser can come back with gaps. Each gap is drawn in the app's colour.
+  it('fills a partial palette from the app palette, colour by colour', () => {
+    const partial = {
+      ...CAMPBELL,
+      id: 'partial',
+      name: 'Partial',
+      ansi: { red: '#123456' }
+    } as unknown as TerminalScheme
+    useApp.getState().setSettings({ terminalCustomSchemes: [partial] })
+    render(<Settings />)
+
+    const card = screen.getByRole('radio', { name: 'Partial (imported)' })
+    const chips = [...card.querySelectorAll<HTMLElement>('.scheme-chips span')]
+    expect(chips.map((c) => c.style.background).filter((b) => b === '')).toEqual([])
+    expect(chips[0].style.background).toBe('rgb(18, 52, 86)')
+  })
+
   it('marks the selection with more than colour', () => {
     useApp.getState().setSettings({ terminalScheme: 'nord' })
     render(<Settings />)
