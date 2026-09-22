@@ -589,6 +589,13 @@ button {
   background: radial-gradient(circle, var(--info) 0 1.5px, transparent 2px);
   box-shadow: inset 0 0 0 1.5px var(--info);
 }
+/* The shape says "connecting" on its own, so the pulse is decoration a
+   reduced-motion setting can have. */
+@media (prefers-reduced-motion: reduce) {
+  .status-dot.connecting {
+    animation: none;
+  }
+}
 /* Failed: the alarm square, in the alarm colour. Tunnels and the VPN card set
    this; without a rule it was an 8px span with nothing painted in it. */
 .status-dot.error {
