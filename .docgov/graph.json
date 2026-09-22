@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-13",
+  "generated": "2026-09-22",
   "nodes": [
     {
       "id": "claude",
@@ -11,8 +11,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 106,
-      "hash": "c9977fecadd7e7df",
+      "lines": 115,
+      "hash": "7dfe736e1811e9b5",
       "generated": false
     },
     {
@@ -37,8 +37,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 182,
-      "hash": "9b6fa409f7419841",
+      "lines": 219,
+      "hash": "1278d029a4e15d74",
       "generated": false
     },
     {
@@ -50,8 +50,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 161,
-      "hash": "3ba25244641c3588",
+      "lines": 163,
+      "hash": "7ff42ef1a90e7e50",
       "generated": false
     },
     {
@@ -63,8 +63,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 350,
-      "hash": "85a7bb44356dae6d",
+      "lines": 443,
+      "hash": "29d0a87993b6a959",
       "generated": false
     },
     {
@@ -89,8 +89,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 550,
-      "hash": "9ca340048adfd332",
+      "lines": 620,
+      "hash": "55a6b831ead205fb",
       "generated": false
     },
     {
@@ -102,8 +102,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 323,
-      "hash": "1ab9e3e35d9f14e9",
+      "lines": 406,
+      "hash": "a4184b776aaf8d63",
       "generated": false
     },
     {
@@ -141,8 +141,21 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 205,
-      "hash": "2bec913d0d4ae9ba",
+      "lines": 211,
+      "hash": "3d72e36a1e411c6f",
+      "generated": false
+    },
+    {
+      "id": "docs-cloud",
+      "path": "docs/cloud.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 180,
+      "hash": "bfabef90604a9b2a",
       "generated": false
     },
     {
@@ -180,8 +193,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 175,
-      "hash": "39b5f7ce4a39fb35",
+      "lines": 214,
+      "hash": "79ef6d5dd446427f",
       "generated": false
     },
     {
@@ -193,8 +206,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 117,
-      "hash": "50314a643404b814",
+      "lines": 118,
+      "hash": "8dc74f2ae50adc6f",
       "generated": false
     },
     {
@@ -207,7 +220,7 @@
       "status": "active",
       "kind": "document",
       "lines": 265,
-      "hash": "72d8d648d8fb5d63",
+      "hash": "893799379301bf91",
       "generated": false
     },
     {
@@ -221,6 +234,32 @@
       "kind": "document",
       "lines": 65,
       "hash": "ef971d3ca4ca3aec",
+      "generated": false
+    },
+    {
+      "id": "docs-plans-addy-client",
+      "path": "docs/plans/addy-client.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 269,
+      "hash": "bb663662cdd5b018",
+      "generated": false
+    },
+    {
+      "id": "docs-plans-addy",
+      "path": "docs/plans/addy.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 2003,
+      "hash": "385cd09aa2b0d2f0",
       "generated": false
     },
     {
@@ -276,6 +315,32 @@
       "generated": false
     },
     {
+      "id": "docs-plans-sync-security-protocol",
+      "path": "docs/plans/sync-security-protocol.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 469,
+      "hash": "91b98222a0b3fa61",
+      "generated": false
+    },
+    {
+      "id": "docs-plans-vault-ux",
+      "path": "docs/plans/vault-ux.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 251,
+      "hash": "3301e65b9a1f03a3",
+      "generated": false
+    },
+    {
       "id": "docs-plans-vpn-tunnel-clients",
       "path": "docs/plans/vpn-tunnel-clients.md",
       "type": "unknown",
@@ -297,8 +362,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 23,
-      "hash": "5420aa58b8654b44",
+      "lines": 22,
+      "hash": "53c52b6528a8d62e",
       "generated": false
     },
     {
@@ -336,8 +401,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 58,
-      "hash": "d70b6c66c8378ec4",
+      "lines": 103,
+      "hash": "4fb73a44fb0c196d",
       "generated": false
     },
     {
@@ -367,6 +432,58 @@
       "generated": false
     },
     {
+      "id": "sidecar-addyd-pair-vendored",
+      "path": "sidecar/addyd/pair/VENDORED.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 23,
+      "hash": "fdf97f98af8f079b",
+      "generated": false
+    },
+    {
+      "id": "sidecar-addyd-pair-wordlists-readme",
+      "path": "sidecar/addyd/pair/wordlists/README.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 25,
+      "hash": "81c5d3ea74b0d0ca",
+      "generated": false
+    },
+    {
+      "id": "sidecar-addyd-protocol-vendored",
+      "path": "sidecar/addyd/protocol/VENDORED.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 64,
+      "hash": "0e869e60f8667ade",
+      "generated": false
+    },
+    {
+      "id": "sidecar-addyd-protocol-wordlists-readme",
+      "path": "sidecar/addyd/protocol/wordlists/README.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 39,
+      "hash": "d8e5548cef8b960c",
+      "generated": false
+    },
+    {
       "id": "sidecar-netd-readme",
       "path": "sidecar/netd/README.md",
       "type": "unknown",
@@ -377,6 +494,19 @@
       "kind": "document",
       "lines": 559,
       "hash": "4aa90adcfdb6a283",
+      "generated": false
+    },
+    {
+      "id": "tests-probe-readme",
+      "path": "tests/probe/README.md",
+      "type": "unknown",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 58,
+      "hash": "cd7b41f67df5c7f2",
       "generated": false
     }
   ],
@@ -527,6 +657,12 @@
     },
     {
       "from": "readme",
+      "to": "docs-cloud",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
       "to": "docs-monitoring",
       "rel": "references",
       "inferred": true
@@ -558,6 +694,12 @@
     {
       "from": "readme",
       "to": "docs-faq",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "security",
       "rel": "references",
       "inferred": true
     },
@@ -653,6 +795,12 @@
     },
     {
       "from": "docs-ai-agents",
+      "to": "docs-ai-security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-ai-agents",
       "to": "docs-ai-mcp",
       "rel": "references",
       "inferred": true
@@ -665,6 +813,12 @@
     },
     {
       "from": "docs-ai-agents",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-cloud",
       "to": "readme",
       "rel": "references",
       "inferred": true
@@ -761,6 +915,18 @@
     },
     {
       "from": "docs-security",
+      "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-security",
+      "to": "security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-security",
       "to": "security",
       "rel": "references",
       "inferred": true
@@ -834,6 +1000,12 @@
     {
       "from": "docs-vault",
       "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-vault",
+      "to": "security",
       "rel": "references",
       "inferred": true
     },

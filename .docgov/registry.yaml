@@ -6,8 +6,8 @@ documents:
     authority: historical
     visibility: internal
     title: Working on OpsMaxx
-    hash: c9977fecadd7e7df
-    lines: 106
+    hash: 7dfe736e1811e9b5
+    lines: 115
   code-of-conduct:
     path: CODE_OF_CONDUCT.md
     type: unknown
@@ -22,32 +22,40 @@ documents:
     authority: historical
     visibility: internal
     title: Contributing to OpsMaxx
-    hash: 9b6fa409f7419841
-    lines: 182
+    hash: 1278d029a4e15d74
+    lines: 219
   docs-ai-agents:
     path: docs/ai-agents.md
     type: unknown
     authority: historical
     visibility: internal
     title: AI agent access
-    hash: 2bec913d0d4ae9ba
-    lines: 205
+    hash: 3d72e36a1e411c6f
+    lines: 211
   docs-ai-mcp:
     path: docs/AI-MCP.md
     type: unknown
     authority: historical
     visibility: internal
     title: "AI & MCP — technical guide"
-    hash: 9ca340048adfd332
-    lines: 550
+    hash: 55a6b831ead205fb
+    lines: 620
   docs-ai-security:
     path: docs/AI-SECURITY.md
     type: unknown
     authority: historical
     visibility: internal
     title: "AI & MCP — threat model and security boundaries"
-    hash: 1ab9e3e35d9f14e9
-    lines: 323
+    hash: a4184b776aaf8d63
+    lines: 406
+  docs-cloud:
+    path: docs/cloud.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: Cloud servers
+    hash: bfabef90604a9b2a
+    lines: 180
   docs-databases:
     path: docs/databases.md
     type: unknown
@@ -70,23 +78,23 @@ documents:
     authority: historical
     visibility: internal
     title: FAQ
-    hash: 39b5f7ce4a39fb35
-    lines: 175
+    hash: 79ef6d5dd446427f
+    lines: 214
   docs-features:
     path: docs/features.md
     type: unknown
     authority: historical
     visibility: internal
     title: Features
-    hash: 50314a643404b814
-    lines: 117
+    hash: 8dc74f2ae50adc6f
+    lines: 118
   docs-install:
     path: docs/install.md
     type: unknown
     authority: historical
     visibility: internal
     title: Install
-    hash: 72d8d648d8fb5d63
+    hash: 893799379301bf91
     lines: 265
   docs-monitoring:
     path: docs/monitoring.md
@@ -96,6 +104,22 @@ documents:
     title: Monitoring and fleet operations
     hash: ef971d3ca4ca3aec
     lines: 65
+  docs-plans-addy:
+    path: docs/plans/addy.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: "addy — an E2EE satellite relay for OpsMaxx"
+    hash: 385cd09aa2b0d2f0
+    lines: 2003
+  docs-plans-addy-client:
+    path: docs/plans/addy-client.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: "addy, the client half"
+    hash: bb663662cdd5b018
+    lines: 269
   docs-plans-cicd-module:
     path: docs/plans/cicd-module.md
     type: unknown
@@ -128,6 +152,22 @@ documents:
     title: "Roadmap execution — wave log"
     hash: 0d6c0e43f47d1b1a
     lines: 816
+  docs-plans-sync-security-protocol:
+    path: docs/plans/sync-security-protocol.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: "The sync security protocol, next to Termius's Vault"
+    hash: 91b98222a0b3fa61
+    lines: 469
+  docs-plans-vault-ux:
+    path: docs/plans/vault-ux.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: Vault lock/unlock UX
+    hash: 3301e65b9a1f03a3
+    lines: 251
   docs-plans-vpn-tunnel-clients:
     path: docs/plans/vpn-tunnel-clients.md
     type: unknown
@@ -150,8 +190,8 @@ documents:
     authority: historical
     visibility: internal
     title: Security
-    hash: 5420aa58b8654b44
-    lines: 23
+    hash: 53c52b6528a8d62e
+    lines: 22
   docs-terminal:
     path: docs/terminal.md
     type: unknown
@@ -174,8 +214,8 @@ documents:
     authority: historical
     visibility: internal
     title: "Vault, backup and settings"
-    hash: d70b6c66c8378ec4
-    lines: 58
+    hash: 4fb73a44fb0c196d
+    lines: 103
   docs-vpn:
     path: docs/VPN.md
     type: unknown
@@ -206,16 +246,48 @@ documents:
     authority: historical
     visibility: internal
     title: OpsMaxx
-    hash: 3ba25244641c3588
-    lines: 161
+    hash: 7ff42ef1a90e7e50
+    lines: 163
   security:
     path: SECURITY.md
     type: unknown
     authority: historical
     visibility: internal
     title: Security Policy
-    hash: 85a7bb44356dae6d
-    lines: 350
+    hash: 29d0a87993b6a959
+    lines: 443
+  sidecar-addyd-pair-vendored:
+    path: sidecar/addyd/pair/VENDORED.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: Vendored from the addy server
+    hash: fdf97f98af8f079b
+    lines: 23
+  sidecar-addyd-pair-wordlists-readme:
+    path: sidecar/addyd/pair/wordlists/README.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: The pairing-code wordlist
+    hash: 81c5d3ea74b0d0ca
+    lines: 25
+  sidecar-addyd-protocol-vendored:
+    path: sidecar/addyd/protocol/VENDORED.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: Vendored from the addy server
+    hash: 0e869e60f8667ade
+    lines: 64
+  sidecar-addyd-protocol-wordlists-readme:
+    path: sidecar/addyd/protocol/wordlists/README.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: "The EFF long wordlist, vendored"
+    hash: d8e5548cef8b960c
+    lines: 39
   sidecar-netd-readme:
     path: sidecar/netd/README.md
     type: unknown
@@ -224,6 +296,14 @@ documents:
     title: opsmaxx-netd
     hash: 4aa90adcfdb6a283
     lines: 559
+  tests-probe-readme:
+    path: tests/probe/README.md
+    type: unknown
+    authority: historical
+    visibility: internal
+    title: The live device-sync flow probe
+    hash: cd7b41f67df5c7f2
+    lines: 58
   third-party-notices:
     path: THIRD-PARTY-NOTICES.md
     type: unknown
