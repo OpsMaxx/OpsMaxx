@@ -192,7 +192,11 @@ export function ConnectionTree(): React.JSX.Element {
     // removed the focused row, both leave none — so fall back to the first.
     const items = [...(treeRef.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? [])]
     if (items.length > 0 && !items.some((el) => el.dataset.key === focusKey)) {
+      // A focused row that is deleted or moved takes DOM focus with it, to the
+      // page body. If the tree held focus, it keeps it.
+      const held = focusKey !== null && document.activeElement === document.body
       setFocusKey(items[0].dataset.key ?? null)
+      if (held) items[0].focus()
     }
     // Everything that decides which rows exist.
   }, [focusKey, query, collapsed, servers, folders])
@@ -202,6 +206,9 @@ export function ConnectionTree(): React.JSX.Element {
     // A folder being renamed is an input inside its row, and its arrow keys
     // move a caret, not the tree.
     if (el.getAttribute('role') !== 'treeitem') return
+    // Ctrl/Cmd/Alt chords belong to the app's shortcuts, not to the tree.
+    // Shift is left alone: Shift+F10 is the menu.
+    if (e.ctrlKey || e.metaKey || e.altKey) return
     const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="treeitem"]')]
     const i = items.indexOf(el)
     const level = (it: HTMLElement | undefined): number => Number(it?.getAttribute('aria-level') ?? 0)
@@ -252,6 +259,9 @@ export function ConnectionTree(): React.JSX.Element {
         style={{ height: 22, padding: '0 6px', flex: 1 }}
         defaultValue={name}
         onClick={(e) => e.stopPropagation()}
+        // Not the row's menu: opening it takes focus, and the blur below would
+        // commit a name that was still being typed.
+        onContextMenu={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             renameFolder(id, (e.target as HTMLInputElement).value.trim() || name)
@@ -384,8 +394,9 @@ export function ConnectionTree(): React.JSX.Element {
         <span className="label">{labels.get(s.id) ?? s.name}</span>
         {s.cloud && <Cloud size={12} className="faint" />}
         {s.route.length > 0 && <Route size={12} className="faint" />}
-        {s.tags.slice(0, ROW_TAGS).map((t) => (
-          <span key={t} className="chip" title={t}>
+        {s.tags.slice(0, ROW_TAGS).map((t, i) => (
+          // By position: a tag list saved before normalisation can repeat one.
+          <span key={i} className="chip" title={t}>
             {t}
           </span>
         ))}

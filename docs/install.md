@@ -263,7 +263,7 @@ Hops connect in order, top to bottom: `you → Hop 1 → Hop 2 → target`. Use 
 Click a server to open it. **Double-click to open an additional session** in a new tab — useful when you want one shell tailing logs and another running commands.
 
 Each row's status marker has its own shape as well as its own colour — a filled
-dot when connected, a diamond while connecting, a triangle when idle and a hollow
+dot when connected, a pulsing ring with a centre dot while connecting, a triangle when idle and a hollow
 ring when not connected — and hovering it names the state. Once the hourly host
 facts sweep has read a server, its row also shows an icon for the distribution
 family it reported (Ubuntu, Debian, Red Hat, SUSE, Arch, Alpine, NixOS, Gentoo,

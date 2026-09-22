@@ -67,6 +67,22 @@ describe('ContextMenu keyboard', () => {
     expect(document.activeElement).toBe(item('Second'))
   })
 
+  it('goes to the first and last item on Home and End, and marks separators', async () => {
+    await openMenu()
+    await userEvent.keyboard('{End}')
+    expect(document.activeElement).toBe(item('Last'))
+    await userEvent.keyboard('{Home}')
+    expect(document.activeElement).toBe(item('First'))
+    expect(screen.getByRole('separator')).toBeTruthy()
+  })
+
+  it('closes on Tab rather than leaving the menu open behind the focus', async () => {
+    await openMenu()
+    await userEvent.keyboard('{Tab}')
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(document.activeElement).toBe(screen.getByText('opener'))
+  })
+
   it('returns focus to the opener on Escape', async () => {
     await openMenu()
     await userEvent.keyboard('{Escape}')

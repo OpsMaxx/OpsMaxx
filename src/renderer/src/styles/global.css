@@ -568,11 +568,14 @@ button {
   animation: pulse 1.1s ease-in-out infinite;
 }
 /* Colour is never the only signal (panel-audit §7). Each state also has its
-   own shape, in the vocabulary `.state-dot` uses: a filled disc is up, a
-   triangle wants a look, a hollow ring is an absence, and a diamond is on its
-   way. The ring matters most — "not connected" is the state most of a sidebar
-   sits in, and grey-on-grey was the one a colour-blind reader could not
-   separate from anything else. */
+   own shape, and where `.state-dot` has one for the same meaning it is that
+   one: a filled disc is up, a triangle wants a look, a hollow ring is an
+   absence, a square is an alarm. Connecting has no `.state-dot` equivalent, so
+   it is a ring with a dot at its centre — kept round, and pulsing, so it cannot
+   be read as the alarm square an 8px rotated square would nearly be. The plain
+   ring matters most: "not connected" is the state most of a sidebar sits in,
+   and grey-on-grey was the one a colour-blind reader could not separate from
+   anything else. */
 .status-dot.offline {
   background: none;
   box-shadow: inset 0 0 0 2px var(--text-faint);
@@ -583,8 +586,8 @@ button {
   clip-path: polygon(50% 0, 100% 100%, 0 100%);
 }
 .status-dot.connecting {
-  border-radius: 1px;
-  transform: rotate(45deg) scale(0.85);
+  background: radial-gradient(circle, var(--info) 0 1.5px, transparent 2px);
+  box-shadow: inset 0 0 0 1.5px var(--info);
 }
 /* Failed: the alarm square, in the alarm colour. Tunnels and the VPN card set
    this; without a rule it was an 8px span with nothing painted in it. */

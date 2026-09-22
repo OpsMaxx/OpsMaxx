@@ -48,17 +48,32 @@ export function ContextMenu({ x, y, entries, onClose }: ContextMenuProps): React
       style={{ top: py, left: px }}
       ref={ref}
       onKeyDown={(e) => {
-        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
-        e.preventDefault()
+        // Tab would walk out and leave the menu open behind the focus.
+        if (e.key === 'Tab') {
+          e.preventDefault()
+          onClose()
+          return
+        }
         const items = [...(ref.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])]
         const i = items.indexOf(document.activeElement as HTMLButtonElement)
-        const step = e.key === 'ArrowDown' ? 1 : -1
-        items[(i + step + items.length) % items.length]?.focus()
+        const target =
+          e.key === 'ArrowDown'
+            ? items[(i + 1) % items.length]
+            : e.key === 'ArrowUp'
+              ? items[(i - 1 + items.length) % items.length]
+              : e.key === 'Home'
+                ? items[0]
+                : e.key === 'End'
+                  ? items[items.length - 1]
+                  : null
+        if (target === null) return
+        e.preventDefault()
+        target?.focus()
       }}
     >
       {entries.map((e, i) =>
         e.separator ? (
-          <div className="menu-sep" key={i} />
+          <div className="menu-sep" role="separator" key={i} />
         ) : (
           <button
             key={i}

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import userEvent from '@testing-library/user-event'
@@ -134,6 +134,37 @@ describe('connection tree keyboard', () => {
     expect(openServer).toHaveBeenCalledWith('srv-a')
     await userEvent.keyboard('{Shift>}{F10}{/Shift}')
     expect(screen.getByRole('menu').textContent).toContain('Connect')
+  })
+
+  it('leaves Ctrl, Cmd and Alt chords to the app', () => {
+    seed()
+    render(<ConnectionTree />)
+    const cache = rows().find((r) => r.textContent?.includes('cache'))!
+    cache.focus()
+    const ev = new KeyboardEvent('keydown', { key: 'ArrowUp', ctrlKey: true, bubbles: true, cancelable: true })
+    cache.dispatchEvent(ev)
+    expect(document.activeElement).toBe(cache)
+    expect(ev.defaultPrevented).toBe(false)
+  })
+
+  it('keeps focus in the tree when the focused row is deleted', async () => {
+    seed()
+    render(<ConnectionTree />)
+    const cache = rows().find((r) => r.textContent?.includes('cache') && r.getAttribute('aria-level'))!
+    cache.focus()
+    await act(async () => {
+      useApp.setState((st) => ({ servers: st.servers.filter((sv) => sv.id !== 'srv-c') }))
+    })
+    expect(document.activeElement?.getAttribute('role')).toBe('treeitem')
+  })
+
+  it('does not open the row menu from inside a folder being renamed', () => {
+    seed()
+    render(<ConnectionTree />)
+    const folder = rows().find((r) => r.textContent?.includes('Production'))!
+    fireEvent.doubleClick(folder)
+    fireEvent.contextMenu(folder.querySelector('input')!)
+    expect(screen.queryByRole('menu')).toBeNull()
   })
 
   it('leaves a folder being renamed to its input', async () => {
