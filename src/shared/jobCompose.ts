@@ -193,12 +193,17 @@ export const JOB_TEMPLATE_MAX = 200
 /** A generous 50 steps' worth. Not a technical limit. */
 const JOB_TEMPLATE_TEXT_MAX = 20_000
 
-// C0 except newline and tab, DEL, C1 and the bidi overrides. A template's text
-// is pasted into a live shell, so an escape sequence in it is not cosmetic:
-// ESC [ 2 0 1 ~ ends bracketed paste and turns the rest of the text into
-// keystrokes. The panel never produces one; a hand-edited or restored file can.
-// eslint-disable-next-line no-control-regex -- matching them is the point
-const UNSAFE_TEMPLATE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f‪-‮⁦-⁩]/g
+// C0 except newline and tab, DEL, C1, and every invisible or reordering
+// character: bidi controls and isolates, zero-width spaces and joiners, the
+// Arabic letter mark, the line and paragraph separators, the byte-order mark
+// and the tag block. A template's text is pasted into a live shell, so an
+// escape sequence in it is not cosmetic -- ESC [ 2 0 1 ~ ends bracketed paste
+// and turns the rest into keystrokes -- and a character the confirmation
+// cannot show is one the operator approves without seeing. The panel never
+// produces one; a hand-edited or restored file can.
+const UNSAFE_TEMPLATE =
+  // eslint-disable-next-line no-control-regex -- matching them is the point
+  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]|\udb40[\udc00-\udc7f]/g
 
 function cleanTemplateText(raw: unknown): string | null {
   if (typeof raw !== 'string') return null
@@ -268,17 +273,38 @@ export function draftFromTemplate(t: JobTemplate, current: JobDraft): JobDraft {
  * travel -- a terminal has no reboot-and-wait and no undo button.
  */
 export function templateTerminalText(t: JobTemplate): string {
-  return parseJobSteps(t.steps).join('\n')
+  // A tab is a keystroke to a shell without bracketed paste: it asks for
+  // completion, and what gets completed depends on the host, not the template.
+  return parseJobSteps(t.steps.replace(/\t/g, ' ')).join('\n')
 }
 
 /**
- * The preload's `jobTemplates` namespace. Three calls: rename is a `save` with
- * the same id. `list` answers `null` when the file exists and cannot be read,
- * which is not the same as "you have saved none", and `save` refuses rather
- * than overwrite a file it could not read.
+ * What reading the file found.
+ *
+ * `problem` is null when saving is safe. Otherwise it says why the file will
+ * not be written -- it would not parse, a newer version wrote it, or a row in it
+ * is not one this version accepts -- and nothing can be saved or deleted until
+ * the file is set aside. Rewriting it would keep only the rows this version
+ * understood and silently delete the rest.
+ */
+export interface JobTemplateList {
+  /** What could be read. Usable for loading even when `problem` is set. */
+  templates: JobTemplate[]
+  problem: string | null
+  /** Where the file is, so the sentence can say. */
+  path: string
+}
+
+export type JobTemplateResult<T extends object = object> = ({ ok: true } & T) | { ok: false; reason: string }
+
+/**
+ * The preload's `jobTemplates` namespace. Rename is a `save` with the same id.
+ * `setAside` moves a file with a problem out of the way so a fresh one can be
+ * started; it never deletes one.
  */
 export interface JobTemplatesBridge {
-  list(): Promise<JobTemplate[] | null>
-  save(template: JobTemplate): Promise<JobTemplate | null>
-  remove(id: string): Promise<boolean>
+  list(): Promise<JobTemplateList>
+  save(template: JobTemplate): Promise<JobTemplateResult<{ template: JobTemplate }>>
+  remove(id: string): Promise<JobTemplateResult>
+  setAside(): Promise<JobTemplateResult<{ path: string }>>
 }

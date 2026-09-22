@@ -93,7 +93,12 @@ import type {
 } from '../shared/processes'
 import type { ChangeLogBridge, ChangeLogFilter, ChangeLogPage } from '../shared/changelog'
 import type { RunbookNote, RunbookView, RunbooksBridge } from '../shared/runbooks'
-import type { JobTemplate, JobTemplatesBridge } from '../shared/jobCompose'
+import type {
+  JobTemplate,
+  JobTemplateList,
+  JobTemplateResult,
+  JobTemplatesBridge
+} from '../shared/jobCompose'
 import type { StoreAlertKind } from '../shared/webhook'
 import type { BytesReading } from '../shared/bytesForecast'
 import type { EnginePrecheckProbe } from '../shared/enginePrecheck'
@@ -1433,13 +1438,16 @@ const api = {
   // interface, an extra one is an excess property.
   jobs: jobsBridge,
   // Saved job templates: steps, never targets or an approval. Rename is a
-  // `save` with the same id. `satisfies` for the reason every bridge here
+  // `save` with the same id; `setAside` renames a file with a problem. `satisfies` for the reason every bridge here
   // carries one.
   jobTemplates: {
-    list: (): Promise<JobTemplate[] | null> => ipcRenderer.invoke('job-templates:list'),
-    save: (template: JobTemplate): Promise<JobTemplate | null> =>
+    list: (): Promise<JobTemplateList> => ipcRenderer.invoke('job-templates:list'),
+    save: (template: JobTemplate): Promise<JobTemplateResult<{ template: JobTemplate }>> =>
       ipcRenderer.invoke('job-templates:save', template),
-    remove: (id: string): Promise<boolean> => ipcRenderer.invoke('job-templates:remove', id)
+    remove: (id: string): Promise<JobTemplateResult> =>
+      ipcRenderer.invoke('job-templates:remove', id),
+    setAside: (): Promise<JobTemplateResult<{ path: string }>> =>
+      ipcRenderer.invoke('job-templates:set-aside')
   } satisfies JobTemplatesBridge,
   // Background sampling of the whole estate, scheduled in main so it continues
   // when the monitor is not on screen. `metrics` above is the foreground path:

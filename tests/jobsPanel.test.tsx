@@ -473,13 +473,13 @@ describe('saved templates in the composer', () => {
   it('saves steps without servers, loads them back, renames and deletes', async () => {
     const saved = new Map<string, Record<string, unknown>>()
     const templates = {
-      list: vi.fn(async () => [...saved.values()]),
+      list: vi.fn(async () => ({ templates: [...saved.values()], problem: null, path: '/t.json' })),
       save: vi.fn(async (t: Record<string, unknown>) => {
         const stored = { ...t, updatedAt: 1 }
         saved.set(t.id as string, stored)
-        return stored
+        return { ok: true, template: stored }
       }),
-      remove: vi.fn(async (id: string) => saved.delete(id))
+      remove: vi.fn(async (id: string) => ({ ok: saved.delete(id) }))
     }
     const stub = { ...jobsStub(), jobTemplates: templates }
     const servers = [server(1), server(2)]
@@ -511,5 +511,27 @@ describe('saved templates in the composer', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Confirm delete' }))
     await waitFor(() => expect(saved.size).toBe(0))
     expect(runOf(stub)).not.toHaveBeenCalled()
+  })
+})
+
+describe('a templates file main will not rewrite', () => {
+  it('says so, names the file, and offers to set it aside', async () => {
+    const templates = {
+      list: vi.fn(async () => ({
+        templates: [],
+        problem: 'The saved templates file could not be read.',
+        path: '/data/opsmaxx-job-templates.json'
+      })),
+      save: vi.fn(),
+      remove: vi.fn(),
+      setAside: vi.fn(async () => ({ ok: true, path: '/data/opsmaxx-job-templates-aside.json' }))
+    }
+    stubBridge({ ...jobsStub(), jobTemplates: templates })
+    render(<JobsPanel servers={[server(1)]} />)
+    await userEvent.click(screen.getByRole('button', { name: /New job/ }))
+    await screen.findByText('/data/opsmaxx-job-templates.json')
+    await userEvent.click(screen.getByRole('button', { name: 'Set aside and start fresh' }))
+    await screen.findByText(/Moved to \/data\/opsmaxx-job-templates-aside.json/)
+    expect(templates.setAside).toHaveBeenCalledTimes(1)
   })
 })

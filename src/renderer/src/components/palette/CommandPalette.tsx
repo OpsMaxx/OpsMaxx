@@ -68,7 +68,7 @@ export function CommandPalette(): React.JSX.Element {
     let live = true
     void window.opsmaxx?.jobTemplates
       ?.list()
-      .then((t) => live && setTemplates(t ?? []))
+      .then((t) => live && setTemplates(t?.templates ?? []))
       .catch(() => undefined)
     return () => {
       live = false

@@ -16,6 +16,7 @@ import {
   listJobTemplates,
   removeJobTemplate,
   saveJobTemplate,
+  setAsideJobTemplates,
   type JobTemplateDeps
 } from '../src/main/services/jobTemplates'
 import { refreshMcpDataCache } from '../src/main/services/mcpDataCache'
@@ -86,6 +87,17 @@ describe('a template never holds targets or an approval', () => {
     expect(loaded).toMatchObject({ title: 'Upgrade', steps: draft.steps, rebootLast: true, waveSize: 5, gate: false })
   })
 
+  it('strips every character the confirmation could not show', () => {
+    for (const ch of ['\u200b', '\u200d', '\u200f', '\u061c', '\u2028', '\u2029', '\ufeff', '\u202e', '\u2066', '\u{e0041}']) {
+      const t = sanitiseJobTemplate({ ...base, steps: `rm${ch} -rf /tmp/x` })
+      expect(t?.steps, JSON.stringify(ch)).toBe('rm -rf /tmp/x')
+    }
+  })
+
+  it('pastes a tab as a space, so it cannot ask the shell to complete anything', () => {
+    expect(templateTerminalText(sanitiseJobTemplate({ ...base, steps: 'cd /srv\tls' })!)).toBe('cd /srv ls')
+  })
+
   it('pastes the commands and not the notes', () => {
     expect(templateTerminalText(sanitiseJobTemplate(base)!)).toBe('nginx -t\nsystemctl reload nginx')
   })
@@ -94,6 +106,7 @@ describe('a template never holds targets or an approval', () => {
 describe('the templates file', () => {
   let dir: string
   let deps: JobTemplateDeps
+  const file = (): string => join(dir, 'opsmaxx-job-templates.json')
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'jobtpl-'))
     deps = { dir, now: () => 1234 }
@@ -101,33 +114,71 @@ describe('the templates file', () => {
   afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
   it('saves, lists, renames and deletes', () => {
-    expect(listJobTemplates(deps)).toEqual([])
+    expect(listJobTemplates(deps)).toEqual({ templates: [], problem: null, path: file() })
     const saved = saveJobTemplate(deps, base)
-    expect(saved).toMatchObject({ ...base, updatedAt: 1234 })
-    expect(listJobTemplates(deps)).toEqual([saved])
+    expect(saved).toMatchObject({ ok: true, template: { ...base, updatedAt: 1234 } })
+    const first = saved.ok ? saved.template : base
+    expect(listJobTemplates(deps).templates).toEqual([first])
 
-    const renamed = saveJobTemplate(deps, { ...saved, name: 'Reload nginx' })
-    expect(listJobTemplates(deps)).toEqual([renamed])
-    expect(renamed?.name).toBe('Reload nginx')
+    const renamed = saveJobTemplate(deps, { ...first, name: 'Reload nginx' })
+    expect(renamed).toMatchObject({ ok: true, template: { id: 'tpl-1', name: 'Reload nginx' } })
+    expect(listJobTemplates(deps).templates.map((t) => t.name)).toEqual(['Reload nginx'])
 
-    expect(removeJobTemplate(deps, 'tpl-1')).toBe(true)
-    expect(listJobTemplates(deps)).toEqual([])
-    expect(removeJobTemplate(deps, 'tpl-1')).toBe(false)
+    expect(removeJobTemplate(deps, 'tpl-1')).toEqual({ ok: true })
+    expect(listJobTemplates(deps).templates).toEqual([])
+    expect(removeJobTemplate(deps, 'tpl-1').ok).toBe(false)
   })
 
   it('never writes targets to disk, even when handed them', () => {
     saveJobTemplate(deps, { ...base, targets: [{ serverId: 's1' }], approval: { phrase: 'RUN' } })
-    const raw = readFileSync(join(dir, 'opsmaxx-job-templates.json'), 'utf8')
-    expect(raw).not.toMatch(/targets|approval|serverId/)
+    expect(readFileSync(file(), 'utf8')).not.toMatch(/targets|approval|serverId/)
   })
 
   it('does not overwrite a file it cannot read', () => {
-    const path = join(dir, 'opsmaxx-job-templates.json')
-    writeFileSync(path, '{ not json', { mode: 0o600 })
-    expect(listJobTemplates(deps)).toBeNull()
-    expect(saveJobTemplate(deps, base)).toBeNull()
-    expect(removeJobTemplate(deps, 'tpl-1')).toBe(false)
-    expect(readFileSync(path, 'utf8')).toBe('{ not json')
+    writeFileSync(file(), '{ not json', { mode: 0o600 })
+    expect(listJobTemplates(deps).problem).toMatch(/could not be read/)
+    expect(saveJobTemplate(deps, base).ok).toBe(false)
+    expect(removeJobTemplate(deps, 'tpl-1').ok).toBe(false)
+    expect(readFileSync(file(), 'utf8')).toBe('{ not json')
+  })
+
+  // A row this version refuses is left out of the list -- and a save that wrote
+  // the list back would have deleted it.
+  it('refuses to save over a row it could not validate', () => {
+    const oversize = { ...base, id: 'tpl-big', name: 'x'.repeat(121) }
+    const before = JSON.stringify({ v: 1, templates: [base, oversize] })
+    writeFileSync(file(), before, { mode: 0o600 })
+
+    const read = listJobTemplates(deps)
+    expect(read.templates.map((t) => t.id)).toEqual(['tpl-1'])
+    expect(read.problem).toMatch(/1 saved template/)
+
+    const saved = saveJobTemplate(deps, { ...base, id: 'tpl-new' })
+    expect(saved).toMatchObject({ ok: false, reason: expect.stringMatching(/not rewritten/) })
+    expect(removeJobTemplate(deps, 'tpl-1').ok).toBe(false)
+    expect(readFileSync(file(), 'utf8')).toBe(before)
+  })
+
+  it('refuses to rewrite a file from another version as v1', () => {
+    const before = JSON.stringify({ v: 2, templates: [base] })
+    writeFileSync(file(), before, { mode: 0o600 })
+    expect(listJobTemplates(deps).problem).toMatch(/different version/)
+    expect(saveJobTemplate(deps, base).ok).toBe(false)
+    expect(readFileSync(file(), 'utf8')).toBe(before)
+  })
+
+  it('sets a problem file aside, never deletes it, and never overwrites an earlier one', () => {
+    expect(setAsideJobTemplates(deps).ok).toBe(false)
+    writeFileSync(file(), '{ not json', { mode: 0o600 })
+    const aside = join(dir, 'opsmaxx-job-templates-aside.json')
+    expect(setAsideJobTemplates(deps)).toEqual({ ok: true, path: aside })
+    expect(readFileSync(aside, 'utf8')).toBe('{ not json')
+    expect(saveJobTemplate(deps, base).ok).toBe(true)
+
+    writeFileSync(file(), '{ also broken', { mode: 0o600 })
+    expect(setAsideJobTemplates(deps).ok).toBe(false)
+    expect(readFileSync(aside, 'utf8')).toBe('{ not json')
+    expect(readFileSync(file(), 'utf8')).toBe('{ also broken')
   })
 })
 

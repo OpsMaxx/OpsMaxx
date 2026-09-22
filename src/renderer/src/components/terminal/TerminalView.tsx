@@ -584,6 +584,10 @@ function RealTerminal({
           text={pending.text}
           lines={pending.lines}
           full={pending.full}
+          // Read when the dialog renders, from the shell as it is now: this is
+          // what decides whether pasting runs anything.
+          bracketed={termRef.current?.modes.bracketedPasteMode ?? false}
+          local={transport.serverId === undefined}
           server={transport.title}
           onCancel={() => setPending(null)}
           onConfirm={() => {

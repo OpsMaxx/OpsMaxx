@@ -25,14 +25,18 @@ and choose **Open in code** to edit it in VS Code (or whatever you configure in
 Settings → Editor). Saving uploads it back to the server automatically — no
 download/re-upload dance. The inline editor is still there for quick edits.
 
-**Multi-line pastes ask first.** Pasting more than one line into a remote shell
-shows a preview and a confirmation, because every line runs the moment it
-lands. Single-line pastes go straight through.
+**Multi-line pastes ask first.** Pasting more than one line into a shell shows a
+preview and a confirmation that says what the paste will do. If the shell has
+bracketed paste on, as recent bash and zsh do, nothing runs until you press
+Enter. Otherwise each line runs as it lands, and a last line without a newline
+waits for Enter. Single-line pastes go straight through.
 
 **Run a saved job template here.** With the Jobs module on, the command palette
 (<kbd>Ctrl</kbd>+<kbd>K</kbd>) lists every template saved in the Jobs composer as
 *Run in this terminal: name*. It opens the same confirmation, showing every
-command, and asks even for a single line. Nothing is sent until you confirm.
+command, and asks even for a single line. Cancel has the focus, so the Enter
+that picked the template cannot also confirm it. Nothing is sent until you
+press **Paste**.
 
 Control keys such as <kbd>Ctrl</kbd>+<kbd>C</kbd>, <kbd>Ctrl</kbd>+<kbd>A</kbd> and <kbd>Ctrl</kbd>+<kbd>W</kbd> pass through to the remote shell, so `vim`, `nano` and bash line editing behave normally.
 

@@ -110,7 +110,12 @@ import { PostureReader, firewallRulesGranted } from './services/posture'
 import { DriftReader } from './services/drift'
 import { readChangeLog } from './services/changelog'
 import { readRunbook, saveRunbookNote } from './services/runbooks'
-import { listJobTemplates, removeJobTemplate, saveJobTemplate } from './services/jobTemplates'
+import {
+  listJobTemplates,
+  removeJobTemplate,
+  saveJobTemplate,
+  setAsideJobTemplates
+} from './services/jobTemplates'
 import { isRunbookKind, type RunbookNote, type RunbookView } from '../shared/runbooks'
 import type { ChangeLogFilter, ChangeLogPage } from '../shared/changelog'
 import type {
@@ -3159,6 +3164,7 @@ ipcMain.handle('jobs:capabilities', () => [...jobCapabilities.values()])
 ipcMain.handle('job-templates:list', () => listJobTemplates())
 ipcMain.handle('job-templates:save', (_e, template: unknown) => saveJobTemplate({}, template))
 ipcMain.handle('job-templates:remove', (_e, id: unknown) => removeJobTemplate({}, id))
+ipcMain.handle('job-templates:set-aside', () => setAsideJobTemplates({}))
 
 // ---- Live log tailing across hosts ----
 //

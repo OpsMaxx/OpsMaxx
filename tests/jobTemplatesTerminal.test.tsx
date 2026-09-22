@@ -7,6 +7,7 @@ import { stubBridge } from './setup/renderer'
 import { CommandPalette } from '../src/renderer/src/components/palette/CommandPalette'
 import {
   PasteConfirm,
+  pasteEffect,
   useTerminalPasteRequest
 } from '../src/renderer/src/components/terminal/PasteConfirm'
 import { useApp } from '../src/renderer/src/store/app'
@@ -52,7 +53,7 @@ beforeEach(() => {
   writes.ssh.mockReset()
   writes.local.mockReset()
   stubBridge({
-    jobTemplates: { list: vi.fn(async () => [oneLiner]) },
+    jobTemplates: { list: vi.fn(async () => ({ templates: [oneLiner], problem: null, path: '/x' })) },
     ssh: { write: writes.ssh },
     local: { write: writes.local }
   })
@@ -130,7 +131,7 @@ describe('run a saved template in this terminal', () => {
     expect(document.querySelector('.paste-preview')?.textContent).toBe(long)
     expect(paste).not.toHaveBeenCalled()
 
-    await userEvent.click(screen.getByText('Paste and run'))
+    await userEvent.click(screen.getByRole('button', { name: /^Paste$/ }))
     expect(paste).toHaveBeenCalledWith(long)
   })
 
@@ -145,5 +146,65 @@ describe('run a saved template in this terminal', () => {
     await new Promise((r) => setTimeout(r, 0))
     expect(open).not.toHaveBeenCalled()
     expect(useApp.getState().pasteRequest).not.toBeNull()
+  })
+})
+
+describe('the confirmation says what pasting will do', () => {
+  it('names each of the three behaviours, not only the alarming one', () => {
+    expect(pasteEffect('a\nb', true)).toBe('Nothing runs until you press Enter')
+    expect(pasteEffect('a\nb\n', true)).toBe('Nothing runs until you press Enter')
+    expect(pasteEffect('a\nb\n', false)).toBe('Every line runs as soon as it is pasted')
+    expect(pasteEffect('a\nb', false)).toBe('All but the last line run now; the last waits for Enter')
+    expect(pasteEffect('a', false)).toBe('It waits for you to press Enter')
+  })
+
+  it('does not call a shell on this computer remote', () => {
+    const noop = (): void => {}
+    render(<PasteConfirm text="ls" lines={1} server="zsh" local full onConfirm={noop} onCancel={noop} />)
+    expect(screen.getByText(/This is a shell on this computer/)).toBeTruthy()
+    expect(screen.queryByText(/remote shell/)).toBeNull()
+  })
+
+  it('says "Paste", not "Paste and run", when nothing will run on paste', () => {
+    const noop = (): void => {}
+    render(<PasteConfirm text={'a\nb'} lines={2} server="web" bracketed onConfirm={noop} onCancel={noop} />)
+    expect(screen.getByText('Nothing runs until you press Enter')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Paste$/ })).toBeTruthy()
+  })
+})
+
+describe('the Enter that chose the template does not also confirm it', () => {
+  it('writes nothing when Enter is pressed twice through the palette', async () => {
+    const paste = vi.fn()
+    function Pane(): React.JSX.Element | null {
+      const [text, setText] = useState<string | null>(null)
+      const tab = useApp.getState().tabs[0]
+      useTerminalPasteRequest(useApp.getState().panes[tab.id]?.activePaneId ?? tab.id, setText)
+      return text === null ? null : (
+        <PasteConfirm
+          text={text}
+          lines={1}
+          server="web"
+          full
+          onCancel={() => setText(null)}
+          onConfirm={() => paste(text)}
+        />
+      )
+    }
+    const { container } = render(
+      <>
+        <Pane />
+        <CommandPalette />
+      </>
+    )
+    await waitFor(() => expect(row(container, 'Run in this terminal: Reload nginx')).toBeTruthy())
+    await userEvent.type(container.querySelector('.palette-input input') as HTMLElement, 'Run in this terminal')
+    // The first Enter runs the palette entry; the second -- a key repeat, or a
+    // second tap -- lands on whatever the dialog focused.
+    await userEvent.keyboard('{Enter}')
+    await screen.findByText('Paste 1 line into web?')
+    await userEvent.keyboard('{Enter}')
+    expect(paste).not.toHaveBeenCalled()
+    expect(writes.ssh).not.toHaveBeenCalled()
   })
 })

@@ -1,7 +1,13 @@
 import { app } from 'electron'
 import { join } from 'node:path'
-import { existsSync, readFileSync } from 'node:fs'
-import { JOB_TEMPLATE_MAX, sanitiseJobTemplate, type JobTemplate } from '../../shared/jobCompose'
+import { existsSync, readFileSync, renameSync } from 'node:fs'
+import {
+  JOB_TEMPLATE_MAX,
+  sanitiseJobTemplate,
+  type JobTemplate,
+  type JobTemplateList,
+  type JobTemplateResult
+} from '../../shared/jobCompose'
 import { atomicWriteFileSync } from './atomicWrite'
 
 // Saved job templates -- the main-process half of the follow-on to item 33.
@@ -19,6 +25,10 @@ import { atomicWriteFileSync } from './atomicWrite'
 // person later pastes into a live shell believing they wrote it.
 
 const TEMPLATES_FILE = 'opsmaxx-job-templates.json'
+/** Where a file with a problem is moved. ONE fixed name, listed in
+ *  ALL_DATA_FILES, so "delete everything" finds it; a timestamped name would be
+ *  a copy of the user's commands that no wipe list knows about. */
+const ASIDE_FILE = 'opsmaxx-job-templates-aside.json'
 
 /** Versioned from the first write, as runbooks.ts's notes are. */
 interface TemplatesFile {
@@ -34,33 +44,56 @@ export interface JobTemplateDeps {
   now?: () => number
 }
 
-function templatesPath(deps: JobTemplateDeps): string {
-  return join(deps.dir ?? app.getPath('userData'), TEMPLATES_FILE)
+function userPath(deps: JobTemplateDeps, name: string): string {
+  return join(deps.dir ?? app.getPath('userData'), name)
 }
 
-/** Every stored template, or `null` when the file exists and cannot be read.
- *  An unreadable file is not an empty one, and the panel says which. */
-export function listJobTemplates(deps: JobTemplateDeps = {}): JobTemplate[] | null {
-  const path = templatesPath(deps)
-  if (!existsSync(path)) return []
+/**
+ * Everything the file holds that this version can use, and whether it is safe
+ * to write back.
+ *
+ * Reading is forgiving and writing is not. A row this version refuses -- a
+ * 121-character name, 51 steps, a field from a newer build -- is left out of
+ * the list, which is harmless; writing the list back would DELETE it, which is
+ * not. So any such row, an unknown `v`, or a file that will not parse sets
+ * `problem`, and every write refuses while it is set.
+ */
+export function listJobTemplates(deps: JobTemplateDeps = {}): JobTemplateList {
+  const path = userPath(deps, TEMPLATES_FILE)
+  const empty = (problem: string | null): JobTemplateList => ({ templates: [], problem, path })
+  if (!existsSync(path)) return empty(null)
   let parsed: unknown
   try {
     parsed = JSON.parse(readFileSync(path, 'utf8'))
   } catch (err) {
     console.error('[jobTemplates] file unreadable:', err)
-    return null
+    return empty('The saved templates file could not be read.')
   }
-  const rows = (parsed as Partial<TemplatesFile> | null)?.templates
-  if (!Array.isArray(rows)) return null
+  const file = parsed as Partial<TemplatesFile> | null
+  if (file?.v !== TEMPLATES_VERSION) {
+    return empty('The saved templates file was written by a different version of OpsMaxx.')
+  }
+  if (!Array.isArray(file.templates)) return empty('The saved templates file holds no list.')
   // Every row narrowed again: the file survives hand edits and restores, and a
   // row that arrived with `targets` on it leaves without them.
-  return rows.map(sanitiseJobTemplate).filter((t): t is JobTemplate => t !== null)
+  const templates = file.templates
+    .map(sanitiseJobTemplate)
+    .filter((t): t is JobTemplate => t !== null)
+  const dropped = file.templates.length - templates.length
+  return {
+    templates,
+    problem:
+      dropped === 0
+        ? null
+        : `${dropped} saved template(s) are not in a shape this version accepts, so the file is not rewritten.`,
+    path
+  }
 }
 
 function write(deps: JobTemplateDeps, templates: JobTemplate[]): boolean {
   const body: TemplatesFile = { v: TEMPLATES_VERSION, templates }
   try {
-    atomicWriteFileSync(templatesPath(deps), JSON.stringify(body))
+    atomicWriteFileSync(userPath(deps, TEMPLATES_FILE), JSON.stringify(body))
     return true
   } catch (err) {
     console.error('[jobTemplates] save failed:', err)
@@ -68,27 +101,56 @@ function write(deps: JobTemplateDeps, templates: JobTemplate[]): boolean {
   }
 }
 
+const NOT_WRITTEN = 'The saved templates file could not be written.'
+
 /**
  * Create, or replace the one with the same id -- which is also how a rename
- * happens. Returns the template as stored, or `null` when it was refused or did
- * not land, so the panel never shows back a template from memory.
+ * happens. Returns the template as stored, so the panel never shows one back
+ * from memory, or the reason it was not.
  */
-export function saveJobTemplate(deps: JobTemplateDeps, raw: unknown): JobTemplate | null {
+export function saveJobTemplate(
+  deps: JobTemplateDeps,
+  raw: unknown
+): JobTemplateResult<{ template: JobTemplate }> {
   const clean = sanitiseJobTemplate(raw)
-  if (!clean) return null
-  // Refuse rather than overwrite a file that exists and would not parse: the
-  // templates in it are still on disk, and one save would replace all of them.
-  const existing = listJobTemplates(deps)
-  if (existing === null) return null
-  const others = existing.filter((t) => t.id !== clean.id)
-  if (others.length >= JOB_TEMPLATE_MAX) return null
-  const stored: JobTemplate = { ...clean, updatedAt: (deps.now ?? Date.now)() }
-  return write(deps, [...others, stored]) ? stored : null
+  if (!clean) {
+    return { ok: false, reason: 'A template needs a name and at least one command.' }
+  }
+  const { templates, problem } = listJobTemplates(deps)
+  if (problem) return { ok: false, reason: problem }
+  const others = templates.filter((t) => t.id !== clean.id)
+  if (others.length >= JOB_TEMPLATE_MAX) {
+    return { ok: false, reason: `There are already ${JOB_TEMPLATE_MAX} saved templates.` }
+  }
+  const template: JobTemplate = { ...clean, updatedAt: (deps.now ?? Date.now)() }
+  return write(deps, [...others, template]) ? { ok: true, template } : { ok: false, reason: NOT_WRITTEN }
 }
 
-export function removeJobTemplate(deps: JobTemplateDeps, id: unknown): boolean {
-  const existing = listJobTemplates(deps)
-  if (existing === null || typeof id !== 'string') return false
-  const kept = existing.filter((t) => t.id !== id)
-  return kept.length !== existing.length && write(deps, kept)
+export function removeJobTemplate(deps: JobTemplateDeps, id: unknown): JobTemplateResult {
+  const { templates, problem } = listJobTemplates(deps)
+  if (problem) return { ok: false, reason: problem }
+  const kept = templates.filter((t) => t.id !== id)
+  if (kept.length === templates.length) return { ok: false, reason: 'That template is not saved.' }
+  return write(deps, kept) ? { ok: true } : { ok: false, reason: NOT_WRITTEN }
+}
+
+/**
+ * Move a file with a problem to ASIDE_FILE so the next save starts a fresh
+ * one. A rename, never a delete: the rows in it are the user's and may be
+ * recoverable by hand. Refuses when an earlier set-aside copy is still there,
+ * because renaming over it would delete that one instead.
+ */
+export function setAsideJobTemplates(deps: JobTemplateDeps): JobTemplateResult<{ path: string }> {
+  const { problem, path } = listJobTemplates(deps)
+  if (!problem) return { ok: false, reason: 'The saved templates file has nothing wrong with it.' }
+  const aside = userPath(deps, ASIDE_FILE)
+  if (existsSync(aside)) {
+    return { ok: false, reason: `An earlier set-aside copy is still at ${aside}. Move it first.` }
+  }
+  try {
+    renameSync(path, aside)
+    return { ok: true, path: aside }
+  } catch (err) {
+    return { ok: false, reason: `It could not be moved: ${err instanceof Error ? err.message : String(err)}` }
+  }
 }

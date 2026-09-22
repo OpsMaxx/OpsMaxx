@@ -151,34 +151,43 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
       live = false
     }
   }, [fileBody])
-  // Saved templates: steps, never servers. `null` is "could not be read",
-  // which is not "none saved". Loaded when the composer opens.
-  const [templates, setTemplates] = useState<JobTemplate[] | null>([])
+  // Saved templates: steps, never servers. Loaded when the composer opens.
+  // `problem` is the file main will not rewrite -- unreadable, from another
+  // version, or holding rows this one refuses -- and saving waits on it.
+  const [templates, setTemplates] = useState<JobTemplate[]>([])
+  const [templateFile, setTemplateFile] = useState<{ problem: string; path: string } | null>(null)
   const [templateId, setTemplateId] = useState('')
   const [templateName, setTemplateName] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [templateNote, setTemplateNote] = useState<string | null>(null)
-  const chosenTemplate = templates?.find((t) => t.id === templateId)
+  const chosenTemplate = templates.find((t) => t.id === templateId)
+  const loadTemplates = useCallback(async (): Promise<void> => {
+    try {
+      const read = await window.opsmaxx?.jobTemplates?.list()
+      if (!read) return
+      setTemplates(read.templates)
+      setTemplateFile(read.problem ? { problem: read.problem, path: read.path } : null)
+    } catch (e) {
+      setTemplateNote(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
   useEffect(() => {
-    if (!composing) return
-    void window.opsmaxx?.jobTemplates
-      ?.list()
-      .then(setTemplates)
-      .catch(() => setTemplates(null))
-  }, [composing])
+    if (composing) void loadTemplates()
+  }, [composing, loadTemplates])
 
   /** One save path for "save as new" and "rename": main narrows the template,
-   *  stamps it, and hands back what it stored -- or null, said out loud. */
+   *  stamps it, and hands back what it stored -- or why it did not. */
   const storeTemplate = async (t: JobTemplate | null): Promise<void> => {
-    const stored = t ? await window.opsmaxx?.jobTemplates?.save(t) : null
-    if (!stored) {
-      setTemplateNote(
-        'The template was not saved. It needs a name and at least one command, and the saved templates must be readable.'
-      )
+    const result = t
+      ? await window.opsmaxx?.jobTemplates?.save(t)
+      : { ok: false as const, reason: 'A template needs a name and at least one command.' }
+    if (!result?.ok) {
+      setTemplateNote(result?.reason ?? 'The template was not saved.')
       return
     }
+    const stored = result.template
     setTemplateNote(null)
-    setTemplates((cur) => [...(cur ?? []).filter((x) => x.id !== stored.id), stored])
+    setTemplates((cur) => [...cur.filter((x) => x.id !== stored.id), stored])
     setTemplateId(stored.id)
     setTemplateName(stored.name)
   }
@@ -190,13 +199,25 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
       return
     }
     setConfirmDelete(false)
-    if (await window.opsmaxx?.jobTemplates?.remove(chosenTemplate.id)) {
-      setTemplates((cur) => (cur ?? []).filter((x) => x.id !== chosenTemplate.id))
-      setTemplateId('')
-      setTemplateName('')
-    } else {
-      setTemplateNote('The template was not deleted.')
+    const result = await window.opsmaxx?.jobTemplates?.remove(chosenTemplate.id)
+    if (!result?.ok) {
+      setTemplateNote(result?.reason ?? 'The template was not deleted.')
+      return
     }
+    setTemplateNote(null)
+    setTemplates((cur) => cur.filter((x) => x.id !== chosenTemplate.id))
+    setTemplateId('')
+    setTemplateName('')
+  }
+
+  /** The way out of a file main will not rewrite: move it aside, never delete
+   *  it, and say where it went. */
+  const setAsideTemplates = async (): Promise<void> => {
+    const result = await window.opsmaxx?.jobTemplates?.setAside()
+    setTemplateNote(
+      result?.ok ? `Moved to ${result.path}. New templates start a fresh file.` : result?.reason ?? null
+    )
+    if (result?.ok) await loadTemplates()
   }
 
   const openId = useRef<string | null>(null)
@@ -732,7 +753,7 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
                   aria-label="Saved template"
                   value={templateId}
                   onChange={(e) => {
-                    const t = templates?.find((x) => x.id === e.target.value)
+                    const t = templates.find((x) => x.id === e.target.value)
                     setTemplateId(t?.id ?? '')
                     setTemplateName(t?.name ?? '')
                     setConfirmDelete(false)
@@ -740,9 +761,9 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
                   }}
                 >
                   <option value="">
-                    {templates === null ? 'Saved templates could not be read' : 'Load a saved template…'}
+                    Load a saved template…
                   </option>
-                  {(templates ?? []).map((t) => (
+                  {templates.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.name}
                     </option>
@@ -778,6 +799,15 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
                   </>
                 )}
               </div>
+              {templateFile && (
+                <div className="s-note state-unknown">
+                  {templateFile.problem} Nothing can be saved or deleted until it is set aside. It
+                  is at <span className="mono selectable">{templateFile.path}</span>.{' '}
+                  <button className="btn sm" onClick={() => void setAsideTemplates()}>
+                    Set aside and start fresh
+                  </button>
+                </div>
+              )}
               {templateNote && <div className="s-note state-unknown">{templateNote}</div>}
               <input
                 className="input"

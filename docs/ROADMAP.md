@@ -328,7 +328,9 @@ selection from a folder or tag, and halt-remaining-across-hosts.
 targets, wave size, gate or approval (`JobTemplate` refuses `targets` and
 `approval` by type, `sanitiseJobTemplate` drops them at runtime). Stored in
 `opsmaxx-job-templates.json` beside the runbook notes, device-local and UNDECIDED
-for sync like them. Loading one fills the composer and stops; `planJob` still mints
+for sync like them. A file that will not parse, came from another version, or
+holds a row this version refuses is never rewritten; the composer names it and
+offers to move it to `opsmaxx-job-templates-aside.json`. Loading one fills the composer and stops; `planJob` still mints
 the confirmation over the servers picked now. The command palette offers "Run in
 this terminal" per template, which opens the paste confirmation showing every line,
 one line included, and writes nothing before it is confirmed. No MCP tool reaches

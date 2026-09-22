@@ -133,6 +133,8 @@ export const NOT_SYNCED: Readonly<Record<string, string>> = {
     'UNDECIDED: user-authored notes about their own estate, unreproducible, and currently lost on a device wipe',
   rules: 'UNDECIDED: automation rules with pinned server ids; the same shape as runbooks',
   jobTemplates: 'UNDECIDED: saved job step lists the user wrote; the same kind of thing as runbooks',
+  jobTemplatesAside:
+    'device-local: an unreadable templates file moved aside for recovery by hand; syncing it would spread the damage',
   processes: 'UNDECIDED: managed long-running process definitions',
   backupTargets: 'UNDECIDED: where backups go; holds no credential but maps where the estate copies live',
   credproxyRules: 'UNDECIDED: which third-party endpoints this machine forwards to',
