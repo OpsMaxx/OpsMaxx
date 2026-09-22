@@ -517,6 +517,23 @@ button {
 .tree-row.dragover {
   box-shadow: inset 0 0 0 1px var(--accent-border);
 }
+/* Inset, because the row clips its overflow and sits flush with the scroll
+   area's edge: the global ring's outward offset was cut off on both sides. */
+.tree-row:focus-visible {
+  outline-offset: -2px;
+}
+/* Tags on a connection row. The shared chip, a size down, so two of them fit
+   beside a name in a 28px row without the name being the thing that gives. */
+.tree-row .chip {
+  flex: none;
+  height: 16px;
+  padding: 0 5px;
+  font-weight: 500;
+}
+.tree-row .distro {
+  display: inline-flex;
+  flex: none;
+}
 
 .status-dot {
   width: 8px;
@@ -538,6 +555,25 @@ button {
 .status-dot.connecting {
   background: var(--info);
   animation: pulse 1.1s ease-in-out infinite;
+}
+/* Colour is never the only signal (panel-audit §7). Each state also has its
+   own shape, in the vocabulary `.state-dot` uses: a filled disc is up, a
+   triangle wants a look, a hollow ring is an absence, and a diamond is on its
+   way. The ring matters most — "not connected" is the state most of a sidebar
+   sits in, and grey-on-grey was the one a colour-blind reader could not
+   separate from anything else. */
+.status-dot.offline {
+  background: none;
+  box-shadow: inset 0 0 0 2px var(--text-faint);
+}
+.status-dot.idle {
+  border-radius: 0;
+  box-shadow: none;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.status-dot.connecting {
+  border-radius: 1px;
+  transform: rotate(45deg) scale(0.85);
 }
 @keyframes pulse {
   50% {
