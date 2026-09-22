@@ -850,7 +850,10 @@ export function FleetMonitor({ hidden = false }: { hidden?: boolean }): React.JS
               apart from it. `cicdTrigger` is decided HERE, at the mount point,
               like every other module -- the panel renders what it is told it
               may, and does not read the registry itself. */}
-          <CicdPanel canTrigger={moduleEnabled(modules, 'cicdTrigger')} />
+          <CicdPanel
+            canTrigger={moduleEnabled(modules, 'cicdTrigger')}
+            active={!hidden && rail !== 'operations' && activeTab === 'cicd'}
+          />
         </div>
       )}
       {/* No `servers` prop, for the same reason ProcessesPanel has none and a

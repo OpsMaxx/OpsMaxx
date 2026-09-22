@@ -104,6 +104,7 @@ export function CicdPanel({
   bridge = cicdBridge(),
   intervalSec = DEFAULT_INTERVAL_SEC,
   canTrigger = false,
+  active = true,
   onSaveConnection
 }: {
   connections?: CicdConnection[]
@@ -115,6 +116,8 @@ export function CicdPanel({
    * `tests/moduleBoundaries.test.ts` can still find the guard where it looks.
    */
   canTrigger?: boolean
+  /** False while mounted but not on screen. Only the clock reads it. */
+  active?: boolean
   onSaveConnection?: (connection: CicdConnection, token: string) => void | Promise<void>
 }): React.JSX.Element {
   const stored = useCicdConnectionList()
@@ -123,7 +126,7 @@ export function CicdPanel({
   // The preload half is a separate file and can be older than this panel.
   const canRefresh = cicdBridgeHas(bridge, 'refresh')
   const states = useCicdState(bridge)
-  const now = useNow()
+  const now = useNow(1000, active)
 
   // When the panel was opened. A failure that arrived after this is new to the
   // reader; one that was already there is not, and the ranking says so.

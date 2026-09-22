@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useApp } from '../../store/app'
 import { bridgeHas } from '../../lib/bridge'
@@ -132,13 +132,23 @@ export function hostOf(baseUrl: string): string {
   }
 }
 
-/** A clock that makes "read 34s ago" count up instead of freezing at mount. */
-export function useNow(intervalMs = 1000): number {
+/**
+ * A clock that makes "read 34s ago" count up instead of freezing at mount.
+ *
+ * `running` false stops it. FleetMonitor keeps a visited module mounted and
+ * hides it with display:none, so a clock that ticked regardless re-rendered the
+ * whole panel every second for the rest of the session, behind whatever the
+ * user had moved on to. A layout effect, so the catch-up on the way back is
+ * committed before the panel is painted and a stale "read 5m ago" never shows.
+ */
+export function useNow(intervalMs = 1000, running = true): number {
   const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (!running) return
+    setNow(Date.now())
     const t = setInterval(() => setNow(Date.now()), intervalMs)
     return () => clearInterval(t)
-  }, [intervalMs])
+  }, [intervalMs, running])
   return now
 }
 
