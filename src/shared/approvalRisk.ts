@@ -36,7 +36,7 @@
 // unrecognised command does not get a soothing paraphrase, and a missing reason
 // is printed as a missing reason.
 
-import type { AiCapability } from './mcp'
+import type { AiCapability, ContentPreview } from './mcp'
 
 /**
  * The scale, low to high, in order. Exported because the modal prints its
@@ -647,4 +647,97 @@ export function resolveFuseDeadline(
     if (!Number.isNaN(at)) return at
   }
   return fuseDeadline(createdAt, timeoutSeconds)
+}
+
+// ---------------------------------------------------------------------------
+// What write_file will write
+// ---------------------------------------------------------------------------
+
+/** What secretRedaction.ts puts where a secret was. See contentPreview. */
+const REDACTION_MARKER = '[REDACTED]'
+
+/** The most of an agent's file content the dialog shows. See contentPreview. */
+export const PREVIEW_MAX_CHARS = 4096
+export const PREVIEW_MAX_LINES = 80
+
+// Everything a reader cannot see, or sees in the wrong order, by Unicode
+// category rather than by a hand-kept list of code points:
+//
+//   \p{Cc}  controls (C0, DEL, C1) -- except tab and newline, below
+//   \p{Cf}  format characters: soft hyphen, the Arabic letter mark, every
+//          zero-width and directional mark, the bidi embeddings, overrides
+//          and isolates, the invisible operators, the BOM, the interlinear
+//          annotation marks, and the TAG block U+E0000-E007F, which spells
+//          ASCII no screen shows ("ASCII smuggling")
+//   \p{Zl} \p{Zp}  the line and paragraph separators
+//   \p{Cs}  a lone surrogate, which renders as a replacement character
+//
+// plus the characters that are letters or marks by category and blank on
+// screen anyway: the combining grapheme joiner U+034F, the Hangul fillers
+// U+115F, U+1160, U+3164 and U+FFA0, the braille pattern blank U+2800, the
+// Mongolian vowel separator U+180E, and the variation selectors U+FE00-FE0F
+// and U+E0100-E01EF. The `u` flag is what lets the class see anything above
+// U+FFFF at all.
+//
+// A lone CR is spelled out too -- it is how a line hides its own start in a
+// terminal -- while the CR of a CRLF pair, the newline and the tab are left
+// alone, because every Windows file and every Makefile would otherwise read as
+// an attack.
+//
+// sanitizeAgentIntent and remoteText strip the same kind of character, and
+// this does the opposite. Those are sentences, where deleting the character is
+// the repair. This is a FILE the operator is about to put on a server:
+// deleting a U+202E from the preview would show them a file that is not the
+// one being written, which is the exact lie the preview exists to stop. So
+// each one is kept, and spelled out.
+const PREVIEW_INVISIBLE =
+  // The class holds lone combining marks ON PURPOSE -- matching a variation
+  // selector by itself, rather than as part of the character it modifies, is
+  // how it gets spelled out -- which is what this lint exists to object to.
+  // eslint-disable-next-line no-misleading-character-class
+  /\r(?!\n)|(?![\t\n\r])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}\u034f\u115f\u1160\u180e\u3164\uffa0\u2800\ufe00-\ufe0f\u{e0100}-\u{e01ef}]/gu
+
+/** `\u202e` becomes `⟨U+202E⟩`, `\u{e0041}` becomes `⟨U+E0041⟩`: printed, never obeyed. */
+export function showInvisibles(text: string): string {
+  return text.replace(
+    PREVIEW_INVISIBLE,
+    (c) => `⟨U+${(c.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0')}⟩`
+  )
+}
+
+/**
+ * The head of an agent's file content, made fit to show a human.
+ *
+ * Takes ALREADY-REDACTED text. The redactor lives in main (secretRedaction.ts)
+ * because it needs the server's known secret values, and it has to run over the
+ * whole content before this cuts it: a known password straddling the cut would
+ * otherwise survive as its first half, which no pattern recognises.
+ *
+ * Capped by characters and by lines, whichever bites first, because either one
+ * alone lets a single payload fill the dialog -- one 4 KB line, or eighty
+ * one-character ones. The cut is taken on the source text and the invisible
+ * characters are spelled out afterwards, so an agent cannot use them to make
+ * the preview longer than the cap, and the omitted counts describe the file
+ * rather than the rendering.
+ */
+export function contentPreview(redacted: string): ContentPreview {
+  let head = redacted.slice(0, PREVIEW_MAX_CHARS).split('\n').slice(0, PREVIEW_MAX_LINES).join('\n')
+  // Nor on part of a redaction marker. Nothing leaks -- the secret was replaced
+  // before the cut -- but "[REDAC" reads as file content rather than as
+  // OpsMaxx having removed something, so the marker is shown whole or not at
+  // all. REDACTION_MARKER must match PLACEHOLDER in secretRedaction.ts; the
+  // preview tests run real redactOutput output through here to hold them to it.
+  const open = head.lastIndexOf('[')
+  if (open >= 0 && head.length - open < REDACTION_MARKER.length && redacted.startsWith(REDACTION_MARKER, open)) {
+    head = head.slice(0, open)
+  }
+  // Never end on half a surrogate pair: it renders as a replacement character
+  // that the file does not contain.
+  if (/[\ud800-\udbff]$/.test(head)) head = head.slice(0, -1)
+  const breaks = (s: string): number => s.split('\n').length - 1
+  return {
+    text: showInvisibles(head),
+    omittedChars: redacted.length - head.length,
+    omittedLines: breaks(redacted) - breaks(head)
+  }
 }

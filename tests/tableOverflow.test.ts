@@ -107,6 +107,13 @@ describe('a long server name does not push its address off the card', () => {
     expect(block).toContain('white-space: nowrap')
   })
 
+  // A hostname as wide as the card used to leave the name zero width. The name
+  // keeps a readable stub and the address wraps to its own line instead.
+  it('keeps a readable stub of the name and wraps the address instead', () => {
+    expect(head()).toMatch(/flex-wrap:\s*wrap/)
+    expect(CSS).toMatch(/\.metric-card \.m-head > \.row \{[^}]*flex:\s*1 1 \d+ch/)
+  })
+
   it('never lets the address shrink', () => {
     const i = CSS.indexOf('.metric-card .m-head > .mono')
     expect(i).toBeGreaterThan(-1)

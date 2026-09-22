@@ -7,6 +7,8 @@ import { setAssignment, resetPolicyCacheForTests } from '../src/main/services/po
 import { setMcpConfig, createSession, resetMcpAuthForTests } from '../src/main/services/mcpAuth'
 import { startMcpServer, stopMcpServer } from '../src/main/services/mcpServer'
 import { onApprovalEvent, respondToApproval, listPendingApprovals, armApproval, resetApprovalVolumeForTests } from '../src/main/services/approvals'
+import { listAudit } from '../src/main/services/auditLog'
+import type { ApprovalRequest } from '../src/shared/mcp'
 
 // An ASK-tier tool call blocks until a human answers it in the app. Before
 // this, the agent got no output whatsoever for the whole approval timeout and
@@ -166,6 +168,44 @@ describe('a pending approval is visible to the agent', () => {
     const text = (result.content as { type: string; text: string }[])[0].text
     expect(text).toContain('the user rejected')
     expect(text).not.toContain('timed out')
+    await client.close()
+  })
+
+  // The dialog used to show `write <path> (N bytes)` and none of the N bytes.
+  // The preview is for the human deciding and for nobody else: not the audit
+  // log, and not the agent.
+  it('shows the human what write_file will write, and only the human', async () => {
+    const client = await connectedClient()
+    const content = 'server_name example;\nDB_PASSWORD=s3cret-value\nmarker-\u202Eevil'
+    let seen: ApprovalRequest | null = null
+    const off = onApprovalEvent((e) => {
+      if (e.type === 'created') {
+        seen = { ...e.request }
+        setTimeout(() => respondToApproval(e.request.id, 'denied'), 10)
+      }
+    })
+    let result
+    try {
+      result = await client.callTool({
+        name: 'write_file',
+        arguments: { serverName: 'Nginx Server Prod', path: '/tmp/preview', content }
+      })
+    } finally {
+      off()
+    }
+    const preview = (seen as ApprovalRequest | null)?.contentPreview
+    expect(preview?.text).toContain('server_name example;')
+    expect(preview?.text).toContain('DB_PASSWORD=[REDACTED]')
+    expect(preview?.text).toContain('marker-⟨U+202E⟩evil')
+    expect(JSON.stringify(seen)).not.toContain('s3cret-value')
+
+    const agentSaw = JSON.stringify(result)
+    expect(agentSaw).not.toContain('server_name example')
+    expect(agentSaw).not.toContain('marker-')
+
+    const row = listAudit().find((e) => e.action.startsWith('write /tmp/preview'))
+    expect(row).toBeTruthy()
+    expect(JSON.stringify(row)).not.toContain('server_name example')
     await client.close()
   })
 })

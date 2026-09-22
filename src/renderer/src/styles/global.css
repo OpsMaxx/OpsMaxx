@@ -1871,13 +1871,19 @@ details[open] > .disclosure-head .chev {
   color: var(--text-muted);
   font-size: var(--fs-sm);
   font-weight: 550;
+  /* A hostname as long as the card is wide left the name no room at all:
+     `db-primary.example.internal` squeezed the server name to zero. Wrapping
+     puts the address on its own line, whole, rather than erasing the name. */
+  flex-wrap: wrap;
 }
 /* The name is what gives way, because an ellipsis is a visible admission that
    there is more. It needs min-width:0 to be allowed to: a flex item will not
    shrink below its content without it, which is why the address moved instead
-   of the name yielding. */
+   of the name yielding. It gives way only down to a readable stub; past that
+   the address wraps instead. */
 .metric-card .m-head > .row {
   min-width: 0;
+  flex: 1 1 10ch;
 }
 .metric-card .m-head > .row b {
   overflow: hidden;

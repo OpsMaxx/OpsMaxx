@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import { redactOutput } from '../src/main/services/secretRedaction'
 import {
   APPROVAL_RISK_SCALE,
+  PREVIEW_MAX_CHARS,
+  PREVIEW_MAX_LINES,
+  contentPreview,
   NO_CONSEQUENCE_TEXT,
   describeConsequence,
   explainRisk,
@@ -386,5 +390,106 @@ describe('tunnels say whether one is being written, removed, started or stopped'
   it('still describes starting and stopping the way it always did', () => {
     expect(say('Start tunnel "PG forward" (127.0.0.1:15432 -> 10.0.0.5:5432)')).toContain('Opens a tunnel')
     expect(say('Stop tunnel "PG forward" (127.0.0.1:15432 -> 10.0.0.5:5432)')).toContain('Closes that tunnel')
+  })
+})
+
+// What write_file will write, as the operator is shown it. Every character is
+// the agent's, so the preview may neither hide one nor obey one.
+describe('contentPreview', () => {
+  it('spells out bidi overrides and isolates instead of letting them reorder the line', () => {
+    const p = contentPreview('rm -rf /tmp/\u202Egnp.x\u202C and \u2066x\u2069')
+    expect(p.text).toBe('rm -rf /tmp/⟨U+202E⟩gnp.x⟨U+202C⟩ and ⟨U+2066⟩x⟨U+2069⟩')
+    expect(p.text).not.toMatch(/[\u202a-\u202e\u2066-\u2069]/)
+  })
+
+  it('spells out zero-width characters, controls, a BOM and a lone carriage return', () => {
+    const p = contentPreview('\uFEFFa\u200Bb\u200Dc\u0007d\u001Be\rf')
+    expect(p.text).toBe('⟨U+FEFF⟩a⟨U+200B⟩b⟨U+200D⟩c⟨U+0007⟩d⟨U+001B⟩e⟨U+000D⟩f')
+  })
+
+  it('leaves newlines, tabs and CRLF line endings alone', () => {
+    expect(contentPreview('a\tb\r\nc\n').text).toBe('a\tb\r\nc\n')
+  })
+
+  it('caps a megabyte at the character limit and says how much it left out', () => {
+    const big = 'x'.repeat(1024 * 1024)
+    const p = contentPreview(big)
+    expect(p.text).toHaveLength(PREVIEW_MAX_CHARS)
+    expect(p.omittedChars).toBe(big.length - PREVIEW_MAX_CHARS)
+  })
+
+  it('caps by lines too, so eighty short lines cannot fill the dialog', () => {
+    const lines = Array.from({ length: 500 }, (_, i) => `l${i}`).join('\n')
+    const p = contentPreview(lines)
+    expect(p.text.split('\n')).toHaveLength(PREVIEW_MAX_LINES)
+    expect(p.omittedLines).toBe(500 - PREVIEW_MAX_LINES)
+  })
+
+  it('cuts before spelling out, so invisibles cannot stretch the cap or skew the count', () => {
+    const p = contentPreview('\u200B'.repeat(PREVIEW_MAX_CHARS * 2))
+    expect(p.omittedChars).toBe(PREVIEW_MAX_CHARS)
+    expect(p.text).toBe('⟨U+200B⟩'.repeat(PREVIEW_MAX_CHARS))
+  })
+
+  it('never ends on half a surrogate pair', () => {
+    const p = contentPreview('x'.repeat(PREVIEW_MAX_CHARS - 1) + '😀tail')
+    expect(p.text).toBe('x'.repeat(PREVIEW_MAX_CHARS - 1))
+  })
+})
+
+// The first cut matched a hand-kept list of BMP code points with no `u` flag,
+// so anything above U+FFFF was invisible to it and a handful of blank letters
+// and marks walked past. These are the ones a reviewer named.
+describe('contentPreview, beyond the BMP and the obvious', () => {
+  it('spells out the TAG block, which smuggles ASCII no screen shows', () => {
+    // "hi" in tag characters, fenced by the tag begin/cancel marks.
+    const smuggled = '\u{E0001}\u{E0068}\u{E0069}\u{E007F}'
+    expect(contentPreview(`ok${smuggled}`).text).toBe('ok⟨U+E0001⟩⟨U+E0068⟩⟨U+E0069⟩⟨U+E007F⟩')
+  })
+
+  it.each([
+    ['Hangul filler', 'ㅤ', 'U+3164'],
+    ['Hangul choseong filler', 'ᅟ', 'U+115F'],
+    ['Hangul jungseong filler', 'ᅠ', 'U+1160'],
+    ['halfwidth Hangul filler', 'ﾠ', 'U+FFA0'],
+    ['braille pattern blank', '\u2800', 'U+2800'],
+    ['Mongolian vowel separator', '᠎', 'U+180E'],
+    ['variation selector 16', '️', 'U+FE0F'],
+    ['supplementary variation selector', '\u{E0100}', 'U+E0100'],
+    ['combining grapheme joiner', '͏', 'U+034F'],
+    ['interlinear annotation anchor', '￹', 'U+FFF9'],
+    ['interlinear annotation terminator', '￻', 'U+FFFB'],
+    ['word joiner', '⁠', 'U+2060'],
+    ['line separator', ' ', 'U+2028']
+  ])('spells out the %s', (_name, ch, code) => {
+    expect(contentPreview(`a${ch}b`).text).toBe(`a⟨${code}⟩b`)
+  })
+
+  it('prints the code point of an astral character, never half of it', () => {
+    expect(contentPreview('\u{E0041}').text).toBe('⟨U+E0041⟩')
+  })
+
+  it('leaves ordinary astral text alone', () => {
+    expect(contentPreview('ship it 🚀').text).toBe('ship it 🚀')
+  })
+})
+
+describe('contentPreview, the reviewer\u2019s cases', () => {
+  it('spells out a tag character and the Hangul filler by code point', () => {
+    expect(contentPreview(`a${String.fromCodePoint(0xe0072)}b\u3164c`).text).toBe('a⟨U+E0072⟩b⟨U+3164⟩c')
+  })
+
+  it('shows a redaction marker at the cut whole or not at all', () => {
+    // A known secret whose placeholder straddles the cut, redacted by the real
+    // redactor so the marker here cannot drift from the one it writes.
+    const redacted = redactOutput('x'.repeat(PREVIEW_MAX_CHARS - 4) + 'hunter22-secret tail', ['hunter22-secret'])
+    const p = contentPreview(redacted)
+    expect(p.text).toBe('x'.repeat(PREVIEW_MAX_CHARS - 4))
+    expect(p.omittedChars).toBe(redacted.length - (PREVIEW_MAX_CHARS - 4))
+  })
+
+  it('keeps a marker that fits', () => {
+    const redacted = redactOutput('x hunter22-secret', ['hunter22-secret'])
+    expect(contentPreview(redacted).text).toBe('x [REDACTED]')
   })
 })

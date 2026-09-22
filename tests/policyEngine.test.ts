@@ -5,6 +5,7 @@ import {
   evaluateCommand,
   evaluateFilePath,
   classifyCommand,
+  extractPathAccesses,
   mostRestrictive,
   globToRegExp
 } from '../src/main/services/policyEngine'
@@ -227,5 +228,571 @@ describe('mostRestrictive', () => {
     expect(mostRestrictive({ decision: 'deny', reason: 'a' }, { decision: 'allow', reason: 'b' }).decision).toBe('deny')
     expect(mostRestrictive({ decision: 'ask', reason: 'a' }, { decision: 'allow', reason: 'b' }).decision).toBe('ask')
     expect(mostRestrictive({ decision: 'allow', reason: 'a' }, { decision: 'allow', reason: 'b' }).decision).toBe('allow')
+  })
+})
+
+// classifyCommand used to look at the START of the string only, so with
+// sudo=deny and terminal=allow every one of these ran with no prompt -- and
+// the escalation shells ran under a policy that says they never run at all.
+describe('escalation anywhere in the command', () => {
+  const noSudo = group({ terminal: 'allow', sudo: 'deny' })
+  const withSudo = group({ terminal: 'allow', sudo: 'allow' })
+
+  it.each([
+    '/usr/bin/sudo reboot',
+    'env sudo reboot',
+    'env -i PATH=/usr/bin sudo reboot',
+    'command sudo systemctl stop nginx',
+    'exec sudo reboot',
+    'builtin exec sudo reboot',
+    'nohup sudo reboot',
+    'time sudo reboot',
+    'nice -n 5 sudo reboot',
+    'ionice -c 3 sudo reboot',
+    'stdbuf -oL sudo reboot',
+    'timeout 10 sudo reboot',
+    'timeout -s KILL 10 sudo reboot',
+    'xargs sudo rm',
+    'busybox su -c reboot',
+    'FOO=1 sudo reboot',
+    'true; sudo reboot',
+    'true && sudo reboot',
+    'false || sudo reboot',
+    'ls | sudo tee /etc/x',
+    'sleep 1 & sudo reboot',
+    'echo x\nsudo reboot',
+    'echo $(sudo cat /etc/shadow)',
+    'echo `sudo id`',
+    'bash -c "sudo reboot"',
+    "sh -c 'pkexec rm -rf /var/lib'",
+    "env -S 'sudo reboot'",
+    'pkexec rm -rf /var/lib',
+    'su -c "rm -rf /var/lib"',
+    'su root -c id',
+    'doas reboot',
+    './sudo reboot',
+    'run0 systemctl stop nginx',
+    'runuser -u postgres -- psql',
+    'runuser -u postgres psql',
+    'sudoedit /etc/hosts',
+    'machinectl shell root@ /bin/true -c id'
+  ])('denies %s under sudo=deny', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('deny')
+  })
+
+  it.each([
+    '/usr/bin/sudo -i',
+    'env sudo -i',
+    'command sudo -s',
+    '/usr/bin/sudo bash',
+    'sudo -u root -i',
+    'sudo -iu root',
+    'sudo --login',
+    'true; sudo -i',
+    'bash -c "sudo -i"',
+    'echo $(sudo -i)',
+    'pkexec',
+    'pkexec bash',
+    'pkexec /bin/sh',
+    'su',
+    'su root',
+    'su -l root',
+    'su -c bash',
+    'su root -c "bash"',
+    'busybox su',
+    'doas -s',
+    'doas bash',
+    'run0',
+    'runuser -l root',
+    'runuser -u root bash',
+    'sudo su',
+    'sudo env bash',
+    'sudo sh -c bash',
+    "env sudo bash -c 'zsh'",
+    'machinectl shell',
+    'machinectl shell root@'
+  ])('refuses the escalation shell %s even with sudo=allow', (cmd) => {
+    expect(classifyCommand(cmd).isUnrestrictedShell).toBe(true)
+    expect(evaluateCommand(withSudo, cmd).decision).toBe('deny')
+  })
+
+  // A name in ARGUMENT position is text, not a run. Over-blocking these would
+  // put a sudo=deny group in front of an agent reading its own auth log.
+  it.each([
+    'ls',
+    'echo sudo',
+    'grep sudo /var/log/auth.log',
+    'ls su',
+    'cat sudoers.txt',
+    'command -v sudo',
+    'which sudo pkexec',
+    'journalctl -t sudo',
+    'systemctl status sudo',
+    'echo "run sudo later"',
+    'cmd 2>&1 | grep su',
+    'bash -c "echo sudo"',
+    'echo "use sudo"',
+    'man sudo',
+    'find / -name sudo',
+    'test -x /usr/bin/sudo',
+    'cat /etc/sudoers.d/90-cloud-init-users',
+    'watch -n 5 df -h',
+    'flock /tmp/lock ls',
+    'timeout 5 uptime',
+    'if true; then echo ok; fi',
+    '{ echo a; echo b; }',
+    'script --help'
+  ])('leaves %s alone', (cmd) => {
+    expect(classifyCommand(cmd)).toEqual({ isSudo: false, isUnrestrictedShell: false, computedCommand: false })
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('allow')
+  })
+
+  // Tighter only: everything the start-of-string tests caught, still caught.
+  it.each([
+    ['sudo systemctl restart nginx', { isSudo: true, isUnrestrictedShell: false }],
+    ['doas reboot', { isSudo: true, isUnrestrictedShell: false }],
+    ['sudo -i', { isSudo: true, isUnrestrictedShell: true }],
+    ['sudo su -', { isSudo: true, isUnrestrictedShell: true }],
+    ['sudo /bin/sh', { isSudo: true, isUnrestrictedShell: true }],
+    ['su -', { isSudo: true, isUnrestrictedShell: true }],
+    ['su - root', { isSudo: true, isUnrestrictedShell: true }]
+  ])('still classifies %s as before, or stricter', (cmd, expected) => {
+    expect(classifyCommand(cmd)).toMatchObject(expected)
+  })
+})
+
+// Path rules read only the outer command line, so a file the group denies was
+// reachable by wrapping the read in a shell string or a substitution. They now
+// walk the same nested strings the escalation check walks.
+describe('path rules inside nested command lines', () => {
+  const shadowDenied = group({ terminal: 'allow', sudo: 'allow', readFiles: 'allow', writeFiles: 'allow' }, [
+    { id: 'shadow', pattern: '/etc/shadow', read: 'deny', write: 'deny' }
+  ])
+
+  it.each([
+    'cat /etc/shadow',
+    "sh -c 'cat /etc/shadow'",
+    'bash -c "cat /etc/shadow"',
+    'sudo sh -c "cat /etc/shadow"',
+    "su -c 'cat /etc/shadow'",
+    'echo $(cat /etc/shadow)',
+    'echo `cat /etc/shadow`',
+    "env -S 'cat /etc/shadow'",
+    'timeout 5 cat /etc/shadow',
+    'pkexec cat /etc/shadow',
+    'busybox cat /etc/shadow',
+    'exec cat /etc/shadow',
+    'xargs -n 1 cat /etc/shadow',
+    `sh -c "bash -c 'cat /etc/shadow'"`,
+    "sh -c 'echo x > /etc/shadow'",
+    "true; sh -c 'tail -n 1 /etc/shadow'"
+  ])('denies %s like a direct read', (cmd) => {
+    expect(evaluateCommand(shadowDenied, cmd).decision).toBe('deny')
+  })
+
+  it.each([
+    "sh -c 'ls /tmp'",
+    "sh -c 'cat /etc/hostname'",
+    'bash -c "echo /etc/shadow"',
+    'echo $(date)',
+    // (`sudo sh -c ...` itself is a refused shell form, whatever it runs.)
+    "su -c 'ls /tmp'"
+  ])('leaves %s alone under an unrelated rule', (cmd) => {
+    expect(evaluateCommand(shadowDenied, cmd).decision).toBe('allow')
+  })
+
+  it('reports a nested path once, with its mode', () => {
+    expect(extractPathAccesses("sudo sh -c 'cat /etc/shadow'")).toEqual([{ path: '/etc/shadow', mode: 'read' }])
+  })
+})
+
+// Final-pass findings on the classifier: shell grammar, backslash quoting,
+// systemd-run, more wrappers, eval, and a command word computed at run time.
+describe('escalation behind grammar, quoting and more wrappers', () => {
+  const noSudo = group({ terminal: 'allow', sudo: 'deny' })
+  const withSudo = group({ terminal: 'allow', sudo: 'allow' })
+  const shadowDenied = group({ terminal: 'allow', sudo: 'allow', readFiles: 'allow', writeFiles: 'allow' }, [
+    { id: 'shadow', pattern: '/etc/shadow', read: 'deny', write: 'deny' },
+    { id: 'ssh', pattern: '/root/.ssh/**', read: 'deny', write: 'deny' }
+  ])
+
+  it.each([
+    'if true; then sudo reboot; fi',
+    'while true; do sudo reboot; done',
+    '{ sudo reboot; }',
+    '(sudo reboot)',
+    '! sudo reboot',
+    '\\sudo reboot',
+    'su\\do reboot',
+    'systemd-run reboot',
+    'systemd-run -p User=root reboot',
+    'setsid sudo reboot',
+    'unbuffer sudo reboot',
+    'watch -n 1 sudo reboot',
+    "watch 'sudo reboot'",
+    'flock /tmp/l sudo reboot',
+    "flock /tmp/l -c 'sudo reboot'",
+    'chrt 10 sudo reboot',
+    'taskset 0x3 sudo reboot',
+    "script -q -c 'sudo reboot' /dev/null",
+    'eval sudo reboot',
+    'eval "sudo reboot"'
+  ])('denies %s under sudo=deny', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('deny')
+  })
+
+  it.each(['systemd-run --pty bash', 'systemd-run', 'systemd-run -t', '{ sudo -i; }', 'eval sudo -i', '\\sudo -i'])(
+    'refuses the escalation shell %s even with sudo=allow',
+    (cmd) => {
+      expect(evaluateCommand(withSudo, cmd).decision).toBe('deny')
+    }
+  )
+
+  it.each(['su --help', 'pkexec --version', 'run0 --help', 'systemd-run --version'])(
+    '%s asks the tool about itself and is not a root shell',
+    (cmd) => {
+      expect(classifyCommand(cmd).isUnrestrictedShell).toBe(false)
+      expect(evaluateCommand(withSudo, cmd).decision).toBe('allow')
+    }
+  )
+
+  // Cannot be named, so cannot be graded: asked about, not refused.
+  it.each(['$(which sudo) reboot', '${SUDO:-sudo} reboot', '`which sudo` reboot', '$TOOL --run'])(
+    'asks before running %s, whose command word is computed',
+    (cmd) => {
+      expect(classifyCommand(cmd).computedCommand).toBe(true)
+      expect(evaluateCommand(group({ terminal: 'allow', sudo: 'allow' }), cmd).decision).toBe('ask')
+    }
+  )
+
+  it('does not treat an argument that is a variable as a computed command', () => {
+    expect(classifyCommand('echo $HOME').computedCommand).toBe(false)
+    expect(evaluateCommand(noSudo, 'echo $HOME').decision).toBe('allow')
+  })
+
+  // The path rules read the same walk, so every one of these reaches them.
+  it.each([
+    "bash -c 'cat /etc/shadow'",
+    'timeout 5 cat /etc/shadow',
+    'echo $(cat /root/.ssh/id_rsa)',
+    'pkexec cat /etc/shadow',
+    'xargs cat /etc/shadow',
+    'if true; then cat /etc/shadow; fi',
+    '\\cat /etc/shadow',
+    'flock /tmp/l cat /etc/shadow',
+    "watch 'cat /etc/shadow'",
+    'eval cat /etc/shadow',
+    'systemd-run cat /etc/shadow'
+  ])('applies the /etc/shadow and /root/.ssh rules to %s', (cmd) => {
+    expect(evaluateCommand(shadowDenied, cmd).decision).toBe('deny')
+  })
+
+  // Decisions unchanged for commands with no absolute path, or an unrelated one.
+  it.each([
+    ['uptime', 'allow'],
+    ['df -h', 'allow'],
+    ['ls /tmp', 'allow'],
+    ['cat /etc/hostname', 'allow'],
+    ["sh -c 'ls /var/log'", 'allow'],
+    ['timeout 5 cat /etc/os-release', 'allow'],
+    ['echo $(date)', 'allow'],
+    ['grep -r shadow /var/log/syslog', 'allow']
+  ])('leaves %s at %s', (cmd, decision) => {
+    expect(evaluateCommand(shadowDenied, cmd).decision).toBe(decision)
+  })
+})
+
+// Security pass #2: the last forms that allowed, and the rule that ends the
+// list -- a command word the walk cannot read literally asks, never allows.
+describe('fail toward ask', () => {
+  const noSudo = group({ terminal: 'allow', sudo: 'deny' })
+  const withSudo = group({ terminal: 'allow', sudo: 'allow' })
+
+  it.each([
+    'case x in *) sudo reboot;; esac',
+    'case $1 in a) ls;; b) sudo reboot;; esac',
+    'f(){ sudo reboot; }; f',
+    'f() { sudo reboot; }; f',
+    'function f { sudo reboot; }; f',
+    'function f() { sudo reboot; }',
+    'coproc sudo reboot',
+    'coproc x { sudo reboot; }',
+    '~/bin/sudo reboot',
+    '$HOME/bin/sudo reboot',
+    '${HOME}/bin/sudo reboot',
+    'runas /user:Administrator "cmd /c shutdown /r"',
+    'runas /savecred /user:admin notepad.exe',
+    'C:\\Windows\\System32\\runas.exe /user:admin whoami',
+    'gsudo net stop spooler',
+    'gsudo.exe whoami',
+    'sudo.exe net stop spooler'
+  ])('denies %s under sudo=deny', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('deny')
+  })
+
+  it.each([
+    'gsudo',
+    'gsudo cmd',
+    'gsudo powershell -NoProfile',
+    'runas /user:Administrator cmd',
+    'runas /user:Administrator "powershell -NoExit"'
+  ])('refuses the elevated shell %s even with sudo=allow', (cmd) => {
+    expect(evaluateCommand(withSudo, cmd).decision).toBe('deny')
+  })
+
+  it.each(['gsudo -k', 'runas', 'runas /?', 'gsudo --help', 'gsudo cmd /c whoami'])('%s is not a shell', (cmd) => {
+    expect(classifyCommand(cmd).isUnrestrictedShell).toBe(false)
+  })
+
+  // Nested deeper than the walk reads: not read, so not allowed.
+  it.each([
+    'eval eval eval eval sudo reboot',
+    'sh -c "eval eval eval sudo reboot"',
+    'eval eval eval eval eval ls'
+  ])('asks rather than allows %s, nested past the walk', (cmd) => {
+    expect(classifyCommand(cmd).computedCommand).toBe(true)
+    expect(evaluateCommand(noSudo, cmd).decision).not.toBe('allow')
+  })
+
+  // Weird but harmless: the walk cannot name the command word, so it asks.
+  it.each([
+    '{sudo,reboot}',
+    '{ls,-la}',
+    '*',
+    '/usr/bin/ec?o hi',
+    '/usr/bin/[e]cho hi',
+    'f(){echo hi;}',
+    '=foo',
+    '$(echo ls)'
+  ])('asks before running %s', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('ask')
+  })
+
+  // Literal command words are untouched by the rule.
+  it.each([
+    '[ -f /etc/hosts ] && echo yes',
+    '[[ -f /etc/hosts ]] && echo yes',
+    '(( 1 + 1 ))',
+    '(cd /tmp && ls)',
+    '(ls)',
+    'for f in a b c; do echo $f; done',
+    'select x in a b; do echo $x; done',
+    'case $x in a) echo a;; *) echo other;; esac',
+    'f() { echo hi; }; f',
+    '~/bin/tool --run',
+    '$HOME/bin/tool --run',
+    'x=1 y=2 env',
+    'echo {a,b}',
+    'ls *.log',
+    'for ((i=0;i<3;i++)); do echo $i; done'
+  ])('still allows %s', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('allow')
+  })
+})
+
+// Security pass #3: POSIX quoting, spaced function definitions, and what
+// cmd and PowerShell run.
+describe('quoting, and the Windows shells', () => {
+  const noSudo = group({ terminal: 'allow', sudo: 'deny' })
+  const withSudo = group({ terminal: 'allow', sudo: 'allow' })
+
+  it.each([
+    `sh -c "sh -c \\"sh -c 'sudo reboot'\\""`,
+    `sh -c 'echo '\\''hi'\\''; sudo reboot'`,
+    'f ( ) { sudo reboot; }; f',
+    'f () { sudo reboot; }; f',
+    'cmd /c runas /user:admin cmd',
+    'cmd.exe /c "runas /savecred /user:admin notepad"',
+    'cmd /k sudo net stop spooler',
+    'powershell -Command "runas /user:admin notepad"',
+    'pwsh -c "gsudo whoami"',
+    'powershell -Command "Start-Process notepad -Verb RunAs"',
+    'Start-Process notepad -Verb RunAs',
+    'Start-Process -FilePath notepad -Verb runas',
+    'saps notepad -verb:RunAs',
+    // Unbalanced, and still read far enough to find the sudo in it.
+    "sh -c 'sudo reboot"
+  ])('denies %s under sudo=deny', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('deny')
+  })
+
+  it.each(['Start-Process powershell -Verb RunAs', 'cmd /c runas /user:admin cmd', 'powershell -c "gsudo"'])(
+    'refuses the elevated shell %s even with sudo=allow',
+    (cmd) => {
+      expect(evaluateCommand(withSudo, cmd).decision).toBe('deny')
+    }
+  )
+
+  it.each([
+    'powershell -EncodedCommand ZQBjAGgAbwAgAGgAaQA=',
+    'powershell -enc ZQBjAGgAbwA=',
+    'pwsh -e ZQBjAGgAbwA=',
+    'echo "unterminated',
+    'echo trailing\\'
+  ])('asks before running %s, which cannot be read', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('ask')
+  })
+
+  it.each([
+    'echo "a \\"quoted\\" word"',
+    `echo 'it'\\''s fine'`,
+    'echo \\$HOME',
+    'cmd /c dir C:\\',
+    'dir C:\\',
+    'powershell -Command "Get-ChildItem C:\\\\"',
+    'Start-Process notepad',
+    'type C:\\Users\\me\\notes.txt'
+  ])('still allows %s', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('allow')
+  })
+
+  // An escaped `;` is a character, not a separator: this prints "a;sudo
+  // reboot" and runs no sudo. (The separate command-risk grader still reads
+  // the word `reboot` and may ask; it never denies.)
+  it('reads an escaped separator as a character', () => {
+    const cmd = 'echo a\\;sudo reboot'
+    expect(classifyCommand(cmd).isSudo).toBe(false)
+    expect(evaluateCommand(noSudo, cmd).decision).not.toBe('deny')
+  })
+})
+
+// Security pass #4: substitutions with parens of their own, process
+// substitution, cmd's glued switches and carets, and PowerShell's implicit
+// -Command and iex.
+describe('substitutions, cmd and PowerShell, read whole', () => {
+  const noSudo = group({ terminal: 'allow', sudo: 'deny' })
+  const withSudo = group({ terminal: 'allow', sudo: 'allow' })
+  const shadowDenied = group({ terminal: 'allow', sudo: 'allow', readFiles: 'allow', writeFiles: 'allow' }, [
+    { id: 'shadow', pattern: '/etc/shadow', read: 'deny', write: 'deny' }
+  ])
+
+  it.each([
+    'echo $(case a in a) sudo reboot;; esac)',
+    'echo $(case a in (a) sudo reboot;; esac)',
+    'echo "$(ls (x); sudo reboot)"',
+    'diff <(sudo cat /etc/shadow) /dev/null',
+    'tee >(sudo tee /etc/x) < /dev/null',
+    'echo $(( $(sudo reboot) + 1 ))',
+    'cmd /cRUNAS /user:admin notepad',
+    'cmd /c ru^nas /user:admin notepad',
+    'cmd /c^ runas /user:admin notepad',
+    'cmd /c "r^unas /user:admin notepad"',
+    'powershell Start-Process cmd -Verb RunAs',
+    'powershell "Start-Process notepad -Verb RunAs"',
+    'powershell -NoProfile -ExecutionPolicy Bypass Start-Process notepad -Verb RunAs',
+    'pwsh -WindowStyle Hidden "gsudo whoami"',
+    'iex "Start-Process notepad -Verb RunAs"',
+    'Invoke-Expression "runas /user:admin notepad"'
+  ])('denies %s under sudo=deny', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('deny')
+  })
+
+  // Four levels deep -- a substitution, eval, a substitution, eval -- so past
+  // what the walk reads: asked about, never allowed.
+  it('does not allow the reviewer\'s four-deep eval and substitution nest', () => {
+    const cmd = 'echo $(eval "echo \\$(eval \\"sudo reboot\\")")'
+    expect(evaluateCommand(noSudo, cmd).decision).not.toBe('allow')
+  })
+
+  // Single quotes expand nothing: this prints the text and runs no sudo.
+  it('does not read a substitution inside single quotes as a run', () => {
+    expect(classifyCommand("echo '$(sudo id)'").isSudo).toBe(false)
+  })
+
+  it.each(['echo $(ls (x); cat /etc/shadow)', 'cat <(cat /etc/shadow)', 'diff <(cat /etc/shadow) /dev/null'])(
+    'applies the /etc/shadow rule inside %s',
+    (cmd) => {
+      expect(evaluateCommand(shadowDenied, cmd).decision).toBe('deny')
+    }
+  )
+
+  it.each(['powershell Start-Process powershell -Verb RunAs', 'cmd /cRUNAS /user:admin cmd'])(
+    'refuses the elevated shell %s even with sudo=allow',
+    (cmd) => {
+      expect(evaluateCommand(withSudo, cmd).decision).toBe('deny')
+    }
+  )
+
+  it.each([
+    'echo $(unclosed',
+    'cat <(ls',
+    'cmd /c echo %PATH%',
+    'cmd /c di^r',
+    'iex $payload'
+  ])('asks before running %s, which cannot be read', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('ask')
+  })
+
+  it.each([
+    "echo '<(x)'",
+    'echo "<(not a substitution)"',
+    'echo $(( 1 + 2 ))',
+    'echo $(case a in a) echo hi;; esac)',
+    'diff <(ls /tmp) <(ls /var)',
+    'cmd /c dir',
+    'cmd /cdir',
+    'powershell Get-ChildItem',
+    'powershell -NoProfile "Get-Date"',
+    'iex "Get-Date"'
+  ])('still allows %s', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('allow')
+  })
+})
+
+// Security pass #5: backquote bodies, and cmd / PowerShell failing toward ask.
+describe('backquotes, and Windows failing toward ask', () => {
+  const noSudo = group({ terminal: 'allow', sudo: 'deny' })
+  const shadowDenied = group({ terminal: 'allow', sudo: 'allow', readFiles: 'allow', writeFiles: 'allow' }, [
+    { id: 'shadow', pattern: '/etc/shadow', read: 'deny', write: 'deny' }
+  ])
+
+  it.each([
+    'echo `echo \\`sudo reboot\\``',
+    'echo `echo \\$(eval "sudo reboot")`',
+    'echo "`echo \\"$(sudo reboot)\\"`"',
+    'cmd /r runas /user:admin notepad',
+    'cmd /C/Crunas /user:admin notepad',
+    'cmd.exe/c runas /user:admin notepad',
+    'C:\\Windows\\System32\\cmd.exe/c runas /user:admin notepad',
+    'powershell -Command "Invoke-Command { runas /user:admin notepad }"',
+    'icm -ScriptBlock { runas /user:admin notepad }',
+    'Start-Job { Start-Process notepad -Verb RunAs }',
+    '& { runas /user:admin notepad }',
+    '. runas /user:admin notepad'
+  ])('denies %s under sudo=deny', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('deny')
+  })
+
+  it("applies the /etc/shadow rule inside a backquoted sh -c with the '\\\\'' idiom", () => {
+    const cmd = "echo `sh -c 'eval '\\\\''cat /etc/shadow'\\\\'''`"
+    expect(evaluateCommand(shadowDenied, cmd).decision).toBe('deny')
+  })
+
+  // Not parsed; asked about.
+  it.each([
+    'cmd /c set X=runas& %X% /user:a cmd',
+    'cmd /c "set X=runas& %X% /user:a cmd"',
+    'cmd /v:on /c "set X=runas&& !X! /user:a cmd"',
+    'cmd /c echo !X!',
+    '%COMSPEC% /c whoami',
+    'cmd /c echo 50%',
+    'Invoke-Command -ScriptBlock $block'
+  ])('asks before running %s', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('ask')
+  })
+
+  it.each([
+    'echo `date`',
+    'echo `echo hello`',
+    'cmd /c dir',
+    'cmd /c echo hello',
+    'cmd.exe /c ver',
+    'powershell -Command "Invoke-Command { Get-Date }"',
+    'Get-Process | ForEach-Object { $_.Name }',
+    '. ./env.sh',
+    '. venv/bin/activate',
+    'source ~/.bashrc'
+  ])('still allows %s', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('allow')
   })
 })

@@ -108,10 +108,22 @@ redirection targets, `cp`/`mv` sources and destinations, `dd if=`/`of=` — and 
 before the command runs. `cat /etc/shadow` is refused exactly as `read_file /etc/shadow` is, and
 `sudo` does not bypass it.
 
+The same check runs on every segment the escalation check walks (`walkCommand`, described in
+docs/AI-SECURITY.md): inside `sh -c '…'` and the other shells, `su -c`, `env -S`, `eval`,
+`watch`, `flock -c`, `script -c`, `$(…)` and backticks, up to three levels deep, and past shell
+grammar (`if … then`, `{ … }`), backslash-quoted command words and every wrapper and escalator it
+steps over (`timeout`, `xargs`, `busybox`, `pkexec`, `run0`, `systemd-run` and the rest). So
+`bash -c 'cat /etc/shadow'`, `timeout 5 cat /etc/shadow` and `echo $(cat /root/.ssh/id_rsa)` are
+refused like `cat /etc/shadow`, and the two checks cannot disagree about what a command runs.
+
 This is best-effort by design: only absolute paths and only recognised commands, because a
 relative operand cannot be matched against a pattern without knowing the remote working directory.
-`cd /root/.ssh && cat id_rsa` still gets through. It closes the direct form and can only ever
-narrow a decision, never widen one.
+What still gets through: a relative path after a `cd` (`cd /etc && cat shadow`,
+`cd /root/.ssh && cat id_rsa`), a glob (`cat /etc/sh*dow`), a path in a variable (`f=/etc/shadow;
+cat $f`), `eval` of a variable, a script file that reads the path, and a program that is not on the list of
+recognised file commands (`python3 -c 'open("/etc/shadow")'`). It closes the direct and wrapped
+forms and can only ever narrow a decision, never widen one; a file that must stay unread needs
+`readFiles`/`terminal` at ask or deny, or the host's own permissions.
 
 ### Databases, tunnels and VPNs
 
@@ -232,9 +244,9 @@ consequences of closing that are deliberate and are not left to the capability's
   approval authorises the call in front of the user and never the next one. Without that,
   `add_server` — which has no server id yet and so shares one elevation key across every add in a
   session — approved the first write and then wrote every one after it silently. `update_server`
-  is scoped to itself rather than per-call: the first change to a connection asks, and further
-  changes to that same connection in that same session do not, because an operator who has just
-  approved a repoint should not be shown the same card again for the next field. That yes still
+  is scoped to itself rather than per-call: its dialog offers a second answer, **Allow
+  update_server on *server* for this session**, after which further changes to that same
+  connection in that same session do not ask. **Approve once** covers the one change. Either yes
   reaches no other tool, no other server and no later session.
 
 **Jump hosts.** `jumpHosts` names servers that already exist, by friendly name, in dial order.
@@ -419,7 +431,7 @@ Any capability evaluating to `ask` calls `requestApproval` (`approvals.ts`), whi
 tool call on an in-memory pending request — nothing is written to disk until it resolves. The
 request only clears when:
 
-- a human clicks **Approve once** or **Deny** on the **Approvals** screen (`respondToApproval`),
+- a human answers it in the approval dialog or on the **Approvals** screen (`respondToApproval`),
 - it times out (`approvalTimeoutSeconds` in Security, 1–10 minutes) and is treated as denied, or
 - **Stop all AI access** denies every pending request at once (`denyAllPending`).
 
@@ -427,12 +439,72 @@ There is no code path from the MCP/HTTP surface into `respondToApproval` — app
 requires the renderer's IPC handler, which only the human-facing UI calls. An agent cannot approve
 its own request by construction, not by convention.
 
+**Two ways to say yes, and each says how far it reaches.**
+
+- **Approve once** authorises this call and nothing after it. The next call asks again.
+- **Allow "*permission*" on *server* for this session** also remembers the answer, in memory, for
+  that permission on that server **under the same policy rule** until the agent's session ends or
+  AI access is stopped. The remembered key is session + server + permission + the policy engine's
+  reason for asking, so a grant given under "Terminal commands require approval" does not answer
+  a path rule that asks on its own account. For a tool whose grant `gate()` narrows to itself
+  (`update_server`) the button names the tool instead of the permission. Calls it carries are
+  audited as `approved-earlier`, and the call that gave it as `approved-for-session`, so every
+  carried row has one to point back to.
+
+The second button is only offered where `gate()` would honour it. These are per-call — every
+call asks, they show **Approve once** alone, and they never read a remembered grant:
+
+- `add_server`, `remove_server`, `create_tunnel`, `delete_tunnel`, and the `ciTrigger` tools
+  `trigger_run`, `cancel_run` and `rerun_run`;
+- `execute_command` for any command the classifier grades above ordinary, any command the
+  policy recognises as running as another user (`classifyCommand`: `sudo`, `doas`, `su`,
+  `pkexec`, `run0`, `runuser`, `systemd-run`, `sudoedit`, `machinectl shell`, `runas`, `gsudo` or
+  `sudo.exe` as the command word of any segment — see docs/AI-SECURITY.md), any command whose
+  command word the walk cannot read literally (`$(which sudo) reboot`, `{sudo,reboot}`, or nested
+  past three levels), and, as a further raise, any command with the word
+  `sudo` anywhere in it. Those are also gated and audited as the `sudo` permission rather than
+  `terminal`, so an "Execute terminal commands" grant never reaches them. A false positive only
+  means being asked again;
+- `container_action` when stopping or restarting a container;
+- `query_database` for anything not classified as a read;
+- `set_tunnel` and `set_vpn` when starting.
+
+Main reads the scope
+strictly — anything other than exactly `session`, including a missing one, is `once`, and a
+session answer to a request that did not offer one is also `once` — so a renderer bug fails
+toward being asked again. **Deny** keeps the weight and the keyboard focus. The dialog also names
+the permission being granted, in the words the Access screen uses.
+
+Up to and including 0.50.25, the only yes button read **Approve once** and was remembered for the session
+anyway, on every tool that was not per-call.
+
+**`write_file` shows what it will write.** The dialog used to show `write <path> (N bytes)` and
+none of the bytes. It now shows the start of the content — the first 4,096 characters or 80
+lines, whichever is shorter, and how much is left out — in a scrolling, fixed-height, monospace
+frame labelled as the agent's. The content is redacted with `secretRedaction.ts` against the
+server's known secrets *before* it is cut, so a secret straddling the cut cannot survive as a
+prefix. Every character in the Unicode categories Cc (controls, except tab and newline), Cf
+(format characters, including every bidi, zero-width and directional mark and the U+E0000–E007F
+tag block), Zl, Zp and Cs, plus U+034F, the Hangul fillers U+115F, U+1160, U+3164 and U+FFA0,
+the braille pattern blank U+2800,
+U+180E and the variation selectors U+FE00–FE0F and U+E0100–E01EF, is printed as `⟨U+XXXX⟩`
+rather than obeyed, as is a carriage return that is not part of a CRLF pair
+(`contentPreview`, `src/shared/approvalRisk.ts`). The preview is built in `approvals.ts`
+and is never written to the audit log, never returned to the agent, and dropped from the request
+once it is answered. A write carried on a session approval shows no preview, because nothing asks.
+
 ## Audit Log
 
 ![Audit Log showing agent, session, workspace/server, action and outcome](images/ai-audit-log.png)
 
 Every gated action — allowed outright, approved, denied, or failed — is appended to
-`opsmaxx-ai-audit.jsonl` (`auditLog.ts`) as one JSON object per line, **append-only** (a crash
+`opsmaxx-ai-audit.jsonl` (`auditLog.ts`) as exactly one JSON object per call, including a call
+whose connection fails after it was allowed (`tests/auditOneRowPerCall.integration.test.ts`). A
+refusal by the policy itself is shown as **Blocked by policy** with the rule that refused it, never
+as allowed — including an `ask` on a call that names no single server (the fleet-wide reads), which
+has nobody to put the question to and is refused. A request OpsMaxx declined to put to anyone,
+because the session already had too many open or the same action was just denied, is shown as
+**Denied — not asked**, never as a refusal by you. Rows are written one per line, **append-only** (a crash
 mid-write can corrupt at most the last line). Every free-text field (`action`, `error`) is passed
 through the same redaction (`secretRedaction.ts`) used for tool output before it's written, so the
 audit trail itself never becomes a place secrets end up.

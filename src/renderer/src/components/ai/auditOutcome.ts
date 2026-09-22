@@ -43,19 +43,73 @@ export function auditOutcome(e: Pick<AuditEntry, 'approval' | 'result' | 'exitCo
   if (e.approval === 'denied') {
     return { label: 'Denied', decidedBy: 'you', tone: 'danger', detail: 'You refused this request.' }
   }
+  // Refused without asking anyone -- the queue was full, or the same thing was
+  // just denied. It used to be written as `denied` and read "You refused this
+  // request", about a request nobody was shown.
+  if (e.approval === 'not-asked') {
+    return {
+      label: 'Denied — not asked',
+      decidedBy: 'policy',
+      tone: 'warn',
+      detail: e.error
+        ? `${e.error}. Nobody was shown this request.`
+        : 'OpsMaxx did not ask anyone about this request, and it did not run.'
+    }
+  }
+
+  // Refused by the policy itself, before anything was asked or allowed.
+  //
+  // gate() writes these as `not-required` + `denied`: no approval was needed
+  // because there was nothing to approve. They fell through to the branch
+  // below and read "Allowed, then blocked -- the access group allowed this
+  // outright", which is the opposite of what happened, on exactly the rows an
+  // incident review reads first: a terminal the group denies, the /etc/shadow
+  // rule, a server on No AI Access. The rule that refused it is the row's
+  // `error`, and the sentence names it.
+  if (e.result === 'denied' && (e.approval === 'not-required' || e.approval === undefined)) {
+    return {
+      label: 'Blocked by policy',
+      decidedBy: 'policy',
+      tone: 'danger',
+      detail: e.error
+        ? `The access group refused this: ${e.error} Nothing was asked.`
+        : 'The access group refused this. Nothing was asked.'
+    }
+  }
 
   // Approved, or never needed approval. What matters now is what happened.
-  const who: AuditOutcome['decidedBy'] = e.approval === 'approved' ? 'you' : 'policy'
-  const prefix = e.approval === 'approved' ? 'Approved' : 'Allowed'
+  //
+  // `approved-earlier` used to fall into the policy branch and read "the access
+  // group allowed this outright", which is false twice: the group said ask, and
+  // a person did answer -- on an earlier request. It is the operator's decision
+  // carried forward, and the row says so rather than crediting the policy.
+  const human = e.approval === 'approved' || e.approval === 'approved-for-session' || e.approval === 'approved-earlier'
+  const who: AuditOutcome['decidedBy'] = human ? 'you' : 'policy'
+  const prefix =
+    e.approval === 'approved-for-session'
+      ? 'Approved for session'
+      : e.approval === 'approved-earlier'
+        ? 'Approved earlier'
+        : e.approval === 'approved'
+          ? 'Approved'
+          : 'Allowed'
   const because =
     e.approval === 'approved'
       ? 'You approved this request.'
-      : 'The access group allowed this outright, so nothing was asked.'
+      : e.approval === 'approved-for-session'
+        ? 'You approved this request, and allowed the same on this server for the rest of the session.'
+        : e.approval === 'approved-earlier'
+          ? // Not "you allowed this for the session": rows written up to
+            // 0.50.25 were carried by an "Approve once" click, which the
+            // operator never knew was a session grant, and nothing in a row
+            // says which era wrote it.
+            'Nothing was asked: an approval given earlier in this session covered it.'
+          : 'The access group allowed this outright, so nothing was asked.'
 
   if (e.result === 'denied') {
-    // Approval said yes and something downstream still said no — a path rule,
-    // or a capability the group does not grant. Collapsing this into "denied"
-    // would lose exactly the distinction an incident review needs.
+    // Approval said yes and something downstream still said no. Only a row
+    // with a human approval reaches here -- a policy refusal returned above --
+    // so "then" is always true of it.
     return {
       label: `${prefix}, then blocked`,
       decidedBy: who,
@@ -74,7 +128,7 @@ export function auditOutcome(e: Pick<AuditEntry, 'approval' | 'result' | 'exitCo
   return {
     label: `${prefix}, ran${code}`,
     decidedBy: who,
-    tone: e.approval === 'approved' ? 'ok' : 'muted',
+    tone: e.approval === 'approved' || e.approval === 'approved-for-session' ? 'ok' : 'muted',
     detail: `${because} It ran and returned success.`
   }
 }

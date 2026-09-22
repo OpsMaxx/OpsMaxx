@@ -318,3 +318,70 @@ describe('giving the operator more time', () => {
     expect(listPendingApprovals()).toHaveLength(0)
   })
 })
+
+// "Approve once" used to be remembered for the session anyway. The scope is now
+// part of the answer, and main is strict about it in the direction that fails
+// toward asking again.
+describe('how far one yes reaches', () => {
+  beforeEach(() => {
+    resetMcpAuthForTests()
+    setMcpConfig({ approvalTimeoutSeconds: 60 })
+  })
+
+  it('reports a session answer only for a request that offered one', async () => {
+    const pending = req({ sessionGrant: 'capability' })
+    const [request] = listPendingApprovals()
+    respondToApproval(request.id, 'approved', 'session')
+    expect(await pending).toBe('approved-for-session')
+    expect(listRecentApprovals()[0].grantedScope).toBe('session')
+  })
+
+  it('reads a session answer to a per-call request as once', async () => {
+    // No sessionGrant: the dialog never offered the second button, and a
+    // renderer that sends the scope anyway must not be able to mint the grant.
+    const pending = req()
+    const [request] = listPendingApprovals()
+    respondToApproval(request.id, 'approved', 'session')
+    expect(await pending).toBe('approved')
+    expect(listRecentApprovals()[0].grantedScope).toBe('once')
+  })
+
+  it.each([undefined, 'once', 'SESSION', 'forever', 1, null])('reads scope %s as once', async (scope) => {
+    const pending = req({ sessionGrant: 'capability' })
+    const [request] = listPendingApprovals()
+    respondToApproval(request.id, 'approved', scope)
+    expect(await pending).toBe('approved')
+  })
+})
+
+describe('the write_file preview', () => {
+  beforeEach(() => {
+    resetMcpAuthForTests()
+    setMcpConfig({ approvalTimeoutSeconds: 60 })
+  })
+
+  it('is built from the content, redacted, and never carries the raw content', async () => {
+    const content = 'DB_PASSWORD=hunter2\nhost=db.internal hunter-known-9\nok'
+    const pending = req({
+      capability: 'writeFiles',
+      action: 'write /etc/app.env',
+      writeContent: { content, knownSecrets: ['hunter-known-9'] }
+    })
+    const [request] = listPendingApprovals()
+    expect(request.contentPreview?.text).toContain('DB_PASSWORD=[REDACTED]')
+    expect(request.contentPreview?.text).toContain('host=db.internal [REDACTED]')
+    expect(JSON.stringify(request)).not.toContain('hunter2')
+    expect(JSON.stringify(request)).not.toContain('hunter-known-9')
+    expect(request).not.toHaveProperty('writeContent')
+    respondToApproval(request.id, 'denied')
+    await pending
+  })
+
+  it('is dropped once the request is answered', async () => {
+    const pending = req({ writeContent: { content: 'hello', knownSecrets: [] } })
+    const [request] = listPendingApprovals()
+    respondToApproval(request.id, 'approved')
+    await pending
+    expect(listRecentApprovals()[0].contentPreview).toBeUndefined()
+  })
+})

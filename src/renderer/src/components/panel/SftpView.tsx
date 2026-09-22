@@ -948,7 +948,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       )}
 
       {queue.length > 0 && (
-        <div className="row faint" style={{ marginBottom: 12, gap: 10, fontSize: 12 }} data-testid="transfer-queue">
+        <div className="row faint" style={{ marginBottom: 12, gap: 10, fontSize: 'var(--fs-caption)' }} data-testid="transfer-queue">
           <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {queue.length} queued: {queueNames(queue)}
           </span>
@@ -1141,7 +1141,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
                   ? `A new copy could not be given the existing file's owner or permissions, so it can only be overwritten in place, which keeps them. ${IN_PLACE_RISK}`
                   : `${overwrite.names.length === 1 ? 'A file with this name is' : 'Files with these names are'} already in ${overwrite.dir}. Overwriting replaces ${overwrite.names.length === 1 ? 'it' : 'them'}; Skip uploads only the rest.`}
           </p>
-          <ul className="mono" style={{ fontSize: 12, maxHeight: 180, overflow: 'auto' }}>
+          <ul className="mono" style={{ fontSize: 'var(--fs-identifier)', maxHeight: 180, overflow: 'auto' }}>
             {overwrite.names.map((n) => (
               <li key={n}>{n}</li>
             ))}

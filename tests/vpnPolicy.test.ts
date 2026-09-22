@@ -12,6 +12,7 @@ import { refreshMcpDataCache } from '../src/main/services/mcpDataCache'
 import { setMcpConfig, createSession, resetMcpAuthForTests } from '../src/main/services/mcpAuth'
 import { startMcpServer, stopMcpServer } from '../src/main/services/mcpServer'
 import { registerVpnManager, resetVpnManagerForTests } from '../src/main/services/vpn/managerApi'
+import { onApprovalEvent, respondToApproval } from '../src/main/services/approvals'
 import type { AccessGroup, PermissionValue } from '../src/shared/mcp'
 import type { VpnKind } from '../src/shared/vpn'
 
@@ -258,6 +259,27 @@ describe('set_vpn against a live bridge', () => {
     const out = await call({ vpnName: 'office', running: false })
     expect(out).toContain('Stopped "office"')
     expect(stopped).toContain('vpn-wg')
+  })
+
+  // docs/AI-SECURITY.md: no configuration in which a VPN comes up silently.
+  // A start answered "for this session" used to be remembered, and the next
+  // start was waved through as approved-earlier -- a VPN coming up with no
+  // prompt at all.
+  it('asks for every start, even after one was allowed for the session', async () => {
+    let asked = 0
+    const off = onApprovalEvent((e) => {
+      if (e.type === 'created') {
+        asked += 1
+        respondToApproval(e.request.id, 'approved', 'session')
+      }
+    })
+    try {
+      await call({ vpnName: 'office', running: true })
+      await call({ vpnName: 'office', running: true })
+      expect(asked).toBe(2)
+    } finally {
+      off()
+    }
   })
 
   it('lists VPNs without naming an endpoint, a key or a bind address', async () => {

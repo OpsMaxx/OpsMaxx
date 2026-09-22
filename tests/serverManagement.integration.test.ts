@@ -28,6 +28,7 @@ const { listAudit } = await import('../src/main/services/auditLog')
 const { setAgentServerCreator, setAgentConfigWriter } = await import('../src/main/services/agentConfigWrite')
 type AgentServerRequest = import('../src/main/services/agentConfigWrite').AgentServerRequest
 type AgentConfigRequest = import('../src/main/services/agentConfigWrite').AgentConfigRequest
+type ApprovalRequest = import('../src/shared/mcp').ApprovalRequest
 
 const PORT = 18761
 
@@ -121,15 +122,20 @@ async function call(c: Client, name: string, args: Record<string, unknown>): Pro
   return r.content.map((x) => x.text).join('\n')
 }
 
-function autoRespond(decision: 'approved' | 'denied'): { stop: () => void; count: () => number } {
-  let seen = 0
+// `scope` is passed through untouched, including when it is absent: a missing
+// scope is one of the cases under test, and it must mean "once".
+function autoRespond(
+  decision: 'approved' | 'denied',
+  scope?: unknown
+): { stop: () => void; count: () => number; requests: ApprovalRequest[] } {
+  const requests: ApprovalRequest[] = []
   const off = onApprovalEvent((e) => {
     if (e.type === 'created') {
-      seen += 1
-      respondToApproval(e.request.id, decision)
+      requests.push({ ...e.request })
+      respondToApproval(e.request.id, decision, scope)
     }
   })
-  return { stop: off, count: () => seen }
+  return { stop: off, count: () => requests.length, requests }
 }
 
 describe('add_server jumpHosts', () => {
@@ -290,13 +296,17 @@ describe('one approval writes one server', () => {
   // audited as `approved-earlier` -- which is how one dialog leaves four
   // unwanted connections behind.
   it('asks again for a second add in the same session', async () => {
-    const a = autoRespond('approved')
+    // Answered FOR THE SESSION, which is the strongest yes there is, and it
+    // still covers one add: a per-call tool is offered no session grant, and
+    // main reads a session answer sent for one anyway as once.
+    const a = autoRespond('approved', 'session')
     const c = await clientFor('grp-full')
     try {
       await call(c, 'add_server', { name: 'First', host: '10.0.0.21' })
       await call(c, 'add_server', { name: 'Second', host: '10.0.0.22' })
       expect(created).toHaveLength(2)
       expect(a.count()).toBe(2)
+      expect(a.requests.map((r) => r.sessionGrant)).toEqual([undefined, undefined])
     } finally {
       a.stop()
       await c.close()
@@ -385,7 +395,7 @@ describe('update_server', () => {
   // dialog without reading it. The three tests below pin the edges of the
   // narrower grant: same server yes, other server no, other tool no.
   it('does not ask again for a second change to the same server in one session', async () => {
-    const a = autoRespond('approved')
+    const a = autoRespond('approved', 'session')
     const c = await clientFor('grp-full')
     try {
       await call(c, 'update_server', { serverName: 'Scanner01', port: 2201 })
@@ -402,7 +412,47 @@ describe('update_server', () => {
       // 'approved-earlier' with `result: 'success'` before the change had run,
       // and the tool then recorded 'approved' on top, which is the audit log
       // claiming a human had looked at a card nobody was shown.
-      expect(carried.map((e) => e.approval)).toEqual(['approved-earlier', 'approved'])
+      //
+      // The first row says the human answered for the session, not just for
+      // that call, so the carried row below it has something to point back to.
+      expect(carried.map((e) => e.approval)).toEqual(['approved-earlier', 'approved-for-session'])
+      // And the grant it offered was the narrow one: this tool, on this server.
+      expect(a.requests[0].sessionGrant).toBe('tool')
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  // "Approve once" used to mean the rest of the session. It now means once.
+  it('asks again after an "Approve once"', async () => {
+    const a = autoRespond('approved', 'once')
+    const c = await clientFor('grp-full')
+    try {
+      await call(c, 'update_server', { serverName: 'Scanner01', port: 2211 })
+      await call(c, 'update_server', { serverName: 'Scanner01', port: 2212 })
+      expect(a.count()).toBe(2)
+      expect(written).toHaveLength(2)
+      const rows = listAudit().filter((e) => /^Change server "Scanner01" \(port to 221[12]\)/.test(e.action))
+      expect(rows.map((e) => e.approval)).toEqual(['approved', 'approved'])
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  // Fail toward asking again: an answer with no scope -- an older preload, a
+  // renderer bug -- and one with a scope main does not recognise are both once.
+  it.each([
+    ['no scope', undefined],
+    ['an unrecognised scope', 'forever']
+  ])('treats an approval with %s as once', async (_label, scope) => {
+    const a = autoRespond('approved', scope)
+    const c = await clientFor('grp-full')
+    try {
+      await call(c, 'update_server', { serverName: 'Scanner01', port: 2221 })
+      await call(c, 'update_server', { serverName: 'Scanner01', port: 2222 })
+      expect(a.count()).toBe(2)
     } finally {
       a.stop()
       await c.close()
@@ -410,7 +460,7 @@ describe('update_server', () => {
   })
 
   it('asks again for a change to a different server', async () => {
-    const a = autoRespond('approved')
+    const a = autoRespond('approved', 'session')
     const c = await clientFor('grp-full')
     try {
       await call(c, 'update_server', { serverName: 'Scanner01', port: 2201 })
@@ -425,7 +475,7 @@ describe('update_server', () => {
   it('does not let a change approval buy the removal of that same server', async () => {
     // Both are `manageServers`. Keying the memory on the capability alone would
     // have made a yes about repointing a connection into a silent delete of it.
-    const a = autoRespond('approved')
+    const a = autoRespond('approved', 'session')
     const c = await clientFor('grp-full')
     try {
       await call(c, 'update_server', { serverName: 'Scanner01', port: 2201 })
@@ -642,6 +692,176 @@ describe('the dedup token', () => {
       const out = await call(c, 'list_servers', {})
       expect(out).not.toContain('[id ')
     } finally {
+      await c.close()
+    }
+  })
+})
+
+// execute_command used to gate, audit and REMEMBER every command as `terminal`,
+// sudo included. "Allow Execute terminal commands on Scanner01 for this
+// session", given about `df`, then covered `sudo rm -rf /var/lib` with no
+// dialog. The policy asks for sudo and for destructive commands on its own;
+// the memory is what paid those questions out of the terminal answer.
+describe('what a terminal session grant covers', () => {
+  const TERM_ASK = 'grp-terminal-ask'
+  const useTerminalAsk = (): void => {
+    const full = getGroup('grp-full')!
+    saveGroup({
+      ...full,
+      id: TERM_ASK,
+      name: 'Terminal Ask',
+      builtIn: false,
+      capabilities: { ...full.capabilities, terminal: 'ask', sudo: 'ask' },
+      filePolicies: [...full.filePolicies, { id: 'secret', pattern: '/secret/**', read: 'ask' }]
+    })
+    setAssignment({ level: 'workspace', workspaceId: 'ws' }, TERM_ASK)
+  }
+
+  it('covers ordinary commands, and not sudo or a destructive one', async () => {
+    useTerminalAsk()
+    const a = autoRespond('approved', 'session')
+    const c = await clientFor(TERM_ASK)
+    try {
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'df' })
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'uptime' })
+      expect(a.count()).toBe(1)
+      expect(a.requests[0].sessionGrant).toBe('capability')
+      expect(a.requests[0].capability).toBe('terminal')
+
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'sudo systemctl restart cron' })
+      expect(a.count()).toBe(2)
+      // Asked as what it is, and never offered for the session.
+      expect(a.requests[1].capability).toBe('sudo')
+      expect(a.requests[1].sessionGrant).toBeUndefined()
+
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'rm -rf /var/lib/postgresql' })
+      expect(a.count()).toBe(3)
+      expect(a.requests[2].sessionGrant).toBeUndefined()
+
+      // And answering one of those "for the session" anyway buys nothing.
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'sudo systemctl restart cron' })
+      expect(a.count()).toBe(4)
+
+      const sudoRow = listAudit().find((e) => e.action === 'sudo systemctl restart cron')
+      expect(sudoRow?.capability).toBe('sudo')
+      expect(sudoRow?.approval).toBe('approved')
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  it('does not answer a path rule that asks on its own account', async () => {
+    useTerminalAsk()
+    const a = autoRespond('approved', 'session')
+    const c = await clientFor(TERM_ASK)
+    try {
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'ls /tmp' })
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'cat /secret/key' })
+      expect(a.count()).toBe(2)
+      expect(a.requests[1].policyReason).toMatch(/Path rule "\/secret\/\*\*"/)
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+})
+
+// assessCommand grades `su -c "..."` and `pkexec rm` ordinary, and only `sudo`
+// was looked for here, so every other way to become root rode a terminal
+// session grant given about `df`.
+describe('every way to become another user asks on its own', () => {
+  const ESC_ASK = 'grp-escalation-ask'
+  const useAskGroup = (): void => {
+    const full = getGroup('grp-full')!
+    saveGroup({
+      ...full,
+      id: ESC_ASK,
+      name: 'Escalation Ask',
+      builtIn: false,
+      capabilities: { ...full.capabilities, terminal: 'ask', sudo: 'ask', containerControl: 'ask' }
+    })
+    setAssignment({ level: 'workspace', workspaceId: 'ws' }, ESC_ASK)
+  }
+
+  it.each(['su -c "id"', 'pkexec id', 'doas id', '/usr/bin/sudo id', 'runuser -u postgres id'])(
+    'asks again for %s after a session grant on df',
+    async (command) => {
+      useAskGroup()
+      const a = autoRespond('approved', 'session')
+      const c = await clientFor(ESC_ASK)
+      try {
+        await call(c, 'execute_command', { serverName: 'Scanner01', command: 'df' })
+        await call(c, 'execute_command', { serverName: 'Scanner01', command })
+        expect(a.count()).toBe(2)
+        expect(a.requests[1].capability).toBe('sudo')
+        expect(a.requests[1].sessionGrant).toBeUndefined()
+      } finally {
+        a.stop()
+        await c.close()
+      }
+    }
+  )
+
+  // A restart and a stop each drop every connection the container serves. One
+  // yes used to cover every later action on every container on the host.
+  it('does not let a container grant cover a stop or a restart', async () => {
+    useAskGroup()
+    const a = autoRespond('approved', 'session')
+    const c = await clientFor(ESC_ASK)
+    try {
+      await call(c, 'container_action', { serverName: 'Scanner01', container: 'web', action: 'start' })
+      await call(c, 'container_action', { serverName: 'Scanner01', container: 'api', action: 'start' })
+      // A start may be remembered...
+      expect(a.count()).toBe(1)
+      expect(a.requests[0].sessionGrant).toBe('capability')
+      // ...a stop or restart is asked for every time, and offered only once.
+      await call(c, 'container_action', { serverName: 'Scanner01', container: 'db', action: 'stop' })
+      await call(c, 'container_action', { serverName: 'Scanner01', container: 'db', action: 'restart' })
+      await call(c, 'container_action', { serverName: 'Scanner01', container: 'db', action: 'stop' })
+      expect(a.count()).toBe(4)
+      expect(a.requests.slice(1).map((r) => r.sessionGrant)).toEqual([undefined, undefined, undefined])
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+})
+
+// withRestriction kept the SESSION group's reason on an ask/ask tie, so a path
+// rule in the server's own assignment reached gate() under "Terminal commands
+// require approval" -- the same question as `ls` -- and a session grant given
+// about `ls` answered it.
+describe('a restriction group’s own rule', () => {
+  it('is not answered by a session grant given under the session group’s rule', async () => {
+    const full = getGroup('grp-full')!
+    saveGroup({
+      ...full,
+      id: 'grp-session-term-ask',
+      name: 'Session Terminal Ask',
+      builtIn: false,
+      capabilities: { ...full.capabilities, terminal: 'ask' }
+    })
+    saveGroup({
+      ...full,
+      id: 'grp-server-secret-ask',
+      name: 'Server Secret Ask',
+      builtIn: false,
+      capabilities: { ...full.capabilities, terminal: 'ask' },
+      filePolicies: [...full.filePolicies, { id: 'secret', pattern: '/secret/**', read: 'ask' }]
+    })
+    setAssignment({ level: 'workspace', workspaceId: 'ws' }, 'grp-server-secret-ask')
+    const a = autoRespond('approved', 'session')
+    const c = await clientFor('grp-session-term-ask')
+    try {
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'ls /tmp' })
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'ls /var' })
+      expect(a.count()).toBe(1)
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'cat /secret/key' })
+      expect(a.count()).toBe(2)
+      expect(a.requests[1].policyReason).toMatch(/Path rule "\/secret\/\*\*"/)
+    } finally {
+      a.stop()
       await c.close()
     }
   })

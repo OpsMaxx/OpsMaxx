@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Clock, Octagon, ShieldAlert, X } from 'lucide-react'
-import type { ApprovalRequest, AuditEntry, McpAgentSession } from '../../../../shared/mcp'
+import { AI_CAPABILITIES } from '../../../../shared/mcp'
+import type { ApprovalRequest, AuditEntry, ContentPreview, McpAgentSession } from '../../../../shared/mcp'
 import { describeConsequence, describeDenial, explainRisk } from '../../../../shared/approvalRisk'
 import { duration } from '../../lib/format'
 import {
@@ -131,8 +132,97 @@ function useProvenance(request: ApprovalRequest): Provenance {
 function Row({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
   return (
     <div style={{ display: 'flex', gap: 12, alignItems: 'baseline' }}>
-      <div style={{ width: 132, flex: 'none', color: 'var(--text-faint)', fontSize: 11 }}>{label}</div>
+      <div style={{ width: 132, flex: 'none', color: 'var(--text-faint)', fontSize: 'var(--fs-caption)' }}>{label}</div>
       <div style={{ color: 'var(--text-muted)', fontSize: 12, minWidth: 0 }}>{children}</div>
+    </div>
+  )
+}
+
+/** The capability's name as the Access screen prints it, or its id if none. */
+export function capabilityLabel(capability: ApprovalRequest['capability']): string {
+  return AI_CAPABILITIES.find((c) => c.id === capability)?.label ?? capability
+}
+
+/**
+ * The second yes, in words that say exactly what it buys — or null, when main
+ * did not offer one.
+ *
+ * The first yes used to be labelled "Approve once" and remembered for the rest
+ * of the session anyway. A grant is only a grant if the person giving it can
+ * read its extent off the button, so the extent is the label: which permission
+ * (or, for a tool main narrowed the grant to, which tool), on which server, for
+ * how long. Null for a per-call tool, which gets "Approve once" and nothing
+ * else.
+ */
+export function sessionGrantLabel(request: ApprovalRequest): string | null {
+  if (request.sessionGrant === 'tool' && request.toolName) {
+    return `Allow ${request.toolName} on ${request.serverName} for this session`
+  }
+  if (request.sessionGrant) {
+    return `Allow “${capabilityLabel(request.capability)}” on ${request.serverName} for this session`
+  }
+  return null
+}
+
+/**
+ * Said next to a session grant on a write. The preview is the reason to
+ * approve a write at all, and a remembered yes skips the dialog -- and with it
+ * the preview -- for every later write it covers.
+ */
+export const LATER_WRITES_UNSEEN = 'Later writes in this session won’t be shown to you.'
+
+/**
+ * What write_file will put on the server, as far as a dialog can show it.
+ *
+ * EVERY CHARACTER IN THIS FRAME WAS CHOSEN BY THE AGENT, so the frame is built
+ * to be unmistakable for anything OpsMaxx says. It is monospace, bordered and
+ * labelled as the agent's; it has a fixed maximum height and scrolls inside
+ * itself, so a megabyte cannot push the answer buttons off the screen; and it
+ * is one <pre> of text that React escapes, so nothing in it can become a row,
+ * a button or markup. The text arrives from main already redacted, capped and
+ * with every invisible or reordering character spelled out as ⟨U+XXXX⟩ -- a
+ * bidi override that could flip what the operator reads is printed, never
+ * obeyed. See contentPreview in shared/approvalRisk.ts.
+ */
+export function WritePreview({
+  agentName,
+  preview
+}: {
+  agentName: string
+  preview: ContentPreview
+}): React.JSX.Element {
+  return (
+    <div>
+      <div style={{ color: 'var(--text-faint)', fontSize: 'var(--fs-caption)', marginBottom: 4 }}>
+        What {agentName} wants written — the agent’s content, not OpsMaxx’s. Secrets are shown redacted, and
+        invisible characters as ⟨U+…⟩.
+      </div>
+      <pre
+        className="mono"
+        aria-label={`File content written by ${agentName}`}
+        style={{
+          margin: 0,
+          padding: '8px 10px',
+          maxHeight: 200,
+          overflow: 'auto',
+          background: 'var(--bg-input)',
+          border: '1px dashed var(--border-strong)',
+          borderRadius: 'var(--r-md)',
+          color: 'var(--text-muted)',
+          fontSize: 'var(--fs-caption)',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-all'
+        }}
+      >
+        {preview.text}
+      </pre>
+      {preview.omittedChars > 0 && (
+        <div style={{ color: 'var(--warn)', fontSize: 'var(--fs-caption)', marginTop: 4 }}>
+          Only the start is shown: {preview.omittedChars.toLocaleString()} more characters
+          {preview.omittedLines > 0 ? ` (${preview.omittedLines.toLocaleString()} more lines)` : ''} are not.
+          Approving writes all of it.
+        </div>
+      )}
     </div>
   )
 }
@@ -160,6 +250,7 @@ export function ApprovalDialog({
   const fuse = useApprovalFuse(request)
   const prov = useProvenance(request)
   const extendable = canExtendFuse()
+  const grantLabel = sessionGrantLabel(request)
 
   const toneText =
     risk.tone === 'danger' ? 'var(--danger)' : risk.tone === 'warn' ? 'var(--warn)' : 'var(--text-muted)'
@@ -220,7 +311,7 @@ export function ApprovalDialog({
                 // The honest absence. The timer lives in main's approvals.ts
                 // and no IPC reaches it, so a "Give me more time" button here
                 // would be a control that looked like it worked and did not.
-                <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-faint)', maxWidth: 210 }}>
+                <div style={{ marginTop: 4, fontSize: 'var(--fs-caption)', color: 'var(--text-faint)', maxWidth: 210 }}>
                   This build cannot extend the fuse. Decide later keeps it in the status bar — the clock keeps
                   running either way.
                 </div>
@@ -273,7 +364,7 @@ export function ApprovalDialog({
           >
             <div style={{ fontSize: 14, lineHeight: 1.55, color: 'var(--text)' }}>{consequence.text}</div>
             {!consequence.known && (
-              <div style={{ fontSize: 11, color: 'var(--warn)', marginTop: 6 }}>
+              <div style={{ fontSize: 'var(--fs-caption)', color: 'var(--warn)', marginTop: 6 }}>
                 Not being able to describe an action is itself a reason to look harder at it.
               </div>
             )}
@@ -281,7 +372,7 @@ export function ApprovalDialog({
 
           {/* 3. The command, as evidence — secondary to the sentence above it. */}
           <div>
-            <div style={{ color: 'var(--text-faint)', fontSize: 11, marginBottom: 4 }}>
+            <div style={{ color: 'var(--text-faint)', fontSize: 'var(--fs-caption)', marginBottom: 4 }}>
               What {request.agentName} asked OpsMaxx to run
             </div>
             <pre
@@ -302,6 +393,8 @@ export function ApprovalDialog({
             </pre>
           </div>
 
+          {request.contentPreview && <WritePreview agentName={request.agentName} preview={request.contentPreview} />}
+
           {/* 4. Provenance. */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <Row label="Agent">
@@ -315,6 +408,13 @@ export function ApprovalDialog({
             </Row>
             <Row label="Where">
               {request.workspaceName} / {request.serverName}
+            </Row>
+            {/* Which permission a yes is spent on. The capability was the one
+                fact on the request the dialog only used internally, and it is
+                the unit a session grant is measured in. */}
+            <Row label="Permission">
+              {capabilityLabel(request.capability)}
+              <span className="mono" style={{ color: 'var(--text-faint)' }}> · {request.capability}</span>
             </Row>
             <Row label="Session">
               {!prov.sessionRead ? (
@@ -364,7 +464,7 @@ export function ApprovalDialog({
               {request.intent ? (
                 <>
                   <span style={{ color: 'var(--text)' }}>“{request.intent}”</span>
-                  <div style={{ color: 'var(--text-faint)', fontSize: 11, marginTop: 3 }}>
+                  <div style={{ color: 'var(--text-faint)', fontSize: 'var(--fs-caption)', marginTop: 3 }}>
                     {request.agentName}’s own words, not OpsMaxx’s. Nothing checked whether they are true.
                   </div>
                 </>
@@ -405,7 +505,22 @@ export function ApprovalDialog({
           <button className="btn ghost" onClick={() => deferApproval(request.id)}>
             <X size={13} /> Decide later
           </button>
-          <button className="btn" onClick={() => void respondToApproval(request.id, 'approved')}>
+          {/* Two yeses, and they say different things. "Approve once" is this
+              call; the second button remembers the answer for the rest of the
+              session, and its label is the grant's full extent. Absent for a
+              per-call tool, where main would not honour it. Neither carries
+              any weight: Deny keeps the fill and the focus. */}
+          {grantLabel && request.contentPreview && (
+            <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--warn)', maxWidth: 180, textAlign: 'right' }}>
+              {LATER_WRITES_UNSEEN}
+            </span>
+          )}
+          {grantLabel && (
+            <button className="btn" onClick={() => void respondToApproval(request.id, 'approved', 'session')}>
+              {grantLabel}
+            </button>
+          )}
+          <button className="btn" onClick={() => void respondToApproval(request.id, 'approved', 'once')}>
             Approve once
           </button>
           <button
