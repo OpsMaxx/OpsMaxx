@@ -10,7 +10,7 @@ import { startMcpServer, stopMcpServer } from '../src/main/services/mcpServer'
 // What an agent actually sees. Everything asserted here is metadata the model
 // reads before deciding which tool to call, so it is worth pinning: a tool that
 // silently loses its annotations looks safe-and-unremarkable to a client.
-const PORT = 58736
+const PORT = 18736
 
 let client: Client
 let tools: Awaited<ReturnType<Client['listTools']>>['tools']

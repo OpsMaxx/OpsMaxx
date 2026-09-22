@@ -7,7 +7,7 @@ import { setAssignment, resetPolicyCacheForTests } from '../src/main/services/po
 import { setMcpConfig, createSession, resetMcpAuthForTests } from '../src/main/services/mcpAuth'
 import { startMcpServer, stopMcpServer } from '../src/main/services/mcpServer'
 
-const PORT = 58732
+const PORT = 18732
 
 const sampleData = {
   workspaces: [

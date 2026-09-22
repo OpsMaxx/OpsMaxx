@@ -15,7 +15,7 @@ import { refreshMcpDataCache } from '../src/main/services/mcpDataCache'
 import { startMcpServer, stopMcpServer } from '../src/main/services/mcpServer'
 import { approveConsent, listPendingConsents, resetOAuthForTests } from '../src/main/services/mcpOAuth'
 
-const PORT = 58822
+const PORT = 18822
 const BASE = `http://127.0.0.1:${PORT}`
 const REDIRECT = 'http://localhost:52999/callback'
 

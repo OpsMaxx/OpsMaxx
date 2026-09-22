@@ -10,7 +10,7 @@ import { startMcpServer, stopMcpServer } from '../src/main/services/mcpServer'
 // "SFTP download" and "SFTP upload" are switches in the access-group editor.
 // They were never read by anything, so turning them off changed nothing — the
 // worst kind of permission, because the user believes it took effect.
-const PORT = 58737
+const PORT = 18737
 
 const sampleData = {
   workspaces: [{ id: 'ws', name: 'W' }],

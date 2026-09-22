@@ -28,7 +28,7 @@ const { onApprovalEvent, respondToApproval } = await import('../src/main/service
 const { setAgentConfigWriter } = await import('../src/main/services/agentConfigWrite')
 type AgentConfigRequest = import('../src/main/services/agentConfigWrite').AgentConfigRequest
 
-const PORT = 58763
+const PORT = 18763
 
 const sampleData = {
   workspaces: [{ id: 'ws', name: 'Personal' }],

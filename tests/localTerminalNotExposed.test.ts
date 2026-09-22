@@ -34,7 +34,7 @@ import { AI_CAPABILITIES } from '../src/shared/mcp'
 // risk R8.
 
 const ROOT = resolve(__dirname, '..')
-const PORT = 58742
+const PORT = 18742
 
 // ---------------------------------------------------------------------------
 // 1. Runtime: what the bridge actually serves

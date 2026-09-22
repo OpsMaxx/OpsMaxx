@@ -29,7 +29,7 @@ const { setAgentServerCreator, setAgentConfigWriter } = await import('../src/mai
 type AgentServerRequest = import('../src/main/services/agentConfigWrite').AgentServerRequest
 type AgentConfigRequest = import('../src/main/services/agentConfigWrite').AgentConfigRequest
 
-const PORT = 58761
+const PORT = 18761
 
 // Two servers behind a bastion, and the bastion, which is the shape the report
 // described. Scanner01 routes through Bastion by saved reference.

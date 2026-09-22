@@ -27,7 +27,7 @@ const { setAssignment, resetPolicyCacheForTests } = await import('../src/main/se
 const { setMcpConfig, createSession, resetMcpAuthForTests } = await import('../src/main/services/mcpAuth')
 const { startMcpServer, stopMcpServer } = await import('../src/main/services/mcpServer')
 
-const PORT = 58762
+const PORT = 18762
 const HOST = '10.21.15.7'
 
 const sampleData = {

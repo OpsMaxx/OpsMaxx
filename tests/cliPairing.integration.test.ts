@@ -21,7 +21,7 @@ import type { McpAgentSession } from '../src/shared/mcp'
 // event, standing in for the app UI, does), /pair/confirm mints a real
 // session, and the compiled CLI's `bridge` subcommand relays a genuine MCP
 // client's traffic over stdio into that same authenticated HTTP endpoint.
-const PORT = 58733
+const PORT = 18733
 
 const sampleData = {
   workspaces: [{ id: 'ws-prod', name: 'Production' }],

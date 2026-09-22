@@ -15,7 +15,7 @@ import type { CapacityReport } from '../src/shared/capacity'
 // all have to reach the agent as themselves, because an agent that reads any of
 // them as "usage is fine" will say so to somebody.
 
-const PORT = 58741
+const PORT = 18741
 
 const sampleData = {
   workspaces: [{ id: 'ws-prod', name: 'Production' }],

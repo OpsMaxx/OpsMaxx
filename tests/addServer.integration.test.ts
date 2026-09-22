@@ -15,7 +15,7 @@ import {
   type AgentServerResult
 } from '../src/main/services/agentConfigWrite'
 
-const PORT = 58735
+const PORT = 18735
 const PASSWORD = 'hunter2-do-not-log-me'
 
 const sampleData = {

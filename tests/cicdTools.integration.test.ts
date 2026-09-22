@@ -81,7 +81,7 @@ const { setMcpConfig, createSession, resetMcpAuthForTests } = await import('../s
 const { startMcpServer, stopMcpServer } = await import('../src/main/services/mcpServer')
 const { onApprovalEvent, respondToApproval } = await import('../src/main/services/approvals')
 
-const PORT = 58751
+const PORT = 18751
 
 const CONNECTION = {
   id: 'ci1',

@@ -13,7 +13,7 @@ import { onApprovalEvent, respondToApproval, listPendingApprovals, armApproval, 
 // reported the tool as hung. These tests pin the two things that stop that:
 // the agent is told an approval is pending, and if nobody answers, the error
 // says where the request was waiting instead of just "timed out".
-const PORT = 58739
+const PORT = 18739
 
 const sampleData = {
   workspaces: [{ id: 'ws-prod', name: 'Production' }],

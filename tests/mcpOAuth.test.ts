@@ -27,7 +27,7 @@ import {
   authenticate
 } from '../src/main/services/mcpAuth'
 
-const PORT = 58811
+const PORT = 18811
 const REDIRECT = 'http://localhost:52346/callback'
 const WORKSPACES = [{ id: 'ws-prod', name: 'Production' }]
 const GRANT = { groupId: 'grp-read-only', groupName: 'Read Only', workspaces: WORKSPACES }

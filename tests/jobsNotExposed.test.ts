@@ -65,7 +65,7 @@ import { AI_CAPABILITIES } from '../src/shared/mcp'
 // not weaken the assertion.
 
 const ROOT = resolve(__dirname, '..')
-const PORT = 58753
+const PORT = 18753
 
 const read = (p: string): string => readFileSync(join(ROOT, p), 'utf8')
 

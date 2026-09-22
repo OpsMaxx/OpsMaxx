@@ -110,15 +110,29 @@ describe.skipIf(!POSIX_ONLY)('detecting a provider CLI', () => {
     }
   })
 
-  it('reports a missing tool as absent rather than throwing', async () => {
-    process.env.OPSMAXX_CLOUD_BIN_DIR = join(dir, 'nowhere')
-    resetCloudBinaryCache()
-    // PATH may legitimately contain a real gcloud on a developer machine, so
-    // this asserts only that the call is total - never that nothing is found.
-    const got = await detectProvider('gcp')
-    expect(typeof got.installed).toBe('boolean')
-    if (!got.installed) expect(got.error).toBeTruthy()
-  })
+  it(
+    'reports a missing tool as absent rather than throwing',
+    async () => {
+      process.env.OPSMAXX_CLOUD_BIN_DIR = join(dir, 'nowhere')
+      resetCloudBinaryCache()
+      // PATH may legitimately contain a real gcloud on a developer machine, so
+      // this asserts only that the call is total - never that nothing is found.
+      const got = await detectProvider('gcp')
+      expect(typeof got.installed).toBe('boolean')
+      if (!got.installed) expect(got.error).toBeTruthy()
+    },
+    // A minute, because on a machine that HAS the tool this shells out to it.
+    //
+    // The override above says where to look first, not where to look only, and
+    // the fixed list it falls through to includes /usr/lib/google-cloud-sdk and
+    // /snap/bin -- which is exactly where a CI runner has the Google Cloud SDK.
+    // So there the call finds the real gcloud and runs `gcloud --version`, and
+    // a cold start of that under load went past the default 15s and failed the
+    // build. Locally, with no gcloud on PATH, the same test finishes in about a
+    // second. Tolerating a real tool is this test's stated intent, so it has to
+    // tolerate the time one takes.
+    60_000
+  )
 
   // The rules below are asserted against checkExecutable directly rather than
   // through detectProvider. Planting a bad candidate and asserting "nothing was

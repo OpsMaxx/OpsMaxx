@@ -19,7 +19,7 @@ import { resolveDefaultSessionGroup } from '../src/shared/mcp'
 // then reach OpsMaxx with the credential each button hands out. Clicking the
 // buttons proves a session was created; only this proves the agent on the other
 // end can actually see a server, which is the part that silently fails.
-const PORT = 58734
+const PORT = 18734
 
 const sampleData = {
   workspaces: [

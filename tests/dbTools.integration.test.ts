@@ -34,7 +34,7 @@ const { startMcpServer, stopMcpServer } = await import('../src/main/services/mcp
 const { onApprovalEvent, respondToApproval } = await import('../src/main/services/approvals')
 const { listAudit } = await import('../src/main/services/auditLog')
 
-const PORT = 58738
+const PORT = 18738
 
 beforeAll(async () => {
   resetPolicyCacheForTests()
