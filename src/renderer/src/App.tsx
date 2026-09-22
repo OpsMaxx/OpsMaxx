@@ -6,6 +6,7 @@ import { ConflictChooser } from './components/addy/ConflictChooser'
 import type { AddyRevocation } from '../../preload'
 import { startBackupRunWatch } from './store/backupRuns'
 import { clsx } from './lib/format'
+import { deferredView } from './lib/deferredView'
 import { initPersistence } from './store/persist'
 import { startVaultLockWatch } from './store/vault'
 import { useHotkeys } from './hooks/useHotkeys'
@@ -14,15 +15,8 @@ import { ActivityBar } from './components/layout/ActivityBar'
 import { Sidebar } from './components/layout/Sidebar'
 import { StatusBar } from './components/layout/StatusBar'
 import { WorkspacePanel } from './components/panel/WorkspacePanel'
-import { FleetMonitor } from './components/monitor/FleetMonitor'
-import { TunnelsView } from './components/tunnels/TunnelsView'
-import { HttpView } from './components/http/HttpView'
-import { DatabaseWorkspace } from './components/databases/DatabaseView'
 import { AddDatabaseModal } from './components/databases/AddDatabaseModal'
 import { AddApiModal } from './components/http/AddApiModal'
-import { Settings } from './components/settings/Settings'
-import { VaultView } from './components/vault/VaultView'
-import { AiPanel } from './components/ai/AiPanel'
 import { ApprovalWatcher } from './components/ai/ApprovalWatcher'
 import { AgentConfigWatcher } from './components/ai/AgentConfigWatcher'
 import { FleetWatcher } from './components/monitor/FleetWatcher'
@@ -42,6 +36,32 @@ import { VpnPromptModal } from './components/vpn/VpnPromptModal'
 import { WorkspaceManager } from './components/workspace/WorkspaceManager'
 import { WorkspaceUnlock } from './components/workspace/WorkspaceUnlock'
 import { Toasts } from './components/common/Toasts'
+
+const monitorView = deferredView(() =>
+  import('./components/monitor/FleetMonitor').then((m) => m.FleetMonitor)
+)
+const databasesView = deferredView(() =>
+  import('./components/databases/DatabaseView').then((m) => m.DatabaseWorkspace)
+)
+const tunnelsView = deferredView(() =>
+  import('./components/tunnels/TunnelsView').then((m) => m.TunnelsView)
+)
+const httpView = deferredView(() => import('./components/http/HttpView').then((m) => m.HttpView))
+const vaultView = deferredView(() =>
+  import('./components/vault/VaultView').then((m) => m.VaultView)
+)
+const aiView = deferredView(() => import('./components/ai/AiPanel').then((m) => m.AiPanel))
+const settingsView = deferredView(() =>
+  import('./components/settings/Settings').then((m) => m.Settings)
+)
+const FleetMonitor = monitorView.View
+const DatabaseWorkspace = databasesView.View
+const TunnelsView = tunnelsView.View
+const HttpView = httpView.View
+const VaultView = vaultView.View
+const AiPanel = aiView.View
+const Settings = settingsView.View
+const DEFERRED_VIEWS = [monitorView, databasesView, tunnelsView, httpView, vaultView, aiView, settingsView]
 
 // The connections panel stays mounted whatever the active view is: unmounting
 // it would tear down every live terminal, so switching to Databases and back
@@ -147,6 +167,13 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     void initPersistence()
+  }, [])
+
+  // After the first paint, not before it: that is the whole point of keeping
+  // them out of the startup bundle. See deferredView.
+  useEffect(() => {
+    const id = requestIdleCallback(() => DEFERRED_VIEWS.forEach((v) => void v.preload()))
+    return () => cancelIdleCallback(id)
   }, [])
 
   // App level, not inside the Vault view. Whatever is on screen when the vault
