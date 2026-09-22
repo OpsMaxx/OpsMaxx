@@ -13,10 +13,9 @@ import {
   unlink,
   writeFile
 } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
 import type { WebContents } from 'electron'
 import type { SftpDownloadSummary, SftpEntry, SftpResult, SftpUploadSummary } from '../../shared/ssh'
-import { reserveLocalFile, safeLocalName } from './transferName'
+import { reserveLocalFile, safeLocalName, tempName } from './transferName'
 
 /**
  * The Files view, backed by this machine's own filesystem.
@@ -453,18 +452,27 @@ function copyWithProgress(
      * created with `wx`, so it is certainly this call's, and it is the only
      * thing `fail` ever removes.
      */
-    const tmp = join(dirname(to), `.${basename(to)}.opsmaxx-partial-${randomUUID()}`)
+    const tmp = join(dirname(to), tempName(basename(to)))
     // An abort destroys the read side with an AbortError, which lands in `fail`.
     const read = createReadStream(from, { signal })
     const write = createWriteStream(tmp, { flags: 'wx' })
+    let failed = false
     const fail = (err: Error): void => {
+      if (failed) return
+      failed = true
       read.destroy()
-      write.destroy()
       // A temporary file that will not go is named on the error, so the
       // caller can report it rather than leave it to be found.
-      void rm(tmp, { force: true })
-        .catch(() => Object.assign(err, { leftover: tmp }))
-        .then(() => reject(err))
+      const clean = (): void =>
+        void rm(tmp, { force: true })
+          .catch(() => Object.assign(err, { leftover: tmp }))
+          .then(() => reject(err))
+      // Removed only once the write side has closed: a cancel can land while
+      // the file is still being opened, and removing it first let the open
+      // create it again afterwards.
+      if (write.closed) return clean()
+      write.once('close', clean)
+      write.destroy()
     }
     read.on('data', (c: Buffer | string) => {
       transferred += typeof c === 'string' ? Buffer.byteLength(c) : c.length

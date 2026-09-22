@@ -35,7 +35,9 @@ progress bar, and **Clear queue** drops it. **Cancel** stops the running transfe
 - A cancelled **download** removes the partial file it was writing.
 - An **upload** is written to a temporary name beside the target and renamed
   over it only when complete, so a cancelled or failed upload never leaves the
-  file that was already there half-replaced. Cancelling removes the temporary
+  file that was already there half-replaced. On a server without atomic rename
+  (Windows OpenSSH, proftpd), the old file is first moved aside and is put back
+  if the new one cannot take its place. Cancelling removes the temporary
   copy; if it cannot (the connection has gone), OpsMaxx names the file left
   behind. Copies in this machine's Files view work the same way.
 - **Cancel** returns at once even on a connection that has stopped answering,

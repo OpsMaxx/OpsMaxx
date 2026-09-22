@@ -1,11 +1,10 @@
 import type { WebContents } from 'electron'
 import { basename, join, posix } from 'node:path'
-import { randomUUID } from 'node:crypto'
 import { statSync } from 'node:fs'
 import { rename, rm } from 'node:fs/promises'
 import type { Client, SFTPWrapper, FileEntry } from 'ssh2'
 import { acquire, release, type PooledConnection } from './ssh'
-import { reserveLocalFile, safeLocalName } from './transferName'
+import { reserveLocalFile, safeLocalName, tempName } from './transferName'
 import type {
   SftpDownloadSummary,
   SftpEntry,
@@ -166,16 +165,23 @@ function progressSender(
 
 interface Transfer {
   cancelled: boolean
+  /**
+   * True while an upload is being swapped into place. That swap is the commit
+   * point: once the old file has been moved aside, stopping half-way leaves the
+   * user's file under a name they do not know. So a Cancel that lands then is
+   * recorded, and the channel is closed only once the swap has finished.
+   */
+  committing: boolean
   /** This transfer's own channel, once open. */
   ch?: SFTPWrapper
   /**
    * Rejects the moment the transfer is cancelled.
    *
-   * Every wait inside a transfer is raced against it, because ending a channel
-   * only SENDS a close: the requests in flight fail when the server answers
-   * it, and on a stalled link that is never. Without the race, Cancel on a
-   * dead connection would sit there as long as the connection did, and so
-   * would everything queued behind it.
+   * Every wait inside a transfer — except the swap above — is raced against
+   * it, because ending a channel only SENDS a close: the requests in flight
+   * fail when the server answers it, and on a stalled link that is never.
+   * Without the race, Cancel on a dead connection would sit there as long as
+   * the connection did, and so would everything queued behind it.
    */
   stop: Promise<never>
   cancel: () => void
@@ -197,10 +203,11 @@ function begin(key: string): Transfer {
   stop.catch(() => {})
   const t: Transfer = {
     cancelled: false,
+    committing: false,
     stop,
     cancel: () => {
       t.cancelled = true
-      t.ch?.end()
+      if (!t.committing) t.ch?.end()
       reject(new Error('cancelled'))
     }
   }
@@ -213,6 +220,9 @@ function finish(key: string, t: Transfer): void {
   t.ch?.end()
 }
 
+const SESSION_LIMIT =
+  'The server refused another SFTP channel (session limit). Close another Files tab or terminal on this server and try again.'
+
 /**
  * A channel of this transfer's own, on the server's existing connection.
  *
@@ -221,14 +231,24 @@ function finish(key: string, t: Transfer): void {
  * them — and the cached channel is also carrying the external editor's
  * auto-save and the inline editor's writes, both of which truncate before they
  * write. Closing THAT one could leave a half-saved config on the server.
+ *
+ * The cost is one more session on the connection, and sshd's MaxSessions
+ * (10 by default) is shared with every terminal on it. A refusal is said as
+ * that rather than as ssh2's "Channel open failure", and the transfer does not
+ * fall back to the shared channel: that would bring back the problem above.
  */
 async function channelFor(conn: Conn, t: Transfer): Promise<SFTPWrapper> {
   const ch = await Promise.race([
-    openSftp(conn.conn.client).then((c) => {
-      // Cancelled while it was opening: nothing will ever end it otherwise.
-      if (t.cancelled) c.end()
-      return c
-    }),
+    openSftp(conn.conn.client).then(
+      (c) => {
+        // Cancelled while it was opening: nothing will ever end it otherwise.
+        if (t.cancelled) c.end()
+        return c
+      },
+      (err) => {
+        throw /channel open failure/i.test(msg(err)) ? new Error(SESSION_LIMIT) : err
+      }
+    ),
     t.stop
   ])
   t.ch = ch
@@ -240,35 +260,63 @@ export function sftpCancel(key: string): void {
   running.get(key)?.cancel()
 }
 
-// A temporary name beside the target. Dot-prefixed and unmistakable, so one
-// left behind by a cut connection is recognisable for what it is.
-function partialName(dir: string, name: string): string {
-  return remoteJoin(dir, `.${name}.opsmaxx-partial-${randomUUID()}`)
+const MISSING_CODE = 2 // SFTP status NO_SUCH_FILE
+const isMissing = (err: unknown): boolean => (err as { code?: number } | null)?.code === MISSING_CODE
+
+/**
+ * The swap could not be completed or undone, so files are sitting under
+ * temporary names. `keep` is every one of them: none may be cleaned up.
+ */
+class Stranded extends Error {
+  constructor(
+    message: string,
+    readonly keep: string[]
+  ) {
+    super(message)
+  }
 }
 
-// The fallback below removed the target and then could not rename the upload
-// into its place: the temporary file is now the only copy there is.
-class Stranded extends Error {}
+const call = (run: (cb: (err?: Error | null) => void) => void): Promise<Error | null> =>
+  new Promise((resolve) => run((err) => resolve(err ?? null)))
 
-// Move a finished upload over its target. posix-rename replaces in one step;
-// a server without the extension gets the target removed first, because plain
-// SFTP rename refuses to replace an existing file.
-function replace(sftp: SFTPWrapper, from: string, to: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const done = (err?: Error | null): void => (err ? reject(err) : resolve())
-    try {
-      sftp.ext_openssh_rename(from, to, done)
-    } catch {
-      sftp.unlink(to, (err) => {
-        if (err && (err as { code?: number }).code !== 2) return reject(err)
-        sftp.rename(from, to, (err) =>
-          err
-            ? reject(new Stranded(`${to} was removed to make way, but the upload could not be renamed into its place — it is at ${from}`))
-            : resolve()
-        )
-      })
-    }
-  })
+/**
+ * Move a finished upload over its target. Resolves with any file it had to
+ * leave behind.
+ *
+ * posix-rename replaces in one step. A server without the extension — Windows
+ * OpenSSH, proftpd's mod_sftp — only has plain rename, which refuses to
+ * replace an existing file. Deleting the target first and then renaming loses
+ * both copies if the rename fails. So the old file is moved ASIDE, the upload
+ * is renamed into place, and only then is the old one deleted; a failed rename
+ * puts it back. If even that fails, both names are reported and nothing is
+ * deleted.
+ */
+async function replace(sftp: SFTPWrapper, tmp: string, target: string, name: string): Promise<string[]> {
+  try {
+    const err = await call((cb) => sftp.ext_openssh_rename(tmp, target, cb))
+    if (err) throw err
+    return []
+  } catch (err) {
+    // ssh2 throws synchronously when the server lacks the extension; any
+    // other error is a real failure of the rename itself.
+    if (!/does not support/i.test(msg(err))) throw err
+  }
+  const old = remoteJoin(posix.dirname(target), tempName(name, 'old'))
+  const aside = await call((cb) => sftp.rename(target, old, cb))
+  if (aside && !isMissing(aside)) throw aside
+  const hadOld = !aside
+  const into = await call((cb) => sftp.rename(tmp, target, cb))
+  if (!into) {
+    if (hadOld && (await call((cb) => sftp.unlink(old, cb)))) return [old]
+    return []
+  }
+  if (!hadOld) throw into
+  const back = await call((cb) => sftp.rename(old, target, cb))
+  if (!back) throw into
+  throw new Stranded(
+    `the upload could not be renamed over ${target}, and the old file could not be put back — the old file is at ${old} and the upload at ${tmp}`,
+    [tmp, old]
+  )
 }
 
 // Remove a remote file this transfer created, giving up after a few seconds:
@@ -276,9 +324,7 @@ function replace(sftp: SFTPWrapper, from: string, to: string): Promise<void> {
 // "No such file" is success — the rename may have landed first.
 function removeRemote(sftp: SFTPWrapper, path: string): Promise<boolean> {
   return Promise.race([
-    new Promise<boolean>((resolve) =>
-      sftp.unlink(path, (err) => resolve(!err || (err as { code?: number }).code === 2))
-    ),
+    new Promise<boolean>((resolve) => sftp.unlink(path, (err) => resolve(!err || isMissing(err)))),
     new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3000))
   ])
 }
@@ -286,7 +332,7 @@ function removeRemote(sftp: SFTPWrapper, path: string): Promise<boolean> {
 // Uploads local files into a remote directory, one at a time so progress is
 // meaningful and a failure part-way through still reports what did land.
 //
-// Each file goes to a temporary name and is renamed over the target only once
+// Each file goes to a temporary name and is swapped over the target only once
 // it is complete, so a cancelled or failed upload never leaves the target
 // truncated — the file that was there before is untouched until the last step.
 export async function sftpUpload(
@@ -311,23 +357,40 @@ export async function sftpUpload(
       const name = basename(local)
       const send = progressSender(wc, key, name, i + 1, localPaths.length, 'up')
       let tmp: string | undefined
+      let put: Promise<void> | undefined
       try {
         // Directories would need a recursive walk; refuse them explicitly rather
         // than failing later with an opaque EISDIR.
         if (statSync(local).isDirectory()) throw new Error('folders cannot be uploaded yet')
         send(0, statSync(local).size)
-        tmp = partialName(remoteDir, name)
-        await Promise.race([xfer(ch, 'put', local, tmp, send), t.stop])
-        await Promise.race([replace(ch, tmp, remoteJoin(remoteDir, name)), t.stop])
+        tmp = remoteJoin(remoteDir, tempName(name))
+        put = xfer(ch, 'put', local, tmp, send)
+        await Promise.race([put, t.stop])
+        // Not raced against Cancel: see Transfer.committing.
+        t.committing = true
+        try {
+          leftover.push(...(await replace(ch, tmp, remoteJoin(remoteDir, name), name)))
+        } finally {
+          t.committing = false
+          if (t.cancelled) ch.end()
+        }
         uploaded.push(name)
       } catch (err) {
-        // The temporary file is this upload's, whatever went wrong, and is
-        // removed — unless the old file is already gone, when it is the only
-        // copy left and deleting it would lose the upload as well. After a
-        // cancel the transfer's own channel is closing, so the cached one
-        // does the removing.
-        const sftp = t.cancelled ? conns.get(key)?.sftp : ch
-        if (tmp && (err instanceof Stranded || !(sftp && (await removeRemote(sftp, tmp))))) leftover.push(tmp)
+        if (err instanceof Stranded) leftover.push(...err.keep)
+        else if (tmp) {
+          // The temporary file is this upload's and nothing else holds the
+          // data in it. After a cancel the transfer's own channel is closing,
+          // so the cached one does the removing — and does it again once the
+          // cut-off transfer settles, because an open already on the wire can
+          // create the file after the first removal has run.
+          const partial = tmp
+          const remove = (): Promise<boolean> => {
+            const sftp = t.cancelled ? conns.get(key)?.sftp : ch
+            return sftp ? removeRemote(sftp, partial) : Promise.resolve(false)
+          }
+          if (!(await remove())) leftover.push(partial)
+          if (t.cancelled) void put?.then(remove, remove)
+        }
         if (t.cancelled) break
         failed.push({ name, error: msg(err) })
       }
@@ -379,6 +442,7 @@ export async function sftpDownload(
       }
       let target: string | undefined
       let tmp: string | undefined
+      let get: Promise<void> | undefined
       try {
         target = await reserveLocalFile(localDir, name)
         // fastGet opens its destination by path with 'w', which follows a
@@ -386,9 +450,10 @@ export async function sftpDownload(
         // finished file is renamed over the placeholder — a rename replaces
         // whatever is at that path, even a link swapped in meanwhile, rather
         // than writing through it.
-        tmp = join(localDir, `.${name}.opsmaxx-partial-${randomUUID()}`)
+        tmp = join(localDir, tempName(name))
         const send = progressSender(wc, key, remoteName, i + 1, remotePaths.length, 'down')
-        await Promise.race([xfer(ch, 'get', remotePaths[i], tmp, send), t.stop])
+        get = xfer(ch, 'get', remotePaths[i], tmp, send)
+        await Promise.race([get, t.stop])
         await rename(tmp, target)
         saved.push(basename(target))
       } catch (err) {
@@ -399,6 +464,13 @@ export async function sftpDownload(
         // it is reported instead.
         for (const p of [tmp, target])
           if (p) await rm(p, { force: true, maxRetries: 3 }).catch(() => leftover.push(p))
+        // A cancelled fastGet can still write to its file after the removal
+        // above, until the channel close is answered. Once it settles, again.
+        const partial = tmp
+        if (t.cancelled && partial) {
+          const again = (): Promise<void> => rm(partial, { force: true, maxRetries: 3 }).catch(() => {})
+          void get?.then(again, again)
+        }
         if (t.cancelled) break
         failed.push({ name: remoteName, error: msg(err) })
       }

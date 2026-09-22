@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { open } from 'node:fs/promises'
 
@@ -57,4 +58,20 @@ export async function reserveLocalFile(dir: string, name: string): Promise<strin
     }
   }
   throw new Error(`a thousand files named like ${name} are already in that folder`)
+}
+
+/**
+ * A temporary name beside `name`: a file still being written (`part`), or an
+ * old one moved aside while a new one takes its place (`old`).
+ *
+ * Short on purpose. The first version was `.<name>.opsmaxx-partial-<uuid>`,
+ * about 55 bytes longer than the name, so a name near the 255-byte limit that
+ * saved fine directly failed with ENAMETOOLONG once it went through a temp
+ * file. At most 40 characters of the name are kept — whole code points, so a
+ * cut never splits a surrogate pair — which is ample to recognise a leftover
+ * by. Dot-prefixed so it stays out of the way; 64 random bits so nobody can
+ * plant a symlink at it before it is created.
+ */
+export function tempName(name: string, kind: 'part' | 'old' = 'part'): string {
+  return `.${Array.from(name).slice(0, 40).join('')}.opx-${kind}-${randomBytes(8).toString('hex')}`
 }

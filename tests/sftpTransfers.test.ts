@@ -62,9 +62,15 @@ class FakeSftp {
     this.renamed.push([from, to])
     cb(null)
   }
+  // Per-call outcomes for plain rename, in order; absent means success.
+  renameErrors: (Error | null)[] = []
+  // Holds plain renames until the test releases them, to cancel mid-swap.
+  held: (() => void)[] | null = null
   rename(from: string, to: string, cb: Cb): void {
     this.renamed.push([from, to])
-    cb(null)
+    const err = this.renameErrors.shift() ?? null
+    if (this.held) this.held.push(() => cb(err))
+    else cb(err)
   }
   unlink(path: string, cb: Cb): void {
     this.unlinked.push(path)
@@ -77,8 +83,11 @@ class FakeSftp {
 }
 
 let channels: FakeSftp[] = []
+// Set to make the next channel open fail the way sshd's MaxSessions does.
+let refuseChannel = false
 const client = {
-  sftp: (cb: (err: Error | null, s: FakeSftp) => void) => {
+  sftp: (cb: (err: Error | null, s?: FakeSftp) => void) => {
+    if (refuseChannel) return cb(new Error('(SSH) Channel open failure: open failed'))
     const s = new FakeSftp()
     channels.push(s)
     cb(null, s)
@@ -94,7 +103,7 @@ vi.mock('../src/main/services/ssh', () => ({
 const { sftpConnect, sftpDownload, sftpUpload, sftpCancel, sftpDisposeAll } = await import(
   '../src/main/services/sftp'
 )
-const { safeLocalName, reserveLocalFile } = await import('../src/main/services/transferName')
+const { safeLocalName, reserveLocalFile, tempName } = await import('../src/main/services/transferName')
 
 const wc = { isDestroyed: () => false, send: vi.fn() } as unknown as WebContents
 const cfg = { sessionId: 's', host: 'box.example.test', port: 22, username: 'ops', cols: 80, rows: 24 } as SshConnectConfig
@@ -104,6 +113,7 @@ let dir: string
 
 beforeEach(async () => {
   channels = []
+  refuseChannel = false
   dir = mkdtempSync(join(tmpdir(), 'sp-sftp-xfer-'))
   await sftpConnect(KEY, cfg)
 })
@@ -145,6 +155,14 @@ describe('the names a server chooses', () => {
 
   it('refuses a name with nothing left in it', () => {
     for (const n of ['', '.', '..', '...', '/', '\u0001\u0002']) expect(safeLocalName(n)).toBeNull()
+  })
+
+  // The temporary name must not push a long name past the 255-byte limit.
+  it('keeps temporary names short whatever the name', () => {
+    const long = 'x'.repeat(240) + '.tar.gz'
+    expect(Buffer.byteLength(tempName(long))).toBeLessThan(80)
+    expect(Buffer.byteLength(tempName('😀'.repeat(100), 'old'))).toBeLessThan(250)
+    expect(tempName('a.txt')).toMatch(/^\.a\.txt\.opx-part-[0-9a-f]{16}$/)
   })
 
   it('never replaces a file already in the folder', async () => {
@@ -199,7 +217,7 @@ describe('downloads', () => {
   it('never hand fastGet the reserved path', async () => {
     const run = sftpDownload(wc, KEY, ['/srv/report.pdf'], dir)
     await started()
-    expect(transferCh().got[0]).toMatch(/\.report\.pdf\.opsmaxx-partial-/)
+    expect(transferCh().got[0]).toMatch(/\.report\.pdf\.opx-part-/)
     transferCh().pending.shift()?.(null)
     expect((await run).data?.saved).toEqual(['report.pdf'])
     expect(readFileSync(join(dir, 'report.pdf'), 'utf8')).toBe('partial')
@@ -249,6 +267,29 @@ describe('cancel touches only the transfer', () => {
     expect(readdirSync(dir)).toEqual([])
   })
 
+  // The stop race returns before fastGet settles, so a write already on its
+  // way can recreate the partial after it was removed. It is removed again.
+  it('removes a partial file the cut-off transfer writes after the cancel', async () => {
+    const run = sftpDownload(wc, KEY, ['/srv/big.iso'], dir)
+    await started()
+    const ch = transferCh()
+    ch.stalled = true
+    sftpCancel(KEY)
+    await run
+    expect(readdirSync(dir)).toEqual([])
+
+    writeFileSync(ch.got[0], 'late')
+    ch.pending.shift()?.(new Error('No response from server'))
+    await vi.waitFor(() => expect(readdirSync(dir)).toEqual([]))
+  })
+
+  it('says the session limit, not a raw channel error, when the server refuses a channel', async () => {
+    refuseChannel = true
+    const r = await sftpDownload(wc, KEY, ['/srv/big.iso'], dir)
+    expect(r.ok).toBe(false)
+    expect(r.error).toMatch(/session limit/)
+  })
+
   it('refuses a second transfer on the same key, and Cancel still stops the first', async () => {
     const first = sftpDownload(wc, KEY, ['/srv/big.iso'], dir)
     const second = await sftpDownload(wc, KEY, ['/srv/other.iso'], dir)
@@ -268,44 +309,95 @@ describe('uploads', () => {
     const run = sftpUpload(wc, KEY, [local], '/srv')
     await started()
     const tmp = transferCh().put[0]
-    expect(tmp).toMatch(/^\/srv\/\.app\.conf\.opsmaxx-partial-/)
+    expect(tmp).toMatch(/^\/srv\/\.app\.conf\.opx-part-[0-9a-f]{16}$/)
     transferCh().pending.shift()?.(null)
     const r = await run
     expect(r.data?.uploaded).toEqual(['app.conf'])
     expect(transferCh().renamed).toEqual([[tmp, '/srv/app.conf']])
   })
 
-  it('replace the target first on a server without posix-rename', async () => {
-    const local = join(dir, 'app.conf')
-    writeFileSync(local, 'x')
-    const run = sftpUpload(wc, KEY, [local], '/srv')
-    await started()
-    transferCh().posixRename = false
-    transferCh().pending.shift()?.(null)
-    await run
-    expect(transferCh().unlinked).toEqual(['/srv/app.conf'])
-    expect(transferCh().renamed).toEqual([[transferCh().put[0], '/srv/app.conf']])
-  })
-
   /**
-   * Without posix-rename the target is removed first. If the rename then
-   * fails, the temporary file is the only copy of anything, and removing it
-   * as ordinary cleanup would lose the upload as well as the old file.
+   * Without posix-rename, plain SFTP rename will not replace a file. Deleting
+   * the target first and then renaming loses BOTH copies if the rename fails,
+   * so the old file is moved aside, the upload renamed in, and only then is
+   * the old one deleted.
    */
-  it('keep, and name, the temporary file when the fallback rename fails', async () => {
-    const local = join(dir, 'app.conf')
-    writeFileSync(local, 'x')
-    const run = sftpUpload(wc, KEY, [local], '/srv')
-    await started()
-    const ch = transferCh()
-    ch.posixRename = false
-    ch.rename = (_from: string, _to: string, cb: Cb): void => cb(new Error('Failure'))
-    ch.pending.shift()?.(null)
-    const r = await run
-    const tmp = ch.put[0]
-    expect(ch.unlinked).toEqual(['/srv/app.conf'])
-    expect(r.data?.leftover).toEqual([tmp])
-    expect(r.data?.failed[0].error).toContain(tmp)
+  describe('on a server without posix-rename', () => {
+    async function swap(prepare: (ch: FakeSftp) => void): Promise<{ ch: FakeSftp; tmp: string; r: Awaited<ReturnType<typeof sftpUpload>> }> {
+      const local = join(dir, 'app.conf')
+      writeFileSync(local, 'x')
+      const run = sftpUpload(wc, KEY, [local], '/srv')
+      await started()
+      const ch = transferCh()
+      ch.posixRename = false
+      prepare(ch)
+      ch.pending.shift()?.(null)
+      const r = await run
+      return { ch, tmp: ch.put[0], r }
+    }
+    const old = (ch: FakeSftp): string => ch.renamed[0][1]
+
+    it('moves the old file aside, renames the upload in, then deletes the old one', async () => {
+      const { ch, tmp, r } = await swap(() => {})
+      expect(r.data?.uploaded).toEqual(['app.conf'])
+      expect(old(ch)).toMatch(/^\/srv\/\.app\.conf\.opx-old-/)
+      expect(ch.renamed).toEqual([
+        ['/srv/app.conf', old(ch)],
+        [tmp, '/srv/app.conf']
+      ])
+      expect(ch.unlinked).toEqual([old(ch)])
+    })
+
+    it('puts the old file back when the upload cannot be renamed in', async () => {
+      const { ch, tmp, r } = await swap((ch) => (ch.renameErrors = [null, new Error('Failure')]))
+      expect(ch.renamed[2]).toEqual([old(ch), '/srv/app.conf'])
+      // The old file is back, so the upload's temporary copy is ordinary cleanup.
+      expect(ch.unlinked).toEqual([tmp])
+      expect(r.data?.failed.map((f) => f.name)).toEqual(['app.conf'])
+      expect(r.data?.leftover).toBeUndefined()
+    })
+
+    it('deletes nothing, and names both files, when the old one cannot be put back', async () => {
+      const { ch, tmp, r } = await swap((ch) => (ch.renameErrors = [null, new Error('Failure'), new Error('Failure')]))
+      expect(ch.unlinked).toEqual([])
+      expect(cached().unlinked).toEqual([])
+      expect(r.data?.leftover).toEqual([tmp, old(ch)])
+      expect(r.data?.failed[0].error).toContain(old(ch))
+      expect(r.data?.failed[0].error).toContain(tmp)
+    })
+
+    // The swap is the commit point. A cancel that lands inside it is honoured
+    // after it, not by closing the channel between "moved aside" and
+    // "renamed in" — which left the user's file under a name they never saw.
+    it('finishes the swap when Cancel lands in the middle of it', async () => {
+      const local = join(dir, 'app.conf')
+      writeFileSync(local, 'x')
+      const run = sftpUpload(wc, KEY, [local], '/srv')
+      await started()
+      const ch = transferCh()
+      ch.posixRename = false
+      ch.held = []
+      ch.pending.shift()?.(null)
+      await vi.waitFor(() => expect(ch.held).toHaveLength(1))
+
+      sftpCancel(KEY)
+      expect(ch.ended).toBe(false)
+      ch.held.shift()?.()
+      await vi.waitFor(() => expect(ch.held).toHaveLength(1))
+      ch.held.shift()?.()
+      const r = await run
+
+      expect(ch.renamed).toEqual([
+        ['/srv/app.conf', old(ch)],
+        [ch.put[0], '/srv/app.conf']
+      ])
+      expect(r.data?.uploaded).toEqual(['app.conf'])
+      expect(r.data?.cancelled).toBe(true)
+      // Nothing but the moved-aside old file was deleted, and only after.
+      expect(ch.unlinked).toEqual([old(ch)])
+      expect(cached().unlinked).toEqual([])
+      expect(ch.ended).toBe(true)
+    })
   })
 
   it('cancelled, remove only their own temporary file and never touch the target', async () => {
@@ -318,8 +410,9 @@ describe('uploads', () => {
     const r = await run
     expect(r.data?.cancelled).toBe(true)
     expect(r.data?.leftover).toBeUndefined()
-    // Removed over the cached channel, because the transfer's own is closing.
-    expect(cached().unlinked).toEqual([tmp])
+    // Removed over the cached channel, because the transfer's own is closing —
+    // and again once the cut-off put settles, in case it created the file late.
+    expect(new Set(cached().unlinked)).toEqual(new Set([tmp]))
     expect([...cached().renamed, ...transferCh().renamed]).toEqual([])
     expect(transferCh().unlinked).toEqual([])
   })

@@ -223,6 +223,22 @@ describe('copying files in', () => {
     expect((await first).ok).toBe(true)
   })
 
+  // A name near the 255-byte limit saved fine directly; the temporary file
+  // it now goes through must not push it over.
+  it('copies a file whose name is close to the length limit', async () => {
+    const name = 'n'.repeat(240) + '.txt'
+    mkdirSync(join(dir, 'src'))
+    mkdirSync(join(dir, 'dest'))
+    const src = join(dir, 'src', name)
+    writeFileSync(src, 'long')
+    const up = await localFilesUpload(wc(), 'k', [src], join(dir, 'dest'))
+    expect(up.data?.uploaded).toEqual([name])
+    rmSync(join(dir, 'dest', name))
+    const down = await localFilesDownload(wc(), 'k', [src], join(dir, 'dest'))
+    expect(down.data?.saved).toEqual([name])
+    expect(readdirSync(join(dir, 'dest'))).toEqual([name])
+  })
+
   // Download from this machine is a copy into a picked folder, under the same
   // rule as the SSH half: a file already there is never replaced.
   it('downloads beside an existing file rather than over it', async () => {
