@@ -7,7 +7,9 @@
   position: fixed;
   inset: 0;
   /* The approval layer, with the AI approval dialog: both are a fuse that
-     refuses on expiry, and neither may sit under anything else. */
+     refuses on expiry, and neither may sit under anything else. The two tie,
+     so if both are up DOM order decides — App.tsx mounts AgentApprovalWatcher
+     after ApprovalWatcher, so this one is in front. */
   z-index: var(--z-approval);
   display: flex;
   align-items: center;

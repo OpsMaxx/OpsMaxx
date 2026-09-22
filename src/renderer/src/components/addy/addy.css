@@ -15,8 +15,7 @@
   background: var(--bg-app);
   overflow-y: auto;
   /* Above everything, including the frameless title bar's own drag region:
-     there is no window control on this screen that should still work. Only the
-     approval layer is higher, and no approval can be mounted beside this. */
+     there is no window control on this screen that should still work. */
   z-index: var(--z-revoked);
 }
 
