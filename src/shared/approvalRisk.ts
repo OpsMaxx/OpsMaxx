@@ -657,28 +657,47 @@ export function resolveFuseDeadline(
 export const PREVIEW_MAX_CHARS = 4096
 export const PREVIEW_MAX_LINES = 80
 
-// Everything a reader cannot see, or sees in the wrong order: C0 and C1
-// controls, DEL, the soft hyphen, the Arabic letter mark, zero-width and
-// directional marks, line and paragraph separators, the bidi embeddings,
-// overrides and isolates, the invisible operators, and the BOM. A lone CR goes
-// too -- it is how a line hides its own start in a terminal -- while the CR of
-// a CRLF pair and the tab are left alone, because every Windows file and every
-// Makefile would otherwise read as an attack.
+// Everything a reader cannot see, or sees in the wrong order, by Unicode
+// category rather than by a hand-kept list of code points:
 //
-// The same set sanitizeAgentIntent and remoteText strip, and the opposite
-// treatment. Those are sentences, where deleting the character is the repair.
-// This is a FILE the operator is about to put on a server: deleting a U+202E
-// from the preview would show them a file that is not the one being written,
-// which is the exact lie the preview exists to stop. So each one is kept, and
-// spelled out.
-// eslint-disable-next-line no-control-regex -- matching them is the point
-const PREVIEW_INVISIBLE = /\r(?!\n)|[\u0000-\u0008\u000b-\u000c\u000e-\u001f\u007f-\u009f\u00ad\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g
+//   \p{Cc}  controls (C0, DEL, C1) -- except tab and newline, below
+//   \p{Cf}  format characters: soft hyphen, the Arabic letter mark, every
+//          zero-width and directional mark, the bidi embeddings, overrides
+//          and isolates, the invisible operators, the BOM, the interlinear
+//          annotation marks, and the TAG block U+E0000-E007F, which spells
+//          ASCII no screen shows ("ASCII smuggling")
+//   \p{Zl} \p{Zp}  the line and paragraph separators
+//   \p{Cs}  a lone surrogate, which renders as a replacement character
+//
+// plus the characters that are letters or marks by category and blank on
+// screen anyway: the combining grapheme joiner U+034F, the Hangul fillers
+// U+115F, U+1160, U+3164 and U+FFA0, the Mongolian vowel separator U+180E,
+// and the variation selectors U+FE00-FE0F and U+E0100-E01EF. The `u` flag is
+// what lets the class see anything above U+FFFF at all.
+//
+// A lone CR is spelled out too -- it is how a line hides its own start in a
+// terminal -- while the CR of a CRLF pair, the newline and the tab are left
+// alone, because every Windows file and every Makefile would otherwise read as
+// an attack.
+//
+// sanitizeAgentIntent and remoteText strip the same kind of character, and
+// this does the opposite. Those are sentences, where deleting the character is
+// the repair. This is a FILE the operator is about to put on a server:
+// deleting a U+202E from the preview would show them a file that is not the
+// one being written, which is the exact lie the preview exists to stop. So
+// each one is kept, and spelled out.
+const PREVIEW_INVISIBLE =
+  // The class holds lone combining marks ON PURPOSE -- matching a variation
+  // selector by itself, rather than as part of the character it modifies, is
+  // how it gets spelled out -- which is what this lint exists to object to.
+  // eslint-disable-next-line no-misleading-character-class
+  /\r(?!\n)|(?![\t\n\r])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}\u034f\u115f\u1160\u180e\u3164\uffa0\ufe00-\ufe0f\u{e0100}-\u{e01ef}]/gu
 
-/** `\u202e` becomes `⟨U+202E⟩`: printed, never obeyed. */
+/** `\u202e` becomes `⟨U+202E⟩`, `\u{e0041}` becomes `⟨U+E0041⟩`: printed, never obeyed. */
 export function showInvisibles(text: string): string {
   return text.replace(
     PREVIEW_INVISIBLE,
-    (c) => `⟨U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}⟩`
+    (c) => `⟨U+${(c.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0')}⟩`
   )
 }
 

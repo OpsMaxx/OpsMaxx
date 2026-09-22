@@ -28,7 +28,7 @@ describe('what one approval covers', () => {
     expect(SRC).toMatch(/const elevationKey = \(sessionId: string, serverId: string, scope: string\)/)
     // The scope defaults to the capability, which is what keeps that grain the
     // default for every caller that does not ask for a narrower one.
-    expect(GATE).toMatch(/elevationKey\(ctx\.session\.id, ctx\.serverId, subject\.elevationScope \?\? ctx\.capability\)/)
+    expect(GATE).toMatch(/`\$\{subject\.elevationScope \?\? ctx\.capability\}\\u0000\$\{check\.reason\}`/)
   })
 
   // A capability several differently-shaped tools share is too coarse a key on
@@ -93,6 +93,27 @@ describe('what one approval covers', () => {
     // this one" and "a human looked at one like it" survives, and that is
     // exactly what an audit is for.
     expect(GATE).toMatch(/approval: 'approved-earlier'/)
+  })
+
+  // A grant is an answer to the question the policy asked. Keyed on the rule
+  // as well as the capability, so a grant given under "Terminal commands
+  // require approval" cannot answer a path rule that asks on its own account.
+  it('is keyed on the rule that asked, not only the capability', () => {
+    expect(GATE).toMatch(/\\u0000\$\{check\.reason\}/)
+  })
+
+  // Each of these is a tool whose policy says "always asks" or "never silent"
+  // for the dangerous half of what it does; a session grant would make the
+  // sentence false on the second call.
+  it.each([
+    ['execute_command', /perCall: elevated/],
+    ['query_database', /perCall: !reads/],
+    ['set_tunnel', /perCall: running/],
+    ['set_vpn', /perCall: running/]
+  ])('makes the dangerous half of %s per-call', (tool, flag) => {
+    const at = SRC.indexOf(`toolName: '${tool}'`)
+    expect(at).toBeGreaterThanOrEqual(0)
+    expect(SRC.slice(at, at + 1800)).toMatch(flag)
   })
 
   it('dies with the session', () => {

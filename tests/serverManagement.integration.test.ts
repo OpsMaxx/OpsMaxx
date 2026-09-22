@@ -696,3 +696,73 @@ describe('the dedup token', () => {
     }
   })
 })
+
+// execute_command used to gate, audit and REMEMBER every command as `terminal`,
+// sudo included. "Allow Execute terminal commands on Scanner01 for this
+// session", given about `df`, then covered `sudo rm -rf /var/lib` with no
+// dialog. The policy asks for sudo and for destructive commands on its own;
+// the memory is what paid those questions out of the terminal answer.
+describe('what a terminal session grant covers', () => {
+  const TERM_ASK = 'grp-terminal-ask'
+  const useTerminalAsk = (): void => {
+    const full = getGroup('grp-full')!
+    saveGroup({
+      ...full,
+      id: TERM_ASK,
+      name: 'Terminal Ask',
+      builtIn: false,
+      capabilities: { ...full.capabilities, terminal: 'ask', sudo: 'ask' },
+      filePolicies: [...full.filePolicies, { id: 'secret', pattern: '/secret/**', read: 'ask' }]
+    })
+    setAssignment({ level: 'workspace', workspaceId: 'ws' }, TERM_ASK)
+  }
+
+  it('covers ordinary commands, and not sudo or a destructive one', async () => {
+    useTerminalAsk()
+    const a = autoRespond('approved', 'session')
+    const c = await clientFor(TERM_ASK)
+    try {
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'df' })
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'uptime' })
+      expect(a.count()).toBe(1)
+      expect(a.requests[0].sessionGrant).toBe('capability')
+      expect(a.requests[0].capability).toBe('terminal')
+
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'sudo systemctl restart cron' })
+      expect(a.count()).toBe(2)
+      // Asked as what it is, and never offered for the session.
+      expect(a.requests[1].capability).toBe('sudo')
+      expect(a.requests[1].sessionGrant).toBeUndefined()
+
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'rm -rf /var/lib/postgresql' })
+      expect(a.count()).toBe(3)
+      expect(a.requests[2].sessionGrant).toBeUndefined()
+
+      // And answering one of those "for the session" anyway buys nothing.
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'sudo systemctl restart cron' })
+      expect(a.count()).toBe(4)
+
+      const sudoRow = listAudit().find((e) => e.action === 'sudo systemctl restart cron')
+      expect(sudoRow?.capability).toBe('sudo')
+      expect(sudoRow?.approval).toBe('approved')
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  it('does not answer a path rule that asks on its own account', async () => {
+    useTerminalAsk()
+    const a = autoRespond('approved', 'session')
+    const c = await clientFor(TERM_ASK)
+    try {
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'ls /tmp' })
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'cat /secret/key' })
+      expect(a.count()).toBe(2)
+      expect(a.requests[1].policyReason).toMatch(/Path rule "\/secret\/\*\*"/)
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+})

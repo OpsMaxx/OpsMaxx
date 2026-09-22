@@ -28,7 +28,7 @@ vi.mock('../src/main/services/db', () => ({
 }))
 
 const { refreshMcpDataCache } = await import('../src/main/services/mcpDataCache')
-const { setAssignment, resetPolicyCacheForTests } = await import('../src/main/services/policyStore')
+const { setAssignment, resetPolicyCacheForTests, saveGroup, getGroup } = await import('../src/main/services/policyStore')
 const { setMcpConfig, createSession, resetMcpAuthForTests } = await import('../src/main/services/mcpAuth')
 const { startMcpServer, stopMcpServer } = await import('../src/main/services/mcpServer')
 const { onApprovalEvent, respondToApproval } = await import('../src/main/services/approvals')
@@ -250,6 +250,105 @@ describe('tunnel tools', () => {
       expect(await call(c, 'set_tunnel', { tunnelName: 'DB Forward', running: true })).toContain('already in use')
     } finally {
       stop()
+      await c.close()
+    }
+  })
+})
+
+// A session grant is an answer to one question, and "always asks" has to stay
+// true after the operator has said "for this session" to something nearby.
+// Each of these carried silently before starts, writes and non-reads became
+// per-call.
+describe('what a session grant cannot buy', () => {
+  // Full Access with the two capabilities under test lowered to ASK, so a read
+  // and a stop reach a human at all -- on the seeded groups neither asks.
+  const ASKS = 'grp-db-tunnel-ask'
+  const useAskGroup = (): void => {
+    const full = getGroup('grp-full')!
+    saveGroup({
+      ...full,
+      id: ASKS,
+      name: 'DB and tunnels ask',
+      builtIn: false,
+      capabilities: { ...full.capabilities, databaseAccess: 'ask', sshTunnel: 'ask' }
+    })
+    setAssignment({ level: 'workspace', workspaceId: 'ws' }, ASKS)
+  }
+
+  function answerForSession(): { stop: () => void; asked: () => number } {
+    let asked = 0
+    const off = onApprovalEvent((e) => {
+      if (e.type === 'created') {
+        asked += 1
+        respondToApproval(e.request.id, 'approved', 'session')
+      }
+    })
+    return { stop: off, asked: () => asked }
+  }
+
+  it('a session grant on a SELECT does not cover a DROP TABLE', async () => {
+    useAskGroup()
+    const a = answerForSession()
+    const c = await clientFor(ASKS)
+    try {
+      await call(c, 'query_database', { databaseName: 'Orders', statement: 'SELECT 1' })
+      await call(c, 'query_database', { databaseName: 'Orders', statement: 'SELECT 2' })
+      // Reads may be granted for the session...
+      expect(a.asked()).toBe(1)
+      await call(c, 'query_database', { databaseName: 'Orders', statement: 'DROP TABLE carried' })
+      // ...a write is asked for regardless.
+      expect(a.asked()).toBe(2)
+      const row = listAudit().find((e) => e.action === 'DROP TABLE carried')
+      expect(row?.approval).toBe('approved')
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  it('a write answered for the session still asks for the next write', async () => {
+    useAskGroup()
+    const a = answerForSession()
+    const c = await clientFor(ASKS)
+    try {
+      await call(c, 'query_database', { databaseName: 'Orders', statement: 'DELETE FROM a' })
+      await call(c, 'query_database', { databaseName: 'Orders', statement: 'DELETE FROM b' })
+      expect(a.asked()).toBe(2)
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  it('a session grant on one tunnel start does not cover the next start', async () => {
+    setAssignment({ level: 'workspace', workspaceId: 'ws' }, 'grp-full')
+    const a = answerForSession()
+    const c = await clientFor('grp-full')
+    try {
+      await call(c, 'set_tunnel', { tunnelName: 'DB Forward', running: true })
+      await call(c, 'set_tunnel', { tunnelName: 'DB Forward', running: true })
+      expect(a.asked()).toBe(2)
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  it('a session grant on a tunnel stop does not cover a start', async () => {
+    useAskGroup()
+    const a = answerForSession()
+    const c = await clientFor(ASKS)
+    try {
+      await call(c, 'set_tunnel', { tunnelName: 'DB Forward', running: false })
+      expect(a.asked()).toBe(1)
+      await call(c, 'set_tunnel', { tunnelName: 'DB Forward', running: true })
+      expect(a.asked()).toBe(2)
+      expect(tunnelCalls).toEqual([
+        { id: 'tn1', started: false },
+        { id: 'tn1', started: true }
+      ])
+    } finally {
+      a.stop()
       await c.close()
     }
   })

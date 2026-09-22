@@ -431,13 +431,26 @@ its own request by construction, not by convention.
 
 - **Approve once** authorises this call and nothing after it. The next call asks again.
 - **Allow "*permission*" on *server* for this session** also remembers the answer, in memory, for
-  that permission on that server until the agent's session ends or AI access is stopped. For a
-  tool whose grant `gate()` narrows to itself (`update_server`) the button names the tool instead
-  of the permission. Calls it carries are audited as `approved-earlier`, and the call that gave it
-  as `approved-for-session`, so every carried row has one to point back to.
+  that permission on that server **under the same policy rule** until the agent's session ends or
+  AI access is stopped. The remembered key is session + server + permission + the policy engine's
+  reason for asking, so a grant given under "Terminal commands require approval" does not answer
+  a path rule that asks on its own account. For a tool whose grant `gate()` narrows to itself
+  (`update_server`) the button names the tool instead of the permission. Calls it carries are
+  audited as `approved-earlier`, and the call that gave it as `approved-for-session`, so every
+  carried row has one to point back to.
 
-The second button is only offered where `gate()` would honour it: `add_server`, `remove_server`
-and every `ciTrigger` tool are per-call and show **Approve once** alone. Main reads the scope
+The second button is only offered where `gate()` would honour it. These are per-call — every
+call asks, they show **Approve once** alone, and they never read a remembered grant:
+
+- `add_server`, `remove_server`, `create_tunnel`, `delete_tunnel`, and every `ciTrigger` tool;
+- `execute_command` for any command the classifier grades above ordinary: anything containing
+  `sudo`, and every elevated or destructive command. A `sudo` command is also gated and audited
+  as the `sudo` permission rather than `terminal`, so an "Execute terminal commands" grant never
+  reaches it;
+- `query_database` for anything not classified as a read;
+- `set_tunnel` and `set_vpn` when starting.
+
+Main reads the scope
 strictly — anything other than exactly `session`, including a missing one, is `once`, and a
 session answer to a request that did not offer one is also `once` — so a renderer bug fails
 toward being asked again. **Deny** keeps the weight and the keyboard focus. The dialog also names
@@ -451,8 +464,12 @@ none of the bytes. It now shows the start of the content — the first 4,096 cha
 lines, whichever is shorter, and how much is left out — in a scrolling, fixed-height, monospace
 frame labelled as the agent's. The content is redacted with `secretRedaction.ts` against the
 server's known secrets *before* it is cut, so a secret straddling the cut cannot survive as a
-prefix, and every control, zero-width and bidi character is printed as `⟨U+XXXX⟩` rather than
-obeyed (`contentPreview`, `src/shared/approvalRisk.ts`). The preview is built in `approvals.ts`
+prefix. Every character in the Unicode categories Cc (controls, except tab and newline), Cf
+(format characters, including every bidi, zero-width and directional mark and the U+E0000–E007F
+tag block), Zl, Zp and Cs, plus U+034F, the Hangul fillers U+115F, U+1160, U+3164 and U+FFA0,
+U+180E and the variation selectors U+FE00–FE0F and U+E0100–E01EF, is printed as `⟨U+XXXX⟩`
+rather than obeyed, as is a carriage return that is not part of a CRLF pair
+(`contentPreview`, `src/shared/approvalRisk.ts`). The preview is built in `approvals.ts`
 and is never written to the audit log, never returned to the agent, and dropped from the request
 once it is answered. A write carried on a session approval shows no preview, because nothing asks.
 

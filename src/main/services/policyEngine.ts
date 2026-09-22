@@ -408,10 +408,19 @@ export function evaluateCommand(group: AccessGroup | null, command: string): Dec
   }
 
   // A path rule can only narrow the command decision, never widen it.
-  return extractPathAccesses(command).reduce<Decision>(
-    (acc, { path, mode }) => mostRestrictive(acc, evaluateFilePath(group, path, mode)),
-    base
-  )
+  //
+  // On an ask-against-ask tie the explicit path rule is the one NAMED. The
+  // decision is the same either way -- ask is ask -- but the reason is what
+  // gate() keys a remembered approval on, and mostRestrictive keeps its first
+  // argument on a tie. So under terminal=ask, `cat /secret/key` used to reach
+  // the gate as "Terminal commands require approval", the same question as
+  // `ls /tmp`, and an "allow for this session" given about `ls` answered a
+  // rule the operator had written specifically to be asked about.
+  return extractPathAccesses(command).reduce<Decision>((acc, { path, mode }) => {
+    const byPath = evaluateFilePath(group, path, mode)
+    if (acc.decision === 'ask' && byPath.decision === 'ask' && byPath.reason.startsWith('Path rule ')) return byPath
+    return mostRestrictive(acc, byPath)
+  }, base)
 }
 
 // Minimal glob support: `**` crosses path segments, `*` stays within one,

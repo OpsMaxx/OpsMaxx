@@ -435,3 +435,39 @@ describe('contentPreview', () => {
     expect(p.text).toBe('x'.repeat(PREVIEW_MAX_CHARS - 1))
   })
 })
+
+// The first cut matched a hand-kept list of BMP code points with no `u` flag,
+// so anything above U+FFFF was invisible to it and a handful of blank letters
+// and marks walked past. These are the ones a reviewer named.
+describe('contentPreview, beyond the BMP and the obvious', () => {
+  it('spells out the TAG block, which smuggles ASCII no screen shows', () => {
+    // "hi" in tag characters, fenced by the tag begin/cancel marks.
+    const smuggled = '\u{E0001}\u{E0068}\u{E0069}\u{E007F}'
+    expect(contentPreview(`ok${smuggled}`).text).toBe('ok⟨U+E0001⟩⟨U+E0068⟩⟨U+E0069⟩⟨U+E007F⟩')
+  })
+
+  it.each([
+    ['Hangul filler', 'ㅤ', 'U+3164'],
+    ['Hangul choseong filler', 'ᅟ', 'U+115F'],
+    ['Hangul jungseong filler', 'ᅠ', 'U+1160'],
+    ['halfwidth Hangul filler', 'ﾠ', 'U+FFA0'],
+    ['Mongolian vowel separator', '᠎', 'U+180E'],
+    ['variation selector 16', '️', 'U+FE0F'],
+    ['supplementary variation selector', '\u{E0100}', 'U+E0100'],
+    ['combining grapheme joiner', '͏', 'U+034F'],
+    ['interlinear annotation anchor', '￹', 'U+FFF9'],
+    ['interlinear annotation terminator', '￻', 'U+FFFB'],
+    ['word joiner', '⁠', 'U+2060'],
+    ['line separator', ' ', 'U+2028']
+  ])('spells out the %s', (_name, ch, code) => {
+    expect(contentPreview(`a${ch}b`).text).toBe(`a⟨${code}⟩b`)
+  })
+
+  it('prints the code point of an astral character, never half of it', () => {
+    expect(contentPreview('\u{E0041}').text).toBe('⟨U+E0041⟩')
+  })
+
+  it('leaves ordinary astral text alone', () => {
+    expect(contentPreview('ship it 🚀').text).toBe('ship it 🚀')
+  })
+})

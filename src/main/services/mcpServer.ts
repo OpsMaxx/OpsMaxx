@@ -802,11 +802,13 @@ function countSessionActions(sessionId: string): number | null {
 /**
  * Approvals already granted in this session, remembered.
  *
- * Keyed session + server + capability. Answering one `execute_command` on
- * Scanner01 with "Allow … for this session" stops the app asking again for
- * terminal commands on Scanner01 for the rest of that session -- and asks
- * afresh for `sudo`, which is a different capability and deliberately not
- * covered by having said yes to `df`. "Approve once" writes nothing here.
+ * Keyed session + server + capability + the policy rule that asked. Answering
+ * one ordinary `execute_command` on Scanner01 with "Allow … for this session"
+ * stops the app asking again for ordinary terminal commands on Scanner01 for
+ * the rest of that session. It never covers `sudo` or anything the command
+ * classifier grades above ordinary: execute_command audits sudo as its own
+ * capability and makes every non-ordinary command per-call, so none of them
+ * reads this set. "Approve once" writes nothing here.
  *
  * Why per server rather than session-wide: a person approving an action is
  * looking at a server name while they do it, and carrying that consent to a
@@ -880,9 +882,19 @@ async function gate(
     // dead code on exactly the configuration it was written for.
     const perCall = ctx.capability === 'ciTrigger' || subject.perCall === true
     // Defaults to the capability, so every caller that names no scope keeps the
-    // grain it has always had -- approving one `execute_command` on a host
-    // still covers `terminal` on that host and still asks afresh for `sudo`.
-    const key = elevationKey(ctx.session.id, ctx.serverId, subject.elevationScope ?? ctx.capability)
+    // grain it has always had.
+    //
+    // AND THE RULE THAT ASKED. A capability is too coarse on its own: a path
+    // rule on /etc/** and the blanket "Read files: ask" are both `readFiles`,
+    // and a grant given under the looser rule must not answer the stricter
+    // one. check.reason is the policy engine's own sentence for the rule that
+    // produced this `ask`, so a different rule is a different key -- a grant
+    // can only ever be spent on the question it was given in answer to.
+    const key = elevationKey(
+      ctx.session.id,
+      ctx.serverId,
+      `${subject.elevationScope ?? ctx.capability}\u0000${check.reason}`
+    )
     if (!perCall && sessionElevations.has(key)) {
       // Reported as what it is -- allowed on the strength of an approval given
       // earlier in this session, not an action nobody approved. The audit log
@@ -1974,7 +1986,14 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         serverId: s.id,
         serverName: s.name,
         action: command,
-        capability: 'terminal'
+        // Named for what the command actually does. A `sudo` command was
+        // audited, prompted and REMEMBERED as `terminal`, so "allow terminal
+        // commands on this host for the session", given about `df`, silently
+        // covered `sudo rm -rf /var/lib` -- the policy asks for sudo separately
+        // and the gate's memory then paid that question out of the terminal
+        // answer. The policy decision itself is unchanged: effectiveCommand
+        // above still decides, from the command, exactly as it did.
+        capability: /sudo\b/.test(command) ? 'sudo' : 'terminal'
       }
       // ONE CLASSIFIER, NOT TWO. This path graded `high` on the word `sudo`
       // and on nothing else, so `docker volume rm` -- which the operator's own
@@ -2002,7 +2021,25 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const gated = await gate(
         ctx,
         check,
-        { toolName: 'execute_command', level: elevated ? 'high' : 'medium', because, intent },
+        {
+          toolName: 'execute_command',
+          level: elevated ? 'high' : 'medium',
+          because,
+          intent,
+          // Anything graded above ordinary -- sudo, an elevated or destructive
+          // finding, a path rule's refusal -- is answered one command at a
+          // time, and never reads or writes a session grant. Two reasons, and
+          // the second is why this is the whole tier and not only
+          // `destructive`. The first: these are the commands the policy says
+          // are never granted silently. The second: under a group with sudo at
+          // ask, `sudo systemctl status` and `sudo rm -rf /var/lib` reach
+          // gate() under the SAME rule ("Sudo commands require approval"),
+          // because the destructive upgrade only lifts an `allow`, so no key
+          // built from the capability and the rule can tell them apart. What
+          // the classifier can tell apart is whether the command is ordinary,
+          // and only an ordinary command is grantable for the session.
+          perCall: elevated
+        },
         extra
       )
       if (!gated.ok) return gated.result
@@ -2019,7 +2056,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           serverId: s.id,
           serverName: s.name,
           action: command,
-          capability: 'terminal',
+          capability: ctx.capability,
           approval: gated.approval,
           result: 'error',
           error: result.error
@@ -2637,7 +2674,13 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           because: reads
             ? 'OpsMaxx classified this statement as a read'
             : 'OpsMaxx could not classify this statement as a read, so it is treated as one that changes data',
-          intent
+          intent,
+          // A write "always requires approval" (evaluateDatabaseStatement), and
+          // that sentence was false the moment anything was remembered: a
+          // session grant given on a SELECT covered the DROP TABLE after it,
+          // because both are `databaseAccess` on the same database. Reads may
+          // be granted for the session; anything else asks every time.
+          perCall: !reads
         },
         extra
       )
@@ -2770,7 +2813,11 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           because: running
             ? 'it opens a network path between this machine and a port on the server'
             : 'it closes a tunnel that other things may still be using',
-          intent
+          intent,
+          // Opening one "always requires approval" (evaluateTunnelOpen) -- each
+          // time, which a session grant from an earlier start or stop would
+          // otherwise quietly stop being.
+          perCall: running
         },
         extra
       )
@@ -2935,7 +2982,11 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
             : liveDependents > 0
               ? `it stops a VPN that ${liveDependents} live session(s) reach their host through`
               : 'it stops a VPN that other sessions may depend on',
-          intent
+          intent,
+          // docs/AI-SECURITY.md: there is no configuration in which a VPN comes
+          // up silently. A start remembered from an earlier start, or from a
+          // stop, would be one. Starts ask every time.
+          perCall: running
         },
         extra
       )

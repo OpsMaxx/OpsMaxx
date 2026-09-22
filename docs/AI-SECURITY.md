@@ -242,7 +242,8 @@ them is a preference:
 
 - **Starting a VPN is always ASK**, on every group, including one a user has explicitly raised to
   ALLOW (`evaluateVpnControl`, `policyEngine.ts`). There is no configuration in which a VPN comes
-  up silently at an agent's request.
+  up silently at an agent's request. That includes a remembered approval: a start is per-call in `gate()`, so
+  answering one start "for this session" does not cover the next.
 - **Reverse proxies (frp) are refused outright**, in both directions, before the access group is
   read (`isVpnKindRefusedForAi`). An frp proxy makes a port on the user's own machine reachable
   from the frp server — from the internet — and an approval dialog is not a meaningful control
