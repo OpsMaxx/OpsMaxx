@@ -2627,7 +2627,30 @@ export const useApp = create<AppState>((set, get) => ({
         status: 'inactive' as const,
         serverId: t.serverId ?? null
       })),
-      settings: { ...DEFAULT_SETTINGS, ...(data.settings ?? {}) }
+      /**
+       * Replaced only when the caller actually brought some.
+       *
+       * This is a `Partial`, and two callers use it as one: the tunnel
+       * manager saves an edit as `replaceAll({ tunnels })` and the database
+       * editor as `replaceAll({ databases })`, each naming the single
+       * collection it changed. Every other key above falls back to live state
+       * for exactly that reason -- `data.servers ?? s.servers`, and so on.
+       *
+       * This one did not. It was `{ ...DEFAULT_SETTINGS, ...(data.settings ??
+       * {}) }`, which for a partial call collapses to DEFAULT_SETTINGS and
+       * resets the lot: terminal scheme and font size, compact density, vault
+       * auto-lock, shell integration, which modules are on, every shortcut.
+       * So editing a database connection silently reverted every preference
+       * in the app, which is the half of issue #35 that reading the settings
+       * pane could never explain -- the pane was wired correctly and the key
+       * really was persisted; the wipe happened somewhere else entirely.
+       *
+       * A branch rather than `...s.settings` in the middle, because the two
+       * cases genuinely differ: a load or a backup restore DOES carry a whole
+       * settings object, and there the absent keys should come from the
+       * defaults, not from whatever this session happens to be holding.
+       */
+      settings: data.settings ? { ...DEFAULT_SETTINGS, ...data.settings } : s.settings
       }
     })
   },
