@@ -132,11 +132,25 @@ export interface SftpProgress {
   // 1-based position in the current batch.
   index: number
   count: number
+  // Absent means an upload, which is all this event carried before downloads.
+  direction?: 'up' | 'down'
 }
 
 export interface SftpUploadSummary {
   uploaded: string[]
   failed: { name: string; error: string }[]
+  // Stopped by the user. The file that was in flight is in neither list.
+  cancelled?: boolean
+  // A partial file a cancel could not safely remove, so the user is told where.
+  leftover?: string
+}
+
+export interface SftpDownloadSummary {
+  // The local names files were saved under, which differ from the remote ones
+  // when a name had to be cleaned or a file of that name was already there.
+  saved: string[]
+  failed: { name: string; error: string }[]
+  cancelled?: boolean
 }
 
 export interface HostMetrics {

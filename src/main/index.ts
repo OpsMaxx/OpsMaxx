@@ -51,6 +51,8 @@ import {
   sftpRename,
   sftpDelete,
   sftpUpload,
+  sftpDownload,
+  sftpCancel,
   sftpDisconnect,
   sftpDisposeAll
 } from './services/sftp'
@@ -295,6 +297,9 @@ import {
   localFilesRead,
   localFilesRename,
   localFilesUpload,
+  localFilesDownload,
+  localFilesCancel,
+  refuse as refuseProtectedPath,
   setLocalFilesProtectedRoot,
   localFilesWrite
 } from './services/localFiles'
@@ -1018,6 +1023,31 @@ ipcMain.handle('dialog:openUpload', async () => {
   return result.canceled ? null : result.filePaths
 })
 
+/**
+ * Folders the user chose in the native picker this run, and the only places
+ * `sftp:download` will write.
+ *
+ * The renderer names the destination on every download call, so without this
+ * it could name any directory on the disk. Recording what the picker returned
+ * here, in main, means the path a download lands in is one a person chose in
+ * an OS dialog — never one the renderer, or the server whose file names it is
+ * displaying, made up.
+ */
+const downloadDirs = new Set<string>()
+
+ipcMain.handle('dialog:pickDownloadFolder', async () => {
+  if (!mainWindow) return null
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose a folder to save into',
+    buttonLabel: 'Save here',
+    properties: ['openDirectory', 'createDirectory']
+  })
+  const dir = result.canceled ? undefined : result.filePaths[0]
+  if (!dir) return null
+  downloadDirs.add(dir)
+  return dir
+})
+
 // ---- SSH ----
 
 // Multi-factor challenges are answered by the user, so the request is relayed
@@ -1523,6 +1553,18 @@ ipcMain.handle('sftp:upload', (e, key: string, localPaths: string[], remoteDir: 
     ? localFilesUpload(e.sender, key, localPaths, remoteDir)
     : sftpUpload(e.sender, key, localPaths, remoteDir)
 )
+ipcMain.handle('sftp:download', (e, key: string, remotePaths: string[], localDir: string) => {
+  if (!downloadDirs.has(localDir)) return { ok: false, error: 'Choose a folder to save into first.' }
+  if (isLocalFileSession(key)) return localFilesDownload(e.sender, key, remotePaths, localDir)
+  // A server's file names are its own choice, and a folder picked by mistake
+  // could be the app's own data directory — where a new file with the right
+  // name is read as configuration. The local half checks this itself.
+  return refuseProtectedPath(localDir) ?? sftpDownload(e.sender, key, remotePaths, localDir)
+})
+ipcMain.handle('sftp:cancel', (_e, key: string) => {
+  localFilesCancel(key)
+  sftpCancel(key)
+})
 ipcMain.handle('sftp:disconnect', (_e, key: string) => {
   localFilesDisconnect(key)
   sftpDisconnect(key)

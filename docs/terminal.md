@@ -25,6 +25,25 @@ and choose **Open in code** to edit it in VS Code (or whatever you configure in
 Settings → Editor). Saving uploads it back to the server automatically — no
 download/re-upload dance. The inline editor is still there for quick edits.
 
+**Transfers in the Files view.** Drag files onto the list, or use **Upload**, to
+send them to the directory you are looking at. Right-click a file and choose
+**Download…** to save it into a folder you pick. Only files can be downloaded so
+far; a folder has to be opened and its files downloaded one by one. One transfer
+runs at a time. Anything you start meanwhile waits in a queue shown under the
+progress bar, and **Clear queue** drops it. **Cancel** stops the running transfer:
+
+- A cancelled **download** removes the partial file it was writing.
+- A cancelled **upload** removes the partial file it was writing, unless a file
+  with that name was already on the server. That one has been partly replaced,
+  so it is left in place and OpsMaxx tells you which file it is.
+
+A download never overwrites anything on this machine. If the folder already has
+a file with that name, the new one is saved as `name (1).ext`. The server picks
+the file names, so separators, `..` and control characters are removed from
+them before anything is written. An upload that would replace files on the
+server asks first, with **Overwrite**, **Skip** (upload only the others) or
+**Cancel all**.
+
 **Multi-line pastes ask first.** Pasting more than one line into a remote shell
 shows a preview and a confirmation, because every line runs the moment it
 lands. Single-line pastes go straight through.

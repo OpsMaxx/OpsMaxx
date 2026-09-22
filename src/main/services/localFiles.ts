@@ -14,7 +14,8 @@ import {
   writeFile
 } from 'node:fs/promises'
 import type { WebContents } from 'electron'
-import type { SftpEntry, SftpResult, SftpUploadSummary } from '../../shared/ssh'
+import type { SftpDownloadSummary, SftpEntry, SftpResult, SftpUploadSummary } from '../../shared/ssh'
+import { reserveLocalFile, safeLocalName } from './transferName'
 
 /**
  * The Files view, backed by this machine's own filesystem.
@@ -127,8 +128,15 @@ function isProtected(path: string): boolean {
 const PROTECTED_MESSAGE =
   "This is OpsMaxx's own data directory. It holds the vault, the access policy and the audit log, and is not editable from the Files view."
 
-/** Guard for every path this module takes. Returns a failed result, or null. */
-function refuse(...paths: string[]): SftpResult<never> | null {
+/**
+ * Guard for every path this module takes. Returns a failed result, or null.
+ *
+ * Exported for the one caller outside this module that writes to this
+ * machine: a download from a server into a picked folder, which must not be
+ * able to plant a file in the app's own data directory any more than a copy
+ * here can.
+ */
+export function refuse(...paths: string[]): SftpResult<never> | null {
   return paths.some(isProtected) ? { ok: false, error: PROTECTED_MESSAGE } : null
 }
 
@@ -288,8 +296,9 @@ export async function localFilesUpload(
   if (refused) return refused
   const uploaded: string[] = []
   const failed: { name: string; error: string }[] = []
+  const signal = startCopy(key)
 
-  for (let i = 0; i < localPaths.length; i++) {
+  for (let i = 0; i < localPaths.length && !signal.aborted; i++) {
     const from = localPaths[i]
     const name = basename(from)
     const to = join(destDir, name)
@@ -309,30 +318,100 @@ export async function localFilesUpload(
         throw new Error('that file is already in this folder')
       }
       send(0, st.size)
-      await copyWithProgress(from, to, st.size, send)
+      await copyWithProgress(from, to, st.size, send, signal)
       uploaded.push(name)
     } catch (err) {
-      failed.push({ name, error: msg(err) })
+      if (!signal.aborted) failed.push({ name, error: msg(err) })
     }
   }
+  copying.delete(key)
 
   return {
-    ok: failed.length === 0,
+    ok: failed.length === 0 && !signal.aborted,
     error: failed.length ? `${failed[0].name}: ${failed[0].error}` : undefined,
-    data: { uploaded, failed }
+    data: { uploaded, failed, cancelled: signal.aborted || undefined }
   }
+}
+
+/**
+ * "Download" from this machine: a copy into a folder the user picked.
+ *
+ * The same rules as the SSH path apply, because the view is one component and
+ * the user should not have to know which half answered: names are cleaned, and
+ * a file already in the folder is never replaced (transferName.ts).
+ */
+export async function localFilesDownload(
+  wc: WebContents,
+  key: string,
+  sources: string[],
+  destDir: string
+): Promise<SftpResult<SftpDownloadSummary>> {
+  const refused = refuse(destDir, ...sources)
+  if (refused) return refused
+  const saved: string[] = []
+  const failed: { name: string; error: string }[] = []
+  const signal = startCopy(key)
+
+  for (let i = 0; i < sources.length && !signal.aborted; i++) {
+    const from = sources[i]
+    const shown = basename(from)
+    const name = safeLocalName(shown)
+    if (!name) {
+      failed.push({ name: shown, error: 'that name cannot be saved here' })
+      continue
+    }
+    const send = (transferred: number, total: number): void => {
+      if (!wc.isDestroyed()) {
+        const index = i + 1
+        wc.send('sftp:progress', { key, name: shown, transferred, total, index, count: sources.length, direction: 'down' })
+      }
+    }
+    try {
+      const st = await stat(from)
+      if (st.isDirectory()) throw new Error('folders cannot be downloaded yet')
+      const to = await reserveLocalFile(destDir, name)
+      send(0, st.size)
+      await copyWithProgress(from, to, st.size, send, signal)
+      saved.push(basename(to))
+    } catch (err) {
+      if (!signal.aborted) failed.push({ name: shown, error: msg(err) })
+    }
+  }
+  copying.delete(key)
+
+  return {
+    ok: failed.length === 0 && !signal.aborted,
+    error: failed.length ? `${failed[0].name}: ${failed[0].error}` : undefined,
+    data: { saved, failed, cancelled: signal.aborted || undefined }
+  }
+}
+
+// The copy running on each key, so the Files view's Cancel can stop it.
+const copying = new Map<string, AbortController>()
+
+function startCopy(key: string): AbortSignal {
+  const c = new AbortController()
+  copying.set(key, c)
+  return c.signal
+}
+
+export function localFilesCancel(key: string): void {
+  copying.get(key)?.abort()
 }
 
 function copyWithProgress(
   from: string,
   to: string,
   total: number,
-  onStep: (transferred: number, total: number) => void
+  onStep: (transferred: number, total: number) => void,
+  signal: AbortSignal
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let transferred = 0
     let reported = 0
-    const read = createReadStream(from)
+    // An abort destroys the read side with an AbortError, which lands in
+    // `fail` below and removes the partial destination like any other failure.
+    const read = createReadStream(from, { signal })
     const write = createWriteStream(to)
     const fail = (err: Error): void => {
       read.destroy()

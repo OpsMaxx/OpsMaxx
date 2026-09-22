@@ -1,9 +1,12 @@
 import type { WebContents } from 'electron'
-import { basename } from 'node:path'
+import { basename, posix } from 'node:path'
 import { statSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import type { Client, SFTPWrapper, FileEntry } from 'ssh2'
 import { acquire, release, type PooledConnection } from './ssh'
+import { reserveLocalFile, safeLocalName } from './transferName'
 import type {
+  SftpDownloadSummary,
   SftpEntry,
   SftpResult,
   SftpUploadSummary,
@@ -120,32 +123,95 @@ function remoteJoin(dir: string, name: string): string {
   return dir.endsWith('/') ? `${dir}${name}` : `${dir}/${name}`
 }
 
-// fastPut streams the file in parallel chunks rather than buffering it in
-// memory, so uploading a multi-GB archive is fine.
-function putFile(
+// fastPut and fastGet stream the file in parallel chunks rather than buffering
+// it in memory, so moving a multi-GB archive either way is fine.
+function xfer(
   sftp: SFTPWrapper,
-  local: string,
-  remote: string,
+  way: 'put' | 'get',
+  from: string,
+  to: string,
   onStep: (transferred: number, total: number) => void
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let reported = 0
-    sftp.fastPut(
-      local,
-      remote,
-      {
-        // step fires per chunk; throttled to 512 KiB so a large file does not
-        // flood the renderer with IPC messages.
-        step: (transferred: number, _chunk: number, total: number) => {
-          if (transferred === total || transferred - reported >= 512 * 1024) {
-            reported = transferred
-            onStep(transferred, total)
-          }
+    const opts = {
+      // step fires per chunk; throttled to 512 KiB so a large file does not
+      // flood the renderer with IPC messages.
+      step: (transferred: number, _chunk: number, total: number) => {
+        if (transferred === total || transferred - reported >= 512 * 1024) {
+          reported = transferred
+          onStep(transferred, total)
         }
-      },
-      (err) => (err ? reject(err) : resolve())
-    )
+      }
+    }
+    const done = (err?: Error | null): void => (err ? reject(err) : resolve())
+    if (way === 'put') sftp.fastPut(from, to, opts, done)
+    else sftp.fastGet(from, to, opts, done)
   })
+}
+
+function progressSender(
+  wc: WebContents,
+  key: string,
+  name: string,
+  index: number,
+  count: number,
+  direction: 'up' | 'down'
+): (transferred: number, total: number) => void {
+  return (transferred, total) => {
+    if (!wc.isDestroyed()) wc.send('sftp:progress', { key, name, transferred, total, index, count, direction })
+  }
+}
+
+interface Transfer {
+  cancelled: boolean
+}
+
+// The transfer running on each key. One at a time: they share the channel, and
+// the Files view queues the rest.
+const running = new Map<string, Transfer>()
+
+/**
+ * Stop whatever is transferring on this key.
+ *
+ * ssh2's fastPut and fastGet take no abort signal, so the channel under them is
+ * closed instead: every request in flight fails at once, the transfer's own
+ * error path closes its handles, and the remote side stops reading or writing.
+ * `cancellable` opens a fresh channel on the same SSH connection before the
+ * transfer returns, so the next listing does not find a dead one.
+ */
+export function sftpCancel(key: string): void {
+  const t = running.get(key)
+  const conn = conns.get(key)
+  if (!t || !conn) return
+  t.cancelled = true
+  conn.sftp.end()
+}
+
+async function cancellable<T>(key: string, conn: Conn, run: (t: Transfer) => Promise<T>): Promise<T> {
+  const t: Transfer = { cancelled: false }
+  running.set(key, t)
+  try {
+    return await run(t)
+  } finally {
+    running.delete(key)
+    if (t.cancelled) {
+      try {
+        conn.sftp = await openSftp(conn.conn.client)
+      } catch {
+        // The connection went with the channel. Dropping the entry makes the
+        // next call say "not connected", which the view's retry redials.
+        sftpDisconnect(key)
+      }
+    }
+  }
+}
+
+// Whether a remote path exists. Only "no such file" (SFTP status 2) counts as
+// absent: any other failure is treated as present, because the answer decides
+// whether a cancelled upload may delete the path.
+function remoteExists(sftp: SFTPWrapper, path: string): Promise<boolean> {
+  return new Promise((resolve) => sftp.stat(path, (err) => resolve(!err || (err as { code?: number }).code !== 2)))
 }
 
 // Uploads local files into a remote directory, one at a time so progress is
@@ -162,37 +228,100 @@ export async function sftpUpload(
   const uploaded: string[] = []
   const failed: { name: string; error: string }[] = []
 
-  for (let i = 0; i < localPaths.length; i++) {
-    const local = localPaths[i]
-    const name = basename(local)
-    const send = (transferred: number, total: number): void => {
-      if (!wc.isDestroyed()) {
-        wc.send('sftp:progress', {
-          key,
-          name,
-          transferred,
-          total,
-          index: i + 1,
-          count: localPaths.length
-        })
+  // `partial` is the file a cancel interrupted, and whether it was there
+  // before this upload.
+  const { cancelled, partial } = await cancellable(key, conn, async (t) => {
+    for (let i = 0; i < localPaths.length && !t.cancelled; i++) {
+      const local = localPaths[i]
+      const name = basename(local)
+      const remote = remoteJoin(remoteDir, name)
+      const send = progressSender(wc, key, name, i + 1, localPaths.length, 'up')
+      let existed = true
+      try {
+        // Directories would need a recursive walk; refuse them explicitly rather
+        // than failing later with an opaque EISDIR.
+        if (statSync(local).isDirectory()) throw new Error('folders cannot be uploaded yet')
+        existed = await remoteExists(conn.sftp, remote)
+        send(0, statSync(local).size)
+        await xfer(conn.sftp, 'put', local, remote, send)
+        uploaded.push(name)
+      } catch (err) {
+        if (t.cancelled) return { cancelled: true, partial: { remote, existed } }
+        failed.push({ name, error: msg(err) })
       }
     }
-    try {
-      // Directories would need a recursive walk; refuse them explicitly rather
-      // than failing later with an opaque EISDIR.
-      if (statSync(local).isDirectory()) throw new Error('folders cannot be uploaded yet')
-      send(0, statSync(local).size)
-      await putFile(conn.sftp, local, remoteJoin(remoteDir, name), send)
-      uploaded.push(name)
-    } catch (err) {
-      failed.push({ name, error: msg(err) })
-    }
+    return { cancelled: t.cancelled, partial: undefined }
+  })
+
+  let leftover: string | undefined
+  if (partial) {
+    // A half-written file looks like an uploaded one. It is removed only when
+    // this upload created it: one that was already there held the user's data
+    // until the overwrite they approved, and deleting it is not ours to do.
+    const sftp = conns.get(key)?.sftp
+    const removed =
+      !partial.existed &&
+      !!sftp &&
+      (await new Promise<boolean>((resolve) => sftp.unlink(partial.remote, (err) => resolve(!err))))
+    if (!removed) leftover = partial.remote
   }
 
   return {
-    ok: failed.length === 0,
+    ok: failed.length === 0 && !cancelled,
     error: failed.length ? `${failed[0].name}: ${failed[0].error}` : undefined,
-    data: { uploaded, failed }
+    data: { uploaded, failed, cancelled: cancelled || undefined, leftover }
+  }
+}
+
+/**
+ * Downloads remote files into a local folder the user picked.
+ *
+ * The folder is checked by the IPC handler against the ones the native picker
+ * returned; this only ever creates files directly inside it. The names are the
+ * server's, so each is cleaned by safeLocalName and reserved without replacing
+ * anything already there (transferName.ts).
+ */
+export async function sftpDownload(
+  wc: WebContents,
+  key: string,
+  remotePaths: string[],
+  localDir: string
+): Promise<SftpResult<SftpDownloadSummary>> {
+  const conn = conns.get(key)
+  if (!conn) return { ok: false, error: 'not connected' }
+
+  const saved: string[] = []
+  const failed: { name: string; error: string }[] = []
+
+  const cancelled = await cancellable(key, conn, async (t) => {
+    for (let i = 0; i < remotePaths.length && !t.cancelled; i++) {
+      const remoteName = posix.basename(remotePaths[i])
+      const name = safeLocalName(remoteName)
+      if (!name) {
+        failed.push({ name: remoteName, error: 'that name cannot be saved on this machine' })
+        continue
+      }
+      let target: string | undefined
+      try {
+        target = await reserveLocalFile(localDir, name)
+        const send = progressSender(wc, key, remoteName, i + 1, remotePaths.length, 'down')
+        await xfer(conn.sftp, 'get', remotePaths[i], target, send)
+        saved.push(basename(target))
+      } catch (err) {
+        // A partial local file looks like a finished download, and this one
+        // is ours: reserveLocalFile created it moments ago.
+        if (target) await rm(target, { force: true })
+        if (t.cancelled) return true
+        failed.push({ name: remoteName, error: msg(err) })
+      }
+    }
+    return t.cancelled
+  })
+
+  return {
+    ok: failed.length === 0 && !cancelled,
+    error: failed.length ? `${failed[0].name}: ${failed[0].error}` : undefined,
+    data: { saved, failed, cancelled: cancelled || undefined }
   }
 }
 

@@ -111,6 +111,18 @@ function connectFailure(
   }
 }
 
+/** An upload or download waiting for the channel, or on it. */
+type Transfer = { kind: 'upload'; paths: string[]; dir: string } | { kind: 'download'; remotes: string[]; dir: string }
+
+type OverwriteAnswer = 'overwrite' | 'skip' | 'cancel'
+
+// The next few names in the queue, which is what tells the user their drop
+// was kept.
+function queueNames(queue: Transfer[]): string {
+  const names = queue.flatMap((t) => (t.kind === 'upload' ? t.paths.map(baseName) : t.remotes.map(baseName)))
+  return names.length > 3 ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more` : names.join(', ')
+}
+
 // ---- Real SFTP -------------------------------------------------------------
 function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React.JSX.Element {
   // Absent server means this machine.
@@ -129,6 +141,13 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   const [renaming, setRenaming] = useState<string | null>(null)
   const [editor, setEditor] = useState<{ path: string; content: string } | null>(null)
   const [progress, setProgress] = useState<SftpProgress | null>(null)
+  const [queue, setQueue] = useState<Transfer[]>([])
+  const [running, setRunning] = useState<Transfer | null>(null)
+  const [overwrite, setOverwrite] = useState<{
+    names: string[]
+    dir: string
+    answer: (a: OverwriteAnswer) => void
+  } | null>(null)
   const [dropping, setDropping] = useState(false)
   // Non-null while the breadcrumb is being typed into.
   const [editingPath, setEditingPath] = useState<string | null>(null)
@@ -492,48 +511,155 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
     } else toast(fileFailure('delete', e.name, path, res?.error), 'error')
   }
 
-  // Transfer progress is reported from the main process while an upload runs.
+  // Transfer progress is reported from the main process while a transfer runs.
   useEffect(() => {
     return bridgeOn('sftp.onProgress', window.opsmaxx?.sftp?.onProgress, (p) => {
       if (p.key === key) setProgress(p)
     })
   }, [key])
 
-  const upload = async (locals: string[]): Promise<void> => {
+  // The listing on screen when a transfer ends, which is not necessarily the
+  // one that was on screen when it was queued.
+  const refresh = useRef<() => void>(() => {})
+  refresh.current = () => void list(path)
+
+  const askOverwrite = (names: string[], dir: string): Promise<OverwriteAnswer> =>
+    new Promise((resolve) =>
+      setOverwrite({
+        names,
+        dir,
+        answer: (a) => {
+          setOverwrite(null)
+          resolve(a)
+        }
+      })
+    )
+
+  const upload = (locals: string[]): void => {
     const paths = locals.filter(Boolean)
-    // One transfer at a time: they share the single cached SFTP channel.
-    if (!paths.length || progress) return
-    const clashes = paths.map(baseName).filter((n) => entries.some((x) => x.name === n))
-    if (clashes.length && !window.confirm(`Overwrite on the server?\n\n${clashes.join('\n')}`)) return
+    if (paths.length) setQueue((q) => [...q, { kind: 'upload', paths, dir: path }])
+  }
+
+  const runUpload = async ({ paths, dir }: { paths: string[]; dir: string }): Promise<void> => {
+    // Checked when the upload starts rather than when it was queued: the
+    // transfer ahead of it may have just put a file of the same name there.
+    const listing = await window.opsmaxx?.sftp.list(key, dir)
+    const there = new Set((listing?.data ?? (dir === path ? entries : [])).map((x) => x.name))
+    let chosen = paths
+    const clashes = paths.map(baseName).filter((n) => there.has(n))
+    if (clashes.length) {
+      const answer = await askOverwrite(clashes, dir)
+      if (answer === 'cancel') return
+      if (answer === 'skip') chosen = paths.filter((p) => !there.has(baseName(p)))
+      if (!chosen.length) return
+    }
     // Shown immediately: the first step event only arrives once bytes move.
-    setProgress({ key, name: baseName(paths[0]), transferred: 0, total: 0, index: 1, count: paths.length })
-    const res = await window.opsmaxx?.sftp.upload(key, paths, path)
-    setProgress(null)
+    setProgress({ key, name: baseName(chosen[0]), transferred: 0, total: 0, index: 1, count: chosen.length })
+    const res = await window.opsmaxx?.sftp.upload(key, chosen, dir)
     const done = res?.data?.uploaded.length ?? 0
     const failed = res?.data?.failed ?? []
-    if (done) toast(`Uploaded ${done} file${done > 1 ? 's' : ''} to ${path}`, 'ok')
+    if (done) toast(`Uploaded ${done} file${done > 1 ? 's' : ''} to ${dir}`, 'ok')
     for (const f of failed) {
       // The summary reports basenames; the local file that produced one is
-      // still in `paths`, which is what makes a per-file retry possible.
-      const local = paths.find((x) => baseName(x) === f.name)
+      // still in `chosen`, which is what makes a per-file retry possible.
+      const local = chosen.find((x) => baseName(x) === f.name)
       toast(
-        fileFailure('upload', f.name, path, f.error),
+        fileFailure('upload', f.name, dir, f.error),
         'error',
-        local ? { label: 'Try again', run: () => void upload([local]) } : undefined
+        local
+          ? { label: 'Try again', run: () => setQueue((q) => [...q, { kind: 'upload', paths: [local], dir }]) }
+          : undefined
       )
     }
+    if (res?.data?.cancelled) {
+      // Only a file this upload created is removed (see sftpUpload). One
+      // that was already there was replaced part-way and is left, so the user
+      // has to be told which.
+      toast(
+        res.data.leftover
+          ? `Upload cancelled. ${res.data.leftover} on the server is incomplete and was left in place.`
+          : 'Upload cancelled.',
+        res.data.leftover ? 'error' : 'info'
+      )
+      return
+    }
     if (!done && !failed.length)
-      toast(res?.error ? `Nothing was uploaded to ${path} — ${res.error}` : `Nothing was uploaded to ${path}.`, 'error', {
+      toast(res?.error ? `Nothing was uploaded to ${dir} — ${res.error}` : `Nothing was uploaded to ${dir}.`, 'error', {
         label: 'Choose files',
         run: () => void pickAndUpload()
       })
-    void list(path)
   }
 
   const pickAndUpload = async (): Promise<void> => {
     const picked = await window.opsmaxx?.dialog.openUpload()
-    if (picked?.length) await upload(picked)
+    if (picked?.length) upload(picked)
   }
+
+  /**
+   * Save a file into a folder the user picks.
+   *
+   * The folder comes from the OS picker in main, and main refuses a download
+   * into any folder that did not. Files only: nothing here lists a directory
+   * recursively, and a folder "downloaded" as nothing would be worse than
+   * saying so.
+   */
+  const download = async (e: SftpEntry): Promise<void> => {
+    if (e.dir) {
+      toast(
+        `${e.name} is a folder. Only files can be downloaded so far — open it and download what is inside.`,
+        'info',
+        { label: `Open ${e.name}`, run: () => void navigate(join(path, e.name)) }
+      )
+      return
+    }
+    const remote = join(path, e.name)
+    const dir = await window.opsmaxx?.dialog.pickDownloadFolder()
+    if (dir) setQueue((q) => [...q, { kind: 'download', remotes: [remote], dir }])
+  }
+
+  const runDownload = async ({ remotes, dir }: { remotes: string[]; dir: string }): Promise<void> => {
+    const name = (r: string): string => r.split('/').pop() ?? r
+    const first = name(remotes[0])
+    setProgress({ key, name: first, transferred: 0, total: 0, index: 1, count: remotes.length, direction: 'down' })
+    const res = await window.opsmaxx?.sftp.download(key, remotes, dir)
+    const saved = res?.data?.saved ?? []
+    const failed = res?.data?.failed ?? []
+    if (saved.length)
+      toast(saved.length === 1 ? `Saved ${saved[0]} to ${dir}` : `Saved ${saved.length} files to ${dir}`, 'ok')
+    for (const f of failed) {
+      const remote = remotes.find((r) => name(r) === f.name)
+      toast(
+        fileFailure('download', f.name, remote ? remote.slice(0, -f.name.length - 1) || '/' : path, f.error),
+        'error',
+        remote
+          ? { label: 'Try again', run: () => setQueue((q) => [...q, { kind: 'download', remotes: [remote], dir }]) }
+          : undefined
+      )
+    }
+    if (res?.data?.cancelled) toast('Download cancelled. The partial file was removed.', 'info')
+    else if (!saved.length && !failed.length)
+      toast(res?.error ? `Nothing was downloaded — ${res.error}` : 'Nothing was downloaded.', 'error')
+  }
+
+  const cancelTransfer = (): void => void window.opsmaxx?.sftp.cancel(key)
+
+  // One transfer at a time: they share the single cached SFTP channel. What
+  // arrives meanwhile — a second drop, the Upload button, a Download — waits
+  // here in order. It used to be dropped on the floor, with nothing said.
+  useEffect(() => {
+    if (running || !queue.length) return
+    const [next, ...rest] = queue
+    setQueue(rest)
+    setRunning(next)
+    void (next.kind === 'upload' ? runUpload(next) : runDownload(next)).finally(() => {
+      setProgress(null)
+      setRunning(null)
+      refresh.current()
+    })
+    // runUpload and runDownload are rebuilt every render; the queue is what
+    // decides when the next one starts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue, running])
 
   const onDrop = (ev: React.DragEvent): void => {
     ev.preventDefault()
@@ -541,7 +667,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
     const paths = Array.from(ev.dataTransfer.files)
       .map((f) => window.opsmaxx?.sftp.pathFor(f))
       .filter((p): p is string => !!p)
-    if (paths.length) void upload(paths)
+    if (paths.length) upload(paths)
   }
 
   const menu = (e: SftpEntry): MenuEntry[] => [
@@ -557,16 +683,9 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       : []),
     { label: 'Rename', icon: <Edit3 size={14} />, onClick: () => setRenaming(e.name) },
     {
-      label: 'Download',
+      label: e.dir ? 'Download (files only)' : 'Download…',
       icon: <Download size={14} />,
-      // Saving to a chosen folder is not built yet. Opening the file in an
-      // editor does fetch a local copy, which is what most people want when
-      // they reach for Download — so that is offered rather than a dead end.
-      onClick: () =>
-        toast('Saving to a folder is not built yet.', 'info', {
-          label: editorCommand ? `Open in ${editorCommand}` : 'Open in your editor',
-          run: () => void openExternally(e)
-        })
+      onClick: () => void download(e)
     },
     { separator: true, label: '' },
     { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onClick: () => void remove(e) }
@@ -714,7 +833,6 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
         </button>
         <button
           className="btn sm"
-          disabled={!!progress}
           title="Upload files — you can also drag them onto this list"
           onClick={() => void pickAndUpload()}
         >
@@ -734,8 +852,12 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       </div>
 
       {progress && (
-        <div className="row" style={{ marginBottom: 12, gap: 10 }}>
-          <Upload size={14} className="faint" />
+        <div className="row" style={{ marginBottom: queue.length ? 4 : 12, gap: 10 }}>
+          {progress.direction === 'down' ? (
+            <Download size={14} className="faint" aria-label="Downloading" />
+          ) : (
+            <Upload size={14} className="faint" aria-label="Uploading" />
+          )}
           <span className="faint" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
             {progress.name}
             {progress.count > 1 ? ` · ${progress.index}/${progress.count}` : ''}
@@ -748,6 +870,20 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
               }}
             />
           </div>
+          <button className="btn ghost sm" onClick={cancelTransfer}>
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {queue.length > 0 && (
+        <div className="row faint" style={{ marginBottom: 12, gap: 10, fontSize: 12 }} data-testid="transfer-queue">
+          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {queue.length} queued: {queueNames(queue)}
+          </span>
+          <button className="btn ghost sm" onClick={() => setQueue([])}>
+            Clear queue
+          </button>
         </div>
       )}
 
@@ -901,6 +1037,32 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       )}
 
       {ctx && <ContextMenu x={ctx.x} y={ctx.y} entries={menu(ctx.entry)} onClose={() => setCtx(null)} />}
+
+      {overwrite && (
+        <Modal
+          title="Replace files on the server?"
+          subtitle={overwrite.dir}
+          onClose={() => overwrite.answer('cancel')}
+          cancelLabel="Cancel all"
+          footer={
+            <button className="btn secondary size-28" onClick={() => overwrite.answer('skip')}>
+              Skip
+            </button>
+          }
+          confirm={{ label: 'Overwrite', destructive: true, onClick: () => overwrite.answer('overwrite') }}
+        >
+          <p style={{ marginTop: 0 }}>
+            {overwrite.names.length === 1 ? 'A file with this name is' : 'Files with these names are'} already in{' '}
+            {overwrite.dir}. Overwriting replaces {overwrite.names.length === 1 ? 'it' : 'them'}; Skip uploads
+            only the rest.
+          </p>
+          <ul className="mono" style={{ fontSize: 12, maxHeight: 180, overflow: 'auto' }}>
+            {overwrite.names.map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
+        </Modal>
+      )}
 
       {editor && (
         <FileEditor

@@ -8,6 +8,7 @@ import {
   localFilesConnect,
   localFilesDelete,
   localFilesDisconnect,
+  localFilesDownload,
   localFilesList,
   localFilesMkdir,
   localFilesRead,
@@ -171,6 +172,19 @@ describe('copying files in', () => {
     expect(r.ok).toBe(false)
     expect(r.data?.uploaded).toEqual(['good.txt'])
     expect(r.data?.failed.map((f) => f.name)).toEqual(['missing.txt'])
+  })
+
+  // Download from this machine is a copy into a picked folder, under the same
+  // rule as the SSH half: a file already there is never replaced.
+  it('downloads beside an existing file rather than over it', async () => {
+    const src = join(dir, 'notes.txt')
+    writeFileSync(src, 'new')
+    mkdirSync(join(dir, 'dest'))
+    writeFileSync(join(dir, 'dest', 'notes.txt'), 'mine')
+    const r = await localFilesDownload(wc(), 'k', [src], join(dir, 'dest'))
+    expect(r.data?.saved).toEqual(['notes (1).txt'])
+    expect(readFileSync(join(dir, 'dest', 'notes.txt'), 'utf8')).toBe('mine')
+    expect(readFileSync(join(dir, 'dest', 'notes (1).txt'), 'utf8')).toBe('new')
   })
 })
 

@@ -16,7 +16,7 @@ Everything OpsMaxx does, what it replaces, and the shapes of work it was built f
 | **Jump hosts / bastions** | Unlimited chained hops per server, each with its own credentials |
 | **Cloud servers** | Google Cloud, AWS and Azure machines as ordinary servers — through the `gcloud`, `aws` or `az` you already have, signed in as you already are. No cloud credential is stored, and the result is a real SSH session, so files, monitoring and the rest work against it |
 | **Two-factor auth** | Answers keyboard-interactive challenges; connections are shared so you enter a code once, not per session |
-| **SFTP browser** | Browse, edit, upload, rename and delete files over the same connection |
+| **SFTP browser** | Browse, edit, upload, download, rename and delete files over the same connection, with a cancellable transfer queue |
 | **Remote desktop** | RDP to a Windows host in a tab, through a bastion when the host is only reachable from one — with the server certificate pinned on first use |
 | **Server monitoring** | Live CPU, memory, disk and network docked under the terminal, with alerts on CPU, memory and failed systemd units |
 | **Background checking** | Sample every server on a schedule, so a server that runs hot or a unit that dies at 3am is noticed while you are looking at something else |
