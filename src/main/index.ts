@@ -6150,18 +6150,23 @@ app.whenReady().then(() => {
   ruleEngine.start()
   createWindow()
   installMenu()
+  // Read, unsealed and parsed once for every consumer below, the way the
+  // data:save handler hands one blob to the same consumers. Each used to call
+  // loadData() itself: six reads of the file and six decryptions of the whole
+  // estate on the launch path, all returning the same bytes.
+  const boot = loadData()
   // Primed once at launch so the MCP bridge can resolve server/workspace
   // names even before the renderer's first data:save call.
-  refreshMcpDataCache()
+  refreshMcpDataCache(boot)
   // And the CI connections, for the same reason one line up: an agent can call
   // a ci_* tool before any window has opened the CI tab, and an empty list
   // there reads to the agent as "this user has no CI connections" rather than
   // as "the app has not finished starting".
-  cicd.reload()
+  cicd.reload(boot)
   // Same reasoning for the local terminal's kill switch: the renderer may open a
   // shell before its first data:save, so main reads the persisted setting itself
   // rather than starting from a default it would later have to correct.
-  syncLocalTerminalEnabled(loadData())
+  syncLocalTerminalEnabled(boot)
   // The Files view's local half reads and writes arbitrary paths, and the vault,
   // the access policy and the audit log are all files under this directory —
   // every constraint this app advertises is enforced by one of them. Told once
@@ -6180,15 +6185,15 @@ app.whenReady().then(() => {
    * overstated it, and this repo is public.
    */
   setShellIntegrationRoot(app.getPath('userData'))
-syncAccessWriteEnabled(loadData())
+syncAccessWriteEnabled(boot)
   // `true` for boot: a debug session that was already on RESUMES rather than
   // starting fresh, because reproducing a bug can need a restart and a capture
   // that wiped itself on every launch would lose the reproduction it was
   // switched on for. Read here rather than waiting for the renderer's first
   // data:save, or the events from app start — the ones that explain a startup
   // bug — are exactly what goes missing.
-  syncDebugLog(loadData(), true)
-syncDriftWatches(loadData())
+  syncDebugLog(boot, true)
+syncDriftWatches(boot)
   // Before the MCP server: the bridge asks the manager what is running, and a
   // bridge that answered "nothing" because the manager had not booted would be
   // lying about the state of the user's network. This also reaps any engine a
