@@ -149,3 +149,169 @@ export function assignWaves<T>(targets: T[], waveSize: number): (T & { cohort: s
   const n = waveSize > 0 ? Math.floor(waveSize) : targets.length
   return targets.map((t, i) => ({ ...t, cohort: `Wave ${Math.floor(i / Math.max(n, 1)) + 1}` }))
 }
+
+// ---------------------------------------------------------------------------
+// Saved templates -- the follow-on item 33 left open
+// ---------------------------------------------------------------------------
+//
+// A template is the STEPS of a job and nothing that decides where or whether
+// they run. broadcast.ts's rule 1 is the reason: "no saved target set that
+// could drift as the workspace changes". A template that remembered its servers
+// would be exactly that set, and one that remembered its approval would be a
+// confirmation answered once and replayed against whatever the workspace had
+// become. So a template holds the text, the reboot flag and the rollback, and
+// loading one fills the composer and stops: servers are picked fresh, and
+// `planJob` mints the confirmation over the job as it now stands.
+//
+// Wave size and the health gate are deliberately not saved either. Both only
+// mean something against a target count, and the gate check refuses a wave
+// size that is not smaller than it.
+//
+// Human-only, like the rest of this file. Nothing in the MCP bridge can list,
+// read or write one (tests/jobTemplates.test.ts). An agent that could save a
+// template would be choosing the text an operator later runs in a terminal
+// believing they wrote it.
+
+export interface JobTemplate {
+  id: string
+  name: string
+  /** The composer's steps text as typed, `#` notes included. Parsed with
+   *  `parseJobSteps` whenever it is used, exactly as a typed draft is. */
+  steps: string
+  rollback: string
+  rebootLast: boolean
+  updatedAt: number
+  /** Refused by type as well as by `sanitiseJobTemplate`. `never` rather than
+   *  absent so that a spread of a job, a draft-plus-targets or a request
+   *  object into a template fails to compile instead of carrying them along. */
+  targets?: never
+  approval?: never
+}
+
+/** More than this and it is a snippet library, which this is not. */
+export const JOB_TEMPLATE_MAX = 200
+/** A generous 50 steps' worth. Not a technical limit. */
+const JOB_TEMPLATE_TEXT_MAX = 20_000
+
+// C0 except newline and tab, DEL, C1, and every invisible or reordering
+// character: bidi controls and isolates, zero-width spaces and joiners, the
+// Arabic letter mark, the line and paragraph separators, the byte-order mark
+// and the tag block. A template's text is pasted into a live shell, so an
+// escape sequence in it is not cosmetic -- ESC [ 2 0 1 ~ ends bracketed paste
+// and turns the rest into keystrokes -- and a character the confirmation
+// cannot show is one the operator approves without seeing. The panel never
+// produces one; a hand-edited file can.
+const UNSAFE_TEMPLATE =
+  // eslint-disable-next-line no-control-regex -- matching them is the point
+  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]|\udb40[\udc00-\udc7f]/g
+
+function cleanTemplateText(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const clean = raw.replace(/\r\n?/g, '\n').replace(UNSAFE_TEMPLATE, '')
+  return clean.length > JOB_TEMPLATE_TEXT_MAX ? null : clean
+}
+
+/** A name as it is stored: runs of whitespace collapsed, ends trimmed. Also
+ *  what the panel compares with when it asks whether a name is taken, so
+ *  "a  b" and "a b" are the same name there as they are on disk. */
+export function normaliseTemplateName(name: string): string {
+  return name.replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * A template as it may be stored, or `null`.
+ *
+ * Builds a NEW object from the fields a template has, so anything else on the
+ * input -- `targets`, `approval`, `cohort`, a whole JobRunRequest -- is dropped
+ * rather than trusted because it rode along. Called by main on every save and
+ * on every read of the file, which survives hand edits and downgrades.
+ */
+export function sanitiseJobTemplate(raw: unknown): JobTemplate | null {
+  if (raw === null || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  if (typeof r.id !== 'string' || !/^[A-Za-z0-9-]{1,64}$/.test(r.id)) return null
+  const name = normaliseTemplateName(cleanTemplateText(r.name) ?? '')
+  if (name === '' || name.length > 120) return null
+  const steps = cleanTemplateText(r.steps)
+  const rollback = cleanTemplateText(r.rollback ?? '')
+  if (steps === null || rollback === null) return null
+  const count = parseJobSteps(steps).length
+  if (count === 0 || count > JOB_MAX_STEPS || parseJobSteps(rollback).length > JOB_MAX_STEPS) {
+    return null
+  }
+  return {
+    id: r.id,
+    name,
+    steps,
+    rollback,
+    rebootLast: r.rebootLast === true,
+    updatedAt: typeof r.updatedAt === 'number' && Number.isFinite(r.updatedAt) ? r.updatedAt : 0
+  }
+}
+
+/** The composer's draft as a template. The draft has no targets to leave out,
+ *  and wave size and gate are left out on purpose -- see above. */
+export function templateFromDraft(draft: JobDraft, id: string, name: string): JobTemplate | null {
+  return sanitiseJobTemplate({
+    id,
+    name,
+    steps: draft.steps,
+    rollback: draft.rollback,
+    rebootLast: draft.rebootLast
+  })
+}
+
+/** A template loaded into the composer. Wave size and gate keep whatever the
+ *  operator already set, because they belong to the servers being picked now. */
+export function draftFromTemplate(t: JobTemplate, current: JobDraft): JobDraft {
+  return {
+    ...current,
+    title: t.name,
+    steps: t.steps,
+    rollback: t.rollback,
+    rebootLast: t.rebootLast
+  }
+}
+
+/**
+ * What "run in this terminal" pastes: the steps, one per line, `#` notes
+ * dropped exactly as a job drops them. No trailing newline, so it behaves as
+ * any other multi-line paste does, and the reboot flag and rollback do not
+ * travel -- a terminal has no reboot-and-wait and no undo button.
+ */
+export function templateTerminalText(t: JobTemplate): string {
+  // A tab is a keystroke to a shell without bracketed paste: it asks for
+  // completion, and what gets completed depends on the host, not the template.
+  return parseJobSteps(t.steps.replace(/\t/g, ' ')).join('\n')
+}
+
+/**
+ * What reading the file found.
+ *
+ * `problem` is null when saving is safe. Otherwise it says why the file will
+ * not be written -- it would not parse, a newer version wrote it, or a row in it
+ * is not one this version accepts -- and nothing can be saved or deleted until
+ * the file is set aside. Rewriting it would keep only the rows this version
+ * understood and silently delete the rest.
+ */
+export interface JobTemplateList {
+  /** What could be read. Usable for loading even when `problem` is set. */
+  templates: JobTemplate[]
+  problem: string | null
+  /** Where the file is, so the sentence can say. */
+  path: string
+}
+
+export type JobTemplateResult<T extends object = object> = ({ ok: true } & T) | { ok: false; reason: string }
+
+/**
+ * The preload's `jobTemplates` namespace. Rename is a `save` with the same id.
+ * `setAside` moves a file with a problem out of the way so a fresh one can be
+ * started; it never deletes one.
+ */
+export interface JobTemplatesBridge {
+  list(): Promise<JobTemplateList>
+  save(template: JobTemplate): Promise<JobTemplateResult<{ template: JobTemplate }>>
+  remove(id: string): Promise<JobTemplateResult>
+  setAside(): Promise<JobTemplateResult<{ path: string }>>
+}

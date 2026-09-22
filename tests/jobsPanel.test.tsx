@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
 import { JobsPanel } from '../src/renderer/src/components/monitor/JobsPanel'
@@ -466,5 +466,121 @@ describe('the typed file push', () => {
     const stub = jobsStub()
     await fileMode(stub)
     expect(document.body.textContent).toContain('Writes a NEW file only')
+  })
+})
+
+describe('saved templates in the composer', () => {
+  it('saves steps without servers, loads them back, renames and deletes', async () => {
+    const saved = new Map<string, Record<string, unknown>>()
+    const templates = {
+      list: vi.fn(async () => ({ templates: [...saved.values()], problem: null, path: '/t.json' })),
+      save: vi.fn(async (t: Record<string, unknown>) => {
+        const stored = { ...t, updatedAt: 1 }
+        saved.set(t.id as string, stored)
+        return { ok: true, template: stored }
+      }),
+      remove: vi.fn(async (id: string) => ({ ok: saved.delete(id) }))
+    }
+    const stub = { ...jobsStub(), jobTemplates: templates }
+    const servers = [server(1), server(2)]
+    await compose(stub, servers, { title: 'Reload nginx', steps: 'systemctl reload nginx', pick: [1] })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save as template' }))
+    await waitFor(() => expect(templates.save).toHaveBeenCalledTimes(1))
+    const sent = templates.save.mock.calls[0][0]
+    // The server picked above is not in it, and neither is anything approval-shaped.
+    expect(JSON.stringify(sent)).not.toMatch(/s1|web-1|targets|approval|cohort/)
+
+    await userEvent.clear(screen.getByLabelText('Template name'))
+    await userEvent.type(screen.getByLabelText('Template name'), 'Reload web')
+    await userEvent.click(screen.getByRole('button', { name: 'Rename' }))
+    await waitFor(() => expect([...saved.values()][0]).toMatchObject({ name: 'Reload web' }))
+    expect(saved.size).toBe(1)
+
+    // A fresh composer loads it: the steps come back, the servers do not.
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await userEvent.click(screen.getByRole('button', { name: /New job/ }))
+    await waitFor(() => screen.getByRole('option', { name: 'Reload web' }))
+    await userEvent.clear(screen.getByLabelText('Steps'))
+    await userEvent.selectOptions(screen.getByLabelText('Saved template'), 'Reload web')
+    expect((screen.getByLabelText('Steps') as HTMLTextAreaElement).value).toBe('systemctl reload nginx')
+    expect(screen.getByRole('button', { name: 'web-2' }).getAttribute('aria-pressed')).toBe('false')
+
+    // Saving again under the same name asks to replace, and replacing
+    // updates that template in place: same id, one row, new steps.
+    await userEvent.type(screen.getByLabelText('Steps'), ' && echo ok')
+    await userEvent.click(screen.getByRole('button', { name: 'Save as template' }))
+    await screen.findByText('Replace ‘Reload web’?')
+    expect(templates.save).toHaveBeenCalledTimes(2)
+    await userEvent.click(screen.getByRole('button', { name: 'Replace' }))
+    await waitFor(() =>
+      expect([...saved.values()][0]).toMatchObject({ name: 'Reload web', steps: 'systemctl reload nginx && echo ok' })
+    )
+    expect(saved.size).toBe(1)
+
+    // Declining keeps both as they were; a different title saves a second one.
+    await userEvent.click(screen.getByRole('button', { name: 'Save as template' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(saved.size).toBe(1)
+    await userEvent.clear(screen.getByLabelText('Job title'))
+    await userEvent.type(screen.getByLabelText('Job title'), 'Reload web, verbose')
+    await userEvent.click(screen.getByRole('button', { name: 'Save as template' }))
+    await waitFor(() => expect(saved.size).toBe(2))
+    await userEvent.selectOptions(screen.getByLabelText('Saved template'), 'Reload web')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    expect(templates.remove).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Confirm delete' }))
+    await waitFor(() => expect(saved.size).toBe(1))
+    expect([...saved.values()][0]).toMatchObject({ name: 'Reload web, verbose' })
+    expect(runOf(stub)).not.toHaveBeenCalled()
+  })
+})
+
+describe('a templates file main will not rewrite', () => {
+  it('says so, names the file, and offers to set it aside', async () => {
+    const templates = {
+      list: vi.fn(async () => ({
+        templates: [],
+        problem: 'The saved templates file could not be read.',
+        path: '/data/opsmaxx-job-templates.json'
+      })),
+      save: vi.fn(),
+      remove: vi.fn(),
+      setAside: vi.fn(async () => ({ ok: true, path: '/data/opsmaxx-job-templates-aside.json' }))
+    }
+    stubBridge({ ...jobsStub(), jobTemplates: templates })
+    render(<JobsPanel servers={[server(1)]} />)
+    await userEvent.click(screen.getByRole('button', { name: /New job/ }))
+    await screen.findByText('/data/opsmaxx-job-templates.json')
+    await userEvent.click(screen.getByRole('button', { name: 'Set aside and start fresh' }))
+    await screen.findByText(/Moved to \/data\/opsmaxx-job-templates-aside.json/)
+    expect(templates.setAside).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('a taken template name', () => {
+  it('is taken whatever the spacing, because names are stored collapsed', async () => {
+    const templates = {
+      list: vi.fn(async () => ({
+        templates: [
+          { id: 't1', name: 'Reload web', steps: 'systemctl reload nginx', rollback: '', rebootLast: false, updatedAt: 1 }
+        ],
+        problem: null,
+        path: '/t.json'
+      })),
+      save: vi.fn(),
+      remove: vi.fn()
+    }
+    await compose({ ...jobsStub(), jobTemplates: templates }, [server(1)], {
+      title: '  Reload   web ',
+      steps: 'echo new',
+      pick: []
+    })
+    await waitFor(() => screen.getByRole('option', { name: 'Reload web' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save as template' }))
+    await screen.findByText('Replace \u2018Reload web\u2019?')
+    expect(templates.save).not.toHaveBeenCalled()
   })
 })

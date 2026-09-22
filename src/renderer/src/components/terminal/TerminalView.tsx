@@ -4,7 +4,7 @@ import { RECOVERY_BUDGET_MS, type RecoveryState } from '../../hooks/useSessionRe
 import { credentialNote, type CredentialShape } from '../../../../shared/credentialShape'
 import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import { TerminalSearch } from './TerminalSearch'
-import { PasteConfirm } from './PasteConfirm'
+import { PasteConfirm, useTerminalPasteRequest } from './PasteConfirm'
 import { EmptyState } from '../common/EmptyState'
 import { useApp } from '../../store/app'
 import {
@@ -373,7 +373,9 @@ function RealTerminal({
     if (!findRequest || !tabId || findRequest.paneId !== tabId) return
     setFinding(true)
   }, [findRequest, tabId])
-  const [pending, setPending] = useState<{ text: string; lines: number } | null>(null)
+  const [pending, setPending] = useState<{ text: string; lines: number; full?: boolean } | null>(
+    null
+  )
   /**
    * Restored from the last run and not yet dialled.
    *
@@ -397,6 +399,15 @@ function RealTerminal({
     (text, lines) => setPending({ text, lines }),
     tabId,
     dormant
+  )
+
+  // A saved job template run "in this terminal". It goes through the same
+  // confirmation a multi-line paste does, and it asks even for one line: the
+  // clipboard rule is about text that arrives, and this is text someone chose.
+  // Only a LIVE session is a target: a dead or dormant one would take the
+  // confirmed text and drop it.
+  useTerminalPasteRequest(tabId, !dead && !dormant, (text) =>
+    setPending({ text, lines: text.split('\n').length, full: true })
   )
 
   /**
@@ -575,6 +586,11 @@ function RealTerminal({
         <PasteConfirm
           text={pending.text}
           lines={pending.lines}
+          full={pending.full}
+          // Read when the dialog renders, from the shell as it is now: this is
+          // what decides whether pasting runs anything.
+          bracketed={termRef.current?.modes.bracketedPasteMode ?? false}
+          local={transport.serverId === undefined}
           server={transport.title}
           onCancel={() => setPending(null)}
           onConfirm={() => {

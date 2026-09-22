@@ -349,7 +349,9 @@ function scanJobModules(): string[] {
 }
 
 /** The engine files a human has looked at. Compared against the scan below. */
-const REVIEWED_JOB_FILES = ['jobDetached', 'jobExec', 'jobRunner']
+// `jobTemplates` holds saved step lists. Not engine, but an agent that could
+// write one would be choosing text a person later runs believing they wrote it.
+const REVIEWED_JOB_FILES = ['jobDetached', 'jobExec', 'jobRunner', 'jobTemplates']
 
 /** Job-adjacent modules outside `src/main/services`, named because that
  *  directory cannot be scanned wholesale.
@@ -401,7 +403,9 @@ const SHARED_JOB_MODULES = [
   'approvalLog',
   'rules',
   'credProxy',
-  'processes'
+  'processes',
+  // Saved job templates' shared half. See REVIEWED_JOB_FILES.
+  'jobCompose'
 ]
 
 const JOB_MODULE_NAMES = [...new Set([...scanJobModules(), ...SHARED_JOB_MODULES])]

@@ -110,6 +110,12 @@ import { PostureReader, firewallRulesGranted } from './services/posture'
 import { DriftReader } from './services/drift'
 import { readChangeLog } from './services/changelog'
 import { readRunbook, saveRunbookNote } from './services/runbooks'
+import {
+  listJobTemplates,
+  removeJobTemplate,
+  saveJobTemplate,
+  setAsideJobTemplates
+} from './services/jobTemplates'
 import { isRunbookKind, type RunbookNote, type RunbookView } from '../shared/runbooks'
 import type { ChangeLogFilter, ChangeLogPage } from '../shared/changelog'
 import type {
@@ -3149,6 +3155,16 @@ ipcMain.handle('jobs:setDetached', (_e, enabled: boolean) => {
   jobsDetachedEnabled = enabled !== false
 })
 ipcMain.handle('jobs:capabilities', () => [...jobCapabilities.values()])
+
+// Saved job templates. Steps only -- never targets, never an approval -- and
+// nothing here runs anything: loading one fills the composer, and running it
+// in a terminal goes through the paste confirmation. The payload is narrowed
+// by sanitiseJobTemplate inside the service, which drops any field a template
+// does not have. No MCP tool reaches these (tests/jobTemplates.test.ts).
+ipcMain.handle('job-templates:list', () => listJobTemplates())
+ipcMain.handle('job-templates:save', (_e, template: unknown) => saveJobTemplate({}, template))
+ipcMain.handle('job-templates:remove', (_e, id: unknown) => removeJobTemplate({}, id))
+ipcMain.handle('job-templates:set-aside', () => setAsideJobTemplates({}))
 
 // ---- Live log tailing across hosts ----
 //

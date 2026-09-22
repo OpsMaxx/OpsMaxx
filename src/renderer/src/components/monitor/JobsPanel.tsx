@@ -7,8 +7,12 @@ import {
   assignWaves,
   checkJobDraft,
   composeJobSpec,
+  draftFromTemplate,
   EMPTY_JOB_DRAFT,
-  type JobDraft
+  normaliseTemplateName,
+  templateFromDraft,
+  type JobDraft,
+  type JobTemplate
 } from '../../../../shared/jobCompose'
 import {
   checkServiceStep,
@@ -35,6 +39,7 @@ import { useFleet } from '../../store/fleet'
 import type { JobDetail, JobHostResult, JobProgress, JobRecord } from '../../../../shared/jobs'
 import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
+import { Modal } from '../common/Modal'
 import { VaultLockedHosts } from '../common/PanelError'
 import { isVaultLocked } from '../../lib/withVaultUnlock'
 
@@ -148,6 +153,78 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
       live = false
     }
   }, [fileBody])
+  // Saved templates: steps, never servers. Loaded when the composer opens.
+  // `problem` is the file main will not rewrite -- unreadable, from another
+  // version, or holding rows this one refuses -- and saving waits on it.
+  const [templates, setTemplates] = useState<JobTemplate[]>([])
+  const [templateFile, setTemplateFile] = useState<{ problem: string; path: string } | null>(null)
+  const [templateId, setTemplateId] = useState('')
+  const [templateName, setTemplateName] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [templateNote, setTemplateNote] = useState<string | null>(null)
+  const [replacing, setReplacing] = useState<JobTemplate | null>(null)
+  const chosenTemplate = templates.find((t) => t.id === templateId)
+  const loadTemplates = useCallback(async (): Promise<void> => {
+    try {
+      const read = await window.opsmaxx?.jobTemplates?.list()
+      if (!read) return
+      setTemplates(read.templates)
+      setTemplateFile(read.problem ? { problem: read.problem, path: read.path } : null)
+    } catch (e) {
+      setTemplateNote(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+  useEffect(() => {
+    if (composing) void loadTemplates()
+  }, [composing, loadTemplates])
+
+  /** One save path for "save as new" and "rename": main narrows the template,
+   *  stamps it, and hands back what it stored -- or why it did not. */
+  const storeTemplate = async (t: JobTemplate | null): Promise<void> => {
+    const result = t
+      ? await window.opsmaxx?.jobTemplates?.save(t)
+      : { ok: false as const, reason: 'A template needs a name and at least one command.' }
+    if (!result?.ok) {
+      setTemplateNote(result?.reason ?? 'The template was not saved.')
+      return
+    }
+    const stored = result.template
+    setTemplateNote(null)
+    setTemplates((cur) => [...cur.filter((x) => x.id !== stored.id), stored])
+    setTemplateId(stored.id)
+    setTemplateName(stored.name)
+  }
+
+  const deleteTemplate = async (): Promise<void> => {
+    if (!chosenTemplate) return
+    if (!confirmDelete) {
+      setConfirmDelete(true)
+      return
+    }
+    setConfirmDelete(false)
+    const result = await window.opsmaxx?.jobTemplates?.remove(chosenTemplate.id)
+    if (!result?.ok) {
+      setTemplateNote(result?.reason ?? 'The template was not deleted.')
+      return
+    }
+    setTemplateNote(null)
+    setTemplates((cur) => cur.filter((x) => x.id !== chosenTemplate.id))
+    setTemplateId('')
+    setTemplateName('')
+  }
+
+  /** The way out of a file main will not rewrite: move it aside, never delete
+   *  it, and say where it went. */
+  const setAsideTemplates = async (): Promise<void> => {
+    const result = await window.opsmaxx?.jobTemplates?.setAside()
+    setTemplateNote(
+      result?.ok
+        ? `Moved to ${result.path}. The templates that could be read are in a fresh file.`
+        : result?.reason ?? null
+    )
+    if (result?.ok) await loadTemplates()
+  }
+
   const openId = useRef<string | null>(null)
   const sampled = useFleet((s) => s.hosts)
 
@@ -672,6 +749,97 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
             </>
           ) : (
             <>
+              {/* Saved templates. Loading one fills the text below and stops:
+                  the servers are still picked here, and the confirmation is
+                  still whatever planJob asks for once they are. */}
+              <div className="row-actions" style={{ gap: 6, flexWrap: 'wrap' }}>
+                <select
+                  className="input"
+                  aria-label="Saved template"
+                  value={templateId}
+                  onChange={(e) => {
+                    const t = templates.find((x) => x.id === e.target.value)
+                    setTemplateId(t?.id ?? '')
+                    setTemplateName(t?.name ?? '')
+                    setConfirmDelete(false)
+                    if (t) setDraft((d) => draftFromTemplate(t, d))
+                  }}
+                >
+                  <option value="">
+                    Load a saved template…
+                  </option>
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="btn sm"
+                  onClick={() => {
+                    // A second template under a name already in the list is
+                    // two rows nobody can tell apart in the picker, so a taken
+                    // name asks to replace that one instead. Declining leaves
+                    // both as they were: pick a different title.
+                    const name = normaliseTemplateName(draft.title)
+                    const taken = templates.find((t) => t.name === name)
+                    if (taken) setReplacing(taken)
+                    else void storeTemplate(templateFromDraft(draft, crypto.randomUUID(), draft.title))
+                  }}
+                >
+                  Save as template
+                </button>
+                {chosenTemplate && (
+                  <>
+                    <input
+                      className="input"
+                      aria-label="Template name"
+                      style={{ width: 180 }}
+                      value={templateName}
+                      onChange={(e) => setTemplateName(e.target.value)}
+                    />
+                    <button
+                      className="btn sm"
+                      disabled={templateName.trim() === chosenTemplate.name}
+                      onClick={() => void storeTemplate({ ...chosenTemplate, name: templateName })}
+                    >
+                      Rename
+                    </button>
+                    <button className="btn sm" onClick={() => void deleteTemplate()}>
+                      {confirmDelete ? 'Confirm delete' : 'Delete'}
+                    </button>
+                  </>
+                )}
+              </div>
+              {templateFile && (
+                <div className="s-note state-unknown">
+                  {templateFile.problem} Nothing can be saved or deleted until it is set aside. It
+                  is at <span className="mono selectable">{templateFile.path}</span>.{' '}
+                  <button className="btn sm" onClick={() => void setAsideTemplates()}>
+                    Set aside and start fresh
+                  </button>
+                </div>
+              )}
+              {templateNote && <div className="s-note state-unknown">{templateNote}</div>}
+              {replacing && (
+                <Modal
+                  title={`Replace ‘${replacing.name}’?`}
+                  subtitle="Its steps, rollback and reboot flag become the ones in this form."
+                  onClose={() => setReplacing(null)}
+                  confirm={{
+                    label: 'Replace',
+                    onClick: () => {
+                      // Same id: updated in place, so it stays one row.
+                      void storeTemplate(templateFromDraft(draft, replacing.id, replacing.name))
+                      setReplacing(null)
+                    }
+                  }}
+                >
+                  <p className="r-sub">
+                    To keep both, cancel and give this one a different title.
+                  </p>
+                </Modal>
+              )}
               <input
                 className="input"
                 aria-label="Job title"
