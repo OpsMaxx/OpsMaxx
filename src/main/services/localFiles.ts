@@ -1,9 +1,12 @@
 import { basename, dirname, join, resolve as resolvePath, sep } from 'node:path'
 import { homedir } from 'node:os'
-import { createReadStream, createWriteStream, realpathSync } from 'node:fs'
+import { createReadStream, createWriteStream, realpathSync, type Stats, type WriteStream } from 'node:fs'
 import {
   lstat,
   mkdir,
+  open,
+  readlink,
+  type FileHandle,
   readFile,
   readdir,
   rename,
@@ -14,7 +17,8 @@ import {
   writeFile
 } from 'node:fs/promises'
 import type { WebContents } from 'electron'
-import type { SftpEntry, SftpResult, SftpUploadSummary } from '../../shared/ssh'
+import type { SftpDownloadSummary, SftpEntry, SftpResult, SftpUploadSummary } from '../../shared/ssh'
+import { reserveLocalFile, safeLocalName, tempName } from './transferName'
 
 /**
  * The Files view, backed by this machine's own filesystem.
@@ -130,6 +134,22 @@ const PROTECTED_MESSAGE =
 /** Guard for every path this module takes. Returns a failed result, or null. */
 function refuse(...paths: string[]): SftpResult<never> | null {
   return paths.some(isProtected) ? { ok: false, error: PROTECTED_MESSAGE } : null
+}
+
+/**
+ * Whether a download may be written into `dir`. Null when it may.
+ *
+ * Two rules, for both halves of the Files view. The folder must be one the
+ * native picker returned (`picked`, kept by main): the renderer names the
+ * destination on every call, so without this it could name any directory on
+ * the disk. And it must not be the app's own data directory, where a new file
+ * with the right name is read as configuration — a server chooses its own file
+ * names, and a folder can be picked by mistake. `refuse` resolves links, so a
+ * picked folder that is a symlink into that directory is refused too.
+ */
+export function refuseDownloadDir(dir: string, picked: ReadonlySet<string>): SftpResult<never> | null {
+  if (!picked.has(dir)) return { ok: false, error: 'Choose a folder to save into first.' }
+  return refuse(dir)
 }
 
 /** Which keys the renderer opened against this machine rather than a server. */
@@ -273,7 +293,8 @@ export async function localFilesUpload(
   wc: WebContents,
   key: string,
   localPaths: string[],
-  destDir: string
+  destDir: string,
+  inPlace: string[] = []
 ): Promise<SftpResult<SftpUploadSummary>> {
   /**
    * Both ends, not just the destination.
@@ -286,60 +307,296 @@ export async function localFilesUpload(
    */
   const refused = refuse(destDir, ...localPaths)
   if (refused) return refused
+  const copy = startCopy(key)
+  if (!copy) return BUSY
+  const { signal } = copy
   const uploaded: string[] = []
   const failed: { name: string; error: string }[] = []
+  const leftover: string[] = []
+  const needsInPlace: { name: string; reason: 'dir' | 'owner' }[] = []
+  const incomplete: string[] = []
 
-  for (let i = 0; i < localPaths.length; i++) {
+  for (let i = 0; i < localPaths.length && !signal.aborted; i++) {
     const from = localPaths[i]
     const name = basename(from)
-    const to = join(destDir, name)
     const send = (transferred: number, total: number): void => {
       if (!wc.isDestroyed()) {
         wc.send('sftp:progress', { key, name, transferred, total, index: i + 1, count: localPaths.length })
       }
     }
+    let plan: CopyPlan | undefined
     try {
       const st = await stat(from)
       // Directories would need a recursive walk; refused explicitly rather
       // than failing later with an opaque EISDIR, as the SSH path does.
       if (st.isDirectory()) throw new Error('folders cannot be copied yet')
+      if (signal.aborted) break
+      const target = await resolveTarget(join(destDir, name))
       // Copying a file onto itself truncates it to nothing, and the Files view
       // cannot tell that the source it was handed is already the destination.
-      if (resolvePath(from) === resolvePath(to)) {
-        throw new Error('that file is already in this folder')
+      // Checked on the resolved path, and before anything is opened.
+      if (canonical(from) === target.dest) throw new Error('that file is already in this folder')
+      plan = await planCopy(target, inPlace.includes(name))
+      if (plan.needs) {
+        needsInPlace.push({ name, reason: plan.needs })
+        continue
       }
       send(0, st.size)
-      await copyWithProgress(from, to, st.size, send)
+      await copyWithProgress(from, plan.write, st.size, send, signal)
+      await plan.commit()
       uploaded.push(name)
     } catch (err) {
-      failed.push({ name, error: msg(err) })
+      if (plan?.inPlace) incomplete.push(plan.dest)
+      else if (plan && !(await plan.discard())) leftover.push(plan.tmp as string)
+      if (!signal.aborted) failed.push({ name, error: msg(err) })
     }
   }
+  endCopy(key, copy)
 
+  const some = <T,>(xs: T[]): T[] | undefined => (xs.length ? xs : undefined)
   return {
-    ok: failed.length === 0,
+    ok: failed.length === 0 && !signal.aborted,
     error: failed.length ? `${failed[0].name}: ${failed[0].error}` : undefined,
-    data: { uploaded, failed }
+    data: {
+      uploaded,
+      failed,
+      cancelled: signal.aborted || undefined,
+      leftover: some(leftover),
+      needsInPlace: some(needsInPlace),
+      incomplete: some(incomplete)
+    }
   }
 }
 
+/**
+ * "Download" from this machine: a copy into a folder the user picked.
+ *
+ * The same rules as the SSH path apply, because the view is one component and
+ * the user should not have to know which half answered: names are cleaned, and
+ * a file already in the folder is never replaced (transferName.ts).
+ */
+export async function localFilesDownload(
+  wc: WebContents,
+  key: string,
+  sources: string[],
+  destDir: string
+): Promise<SftpResult<SftpDownloadSummary>> {
+  const refused = refuse(destDir, ...sources)
+  if (refused) return refused
+  const copy = startCopy(key)
+  if (!copy) return BUSY
+  const { signal } = copy
+  const saved: string[] = []
+  const failed: { name: string; error: string }[] = []
+  const leftover: string[] = []
+
+  for (let i = 0; i < sources.length && !signal.aborted; i++) {
+    const from = sources[i]
+    const shown = basename(from)
+    const name = safeLocalName(shown)
+    if (!name) {
+      failed.push({ name: shown, error: 'that name cannot be saved here' })
+      continue
+    }
+    const send = (transferred: number, total: number): void => {
+      if (!wc.isDestroyed()) {
+        const index = i + 1
+        wc.send('sftp:progress', { key, name: shown, transferred, total, index, count: sources.length, direction: 'down' })
+      }
+    }
+    let to: string | undefined
+    let plan: CopyPlan | undefined
+    try {
+      const st = await stat(from)
+      if (st.isDirectory()) throw new Error('folders cannot be downloaded yet')
+      if (signal.aborted) break
+      to = await reserveLocalFile(destDir, name)
+      // The placeholder is this download's own empty file, so it is replaced
+      // by rename like any other target.
+      plan = await planCopy(await resolveTarget(to), false)
+      // The placeholder was just created there, so this is not expected — but
+      // an in-place write is never a download's to make.
+      if (plan.needs) throw new Error('cannot write a copy in that folder')
+      send(0, st.size)
+      await copyWithProgress(from, plan.write, st.size, send, signal)
+      await plan.commit()
+      saved.push(basename(to))
+    } catch (err) {
+      // Both are ours: the placeholder reserveLocalFile created and the
+      // temporary copy. A failure to remove one must not end the batch; it is
+      // reported instead.
+      if (plan && !(await plan.discard())) leftover.push(plan.tmp as string)
+      const place = to
+      if (place) await rm(place, { force: true }).catch(() => leftover.push(place))
+      if (!signal.aborted) failed.push({ name: shown, error: msg(err) })
+    }
+  }
+  endCopy(key, copy)
+
+  return {
+    ok: failed.length === 0 && !signal.aborted,
+    error: failed.length ? `${failed[0].name}: ${failed[0].error}` : undefined,
+    data: { saved, failed, cancelled: signal.aborted || undefined, leftover: leftover.length ? leftover : undefined }
+  }
+}
+
+// The copy running on each key, so the Files view's Cancel can stop it. One
+// per key: a second one would take the slot Cancel looks in.
+const copying = new Map<string, AbortController>()
+
+const BUSY: SftpResult<never> = { ok: false, error: 'A transfer is already running here.' }
+
+function startCopy(key: string): AbortController | null {
+  if (copying.has(key)) return null
+  const c = new AbortController()
+  copying.set(key, c)
+  return c
+}
+
+function endCopy(key: string, c: AbortController): void {
+  if (copying.get(key) === c) copying.delete(key)
+}
+
+export function localFilesCancel(key: string): void {
+  copying.get(key)?.abort()
+}
+
+const denied = (err: unknown): boolean => ['EACCES', 'EPERM'].includes((err as NodeJS.ErrnoException).code ?? '')
+
+/** Where a copy goes, and how it gets there. */
+interface CopyPlan {
+  /** The file the copy is for, with any symlinks to it followed. */
+  dest: string
+  /** Why it cannot be replaced by a new copy; nothing is opened when set. */
+  needs?: 'dir' | 'owner'
+  /** Writing straight into `dest`, as approved by the user. */
+  inPlace?: boolean
+  tmp?: string
+  write: WriteStream
+  /** Put the finished copy in place. */
+  commit: () => Promise<void>
+  /** Remove the temporary copy. False when it would not go. */
+  discard: () => Promise<boolean>
+}
+
+/**
+ * Decide how a copy onto `to` will be written, before a byte is moved.
+ * `resolveTarget` follows the links; `planCopy` opens what will be written.
+ *
+ * Normally into a temporary file beside the destination that is renamed over
+ * it when complete. Writing to `to` directly truncated it the moment the
+ * stream opened, so a cancel or failure part-way lost — or left half of — a
+ * file the user had only agreed to replace with a finished copy.
+ *
+ * A rename, though, replaces a FILE, where writing into it did not. Three
+ * things the old in-place write kept are kept here on purpose:
+ *
+ *  - A symlink is followed to the file it names, and that file is replaced —
+ *    not the link, which a rename would turn into a regular file.
+ *  - The new copy gets the old one's permissions (umask would otherwise turn
+ *    a 0755 script into 0644) and its owner and group. When the owner cannot
+ *    be given — a file owned by someone else — the copy is not made: it would
+ *    silently become the uploader's file. `needs: 'owner'`.
+ *  - A writable file in a folder that is not writable cannot have a temporary
+ *    file beside it. `needs: 'dir'`.
+ *
+ * Either `needs` goes back to the view, which asks before overwriting in
+ * place, and comes back with `inPlace` set.
+ *
+ * The temporary file is opened once, with `wx`, and written through that
+ * handle — never reopened by path, so a link swapped in cannot redirect it.
+ */
+async function resolveTarget(to: string): Promise<{ dest: string; existing?: Stats }> {
+  let dest = to
+  let existing: Stats | undefined
+  for (let hops = 0; ; hops++) {
+    try {
+      const l = await lstat(dest)
+      if (!l.isSymbolicLink()) {
+        existing = l
+        break
+      }
+    } catch (err) {
+      // A dangling link: writing through it creates what it names, which is
+      // what the in-place write did.
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') break
+      throw err
+    }
+    if (hops === 40) throw new Error('too many levels of symbolic links')
+    dest = resolvePath(dirname(dest), await readlink(dest))
+  }
+  // A link in the folder can point anywhere, including the app's own data.
+  if (isProtected(dest)) throw new Error(PROTECTED_MESSAGE)
+  return { dest: canonical(dest), existing }
+}
+
+async function planCopy(
+  { dest, existing }: { dest: string; existing?: Stats },
+  inPlace: boolean
+): Promise<CopyPlan> {
+  if (inPlace) {
+    const write = createWriteStream(dest)
+    return { dest, inPlace, write, commit: async () => {}, discard: async () => true }
+  }
+
+  const tmp = join(dirname(dest), tempName(basename(dest)))
+  let fh: FileHandle
+  try {
+    fh = await open(tmp, 'wx')
+  } catch (err) {
+    if (existing && denied(err)) return { dest, needs: 'dir', ...inert }
+    throw err
+  }
+  const discard = (): Promise<boolean> =>
+    rm(tmp, { force: true }).then(
+      () => true,
+      () => false
+    )
+  if (existing) {
+    try {
+      await fh.chmod(existing.mode & 0o7777)
+      const mine = await fh.stat()
+      if (mine.uid !== existing.uid || mine.gid !== existing.gid) await fh.chown(existing.uid, existing.gid)
+    } catch {
+      await fh.close()
+      await discard()
+      return { dest, needs: 'owner', ...inert }
+    }
+  }
+  return { dest, tmp, write: fh.createWriteStream(), commit: () => rename(tmp, dest), discard }
+}
+
+// The shape a plan that opened nothing still has to fill in.
+const inert = {
+  write: undefined as unknown as WriteStream,
+  commit: async (): Promise<void> => {},
+  discard: async (): Promise<boolean> => true
+}
+
+/**
+ * Pump `from` into `write`, reporting progress. Settles only once the write
+ * side has closed, so the caller's cleanup never races the file being open.
+ */
 function copyWithProgress(
   from: string,
-  to: string,
+  write: WriteStream,
   total: number,
-  onStep: (transferred: number, total: number) => void
+  onStep: (transferred: number, total: number) => void,
+  signal: AbortSignal
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let transferred = 0
     let reported = 0
-    const read = createReadStream(from)
-    const write = createWriteStream(to)
+    // An abort destroys the read side with an AbortError, which lands in `fail`.
+    const read = createReadStream(from, { signal })
+    let failed = false
     const fail = (err: Error): void => {
+      if (failed) return
+      failed = true
       read.destroy()
+      if (write.closed) return reject(err)
+      write.once('close', () => reject(err))
       write.destroy()
-      // A half-written destination is worse than none: the view would show a
-      // file that looks copied.
-      void rm(to, { force: true }).finally(() => reject(err))
     }
     read.on('data', (c: Buffer | string) => {
       transferred += typeof c === 'string' ? Buffer.byteLength(c) : c.length
@@ -352,7 +609,9 @@ function copyWithProgress(
     })
     read.on('error', fail)
     write.on('error', fail)
-    write.on('finish', () => resolve())
+    write.on('close', () => {
+      if (!failed) resolve()
+    })
     read.pipe(write)
   })
 }

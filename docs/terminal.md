@@ -25,6 +25,39 @@ and choose **Open in code** to edit it in VS Code (or whatever you configure in
 Settings → Editor). Saving uploads it back to the server automatically — no
 download/re-upload dance. The inline editor is still there for quick edits.
 
+**Transfers in the Files view.** Drag files onto the list, or use **Upload**, to
+send them to the directory you are looking at. Right-click a file and choose
+**Download…** to save it into a folder you pick. Only files can be downloaded so
+far; a folder has to be opened and its files downloaded one by one. One transfer
+runs at a time. Anything you start meanwhile waits in a queue shown under the
+progress bar, and **Clear queue** drops it. **Cancel** stops the running transfer:
+
+- A cancelled **download** removes the partial file it was writing.
+- An **upload** is written to a temporary name beside the target and renamed
+  over it only when complete, so a cancelled or failed upload never leaves the
+  file that was already there half-replaced. On a server without atomic rename
+  (Windows OpenSSH, proftpd), the old file is first moved aside and is put back
+  if the new one cannot take its place. The new file keeps the old one's
+  permissions, owner and group, and uploading onto a symlink replaces the file
+  it points to, not the link.
+- Some files can only be **overwritten in place**: the folder does not let a
+  temporary file be created beside them, or the new copy could not be given
+  the old one's owner. OpsMaxx asks first, because an overwrite in place that
+  fails or is cancelled can leave the file incomplete, and says so if it does. Cancelling removes the temporary
+  copy; if it cannot (the connection has gone), OpsMaxx names the file left
+  behind. Copies in this machine's Files view work the same way.
+- **Cancel** returns at once even on a connection that has stopped answering,
+  and does not interrupt anything else using the same server, such as a save
+  from your editor.
+
+A download never overwrites anything on this machine. If the folder already has
+a file with that name, the new one is saved as `name (1).ext`. The server picks
+the file names, so separators, `..`, control characters and invisible
+formatting characters (such as the one that makes `invoice.exe` display as
+`invoice.jpg`) are removed from them before anything is written. An upload that would replace files on the
+server asks first, with **Overwrite**, **Skip** (upload only the others) or
+**Cancel all**.
+
 **Multi-line pastes ask first.** Pasting more than one line into a shell shows a
 preview and a confirmation that says what the paste will do. If the shell has
 bracketed paste on, as recent bash and zsh do, nothing runs until you press

@@ -132,11 +132,34 @@ export interface SftpProgress {
   // 1-based position in the current batch.
   index: number
   count: number
+  // Absent means an upload, which is all this event carried before downloads.
+  direction?: 'up' | 'down'
 }
 
 export interface SftpUploadSummary {
   uploaded: string[]
   failed: { name: string; error: string }[]
+  // Stopped by the user. The file that was in flight is in neither list.
+  cancelled?: boolean
+  // Partial or temporary files that could not be removed, so the user is told
+  // where they are rather than finding them later.
+  leftover?: string[]
+  // Not uploaded, because they can only be overwritten IN PLACE — which risks
+  // a half-written file — and the view asks before that. `dir`: the folder
+  // does not let a temporary copy be created beside them. `owner`: a new copy
+  // could not be given the existing file's owner or permissions.
+  needsInPlace?: { name: string; reason: 'dir' | 'owner' }[]
+  // Overwritten in place and then stopped part-way, so possibly incomplete.
+  incomplete?: string[]
+}
+
+export interface SftpDownloadSummary {
+  // The local names files were saved under, which differ from the remote ones
+  // when a name had to be cleaned or a file of that name was already there.
+  saved: string[]
+  failed: { name: string; error: string }[]
+  cancelled?: boolean
+  leftover?: string[]
 }
 
 export interface HostMetrics {

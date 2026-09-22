@@ -37,6 +37,7 @@ import type {
   SftpProgress,
   SftpResult,
   SftpUploadSummary,
+  SftpDownloadSummary,
   MetricsResult,
   SshCloseInfo,
   OnDemandTarget
@@ -597,6 +598,9 @@ const api = {
     openKeyMaterial: (): Promise<{ path: string; material: string | null } | null> =>
       ipcRenderer.invoke('dialog:openKeyMaterial'),
     openUpload: (): Promise<string[] | null> => ipcRenderer.invoke('dialog:openUpload'),
+    /** A folder for downloads. Main remembers it; sftp.download refuses any
+     *  folder that did not come back from this picker. */
+    pickDownloadFolder: (): Promise<string | null> => ipcRenderer.invoke('dialog:pickDownloadFolder'),
     saveJson: (suggestedName: string, contents: string): Promise<boolean> =>
       ipcRenderer.invoke('dialog:saveJson', suggestedName, contents),
     openJson: (): Promise<string | null> => ipcRenderer.invoke('dialog:openJson'),
@@ -952,8 +956,18 @@ const api = {
       ipcRenderer.invoke('sftp:rename', key, from, to),
     remove: (key: string, path: string, dir: boolean): Promise<SftpResult> =>
       ipcRenderer.invoke('sftp:delete', key, path, dir),
-    upload: (key: string, localPaths: string[], remoteDir: string): Promise<SftpResult<SftpUploadSummary>> =>
-      ipcRenderer.invoke('sftp:upload', key, localPaths, remoteDir),
+    upload: (
+      key: string,
+      localPaths: string[],
+      remoteDir: string,
+      // Basenames the user agreed may be overwritten in place.
+      inPlace?: string[]
+    ): Promise<SftpResult<SftpUploadSummary>> => ipcRenderer.invoke('sftp:upload', key, localPaths, remoteDir, inPlace),
+    download: (key: string, remotePaths: string[], localDir: string): Promise<SftpResult<SftpDownloadSummary>> =>
+      ipcRenderer.invoke('sftp:download', key, remotePaths, localDir),
+    // Stops the running upload or download on this key. Queued ones are the
+    // view's, not main's.
+    cancel: (key: string): Promise<void> => ipcRenderer.invoke('sftp:cancel', key),
     // Dropped files only carry a path via webUtils; File.path was removed in
     // Electron 32.
     pathFor: (file: File): string => webUtils.getPathForFile(file),

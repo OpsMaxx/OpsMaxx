@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync, readFileSync, statSync } from 'node:fs'
+import { chmodSync, lstatSync, mkdtempSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync, readFileSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import type { WebContents } from 'electron'
@@ -8,6 +8,8 @@ import {
   localFilesConnect,
   localFilesDelete,
   localFilesDisconnect,
+  localFilesDownload,
+  localFilesCancel,
   localFilesList,
   localFilesMkdir,
   localFilesRead,
@@ -171,6 +173,132 @@ describe('copying files in', () => {
     expect(r.ok).toBe(false)
     expect(r.data?.uploaded).toEqual(['good.txt'])
     expect(r.data?.failed.map((f) => f.name)).toEqual(['missing.txt'])
+  })
+
+  /**
+   * Cancel stops a copy; it must not destroy the file being copied over.
+   *
+   * The destination used to be opened for writing at once, truncating it,
+   * and a cancel then removed it outright — so stopping a copy over a file
+   * the user had agreed to replace with a FINISHED one lost that file.
+   */
+  describe('cancelling a copy over an existing file', () => {
+    const big = (): string => {
+      const src = join(dir, 'big.bin')
+      writeFileSync(src, Buffer.alloc(5 * 1024 * 1024, 1))
+      mkdirSync(join(dir, 'dest'))
+      writeFileSync(join(dir, 'dest', 'big.bin'), 'precious')
+      return src
+    }
+
+    it('leaves it intact when the cancel lands mid-copy', async () => {
+      const src = big()
+      const send = vi.fn((_ch: string, p: { transferred: number }) => {
+        if (p.transferred > 0) localFilesCancel('k')
+      })
+      const sender = { isDestroyed: () => false, send } as unknown as WebContents
+      const r = await localFilesUpload(sender, 'k', [src], join(dir, 'dest'))
+      expect(r.data?.cancelled).toBe(true)
+      expect(readFileSync(join(dir, 'dest', 'big.bin'), 'utf8')).toBe('precious')
+      // And no temporary file is left beside it.
+      expect(readdirSync(join(dir, 'dest'))).toEqual(['big.bin'])
+    })
+
+    it('leaves it intact when the cancel lands before the copy opens anything', async () => {
+      const src = big()
+      const run = localFilesUpload(wc(), 'k', [src], join(dir, 'dest'))
+      localFilesCancel('k')
+      expect((await run).data?.cancelled).toBe(true)
+      expect(readFileSync(join(dir, 'dest', 'big.bin'), 'utf8')).toBe('precious')
+    })
+  })
+
+  it('refuses a second copy on the same key rather than orphaning the first', async () => {
+    const src = join(dir, 'a.txt')
+    writeFileSync(src, 'a')
+    mkdirSync(join(dir, 'dest'))
+    const first = localFilesUpload(wc(), 'k', [src], join(dir, 'dest'))
+    const second = await localFilesUpload(wc(), 'k', [src], join(dir, 'dest'))
+    expect(second.error).toMatch(/already running/)
+    expect((await first).ok).toBe(true)
+  })
+
+  // A name near the 255-byte limit saved fine directly; the temporary file
+  // it now goes through must not push it over.
+  it('copies a file whose name is close to the length limit', async () => {
+    const name = 'n'.repeat(240) + '.txt'
+    mkdirSync(join(dir, 'src'))
+    mkdirSync(join(dir, 'dest'))
+    const src = join(dir, 'src', name)
+    writeFileSync(src, 'long')
+    const up = await localFilesUpload(wc(), 'k', [src], join(dir, 'dest'))
+    expect(up.data?.uploaded).toEqual([name])
+    rmSync(join(dir, 'dest', name))
+    const down = await localFilesDownload(wc(), 'k', [src], join(dir, 'dest'))
+    expect(down.data?.saved).toEqual([name])
+    expect(readdirSync(join(dir, 'dest'))).toEqual([name])
+  })
+
+  // What the old in-place write kept of the file it replaced, and the temporary
+  // file plus rename must keep as well.
+  describe('keeping what the replaced file had', () => {
+    it('keeps its permissions', async () => {
+      mkdirSync(join(dir, 'dest'))
+      const dest = join(dir, 'dest', 'deploy.sh')
+      writeFileSync(dest, 'old', { mode: 0o755 })
+      chmodSync(dest, 0o755)
+      const src = join(dir, 'deploy.sh')
+      writeFileSync(src, 'new', { mode: 0o644 })
+      const r = await localFilesUpload(wc(), 'k', [src], join(dir, 'dest'))
+      expect(r.data?.uploaded).toEqual(['deploy.sh'])
+      expect(statSync(dest).mode & 0o777).toBe(0o755)
+      expect(readFileSync(dest, 'utf8')).toBe('new')
+    })
+
+    it('writes through a symlink instead of replacing it', async () => {
+      mkdirSync(join(dir, 'real'))
+      mkdirSync(join(dir, 'dest'))
+      writeFileSync(join(dir, 'real', 'site.conf'), 'old')
+      symlinkSync(join(dir, 'real', 'site.conf'), join(dir, 'dest', 'site.conf'))
+      const src = join(dir, 'site.conf')
+      writeFileSync(src, 'new')
+      const r = await localFilesUpload(wc(), 'k', [src], join(dir, 'dest'))
+      expect(r.data?.uploaded).toEqual(['site.conf'])
+      expect(lstatSync(join(dir, 'dest', 'site.conf')).isSymbolicLink()).toBe(true)
+      expect(readFileSync(join(dir, 'real', 'site.conf'), 'utf8')).toBe('new')
+    })
+
+    it('asks, then overwrites in place, when only the file is writable', async () => {
+      mkdirSync(join(dir, 'dest'))
+      const dest = join(dir, 'dest', 'app.conf')
+      writeFileSync(dest, 'old')
+      chmodSync(join(dir, 'dest'), 0o555)
+      const src = join(dir, 'app.conf')
+      writeFileSync(src, 'new')
+      try {
+        const r = await localFilesUpload(wc(), 'k', [src], join(dir, 'dest'))
+        expect(r.data?.needsInPlace).toEqual([{ name: 'app.conf', reason: 'dir' }])
+        expect(readFileSync(dest, 'utf8')).toBe('old')
+        const again = await localFilesUpload(wc(), 'k', [src], join(dir, 'dest'), ['app.conf'])
+        expect(again.data?.uploaded).toEqual(['app.conf'])
+        expect(readFileSync(dest, 'utf8')).toBe('new')
+      } finally {
+        chmodSync(join(dir, 'dest'), 0o755)
+      }
+    })
+  })
+
+  // Download from this machine is a copy into a picked folder, under the same
+  // rule as the SSH half: a file already there is never replaced.
+  it('downloads beside an existing file rather than over it', async () => {
+    const src = join(dir, 'notes.txt')
+    writeFileSync(src, 'new')
+    mkdirSync(join(dir, 'dest'))
+    writeFileSync(join(dir, 'dest', 'notes.txt'), 'mine')
+    const r = await localFilesDownload(wc(), 'k', [src], join(dir, 'dest'))
+    expect(r.data?.saved).toEqual(['notes (1).txt'])
+    expect(readFileSync(join(dir, 'dest', 'notes.txt'), 'utf8')).toBe('mine')
+    expect(readFileSync(join(dir, 'dest', 'notes (1).txt'), 'utf8')).toBe('new')
   })
 })
 

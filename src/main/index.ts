@@ -51,6 +51,8 @@ import {
   sftpRename,
   sftpDelete,
   sftpUpload,
+  sftpDownload,
+  sftpCancel,
   sftpDisconnect,
   sftpDisposeAll
 } from './services/sftp'
@@ -301,6 +303,9 @@ import {
   localFilesRead,
   localFilesRename,
   localFilesUpload,
+  localFilesDownload,
+  localFilesCancel,
+  refuseDownloadDir,
   setLocalFilesProtectedRoot,
   localFilesWrite
 } from './services/localFiles'
@@ -1024,6 +1029,31 @@ ipcMain.handle('dialog:openUpload', async () => {
   return result.canceled ? null : result.filePaths
 })
 
+/**
+ * Folders the user chose in the native picker this run, and the only places
+ * `sftp:download` will write.
+ *
+ * The renderer names the destination on every download call, so without this
+ * it could name any directory on the disk. Recording what the picker returned
+ * here, in main, means the path a download lands in is one a person chose in
+ * an OS dialog — never one the renderer, or the server whose file names it is
+ * displaying, made up.
+ */
+const downloadDirs = new Set<string>()
+
+ipcMain.handle('dialog:pickDownloadFolder', async () => {
+  if (!mainWindow) return null
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose a folder to save into',
+    buttonLabel: 'Save here',
+    properties: ['openDirectory', 'createDirectory']
+  })
+  const dir = result.canceled ? undefined : result.filePaths[0]
+  if (!dir) return null
+  downloadDirs.add(dir)
+  return dir
+})
+
 // ---- SSH ----
 
 // Multi-factor challenges are answered by the user, so the request is relayed
@@ -1524,11 +1554,24 @@ ipcMain.handle('sftp:rename', (_e, key: string, from: string, to: string) =>
 ipcMain.handle('sftp:delete', (_e, key: string, path: string, dir: boolean) =>
   isLocalFileSession(key) ? localFilesDelete(path, dir) : sftpDelete(key, path, dir)
 )
-ipcMain.handle('sftp:upload', (e, key: string, localPaths: string[], remoteDir: string) =>
+// `inPlace` names files the user agreed to overwrite directly, after an upload
+// reported it could not replace them with a new copy (see planUpload).
+ipcMain.handle('sftp:upload', (e, key: string, localPaths: string[], remoteDir: string, inPlace?: string[]) =>
   isLocalFileSession(key)
-    ? localFilesUpload(e.sender, key, localPaths, remoteDir)
-    : sftpUpload(e.sender, key, localPaths, remoteDir)
+    ? localFilesUpload(e.sender, key, localPaths, remoteDir, inPlace)
+    : sftpUpload(e.sender, key, localPaths, remoteDir, inPlace)
 )
+ipcMain.handle('sftp:download', (e, key: string, remotePaths: string[], localDir: string) => {
+  const refused = refuseDownloadDir(localDir, downloadDirs)
+  if (refused) return refused
+  return isLocalFileSession(key)
+    ? localFilesDownload(e.sender, key, remotePaths, localDir)
+    : sftpDownload(e.sender, key, remotePaths, localDir)
+})
+ipcMain.handle('sftp:cancel', (_e, key: string) => {
+  localFilesCancel(key)
+  sftpCancel(key)
+})
 ipcMain.handle('sftp:disconnect', (_e, key: string) => {
   localFilesDisconnect(key)
   sftpDisconnect(key)

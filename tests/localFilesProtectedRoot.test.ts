@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, symlinkSync } from 'n
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import {
-  localFilesRead, localFilesWrite, localFilesList, localFilesUpload, setLocalFilesProtectedRoot
+  localFilesRead, localFilesWrite, localFilesList, localFilesUpload, refuseDownloadDir, setLocalFilesProtectedRoot
 } from '../src/main/services/localFiles'
 import type { WebContents } from 'electron'
 
@@ -75,3 +75,46 @@ describe('protected data directory', () => {
     expect((await localFilesWrite(join(out, 'fine.txt'), 'ok')).ok).toBe(true)
   })
 })
+
+/**
+ * Where a download may land. The folder-picker check is the Files view's whole
+ * claim about downloads — "only a folder you chose" — so it is a function with
+ * tests rather than an inline line in an IPC handler that could be deleted
+ * with every test still green.
+ */
+describe('download destination', () => {
+  let root: string, out: string
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'PoCUserData-'))
+    out = mkdtempSync(join(tmpdir(), 'poc-out-'))
+    setLocalFilesProtectedRoot(root)
+  })
+  afterEach(() => {
+    setLocalFilesProtectedRoot(join(tmpdir(), 'nonexistent-poc-root'))
+    rmSync(root, { recursive: true, force: true }); rmSync(out, { recursive: true, force: true })
+  })
+
+  it('refuses a folder the picker did not return', () => {
+    expect(refuseDownloadDir(out, new Set())?.error).toMatch(/choose a folder/i)
+    // Exact match only: the renderer cannot dress a picked folder up.
+    expect(refuseDownloadDir(`${out}/`, new Set([out]))?.ok).toBe(false)
+    expect(refuseDownloadDir(join(out, '..'), new Set([out]))?.ok).toBe(false)
+  })
+
+  it('allows a folder the picker returned', () => {
+    expect(refuseDownloadDir(out, new Set([out]))).toBeNull()
+  })
+
+  it('refuses the app data directory even when it was picked', () => {
+    expect(refuseDownloadDir(root, new Set([root]))?.ok).toBe(false)
+    const inside = join(root, 'sub')
+    expect(refuseDownloadDir(inside, new Set([inside]))?.ok).toBe(false)
+  })
+
+  it('refuses a picked folder that is a link into the app data directory', () => {
+    const link = join(out, 'innocent')
+    symlinkSync(root, link)
+    expect(refuseDownloadDir(link, new Set([link]))?.ok).toBe(false)
+  })
+})
+
