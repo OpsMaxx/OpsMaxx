@@ -108,19 +108,19 @@ redirection targets, `cp`/`mv` sources and destinations, `dd if=`/`of=` — and 
 before the command runs. `cat /etc/shadow` is refused exactly as `read_file /etc/shadow` is, and
 `sudo` does not bypass it.
 
-The same check runs inside the command lines a command runs: `sh -c '…'` (and bash, zsh, dash and
-the rest), `su -c '…'`, `env -S '…'`, `$(…)` and backticks, up to three levels deep, and past the
-wrappers the escalation check steps over (`timeout`, `xargs`, `busybox`, `exec`, `pkexec`, `run0`,
-`runuser` and the rest). So `sh -c 'cat /etc/shadow'`, `sudo sh -c "cat /etc/shadow"` and
-`echo $(cat /etc/shadow)` are refused like `cat /etc/shadow`. These are exactly the strings the
-escalation check in docs/AI-SECURITY.md examines, so the two checks cannot disagree about what a
-command runs.
+The same check runs on every segment the escalation check walks (`walkCommand`, described in
+docs/AI-SECURITY.md): inside `sh -c '…'` and the other shells, `su -c`, `env -S`, `eval`,
+`watch`, `flock -c`, `script -c`, `$(…)` and backticks, up to three levels deep, and past shell
+grammar (`if … then`, `{ … }`), backslash-quoted command words and every wrapper and escalator it
+steps over (`timeout`, `xargs`, `busybox`, `pkexec`, `run0`, `systemd-run` and the rest). So
+`bash -c 'cat /etc/shadow'`, `timeout 5 cat /etc/shadow` and `echo $(cat /root/.ssh/id_rsa)` are
+refused like `cat /etc/shadow`, and the two checks cannot disagree about what a command runs.
 
 This is best-effort by design: only absolute paths and only recognised commands, because a
 relative operand cannot be matched against a pattern without knowing the remote working directory.
 What still gets through: a relative path after a `cd` (`cd /etc && cat shadow`,
 `cd /root/.ssh && cat id_rsa`), a glob (`cat /etc/sh*dow`), a path in a variable (`f=/etc/shadow;
-cat $f`), `eval`, a script file that reads the path, and a program that is not on the list of
+cat $f`), `eval` of a variable, a script file that reads the path, and a program that is not on the list of
 recognised file commands (`python3 -c 'open("/etc/shadow")'`). It closes the direct and wrapped
 forms and can only ever narrow a decision, never widen one; a file that must stay unread needs
 `readFiles`/`terminal` at ask or deny, or the host's own permissions.
@@ -458,8 +458,9 @@ call asks, they show **Approve once** alone, and they never read a remembered gr
   `trigger_run`, `cancel_run` and `rerun_run`;
 - `execute_command` for any command the classifier grades above ordinary, any command the
   policy recognises as running as another user (`classifyCommand`: `sudo`, `doas`, `su`,
-  `pkexec`, `run0`, `runuser`, `sudoedit` or `machinectl shell` as the command word of any
-  segment — see docs/AI-SECURITY.md), and, as a further raise, any command with the word
+  `pkexec`, `run0`, `runuser`, `systemd-run`, `sudoedit` or `machinectl shell` as the command word
+  of any segment — see docs/AI-SECURITY.md), any command whose command word is computed when it
+  runs (`$(which sudo) reboot`), and, as a further raise, any command with the word
   `sudo` anywhere in it. Those are also gated and audited as the `sudo` permission rather than
   `terminal`, so an "Execute terminal commands" grant never reaches them. A false positive only
   means being asked again;

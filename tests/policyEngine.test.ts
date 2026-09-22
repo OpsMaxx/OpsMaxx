@@ -330,9 +330,20 @@ describe('escalation anywhere in the command', () => {
     'systemctl status sudo',
     'echo "run sudo later"',
     'cmd 2>&1 | grep su',
-    'bash -c "echo sudo"'
+    'bash -c "echo sudo"',
+    'echo "use sudo"',
+    'man sudo',
+    'find / -name sudo',
+    'test -x /usr/bin/sudo',
+    'cat /etc/sudoers.d/90-cloud-init-users',
+    'watch -n 5 df -h',
+    'flock /tmp/lock ls',
+    'timeout 5 uptime',
+    'if true; then echo ok; fi',
+    '{ echo a; echo b; }',
+    'script --help'
   ])('leaves %s alone', (cmd) => {
-    expect(classifyCommand(cmd)).toEqual({ isSudo: false, isUnrestrictedShell: false })
+    expect(classifyCommand(cmd)).toEqual({ isSudo: false, isUnrestrictedShell: false, computedCommand: false })
     expect(evaluateCommand(noSudo, cmd).decision).toBe('allow')
   })
 
@@ -346,7 +357,7 @@ describe('escalation anywhere in the command', () => {
     ['su -', { isSudo: true, isUnrestrictedShell: true }],
     ['su - root', { isSudo: true, isUnrestrictedShell: true }]
   ])('still classifies %s as before, or stricter', (cmd, expected) => {
-    expect(classifyCommand(cmd)).toEqual(expected)
+    expect(classifyCommand(cmd)).toMatchObject(expected)
   })
 })
 
@@ -392,5 +403,101 @@ describe('path rules inside nested command lines', () => {
 
   it('reports a nested path once, with its mode', () => {
     expect(extractPathAccesses("sudo sh -c 'cat /etc/shadow'")).toEqual([{ path: '/etc/shadow', mode: 'read' }])
+  })
+})
+
+// Final-pass findings on the classifier: shell grammar, backslash quoting,
+// systemd-run, more wrappers, eval, and a command word computed at run time.
+describe('escalation behind grammar, quoting and more wrappers', () => {
+  const noSudo = group({ terminal: 'allow', sudo: 'deny' })
+  const withSudo = group({ terminal: 'allow', sudo: 'allow' })
+  const shadowDenied = group({ terminal: 'allow', sudo: 'allow', readFiles: 'allow', writeFiles: 'allow' }, [
+    { id: 'shadow', pattern: '/etc/shadow', read: 'deny', write: 'deny' },
+    { id: 'ssh', pattern: '/root/.ssh/**', read: 'deny', write: 'deny' }
+  ])
+
+  it.each([
+    'if true; then sudo reboot; fi',
+    'while true; do sudo reboot; done',
+    '{ sudo reboot; }',
+    '(sudo reboot)',
+    '! sudo reboot',
+    '\\sudo reboot',
+    'su\\do reboot',
+    'systemd-run reboot',
+    'systemd-run -p User=root reboot',
+    'setsid sudo reboot',
+    'unbuffer sudo reboot',
+    'watch -n 1 sudo reboot',
+    "watch 'sudo reboot'",
+    'flock /tmp/l sudo reboot',
+    "flock /tmp/l -c 'sudo reboot'",
+    'chrt 10 sudo reboot',
+    'taskset 0x3 sudo reboot',
+    "script -q -c 'sudo reboot' /dev/null",
+    'eval sudo reboot',
+    'eval "sudo reboot"'
+  ])('denies %s under sudo=deny', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('deny')
+  })
+
+  it.each(['systemd-run --pty bash', 'systemd-run', 'systemd-run -t', '{ sudo -i; }', 'eval sudo -i', '\\sudo -i'])(
+    'refuses the escalation shell %s even with sudo=allow',
+    (cmd) => {
+      expect(evaluateCommand(withSudo, cmd).decision).toBe('deny')
+    }
+  )
+
+  it.each(['su --help', 'pkexec --version', 'run0 --help', 'systemd-run --version'])(
+    '%s asks the tool about itself and is not a root shell',
+    (cmd) => {
+      expect(classifyCommand(cmd).isUnrestrictedShell).toBe(false)
+      expect(evaluateCommand(withSudo, cmd).decision).toBe('allow')
+    }
+  )
+
+  // Cannot be named, so cannot be graded: asked about, not refused.
+  it.each(['$(which sudo) reboot', '${SUDO:-sudo} reboot', '`which sudo` reboot', '$HOME/bin/tool --run'])(
+    'asks before running %s, whose command word is computed',
+    (cmd) => {
+      expect(classifyCommand(cmd).computedCommand).toBe(true)
+      expect(evaluateCommand(group({ terminal: 'allow', sudo: 'allow' }), cmd).decision).toBe('ask')
+    }
+  )
+
+  it('does not treat an argument that is a variable as a computed command', () => {
+    expect(classifyCommand('echo $HOME').computedCommand).toBe(false)
+    expect(evaluateCommand(noSudo, 'echo $HOME').decision).toBe('allow')
+  })
+
+  // The path rules read the same walk, so every one of these reaches them.
+  it.each([
+    "bash -c 'cat /etc/shadow'",
+    'timeout 5 cat /etc/shadow',
+    'echo $(cat /root/.ssh/id_rsa)',
+    'pkexec cat /etc/shadow',
+    'xargs cat /etc/shadow',
+    'if true; then cat /etc/shadow; fi',
+    '\\cat /etc/shadow',
+    'flock /tmp/l cat /etc/shadow',
+    "watch 'cat /etc/shadow'",
+    'eval cat /etc/shadow',
+    'systemd-run cat /etc/shadow'
+  ])('applies the /etc/shadow and /root/.ssh rules to %s', (cmd) => {
+    expect(evaluateCommand(shadowDenied, cmd).decision).toBe('deny')
+  })
+
+  // Decisions unchanged for commands with no absolute path, or an unrelated one.
+  it.each([
+    ['uptime', 'allow'],
+    ['df -h', 'allow'],
+    ['ls /tmp', 'allow'],
+    ['cat /etc/hostname', 'allow'],
+    ["sh -c 'ls /var/log'", 'allow'],
+    ['timeout 5 cat /etc/os-release', 'allow'],
+    ['echo $(date)', 'allow'],
+    ['grep -r shadow /var/log/syslog', 'allow']
+  ])('leaves %s at %s', (cmd, decision) => {
+    expect(evaluateCommand(shadowDenied, cmd).decision).toBe(decision)
   })
 })

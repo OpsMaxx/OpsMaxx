@@ -89,6 +89,12 @@ const UNRESTRICTED_SHELL_PATTERNS = [
 export interface CommandClassification {
   isSudo: boolean
   isUnrestrictedShell: boolean
+  /**
+   * Some segment's command word is computed when it runs -- `$(which sudo)`,
+   * `${SUDO:-sudo}`, a backtick -- so nothing here can say what it is.
+   * evaluateCommand turns an `allow` into an `ask` for it.
+   */
+  computedCommand: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -105,12 +111,23 @@ export interface CommandClassification {
 // and so did the escalation SHELLS this function exists to refuse whatever the
 // group says: `/usr/bin/sudo -i`, `env sudo -i`, `pkexec bash`, `su -c bash`.
 //
-// So each command segment is looked at, not the string: split on ; && || | &
-// and newlines; wrappers that run the rest of the line as a command (env,
-// command, exec, nohup, nice, timeout, xargs, busybox, ...) are stepped over
-// with their own options; the command word is reduced to its basename; and
-// the inside of `$(...)`, backticks, `sh -c '...'`, `su -c '...'` and
-// `env -S '...'` is examined the same way, to a small depth.
+// So each command segment is looked at, not the string. walkCommand is the
+// ONE place that decides what a command line runs, and both classifyCommand
+// and extractPathAccesses read its answer, so the escalation check and the
+// path rules can never disagree about it:
+//
+//   * the line is split on ; && || | & and newlines;
+//   * shell grammar in front of a command (`if`, `then`, `do`, `!`, `{`, `(`)
+//     is stepped over, and so are VAR=value assignments and the wrappers that
+//     run the rest of the line (env, command, exec, nohup, nice, timeout,
+//     xargs, busybox, setsid, watch, flock, ...) with their own options;
+//   * the command word is read the way the shell reads it -- backslashes
+//     removed (`\sudo`, `su\do`) and reduced to a basename;
+//   * escalators are stepped through to what they run, so `sudo env bash` is
+//     judged as bash run as root;
+//   * the inside of `$(...)`, backticks, `sh -c`, `su -c`, `env -S`,
+//     `flock -c`, `script -c`, `watch` and `eval` is walked the same way, to a
+//     depth of three.
 //
 // ESCALATION IS THE COMMAND WORD, NEVER AN ARGUMENT. `grep sudo auth.log`,
 // `echo sudo` and `ls su` mention a name; they do not run it. Treating every
@@ -119,19 +136,24 @@ export interface CommandClassification {
 // loosen the rule.
 //
 // BEST-EFFORT, AND ONLY EVER TIGHTER. A command string can always hide what it
-// runs (`$x`, `eval`, a script file), so this narrows the obvious forms -- the
-// ones a model actually emits -- and does not claim more. The old start-of-
-// string tests are still OR'd in, so nothing that was sudo or refused before
-// this is anything less now.
+// runs -- a variable in an argument, `perl -e`, a script file, `ssh localhost`
+// -- so this narrows the forms a model actually emits and does not claim more.
+// A command word that is itself computed (`$(which sudo) reboot`) cannot be
+// named at all, so it is reported for evaluateCommand to ask about. The old
+// start-of-string tests are still OR'd in: nothing that was sudo or refused
+// before this is anything less now.
 //
 // Only the MCP bridge calls this, through evaluateCommand. OpsMaxx's own
 // `sudo -n` privileged reads never pass through it.
 
 /** Names that run the rest of the line as another user. */
-const ESCALATORS = new Set(['sudo', 'doas', 'su', 'pkexec', 'run0', 'runuser'])
+const ESCALATORS = new Set(['sudo', 'doas', 'su', 'pkexec', 'run0', 'runuser', 'systemd-run'])
 
 /** Shells: with no `-c`, running one is an interactive shell. */
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'mksh', 'ash', 'fish', 'csh', 'tcsh'])
+
+/** Shell grammar that can stand in front of a command in the same segment. */
+const GRAMMAR = new Set(['!', '{', '(', 'if', 'then', 'do', 'else', 'elif', 'while', 'until'])
 
 /**
  * Wrappers that run the rest of the line as a command, and the short options
@@ -149,22 +171,45 @@ const RUNNERS: Record<string, Set<string>> = {
   stdbuf: new Set(['-i', '-o', '-e']),
   timeout: new Set(['-s', '-k']),
   xargs: new Set(['-a', '-d', '-E', '-I', '-L', '-n', '-P', '-s']),
-  busybox: new Set()
+  busybox: new Set(),
+  setsid: new Set(),
+  unbuffer: new Set(),
+  watch: new Set(['-n', '-q']),
+  flock: new Set(['-w', '-E', '-c']),
+  chrt: new Set(['-T', '-P', '-D']),
+  taskset: new Set()
+}
+
+/** Wrappers whose first operand is not the command: a duration, a lock, a priority, a mask. */
+const RUNNER_OPERAND = new Set(['timeout', 'flock', 'chrt', 'taskset'])
+
+/** Wrapper options whose value is a whole command line of its own. */
+const RUNNER_COMMAND_FLAGS: Record<string, Set<string>> = {
+  env: new Set(['-S', '--split-string']),
+  flock: new Set(['-c', '--command'])
 }
 
 /** Short options of the escalators that consume the next word. */
+const RUN0_VALUE_FLAGS = [
+  '-u', '-g', '-D', '-p', '-E', '-M', '-H', '--user', '--group', '--chdir', '--unit', '--property',
+  '--setenv', '--slice', '--description', '--nice', '--machine', '--host', '--uid', '--gid'
+]
 const ESCALATOR_VALUE_FLAGS: Record<string, Set<string>> = {
   sudo: new Set(['-u', '-g', '-C', '-D', '-h', '-p', '-r', '-t', '-U', '-R', '-T']),
   doas: new Set(['-u', '-C']),
   pkexec: new Set(['--user']),
-  run0: new Set(['-u', '-g', '-D', '--user', '--group', '--chdir', '--unit', '--property', '--setenv', '--slice', '--description', '--nice', '--machine']),
+  run0: new Set(RUN0_VALUE_FLAGS),
+  'systemd-run': new Set(RUN0_VALUE_FLAGS),
   su: new Set(['-c', '-s', '-g', '-G', '-w', '--command', '--shell', '--group', '--supp-group', '--session-command', '--whitelist-environment']),
   runuser: new Set(['-c', '-s', '-g', '-G', '-u', '-w', '--command', '--shell', '--group', '--supp-group', '--user', '--session-command', '--whitelist-environment'])
 }
 
 const MAX_DEPTH = 3
 const baseName = (t: string): string => t.split('/').pop() ?? t
+/** A token as the shell reads a command word: backslashes removed, then its basename. */
+const word = (t: string): string => baseName(t.replace(/\\(.)/g, '$1').replace(/\\$/, ''))
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
+const REDIRECTION = /(\d?>>?|<)\s*("[^"]*"|'[^']*'|\S+)/g
 
 /** Split a short-option cluster: `-Hiu` -> H, i, u (stopping at a value flag). */
 function shortLetters(token: string, valueFlags: Set<string>): { letters: string[]; takesNext: boolean } {
@@ -177,44 +222,56 @@ function shortLetters(token: string, valueFlags: Set<string>): { letters: string
   return { letters, takesNext: false }
 }
 
-/** Step over leading assignments and runner wrappers; null if what follows is not a run. */
+/**
+ * Step over grammar, assignments and runner wrappers; null if what follows is
+ * not a run at all (`command -v sudo`).
+ */
 function stripRunners(tokens: string[], nested: string[]): string[] | null {
   let t = tokens
   for (;;) {
-    while (t.length && ASSIGNMENT.test(t[0])) t = t.slice(1)
-    const name = t.length ? baseName(t[0]) : ''
+    for (;;) {
+      if (t.length && (GRAMMAR.has(t[0]) || ASSIGNMENT.test(t[0]))) t = t.slice(1)
+      // `(sudo reboot)`: the subshell paren is glued to the command word.
+      else if (t.length && /^\(+./.test(t[0])) t = [t[0].replace(/^\(+/, ''), ...t.slice(1)]
+      else break
+    }
+    const name = t.length ? word(t[0]) : ''
     const valueFlags = RUNNERS[name]
     if (!valueFlags) return t
     t = t.slice(1)
-    while (t.length && t[0].startsWith('-') && t[0] !== '-') {
-      const flag = t[0]
-      if (flag === '--') {
-        t = t.slice(1)
-        break
+    // Options, then (for some) one operand, then options again: flock takes
+    // `-c` after its lock file, `flock /tmp/l -c 'sudo reboot'`.
+    for (let round = 0; round < 2; round++) {
+      while (t.length && t[0].startsWith('-') && t[0] !== '-') {
+        const flag = t[0]
+        if (flag === '--') {
+          t = t.slice(1)
+          break
+        }
+        // `command -v sudo` asks where sudo is; it does not run it.
+        if (name === 'command' && /^-[a-zA-Z]*[vV]/.test(flag)) return null
+        // `env -S 'sudo -i'`, `flock -c 'sudo reboot'`: a command line of its own.
+        const eq = flag.indexOf('=')
+        const long = eq < 0 ? flag : flag.slice(0, eq)
+        if (RUNNER_COMMAND_FLAGS[name]?.has(long)) {
+          if (eq >= 0) {
+            nested.push(flag.slice(eq + 1))
+            t = t.slice(1)
+          } else {
+            if (t[1] !== undefined) nested.push(t[1])
+            t = t.slice(2)
+          }
+          continue
+        }
+        t = t.slice(valueFlags.has(flag) ? 2 : 1)
       }
-      // `command -v sudo` asks where sudo is; it does not run it.
-      if (name === 'command' && /^-[a-zA-Z]*[vV]/.test(flag)) return null
-      // `env -S 'sudo -i'` runs its argument as a command line.
-      if (name === 'env' && (flag === '-S' || flag === '--split-string')) {
-        if (t[1]) nested.push(t[1])
-        t = t.slice(2)
-        continue
-      }
-      if (name === 'env' && flag.startsWith('--split-string=')) {
-        nested.push(flag.slice('--split-string='.length))
-        t = t.slice(1)
-        continue
-      }
-      t = t.slice(valueFlags.has(flag) ? 2 : 1)
+      // `timeout 5 cmd`, `flock /tmp/l cmd`, `chrt 10 cmd`, `taskset 0x3 cmd`.
+      if (round === 0 && RUNNER_OPERAND.has(name) && t.length) t = t.slice(1)
+      else break
     }
-    // `timeout 5 cmd`: the duration is an operand, not the command.
-    if (name === 'timeout' && t.length && /^\d/.test(t[0])) t = t.slice(1)
+    // `watch 'sudo reboot'` hands its arguments to `sh -c`.
+    if (name === 'watch' && t.length) nested.push(t.join(' '))
   }
-}
-
-interface Found {
-  isSudo: boolean
-  isUnrestrictedShell: boolean
 }
 
 /**
@@ -231,7 +288,7 @@ function runsBareShell(line: string, depth = 0): boolean {
 }
 
 function isBareShell(argv: string[], depth = 0): boolean {
-  if (!SHELLS.has(baseName(argv[0]))) return false
+  if (!SHELLS.has(word(argv[0]))) return false
   const c = argv.indexOf('-c')
   if (c < 0) return true
   return depth < MAX_DEPTH && argv[c + 1] !== undefined && runsBareShell(argv[c + 1], depth + 1)
@@ -239,8 +296,10 @@ function isBareShell(argv: string[], depth = 0): boolean {
 
 /** What the escalator in `argv[0]` runs, and whether it is a shell. */
 function escalation(argv: string[], nested: string[]): { shell: boolean; target: string[] } {
-  const name = baseName(argv[0])
+  const name = word(argv[0])
   const valueFlags = ESCALATOR_VALUE_FLAGS[name] ?? new Set<string>()
+  // `su --help`, `pkexec --version`: asks the tool about itself, runs nothing.
+  if (argv.length === 2 && (argv[1] === '--help' || argv[1] === '--version')) return { shell: false, target: [] }
   // su and runuser take options AFTER the user name too (`su root -c id`), so
   // their whole line is read; the others stop at the first word they run.
   const suLike = name === 'su' || name === 'runuser'
@@ -290,53 +349,98 @@ function escalation(argv: string[], nested: string[]): { shell: boolean; target:
   // su, and runuser without `-u user -- cmd`: the result is that user's shell.
   if (name === 'su') return { shell: true, target: [] }
   if (name === 'runuser') return namedUser && target?.length ? { shell: false, target } : { shell: true, target: [] }
-  // pkexec and run0 with nothing to run start a root shell.
-  if (name === 'pkexec' || name === 'run0') return { shell: !target?.length, target: target ?? [] }
+  // pkexec, run0 and systemd-run with nothing to run start a shell.
+  if (name === 'pkexec' || name === 'run0' || name === 'systemd-run') {
+    return { shell: !target?.length, target: target ?? [] }
+  }
   return { shell: shellFlag, target: target ?? [] }
 }
 
-function classifySegment(tokens: string[], depth: number, out: Found, nested: string[]): void {
-  const argv = stripRunners(tokens, nested)
-  if (!argv || argv.length === 0) return
-  const name = baseName(argv[0])
-
-  if (name === 'machinectl' && argv[1] === 'shell') {
-    out.isSudo = true
-    // `machinectl shell [user@]host` with nothing after it is a shell.
-    const rest = argv.slice(2).filter((a) => !a.startsWith('-'))
-    if (rest.length <= 1) out.isUnrestrictedShell = true
-    else classifySegment(rest.slice(1), depth, out, nested)
-    return
-  }
-
-  // sudoedit edits its operands as root; they are files, not a command.
-  if (name === 'sudoedit') {
-    out.isSudo = true
-    return
-  }
-
-  if (ESCALATORS.has(name)) {
-    out.isSudo = true
-    const { shell, target } = escalation(argv, nested)
-    if (shell) out.isUnrestrictedShell = true
-    // `sudo su`, `sudo bash`, `doas env sudo -i`: what it runs is judged too.
-    if (target.length) {
-      const inner = stripRunners(target, nested)
-      if (inner?.length && isBareShell(inner)) out.isUnrestrictedShell = true
-      if (inner?.length && depth < MAX_DEPTH) classifySegment(inner, depth + 1, out, nested)
-    }
-    return
-  }
-
-  // `bash -c '...'`: the string is a command line of its own.
-  if (SHELLS.has(name)) {
-    const c = argv.indexOf('-c')
-    if (c >= 0 && argv[c + 1] !== undefined) nested.push(argv[c + 1])
-  }
+/** What one segment runs, once everything in front of the working command is stepped over. */
+interface SegmentFacts {
+  /** The segment as written, redirections included. */
+  segment: string
+  /** The first command after grammar, assignments and runners -- `sudo -i` for `env sudo -i`. */
+  head: string[]
+  /** Some escalator stood between the segment and the command it runs. */
+  escalated: boolean
+  /** ...and the result is an interactive shell as that user. */
+  shell: boolean
+  /** The working command's own word is computed when it runs. */
+  computed: boolean
+  /** The command that does the work: past runners AND escalators. Empty if none. */
+  argv: string[]
 }
 
-function classifyInto(command: string, depth: number, out: Found, lines?: string[]): void {
-  lines?.push(command)
+function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, 'segment'> {
+  const head = stripRunners(tokens, nested) ?? []
+  let t = head
+  let escalated = false
+  let shell = false
+  const done = (argv: string[]): Omit<SegmentFacts, 'segment'> => ({
+    head,
+    escalated,
+    shell,
+    computed: argv.length > 0 && /^[$`]/.test(argv[0]),
+    argv
+  })
+  // Bounded: every pass consumes at least the command word.
+  for (let pass = 0; pass <= MAX_DEPTH * 3; pass++) {
+    const argv = pass === 0 ? t : stripRunners(t, nested)
+    if (!argv?.length) return done([])
+    const name = word(argv[0])
+
+    // sudoedit edits its operands as root; they are files, not a command.
+    if (name === 'sudoedit') {
+      escalated = true
+      return done([])
+    }
+    // `machinectl shell [user@]host [cmd ...]`: bare, it is a shell.
+    if (name === 'machinectl' && argv[1] === 'shell') {
+      escalated = true
+      let i = 2
+      while (i < argv.length && argv[i].startsWith('-')) i++
+      const cmd = argv.slice(i + 1)
+      if (!cmd.length) {
+        shell = true
+        return done([])
+      }
+      t = cmd
+      continue
+    }
+    if (ESCALATORS.has(name)) {
+      escalated = true
+      const e = escalation(argv, nested)
+      if (e.shell) shell = true
+      if (!e.target.length) return done([])
+      t = e.target
+      continue
+    }
+
+    // The working command. Some of them run a command line of their own.
+    if (SHELLS.has(name)) {
+      const c = argv.indexOf('-c')
+      if (c >= 0 && argv[c + 1] !== undefined) nested.push(argv[c + 1])
+      if (escalated && isBareShell(argv)) shell = true
+    }
+    if (name === 'eval' && argv.length > 1) nested.push(argv.slice(1).join(' '))
+    if (name === 'script') {
+      argv.forEach((a, i) => {
+        if ((a === '-c' || a === '--command') && argv[i + 1] !== undefined) nested.push(argv[i + 1])
+        if (a.startsWith('--command=')) nested.push(a.slice('--command='.length))
+      })
+    }
+    return done(argv)
+  }
+  return done([])
+}
+
+/**
+ * Every segment of a command line, and of every command line nested inside it,
+ * with what each one runs. The single walk both the escalation check and the
+ * path rules read.
+ */
+function walkCommand(command: string, visit: (facts: SegmentFacts) => void, depth = 0): void {
   const nested: string[] = []
   // Command substitutions run whatever they hold, quoted or not. Innermost
   // `$(...)` only, which is enough for the forms anyone writes by hand.
@@ -344,56 +448,33 @@ function classifyInto(command: string, depth: number, out: Found, lines?: string
   for (const m of command.matchAll(/`([^`]*)`/g)) nested.push(m[1])
 
   for (const segment of splitSegments(command)) {
-    const tokens = tokenize(segment)
-    // The start-of-segment patterns, against the segment with its command
-    // word reduced to a basename: `/usr/bin/sudo -i` reads as `sudo -i`.
-    const argv = stripRunners(tokens, nested)
-    if (argv?.length) {
-      const normal = [baseName(argv[0]), ...argv.slice(1)].join(' ')
-      if (UNRESTRICTED_SHELL_PATTERNS.some((rx) => rx.test(normal))) out.isUnrestrictedShell = true
-    }
-    classifySegment(tokens, depth, out, nested)
+    // Redirection targets are files, never the command; the path rules read
+    // them off `segment` directly.
+    const tokens = tokenize(segment.replace(REDIRECTION, ' '))
+    visit({ segment, ...unwrapSegment(tokens, nested) })
   }
-  if (depth < MAX_DEPTH) for (const inner of nested) classifyInto(inner, depth + 1, out, lines)
-}
-
-/**
- * The command line itself, and every command line nested inside it that the
- * escalation walk examines: `sh -c '...'`, `su -c '...'`, `env -S '...'`,
- * `$(...)` and backticks, to the same depth. The path rules walk exactly the
- * strings the escalation check walks, so the two can never disagree about
- * what a command runs.
- */
-function commandLines(command: string): string[] {
-  const lines: string[] = []
-  classifyInto(command, 0, { isSudo: false, isUnrestrictedShell: false }, lines)
-  return lines
-}
-
-/**
- * Step over every runner and escalator in front of the command that does the
- * work: `timeout 5 cat`, `pkexec cat`, `xargs cat`, `busybox cat`, `sudo -u x
- * cat`. Bounded, because each pass removes at least one word.
- */
-function unwrapCommand(tokens: string[]): string[] {
-  let t = tokens
-  for (let pass = 0; pass <= MAX_DEPTH * 2 && t.length; pass++) {
-    const argv = stripRunners(t, [])
-    if (!argv?.length) return []
-    if (!ESCALATORS.has(baseName(argv[0]))) return argv
-    t = escalation(argv, []).target
-  }
-  return t
+  if (depth < MAX_DEPTH) for (const inner of nested) walkCommand(inner, visit, depth + 1)
 }
 
 export function classifyCommand(command: string): CommandClassification {
   const trimmed = command.trim()
-  const out: Found = {
+  const out: CommandClassification = {
     // The original start-of-string tests, kept so this can only get stricter.
     isSudo: /^sudo\b/.test(trimmed) || /^doas\b/.test(trimmed),
-    isUnrestrictedShell: UNRESTRICTED_SHELL_PATTERNS.some((rx) => rx.test(trimmed))
+    isUnrestrictedShell: UNRESTRICTED_SHELL_PATTERNS.some((rx) => rx.test(trimmed)),
+    computedCommand: false
   }
-  classifyInto(trimmed, 0, out)
+  walkCommand(trimmed, (f) => {
+    // The start-of-segment patterns, against the segment with its command
+    // word read as the shell reads it: `/usr/bin/sudo -i` reads as `sudo -i`.
+    if (f.head.length) {
+      const normal = [word(f.head[0]), ...f.head.slice(1)].join(' ')
+      if (UNRESTRICTED_SHELL_PATTERNS.some((rx) => rx.test(normal))) out.isUnrestrictedShell = true
+    }
+    if (f.escalated) out.isSudo = true
+    if (f.shell) out.isUnrestrictedShell = true
+    if (f.computed) out.computedCommand = true
+  })
   // A refused shell is an escalation too, whatever spelled it.
   if (out.isUnrestrictedShell) out.isSudo = true
   return out
@@ -626,39 +707,38 @@ function pathsFromArgv(tokens: string[], found: PathAccess[]): void {
 export function extractPathAccesses(command: string): PathAccess[] {
   const found: PathAccess[] = []
 
-  // Every command line the escalation walk examines, not only the outer one:
-  // `sh -c 'cat /etc/shadow'` and `echo $(cat /root/.ssh/id_rsa)` read the
-  // file exactly as `cat /etc/shadow` does, and used to reach no path rule.
-  for (const line of commandLines(command)) {
-    for (const segment of splitSegments(line)) {
-      // Redirections bind to the segment, not to any particular argv entry, and
-      // `> /etc/passwd` is a write however harmless the command in front of it.
-      for (const m of segment.matchAll(/(\d?>>?|<)\s*("[^"]*"|'[^']*'|\S+)/g)) {
-        const target = m[2].replace(/^["']|["']$/g, '')
-        if (isAbsolute(target)) found.push({ path: target, mode: m[1].includes('>') ? 'write' : 'read' })
-      }
-
-      const bare = tokenize(segment.replace(/(\d?>>?|<)\s*("[^"]*"|'[^']*'|\S+)/g, ' '))
-      let tokens = bare
-      while (tokens.length && PREFIXES.has(commandName(tokens[0]))) {
-        const wrapper = commandName(tokens[0])
-        const valueFlags = PREFIX_VALUE_FLAGS[wrapper] ?? new Set<string>()
-        tokens = tokens.slice(1)
-        while (tokens.length && tokens[0].startsWith('-')) {
-          const takesValue = valueFlags.has(tokens[0])
-          tokens = tokens.slice(takesValue ? 2 : 1)
-        }
-        // `env FOO=bar cmd` and `sudo FOO=bar cmd`
-        while (tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0])) tokens = tokens.slice(1)
-      }
-      pathsFromArgv(tokens, found)
-      // And again past the wider set of wrappers and escalators the
-      // escalation walk knows (timeout, xargs, busybox, exec, pkexec, run0,
-      // runuser). The first pass is kept as it was, so this can only add.
-      const unwrapped = unwrapCommand(bare)
-      if (unwrapped.join('\u0000') !== tokens.join('\u0000')) pathsFromArgv(unwrapped, found)
+  // Every segment walkCommand visits, not only the outer line's: `sh -c 'cat
+  // /etc/shadow'` and `echo $(cat /root/.ssh/id_rsa)` read the file exactly as
+  // `cat /etc/shadow` does, and used to reach no path rule. The same walk the
+  // escalation check reads, so the two cannot disagree about what runs.
+  walkCommand(command, ({ segment, argv }) => {
+    // Redirections bind to the segment, not to any particular argv entry, and
+    // `> /etc/passwd` is a write however harmless the command in front of it.
+    for (const m of segment.matchAll(REDIRECTION)) {
+      const target = m[2].replace(/^["']|["']$/g, '')
+      if (isAbsolute(target)) found.push({ path: target, mode: m[1].includes('>') ? 'write' : 'read' })
     }
-  }
+
+    // The original prefix stripping, kept as it was so nothing it found is
+    // lost...
+    let tokens = tokenize(segment.replace(REDIRECTION, ' '))
+    while (tokens.length && PREFIXES.has(commandName(tokens[0]))) {
+      const wrapper = commandName(tokens[0])
+      const valueFlags = PREFIX_VALUE_FLAGS[wrapper] ?? new Set<string>()
+      tokens = tokens.slice(1)
+      while (tokens.length && tokens[0].startsWith('-')) {
+        const takesValue = valueFlags.has(tokens[0])
+        tokens = tokens.slice(takesValue ? 2 : 1)
+      }
+      // `env FOO=bar cmd` and `sudo FOO=bar cmd`
+      while (tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0])) tokens = tokens.slice(1)
+    }
+    pathsFromArgv(tokens, found)
+    // ...and the walk's own answer, which also steps over grammar, the wider
+    // set of wrappers and every escalator (timeout, xargs, busybox, pkexec,
+    // run0, runuser, ...). Together they can only find more.
+    if (argv.join('\u0000') !== tokens.join('\u0000')) pathsFromArgv(argv, found)
+  })
 
   // One entry per path and mode, first occurrence first.
   const seen = new Set<string>()
@@ -676,7 +756,7 @@ export function evaluateCommand(group: AccessGroup | null, command: string): Dec
   const terminal = evaluateCapability(group, 'terminal')
   if (terminal.decision === 'deny') return { decision: 'deny', reason: 'Terminal access is denied for this access group.' }
 
-  const { isSudo, isUnrestrictedShell } = classifyCommand(command)
+  const { isSudo, isUnrestrictedShell, computedCommand } = classifyCommand(command)
   if (isUnrestrictedShell) {
     return {
       decision: 'deny',
@@ -702,6 +782,18 @@ export function evaluateCommand(group: AccessGroup | null, command: string): Dec
       terminal.decision === 'ask'
         ? { decision: 'ask', reason: 'Terminal commands require approval for this access group.' }
         : { decision: 'allow', reason: 'Allowed by access group.' }
+  }
+
+  // A command word computed when it runs -- `$(which sudo) reboot`,
+  // `${SUDO:-sudo} reboot` -- cannot be named here, so it cannot be graded:
+  // it might be sudo, and a group that denies sudo would never know. Asked
+  // about rather than refused, because `$HOME/bin/tool` is the same shape and
+  // usually harmless; a human can tell which one it is.
+  if (base.decision === 'allow' && computedCommand) {
+    base = {
+      decision: 'ask',
+      reason: 'Requires approval: the command it runs is computed when it runs, so OpsMaxx cannot tell what it is.'
+    }
   }
 
   // THE DANGEROUS FORM IS NEVER GRANTED SILENTLY, WHATEVER THE GROUP SAYS.

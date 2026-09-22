@@ -49,23 +49,45 @@ Regardless of which access group a session holds:
   to anything. Unrestricted root shells (`sudo -i`, `sudo su`, `sudo bash`, `pkexec bash`,
   `su -c bash`, bare `su`, `pkexec` or `run0`) are refused whatever the access group says.
 
-  **How a command is recognised as running as another user** (`classifyCommand`,
-  `policyEngine.ts`). It is the command WORD that counts, in every segment of the line, not the
-  first word of the string: the line is split on `;`, `&&`, `||`, `|`, `&` and newlines, and the
-  insides of `$(...)`, backticks, `sh -c '...'`, `su -c '...'` and `env -S '...'` are examined the
-  same way, to a depth of three. In each segment, leading `VAR=value` assignments and the wrappers
-  `env`, `command`, `exec`, `builtin`, `nohup`, `time`, `nice`, `ionice`, `stdbuf`, `timeout`,
-  `xargs` and `busybox` (with their options) are stepped over, and a path is reduced to its
-  basename. If what is left is `sudo`, `doas`, `su`, `pkexec`, `run0`, `runuser`, `sudoedit` or
-  `machinectl shell`, the command is governed by the **Sudo** capability. So `/usr/bin/sudo
-  reboot`, `env sudo reboot`, `true; sudo reboot` and `su -c "rm -rf /x"` are all sudo, and a
-  group that denies sudo denies them. A name in argument position is not a run: `grep sudo
-  /var/log/auth.log`, `echo sudo` and `command -v sudo` are ordinary commands.
+  **How a command is recognised as running as another user** (`classifyCommand`, built on
+  `walkCommand`, `policyEngine.ts`). It is the command WORD that counts, in every segment of the
+  line, not the first word of the string:
 
-  This is best-effort, and says so: a command string can always hide what it runs (`$cmd`,
-  `eval`, a script file). It closes the direct forms, and it only ever tightens — the older
-  start-of-string tests are still applied as well. OpsMaxx's own `sudo -n` privileged reads do
-  not pass through it; only the MCP bridge's `execute_command` does.
+  - the line is split on `;`, `&&`, `||`, `|`, `&` and newlines;
+  - shell grammar in front of a command (`if`, `then`, `do`, `else`, `elif`, `while`, `until`,
+    `!`, `{`, `(`) and leading `VAR=value` assignments are stepped over;
+  - so are the wrappers `env`, `command`, `exec`, `builtin`, `nohup`, `time`, `nice`, `ionice`,
+    `stdbuf`, `timeout`, `xargs`, `busybox`, `setsid`, `unbuffer`, `watch`, `flock`, `chrt` and
+    `taskset`, with their options and, for `timeout`, `flock`, `chrt` and `taskset`, their one
+    operand;
+  - the command word is read the way the shell reads it: backslashes removed (`\sudo`, `su\do`)
+    and a path reduced to its basename;
+  - the insides of `$(...)`, backticks, `sh -c` (and the other shells), `su -c`, `env -S`,
+    `flock -c`, `script -c`, `watch` and `eval` are walked the same way, to a depth of three.
+
+  If the command word is `sudo`, `doas`, `su`, `pkexec`, `run0`, `runuser`, `systemd-run`,
+  `sudoedit` or `machinectl shell`, the command is governed by the **Sudo** capability, and what it
+  runs is judged too — `sudo env bash` is a root shell. So `/usr/bin/sudo reboot`, `env sudo
+  reboot`, `if true; then sudo reboot; fi`, `\sudo reboot`, `eval sudo reboot` and `su -c "rm -rf
+  /x"` are all sudo, and a group that denies sudo denies them. A name in argument position is not a
+  run: `grep sudo /var/log/auth.log`, `echo sudo`, `man sudo`, `command -v sudo` and `systemctl
+  status sudo` are ordinary commands.
+
+  A command word that is itself computed when it runs — `$(which sudo) reboot`, `${SUDO:-sudo}
+  reboot`, `$HOME/bin/tool` — cannot be named, so a group that would allow it is asked instead,
+  and `execute_command` never lets a remembered approval cover it.
+
+  The path rules read the same walk (`extractPathAccesses`), so `bash -c 'cat /etc/shadow'`,
+  `timeout 5 cat /etc/shadow` and `echo $(cat /root/.ssh/id_rsa)` meet the `/etc/shadow` and
+  `/root/.ssh/**` rules exactly as `cat /etc/shadow` does.
+
+  **What remains best-effort.** A command string can still hide what it runs, and this does not
+  claim otherwise: a variable in an argument (`f=/etc/shadow; cat $f`), a relative path after
+  `cd`, a glob, an interpreter's own code (`perl -e`, `python3 -c`), a script file, `ssh
+  localhost '…'`, and programs that are not recognised file commands. It closes the forms a model
+  actually emits, and it only ever tightens — the older start-of-string tests are still applied as
+  well. OpsMaxx's own `sudo -n` privileged reads do not pass through it; only the MCP bridge's
+  `execute_command` does.
 - **A server's real hostname, IP, port or username.** Every tool that names a server takes and
   returns a friendly name (e.g. "Production API"); `get_server_details` returns OS, access group
   and effective permissions, never connection details.

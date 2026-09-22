@@ -811,9 +811,10 @@ function countSessionActions(sessionId: string): number | null {
 
 /**
  * Does this command run as another user? ONE detector, the policy's own:
- * classifyCommand finds sudo, doas, su, pkexec, run0, runuser, sudoedit and
- * `machinectl shell` as the command word of any segment, behind wrappers and
- * inside `$(...)`, backticks and `sh -c` strings. What the policy allows is
+ * classifyCommand finds sudo, doas, su, pkexec, run0, runuser, systemd-run,
+ * sudoedit and `machinectl shell` as the command word of any segment, behind
+ * grammar, wrappers and backslashes and inside `$(...)`, backticks, `sh -c`
+ * and `eval` strings. What the policy allows is
  * still effectiveCommand's decision; this only decides the capability a
  * command is labelled, prompted and audited under, and makes it per-call.
  *
@@ -2036,7 +2037,10 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       // command somewhere and this is not the change to discover that in.
       const assessed = assessCommand(command)
       const runsAsRoot = runsAsAnotherUser(command)
-      const elevated = check.decision === 'deny' || assessed.risk !== 'ordinary' || runsAsRoot
+      // A command word computed at run time (`$(which sudo) reboot`) may be
+      // anything, sudo included, so it is never covered by a remembered yes.
+      const computed = classifyCommand(command).computedCommand
+      const elevated = check.decision === 'deny' || assessed.risk !== 'ordinary' || runsAsRoot || computed
       // The reason names the rule that fired, in that order, because that is
       // the order the OR above evaluates -- and assessCommand already returns
       // the sentence for its own rule, so this quotes it rather than writing a
@@ -2044,7 +2048,9 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const because = !elevated
         ? 'it runs a shell command of the agent\u2019s own composition on the host'
         : runsAsRoot
-          ? 'the command runs as another user, most likely root (sudo, su, doas, pkexec, run0 or runuser)'
+          ? 'the command runs as another user, most likely root (sudo, su, doas, pkexec, run0, runuser or systemd-run)'
+          : computed
+            ? 'the command it runs is computed when it runs, so OpsMaxx cannot tell what it is'
           : assessed.reasons[0]
             ? `OpsMaxx\u2019s command classifier graded it ${assessed.risk}: ${assessed.reasons[0]}`
             : `OpsMaxx\u2019s command classifier graded it ${assessed.risk}`
