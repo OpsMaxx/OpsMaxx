@@ -44,6 +44,26 @@ export function auditOutcome(e: Pick<AuditEntry, 'approval' | 'result' | 'exitCo
     return { label: 'Denied', decidedBy: 'you', tone: 'danger', detail: 'You refused this request.' }
   }
 
+  // Refused by the policy itself, before anything was asked or allowed.
+  //
+  // gate() writes these as `not-required` + `denied`: no approval was needed
+  // because there was nothing to approve. They fell through to the branch
+  // below and read "Allowed, then blocked -- the access group allowed this
+  // outright", which is the opposite of what happened, on exactly the rows an
+  // incident review reads first: a terminal the group denies, the /etc/shadow
+  // rule, a server on No AI Access. The rule that refused it is the row's
+  // `error`, and the sentence names it.
+  if (e.result === 'denied' && (e.approval === 'not-required' || e.approval === undefined)) {
+    return {
+      label: 'Blocked by policy',
+      decidedBy: 'policy',
+      tone: 'danger',
+      detail: e.error
+        ? `The access group refused this: ${e.error} Nothing was asked.`
+        : 'The access group refused this. Nothing was asked.'
+    }
+  }
+
   // Approved, or never needed approval. What matters now is what happened.
   //
   // `approved-earlier` used to fall into the policy branch and read "the access
@@ -74,9 +94,9 @@ export function auditOutcome(e: Pick<AuditEntry, 'approval' | 'result' | 'exitCo
           : 'The access group allowed this outright, so nothing was asked.'
 
   if (e.result === 'denied') {
-    // Approval said yes and something downstream still said no — a path rule,
-    // or a capability the group does not grant. Collapsing this into "denied"
-    // would lose exactly the distinction an incident review needs.
+    // Approval said yes and something downstream still said no. Only a row
+    // with a human approval reaches here -- a policy refusal returned above --
+    // so "then" is always true of it.
     return {
       label: `${prefix}, then blocked`,
       decidedBy: who,

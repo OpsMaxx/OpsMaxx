@@ -498,7 +498,10 @@ once it is answered. A write carried on a session approval shows no preview, bec
 ![Audit Log showing agent, workspace/server, action and result](images/ai-audit-log.png)
 
 Every gated action — allowed outright, approved, denied, or failed — is appended to
-`opsmaxx-ai-audit.jsonl` (`auditLog.ts`) as one JSON object per line, **append-only** (a crash
+`opsmaxx-ai-audit.jsonl` (`auditLog.ts`) as exactly one JSON object per call, including a call
+whose connection fails after it was allowed (`tests/auditOneRowPerCall.integration.test.ts`). A
+refusal by the policy itself is shown as **Blocked by policy** with the rule that refused it, never
+as allowed. Rows are written one per line, **append-only** (a crash
 mid-write can corrupt at most the last line). Every free-text field (`action`, `error`) is passed
 through the same redaction (`secretRedaction.ts`) used for tool output before it's written, so the
 audit trail itself never becomes a place secrets end up.

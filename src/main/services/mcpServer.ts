@@ -1034,6 +1034,19 @@ async function gate(
  */
 type GateApproval = 'not-required' | 'approved' | 'approved-for-session' | 'approved-earlier'
 
+/**
+ * The row for a call that got past gate() and then failed.
+ *
+ * EVERY GATED CALL LEAVES EXACTLY ONE ROW. Several tools returned early after
+ * the gate -- an SFTP connection that would not open, a reader that is not
+ * running on this machine -- with no row at all, so the audit log showed four
+ * rows for five calls and the missing one was the call that went wrong.
+ * tests/auditOneRowPerCall.integration.test.ts holds every tool to it.
+ */
+function auditError(ctx: AuditContext, approval: GateApproval, error: string): void {
+  recordAudit({ ...auditBase(ctx), approval, result: 'error', error })
+}
+
 function auditSuccess(ctx: AuditContext, approval: GateApproval, extra: { exitCode?: number } = {}): void {
   recordAudit({
     agentName: ctx.session.agentName,
@@ -2157,7 +2170,10 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const cfg = resolveChainSecrets(serverToSshConfig(s))
       const key = `mcp:${s.id}`
       const conn = await sftpConnect(key, cfg)
-      if (!conn.ok) return errorText(`Could not connect: ${conn.error}`)
+      if (!conn.ok) {
+        auditError(ctx, gated.approval, `could not connect: ${conn.error}`)
+        return errorText(`Could not connect: ${conn.error}`)
+      }
       const result = await sftpRead(key, path)
       sftpDisconnect(key)
       if (!result.ok) {
@@ -2221,7 +2237,10 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const cfg = resolveChainSecrets(serverToSshConfig(s))
       const key = `mcp:${s.id}`
       const conn = await sftpConnect(key, cfg)
-      if (!conn.ok) return errorText(`Could not connect: ${conn.error}`)
+      if (!conn.ok) {
+        auditError(ctx, gated.approval, `could not connect: ${conn.error}`)
+        return errorText(`Could not connect: ${conn.error}`)
+      }
       const result = await sftpWrite(key, path, content)
       sftpDisconnect(key)
       if (!result.ok) {
@@ -2279,7 +2298,10 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const cfg = resolveChainSecrets(serverToSshConfig(s))
       const key = `mcp:${s.id}`
       const conn = await sftpConnect(key, cfg)
-      if (!conn.ok) return errorText(`Could not connect: ${conn.error}`)
+      if (!conn.ok) {
+        auditError(ctx, gated.approval, `could not connect: ${conn.error}`)
+        return errorText(`Could not connect: ${conn.error}`)
+      }
       const result = await sftpList(key, path)
       sftpDisconnect(key)
       if (!result.ok) {
@@ -2355,6 +2377,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       // sentences and neither is "usage is fine".
       const report = capacityReader?.(s.id, windowDays ?? 7) ?? null
       if (report === null) {
+        auditError(ctx, gated.approval, 'history is not being recorded on this machine')
         return errorText(
           'OpsMaxx is not recording history on this machine, so there is nothing to forecast from. This does not mean the server has spare capacity.'
         )
@@ -2869,7 +2892,10 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           return text(`Stopped "${tunnel.name}".`)
         }
         const server = tunnel.serverId ? getCachedServer(tunnel.serverId) : null
-        if (!server) return errorText(`"${tunnel.name}" has no SSH server configured to carry it.`)
+        if (!server) {
+          auditError(ctx, approval, 'no SSH server is configured to carry this tunnel')
+          return errorText(`"${tunnel.name}" has no SSH server configured to carry it.`)
+        }
         // No renderer asked for this one, so there is nowhere to push status
         // events; the tunnel manager reads live state when it next renders.
         const result = await tunnelStart(
@@ -4147,13 +4173,17 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!gated.ok) return gated.result
 
       if (!fleetReader) {
+        auditError(ctx, gated.approval, 'the fleet is not being sampled on this machine')
         return errorText(
           'OpsMaxx is not sampling this fleet, so there is nothing collected to report. ' +
             'This does not mean the servers are healthy.'
         )
       }
       const servers = listCachedServers(permitted.map((w) => w.id))
-      if (servers.length === 0) return text('No servers in this workspace.')
+      if (servers.length === 0) {
+        auditSuccess(ctx, gated.approval)
+        return text('No servers in this workspace.')
+      }
 
       const rows = servers.map((srv) => {
         const facts = fleetReader!.factsFor(srv.id)
@@ -4358,10 +4388,12 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!gated.ok) return gated.result
 
       if (!backupReader) {
+        auditError(ctx, gated.approval, 'backup configuration cannot be read on this machine')
         return errorText('OpsMaxx cannot read backup configuration on this machine.')
       }
       const { destinations, alarms } = backupReader()
       if (destinations.length === 0) {
+        auditSuccess(ctx, gated.approval)
         // Said plainly. "No destinations" reads as a clean bill of health if it
         // is reported as an empty list of problems.
         return text('NO BACKUP DESTINATIONS ARE CONFIGURED. Nothing on this machine is being backed up.')
@@ -4514,6 +4546,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!gated.ok) return gated.result
 
       if (!alertReader) {
+        auditError(ctx, gated.approval, 'history is not being recorded on this machine')
         return errorText(
           'OpsMaxx is not recording history on this machine, so there are no alerts to read. ' +
             'This does not mean nothing has gone wrong.'
@@ -4523,9 +4556,9 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       // machine-wide and a session is not.
       const visible = new Set(listCachedServers(permitted.map((w) => w.id)).map((srv) => srv.id))
       const rows = alertReader(Math.min(200, (limit ?? 50) * 4)).filter((r) => visible.has(r.serverId))
+      auditSuccess(ctx, gated.approval)
       if (rows.length === 0) return text('No alerts have fired for the servers in this workspace.')
       const shown = rows.slice(0, limit ?? 50)
-      auditSuccess(ctx, gated.approval)
       return text(
         `${shown.length} alert(s), newest first:\n\n` +
           shown
@@ -4802,6 +4835,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!gated.ok) return gated.result
 
       if (!fleetReader) {
+        auditError(ctx, gated.approval, 'the fleet is not being sampled on this machine')
         return errorText(
           'OpsMaxx is not sampling this fleet, so there is no baseline to compare against. ' +
             'This does not mean nothing has changed.'
@@ -4810,6 +4844,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const reading = fleetReader.driftFor(s.id)
       const drift = reading.drift as { at?: number; readings?: { watchId: string; status: string; detail?: string }[] } | undefined
       if (!drift) {
+        auditSuccess(ctx, gated.approval)
         // "Never sampled" is not "unchanged", and reporting it as a clean bill
         // of health is the failure this whole file keeps guarding against.
         return text(
@@ -4903,13 +4938,17 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!gated.ok) return gated.result
 
       if (!fleetReader) {
+        auditError(ctx, gated.approval, 'the fleet is not being sampled on this machine')
         return errorText(
           'OpsMaxx is not sampling this fleet, so there is no baseline to compare against. ' +
             'This does not mean nothing has changed.'
         )
       }
       const servers = listCachedServers(permitted.map((w) => w.id))
-      if (servers.length === 0) return text('No servers in this workspace.')
+      if (servers.length === 0) {
+        auditSuccess(ctx, gated.approval)
+        return text('No servers in this workspace.')
+      }
 
       const drifted: string[] = []
       const matching: string[] = []

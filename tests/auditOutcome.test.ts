@@ -136,3 +136,30 @@ describe('approvals that reach past one call', () => {
     expect(o.detail).toMatch(/rest of the session/)
   })
 })
+
+// gate() writes a refusal by the policy itself as `not-required` + `denied`:
+// nothing was asked because there was nothing to approve. It used to read
+// "Allowed, then blocked -- the access group allowed this outright".
+describe('a refusal by the policy', () => {
+  const refused = e({
+    approval: 'not-required',
+    result: 'denied',
+    error: 'Path rule "/etc/shadow" (read) = deny'
+  })
+
+  it('is labelled as blocked by policy, never as allowed', () => {
+    const o = auditOutcome(refused)
+    expect(o.label).toBe('Blocked by policy')
+    expect(o.decidedBy).toBe('policy')
+    expect(o.label).not.toMatch(/allowed/i)
+    expect(o.detail).not.toMatch(/allowed this outright/)
+  })
+
+  it('names the rule that refused it', () => {
+    expect(auditOutcome(refused).detail).toContain('Path rule "/etc/shadow" (read) = deny')
+  })
+
+  it('keeps "then blocked" for a row a human approved first', () => {
+    expect(auditOutcome(e({ approval: 'approved', result: 'denied' })).label).toBe('Approved, then blocked')
+  })
+})
