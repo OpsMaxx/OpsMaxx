@@ -250,14 +250,18 @@ export function setupTerminalUX(
  *
  * Two properties this hook exists to preserve, both load-bearing:
  *
- *  - the xterm instance outlives the session. It is built once per transport
- *    and torn down only when the transport changes, so a reconnect keeps the
+ *  - the xterm instance outlives the session. It is built once per PANE and
+ *    torn down only when the pane changes, so a reconnect keeps the
  *    scrollback — usually the thing you most want to read after a drop.
  *  - a reconnect is a `generation` bump, which re-runs exactly the same code
  *    path as the first connect rather than a second, subtly different one.
  *
- * Both effects therefore key on `transport.key`, never on the transport
- * object, which is rebuilt on every render of the component above.
+ * So the two effects key on two different strings, never on the transport
+ * object, which is rebuilt on every render of the component above: the
+ * session on `transport.key`, which carries the saved record's revision, and
+ * the terminal on `transport.paneKey`, which does not. Editing a server has
+ * to redial without costing the user the scrollback of the pane they were
+ * reading.
  */
 export function useTerminalSession(
   transport: TerminalTransport,
@@ -336,8 +340,16 @@ export function useTerminalSession(
   // without it.
   const [online, setOnline] = useState(false)
 
-  // The terminal is built once per transport. Rebuilding it on a reconnect
-  // would throw away the scrollback, so it deliberately outlives the session.
+  // Identity of the PANE, which is deliberately not `transport.key`.
+  //
+  // `key` carries the saved record's revision so that editing a server
+  // redials. Keying the terminal on it too meant an edit also DISPOSED the
+  // xterm, and a password rotation silently took the scrollback with it. The
+  // session is what an edit invalidates; the pane is not.
+  const paneKey = transport.paneKey ?? transport.key
+
+  // The terminal is built once per pane. Rebuilding it on a reconnect would
+  // throw away the scrollback, so it deliberately outlives the session.
   useEffect(() => {
     if (!hostRef.current) return
     const { term, fit, search } = createTerm(
@@ -479,7 +491,7 @@ export function useTerminalSession(
       term.dispose()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transport.key])
+  }, [paneKey])
 
   // The session, which can be torn down and rebuilt under the same terminal.
   // Bumping `generation` reconnects.

@@ -22,11 +22,21 @@ Shipping a version touches more than this repo. Pushing a `v*` tag starts it:
 | Installers, scans, notes | `.github/workflows/release.yml` | **Yes** — on tag push |
 | opsmaxx.dev download links | `OpsMaxx/opsmaxx.dev` | **Yes** — deploy hook, then daily cron |
 | Homebrew cask | `OpsMaxx/homebrew-tap` | **Yes** — dispatch on release, then daily cron |
-| winget manifest | `packaging/winget/` here | **No** — hand-written PR each version |
 | `@opsmaxx/mcp` on npm | `OpsMaxx/opsmaxx-mcp` | **No** — but only when the bridge changes |
 | MCP registry entry | `OpsMaxx/opsmaxx-mcp` `server.json` | **No** — follows an npm publish |
 
-So a routine release is: **tag, then open the winget PR.** Everything else lands on its own.
+So a routine release is: **tag, and nothing else.** The three automated surfaces
+land on their own, and the npm package is only republished when the bridge itself
+changes — which a version bump here is not.
+
+**winget is not pursued, and re-adding it is not a favour.** `packaging/winget/`
+and the PR to `microsoft/winget-pkgs` were the one manual step here, and they are
+retired: PR #433909 passed validation on 2026-09-18 with nothing left on our side,
+and no maintainer has touched it since. Writing a manifest per release only ever
+prepared a PR that cannot be opened — the `New-Package` PR has to merge before any
+version bump can. Do not write or validate a manifest, do not open or update a PR
+there, and do not offer it as a next step after a tag. If it is ever revived, the
+manifest traps are still in `packaging/winget/README.md`.
 
 ### What the release workflow does
 
@@ -81,9 +91,6 @@ ask the resolver rather than assume a relative path.
 - **`tests/releaseWorkflow.test.ts` ratchets the release job.** Every inline `run` step
   must be listed in `CEILING` with a line limit. Adding a step without registering it
   turns `main` red.
-- **winget calls NSIS `nullsoft`**, not `nsis`. `ReleaseDate` must be quoted or a YAML
-  parser hands the schema a date object. `Scope: user`, because `nsis.perMachine` is
-  `false`. Validate against the published v1.6.0 JSON schemas before opening a PR.
 - **Homebrew's main cask repo has a notability threshold** (~75 stars) this project does
   not meet, hence the own tap. Third-party taps also need `brew trust` before they load —
   say so in any install instructions.

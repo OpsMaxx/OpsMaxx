@@ -9,10 +9,23 @@ import { buildDockerShellCommand } from '../../../shared/docker'
 // the bytes come from a socket or a pty. `useTerminalSession` talks only to
 // this; TerminalView chooses which implementation to hand it.
 export interface TerminalTransport {
-  // Identity of the thing being connected to. Both effects in
-  // useTerminalSession key on this, so it must be stable for the life of a
-  // pane and different for different targets.
+  // Identity of the SESSION. The connect effect in useTerminalSession keys on
+  // this, so it must differ for different targets -- and it carries the saved
+  // record's revision, which is what makes editing a server redial the pane
+  // instead of leaving it on the machine the record used to name.
   key: string
+  // Identity of the PANE, when that is not the same thing.
+  //
+  // The xterm instance is built once and torn down only when this changes,
+  // because rebuilding it throws away the scrollback -- usually the thing you
+  // most want to read after a reconnect. So the revision must NOT be in here:
+  // an edit has to redial the session while the terminal above it survives,
+  // and keying both on `key` cost the user their scrollback every time they
+  // rotated a password.
+  //
+  // Absent means the two are the same, which is true of a local shell: it has
+  // no saved record to revise.
+  paneKey?: string
   // The name of the target. Shown in the connecting banner and handed to
   // PasteConfirm, which asks "run this on <title>?".
   title: string
@@ -121,6 +134,7 @@ export function sshTransport(
     // is the right trade here rather than a regression: the buffer belongs to
     // a session on a machine this server no longer points at.
     key: `ssh:${server.id}:${server.rev ?? 0}`,
+    paneKey: `ssh:${server.id}`,
     title: server.name,
     subtitle: `${server.username}@${server.host}:${server.port}`,
     endpoint: `${server.host}:${server.port}`,
@@ -249,6 +263,9 @@ export function containerTransport(
     // Distinct from the server's own key so a container shell and a shell on
     // the host are different sessions rather than one stealing the other.
     key: `container:${server.id}:${server.rev ?? 0}:${containerRef}`,
+    // Spread from sshTransport above, so it must be overridden here too or a
+    // container pane and a host pane would share one terminal.
+    paneKey: `container:${server.id}:${containerRef}`,
     title: containerRef,
     subtitle: `container on ${server.name}`,
     endpoint: `${containerRef} · ${server.host}`,
