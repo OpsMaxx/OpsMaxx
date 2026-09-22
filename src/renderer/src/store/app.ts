@@ -1111,9 +1111,17 @@ function vpnVaultEntryIds(spec: VpnSpec): string[] {
  */
 function retireServerConnections(id: string): void {
   if (typeof window === 'undefined') return
-  void window.opsmaxx?.ssh?.poolEvict?.(id)
-  void window.opsmaxx?.sftp?.disconnect?.(id)
-  void window.opsmaxx?.metrics?.disconnect?.(id)
+  // Swallowed individually, the way `evictPooledConnection` does it: a cache
+  // we could not reach is not a reason to skip the other two, and none of the
+  // three is load-bearing -- the revision bump already makes them miss. A bare
+  // `void` on a rejecting IPC call would leave an unhandled rejection in the
+  // renderer over a cleanup that was optional to begin with.
+  const quietly = (p: Promise<unknown> | undefined): void => {
+    p?.catch(() => {})
+  }
+  quietly(window.opsmaxx?.ssh?.poolEvict?.(id))
+  quietly(window.opsmaxx?.sftp?.disconnect?.(id))
+  quietly(window.opsmaxx?.metrics?.disconnect?.(id))
 }
 
 // Releases the vault entries a set of doomed profiles owned. Fire-and-forget:
