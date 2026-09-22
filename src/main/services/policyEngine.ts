@@ -157,6 +157,10 @@ const ESCALATORS = new Set(['sudo', 'doas', 'su', 'pkexec', 'run0', 'runuser', '
 const WINDOWS_ESCALATORS = new Set(['runas', 'gsudo', 'sudo'])
 const WINDOWS_SHELLS = new Set(['cmd', 'powershell', 'pwsh'])
 
+/** powershell.exe options that take a value, so the value is not read as the command. */
+const POWERSHELL_VALUE_OPTIONS =
+  /^-(?:ex(?:ecutionpolicy)?|ep|w(?:indowstyle)?|v(?:ersion)?|wd|workingdirectory|o(?:utputformat)?|of|i(?:nputformat)?|if|config(?:urationname)?|psconsolefile|settingsfile|custompipename)$/i
+
 /** Shells: with no `-c`, running one is an interactive shell. */
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'mksh', 'ash', 'fish', 'csh', 'tcsh'])
 
@@ -235,6 +239,20 @@ const baseName = (t: string): string => t.split('/').pop() ?? t
 const word = (t: string): string => baseName(t)
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
 const REDIRECTION = /(\d?>>?|<)\s*("[^"]*"|'[^']*'|\S+)/g
+
+/**
+ * The same redirections, removed before a segment is split into words -- but
+ * only OUTSIDE quotes, and never `<(` or `>(`, which are process
+ * substitutions. The plain regex took `<(sudo` out of `eval 'cat <(sudo
+ * reboot)'` before the string was ever handed on, so the sudo inside was
+ * gone by the time anything looked for it. Quoted strings and escapes are
+ * matched first and kept whole.
+ */
+const withoutRedirections = (segment: string): string =>
+  segment.replace(
+    /'[^']*'|"(?:[^"\\]|\\.)*"|\\.|(\d?>>?|<)(?!\()\s*("(?:[^"\\]|\\.)*"|'[^']*'|[^\s'"]+)/g,
+    (m, op: string | undefined) => (op ? ' ' : m)
+  )
 
 /** Split a short-option cluster: `-Hiu` -> H, i, u (stopping at a value flag). */
 function shortLetters(token: string, valueFlags: Set<string>): { letters: string[]; takesNext: boolean } {
@@ -335,7 +353,7 @@ function runsBareShell(line: string, depth = 0): boolean {
 function isBareShell(argv: string[], depth = 0): boolean {
   // cmd / PowerShell: bare unless told to run something and exit.
   if (WINDOWS_SHELLS.has(commandName(argv[0]).toLowerCase())) {
-    return !argv.slice(1).some((a) => /^(?:\/c|-c|-command|-file|-encodedcommand)$/i.test(a))
+    return !argv.slice(1).some((a) => /^(?:\/c.*|-c|-command|-file|-encodedcommand)$/i.test(a))
   }
   if (!SHELLS.has(word(argv[0]))) return false
   const c = argv.indexOf('-c')
@@ -499,14 +517,39 @@ function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, '
     // A base64 `-EncodedCommand` cannot be read here, so it is asked about.
     const windows = commandName(argv[0]).toLowerCase()
     if (windows === 'cmd') {
-      const i = argv.findIndex((a) => /^\/[ck]$/i.test(a))
-      if (i >= 0 && i + 1 < argv.length) nested.push(argv.slice(i + 1).join(' '))
+      // `/c` and `/k` may have the command glued on (`/cRUNAS …`). cmd's own
+      // escape is `^` (`ru^nas`) and it expands `%VAR%` itself: the caret is
+      // stripped so the command is still seen, and either one asks, because
+      // neither is read the way cmd reads it.
+      const i = argv.findIndex((a) => /^\/[ck]/i.test(a))
+      if (i >= 0) {
+        const line = [argv[i].slice(2), ...argv.slice(i + 1)].join(' ').trim()
+        if (/\^|%[^%\s]+%/.test(line)) unreadable = true
+        if (line) nested.push(line.replace(/\^/g, ''))
+      }
     }
     if (windows === 'powershell' || windows === 'pwsh') {
-      const i = argv.findIndex((a) => /^-c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?$/i.test(a))
-      if (i >= 0 && i + 1 < argv.length) nested.push(argv.slice(i + 1).join(' '))
       if (argv.some((a) => /^-e(?:c|n\w*)?$/i.test(a))) unreadable = true
+      // `-Command` (or any prefix of it) takes the rest of the line; with no
+      // switch at all, the first word that is not an option starts an
+      // implicit -Command: `powershell Start-Process cmd -Verb RunAs`.
+      for (let i = 1; i < argv.length; i++) {
+        const a = argv[i]
+        if (/^-c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?$/i.test(a)) {
+          if (i + 1 < argv.length) nested.push(argv.slice(i + 1).join(' '))
+          break
+        }
+        if (/^-f(?:i(?:l(?:e)?)?)?$/i.test(a)) break
+        if (a.startsWith('-')) {
+          if (POWERSHELL_VALUE_OPTIONS.test(a)) i++
+          continue
+        }
+        nested.push(argv.slice(i).join(' '))
+        break
+      }
     }
+    // PowerShell's eval.
+    if ((windows === 'iex' || windows === 'invoke-expression') && argv.length > 1) nested.push(argv.slice(1).join(' '))
     // `Start-Process <file> -Verb RunAs` is PowerShell's sudo.
     if (['start-process', 'saps', 'start'].includes(windows)) {
       const runas = argv.some((a, i) => /^-verb:runas$/i.test(a) || (/^-verb$/i.test(a) && /^runas$/i.test(argv[i + 1] ?? '')))
@@ -539,25 +582,133 @@ function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, '
 }
 
 /**
+ * Where the `(` opened just before `from` closes, or -1.
+ *
+ * Quotes, escapes and backticks are skipped over, nested parens counted, and a
+ * `case` arm's `pattern)` is not taken for the close: inside `case … esac`, a
+ * `)` at the depth the `case` began is the end of a pattern, which is exactly
+ * where the innermost-only regex this replaced came apart --
+ * `$(case a in a) sudo reboot;; esac)` never reached the walk at all.
+ */
+function closingParen(s: string, from: number): number {
+  let depth = 1
+  const caseAt: number[] = []
+  for (let i = from; i < s.length; i++) {
+    const c = s[i]
+    if (c === '\\') {
+      i++
+      continue
+    }
+    if (c === "'" || c === '"' || c === '`') {
+      const end = closingQuote(s, i)
+      if (end < 0) return -1
+      i = end
+      continue
+    }
+    // A word at a word boundary: track `case` ... `esac`.
+    if (/[A-Za-z_]/.test(c) && (i === 0 || /[\s;&|(]/.test(s[i - 1]))) {
+      const w = /^[A-Za-z_]\w*/.exec(s.slice(i))![0]
+      if (w === 'case') caseAt.push(depth)
+      else if (w === 'esac') caseAt.pop()
+      i += w.length - 1
+      continue
+    }
+    if (c === '(') depth++
+    else if (c === ')') {
+      if (caseAt.length && caseAt[caseAt.length - 1] === depth) continue
+      depth--
+      if (depth === 0) return i
+    }
+  }
+  return -1
+}
+
+/** Where the quote (or backtick) opening at `at` closes, or -1. */
+function closingQuote(s: string, at: number): number {
+  const q = s[at]
+  for (let i = at + 1; i < s.length; i++) {
+    if (q !== "'" && s[i] === '\\') {
+      i++
+      continue
+    }
+    if (s[i] === q) return i
+  }
+  return -1
+}
+
+/**
+ * The command lines a string runs by substitution: `$(…)`, `<(…)`, `>(…)`
+ * and backticks, found by a scanner that respects quotes and escapes and
+ * matches parens properly -- so a substitution with parens of its own, or a
+ * `case` inside it, is read whole. Nothing is expanded inside single quotes,
+ * and `<(` inside double quotes is only text, as in the shell. `ok` is false
+ * when something opens and never closes.
+ */
+function substitutions(command: string): { inner: string[]; ok: boolean } {
+  const inner: string[] = []
+  let quote: string | null = null
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i]
+    if (quote === "'") {
+      if (c === "'") quote = null
+      continue
+    }
+    if (c === '\\') {
+      i++
+      continue
+    }
+    if (c === '`') {
+      const end = closingQuote(command, i)
+      if (end < 0) return { inner, ok: false }
+      inner.push(command.slice(i + 1, end))
+      i = end
+      continue
+    }
+    const opens = command.startsWith('$(', i) || (!quote && (command.startsWith('<(', i) || command.startsWith('>(', i)))
+    if (opens) {
+      const arithmetic = command.startsWith('$((', i)
+      const end = closingParen(command, i + 2)
+      if (end < 0) return { inner, ok: false }
+      const body = command.slice(i + 2, end)
+      // `$(( … ))` is arithmetic, not a command -- but a `$(…)` inside it runs.
+      if (arithmetic) {
+        const deeper = substitutions(body.slice(1, -1))
+        if (!deeper.ok) return { inner, ok: false }
+        inner.push(...deeper.inner)
+      } else inner.push(body)
+      i = end
+      continue
+    }
+    if (quote === '"') {
+      if (c === '"') quote = null
+      continue
+    }
+    if (c === '"' || c === "'") quote = c
+  }
+  return { inner, ok: quote === null }
+}
+
+/**
  * Every segment of a command line, and of every command line nested inside it,
  * with what each one runs. The single walk both the escalation check and the
  * path rules read.
  */
 function walkCommand(command: string, visit: (facts: SegmentFacts) => void, depth = 0): void {
   const nested: string[] = []
-  // Command substitutions run whatever they hold, quoted or not. Innermost
-  // `$(...)` only, which is enough for the forms anyone writes by hand.
-  for (const m of command.matchAll(/\$\(([^()]*)\)/g)) nested.push(m[1])
-  for (const m of command.matchAll(/`([^`]*)`/g)) nested.push(m[1])
+  // `$(...)`, `<(...)`, `>(...)` and backticks run whatever they hold.
+  const subs = substitutions(command)
+  nested.push(...subs.inner)
 
-  // A string whose quotes do not close is one the shell will read differently
-  // from anything here: fail toward ask.
-  if (!quotesBalanced(command)) visit({ segment: '', head: [], escalated: false, shell: false, computed: true, argv: [] })
+  // A string whose quotes or substitutions do not close is one the shell will
+  // read differently from anything here: fail toward ask.
+  if (!subs.ok || !quotesBalanced(command)) {
+    visit({ segment: '', head: [], escalated: false, shell: false, computed: true, argv: [] })
+  }
 
   for (const segment of splitSegments(command)) {
     // Redirection targets are files, never the command; the path rules read
     // them off `segment` directly.
-    const tokens = tokenize(segment.replace(REDIRECTION, ' '))
+    const tokens = tokenize(withoutRedirections(segment))
     visit({ segment, ...unwrapSegment(tokens, nested) })
   }
   if (depth < MAX_DEPTH) for (const inner of nested) walkCommand(inner, visit, depth + 1)
@@ -910,7 +1061,7 @@ export function extractPathAccesses(command: string): PathAccess[] {
 
     // The original prefix stripping, kept as it was so nothing it found is
     // lost...
-    let tokens = tokenize(segment.replace(REDIRECTION, ' '))
+    let tokens = tokenize(withoutRedirections(segment))
     while (tokens.length && PREFIXES.has(commandName(tokens[0]))) {
       const wrapper = commandName(tokens[0])
       const valueFlags = PREFIX_VALUE_FLAGS[wrapper] ?? new Set<string>()

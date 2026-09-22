@@ -655,3 +655,86 @@ describe('quoting, and the Windows shells', () => {
     expect(evaluateCommand(noSudo, cmd).decision).not.toBe('deny')
   })
 })
+
+// Security pass #4: substitutions with parens of their own, process
+// substitution, cmd's glued switches and carets, and PowerShell's implicit
+// -Command and iex.
+describe('substitutions, cmd and PowerShell, read whole', () => {
+  const noSudo = group({ terminal: 'allow', sudo: 'deny' })
+  const withSudo = group({ terminal: 'allow', sudo: 'allow' })
+  const shadowDenied = group({ terminal: 'allow', sudo: 'allow', readFiles: 'allow', writeFiles: 'allow' }, [
+    { id: 'shadow', pattern: '/etc/shadow', read: 'deny', write: 'deny' }
+  ])
+
+  it.each([
+    'echo $(case a in a) sudo reboot;; esac)',
+    'echo $(case a in (a) sudo reboot;; esac)',
+    'echo "$(ls (x); sudo reboot)"',
+    'diff <(sudo cat /etc/shadow) /dev/null',
+    'tee >(sudo tee /etc/x) < /dev/null',
+    'echo $(( $(sudo reboot) + 1 ))',
+    'cmd /cRUNAS /user:admin notepad',
+    'cmd /c ru^nas /user:admin notepad',
+    'cmd /c^ runas /user:admin notepad',
+    'cmd /c "r^unas /user:admin notepad"',
+    'powershell Start-Process cmd -Verb RunAs',
+    'powershell "Start-Process notepad -Verb RunAs"',
+    'powershell -NoProfile -ExecutionPolicy Bypass Start-Process notepad -Verb RunAs',
+    'pwsh -WindowStyle Hidden "gsudo whoami"',
+    'iex "Start-Process notepad -Verb RunAs"',
+    'Invoke-Expression "runas /user:admin notepad"'
+  ])('denies %s under sudo=deny', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('deny')
+  })
+
+  // Four levels deep -- a substitution, eval, a substitution, eval -- so past
+  // what the walk reads: asked about, never allowed.
+  it('does not allow the reviewer\'s four-deep eval and substitution nest', () => {
+    const cmd = 'echo $(eval "echo \\$(eval \\"sudo reboot\\")")'
+    expect(evaluateCommand(noSudo, cmd).decision).not.toBe('allow')
+  })
+
+  // Single quotes expand nothing: this prints the text and runs no sudo.
+  it('does not read a substitution inside single quotes as a run', () => {
+    expect(classifyCommand("echo '$(sudo id)'").isSudo).toBe(false)
+  })
+
+  it.each(['echo $(ls (x); cat /etc/shadow)', 'cat <(cat /etc/shadow)', 'diff <(cat /etc/shadow) /dev/null'])(
+    'applies the /etc/shadow rule inside %s',
+    (cmd) => {
+      expect(evaluateCommand(shadowDenied, cmd).decision).toBe('deny')
+    }
+  )
+
+  it.each(['powershell Start-Process powershell -Verb RunAs', 'cmd /cRUNAS /user:admin cmd'])(
+    'refuses the elevated shell %s even with sudo=allow',
+    (cmd) => {
+      expect(evaluateCommand(withSudo, cmd).decision).toBe('deny')
+    }
+  )
+
+  it.each([
+    'echo $(unclosed',
+    'cat <(ls',
+    'cmd /c echo %PATH%',
+    'cmd /c di^r',
+    'iex $payload'
+  ])('asks before running %s, which cannot be read', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('ask')
+  })
+
+  it.each([
+    "echo '<(x)'",
+    'echo "<(not a substitution)"',
+    'echo $(( 1 + 2 ))',
+    'echo $(case a in a) echo hi;; esac)',
+    'diff <(ls /tmp) <(ls /var)',
+    'cmd /c dir',
+    'cmd /cdir',
+    'powershell Get-ChildItem',
+    'powershell -NoProfile "Get-Date"',
+    'iex "Get-Date"'
+  ])('still allows %s', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('allow')
+  })
+})
