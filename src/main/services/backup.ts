@@ -489,6 +489,9 @@ export const ALL_DATA_FILES = [
   // whatever the user wrote down about their own estate.
   RULES_FILE,
   'opsmaxx-runbooks.json',
+  // Saved job templates: step lists the user wrote. Never targets, but still
+  // commands about their own estate.
+  'opsmaxx-job-templates.json',
   // Managed long-running processes: command lines, hosts and the vault entries
   // they resolve at start time.
   'opsmaxx-processes.json',

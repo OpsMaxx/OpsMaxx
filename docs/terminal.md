@@ -29,6 +29,11 @@ download/re-upload dance. The inline editor is still there for quick edits.
 shows a preview and a confirmation, because every line runs the moment it
 lands. Single-line pastes go straight through.
 
+**Run a saved job template here.** With the Jobs module on, the command palette
+(<kbd>Ctrl</kbd>+<kbd>K</kbd>) lists every template saved in the Jobs composer as
+*Run in this terminal: name*. It opens the same confirmation, showing every
+command, and asks even for a single line. Nothing is sent until you confirm.
+
 Control keys such as <kbd>Ctrl</kbd>+<kbd>C</kbd>, <kbd>Ctrl</kbd>+<kbd>A</kbd> and <kbd>Ctrl</kbd>+<kbd>W</kbd> pass through to the remote shell, so `vim`, `nano` and bash line editing behave normally.
 
 **Monitoring** is docked under the terminal rather than hidden in a separate tab. Expand it for live CPU, memory, disk and network. The strip samples only the tab you are looking at, and shares that session's SSH connection. Watching the servers you are *not* looking at is a separate feature — see [Checking servers in the background](#checking-servers-in-the-background).

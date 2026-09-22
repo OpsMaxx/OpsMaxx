@@ -468,3 +468,48 @@ describe('the typed file push', () => {
     expect(document.body.textContent).toContain('Writes a NEW file only')
   })
 })
+
+describe('saved templates in the composer', () => {
+  it('saves steps without servers, loads them back, renames and deletes', async () => {
+    const saved = new Map<string, Record<string, unknown>>()
+    const templates = {
+      list: vi.fn(async () => [...saved.values()]),
+      save: vi.fn(async (t: Record<string, unknown>) => {
+        const stored = { ...t, updatedAt: 1 }
+        saved.set(t.id as string, stored)
+        return stored
+      }),
+      remove: vi.fn(async (id: string) => saved.delete(id))
+    }
+    const stub = { ...jobsStub(), jobTemplates: templates }
+    const servers = [server(1), server(2)]
+    await compose(stub, servers, { title: 'Reload nginx', steps: 'systemctl reload nginx', pick: [1] })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save as template' }))
+    await waitFor(() => expect(templates.save).toHaveBeenCalledTimes(1))
+    const sent = templates.save.mock.calls[0][0]
+    // The server picked above is not in it, and neither is anything approval-shaped.
+    expect(JSON.stringify(sent)).not.toMatch(/s1|web-1|targets|approval|cohort/)
+
+    await userEvent.clear(screen.getByLabelText('Template name'))
+    await userEvent.type(screen.getByLabelText('Template name'), 'Reload web')
+    await userEvent.click(screen.getByRole('button', { name: 'Rename' }))
+    await waitFor(() => expect([...saved.values()][0]).toMatchObject({ name: 'Reload web' }))
+    expect(saved.size).toBe(1)
+
+    // A fresh composer loads it: the steps come back, the servers do not.
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await userEvent.click(screen.getByRole('button', { name: /New job/ }))
+    await waitFor(() => screen.getByRole('option', { name: 'Reload web' }))
+    await userEvent.clear(screen.getByLabelText('Steps'))
+    await userEvent.selectOptions(screen.getByLabelText('Saved template'), 'Reload web')
+    expect((screen.getByLabelText('Steps') as HTMLTextAreaElement).value).toBe('systemctl reload nginx')
+    expect(screen.getByRole('button', { name: 'web-2' }).getAttribute('aria-pressed')).toBe('false')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    expect(templates.remove).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Confirm delete' }))
+    await waitFor(() => expect(saved.size).toBe(0))
+    expect(runOf(stub)).not.toHaveBeenCalled()
+  })
+})

@@ -45,7 +45,7 @@ on**, and an upgrade never switches a module on for an install that did not alre
 |---|---|
 | **Inventory** | Every server, its OS and version, what it has pending, and when it was last seen |
 | **Patching** | What is pending per server, applied in waves that stop on the first server that comes back unhealthy rather than rolling on |
-| **Run one command everywhere** | Broadcast across selected servers with a confirmation naming exactly what runs where, per-server results, and a job that survives the app being closed |
+| **Run one command everywhere** | Broadcast across selected servers with a confirmation naming exactly what runs where, per-server results, and a job that survives the app being closed. Save a job's steps as a template to reuse them — templates never remember servers, and agents cannot read them |
 | **Log tailing** | Follow a file across many servers at once, in one pane |
 | **Fleet search** | Search across what has already been collected, without touching a server |
 | **Docker** | Containers, images and volumes with honest per-item sizes, and reclaim by id against exactly what the preview showed — never a blind `prune` |

@@ -12,7 +12,8 @@ import {
   Bot,
   Download,
   Bug,
-  CornerDownLeft
+  CornerDownLeft,
+  ListChecks
 } from 'lucide-react'
 import { findLocalTab, useApp } from '../../store/app'
 import { useClickOutside } from '../../hooks/useClickOutside'
@@ -31,6 +32,7 @@ import { ACTIVITY_ITEMS } from '../layout/ActivityBar'
 import { MODULES, isOperateModule, moduleEnabled } from '../../../../shared/modules'
 import { reportBug } from '../../lib/reportBug'
 import { fuzzyScore } from '../../lib/fuzzy'
+import { templateTerminalText, type JobTemplate } from '../../../../shared/jobCompose'
 
 interface Cmd {
   id: string
@@ -54,6 +56,24 @@ export function CommandPalette(): React.JSX.Element {
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
+
+  // Saved job templates live in main, so they arrive a frame after the rest --
+  // the one asynchronous group here. Only asked for when Jobs is switched on:
+  // templates are part of that module, and a palette that listed them with it
+  // off would be advertising a surface this install declined.
+  const jobsOn = moduleEnabled(store.settings.modules, 'jobs')
+  const [templates, setTemplates] = useState<JobTemplate[]>([])
+  useEffect(() => {
+    if (!jobsOn) return
+    let live = true
+    void window.opsmaxx?.jobTemplates
+      ?.list()
+      .then((t) => live && setTemplates(t ?? []))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [jobsOn])
 
   const commands = useMemo<Cmd[]>(() => {
     const list: Cmd[] = []
@@ -152,6 +172,23 @@ export function CommandPalette(): React.JSX.Element {
       )
 
     const current = store.activeTab()
+    // "Run in this terminal". It REQUESTS the paste confirmation in the active
+    // pane and writes nothing: the pane shows every line, and only its button
+    // sends them. One row per template, and only while a terminal is on screen.
+    if (current?.view === 'terminal') {
+      const paneId = store.panes[current.id]?.activePaneId ?? current.id
+      templates.forEach((t) => {
+        const text = templateTerminalText(t)
+        list.push({
+          id: `tpl-${t.id}`,
+          group: 'Job templates',
+          title: `Run in this terminal: ${t.name}`,
+          sub: `${text.split('\n').length} line(s) · asks first`,
+          icon: <ListChecks size={16} />,
+          run: () => store.requestTerminalPaste(paneId, text)
+        })
+      })
+    }
     const actions: Cmd[] = [
       // Opening a server from here focuses its existing tab, so duplicating is
       // the way to get a second session on the same box from the palette.
@@ -252,7 +289,7 @@ export function CommandPalette(): React.JSX.Element {
     }))
 
     return [...actions, ...destinations, ...modules, ...aiPages, ...settingsPages, ...list]
-  }, [store])
+  }, [store, templates])
 
   const filtered = useMemo(() => {
     const query = q.trim()

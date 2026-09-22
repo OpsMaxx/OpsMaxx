@@ -322,8 +322,18 @@ one `planJob` demands — the panel does not decide for itself that a verb is
 safe, which is the mistake item 35 had to fix in ComposePanel. Waves are
 `cohort` labels, so twelve servers three at a time is a blast radius of three
 and asks for less than twelve at once. Still open from this item: seeding a
-selection from a folder or tag, halt-remaining-across-hosts, and saved
-templates.
+selection from a folder or tag, and halt-remaining-across-hosts.
+
+**Saved templates — SHIPPED.** Name, steps, rollback and the reboot flag; never
+targets, wave size, gate or approval (`JobTemplate` refuses `targets` and
+`approval` by type, `sanitiseJobTemplate` drops them at runtime). Stored in
+`opsmaxx-job-templates.json` beside the runbook notes, device-local and UNDECIDED
+for sync like them. Loading one fills the composer and stops; `planJob` still mints
+the confirmation over the servers picked now. The command palette offers "Run in
+this terminal" per template, which opens the paste confirmation showing every line,
+one line included, and writes nothing before it is confirmed. No MCP tool reaches
+them (`tests/jobTemplates.test.ts`, and `jobTemplates` is in the job-module scan of
+`tests/jobsNotExposed.test.ts`).
 
 **The finding above, made concrete.** `src/preload/index.ts:168-199` exposes
 `list/get/run/cancel/setDetached/capabilities/onProgress/onOutput`; IPC is wired at

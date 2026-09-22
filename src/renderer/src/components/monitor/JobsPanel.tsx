@@ -7,8 +7,11 @@ import {
   assignWaves,
   checkJobDraft,
   composeJobSpec,
+  draftFromTemplate,
   EMPTY_JOB_DRAFT,
-  type JobDraft
+  templateFromDraft,
+  type JobDraft,
+  type JobTemplate
 } from '../../../../shared/jobCompose'
 import {
   checkServiceStep,
@@ -148,6 +151,54 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
       live = false
     }
   }, [fileBody])
+  // Saved templates: steps, never servers. `null` is "could not be read",
+  // which is not "none saved". Loaded when the composer opens.
+  const [templates, setTemplates] = useState<JobTemplate[] | null>([])
+  const [templateId, setTemplateId] = useState('')
+  const [templateName, setTemplateName] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [templateNote, setTemplateNote] = useState<string | null>(null)
+  const chosenTemplate = templates?.find((t) => t.id === templateId)
+  useEffect(() => {
+    if (!composing) return
+    void window.opsmaxx?.jobTemplates
+      ?.list()
+      .then(setTemplates)
+      .catch(() => setTemplates(null))
+  }, [composing])
+
+  /** One save path for "save as new" and "rename": main narrows the template,
+   *  stamps it, and hands back what it stored -- or null, said out loud. */
+  const storeTemplate = async (t: JobTemplate | null): Promise<void> => {
+    const stored = t ? await window.opsmaxx?.jobTemplates?.save(t) : null
+    if (!stored) {
+      setTemplateNote(
+        'The template was not saved. It needs a name and at least one command, and the saved templates must be readable.'
+      )
+      return
+    }
+    setTemplateNote(null)
+    setTemplates((cur) => [...(cur ?? []).filter((x) => x.id !== stored.id), stored])
+    setTemplateId(stored.id)
+    setTemplateName(stored.name)
+  }
+
+  const deleteTemplate = async (): Promise<void> => {
+    if (!chosenTemplate) return
+    if (!confirmDelete) {
+      setConfirmDelete(true)
+      return
+    }
+    setConfirmDelete(false)
+    if (await window.opsmaxx?.jobTemplates?.remove(chosenTemplate.id)) {
+      setTemplates((cur) => (cur ?? []).filter((x) => x.id !== chosenTemplate.id))
+      setTemplateId('')
+      setTemplateName('')
+    } else {
+      setTemplateNote('The template was not deleted.')
+    }
+  }
+
   const openId = useRef<string | null>(null)
   const sampled = useFleet((s) => s.hosts)
 
@@ -672,6 +723,62 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
             </>
           ) : (
             <>
+              {/* Saved templates. Loading one fills the text below and stops:
+                  the servers are still picked here, and the confirmation is
+                  still whatever planJob asks for once they are. */}
+              <div className="row-actions" style={{ gap: 6, flexWrap: 'wrap' }}>
+                <select
+                  className="input"
+                  aria-label="Saved template"
+                  value={templateId}
+                  onChange={(e) => {
+                    const t = templates?.find((x) => x.id === e.target.value)
+                    setTemplateId(t?.id ?? '')
+                    setTemplateName(t?.name ?? '')
+                    setConfirmDelete(false)
+                    if (t) setDraft((d) => draftFromTemplate(t, d))
+                  }}
+                >
+                  <option value="">
+                    {templates === null ? 'Saved templates could not be read' : 'Load a saved template…'}
+                  </option>
+                  {(templates ?? []).map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="btn sm"
+                  onClick={() =>
+                    void storeTemplate(templateFromDraft(draft, crypto.randomUUID(), draft.title))
+                  }
+                >
+                  Save as template
+                </button>
+                {chosenTemplate && (
+                  <>
+                    <input
+                      className="input"
+                      aria-label="Template name"
+                      style={{ width: 180 }}
+                      value={templateName}
+                      onChange={(e) => setTemplateName(e.target.value)}
+                    />
+                    <button
+                      className="btn sm"
+                      disabled={templateName.trim() === chosenTemplate.name}
+                      onClick={() => void storeTemplate({ ...chosenTemplate, name: templateName })}
+                    >
+                      Rename
+                    </button>
+                    <button className="btn sm" onClick={() => void deleteTemplate()}>
+                      {confirmDelete ? 'Confirm delete' : 'Delete'}
+                    </button>
+                  </>
+                )}
+              </div>
+              {templateNote && <div className="s-note state-unknown">{templateNote}</div>}
               <input
                 className="input"
                 aria-label="Job title"

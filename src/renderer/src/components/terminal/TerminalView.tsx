@@ -4,7 +4,7 @@ import { RECOVERY_BUDGET_MS, type RecoveryState } from '../../hooks/useSessionRe
 import { credentialNote, type CredentialShape } from '../../../../shared/credentialShape'
 import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import { TerminalSearch } from './TerminalSearch'
-import { PasteConfirm } from './PasteConfirm'
+import { PasteConfirm, useTerminalPasteRequest } from './PasteConfirm'
 import { EmptyState } from '../common/EmptyState'
 import { useApp } from '../../store/app'
 import {
@@ -373,7 +373,15 @@ function RealTerminal({
     if (!findRequest || !tabId || findRequest.paneId !== tabId) return
     setFinding(true)
   }, [findRequest, tabId])
-  const [pending, setPending] = useState<{ text: string; lines: number } | null>(null)
+  const [pending, setPending] = useState<{ text: string; lines: number; full?: boolean } | null>(
+    null
+  )
+  // A saved job template run "in this terminal". It goes through the same
+  // confirmation a multi-line paste does, and it asks even for one line: the
+  // clipboard rule is about text that arrives, and this is text someone chose.
+  useTerminalPasteRequest(tabId, (text) =>
+    setPending({ text, lines: text.split('\n').length, full: true })
+  )
   /**
    * Restored from the last run and not yet dialled.
    *
@@ -575,6 +583,7 @@ function RealTerminal({
         <PasteConfirm
           text={pending.text}
           lines={pending.lines}
+          full={pending.full}
           server={transport.title}
           onCancel={() => setPending(null)}
           onConfirm={() => {

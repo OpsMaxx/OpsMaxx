@@ -63,6 +63,7 @@ const WRITES_TO_USERDATA = [
   'opsmaxx-data.json.bak',
   'opsmaxx-env-secrets.json',
   'opsmaxx-job-approvals.jsonl',
+  'opsmaxx-job-templates.json',
   'opsmaxx-known-hosts.json',
   'opsmaxx-local-sessions.jsonl',
   'opsmaxx-mcp-config.json',
