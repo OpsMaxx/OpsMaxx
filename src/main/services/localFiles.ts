@@ -414,6 +414,9 @@ export async function localFilesDownload(
       // The placeholder is this download's own empty file, so it is replaced
       // by rename like any other target.
       plan = await planCopy(await resolveTarget(to), false)
+      // The placeholder was just created there, so this is not expected — but
+      // an in-place write is never a download's to make.
+      if (plan.needs) throw new Error('cannot write a copy in that folder')
       send(0, st.size)
       await copyWithProgress(from, plan.write, st.size, send, signal)
       await plan.commit()

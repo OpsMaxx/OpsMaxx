@@ -335,6 +335,7 @@ function removeRemote(sftp: SFTPWrapper, path: string): Promise<boolean> {
 }
 
 const DENIED_CODE = 3 // SFTP status PERMISSION_DENIED
+const UNSUPPORTED_CODE = 8 // SFTP status OP_UNSUPPORTED
 
 // An ssh2 callback that also carries a value, as a promise of [error, value].
 function ask<T>(run: (cb: (err: Error | null | undefined, v: T) => void) => void): Promise<[Error | null, T]> {
@@ -402,13 +403,19 @@ async function planUpload(ch: SFTPWrapper, path: string, inPlace: boolean): Prom
   let needs: UploadPlan['needs']
   if (existing) {
     const old = existing
+    // A server with no POSIX modes — some Windows OpenSSH builds — answers
+    // these with OP_UNSUPPORTED. There is nothing to preserve there, so the
+    // swap goes ahead; asking about every overwrite on such a server would
+    // only teach people to click through. Anything else is a refusal, and
+    // means the new copy would differ from the file it replaces.
+    const refused = (err: Error | null): boolean => !!err && (err as { code?: number }).code !== UNSUPPORTED_CODE
     const chmod = await call((cb) => ch.fchmod(handle, old.mode & 0o7777, cb))
     const [serr, mine] = await ask<Stats>((cb) => ch.fstat(handle, cb))
     const chown =
-      chmod || serr || (mine.uid === old.uid && mine.gid === old.gid)
+      serr || (mine.uid === old.uid && mine.gid === old.gid)
         ? null
         : await call((cb) => ch.fchown(handle, old.uid, old.gid, cb))
-    if (chmod || serr || chown) needs = 'owner'
+    if (refused(chmod) || refused(serr) || refused(chown)) needs = 'owner'
   }
   await call((cb) => ch.close(handle, cb))
   if (needs) {
@@ -435,6 +442,10 @@ export async function sftpUpload(
 ): Promise<SftpResult<SftpUploadSummary>> {
   const conn = conns.get(key)
   if (!conn) return { ok: false, error: 'not connected' }
+  // Every path below is resolved with posix.resolve, which falls back to THIS
+  // machine's working directory for a relative one. The view always sends the
+  // absolute directory it lists, so anything else is refused.
+  if (!posix.isAbsolute(remoteDir)) return { ok: false, error: `${remoteDir} is not an absolute path on the server.` }
   if (running.has(key)) return BUSY
   const t = begin(key)
 

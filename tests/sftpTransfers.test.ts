@@ -31,6 +31,8 @@ let remote = new Map<string, RemoteNode>()
 let readonlyDirs = new Set<string>()
 // Whether this user may chown (they may not, unless root).
 let chownDenied = false
+// What fchmod and fstat answer: a server with no POSIX modes says unsupported.
+let attrError: Error | null = null
 const ME = { uid: 1000, gid: 1000 }
 const sftpError = (code: number, message: string): Error => Object.assign(new Error(message), { code })
 const statsOf = (n: RemoteNode): object => ({
@@ -110,11 +112,13 @@ class FakeSftp {
     cb(null, Buffer.from(path))
   }
   fchmod(h: Buffer, mode: number, cb: Cb): void {
+    if (attrError) return cb(attrError)
     const n = remote.get(h.toString())
     if (n) n.mode = mode
     cb(null)
   }
   fstat(h: Buffer, cb: (err: Error | null, s?: object) => void): void {
+    if (attrError) return cb(attrError)
     const n = remote.get(h.toString())
     if (n) cb(null, statsOf(n))
     else cb(sftpError(2, 'No such file'))
@@ -191,6 +195,7 @@ beforeEach(async () => {
   remote = new Map()
   readonlyDirs = new Set()
   chownDenied = false
+  attrError = null
   dir = mkdtempSync(join(tmpdir(), 'sp-sftp-xfer-'))
   await sftpConnect(KEY, cfg)
 })
@@ -585,6 +590,33 @@ describe('what an upload keeps of the file it replaces', () => {
     const r = await run
     expect(r.data?.incomplete).toEqual(['/srv/app.conf'])
     expect(remote.has('/srv/app.conf')).toBe(true)
+  })
+
+  // Some Windows OpenSSH builds support neither. Nothing to keep there, so
+  // asking about every overwrite would be noise.
+  it('swaps as usual on a server that does not support modes at all', async () => {
+    remote.set('/srv/app.conf', { mode: 0o644, ...ME })
+    attrError = sftpError(8, 'Operation unsupported')
+    const r = await upload('app.conf', '/srv')
+    expect(r.data?.uploaded).toEqual(['app.conf'])
+    expect(r.data?.needsInPlace).toBeUndefined()
+  })
+
+  it('still asks when setting the mode is refused', async () => {
+    remote.set('/srv/app.conf', { mode: 0o644, ...ME })
+    attrError = sftpError(3, 'Permission denied')
+    const r = await upload('app.conf', '/srv')
+    expect(r.data?.needsInPlace).toEqual([{ name: 'app.conf', reason: 'owner' }])
+  })
+
+  // posix.resolve would fill a relative path in from this machine's cwd.
+  it('refuses a relative destination folder', async () => {
+    const local = join(dir, 'a.txt')
+    writeFileSync(local, 'x')
+    const r = await sftpUpload(wc, KEY, [local], 'srv')
+    expect(r.ok).toBe(false)
+    expect(r.error).toMatch(/not an absolute path/)
+    expect(channels).toHaveLength(1)
   })
 })
 
