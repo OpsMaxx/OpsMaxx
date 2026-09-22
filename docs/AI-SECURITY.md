@@ -62,14 +62,21 @@ Regardless of which access group a session holds:
     `stdbuf`, `timeout`, `xargs`, `busybox`, `setsid`, `unbuffer`, `watch`, `flock`, `chrt` and
     `taskset`, with their options and, for `timeout`, `flock`, `chrt` and `taskset`, their one
     operand;
-  - the command word is read the way the shell reads it: backslashes removed (`\sudo`, `su\do`)
-    and a path reduced to its basename;
+  - words are read with POSIX quoting: outside quotes a backslash escapes the next character
+    (`\sudo`, `su\do`); inside double quotes only `\"`, `\\`, `\$`, a backtick and a newline
+    are escapes; inside single quotes nothing is, so `sh -c "sh -c \"sh -c 'sudo reboot'\""` and
+    shlex.quote's `'\''` come apart exactly where the shell takes them apart. A word that starts
+    like a Windows path (`C:\`, `\\server`) keeps its backslashes, which are separators there. The
+    command word is then reduced to its basename;
   - the insides of `$(...)`, backticks, `sh -c` (and the other shells), `su -c`, `env -S`,
-    `flock -c`, `script -c`, `watch` and `eval` are walked the same way, to a depth of three.
+    `flock -c`, `script -c`, `watch`, `eval`, and on Windows `cmd /c` or `/k`, PowerShell's
+    `-Command` (or `-c`) and `Start-Process`'s `-ArgumentList`, are walked the same way, to a
+    depth of three.
 
   If the command word is `sudo`, `doas`, `su`, `pkexec`, `run0`, `runuser`, `systemd-run`,
   `sudoedit` or `machinectl shell` — or, on Windows, `runas` (with its `/user:` and `/savecred`
-  options), `gsudo` or `sudo.exe` — the command is governed by the **Sudo** capability, and what it
+  options), `gsudo`, `sudo.exe` or `Start-Process … -Verb RunAs` — the command is governed by the
+  **Sudo** capability, and what it
   runs is judged too — `sudo env bash` and `gsudo cmd` are elevated shells. So `/usr/bin/sudo reboot`, `env sudo
   reboot`, `if true; then sudo reboot; fi`, `\sudo reboot`, `eval sudo reboot` and `su -c "rm -rf
   /x"` are all sudo, and a group that denies sudo denies them. A name in argument position is not a
@@ -82,7 +89,14 @@ Regardless of which access group a session holds:
   (`/usr/bin/ec?o`), a paren, a redirection, or a leading `=` — the command cannot be named, so a
   group that would allow it is asked instead, and `execute_command` never lets a remembered
   approval cover it. The same holds for anything nested deeper than the three levels the walk
-  reads (`eval eval eval eval sudo reboot`). Such a command is asked about, never allowed and never
+  reads (`eval eval eval eval sudo reboot`), for a line whose quotes do not close or that ends on
+  a bare backslash, and for a base64 PowerShell `-EncodedCommand` (`-enc`, `-e`).
+
+  The quoting is tested with a generated matrix rather than hand-picked cases
+  (`tests/escalationQuotingMatrix.test.ts`): every nest of `eval '…'`, `sh -c '…'`, `sh -c "…"`,
+  `env -S "…"` and `$(…)` up to four deep around `sudo reboot`, each quoted the way a careful tool
+  quotes, must be denied to depth three and never allowed at four; the same 780 nests around `ls
+  /tmp` must never be denied. Such a command is asked about, never allowed and never
   refused on a guess. Only a leading home directory is let through: `$HOME/bin/tool`,
   `${HOME}/bin/tool` and `~/bin/tool` are judged by their literal basename, so `~/bin/sudo` is still
   sudo.

@@ -589,3 +589,69 @@ describe('fail toward ask', () => {
     expect(evaluateCommand(noSudo, cmd).decision).toBe('allow')
   })
 })
+
+// Security pass #3: POSIX quoting, spaced function definitions, and what
+// cmd and PowerShell run.
+describe('quoting, and the Windows shells', () => {
+  const noSudo = group({ terminal: 'allow', sudo: 'deny' })
+  const withSudo = group({ terminal: 'allow', sudo: 'allow' })
+
+  it.each([
+    `sh -c "sh -c \\"sh -c 'sudo reboot'\\""`,
+    `sh -c 'echo '\\''hi'\\''; sudo reboot'`,
+    'f ( ) { sudo reboot; }; f',
+    'f () { sudo reboot; }; f',
+    'cmd /c runas /user:admin cmd',
+    'cmd.exe /c "runas /savecred /user:admin notepad"',
+    'cmd /k sudo net stop spooler',
+    'powershell -Command "runas /user:admin notepad"',
+    'pwsh -c "gsudo whoami"',
+    'powershell -Command "Start-Process notepad -Verb RunAs"',
+    'Start-Process notepad -Verb RunAs',
+    'Start-Process -FilePath notepad -Verb runas',
+    'saps notepad -verb:RunAs',
+    // Unbalanced, and still read far enough to find the sudo in it.
+    "sh -c 'sudo reboot"
+  ])('denies %s under sudo=deny', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('deny')
+  })
+
+  it.each(['Start-Process powershell -Verb RunAs', 'cmd /c runas /user:admin cmd', 'powershell -c "gsudo"'])(
+    'refuses the elevated shell %s even with sudo=allow',
+    (cmd) => {
+      expect(evaluateCommand(withSudo, cmd).decision).toBe('deny')
+    }
+  )
+
+  it.each([
+    'powershell -EncodedCommand ZQBjAGgAbwAgAGgAaQA=',
+    'powershell -enc ZQBjAGgAbwA=',
+    'pwsh -e ZQBjAGgAbwA=',
+    'echo "unterminated',
+    'echo trailing\\'
+  ])('asks before running %s, which cannot be read', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('ask')
+  })
+
+  it.each([
+    'echo "a \\"quoted\\" word"',
+    `echo 'it'\\''s fine'`,
+    'echo \\$HOME',
+    'cmd /c dir C:\\',
+    'dir C:\\',
+    'powershell -Command "Get-ChildItem C:\\\\"',
+    'Start-Process notepad',
+    'type C:\\Users\\me\\notes.txt'
+  ])('still allows %s', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('allow')
+  })
+
+  // An escaped `;` is a character, not a separator: this prints "a;sudo
+  // reboot" and runs no sudo. (The separate command-risk grader still reads
+  // the word `reboot` and may ask; it never denies.)
+  it('reads an escaped separator as a character', () => {
+    const cmd = 'echo a\\;sudo reboot'
+    expect(classifyCommand(cmd).isSudo).toBe(false)
+    expect(evaluateCommand(noSudo, cmd).decision).not.toBe('deny')
+  })
+})

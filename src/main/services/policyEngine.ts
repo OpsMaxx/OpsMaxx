@@ -231,8 +231,8 @@ const ESCALATOR_VALUE_FLAGS: Record<string, Set<string>> = {
 
 const MAX_DEPTH = 3
 const baseName = (t: string): string => t.split('/').pop() ?? t
-/** A token as the shell reads a command word: backslashes removed, then its basename. */
-const word = (t: string): string => baseName(t.replace(/\\(.)/g, '$1').replace(/\\$/, ''))
+/** A command word's basename. tokenize has already removed the shell's escapes. */
+const word = (t: string): string => baseName(t)
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
 const REDIRECTION = /(\d?>>?|<)\s*("[^"]*"|'[^']*'|\S+)/g
 
@@ -262,6 +262,9 @@ function stripRunners(tokens: string[], nested: string[]): string[] | null {
       // `select` headers likewise: their bodies are later segments.
       if (w === '[[' || w.startsWith('((') || w === 'for' || w === 'select') return []
       if (GRAMMAR.has(w) || ASSIGNMENT.test(w) || FUNCTION_NAME.test(w)) t = t.slice(1)
+      // `f ( ) { ... }` and `f () { ... }`: the same definition, spaced out.
+      else if (/^[A-Za-z_][\w.:-]*$/.test(w) && t[1] === '(' && t[2] === ')') t = t.slice(3)
+      else if (/^[A-Za-z_][\w.:-]*$/.test(w) && t[1] === '()') t = t.slice(2)
       // `case x in *) sudo reboot`: the header, then the arm's pattern.
       else if (w === 'case') {
         const i = t.indexOf('in')
@@ -435,6 +438,9 @@ function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, '
   let t = head
   let escalated = false
   let shell = false
+  // Set when the command hands over something this walk cannot read at all,
+  // such as a base64 PowerShell command.
+  let unreadable = false
   const done = (argv: string[]): Omit<SegmentFacts, 'segment'> => ({
     head,
     escalated,
@@ -443,7 +449,7 @@ function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, '
     // everything the walk understands -- `$(which sudo)`, `{sudo,reboot}`,
     // `f(){sudo` -- is one this code cannot name, so it is reported for
     // evaluateCommand to ask about rather than guessed at.
-    computed: argv.length > 0 && argv[0] !== '[' && UNREADABLE_WORD.test(argv[0]),
+    computed: unreadable || (argv.length > 0 && argv[0] !== '[' && UNREADABLE_WORD.test(argv[0])),
     argv
   })
   // Bounded: every pass consumes at least the command word.
@@ -488,6 +494,36 @@ function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, '
       const c = argv.indexOf('-c')
       if (c >= 0 && argv[c + 1] !== undefined) nested.push(argv[c + 1])
     }
+    // cmd and PowerShell run a command line too: everything after `/c` or
+    // `/k`, or after `-Command` (which PowerShell lets you shorten to `-c`).
+    // A base64 `-EncodedCommand` cannot be read here, so it is asked about.
+    const windows = commandName(argv[0]).toLowerCase()
+    if (windows === 'cmd') {
+      const i = argv.findIndex((a) => /^\/[ck]$/i.test(a))
+      if (i >= 0 && i + 1 < argv.length) nested.push(argv.slice(i + 1).join(' '))
+    }
+    if (windows === 'powershell' || windows === 'pwsh') {
+      const i = argv.findIndex((a) => /^-c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?$/i.test(a))
+      if (i >= 0 && i + 1 < argv.length) nested.push(argv.slice(i + 1).join(' '))
+      if (argv.some((a) => /^-e(?:c|n\w*)?$/i.test(a))) unreadable = true
+    }
+    // `Start-Process <file> -Verb RunAs` is PowerShell's sudo.
+    if (['start-process', 'saps', 'start'].includes(windows)) {
+      const runas = argv.some((a, i) => /^-verb:runas$/i.test(a) || (/^-verb$/i.test(a) && /^runas$/i.test(argv[i + 1] ?? '')))
+      if (runas) {
+        escalated = true
+        const fp = argv.findIndex((a) => /^-filepath$/i.test(a))
+        const file = fp >= 0 ? argv[fp + 1] : argv.slice(1).find((a) => !a.startsWith('-'))
+        const al = argv.findIndex((a) => /^-argumentlist$/i.test(a))
+        const args = al >= 0 ? (argv[al + 1] ?? '') : ''
+        if (file) {
+          const line = `${file} ${args}`.trim()
+          nested.push(line)
+          if (runsBareShell(line)) shell = true
+        }
+        return done([])
+      }
+    }
     // A shell -- POSIX, cmd or PowerShell -- left open as the other user.
     if (escalated && isBareShell(argv)) shell = true
     if (name === 'eval' && argv.length > 1) nested.push(argv.slice(1).join(' '))
@@ -513,6 +549,10 @@ function walkCommand(command: string, visit: (facts: SegmentFacts) => void, dept
   // `$(...)` only, which is enough for the forms anyone writes by hand.
   for (const m of command.matchAll(/\$\(([^()]*)\)/g)) nested.push(m[1])
   for (const m of command.matchAll(/`([^`]*)`/g)) nested.push(m[1])
+
+  // A string whose quotes do not close is one the shell will read differently
+  // from anything here: fail toward ask.
+  if (!quotesBalanced(command)) visit({ segment: '', head: [], escalated: false, shell: false, computed: true, argv: [] })
 
   for (const segment of splitSegments(command)) {
     // Redirection targets are files, never the command; the path rules read
@@ -629,6 +669,19 @@ function splitSegments(command: string): string[] {
   let quote: string | null = null
   for (let i = 0; i < command.length; i++) {
     const c = command[i]
+    // POSIX quoting, as tokenize reads it: nothing escapes inside single
+    // quotes; inside double quotes and outside quotes a backslash takes the
+    // next character with it, so `\;` and `"a\"b"` never end a segment.
+    if (quote === "'") {
+      if (c === quote) quote = null
+      current += c
+      continue
+    }
+    if (c === '\\' && i + 1 < command.length) {
+      current += c + command[i + 1]
+      i++
+      continue
+    }
     if (quote) {
       if (c === quote) quote = null
       current += c
@@ -664,29 +717,95 @@ function splitSegments(command: string): string[] {
   return out.filter((s) => s.trim())
 }
 
+/**
+ * Words, as a POSIX shell reads them.
+ *
+ * Outside quotes a backslash escapes the next character (`\sudo` is `sudo`);
+ * inside double quotes only `\"`, `\\`, `\$`, a backtick and a newline are
+ * escapes; inside single quotes nothing is. The tokenizer used to ignore
+ * backslashes altogether, so a correctly quoted nest -- `sh -c "sh -c \"sh -c
+ * 'sudo reboot'\""`, or the `'\''` that shlex.quote emits -- came apart in
+ * the wrong places and the sudo at the bottom was never seen.
+ *
+ * ONE EXCEPTION: a word that begins like a Windows path (`C:\`, `\\server`)
+ * keeps its backslashes. On a Windows target they are separators, not
+ * escapes, and the path rules and the Windows escalator names are matched
+ * against them; on a POSIX host such a word names nothing either way.
+ */
 function tokenize(segment: string): string[] {
   const tokens: string[] = []
   let current = ''
+  let started = false
+  let literal = false
   let quote: string | null = null
-  for (const c of segment) {
-    if (quote) {
-      if (c === quote) quote = null
+  for (let i = 0; i < segment.length; i++) {
+    const c = segment[i]
+    if (quote === "'") {
+      if (c === "'") quote = null
       else current += c
+      continue
+    }
+    if (quote === '"') {
+      if (c === '\\' && i + 1 < segment.length && '"\\$`\n'.includes(segment[i + 1])) {
+        if (segment[i + 1] !== '\n') current += segment[i + 1]
+        i++
+      } else if (c === '"') quote = null
+      else current += c
+      continue
+    }
+    if (!started) literal = /^(?:[A-Za-z]:\\|\\\\)/.test(segment.slice(i))
+    if (c === '\\' && !literal) {
+      if (i + 1 < segment.length && segment[i + 1] !== '\n') current += segment[i + 1]
+      i++
+      started = true
       continue
     }
     if (c === '"' || c === "'") {
       quote = c
+      started = true
       continue
     }
     if (/\s/.test(c)) {
-      if (current) tokens.push(current)
+      if (started) tokens.push(current)
       current = ''
+      started = false
       continue
     }
     current += c
+    started = true
   }
-  if (current) tokens.push(current)
+  if (started) tokens.push(current)
   return tokens
+}
+
+/**
+ * Does every quote close, and does the line not end on a bare backslash? A
+ * string that fails this cannot be read the way the shell will read it, so
+ * walkCommand fails toward ask on it.
+ */
+function quotesBalanced(line: string): boolean {
+  let quote: string | null = null
+  let literal = false
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]
+    if (quote === "'") {
+      if (c === "'") quote = null
+      continue
+    }
+    // tokenize's exception, kept here too: `dir C:\` does not end on an escape.
+    if (!quote && (i === 0 || /\s/.test(line[i - 1]))) literal = /^(?:[A-Za-z]:\\|\\\\)/.test(line.slice(i))
+    if (c === '\\' && (quote || !literal)) {
+      if (i + 1 >= line.length) return false
+      i++
+      continue
+    }
+    if (quote === '"') {
+      if (c === '"') quote = null
+      continue
+    }
+    if (c === '"' || c === "'") quote = c
+  }
+  return quote === null
 }
 
 // Three absolute-path shapes, not one.
