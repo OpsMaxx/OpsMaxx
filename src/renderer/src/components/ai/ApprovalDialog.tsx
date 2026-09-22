@@ -165,6 +165,13 @@ export function sessionGrantLabel(request: ApprovalRequest): string | null {
 }
 
 /**
+ * Said next to a session grant on a write. The preview is the reason to
+ * approve a write at all, and a remembered yes skips the dialog -- and with it
+ * the preview -- for every later write it covers.
+ */
+export const LATER_WRITES_UNSEEN = 'Later writes in this session won’t be shown to you.'
+
+/**
  * What write_file will put on the server, as far as a dialog can show it.
  *
  * EVERY CHARACTER IN THIS FRAME WAS CHOSEN BY THE AGENT, so the frame is built
@@ -503,6 +510,11 @@ export function ApprovalDialog({
               session, and its label is the grant's full extent. Absent for a
               per-call tool, where main would not honour it. Neither carries
               any weight: Deny keeps the fill and the focus. */}
+          {grantLabel && request.contentPreview && (
+            <span style={{ fontSize: 11, color: 'var(--warn)', maxWidth: 180, textAlign: 'right' }}>
+              {LATER_WRITES_UNSEEN}
+            </span>
+          )}
           {grantLabel && (
             <button className="btn" onClick={() => void respondToApproval(request.id, 'approved', 'session')}>
               {grantLabel}

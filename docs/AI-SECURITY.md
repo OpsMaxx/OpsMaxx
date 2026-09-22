@@ -44,10 +44,28 @@ Regardless of which access group a session holds:
 - **Vault secrets.** There is no MCP tool that reads the Vault. This isn't a policy that could be
   misconfigured to `allow` — the code path doesn't exist.
 - **Sudo / root credentials.** OpsMaxx does not separately store a "sudo password" for any
-  server — sudo capability is a policy decision about whether a `sudo`/`doas` command is allowed
-  to run over the SSH connection that's already authenticated, not a credential handed to
-  anything. Unrestricted root shells (`sudo -i`, `sudo su`, `sudo bash`, bare `su`) are refused
-  unconditionally, before the access group is even consulted.
+  server — sudo capability is a policy decision about whether a command that runs as another user
+  is allowed to run over the SSH connection that's already authenticated, not a credential handed
+  to anything. Unrestricted root shells (`sudo -i`, `sudo su`, `sudo bash`, `pkexec bash`,
+  `su -c bash`, bare `su`, `pkexec` or `run0`) are refused whatever the access group says.
+
+  **How a command is recognised as running as another user** (`classifyCommand`,
+  `policyEngine.ts`). It is the command WORD that counts, in every segment of the line, not the
+  first word of the string: the line is split on `;`, `&&`, `||`, `|`, `&` and newlines, and the
+  insides of `$(...)`, backticks, `sh -c '...'`, `su -c '...'` and `env -S '...'` are examined the
+  same way, to a depth of three. In each segment, leading `VAR=value` assignments and the wrappers
+  `env`, `command`, `exec`, `builtin`, `nohup`, `time`, `nice`, `ionice`, `stdbuf`, `timeout`,
+  `xargs` and `busybox` (with their options) are stepped over, and a path is reduced to its
+  basename. If what is left is `sudo`, `doas`, `su`, `pkexec`, `run0`, `runuser`, `sudoedit` or
+  `machinectl shell`, the command is governed by the **Sudo** capability. So `/usr/bin/sudo
+  reboot`, `env sudo reboot`, `true; sudo reboot` and `su -c "rm -rf /x"` are all sudo, and a
+  group that denies sudo denies them. A name in argument position is not a run: `grep sudo
+  /var/log/auth.log`, `echo sudo` and `command -v sudo` are ordinary commands.
+
+  This is best-effort, and says so: a command string can always hide what it runs (`$cmd`,
+  `eval`, a script file). It closes the direct forms, and it only ever tightens — the older
+  start-of-string tests are still applied as well. OpsMaxx's own `sudo -n` privileged reads do
+  not pass through it; only the MCP bridge's `execute_command` does.
 - **A server's real hostname, IP, port or username.** Every tool that names a server takes and
   returns a friendly name (e.g. "Production API"); `get_server_details` returns OS, access group
   and effective permissions, never connection details.
@@ -155,7 +173,7 @@ names.
 | Credential exposure to a model's context (and whatever a provider retains of it) | Credentials are resolved inside the main process at connect time and never placed in a tool response | `credentialResolver.ts` |
 | Network/topology exposure — leaking internal IPs, hostnames, usernames just by listing servers | Tool responses carry only names, OS and permissions | `mcpServer.ts` (`list_servers`, `get_server_details`) |
 | Prompt-injection or a confused agent running something destructive | Any capability set to ASK blocks until a human approves; the agent has no path to approve its own request | `approvals.ts`, `mcpServer.ts` |
-| Sudo / privilege escalation, including via disguised unrestricted shells | Hard-denied by pattern match, independent of access-group configuration | `policyEngine.ts` (`classifyCommand`, `evaluateCommand`) |
+| Sudo / privilege escalation, including via disguised unrestricted shells | Unrestricted root shells are denied whatever the access group says; every other command that runs as another user — recognised as the command word of any segment, behind wrappers and inside `sh -c` and `$(...)` — is governed by the Sudo capability (see *How a command is recognised as running as another user* above) | `policyEngine.ts` (`classifyCommand`, `evaluateCommand`) |
 | An agent silently changing which network the user's traffic crosses | Starting a VPN is always ASK, on every group, including one set to ALLOW; stopping one is ASK whenever live sessions depend on it | `policyEngine.ts` (`evaluateVpnControl`) |
 | An agent publishing a local port to the internet through a reverse proxy | `set_vpn` refuses `frp` profiles before the access group is consulted, in either direction; no capability value reaches past it, and there is no tool that can create one | `policyEngine.ts` (`isVpnKindRefusedForAi`), `mcpServer.ts` (`set_vpn`) |
 | Secrets leaking through command output (`env`, a misconfigured app, a `cat` of a file with a key in it) | Known credential values blanked verbatim; pattern rules catch `PASSWORD=`/`TOKEN=`-style assignments, PEM key blocks, bearer tokens, AWS access key IDs, connection-string passwords | `secretRedaction.ts` |

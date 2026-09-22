@@ -229,3 +229,122 @@ describe('mostRestrictive', () => {
     expect(mostRestrictive({ decision: 'allow', reason: 'a' }, { decision: 'allow', reason: 'b' }).decision).toBe('allow')
   })
 })
+
+// classifyCommand used to look at the START of the string only, so with
+// sudo=deny and terminal=allow every one of these ran with no prompt -- and
+// the escalation shells ran under a policy that says they never run at all.
+describe('escalation anywhere in the command', () => {
+  const noSudo = group({ terminal: 'allow', sudo: 'deny' })
+  const withSudo = group({ terminal: 'allow', sudo: 'allow' })
+
+  it.each([
+    '/usr/bin/sudo reboot',
+    'env sudo reboot',
+    'env -i PATH=/usr/bin sudo reboot',
+    'command sudo systemctl stop nginx',
+    'exec sudo reboot',
+    'builtin exec sudo reboot',
+    'nohup sudo reboot',
+    'time sudo reboot',
+    'nice -n 5 sudo reboot',
+    'ionice -c 3 sudo reboot',
+    'stdbuf -oL sudo reboot',
+    'timeout 10 sudo reboot',
+    'timeout -s KILL 10 sudo reboot',
+    'xargs sudo rm',
+    'busybox su -c reboot',
+    'FOO=1 sudo reboot',
+    'true; sudo reboot',
+    'true && sudo reboot',
+    'false || sudo reboot',
+    'ls | sudo tee /etc/x',
+    'sleep 1 & sudo reboot',
+    'echo x\nsudo reboot',
+    'echo $(sudo cat /etc/shadow)',
+    'echo `sudo id`',
+    'bash -c "sudo reboot"',
+    "sh -c 'pkexec rm -rf /var/lib'",
+    "env -S 'sudo reboot'",
+    'pkexec rm -rf /var/lib',
+    'su -c "rm -rf /var/lib"',
+    'su root -c id',
+    'doas reboot',
+    './sudo reboot',
+    'run0 systemctl stop nginx',
+    'runuser -u postgres -- psql',
+    'runuser -u postgres psql',
+    'sudoedit /etc/hosts',
+    'machinectl shell root@ /bin/true -c id'
+  ])('denies %s under sudo=deny', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('deny')
+  })
+
+  it.each([
+    '/usr/bin/sudo -i',
+    'env sudo -i',
+    'command sudo -s',
+    '/usr/bin/sudo bash',
+    'sudo -u root -i',
+    'sudo -iu root',
+    'sudo --login',
+    'true; sudo -i',
+    'bash -c "sudo -i"',
+    'echo $(sudo -i)',
+    'pkexec',
+    'pkexec bash',
+    'pkexec /bin/sh',
+    'su',
+    'su root',
+    'su -l root',
+    'su -c bash',
+    'su root -c "bash"',
+    'busybox su',
+    'doas -s',
+    'doas bash',
+    'run0',
+    'runuser -l root',
+    'runuser -u root bash',
+    'sudo su',
+    'sudo env bash',
+    'sudo sh -c bash',
+    "env sudo bash -c 'zsh'",
+    'machinectl shell',
+    'machinectl shell root@'
+  ])('refuses the escalation shell %s even with sudo=allow', (cmd) => {
+    expect(classifyCommand(cmd).isUnrestrictedShell).toBe(true)
+    expect(evaluateCommand(withSudo, cmd).decision).toBe('deny')
+  })
+
+  // A name in ARGUMENT position is text, not a run. Over-blocking these would
+  // put a sudo=deny group in front of an agent reading its own auth log.
+  it.each([
+    'ls',
+    'echo sudo',
+    'grep sudo /var/log/auth.log',
+    'ls su',
+    'cat sudoers.txt',
+    'command -v sudo',
+    'which sudo pkexec',
+    'journalctl -t sudo',
+    'systemctl status sudo',
+    'echo "run sudo later"',
+    'cmd 2>&1 | grep su',
+    'bash -c "echo sudo"'
+  ])('leaves %s alone', (cmd) => {
+    expect(classifyCommand(cmd)).toEqual({ isSudo: false, isUnrestrictedShell: false })
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('allow')
+  })
+
+  // Tighter only: everything the start-of-string tests caught, still caught.
+  it.each([
+    ['sudo systemctl restart nginx', { isSudo: true, isUnrestrictedShell: false }],
+    ['doas reboot', { isSudo: true, isUnrestrictedShell: false }],
+    ['sudo -i', { isSudo: true, isUnrestrictedShell: true }],
+    ['sudo su -', { isSudo: true, isUnrestrictedShell: true }],
+    ['sudo /bin/sh', { isSudo: true, isUnrestrictedShell: true }],
+    ['su -', { isSudo: true, isUnrestrictedShell: true }],
+    ['su - root', { isSudo: true, isUnrestrictedShell: true }]
+  ])('still classifies %s as before, or stricter', (cmd, expected) => {
+    expect(classifyCommand(cmd)).toEqual(expected)
+  })
+})

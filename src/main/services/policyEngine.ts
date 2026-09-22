@@ -91,11 +91,282 @@ export interface CommandClassification {
   isUnrestrictedShell: boolean
 }
 
+// ---------------------------------------------------------------------------
+// Finding escalation ANYWHERE in a command
+// ---------------------------------------------------------------------------
+//
+// This used to test the start of the string and nothing else -- `^sudo`,
+// `^doas`, and the shell patterns above anchored the same way. With sudo=deny
+// and terminal=allow, every one of these therefore ran, silently:
+//
+//   /usr/bin/sudo reboot        env sudo reboot       command sudo systemctl stop nginx
+//   true; sudo reboot           pkexec rm -rf /x      su -c "rm -rf /x"
+//
+// and so did the escalation SHELLS this function exists to refuse whatever the
+// group says: `/usr/bin/sudo -i`, `env sudo -i`, `pkexec bash`, `su -c bash`.
+//
+// So each command segment is looked at, not the string: split on ; && || | &
+// and newlines; wrappers that run the rest of the line as a command (env,
+// command, exec, nohup, nice, timeout, xargs, busybox, ...) are stepped over
+// with their own options; the command word is reduced to its basename; and
+// the inside of `$(...)`, backticks, `sh -c '...'`, `su -c '...'` and
+// `env -S '...'` is examined the same way, to a small depth.
+//
+// ESCALATION IS THE COMMAND WORD, NEVER AN ARGUMENT. `grep sudo auth.log`,
+// `echo sudo` and `ls su` mention a name; they do not run it. Treating every
+// mention as a run would put a sudo=deny group in front of an agent reading
+// its own auth log, and a rule that fires on innocent text teaches people to
+// loosen the rule.
+//
+// BEST-EFFORT, AND ONLY EVER TIGHTER. A command string can always hide what it
+// runs (`$x`, `eval`, a script file), so this narrows the obvious forms -- the
+// ones a model actually emits -- and does not claim more. The old start-of-
+// string tests are still OR'd in, so nothing that was sudo or refused before
+// this is anything less now.
+//
+// Only the MCP bridge calls this, through evaluateCommand. OpsMaxx's own
+// `sudo -n` privileged reads never pass through it.
+
+/** Names that run the rest of the line as another user. */
+const ESCALATORS = new Set(['sudo', 'doas', 'su', 'pkexec', 'run0', 'runuser'])
+
+/** Shells: with no `-c`, running one is an interactive shell. */
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'mksh', 'ash', 'fish', 'csh', 'tcsh'])
+
+/**
+ * Wrappers that run the rest of the line as a command, and the short options
+ * of each that consume the next word. A wrapper not listed takes no values.
+ */
+const RUNNERS: Record<string, Set<string>> = {
+  env: new Set(['-u', '-C', '-S']),
+  command: new Set(),
+  exec: new Set(['-a']),
+  builtin: new Set(),
+  nohup: new Set(),
+  time: new Set(['-f', '-o']),
+  nice: new Set(['-n']),
+  ionice: new Set(['-c', '-n', '-p']),
+  stdbuf: new Set(['-i', '-o', '-e']),
+  timeout: new Set(['-s', '-k']),
+  xargs: new Set(['-a', '-d', '-E', '-I', '-L', '-n', '-P', '-s']),
+  busybox: new Set()
+}
+
+/** Short options of the escalators that consume the next word. */
+const ESCALATOR_VALUE_FLAGS: Record<string, Set<string>> = {
+  sudo: new Set(['-u', '-g', '-C', '-D', '-h', '-p', '-r', '-t', '-U', '-R', '-T']),
+  doas: new Set(['-u', '-C']),
+  pkexec: new Set(['--user']),
+  run0: new Set(['-u', '-g', '-D', '--user', '--group', '--chdir', '--unit', '--property', '--setenv', '--slice', '--description', '--nice', '--machine']),
+  su: new Set(['-c', '-s', '-g', '-G', '-w', '--command', '--shell', '--group', '--supp-group', '--session-command', '--whitelist-environment']),
+  runuser: new Set(['-c', '-s', '-g', '-G', '-u', '-w', '--command', '--shell', '--group', '--supp-group', '--user', '--session-command', '--whitelist-environment'])
+}
+
+const MAX_DEPTH = 3
+const baseName = (t: string): string => t.split('/').pop() ?? t
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
+
+/** Split a short-option cluster: `-Hiu` -> H, i, u (stopping at a value flag). */
+function shortLetters(token: string, valueFlags: Set<string>): { letters: string[]; takesNext: boolean } {
+  const letters: string[] = []
+  for (let i = 1; i < token.length; i++) {
+    const l = token[i]
+    letters.push(l)
+    if (valueFlags.has(`-${l}`)) return { letters, takesNext: i === token.length - 1 }
+  }
+  return { letters, takesNext: false }
+}
+
+/** Step over leading assignments and runner wrappers; null if what follows is not a run. */
+function stripRunners(tokens: string[], nested: string[]): string[] | null {
+  let t = tokens
+  for (;;) {
+    while (t.length && ASSIGNMENT.test(t[0])) t = t.slice(1)
+    const name = t.length ? baseName(t[0]) : ''
+    const valueFlags = RUNNERS[name]
+    if (!valueFlags) return t
+    t = t.slice(1)
+    while (t.length && t[0].startsWith('-') && t[0] !== '-') {
+      const flag = t[0]
+      if (flag === '--') {
+        t = t.slice(1)
+        break
+      }
+      // `command -v sudo` asks where sudo is; it does not run it.
+      if (name === 'command' && /^-[a-zA-Z]*[vV]/.test(flag)) return null
+      // `env -S 'sudo -i'` runs its argument as a command line.
+      if (name === 'env' && (flag === '-S' || flag === '--split-string')) {
+        if (t[1]) nested.push(t[1])
+        t = t.slice(2)
+        continue
+      }
+      if (name === 'env' && flag.startsWith('--split-string=')) {
+        nested.push(flag.slice('--split-string='.length))
+        t = t.slice(1)
+        continue
+      }
+      t = t.slice(valueFlags.has(flag) ? 2 : 1)
+    }
+    // `timeout 5 cmd`: the duration is an operand, not the command.
+    if (name === 'timeout' && t.length && /^\d/.test(t[0])) t = t.slice(1)
+  }
+}
+
+interface Found {
+  isSudo: boolean
+  isUnrestrictedShell: boolean
+}
+
+/**
+ * Does this command line, run as another user, leave them in a shell? True for
+ * a bare `bash`, and for a shell whose `-c` string is itself a bare shell --
+ * `su -c bash`, `sudo sh -c bash` -- which is the same root prompt spelled
+ * longer.
+ */
+function runsBareShell(line: string, depth = 0): boolean {
+  return splitSegments(line).some((segment) => {
+    const argv = stripRunners(tokenize(segment), [])
+    return !!argv?.length && isBareShell(argv, depth)
+  })
+}
+
+function isBareShell(argv: string[], depth = 0): boolean {
+  if (!SHELLS.has(baseName(argv[0]))) return false
+  const c = argv.indexOf('-c')
+  if (c < 0) return true
+  return depth < MAX_DEPTH && argv[c + 1] !== undefined && runsBareShell(argv[c + 1], depth + 1)
+}
+
+/** What the escalator in `argv[0]` runs, and whether it is a shell. */
+function escalation(argv: string[], nested: string[]): { shell: boolean; target: string[] } {
+  const name = baseName(argv[0])
+  const valueFlags = ESCALATOR_VALUE_FLAGS[name] ?? new Set<string>()
+  // su and runuser take options AFTER the user name too (`su root -c id`), so
+  // their whole line is read; the others stop at the first word they run.
+  const suLike = name === 'su' || name === 'runuser'
+  let rest = argv.slice(1)
+  let target: string[] | null = null
+  let shellFlag = false
+  let command: string | null = null
+  let namedUser = false
+  while (rest.length) {
+    const flag = rest[0]
+    if (flag === '--') {
+      target = rest.slice(1)
+      break
+    }
+    if (!flag.startsWith('-') || flag === '-') {
+      // `runuser -u user cmd`: with -u, the first word is the command.
+      if (!suLike || (name === 'runuser' && namedUser)) {
+        target = rest
+        break
+      }
+      rest = rest.slice(1) // a user name, or `-` meaning a login shell
+      continue
+    }
+    if (flag.startsWith('--')) {
+      const eq = flag.indexOf('=')
+      const long = eq < 0 ? flag : flag.slice(0, eq)
+      const attached = eq < 0 ? undefined : flag.slice(eq + 1)
+      if (long === '--login' || (long === '--shell' && (name === 'sudo' || name === 'doas'))) shellFlag = true
+      if (long === '--command' || long === '--session-command') command = attached ?? rest[1] ?? ''
+      if (long === '--user') namedUser = true
+      rest = rest.slice(attached === undefined && valueFlags.has(long) ? 2 : 1)
+      continue
+    }
+    const { letters, takesNext } = shortLetters(flag, valueFlags)
+    // sudo -i / -s, doas -s: a login or plain shell as the target user.
+    if ((name === 'sudo' || name === 'doas') && letters.some((l) => l === 'i' || l === 's')) shellFlag = true
+    if (suLike && letters.includes('l')) shellFlag = true
+    if (suLike && letters.includes('u')) namedUser = true
+    const last = letters[letters.length - 1]
+    if (suLike && last === 'c') command = takesNext ? (rest[1] ?? '') : flag.slice(flag.indexOf('c') + 1)
+    rest = rest.slice(takesNext ? 2 : 1)
+  }
+  if (command !== null) {
+    nested.push(command)
+    return { shell: runsBareShell(command), target: [] }
+  }
+  // su, and runuser without `-u user -- cmd`: the result is that user's shell.
+  if (name === 'su') return { shell: true, target: [] }
+  if (name === 'runuser') return namedUser && target?.length ? { shell: false, target } : { shell: true, target: [] }
+  // pkexec and run0 with nothing to run start a root shell.
+  if (name === 'pkexec' || name === 'run0') return { shell: !target?.length, target: target ?? [] }
+  return { shell: shellFlag, target: target ?? [] }
+}
+
+function classifySegment(tokens: string[], depth: number, out: Found, nested: string[]): void {
+  const argv = stripRunners(tokens, nested)
+  if (!argv || argv.length === 0) return
+  const name = baseName(argv[0])
+
+  if (name === 'machinectl' && argv[1] === 'shell') {
+    out.isSudo = true
+    // `machinectl shell [user@]host` with nothing after it is a shell.
+    const rest = argv.slice(2).filter((a) => !a.startsWith('-'))
+    if (rest.length <= 1) out.isUnrestrictedShell = true
+    else classifySegment(rest.slice(1), depth, out, nested)
+    return
+  }
+
+  // sudoedit edits its operands as root; they are files, not a command.
+  if (name === 'sudoedit') {
+    out.isSudo = true
+    return
+  }
+
+  if (ESCALATORS.has(name)) {
+    out.isSudo = true
+    const { shell, target } = escalation(argv, nested)
+    if (shell) out.isUnrestrictedShell = true
+    // `sudo su`, `sudo bash`, `doas env sudo -i`: what it runs is judged too.
+    if (target.length) {
+      const inner = stripRunners(target, nested)
+      if (inner?.length && isBareShell(inner)) out.isUnrestrictedShell = true
+      if (inner?.length && depth < MAX_DEPTH) classifySegment(inner, depth + 1, out, nested)
+    }
+    return
+  }
+
+  // `bash -c '...'`: the string is a command line of its own.
+  if (SHELLS.has(name)) {
+    const c = argv.indexOf('-c')
+    if (c >= 0 && argv[c + 1] !== undefined) nested.push(argv[c + 1])
+  }
+}
+
+function classifyInto(command: string, depth: number, out: Found): void {
+  const nested: string[] = []
+  // Command substitutions run whatever they hold, quoted or not. Innermost
+  // `$(...)` only, which is enough for the forms anyone writes by hand.
+  for (const m of command.matchAll(/\$\(([^()]*)\)/g)) nested.push(m[1])
+  for (const m of command.matchAll(/`([^`]*)`/g)) nested.push(m[1])
+
+  for (const segment of splitSegments(command)) {
+    const tokens = tokenize(segment)
+    // The start-of-segment patterns, against the segment with its command
+    // word reduced to a basename: `/usr/bin/sudo -i` reads as `sudo -i`.
+    const argv = stripRunners(tokens, nested)
+    if (argv?.length) {
+      const normal = [baseName(argv[0]), ...argv.slice(1)].join(' ')
+      if (UNRESTRICTED_SHELL_PATTERNS.some((rx) => rx.test(normal))) out.isUnrestrictedShell = true
+    }
+    classifySegment(tokens, depth, out, nested)
+  }
+  if (depth < MAX_DEPTH) for (const inner of nested) classifyInto(inner, depth + 1, out)
+}
+
 export function classifyCommand(command: string): CommandClassification {
   const trimmed = command.trim()
-  const isSudo = /^sudo\b/.test(trimmed) || /^doas\b/.test(trimmed)
-  const isUnrestrictedShell = UNRESTRICTED_SHELL_PATTERNS.some((rx) => rx.test(trimmed))
-  return { isSudo, isUnrestrictedShell }
+  const out: Found = {
+    // The original start-of-string tests, kept so this can only get stricter.
+    isSudo: /^sudo\b/.test(trimmed) || /^doas\b/.test(trimmed),
+    isUnrestrictedShell: UNRESTRICTED_SHELL_PATTERNS.some((rx) => rx.test(trimmed))
+  }
+  classifyInto(trimmed, 0, out)
+  // A refused shell is an escalation too, whatever spelled it.
+  if (out.isUnrestrictedShell) out.isSudo = true
+  return out
 }
 
 
@@ -192,6 +463,13 @@ function splitSegments(command: string): string[] {
       out.push(current)
       current = ''
       i++
+      continue
+    }
+    // A lone `&` backgrounds one command and starts the next. `2>&1`, `&>`
+    // and `>&` are redirections, not separators.
+    if (c === '&' && command[i - 1] !== '>' && command[i - 1] !== '<' && command[i + 1] !== '>') {
+      out.push(current)
+      current = ''
       continue
     }
     if (c === ';' || c === '|' || c === '\n') {

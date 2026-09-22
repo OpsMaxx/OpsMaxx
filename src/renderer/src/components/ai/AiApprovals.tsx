@@ -3,7 +3,7 @@ import { Check, X } from 'lucide-react'
 import type { ApprovalRequest, ApprovalScope } from '../../../../shared/mcp'
 import { describeConsequence, formatRiskLabel, riskTone } from '../../../../shared/approvalRisk'
 import { bridgeOn } from '../../lib/bridge'
-import { WritePreview, capabilityLabel, sessionGrantLabel } from './ApprovalDialog'
+import { LATER_WRITES_UNSEEN, WritePreview, capabilityLabel, sessionGrantLabel } from './ApprovalDialog'
 
 export function AiApprovals(): React.JSX.Element {
   // `null` until the first read comes back, NOT `[]`.
@@ -109,6 +109,11 @@ export function AiApprovals(): React.JSX.Element {
             <div className="r-sub">Permission: {capabilityLabel(a.capability)}</div>
             {a.policyReason && <div className="r-sub">Rule: {a.policyReason}</div>}
             {a.contentPreview && <WritePreview agentName={a.agentName} preview={a.contentPreview} />}
+            {a.contentPreview && grantLabel && (
+              <div className="r-sub" style={{ color: 'var(--warn)' }}>
+                {LATER_WRITES_UNSEEN}
+              </div>
+            )}
           </div>
           <div className="spacer" />
           <button className="btn sm danger" onClick={() => respond(a.id, 'denied')}>

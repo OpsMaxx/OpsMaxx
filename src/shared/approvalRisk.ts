@@ -674,9 +674,10 @@ export const PREVIEW_MAX_LINES = 80
 //
 // plus the characters that are letters or marks by category and blank on
 // screen anyway: the combining grapheme joiner U+034F, the Hangul fillers
-// U+115F, U+1160, U+3164 and U+FFA0, the Mongolian vowel separator U+180E,
-// and the variation selectors U+FE00-FE0F and U+E0100-E01EF. The `u` flag is
-// what lets the class see anything above U+FFFF at all.
+// U+115F, U+1160, U+3164 and U+FFA0, the braille pattern blank U+2800, the
+// Mongolian vowel separator U+180E, and the variation selectors U+FE00-FE0F
+// and U+E0100-E01EF. The `u` flag is what lets the class see anything above
+// U+FFFF at all.
 //
 // A lone CR is spelled out too -- it is how a line hides its own start in a
 // terminal -- while the CR of a CRLF pair, the newline and the tab are left
@@ -694,7 +695,7 @@ const PREVIEW_INVISIBLE =
   // selector by itself, rather than as part of the character it modifies, is
   // how it gets spelled out -- which is what this lint exists to object to.
   // eslint-disable-next-line no-misleading-character-class
-  /\r(?!\n)|(?![\t\n\r])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}\u034f\u115f\u1160\u180e\u3164\uffa0\ufe00-\ufe0f\u{e0100}-\u{e01ef}]/gu
+  /\r(?!\n)|(?![\t\n\r])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}\u034f\u115f\u1160\u180e\u3164\uffa0\u2800\ufe00-\ufe0f\u{e0100}-\u{e01ef}]/gu
 
 /** `\u202e` becomes `⟨U+202E⟩`, `\u{e0041}` becomes `⟨U+E0041⟩`: printed, never obeyed. */
 export function showInvisibles(text: string): string {

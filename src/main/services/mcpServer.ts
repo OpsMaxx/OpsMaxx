@@ -44,6 +44,7 @@ import {
   resolveGroupId,
   resolveRestriction,
   evaluateCapability,
+  classifyCommand,
   evaluateCommand,
   evaluateFilePath,
   evaluateDatabaseStatement,
@@ -512,6 +513,15 @@ function resolveGroups(
 
 function withRestriction(grant: Decision, restriction: Decision | null, label: string): Decision {
   if (!restriction) return grant
+  // Both ask, for different reasons: name both. The decision is the same, but
+  // the reason is what gate() keys a remembered approval on, and keeping only
+  // the grant's let a restriction group's own path rule -- "ask before reading
+  // /secret/**" -- reach the gate under the grant's "Terminal commands require
+  // approval". A session grant given about `ls` then answered `cat
+  // /secret/key`, a question the restriction had been written to ask.
+  if (grant.decision === 'ask' && restriction.decision === 'ask' && grant.reason !== restriction.reason) {
+    return { decision: 'ask', reason: `${grant.reason} + ${restriction.reason}` }
+  }
   const winner = mostRestrictive(grant, restriction)
   // mostRestrictive prefers its first argument on a tie, so this is only the
   // restriction when the restriction is strictly the narrower of the two.
@@ -800,24 +810,22 @@ function countSessionActions(sessionId: string): number | null {
 }
 
 /**
- * Every way a command can switch to another user, root included, as a word
- * anywhere in the command -- so `/usr/bin/sudo`, `env sudo`, `command sudo`,
- * `su -c "..."` and `pkexec` all count, wherever they sit.
+ * Does this command run as another user? ONE detector, the policy's own:
+ * classifyCommand finds sudo, doas, su, pkexec, run0, runuser, sudoedit and
+ * `machinectl shell` as the command word of any segment, behind wrappers and
+ * inside `$(...)`, backticks and `sh -c` strings. What the policy allows is
+ * still effectiveCommand's decision; this only decides the capability a
+ * command is labelled, prompted and audited under, and makes it per-call.
  *
- * It decides two things in execute_command and nothing else: the capability a
- * command is labelled, prompted and audited under, and whether a remembered
- * approval may cover it (a match makes it per-call). What the policy ALLOWS is
- * still effectiveCommand's decision, untouched, and the escalation-SHELL
- * refusals (sudo -i, su, sudo bash) still live in classifyCommand.
- *
- * Deliberately loose. assessCommand grades `su -c "rm -rf /x"` and `pkexec rm`
- * ordinary -- it anchors on `sudo` at a command start and never looks inside a
- * `su -c` string -- so a stricter pattern here would let those ride an "allow
- * terminal commands for this session" given about `df`. A false positive
- * (`ls su`, `grep sudo /var/log/auth.log`) only means the operator is asked
- * again, which is the cheap direction to be wrong in.
+ * The `sudo` word test stays OR'd in as a raise, never a replacement: it is
+ * looser (it fires on `grep sudo auth.log`), and a false positive here only
+ * means the operator is asked again -- the cheap direction to be wrong in,
+ * for a question about whether a remembered yes may cover a command.
  */
-const RUNS_AS_ANOTHER_USER = /\b(?:sudo|su|doas|pkexec|runuser)\b/
+const runsAsAnotherUser = (command: string): boolean => {
+  const c = classifyCommand(command)
+  return c.isSudo || c.isUnrestrictedShell || /\bsudo\b/.test(command)
+}
 
 /**
  * Approvals already granted in this session, remembered.
@@ -2015,7 +2023,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         // and the gate's memory then paid that question out of the terminal
         // answer. The policy decision itself is unchanged: effectiveCommand
         // above still decides, from the command, exactly as it did.
-        capability: RUNS_AS_ANOTHER_USER.test(command) ? 'sudo' : 'terminal'
+        capability: runsAsAnotherUser(command) ? 'sudo' : 'terminal'
       }
       // ONE CLASSIFIER, NOT TWO. This path graded `high` on the word `sudo`
       // and on nothing else, so `docker volume rm` -- which the operator's own
@@ -2027,7 +2035,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       // rule, but swapping one rule for another would quietly lower some
       // command somewhere and this is not the change to discover that in.
       const assessed = assessCommand(command)
-      const runsAsRoot = RUNS_AS_ANOTHER_USER.test(command)
+      const runsAsRoot = runsAsAnotherUser(command)
       const elevated = check.decision === 'deny' || assessed.risk !== 'ordinary' || runsAsRoot
       // The reason names the rule that fired, in that order, because that is
       // the order the OR above evaluates -- and assessCommand already returns
@@ -2036,7 +2044,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const because = !elevated
         ? 'it runs a shell command of the agent\u2019s own composition on the host'
         : runsAsRoot
-          ? 'the command runs as another user, most likely root, through sudo, su, doas, pkexec or runuser'
+          ? 'the command runs as another user, most likely root (sudo, su, doas, pkexec, run0 or runuser)'
           : assessed.reasons[0]
             ? `OpsMaxx\u2019s command classifier graded it ${assessed.risk}: ${assessed.reasons[0]}`
             : `OpsMaxx\u2019s command classifier graded it ${assessed.risk}`

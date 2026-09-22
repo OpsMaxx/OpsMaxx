@@ -444,12 +444,13 @@ call asks, they show **Approve once** alone, and they never read a remembered gr
 
 - `add_server`, `remove_server`, `create_tunnel`, `delete_tunnel`, and the `ciTrigger` tools
   `trigger_run`, `cancel_run` and `rerun_run`;
-- `execute_command` for any command the classifier grades above ordinary, and for any command
-  containing `sudo`, `su`, `doas`, `pkexec` or `runuser` as a word anywhere in it. Those are also
-  gated and audited as the `sudo` permission rather than `terminal`, so an "Execute terminal
-  commands" grant never reaches them. The match is deliberately loose: a false positive only
-  means being asked again. What the policy allows, and the refusal of escalation shells, are
-  unchanged;
+- `execute_command` for any command the classifier grades above ordinary, any command the
+  policy recognises as running as another user (`classifyCommand`: `sudo`, `doas`, `su`,
+  `pkexec`, `run0`, `runuser`, `sudoedit` or `machinectl shell` as the command word of any
+  segment — see docs/AI-SECURITY.md), and, as a further raise, any command with the word
+  `sudo` anywhere in it. Those are also gated and audited as the `sudo` permission rather than
+  `terminal`, so an "Execute terminal commands" grant never reaches them. A false positive only
+  means being asked again;
 - `container_action` when stopping or restarting a container;
 - `query_database` for anything not classified as a read;
 - `set_tunnel` and `set_vpn` when starting.
@@ -471,6 +472,7 @@ server's known secrets *before* it is cut, so a secret straddling the cut cannot
 prefix. Every character in the Unicode categories Cc (controls, except tab and newline), Cf
 (format characters, including every bidi, zero-width and directional mark and the U+E0000–E007F
 tag block), Zl, Zp and Cs, plus U+034F, the Hangul fillers U+115F, U+1160, U+3164 and U+FFA0,
+the braille pattern blank U+2800,
 U+180E and the variation selectors U+FE00–FE0F and U+E0100–E01EF, is printed as `⟨U+XXXX⟩`
 rather than obeyed, as is a carriage return that is not part of a CRLF pair
 (`contentPreview`, `src/shared/approvalRisk.ts`). The preview is built in `approvals.ts`

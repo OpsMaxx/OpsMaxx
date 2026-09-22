@@ -472,6 +472,20 @@ describe('what write_file will write', () => {
     expect(screen.getByRole('button', { name: 'Approve once' })).toBeTruthy()
   })
 
+  it('says, next to the session button, that later writes will not be shown', async () => {
+    harness({ approvals: [{ ...writeRequest('x=1'), sessionGrant: 'capability' }] })
+    render(<ApprovalWatcher />)
+    await screen.findByRole('button', { name: /Allow “Write files” on k3s-node-01 for this session/ })
+    expect(screen.getByText('Later writes in this session won’t be shown to you.')).toBeTruthy()
+  })
+
+  it('does not say it when there is no session button to press', async () => {
+    harness({ approvals: [writeRequest('x=1')] })
+    render(<ApprovalWatcher />)
+    await screen.findByLabelText('File content written by Claude Code')
+    expect(screen.queryByText(/Later writes in this session/)).toBeNull()
+  })
+
   it('shows no content frame for a request that carries none', async () => {
     harness()
     render(<ApprovalWatcher />)

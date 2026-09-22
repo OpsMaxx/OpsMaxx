@@ -827,3 +827,42 @@ describe('every way to become another user asks on its own', () => {
     }
   })
 })
+
+// withRestriction kept the SESSION group's reason on an ask/ask tie, so a path
+// rule in the server's own assignment reached gate() under "Terminal commands
+// require approval" -- the same question as `ls` -- and a session grant given
+// about `ls` answered it.
+describe('a restriction group’s own rule', () => {
+  it('is not answered by a session grant given under the session group’s rule', async () => {
+    const full = getGroup('grp-full')!
+    saveGroup({
+      ...full,
+      id: 'grp-session-term-ask',
+      name: 'Session Terminal Ask',
+      builtIn: false,
+      capabilities: { ...full.capabilities, terminal: 'ask' }
+    })
+    saveGroup({
+      ...full,
+      id: 'grp-server-secret-ask',
+      name: 'Server Secret Ask',
+      builtIn: false,
+      capabilities: { ...full.capabilities, terminal: 'ask' },
+      filePolicies: [...full.filePolicies, { id: 'secret', pattern: '/secret/**', read: 'ask' }]
+    })
+    setAssignment({ level: 'workspace', workspaceId: 'ws' }, 'grp-server-secret-ask')
+    const a = autoRespond('approved', 'session')
+    const c = await clientFor('grp-session-term-ask')
+    try {
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'ls /tmp' })
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'ls /var' })
+      expect(a.count()).toBe(1)
+      await call(c, 'execute_command', { serverName: 'Scanner01', command: 'cat /secret/key' })
+      expect(a.count()).toBe(2)
+      expect(a.requests[1].policyReason).toMatch(/Path rule "\/secret\/\*\*"/)
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+})

@@ -452,6 +452,7 @@ describe('contentPreview, beyond the BMP and the obvious', () => {
     ['Hangul choseong filler', 'ᅟ', 'U+115F'],
     ['Hangul jungseong filler', 'ᅠ', 'U+1160'],
     ['halfwidth Hangul filler', 'ﾠ', 'U+FFA0'],
+    ['braille pattern blank', '\u2800', 'U+2800'],
     ['Mongolian vowel separator', '᠎', 'U+180E'],
     ['variation selector 16', '️', 'U+FE0F'],
     ['supplementary variation selector', '\u{E0100}', 'U+E0100'],
