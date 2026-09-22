@@ -81,6 +81,19 @@
       "generated": false
     },
     {
+      "id": "competitive-ux-review",
+      "path": "docs/10-internal/competitive-ux-review.md",
+      "type": "note.internal",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "draft",
+      "kind": "document",
+      "lines": 234,
+      "hash": "4fbfb03987920272",
+      "generated": false
+    },
+    {
       "id": "docs-ai-mcp",
       "path": "docs/AI-MCP.md",
       "type": "unknown",
@@ -724,6 +737,24 @@
     {
       "from": "security",
       "to": "docs-ai-security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "competitive-ux-review",
+      "to": "docs-plans-sync-security-protocol",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "competitive-ux-review",
+      "to": "docs-design-panel-audit",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "competitive-ux-review",
+      "to": "docs-plans-sync-security-protocol",
       "rel": "references",
       "inferred": true
     },

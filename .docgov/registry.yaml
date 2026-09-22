@@ -16,6 +16,15 @@ documents:
     title: Contributor Covenant Code of Conduct
     hash: c1d27061e8b4a490
     lines: 47
+  competitive-ux-review:
+    path: docs/10-internal/competitive-ux-review.md
+    type: note.internal
+    authority: historical
+    visibility: internal
+    title: Competitive UX review
+    status: draft
+    hash: 4fbfb03987920272
+    lines: 234
   contributing:
     path: CONTRIBUTING.md
     type: unknown
