@@ -335,7 +335,8 @@ function classifySegment(tokens: string[], depth: number, out: Found, nested: st
   }
 }
 
-function classifyInto(command: string, depth: number, out: Found): void {
+function classifyInto(command: string, depth: number, out: Found, lines?: string[]): void {
+  lines?.push(command)
   const nested: string[] = []
   // Command substitutions run whatever they hold, quoted or not. Innermost
   // `$(...)` only, which is enough for the forms anyone writes by hand.
@@ -353,7 +354,36 @@ function classifyInto(command: string, depth: number, out: Found): void {
     }
     classifySegment(tokens, depth, out, nested)
   }
-  if (depth < MAX_DEPTH) for (const inner of nested) classifyInto(inner, depth + 1, out)
+  if (depth < MAX_DEPTH) for (const inner of nested) classifyInto(inner, depth + 1, out, lines)
+}
+
+/**
+ * The command line itself, and every command line nested inside it that the
+ * escalation walk examines: `sh -c '...'`, `su -c '...'`, `env -S '...'`,
+ * `$(...)` and backticks, to the same depth. The path rules walk exactly the
+ * strings the escalation check walks, so the two can never disagree about
+ * what a command runs.
+ */
+function commandLines(command: string): string[] {
+  const lines: string[] = []
+  classifyInto(command, 0, { isSudo: false, isUnrestrictedShell: false }, lines)
+  return lines
+}
+
+/**
+ * Step over every runner and escalator in front of the command that does the
+ * work: `timeout 5 cat`, `pkexec cat`, `xargs cat`, `busybox cat`, `sudo -u x
+ * cat`. Bounded, because each pass removes at least one word.
+ */
+function unwrapCommand(tokens: string[]): string[] {
+  let t = tokens
+  for (let pass = 0; pass <= MAX_DEPTH * 2 && t.length; pass++) {
+    const argv = stripRunners(t, [])
+    if (!argv?.length) return []
+    if (!ESCALATORS.has(baseName(argv[0]))) return argv
+    t = escalation(argv, []).target
+  }
+  return t
 }
 
 export function classifyCommand(command: string): CommandClassification {
@@ -545,76 +575,99 @@ export const toMatchPath = (t: string): string => t.replace(/\\/g, '/')
 const commandName = (token: string): string =>
   (token.split(/[\\/]/).pop() ?? '').replace(/\.(exe|com|cmd|bat|ps1)$/i, '')
 
+/** The paths one command's argv reads or writes, onto `found`. */
+function pathsFromArgv(tokens: string[], found: PathAccess[]): void {
+  if (tokens.length === 0) return
+
+  const name = commandName(tokens[0])
+  const lower = name.toLowerCase()
+  // PowerShell and cmd flags are `/Q`, `/S`, `-Path` — a `/`-prefixed token
+  // is a flag there, not the absolute path it would be on POSIX. Only drop
+  // slash-flags when the command is a Windows one, or `cat /etc/shadow`
+  // would lose its operand.
+  const isWindowsCmd = WINDOWS_READ_COMMANDS.has(lower) || WINDOWS_WRITE_COMMANDS.has(lower)
+  const operands = tokens
+    .slice(1)
+    .filter((t) => !t.startsWith('-'))
+    .filter((t) => !(isWindowsCmd && /^\/[A-Za-z?]$/.test(t)))
+
+  if (COPY_COMMANDS.has(name)) {
+    // Last operand is the destination; everything before it is a source.
+    operands.forEach((t, i) => {
+      if (!isAbsolute(t)) return
+      found.push({ path: t, mode: i === operands.length - 1 && operands.length > 1 ? 'write' : 'read' })
+    })
+    return
+  }
+
+  // `sed -i` edits in place; without it the operands are only read.
+  const mode: 'read' | 'write' | null =
+    name === 'sed' || name === 'perl'
+      ? tokens.some((t) => /^-\w*i/.test(t))
+        ? 'write'
+        : 'read'
+      : READ_COMMANDS.has(name) || WINDOWS_READ_COMMANDS.has(lower)
+        ? 'read'
+        : WRITE_COMMANDS.has(name) || WINDOWS_WRITE_COMMANDS.has(lower)
+          ? 'write'
+          : null
+  if (!mode) return
+
+  // grep/awk/sed take a pattern or script before their file operands, but a
+  // pattern is not an absolute path, so filtering on that is enough.
+  for (const t of operands) {
+    if (isAbsolute(t)) found.push({ path: t, mode })
+    // dd if=/x of=/y
+    const kv = /^(if|of)=(.+)$/.exec(t)
+    if (kv && isAbsolute(kv[2])) found.push({ path: kv[2], mode: kv[1] === 'of' ? 'write' : 'read' })
+  }
+}
+
 export function extractPathAccesses(command: string): PathAccess[] {
   const found: PathAccess[] = []
 
-  for (const segment of splitSegments(command)) {
-    // Redirections bind to the segment, not to any particular argv entry, and
-    // `> /etc/passwd` is a write however harmless the command in front of it.
-    for (const m of segment.matchAll(/(\d?>>?|<)\s*("[^"]*"|'[^']*'|\S+)/g)) {
-      const target = m[2].replace(/^["']|["']$/g, '')
-      if (isAbsolute(target)) found.push({ path: target, mode: m[1].includes('>') ? 'write' : 'read' })
-    }
-
-    let tokens = tokenize(segment.replace(/(\d?>>?|<)\s*("[^"]*"|'[^']*'|\S+)/g, ' '))
-    while (tokens.length && PREFIXES.has(commandName(tokens[0]))) {
-      const wrapper = commandName(tokens[0])
-      const valueFlags = PREFIX_VALUE_FLAGS[wrapper] ?? new Set<string>()
-      tokens = tokens.slice(1)
-      while (tokens.length && tokens[0].startsWith('-')) {
-        const takesValue = valueFlags.has(tokens[0])
-        tokens = tokens.slice(takesValue ? 2 : 1)
+  // Every command line the escalation walk examines, not only the outer one:
+  // `sh -c 'cat /etc/shadow'` and `echo $(cat /root/.ssh/id_rsa)` read the
+  // file exactly as `cat /etc/shadow` does, and used to reach no path rule.
+  for (const line of commandLines(command)) {
+    for (const segment of splitSegments(line)) {
+      // Redirections bind to the segment, not to any particular argv entry, and
+      // `> /etc/passwd` is a write however harmless the command in front of it.
+      for (const m of segment.matchAll(/(\d?>>?|<)\s*("[^"]*"|'[^']*'|\S+)/g)) {
+        const target = m[2].replace(/^["']|["']$/g, '')
+        if (isAbsolute(target)) found.push({ path: target, mode: m[1].includes('>') ? 'write' : 'read' })
       }
-      // `env FOO=bar cmd` and `sudo FOO=bar cmd`
-      while (tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0])) tokens = tokens.slice(1)
-    }
-    if (tokens.length === 0) continue
 
-    const name = commandName(tokens[0])
-    const lower = name.toLowerCase()
-    // PowerShell and cmd flags are `/Q`, `/S`, `-Path` — a `/`-prefixed token
-    // is a flag there, not the absolute path it would be on POSIX. Only drop
-    // slash-flags when the command is a Windows one, or `cat /etc/shadow`
-    // would lose its operand.
-    const isWindowsCmd = WINDOWS_READ_COMMANDS.has(lower) || WINDOWS_WRITE_COMMANDS.has(lower)
-    const operands = tokens
-      .slice(1)
-      .filter((t) => !t.startsWith('-'))
-      .filter((t) => !(isWindowsCmd && /^\/[A-Za-z?]$/.test(t)))
-
-    if (COPY_COMMANDS.has(name)) {
-      // Last operand is the destination; everything before it is a source.
-      operands.forEach((t, i) => {
-        if (!isAbsolute(t)) return
-        found.push({ path: t, mode: i === operands.length - 1 && operands.length > 1 ? 'write' : 'read' })
-      })
-      continue
-    }
-
-    // `sed -i` edits in place; without it the operands are only read.
-    const mode: 'read' | 'write' | null =
-      name === 'sed' || name === 'perl'
-        ? tokens.some((t) => /^-\w*i/.test(t))
-          ? 'write'
-          : 'read'
-        : READ_COMMANDS.has(name) || WINDOWS_READ_COMMANDS.has(lower)
-          ? 'read'
-          : WRITE_COMMANDS.has(name) || WINDOWS_WRITE_COMMANDS.has(lower)
-            ? 'write'
-            : null
-    if (!mode) continue
-
-    // grep/awk/sed take a pattern or script before their file operands, but a
-    // pattern is not an absolute path, so filtering on that is enough.
-    for (const t of operands) {
-      if (isAbsolute(t)) found.push({ path: t, mode })
-      // dd if=/x of=/y
-      const kv = /^(if|of)=(.+)$/.exec(t)
-      if (kv && isAbsolute(kv[2])) found.push({ path: kv[2], mode: kv[1] === 'of' ? 'write' : 'read' })
+      const bare = tokenize(segment.replace(/(\d?>>?|<)\s*("[^"]*"|'[^']*'|\S+)/g, ' '))
+      let tokens = bare
+      while (tokens.length && PREFIXES.has(commandName(tokens[0]))) {
+        const wrapper = commandName(tokens[0])
+        const valueFlags = PREFIX_VALUE_FLAGS[wrapper] ?? new Set<string>()
+        tokens = tokens.slice(1)
+        while (tokens.length && tokens[0].startsWith('-')) {
+          const takesValue = valueFlags.has(tokens[0])
+          tokens = tokens.slice(takesValue ? 2 : 1)
+        }
+        // `env FOO=bar cmd` and `sudo FOO=bar cmd`
+        while (tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0])) tokens = tokens.slice(1)
+      }
+      pathsFromArgv(tokens, found)
+      // And again past the wider set of wrappers and escalators the
+      // escalation walk knows (timeout, xargs, busybox, exec, pkexec, run0,
+      // runuser). The first pass is kept as it was, so this can only add.
+      const unwrapped = unwrapCommand(bare)
+      if (unwrapped.join('\u0000') !== tokens.join('\u0000')) pathsFromArgv(unwrapped, found)
     }
   }
 
-  return found
+  // One entry per path and mode, first occurrence first.
+  const seen = new Set<string>()
+  return found.filter((f) => {
+    const key = `${f.mode}\u0000${f.path}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 export function evaluateCommand(group: AccessGroup | null, command: string): Decision {

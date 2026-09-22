@@ -5,6 +5,7 @@ import {
   evaluateCommand,
   evaluateFilePath,
   classifyCommand,
+  extractPathAccesses,
   mostRestrictive,
   globToRegExp
 } from '../src/main/services/policyEngine'
@@ -346,5 +347,50 @@ describe('escalation anywhere in the command', () => {
     ['su - root', { isSudo: true, isUnrestrictedShell: true }]
   ])('still classifies %s as before, or stricter', (cmd, expected) => {
     expect(classifyCommand(cmd)).toEqual(expected)
+  })
+})
+
+// Path rules read only the outer command line, so a file the group denies was
+// reachable by wrapping the read in a shell string or a substitution. They now
+// walk the same nested strings the escalation check walks.
+describe('path rules inside nested command lines', () => {
+  const shadowDenied = group({ terminal: 'allow', sudo: 'allow', readFiles: 'allow', writeFiles: 'allow' }, [
+    { id: 'shadow', pattern: '/etc/shadow', read: 'deny', write: 'deny' }
+  ])
+
+  it.each([
+    'cat /etc/shadow',
+    "sh -c 'cat /etc/shadow'",
+    'bash -c "cat /etc/shadow"',
+    'sudo sh -c "cat /etc/shadow"',
+    "su -c 'cat /etc/shadow'",
+    'echo $(cat /etc/shadow)',
+    'echo `cat /etc/shadow`',
+    "env -S 'cat /etc/shadow'",
+    'timeout 5 cat /etc/shadow',
+    'pkexec cat /etc/shadow',
+    'busybox cat /etc/shadow',
+    'exec cat /etc/shadow',
+    'xargs -n 1 cat /etc/shadow',
+    `sh -c "bash -c 'cat /etc/shadow'"`,
+    "sh -c 'echo x > /etc/shadow'",
+    "true; sh -c 'tail -n 1 /etc/shadow'"
+  ])('denies %s like a direct read', (cmd) => {
+    expect(evaluateCommand(shadowDenied, cmd).decision).toBe('deny')
+  })
+
+  it.each([
+    "sh -c 'ls /tmp'",
+    "sh -c 'cat /etc/hostname'",
+    'bash -c "echo /etc/shadow"',
+    'echo $(date)',
+    // (`sudo sh -c ...` itself is a refused shell form, whatever it runs.)
+    "su -c 'ls /tmp'"
+  ])('leaves %s alone under an unrelated rule', (cmd) => {
+    expect(evaluateCommand(shadowDenied, cmd).decision).toBe('allow')
+  })
+
+  it('reports a nested path once, with its mode', () => {
+    expect(extractPathAccesses("sudo sh -c 'cat /etc/shadow'")).toEqual([{ path: '/etc/shadow', mode: 'read' }])
   })
 })
