@@ -167,6 +167,20 @@ describe('the templates file', () => {
     expect(readFileSync(file(), 'utf8')).toBe(before)
   })
 
+  it('keeps the readable rows when it sets a file aside for one bad row', () => {
+    const oversize = { ...base, id: 'tpl-big', name: 'x'.repeat(121) }
+    const before = JSON.stringify({ v: 1, templates: [base, oversize] })
+    writeFileSync(file(), before, { mode: 0o600 })
+    const aside = join(dir, 'opsmaxx-job-templates-aside.json')
+    expect(setAsideJobTemplates(deps)).toEqual({ ok: true, path: aside })
+    // The original, bad row and all, is in the aside copy...
+    expect(readFileSync(aside, 'utf8')).toBe(before)
+    // ...and the good one survives in a file that can be written again.
+    const fresh = listJobTemplates(deps)
+    expect(fresh).toMatchObject({ problem: null, templates: [{ id: 'tpl-1', name: base.name }] })
+    expect(saveJobTemplate(deps, { ...base, id: 'tpl-2' }).ok).toBe(true)
+  })
+
   it('sets a problem file aside, never deletes it, and never overwrites an earlier one', () => {
     expect(setAsideJobTemplates(deps).ok).toBe(false)
     writeFileSync(file(), '{ not json', { mode: 0o600 })

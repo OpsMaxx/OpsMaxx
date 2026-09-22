@@ -559,3 +559,28 @@ describe('a templates file main will not rewrite', () => {
     expect(templates.setAside).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('a taken template name', () => {
+  it('is taken whatever the spacing, because names are stored collapsed', async () => {
+    const templates = {
+      list: vi.fn(async () => ({
+        templates: [
+          { id: 't1', name: 'Reload web', steps: 'systemctl reload nginx', rollback: '', rebootLast: false, updatedAt: 1 }
+        ],
+        problem: null,
+        path: '/t.json'
+      })),
+      save: vi.fn(),
+      remove: vi.fn()
+    }
+    await compose({ ...jobsStub(), jobTemplates: templates }, [server(1)], {
+      title: '  Reload   web ',
+      steps: 'echo new',
+      pick: []
+    })
+    await waitFor(() => screen.getByRole('option', { name: 'Reload web' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save as template' }))
+    await screen.findByText('Replace \u2018Reload web\u2019?')
+    expect(templates.save).not.toHaveBeenCalled()
+  })
+})

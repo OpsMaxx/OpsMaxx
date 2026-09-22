@@ -9,6 +9,7 @@ import {
   composeJobSpec,
   draftFromTemplate,
   EMPTY_JOB_DRAFT,
+  normaliseTemplateName,
   templateFromDraft,
   type JobDraft,
   type JobTemplate
@@ -217,7 +218,9 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
   const setAsideTemplates = async (): Promise<void> => {
     const result = await window.opsmaxx?.jobTemplates?.setAside()
     setTemplateNote(
-      result?.ok ? `Moved to ${result.path}. New templates start a fresh file.` : result?.reason ?? null
+      result?.ok
+        ? `Moved to ${result.path}. The templates that could be read are in a fresh file.`
+        : result?.reason ?? null
     )
     if (result?.ok) await loadTemplates()
   }
@@ -778,7 +781,8 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
                     // two rows nobody can tell apart in the picker, so a taken
                     // name asks to replace that one instead. Declining leaves
                     // both as they were: pick a different title.
-                    const taken = templates.find((t) => t.name === draft.title.trim())
+                    const name = normaliseTemplateName(draft.title)
+                    const taken = templates.find((t) => t.name === name)
                     if (taken) setReplacing(taken)
                     else void storeTemplate(templateFromDraft(draft, crypto.randomUUID(), draft.title))
                   }}

@@ -29,7 +29,9 @@ download/re-upload dance. The inline editor is still there for quick edits.
 preview and a confirmation that says what the paste will do. If the shell has
 bracketed paste on, as recent bash and zsh do, nothing runs until you press
 Enter. Otherwise each line runs as it lands, and a last line without a newline
-waits for Enter. Single-line pastes go straight through.
+waits for Enter. A carriage return on its own counts as a line break, because
+the shell treats it as Enter. Single-line pastes, including one with a trailing
+line break, go straight through.
 
 **Run a saved job template here.** With the Jobs module on, the command palette
 (<kbd>Ctrl</kbd>+<kbd>K</kbd>) lists every template saved in the Jobs composer as

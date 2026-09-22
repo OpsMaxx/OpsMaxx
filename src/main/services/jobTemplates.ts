@@ -146,13 +146,13 @@ export function removeJobTemplate(deps: JobTemplateDeps, id: unknown): JobTempla
 }
 
 /**
- * Move a file with a problem to ASIDE_FILE so the next save starts a fresh
- * one. A rename, never a delete: the rows in it are the user's and may be
+ * Move a file with a problem to ASIDE_FILE and start a fresh one holding the
+ * rows that could be read. A rename, never a delete: the rows in it are the user's and may be
  * recoverable by hand. Refuses when an earlier set-aside copy is still there,
  * because renaming over it would delete that one instead.
  */
 export function setAsideJobTemplates(deps: JobTemplateDeps): JobTemplateResult<{ path: string }> {
-  const { problem, path } = listJobTemplates(deps)
+  const { templates, problem, path } = listJobTemplates(deps)
   if (!problem) return { ok: false, reason: 'The saved templates file has nothing wrong with it.' }
   const aside = userPath(deps, ASIDE_FILE)
   if (existsSync(aside)) {
@@ -160,8 +160,15 @@ export function setAsideJobTemplates(deps: JobTemplateDeps): JobTemplateResult<{
   }
   try {
     renameSync(path, aside)
-    return { ok: true, path: aside }
   } catch (err) {
     return { ok: false, reason: `It could not be moved: ${err instanceof Error ? err.message : String(err)}` }
   }
+  // The whole original is in the aside copy, so the fresh file can start with
+  // the rows this version COULD read rather than empty: one bad row must not
+  // cost every good template. Empty when nothing parsed or the version is
+  // another one's, because then nothing was read.
+  if (templates.length > 0 && !write(deps, templates)) {
+    return { ok: false, reason: `Moved to ${aside}, but the readable templates could not be written back.` }
+  }
+  return { ok: true, path: aside }
 }

@@ -211,6 +211,13 @@ function cleanTemplateText(raw: unknown): string | null {
   return clean.length > JOB_TEMPLATE_TEXT_MAX ? null : clean
 }
 
+/** A name as it is stored: runs of whitespace collapsed, ends trimmed. Also
+ *  what the panel compares with when it asks whether a name is taken, so
+ *  "a  b" and "a b" are the same name there as they are on disk. */
+export function normaliseTemplateName(name: string): string {
+  return name.replace(/\s+/g, ' ').trim()
+}
+
 /**
  * A template as it may be stored, or `null`.
  *
@@ -223,7 +230,7 @@ export function sanitiseJobTemplate(raw: unknown): JobTemplate | null {
   if (raw === null || typeof raw !== 'object') return null
   const r = raw as Record<string, unknown>
   if (typeof r.id !== 'string' || !/^[A-Za-z0-9-]{1,64}$/.test(r.id)) return null
-  const name = cleanTemplateText(r.name)?.replace(/\s+/g, ' ').trim() ?? ''
+  const name = normaliseTemplateName(cleanTemplateText(r.name) ?? '')
   if (name === '' || name.length > 120) return null
   const steps = cleanTemplateText(r.steps)
   const rollback = cleanTemplateText(r.rollback ?? '')

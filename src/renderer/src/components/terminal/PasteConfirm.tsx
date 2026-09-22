@@ -61,8 +61,8 @@ export function useTerminalPasteRequest(
  */
 export function pasteEffect(text: string, bracketed: boolean): string {
   if (bracketed) return 'Nothing runs until you press Enter'
-  if (/\r?\n$/.test(text)) return 'Every line runs as soon as it is pasted'
-  return /\r?\n/.test(text)
+  if (/[\r\n]$/.test(text)) return 'Every line runs as soon as it is pasted'
+  return /[\r\n]/.test(text)
     ? 'All but the last line run now; the last waits for Enter'
     : 'It waits for you to press Enter'
 }
@@ -92,8 +92,11 @@ export function PasteConfirm({
   onConfirm: () => void
   onCancel: () => void
 }): React.JSX.Element {
-  const preview = text.split(/\r?\n/).slice(0, full ? undefined : 12)
-  const hidden = Math.max(0, text.split(/\r?\n/).length - preview.length)
+  // Split on every break xterm will send as Enter, a lone \r included, so the
+  // preview shows one row per command that will run.
+  const rows = text.split(/\r\n|\r|\n/)
+  const preview = rows.slice(0, full ? undefined : 12)
+  const hidden = Math.max(0, rows.length - preview.length)
 
   return (
     <Modal

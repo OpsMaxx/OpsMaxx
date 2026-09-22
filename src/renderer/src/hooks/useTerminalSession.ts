@@ -200,8 +200,15 @@ export function setupTerminalUX(
     if (!t) return
     // A pasted block runs line by line the moment it lands. Confirm anything
     // multi-line so a stray paste cannot execute a script on a production box.
-    const lines = t.split(/\r?\n/).filter((l) => l.length > 0)
-    const multiline = /\r?\n/.test(t.trimEnd())
+    //
+    // A LONE \r is a line break too. xterm sends every line break of a paste
+    // as a carriage return, which the shell takes as Enter, so "a\rb" runs
+    // two commands exactly as "a\nb" does -- and it used to go straight
+    // through, because only \n was looked for. One trailing break is still
+    // allowed without asking (trimEnd), as it always was: that is a single
+    // command copied with its newline.
+    const lines = t.split(/\r\n|\r|\n/).filter((l) => l.length > 0)
+    const multiline = /[\r\n]/.test(t.trimEnd())
     if (multiline && onConfirmPaste) {
       onConfirmPaste(t, lines.length)
       return
