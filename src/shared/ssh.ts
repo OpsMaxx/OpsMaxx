@@ -141,8 +141,9 @@ export interface SftpUploadSummary {
   failed: { name: string; error: string }[]
   // Stopped by the user. The file that was in flight is in neither list.
   cancelled?: boolean
-  // A partial file a cancel could not safely remove, so the user is told where.
-  leftover?: string
+  // Partial or temporary files that could not be removed, so the user is told
+  // where they are rather than finding them later.
+  leftover?: string[]
 }
 
 export interface SftpDownloadSummary {
@@ -151,6 +152,7 @@ export interface SftpDownloadSummary {
   saved: string[]
   failed: { name: string; error: string }[]
   cancelled?: boolean
+  leftover?: string[]
 }
 
 export interface HostMetrics {

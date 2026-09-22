@@ -31,7 +31,8 @@ export function safeLocalName(remote: string): string | null {
     .replace(/[<>:"|?*]/g, '_')
     .replace(/[. ]+$/, '')
   if (name === '' || /^\.+$/.test(name)) return null
-  return /^(con|prn|aux|nul|conin\$|conout\$|com[\d¹²³]|lpt[\d¹²³])(\.|$)/i.test(name) ? `_${name}` : name
+  // Spaces before the extension count too: Windows opens the device for `NUL .txt`.
+  return /^(con|prn|aux|nul|conin\$|conout\$|com[\d¹²³⁴-⁹⁰]|lpt[\d¹²³⁴-⁹⁰]) *(\.|$)/i.test(name) ? `_${name}` : name
 }
 
 /**

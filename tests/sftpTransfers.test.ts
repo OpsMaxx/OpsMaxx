@@ -131,11 +131,15 @@ describe('the names a server chooses', () => {
     // U+202E makes this display as invoiceexe.jpg in a file manager.
     expect(safeLocalName('invoice\u202Egpj.exe')).toBe('invoicegpj.exe')
     expect(safeLocalName('a\u200Bb\u0085c\u009f.txt')).toBe('abc.txt')
+    // Every bidi embedding, override and isolate, and the other zero-widths.
+    expect(safeLocalName('\u202Ai\u202Bn\u202Cv\u2066o\u2067i\u2068c\u2069e\u200C\u200D\uFEFF.pdf')).toBe('invoice.pdf')
   })
 
   it('prefixes every Windows device name', () => {
-    for (const n of ['COM¹', 'lpt³.log', 'CONIN$', 'conout$.txt', 'nul'])
+    for (const n of ['COM¹', 'COM⁹', 'lpt³.log', 'CONIN$', 'conout$.txt', 'nul', 'NUL .txt'])
       expect(safeLocalName(n)).toBe(`_${n}`)
+    // Trailing dots and spaces are what Windows strips, so CON. is CON.
+    expect(safeLocalName('CON. ')).toBe('_CON')
     expect(safeLocalName('console.log')).toBe('console.log')
   })
 
@@ -209,6 +213,8 @@ describe('downloads', () => {
     const r = await run
     expect(transferCh().got).toHaveLength(2)
     expect(r.data?.failed.map((f) => f.name)).toEqual(['a.bin', 'b.bin'])
+    // And what could not be removed is named, not left to be found.
+    expect(r.data?.leftover).toEqual(transferCh().got)
   })
 })
 
@@ -279,6 +285,27 @@ describe('uploads', () => {
     await run
     expect(transferCh().unlinked).toEqual(['/srv/app.conf'])
     expect(transferCh().renamed).toEqual([[transferCh().put[0], '/srv/app.conf']])
+  })
+
+  /**
+   * Without posix-rename the target is removed first. If the rename then
+   * fails, the temporary file is the only copy of anything, and removing it
+   * as ordinary cleanup would lose the upload as well as the old file.
+   */
+  it('keep, and name, the temporary file when the fallback rename fails', async () => {
+    const local = join(dir, 'app.conf')
+    writeFileSync(local, 'x')
+    const run = sftpUpload(wc, KEY, [local], '/srv')
+    await started()
+    const ch = transferCh()
+    ch.posixRename = false
+    ch.rename = (_from: string, _to: string, cb: Cb): void => cb(new Error('Failure'))
+    ch.pending.shift()?.(null)
+    const r = await run
+    const tmp = ch.put[0]
+    expect(ch.unlinked).toEqual(['/srv/app.conf'])
+    expect(r.data?.leftover).toEqual([tmp])
+    expect(r.data?.failed[0].error).toContain(tmp)
   })
 
   it('cancelled, remove only their own temporary file and never touch the target', async () => {

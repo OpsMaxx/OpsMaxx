@@ -246,6 +246,10 @@ function partialName(dir: string, name: string): string {
   return remoteJoin(dir, `.${name}.opsmaxx-partial-${randomUUID()}`)
 }
 
+// The fallback below removed the target and then could not rename the upload
+// into its place: the temporary file is now the only copy there is.
+class Stranded extends Error {}
+
 // Move a finished upload over its target. posix-rename replaces in one step;
 // a server without the extension gets the target removed first, because plain
 // SFTP rename refuses to replace an existing file.
@@ -257,7 +261,11 @@ function replace(sftp: SFTPWrapper, from: string, to: string): Promise<void> {
     } catch {
       sftp.unlink(to, (err) => {
         if (err && (err as { code?: number }).code !== 2) return reject(err)
-        sftp.rename(from, to, done)
+        sftp.rename(from, to, (err) =>
+          err
+            ? reject(new Stranded(`${to} was removed to make way, but the upload could not be renamed into its place — it is at ${from}`))
+            : resolve()
+        )
       })
     }
   })
@@ -294,7 +302,7 @@ export async function sftpUpload(
 
   const uploaded: string[] = []
   const failed: { name: string; error: string }[] = []
-  let leftover: string | undefined
+  const leftover: string[] = []
 
   try {
     const ch = await channelFor(conn, t)
@@ -313,10 +321,13 @@ export async function sftpUpload(
         await Promise.race([replace(ch, tmp, remoteJoin(remoteDir, name)), t.stop])
         uploaded.push(name)
       } catch (err) {
-        // The temporary file is this upload's, whatever went wrong. After a
-        // cancel its own channel is closing, so the cached one removes it.
+        // The temporary file is this upload's, whatever went wrong, and is
+        // removed — unless the old file is already gone, when it is the only
+        // copy left and deleting it would lose the upload as well. After a
+        // cancel the transfer's own channel is closing, so the cached one
+        // does the removing.
         const sftp = t.cancelled ? conns.get(key)?.sftp : ch
-        if (tmp && !(sftp && (await removeRemote(sftp, tmp)))) leftover = tmp
+        if (tmp && (err instanceof Stranded || !(sftp && (await removeRemote(sftp, tmp))))) leftover.push(tmp)
         if (t.cancelled) break
         failed.push({ name, error: msg(err) })
       }
@@ -330,7 +341,7 @@ export async function sftpUpload(
   return {
     ok: failed.length === 0 && !t.cancelled,
     error: failed.length ? `${failed[0].name}: ${failed[0].error}` : undefined,
-    data: { uploaded, failed, cancelled: t.cancelled || undefined, leftover }
+    data: { uploaded, failed, cancelled: t.cancelled || undefined, leftover: leftover.length ? leftover : undefined }
   }
 }
 
@@ -355,6 +366,7 @@ export async function sftpDownload(
 
   const saved: string[] = []
   const failed: { name: string; error: string }[] = []
+  const leftover: string[] = []
 
   try {
     const ch = await channelFor(conn, t)
@@ -383,8 +395,10 @@ export async function sftpDownload(
         // Both files are ours: the placeholder reserveLocalFile created, and
         // the partial download beside it. Retried because on Windows fastGet
         // may still hold the partial open for a moment after a cancel, and
-        // guarded because a file that will not go must not end the batch.
-        for (const p of [tmp, target]) if (p) await rm(p, { force: true, maxRetries: 3 }).catch(() => {})
+        // guarded because a file that will not go must not end the batch —
+        // it is reported instead.
+        for (const p of [tmp, target])
+          if (p) await rm(p, { force: true, maxRetries: 3 }).catch(() => leftover.push(p))
         if (t.cancelled) break
         failed.push({ name: remoteName, error: msg(err) })
       }
@@ -398,7 +412,7 @@ export async function sftpDownload(
   return {
     ok: failed.length === 0 && !t.cancelled,
     error: failed.length ? `${failed[0].name}: ${failed[0].error}` : undefined,
-    data: { saved, failed, cancelled: t.cancelled || undefined }
+    data: { saved, failed, cancelled: t.cancelled || undefined, leftover: leftover.length ? leftover : undefined }
   }
 }
 

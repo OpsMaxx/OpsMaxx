@@ -309,6 +309,7 @@ export async function localFilesUpload(
   const { signal } = copy
   const uploaded: string[] = []
   const failed: { name: string; error: string }[] = []
+  const leftover: string[] = []
 
   for (let i = 0; i < localPaths.length && !signal.aborted; i++) {
     const from = localPaths[i]
@@ -333,6 +334,8 @@ export async function localFilesUpload(
       await copyWithProgress(from, to, st.size, send, signal)
       uploaded.push(name)
     } catch (err) {
+      const partial = (err as { leftover?: string }).leftover
+      if (partial) leftover.push(partial)
       if (!signal.aborted) failed.push({ name, error: msg(err) })
     }
   }
@@ -341,7 +344,7 @@ export async function localFilesUpload(
   return {
     ok: failed.length === 0 && !signal.aborted,
     error: failed.length ? `${failed[0].name}: ${failed[0].error}` : undefined,
-    data: { uploaded, failed, cancelled: signal.aborted || undefined }
+    data: { uploaded, failed, cancelled: signal.aborted || undefined, leftover: leftover.length ? leftover : undefined }
   }
 }
 
@@ -365,6 +368,7 @@ export async function localFilesDownload(
   const { signal } = copy
   const saved: string[] = []
   const failed: { name: string; error: string }[] = []
+  const leftover: string[] = []
 
   for (let i = 0; i < sources.length && !signal.aborted; i++) {
     const from = sources[i]
@@ -390,8 +394,11 @@ export async function localFilesDownload(
       saved.push(basename(to))
     } catch (err) {
       // The empty placeholder reserveLocalFile created is ours to remove. A
-      // failure to remove it must not end the batch.
-      if (to) await rm(to, { force: true }).catch(() => {})
+      // failure to remove it must not end the batch; it is reported instead.
+      const place = to
+      if (place) await rm(place, { force: true }).catch(() => leftover.push(place))
+      const partial = (err as { leftover?: string }).leftover
+      if (partial) leftover.push(partial)
       if (!signal.aborted) failed.push({ name: shown, error: msg(err) })
     }
   }
@@ -400,7 +407,7 @@ export async function localFilesDownload(
   return {
     ok: failed.length === 0 && !signal.aborted,
     error: failed.length ? `${failed[0].name}: ${failed[0].error}` : undefined,
-    data: { saved, failed, cancelled: signal.aborted || undefined }
+    data: { saved, failed, cancelled: signal.aborted || undefined, leftover: leftover.length ? leftover : undefined }
   }
 }
 
@@ -453,8 +460,10 @@ function copyWithProgress(
     const fail = (err: Error): void => {
       read.destroy()
       write.destroy()
+      // A temporary file that will not go is named on the error, so the
+      // caller can report it rather than leave it to be found.
       void rm(tmp, { force: true })
-        .catch(() => {})
+        .catch(() => Object.assign(err, { leftover: tmp }))
         .then(() => reject(err))
     }
     read.on('data', (c: Buffer | string) => {

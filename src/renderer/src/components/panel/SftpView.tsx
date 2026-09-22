@@ -111,6 +111,12 @@ function connectFailure(
   }
 }
 
+// Partial files a transfer could not remove, said once with every path.
+function reportLeftover(paths: string[] | undefined, where: string): void {
+  if (paths?.length)
+    toast(`${paths.length === 1 ? 'A partial file' : `${paths.length} partial files`} could not be removed ${where}: ${paths.join(', ')}`, 'error')
+}
+
 /** An upload or download waiting for the channel, or on it. */
 type Transfer = { kind: 'upload'; paths: string[]; dir: string } | { kind: 'download'; remotes: string[]; dir: string }
 
@@ -578,15 +584,12 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
           : undefined
       )
     }
+    // The target is untouched until an upload completes (see sftpUpload), so
+    // what a cancel or failure can leave is only a temporary copy — named here
+    // whenever removing one failed, rather than left for someone to find.
+    reportLeftover(res?.data?.leftover, 'on the server')
     if (res?.data?.cancelled) {
-      // The target is untouched until an upload completes (see sftpUpload);
-      // what a cancel can leave is the temporary copy, if removing it failed.
-      toast(
-        res.data.leftover
-          ? `Upload cancelled, but the partial copy ${res.data.leftover} could not be removed from the server.`
-          : 'Upload cancelled.',
-        res.data.leftover ? 'error' : 'info'
-      )
+      toast('Upload cancelled.', 'info')
       return
     }
     if (!done && !failed.length)
@@ -642,7 +645,8 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
           : undefined
       )
     }
-    if (res?.data?.cancelled) toast('Download cancelled. The partial file was removed.', 'info')
+    reportLeftover(res?.data?.leftover, 'on this machine')
+    if (res?.data?.cancelled) toast('Download cancelled.', 'info')
     else if (!saved.length && !failed.length)
       toast(res?.error ? `Nothing was downloaded — ${res.error}` : 'Nothing was downloaded.', 'error')
   }

@@ -105,6 +105,12 @@ describe('download destination', () => {
     expect(refuseDownloadDir(out, new Set([out]))).toBeNull()
   })
 
+  it('refuses the app data directory even when it was picked', () => {
+    expect(refuseDownloadDir(root, new Set([root]))?.ok).toBe(false)
+    const inside = join(root, 'sub')
+    expect(refuseDownloadDir(inside, new Set([inside]))?.ok).toBe(false)
+  })
+
   it('refuses a picked folder that is a link into the app data directory', () => {
     const link = join(out, 'innocent')
     symlinkSync(root, link)
