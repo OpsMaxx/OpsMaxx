@@ -132,7 +132,7 @@ function useProvenance(request: ApprovalRequest): Provenance {
 function Row({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
   return (
     <div style={{ display: 'flex', gap: 12, alignItems: 'baseline' }}>
-      <div style={{ width: 132, flex: 'none', color: 'var(--text-faint)', fontSize: 11 }}>{label}</div>
+      <div style={{ width: 132, flex: 'none', color: 'var(--text-faint)', fontSize: 'var(--fs-caption)' }}>{label}</div>
       <div style={{ color: 'var(--text-muted)', fontSize: 12, minWidth: 0 }}>{children}</div>
     </div>
   )
@@ -193,7 +193,7 @@ export function WritePreview({
 }): React.JSX.Element {
   return (
     <div>
-      <div style={{ color: 'var(--text-faint)', fontSize: 11, marginBottom: 4 }}>
+      <div style={{ color: 'var(--text-faint)', fontSize: 'var(--fs-caption)', marginBottom: 4 }}>
         What {agentName} wants written — the agent’s content, not OpsMaxx’s. Secrets are shown redacted, and
         invisible characters as ⟨U+…⟩.
       </div>
@@ -209,7 +209,7 @@ export function WritePreview({
           border: '1px dashed var(--border-strong)',
           borderRadius: 'var(--r-md)',
           color: 'var(--text-muted)',
-          fontSize: 11,
+          fontSize: 'var(--fs-caption)',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-all'
         }}
@@ -217,7 +217,7 @@ export function WritePreview({
         {preview.text}
       </pre>
       {preview.omittedChars > 0 && (
-        <div style={{ color: 'var(--warn)', fontSize: 11, marginTop: 4 }}>
+        <div style={{ color: 'var(--warn)', fontSize: 'var(--fs-caption)', marginTop: 4 }}>
           Only the start is shown: {preview.omittedChars.toLocaleString()} more characters
           {preview.omittedLines > 0 ? ` (${preview.omittedLines.toLocaleString()} more lines)` : ''} are not.
           Approving writes all of it.
@@ -311,7 +311,7 @@ export function ApprovalDialog({
                 // The honest absence. The timer lives in main's approvals.ts
                 // and no IPC reaches it, so a "Give me more time" button here
                 // would be a control that looked like it worked and did not.
-                <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-faint)', maxWidth: 210 }}>
+                <div style={{ marginTop: 4, fontSize: 'var(--fs-caption)', color: 'var(--text-faint)', maxWidth: 210 }}>
                   This build cannot extend the fuse. Decide later keeps it in the status bar — the clock keeps
                   running either way.
                 </div>
@@ -364,7 +364,7 @@ export function ApprovalDialog({
           >
             <div style={{ fontSize: 14, lineHeight: 1.55, color: 'var(--text)' }}>{consequence.text}</div>
             {!consequence.known && (
-              <div style={{ fontSize: 11, color: 'var(--warn)', marginTop: 6 }}>
+              <div style={{ fontSize: 'var(--fs-caption)', color: 'var(--warn)', marginTop: 6 }}>
                 Not being able to describe an action is itself a reason to look harder at it.
               </div>
             )}
@@ -372,7 +372,7 @@ export function ApprovalDialog({
 
           {/* 3. The command, as evidence — secondary to the sentence above it. */}
           <div>
-            <div style={{ color: 'var(--text-faint)', fontSize: 11, marginBottom: 4 }}>
+            <div style={{ color: 'var(--text-faint)', fontSize: 'var(--fs-caption)', marginBottom: 4 }}>
               What {request.agentName} asked OpsMaxx to run
             </div>
             <pre
@@ -464,7 +464,7 @@ export function ApprovalDialog({
               {request.intent ? (
                 <>
                   <span style={{ color: 'var(--text)' }}>“{request.intent}”</span>
-                  <div style={{ color: 'var(--text-faint)', fontSize: 11, marginTop: 3 }}>
+                  <div style={{ color: 'var(--text-faint)', fontSize: 'var(--fs-caption)', marginTop: 3 }}>
                     {request.agentName}’s own words, not OpsMaxx’s. Nothing checked whether they are true.
                   </div>
                 </>
@@ -511,7 +511,7 @@ export function ApprovalDialog({
               per-call tool, where main would not honour it. Neither carries
               any weight: Deny keeps the fill and the focus. */}
           {grantLabel && request.contentPreview && (
-            <span style={{ fontSize: 11, color: 'var(--warn)', maxWidth: 180, textAlign: 'right' }}>
+            <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--warn)', maxWidth: 180, textAlign: 'right' }}>
               {LATER_WRITES_UNSEEN}
             </span>
           )}
