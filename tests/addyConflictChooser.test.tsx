@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { stubBridge } from './setup/renderer'
 import { ConflictChooser } from '../src/renderer/src/components/addy/ConflictChooser'
 import { SYNCED_COLLECTIONS } from '../src/shared/addy'
@@ -87,6 +87,14 @@ describe('the way out', () => {
     withConflicts([conflict()])
     render(<ConflictChooser />)
     await screen.findByRole('dialog')
+    // Drain the passive effects before pressing anything. The listener below
+    // is attached by a `useEffect`, which React schedules as a separate task
+    // AFTER the commit that puts the dialog in the DOM -- and `findByRole`
+    // resolves on that commit. Firing in the gap loses the key, which is a
+    // race the machine's speed decides: green 14/14 here, red on a loaded CI
+    // runner. No user can press a key inside one frame of a dialog opening,
+    // so this is the test learning what the component already promises.
+    await act(async () => {})
 
     fireEvent.keyDown(document, { key: 'Escape' })
 
