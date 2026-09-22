@@ -44,10 +44,88 @@ Regardless of which access group a session holds:
 - **Vault secrets.** There is no MCP tool that reads the Vault. This isn't a policy that could be
   misconfigured to `allow` — the code path doesn't exist.
 - **Sudo / root credentials.** OpsMaxx does not separately store a "sudo password" for any
-  server — sudo capability is a policy decision about whether a `sudo`/`doas` command is allowed
-  to run over the SSH connection that's already authenticated, not a credential handed to
-  anything. Unrestricted root shells (`sudo -i`, `sudo su`, `sudo bash`, bare `su`) are refused
-  unconditionally, before the access group is even consulted.
+  server — sudo capability is a policy decision about whether a command that runs as another user
+  is allowed to run over the SSH connection that's already authenticated, not a credential handed
+  to anything. Unrestricted root shells (`sudo -i`, `sudo su`, `sudo bash`, `pkexec bash`,
+  `su -c bash`, bare `su`, `pkexec` or `run0`) are refused whatever the access group says.
+
+  **How a command is recognised as running as another user** (`classifyCommand`, built on
+  `walkCommand`, `policyEngine.ts`). It is the command WORD that counts, in every segment of the
+  line, not the first word of the string:
+
+  - the line is split on `;`, `&&`, `||`, `|`, `&` and newlines;
+  - shell grammar in front of a command is stepped over: `if`, `then`, `do`, `else`, `elif`,
+    `while`, `until`, `!`, `{`, `(`, a `case … in` header and an arm's `pattern)`, a function
+    definition (`name()`, `name(){`, `function name`), `coproc [NAME]`, and leading `VAR=value`
+    assignments. `[[ … ]]`, `(( … ))` and `for`/`select` headers run nothing themselves;
+  - so are the wrappers `env`, `command`, `exec`, `builtin`, `nohup`, `time`, `nice`, `ionice`,
+    `stdbuf`, `timeout`, `xargs`, `busybox`, `setsid`, `unbuffer`, `watch`, `flock`, `chrt` and
+    `taskset`, with their options and, for `timeout`, `flock`, `chrt` and `taskset`, their one
+    operand;
+  - words are read with POSIX quoting: outside quotes a backslash escapes the next character
+    (`\sudo`, `su\do`); inside double quotes only `\"`, `\\`, `\$`, a backtick and a newline
+    are escapes; inside single quotes nothing is, so `sh -c "sh -c \"sh -c 'sudo reboot'\""` and
+    shlex.quote's `'\''` come apart exactly where the shell takes them apart. A word that starts
+    like a Windows path (`C:\`, `\\server`) keeps its backslashes, which are separators there. The
+    command word is then reduced to its basename;
+  - the insides of `$(...)`, `<(...)`, `>(...)`, backticks, `sh -c` (and the other shells),
+    `su -c`, `env -S`, `flock -c`, `script -c`, `watch`, `eval`, and on Windows `cmd /c`, `/r` or
+    `/k` (glued on or not, `cmd.exe/c` included), PowerShell's `-Command` (or `-c`, or the implicit
+    command a bare `powershell Start-Process …` takes), `iex`/`Invoke-Expression`, the scriptblock
+    `Invoke-Command`/`icm`/`Start-Job` runs, and `Start-Process`'s `-ArgumentList`, are walked the
+    same way, to a depth of three. Substitutions are found by a scanner that respects quotes and
+    escapes and matches parens -- including a `case` arm's `pattern)` -- so `$(case a in a) sudo
+    reboot;; esac)` is read whole. Nothing is expanded inside single quotes, as in the shell. A
+    backquoted body has its `` \` ``, `\$` and `\\` escapes taken off before it is walked (and `\"`
+    inside double quotes), which is how backquotes nest. cmd's `^` escape is removed before the
+    command is read; a PowerShell `. cmd` runs `cmd`, so the word after `.` is judged.
+
+  If the command word is `sudo`, `doas`, `su`, `pkexec`, `run0`, `runuser`, `systemd-run`,
+  `sudoedit` or `machinectl shell` — or, on Windows, `runas` (with its `/user:` and `/savecred`
+  options), `gsudo`, `sudo.exe` or `Start-Process … -Verb RunAs` — the command is governed by the
+  **Sudo** capability, and what it runs is judged too — `sudo env bash` and `gsudo cmd` are
+  elevated shells. So `/usr/bin/sudo reboot`, `env sudo reboot`, `if true; then sudo reboot; fi`,
+  `\sudo reboot`, `eval sudo reboot` and `su -c "rm -rf /x"` are all sudo, and a group that denies
+  sudo denies them. A name in argument position is not a run: `grep sudo /var/log/auth.log`, `echo
+  sudo`, `man sudo`, `command -v sudo` and `systemctl status sudo` are ordinary commands.
+
+  **The rule that ends the list: fail toward ask.** If, after everything above has been stepped
+  over, a segment's command word still holds shell syntax the walk does not read — an expansion
+  (`$(which sudo)`, `${SUDO:-sudo}`, a backtick, cmd's `%VAR%` or `!VAR!`), a brace list
+  (`{sudo,reboot}`), a glob (`/usr/bin/ec?o`), a paren, a redirection, or a leading `=` — the
+  command cannot be named, so a group that would allow it is asked instead, and `execute_command`
+  never lets a remembered approval cover it. The same holds for anything nested deeper than the
+  three levels the walk reads (`eval eval eval eval sudo reboot`); for a line whose quotes or
+  substitutions do not close or that ends on a bare backslash; for a base64 PowerShell
+  `-EncodedCommand` (`-enc`, `-e`); for `Invoke-Command` given its scriptblock any way but
+  literally; and for any cmd string containing `^`, `%` or `!`, or run with `/v:on`. cmd is not
+  parsed — its `%` and `!` expansions happen after any `&` inside the string, where nothing here can
+  follow them — so it fails toward ask instead. That includes the harmless: `cmd /c echo 50%` asks.
+  Such a command is asked about, never allowed and never refused on a guess. Only a leading home
+  directory is let through: `$HOME/bin/tool`, `${HOME}/bin/tool` and `~/bin/tool` are judged by
+  their literal basename, so `~/bin/sudo` is still sudo.
+
+  The quoting is tested with a generated matrix rather than hand-picked cases
+  (`tests/escalationQuotingMatrix.test.ts`): every nest of `eval '…'`, `sh -c '…'`, `sh -c "…"`,
+  `env -S "…"`, `$(…)`, a `$(case … esac)` with parens of its own, `cat <(…)` and a backquote, up to
+  four deep around `sudo reboot`, each quoted the way a careful tool quotes, must be denied to depth
+  three and never allowed at four; the same 4,680 nests around `ls /tmp` must never be denied.
+
+  The path rules read the same walk (`extractPathAccesses`), so `bash -c 'cat /etc/shadow'`,
+  `timeout 5 cat /etc/shadow` and `echo $(cat /root/.ssh/id_rsa)` meet the `/etc/shadow` and
+  `/root/.ssh/**` rules exactly as `cat /etc/shadow` does.
+
+  **What remains best-effort.** A command string can still hide what it runs, and this does not
+  claim otherwise. The command word is guarded by the rule above; its ARGUMENTS are not, so these
+  still pass as whatever their literal command word says: a variable in an argument
+  (`f=/etc/shadow; cat $f`), a relative path after `cd`, a glob in a path, an interpreter's own
+  code (`perl -e`, `python3 -c`, `node -e`), a script file — including one read with `.` or
+  `source`, which is judged by the script's own name and not by what it contains — a PowerShell
+  `ForEach-Object`/`Where-Object` block, `ssh localhost '…'`, and programs that are not recognised
+  file commands. It closes the forms a model
+  actually emits, and it only ever tightens — the older start-of-string tests are still applied as
+  well. OpsMaxx's own `sudo -n` privileged reads do not pass through it; only the MCP bridge's
+  `execute_command` does.
 - **A server's real hostname, IP, port or username.** Every tool that names a server takes and
   returns a friendly name (e.g. "Production API"); `get_server_details` returns OS, access group
   and effective permissions, never connection details.
@@ -155,7 +233,7 @@ names.
 | Credential exposure to a model's context (and whatever a provider retains of it) | Credentials are resolved inside the main process at connect time and never placed in a tool response | `credentialResolver.ts` |
 | Network/topology exposure — leaking internal IPs, hostnames, usernames just by listing servers | Tool responses carry only names, OS and permissions | `mcpServer.ts` (`list_servers`, `get_server_details`) |
 | Prompt-injection or a confused agent running something destructive | Any capability set to ASK blocks until a human approves; the agent has no path to approve its own request | `approvals.ts`, `mcpServer.ts` |
-| Sudo / privilege escalation, including via disguised unrestricted shells | Hard-denied by pattern match, independent of access-group configuration | `policyEngine.ts` (`classifyCommand`, `evaluateCommand`) |
+| Sudo / privilege escalation, including via disguised unrestricted shells | Unrestricted root shells are denied whatever the access group says; every other command that runs as another user — recognised as the command word of any segment, behind wrappers and inside `sh -c` and `$(...)` — is governed by the Sudo capability (see *How a command is recognised as running as another user* above) | `policyEngine.ts` (`classifyCommand`, `evaluateCommand`) |
 | An agent silently changing which network the user's traffic crosses | Starting a VPN is always ASK, on every group, including one set to ALLOW; stopping one is ASK whenever live sessions depend on it | `policyEngine.ts` (`evaluateVpnControl`) |
 | An agent publishing a local port to the internet through a reverse proxy | `set_vpn` refuses `frp` profiles before the access group is consulted, in either direction; no capability value reaches past it, and there is no tool that can create one | `policyEngine.ts` (`isVpnKindRefusedForAi`), `mcpServer.ts` (`set_vpn`) |
 | Secrets leaking through command output (`env`, a misconfigured app, a `cat` of a file with a key in it) | Known credential values blanked verbatim; pattern rules catch `PASSWORD=`/`TOKEN=`-style assignments, PEM key blocks, bearer tokens, AWS access key IDs, connection-string passwords | `secretRedaction.ts` |
@@ -234,14 +312,16 @@ add a server *and* bring up a VPN that server's traffic is routed through, and b
 look ordinary in isolation. `manageServers` now also edits and removes connections, which widens
 that composition rather than narrowing it — hence the two rules on it: changing and removing always
 ask, and an approval is scoped to the one tool on the one server that was approved, so neither half
-of the composition can be assembled silently. Saying yes to a change covers further changes to that
-same connection for the rest of that session; it never covers a removal, another connection, or the
-next session. That composition is the reason for the three rules below, and none of
+of the composition can be assembled silently. **Approve once** covers the one change; the separate
+**Allow update_server on *server* for this session** answer also covers further changes to that same
+connection for the rest of that session. Neither covers a removal, another connection, or the next
+session. That composition is the reason for the three rules below, and none of
 them is a preference:
 
 - **Starting a VPN is always ASK**, on every group, including one a user has explicitly raised to
   ALLOW (`evaluateVpnControl`, `policyEngine.ts`). There is no configuration in which a VPN comes
-  up silently at an agent's request.
+  up silently at an agent's request. That includes a remembered approval: a start is per-call in `gate()`, so
+  answering one start "for this session" does not cover the next.
 - **Reverse proxies (frp) are refused outright**, in both directions, before the access group is
   read (`isVpnKindRefusedForAi`). An frp proxy makes a port on the user's own machine reachable
   from the frp server — from the internet — and an approval dialog is not a meaningful control

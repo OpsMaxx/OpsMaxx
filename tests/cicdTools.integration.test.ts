@@ -181,12 +181,16 @@ async function call(c: Client, name: string, args: Record<string, unknown>): Pro
 }
 
 /** Auto-approves, and counts how many prompts a human was actually shown. */
-function watchApprovals(): { count: () => number; stop: () => void } {
+// Answers FOR THE SESSION by default -- the strongest yes there is. For the
+// per-call tests that is the point: a trigger answered "for this session" must
+// still ask for the next one. For the ciRead test it is what makes caching
+// possible at all, since "Approve once" no longer remembers anything.
+function watchApprovals(scope: 'once' | 'session' = 'session'): { count: () => number; stop: () => void } {
   let n = 0
   const off = onApprovalEvent((e) => {
     if (e.type !== 'created') return
     n++
-    respondToApproval(e.request.id, 'approved')
+    respondToApproval(e.request.id, 'approved', scope)
   })
   return { count: () => n, stop: off }
 }
@@ -743,7 +747,20 @@ describe('addressing', () => {
     }
   })
 
-  it('caches a ciRead approval for the session the way every other read does', async () => {
+  it('does not cache a ciRead approval given once', async () => {
+    const c = await clientFor(GROUP_ASK)
+    const w = watchApprovals('once')
+    try {
+      await call(c, 'list_pipelines', { connectionName: 'platform-gitlab' })
+      await call(c, 'list_pipelines', { connectionName: 'platform-gitlab' })
+      expect(w.count()).toBe(2)
+    } finally {
+      w.stop()
+      await c.close()
+    }
+  })
+
+  it('caches a ciRead approval given for the session, the way every other read does', async () => {
     // ciRead is NOT the per-call capability; only ciTrigger is. Asking twice
     // for the same read is exactly the reflexive-clicking problem the elevation
     // cache exists to avoid.

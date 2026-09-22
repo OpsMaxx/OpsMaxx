@@ -44,6 +44,7 @@ import {
   resolveGroupId,
   resolveRestriction,
   evaluateCapability,
+  classifyCommand,
   evaluateCommand,
   evaluateFilePath,
   evaluateDatabaseStatement,
@@ -512,6 +513,15 @@ function resolveGroups(
 
 function withRestriction(grant: Decision, restriction: Decision | null, label: string): Decision {
   if (!restriction) return grant
+  // Both ask, for different reasons: name both. The decision is the same, but
+  // the reason is what gate() keys a remembered approval on, and keeping only
+  // the grant's let a restriction group's own path rule -- "ask before reading
+  // /secret/**" -- reach the gate under the grant's "Terminal commands require
+  // approval". A session grant given about `ls` then answered `cat
+  // /secret/key`, a question the restriction had been written to ask.
+  if (grant.decision === 'ask' && restriction.decision === 'ask' && grant.reason !== restriction.reason) {
+    return { decision: 'ask', reason: `${grant.reason} + ${restriction.reason}` }
+  }
   const winner = mostRestrictive(grant, restriction)
   // mostRestrictive prefers its first argument on a tie, so this is only the
   // restriction when the restriction is strictly the narrower of the two.
@@ -749,6 +759,13 @@ interface GateSubject {
    * of the session, and nothing else.
    */
   elevationScope?: string
+  /**
+   * write_file's content, for the approval dialog to show. Raw here; approvals.ts
+   * redacts it against these secrets, caps it, and makes it visible-safe, and
+   * nothing else reads it. It never reaches the audit row (that is ctx.action,
+   * which carries a byte count) and never goes back to the agent.
+   */
+  writeContent?: { content: string; knownSecrets: string[] }
 }
 
 /**
@@ -793,12 +810,35 @@ function countSessionActions(sessionId: string): number | null {
 }
 
 /**
+ * Does this command run as another user? ONE detector, the policy's own:
+ * classifyCommand finds sudo, doas, su, pkexec, run0, runuser, systemd-run,
+ * sudoedit, `machinectl shell`, runas, gsudo and sudo.exe as the command word
+ * of any segment, behind
+ * grammar, wrappers and backslashes and inside `$(...)`, backticks, `sh -c`
+ * and `eval` strings. What the policy allows is
+ * still effectiveCommand's decision; this only decides the capability a
+ * command is labelled, prompted and audited under, and makes it per-call.
+ *
+ * The `sudo` word test stays OR'd in as a raise, never a replacement: it is
+ * looser (it fires on `grep sudo auth.log`), and a false positive here only
+ * means the operator is asked again -- the cheap direction to be wrong in,
+ * for a question about whether a remembered yes may cover a command.
+ */
+const runsAsAnotherUser = (command: string): boolean => {
+  const c = classifyCommand(command)
+  return c.isSudo || c.isUnrestrictedShell || /\bsudo\b/.test(command)
+}
+
+/**
  * Approvals already granted in this session, remembered.
  *
- * Keyed session + server + capability. Approving one `execute_command` on
- * Scanner01 stops the app asking again for terminal commands on Scanner01 for
- * the rest of that session -- and asks afresh for `sudo`, which is a different
- * capability and deliberately not covered by having said yes to `df`.
+ * Keyed session + server + capability + the policy rule that asked. Answering
+ * one ordinary `execute_command` on Scanner01 with "Allow … for this session"
+ * stops the app asking again for ordinary terminal commands on Scanner01 for
+ * the rest of that session. It never covers `sudo` or anything the command
+ * classifier grades above ordinary: execute_command audits sudo as its own
+ * capability and makes every non-ordinary command per-call, so none of them
+ * reads this set. "Approve once" writes nothing here.
  *
  * Why per server rather than session-wide: a person approving an action is
  * looking at a server name while they do it, and carrying that consent to a
@@ -850,16 +890,38 @@ async function gate(
 
   if (check.decision === 'ask') {
     if (!ctx.serverId || !ctx.serverName || !ctx.capability || !ctx.workspaceId || !ctx.workspaceName) {
-      return { ok: false, result: errorText('Denied: this action requires approval but has no server context.') }
+      // An approval names one server, and this call names none -- the
+      // fleet-wide reads pass serverId null -- so there is nobody to ask and
+      // it is refused. It used to be refused with no audit row at all, which
+      // made an `ask` on fleetRead, backupRead or ciRead a silent, unrecorded
+      // refusal. Recorded now as what it is: the policy's answer, not a
+      // human's.
+      const reason = 'this action requires approval, and an approval needs a single server to name, which this call does not have'
+      recordAudit({
+        agentName: ctx.session.agentName,
+        sessionId: ctx.session.id,
+        workspaceId: ctx.workspaceId,
+        workspaceName: ctx.workspaceName,
+        serverId: ctx.serverId,
+        serverName: ctx.serverName,
+        action: ctx.action,
+        capability: ctx.capability,
+        approval: 'not-required',
+        result: 'denied',
+        error: reason
+      })
+      return { ok: false, result: errorText(`Denied: ${reason}.`) }
     }
     // Already answered for this capability on this server, in this session.
     //
     // Only reached for an `ask`. A `deny` returns above and is never softened
     // by anything here -- an elevation lifts a question, never a refusal.
     // ciTrigger is excluded from the cache in BOTH directions: it is never read
-    // from and never written to. For container_action, carrying one approval
-    // across a session costs one more service on a host the user administers.
-    // For a build it is an unbounded remote-execution loop -- one approval buys
+    // from and never written to. container_action used to be the example of
+    // the acceptable case -- "one more service on a host the user administers"
+    // -- and it is not any more: a stop or restart is per-call too, because a
+    // yes to restarting one container covered stopping every other on the
+    // host. For a build it is an unbounded remote-execution loop -- one approval buys
     // every pipeline on that CI server for the rest of the session, on
     // infrastructure OpsMaxx cannot inspect and cannot stop, driven by an agent
     // whose next move is shaped by log text a stranger wrote into a pull
@@ -872,9 +934,19 @@ async function gate(
     // dead code on exactly the configuration it was written for.
     const perCall = ctx.capability === 'ciTrigger' || subject.perCall === true
     // Defaults to the capability, so every caller that names no scope keeps the
-    // grain it has always had -- approving one `execute_command` on a host
-    // still covers `terminal` on that host and still asks afresh for `sudo`.
-    const key = elevationKey(ctx.session.id, ctx.serverId, subject.elevationScope ?? ctx.capability)
+    // grain it has always had.
+    //
+    // AND THE RULE THAT ASKED. A capability is too coarse on its own: a path
+    // rule on /etc/** and the blanket "Read files: ask" are both `readFiles`,
+    // and a grant given under the looser rule must not answer the stricter
+    // one. check.reason is the policy engine's own sentence for the rule that
+    // produced this `ask`, so a different rule is a different key -- a grant
+    // can only ever be spent on the question it was given in answer to.
+    const key = elevationKey(
+      ctx.session.id,
+      ctx.serverId,
+      `${subject.elevationScope ?? ctx.capability}\u0000${check.reason}`
+    )
     if (!perCall && sessionElevations.has(key)) {
       // Reported as what it is -- allowed on the strength of an approval given
       // earlier in this session, not an action nobody approved. The audit log
@@ -886,6 +958,13 @@ async function gate(
       return { ok: true, approval: 'approved-earlier' }
     }
     if (extra) await noteAwaitingApproval(extra, ctx.action, ctx.serverName)
+    // "Approve once" used to mean exactly this -- and then add the elevation
+    // below anyway, so the button granted the rest of the session on every tool
+    // that was not per-call. The grant is now a second, separately labelled
+    // answer, and it is only OFFERED where the cache would honour it: a
+    // per-call tool sends no `sessionGrant`, so its dialog has one yes button
+    // and approvals.ts reads any session answer for it as once.
+    const sessionGrant = perCall ? undefined : subject.elevationScope ? ('tool' as const) : ('capability' as const)
     const decision = await requestApproval({
       sessionId: ctx.session.id,
       agentName: ctx.session.agentName,
@@ -910,10 +989,14 @@ async function gate(
       // The rule that produced this `ask`, which gate() has had in hand all
       // along and dropped on the floor.
       policyReason: check.reason,
-      actionsThisSession: countSessionActions(ctx.session.id) ?? undefined
+      actionsThisSession: countSessionActions(ctx.session.id) ?? undefined,
+      sessionGrant,
+      writeContent: subject.writeContent
     })
-    if (decision === 'approved' && !perCall) sessionElevations.add(key)
-    if (decision !== 'approved') {
+    // Only an explicit session answer is remembered. A plain `approved` is the
+    // "Approve once" button and covers this call alone.
+    if (decision === 'approved-for-session' && !perCall) sessionElevations.add(key)
+    if (decision !== 'approved' && decision !== 'approved-for-session') {
       recordAudit({
         agentName: ctx.session.agentName,
         sessionId: ctx.session.id,
@@ -923,11 +1006,16 @@ async function gate(
         serverName: ctx.serverName,
         action: ctx.action,
         capability: ctx.capability,
-        // A refusal is recorded as the denial it was: the action did not
-        // happen. What the audit cannot say is that nobody was asked, so the
-        // agent is told that instead -- see ApprovalDecision in approvals.ts.
-        approval: decision === 'refused' ? 'denied' : decision,
-        result: 'denied'
+        // `refused` is OpsMaxx declining to ask -- too many requests open, or
+        // this one denied moments ago -- and it used to be written as
+        // `denied`, which the audit view rendered "You refused this request".
+        // Nobody was asked. `not-asked` says so, and says why.
+        approval: decision === 'refused' ? 'not-asked' : decision,
+        result: 'denied',
+        error:
+          decision === 'refused'
+            ? 'OpsMaxx did not ask: this session already had too many approval requests open, or the same action was denied moments ago'
+            : undefined
       })
       if (decision === 'refused') {
         return {
@@ -949,11 +1037,14 @@ async function gate(
         )
       }
     }
+    // A human answered this one just now; the audit row says whether they also
+    // answered for the ones like it, so the `approved-earlier` rows that follow
+    // have a row to point back to.
+    return { ok: true, approval: decision === 'approved-for-session' && !perCall ? 'approved-for-session' : 'approved' }
   }
 
-  // An `ask` that reached here was answered by a human just now; an `allow`
-  // never entered either branch above.
-  return { ok: true, approval: check.decision === 'ask' ? 'approved' : 'not-required' }
+  // Only an `allow` reaches here: every `ask` returned from its own branch.
+  return { ok: true, approval: 'not-required' }
 }
 
 /**
@@ -966,7 +1057,20 @@ async function gate(
  * just looked at -- on top of the 'approved-earlier' row gate() had already
  * written for it. Two rows, and the louder one was the untrue one.
  */
-type GateApproval = 'not-required' | 'approved' | 'approved-earlier'
+type GateApproval = 'not-required' | 'approved' | 'approved-for-session' | 'approved-earlier'
+
+/**
+ * The row for a call that got past gate() and then failed.
+ *
+ * EVERY GATED CALL LEAVES EXACTLY ONE ROW. Several tools returned early after
+ * the gate -- an SFTP connection that would not open, a reader that is not
+ * running on this machine -- with no row at all, so the audit log showed four
+ * rows for five calls and the missing one was the call that went wrong.
+ * tests/auditOneRowPerCall.integration.test.ts holds every tool to it.
+ */
+function auditError(ctx: AuditContext, approval: GateApproval, error: string): void {
+  recordAudit({ ...auditBase(ctx), approval, result: 'error', error })
+}
 
 function auditSuccess(ctx: AuditContext, approval: GateApproval, extra: { exitCode?: number } = {}): void {
   recordAudit({
@@ -1952,7 +2056,14 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         serverId: s.id,
         serverName: s.name,
         action: command,
-        capability: 'terminal'
+        // Named for what the command actually does. A `sudo` command was
+        // audited, prompted and REMEMBERED as `terminal`, so "allow terminal
+        // commands on this host for the session", given about `df`, silently
+        // covered `sudo rm -rf /var/lib` -- the policy asks for sudo separately
+        // and the gate's memory then paid that question out of the terminal
+        // answer. The policy decision itself is unchanged: effectiveCommand
+        // above still decides, from the command, exactly as it did.
+        capability: runsAsAnotherUser(command) ? 'sudo' : 'terminal'
       }
       // ONE CLASSIFIER, NOT TWO. This path graded `high` on the word `sudo`
       // and on nothing else, so `docker volume rm` -- which the operator's own
@@ -1964,8 +2075,12 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       // rule, but swapping one rule for another would quietly lower some
       // command somewhere and this is not the change to discover that in.
       const assessed = assessCommand(command)
-      const runsAsRoot = /sudo\b/.test(command)
-      const elevated = check.decision === 'deny' || assessed.risk !== 'ordinary' || runsAsRoot
+      const runsAsRoot = runsAsAnotherUser(command)
+      // A command word the walk cannot read literally (`$(which sudo) reboot`,
+      // `{sudo,reboot}`, nesting past its depth) may be anything, sudo
+      // included, so it is never covered by a remembered yes.
+      const computed = classifyCommand(command).computedCommand
+      const elevated = check.decision === 'deny' || assessed.risk !== 'ordinary' || runsAsRoot || computed
       // The reason names the rule that fired, in that order, because that is
       // the order the OR above evaluates -- and assessCommand already returns
       // the sentence for its own rule, so this quotes it rather than writing a
@@ -1973,14 +2088,34 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const because = !elevated
         ? 'it runs a shell command of the agent\u2019s own composition on the host'
         : runsAsRoot
-          ? 'the command runs as root, through sudo'
+          ? 'the command runs as another user, most likely root (sudo, su, doas, pkexec, run0, runuser or systemd-run)'
+          : computed
+            ? 'the command it runs is computed when it runs, so OpsMaxx cannot tell what it is'
           : assessed.reasons[0]
             ? `OpsMaxx\u2019s command classifier graded it ${assessed.risk}: ${assessed.reasons[0]}`
             : `OpsMaxx\u2019s command classifier graded it ${assessed.risk}`
       const gated = await gate(
         ctx,
         check,
-        { toolName: 'execute_command', level: elevated ? 'high' : 'medium', because, intent },
+        {
+          toolName: 'execute_command',
+          level: elevated ? 'high' : 'medium',
+          because,
+          intent,
+          // Anything graded above ordinary -- sudo, an elevated or destructive
+          // finding, a path rule's refusal -- is answered one command at a
+          // time, and never reads or writes a session grant. Two reasons, and
+          // the second is why this is the whole tier and not only
+          // `destructive`. The first: these are the commands the policy says
+          // are never granted silently. The second: under a group with sudo at
+          // ask, `sudo systemctl status` and `sudo rm -rf /var/lib` reach
+          // gate() under the SAME rule ("Sudo commands require approval"),
+          // because the destructive upgrade only lifts an `allow`, so no key
+          // built from the capability and the rule can tell them apart. What
+          // the classifier can tell apart is whether the command is ordinary,
+          // and only an ordinary command is grantable for the session.
+          perCall: elevated
+        },
         extra
       )
       if (!gated.ok) return gated.result
@@ -1997,7 +2132,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           serverId: s.id,
           serverName: s.name,
           action: command,
-          capability: 'terminal',
+          capability: ctx.capability,
           approval: gated.approval,
           result: 'error',
           error: result.error
@@ -2060,7 +2195,10 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const cfg = resolveChainSecrets(serverToSshConfig(s))
       const key = `mcp:${s.id}`
       const conn = await sftpConnect(key, cfg)
-      if (!conn.ok) return errorText(`Could not connect: ${conn.error}`)
+      if (!conn.ok) {
+        auditError(ctx, gated.approval, `could not connect: ${conn.error}`)
+        return errorText(`Could not connect: ${conn.error}`)
+      }
       const result = await sftpRead(key, path)
       sftpDisconnect(key)
       if (!result.ok) {
@@ -2111,7 +2249,11 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           toolName: 'write_file',
           level: 'medium',
           because: 'it overwrites a file on the host, and OpsMaxx keeps no copy of the previous contents',
-          intent
+          intent,
+          // The dialog used to show `write <path> (N bytes)` and nothing of the
+          // N bytes, so approving a write meant approving content nobody had
+          // been shown.
+          writeContent: { content, knownSecrets: knownSecretValuesForServer(s.id) }
         },
         extra
       )
@@ -2120,7 +2262,10 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const cfg = resolveChainSecrets(serverToSshConfig(s))
       const key = `mcp:${s.id}`
       const conn = await sftpConnect(key, cfg)
-      if (!conn.ok) return errorText(`Could not connect: ${conn.error}`)
+      if (!conn.ok) {
+        auditError(ctx, gated.approval, `could not connect: ${conn.error}`)
+        return errorText(`Could not connect: ${conn.error}`)
+      }
       const result = await sftpWrite(key, path, content)
       sftpDisconnect(key)
       if (!result.ok) {
@@ -2178,7 +2323,10 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const cfg = resolveChainSecrets(serverToSshConfig(s))
       const key = `mcp:${s.id}`
       const conn = await sftpConnect(key, cfg)
-      if (!conn.ok) return errorText(`Could not connect: ${conn.error}`)
+      if (!conn.ok) {
+        auditError(ctx, gated.approval, `could not connect: ${conn.error}`)
+        return errorText(`Could not connect: ${conn.error}`)
+      }
       const result = await sftpList(key, path)
       sftpDisconnect(key)
       if (!result.ok) {
@@ -2254,6 +2402,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       // sentences and neither is "usage is fine".
       const report = capacityReader?.(s.id, windowDays ?? 7) ?? null
       if (report === null) {
+        auditError(ctx, gated.approval, 'history is not being recorded on this machine')
         return errorText(
           'OpsMaxx is not recording history on this machine, so there is nothing to forecast from. This does not mean the server has spare capacity.'
         )
@@ -2363,17 +2512,17 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (usable && cached?.entry.host) {
         m = cached.entry.host
         provenance = `Taken by background checking ${agePhrase(age)}, not sampled just now.`
-        auditSuccess(ctx, 'not-required')
+        auditSuccess(ctx, gated.approval)
       } else {
         const cfg = resolveChainSecrets(serverToSshConfig(s))
         // No dialog: an agent asked for this, so there is nobody whose click a
         // verification-code prompt would be the answer to.
         const result = await metricsSample(`mcp:${s.id}`, cfg, false)
         if (!result.ok || !result.data) {
-          recordAudit({ ...auditBase(ctx), approval: 'not-required', result: 'error', error: result.error })
+          recordAudit({ ...auditBase(ctx), approval: gated.approval, result: 'error', error: result.error })
           return errorText(`Could not sample metrics: ${result.error ?? 'unknown error'}`)
         }
-        auditSuccess(ctx, 'not-required')
+        auditSuccess(ctx, gated.approval)
         m = result.data
         provenance = 'Sampled just now.'
       }
@@ -2611,7 +2760,13 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           because: reads
             ? 'OpsMaxx classified this statement as a read'
             : 'OpsMaxx could not classify this statement as a read, so it is treated as one that changes data',
-          intent
+          intent,
+          // A write "always requires approval" (evaluateDatabaseStatement), and
+          // that sentence was false the moment anything was remembered: a
+          // session grant given on a SELECT covered the DROP TABLE after it,
+          // because both are `databaseAccess` on the same database. Reads may
+          // be granted for the session; anything else asks every time.
+          perCall: !reads
         },
         extra
       )
@@ -2744,7 +2899,11 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           because: running
             ? 'it opens a network path between this machine and a port on the server'
             : 'it closes a tunnel that other things may still be using',
-          intent
+          intent,
+          // Opening one "always requires approval" (evaluateTunnelOpen) -- each
+          // time, which a session grant from an earlier start or stop would
+          // otherwise quietly stop being.
+          perCall: running
         },
         extra
       )
@@ -2758,7 +2917,10 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           return text(`Stopped "${tunnel.name}".`)
         }
         const server = tunnel.serverId ? getCachedServer(tunnel.serverId) : null
-        if (!server) return errorText(`"${tunnel.name}" has no SSH server configured to carry it.`)
+        if (!server) {
+          auditError(ctx, approval, 'no SSH server is configured to carry this tunnel')
+          return errorText(`"${tunnel.name}" has no SSH server configured to carry it.`)
+        }
         // No renderer asked for this one, so there is nowhere to push status
         // events; the tunnel manager reads live state when it next renders.
         const result = await tunnelStart(
@@ -2909,7 +3071,11 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
             : liveDependents > 0
               ? `it stops a VPN that ${liveDependents} live session(s) reach their host through`
               : 'it stops a VPN that other sessions may depend on',
-          intent
+          intent,
+          // docs/AI-SECURITY.md: there is no configuration in which a VPN comes
+          // up silently. A start remembered from an earlier start, or from a
+          // stop, would be one. Starts ask every time.
+          perCall: running
         },
         extra
       )
@@ -4003,8 +4169,11 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (permitted.length === 0) {
         return errorText('This session is not permitted to read the fleet in any of its workspaces.')
       }
-      // The strictest surviving decision governs the prompt: if any permitted
-      // workspace says ask, the human is asked once for the whole call.
+      // The strictest surviving decision governs. If any permitted workspace
+      // says ask, the call is REFUSED, not asked: an approval names one server
+      // and this call names none, so gate() has nobody to put it to (and
+      // records the refusal). Making the fleet-wide reads askable is its own
+      // piece of work.
       const check = permitted
         .map((w) => effectiveWorkspaceCapability(auth.session, w.id, 'fleetRead'))
         .reduce((strictest, d) => (d.decision === 'ask' ? d : strictest))
@@ -4032,13 +4201,17 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!gated.ok) return gated.result
 
       if (!fleetReader) {
+        auditError(ctx, gated.approval, 'the fleet is not being sampled on this machine')
         return errorText(
           'OpsMaxx is not sampling this fleet, so there is nothing collected to report. ' +
             'This does not mean the servers are healthy.'
         )
       }
       const servers = listCachedServers(permitted.map((w) => w.id))
-      if (servers.length === 0) return text('No servers in this workspace.')
+      if (servers.length === 0) {
+        auditSuccess(ctx, gated.approval)
+        return text('No servers in this workspace.')
+      }
 
       const rows = servers.map((srv) => {
         const facts = fleetReader!.factsFor(srv.id)
@@ -4125,7 +4298,13 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
             action === 'start'
               ? `it starts the container "${container}", which begins serving traffic again`
               : `it ${action}s the container "${container}" and drops every connection it is serving`,
-          intent
+          intent,
+          // Stopping and restarting drop every connection the container is
+          // serving, so each one is asked for. A session grant used to carry:
+          // a yes to restarting one container covered stopping every other on
+          // that host, since all three actions are `containerControl` under
+          // the same rule. Only a start may be remembered for the session.
+          perCall: action !== 'start'
         },
         extra
       )
@@ -4237,10 +4416,12 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!gated.ok) return gated.result
 
       if (!backupReader) {
+        auditError(ctx, gated.approval, 'backup configuration cannot be read on this machine')
         return errorText('OpsMaxx cannot read backup configuration on this machine.')
       }
       const { destinations, alarms } = backupReader()
       if (destinations.length === 0) {
+        auditSuccess(ctx, gated.approval)
         // Said plainly. "No destinations" reads as a clean bill of health if it
         // is reported as an empty list of problems.
         return text('NO BACKUP DESTINATIONS ARE CONFIGURED. Nothing on this machine is being backed up.')
@@ -4393,6 +4574,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!gated.ok) return gated.result
 
       if (!alertReader) {
+        auditError(ctx, gated.approval, 'history is not being recorded on this machine')
         return errorText(
           'OpsMaxx is not recording history on this machine, so there are no alerts to read. ' +
             'This does not mean nothing has gone wrong.'
@@ -4402,9 +4584,9 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       // machine-wide and a session is not.
       const visible = new Set(listCachedServers(permitted.map((w) => w.id)).map((srv) => srv.id))
       const rows = alertReader(Math.min(200, (limit ?? 50) * 4)).filter((r) => visible.has(r.serverId))
+      auditSuccess(ctx, gated.approval)
       if (rows.length === 0) return text('No alerts have fired for the servers in this workspace.')
       const shown = rows.slice(0, limit ?? 50)
-      auditSuccess(ctx, gated.approval)
       return text(
         `${shown.length} alert(s), newest first:\n\n` +
           shown
@@ -4681,6 +4863,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!gated.ok) return gated.result
 
       if (!fleetReader) {
+        auditError(ctx, gated.approval, 'the fleet is not being sampled on this machine')
         return errorText(
           'OpsMaxx is not sampling this fleet, so there is no baseline to compare against. ' +
             'This does not mean nothing has changed.'
@@ -4689,6 +4872,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const reading = fleetReader.driftFor(s.id)
       const drift = reading.drift as { at?: number; readings?: { watchId: string; status: string; detail?: string }[] } | undefined
       if (!drift) {
+        auditSuccess(ctx, gated.approval)
         // "Never sampled" is not "unchanged", and reporting it as a clean bill
         // of health is the failure this whole file keeps guarding against.
         return text(
@@ -4782,13 +4966,17 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!gated.ok) return gated.result
 
       if (!fleetReader) {
+        auditError(ctx, gated.approval, 'the fleet is not being sampled on this machine')
         return errorText(
           'OpsMaxx is not sampling this fleet, so there is no baseline to compare against. ' +
             'This does not mean nothing has changed.'
         )
       }
       const servers = listCachedServers(permitted.map((w) => w.id))
-      if (servers.length === 0) return text('No servers in this workspace.')
+      if (servers.length === 0) {
+        auditSuccess(ctx, gated.approval)
+        return text('No servers in this workspace.')
+      }
 
       const drifted: string[] = []
       const matching: string[] = []

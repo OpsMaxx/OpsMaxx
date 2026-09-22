@@ -5,7 +5,8 @@ import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
 import { ApprovalWatcher } from '../src/renderer/src/components/ai/ApprovalWatcher'
 import { useApprovalQueue } from '../src/renderer/src/store/approvalQueue'
-import { NO_CONSEQUENCE_TEXT } from '../src/shared/approvalRisk'
+import { NO_CONSEQUENCE_TEXT, PREVIEW_MAX_CHARS, contentPreview } from '../src/shared/approvalRisk'
+import { redactOutput } from '../src/main/services/secretRedaction'
 import type { ApprovalRequest, McpAgentSession } from '../src/shared/mcp'
 
 // The modal half of finding C5.
@@ -369,5 +370,126 @@ describe('asking for more time', () => {
     })
     render(<ApprovalWatcher />)
     expect(await screen.findByText('Auto-denies in 5:00')).toBeTruthy()
+  })
+})
+
+// "Approve once" used to be remembered for the rest of the session. It now
+// means once, and the session grant is a second answer whose label is its whole
+// extent -- offered only where main said the cache would honour it.
+describe('once, or for the session', () => {
+  it('sends "once" for Approve once', async () => {
+    const h = harness({ approvals: [request({ sessionGrant: 'capability' })] })
+    render(<ApprovalWatcher />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Approve once' }))
+    expect(h.respondApproval).toHaveBeenCalledWith('appr-1', 'approved', 'once')
+  })
+
+  it('names the permission, the server and the duration on the session button', async () => {
+    const h = harness({ approvals: [request({ sessionGrant: 'capability' })] })
+    render(<ApprovalWatcher />)
+    const grant = await screen.findByRole('button', {
+      name: 'Allow “Sudo / privilege escalation” on k3s-node-01 for this session'
+    })
+    await userEvent.click(grant)
+    expect(h.respondApproval).toHaveBeenCalledWith('appr-1', 'approved', 'session')
+  })
+
+  it('names the tool when main narrowed the grant to one', async () => {
+    harness({
+      approvals: [request({ sessionGrant: 'tool', toolName: 'update_server', capability: 'manageServers' })]
+    })
+    render(<ApprovalWatcher />)
+    expect(
+      await screen.findByRole('button', { name: 'Allow update_server on k3s-node-01 for this session' })
+    ).toBeTruthy()
+  })
+
+  it('offers only Approve once for a per-call tool', async () => {
+    // No sessionGrant is how main says per-call: remove_server, add_server,
+    // every CI trigger.
+    harness({ approvals: [request({ toolName: 'remove_server', capability: 'manageServers' })] })
+    render(<ApprovalWatcher />)
+    await screen.findByRole('button', { name: 'Approve once' })
+    expect(screen.queryByRole('button', { name: /for this session/ })).toBeNull()
+  })
+
+  it('keeps the weight and the focus on Deny with both yeses on screen', async () => {
+    harness({ approvals: [request({ sessionGrant: 'capability' })] })
+    render(<ApprovalWatcher />)
+    const deny = await screen.findByRole('button', { name: 'Deny' })
+    expect(document.activeElement).toBe(deny)
+    expect(screen.getByRole('button', { name: /for this session/ }).className).not.toContain('primary')
+  })
+
+  it('shows which permission is being granted', async () => {
+    harness()
+    render(<ApprovalWatcher />)
+    expect(await screen.findByText('Sudo / privilege escalation')).toBeTruthy()
+  })
+})
+
+describe('what write_file will write', () => {
+  function writeRequest(raw: string, knownSecrets: string[] = []): ApprovalRequest {
+    return request({
+      capability: 'writeFiles',
+      toolName: 'write_file',
+      risk: 'medium',
+      action: `write /etc/app.env (${raw.length} bytes)`,
+      // Built the way approvals.ts builds it, so this is what main would send.
+      contentPreview: contentPreview(redactOutput(raw, knownSecrets))
+    })
+  }
+
+  it('shows the content, with a secret in it redacted', async () => {
+    harness({ approvals: [writeRequest('PORT=8080\nAPI_KEY=sk-live-abc123\nNOTE=pw is hunter22', ['hunter22'])] })
+    render(<ApprovalWatcher />)
+    const frame = await screen.findByLabelText('File content written by Claude Code')
+    expect(frame.textContent).toContain('PORT=8080')
+    expect(frame.textContent).toContain('API_KEY=[REDACTED]')
+    expect(frame.textContent).not.toContain('sk-live-abc123')
+    expect(frame.textContent).not.toContain('hunter22')
+    expect(screen.getByText(/the agent’s content, not OpsMaxx’s/)).toBeTruthy()
+  })
+
+  it('prints bidi overrides and zero-width characters as visible escapes', async () => {
+    harness({ approvals: [writeRequest('echo safe\u202E;hs.krow\u202C\u200B done')] })
+    render(<ApprovalWatcher />)
+    const frame = await screen.findByLabelText('File content written by Claude Code')
+    expect(frame.textContent).toBe('echo safe⟨U+202E⟩;hs.krow⟨U+202C⟩⟨U+200B⟩ done')
+  })
+
+  it('caps a megabyte, says how much it left out, and still shows the buttons', async () => {
+    const raw = 'A'.repeat(1024 * 1024)
+    harness({ approvals: [writeRequest(raw)] })
+    render(<ApprovalWatcher />)
+    const frame = await screen.findByLabelText('File content written by Claude Code')
+    expect(frame.textContent).toHaveLength(PREVIEW_MAX_CHARS)
+    expect(frame.style.maxHeight).toBe('200px')
+    expect(frame.style.overflow).toBe('auto')
+    expect(screen.getByText(/Only the start is shown: .* more characters/)).toBeTruthy()
+    expect(screen.getByText(/Approving writes all of it/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Approve once' })).toBeTruthy()
+  })
+
+  it('says, next to the session button, that later writes will not be shown', async () => {
+    harness({ approvals: [{ ...writeRequest('x=1'), sessionGrant: 'capability' }] })
+    render(<ApprovalWatcher />)
+    await screen.findByRole('button', { name: /Allow “Write files” on k3s-node-01 for this session/ })
+    expect(screen.getByText('Later writes in this session won’t be shown to you.')).toBeTruthy()
+  })
+
+  it('does not say it when there is no session button to press', async () => {
+    harness({ approvals: [writeRequest('x=1')] })
+    render(<ApprovalWatcher />)
+    await screen.findByLabelText('File content written by Claude Code')
+    expect(screen.queryByText(/Later writes in this session/)).toBeNull()
+  })
+
+  it('shows no content frame for a request that carries none', async () => {
+    harness()
+    render(<ApprovalWatcher />)
+    await screen.findByText(/Restarts cron/)
+    expect(screen.queryByLabelText(/File content written by/)).toBeNull()
   })
 })

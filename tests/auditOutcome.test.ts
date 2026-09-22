@@ -112,3 +112,66 @@ describe('the export', () => {
     expect(auditExport([e({})])).toContain('sess-abcdef123456')
   })
 })
+
+// A call carried on an earlier session approval used to read "the access group
+// allowed this outright", crediting a policy that said ask for a decision a
+// person made. And the row that gave the grant read like any single yes, so
+// nothing in the log explained where the carried ones came from.
+describe('approvals that reach past one call', () => {
+  it('credits a carried approval to the person who gave it, not to the policy', () => {
+    const o = auditOutcome(e({ approval: 'approved-earlier', result: 'success' }))
+    expect(o.decidedBy).toBe('you')
+    expect(o.label).toMatch(/^Approved earlier/)
+    expect(o.detail).toMatch(/^Nothing was asked: an approval given earlier in this session covered it\./)
+    // Not "you allowed this for the session": rows up to 0.50.25 were carried
+    // by an "Approve once" click, and nothing in a row says which era wrote it.
+    expect(o.detail).not.toMatch(/you allowed/i)
+    expect(o.detail).not.toMatch(/access group/)
+  })
+
+  it('marks the row that granted the session', () => {
+    const o = auditOutcome(e({ approval: 'approved-for-session', result: 'success' }))
+    expect(o.decidedBy).toBe('you')
+    expect(o.label).toMatch(/^Approved for session/)
+    expect(o.detail).toMatch(/rest of the session/)
+  })
+})
+
+// gate() writes a refusal by the policy itself as `not-required` + `denied`:
+// nothing was asked because there was nothing to approve. It used to read
+// "Allowed, then blocked -- the access group allowed this outright".
+describe('a refusal by the policy', () => {
+  const refused = e({
+    approval: 'not-required',
+    result: 'denied',
+    error: 'Path rule "/etc/shadow" (read) = deny'
+  })
+
+  it('is labelled as blocked by policy, never as allowed', () => {
+    const o = auditOutcome(refused)
+    expect(o.label).toBe('Blocked by policy')
+    expect(o.decidedBy).toBe('policy')
+    expect(o.label).not.toMatch(/allowed/i)
+    expect(o.detail).not.toMatch(/allowed this outright/)
+  })
+
+  it('names the rule that refused it', () => {
+    expect(auditOutcome(refused).detail).toContain('Path rule "/etc/shadow" (read) = deny')
+  })
+
+  it('keeps "then blocked" for a row a human approved first', () => {
+    expect(auditOutcome(e({ approval: 'approved', result: 'denied' })).label).toBe('Approved, then blocked')
+  })
+})
+
+describe('a request nobody was asked about', () => {
+  it('is not attributed to the operator', () => {
+    const o = auditOutcome(
+      e({ approval: 'not-asked', result: 'denied', error: 'OpsMaxx did not ask: the same action was denied moments ago' })
+    )
+    expect(o.label).toBe('Denied — not asked')
+    expect(o.decidedBy).not.toBe('you')
+    expect(o.detail).toContain('did not ask')
+    expect(o.detail).not.toMatch(/You refused/)
+  })
+})
