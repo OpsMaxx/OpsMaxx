@@ -240,6 +240,11 @@ Fill in the server, port and username, then pick how to authenticate:
 
 > **Key files without an extension** (`id_ed25519`, or any bare filename) are fully supported — the file picker shows all files by default.
 
+**Tags** are optional: type them comma-separated (`prod, eu-west, db`). They are
+stored lowercase, up to eight per server, drawn as small chips on the server's
+row in the sidebar, and matched by the sidebar search. Edit or clear them the
+same way from **Edit server**.
+
 ### 2. Add jump hosts, in the same dialog
 
 Servers inside a private network are reached through a bastion. Click **Add jump host** and the hops appear right there — no second dialog, no separate step.
@@ -256,6 +261,24 @@ Hops connect in order, top to bottom: `you → Hop 1 → Hop 2 → target`. Use 
 ### 3. Open a session
 
 Click a server to open it. **Double-click to open an additional session** in a new tab — useful when you want one shell tailing logs and another running commands.
+
+Each row's status marker has its own shape as well as its own colour — a filled
+dot when connected, a pulsing ring with a centre dot while connecting, a triangle when idle and a hollow
+ring when not connected — and hovering it names the state. Once the hourly host
+facts sweep has read a server, its row also shows an icon for the distribution
+family it reported (Ubuntu, Debian, Red Hat, SUSE, Arch, Alpine, NixOS, Gentoo,
+OpenWrt); a server not yet read, or running something outside that list, shows
+none.
+
+The list works from the keyboard. <kbd>Tab</kbd> into it, then:
+
+| Key | Action |
+|---|---|
+| <kbd>↑</kbd> / <kbd>↓</kbd> | Previous / next row |
+| <kbd>Home</kbd> / <kbd>End</kbd> | First / last row |
+| <kbd>→</kbd> / <kbd>←</kbd> | Expand / collapse a folder; from a server, <kbd>←</kbd> goes to its folder |
+| <kbd>Enter</kbd> | Open the server, or open / close the folder — the same as a click |
+| <kbd>Shift</kbd>+<kbd>F10</kbd> or the Menu key | The right-click menu, with focus in it |
 
 Sessions keep running when you switch workspaces, change views or open a database. Nothing is torn down until you close the tab.
 

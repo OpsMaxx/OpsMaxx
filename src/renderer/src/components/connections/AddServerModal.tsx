@@ -36,6 +36,7 @@ import { useVaultPrompt } from '../../store/vaultPrompt'
 import type { VaultEntryDescriptor, VaultIndexResult } from '../../../../shared/vaultIndex'
 import { VpnTransportSelect } from '../vpn/VpnTransportSelect'
 import { classifyConnectionError, faultAdvice } from '../../lib/connectionError'
+import { MAX_TAGS, parseTags } from '../../lib/serverTags'
 import type { AuthMethod, Hop, UUID } from '../../types'
 
 // `unavailable` says why rather than hiding the option.
@@ -203,6 +204,9 @@ export function AddServerModal(): React.JSX.Element {
 
   const [name, setName] = useState(existing?.name ?? '')
   const [host, setHost] = useState(existing?.host ?? '')
+  // Kept as the typed text and parsed on save. Parsing on every keystroke, as
+  // the vault's tag field does, eats the comma you just typed.
+  const [tagsText, setTagsText] = useState((existing?.tags ?? []).join(', '))
   const [port, setPort] = useState(String(existing?.port ?? 22))
   const [username, setUsername] = useState(existing?.username ?? 'root')
   const [auth, setAuth] = useState<AuthMethod>(existing?.auth ?? 'key')
@@ -581,6 +585,7 @@ export function AddServerModal(): React.JSX.Element {
       // exists - so a value typed here before switching type must not survive.
       host: isCloud ? '' : host.trim(),
       port: Number(port) || 22,
+      tags: parseTags(tagsText),
       // `root` IS THE WRONG DEFAULT FOR A WINDOWS DESKTOP, and it was not
       // inert: rdpRelay falls back to this field, so an RDP-only record saved
       // with the form's SSH default tried to sign in as root. The one account
@@ -821,6 +826,23 @@ export function AddServerModal(): React.JSX.Element {
           onChange={(e) => setName(e.target.value)}
           autoFocus
         />
+      </div>
+
+      <div className="field">
+        <label className="field-label" htmlFor="server-tags">
+          Tags
+        </label>
+        <input
+          id="server-tags"
+          className="input"
+          placeholder="prod, eu-west, db"
+          value={tagsText}
+          onChange={(e) => setTagsText(e.target.value)}
+        />
+        <span className="field-hint">
+          Comma-separated, up to {MAX_TAGS}. Shown on the connection&apos;s row and matched by the
+          sidebar search.
+        </span>
       </div>
 
       {/**

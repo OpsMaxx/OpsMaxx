@@ -517,6 +517,34 @@ button {
 .tree-row.dragover {
   box-shadow: inset 0 0 0 1px var(--accent-border);
 }
+/* Inset, because the row clips its overflow and sits flush with the scroll
+   area's edge: the global ring's outward offset was cut off on both sides. */
+.tree-row:focus-visible {
+  outline-offset: -2px;
+}
+/* Tags on a connection row. The shared chip, a size down, and allowed to
+   shrink: the name keeps at least 6ch, and a long tag ellipsizes rather than
+   pushing the name off the row. */
+.tree-row .chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 9ch;
+  /* Block, not the chip's inline-flex: an ellipsis needs a text line to cut. */
+  display: inline-block;
+  height: 16px;
+  line-height: 14px;
+  padding: 0 5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-row .label {
+  flex: 1 0 6ch;
+}
+.tree-row .distro {
+  display: inline-flex;
+  flex: none;
+}
 
 .status-dot {
   width: 8px;
@@ -538,6 +566,34 @@ button {
 .status-dot.connecting {
   background: var(--info);
   animation: pulse 1.1s ease-in-out infinite;
+}
+/* Colour is never the only signal (panel-audit §7). Each state also has its
+   own shape, and where `.state-dot` has one for the same meaning it is that
+   one: a filled disc is up, a triangle wants a look, a hollow ring is an
+   absence, a square is an alarm. Connecting has no `.state-dot` equivalent, so
+   it is a ring with a dot at its centre — kept round, and pulsing, so it cannot
+   be read as the alarm square an 8px rotated square would nearly be. The plain
+   ring matters most: "not connected" is the state most of a sidebar sits in,
+   and grey-on-grey was the one a colour-blind reader could not separate from
+   anything else. */
+.status-dot.offline {
+  background: none;
+  box-shadow: inset 0 0 0 2px var(--text-faint);
+}
+.status-dot.idle {
+  border-radius: 0;
+  box-shadow: none;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.status-dot.connecting {
+  background: radial-gradient(circle, var(--info) 0 1.5px, transparent 2px);
+  box-shadow: inset 0 0 0 1.5px var(--info);
+}
+/* Failed: the alarm square, in the alarm colour. Tunnels and the VPN card set
+   this; without a rule it was an 8px span with nothing painted in it. */
+.status-dot.error {
+  background: var(--danger);
+  border-radius: 1px;
 }
 @keyframes pulse {
   50% {
