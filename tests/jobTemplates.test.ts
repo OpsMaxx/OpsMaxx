@@ -209,7 +209,7 @@ describe('the templates file', () => {
 const PORT = 18771
 // Names are held to the broad word; descriptions to the specific concepts, so an
 // unrelated "template" (trivy's `--format template`, say) cannot turn this red.
-const TEMPLATE_NAME = /template|snippet|preset|saved.?command/i
+const TEMPLATE_NAME = /template|snippet|preset|saved.?command|job.?steps?/i
 const TEMPLATE_CONCEPT = /job.?templates?|saved.?(job.?)?templates?|opsmaxx-job-templates|jobTemplates|saved.?commands?/i
 
 describe('the MCP bridge exposes no job template', () => {
