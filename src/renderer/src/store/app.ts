@@ -344,6 +344,22 @@ export interface AppSettings {
   /** Schemes the user imported from an iTerm2 or Windows Terminal file. */
   terminalCustomSchemes: TerminalScheme[]
   /**
+   * The monospace family the terminal draws with.
+   *
+   * Empty means the app's own `--font-mono` stack, the same way an empty
+   * `terminalScheme` means the app palette -- "app default" is a real,
+   * selectable entry rather than an absence to interpret.
+   *
+   * There was no key here at all until now. The Settings dropdown offering
+   * four fonts has been in the app since 0.1.0 with no `value` and no
+   * `onChange`, so it reset to its first option every time the pane was
+   * reopened and never reached the terminal, which read the CSS token
+   * directly. Reported as issue #35.
+   */
+  terminalFontFamily: string
+  /** Blink the terminal cursor. Was hardcoded on in createTerm. */
+  terminalCursorBlink: boolean
+  /**
    * Start local shells with OSC 133 prompt marks.
    *
    * Optional, and absence reads as OFF. This changes how every local shell
@@ -413,6 +429,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   localTerminalEnabled: true,
   terminalScheme: '',
   terminalCustomSchemes: [],
+  terminalFontFamily: '',
+  terminalCursorBlink: true,
   jobsDetached: true,
   shortcuts: {}
 }
@@ -1076,6 +1094,26 @@ function vpnVaultEntryIds(spec: VpnSpec): string[] {
     spec.visitors.forEach((v) => take(v.secretKeyRef))
   }
   return [...ids]
+}
+
+/**
+ * Drop the live connections held against a server, without closing anything
+ * another pane is still using.
+ *
+ * Fire-and-forget, and not load-bearing for correctness: the revision bump in
+ * `updateServer` is already in the pool key, so these caches now miss on their
+ * own. This is what makes it immediate rather than leaving a session
+ * authenticated to a host the user just repointed idling for fifteen minutes.
+ *
+ * `typeof window` for the same reason `releaseVpnSecrets` below gives: a bare
+ * reference to an undeclared global is a ReferenceError, not undefined, so the
+ * optional chain does not help under the test suite's `environment: 'node'`.
+ */
+function retireServerConnections(id: string): void {
+  if (typeof window === 'undefined') return
+  void window.opsmaxx?.ssh?.poolEvict?.(id)
+  void window.opsmaxx?.sftp?.disconnect?.(id)
+  void window.opsmaxx?.metrics?.disconnect?.(id)
 }
 
 // Releases the vault entries a set of doomed profiles owned. Fire-and-forget:
@@ -2051,8 +2089,33 @@ export const useApp = create<AppState>((set, get) => ({
     return id
   },
 
-  updateServer: (id, patch) =>
-    set((s) => ({ servers: s.servers.map((sv) => (sv.id === id ? { ...sv, ...patch } : sv)) })),
+  updateServer: (id, patch) => {
+    // Editing a server has to retire the connections made to the old one.
+    //
+    // This was a pure spread with no side effects at all -- compare
+    // `deleteServer` directly below, which has done its own forgetting since
+    // the day it was written. So you could change a server's host, press Save,
+    // click it in the sidebar, and land on the previous machine: main's pool,
+    // the SFTP browser and the metrics sampler are each keyed on the server
+    // id, which an edit does not change, so all three hit and handed back a
+    // connection already authenticated to the box the record used to name.
+    //
+    // `rev` after the spread, so a caller echoing a whole record back cannot
+    // carry a stale one in. Bumped unconditionally rather than on a field
+    // diff, because a credential rotation changes nothing on this record --
+    // the secret lives in the OS keychain -- and must still invalidate. Every
+    // caller is an explicit user or agent save, never a poll, so this cannot
+    // loop.
+    //
+    // Retired before set(), because renderer IPC is FIFO: these reach main
+    // ahead of the connect the state change is about to trigger.
+    retireServerConnections(id)
+    set((s) => ({
+      servers: s.servers.map((sv) =>
+        sv.id === id ? { ...sv, ...patch, rev: (sv.rev ?? 0) + 1 } : sv
+      )
+    }))
+  },
 
   deleteServer: (id) => {
     // Forget everything keyed by this server before dropping it.

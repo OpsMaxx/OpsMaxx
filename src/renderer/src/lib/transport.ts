@@ -109,7 +109,18 @@ export function sshTransport(
 ): TerminalTransport {
   const api = (): typeof window.opsmaxx.ssh | undefined => window.opsmaxx?.ssh
   return {
-    key: `ssh:${server.id}`,
+    // The revision is part of the key, not just the payload.
+    //
+    // `key` is what the session effect in useTerminalSession watches, so this
+    // is what makes an open pane redial after its server was edited. Without
+    // it the pane held a session to the host the record used to name and had
+    // no way to learn otherwise -- clicking the server in the sidebar found
+    // the existing tab and did not even attempt a connect.
+    //
+    // It also rebuilds the xterm, so the pane's scrollback is discarded. That
+    // is the right trade here rather than a regression: the buffer belongs to
+    // a session on a machine this server no longer points at.
+    key: `ssh:${server.id}:${server.rev ?? 0}`,
     title: server.name,
     subtitle: `${server.username}@${server.host}:${server.port}`,
     endpoint: `${server.host}:${server.port}`,
@@ -127,6 +138,7 @@ export function sshTransport(
             port: server.port,
             username: server.username,
             auth: asAuth(server.auth),
+            rev: server.rev,
             cols,
             rows,
             // Jump hops need their own credentials: either the secrets stored
@@ -236,7 +248,7 @@ export function containerTransport(
     onLifecycle: undefined,
     // Distinct from the server's own key so a container shell and a shell on
     // the host are different sessions rather than one stealing the other.
-    key: `container:${server.id}:${containerRef}`,
+    key: `container:${server.id}:${server.rev ?? 0}:${containerRef}`,
     title: containerRef,
     subtitle: `container on ${server.name}`,
     endpoint: `${containerRef} · ${server.host}`,
@@ -257,6 +269,7 @@ export function containerTransport(
             port: server.port,
             username: server.username,
             auth: asAuth(server.auth),
+            rev: server.rev,
             cols,
             rows,
             hops: sshHopsFor(server),

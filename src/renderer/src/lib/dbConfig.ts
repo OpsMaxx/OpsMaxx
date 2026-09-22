@@ -25,13 +25,25 @@ import type { DbConnectConfig } from '../../../shared/db'
  */
 export type DbConnectFields = Pick<
   DatabaseConn,
-  'id' | 'kind' | 'host' | 'port' | 'username' | 'database' | 'ssl' | 'sshServerId' | 'vpnProfileId'
+  | 'id'
+  | 'rev'
+  | 'kind'
+  | 'host'
+  | 'port'
+  | 'username'
+  | 'database'
+  | 'ssl'
+  | 'sshServerId'
+  | 'vpnProfileId'
 >
 
 export function dbConnectConfig(db: DbConnectFields, servers: Server[]): DbConnectConfig {
   const jump = db.sshServerId ? servers.find((s) => s.id === db.sshServerId) : undefined
   return {
     id: db.id,
+    // Carried so main's client cache can tell this database as it is now from
+    // the same database as it was before an edit. See DatabaseConn.rev.
+    rev: db.rev,
     kind: db.kind,
     host: db.host,
     port: db.port,

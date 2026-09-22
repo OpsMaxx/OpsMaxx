@@ -58,6 +58,25 @@ export interface Server {
   port: number
   username: string
   auth: AuthMethod
+  /**
+   * Bumped every time this connection profile is saved.
+   *
+   * Part of the connection's IDENTITY, not a detail of it. Every live
+   * connection cache in main was keyed on the server id alone, so editing a
+   * record changed the record and no key -- and the next connect was handed a
+   * connection still authenticated to the box the record used to name. This
+   * travels into the pool key, so a stale entry can never be hit; it is left
+   * to idle out rather than raced against the reconnect.
+   *
+   * A COUNTER rather than a hash of the fields, and that is the whole reason
+   * it exists as a field: rotating a credential changes nothing on this record
+   * -- secrets live in the OS keychain -- and must still retire the connection
+   * that authenticated with the old one. `updateServer` bumps it on the act of
+   * saving, not on a field diff.
+   *
+   * Absent means never edited, which is every record saved before this.
+   */
+  rev?: number
   status: ServerStatus
   tags: string[]
   favorite: boolean
@@ -225,6 +244,16 @@ export interface Tunnel {
 export type DbKind = 'postgres' | 'mysql' | 'mssql' | 'mongodb' | 'redis'
 export interface DatabaseConn {
   id: UUID
+  /**
+   * Bumped every time this connection profile is saved. The database half of
+   * `Server.rev`, and there for exactly the same reason: main caches one
+   * client per database id, so editing a record changed the record and no key
+   * -- and the next query was answered by a client still connected to the
+   * database the record used to name.
+   *
+   * Absent means never edited.
+   */
+  rev?: number
   workspaceId: UUID
   name: string
   kind: DbKind

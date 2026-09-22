@@ -49,8 +49,13 @@ describe('how it reaches a terminal', () => {
   it('gives a container shell its own session key', () => {
     // Otherwise a shell in a container and a shell on the host are the same
     // session, and one steals the other.
+    //
+    // The revision is in here for the same reason it is in the host key: a
+    // container shell rides the same pooled connection, so editing the
+    // server's credentials has to redial this pane too rather than leave it
+    // exec'ing on the machine the record used to name.
     expect(read('src/renderer/src/lib/transport.ts')).toMatch(
-      /key: `container:\$\{server\.id\}:\$\{containerRef\}`/
+      /key: `container:\$\{server\.id\}:\$\{server\.rev \?\? 0\}:\$\{containerRef\}`/
     )
   })
 

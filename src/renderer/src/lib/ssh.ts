@@ -47,6 +47,9 @@ export function sshHopsFor(server: Server): (SshHop & { serverId?: string })[] {
 export function sshTargetFor(server: Server): SshHop & { serverId: string; hops: SshHop[] } {
   return {
     serverId: server.id,
+    // Carried so main's pool key can tell this server as it is now from the
+    // same server as it was before an edit. See Server.rev.
+    rev: server.rev,
     host: server.host,
     port: server.port,
     username: server.username,
@@ -57,6 +60,8 @@ export function sshTargetFor(server: Server): SshHop & { serverId: string; hops:
 
 export interface SshHopInfo {
   serverId: string
+  /** See Server.rev — part of this hop's pool identity, not a detail of it. */
+  rev?: number
   host: string
   port: number
   username: string
@@ -88,6 +93,9 @@ export interface SshHopInfo {
 export function sshHopFor(server: Server): SshHopInfo {
   return {
     serverId: server.id,
+    // Carried so main's pool key can tell this server as it is now from the
+    // same server as it was before an edit. See Server.rev.
+    rev: server.rev,
     host: server.host,
     port: server.port,
     username: server.username,

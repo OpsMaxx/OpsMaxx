@@ -13,6 +13,8 @@ import type {
 interface Conn {
   conn: PooledConnection
   sftp: SFTPWrapper
+  /** The record revision this handle was opened against. See Server.rev. */
+  rev?: number
 }
 
 // One cached SFTP connection per server id. Opened lazily on first operation.
@@ -26,14 +28,20 @@ function openSftp(client: Client): Promise<SFTPWrapper> {
 
 async function ensure(key: string, cfg: SshConnectConfig): Promise<SFTPWrapper> {
   const existing = conns.get(key)
-  if (existing) return existing.sftp
+  // The key is the server id, so it survives an edit that makes this cached
+  // handle wrong -- and the fresh cfg the caller went to the trouble of
+  // building was then discarded. `rev` is what tells the two apart. Without
+  // this the file browser kept listing the filesystem of the machine the
+  // record used to name, however many times the user reopened it.
+  if (existing && existing.rev === cfg.rev) return existing.sftp
+  if (existing) sftpDisconnect(key)
   // Shares the terminal's authenticated connection, so browsing files never
   // triggers a second login.
   const conn = await acquire(cfg)
   const client = conn.client
   const sftp = await openSftp(client)
   client.on('close', () => conns.delete(key))
-  conns.set(key, { conn, sftp })
+  conns.set(key, { conn, sftp, rev: cfg.rev })
   return sftp
 }
 

@@ -4,6 +4,8 @@ export interface Conn {
   kind: DbKind
   client: any
   close: () => Promise<void>
+  /** The record revision this client was built from. See DatabaseConn.rev. */
+  rev?: number
 }
 
 const conns = new Map<string, Conn>()
@@ -338,9 +340,15 @@ export async function openTransient(cfg: DbConnectConfig, allowPrompt = false): 
 
 export async function ensure(cfg: DbConnectConfig, allowPrompt = false): Promise<Conn> {
   const existing = conns.get(cfg.id)
-  if (existing) return existing
+  // The key is the database id, so it outlives an edit that makes this client
+  // wrong, and the cfg the caller built was discarded on every hit. `rev` is
+  // what tells the two apart: without it, correcting a host, port, username or
+  // password and re-running the query went on answering from the connection
+  // to the database the record used to name.
+  if (existing && existing.rev === cfg.rev) return existing
+  if (existing) await dbClose(cfg.id)
   const conn = await build(cfg, allowPrompt)
-  conns.set(cfg.id, conn)
+  conns.set(cfg.id, { ...conn, rev: cfg.rev })
   return conn
 }
 

@@ -30,6 +30,13 @@ export interface DbSshConfig {
 
 export interface DbConnectConfig {
   id: string
+  /**
+   * Which revision of the saved record this was built from. See
+   * `DatabaseConn.rev` -- it is what stops a cached client connected to the
+   * database a record USED to name from answering a query built from that
+   * record as it stands now.
+   */
+  rev?: number
   kind: DbKind
   host: string
   port: number

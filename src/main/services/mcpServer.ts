@@ -1088,6 +1088,10 @@ function databaseConfig(db: CachedDatabase): Parameters<typeof dbQuery>[0] {
   const server = db.sshServerId ? getCachedServer(db.sshServerId) : null
   return {
     id: db.id,
+    // Carried, not defaulted. Main compares this against the cached client on
+    // every hit, so a bridge call that omitted it would fight the app's own
+    // connection for the same cache key. See CachedDatabase.rev.
+    rev: db.rev,
     kind: db.kind,
     host: db.host,
     port: db.port,

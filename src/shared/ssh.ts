@@ -33,6 +33,14 @@ export interface SshHop {
    * loopback address the transport happens to be using this minute.
    */
   hostKeyId?: string
+  /**
+   * Which revision of the saved record this target was built from.
+   *
+   * Read only by `hopKey`. See `Server.rev`: it is what stops a pooled
+   * connection to the host a record USED to name from being handed to a
+   * connect built from that record as it stands now.
+   */
+  rev?: number
   username: string
   auth: SshAuth
   password?: string

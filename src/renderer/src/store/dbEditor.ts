@@ -31,10 +31,24 @@ export function openDatabaseEditor(id: string): void {
 
 /** Writes changed fields back. `replaceAll` is the store's own bulk setter and
  *  replaces the `databases` reference, which is what persist.ts watches, so an
- *  edit is saved exactly like an add or a delete. */
+ *  edit is saved exactly like an add or a delete.
+ *
+ *  The revision bump is what makes the edit reach the connection rather than
+ *  only the record. Main caches one client per database id, and an id does not
+ *  change when a host does -- so correcting a wrong port and re-running the
+ *  query used to go on answering from the old one. Bumped on the act of
+ *  saving, not on a field diff, so a password-only correction invalidates too:
+ *  the secret lives in the vault or the keychain and changes nothing here.
+ *
+ *  `dbClose` on top is not what makes it correct -- the new revision already
+ *  makes the cache miss -- it is what frees the old client now instead of
+ *  leaving it open against a database the user just repointed. */
 export function saveDatabaseEdit(id: string, patch: Partial<DatabaseConn>): void {
   const state = useApp.getState()
+  if (typeof window !== 'undefined') void window.opsmaxx?.db?.close?.(id)
   state.replaceAll({
-    databases: state.databases.map((d) => (d.id === id ? { ...d, ...patch } : d))
+    databases: state.databases.map((d) =>
+      d.id === id ? { ...d, ...patch, rev: (d.rev ?? 0) + 1 } : d
+    )
   })
 }

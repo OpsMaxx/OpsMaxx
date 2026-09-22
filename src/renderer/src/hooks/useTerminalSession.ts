@@ -128,17 +128,28 @@ export function observeSize(
   }
 }
 
+/** The app's own monospace stack, which an empty `terminalFontFamily` means. */
+export function appFontStack(): string {
+  return getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim()
+}
+
 export function createTerm(
   host: HTMLDivElement,
   fontSize: number,
   schemeId?: string,
-  custom?: TerminalScheme[]
+  custom?: TerminalScheme[],
+  fontFamily?: string,
+  cursorBlink?: boolean
 ): { term: Terminal; fit: FitAddon; search: SearchAddon } {
   const term = new Terminal({
-    fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim(),
+    // The setting, or the app's stack when it is empty. This read the CSS
+    // token unconditionally until issue #35: the Settings dropdown offering
+    // four fonts wrote nowhere, so the only font the terminal could ever use
+    // was whatever `--font-mono` resolved to.
+    fontFamily: fontFamily || appFontStack(),
     fontSize,
     lineHeight: 1.35,
-    cursorBlink: true,
+    cursorBlink: cursorBlink !== false,
     allowProposedApi: true,
     theme: themeFromCss(schemeId, custom) as never,
     scrollback: 10000
@@ -281,12 +292,18 @@ export function useTerminalSession(
   const resolvedTheme = useResolvedTheme()
   const terminalScheme = useApp((s) => s.settings.terminalScheme)
   const customSchemes = useApp((s) => s.settings.terminalCustomSchemes)
+  const fontFamily = useApp((s) => s.settings.terminalFontFamily)
+  const cursorBlink = useApp((s) => s.settings.terminalCursorBlink !== false)
   // Read once at creation like the font size is, then re-applied by the effect
   // below — the session must survive a palette change, not be rebuilt by it.
   const schemeRef = useRef(terminalScheme)
   schemeRef.current = terminalScheme
   const customRef = useRef(customSchemes)
   customRef.current = customSchemes
+  const fontFamilyRef = useRef(fontFamily)
+  fontFamilyRef.current = fontFamily
+  const cursorBlinkRef = useRef(cursorBlink)
+  cursorBlinkRef.current = cursorBlink
   // Kept in refs so the zoom effect can reach the live terminal without
   // rebuilding it — recreating would drop the session.
   const termRef = useRef<Terminal | null>(null)
@@ -327,7 +344,9 @@ export function useTerminalSession(
       hostRef.current,
       initialFontSize.current,
       schemeRef.current,
-      customRef.current
+      customRef.current,
+      fontFamilyRef.current,
+      cursorBlinkRef.current
     )
     termRef.current = term
     fitRef.current = fit
@@ -551,6 +570,27 @@ export function useTerminalSession(
     if (sessionRef.current) transport.resize(sessionRef.current, term.cols, term.rows)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fontSize, hostRef])
+
+  // A family change alters the cell size, so this needs the same refit and
+  // pty-resize the zoom effect above does -- setting the option alone leaves
+  // the shell wrapping to the old column count. Applied to the live terminal
+  // rather than recreating it, so the session and its scrollback survive.
+  useEffect(() => {
+    const term = termRef.current
+    const fit = fitRef.current
+    const host = hostRef.current
+    if (!term || !fit || !host) return
+    term.options.fontFamily = fontFamily || appFontStack()
+    safeFit(fit, host)
+    if (sessionRef.current) transport.resize(sessionRef.current, term.cols, term.rows)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fontFamily, hostRef])
+
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+    term.options.cursorBlink = cursorBlink
+  }, [cursorBlink])
 
   // The palette is read from CSS at creation, so a terminal opened before the
   // theme changed kept the old background and foreground for as long as it

@@ -6,6 +6,8 @@ import type { HostMetrics, MetricsResult, PortListener, ServiceUnit, SshConnectC
 interface Conn {
   conn: PooledConnection
   client: Client
+  /** The record revision this client was opened against. See Server.rev. */
+  rev?: number
 }
 
 // One metrics connection per server id, opened lazily and reused for polling.
@@ -13,11 +15,16 @@ const conns = new Map<string, Conn>()
 
 async function ensure(key: string, cfg: SshConnectConfig, allowPrompt = true): Promise<Client> {
   const existing = conns.get(key)
-  if (existing) return existing.client
+  // Same as the SFTP cache: the key is the server id, so it outlives an edit
+  // that makes this client wrong, and the cfg the caller passed was thrown
+  // away on every hit. Without the revision check the monitor kept reporting
+  // the CPU, disks and failed units of the machine the record used to name.
+  if (existing && existing.rev === cfg.rev) return existing.client
+  if (existing) metricsDisconnect(key)
   const conn = await acquire(cfg, undefined, allowPrompt)
   const client = conn.client
   client.on('close', () => conns.delete(key))
-  conns.set(key, { conn, client })
+  conns.set(key, { conn, client, rev: cfg.rev })
   return client
 }
 

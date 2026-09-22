@@ -33,7 +33,9 @@ function useDemoSession(server: Server, hostRef: React.RefObject<HTMLDivElement 
       hostRef.current,
       useApp.getState().settings.terminalFontSize,
       useApp.getState().settings.terminalScheme,
-      useApp.getState().settings.terminalCustomSchemes
+      useApp.getState().settings.terminalCustomSchemes,
+      useApp.getState().settings.terminalFontFamily,
+      useApp.getState().settings.terminalCursorBlink !== false
     )
     const disposeUX = setupTerminalUX(term, hostRef.current)
     const user = server.username

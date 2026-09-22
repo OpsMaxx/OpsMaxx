@@ -29,6 +29,15 @@ export interface CachedServer {
   port: number
   username: string
   auth: SshAuth
+  /**
+   * Which revision of the record this is. See `Server.rev` in the renderer.
+   *
+   * Cached so `preparedSshTarget` can stamp it on a config built by a caller
+   * with no renderer behind it -- an MCP tool, the CLI. Without it those
+   * callers key on `srv:<id>` while the app keys on `srv:<id>|rev:n`, and one
+   * server ends up holding two separately authenticated sessions.
+   */
+  rev?: number
   os: string
   route: CachedHop[]
   // Reached through this VPN profile when set, which is why the VPN has to be
@@ -63,6 +72,16 @@ export interface CachedServer {
 
 export interface CachedDatabase {
   id: string
+  /**
+   * Which revision of the record this is. See `DatabaseConn.rev`.
+   *
+   * Cached because main keys its client cache on the database id and compares
+   * revisions on every hit. A bridge caller that sent none while the app sent
+   * one would not merely open a second client -- both would be claiming the
+   * SAME key, so each call would close the other's and rebuild, thrashing the
+   * connection for as long as both were in use.
+   */
+  rev?: number
   workspaceId: string
   name: string
   kind: DbKind
@@ -189,6 +208,7 @@ function parseServers(raw: unknown): CachedServer[] {
         port: asNumber(s.port, 22),
         username: asString(s.username),
         auth: isSshAuth(s.auth) ? s.auth : 'key',
+        ...(typeof s.rev === 'number' ? { rev: s.rev } : {}),
         os: asString(s.os, 'Linux'),
         route: parseRoute(s.route),
         vpnProfileId: typeof s.vpnProfileId === 'string' ? s.vpnProfileId : null,
@@ -251,7 +271,8 @@ function parseDatabases(raw: unknown): CachedDatabase[] {
       ssl: d.ssl === true,
       uri: d.uri === true,
       sshServerId: typeof d.sshServerId === 'string' ? d.sshServerId : null,
-      vpnProfileId: typeof d.vpnProfileId === 'string' ? d.vpnProfileId : null
+      vpnProfileId: typeof d.vpnProfileId === 'string' ? d.vpnProfileId : null,
+      ...(typeof d.rev === 'number' ? { rev: d.rev } : {})
     }))
 }
 
@@ -336,6 +357,11 @@ export function serverToSshConfig(
     username: server.username,
     auth: server.auth,
     serverId: server.id,
+    // Carried so a bridge caller invalidates on an edit the same way the app
+    // does. Its caches are in the `mcp:` namespace and so never collide with
+    // the app's, but without this they would go on answering from a
+    // connection to the host the record used to name. See CachedServer.rev.
+    rev: server.rev,
     hops: server.route,
     sessionId: `mcp:${server.id}`,
     cols: 80,

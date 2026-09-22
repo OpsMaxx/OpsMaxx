@@ -243,8 +243,6 @@ const SETTING_INDEX: SettingEntry[] = [
   { section: 'terminal', title: 'Font family', desc: 'Monospace font used in the terminal.', aliases: 'typeface monospace' },
   { section: 'terminal', title: 'Font size', desc: 'Terminal text size. Also Ctrl + / Ctrl - / Ctrl 0.', aliases: 'zoom bigger smaller text size' },
   { section: 'terminal', title: 'Cursor blink', desc: 'Blink the terminal cursor.', aliases: 'caret' },
-  { section: 'terminal', title: 'Copy on select', desc: 'Automatically copy selected text.', aliases: 'clipboard selection' },
-  { section: 'terminal', title: 'Scroll to bottom on output', desc: 'Follow new output automatically.', aliases: 'autoscroll follow tail' },
   {
     section: 'terminal',
     title: 'Allow this machine as a target',
@@ -360,8 +358,17 @@ export function searchSettings(query: string): SettingEntry[] {
   return SETTING_INDEX.filter((e) => settingMatches(e, query))
 }
 
-// A toggle backed by real, persisted state — unlike `Toggle` below, which is
-// still placeholder UI holding its value in local state.
+/**
+ * A toggle backed by real, persisted state. The only kind this panel has.
+ *
+ * There used to be a second one, `Toggle`, which held its value in local
+ * `useState` and reached nothing — placeholder UI from the original mock that
+ * five settings were still wired to years later. It looked identical to this
+ * one, so the only way to discover a setting did nothing was to set it, close
+ * the pane and watch it snap back. That is what issue #35 reported about the
+ * terminal's font family. Every control in here now writes to the store; a new
+ * one that does not is a bug, not a placeholder.
+ */
 function SettingSwitch({
   label,
   desc,
@@ -666,19 +673,6 @@ function VaultState(): React.JSX.Element {
           <LockOpen size={13} /> Unlock vault
         </button>
       )}
-    </div>
-  )
-}
-
-function Toggle({ label, desc, initial = false }: { label: string; desc: string; initial?: boolean }): React.JSX.Element {
-  const [on, setOn] = useState(initial)
-  return (
-    <div className="setting-row">
-      <div className="s-info">
-        <div className="s-title">{label}</div>
-        <div className="s-desc">{desc}</div>
-      </div>
-      <span className={clsx('switch', on && 'on')} onClick={() => setOn((v) => !v)} />
     </div>
   )
 }
@@ -990,8 +984,6 @@ export function Settings(): React.JSX.Element {
                 checked={settings.compactDensity}
                 onChange={(v) => setSettings({ compactDensity: v })}
               />
-              <Toggle label="Show status bar" desc="Display the bottom status bar." initial />
-              <Toggle label="Animated transitions" desc="Subtle motion on menus and modals." initial />
             </div>
           )}
 
@@ -1010,11 +1002,17 @@ export function Settings(): React.JSX.Element {
                   <div className="s-title">Font family</div>
                   <div className="s-desc">Monospace font used in the terminal.</div>
                 </div>
-                <select className="select" style={{ width: 220 }}>
-                  <option>JetBrains Mono</option>
-                  <option>SF Mono</option>
-                  <option>Cascadia Code</option>
-                  <option>Menlo</option>
+                <select
+                  className="select"
+                  style={{ width: 220 }}
+                  value={settings.terminalFontFamily}
+                  onChange={(e) => setSettings({ terminalFontFamily: e.target.value })}
+                >
+                  <option value="">App default</option>
+                  <option value="JetBrains Mono">JetBrains Mono</option>
+                  <option value="SF Mono">SF Mono</option>
+                  <option value="Cascadia Code">Cascadia Code</option>
+                  <option value="Menlo">Menlo</option>
                 </select>
               </div>
               <div className="setting-row">
@@ -1101,9 +1099,12 @@ export function Settings(): React.JSX.Element {
                   </button>
                 </div>
               </div>
-              <Toggle label="Cursor blink" desc="Blink the terminal cursor." initial />
-              <Toggle label="Copy on select" desc="Automatically copy selected text." />
-              <Toggle label="Scroll to bottom on output" desc="Follow new output automatically." initial />
+              <SettingSwitch
+                label="Cursor blink"
+                desc="Blink the terminal cursor."
+                checked={settings.terminalCursorBlink !== false}
+                onChange={(v) => setSettings({ terminalCursorBlink: v })}
+              />
               <SettingSwitch
                 label="Shell integration"
                 desc="Start local shells so they report where each prompt begins and what each command exited with. Uses the shell's own startup options for the session OpsMaxx starts — your shell config files are never modified, and turning this off restores the previous behaviour exactly. zsh and bash get prompt and command marks; fish gets command marks only; a login bash and PowerShell are not supported."

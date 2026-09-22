@@ -838,7 +838,7 @@ const connecting = new Map<string, { promise: Promise<PooledConnection>; allowPr
 
 // Identity of a single hop. Includes the parent so the same host reached by a
 // different route is not mistaken for the same connection.
-function hopKey(
+export function hopKey(
   hop: SshHop & {
     serverId?: string
     vpnProfileId?: string
@@ -868,9 +868,23 @@ function hopKey(
   // its own full authentication. The forward cannot go stale under a live
   // connection because the connection owns it -- `transportRelease` closes it when
   // the connection is destroyed, not when an acquire ends.
+  //
+  // `rev` is the credentials half of the same argument the VPN paragraph
+  // above makes. A hop with a serverId keys on that id alone, so editing a
+  // server's host, port, username or auth changed the record and left every
+  // key identical -- the next connect was handed a pooled connection still
+  // authenticated to the old box. Bumped by `updateServer` on every save, so
+  // it also covers a credential rotation, which changes no field on the
+  // record at all.
+  //
+  // APPENDED as its own `|` segment rather than folded into `self`, and that
+  // is load-bearing: `keyOwnsServer` below accepts `srv:<id>` followed by a
+  // `|`, so eviction and session recovery keep working untouched. Folding it
+  // into `self` would break both silently.
   const via = hop.vpnProfileId ? `|vpn:${hop.vpnProfileId}` : ''
   const tag = hop.poolTag ? `|${hop.poolTag}` : ''
-  return parentKey ? `${parentKey}>${self}${via}${tag}` : `${self}${via}${tag}`
+  const rev = hop.rev ? `|rev:${hop.rev}` : ''
+  return parentKey ? `${parentKey}>${self}${via}${tag}${rev}` : `${self}${via}${tag}${rev}`
 }
 
 function destroy(conn: PooledConnection): void {
@@ -1338,18 +1352,30 @@ export function invalidate(conn: PooledConnection): void {
 }
 
 /**
- * Is this pool key the connection to `serverId` itself, rather than a bastion
- * it was reached through?
+ * Does this pool key involve `serverId` at all — as the connection itself, or
+ * as a bastion it was reached through?
  *
- * A chained key is `parent>self`, and the hop that owns the socket is the last
- * segment. `hopKey` writes a server's own segment as `srv:<id>`, optionally
- * followed by `|vpn:…` and `|<poolTag>` — so an exact match or that same id
- * followed by a `|` is the connection, and `srv:<bastion>>srv:<id>` matches on
- * its last segment exactly as a direct connection does.
+ * A chained key is `parent>self`. `hopKey` writes a server's own segment as
+ * `srv:<id>`, optionally followed by `|vpn:…`, `|<poolTag>` and `|rev:…` — so
+ * an exact match, or that same id followed by a `|`, is that server's segment.
+ *
+ * It used to ask only about the LAST segment, on the reasoning that the last
+ * hop owns the socket. True, and not the question worth asking: a chain is
+ * only as live as the bastion carrying it, so a jump host that was edited or
+ * rebooted invalidates `srv:<bastion>>srv:<target>` as surely as it does the
+ * direct connection to itself — and that key ends in the target, where the
+ * old test never looked.
  */
-function keyOwnsServer(key: string, serverId: string): boolean {
-  const self = key.split('>').pop() ?? ''
-  return self === `srv:${serverId}` || self.startsWith(`srv:${serverId}|`)
+export function keyOwnsServer(key: string, serverId: string): boolean {
+  // EVERY segment, not just the last. A chained key is `parent>self`, so a
+  // bastion whose own record changed -- or which went away with its sockets --
+  // makes every chain THROUGH it stale, not merely the direct connection to
+  // it. `srv:<bastion>>srv:<target>` has the bastion in a position the old
+  // last-segment test could never see, so evicting a jump host left every
+  // chain across it in the pool looking usable.
+  return key
+    .split('>')
+    .some((seg) => seg === `srv:${serverId}` || seg.startsWith(`srv:${serverId}|`))
 }
 
 /**

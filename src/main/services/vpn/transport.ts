@@ -165,8 +165,22 @@ export function withVpnTransportDb(cfg: DbConnectConfig): DbConnectConfig {
 export function preparedSshTarget<T extends SshHop & { serverId?: string; hops?: SshHop[] }>(
   cfg: T
 ): T & { vpnProfileId?: string; serverName?: string; cloudTarget?: CloudTarget } {
+  // A revision only when the caller did not state one.
+  //
+  // An MCP tool or the CLI builds its config from main's own cache and has no
+  // revision to send. Without this it would key on `srv:<id>` while the
+  // renderer keyed on `srv:<id>|rev:3`, and one server would hold two
+  // separately authenticated sessions for as long as the app ran.
+  //
+  // The renderer's own claim WINS here, unlike vpnProfileId above, and for the
+  // opposite reason: this cache is written by a 400ms-debounced `data:save`,
+  // so inside that window the renderer is the fresher of the two.
+  const withRev =
+    cfg.rev === undefined && cfg.serverId
+      ? { ...cfg, rev: getCachedServer(cfg.serverId)?.rev }
+      : cfg
   // Cloud last, and it is another pure annotation: a server that is not a cloud
   // one comes back untouched, so every existing caller is unaffected and every
   // cloud one is handled without being edited.
-  return withCloudTransport(withVpnTransport(resolveChainSecrets(cfg)))
+  return withCloudTransport(withVpnTransport(resolveChainSecrets(withRev)))
 }
