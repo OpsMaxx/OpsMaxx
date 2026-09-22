@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { deferredView } from '../src/renderer/src/lib/deferredView'
+import { ErrorBoundary } from '../src/renderer/src/components/common/ErrorBoundary'
 
 /**
  * The views App keeps out of the startup bundle must render exactly as the
@@ -60,28 +61,33 @@ describe('deferredView', () => {
     }
   })
 
-  it('fails in place with a retry, leaving the rest of the app mounted', async () => {
+  it('fails in place, logged, never at the root boundary, and offers a reload', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
-    let attempts = 0
-    const v = deferredView<{ label: string }>(() =>
-      ++attempts === 1 ? Promise.reject(new Error('chunk gone')) : Promise.resolve(Probe)
-    )
-    await v.preload()
-    // Visible in the debug trace even though no view was on screen to fail.
-    expect(error).toHaveBeenCalled()
-    render(
-      <>
-        <p>terminal still here</p>
-        <v.View label="second try" />
-      </>
-    )
-    expect(screen.getByText(/This view failed to load: chunk gone/)).toBeTruthy()
-    expect(screen.getByText('terminal still here')).toBeTruthy()
+    const reload = vi.fn()
+    // jsdom's location.reload cannot be spied on directly: it is unforgeable.
+    vi.stubGlobal('location', { reload })
+    try {
+      const v = deferredView<{ label: string }>(() => Promise.reject(new Error('chunk gone')))
+      await v.preload()
+      // Visible in the debug trace even though no view was on screen to fail.
+      expect(error).toHaveBeenCalled()
+      render(
+        <ErrorBoundary>
+          <p>terminal still here</p>
+          <v.View label="never" />
+        </ErrorBoundary>
+      )
+      expect(screen.getByText(/This view failed to load: chunk gone/)).toBeTruthy()
+      expect(screen.queryByText('Something broke in the interface')).toBeNull()
+      expect(screen.getByText('terminal still here')).toBeTruthy()
 
-    await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
-    await waitFor(() => expect(screen.getByText('second try')).toBeTruthy())
-    expect(screen.getByText('terminal still here')).toBeTruthy()
-    expect(attempts).toBe(2)
-    error.mockRestore()
+      // A reload, not a retry: a failed import() is cached for the document.
+      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+      await userEvent.click(screen.getByRole('button', { name: 'Reload window' }))
+      expect(reload).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.unstubAllGlobals()
+      error.mockRestore()
+    }
   })
 })

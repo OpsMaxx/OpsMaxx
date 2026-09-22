@@ -17,9 +17,15 @@ import { forwardDebugError } from './debugForward'
  * the chunk really is still in flight costs a frame, not that.
  *
  * A chunk that will not load is the one failure a static import could never
- * have, so it is answered here, in the view's own place, with a retry. Thrown
- * instead, it would reach the root ErrorBoundary and take WorkspacePanel — and
- * every live terminal in it — down with a view the user was only visiting.
+ * have, so it is answered here, in the view's own place. Thrown instead, it
+ * would reach the root ErrorBoundary and take WorkspacePanel — and every live
+ * terminal in it — down with a view the user was only visiting.
+ *
+ * The way out is a window reload, not a retry. Chromium caches a failed
+ * dynamic import for the life of the document, and a module that threw while
+ * evaluating is cached as failed by the spec, so calling import() again with
+ * the same URL fails again however many times it is pressed. Reloading costs
+ * the open sessions, so the button says so before anyone presses it.
  */
 export function deferredView<P extends object>(
   load: () => Promise<ComponentType<P>>
@@ -42,11 +48,6 @@ export function deferredView<P extends object>(
         )
       }
     ))
-  const retry = (): Promise<void> => {
-    failed = null
-    pending = null
-    return preload()
-  }
   function View(props: P): React.JSX.Element | null {
     const [, rerender] = useState(0)
     // Whether THIS view mounted empty, decided at render rather than read in
@@ -61,10 +62,14 @@ export function deferredView<P extends object>(
       return (
         <div className="panel-note is-alarm">
           <span className="grow">
-            This view failed to load: {failed instanceof Error ? failed.message : String(failed)}
+            This view failed to load: {failed instanceof Error ? failed.message : String(failed)}.
+            Reloading keeps your tabs, but every open session is disconnected and waits for you
+            to reconnect it.
           </span>
-          <button className="btn" onClick={() => void retry().then(() => rerender((n) => n + 1))}>
-            Retry
+          {/* Restored tabs come back dormant — see useTerminalSession — so this
+              is exactly what a reload does to them. */}
+          <button className="btn" onClick={() => window.location.reload()}>
+            Reload window
           </button>
         </div>
       )
