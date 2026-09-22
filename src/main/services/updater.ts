@@ -1,18 +1,10 @@
 import { app, shell } from 'electron'
-// electron-updater is CommonJS, and it is externalized rather than bundled
-// (external deps resolve through real Node ESM/CJS interop, not esbuild's
-// bundle-time shim) — Node's cjs-module-lexer cannot statically see
-// `autoUpdater` as a named export of this particular module, even though the
-// package itself does expose it. The default-import form sidesteps that
-// entirely; see electron-updater's own docs for this exact caveat.
-import electronUpdater from 'electron-updater'
+import type { AppUpdater } from 'electron-updater'
 import { isPortable } from '../portable'
 import { channelOfVersion } from '../../shared/updater'
 import type { UpdatePrefs, UpdaterCapabilities, UpdaterStatus } from '../../shared/updater'
 import { channelConfig } from './updaterChannel'
 import { getUpdatePrefs, setUpdatePrefs } from './updatePrefs'
-
-const { autoUpdater } = electronUpdater
 
 // electron-builder's `publish: provider: github` config (electron-builder.yml)
 // bakes an app-update.yml into the packaged resources at build time, which is
@@ -69,19 +61,11 @@ export function getCapabilities(): UpdaterCapabilities {
   }
 }
 
-// Without this, electron-updater silently no-ops checkForUpdates() whenever
-// !app.isPackaged — logging a warning and resolving as if nothing were wrong,
-// which from the UI looked identical to "you're already up to date" no
-// matter what was actually published. dev-app-update.yml (repo root) mirrors
-// electron-builder.yml's publish config so `npm run dev` exercises the exact
-// same GitHub-releases check a packaged build does, not a stub.
-if (!app.isPackaged) autoUpdater.forceDevUpdateConfig = true
-
 // Push the current prefs into autoUpdater. Called before every check rather
 // than only on change, because electron-updater keeps this state on a
 // long-lived singleton and there is no way to ask it what it currently
 // believes — cheap to re-assert, expensive to get wrong.
-function applyPrefs(prefs: UpdatePrefs): void {
+function applyPrefs(autoUpdater: AppUpdater, prefs: UpdatePrefs): void {
   autoUpdater.autoDownload = prefs.autoDownload && CAN_AUTO_INSTALL
   // A platform that cannot self-install has nothing to install on quit, and
   // letting electron-updater try would mean a quit that hangs on a replace it
@@ -101,38 +85,73 @@ function applyPrefs(prefs: UpdatePrefs): void {
   autoUpdater.allowDowngrade = cfg.allowDowngrade
 }
 
-// Safe defaults for the window between module load and the first applyPrefs:
-// nothing downloads or installs itself until the stored prefs have actually
-// said so.
-autoUpdater.autoDownload = false
-autoUpdater.autoInstallOnAppQuit = false
+/**
+ * electron-updater, loaded on first use rather than at startup.
+ *
+ * It and its dependencies were a static import of the main bundle, evaluated
+ * before `app.whenReady` could fire and so before the first window could be
+ * created — 15 to 30 ms on every launch with a warm disk cache, for a module
+ * whose first real job is a network check. Nothing here can miss an event by
+ * loading late: the listeners are attached before the first check or
+ * download, and those are the only things that emit.
+ *
+ * electron-updater is CommonJS, and it is externalized rather than bundled
+ * (external deps resolve through real Node ESM/CJS interop, not esbuild's
+ * bundle-time shim) — Node's cjs-module-lexer cannot statically see
+ * `autoUpdater` as a named export of this particular module, even though the
+ * package itself does expose it. Reading it off `default` sidesteps that
+ * entirely; see electron-updater's own docs for this exact caveat.
+ */
+let loaded: Promise<AppUpdater> | null = null
+let ready: AppUpdater | null = null
+function updater(): Promise<AppUpdater> {
+  return (loaded ??= import('electron-updater').then(({ default: electronUpdater }) => {
+    const { autoUpdater } = electronUpdater
+    ready = autoUpdater
+    // Without this, electron-updater silently no-ops checkForUpdates() whenever
+    // !app.isPackaged — logging a warning and resolving as if nothing were wrong,
+    // which from the UI looked identical to "you're already up to date" no
+    // matter what was actually published. dev-app-update.yml (repo root) mirrors
+    // electron-builder.yml's publish config so `npm run dev` exercises the exact
+    // same GitHub-releases check a packaged build does, not a stub.
+    if (!app.isPackaged) autoUpdater.forceDevUpdateConfig = true
 
-autoUpdater.on('checking-for-update', () => setStatus({ state: 'checking' }))
-autoUpdater.on('update-not-available', () => setStatus({ state: 'not-available' }))
-autoUpdater.on('error', (err) => setStatus({ state: 'error', message: err.message }))
-autoUpdater.on('download-progress', (p) => setStatus({ state: 'downloading', percent: Math.round(p.percent) }))
-autoUpdater.on('update-downloaded', (info) =>
-  setStatus({ state: 'downloaded', version: info.version, channel: channelOfVersion(info.version) })
-)
-autoUpdater.on('update-available', (info) => {
-  const channel = channelOfVersion(info.version)
-  if (!CAN_AUTO_INSTALL) {
-    setStatus({ state: 'manual', version: info.version, channel })
-    return
-  }
-  setStatus({ state: 'available', version: info.version, channel })
-  // Started here rather than left to autoUpdater.autoDownload, so the renderer
-  // always sees 'available' before 'downloading' — the framework kicks its own
-  // auto-download off after this emit returns, and a user watching the status
-  // bar should see what was found before it starts pulling it. Calling it
-  // twice is harmless: downloadUpdate() hands back the in-flight promise when
-  // one already exists (AppUpdater.js:442).
-  if (getUpdatePrefs().autoDownload) void autoUpdater.downloadUpdate()
-})
+    // Safe defaults for the window between module load and the first applyPrefs:
+    // nothing downloads or installs itself until the stored prefs have actually
+    // said so.
+    autoUpdater.autoDownload = false
+    autoUpdater.autoInstallOnAppQuit = false
+
+    autoUpdater.on('checking-for-update', () => setStatus({ state: 'checking' }))
+    autoUpdater.on('update-not-available', () => setStatus({ state: 'not-available' }))
+    autoUpdater.on('error', (err) => setStatus({ state: 'error', message: err.message }))
+    autoUpdater.on('download-progress', (p) => setStatus({ state: 'downloading', percent: Math.round(p.percent) }))
+    autoUpdater.on('update-downloaded', (info) =>
+      setStatus({ state: 'downloaded', version: info.version, channel: channelOfVersion(info.version) })
+    )
+    autoUpdater.on('update-available', (info) => {
+      const channel = channelOfVersion(info.version)
+      if (!CAN_AUTO_INSTALL) {
+        setStatus({ state: 'manual', version: info.version, channel })
+        return
+      }
+      setStatus({ state: 'available', version: info.version, channel })
+      // Started here rather than left to autoUpdater.autoDownload, so the renderer
+      // always sees 'available' before 'downloading' — the framework kicks its own
+      // auto-download off after this emit returns, and a user watching the status
+      // bar should see what was found before it starts pulling it. Calling it
+      // twice is harmless: downloadUpdate() hands back the in-flight promise when
+      // one already exists (AppUpdater.js:442).
+      if (getUpdatePrefs().autoDownload) void autoUpdater.downloadUpdate()
+    })
+    return autoUpdater
+  }))
+}
 
 export async function checkForUpdates(): Promise<void> {
-  applyPrefs(getUpdatePrefs())
   try {
+    const autoUpdater = await updater()
+    applyPrefs(autoUpdater, getUpdatePrefs())
     await autoUpdater.checkForUpdates()
   } catch (err) {
     setStatus({ state: 'error', message: err instanceof Error ? err.message : String(err) })
@@ -150,7 +169,7 @@ export async function checkForUpdates(): Promise<void> {
 export async function downloadUpdate(): Promise<void> {
   if (!CAN_AUTO_INSTALL) return
   try {
-    await autoUpdater.downloadUpdate()
+    await (await updater()).downloadUpdate()
   } catch (err) {
     setStatus({ state: 'error', message: err instanceof Error ? err.message : String(err) })
   }
@@ -186,7 +205,9 @@ export function getPrefs(): UpdatePrefs {
 export function setPrefs(patch: Partial<UpdatePrefs>): UpdatePrefs {
   const before = getUpdatePrefs()
   const next = setUpdatePrefs(patch)
-  applyPrefs(next)
+  // Not loaded yet means nothing has checked, so there is no state to correct:
+  // the first check applies the stored prefs before it runs.
+  if (ready) applyPrefs(ready, next)
   // Both of these change what the *next* check does, so neither is visible
   // until one happens. Switching channel is the case users notice: they pick
   // beta expecting to be offered a beta, and waiting up to six hours to find
@@ -203,7 +224,7 @@ export function setPrefs(patch: Partial<UpdatePrefs>): UpdatePrefs {
 // belt-and-braces backend check for anything that calls it regardless.
 export function installUpdate(): void {
   if (!CAN_AUTO_INSTALL) return
-  autoUpdater.quitAndInstall()
+  void updater().then((u) => u.quitAndInstall())
 }
 
 export function openReleasePage(): void {
