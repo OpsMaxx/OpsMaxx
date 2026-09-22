@@ -206,6 +206,24 @@ const RUNNERS: Record<string, Set<string>> = {
   timeout: new Set(['-s', '-k']),
   xargs: new Set(['-a', '-d', '-E', '-I', '-L', '-n', '-P', '-s']),
   busybox: new Set(),
+  chroot: new Set(['--userspec', '--groups']),
+  strace: new Set(['-e', '-o', '-p', '-s', '-u', '-E', '-I', '-b', '-a', '-O', '-S', '-X', '-P', '-U']),
+  ltrace: new Set(['-e', '-o', '-p', '-s', '-u', '-n', '-a', '-A', '-D', '-F', '-l', '-w', '-x']),
+  nsenter: new Set(['-t', '-S', '-G', '--target', '--setuid', '--setgid']),
+  unshare: new Set(['-S', '-G', '--setuid', '--setgid']),
+  firejail: new Set(),
+  bwrap: new Set([
+    '--chdir', '--uid', '--gid', '--tmpfs', '--proc', '--dev', '--dir', '--unsetenv', '--hostname',
+    '--remount-ro', '--mqueue', '--lock-file', '--sync-fd', '--info-fd', '--block-fd', '--userns',
+    '--userns2', '--pidns', '--seccomp', '--add-seccomp-fd', '--exec-label', '--file-label', '--cap-add',
+    '--cap-drop', '--argv0', '--perms', '--size', '--json-status-fd'
+  ]),
+  setpriv: new Set([
+    '--reuid', '--regid', '--groups', '--inh-caps', '--ambient-caps', '--bounding-set', '--securebits',
+    '--pdeathsig', '--selinux-label', '--apparmor-profile'
+  ]),
+  setarch: new Set(),
+  prlimit: new Set(['-p']),
   // `. runas …` in PowerShell runs runas; `. ./env.sh` in a POSIX shell reads
   // a script, which is judged by its own name (and is best-effort either way).
   '.': new Set(),
@@ -218,7 +236,15 @@ const RUNNERS: Record<string, Set<string>> = {
 }
 
 /** Wrappers whose first operand is not the command: a duration, a lock, a priority, a mask. */
-const RUNNER_OPERAND = new Set(['timeout', 'flock', 'chrt', 'taskset'])
+const RUNNER_OPERAND = new Set(['timeout', 'flock', 'chrt', 'taskset', 'chroot', 'setarch'])
+
+/** bwrap options that take TWO values (`--bind SRC DEST`). */
+const RUNNER_TWO_VALUES: Record<string, Set<string>> = {
+  bwrap: new Set([
+    '--bind', '--ro-bind', '--dev-bind', '--bind-try', '--ro-bind-try', '--dev-bind-try', '--symlink',
+    '--setenv', '--file', '--bind-data', '--ro-bind-data', '--chmod'
+  ])
+}
 
 /** Wrapper options whose value is a whole command line of its own. */
 const RUNNER_COMMAND_FLAGS: Record<string, Set<string>> = {
@@ -247,7 +273,7 @@ const baseName = (t: string): string => t.split('/').pop() ?? t
 /** A command word's basename. tokenize has already removed the shell's escapes. */
 const word = (t: string): string => baseName(t)
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
-const REDIRECTION = /(\d?>>?|<)\s*("[^"]*"|'[^']*'|\S+)/g
+const REDIRECTION = /(\d?>>?|<<<|<<-?|<)\s*("[^"]*"|'[^']*'|\S+)/g
 
 /**
  * The same redirections, removed before a segment is split into words -- but
@@ -259,7 +285,7 @@ const REDIRECTION = /(\d?>>?|<)\s*("[^"]*"|'[^']*'|\S+)/g
  */
 const withoutRedirections = (segment: string): string =>
   segment.replace(
-    /'[^']*'|"(?:[^"\\]|\\.)*"|\\.|(\d?>>?|<)(?!\()\s*("(?:[^"\\]|\\.)*"|'[^']*'|[^\s'"]+)/g,
+    /'[^']*'|"(?:[^"\\]|\\.)*"|\\.|(\d?>>?|<<<|<<-?|<)(?!\()\s*("(?:[^"\\]|\\.)*"|'[^']*'|[^\s'"]+)/g,
     (m, op: string | undefined) => (op ? ' ' : m)
   )
 
@@ -335,7 +361,7 @@ function stripRunners(tokens: string[], nested: string[]): string[] | null {
           }
           continue
         }
-        t = t.slice(valueFlags.has(flag) ? 2 : 1)
+        t = t.slice(RUNNER_TWO_VALUES[name]?.has(flag) ? 3 : valueFlags.has(flag) ? 2 : 1)
       }
       // `timeout 5 cmd`, `flock /tmp/l cmd`, `chrt 10 cmd`, `taskset 0x3 cmd`.
       if (round === 0 && RUNNER_OPERAND.has(name) && t.length) t = t.slice(1)
@@ -359,15 +385,72 @@ function runsBareShell(line: string, depth = 0): boolean {
   })
 }
 
+/**
+ * The command string a POSIX shell (or `script`) was handed, or undefined.
+ *
+ * ONE PLACE reads it, because every place that read it separately looked for
+ * an exact `-c` and nothing else -- so `bash -lc "sudo …"`, `sh -ec`, `zsh -ic`
+ * and `bash -lic`, the form Codex-style agents wrap every command in, were
+ * never walked and never met a path rule.
+ *
+ * For a shell, `-c` is a flag anywhere in an option cluster, and the string is
+ * the first operand after the options (`bash -c -x 'cmd'` is legal). `-o`,
+ * `+o`, `-O`, `+O`, `--rcfile` and `--init-file` take a value. For `script`,
+ * `-c` takes its value directly: the rest of the cluster, or the next word.
+ */
+function commandString(argv: string[]): string | undefined {
+  const isScript = word(argv[0]) === 'script'
+  let flagged = false
+  for (let i = 1; i < argv.length; i++) {
+    const a = argv[i]
+    if (a.startsWith('--command=')) return a.slice('--command='.length)
+    if (a === '--command') return argv[i + 1]
+    if (a === '--') return flagged ? argv[i + 1] : undefined
+    if (/^[-+][oO]$/.test(a) || a === '--rcfile' || a === '--init-file') {
+      i++
+      continue
+    }
+    if (/^-[A-Za-z]+$/.test(a) && a.includes('c')) {
+      if (isScript) return a.endsWith('c') ? argv[i + 1] : a.slice(a.indexOf('c') + 1)
+      flagged = true
+      continue
+    }
+    if (a.startsWith('-') || (a.startsWith('+') && a.length > 1)) continue
+    // The first operand: the command string after a `-c`, or a script file.
+    return flagged ? a : undefined
+  }
+  return undefined
+}
+
+/**
+ * A shell's first operand -- the script it runs -- when it has no `-c`.
+ * Undefined with `-s`, which reads the script from stdin and makes every
+ * operand a positional parameter.
+ */
+function scriptOperand(argv: string[]): string | undefined {
+  for (let i = 1; i < argv.length; i++) {
+    const a = argv[i]
+    if (/^-[A-Za-z]*s[A-Za-z]*$/.test(a)) return undefined
+    if (/^[-+][oO]$/.test(a) || a === '--rcfile' || a === '--init-file') {
+      i++
+      continue
+    }
+    if (a === '--') return argv[i + 1]
+    if (a.startsWith('-') || (a.startsWith('+') && a.length > 1)) continue
+    return a
+  }
+  return undefined
+}
+
 function isBareShell(argv: string[], depth = 0): boolean {
   // cmd / PowerShell: bare unless told to run something and exit.
   if (WINDOWS_SHELLS.has(commandName(argv[0]).toLowerCase())) {
     return !argv.slice(1).some((a) => /^(?:\/[cr].*|-c|-command|-file|-encodedcommand)$/i.test(a))
   }
   if (!SHELLS.has(word(argv[0]))) return false
-  const c = argv.indexOf('-c')
-  if (c < 0) return true
-  return depth < MAX_DEPTH && argv[c + 1] !== undefined && runsBareShell(argv[c + 1], depth + 1)
+  const line = commandString(argv)
+  if (line === undefined) return true
+  return depth < MAX_DEPTH && runsBareShell(line, depth + 1)
 }
 
 /** What the escalator in `argv[0]` runs, and whether it is a shell. */
@@ -460,7 +543,10 @@ interface SegmentFacts {
   argv: string[]
 }
 
-function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, 'segment'> {
+/** parallel options that take a value. */
+const PARALLEL_VALUE_OPTIONS = new Set(['-j', '-S', '-a', '-I', '-n', '-N', '-P', '--jobs', '--sshlogin', '--arg-file'])
+
+function unwrapSegment(tokens: string[], nested: string[], stdinFed = false): Omit<SegmentFacts, 'segment'> {
   const head = stripRunners(tokens, nested) ?? []
   let t = head
   let escalated = false
@@ -510,6 +596,15 @@ function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, '
       t = cmd
       continue
     }
+    // `capsh … -- ARGS` hands ARGS to /bin/bash.
+    if (name === 'capsh') {
+      const dash = argv.indexOf('--')
+      if (dash >= 0) {
+        t = ['bash', ...argv.slice(dash + 1)]
+        continue
+      }
+      return done(argv)
+    }
     if (ESCALATORS.has(name)) {
       escalated = true
       const e = escalation(argv, nested, name)
@@ -521,8 +616,51 @@ function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, '
 
     // The working command. Some of them run a command line of their own.
     if (SHELLS.has(name)) {
-      const c = argv.indexOf('-c')
-      if (c >= 0 && argv[c + 1] !== undefined) nested.push(argv[c + 1])
+      const line = commandString(argv)
+      if (line !== undefined) nested.push(line)
+      else {
+        // No command string: the shell runs its stdin, or a script. Fed by a
+        // pipe (`echo "sudo reboot" | sh`), a here-string or here-doc, an
+        // input redirection, or a process substitution in place of the
+        // script, what it runs is not on this line to read -- so it asks.
+        const script = scriptOperand(argv)
+        if (
+          (script === undefined && stdinFed) ||
+          (script !== undefined && /^(?:-|\/dev\/stdin|\/dev\/fd\/\d+|<\(.*)$/.test(script))
+        ) {
+          unreadable = true
+        }
+      }
+    }
+    // More commands that run a command of their own.
+    if (name === 'find') {
+      // `-exec CMD … ;` / `+`, `-execdir`, `-ok`, `-okdir`: CMD runs per file.
+      for (let i = 1; i < argv.length; i++) {
+        if (!/^-(?:exec|execdir|ok|okdir)$/.test(argv[i])) continue
+        const end = argv.findIndex((a, j) => j > i && (a === ';' || a === '+'))
+        const cmd = argv.slice(i + 1, end < 0 ? undefined : end)
+        if (cmd.length) nested.push(cmd.join(' '))
+        if (end < 0) break
+        i = end
+      }
+    }
+    if (name === 'sg') {
+      // `sg [-] GROUP [-c] "command"`
+      const rest = argv.slice(1).filter((a) => a !== '-')
+      const cmd = rest.slice(1).filter((a) => a !== '-c')
+      if (cmd.length) nested.push(cmd.join(' '))
+    }
+    if (name === 'parallel') {
+      // `parallel [opts] TEMPLATE ::: args` runs the template per argument;
+      // with no template, each argument is itself the command.
+      let i = 1
+      while (i < argv.length && argv[i].startsWith('-') && !argv[i].startsWith(':::')) {
+        i += PARALLEL_VALUE_OPTIONS.has(argv[i]) ? 2 : 1
+      }
+      const sep = argv.findIndex((a, j) => j >= i && /^::::?\+?$/.test(a))
+      const template = argv.slice(i, sep < 0 ? undefined : sep)
+      if (template.length) nested.push(template.join(' '))
+      else if (sep >= 0) for (const a of argv.slice(sep + 1)) if (!/^::::?\+?$/.test(a)) nested.push(a)
     }
     // cmd and PowerShell run a command line too: everything after `/c` or
     // `/k`, or after `-Command` (which PowerShell lets you shorten to `-c`).
@@ -605,10 +743,8 @@ function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, '
     if (escalated && isBareShell(argv)) shell = true
     if (name === 'eval' && argv.length > 1) nested.push(argv.slice(1).join(' '))
     if (name === 'script') {
-      argv.forEach((a, i) => {
-        if ((a === '-c' || a === '--command') && argv[i + 1] !== undefined) nested.push(argv[i + 1])
-        if (a.startsWith('--command=')) nested.push(a.slice('--command='.length))
-      })
+      const line = commandString(argv)
+      if (line !== undefined) nested.push(line)
     }
     return done(argv)
   }
@@ -744,12 +880,17 @@ function walkCommand(command: string, visit: (facts: SegmentFacts) => void, dept
     visit({ segment: '', head: [], escalated: false, shell: false, computed: true, argv: [] })
   }
 
-  for (const segment of splitSegments(command)) {
+  const piped: boolean[] = []
+  splitSegments(command, piped).forEach((segment, i) => {
     // Redirection targets are files, never the command; the path rules read
     // them off `segment` directly.
     const tokens = tokenize(withoutRedirections(segment))
-    visit({ segment, ...unwrapSegment(tokens, nested) })
-  }
+    // Does this segment's stdin come from somewhere other than the terminal:
+    // a pipe, or an input redirection (`<`, `<<`, `<<<`) that is not a
+    // process substitution? A shell with no command string runs it.
+    const redirectedIn = [...segment.matchAll(REDIRECTION)].some((m) => m[1].startsWith('<') && !m[2].startsWith('('))
+    visit({ segment, ...unwrapSegment(tokens, nested, piped[i] || redirectedIn) })
+  })
   if (depth < MAX_DEPTH) for (const inner of nested) walkCommand(inner, visit, depth + 1)
   // Nested deeper than the walk goes: whatever is down there was not read, so
   // it fails toward ask like any other command that cannot be named.
@@ -853,8 +994,10 @@ export interface PathAccess {
 
 // Splits on the shell operators that start a new command, respecting quotes so
 // a separator inside an argument is not treated as one.
-function splitSegments(command: string): string[] {
+function splitSegments(command: string, piped?: boolean[]): string[] {
   const out: string[] = []
+  // One entry per separator: whether it was a single `|`.
+  const fed: boolean[] = []
   let current = ''
   let quote: string | null = null
   for (let i = 0; i < command.length; i++) {
@@ -885,6 +1028,7 @@ function splitSegments(command: string): string[] {
     const two = command.slice(i, i + 2)
     if (two === '&&' || two === '||') {
       out.push(current)
+      fed.push(false)
       current = ''
       i++
       continue
@@ -893,18 +1037,25 @@ function splitSegments(command: string): string[] {
     // and `>&` are redirections, not separators.
     if (c === '&' && command[i - 1] !== '>' && command[i - 1] !== '<' && command[i + 1] !== '>') {
       out.push(current)
+      fed.push(false)
       current = ''
       continue
     }
     if (c === ';' || c === '|' || c === '\n') {
       out.push(current)
+      fed.push(c === '|')
       current = ''
       continue
     }
     current += c
   }
   out.push(current)
-  return out.filter((s) => s.trim())
+  // `piped[i]` says whether segment i reads the output of the one before it,
+  // for walkCommand's `… | sh` rule. Kept in step with the empty-segment
+  // filter below.
+  const kept = out.map((segment, i) => ({ segment, piped: fed[i - 1] ?? false })).filter((x) => x.segment.trim())
+  piped?.push(...kept.map((x) => x.piped))
+  return kept.map((x) => x.segment)
 }
 
 /**

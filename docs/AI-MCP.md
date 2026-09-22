@@ -109,12 +109,14 @@ before the command runs. `cat /etc/shadow` is refused exactly as `read_file /etc
 `sudo` does not bypass it.
 
 The same check runs on every segment the escalation check walks (`walkCommand`, described in
-docs/AI-SECURITY.md): inside `sh -c '…'` and the other shells, `su -c`, `env -S`, `eval`,
-`watch`, `flock -c`, `script -c`, `$(…)` and backticks, up to three levels deep, and past shell
-grammar (`if … then`, `{ … }`), backslash-quoted command words and every wrapper and escalator it
-steps over (`timeout`, `xargs`, `busybox`, `pkexec`, `run0`, `systemd-run` and the rest). So
-`bash -c 'cat /etc/shadow'`, `timeout 5 cat /etc/shadow` and `echo $(cat /root/.ssh/id_rsa)` are
-refused like `cat /etc/shadow`, and the two checks cannot disagree about what a command runs.
+docs/AI-SECURITY.md): inside a shell's command string (`sh -c`, and `-c` in a cluster such as
+`bash -lc` or `sh -ec`), `script -c`, `su -c`, `sg`, `env -S`, `eval`, `watch`, `flock -c`,
+`find -exec`, a `parallel` template, `$(…)`, `<(…)` and backticks, up to three levels deep, and past
+shell grammar (`if … then`, `{ … }`), backslash-quoted command words and every wrapper and escalator
+it steps over (`timeout`, `xargs`, `busybox`, `chroot`, `strace`, `bwrap`, `pkexec`, `run0`,
+`systemd-run` and the rest). So `bash -lc 'cat /etc/shadow'`, `timeout 5 cat /etc/shadow` and
+`echo $(cat /root/.ssh/id_rsa)` are refused like `cat /etc/shadow`, and the two checks cannot
+disagree about what a command runs.
 
 This is best-effort by design: only absolute paths and only recognised commands, because a
 relative operand cannot be matched against a pattern without knowing the remote working directory.

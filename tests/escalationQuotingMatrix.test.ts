@@ -11,7 +11,7 @@ import type { AccessGroup } from '../src/shared/mcp'
 // a group that denies sudo. Hand-written cases had passed; the generated set
 // had not. So the generated set is the test.
 //
-// Eight wrappers, so 8 + 64 + 512 + 4096 nests. Every wrapper quotes its
+// Thirteen wrappers, so 13 + 169 + 2197 + 28561 nests. Every wrapper quotes its
 // argument the way a careful tool would -- POSIX
 // single quotes with the '\'' idiom shlex.quote emits, or double quotes with
 // \ " $ and ` escaped -- and every combination up to depth four is checked.
@@ -31,7 +31,14 @@ const WRAPPERS: Record<string, (s: string) => string> = {
   'cat <(…)': (s) => `cat <(${s})`,
   // Backquotes nest only by escaping: \, ` and $ inside them are written \\,
   // \` and \$, and the shell takes the escape off before running the body.
-  '`…`': (s) => `echo \`${s.replace(/[\\`$]/g, '\\$&')}\``
+  '`…`': (s) => `echo \`${s.replace(/[\\`$]/g, '\\$&')}\``,
+  // `-c` inside an option cluster. Only an exact `-c` used to be read, and
+  // `bash -lc` is what Codex-style agents wrap every command in.
+  "bash -lc '…'": (s) => `bash -lc ${sq(s)}`,
+  'sh -ec "…"': (s) => `sh -ec ${dq(s)}`,
+  "zsh -ic '…'": (s) => `zsh -ic ${sq(s)}`,
+  'bash -lic "…"': (s) => `bash -lic ${dq(s)}`,
+  "script -qc '…'": (s) => `script -qc ${sq(s)} /dev/null`
 }
 
 /** Every nest of 1..maxDepth wrappers around `inner`, with its depth and a readable label. */
@@ -65,6 +72,10 @@ function group(caps: Partial<AccessGroup['capabilities']>): AccessGroup {
 }
 
 const noSudo = group({ terminal: 'allow', sudo: 'deny' })
+const shadowDenied: AccessGroup = {
+  ...group({ terminal: 'allow', sudo: 'allow' }),
+  filePolicies: [{ id: 'shadow', pattern: '/etc/shadow', read: 'deny', write: 'deny' }]
+}
 
 describe('every quoted nest around `sudo reboot`, sudo=deny + terminal=allow', () => {
   const all = nests('sudo reboot', 4)
@@ -98,5 +109,25 @@ describe('the same matrix around a harmless `ls /tmp`', () => {
       .filter((n) => evaluateCommand(noSudo, n.command).decision === 'deny')
       .map((n) => `${n.label}: ${n.command}`)
     expect(denied).toEqual([])
+  })
+})
+
+describe('every quoted nest around `cat /etc/shadow`, with a deny rule on it', () => {
+  const all = nests('cat /etc/shadow', 4)
+
+  it('meets the path rule in every nest up to depth three', () => {
+    const allowed = all
+      .filter((n) => n.depth <= 3)
+      .filter((n) => evaluateCommand(shadowDenied, n.command).decision !== 'deny')
+      .map((n) => `${n.label}: ${n.command}`)
+    expect(allowed).toEqual([])
+  })
+
+  it('never allows a nest at depth four', () => {
+    const allowed = all
+      .filter((n) => n.depth === 4)
+      .filter((n) => evaluateCommand(shadowDenied, n.command).decision === 'allow')
+      .map((n) => `${n.label}: ${n.command}`)
+    expect(allowed).toEqual([])
   })
 })

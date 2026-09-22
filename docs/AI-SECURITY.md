@@ -59,17 +59,21 @@ Regardless of which access group a session holds:
     definition (`name()`, `name(){`, `function name`), `coproc [NAME]`, and leading `VAR=value`
     assignments. `[[ … ]]`, `(( … ))` and `for`/`select` headers run nothing themselves;
   - so are the wrappers `env`, `command`, `exec`, `builtin`, `nohup`, `time`, `nice`, `ionice`,
-    `stdbuf`, `timeout`, `xargs`, `busybox`, `setsid`, `unbuffer`, `watch`, `flock`, `chrt` and
-    `taskset`, with their options and, for `timeout`, `flock`, `chrt` and `taskset`, their one
-    operand;
+    `stdbuf`, `timeout`, `xargs`, `busybox`, `setsid`, `unbuffer`, `watch`, `flock`, `chrt`,
+    `taskset`, `chroot`, `setarch`, `strace`, `ltrace`, `nsenter`, `unshare`, `firejail`, `bwrap`,
+    `setpriv`, `prlimit` and `.`, with their options and, for `timeout`, `flock`, `chrt`, `taskset`,
+    `chroot` and `setarch`, their one operand; `capsh … -- ARGS` is read as `bash ARGS`;
   - words are read with POSIX quoting: outside quotes a backslash escapes the next character
     (`\sudo`, `su\do`); inside double quotes only `\"`, `\\`, `\$`, a backtick and a newline
     are escapes; inside single quotes nothing is, so `sh -c "sh -c \"sh -c 'sudo reboot'\""` and
     shlex.quote's `'\''` come apart exactly where the shell takes them apart. A word that starts
     like a Windows path (`C:\`, `\\server`) keeps its backslashes, which are separators there. The
     command word is then reduced to its basename;
-  - the insides of `$(...)`, `<(...)`, `>(...)`, backticks, `sh -c` (and the other shells),
-    `su -c`, `env -S`, `flock -c`, `script -c`, `watch`, `eval`, and on Windows `cmd /c`, `/r` or
+  - the insides of `$(...)`, `<(...)`, `>(...)`, backticks, a shell's command string (`-c`
+    anywhere in an option cluster: `bash -lc`, `sh -ec`, `zsh -ic`, `bash -lic`, with the string
+    as the first operand after the options), `script -c` (`-qc` included), `su -c`, `sg`, `env -S`,
+    `flock -c`, `find -exec`/`-execdir`/`-ok`, a `parallel` template (or, with none, each of its
+    arguments), `watch`, `eval`, and on Windows `cmd /c`, `/r` or
     `/k` (glued on or not, `cmd.exe/c` included), PowerShell's `-Command` (or `-c`, or the implicit
     command a bare `powershell Start-Process …` takes), `iex`/`Invoke-Expression`, the scriptblock
     `Invoke-Command`/`icm`/`Start-Job` runs, and `Start-Process`'s `-ArgumentList`, are walked the
@@ -96,7 +100,10 @@ Regardless of which access group a session holds:
   command cannot be named, so a group that would allow it is asked instead, and `execute_command`
   never lets a remembered approval cover it. The same holds for anything nested deeper than the
   three levels the walk reads (`eval eval eval eval sudo reboot`); for a line whose quotes or
-  substitutions do not close or that ends on a bare backslash; for a base64 PowerShell
+  substitutions do not close or that ends on a bare backslash; for a POSIX shell given no command
+  string whose input comes from somewhere else — a pipe (`echo "sudo reboot" | sh`, `curl … |
+  bash`), a here-string or here-doc, an input redirection, `-s`, or a process substitution or
+  `/dev/stdin` in place of its script — because what it runs is not on the line; for a base64 PowerShell
   `-EncodedCommand` (`-enc`, `-e`); for `Invoke-Command` given its scriptblock any way but
   literally; and for any cmd string containing `^`, `%` or `!`, or run with `/v:on`. cmd is not
   parsed — its `%` and `!` expansions happen after any `&` inside the string, where nothing here can
@@ -107,9 +114,11 @@ Regardless of which access group a session holds:
 
   The quoting is tested with a generated matrix rather than hand-picked cases
   (`tests/escalationQuotingMatrix.test.ts`): every nest of `eval '…'`, `sh -c '…'`, `sh -c "…"`,
-  `env -S "…"`, `$(…)`, a `$(case … esac)` with parens of its own, `cat <(…)` and a backquote, up to
-  four deep around `sudo reboot`, each quoted the way a careful tool quotes, must be denied to depth
-  three and never allowed at four; the same 4,680 nests around `ls /tmp` must never be denied.
+  `env -S "…"`, `$(…)`, a `$(case … esac)` with parens of its own, `cat <(…)`, a backquote,
+  `bash -lc`, `sh -ec`, `zsh -ic`, `bash -lic` and `script -qc` — 30,940 nests up to four deep,
+  each quoted the way a careful tool quotes. Around `sudo reboot` under a group that denies sudo,
+  and around `cat /etc/shadow` under a path rule that denies it, every nest to depth three must be
+  denied and none at depth four allowed; the same nests around `ls /tmp` must never be denied.
 
   The path rules read the same walk (`extractPathAccesses`), so `bash -c 'cat /etc/shadow'`,
   `timeout 5 cat /etc/shadow` and `echo $(cat /root/.ssh/id_rsa)` meet the `/etc/shadow` and
@@ -119,10 +128,12 @@ Regardless of which access group a session holds:
   claim otherwise. The command word is guarded by the rule above; its ARGUMENTS are not, so these
   still pass as whatever their literal command word says: a variable in an argument
   (`f=/etc/shadow; cat $f`), a relative path after `cd`, a glob in a path, an interpreter's own
-  code (`perl -e`, `python3 -c`, `node -e`), a script file — including one read with `.` or
-  `source`, which is judged by the script's own name and not by what it contains — a PowerShell
-  `ForEach-Object`/`Where-Object` block, `ssh localhost '…'`, and programs that are not recognised
-  file commands. It closes the forms a model
+  code (`perl -e`, `python3 -c`, `node -e`, `expect -c`), a script file — `bash script.sh`, or one
+  read with `.` or `source`, each judged by the script's own name and not by what it contains — a
+  PowerShell `ForEach-Object`/`Where-Object` block, a command handed to a long-lived tool that runs
+  it later or elsewhere (`tmux`, `screen`, `at`, `crontab`, `docker exec`, `kubectl exec`, `ssh
+  localhost '…'`), wrappers not named above, and programs that are not recognised file
+  commands. It closes the forms a model
   actually emits, and it only ever tightens — the older start-of-string tests are still applied as
   well. OpsMaxx's own `sudo -n` privileged reads do not pass through it; only the MCP bridge's
   `execute_command` does.
