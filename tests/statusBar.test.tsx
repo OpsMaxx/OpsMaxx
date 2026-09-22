@@ -160,6 +160,18 @@ describe('StatusBar', () => {
     expect(useApp.getState().activity).toBe('monitor')
     expect(useNav.getState().monitorTab).toBe('alerts')
   })
+
+  // While something is alerting, the alert chip is the way in, and the bell
+  // steps aside so there are not two buttons to one page.
+  it('hides the bell while the alert chip is showing', () => {
+    stubBridge({})
+    raise('cpu', 97)
+
+    render(<StatusBar />)
+
+    expect(chip()).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Alert inbox' })).toBeNull()
+  })
 })
 
 // Same signal, second surface. `settings.backupDirty` also raises a dot on the

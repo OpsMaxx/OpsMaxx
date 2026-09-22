@@ -1041,7 +1041,9 @@ export function Settings(): React.JSX.Element {
               </div>
               <div className="setting-row wrap">
                 <div className="s-info">
-                  <div className="s-title">Colour scheme</div>
+                  <div className="s-title" id="terminal-scheme-title">
+                    Colour scheme
+                  </div>
                   <div className="s-desc">
                     Applies to open terminals immediately. A scheme without its own background keeps
                     the app&apos;s, so it follows light and dark.
@@ -1082,6 +1084,7 @@ export function Settings(): React.JSX.Element {
                   value={settings.terminalScheme}
                   custom={settings.terminalCustomSchemes}
                   onChange={(id) => setSettings({ terminalScheme: id })}
+                  labelledBy="terminal-scheme-title"
                 />
               </div>
               <SettingSwitch

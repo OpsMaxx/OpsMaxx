@@ -22,7 +22,8 @@ beforeEach(() => {
   useNav.getState().setSettingsSection('terminal')
 })
 
-const group = (): HTMLElement => screen.getByRole('radiogroup', { name: 'Terminal colour scheme' })
+// Named by the visible row title, not by a label only a screen reader hears.
+const group = (): HTMLElement => screen.getByRole('radiogroup', { name: 'Colour scheme' })
 const radios = (): HTMLElement[] => within(group()).getAllByRole('radio')
 const checked = (): HTMLElement[] => radios().filter((r) => r.getAttribute('aria-checked') === 'true')
 /** The card's name, without the "$ ls" drawn in its preview. */
@@ -64,6 +65,23 @@ describe('terminal colour scheme swatches', () => {
     expect(useApp.getState().settings.terminalScheme).toBe('campbell')
 
     fireEvent.keyDown(checked()[0], { key: 'Home' })
+    expect(useApp.getState().settings.terminalScheme).toBe('')
+
+    fireEvent.keyDown(checked()[0], { key: 'End' })
+    expect(useApp.getState().settings.terminalScheme).toBe('campbell')
+    // ...and right of the last is the first.
+    fireEvent.keyDown(checked()[0], { key: 'ArrowRight' })
+    expect(useApp.getState().settings.terminalScheme).toBe('')
+  })
+
+  // An imported scheme that has since gone: the first card shows as checked,
+  // so Space on it has to make that true rather than do nothing.
+  it('writes the shown selection when the stored one no longer exists', () => {
+    useApp.getState().setSettings({ terminalScheme: 'deleted-import' })
+    render(<Settings />)
+
+    expect(checked().map(label)).toEqual(['App palette'])
+    fireEvent.keyDown(checked()[0], { key: ' ' })
     expect(useApp.getState().settings.terminalScheme).toBe('')
   })
 

@@ -12,8 +12,9 @@ const SAMPLE = ['red', 'green', 'yellow', 'blue', 'magenta', 'cyan'] as const
  *
  * A name says nothing about what a scheme looks like until it has been applied
  * and a terminal looked at, which made choosing one a round trip per candidate.
- * Each card is drawn from the same `themeFromCss` the terminal itself uses, so
- * the preview cannot disagree with the result.
+ * Each card is drawn from the colours the terminal itself will use: a scheme's
+ * own, or `themeFromCss` for the app palette, so the preview cannot disagree
+ * with the result.
  *
  * A radio group, keyboard-first: one tab stop, arrow keys move AND select (as
  * native radios do), Home/End jump. The chosen card carries a check and a
@@ -23,11 +24,14 @@ const SAMPLE = ['red', 'green', 'yellow', 'blue', 'magenta', 'cyan'] as const
 export function SchemePicker({
   value,
   custom,
-  onChange
+  onChange,
+  labelledBy
 }: {
   value: string
   custom: TerminalScheme[]
   onChange: (id: string) => void
+  /** The id of the visible title the group is named by. */
+  labelledBy: string
 }): React.JSX.Element {
   // `''` is the app's own palette. Imported schemes follow the built-ins, as
   // they did under their own heading in the select this replaced.
@@ -37,8 +41,10 @@ export function SchemePicker({
     ...custom.map((s) => ({ id: s.id, name: `${s.name} (imported)`, scheme: s }))
   ]
   const refs = useRef<(HTMLDivElement | null)[]>([])
+  const appAnsi = themeFromCss('')
   // A stored id that no longer resolves (an imported scheme since removed)
-  // still leaves one card reachable by Tab.
+  // still leaves one card reachable by Tab, and Space or Enter on it writes
+  // that card's id, so what is shown checked becomes what is stored.
   const current = Math.max(
     0,
     options.findIndex((o) => o.id === value)
@@ -54,10 +60,11 @@ export function SchemePicker({
     <div
       className="scheme-picker"
       role="radiogroup"
-      aria-label="Terminal colour scheme"
+      aria-labelledby={labelledBy}
       onKeyDown={(e) => {
         const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key]
         if (step !== undefined) move(current + step)
+        else if (e.key === ' ' || e.key === 'Enter') onChange(options[current].id)
         else if (e.key === 'Home') move(0)
         else if (e.key === 'End') move(options.length - 1)
         else return
@@ -65,7 +72,9 @@ export function SchemePicker({
       }}
     >
       {options.map((o, i) => {
-        const t = themeFromCss(o.id, custom)
+        // A scheme replaces all sixteen ANSI colours, so its own are exactly
+        // what the terminal will use; only the app palette needs resolving.
+        const ansi = o.scheme?.ansi ?? appAnsi
         const selected = i === current
         return (
           <div
@@ -93,7 +102,7 @@ export function SchemePicker({
               <span className="mono">$ ls</span>
               <span className="scheme-chips">
                 {SAMPLE.map((k) => (
-                  <span key={k} style={{ background: t[k] }} />
+                  <span key={k} style={{ background: ansi[k] }} />
                 ))}
               </span>
             </div>
