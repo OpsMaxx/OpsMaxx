@@ -738,3 +738,61 @@ describe('substitutions, cmd and PowerShell, read whole', () => {
     expect(evaluateCommand(noSudo, cmd).decision).toBe('allow')
   })
 })
+
+// Security pass #5: backquote bodies, and cmd / PowerShell failing toward ask.
+describe('backquotes, and Windows failing toward ask', () => {
+  const noSudo = group({ terminal: 'allow', sudo: 'deny' })
+  const shadowDenied = group({ terminal: 'allow', sudo: 'allow', readFiles: 'allow', writeFiles: 'allow' }, [
+    { id: 'shadow', pattern: '/etc/shadow', read: 'deny', write: 'deny' }
+  ])
+
+  it.each([
+    'echo `echo \\`sudo reboot\\``',
+    'echo `echo \\$(eval "sudo reboot")`',
+    'echo "`echo \\"$(sudo reboot)\\"`"',
+    'cmd /r runas /user:admin notepad',
+    'cmd /C/Crunas /user:admin notepad',
+    'cmd.exe/c runas /user:admin notepad',
+    'C:\\Windows\\System32\\cmd.exe/c runas /user:admin notepad',
+    'powershell -Command "Invoke-Command { runas /user:admin notepad }"',
+    'icm -ScriptBlock { runas /user:admin notepad }',
+    'Start-Job { Start-Process notepad -Verb RunAs }',
+    '& { runas /user:admin notepad }',
+    '. runas /user:admin notepad'
+  ])('denies %s under sudo=deny', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('deny')
+  })
+
+  it("applies the /etc/shadow rule inside a backquoted sh -c with the '\\\\'' idiom", () => {
+    const cmd = "echo `sh -c 'eval '\\\\''cat /etc/shadow'\\\\'''`"
+    expect(evaluateCommand(shadowDenied, cmd).decision).toBe('deny')
+  })
+
+  // Not parsed; asked about.
+  it.each([
+    'cmd /c set X=runas& %X% /user:a cmd',
+    'cmd /c "set X=runas& %X% /user:a cmd"',
+    'cmd /v:on /c "set X=runas&& !X! /user:a cmd"',
+    'cmd /c echo !X!',
+    '%COMSPEC% /c whoami',
+    'cmd /c echo 50%',
+    'Invoke-Command -ScriptBlock $block'
+  ])('asks before running %s', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('ask')
+  })
+
+  it.each([
+    'echo `date`',
+    'echo `echo hello`',
+    'cmd /c dir',
+    'cmd /c echo hello',
+    'cmd.exe /c ver',
+    'powershell -Command "Invoke-Command { Get-Date }"',
+    'Get-Process | ForEach-Object { $_.Name }',
+    '. ./env.sh',
+    '. venv/bin/activate',
+    'source ~/.bashrc'
+  ])('still allows %s', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('allow')
+  })
+})

@@ -69,43 +69,47 @@ Regardless of which access group a session holds:
     like a Windows path (`C:\`, `\\server`) keeps its backslashes, which are separators there. The
     command word is then reduced to its basename;
   - the insides of `$(...)`, `<(...)`, `>(...)`, backticks, `sh -c` (and the other shells),
-    `su -c`, `env -S`, `flock -c`, `script -c`, `watch`, `eval`, and on Windows `cmd /c` or `/k`
-    (glued on or not), PowerShell's `-Command` (or `-c`, or the implicit command a bare
-    `powershell Start-Process …` takes), `iex`/`Invoke-Expression` and `Start-Process`'s
-    `-ArgumentList`, are walked the same way, to a depth of three. Substitutions are found by a
-    scanner that respects quotes and escapes and matches parens -- including a `case` arm's
-    `pattern)` -- so `$(case a in a) sudo reboot;; esac)` is read whole. Nothing is expanded inside
-    single quotes, as in the shell. cmd's `^` escape is removed before the command is read.
+    `su -c`, `env -S`, `flock -c`, `script -c`, `watch`, `eval`, and on Windows `cmd /c`, `/r` or
+    `/k` (glued on or not, `cmd.exe/c` included), PowerShell's `-Command` (or `-c`, or the implicit
+    command a bare `powershell Start-Process …` takes), `iex`/`Invoke-Expression`, the scriptblock
+    `Invoke-Command`/`icm`/`Start-Job` runs, and `Start-Process`'s `-ArgumentList`, are walked the
+    same way, to a depth of three. Substitutions are found by a scanner that respects quotes and
+    escapes and matches parens -- including a `case` arm's `pattern)` -- so `$(case a in a) sudo
+    reboot;; esac)` is read whole. Nothing is expanded inside single quotes, as in the shell. A
+    backquoted body has its `` \` ``, `\$` and `\\` escapes taken off before it is walked (and `\"`
+    inside double quotes), which is how backquotes nest. cmd's `^` escape is removed before the
+    command is read; a PowerShell `. cmd` runs `cmd`, so the word after `.` is judged.
 
   If the command word is `sudo`, `doas`, `su`, `pkexec`, `run0`, `runuser`, `systemd-run`,
   `sudoedit` or `machinectl shell` — or, on Windows, `runas` (with its `/user:` and `/savecred`
   options), `gsudo`, `sudo.exe` or `Start-Process … -Verb RunAs` — the command is governed by the
-  **Sudo** capability, and what it
-  runs is judged too — `sudo env bash` and `gsudo cmd` are elevated shells. So `/usr/bin/sudo reboot`, `env sudo
-  reboot`, `if true; then sudo reboot; fi`, `\sudo reboot`, `eval sudo reboot` and `su -c "rm -rf
-  /x"` are all sudo, and a group that denies sudo denies them. A name in argument position is not a
-  run: `grep sudo /var/log/auth.log`, `echo sudo`, `man sudo`, `command -v sudo` and `systemctl
-  status sudo` are ordinary commands.
+  **Sudo** capability, and what it runs is judged too — `sudo env bash` and `gsudo cmd` are
+  elevated shells. So `/usr/bin/sudo reboot`, `env sudo reboot`, `if true; then sudo reboot; fi`,
+  `\sudo reboot`, `eval sudo reboot` and `su -c "rm -rf /x"` are all sudo, and a group that denies
+  sudo denies them. A name in argument position is not a run: `grep sudo /var/log/auth.log`, `echo
+  sudo`, `man sudo`, `command -v sudo` and `systemctl status sudo` are ordinary commands.
 
   **The rule that ends the list: fail toward ask.** If, after everything above has been stepped
   over, a segment's command word still holds shell syntax the walk does not read — an expansion
-  (`$(which sudo)`, `${SUDO:-sudo}`, a backtick), a brace list (`{sudo,reboot}`), a glob
-  (`/usr/bin/ec?o`), a paren, a redirection, or a leading `=` — the command cannot be named, so a
-  group that would allow it is asked instead, and `execute_command` never lets a remembered
-  approval cover it. The same holds for anything nested deeper than the three levels the walk
-  reads (`eval eval eval eval sudo reboot`), for a line whose quotes or substitutions do not close
-  or that ends on a bare backslash, for a base64 PowerShell `-EncodedCommand` (`-enc`, `-e`), and
-  for a cmd string that uses `^` or a `%VAR%` expansion, neither of which is read the way cmd
-  reads it.
+  (`$(which sudo)`, `${SUDO:-sudo}`, a backtick, cmd's `%VAR%` or `!VAR!`), a brace list
+  (`{sudo,reboot}`), a glob (`/usr/bin/ec?o`), a paren, a redirection, or a leading `=` — the
+  command cannot be named, so a group that would allow it is asked instead, and `execute_command`
+  never lets a remembered approval cover it. The same holds for anything nested deeper than the
+  three levels the walk reads (`eval eval eval eval sudo reboot`); for a line whose quotes or
+  substitutions do not close or that ends on a bare backslash; for a base64 PowerShell
+  `-EncodedCommand` (`-enc`, `-e`); for `Invoke-Command` given its scriptblock any way but
+  literally; and for any cmd string containing `^`, `%` or `!`, or run with `/v:on`. cmd is not
+  parsed — its `%` and `!` expansions happen after any `&` inside the string, where nothing here can
+  follow them — so it fails toward ask instead. That includes the harmless: `cmd /c echo 50%` asks.
+  Such a command is asked about, never allowed and never refused on a guess. Only a leading home
+  directory is let through: `$HOME/bin/tool`, `${HOME}/bin/tool` and `~/bin/tool` are judged by
+  their literal basename, so `~/bin/sudo` is still sudo.
 
   The quoting is tested with a generated matrix rather than hand-picked cases
   (`tests/escalationQuotingMatrix.test.ts`): every nest of `eval '…'`, `sh -c '…'`, `sh -c "…"`,
-  `env -S "…"`, `$(…)`, a `$(case … esac)` with parens of its own and `cat <(…)`, up to four deep
-  around `sudo reboot`, each quoted the way a careful tool quotes, must be denied to depth three
-  and never allowed at four; the same 2,800 nests around `ls /tmp` must never be denied. Such a command is asked about, never allowed and never
-  refused on a guess. Only a leading home directory is let through: `$HOME/bin/tool`,
-  `${HOME}/bin/tool` and `~/bin/tool` are judged by their literal basename, so `~/bin/sudo` is still
-  sudo.
+  `env -S "…"`, `$(…)`, a `$(case … esac)` with parens of its own, `cat <(…)` and a backquote, up to
+  four deep around `sudo reboot`, each quoted the way a careful tool quotes, must be denied to depth
+  three and never allowed at four; the same 4,680 nests around `ls /tmp` must never be denied.
 
   The path rules read the same walk (`extractPathAccesses`), so `bash -c 'cat /etc/shadow'`,
   `timeout 5 cat /etc/shadow` and `echo $(cat /root/.ssh/id_rsa)` meet the `/etc/shadow` and
@@ -115,8 +119,10 @@ Regardless of which access group a session holds:
   claim otherwise. The command word is guarded by the rule above; its ARGUMENTS are not, so these
   still pass as whatever their literal command word says: a variable in an argument
   (`f=/etc/shadow; cat $f`), a relative path after `cd`, a glob in a path, an interpreter's own
-  code (`perl -e`, `python3 -c`, `node -e`), a script file, `ssh localhost '…'`, and programs that
-  are not recognised file commands. It closes the forms a model
+  code (`perl -e`, `python3 -c`, `node -e`), a script file — including one read with `.` or
+  `source`, which is judged by the script's own name and not by what it contains — a PowerShell
+  `ForEach-Object`/`Where-Object` block, `ssh localhost '…'`, and programs that are not recognised
+  file commands. It closes the forms a model
   actually emits, and it only ever tightens — the older start-of-string tests are still applied as
   well. OpsMaxx's own `sudo -n` privileged reads do not pass through it; only the MCP bridge's
   `execute_command` does.

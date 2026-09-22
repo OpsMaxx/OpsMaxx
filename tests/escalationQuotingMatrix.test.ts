@@ -11,7 +11,7 @@ import type { AccessGroup } from '../src/shared/mcp'
 // a group that denies sudo. Hand-written cases had passed; the generated set
 // had not. So the generated set is the test.
 //
-// Seven wrappers, so 7 + 49 + 343 + 2401 nests. Every wrapper quotes its
+// Eight wrappers, so 8 + 64 + 512 + 4096 nests. Every wrapper quotes its
 // argument the way a careful tool would -- POSIX
 // single quotes with the '\'' idiom shlex.quote emits, or double quotes with
 // \ " $ and ` escaped -- and every combination up to depth four is checked.
@@ -28,7 +28,10 @@ const WRAPPERS: Record<string, (s: string) => string> = {
   // A substitution with parens of its own: the innermost-only extractor this
   // replaced never walked it at all.
   '$(case … a) …;; esac)': (s) => `echo $(case a in a) ${s};; esac)`,
-  'cat <(…)': (s) => `cat <(${s})`
+  'cat <(…)': (s) => `cat <(${s})`,
+  // Backquotes nest only by escaping: \, ` and $ inside them are written \\,
+  // \` and \$, and the shell takes the escape off before running the body.
+  '`…`': (s) => `echo \`${s.replace(/[\\`$]/g, '\\$&')}\``
 }
 
 /** Every nest of 1..maxDepth wrappers around `inner`, with its depth and a readable label. */

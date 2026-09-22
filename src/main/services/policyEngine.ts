@@ -157,6 +157,12 @@ const ESCALATORS = new Set(['sudo', 'doas', 'su', 'pkexec', 'run0', 'runuser', '
 const WINDOWS_ESCALATORS = new Set(['runas', 'gsudo', 'sudo'])
 const WINDOWS_SHELLS = new Set(['cmd', 'powershell', 'pwsh'])
 
+/** PowerShell commands that run a scriptblock argument. */
+// ForEach-Object and Where-Object are left out on purpose: their blocks are
+// almost always expressions (`{ $_.Name }`), which would all ask. A command run
+// inside one is best-effort, like any command inside an interpreter's code.
+const SCRIPTBLOCK_RUNNERS = new Set(['invoke-command', 'icm', 'start-job', 'sajb', 'start-threadjob'])
+
 /** powershell.exe options that take a value, so the value is not read as the command. */
 const POWERSHELL_VALUE_OPTIONS =
   /^-(?:ex(?:ecutionpolicy)?|ep|w(?:indowstyle)?|v(?:ersion)?|wd|workingdirectory|o(?:utputformat)?|of|i(?:nputformat)?|if|config(?:urationname)?|psconsolefile|settingsfile|custompipename)$/i
@@ -181,7 +187,7 @@ const FUNCTION_NAME = /^[A-Za-z_][\w.:-]*\(\)\{?$/
  * everything it understands has been stepped over. `[` alone is the test
  * builtin and is literal.
  */
-const UNREADABLE_WORD = /[(){}$`*?[\]<>]|^=/
+const UNREADABLE_WORD = /[(){}$`*?[\]<>%!]|^=/
 
 /**
  * Wrappers that run the rest of the line as a command, and the short options
@@ -200,6 +206,9 @@ const RUNNERS: Record<string, Set<string>> = {
   timeout: new Set(['-s', '-k']),
   xargs: new Set(['-a', '-d', '-E', '-I', '-L', '-n', '-P', '-s']),
   busybox: new Set(),
+  // `. runas …` in PowerShell runs runas; `. ./env.sh` in a POSIX shell reads
+  // a script, which is judged by its own name (and is best-effort either way).
+  '.': new Set(),
   setsid: new Set(),
   unbuffer: new Set(),
   watch: new Set(['-n', '-q']),
@@ -353,7 +362,7 @@ function runsBareShell(line: string, depth = 0): boolean {
 function isBareShell(argv: string[], depth = 0): boolean {
   // cmd / PowerShell: bare unless told to run something and exit.
   if (WINDOWS_SHELLS.has(commandName(argv[0]).toLowerCase())) {
-    return !argv.slice(1).some((a) => /^(?:\/c.*|-c|-command|-file|-encodedcommand)$/i.test(a))
+    return !argv.slice(1).some((a) => /^(?:\/[cr].*|-c|-command|-file|-encodedcommand)$/i.test(a))
   }
   if (!SHELLS.has(word(argv[0]))) return false
   const c = argv.indexOf('-c')
@@ -476,7 +485,10 @@ function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, '
     if (!stripped?.length) return done([])
     // `$HOME/bin/tool`, `~/bin/tool`: only the home directory is computed, so
     // the literal basename is judged -- `~/bin/sudo` is still sudo.
-    const argv = [stripped[0].replace(/^(?:\$HOME|\$\{HOME\}|~)(?=\/)/, ''), ...stripped.slice(1)]
+    let argv = [stripped[0].replace(/^(?:\$HOME|\$\{HOME\}|~)(?=\/)/, ''), ...stripped.slice(1)]
+    // `cmd.exe/c runas …`: cmd takes a switch glued straight onto its name.
+    const glued = /^(.*\bcmd(?:\.exe)?)(\/[a-z].*)$/i.exec(argv[0])
+    if (glued) argv = [glued[1], glued[2], ...argv.slice(1)]
     const windowsName = commandName(argv[0]).toLowerCase()
     const name = !ESCALATORS.has(word(argv[0])) && WINDOWS_ESCALATORS.has(windowsName) ? windowsName : word(argv[0])
 
@@ -517,15 +529,27 @@ function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, '
     // A base64 `-EncodedCommand` cannot be read here, so it is asked about.
     const windows = commandName(argv[0]).toLowerCase()
     if (windows === 'cmd') {
-      // `/c` and `/k` may have the command glued on (`/cRUNAS …`). cmd's own
-      // escape is `^` (`ru^nas`) and it expands `%VAR%` itself: the caret is
-      // stripped so the command is still seen, and either one asks, because
-      // neither is read the way cmd reads it.
-      const i = argv.findIndex((a) => /^\/[ck]/i.test(a))
-      if (i >= 0) {
-        const line = [argv[i].slice(2), ...argv.slice(i + 1)].join(' ').trim()
-        if (/\^|%[^%\s]+%/.test(line)) unreadable = true
-        if (line) nested.push(line.replace(/\^/g, ''))
+      // cmd is not parsed, it is failed toward ask. Its switches may be glued
+      // together or onto the command (`/C/Crunas`, `/cRUNAS`), `/r` is `/c`,
+      // `^` is its escape (`ru^nas`), and it expands `%VAR%` and, with
+      // `/v:on`, `!VAR!` itself -- after any `&` inside the string, too, so a
+      // `%` anywhere cannot be read the way cmd reads it. The carets are
+      // stripped so the command is still seen and judged; any `^`, `%`, `!`
+      // or `/v:on` also asks.
+      const first = argv.findIndex((a, i) => i > 0 && a.startsWith('/'))
+      if (first >= 0) {
+        let line = argv.slice(first).join(' ')
+        let runs = false
+        for (let m = /^\s*\/([a-z])(:\w+)?/i.exec(line); m; m = /^\s*\/([a-z])(:\w+)?/i.exec(line)) {
+          if (/^v$/i.test(m[1]) && /^:on$/i.test(m[2] ?? '')) unreadable = true
+          line = line.slice(m[0].length)
+          if (/^[ckr]$/i.test(m[1])) runs = true
+        }
+        line = line.trim()
+        if (runs && line) {
+          if (/[\^%!]/.test(line)) unreadable = true
+          nested.push(line.replace(/\^/g, ''))
+        }
       }
     }
     if (windows === 'powershell' || windows === 'pwsh') {
@@ -550,6 +574,16 @@ function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, '
     }
     // PowerShell's eval.
     if ((windows === 'iex' || windows === 'invoke-expression') && argv.length > 1) nested.push(argv.slice(1).join(' '))
+    // A PowerShell scriptblock runs its body: `Invoke-Command { runas … }`,
+    // `icm -ScriptBlock { … }`, `Start-Job { … }`. The body is walked; a block
+    // handed over some other way (a variable) cannot be read, so it asks.
+    if (SCRIPTBLOCK_RUNNERS.has(windows)) {
+      const rest = argv.slice(1).join(' ')
+      const open = rest.indexOf('{')
+      const close = rest.lastIndexOf('}')
+      if (open >= 0 && close > open) nested.push(rest.slice(open + 1, close))
+      else unreadable = true
+    }
     // `Start-Process <file> -Verb RunAs` is PowerShell's sudo.
     if (['start-process', 'saps', 'start'].includes(windows)) {
       const runas = argv.some((a, i) => /^-verb:runas$/i.test(a) || (/^-verb$/i.test(a) && /^runas$/i.test(argv[i + 1] ?? '')))
@@ -660,7 +694,12 @@ function substitutions(command: string): { inner: string[]; ok: boolean } {
     if (c === '`') {
       const end = closingQuote(command, i)
       if (end < 0) return { inner, ok: false }
-      inner.push(command.slice(i + 1, end))
+      // Inside backquotes `\``, `\$` and `\\` stand for the character itself
+      // -- it is the only way backquotes nest -- and inside double quotes so
+      // does `\"`. Walked raw, `echo \`echo \\\`sudo reboot\\\`\``
+      // never reached its sudo.
+      const escapes = quote === '"' ? /\\([`$\\"])/g : /\\([`$\\])/g
+      inner.push(command.slice(i + 1, end).replace(escapes, '$1'))
       i = end
       continue
     }
