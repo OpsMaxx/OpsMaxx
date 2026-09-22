@@ -25,11 +25,17 @@ export function useTerminalPasteRequest(
   useEffect(() => {
     if (!paneId || !live) return
     useApp.setState((s) => ({ pasteTargets: { ...s.pasteTargets, [paneId]: true as const } }))
+    // Withdrawing also clears a request addressed to this pane, so one that
+    // the pane never got to -- it died, went dormant, or was closed or swapped
+    // out first -- cannot wait in the store for the next pane with this id.
     return () =>
       useApp.setState((s) => {
         const rest = { ...s.pasteTargets }
         delete rest[paneId]
-        return { pasteTargets: rest }
+        return {
+          pasteTargets: rest,
+          ...(s.pasteRequest?.paneId === paneId ? { pasteRequest: null } : {})
+        }
       })
   }, [paneId, live])
 

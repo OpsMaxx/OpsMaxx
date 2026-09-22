@@ -19,9 +19,16 @@ import { atomicWriteFileSync } from './atomicWrite'
 // uses. Listed in ALL_DATA_FILES so "delete everything" takes it, and in
 // NOT_SYNCED beside runbooks and rules, which are the same kind of thing.
 //
-// NOT in a backup bundle (buildBundle in backup.ts carries the workspace blob,
-// secrets, vault, locks and known hosts only), so templates stay on this
-// machine and do not survive a move to another one. docs/features.md says so.
+// NOT in a backup bundle, deliberately, and for the reason the runbook notes
+// and automation rules beside it are not either. buildBundle in backup.ts
+// carries the workspace blob, secrets, vault, locks and known hosts -- what it
+// takes to reach the estate -- and none of the operator-authored command files.
+// Those three are one class (NOT_SYNCED marks them UNDECIDED together), and
+// carrying one of them would be deciding for the class in a side door: a restore
+// path for commands needs its own answer to "may a bundle someone hands you
+// plant text you later paste into a shell", which is not this file's to give.
+// So templates stay on this machine and do not survive a move to another one,
+// and docs/features.md says so.
 //
 // Named job*.ts on purpose: tests/jobsNotExposed.test.ts scans this directory
 // for that prefix, so the bridge cannot import this file without a test going

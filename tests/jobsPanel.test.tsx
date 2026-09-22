@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
 import { JobsPanel } from '../src/renderer/src/components/monitor/JobsPanel'
@@ -506,26 +506,34 @@ describe('saved templates in the composer', () => {
     expect((screen.getByLabelText('Steps') as HTMLTextAreaElement).value).toBe('systemctl reload nginx')
     expect(screen.getByRole('button', { name: 'web-2' }).getAttribute('aria-pressed')).toBe('false')
 
-    // Editing the steps and pressing Save replaces the chosen template in
-    // place: same id, same name, one row.
+    // Saving again under the same name asks to replace, and replacing
+    // updates that template in place: same id, one row, new steps.
     await userEvent.type(screen.getByLabelText('Steps'), ' && echo ok')
-    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save as template' }))
+    await screen.findByText('Replace ‘Reload web’?')
+    expect(templates.save).toHaveBeenCalledTimes(2)
+    await userEvent.click(screen.getByRole('button', { name: 'Replace' }))
     await waitFor(() =>
       expect([...saved.values()][0]).toMatchObject({ name: 'Reload web', steps: 'systemctl reload nginx && echo ok' })
     )
     expect(saved.size).toBe(1)
 
-    // Save as template under a name already taken is refused, not duplicated.
-    await userEvent.clear(screen.getByLabelText('Job title'))
-    await userEvent.type(screen.getByLabelText('Job title'), 'Reload web')
+    // Declining keeps both as they were; a different title saves a second one.
     await userEvent.click(screen.getByRole('button', { name: 'Save as template' }))
-    await screen.findByText(/already saved/)
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
     expect(saved.size).toBe(1)
+    await userEvent.clear(screen.getByLabelText('Job title'))
+    await userEvent.type(screen.getByLabelText('Job title'), 'Reload web, verbose')
+    await userEvent.click(screen.getByRole('button', { name: 'Save as template' }))
+    await waitFor(() => expect(saved.size).toBe(2))
+    await userEvent.selectOptions(screen.getByLabelText('Saved template'), 'Reload web')
 
     await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
     expect(templates.remove).not.toHaveBeenCalled()
     await userEvent.click(screen.getByRole('button', { name: 'Confirm delete' }))
-    await waitFor(() => expect(saved.size).toBe(0))
+    await waitFor(() => expect(saved.size).toBe(1))
+    expect([...saved.values()][0]).toMatchObject({ name: 'Reload web, verbose' })
     expect(runOf(stub)).not.toHaveBeenCalled()
   })
 })

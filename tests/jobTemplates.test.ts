@@ -193,7 +193,10 @@ describe('the templates file', () => {
 // tests/jobsNotExposed.test.ts is the guard that cannot be renamed around.
 
 const PORT = 18771
-const TEMPLATE = /template|snippet|preset|saved.?command|job.?step/i
+// Names are held to the broad word; descriptions to the specific concepts, so an
+// unrelated "template" (trivy's `--format template`, say) cannot turn this red.
+const TEMPLATE_NAME = /template|snippet|preset|saved.?command/i
+const TEMPLATE_CONCEPT = /job.?templates?|saved.?(job.?)?templates?|opsmaxx-job-templates|jobTemplates|saved.?commands?/i
 
 describe('the MCP bridge exposes no job template', () => {
   let token: string
@@ -232,14 +235,21 @@ describe('the MCP bridge exposes no job template', () => {
       expect(tools.length, 'the bridge served no tools — this proves nothing').toBeGreaterThan(0)
       const hits = tools.filter(
         (t) =>
-          TEMPLATE.test(t.name) ||
-          TEMPLATE.test(t.description ?? '') ||
-          TEMPLATE.test(JSON.stringify(t.inputSchema ?? {}))
+          TEMPLATE_NAME.test(t.name) ||
+          TEMPLATE_CONCEPT.test(t.description ?? '') ||
+          TEMPLATE_CONCEPT.test(JSON.stringify(t.inputSchema ?? {}))
       )
       expect(hits.map((t) => t.name)).toEqual([])
     } finally {
       await client.close()
     }
+  })
+
+  it('recognises the concepts it is looking for, and not an unrelated template', () => {
+    for (const d of ['List saved templates', 'Run a job template', 'reads opsmaxx-job-templates.json']) {
+      expect(TEMPLATE_CONCEPT.test(d), d).toBe(true)
+    }
+    expect(TEMPLATE_CONCEPT.test('trivy is read with --format template')).toBe(false)
   })
 
   it('does not name the file, the channel or the service in its source', () => {

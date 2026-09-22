@@ -38,6 +38,7 @@ import { useFleet } from '../../store/fleet'
 import type { JobDetail, JobHostResult, JobProgress, JobRecord } from '../../../../shared/jobs'
 import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
+import { Modal } from '../common/Modal'
 import { VaultLockedHosts } from '../common/PanelError'
 import { isVaultLocked } from '../../lib/withVaultUnlock'
 
@@ -160,6 +161,7 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
   const [templateName, setTemplateName] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [templateNote, setTemplateNote] = useState<string | null>(null)
+  const [replacing, setReplacing] = useState<JobTemplate | null>(null)
   const chosenTemplate = templates.find((t) => t.id === templateId)
   const loadTemplates = useCallback(async (): Promise<void> => {
     try {
@@ -773,33 +775,18 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
                   className="btn sm"
                   onClick={() => {
                     // A second template under a name already in the list is
-                    // two rows nobody can tell apart in the picker. Replacing
-                    // one is Save, on the template chosen.
-                    if (templates.some((t) => t.name === draft.title.trim())) {
-                      setTemplateNote(
-                        'A template with this name is already saved. Choose it and press Save to replace its steps, or change the title.'
-                      )
-                      return
-                    }
-                    void storeTemplate(templateFromDraft(draft, crypto.randomUUID(), draft.title))
+                    // two rows nobody can tell apart in the picker, so a taken
+                    // name asks to replace that one instead. Declining leaves
+                    // both as they were: pick a different title.
+                    const taken = templates.find((t) => t.name === draft.title.trim())
+                    if (taken) setReplacing(taken)
+                    else void storeTemplate(templateFromDraft(draft, crypto.randomUUID(), draft.title))
                   }}
                 >
                   Save as template
                 </button>
                 {chosenTemplate && (
                   <>
-                    {/* The steps, rollback and reboot flag as they stand in the
-                        form now, under the chosen template's id and name. */}
-                    <button
-                      className="btn sm"
-                      onClick={() =>
-                        void storeTemplate(
-                          templateFromDraft(draft, chosenTemplate.id, chosenTemplate.name)
-                        )
-                      }
-                    >
-                      Save
-                    </button>
                     <input
                       className="input"
                       aria-label="Template name"
@@ -830,6 +817,25 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
                 </div>
               )}
               {templateNote && <div className="s-note state-unknown">{templateNote}</div>}
+              {replacing && (
+                <Modal
+                  title={`Replace ‘${replacing.name}’?`}
+                  subtitle="Its steps, rollback and reboot flag become the ones in this form."
+                  onClose={() => setReplacing(null)}
+                  confirm={{
+                    label: 'Replace',
+                    onClick: () => {
+                      // Same id: updated in place, so it stays one row.
+                      void storeTemplate(templateFromDraft(draft, replacing.id, replacing.name))
+                      setReplacing(null)
+                    }
+                  }}
+                >
+                  <p className="r-sub">
+                    To keep both, cancel and give this one a different title.
+                  </p>
+                </Modal>
+              )}
               <input
                 className="input"
                 aria-label="Job title"

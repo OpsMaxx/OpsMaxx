@@ -186,6 +186,23 @@ describe('run a saved template in this terminal', () => {
     view.unmount()
     expect(useApp.getState().pasteTargets).not.toHaveProperty('pane-1')
   })
+
+  it('clears a request its pane was swapped out before taking', () => {
+    const open = vi.fn()
+    function Pane(): null {
+      useTerminalPasteRequest('pane-1', true, open)
+      return null
+    }
+    const view = render(<Pane />)
+    // The request and the pane's departure land in the same commit, so the
+    // pane never consumes it -- and nothing else will.
+    act(() => {
+      useApp.getState().requestTerminalPaste('pane-1', 'reboot')
+      view.unmount()
+    })
+    expect(open).not.toHaveBeenCalled()
+    expect(useApp.getState().pasteRequest).toBeNull()
+  })
 })
 
 describe('the confirmation says what pasting will do', () => {
