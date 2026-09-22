@@ -33,9 +33,14 @@ runs at a time. Anything you start meanwhile waits in a queue shown under the
 progress bar, and **Clear queue** drops it. **Cancel** stops the running transfer:
 
 - A cancelled **download** removes the partial file it was writing.
-- A cancelled **upload** removes the partial file it was writing, unless a file
-  with that name was already on the server. That one has been partly replaced,
-  so it is left in place and OpsMaxx tells you which file it is.
+- An **upload** is written to a temporary name beside the target and renamed
+  over it only when complete, so a cancelled or failed upload never leaves the
+  file that was already there half-replaced. Cancelling removes the temporary
+  copy; if it cannot (the connection has gone), OpsMaxx names the file left
+  behind. Copies in this machine's Files view work the same way.
+- **Cancel** returns at once even on a connection that has stopped answering,
+  and does not interrupt anything else using the same server, such as a save
+  from your editor.
 
 A download never overwrites anything on this machine. If the folder already has
 a file with that name, the new one is saved as `name (1).ext`. The server picks

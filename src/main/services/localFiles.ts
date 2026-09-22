@@ -13,6 +13,7 @@ import {
   unlink,
   writeFile
 } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import type { WebContents } from 'electron'
 import type { SftpDownloadSummary, SftpEntry, SftpResult, SftpUploadSummary } from '../../shared/ssh'
 import { reserveLocalFile, safeLocalName } from './transferName'
@@ -294,9 +295,11 @@ export async function localFilesUpload(
    */
   const refused = refuse(destDir, ...localPaths)
   if (refused) return refused
+  const copy = startCopy(key)
+  if (!copy) return BUSY
+  const { signal } = copy
   const uploaded: string[] = []
   const failed: { name: string; error: string }[] = []
-  const signal = startCopy(key)
 
   for (let i = 0; i < localPaths.length && !signal.aborted; i++) {
     const from = localPaths[i]
@@ -324,7 +327,7 @@ export async function localFilesUpload(
       if (!signal.aborted) failed.push({ name, error: msg(err) })
     }
   }
-  copying.delete(key)
+  endCopy(key, copy)
 
   return {
     ok: failed.length === 0 && !signal.aborted,
@@ -348,9 +351,11 @@ export async function localFilesDownload(
 ): Promise<SftpResult<SftpDownloadSummary>> {
   const refused = refuse(destDir, ...sources)
   if (refused) return refused
+  const copy = startCopy(key)
+  if (!copy) return BUSY
+  const { signal } = copy
   const saved: string[] = []
   const failed: { name: string; error: string }[] = []
-  const signal = startCopy(key)
 
   for (let i = 0; i < sources.length && !signal.aborted; i++) {
     const from = sources[i]
@@ -366,18 +371,21 @@ export async function localFilesDownload(
         wc.send('sftp:progress', { key, name: shown, transferred, total, index, count: sources.length, direction: 'down' })
       }
     }
+    let to: string | undefined
     try {
       const st = await stat(from)
       if (st.isDirectory()) throw new Error('folders cannot be downloaded yet')
-      const to = await reserveLocalFile(destDir, name)
+      to = await reserveLocalFile(destDir, name)
       send(0, st.size)
       await copyWithProgress(from, to, st.size, send, signal)
       saved.push(basename(to))
     } catch (err) {
+      // The empty placeholder reserveLocalFile created is ours to remove.
+      if (to) await rm(to, { force: true })
       if (!signal.aborted) failed.push({ name: shown, error: msg(err) })
     }
   }
-  copying.delete(key)
+  endCopy(key, copy)
 
   return {
     ok: failed.length === 0 && !signal.aborted,
@@ -386,13 +394,21 @@ export async function localFilesDownload(
   }
 }
 
-// The copy running on each key, so the Files view's Cancel can stop it.
+// The copy running on each key, so the Files view's Cancel can stop it. One
+// per key: a second one would take the slot Cancel looks in.
 const copying = new Map<string, AbortController>()
 
-function startCopy(key: string): AbortSignal {
+const BUSY: SftpResult<never> = { ok: false, error: 'A transfer is already running here.' }
+
+function startCopy(key: string): AbortController | null {
+  if (copying.has(key)) return null
   const c = new AbortController()
   copying.set(key, c)
-  return c.signal
+  return c
+}
+
+function endCopy(key: string, c: AbortController): void {
+  if (copying.get(key) === c) copying.delete(key)
 }
 
 export function localFilesCancel(key: string): void {
@@ -407,18 +423,27 @@ function copyWithProgress(
   signal: AbortSignal
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    // Cancelled while the caller was still stat-ing: open nothing at all.
+    if (signal.aborted) return reject(new Error('cancelled'))
     let transferred = 0
     let reported = 0
-    // An abort destroys the read side with an AbortError, which lands in
-    // `fail` below and removes the partial destination like any other failure.
+    /**
+     * Written beside the destination and renamed over it only when complete.
+     *
+     * Writing to `to` directly truncated it the moment the stream opened, so a
+     * cancel or a failure part-way removed — or left half of — a file the user
+     * had only agreed to replace with a finished copy. The temporary name is
+     * created with `wx`, so it is certainly this call's, and it is the only
+     * thing `fail` ever removes.
+     */
+    const tmp = join(dirname(to), `.${basename(to)}.opsmaxx-partial-${randomUUID()}`)
+    // An abort destroys the read side with an AbortError, which lands in `fail`.
     const read = createReadStream(from, { signal })
-    const write = createWriteStream(to)
+    const write = createWriteStream(tmp, { flags: 'wx' })
     const fail = (err: Error): void => {
       read.destroy()
       write.destroy()
-      // A half-written destination is worse than none: the view would show a
-      // file that looks copied.
-      void rm(to, { force: true }).finally(() => reject(err))
+      void rm(tmp, { force: true }).finally(() => reject(err))
     }
     read.on('data', (c: Buffer | string) => {
       transferred += typeof c === 'string' ? Buffer.byteLength(c) : c.length
@@ -431,7 +456,9 @@ function copyWithProgress(
     })
     read.on('error', fail)
     write.on('error', fail)
-    write.on('finish', () => resolve())
+    write.on('finish', () => {
+      rename(tmp, to).then(resolve, fail)
+    })
     read.pipe(write)
   })
 }

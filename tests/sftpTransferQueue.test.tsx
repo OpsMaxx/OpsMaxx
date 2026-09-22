@@ -119,4 +119,18 @@ describe('overwrite', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(upload).not.toHaveBeenCalled()
   })
+
+  it('asks about every name when the directory could not be listed', async () => {
+    const { upload } = setup([file('app.conf')])
+    render(<SftpView tabId="t" />)
+    await screen.findByText('app.conf')
+    // The listing taken when the upload starts fails.
+    const bridge = (window as unknown as { opsmaxx: { sftp: { list: ReturnType<typeof vi.fn> } } }).opsmaxx
+    bridge.sftp.list.mockResolvedValueOnce({ ok: false, error: 'Permission denied' })
+
+    await drop('new.conf')
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toMatch(/Could not check \/srv for existing files/)
+    expect(upload).not.toHaveBeenCalled()
+  })
 })

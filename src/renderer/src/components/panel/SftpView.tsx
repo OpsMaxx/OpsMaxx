@@ -146,6 +146,8 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   const [overwrite, setOverwrite] = useState<{
     names: string[]
     dir: string
+    // The listing failed, so these MAY be there rather than are.
+    unchecked: boolean
     answer: (a: OverwriteAnswer) => void
   } | null>(null)
   const [dropping, setDropping] = useState(false)
@@ -523,11 +525,12 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   const refresh = useRef<() => void>(() => {})
   refresh.current = () => void list(path)
 
-  const askOverwrite = (names: string[], dir: string): Promise<OverwriteAnswer> =>
+  const askOverwrite = (names: string[], dir: string, unchecked: boolean): Promise<OverwriteAnswer> =>
     new Promise((resolve) =>
       setOverwrite({
         names,
         dir,
+        unchecked,
         answer: (a) => {
           setOverwrite(null)
           resolve(a)
@@ -543,12 +546,16 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   const runUpload = async ({ paths, dir }: { paths: string[]; dir: string }): Promise<void> => {
     // Checked when the upload starts rather than when it was queued: the
     // transfer ahead of it may have just put a file of the same name there.
+    // A listing that failed says nothing about what is there, and reading it
+    // as "nothing clashes" is how a file gets replaced without a word. Every
+    // name is treated as a possible clash instead, and the dialog says why.
     const listing = await window.opsmaxx?.sftp.list(key, dir)
-    const there = new Set((listing?.data ?? (dir === path ? entries : [])).map((x) => x.name))
+    const unchecked = !listing?.ok
+    const there = new Set(unchecked ? paths.map(baseName) : (listing.data ?? []).map((x) => x.name))
     let chosen = paths
     const clashes = paths.map(baseName).filter((n) => there.has(n))
     if (clashes.length) {
-      const answer = await askOverwrite(clashes, dir)
+      const answer = await askOverwrite(clashes, dir, unchecked)
       if (answer === 'cancel') return
       if (answer === 'skip') chosen = paths.filter((p) => !there.has(baseName(p)))
       if (!chosen.length) return
@@ -572,12 +579,11 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       )
     }
     if (res?.data?.cancelled) {
-      // Only a file this upload created is removed (see sftpUpload). One
-      // that was already there was replaced part-way and is left, so the user
-      // has to be told which.
+      // The target is untouched until an upload completes (see sftpUpload);
+      // what a cancel can leave is the temporary copy, if removing it failed.
       toast(
         res.data.leftover
-          ? `Upload cancelled. ${res.data.leftover} on the server is incomplete and was left in place.`
+          ? `Upload cancelled, but the partial copy ${res.data.leftover} could not be removed from the server.`
           : 'Upload cancelled.',
         res.data.leftover ? 'error' : 'info'
       )
@@ -1052,9 +1058,9 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
           confirm={{ label: 'Overwrite', destructive: true, onClick: () => overwrite.answer('overwrite') }}
         >
           <p style={{ marginTop: 0 }}>
-            {overwrite.names.length === 1 ? 'A file with this name is' : 'Files with these names are'} already in{' '}
-            {overwrite.dir}. Overwriting replaces {overwrite.names.length === 1 ? 'it' : 'them'}; Skip uploads
-            only the rest.
+            {overwrite.unchecked
+              ? `Could not check ${overwrite.dir} for existing files, so any of these may replace one already there. Skip uploads none of them.`
+              : `${overwrite.names.length === 1 ? 'A file with this name is' : 'Files with these names are'} already in ${overwrite.dir}. Overwriting replaces ${overwrite.names.length === 1 ? 'it' : 'them'}; Skip uploads only the rest.`}
           </p>
           <ul className="mono" style={{ fontSize: 12, maxHeight: 180, overflow: 'auto' }}>
             {overwrite.names.map((n) => (
