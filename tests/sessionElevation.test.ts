@@ -119,7 +119,8 @@ describe('what one approval covers', () => {
     ['execute_command', /perCall: elevated/],
     ['query_database', /perCall: !reads/],
     ['set_tunnel', /perCall: running/],
-    ['set_vpn', /perCall: running/]
+    ['set_vpn', /perCall: running/],
+    ['container_action', /perCall: action !== 'start'/]
   ])('makes the dangerous half of %s per-call', (tool, flag) => {
     const at = SRC.indexOf(`toolName: '${tool}'`)
     expect(at).toBeGreaterThanOrEqual(0)

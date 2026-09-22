@@ -444,10 +444,13 @@ call asks, they show **Approve once** alone, and they never read a remembered gr
 
 - `add_server`, `remove_server`, `create_tunnel`, `delete_tunnel`, and the `ciTrigger` tools
   `trigger_run`, `cancel_run` and `rerun_run`;
-- `execute_command` for any command the classifier grades above ordinary: anything containing
-  `sudo`, and every elevated or destructive command. A `sudo` command is also gated and audited
-  as the `sudo` permission rather than `terminal`, so an "Execute terminal commands" grant never
-  reaches it;
+- `execute_command` for any command the classifier grades above ordinary, and for any command
+  containing `sudo`, `su`, `doas`, `pkexec` or `runuser` as a word anywhere in it. Those are also
+  gated and audited as the `sudo` permission rather than `terminal`, so an "Execute terminal
+  commands" grant never reaches them. The match is deliberately loose: a false positive only
+  means being asked again. What the policy allows, and the refusal of escalation shells, are
+  unchanged;
+- `container_action` when stopping or restarting a container;
 - `query_database` for anything not classified as a read;
 - `set_tunnel` and `set_vpn` when starting.
 

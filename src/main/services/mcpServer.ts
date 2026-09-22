@@ -800,6 +800,26 @@ function countSessionActions(sessionId: string): number | null {
 }
 
 /**
+ * Every way a command can switch to another user, root included, as a word
+ * anywhere in the command -- so `/usr/bin/sudo`, `env sudo`, `command sudo`,
+ * `su -c "..."` and `pkexec` all count, wherever they sit.
+ *
+ * It decides two things in execute_command and nothing else: the capability a
+ * command is labelled, prompted and audited under, and whether a remembered
+ * approval may cover it (a match makes it per-call). What the policy ALLOWS is
+ * still effectiveCommand's decision, untouched, and the escalation-SHELL
+ * refusals (sudo -i, su, sudo bash) still live in classifyCommand.
+ *
+ * Deliberately loose. assessCommand grades `su -c "rm -rf /x"` and `pkexec rm`
+ * ordinary -- it anchors on `sudo` at a command start and never looks inside a
+ * `su -c` string -- so a stricter pattern here would let those ride an "allow
+ * terminal commands for this session" given about `df`. A false positive
+ * (`ls su`, `grep sudo /var/log/auth.log`) only means the operator is asked
+ * again, which is the cheap direction to be wrong in.
+ */
+const RUNS_AS_ANOTHER_USER = /\b(?:sudo|su|doas|pkexec|runuser)\b/
+
+/**
  * Approvals already granted in this session, remembered.
  *
  * Keyed session + server + capability + the policy rule that asked. Answering
@@ -867,9 +887,11 @@ async function gate(
     // Only reached for an `ask`. A `deny` returns above and is never softened
     // by anything here -- an elevation lifts a question, never a refusal.
     // ciTrigger is excluded from the cache in BOTH directions: it is never read
-    // from and never written to. For container_action, carrying one approval
-    // across a session costs one more service on a host the user administers.
-    // For a build it is an unbounded remote-execution loop -- one approval buys
+    // from and never written to. container_action used to be the example of
+    // the acceptable case -- "one more service on a host the user administers"
+    // -- and it is not any more: a stop or restart is per-call too, because a
+    // yes to restarting one container covered stopping every other on the
+    // host. For a build it is an unbounded remote-execution loop -- one approval buys
     // every pipeline on that CI server for the rest of the session, on
     // infrastructure OpsMaxx cannot inspect and cannot stop, driven by an agent
     // whose next move is shaped by log text a stranger wrote into a pull
@@ -1993,7 +2015,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         // and the gate's memory then paid that question out of the terminal
         // answer. The policy decision itself is unchanged: effectiveCommand
         // above still decides, from the command, exactly as it did.
-        capability: /sudo\b/.test(command) ? 'sudo' : 'terminal'
+        capability: RUNS_AS_ANOTHER_USER.test(command) ? 'sudo' : 'terminal'
       }
       // ONE CLASSIFIER, NOT TWO. This path graded `high` on the word `sudo`
       // and on nothing else, so `docker volume rm` -- which the operator's own
@@ -2005,7 +2027,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       // rule, but swapping one rule for another would quietly lower some
       // command somewhere and this is not the change to discover that in.
       const assessed = assessCommand(command)
-      const runsAsRoot = /sudo\b/.test(command)
+      const runsAsRoot = RUNS_AS_ANOTHER_USER.test(command)
       const elevated = check.decision === 'deny' || assessed.risk !== 'ordinary' || runsAsRoot
       // The reason names the rule that fired, in that order, because that is
       // the order the OR above evaluates -- and assessCommand already returns
@@ -2014,7 +2036,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const because = !elevated
         ? 'it runs a shell command of the agent\u2019s own composition on the host'
         : runsAsRoot
-          ? 'the command runs as root, through sudo'
+          ? 'the command runs as another user, most likely root, through sudo, su, doas, pkexec or runuser'
           : assessed.reasons[0]
             ? `OpsMaxx\u2019s command classifier graded it ${assessed.risk}: ${assessed.reasons[0]}`
             : `OpsMaxx\u2019s command classifier graded it ${assessed.risk}`
@@ -4202,7 +4224,13 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
             action === 'start'
               ? `it starts the container "${container}", which begins serving traffic again`
               : `it ${action}s the container "${container}" and drops every connection it is serving`,
-          intent
+          intent,
+          // Stopping and restarting drop every connection the container is
+          // serving, so each one is asked for. A session grant used to carry:
+          // a yes to restarting one container covered stopping every other on
+          // that host, since all three actions are `containerControl` under
+          // the same rule. Only a start may be remembered for the session.
+          perCall: action !== 'start'
         },
         extra
       )

@@ -766,3 +766,64 @@ describe('what a terminal session grant covers', () => {
     }
   })
 })
+
+// assessCommand grades `su -c "..."` and `pkexec rm` ordinary, and only `sudo`
+// was looked for here, so every other way to become root rode a terminal
+// session grant given about `df`.
+describe('every way to become another user asks on its own', () => {
+  const ESC_ASK = 'grp-escalation-ask'
+  const useAskGroup = (): void => {
+    const full = getGroup('grp-full')!
+    saveGroup({
+      ...full,
+      id: ESC_ASK,
+      name: 'Escalation Ask',
+      builtIn: false,
+      capabilities: { ...full.capabilities, terminal: 'ask', sudo: 'ask', containerControl: 'ask' }
+    })
+    setAssignment({ level: 'workspace', workspaceId: 'ws' }, ESC_ASK)
+  }
+
+  it.each(['su -c "id"', 'pkexec id', 'doas id', '/usr/bin/sudo id', 'runuser -u postgres id'])(
+    'asks again for %s after a session grant on df',
+    async (command) => {
+      useAskGroup()
+      const a = autoRespond('approved', 'session')
+      const c = await clientFor(ESC_ASK)
+      try {
+        await call(c, 'execute_command', { serverName: 'Scanner01', command: 'df' })
+        await call(c, 'execute_command', { serverName: 'Scanner01', command })
+        expect(a.count()).toBe(2)
+        expect(a.requests[1].capability).toBe('sudo')
+        expect(a.requests[1].sessionGrant).toBeUndefined()
+      } finally {
+        a.stop()
+        await c.close()
+      }
+    }
+  )
+
+  // A restart and a stop each drop every connection the container serves. One
+  // yes used to cover every later action on every container on the host.
+  it('does not let a container grant cover a stop or a restart', async () => {
+    useAskGroup()
+    const a = autoRespond('approved', 'session')
+    const c = await clientFor(ESC_ASK)
+    try {
+      await call(c, 'container_action', { serverName: 'Scanner01', container: 'web', action: 'start' })
+      await call(c, 'container_action', { serverName: 'Scanner01', container: 'api', action: 'start' })
+      // A start may be remembered...
+      expect(a.count()).toBe(1)
+      expect(a.requests[0].sessionGrant).toBe('capability')
+      // ...a stop or restart is asked for every time, and offered only once.
+      await call(c, 'container_action', { serverName: 'Scanner01', container: 'db', action: 'stop' })
+      await call(c, 'container_action', { serverName: 'Scanner01', container: 'db', action: 'restart' })
+      await call(c, 'container_action', { serverName: 'Scanner01', container: 'db', action: 'stop' })
+      expect(a.count()).toBe(4)
+      expect(a.requests.slice(1).map((r) => r.sessionGrant)).toEqual([undefined, undefined, undefined])
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+})
