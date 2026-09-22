@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useApp } from '../store/app'
 import { COMMANDS_BY_ID, comboFrom, isMac, resolveBindings, type Scope } from '../lib/shortcuts'
 import { openMonitor } from '../store/nav'
+import { approvalShowing } from './useClickOutside'
 import type { Workspace } from '../types'
 
 type Store = ReturnType<typeof useApp.getState>
@@ -175,9 +176,16 @@ export function runShortcut(
   if (!combo) return false
   const s = useApp.getState()
   const bindings = resolveBindings(s.settings.shortcuts)
+  // While an approval is up the keyboard is its, and focus is on its buttons
+  // rather than a terminal, so every app shortcut would otherwise fire under
+  // it: Ctrl+K opened the palette beneath the scrim and took focus into it,
+  // Close Tab closed a tab nobody could see. Zoom is the exception, because it
+  // is for reading the dialog.
+  const blind = approvalShowing()
 
   for (const [id, keys] of bindings) {
     if (keys !== combo) continue
+    if (blind && !id.startsWith('zoom-')) continue
     const cmd = COMMANDS_BY_ID.get(id)
     if (!cmd || !scopeApplies(cmd.scope, where, usedAppModifier(e))) continue
     if (RUNNERS[id]?.(s, term)) return true
@@ -186,7 +194,7 @@ export function runShortcut(
   // Ctrl/Cmd+1…9 jumps to the Nth visible workspace. Checked after the user's
   // bindings so rebinding a digit still wins, and matched on e.code so it
   // lands on the right digit under non-US keyboard layouts.
-  return switchWorkspaceByDigit(e, s)
+  return !blind && switchWorkspaceByDigit(e, s)
 }
 
 function switchWorkspaceByDigit(e: KeyboardEvent, s: Store): boolean {

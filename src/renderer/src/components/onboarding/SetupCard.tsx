@@ -4,6 +4,7 @@ import { useApp } from '../../store/app'
 import { useOnboarding } from '../../store/onboarding'
 import { useUpdater } from '../../store/updater'
 import { clsx } from '../../lib/format'
+import { approvalShowing } from '../../hooks/useClickOutside'
 import {
   DEFAULT_PERSONA_ID,
   PERSONAS,
@@ -130,6 +131,9 @@ export function SetupCard(): React.JSX.Element | null {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent): void => {
+      // The approval layer is above this card. Enter on an approval's button
+      // would otherwise also advance a step here, and Escape commit the card.
+      if (approvalShowing()) return
       // Escape commits what has been answered so far, plus the defaults for
       // anything not yet reached, rather than cancelling: there is nothing to
       // cancel back to, and leaving a new install with most of the modules off is

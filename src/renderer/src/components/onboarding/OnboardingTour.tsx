@@ -4,6 +4,7 @@ import { useOnboarding } from '../../store/onboarding'
 import { useApp } from '../../store/app'
 import { clsx } from '../../lib/format'
 import { TOUR_STEPS, walkthroughFor } from './tourSteps'
+import { approvalShowing } from '../../hooks/useClickOutside'
 
 // A first-run walkthrough, mounted once at the app root.
 //
@@ -55,6 +56,8 @@ export function OnboardingTour(): React.JSX.Element | null {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent): void => {
+      // The approval layer is above the tour, so its keys are not the tour's.
+      if (approvalShowing()) return
       if (e.key === 'Escape') finish()
       if (e.key === 'ArrowRight') {
         if (step < steps.length - 1) next()
