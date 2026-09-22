@@ -71,7 +71,7 @@ read/write setting:
    the connection. The whole exchange is in the **Audit Log**, alongside anything else OpsMaxx
    allowed, asked about, denied or failed:
 
-![Audit Log showing agent, workspace/server, action and result](images/ai-audit-log.png)
+![Audit Log showing agent, session, workspace/server, action and outcome](images/ai-audit-log.png)
 
 ### Connecting an agent
 

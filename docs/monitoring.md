@@ -12,7 +12,7 @@ Watching a fleet, and running the same change across it safely.
 Press <kbd>Ctrl</kbd>+<kbd>M</kbd> for a live wall of every server in the workspace —
 CPU, memory, disk and network for each, with the estate totalled across the top.
 
-![OpsMaxx Fleet Monitor showing grouped servers with live CPU, memory, disk and network metrics](images/fleet-monitor.png)
+![OpsMaxx Fleet Monitor showing servers grouped into Databases, Application and Edge & bastions, each card with live CPU, memory and network](images/fleet-monitor.png)
 
 Cards are **grouped**, so databases, application servers and bastions stay visually
 separate rather than becoming one long list. Drag a card between groups, or create a

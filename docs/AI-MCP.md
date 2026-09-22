@@ -342,7 +342,7 @@ has to be created by hand under **AI & MCP → AI Agents**.
 
 ## Access Groups
 
-![Access group capabilities, file path rules, and workspace/server assignment](images/ai-access-groups.png)
+![Access Groups: the five built-in groups, each described from its own settings, and every capability set to ALLOW, ASK or DENY](images/ai-access-groups.png)
 
 An access group (`AccessGroup`, `shared/mcp.ts`) is a policy across **21 capabilities**
 (`AI_CAPABILITIES`): view server, execute terminal commands, read files, write files, SFTP
@@ -429,7 +429,7 @@ its own request by construction, not by convention.
 
 ## Audit Log
 
-![Audit Log showing agent, workspace/server, action and result](images/ai-audit-log.png)
+![Audit Log showing agent, session, workspace/server, action and outcome](images/ai-audit-log.png)
 
 Every gated action — allowed outright, approved, denied, or failed — is appended to
 `opsmaxx-ai-audit.jsonl` (`auditLog.ts`) as one JSON object per line, **append-only** (a crash

@@ -80,7 +80,7 @@ A red **Backup out of date** indicator appears whenever your connections change,
 
 | Section | What it covers |
 |---|---|
-| **General** | Workspace-level preferences |
+| **General** | The version and update checks — channel, how often, automatic download, install on quit — and the walkthrough |
 | **Appearance** | Theme (dark / light / system) and density |
 | **Terminal** | Font family, **font size** (also <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>-</kbd>), **colour scheme** (see [Terminal](terminal.md)), cursor blink, scroll behaviour |
 | **Connections** | Defaults for new connections |
