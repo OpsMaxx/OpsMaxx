@@ -193,7 +193,7 @@ export function WritePreview({
 }): React.JSX.Element {
   return (
     <div>
-      <div style={{ color: 'var(--text-faint)', fontSize: 11, marginBottom: 4 }}>
+      <div style={{ color: 'var(--text-faint)', fontSize: 'var(--fs-xs)', marginBottom: 4 }}>
         What {agentName} wants written — the agent’s content, not OpsMaxx’s. Secrets are shown redacted, and
         invisible characters as ⟨U+…⟩.
       </div>
@@ -209,7 +209,7 @@ export function WritePreview({
           border: '1px dashed var(--border-strong)',
           borderRadius: 'var(--r-md)',
           color: 'var(--text-muted)',
-          fontSize: 11,
+          fontSize: 'var(--fs-xs)',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-all'
         }}
@@ -217,7 +217,7 @@ export function WritePreview({
         {preview.text}
       </pre>
       {preview.omittedChars > 0 && (
-        <div style={{ color: 'var(--warn)', fontSize: 11, marginTop: 4 }}>
+        <div style={{ color: 'var(--warn)', fontSize: 'var(--fs-xs)', marginTop: 4 }}>
           Only the start is shown: {preview.omittedChars.toLocaleString()} more characters
           {preview.omittedLines > 0 ? ` (${preview.omittedLines.toLocaleString()} more lines)` : ''} are not.
           Approving writes all of it.
@@ -479,6 +479,22 @@ export function ApprovalDialog({
           </div>
         </div>
 
+        {/* Its own full-width line, above the buttons and outside their row.
+            Squeezed into the row it had to share the width with three
+            buttons, and at a desktop width it wrapped to one word a line. */}
+        {grantLabel && request.contentPreview && (
+          <div
+            data-testid="later-writes-note"
+            style={{
+              padding: '0 var(--sp-5)',
+              color: 'var(--warn)',
+              fontSize: 'var(--fs-xs)',
+              textAlign: 'right'
+            }}
+          >
+            {LATER_WRITES_UNSEEN}
+          </div>
+        )}
         <div className="modal-footer">
           {/* The kill switch, brought to where the alarm is. Its own copy lives
               three screens away in AI & MCP > Security; this calls the same IPC
@@ -510,11 +526,6 @@ export function ApprovalDialog({
               session, and its label is the grant's full extent. Absent for a
               per-call tool, where main would not honour it. Neither carries
               any weight: Deny keeps the fill and the focus. */}
-          {grantLabel && request.contentPreview && (
-            <span style={{ fontSize: 11, color: 'var(--warn)', maxWidth: 180, textAlign: 'right' }}>
-              {LATER_WRITES_UNSEEN}
-            </span>
-          )}
           {grantLabel && (
             <button className="btn" onClick={() => void respondToApproval(request.id, 'approved', 'session')}>
               {grantLabel}

@@ -463,10 +463,12 @@ call asks, they show **Approve once** alone, and they never read a remembered gr
   `pkexec`, `run0`, `runuser`, `systemd-run`, `sudoedit`, `machinectl shell`, `runas`, `gsudo` or
   `sudo.exe` as the command word of any segment — see docs/AI-SECURITY.md), any command whose
   command word the walk cannot read literally (`$(which sudo) reboot`, `{sudo,reboot}`, or nested
-  past three levels), and, as a further raise, any command with the word
-  `sudo` anywhere in it. Those are also gated and audited as the `sudo` permission rather than
-  `terminal`, so an "Execute terminal commands" grant never reaches them. A false positive only
-  means being asked again;
+  past three levels), and, as a further raise, any command with the word `sudo` anywhere in it.
+  Only the commands the policy recognises as running as another user are also gated and audited
+  as the `sudo` permission rather than `terminal`, so an "Execute terminal commands" grant never
+  reaches them; one that merely mentions sudo (`grep sudo /var/log/auth.log`) is labelled
+  `terminal`, which is what it is, and is only kept per-call. A false positive there only means
+  being asked again;
 - `container_action` when stopping or restarting a container;
 - `query_database` for anything not classified as a read;
 - `set_tunnel` and `set_vpn` when starting.
