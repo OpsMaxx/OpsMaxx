@@ -26,6 +26,9 @@ describe('what one approval covers', () => {
   it('reads gate() and only gate()', () => {
     expect(SRC.indexOf("return { ok: true, approval: 'not-required' }")).toBeGreaterThan(SRC.indexOf('async function gate('))
     expect(GATE).not.toMatch(/function auditSuccess/)
+    // gate() is a couple of hundred lines; the whole file is thousands.
+    expect(GATE.length).toBeGreaterThan(0)
+    expect(GATE.split('\n').length).toBeLessThan(250)
   })
 
   it('is scoped to the session, the server AND the capability', () => {

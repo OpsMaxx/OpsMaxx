@@ -442,7 +442,8 @@ its own request by construction, not by convention.
 The second button is only offered where `gate()` would honour it. These are per-call — every
 call asks, they show **Approve once** alone, and they never read a remembered grant:
 
-- `add_server`, `remove_server`, `create_tunnel`, `delete_tunnel`, and every `ciTrigger` tool;
+- `add_server`, `remove_server`, `create_tunnel`, `delete_tunnel`, and the `ciTrigger` tools
+  `trigger_run`, `cancel_run` and `rerun_run`;
 - `execute_command` for any command the classifier grades above ordinary: anything containing
   `sudo`, and every elevated or destructive command. A `sudo` command is also gated and audited
   as the `sudo` permission rather than `terminal`, so an "Execute terminal commands" grant never
