@@ -188,11 +188,12 @@ describe('the templates file', () => {
 //
 // tests/jobsNotExposed.test.ts already keeps jobTemplates.ts and jobCompose.ts
 // out of the bridge's import closure. This is the runtime half: no tool whose
-// name or input schema speaks of a template, and no literal path
-// to the file or the IPC channel in the bridge's source.
+// name, description or input schema speaks of a template, and no literal path
+// to the file or the IPC channel in the bridge's source. The import scan in
+// tests/jobsNotExposed.test.ts is the guard that cannot be renamed around.
 
 const PORT = 18771
-const TEMPLATE = /template|snippet|saved.?command/i
+const TEMPLATE = /template|snippet|preset|saved.?command|job.?step/i
 
 describe('the MCP bridge exposes no job template', () => {
   let token: string
@@ -230,7 +231,10 @@ describe('the MCP bridge exposes no job template', () => {
       const { tools } = await client.listTools()
       expect(tools.length, 'the bridge served no tools — this proves nothing').toBeGreaterThan(0)
       const hits = tools.filter(
-        (t) => TEMPLATE.test(t.name) || TEMPLATE.test(JSON.stringify(t.inputSchema ?? {}))
+        (t) =>
+          TEMPLATE.test(t.name) ||
+          TEMPLATE.test(t.description ?? '') ||
+          TEMPLATE.test(JSON.stringify(t.inputSchema ?? {}))
       )
       expect(hits.map((t) => t.name)).toEqual([])
     } finally {

@@ -552,6 +552,12 @@ interface AppState {
    */
   pasteRequest: { paneId: string; text: string; nonce: number } | null
   /**
+   * Panes whose session is live and can take a paste request. Registered by
+   * the pane itself (see useTerminalPasteRequest), so a demo pane or a dead or
+   * dormant session is never offered as a target.
+   */
+  pasteTargets: Record<string, true>
+  /**
    * A request to focus the endpoint editor for one API.
    *
    * A nonce for the reason findRequest carries one: pressing the toolbar's
@@ -690,7 +696,8 @@ interface AppState {
   /** Open Find in one terminal pane. The toolbar's magnifier, and anything
    *  else that wants to reach the search bar without a keyboard. */
   requestTerminalFind: (paneId: string) => void
-  /** Ask one terminal pane to show `text` in the paste confirmation. Writes nothing. */
+  /** Ask one terminal pane to show `text` in the paste confirmation. Writes
+   *  nothing, and does nothing for a pane that is not a live paste target. */
   requestTerminalPaste: (paneId: string, text: string) => void
   /** Put the cursor in the endpoint editor for one API. The toolbar's plus. */
   requestApiEndpointFocus: (collectionId: string) => void
@@ -1258,6 +1265,7 @@ export const useApp = create<AppState>((set, get) => ({
   activeTabId: null,
   findRequest: null,
   pasteRequest: null,
+  pasteTargets: {},
   apiEndpointFocus: null,
   closedTabs: [],
   tabSession: {},
@@ -1728,9 +1736,11 @@ export const useApp = create<AppState>((set, get) => ({
     })),
 
   requestTerminalPaste: (paneId, text) =>
-    set((s) => ({
-      pasteRequest: { paneId, text, nonce: (s.pasteRequest?.nonce ?? 0) + 1 }
-    })),
+    set((s) =>
+      s.pasteTargets[paneId]
+        ? { pasteRequest: { paneId, text, nonce: (s.pasteRequest?.nonce ?? 0) + 1 } }
+        : {}
+    ),
 
   selectTabByNumber: (n) =>
     set((s) => {

@@ -174,9 +174,10 @@ export function CommandPalette(): React.JSX.Element {
     const current = store.activeTab()
     // "Run in this terminal". It REQUESTS the paste confirmation in the active
     // pane and writes nothing: the pane shows every line, and only its button
-    // sends them. One row per template, and only while a terminal is on screen.
-    if (current?.view === 'terminal') {
-      const paneId = store.panes[current.id]?.activePaneId ?? current.id
+    // sends them. One row per template, and only while the active pane is a
+    // live session -- not a demo shell, not a dead or dormant one.
+    const paneId = current ? (store.panes[current.id]?.activePaneId ?? current.id) : null
+    if (current?.view === 'terminal' && paneId && store.pasteTargets[paneId]) {
       templates.forEach((t) => {
         const text = templateTerminalText(t)
         list.push({

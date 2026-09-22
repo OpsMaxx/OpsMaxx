@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { stubBridge } from './setup/renderer'
@@ -63,10 +63,18 @@ beforeEach(() => {
     panes: {},
     activeWorkspaceId: 'ws-default',
     pasteRequest: null,
+    pasteTargets: {},
     settings: { ...s.settings, modules: { ...defaultModuleState(), jobs: true } }
   }))
   useApp.getState().openServer(web.id, 'terminal')
+  // The live RealTerminal a real app would have mounted for that tab.
+  useApp.setState({ pasteTargets: { [activePane()]: true } })
 })
+
+function activePane(): string {
+  const tab = useApp.getState().tabs[0]
+  return useApp.getState().panes[tab.id]?.activePaneId ?? tab.id
+}
 
 function row(container: HTMLElement, title: string): Element | undefined {
   return [...container.querySelectorAll('.palette-item')].find(
@@ -80,9 +88,7 @@ describe('run a saved template in this terminal', () => {
     await waitFor(() => expect(row(container, 'Run in this terminal: Reload nginx')).toBeTruthy())
     await userEvent.click(row(container, 'Run in this terminal: Reload nginx') as HTMLElement)
 
-    const tab = useApp.getState().tabs[0]
-    const pane = useApp.getState().panes[tab.id]?.activePaneId ?? tab.id
-    expect(useApp.getState().pasteRequest).toMatchObject({ paneId: pane, text: 'systemctl reload nginx' })
+    expect(useApp.getState().pasteRequest).toMatchObject({ paneId: activePane(), text: 'systemctl reload nginx' })
     expect(writes.ssh).not.toHaveBeenCalled()
     expect(writes.local).not.toHaveBeenCalled()
   })
@@ -100,7 +106,7 @@ describe('run a saved template in this terminal', () => {
     // confirm button is the only thing that pastes.
     function Pane(): React.JSX.Element | null {
       const [text, setText] = useState<string | null>(null)
-      useTerminalPasteRequest('pane-1', setText)
+      useTerminalPasteRequest('pane-1', true, setText)
       return text === null ? null : (
         <PasteConfirm
           text={text}
@@ -138,14 +144,47 @@ describe('run a saved template in this terminal', () => {
   it('ignores a request for another pane', async () => {
     const open = vi.fn()
     function Pane(): null {
-      useTerminalPasteRequest('pane-1', open)
+      useTerminalPasteRequest('pane-1', true, open)
       return null
     }
     render(<Pane />)
-    useApp.getState().requestTerminalPaste('pane-2', 'rm -rf /')
+    act(() => useApp.setState({ pasteRequest: { paneId: 'pane-2', text: 'rm -rf /', nonce: 1 } }))
     await new Promise((r) => setTimeout(r, 0))
     expect(open).not.toHaveBeenCalled()
     expect(useApp.getState().pasteRequest).not.toBeNull()
+  })
+
+  it('is not offered for a pane that is not a live session', async () => {
+    // A demo shell never registers; a dead or dormant one withdraws.
+    useApp.setState({ pasteTargets: {} })
+    const { container } = render(<CommandPalette />)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(row(container, 'Run in this terminal: Reload nginx')).toBeUndefined()
+  })
+
+  it('never leaves a request waiting for a pane that is not a target', () => {
+    useApp.getState().requestTerminalPaste('no-such-pane', 'rm -rf /')
+    expect(useApp.getState().pasteRequest).toBeNull()
+  })
+
+  it('withdraws when its session dies, and drops a request that races the death', async () => {
+    const open = vi.fn()
+    function Pane({ live }: { live: boolean }): null {
+      useTerminalPasteRequest('pane-1', live, open)
+      return null
+    }
+    const view = render(<Pane live />)
+    expect(useApp.getState().pasteTargets['pane-1']).toBe(true)
+
+    view.rerender(<Pane live={false} />)
+    expect(useApp.getState().pasteTargets['pane-1']).toBeUndefined()
+    act(() => useApp.setState({ pasteRequest: { paneId: 'pane-1', text: 'reboot', nonce: 9 } }))
+    await new Promise((r) => setTimeout(r, 0))
+    expect(open).not.toHaveBeenCalled()
+    expect(useApp.getState().pasteRequest).toBeNull()
+
+    view.unmount()
+    expect(useApp.getState().pasteTargets).not.toHaveProperty('pane-1')
   })
 })
 
@@ -178,8 +217,7 @@ describe('the Enter that chose the template does not also confirm it', () => {
     const paste = vi.fn()
     function Pane(): React.JSX.Element | null {
       const [text, setText] = useState<string | null>(null)
-      const tab = useApp.getState().tabs[0]
-      useTerminalPasteRequest(useApp.getState().panes[tab.id]?.activePaneId ?? tab.id, setText)
+      useTerminalPasteRequest(activePane(), true, setText)
       return text === null ? null : (
         <PasteConfirm
           text={text}

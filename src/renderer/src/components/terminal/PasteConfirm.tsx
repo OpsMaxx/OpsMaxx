@@ -4,21 +4,40 @@ import { ClipboardPaste, AlertTriangle } from 'lucide-react'
 import { useApp } from '../../store/app'
 
 /**
- * Hand a pending `pasteRequest` for this pane to `open`, and clear it.
+ * Make this pane a paste target while its session is live, and hand it any
+ * `pasteRequest` addressed to it.
  *
- * Cleared on the way through so a pane that remounts does not ask again for
- * text it was already asked about. `open` only puts the text in front of the
- * confirmation below -- nothing reaches the shell until its button is pressed.
+ * Registering is what lets the palette offer "Run in this terminal" only where
+ * something will take the text: a demo pane never calls this, and a dead or
+ * dormant one withdraws. `requestTerminalPaste` refuses a pane that is not
+ * registered, so a request never sits in the store waiting for a pane that
+ * will not come. A request is cleared on the way through, and one that arrives
+ * after the session died is dropped rather than confirmed into nothing.
+ *
+ * `open` only puts the text in front of the confirmation below -- nothing
+ * reaches the shell until its button is pressed.
  */
 export function useTerminalPasteRequest(
   paneId: string | undefined,
+  live: boolean,
   open: (text: string) => void
 ): void {
+  useEffect(() => {
+    if (!paneId || !live) return
+    useApp.setState((s) => ({ pasteTargets: { ...s.pasteTargets, [paneId]: true as const } }))
+    return () =>
+      useApp.setState((s) => {
+        const rest = { ...s.pasteTargets }
+        delete rest[paneId]
+        return { pasteTargets: rest }
+      })
+  }, [paneId, live])
+
   const request = useApp((s) => s.pasteRequest)
   useEffect(() => {
     if (!request || !paneId || request.paneId !== paneId) return
     useApp.setState({ pasteRequest: null })
-    open(request.text)
+    if (live) open(request.text)
     // `open` is a fresh closure every render; the request is the event.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request, paneId])

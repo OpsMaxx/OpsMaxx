@@ -33,7 +33,7 @@ waits for Enter. Single-line pastes go straight through.
 
 **Run a saved job template here.** With the Jobs module on, the command palette
 (<kbd>Ctrl</kbd>+<kbd>K</kbd>) lists every template saved in the Jobs composer as
-*Run in this terminal: name*. It opens the same confirmation, showing every
+*Run in this terminal: name* while a live session is on screen. It opens the same confirmation, showing every
 command, and asks even for a single line. Cancel has the focus, so the Enter
 that picked the template cannot also confirm it. Nothing is sent until you
 press **Paste**.

@@ -771,14 +771,35 @@ export function JobsPanel({ servers, jump }: Props): React.JSX.Element {
                 </select>
                 <button
                   className="btn sm"
-                  onClick={() =>
+                  onClick={() => {
+                    // A second template under a name already in the list is
+                    // two rows nobody can tell apart in the picker. Replacing
+                    // one is Save, on the template chosen.
+                    if (templates.some((t) => t.name === draft.title.trim())) {
+                      setTemplateNote(
+                        'A template with this name is already saved. Choose it and press Save to replace its steps, or change the title.'
+                      )
+                      return
+                    }
                     void storeTemplate(templateFromDraft(draft, crypto.randomUUID(), draft.title))
-                  }
+                  }}
                 >
                   Save as template
                 </button>
                 {chosenTemplate && (
                   <>
+                    {/* The steps, rollback and reboot flag as they stand in the
+                        form now, under the chosen template's id and name. */}
+                    <button
+                      className="btn sm"
+                      onClick={() =>
+                        void storeTemplate(
+                          templateFromDraft(draft, chosenTemplate.id, chosenTemplate.name)
+                        )
+                      }
+                    >
+                      Save
+                    </button>
                     <input
                       className="input"
                       aria-label="Template name"

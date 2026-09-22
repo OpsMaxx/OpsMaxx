@@ -506,6 +506,22 @@ describe('saved templates in the composer', () => {
     expect((screen.getByLabelText('Steps') as HTMLTextAreaElement).value).toBe('systemctl reload nginx')
     expect(screen.getByRole('button', { name: 'web-2' }).getAttribute('aria-pressed')).toBe('false')
 
+    // Editing the steps and pressing Save replaces the chosen template in
+    // place: same id, same name, one row.
+    await userEvent.type(screen.getByLabelText('Steps'), ' && echo ok')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect([...saved.values()][0]).toMatchObject({ name: 'Reload web', steps: 'systemctl reload nginx && echo ok' })
+    )
+    expect(saved.size).toBe(1)
+
+    // Save as template under a name already taken is refused, not duplicated.
+    await userEvent.clear(screen.getByLabelText('Job title'))
+    await userEvent.type(screen.getByLabelText('Job title'), 'Reload web')
+    await userEvent.click(screen.getByRole('button', { name: 'Save as template' }))
+    await screen.findByText(/already saved/)
+    expect(saved.size).toBe(1)
+
     await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
     expect(templates.remove).not.toHaveBeenCalled()
     await userEvent.click(screen.getByRole('button', { name: 'Confirm delete' }))

@@ -376,12 +376,6 @@ function RealTerminal({
   const [pending, setPending] = useState<{ text: string; lines: number; full?: boolean } | null>(
     null
   )
-  // A saved job template run "in this terminal". It goes through the same
-  // confirmation a multi-line paste does, and it asks even for one line: the
-  // clipboard rule is about text that arrives, and this is text someone chose.
-  useTerminalPasteRequest(tabId, (text) =>
-    setPending({ text, lines: text.split('\n').length, full: true })
-  )
   /**
    * Restored from the last run and not yet dialled.
    *
@@ -405,6 +399,15 @@ function RealTerminal({
     (text, lines) => setPending({ text, lines }),
     tabId,
     dormant
+  )
+
+  // A saved job template run "in this terminal". It goes through the same
+  // confirmation a multi-line paste does, and it asks even for one line: the
+  // clipboard rule is about text that arrives, and this is text someone chose.
+  // Only a LIVE session is a target: a dead or dormant one would take the
+  // confirmed text and drop it.
+  useTerminalPasteRequest(tabId, !dead && !dormant, (text) =>
+    setPending({ text, lines: text.split('\n').length, full: true })
   )
 
   /**

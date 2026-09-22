@@ -200,7 +200,7 @@ const JOB_TEMPLATE_TEXT_MAX = 20_000
 // escape sequence in it is not cosmetic -- ESC [ 2 0 1 ~ ends bracketed paste
 // and turns the rest into keystrokes -- and a character the confirmation
 // cannot show is one the operator approves without seeing. The panel never
-// produces one; a hand-edited or restored file can.
+// produces one; a hand-edited file can.
 const UNSAFE_TEMPLATE =
   // eslint-disable-next-line no-control-regex -- matching them is the point
   /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]|\udb40[\udc00-\udc7f]/g
@@ -217,7 +217,7 @@ function cleanTemplateText(raw: unknown): string | null {
  * Builds a NEW object from the fields a template has, so anything else on the
  * input -- `targets`, `approval`, `cohort`, a whole JobRunRequest -- is dropped
  * rather than trusted because it rode along. Called by main on every save and
- * on every read of the file, which survives hand edits and restored backups.
+ * on every read of the file, which survives hand edits and downgrades.
  */
 export function sanitiseJobTemplate(raw: unknown): JobTemplate | null {
   if (raw === null || typeof raw !== 'object') return null

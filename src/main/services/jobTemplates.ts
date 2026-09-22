@@ -19,6 +19,10 @@ import { atomicWriteFileSync } from './atomicWrite'
 // uses. Listed in ALL_DATA_FILES so "delete everything" takes it, and in
 // NOT_SYNCED beside runbooks and rules, which are the same kind of thing.
 //
+// NOT in a backup bundle (buildBundle in backup.ts carries the workspace blob,
+// secrets, vault, locks and known hosts only), so templates stay on this
+// machine and do not survive a move to another one. docs/features.md says so.
+//
 // Named job*.ts on purpose: tests/jobsNotExposed.test.ts scans this directory
 // for that prefix, so the bridge cannot import this file without a test going
 // red. An agent that could write a template would be choosing the text a
@@ -74,7 +78,7 @@ export function listJobTemplates(deps: JobTemplateDeps = {}): JobTemplateList {
     return empty('The saved templates file was written by a different version of OpsMaxx.')
   }
   if (!Array.isArray(file.templates)) return empty('The saved templates file holds no list.')
-  // Every row narrowed again: the file survives hand edits and restores, and a
+  // Every row narrowed again: the file survives hand edits and downgrades, and a
   // row that arrived with `targets` on it leaves without them.
   const templates = file.templates
     .map(sanitiseJobTemplate)
