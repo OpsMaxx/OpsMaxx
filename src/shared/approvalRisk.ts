@@ -653,6 +653,9 @@ export function resolveFuseDeadline(
 // What write_file will write
 // ---------------------------------------------------------------------------
 
+/** What secretRedaction.ts puts where a secret was. See contentPreview. */
+const REDACTION_MARKER = '[REDACTED]'
+
 /** The most of an agent's file content the dialog shows. See contentPreview. */
 export const PREVIEW_MAX_CHARS = 4096
 export const PREVIEW_MAX_LINES = 80
@@ -718,6 +721,15 @@ export function showInvisibles(text: string): string {
  */
 export function contentPreview(redacted: string): ContentPreview {
   let head = redacted.slice(0, PREVIEW_MAX_CHARS).split('\n').slice(0, PREVIEW_MAX_LINES).join('\n')
+  // Nor on part of a redaction marker. Nothing leaks -- the secret was replaced
+  // before the cut -- but "[REDAC" reads as file content rather than as
+  // OpsMaxx having removed something, so the marker is shown whole or not at
+  // all. REDACTION_MARKER must match PLACEHOLDER in secretRedaction.ts; the
+  // preview tests run real redactOutput output through here to hold them to it.
+  const open = head.lastIndexOf('[')
+  if (open >= 0 && head.length - open < REDACTION_MARKER.length && redacted.startsWith(REDACTION_MARKER, open)) {
+    head = head.slice(0, open)
+  }
   // Never end on half a surrogate pair: it renders as a replacement character
   // that the file does not contain.
   if (/[\ud800-\udbff]$/.test(head)) head = head.slice(0, -1)

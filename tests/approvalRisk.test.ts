@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { redactOutput } from '../src/main/services/secretRedaction'
 import {
   APPROVAL_RISK_SCALE,
   PREVIEW_MAX_CHARS,
@@ -469,5 +470,25 @@ describe('contentPreview, beyond the BMP and the obvious', () => {
 
   it('leaves ordinary astral text alone', () => {
     expect(contentPreview('ship it 🚀').text).toBe('ship it 🚀')
+  })
+})
+
+describe('contentPreview, the reviewer\u2019s cases', () => {
+  it('spells out a tag character and the Hangul filler by code point', () => {
+    expect(contentPreview(`a${String.fromCodePoint(0xe0072)}b\u3164c`).text).toBe('a⟨U+E0072⟩b⟨U+3164⟩c')
+  })
+
+  it('shows a redaction marker at the cut whole or not at all', () => {
+    // A known secret whose placeholder straddles the cut, redacted by the real
+    // redactor so the marker here cannot drift from the one it writes.
+    const redacted = redactOutput('x'.repeat(PREVIEW_MAX_CHARS - 4) + 'hunter22-secret tail', ['hunter22-secret'])
+    const p = contentPreview(redacted)
+    expect(p.text).toBe('x'.repeat(PREVIEW_MAX_CHARS - 4))
+    expect(p.omittedChars).toBe(redacted.length - (PREVIEW_MAX_CHARS - 4))
+  })
+
+  it('keeps a marker that fits', () => {
+    const redacted = redactOutput('x hunter22-secret', ['hunter22-secret'])
+    expect(contentPreview(redacted).text).toBe('x [REDACTED]')
   })
 })

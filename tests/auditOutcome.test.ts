@@ -122,7 +122,10 @@ describe('approvals that reach past one call', () => {
     const o = auditOutcome(e({ approval: 'approved-earlier', result: 'success' }))
     expect(o.decidedBy).toBe('you')
     expect(o.label).toMatch(/^Approved earlier/)
-    expect(o.detail).toMatch(/earlier request/)
+    expect(o.detail).toMatch(/^Nothing was asked: an approval given earlier in this session covered it\./)
+    // Not "you allowed this for the session": rows up to 0.50.25 were carried
+    // by an "Approve once" click, and nothing in a row says which era wrote it.
+    expect(o.detail).not.toMatch(/you allowed/i)
     expect(o.detail).not.toMatch(/access group/)
   })
 

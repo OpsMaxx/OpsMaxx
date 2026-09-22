@@ -8,7 +8,7 @@ const SRC = readFileSync(
 )
 
 /** The body of gate(), which is where every one of these rules has to hold. */
-const GATE = SRC.slice(SRC.indexOf('async function gate('), SRC.indexOf('\n  return { ok: true }\n}'))
+const GATE = SRC.slice(SRC.indexOf('async function gate('), SRC.indexOf("return { ok: true, approval: 'not-required' }"))
 
 /**
  * An approval, remembered for the rest of the session.
@@ -21,6 +21,13 @@ const GATE = SRC.slice(SRC.indexOf('async function gate('), SRC.indexOf('\n  ret
  */
 
 describe('what one approval covers', () => {
+  // A missing end marker makes GATE the rest of the file, and every
+  // not.toMatch below would then be scanning code gate() never runs.
+  it('reads gate() and only gate()', () => {
+    expect(SRC.indexOf("return { ok: true, approval: 'not-required' }")).toBeGreaterThan(SRC.indexOf('async function gate('))
+    expect(GATE).not.toMatch(/function auditSuccess/)
+  })
+
   it('is scoped to the session, the server AND the capability', () => {
     // Not session-wide: a person approving an action is looking at a server
     // name while they do it, and carrying that consent to a machine they were
@@ -114,6 +121,17 @@ describe('what one approval covers', () => {
     const at = SRC.indexOf(`toolName: '${tool}'`)
     expect(at).toBeGreaterThanOrEqual(0)
     expect(SRC.slice(at, at + 1800)).toMatch(flag)
+  })
+
+  // get_server_metrics wrote 'not-required' whatever gate() said, so a metrics
+  // read that a human approved -- or approved for the session -- was audited
+  // as one nobody was asked about, and the carried rows after it had no
+  // granting row to point back to. Only gate()'s own deny branch may write a
+  // literal approval; every tool writes what gate() handed it.
+  it('is audited as gate() reported it, never as a hard-coded answer', () => {
+    const outsideGate = SRC.replace(GATE, '')
+    expect(outsideGate).not.toMatch(/auditSuccess\(ctx, '/)
+    expect(outsideGate).not.toMatch(/approval: 'not-required',\s*result/)
   })
 
   it('dies with the session', () => {

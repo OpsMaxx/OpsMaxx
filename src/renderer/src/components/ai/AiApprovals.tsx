@@ -119,7 +119,7 @@ export function AiApprovals(): React.JSX.Element {
               {grantLabel}
             </button>
           )}
-          <button className="btn sm primary" onClick={() => respond(a.id, 'approved', 'once')}>
+          <button className="btn sm" onClick={() => respond(a.id, 'approved', 'once')}>
             <Check size={13} /> Approve once
           </button>
         </div>

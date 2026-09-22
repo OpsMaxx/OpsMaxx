@@ -2426,17 +2426,17 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (usable && cached?.entry.host) {
         m = cached.entry.host
         provenance = `Taken by background checking ${agePhrase(age)}, not sampled just now.`
-        auditSuccess(ctx, 'not-required')
+        auditSuccess(ctx, gated.approval)
       } else {
         const cfg = resolveChainSecrets(serverToSshConfig(s))
         // No dialog: an agent asked for this, so there is nobody whose click a
         // verification-code prompt would be the answer to.
         const result = await metricsSample(`mcp:${s.id}`, cfg, false)
         if (!result.ok || !result.data) {
-          recordAudit({ ...auditBase(ctx), approval: 'not-required', result: 'error', error: result.error })
+          recordAudit({ ...auditBase(ctx), approval: gated.approval, result: 'error', error: result.error })
           return errorText(`Could not sample metrics: ${result.error ?? 'unknown error'}`)
         }
-        auditSuccess(ctx, 'not-required')
+        auditSuccess(ctx, gated.approval)
         m = result.data
         provenance = 'Sampled just now.'
       }

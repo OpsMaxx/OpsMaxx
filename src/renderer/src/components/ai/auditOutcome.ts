@@ -66,7 +66,11 @@ export function auditOutcome(e: Pick<AuditEntry, 'approval' | 'result' | 'exitCo
       : e.approval === 'approved-for-session'
         ? 'You approved this request, and allowed the same on this server for the rest of the session.'
         : e.approval === 'approved-earlier'
-          ? 'Nothing was asked: you allowed this for the rest of the session on an earlier request.'
+          ? // Not "you allowed this for the session": rows written up to
+            // 0.50.25 were carried by an "Approve once" click, which the
+            // operator never knew was a session grant, and nothing in a row
+            // says which era wrote it.
+            'Nothing was asked: an approval given earlier in this session covered it.'
           : 'The access group allowed this outright, so nothing was asked.'
 
   if (e.result === 'denied') {
