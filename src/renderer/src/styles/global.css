@@ -522,13 +522,24 @@ button {
 .tree-row:focus-visible {
   outline-offset: -2px;
 }
-/* Tags on a connection row. The shared chip, a size down, so two of them fit
-   beside a name in a 28px row without the name being the thing that gives. */
+/* Tags on a connection row. The shared chip, a size down, and allowed to
+   shrink: the name keeps at least 6ch, and a long tag ellipsizes rather than
+   pushing the name off the row. */
 .tree-row .chip {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 9ch;
+  /* Block, not the chip's inline-flex: an ellipsis needs a text line to cut. */
+  display: inline-block;
   height: 16px;
+  line-height: 14px;
   padding: 0 5px;
   font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-row .label {
+  flex: 1 0 6ch;
 }
 .tree-row .distro {
   display: inline-flex;
@@ -574,6 +585,12 @@ button {
 .status-dot.connecting {
   border-radius: 1px;
   transform: rotate(45deg) scale(0.85);
+}
+/* Failed: the alarm square, in the alarm colour. Tunnels and the VPN card set
+   this; without a rule it was an 8px span with nothing painted in it. */
+.status-dot.error {
+  background: var(--danger);
+  border-radius: 1px;
 }
 @keyframes pulse {
   50% {

@@ -49,6 +49,15 @@ const STATE_COLOR: Record<CheckState, string> = {
   unknown: 'var(--text-faint)'
 }
 
+/** The same states as `.status-dot` shapes, so up and down differ by more
+ *  than the colour an inline background used to give them. */
+const STATE_DOT: Record<CheckState, string> = {
+  up: 'online',
+  slow: 'idle',
+  down: 'error',
+  unknown: 'offline'
+}
+
 export function HttpMonitorPanel(): React.JSX.Element {
   const checks = useApp((s) => s.httpChecks)
   const activeId = useApp((s) => s.activeId)
@@ -204,11 +213,7 @@ export function HttpMonitorPanel(): React.JSX.Element {
             return (
               <div key={check.id} className="card">
                 <div className="row" style={{ gap: 10, alignItems: 'baseline' }}>
-                  <span
-                    className="status-dot"
-                    style={{ background: STATE_COLOR[s.state] }}
-                    aria-hidden
-                  />
+                  <span className={clsx('status-dot', STATE_DOT[s.state])} aria-hidden />
                   <span className="sidebar-title">{check.name}</span>
                   <span
                     className="faint"

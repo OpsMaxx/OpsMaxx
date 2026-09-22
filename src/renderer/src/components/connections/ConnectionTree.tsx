@@ -278,6 +278,8 @@ export function ConnectionTree(): React.JSX.Element {
   const serversIn = (folderId: string | null): Server[] =>
     servers.filter((s) => s.folderId === folderId && match(s))
 
+  const rootServers = serversIn(null)
+
   const recent = useMemo(() => servers.slice(0, 3), [servers])
 
   const entries = (s: Server): MenuEntry[] => [
@@ -383,7 +385,7 @@ export function ConnectionTree(): React.JSX.Element {
         {s.cloud && <Cloud size={12} className="faint" />}
         {s.route.length > 0 && <Route size={12} className="faint" />}
         {s.tags.slice(0, ROW_TAGS).map((t) => (
-          <span key={t} className="chip">
+          <span key={t} className="chip" title={t}>
             {t}
           </span>
         ))}
@@ -414,10 +416,13 @@ export function ConnectionTree(): React.JSX.Element {
           needs no credential and cannot fail to resolve. */}
       <LocalMachineSection query={query} />
 
+      {/* Three trees — Favorites, Connections, Recent — under ONE keyboard
+          handler, so the arrows walk straight from one list into the next. The
+          section headers sit between them rather than inside: a tree may hold
+          only its rows, and the Connections header is a drop target with a
+          button in it. */}
       <div
         ref={treeRef}
-        role="tree"
-        aria-label="Connections"
         onKeyDown={onTreeKeyDown}
         onFocus={(e) => {
           const key = (e.target as HTMLElement).dataset.key
@@ -425,11 +430,13 @@ export function ConnectionTree(): React.JSX.Element {
         }}
       >
         {favorites.length > 0 && (
-          <div className="tree-section" role="group" aria-label="Favorites">
-            <div className="tree-section-label" aria-hidden="true">
+          <div className="tree-section">
+            <div className="tree-section-label">
               <Star size={11} /> Favorites
             </div>
-            {favorites.map((s) => serverRow(s, `fav:${s.id}`, 1))}
+            <div role="tree" aria-label="Favorites">
+              {favorites.map((s) => serverRow(s, `fav:${s.id}`, 1))}
+            </div>
           </div>
         )}
 
@@ -462,127 +469,152 @@ export function ConnectionTree(): React.JSX.Element {
             </button>
           </div>
 
-          {rootFolders.map((f) => {
-            const open = !collapsed[f.id]
-            const childFolders = folders.filter((cf) => cf.parentId === f.id)
-            const direct = serversIn(f.id)
-            return (
-              <div key={f.id}>
-                <div
-                  role="treeitem"
-                  aria-level={1}
-                  aria-expanded={open}
-                  data-key={`folder:${f.id}`}
-                  data-folder={f.id}
-                  tabIndex={focusKey === `folder:${f.id}` ? 0 : -1}
-                  className={clsx('tree-row', dropFolder === f.id && 'dragover')}
-                  onClick={() => renaming !== f.id && setCollapsed((c) => ({ ...c, [f.id]: !c[f.id] }))}
-                  onDoubleClick={() => setRenaming(f.id)}
-                  onContextMenu={(e) => {
-                    e.preventDefault()
-                    setFolderCtx({ x: e.clientX, y: e.clientY, id: f.id })
-                  }}
-                  onDragOver={(e) => {
-                    if (dragId) {
-                      e.preventDefault()
-                      setDropFolder(f.id)
-                    }
-                  }}
-                  onDragLeave={() => setDropFolder(null)}
-                  onDrop={() => {
-                    if (dragId) {
-                      moveServerToFolder(dragId, f.id)
-                      toast(`Moved to ${f.name}`)
-                    }
-                    setDropFolder(null)
-                    setDragId(null)
-                  }}
-                >
-                  <ChevronRight size={14} className={clsx('chev', open && 'open')} />
-                  {open ? (
-                    <FolderOpen size={15} className="folder-icon" />
-                  ) : (
-                    <Folder size={15} className="folder-icon" />
-                  )}
-                  {folderLabel(f.id, f.name)}
-                  <span className="spacer" />
-                  <span className="faint" style={{ fontSize: 11 }}>
-                    {direct.length + childFolders.reduce((n, c) => n + serversIn(c.id).length, 0)}
-                  </span>
-                </div>
-                {open && (
-                  <div className="tree-children" role="group">
-                    {childFolders.map((cf) => {
-                      const copen = !collapsed[cf.id]
-                      return (
-                        <div key={cf.id}>
-                          <div
-                            role="treeitem"
-                            aria-level={2}
-                            aria-expanded={copen}
-                            data-key={`folder:${cf.id}`}
-                            data-folder={cf.id}
-                            tabIndex={focusKey === `folder:${cf.id}` ? 0 : -1}
-                            className={clsx('tree-row', dropFolder === cf.id && 'dragover')}
-                            onClick={() => renaming !== cf.id && setCollapsed((c) => ({ ...c, [cf.id]: !c[cf.id] }))}
-                            onDoubleClick={() => setRenaming(cf.id)}
-                            onContextMenu={(e) => {
-                              e.preventDefault()
-                              setFolderCtx({ x: e.clientX, y: e.clientY, id: cf.id })
-                            }}
-                            onDragOver={(e) => {
-                              if (dragId) {
-                                e.preventDefault()
-                                setDropFolder(cf.id)
-                              }
-                            }}
-                            onDragLeave={() => setDropFolder(null)}
-                            onDrop={() => {
-                              if (dragId) {
-                                moveServerToFolder(dragId, cf.id)
-                                toast(`Moved to ${cf.name}`)
-                              }
-                              setDropFolder(null)
-                              setDragId(null)
-                            }}
-                          >
-                            <ChevronRight size={14} className={clsx('chev', copen && 'open')} />
-                            {copen ? (
-                              <FolderOpen size={15} className="folder-icon" />
-                            ) : (
-                              <Folder size={15} className="folder-icon" />
-                            )}
-                            {folderLabel(cf.id, cf.name)}
-                          </div>
-                          {copen && (
-                            <div className="tree-children" role="group">
-                              {serversIn(cf.id).map((s) => serverRow(s, `srv:${s.id}`, 3))}
+          {(rootFolders.length > 0 || rootServers.length > 0) && (
+            <div role="tree" aria-label="Connections">
+              {rootFolders.map((f) => {
+                const open = !collapsed[f.id]
+                const childFolders = folders.filter((cf) => cf.parentId === f.id)
+                const direct = serversIn(f.id)
+                return (
+                  <div key={f.id}>
+                    <div
+                      role="treeitem"
+                      aria-level={1}
+                      aria-expanded={open}
+                      data-key={`folder:${f.id}`}
+                      data-folder={f.id}
+                      tabIndex={focusKey === `folder:${f.id}` ? 0 : -1}
+                      className={clsx('tree-row', dropFolder === f.id && 'dragover')}
+                      onClick={() => renaming !== f.id && setCollapsed((c) => ({ ...c, [f.id]: !c[f.id] }))}
+                      onDoubleClick={() => setRenaming(f.id)}
+                      onContextMenu={(e) => {
+                        e.preventDefault()
+                        setFolderCtx({ x: e.clientX, y: e.clientY, id: f.id })
+                      }}
+                      onDragOver={(e) => {
+                        if (dragId) {
+                          e.preventDefault()
+                          setDropFolder(f.id)
+                        }
+                      }}
+                      onDragLeave={() => setDropFolder(null)}
+                      onDrop={() => {
+                        if (dragId) {
+                          moveServerToFolder(dragId, f.id)
+                          toast(`Moved to ${f.name}`)
+                        }
+                        setDropFolder(null)
+                        setDragId(null)
+                      }}
+                    >
+                      <ChevronRight size={14} className={clsx('chev', open && 'open')} />
+                      {open ? (
+                        <FolderOpen size={15} className="folder-icon" />
+                      ) : (
+                        <Folder size={15} className="folder-icon" />
+                      )}
+                      {folderLabel(f.id, f.name)}
+                      <span className="spacer" />
+                      <span className="faint" style={{ fontSize: 11 }}>
+                        {direct.length + childFolders.reduce((n, c) => n + serversIn(c.id).length, 0)}
+                      </span>
+                    </div>
+                    {open && (
+                      <div className="tree-children" role="group">
+                        {childFolders.map((cf) => {
+                          const copen = !collapsed[cf.id]
+                          return (
+                            <div key={cf.id}>
+                              <div
+                                role="treeitem"
+                                aria-level={2}
+                                aria-expanded={copen}
+                                data-key={`folder:${cf.id}`}
+                                data-folder={cf.id}
+                                tabIndex={focusKey === `folder:${cf.id}` ? 0 : -1}
+                                className={clsx('tree-row', dropFolder === cf.id && 'dragover')}
+                                onClick={() => renaming !== cf.id && setCollapsed((c) => ({ ...c, [cf.id]: !c[cf.id] }))}
+                                onDoubleClick={() => setRenaming(cf.id)}
+                                onContextMenu={(e) => {
+                                  e.preventDefault()
+                                  setFolderCtx({ x: e.clientX, y: e.clientY, id: cf.id })
+                                }}
+                                onDragOver={(e) => {
+                                  if (dragId) {
+                                    e.preventDefault()
+                                    setDropFolder(cf.id)
+                                  }
+                                }}
+                                onDragLeave={() => setDropFolder(null)}
+                                onDrop={() => {
+                                  if (dragId) {
+                                    moveServerToFolder(dragId, cf.id)
+                                    toast(`Moved to ${cf.name}`)
+                                  }
+                                  setDropFolder(null)
+                                  setDragId(null)
+                                }}
+                              >
+                                <ChevronRight size={14} className={clsx('chev', copen && 'open')} />
+                                {copen ? (
+                                  <FolderOpen size={15} className="folder-icon" />
+                                ) : (
+                                  <Folder size={15} className="folder-icon" />
+                                )}
+                                {folderLabel(cf.id, cf.name)}
+                              </div>
+                              {copen && (
+                                <div className="tree-children" role="group">
+                                  {serversIn(cf.id).map((s) => serverRow(s, `srv:${s.id}`, 3))}
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                    {direct.map((s) => serverRow(s, `srv:${s.id}`, 2))}
+                          )
+                        })}
+                        {direct.map((s) => serverRow(s, `srv:${s.id}`, 2))}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            )
-          })}
+                )
+              })}
 
-          {serversIn(null).map((s) => serverRow(s, `srv:${s.id}`, 1))}
+              {rootServers.map((s) => serverRow(s, `srv:${s.id}`, 1))}
+            </div>
+          )}
         </div>
-      </div>
 
-      <div className="tree-section">
-        <div className="tree-section-label">
-          <ServerIcon size={11} /> Recent
-        </div>
-        {recent.map((s) => (
-          <div key={s.id} className="tree-row" onClick={() => openServer(s.id)}>
-            <StatusDot status={s.status} />
-            <span className="label">{labels.get(s.id) ?? s.name}</span>
+        <div className="tree-section">
+          <div className="tree-section-label">
+            <ServerIcon size={11} /> Recent
           </div>
-        ))}
+          {recent.length > 0 && (
+            <div role="tree" aria-label="Recent">
+              {recent.map((s) => {
+                const key = `recent:${s.id}`
+                return (
+                  <div
+                    key={key}
+                    role="treeitem"
+                    aria-level={1}
+                    data-key={key}
+                    tabIndex={focusKey === key ? 0 : -1}
+                    className="tree-row"
+                    onClick={() => openServer(s.id)}
+                    // The same menu as the server's row in the tree, which is
+                    // also what Shift+F10 on this row opens.
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      setCtx({ x: e.clientX, y: e.clientY, server: s })
+                    }}
+                  >
+                    <StatusDot status={s.status} />
+                    <span className="label">{labels.get(s.id) ?? s.name}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       {ctx && (

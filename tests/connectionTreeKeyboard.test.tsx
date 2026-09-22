@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
 import { ConnectionTree } from '../src/renderer/src/components/connections/ConnectionTree'
@@ -50,10 +52,14 @@ beforeEach(() => {
 })
 
 describe('connection tree keyboard', () => {
-  it('is a tree with exactly one tab stop, and folders say whether they are open', () => {
+  it('is three named trees holding only rows, with exactly one tab stop between them', () => {
     seed()
     render(<ConnectionTree />)
-    expect(screen.getByRole('tree')).toBeTruthy()
+    const trees = screen.getAllByRole('tree')
+    expect(trees.map((t) => t.getAttribute('aria-label'))).toEqual(['Favorites', 'Connections', 'Recent'])
+    // A tree may own only rows and groups. The Connections header — a drop
+    // target with a "New folder" button — sits between trees, not in one.
+    for (const t of trees) expect(t.querySelector('button, .tree-section-label')).toBeNull()
     expect(rows().filter((r) => r.tabIndex === 0)).toHaveLength(1)
     const folder = rows().find((r) => r.textContent?.includes('Production'))!
     expect(folder.getAttribute('aria-expanded')).toBe('true')
@@ -76,13 +82,17 @@ describe('connection tree keyboard', () => {
     expect(focused()).toContain('Production')
     await u.keyboard('{ArrowLeft}')
     expect(document.activeElement!.getAttribute('aria-expanded')).toBe('false')
-    expect(rows().some((r) => r.textContent?.includes('api'))).toBe(false)
+    const conns = screen.getByRole('tree', { name: 'Connections' })
+    expect(within(conns).queryAllByRole('treeitem').some((r) => r.textContent?.includes('api'))).toBe(false)
     await u.keyboard('{ArrowRight}')
     expect(document.activeElement!.getAttribute('aria-expanded')).toBe('true')
     await u.keyboard('{ArrowRight}')
     expect(focused()).toContain('api')
+    // Down from the last connection crosses into Recent: one keyboard model.
     await u.keyboard('{End}')
-    expect(focused()).toContain('cache')
+    expect(within(screen.getByRole('tree', { name: 'Recent' })).getAllByRole('treeitem').at(-1)).toBe(
+      document.activeElement
+    )
     await u.keyboard('{Home}')
     expect(focused()).toContain('bastion')
     // The roving tab stop follows focus.
@@ -112,6 +122,18 @@ describe('connection tree keyboard', () => {
 
     fireEvent.keyDown(cache, { key: 'ContextMenu' })
     expect(screen.getByRole('menu').textContent).toContain('Edit server')
+  })
+
+  it('reaches Recent rows too: Enter opens, Shift+F10 gives the menu', async () => {
+    const { openServer } = seed()
+    render(<ConnectionTree />)
+    const recent = within(screen.getByRole('tree', { name: 'Recent' })).getAllByRole('treeitem')
+    expect(recent.map((r) => r.textContent)).toEqual(['api', 'bastion', 'cache'])
+    recent[0].focus()
+    await userEvent.keyboard('{Enter}')
+    expect(openServer).toHaveBeenCalledWith('srv-a')
+    await userEvent.keyboard('{Shift>}{F10}{/Shift}')
+    expect(screen.getByRole('menu').textContent).toContain('Connect')
   })
 
   it('leaves a folder being renamed to its input', async () => {
@@ -149,7 +171,8 @@ describe('what a row shows', () => {
     seed()
     render(<ConnectionTree />)
     await userEvent.type(screen.getByPlaceholderText('Search connections…'), 'redis')
-    const names = rows().map((r) => r.textContent)
+    const tree = screen.getByRole('tree', { name: 'Connections' })
+    const names = within(tree).getAllByRole('treeitem').map((r) => r.textContent)
     expect(names.some((n) => n?.includes('cache'))).toBe(true)
     expect(names.some((n) => n?.includes('api'))).toBe(false)
   })
@@ -166,5 +189,30 @@ describe('what a row shows', () => {
     expect(screen.getAllByRole('img', { name: 'Ubuntu' })).toHaveLength(1)
     const cache = rows().find((r) => r.textContent?.includes('cache'))!
     expect(cache.querySelector('.distro')).toBeNull()
+  })
+})
+
+describe('the stylesheet behind a row', () => {
+  const css = readFileSync(join(__dirname, '..', 'src', 'renderer', 'src', 'styles', 'global.css'), 'utf8')
+  const rule = (selector: string): string => {
+    // At a line start, so `.db-schema .tree-row .label` does not answer for it.
+    const i = css.lastIndexOf(`\n${selector} {`)
+    expect(i, `${selector} has no rule`).toBeGreaterThan(-1)
+    return css.slice(i, css.indexOf('}', i))
+  }
+
+  it.each(['online', 'idle', 'offline', 'connecting', 'error'])(
+    'gives .status-dot.%s a rule of its own',
+    (state) => {
+      rule(`.status-dot.${state}`)
+    }
+  )
+
+  it('lets tag chips shrink before the name does', () => {
+    const chip = rule('.tree-row .chip')
+    expect(chip).toMatch(/min-width:\s*0/)
+    expect(chip).toMatch(/text-overflow:\s*ellipsis/)
+    expect(chip).not.toMatch(/flex:\s*none/)
+    expect(rule('.tree-row .label')).toMatch(/flex:\s*1 0 6ch/)
   })
 })

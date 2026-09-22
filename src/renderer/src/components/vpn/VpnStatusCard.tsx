@@ -104,28 +104,21 @@ const HEALTH_CHIP: Record<VpnHealth, string> = {
   error: 'danger'
 }
 
-// `.status-dot` ships online/idle/offline/connecting; amber is `idle`, which is
-// exactly the shade `degraded` wants. There is no red variant, so error paints
-// itself from the same tokens the danger chip uses.
+// `.status-dot`'s states, each with its own shape as well as its colour. Amber
+// is `idle`, which is exactly the shade `degraded` wants; `error` is the red
+// square. It used to be `offline` repainted red inline, which covered the
+// offline ring with a filled disc — the same shape as `ok`, told apart by
+// colour alone.
 const HEALTH_DOT: Record<VpnHealth, string> = {
   off: 'offline',
   connecting: 'connecting',
   ok: 'online',
   degraded: 'idle',
-  error: 'offline'
+  error: 'error'
 }
 
 export function HealthDot({ health }: { health: VpnHealth }): React.JSX.Element {
-  return (
-    <span
-      className={clsx('status-dot', HEALTH_DOT[health])}
-      style={
-        health === 'error'
-          ? { background: 'var(--danger)', boxShadow: '0 0 0 3px var(--danger-soft)' }
-          : undefined
-      }
-    />
-  )
+  return <span className={clsx('status-dot', HEALTH_DOT[health])} />
 }
 
 export function HealthChip({ health }: { health: VpnHealth }): React.JSX.Element {
