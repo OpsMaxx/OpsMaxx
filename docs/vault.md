@@ -82,7 +82,7 @@ A red **Backup out of date** indicator appears whenever your connections change,
 |---|---|
 | **General** | Workspace-level preferences |
 | **Appearance** | Theme (dark / light / system) and density |
-| **Terminal** | Font family, **font size** (also <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>-</kbd>), cursor blink, scroll behaviour |
+| **Terminal** | Font family, **font size** (also <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>-</kbd>), **colour scheme** (see [Terminal](terminal.md)), cursor blink, scroll behaviour |
 | **Connections** | Defaults for new connections |
 | **SSH** | **How long an authenticated connection is kept** after its last session closes, and a live list of shared connections with a Disconnect button |
 | **Security** | Credential storage, **how long the vault stays on screen**, workspace locking, and the list of **trusted SSH host keys** with a Forget button |

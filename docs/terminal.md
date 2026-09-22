@@ -29,6 +29,16 @@ download/re-upload dance. The inline editor is still there for quick edits.
 shows a preview and a confirmation, because every line runs the moment it
 lands. Single-line pastes go straight through.
 
+**Colour scheme.** Settings → Terminal shows each scheme as a swatch — its
+background, its text and six of its ANSI colours — so you can see one before
+choosing it. The choices are the app's own palette (the default, which follows
+light and dark), six built-ins (Solarized Dark and Light, Dracula, Nord, Gruvbox
+Dark, One Dark), and any you import with **Import a file**: a Windows Terminal
+scheme or `settings.json`, or an iTerm2 `.itermcolors` preset. A scheme without
+its own background keeps the app's. The change applies to open terminals
+immediately. The swatches are a radio group: <kbd>Tab</kbd> to it, then the
+arrow keys move the selection.
+
 Control keys such as <kbd>Ctrl</kbd>+<kbd>C</kbd>, <kbd>Ctrl</kbd>+<kbd>A</kbd> and <kbd>Ctrl</kbd>+<kbd>W</kbd> pass through to the remote shell, so `vim`, `nano` and bash line editing behave normally.
 
 **Monitoring** is docked under the terminal rather than hidden in a separate tab. Expand it for live CPU, memory, disk and network. The strip samples only the tab you are looking at, and shares that session's SSH connection. Watching the servers you are *not* looking at is a separate feature — see [Checking servers in the background](#checking-servers-in-the-background).

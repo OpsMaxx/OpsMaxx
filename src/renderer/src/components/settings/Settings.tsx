@@ -87,7 +87,8 @@ const MODULE_GROUPS: { id: string; label: string; detail: string; match: (m: Mod
       match: (m) => m.surface === 'operate'
     }
   ]
-import { TERMINAL_SCHEMES, parseTerminalScheme } from '../../../../shared/terminalTheme'
+import { parseTerminalScheme } from '../../../../shared/terminalTheme'
+import { SchemePicker } from './SchemePicker'
 import { useFleetStatus } from '../../store/fleetStatus'
 import { toast } from '../../store/toast'
 
@@ -1038,7 +1039,7 @@ export function Settings(): React.JSX.Element {
                   </button>
                 </div>
               </div>
-              <div className="setting-row">
+              <div className="setting-row wrap">
                 <div className="s-info">
                   <div className="s-title">Colour scheme</div>
                   <div className="s-desc">
@@ -1047,27 +1048,6 @@ export function Settings(): React.JSX.Element {
                   </div>
                 </div>
                 <div className="row" style={{ gap: 6 }}>
-                  <select
-                    className="input"
-                    value={settings.terminalScheme}
-                    onChange={(e) => setSettings({ terminalScheme: e.target.value })}
-                  >
-                    <option value="">App palette</option>
-                    {TERMINAL_SCHEMES.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                    {settings.terminalCustomSchemes.length > 0 && (
-                      <optgroup label="Imported">
-                        {settings.terminalCustomSchemes.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                  </select>
                   <button
                     className="btn sm"
                     onClick={() => {
@@ -1098,6 +1078,11 @@ export function Settings(): React.JSX.Element {
                     Import a file
                   </button>
                 </div>
+                <SchemePicker
+                  value={settings.terminalScheme}
+                  custom={settings.terminalCustomSchemes}
+                  onChange={(id) => setSettings({ terminalScheme: id })}
+                />
               </div>
               <SettingSwitch
                 label="Cursor blink"
