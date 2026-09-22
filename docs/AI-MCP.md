@@ -501,7 +501,10 @@ Every gated action — allowed outright, approved, denied, or failed — is appe
 `opsmaxx-ai-audit.jsonl` (`auditLog.ts`) as exactly one JSON object per call, including a call
 whose connection fails after it was allowed (`tests/auditOneRowPerCall.integration.test.ts`). A
 refusal by the policy itself is shown as **Blocked by policy** with the rule that refused it, never
-as allowed. Rows are written one per line, **append-only** (a crash
+as allowed — including an `ask` on a call that names no single server (the fleet-wide reads), which
+has nobody to put the question to and is refused. A request OpsMaxx declined to put to anyone,
+because the session already had too many open or the same action was just denied, is shown as
+**Denied — not asked**, never as a refusal by you. Rows are written one per line, **append-only** (a crash
 mid-write can corrupt at most the last line). Every free-text field (`action`, `error`) is passed
 through the same redaction (`secretRedaction.ts`) used for tool output before it's written, so the
 audit trail itself never becomes a place secrets end up.

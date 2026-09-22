@@ -562,6 +562,12 @@ export type AuditApproval =
   | 'approved-earlier'
   | 'denied'
   | 'timeout'
+  /**
+   * OpsMaxx declined to put the question to anyone: the session already had
+   * too many approval requests open, or the same action was denied moments
+   * ago. The action did not happen, and nobody decided that it should not.
+   */
+  | 'not-asked'
 export type AuditResult = 'success' | 'error' | 'denied'
 
 export interface AuditEntry {

@@ -41,6 +41,7 @@ const { setAssignment, saveGroup, getGroup, resetPolicyCacheForTests } = await i
 const { setMcpConfig, createSession, resetMcpAuthForTests } = await import('../src/main/services/mcpAuth')
 const { startMcpServer, stopMcpServer } = await import('../src/main/services/mcpServer')
 const { listAudit } = await import('../src/main/services/auditLog')
+const { onApprovalEvent, respondToApproval, resetApprovalVolumeForTests } = await import('../src/main/services/approvals')
 const { auditOutcome } = await import('../src/renderer/src/components/ai/auditOutcome')
 
 const PORT = 18877
@@ -97,7 +98,15 @@ afterAll(async () => await stopMcpServer())
 beforeEach(() => {
   sshOk = true
   sftpOk = true
+  resetApprovalVolumeForTests()
 })
+
+/** Re-save the open group with some capabilities changed, for one test. */
+function withOpen(changes: Record<string, 'allow' | 'ask' | 'deny'>): () => void {
+  const before = getGroup(OPEN)!
+  saveGroup({ ...before, capabilities: { ...before.capabilities, ...changes } })
+  return () => saveGroup(before)
+}
 
 async function session(): Promise<{ c: Client; id: string }> {
   const { token, session: s } = createSession({
@@ -178,6 +187,55 @@ describe('a refusal by the policy reads as one', () => {
       // The rule that refused it is named, not paraphrased.
       expect(outcome.detail).toContain(rows[0].error)
     } finally {
+      await c.close()
+    }
+  })
+})
+
+// An `ask` on a call that names no server -- the fleet-wide reads pass
+// serverId null -- used to be refused with no row at all.
+describe('an ask with no server to name', () => {
+  it('is refused with one row that reads as the policy\u2019s answer', async () => {
+    const restore = withOpen({ fleetRead: 'ask' })
+    const { c, id } = await session()
+    try {
+      expect(await call(c, 'fleet_inventory', {})).toMatch(/Denied/)
+      const rows = rowsFor(id)
+      expect(rows).toHaveLength(1)
+      expect(rows[0]).toMatchObject({ approval: 'not-required', result: 'denied', serverId: null })
+      expect(auditOutcome(rows[0]).label).toBe('Blocked by policy')
+    } finally {
+      restore()
+      await c.close()
+    }
+  })
+})
+
+// `refused` -- the deny cooldown or a full queue -- is OpsMaxx declining to
+// ask. It used to be written as `denied` and read "You refused this request".
+describe('a request OpsMaxx declined to ask', () => {
+  it('is recorded as not asked, never as the operator\u2019s refusal', async () => {
+    const restore = withOpen({ terminal: 'ask' })
+    const off = onApprovalEvent((e) => {
+      if (e.type === 'created') respondToApproval(e.request.id, 'denied')
+    })
+    const { c, id } = await session()
+    try {
+      // Denied by the operator, which starts the cooldown on this subject...
+      await call(c, 'execute_command', { serverName: 'Box', command: 'uptime' })
+      // ...so the same call straight after is refused without a prompt.
+      expect(await call(c, 'execute_command', { serverName: 'Box', command: 'uptime' })).toMatch(/did not ask/)
+      const [refused, denied] = rowsFor(id)
+      expect(denied.approval).toBe('denied')
+      expect(auditOutcome(denied).label).toBe('Denied')
+      expect(refused).toMatchObject({ approval: 'not-asked', result: 'denied' })
+      const outcome = auditOutcome(refused)
+      expect(outcome.label).toBe('Denied — not asked')
+      expect(outcome.detail).not.toMatch(/You refused/)
+      expect(outcome.detail).toMatch(/did not ask/)
+    } finally {
+      off()
+      restore()
       await c.close()
     }
   })

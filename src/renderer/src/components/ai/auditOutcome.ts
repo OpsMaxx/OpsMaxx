@@ -43,6 +43,19 @@ export function auditOutcome(e: Pick<AuditEntry, 'approval' | 'result' | 'exitCo
   if (e.approval === 'denied') {
     return { label: 'Denied', decidedBy: 'you', tone: 'danger', detail: 'You refused this request.' }
   }
+  // Refused without asking anyone -- the queue was full, or the same thing was
+  // just denied. It used to be written as `denied` and read "You refused this
+  // request", about a request nobody was shown.
+  if (e.approval === 'not-asked') {
+    return {
+      label: 'Denied — not asked',
+      decidedBy: 'policy',
+      tone: 'warn',
+      detail: e.error
+        ? `${e.error}. Nobody was shown this request.`
+        : 'OpsMaxx did not ask anyone about this request, and it did not run.'
+    }
+  }
 
   // Refused by the policy itself, before anything was asked or allowed.
   //

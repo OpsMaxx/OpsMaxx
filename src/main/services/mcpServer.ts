@@ -890,7 +890,27 @@ async function gate(
 
   if (check.decision === 'ask') {
     if (!ctx.serverId || !ctx.serverName || !ctx.capability || !ctx.workspaceId || !ctx.workspaceName) {
-      return { ok: false, result: errorText('Denied: this action requires approval but has no server context.') }
+      // An approval names one server, and this call names none -- the
+      // fleet-wide reads pass serverId null -- so there is nobody to ask and
+      // it is refused. It used to be refused with no audit row at all, which
+      // made an `ask` on fleetRead, backupRead or ciRead a silent, unrecorded
+      // refusal. Recorded now as what it is: the policy's answer, not a
+      // human's.
+      const reason = 'this action requires approval, and an approval needs a single server to name, which this call does not have'
+      recordAudit({
+        agentName: ctx.session.agentName,
+        sessionId: ctx.session.id,
+        workspaceId: ctx.workspaceId,
+        workspaceName: ctx.workspaceName,
+        serverId: ctx.serverId,
+        serverName: ctx.serverName,
+        action: ctx.action,
+        capability: ctx.capability,
+        approval: 'not-required',
+        result: 'denied',
+        error: reason
+      })
+      return { ok: false, result: errorText(`Denied: ${reason}.`) }
     }
     // Already answered for this capability on this server, in this session.
     //
@@ -986,11 +1006,16 @@ async function gate(
         serverName: ctx.serverName,
         action: ctx.action,
         capability: ctx.capability,
-        // A refusal is recorded as the denial it was: the action did not
-        // happen. What the audit cannot say is that nobody was asked, so the
-        // agent is told that instead -- see ApprovalDecision in approvals.ts.
-        approval: decision === 'refused' ? 'denied' : decision,
-        result: 'denied'
+        // `refused` is OpsMaxx declining to ask -- too many requests open, or
+        // this one denied moments ago -- and it used to be written as
+        // `denied`, which the audit view rendered "You refused this request".
+        // Nobody was asked. `not-asked` says so, and says why.
+        approval: decision === 'refused' ? 'not-asked' : decision,
+        result: 'denied',
+        error:
+          decision === 'refused'
+            ? 'OpsMaxx did not ask: this session already had too many approval requests open, or the same action was denied moments ago'
+            : undefined
       })
       if (decision === 'refused') {
         return {
@@ -4144,8 +4169,11 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (permitted.length === 0) {
         return errorText('This session is not permitted to read the fleet in any of its workspaces.')
       }
-      // The strictest surviving decision governs the prompt: if any permitted
-      // workspace says ask, the human is asked once for the whole call.
+      // The strictest surviving decision governs. If any permitted workspace
+      // says ask, the call is REFUSED, not asked: an approval names one server
+      // and this call names none, so gate() has nobody to put it to (and
+      // records the refusal). Making the fleet-wide reads askable is its own
+      // piece of work.
       const check = permitted
         .map((w) => effectiveWorkspaceCapability(auth.session, w.id, 'fleetRead'))
         .reduce((strictest, d) => (d.decision === 'ask' ? d : strictest))

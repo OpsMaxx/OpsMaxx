@@ -209,10 +209,10 @@ export interface CreateApprovalInput {
 /**
  * `refused` is OpsMaxx declining to ask, not a human declining the action.
  *
- * Kept out of AuditApproval deliberately: the audit log records it as `denied`,
- * which is what happened to the action, while gate() tells the agent the
- * separate thing that is true of it -- nobody was asked, and retrying now will
- * be refused again.
+ * The audit log records it as `not-asked` -- the action did not happen, and no
+ * human decided that it should not -- and gate() tells the agent the same:
+ * nobody was asked, and retrying now will be refused again. It used to be
+ * written as `denied`, which the audit view read as the operator's refusal.
  */
 export type ApprovalDecision = 'approved' | 'approved-for-session' | 'denied' | 'timeout' | 'refused'
 
