@@ -950,8 +950,13 @@ const api = {
       ipcRenderer.invoke('sftp:rename', key, from, to),
     remove: (key: string, path: string, dir: boolean): Promise<SftpResult> =>
       ipcRenderer.invoke('sftp:delete', key, path, dir),
-    upload: (key: string, localPaths: string[], remoteDir: string): Promise<SftpResult<SftpUploadSummary>> =>
-      ipcRenderer.invoke('sftp:upload', key, localPaths, remoteDir),
+    upload: (
+      key: string,
+      localPaths: string[],
+      remoteDir: string,
+      // Basenames the user agreed may be overwritten in place.
+      inPlace?: string[]
+    ): Promise<SftpResult<SftpUploadSummary>> => ipcRenderer.invoke('sftp:upload', key, localPaths, remoteDir, inPlace),
     download: (key: string, remotePaths: string[], localDir: string): Promise<SftpResult<SftpDownloadSummary>> =>
       ipcRenderer.invoke('sftp:download', key, remotePaths, localDir),
     // Stops the running upload or download on this key. Queued ones are the

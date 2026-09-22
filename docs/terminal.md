@@ -37,7 +37,13 @@ progress bar, and **Clear queue** drops it. **Cancel** stops the running transfe
   over it only when complete, so a cancelled or failed upload never leaves the
   file that was already there half-replaced. On a server without atomic rename
   (Windows OpenSSH, proftpd), the old file is first moved aside and is put back
-  if the new one cannot take its place. Cancelling removes the temporary
+  if the new one cannot take its place. The new file keeps the old one's
+  permissions, owner and group, and uploading onto a symlink replaces the file
+  it points to, not the link.
+- Some files can only be **overwritten in place**: the folder does not let a
+  temporary file be created beside them, or the new copy could not be given
+  the old one's owner. OpsMaxx asks first, because an overwrite in place that
+  fails or is cancelled can leave the file incomplete, and says so if it does. Cancelling removes the temporary
   copy; if it cannot (the connection has gone), OpsMaxx names the file left
   behind. Copies in this machine's Files view work the same way.
 - **Cancel** returns at once even on a connection that has stopped answering,

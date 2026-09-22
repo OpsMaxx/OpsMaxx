@@ -16,6 +16,31 @@ import type { SshConnectConfig } from '../src/shared/ssh'
 
 type Cb = (err?: Error | null) => void
 
+/**
+ * The server's files, shared by every channel as a real server's are. Only
+ * what the upload path inspects: mode, owner, and whether it is a link.
+ */
+interface RemoteNode {
+  mode: number
+  uid: number
+  gid: number
+  link?: string
+}
+let remote = new Map<string, RemoteNode>()
+// Folders the uploader may not create files in.
+let readonlyDirs = new Set<string>()
+// Whether this user may chown (they may not, unless root).
+let chownDenied = false
+const ME = { uid: 1000, gid: 1000 }
+const sftpError = (code: number, message: string): Error => Object.assign(new Error(message), { code })
+const statsOf = (n: RemoteNode): object => ({
+  mode: (n.link ? 0o120000 : 0o100000) | n.mode,
+  uid: n.uid,
+  gid: n.gid,
+  isSymbolicLink: () => !!n.link
+})
+const parent = (p: string): string => p.slice(0, p.lastIndexOf('/')) || '/'
+
 class FakeSftp {
   pending: Cb[] = []
   unlinked: string[] = []
@@ -49,8 +74,10 @@ class FakeSftp {
     this.pending.push(cb)
     this.markStarted()
   }
-  fastPut(_local: string, remote: string, _opts: unknown, cb: Cb): void {
-    this.put.push(remote)
+  fastPut(_local: string, path: string, _opts: unknown, cb: Cb): void {
+    // Opens with 'w': an existing file keeps its mode and owner.
+    if (!remote.has(path)) remote.set(path, { mode: 0o644, ...ME })
+    this.put.push(path)
     this.pending.push(cb)
     this.markStarted()
   }
@@ -60,6 +87,44 @@ class FakeSftp {
   ext_openssh_rename(from: string, to: string, cb: Cb): void {
     if (!this.posixRename) throw new Error('Server does not support this extended request')
     this.renamed.push([from, to])
+    this.move(from, to)
+    cb(null)
+  }
+  private move(from: string, to: string): void {
+    const n = remote.get(from)
+    remote.delete(from)
+    if (n) remote.set(to, n)
+  }
+  lstat(path: string, cb: (err: Error | null, s?: object) => void): void {
+    const n = remote.get(path)
+    if (n) cb(null, statsOf(n))
+    else cb(sftpError(2, 'No such file'))
+  }
+  readlink(path: string, cb: (err: Error | null, l?: string) => void): void {
+    cb(null, remote.get(path)?.link)
+  }
+  open(path: string, _flags: string, cb: (err: Error | null, h?: Buffer) => void): void {
+    if (readonlyDirs.has(parent(path))) return cb(sftpError(3, 'Permission denied'))
+    if (remote.has(path)) return cb(sftpError(4, 'Failure'))
+    remote.set(path, { mode: 0o644, ...ME })
+    cb(null, Buffer.from(path))
+  }
+  fchmod(h: Buffer, mode: number, cb: Cb): void {
+    const n = remote.get(h.toString())
+    if (n) n.mode = mode
+    cb(null)
+  }
+  fstat(h: Buffer, cb: (err: Error | null, s?: object) => void): void {
+    const n = remote.get(h.toString())
+    if (n) cb(null, statsOf(n))
+    else cb(sftpError(2, 'No such file'))
+  }
+  fchown(h: Buffer, uid: number, gid: number, cb: Cb): void {
+    if (chownDenied) return cb(sftpError(3, 'Permission denied'))
+    Object.assign(remote.get(h.toString()) ?? {}, { uid, gid })
+    cb(null)
+  }
+  close(_h: Buffer, cb: Cb): void {
     cb(null)
   }
   // Per-call outcomes for plain rename, in order; absent means success.
@@ -68,12 +133,21 @@ class FakeSftp {
   held: (() => void)[] | null = null
   rename(from: string, to: string, cb: Cb): void {
     this.renamed.push([from, to])
-    const err = this.renameErrors.shift() ?? null
-    if (this.held) this.held.push(() => cb(err))
-    else cb(err)
+    const scripted = this.renameErrors.shift() ?? null
+    const run = (): void => {
+      if (scripted) return cb(scripted)
+      if (!remote.has(from)) return cb(sftpError(2, 'No such file'))
+      // Plain SFTP rename will not replace an existing file.
+      if (remote.has(to)) return cb(sftpError(4, 'Failure'))
+      this.move(from, to)
+      cb(null)
+    }
+    if (this.held) this.held.push(run)
+    else run()
   }
   unlink(path: string, cb: Cb): void {
     this.unlinked.push(path)
+    remote.delete(path)
     cb(null)
   }
   end(): void {
@@ -114,6 +188,9 @@ let dir: string
 beforeEach(async () => {
   channels = []
   refuseChannel = false
+  remote = new Map()
+  readonlyDirs = new Set()
+  chownDenied = false
   dir = mkdtempSync(join(tmpdir(), 'sp-sftp-xfer-'))
   await sftpConnect(KEY, cfg)
 })
@@ -326,6 +403,7 @@ describe('uploads', () => {
     async function swap(prepare: (ch: FakeSftp) => void): Promise<{ ch: FakeSftp; tmp: string; r: Awaited<ReturnType<typeof sftpUpload>> }> {
       const local = join(dir, 'app.conf')
       writeFileSync(local, 'x')
+      remote.set('/srv/app.conf', { mode: 0o644, ...ME })
       const run = sftpUpload(wc, KEY, [local], '/srv')
       await started()
       const ch = transferCh()
@@ -372,6 +450,7 @@ describe('uploads', () => {
     it('finishes the swap when Cancel lands in the middle of it', async () => {
       const local = join(dir, 'app.conf')
       writeFileSync(local, 'x')
+      remote.set('/srv/app.conf', { mode: 0o644, ...ME })
       const run = sftpUpload(wc, KEY, [local], '/srv')
       await started()
       const ch = transferCh()
@@ -417,3 +496,95 @@ describe('uploads', () => {
     expect(transferCh().unlinked).toEqual([])
   })
 })
+
+/**
+ * What the old in-place write kept, and a rename does not.
+ *
+ * Writing into the target preserved its mode and owner, wrote THROUGH a
+ * symlink, and needed only the file to be writable. A temp-then-rename swap
+ * loses all three unless it is made to keep them.
+ */
+describe('what an upload keeps of the file it replaces', () => {
+  async function upload(name: string, dirPath: string, inPlace?: string[]): Promise<Awaited<ReturnType<typeof sftpUpload>>> {
+    const local = join(dir, name)
+    writeFileSync(local, 'new')
+    const before = channels.length
+    const run = sftpUpload(wc, KEY, [local], dirPath, inPlace)
+    // Let each put complete as soon as it starts.
+    await vi.waitFor(() => expect(channels.length).toBeGreaterThan(before))
+    const ch = channels[before]
+    const tick = setInterval(() => ch.pending.shift()?.(null), 1)
+    try {
+      return await run
+    } finally {
+      clearInterval(tick)
+    }
+  }
+
+  it('keeps the permissions, so a 0755 script stays executable', async () => {
+    remote.set('/srv/deploy.sh', { mode: 0o755, ...ME })
+    const r = await upload('deploy.sh', '/srv')
+    expect(r.data?.uploaded).toEqual(['deploy.sh'])
+    expect(remote.get('/srv/deploy.sh')?.mode).toBe(0o755)
+  })
+
+  it('keeps the owner and group when they can be given', async () => {
+    remote.set('/srv/app.conf', { mode: 0o640, uid: 1000, gid: 33 })
+    await upload('app.conf', '/srv')
+    expect(remote.get('/srv/app.conf')).toMatchObject({ mode: 0o640, uid: 1000, gid: 33 })
+  })
+
+  it('asks rather than silently taking ownership when they cannot', async () => {
+    remote.set('/srv/app.conf', { mode: 0o644, uid: 0, gid: 0 })
+    chownDenied = true
+    const r = await upload('app.conf', '/srv')
+    expect(r.data?.needsInPlace).toEqual([{ name: 'app.conf', reason: 'owner' }])
+    expect(r.data?.uploaded).toEqual([])
+    // Nothing was sent, and nothing is left behind.
+    expect(transferCh().put).toEqual([])
+    expect([...remote.keys()]).toEqual(['/srv/app.conf'])
+  })
+
+  it('overwrites in place, keeping the owner, once the user agrees', async () => {
+    remote.set('/srv/app.conf', { mode: 0o644, uid: 0, gid: 0 })
+    chownDenied = true
+    const r = await upload('app.conf', '/srv', ['app.conf'])
+    expect(r.data?.uploaded).toEqual(['app.conf'])
+    expect(transferCh().put).toEqual(['/srv/app.conf'])
+    expect(remote.get('/srv/app.conf')).toMatchObject({ uid: 0, gid: 0 })
+  })
+
+  it('writes through a symlink instead of replacing it', async () => {
+    remote.set('/etc/nginx/sites-enabled/foo', { mode: 0o777, ...ME, link: '../sites-available/foo' })
+    remote.set('/etc/nginx/sites-available/foo', { mode: 0o644, ...ME })
+    const r = await upload('foo', '/etc/nginx/sites-enabled')
+    expect(r.data?.uploaded).toEqual(['foo'])
+    expect(remote.get('/etc/nginx/sites-enabled/foo')?.link).toBe('../sites-available/foo')
+    expect(transferCh().renamed.at(-1)?.[1]).toBe('/etc/nginx/sites-available/foo')
+    // The temporary file went beside the real file, not beside the link.
+    expect(transferCh().put[0]).toMatch(/^\/etc\/nginx\/sites-available\/\.foo\.opx-part-/)
+  })
+
+  it('asks before overwriting in place when the folder is not writable', async () => {
+    remote.set('/srv/app.conf', { mode: 0o644, ...ME })
+    readonlyDirs.add('/srv')
+    const r = await upload('app.conf', '/srv')
+    expect(r.data?.needsInPlace).toEqual([{ name: 'app.conf', reason: 'dir' }])
+    expect(r.data?.failed).toEqual([])
+    const again = await upload('app.conf', '/srv', ['app.conf'])
+    expect(again.data?.uploaded).toEqual(['app.conf'])
+  })
+
+  it('reports an in-place overwrite that was cancelled as possibly incomplete', async () => {
+    remote.set('/srv/app.conf', { mode: 0o644, ...ME })
+    const local = join(dir, 'app.conf')
+    writeFileSync(local, 'new')
+    const run = sftpUpload(wc, KEY, [local], '/srv', ['app.conf'])
+    await started()
+    sftpCancel(KEY)
+    const r = await run
+    expect(r.data?.incomplete).toEqual(['/srv/app.conf'])
+    expect(remote.has('/srv/app.conf')).toBe(true)
+  })
+})
+

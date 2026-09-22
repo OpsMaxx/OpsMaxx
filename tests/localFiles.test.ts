@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync, readFileSync, statSync } from 'node:fs'
+import { chmodSync, lstatSync, mkdtempSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync, readFileSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import type { WebContents } from 'electron'
@@ -237,6 +237,55 @@ describe('copying files in', () => {
     const down = await localFilesDownload(wc(), 'k', [src], join(dir, 'dest'))
     expect(down.data?.saved).toEqual([name])
     expect(readdirSync(join(dir, 'dest'))).toEqual([name])
+  })
+
+  // What the old in-place write kept of the file it replaced, and the temporary
+  // file plus rename must keep as well.
+  describe('keeping what the replaced file had', () => {
+    it('keeps its permissions', async () => {
+      mkdirSync(join(dir, 'dest'))
+      const dest = join(dir, 'dest', 'deploy.sh')
+      writeFileSync(dest, 'old', { mode: 0o755 })
+      chmodSync(dest, 0o755)
+      const src = join(dir, 'deploy.sh')
+      writeFileSync(src, 'new', { mode: 0o644 })
+      const r = await localFilesUpload(wc(), 'k', [src], join(dir, 'dest'))
+      expect(r.data?.uploaded).toEqual(['deploy.sh'])
+      expect(statSync(dest).mode & 0o777).toBe(0o755)
+      expect(readFileSync(dest, 'utf8')).toBe('new')
+    })
+
+    it('writes through a symlink instead of replacing it', async () => {
+      mkdirSync(join(dir, 'real'))
+      mkdirSync(join(dir, 'dest'))
+      writeFileSync(join(dir, 'real', 'site.conf'), 'old')
+      symlinkSync(join(dir, 'real', 'site.conf'), join(dir, 'dest', 'site.conf'))
+      const src = join(dir, 'site.conf')
+      writeFileSync(src, 'new')
+      const r = await localFilesUpload(wc(), 'k', [src], join(dir, 'dest'))
+      expect(r.data?.uploaded).toEqual(['site.conf'])
+      expect(lstatSync(join(dir, 'dest', 'site.conf')).isSymbolicLink()).toBe(true)
+      expect(readFileSync(join(dir, 'real', 'site.conf'), 'utf8')).toBe('new')
+    })
+
+    it('asks, then overwrites in place, when only the file is writable', async () => {
+      mkdirSync(join(dir, 'dest'))
+      const dest = join(dir, 'dest', 'app.conf')
+      writeFileSync(dest, 'old')
+      chmodSync(join(dir, 'dest'), 0o555)
+      const src = join(dir, 'app.conf')
+      writeFileSync(src, 'new')
+      try {
+        const r = await localFilesUpload(wc(), 'k', [src], join(dir, 'dest'))
+        expect(r.data?.needsInPlace).toEqual([{ name: 'app.conf', reason: 'dir' }])
+        expect(readFileSync(dest, 'utf8')).toBe('old')
+        const again = await localFilesUpload(wc(), 'k', [src], join(dir, 'dest'), ['app.conf'])
+        expect(again.data?.uploaded).toEqual(['app.conf'])
+        expect(readFileSync(dest, 'utf8')).toBe('new')
+      } finally {
+        chmodSync(join(dir, 'dest'), 0o755)
+      }
+    })
   })
 
   // Download from this machine is a copy into a picked folder, under the same

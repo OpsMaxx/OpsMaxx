@@ -2,7 +2,7 @@ import type { WebContents } from 'electron'
 import { basename, join, posix } from 'node:path'
 import { statSync } from 'node:fs'
 import { rename, rm } from 'node:fs/promises'
-import type { Client, SFTPWrapper, FileEntry } from 'ssh2'
+import type { Client, SFTPWrapper, FileEntry, Stats } from 'ssh2'
 import { acquire, release, type PooledConnection } from './ssh'
 import { reserveLocalFile, safeLocalName, tempName } from './transferName'
 import type {
@@ -170,6 +170,11 @@ interface Transfer {
    * point: once the old file has been moved aside, stopping half-way leaves the
    * user's file under a name they do not know. So a Cancel that lands then is
    * recorded, and the channel is closed only once the swap has finished.
+   *
+   * The price: on a link that stalls during the swap itself — two or three
+   * renames, one round trip each — Cancel waits for it like everything else
+   * on that connection. Accepted, because the alternative is abandoning the
+   * user's file half-moved.
    */
   committing: boolean
   /** This transfer's own channel, once open. */
@@ -329,17 +334,104 @@ function removeRemote(sftp: SFTPWrapper, path: string): Promise<boolean> {
   ])
 }
 
+const DENIED_CODE = 3 // SFTP status PERMISSION_DENIED
+
+// An ssh2 callback that also carries a value, as a promise of [error, value].
+function ask<T>(run: (cb: (err: Error | null | undefined, v: T) => void) => void): Promise<[Error | null, T]> {
+  return new Promise((resolve) => run((err, v) => resolve([err ?? null, v])))
+}
+
+/** Where an upload goes, and how it gets there. */
+interface UploadPlan {
+  /** The file being replaced, with any symlinks to it followed. */
+  target: string
+  /** The temporary file the upload is written to, when not in place. */
+  tmp?: string
+  /** Why it cannot be replaced by a new copy; nothing is left open when set. */
+  needs?: 'dir' | 'owner'
+}
+
+/**
+ * Decide how an upload onto `path` will be written, before a byte is moved.
+ *
+ * Normally to a temporary file beside the target that `replace` swaps in when
+ * it is complete. But a rename replaces a FILE, where the in-place write this
+ * used to be did not, and three things that write kept are kept here:
+ *
+ *  - A symlink (sites-enabled/foo) is followed to the file it names, and that
+ *    file is replaced — not the link, which a rename would turn into a regular
+ *    file.
+ *  - The new copy gets the old one's permissions, so deploy.sh stays 0755
+ *    rather than the server's umask default, and its owner and group. When
+ *    they cannot be given, the copy is not made: the file would silently
+ *    become the uploader's. `needs: 'owner'`.
+ *  - A writable file in a folder that is not writable cannot have a temporary
+ *    file beside it. `needs: 'dir'`.
+ *
+ * Either `needs` goes back to the view, which asks before overwriting in
+ * place and sends the file again with `inPlace`. The temporary file is created
+ * empty here with `wx` and its attributes set on the handle, so every check
+ * is done before the upload starts rather than after it has finished.
+ */
+async function planUpload(ch: SFTPWrapper, path: string, inPlace: boolean): Promise<UploadPlan> {
+  let target = path
+  let existing: Stats | undefined
+  for (let hops = 0; ; hops++) {
+    const [err, st] = await ask<Stats>((cb) => ch.lstat(target, cb))
+    // Missing, or a dangling link: writing through it creates what it names,
+    // which is what the in-place write did.
+    if (err && isMissing(err)) break
+    if (err) throw err
+    if (!st.isSymbolicLink()) {
+      existing = st
+      break
+    }
+    if (hops === 40) throw new Error('too many levels of symbolic links')
+    const [lerr, link] = await ask<string>((cb) => ch.readlink(target, cb))
+    if (lerr) throw lerr
+    target = posix.resolve(posix.dirname(target), link)
+  }
+  if (inPlace) return { target }
+
+  const tmp = remoteJoin(posix.dirname(target), tempName(posix.basename(target)))
+  const [oerr, handle] = await ask<Buffer>((cb) => ch.open(tmp, 'wx', cb))
+  if (oerr) {
+    if (existing && (oerr as { code?: number }).code === DENIED_CODE) return { target, needs: 'dir' }
+    throw oerr
+  }
+  let needs: UploadPlan['needs']
+  if (existing) {
+    const old = existing
+    const chmod = await call((cb) => ch.fchmod(handle, old.mode & 0o7777, cb))
+    const [serr, mine] = await ask<Stats>((cb) => ch.fstat(handle, cb))
+    const chown =
+      chmod || serr || (mine.uid === old.uid && mine.gid === old.gid)
+        ? null
+        : await call((cb) => ch.fchown(handle, old.uid, old.gid, cb))
+    if (chmod || serr || chown) needs = 'owner'
+  }
+  await call((cb) => ch.close(handle, cb))
+  if (needs) {
+    await call((cb) => ch.unlink(tmp, cb))
+    return { target, needs }
+  }
+  return { target, tmp }
+}
+
 // Uploads local files into a remote directory, one at a time so progress is
 // meaningful and a failure part-way through still reports what did land.
 //
 // Each file goes to a temporary name and is swapped over the target only once
 // it is complete, so a cancelled or failed upload never leaves the target
 // truncated — the file that was there before is untouched until the last step.
+// `inPlace` names the files the user has agreed may be overwritten directly
+// instead, because planUpload found they cannot be swapped.
 export async function sftpUpload(
   wc: WebContents,
   key: string,
   localPaths: string[],
-  remoteDir: string
+  remoteDir: string,
+  inPlace: string[] = []
 ): Promise<SftpResult<SftpUploadSummary>> {
   const conn = conns.get(key)
   if (!conn) return { ok: false, error: 'not connected' }
@@ -349,6 +441,8 @@ export async function sftpUpload(
   const uploaded: string[] = []
   const failed: { name: string; error: string }[] = []
   const leftover: string[] = []
+  const needsInPlace: { name: string; reason: 'dir' | 'owner' }[] = []
+  const incomplete: string[] = []
 
   try {
     const ch = await channelFor(conn, t)
@@ -356,40 +450,59 @@ export async function sftpUpload(
       const local = localPaths[i]
       const name = basename(local)
       const send = progressSender(wc, key, name, i + 1, localPaths.length, 'up')
-      let tmp: string | undefined
+      let planning: Promise<UploadPlan> | undefined
+      let plan: UploadPlan | undefined
       let put: Promise<void> | undefined
       try {
         // Directories would need a recursive walk; refuse them explicitly rather
         // than failing later with an opaque EISDIR.
         if (statSync(local).isDirectory()) throw new Error('folders cannot be uploaded yet')
+        planning = planUpload(ch, remoteJoin(remoteDir, name), inPlace.includes(name))
+        plan = await Promise.race([planning, t.stop])
+        if (plan.needs) {
+          needsInPlace.push({ name, reason: plan.needs })
+          continue
+        }
         send(0, statSync(local).size)
-        tmp = remoteJoin(remoteDir, tempName(name))
-        put = xfer(ch, 'put', local, tmp, send)
+        put = xfer(ch, 'put', local, plan.tmp ?? plan.target, send)
         await Promise.race([put, t.stop])
-        // Not raced against Cancel: see Transfer.committing.
-        t.committing = true
-        try {
-          leftover.push(...(await replace(ch, tmp, remoteJoin(remoteDir, name), name)))
-        } finally {
-          t.committing = false
-          if (t.cancelled) ch.end()
+        if (plan.tmp) {
+          // Not raced against Cancel: see Transfer.committing.
+          t.committing = true
+          try {
+            leftover.push(...(await replace(ch, plan.tmp, plan.target, posix.basename(plan.target))))
+          } finally {
+            t.committing = false
+            if (t.cancelled) ch.end()
+          }
         }
         uploaded.push(name)
       } catch (err) {
         if (err instanceof Stranded) leftover.push(...err.keep)
-        else if (tmp) {
+        else if (plan && !plan.tmp) {
+          // Overwritten in place, as agreed, and stopped part-way.
+          if (put) incomplete.push(plan.target)
+        } else {
           // The temporary file is this upload's and nothing else holds the
           // data in it. After a cancel the transfer's own channel is closing,
           // so the cached one does the removing — and does it again once the
-          // cut-off transfer settles, because an open already on the wire can
-          // create the file after the first removal has run.
-          const partial = tmp
-          const remove = (): Promise<boolean> => {
+          // cut-off work settles, because an open already on the wire can
+          // create the file after the first removal has run. That includes
+          // planning, which creates the file before the upload starts.
+          const remove = (partial: string): Promise<boolean> => {
             const sftp = t.cancelled ? conns.get(key)?.sftp : ch
             return sftp ? removeRemote(sftp, partial) : Promise.resolve(false)
           }
-          if (!(await remove())) leftover.push(partial)
-          if (t.cancelled) void put?.then(remove, remove)
+          const partial = plan?.tmp
+          if (partial) {
+            if (!(await remove(partial))) leftover.push(partial)
+            const again = (): Promise<boolean> => remove(partial)
+            if (t.cancelled) void put?.then(again, again)
+          } else if (t.cancelled)
+            void planning?.then(
+              (p) => (p.tmp ? remove(p.tmp) : undefined),
+              () => {}
+            )
         }
         if (t.cancelled) break
         failed.push({ name, error: msg(err) })
@@ -401,10 +514,18 @@ export async function sftpUpload(
     finish(key, t)
   }
 
+  const some = <T,>(xs: T[]): T[] | undefined => (xs.length ? xs : undefined)
   return {
     ok: failed.length === 0 && !t.cancelled,
     error: failed.length ? `${failed[0].name}: ${failed[0].error}` : undefined,
-    data: { uploaded, failed, cancelled: t.cancelled || undefined, leftover: leftover.length ? leftover : undefined }
+    data: {
+      uploaded,
+      failed,
+      cancelled: t.cancelled || undefined,
+      leftover: some(leftover),
+      needsInPlace: some(needsInPlace),
+      incomplete: some(incomplete)
+    }
   }
 }
 

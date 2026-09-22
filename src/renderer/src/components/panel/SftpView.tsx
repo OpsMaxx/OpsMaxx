@@ -28,7 +28,7 @@ import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import { classifyConnectionError, errorText } from '../../lib/connectionError'
 import { openSettings } from '../../store/nav'
 import type { Server } from '../../types'
-import type { SftpEntry, SftpProgress, SftpResult, SshAuth } from '../../../../shared/ssh'
+import type { SftpEntry, SftpProgress, SftpResult, SftpUploadSummary, SshAuth } from '../../../../shared/ssh'
 import { bridgeOn } from '../../lib/bridge'
 import { EmptyState } from '../common/EmptyState'
 
@@ -122,6 +122,16 @@ type Transfer = { kind: 'upload'; paths: string[]; dir: string } | { kind: 'down
 
 type OverwriteAnswer = 'overwrite' | 'skip' | 'cancel'
 
+/**
+ * Why the overwrite dialog is up. `exists`: files of these names are there.
+ * `unchecked`: the folder could not be listed, so they may be. `dir` and
+ * `owner`: main could not replace them with a new copy (see planUpload) and
+ * they can only be overwritten in place.
+ */
+type OverwriteWhy = 'exists' | 'unchecked' | 'dir' | 'owner'
+
+const IN_PLACE_RISK = 'If the transfer fails or is cancelled, the file may be left incomplete.'
+
 // The next few names in the queue, which is what tells the user their drop
 // was kept.
 function queueNames(queue: Transfer[]): string {
@@ -152,8 +162,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   const [overwrite, setOverwrite] = useState<{
     names: string[]
     dir: string
-    // The listing failed, so these MAY be there rather than are.
-    unchecked: boolean
+    why: OverwriteWhy
     answer: (a: OverwriteAnswer) => void
   } | null>(null)
   const [dropping, setDropping] = useState(false)
@@ -531,12 +540,12 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   const refresh = useRef<() => void>(() => {})
   refresh.current = () => void list(path)
 
-  const askOverwrite = (names: string[], dir: string, unchecked: boolean): Promise<OverwriteAnswer> =>
+  const askOverwrite = (names: string[], dir: string, why: OverwriteWhy): Promise<OverwriteAnswer> =>
     new Promise((resolve) =>
       setOverwrite({
         names,
         dir,
-        unchecked,
+        why,
         answer: (a) => {
           setOverwrite(null)
           resolve(a)
@@ -561,18 +570,60 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
     let chosen = paths
     const clashes = paths.map(baseName).filter((n) => there.has(n))
     if (clashes.length) {
-      const answer = await askOverwrite(clashes, dir, unchecked)
+      const answer = await askOverwrite(clashes, dir, unchecked ? 'unchecked' : 'exists')
       if (answer === 'cancel') return
       if (answer === 'skip') chosen = paths.filter((p) => !there.has(baseName(p)))
       if (!chosen.length) return
     }
-    // Shown immediately: the first step event only arrives once bytes move.
-    setProgress({ key, name: baseName(chosen[0]), transferred: 0, total: 0, index: 1, count: chosen.length })
-    const res = await window.opsmaxx?.sftp.upload(key, chosen, dir)
-    const done = res?.data?.uploaded.length ?? 0
-    const failed = res?.data?.failed ?? []
-    if (done) toast(`Uploaded ${done} file${done > 1 ? 's' : ''} to ${dir}`, 'ok')
-    for (const f of failed) {
+    const send = async (files: string[], inPlace?: string[]): Promise<SftpResult<SftpUploadSummary> | undefined> => {
+      // Shown immediately: the first step event only arrives once bytes move.
+      setProgress({ key, name: baseName(files[0]), transferred: 0, total: 0, index: 1, count: files.length })
+      return window.opsmaxx?.sftp.upload(key, files, dir, inPlace)
+    }
+    const res = await send(chosen)
+    const sum: SftpUploadSummary = {
+      uploaded: [...(res?.data?.uploaded ?? [])],
+      failed: [...(res?.data?.failed ?? [])],
+      cancelled: res?.data?.cancelled,
+      leftover: [...(res?.data?.leftover ?? [])],
+      incomplete: [...(res?.data?.incomplete ?? [])]
+    }
+    // Files main could not replace with a new copy go out again, in place —
+    // but only once the user has been told what that risks.
+    const again = sum.cancelled ? [] : (res?.data?.needsInPlace ?? [])
+    const approved: string[] = []
+    for (const why of ['dir', 'owner'] as const) {
+      const names = again.filter((x) => x.reason === why).map((x) => x.name)
+      if (names.length && (await askOverwrite(names, dir, why)) === 'overwrite') approved.push(...names)
+    }
+    if (approved.length) {
+      const second = await send(
+        chosen.filter((p) => approved.includes(baseName(p))),
+        approved
+      )
+      sum.uploaded.push(...(second?.data?.uploaded ?? []))
+      sum.failed.push(...(second?.data?.failed ?? []))
+      sum.leftover?.push(...(second?.data?.leftover ?? []))
+      sum.incomplete?.push(...(second?.data?.incomplete ?? []))
+      sum.cancelled ||= second?.data?.cancelled
+      if (!second?.ok && second?.error && !second.data) sum.failed.push({ name: approved[0], error: second.error })
+    }
+
+    const done = sum.uploaded.length
+    // One toast for how it ended. A Cancel that lands while a file is being
+    // swapped into place lets that swap finish (see sftpUpload), so "cancelled"
+    // and "uploaded" can both be true — said as what actually happened.
+    if (sum.cancelled)
+      toast(
+        !done
+          ? 'Upload cancelled.'
+          : done === chosen.length
+            ? 'Upload finished before it could be cancelled.'
+            : `Uploaded ${done} of ${chosen.length} files to ${dir}; the rest were cancelled.`,
+        'info'
+      )
+    else if (done) toast(`Uploaded ${done} file${done > 1 ? 's' : ''} to ${dir}`, 'ok')
+    for (const f of sum.failed) {
       // The summary reports basenames; the local file that produced one is
       // still in `chosen`, which is what makes a per-file retry possible.
       const local = chosen.find((x) => baseName(x) === f.name)
@@ -584,15 +635,17 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
           : undefined
       )
     }
-    // The target is untouched until an upload completes (see sftpUpload), so
-    // what a cancel or failure can leave is only a temporary copy — named here
-    // whenever removing one failed, rather than left for someone to find.
-    reportLeftover(res?.data?.leftover, 'on the server')
-    if (res?.data?.cancelled) {
-      toast('Upload cancelled.', 'info')
-      return
-    }
-    if (!done && !failed.length)
+    // A new copy leaves the target untouched until it is complete (see
+    // sftpUpload), so what a cancel or failure can leave is a temporary copy —
+    // named whenever removing one failed — or, for a file the user agreed to
+    // overwrite in place, the file itself, part-written.
+    reportLeftover(sum.leftover, 'on the server')
+    if (sum.incomplete?.length)
+      toast(
+        `${sum.incomplete.join(', ')} may be incomplete on the server: ${sum.incomplete.length === 1 ? 'it was' : 'they were'} being overwritten in place when the upload stopped.`,
+        'error'
+      )
+    if (!sum.cancelled && !done && !sum.failed.length && !again.length)
       toast(res?.error ? `Nothing was uploaded to ${dir} — ${res.error}` : `Nothing was uploaded to ${dir}.`, 'error', {
         label: 'Choose files',
         run: () => void pickAndUpload()
@@ -1058,21 +1111,35 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
 
       {overwrite && (
         <Modal
-          title="Replace files on the server?"
+          title={
+            overwrite.why === 'dir' || overwrite.why === 'owner'
+              ? 'Overwrite in place?'
+              : 'Replace files on the server?'
+          }
           subtitle={overwrite.dir}
-          onClose={() => overwrite.answer('cancel')}
-          cancelLabel="Cancel all"
+          // Closing an in-place question is a Skip: those files were the only
+          // ones left, so there is nothing else to cancel.
+          onClose={() => overwrite.answer(overwrite.why === 'dir' || overwrite.why === 'owner' ? 'skip' : 'cancel')}
+          cancelLabel={overwrite.why === 'dir' || overwrite.why === 'owner' ? null : 'Cancel all'}
           footer={
             <button className="btn secondary size-28" onClick={() => overwrite.answer('skip')}>
               Skip
             </button>
           }
-          confirm={{ label: 'Overwrite', destructive: true, onClick: () => overwrite.answer('overwrite') }}
+          confirm={{
+            label: overwrite.why === 'dir' || overwrite.why === 'owner' ? 'Overwrite in place' : 'Overwrite',
+            destructive: true,
+            onClick: () => overwrite.answer('overwrite')
+          }}
         >
           <p style={{ marginTop: 0 }}>
-            {overwrite.unchecked
+            {overwrite.why === 'unchecked'
               ? `Could not check ${overwrite.dir} for existing files, so any of these may replace one already there. Skip uploads none of them.`
-              : `${overwrite.names.length === 1 ? 'A file with this name is' : 'Files with these names are'} already in ${overwrite.dir}. Overwriting replaces ${overwrite.names.length === 1 ? 'it' : 'them'}; Skip uploads only the rest.`}
+              : overwrite.why === 'dir'
+                ? `This folder isn't writable, so the file can only be overwritten in place. ${IN_PLACE_RISK}`
+                : overwrite.why === 'owner'
+                  ? `A new copy could not be given the existing file's owner or permissions, so it can only be overwritten in place, which keeps them. ${IN_PLACE_RISK}`
+                  : `${overwrite.names.length === 1 ? 'A file with this name is' : 'Files with these names are'} already in ${overwrite.dir}. Overwriting replaces ${overwrite.names.length === 1 ? 'it' : 'them'}; Skip uploads only the rest.`}
           </p>
           <ul className="mono" style={{ fontSize: 12, maxHeight: 180, overflow: 'auto' }}>
             {overwrite.names.map((n) => (

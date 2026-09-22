@@ -144,6 +144,13 @@ export interface SftpUploadSummary {
   // Partial or temporary files that could not be removed, so the user is told
   // where they are rather than finding them later.
   leftover?: string[]
+  // Not uploaded, because they can only be overwritten IN PLACE — which risks
+  // a half-written file — and the view asks before that. `dir`: the folder
+  // does not let a temporary copy be created beside them. `owner`: a new copy
+  // could not be given the existing file's owner or permissions.
+  needsInPlace?: { name: string; reason: 'dir' | 'owner' }[]
+  // Overwritten in place and then stopped part-way, so possibly incomplete.
+  incomplete?: string[]
 }
 
 export interface SftpDownloadSummary {

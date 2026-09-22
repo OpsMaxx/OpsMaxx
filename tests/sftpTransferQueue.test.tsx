@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { stubBridge } from './setup/renderer'
+import { useToasts } from '../src/renderer/src/store/toast'
 import { SftpView } from '../src/renderer/src/components/panel/SftpView'
 import type { SftpEntry, SftpResult, SftpUploadSummary } from '../src/shared/ssh'
 
@@ -136,3 +137,57 @@ describe('overwrite', () => {
     expect(upload).not.toHaveBeenCalled()
   })
 })
+
+describe('files that can only be overwritten in place', () => {
+  const needs = (reason: 'dir' | 'owner'): SftpResult<SftpUploadSummary> => ({
+    ok: true,
+    data: { uploaded: [], failed: [], needsInPlace: [{ name: 'app.conf', reason }] }
+  })
+
+  it('asks, and sends them again in place when the user agrees', async () => {
+    const { upload, finish } = setup()
+    render(<SftpView tabId="t" />)
+    await screen.findByText('Empty directory')
+    await drop('app.conf')
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1))
+    await act(async () => finish(needs('dir')))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toMatch(/isn't writable, so the file can only be overwritten in place/)
+    expect(dialog.textContent).toMatch(/may be left incomplete/)
+    act(() => screen.getByText('Overwrite in place').click())
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(2))
+    expect(upload.mock.calls[1]).toEqual(['local', ['/local/app.conf'], '/srv', ['app.conf']])
+  })
+
+  it('sends nothing more when the user skips', async () => {
+    const { upload, finish } = setup()
+    render(<SftpView tabId="t" />)
+    await screen.findByText('Empty directory')
+    await drop('app.conf')
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1))
+    await act(async () => finish(needs('owner')))
+
+    expect((await screen.findByRole('dialog')).textContent).toMatch(/owner or permissions/)
+    act(() => screen.getByText('Skip').click())
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(upload).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('how an upload ended', () => {
+  // A cancel that lands during the final swap lets it finish, so the result
+  // is both "uploaded" and "cancelled". One toast, saying what happened.
+  it('says one accurate thing when the upload finished despite a cancel', async () => {
+    const { upload, finish } = setup()
+    render(<SftpView tabId="t" />)
+    await screen.findByText('Empty directory')
+    await drop('app.conf')
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1))
+    await act(async () => finish({ ok: false, data: { uploaded: ['app.conf'], failed: [], cancelled: true } }))
+
+    const messages = useToasts.getState().toasts.map((t) => t.message)
+    expect(messages).toEqual(['Upload finished before it could be cancelled.'])
+  })
+})
+

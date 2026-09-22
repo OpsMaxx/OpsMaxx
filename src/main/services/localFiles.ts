@@ -1,9 +1,12 @@
 import { basename, dirname, join, resolve as resolvePath, sep } from 'node:path'
 import { homedir } from 'node:os'
-import { createReadStream, createWriteStream, realpathSync } from 'node:fs'
+import { createReadStream, createWriteStream, realpathSync, type Stats, type WriteStream } from 'node:fs'
 import {
   lstat,
   mkdir,
+  open,
+  readlink,
+  type FileHandle,
   readFile,
   readdir,
   rename,
@@ -290,7 +293,8 @@ export async function localFilesUpload(
   wc: WebContents,
   key: string,
   localPaths: string[],
-  destDir: string
+  destDir: string,
+  inPlace: string[] = []
 ): Promise<SftpResult<SftpUploadSummary>> {
   /**
    * Both ends, not just the destination.
@@ -309,41 +313,58 @@ export async function localFilesUpload(
   const uploaded: string[] = []
   const failed: { name: string; error: string }[] = []
   const leftover: string[] = []
+  const needsInPlace: { name: string; reason: 'dir' | 'owner' }[] = []
+  const incomplete: string[] = []
 
   for (let i = 0; i < localPaths.length && !signal.aborted; i++) {
     const from = localPaths[i]
     const name = basename(from)
-    const to = join(destDir, name)
     const send = (transferred: number, total: number): void => {
       if (!wc.isDestroyed()) {
         wc.send('sftp:progress', { key, name, transferred, total, index: i + 1, count: localPaths.length })
       }
     }
+    let plan: CopyPlan | undefined
     try {
       const st = await stat(from)
       // Directories would need a recursive walk; refused explicitly rather
       // than failing later with an opaque EISDIR, as the SSH path does.
       if (st.isDirectory()) throw new Error('folders cannot be copied yet')
+      if (signal.aborted) break
+      const target = await resolveTarget(join(destDir, name))
       // Copying a file onto itself truncates it to nothing, and the Files view
       // cannot tell that the source it was handed is already the destination.
-      if (resolvePath(from) === resolvePath(to)) {
-        throw new Error('that file is already in this folder')
+      // Checked on the resolved path, and before anything is opened.
+      if (canonical(from) === target.dest) throw new Error('that file is already in this folder')
+      plan = await planCopy(target, inPlace.includes(name))
+      if (plan.needs) {
+        needsInPlace.push({ name, reason: plan.needs })
+        continue
       }
       send(0, st.size)
-      await copyWithProgress(from, to, st.size, send, signal)
+      await copyWithProgress(from, plan.write, st.size, send, signal)
+      await plan.commit()
       uploaded.push(name)
     } catch (err) {
-      const partial = (err as { leftover?: string }).leftover
-      if (partial) leftover.push(partial)
+      if (plan?.inPlace) incomplete.push(plan.dest)
+      else if (plan && !(await plan.discard())) leftover.push(plan.tmp as string)
       if (!signal.aborted) failed.push({ name, error: msg(err) })
     }
   }
   endCopy(key, copy)
 
+  const some = <T,>(xs: T[]): T[] | undefined => (xs.length ? xs : undefined)
   return {
     ok: failed.length === 0 && !signal.aborted,
     error: failed.length ? `${failed[0].name}: ${failed[0].error}` : undefined,
-    data: { uploaded, failed, cancelled: signal.aborted || undefined, leftover: leftover.length ? leftover : undefined }
+    data: {
+      uploaded,
+      failed,
+      cancelled: signal.aborted || undefined,
+      leftover: some(leftover),
+      needsInPlace: some(needsInPlace),
+      incomplete: some(incomplete)
+    }
   }
 }
 
@@ -384,20 +405,26 @@ export async function localFilesDownload(
       }
     }
     let to: string | undefined
+    let plan: CopyPlan | undefined
     try {
       const st = await stat(from)
       if (st.isDirectory()) throw new Error('folders cannot be downloaded yet')
+      if (signal.aborted) break
       to = await reserveLocalFile(destDir, name)
+      // The placeholder is this download's own empty file, so it is replaced
+      // by rename like any other target.
+      plan = await planCopy(await resolveTarget(to), false)
       send(0, st.size)
-      await copyWithProgress(from, to, st.size, send, signal)
+      await copyWithProgress(from, plan.write, st.size, send, signal)
+      await plan.commit()
       saved.push(basename(to))
     } catch (err) {
-      // The empty placeholder reserveLocalFile created is ours to remove. A
-      // failure to remove it must not end the batch; it is reported instead.
+      // Both are ours: the placeholder reserveLocalFile created and the
+      // temporary copy. A failure to remove one must not end the batch; it is
+      // reported instead.
+      if (plan && !(await plan.discard())) leftover.push(plan.tmp as string)
       const place = to
       if (place) await rm(place, { force: true }).catch(() => leftover.push(place))
-      const partial = (err as { leftover?: string }).leftover
-      if (partial) leftover.push(partial)
       if (!signal.aborted) failed.push({ name: shown, error: msg(err) })
     }
   }
@@ -431,47 +458,141 @@ export function localFilesCancel(key: string): void {
   copying.get(key)?.abort()
 }
 
+const denied = (err: unknown): boolean => ['EACCES', 'EPERM'].includes((err as NodeJS.ErrnoException).code ?? '')
+
+/** Where a copy goes, and how it gets there. */
+interface CopyPlan {
+  /** The file the copy is for, with any symlinks to it followed. */
+  dest: string
+  /** Why it cannot be replaced by a new copy; nothing is opened when set. */
+  needs?: 'dir' | 'owner'
+  /** Writing straight into `dest`, as approved by the user. */
+  inPlace?: boolean
+  tmp?: string
+  write: WriteStream
+  /** Put the finished copy in place. */
+  commit: () => Promise<void>
+  /** Remove the temporary copy. False when it would not go. */
+  discard: () => Promise<boolean>
+}
+
+/**
+ * Decide how a copy onto `to` will be written, before a byte is moved.
+ * `resolveTarget` follows the links; `planCopy` opens what will be written.
+ *
+ * Normally into a temporary file beside the destination that is renamed over
+ * it when complete. Writing to `to` directly truncated it the moment the
+ * stream opened, so a cancel or failure part-way lost — or left half of — a
+ * file the user had only agreed to replace with a finished copy.
+ *
+ * A rename, though, replaces a FILE, where writing into it did not. Three
+ * things the old in-place write kept are kept here on purpose:
+ *
+ *  - A symlink is followed to the file it names, and that file is replaced —
+ *    not the link, which a rename would turn into a regular file.
+ *  - The new copy gets the old one's permissions (umask would otherwise turn
+ *    a 0755 script into 0644) and its owner and group. When the owner cannot
+ *    be given — a file owned by someone else — the copy is not made: it would
+ *    silently become the uploader's file. `needs: 'owner'`.
+ *  - A writable file in a folder that is not writable cannot have a temporary
+ *    file beside it. `needs: 'dir'`.
+ *
+ * Either `needs` goes back to the view, which asks before overwriting in
+ * place, and comes back with `inPlace` set.
+ *
+ * The temporary file is opened once, with `wx`, and written through that
+ * handle — never reopened by path, so a link swapped in cannot redirect it.
+ */
+async function resolveTarget(to: string): Promise<{ dest: string; existing?: Stats }> {
+  let dest = to
+  let existing: Stats | undefined
+  for (let hops = 0; ; hops++) {
+    try {
+      const l = await lstat(dest)
+      if (!l.isSymbolicLink()) {
+        existing = l
+        break
+      }
+    } catch (err) {
+      // A dangling link: writing through it creates what it names, which is
+      // what the in-place write did.
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') break
+      throw err
+    }
+    if (hops === 40) throw new Error('too many levels of symbolic links')
+    dest = resolvePath(dirname(dest), await readlink(dest))
+  }
+  // A link in the folder can point anywhere, including the app's own data.
+  if (isProtected(dest)) throw new Error(PROTECTED_MESSAGE)
+  return { dest: canonical(dest), existing }
+}
+
+async function planCopy(
+  { dest, existing }: { dest: string; existing?: Stats },
+  inPlace: boolean
+): Promise<CopyPlan> {
+  if (inPlace) {
+    const write = createWriteStream(dest)
+    return { dest, inPlace, write, commit: async () => {}, discard: async () => true }
+  }
+
+  const tmp = join(dirname(dest), tempName(basename(dest)))
+  let fh: FileHandle
+  try {
+    fh = await open(tmp, 'wx')
+  } catch (err) {
+    if (existing && denied(err)) return { dest, needs: 'dir', ...inert }
+    throw err
+  }
+  const discard = (): Promise<boolean> =>
+    rm(tmp, { force: true }).then(
+      () => true,
+      () => false
+    )
+  if (existing) {
+    try {
+      await fh.chmod(existing.mode & 0o7777)
+      const mine = await fh.stat()
+      if (mine.uid !== existing.uid || mine.gid !== existing.gid) await fh.chown(existing.uid, existing.gid)
+    } catch {
+      await fh.close()
+      await discard()
+      return { dest, needs: 'owner', ...inert }
+    }
+  }
+  return { dest, tmp, write: fh.createWriteStream(), commit: () => rename(tmp, dest), discard }
+}
+
+// The shape a plan that opened nothing still has to fill in.
+const inert = {
+  write: undefined as unknown as WriteStream,
+  commit: async (): Promise<void> => {},
+  discard: async (): Promise<boolean> => true
+}
+
+/**
+ * Pump `from` into `write`, reporting progress. Settles only once the write
+ * side has closed, so the caller's cleanup never races the file being open.
+ */
 function copyWithProgress(
   from: string,
-  to: string,
+  write: WriteStream,
   total: number,
   onStep: (transferred: number, total: number) => void,
   signal: AbortSignal
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    // Cancelled while the caller was still stat-ing: open nothing at all.
-    if (signal.aborted) return reject(new Error('cancelled'))
     let transferred = 0
     let reported = 0
-    /**
-     * Written beside the destination and renamed over it only when complete.
-     *
-     * Writing to `to` directly truncated it the moment the stream opened, so a
-     * cancel or a failure part-way removed — or left half of — a file the user
-     * had only agreed to replace with a finished copy. The temporary name is
-     * created with `wx`, so it is certainly this call's, and it is the only
-     * thing `fail` ever removes.
-     */
-    const tmp = join(dirname(to), tempName(basename(to)))
     // An abort destroys the read side with an AbortError, which lands in `fail`.
     const read = createReadStream(from, { signal })
-    const write = createWriteStream(tmp, { flags: 'wx' })
     let failed = false
     const fail = (err: Error): void => {
       if (failed) return
       failed = true
       read.destroy()
-      // A temporary file that will not go is named on the error, so the
-      // caller can report it rather than leave it to be found.
-      const clean = (): void =>
-        void rm(tmp, { force: true })
-          .catch(() => Object.assign(err, { leftover: tmp }))
-          .then(() => reject(err))
-      // Removed only once the write side has closed: a cancel can land while
-      // the file is still being opened, and removing it first let the open
-      // create it again afterwards.
-      if (write.closed) return clean()
-      write.once('close', clean)
+      if (write.closed) return reject(err)
+      write.once('close', () => reject(err))
       write.destroy()
     }
     read.on('data', (c: Buffer | string) => {
@@ -485,8 +606,8 @@ function copyWithProgress(
     })
     read.on('error', fail)
     write.on('error', fail)
-    write.on('finish', () => {
-      rename(tmp, to).then(resolve, fail)
+    write.on('close', () => {
+      if (!failed) resolve()
     })
     read.pipe(write)
   })

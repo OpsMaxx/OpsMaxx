@@ -1548,10 +1548,12 @@ ipcMain.handle('sftp:rename', (_e, key: string, from: string, to: string) =>
 ipcMain.handle('sftp:delete', (_e, key: string, path: string, dir: boolean) =>
   isLocalFileSession(key) ? localFilesDelete(path, dir) : sftpDelete(key, path, dir)
 )
-ipcMain.handle('sftp:upload', (e, key: string, localPaths: string[], remoteDir: string) =>
+// `inPlace` names files the user agreed to overwrite directly, after an upload
+// reported it could not replace them with a new copy (see planUpload).
+ipcMain.handle('sftp:upload', (e, key: string, localPaths: string[], remoteDir: string, inPlace?: string[]) =>
   isLocalFileSession(key)
-    ? localFilesUpload(e.sender, key, localPaths, remoteDir)
-    : sftpUpload(e.sender, key, localPaths, remoteDir)
+    ? localFilesUpload(e.sender, key, localPaths, remoteDir, inPlace)
+    : sftpUpload(e.sender, key, localPaths, remoteDir, inPlace)
 )
 ipcMain.handle('sftp:download', (e, key: string, remotePaths: string[], localDir: string) => {
   const refused = refuseDownloadDir(localDir, downloadDirs)
