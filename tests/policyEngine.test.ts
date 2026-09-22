@@ -884,3 +884,64 @@ describe('bash -lc, stdin-fed shells and more wrappers', () => {
     expect(evaluateCommand(noSudo, cmd).decision).toBe('allow')
   })
 })
+
+// Security pass #7: find -exec walked in place, and the tools that change
+// privilege are escalations, not runners.
+describe('find -exec, and tools that change privilege', () => {
+  const noSudo = group({ terminal: 'allow', sudo: 'deny' })
+  const withSudo = group({ terminal: 'allow', sudo: 'allow' })
+  const shadowDenied = group({ terminal: 'allow', sudo: 'allow', readFiles: 'allow', writeFiles: 'allow' }, [
+    { id: 'shadow', pattern: '/etc/shadow', read: 'deny', write: 'deny' }
+  ])
+
+  it.each([
+    'find . -exec bash -lc "cat /etc/shadow" \\;',
+    'find . -execdir sh -c "cat /etc/shadow" +',
+    'find . -name a -exec true \\; -exec bash -lc "cat /etc/shadow" \\;'
+  ])('applies the /etc/shadow rule inside %s', (cmd) => {
+    expect(evaluateCommand(shadowDenied, cmd).decision).toBe('deny')
+  })
+
+  it.each([
+    "find . -exec sh -c 'eval '\\''sudo reboot'\\''' \\;",
+    'find . -ok bash -lc "sudo reboot" \\;',
+    'setpriv --reuid 0 reboot',
+    'setpriv --reuid=0 --regid=0 --init-groups reboot',
+    'setpriv --clear-groups id',
+    'capsh --user=root -- -c id',
+    'capsh -- -c "id"',
+    'nsenter -t 1 -a id',
+    'nsenter --target 1 --mount --pid reboot'
+  ])('denies %s under sudo=deny', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('deny')
+  })
+
+  it.each(['setpriv --reuid 0 bash', 'capsh --', 'nsenter -t 1 -a', 'nsenter -t 1 -m bash'])(
+    'refuses the root shell %s even with sudo=allow',
+    (cmd) => {
+      expect(evaluateCommand(withSudo, cmd).decision).toBe('deny')
+    }
+  )
+
+  // Root only inside a new user namespace, and everyday rootless tooling.
+  it.each(['unshare -r id', 'unshare --map-root-user id', 'unshare -Ur whoami'])('asks before running %s', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('ask')
+  })
+
+  it.each([
+    'unshare --help',
+    'unshare -n ping -c 1 127.0.0.1',
+    'setpriv --dump',
+    'setpriv --no-new-privs ls',
+    'nsenter --help',
+    'capsh --print',
+    'find . -name "*.c" -exec wc -l {} +',
+    'find . -type f -exec grep -l TODO {} \\;',
+    'chroot /mnt ls',
+    'strace -f ls',
+    'firejail ls',
+    'prlimit --nofile=10 ls'
+  ])('still allows %s', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('allow')
+  })
+})

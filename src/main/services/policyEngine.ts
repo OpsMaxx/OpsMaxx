@@ -147,7 +147,11 @@ export interface CommandClassification {
 // `sudo -n` privileged reads never pass through it.
 
 /** Names that run the rest of the line as another user. */
-const ESCALATORS = new Set(['sudo', 'doas', 'su', 'pkexec', 'run0', 'runuser', 'systemd-run', 'runas', 'gsudo'])
+const ESCALATORS = new Set([
+  'sudo', 'doas', 'su', 'pkexec', 'run0', 'runuser', 'systemd-run', 'runas', 'gsudo',
+  // Enters another process's namespaces -- commonly pid 1's, which is the host.
+  'nsenter'
+])
 
 /**
  * The same, as a Windows command word: `C:\Windows\System32\runas.exe`,
@@ -209,18 +213,12 @@ const RUNNERS: Record<string, Set<string>> = {
   chroot: new Set(['--userspec', '--groups']),
   strace: new Set(['-e', '-o', '-p', '-s', '-u', '-E', '-I', '-b', '-a', '-O', '-S', '-X', '-P', '-U']),
   ltrace: new Set(['-e', '-o', '-p', '-s', '-u', '-n', '-a', '-A', '-D', '-F', '-l', '-w', '-x']),
-  nsenter: new Set(['-t', '-S', '-G', '--target', '--setuid', '--setgid']),
-  unshare: new Set(['-S', '-G', '--setuid', '--setgid']),
   firejail: new Set(),
   bwrap: new Set([
     '--chdir', '--uid', '--gid', '--tmpfs', '--proc', '--dev', '--dir', '--unsetenv', '--hostname',
     '--remount-ro', '--mqueue', '--lock-file', '--sync-fd', '--info-fd', '--block-fd', '--userns',
     '--userns2', '--pidns', '--seccomp', '--add-seccomp-fd', '--exec-label', '--file-label', '--cap-add',
     '--cap-drop', '--argv0', '--perms', '--size', '--json-status-fd'
-  ]),
-  setpriv: new Set([
-    '--reuid', '--regid', '--groups', '--inh-caps', '--ambient-caps', '--bounding-set', '--securebits',
-    '--pdeathsig', '--selinux-label', '--apparmor-profile'
   ]),
   setarch: new Set(),
   prlimit: new Set(['-p']),
@@ -237,6 +235,30 @@ const RUNNERS: Record<string, Set<string>> = {
 
 /** Wrappers whose first operand is not the command: a duration, a lock, a priority, a mask. */
 const RUNNER_OPERAND = new Set(['timeout', 'flock', 'chrt', 'taskset', 'chroot', 'setarch'])
+
+/**
+ * Tools that CHANGE PRIVILEGE, and the options of each that take a value.
+ * Read in unwrapSegment rather than stepped over as runners: stepping over
+ * them treated `setpriv --reuid 0 reboot` like `nice reboot`.
+ */
+const SETPRIV_VALUE_OPTIONS = new Set([
+  '--reuid', '--regid', '--groups', '--inh-caps', '--ambient-caps', '--bounding-set', '--securebits',
+  '--pdeathsig', '--selinux-label', '--apparmor-profile', '--landlock-access', '--landlock-rule'
+])
+const UNSHARE_VALUE_OPTIONS = new Set(['-S', '-G', '--setuid', '--setgid', '--map-user', '--map-group'])
+
+/** One word, quoted so tokenize reads it back as exactly that word. */
+const shellQuote = (w: string): string => (/^[\w@%+=:,./{}-]+$/.test(w) ? w : `'${w.replace(/'/g, `'\\''`)}'`)
+
+/** Everything after a command's own options. */
+function afterOptions(argv: string[], valueOptions: Set<string>): string[] {
+  let i = 1
+  while (i < argv.length && argv[i].startsWith('-') && argv[i] !== '-') {
+    if (argv[i] === '--') return argv.slice(i + 1)
+    i += valueOptions.has(argv[i]) ? 2 : 1
+  }
+  return argv.slice(i)
+}
 
 /** bwrap options that take TWO values (`--bind SRC DEST`). */
 const RUNNER_TWO_VALUES: Record<string, Set<string>> = {
@@ -260,6 +282,7 @@ const RUN0_VALUE_FLAGS = [
 const ESCALATOR_VALUE_FLAGS: Record<string, Set<string>> = {
   sudo: new Set(['-u', '-g', '-C', '-D', '-h', '-p', '-r', '-t', '-U', '-R', '-T']),
   gsudo: new Set(['-u', '-i', '--user', '--integrity', '--loglevel']),
+  nsenter: new Set(['-t', '-S', '-G', '--target', '--setuid', '--setgid']),
   doas: new Set(['-u', '-C']),
   pkexec: new Set(['--user']),
   run0: new Set(RUN0_VALUE_FLAGS),
@@ -521,7 +544,7 @@ function escalation(argv: string[], nested: string[], name = word(argv[0])): { s
   if (name === 'su') return { shell: true, target: [] }
   if (name === 'runuser') return namedUser && target?.length ? { shell: false, target } : { shell: true, target: [] }
   // pkexec, run0, systemd-run and gsudo with nothing to run start a shell.
-  if (name === 'pkexec' || name === 'run0' || name === 'systemd-run' || name === 'gsudo') {
+  if (name === 'pkexec' || name === 'run0' || name === 'systemd-run' || name === 'gsudo' || name === 'nsenter') {
     return { shell: !target?.length, target: target ?? [] }
   }
   return { shell: shellFlag, target: target ?? [] }
@@ -597,13 +620,42 @@ function unwrapSegment(tokens: string[], nested: string[], stdinFed = false): Om
       continue
     }
     // `capsh … -- ARGS` hands ARGS to /bin/bash.
+    // `nsenter --help`, `sudo --version`: the tool describing itself. (The
+    // start-of-string sudo/doas test still counts those two as sudo.)
+    const privileged = ESCALATORS.has(name) || name === 'capsh' || name === 'setpriv' || name === 'unshare'
+    if (privileged && argv.length === 2 && (argv[1] === '--help' || argv[1] === '--version')) return done([])
+    // `capsh` changes identity with --user/--uid/--gid, and `capsh … -- ARGS`
+    // hands ARGS to /bin/bash -- a bare `--` is a shell.
     if (name === 'capsh') {
+      if (argv.some((a) => /^--(?:user|uid|gid)=/.test(a) || a === '--')) escalated = true
       const dash = argv.indexOf('--')
       if (dash >= 0) {
         t = ['bash', ...argv.slice(dash + 1)]
         continue
       }
       return done(argv)
+    }
+    // `setpriv` sets the real and effective ids and the groups; given any of
+    // those it is an escalation. Otherwise (`setpriv --dump`, a capability
+    // tweak) it is stepped over like a runner.
+    if (name === 'setpriv') {
+      if (argv.some((a) => /^--(?:reuid|regid|ruid|euid|rgid|egid|init-groups|clear-groups|keep-groups|groups)\b/.test(a))) {
+        escalated = true
+      }
+      const target = afterOptions(argv, SETPRIV_VALUE_OPTIONS)
+      if (!target.length) return done([])
+      t = target
+      continue
+    }
+    // `unshare -r` / `--map-root-user` is root only inside a new user
+    // namespace, and it is everyday rootless tooling -- so it asks rather than
+    // being refused as sudo.
+    if (name === 'unshare') {
+      if (argv.some((a) => a === '--map-root-user' || /^-[A-Za-z]*r[A-Za-z]*$/.test(a))) unreadable = true
+      const target = afterOptions(argv, UNSHARE_VALUE_OPTIONS)
+      if (!target.length) return done([])
+      t = target
+      continue
     }
     if (ESCALATORS.has(name)) {
       escalated = true
@@ -634,14 +686,25 @@ function unwrapSegment(tokens: string[], nested: string[], stdinFed = false): Om
     }
     // More commands that run a command of their own.
     if (name === 'find') {
-      // `-exec CMD … ;` / `+`, `-execdir`, `-ok`, `-okdir`: CMD runs per file.
+      // `-exec CMD … ;` / `+`, `-execdir`, `-ok`, `-okdir`: CMD runs per file,
+      // as an argv, not a command line. The first one is walked in place, like
+      // chroot's command; any later one is handed on re-quoted, so its words
+      // are the words find will pass. Joining them with spaces took
+      // `bash -lc "cat /etc/shadow"` apart into `bash -lc cat` and a stray
+      // operand.
+      const targets: string[][] = []
       for (let i = 1; i < argv.length; i++) {
         if (!/^-(?:exec|execdir|ok|okdir)$/.test(argv[i])) continue
         const end = argv.findIndex((a, j) => j > i && (a === ';' || a === '+'))
         const cmd = argv.slice(i + 1, end < 0 ? undefined : end)
-        if (cmd.length) nested.push(cmd.join(' '))
+        if (cmd.length) targets.push(cmd)
         if (end < 0) break
         i = end
+      }
+      if (targets.length) {
+        for (const later of targets.slice(1)) nested.push(later.map(shellQuote).join(' '))
+        t = targets[0]
+        continue
       }
     }
     if (name === 'sg') {

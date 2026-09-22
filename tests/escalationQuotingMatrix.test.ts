@@ -11,7 +11,7 @@ import type { AccessGroup } from '../src/shared/mcp'
 // a group that denies sudo. Hand-written cases had passed; the generated set
 // had not. So the generated set is the test.
 //
-// Thirteen wrappers, so 13 + 169 + 2197 + 28561 nests. Every wrapper quotes its
+// Fourteen wrappers, so 14 + 196 + 2744 + 38416 nests. Every wrapper quotes its
 // argument the way a careful tool would -- POSIX
 // single quotes with the '\'' idiom shlex.quote emits, or double quotes with
 // \ " $ and ` escaped -- and every combination up to depth four is checked.
@@ -38,7 +38,10 @@ const WRAPPERS: Record<string, (s: string) => string> = {
   'sh -ec "…"': (s) => `sh -ec ${dq(s)}`,
   "zsh -ic '…'": (s) => `zsh -ic ${sq(s)}`,
   'bash -lic "…"': (s) => `bash -lic ${dq(s)}`,
-  "script -qc '…'": (s) => `script -qc ${sq(s)} /dev/null`
+  "script -qc '…'": (s) => `script -qc ${sq(s)} /dev/null`,
+  // find hands -exec an argv, not a command line; joining it back with spaces
+  // took `bash -lc "…"` apart, and every depth-three allow went through here.
+  "find -exec sh -c '…' \\;": (s) => `find . -maxdepth 0 -exec sh -c ${sq(s)} \\;`
 }
 
 /** Every nest of 1..maxDepth wrappers around `inner`, with its depth and a readable label. */

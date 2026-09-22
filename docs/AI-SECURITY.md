@@ -60,9 +60,10 @@ Regardless of which access group a session holds:
     assignments. `[[ … ]]`, `(( … ))` and `for`/`select` headers run nothing themselves;
   - so are the wrappers `env`, `command`, `exec`, `builtin`, `nohup`, `time`, `nice`, `ionice`,
     `stdbuf`, `timeout`, `xargs`, `busybox`, `setsid`, `unbuffer`, `watch`, `flock`, `chrt`,
-    `taskset`, `chroot`, `setarch`, `strace`, `ltrace`, `nsenter`, `unshare`, `firejail`, `bwrap`,
-    `setpriv`, `prlimit` and `.`, with their options and, for `timeout`, `flock`, `chrt`, `taskset`,
-    `chroot` and `setarch`, their one operand; `capsh … -- ARGS` is read as `bash ARGS`;
+    `taskset`, `chroot`, `setarch`, `strace`, `ltrace`, `firejail`, `bwrap`, `prlimit` and `.`,
+    with their options and, for `timeout`, `flock`, `chrt`, `taskset`, `chroot` and `setarch`,
+    their one operand. `setpriv` and `unshare` are stepped over too, unless they change privilege
+    (below); `capsh … -- ARGS` is read as `bash ARGS`;
   - words are read with POSIX quoting: outside quotes a backslash escapes the next character
     (`\sudo`, `su\do`); inside double quotes only `\"`, `\\`, `\$`, a backtick and a newline
     are escapes; inside single quotes nothing is, so `sh -c "sh -c \"sh -c 'sudo reboot'\""` and
@@ -72,7 +73,8 @@ Regardless of which access group a session holds:
   - the insides of `$(...)`, `<(...)`, `>(...)`, backticks, a shell's command string (`-c`
     anywhere in an option cluster: `bash -lc`, `sh -ec`, `zsh -ic`, `bash -lic`, with the string
     as the first operand after the options), `script -c` (`-qc` included), `su -c`, `sg`, `env -S`,
-    `flock -c`, `find -exec`/`-execdir`/`-ok`, a `parallel` template (or, with none, each of its
+    `flock -c`, `find -exec`/`-execdir`/`-ok`/`-okdir` (its target walked as the argv find passes,
+    not a re-joined line), a `parallel` template (or, with none, each of its
     arguments), `watch`, `eval`, and on Windows `cmd /c`, `/r` or
     `/k` (glued on or not, `cmd.exe/c` included), PowerShell's `-Command` (or `-c`, or the implicit
     command a bare `powershell Start-Process …` takes), `iex`/`Invoke-Expression`, the scriptblock
@@ -85,10 +87,16 @@ Regardless of which access group a session holds:
     command is read; a PowerShell `. cmd` runs `cmd`, so the word after `.` is judged.
 
   If the command word is `sudo`, `doas`, `su`, `pkexec`, `run0`, `runuser`, `systemd-run`,
-  `sudoedit` or `machinectl shell` — or, on Windows, `runas` (with its `/user:` and `/savecred`
+  `sudoedit`, `machinectl shell` or `nsenter` (it enters another process's namespaces, commonly pid
+  1's); `setpriv` given `--reuid`, `--regid`, `--init-groups`, `--clear-groups`, `--keep-groups` or
+  `--groups`; or `capsh` given `--user`, `--uid`, `--gid` or `--` (a bare `--` is a shell) — or,
+  on Windows, `runas` (with its `/user:` and `/savecred`
   options), `gsudo`, `sudo.exe` or `Start-Process … -Verb RunAs` — the command is governed by the
   **Sudo** capability, and what it runs is judged too — `sudo env bash` and `gsudo cmd` are
-  elevated shells. So `/usr/bin/sudo reboot`, `env sudo reboot`, `if true; then sudo reboot; fi`,
+  elevated shells. `unshare -r` / `--map-root-user` is root only inside a new user namespace and
+  is everyday rootless tooling, so it asks rather than counting as sudo. A privileged tool asked
+  only `--help` or `--version` is describing itself and is not an escalation. So
+  `/usr/bin/sudo reboot`, `env sudo reboot`, `if true; then sudo reboot; fi`,
   `\sudo reboot`, `eval sudo reboot` and `su -c "rm -rf /x"` are all sudo, and a group that denies
   sudo denies them. A name in argument position is not a run: `grep sudo /var/log/auth.log`, `echo
   sudo`, `man sudo`, `command -v sudo` and `systemctl status sudo` are ordinary commands.
@@ -115,7 +123,8 @@ Regardless of which access group a session holds:
   The quoting is tested with a generated matrix rather than hand-picked cases
   (`tests/escalationQuotingMatrix.test.ts`): every nest of `eval '…'`, `sh -c '…'`, `sh -c "…"`,
   `env -S "…"`, `$(…)`, a `$(case … esac)` with parens of its own, `cat <(…)`, a backquote,
-  `bash -lc`, `sh -ec`, `zsh -ic`, `bash -lic` and `script -qc` — 30,940 nests up to four deep,
+  `bash -lc`, `sh -ec`, `zsh -ic`, `bash -lic`, `script -qc` and `find -exec sh -c` — 41,370
+  nests up to four deep,
   each quoted the way a careful tool quotes. Around `sudo reboot` under a group that denies sudo,
   and around `cat /etc/shadow` under a path rule that denies it, every nest to depth three must be
   denied and none at depth four allowed; the same nests around `ls /tmp` must never be denied.
