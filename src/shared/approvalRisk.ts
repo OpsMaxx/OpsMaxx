@@ -36,7 +36,7 @@
 // unrecognised command does not get a soothing paraphrase, and a missing reason
 // is printed as a missing reason.
 
-import type { AiCapability } from './mcp'
+import type { AiCapability, ContentPreview } from './mcp'
 
 /**
  * The scale, low to high, in order. Exported because the modal prints its
@@ -647,4 +647,65 @@ export function resolveFuseDeadline(
     if (!Number.isNaN(at)) return at
   }
   return fuseDeadline(createdAt, timeoutSeconds)
+}
+
+// ---------------------------------------------------------------------------
+// What write_file will write
+// ---------------------------------------------------------------------------
+
+/** The most of an agent's file content the dialog shows. See contentPreview. */
+export const PREVIEW_MAX_CHARS = 4096
+export const PREVIEW_MAX_LINES = 80
+
+// Everything a reader cannot see, or sees in the wrong order: C0 and C1
+// controls, DEL, the soft hyphen, the Arabic letter mark, zero-width and
+// directional marks, line and paragraph separators, the bidi embeddings,
+// overrides and isolates, the invisible operators, and the BOM. A lone CR goes
+// too -- it is how a line hides its own start in a terminal -- while the CR of
+// a CRLF pair and the tab are left alone, because every Windows file and every
+// Makefile would otherwise read as an attack.
+//
+// The same set sanitizeAgentIntent and remoteText strip, and the opposite
+// treatment. Those are sentences, where deleting the character is the repair.
+// This is a FILE the operator is about to put on a server: deleting a U+202E
+// from the preview would show them a file that is not the one being written,
+// which is the exact lie the preview exists to stop. So each one is kept, and
+// spelled out.
+// eslint-disable-next-line no-control-regex -- matching them is the point
+const PREVIEW_INVISIBLE = /\r(?!\n)|[\u0000-\u0008\u000b-\u000c\u000e-\u001f\u007f-\u009f\u00ad\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g
+
+/** `\u202e` becomes `⟨U+202E⟩`: printed, never obeyed. */
+export function showInvisibles(text: string): string {
+  return text.replace(
+    PREVIEW_INVISIBLE,
+    (c) => `⟨U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}⟩`
+  )
+}
+
+/**
+ * The head of an agent's file content, made fit to show a human.
+ *
+ * Takes ALREADY-REDACTED text. The redactor lives in main (secretRedaction.ts)
+ * because it needs the server's known secret values, and it has to run over the
+ * whole content before this cuts it: a known password straddling the cut would
+ * otherwise survive as its first half, which no pattern recognises.
+ *
+ * Capped by characters and by lines, whichever bites first, because either one
+ * alone lets a single payload fill the dialog -- one 4 KB line, or eighty
+ * one-character ones. The cut is taken on the source text and the invisible
+ * characters are spelled out afterwards, so an agent cannot use them to make
+ * the preview longer than the cap, and the omitted counts describe the file
+ * rather than the rendering.
+ */
+export function contentPreview(redacted: string): ContentPreview {
+  let head = redacted.slice(0, PREVIEW_MAX_CHARS).split('\n').slice(0, PREVIEW_MAX_LINES).join('\n')
+  // Never end on half a surrogate pair: it renders as a replacement character
+  // that the file does not contain.
+  if (/[\ud800-\udbff]$/.test(head)) head = head.slice(0, -1)
+  const breaks = (s: string): number => s.split('\n').length - 1
+  return {
+    text: showInvisibles(head),
+    omittedChars: redacted.length - head.length,
+    omittedLines: breaks(redacted) - breaks(head)
+  }
 }

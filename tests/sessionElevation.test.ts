@@ -15,8 +15,9 @@ const GATE = SRC.slice(SRC.indexOf('async function gate('), SRC.indexOf('\n  ret
  *
  * Approving the same kind of action over and over is how an operator learns to
  * click through the dialog without reading it -- at which point the dialog is
- * worse than useless, because it still looks like a control. One answer now
- * covers that capability on that server until the session ends.
+ * worse than useless, because it still looks like a control. So the operator
+ * can answer for the session, and that one answer covers that capability on
+ * that server until the session ends -- but only when they chose it.
  */
 
 describe('what one approval covers', () => {
@@ -47,8 +48,15 @@ describe('what one approval covers', () => {
     expect(SRC.slice(addAt, addAt + 1200)).toMatch(/perCall: true/)
   })
 
-  it('remembers only after a real approval', () => {
-    expect(GATE).toMatch(/if \(decision === 'approved' && !perCall\) sessionElevations\.add\(key\)/)
+  // "Approve once" used to add the elevation too, so the button's label was a
+  // grant of one call and its effect was a grant of the session. Only the
+  // separately labelled session answer writes the cache now; a plain
+  // `approved` is exactly one call.
+  it('remembers only after an explicit approval for the session', () => {
+    expect(GATE).toMatch(/if \(decision === 'approved-for-session' && !perCall\) sessionElevations\.add\(key\)/)
+    expect(GATE).not.toMatch(/decision === 'approved' && !perCall\) sessionElevations/)
+    // Offered only where the cache would honour it.
+    expect(GATE).toMatch(/const sessionGrant = perCall \? undefined/)
   })
 
   // `ciTrigger` starts a build on infrastructure OpsMaxx does not administer,
@@ -66,7 +74,7 @@ describe('what one approval covers', () => {
   it('never carries an approval for a capability whose effect leaves the app', () => {
     expect(GATE).toMatch(/const perCall = ctx\.capability === 'ciTrigger'/)
     expect(GATE).toMatch(/if \(!perCall && sessionElevations\.has\(key\)\)/)
-    expect(GATE).toMatch(/if \(decision === 'approved' && !perCall\)/)
+    expect(GATE).toMatch(/if \(decision === 'approved-for-session' && !perCall\)/)
   })
 
   it('is consulted only for an ask, never to soften a deny', () => {

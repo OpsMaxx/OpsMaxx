@@ -112,3 +112,24 @@ describe('the export', () => {
     expect(auditExport([e({})])).toContain('sess-abcdef123456')
   })
 })
+
+// A call carried on an earlier session approval used to read "the access group
+// allowed this outright", crediting a policy that said ask for a decision a
+// person made. And the row that gave the grant read like any single yes, so
+// nothing in the log explained where the carried ones came from.
+describe('approvals that reach past one call', () => {
+  it('credits a carried approval to the person who gave it, not to the policy', () => {
+    const o = auditOutcome(e({ approval: 'approved-earlier', result: 'success' }))
+    expect(o.decidedBy).toBe('you')
+    expect(o.label).toMatch(/^Approved earlier/)
+    expect(o.detail).toMatch(/earlier request/)
+    expect(o.detail).not.toMatch(/access group/)
+  })
+
+  it('marks the row that granted the session', () => {
+    const o = auditOutcome(e({ approval: 'approved-for-session', result: 'success' }))
+    expect(o.decidedBy).toBe('you')
+    expect(o.label).toMatch(/^Approved for session/)
+    expect(o.detail).toMatch(/rest of the session/)
+  })
+})

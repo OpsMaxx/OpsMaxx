@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { useEffect, useState } from 'react'
-import type { ApprovalRequest } from '../../../shared/mcp'
+import type { ApprovalRequest, ApprovalScope } from '../../../shared/mcp'
 import { resolveFuseDeadline, formatFuse } from '../../../shared/approvalRisk'
 import { bridgeOn, bridgeHas } from '../lib/bridge'
 import { toast } from './toast'
@@ -54,7 +54,13 @@ function announce(request: ApprovalRequest): void {
   const audit = { label: 'View in audit log', run: () => openAi('audit') }
 
   if (request.status === 'approved') {
-    toast(`Approved “${where}”. ${request.agentName} was allowed to run it.`, 'info', audit)
+    // Said out loud when the yes reached further than this one action: that is
+    // the half of the answer the operator will not see prompted again.
+    const further =
+      request.grantedScope === 'session'
+        ? ` Later requests like it on ${request.serverName} will not ask again this session.`
+        : ''
+    toast(`Approved “${where}”. ${request.agentName} was allowed to run it.${further}`, 'info', audit)
     return
   }
   if (request.status === 'timeout') {
@@ -157,8 +163,13 @@ export function resumeApprovals(): void {
  * timed out a moment earlier — vanished from the UI as though it had been
  * answered, which is the precise confusion this whole feature exists to remove.
  */
-export async function respondToApproval(id: string, decision: 'approved' | 'denied'): Promise<void> {
-  await window.opsmaxx?.aiMcp?.respondApproval?.(id, decision)
+export async function respondToApproval(
+  id: string,
+  decision: 'approved' | 'denied',
+  scope?: ApprovalScope
+): Promise<void> {
+  const respond = window.opsmaxx?.aiMcp?.respondApproval
+  await (scope ? respond?.(id, decision, scope) : respond?.(id, decision))
 }
 
 /**

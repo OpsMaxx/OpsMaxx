@@ -5778,8 +5778,11 @@ ipcMain.handle('aiMcp:denyAuthorization', (_e, consentId: string) => {
 // ---- AI & MCP: approvals ----
 ipcMain.handle('aiMcp:listApprovals', () => listPendingApprovals())
 ipcMain.handle('aiMcp:recentApprovals', () => listRecentApprovals())
-ipcMain.handle('aiMcp:respondApproval', (_e, id: string, decision: 'approved' | 'denied') =>
-  respondToApproval(id, decision)
+// `scope` is passed through as `unknown` on purpose: respondToApproval is the
+// one place that decides what it means, and it reads anything but exactly
+// 'session' as 'once'.
+ipcMain.handle('aiMcp:respondApproval', (_e, id: string, decision: 'approved' | 'denied', scope?: unknown) =>
+  respondToApproval(id, decision, scope)
 )
 // "Give me more time". Reaches the ONE timer, in approvals.ts, rather than
 // letting the renderer keep a clock of its own: a countdown the renderer could

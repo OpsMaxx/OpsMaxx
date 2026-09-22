@@ -45,12 +45,29 @@ export function auditOutcome(e: Pick<AuditEntry, 'approval' | 'result' | 'exitCo
   }
 
   // Approved, or never needed approval. What matters now is what happened.
-  const who: AuditOutcome['decidedBy'] = e.approval === 'approved' ? 'you' : 'policy'
-  const prefix = e.approval === 'approved' ? 'Approved' : 'Allowed'
+  //
+  // `approved-earlier` used to fall into the policy branch and read "the access
+  // group allowed this outright", which is false twice: the group said ask, and
+  // a person did answer -- on an earlier request. It is the operator's decision
+  // carried forward, and the row says so rather than crediting the policy.
+  const human = e.approval === 'approved' || e.approval === 'approved-for-session' || e.approval === 'approved-earlier'
+  const who: AuditOutcome['decidedBy'] = human ? 'you' : 'policy'
+  const prefix =
+    e.approval === 'approved-for-session'
+      ? 'Approved for session'
+      : e.approval === 'approved-earlier'
+        ? 'Approved earlier'
+        : e.approval === 'approved'
+          ? 'Approved'
+          : 'Allowed'
   const because =
     e.approval === 'approved'
       ? 'You approved this request.'
-      : 'The access group allowed this outright, so nothing was asked.'
+      : e.approval === 'approved-for-session'
+        ? 'You approved this request, and allowed the same on this server for the rest of the session.'
+        : e.approval === 'approved-earlier'
+          ? 'Nothing was asked: you allowed this for the rest of the session on an earlier request.'
+          : 'The access group allowed this outright, so nothing was asked.'
 
   if (e.result === 'denied') {
     // Approval said yes and something downstream still said no — a path rule,
@@ -74,7 +91,7 @@ export function auditOutcome(e: Pick<AuditEntry, 'approval' | 'result' | 'exitCo
   return {
     label: `${prefix}, ran${code}`,
     decidedBy: who,
-    tone: e.approval === 'approved' ? 'ok' : 'muted',
+    tone: e.approval === 'approved' || e.approval === 'approved-for-session' ? 'ok' : 'muted',
     detail: `${because} It ran and returned success.`
   }
 }

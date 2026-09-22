@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Check, X } from 'lucide-react'
-import type { ApprovalRequest } from '../../../../shared/mcp'
+import type { ApprovalRequest, ApprovalScope } from '../../../../shared/mcp'
 import { describeConsequence, formatRiskLabel, riskTone } from '../../../../shared/approvalRisk'
 import { bridgeOn } from '../../lib/bridge'
+import { WritePreview, capabilityLabel, sessionGrantLabel } from './ApprovalDialog'
 
 export function AiApprovals(): React.JSX.Element {
   // `null` until the first read comes back, NOT `[]`.
@@ -42,8 +43,9 @@ export function AiApprovals(): React.JSX.Element {
     }
   }, [])
 
-  const respond = async (id: string, decision: 'approved' | 'denied'): Promise<void> => {
-    await window.opsmaxx?.aiMcp.respondApproval(id, decision)
+  const respond = async (id: string, decision: 'approved' | 'denied', scope?: ApprovalScope): Promise<void> => {
+    const bridge = window.opsmaxx?.aiMcp
+    await (scope ? bridge?.respondApproval(id, decision, scope) : bridge?.respondApproval(id, decision))
     load()
   }
 
@@ -81,6 +83,9 @@ export function AiApprovals(): React.JSX.Element {
         }
         const tone = riskTone(a.risk)
         const consequence = describeConsequence(subject)
+        // Same two yeses as the modal, with the same labels from the same
+        // function: a grant must read the same wherever it is given.
+        const grantLabel = sessionGrantLabel(a)
         return (
         <div className="list-row" key={a.id}>
           <div>
@@ -101,13 +106,20 @@ export function AiApprovals(): React.JSX.Element {
               {consequence.text}
             </div>
             <div className="r-sub mono">{a.action}</div>
+            <div className="r-sub">Permission: {capabilityLabel(a.capability)}</div>
             {a.policyReason && <div className="r-sub">Rule: {a.policyReason}</div>}
+            {a.contentPreview && <WritePreview agentName={a.agentName} preview={a.contentPreview} />}
           </div>
           <div className="spacer" />
           <button className="btn sm danger" onClick={() => respond(a.id, 'denied')}>
             <X size={13} /> Deny
           </button>
-          <button className="btn sm primary" onClick={() => respond(a.id, 'approved')}>
+          {grantLabel && (
+            <button className="btn sm" onClick={() => respond(a.id, 'approved', 'session')}>
+              {grantLabel}
+            </button>
+          )}
+          <button className="btn sm primary" onClick={() => respond(a.id, 'approved', 'once')}>
             <Check size={13} /> Approve once
           </button>
         </div>
@@ -131,7 +143,11 @@ export function AiApprovals(): React.JSX.Element {
                 <div className="r-title">
                   {a.agentName} ·{' '}
                   <span style={{ color: a.status === 'approved' ? 'var(--text-muted)' : 'var(--warn)' }}>
-                    {a.status === 'timeout' ? 'Nobody answered — denied' : a.status}
+                    {a.status === 'timeout'
+                      ? 'Nobody answered — denied'
+                      : a.grantedScope === 'session'
+                        ? 'approved for this session'
+                        : a.status}
                   </span>
                 </div>
                 <div className="r-sub">

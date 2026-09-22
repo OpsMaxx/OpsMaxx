@@ -490,6 +490,56 @@ export interface ApprovalRequest {
    * it labels itself "at least N", so a number here is always the real one.
    */
   actionsThisSession?: number
+
+  /**
+   * What an approval of this request is ALLOWED to cover beyond this one call,
+   * as main decided when it raised it. Absent means nothing: the dialog offers
+   * "Approve once" and no second button, and main would ignore a session scope
+   * sent for it anyway.
+   *
+   * `capability` covers every later call on this capability on this server for
+   * the rest of the agent's session. `tool` is narrower -- repeat calls of
+   * `toolName` on this server, for a tool that shares its capability with
+   * something an approval must not also buy (update_server vs remove_server).
+   * Sent rather than derived because the per-call list lives in gate(), and a
+   * renderer copy of it would be a second list somebody forgets to update.
+   */
+  sessionGrant?: 'capability' | 'tool'
+
+  /** How far the operator's yes reached, once there was one. See ApprovalScope. */
+  grantedScope?: ApprovalScope
+
+  /**
+   * The first part of what write_file will write, for the operator to read
+   * before approving it. Built once, in approvals.ts, from the raw content:
+   * secrets redacted, capped, and every invisible or reordering character
+   * rewritten as a visible ⟨U+XXXX⟩ -- see contentPreview in
+   * shared/approvalRisk.ts. It is shown to the human and nowhere else: never
+   * written to the audit log, never returned to the agent, and dropped from
+   * the request once it is answered.
+   */
+  contentPreview?: ContentPreview
+}
+
+/**
+ * How far one "yes" reaches.
+ *
+ * `once` is this call and nothing after it. `session` also remembers the answer
+ * for the grain `sessionGrant` names, until the agent's session ends or AI
+ * access is stopped. The button used to say "Approve once" and mean `session`,
+ * which is a grant the operator did not know they were giving -- so the two are
+ * now separate answers, and anything main cannot read as exactly `session` is
+ * `once`. A missing or garbled scope fails toward being asked again.
+ */
+export type ApprovalScope = 'once' | 'session'
+
+/** See ApprovalRequest.contentPreview. */
+export interface ContentPreview {
+  text: string
+  /** Characters of the (redacted) content not included in `text`. */
+  omittedChars: number
+  /** Line breaks not included in `text` -- roughly, lines not shown. */
+  omittedLines: number
 }
 
 /**
@@ -499,8 +549,19 @@ export interface ApprovalRequest {
  * only place the difference between "a human looked at this one" and "a human
  * looked at one like it" survives, and that is exactly the question an audit is
  * for.
+ *
+ * `approved-for-session` is the row that GAVE that approval: a human looked at
+ * this one and also said yes to the ones like it. Without it the audit log
+ * shows `approved-earlier` rows with nothing that explains where the earlier
+ * approval came from, because the granting row read the same as a single yes.
  */
-export type AuditApproval = 'not-required' | 'approved' | 'approved-earlier' | 'denied' | 'timeout'
+export type AuditApproval =
+  | 'not-required'
+  | 'approved'
+  | 'approved-for-session'
+  | 'approved-earlier'
+  | 'denied'
+  | 'timeout'
 export type AuditResult = 'success' | 'error' | 'denied'
 
 export interface AuditEntry {

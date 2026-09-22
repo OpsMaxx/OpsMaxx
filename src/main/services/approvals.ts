@@ -1,9 +1,10 @@
 import { EventEmitter } from 'node:events'
 import { randomBytes } from 'node:crypto'
-import type { ApprovalRequest } from '../../shared/mcp'
-import { sanitizeAgentIntent } from '../../shared/approvalRisk'
+import type { ApprovalRequest, ApprovalScope } from '../../shared/mcp'
+import { contentPreview, sanitizeAgentIntent } from '../../shared/approvalRisk'
 import { remoteText } from '../../shared/remoteText'
 import { getMcpConfig } from './mcpAuth'
+import { redactOutput } from './secretRedaction'
 
 // Human-in-the-loop gate for ASK-tier actions. The only way to resolve a
 // pending request is respond(), called from the IPC handler the renderer's
@@ -20,7 +21,7 @@ const pending = new Map<
   string,
   {
     request: ApprovalRequest
-    resolve: (v: 'approved' | 'denied' | 'timeout') => void
+    resolve: (v: 'approved' | 'approved-for-session' | 'denied' | 'timeout') => void
     /** null until armApproval() — the fuse does not burn before the question
      *  has been put to somebody. */
     timer: ReturnType<typeof setTimeout> | null
@@ -188,6 +189,21 @@ export interface CreateApprovalInput {
   sessionGroupName?: string
   /** Exact, or omitted. Never a partial count — see ApprovalRequest. */
   actionsThisSession?: number
+  /**
+   * What a "yes" may cover beyond this call. gate() sets it, from the one place
+   * that knows which tools are per-call; absent means the operator is offered
+   * "Approve once" only, and respondToApproval downgrades a session answer to
+   * once. See ApprovalRequest.sessionGrant.
+   */
+  sessionGrant?: ApprovalRequest['sessionGrant']
+  /**
+   * The RAW content write_file is about to write, and the secrets known for
+   * its server. Never copied onto the request: it is turned into
+   * `request.contentPreview` here, once, for the same reason `intent` is
+   * sanitised here -- one choke point instead of a promise every call site
+   * has to keep.
+   */
+  writeContent?: { content: string; knownSecrets: string[] }
 }
 
 /**
@@ -198,7 +214,7 @@ export interface CreateApprovalInput {
  * separate thing that is true of it -- nobody was asked, and retrying now will
  * be refused again.
  */
-export type ApprovalDecision = 'approved' | 'denied' | 'timeout' | 'refused'
+export type ApprovalDecision = 'approved' | 'approved-for-session' | 'denied' | 'timeout' | 'refused'
 
 // Generous on purpose. The point of passing these through remoteText is the
 // character filtering and the newline flattening, not the truncation: an
@@ -222,7 +238,11 @@ export function requestApproval(input: CreateApprovalInput): Promise<ApprovalDec
   // session's three open trigger prompts must not be what refuses its cancel.
   // Destructured off the request itself: it is a rationing input, not something
   // the operator's dialog shows.
-  const { containment: asked, ...forRequest } = input
+  // `writeContent` goes the same way, and for a harder reason: it is the raw
+  // file, secrets and all, and a request is broadcast to the renderer, listed
+  // over IPC and kept in `recent`. Only the preview built from it below may
+  // travel.
+  const { containment: asked, writeContent, ...forRequest } = input
   const containment = asked === true
   let live = 0
   for (const e of pending.values())
@@ -255,6 +275,11 @@ export function requestApproval(input: CreateApprovalInput): Promise<ApprovalDec
     action: remoteText(input.action, ACTION_MAX_CHARS),
     riskReason: remoteText(input.riskReason, ACTION_MAX_CHARS),
     serverName: remoteText(input.serverName, NAME_MAX_CHARS) || '(unnamed)',
+    // Redacted over the WHOLE content, then cut: a known secret straddling the
+    // cut would otherwise survive as a prefix no pattern recognises.
+    contentPreview: writeContent
+      ? contentPreview(redactOutput(writeContent.content, writeContent.knownSecrets))
+      : undefined,
     // Sent, rather than left for the renderer to reconstruct from createdAt plus
     // the configured timeout: that reconstruction is right only while the fuse
     // cannot move, and extendApproval moves it.
@@ -316,7 +341,7 @@ export function armAllPendingApprovals(): number {
   return armed
 }
 
-function finish(id: string, decision: 'approved' | 'denied' | 'timeout'): void {
+function finish(id: string, decision: 'approved' | 'denied' | 'timeout', scope: ApprovalScope = 'once'): void {
   const entry = pending.get(id)
   if (!entry) return
   if (entry.timer) clearTimeout(entry.timer)
@@ -324,6 +349,15 @@ function finish(id: string, decision: 'approved' | 'denied' | 'timeout'): void {
   pending.delete(id)
   entry.request.status = decision
   entry.request.resolvedAt = new Date().toISOString()
+  // A session answer only counts on a request that offered one. The renderer
+  // hides the button for a per-call tool, and this is what makes hiding it a
+  // guarantee rather than a hope: a scope sent for a request main never made
+  // grantable is read as `once`.
+  const forSession = decision === 'approved' && scope === 'session' && entry.request.sessionGrant !== undefined
+  if (decision === 'approved') entry.request.grantedScope = forSession ? 'session' : 'once'
+  // The file preview was for the person deciding, and they have decided. It is
+  // not kept in `recent`, which outlives the decision by the whole process.
+  delete entry.request.contentPreview
   // A resolved request used to vanish from every surface but the audit log, so
   // the one question an operator has after a timeout -- "what was I asked, and
   // why was I asked it at all" -- was answerable only by going and finding the
@@ -335,15 +369,21 @@ function finish(id: string, decision: 'approved' | 'denied' | 'timeout'): void {
   // presses repeatedly rather than a decision. A timeout is not a decision, so
   // it starts no cooldown -- nobody was there.
   if (decision === 'denied') recentDenials.set(entry.subject, Date.now() + DENY_COOLDOWN_MS)
-  entry.resolve(decision)
+  entry.resolve(forSession ? 'approved-for-session' : decision)
   emitter.emit('event', { type: 'resolved', request: entry.request } satisfies ApprovalEvent)
 }
 
 // Called only from the renderer's approval dialog via IPC — never from the
 // MCP tool-call path.
-export function respondToApproval(id: string, decision: 'approved' | 'denied'): boolean {
+//
+// `scope` arrives from the renderer and is read strictly: exactly `session` is
+// a session grant, and everything else -- absent, misspelt, an older preload
+// that sends two arguments -- is `once`. The two ways of being wrong are not
+// symmetric. Reading a session as once costs the operator one more prompt;
+// reading once as a session hands an agent approvals nobody gave.
+export function respondToApproval(id: string, decision: 'approved' | 'denied', scope?: unknown): boolean {
   if (!pending.has(id)) return false
-  finish(id, decision)
+  finish(id, decision === 'approved' ? 'approved' : 'denied', scope === 'session' ? 'session' : 'once')
   return true
 }
 

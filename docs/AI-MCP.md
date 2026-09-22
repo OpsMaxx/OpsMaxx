@@ -232,9 +232,9 @@ consequences of closing that are deliberate and are not left to the capability's
   approval authorises the call in front of the user and never the next one. Without that,
   `add_server` — which has no server id yet and so shares one elevation key across every add in a
   session — approved the first write and then wrote every one after it silently. `update_server`
-  is scoped to itself rather than per-call: the first change to a connection asks, and further
-  changes to that same connection in that same session do not, because an operator who has just
-  approved a repoint should not be shown the same card again for the next field. That yes still
+  is scoped to itself rather than per-call: its dialog offers a second answer, **Allow
+  update_server on *server* for this session**, after which further changes to that same
+  connection in that same session do not ask. **Approve once** covers the one change. Either yes
   reaches no other tool, no other server and no later session.
 
 **Jump hosts.** `jumpHosts` names servers that already exist, by friendly name, in dial order.
@@ -419,13 +419,42 @@ Any capability evaluating to `ask` calls `requestApproval` (`approvals.ts`), whi
 tool call on an in-memory pending request — nothing is written to disk until it resolves. The
 request only clears when:
 
-- a human clicks **Approve once** or **Deny** on the **Approvals** screen (`respondToApproval`),
+- a human answers it in the approval dialog or on the **Approvals** screen (`respondToApproval`),
 - it times out (`approvalTimeoutSeconds` in Security, 1–10 minutes) and is treated as denied, or
 - **Stop all AI access** denies every pending request at once (`denyAllPending`).
 
 There is no code path from the MCP/HTTP surface into `respondToApproval` — approving a request
 requires the renderer's IPC handler, which only the human-facing UI calls. An agent cannot approve
 its own request by construction, not by convention.
+
+**Two ways to say yes, and each says how far it reaches.**
+
+- **Approve once** authorises this call and nothing after it. The next call asks again.
+- **Allow "*permission*" on *server* for this session** also remembers the answer, in memory, for
+  that permission on that server until the agent's session ends or AI access is stopped. For a
+  tool whose grant `gate()` narrows to itself (`update_server`) the button names the tool instead
+  of the permission. Calls it carries are audited as `approved-earlier`, and the call that gave it
+  as `approved-for-session`, so every carried row has one to point back to.
+
+The second button is only offered where `gate()` would honour it: `add_server`, `remove_server`
+and every `ciTrigger` tool are per-call and show **Approve once** alone. Main reads the scope
+strictly — anything other than exactly `session`, including a missing one, is `once`, and a
+session answer to a request that did not offer one is also `once` — so a renderer bug fails
+toward being asked again. **Deny** keeps the weight and the keyboard focus. The dialog also names
+the permission being granted, in the words the Access screen uses.
+
+Up to and including 0.50.25, the only yes button read **Approve once** and was remembered for the session
+anyway, on every tool that was not per-call.
+
+**`write_file` shows what it will write.** The dialog used to show `write <path> (N bytes)` and
+none of the bytes. It now shows the start of the content — the first 4,096 characters or 80
+lines, whichever is shorter, and how much is left out — in a scrolling, fixed-height, monospace
+frame labelled as the agent's. The content is redacted with `secretRedaction.ts` against the
+server's known secrets *before* it is cut, so a secret straddling the cut cannot survive as a
+prefix, and every control, zero-width and bidi character is printed as `⟨U+XXXX⟩` rather than
+obeyed (`contentPreview`, `src/shared/approvalRisk.ts`). The preview is built in `approvals.ts`
+and is never written to the audit log, never returned to the agent, and dropped from the request
+once it is answered. A write carried on a session approval shows no preview, because nothing asks.
 
 ## Audit Log
 

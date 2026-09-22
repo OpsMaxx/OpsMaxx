@@ -224,6 +224,7 @@ import type {
   McpGlobalConfig,
   McpAgentSession,
   ApprovalRequest,
+  ApprovalScope,
   AuditEntry,
   AuditIntegrity,
   CliPairingRequest
@@ -2145,8 +2146,10 @@ const api = {
     listApprovals: (): Promise<ApprovalRequest[]> => ipcRenderer.invoke('aiMcp:listApprovals'),
     // Resolved ones, for the Approvals page only — never for the modal queue.
     recentApprovals: (): Promise<ApprovalRequest[]> => ipcRenderer.invoke('aiMcp:recentApprovals'),
-    respondApproval: (id: string, decision: 'approved' | 'denied'): Promise<boolean> =>
-      ipcRenderer.invoke('aiMcp:respondApproval', id, decision),
+    // `scope` only means anything with 'approved'; main reads a missing one as
+    // 'once'. See ApprovalScope.
+    respondApproval: (id: string, decision: 'approved' | 'denied', scope?: ApprovalScope): Promise<boolean> =>
+      ipcRenderer.invoke('aiMcp:respondApproval', id, decision, scope),
     // Resolves false when the fuse did NOT move: the request was already
     // answered, the clock already denied it, or the extension ceiling in
     // approvals.ts is spent. The renderer must not treat the call itself as the

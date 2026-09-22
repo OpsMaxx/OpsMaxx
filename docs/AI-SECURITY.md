@@ -234,9 +234,10 @@ add a server *and* bring up a VPN that server's traffic is routed through, and b
 look ordinary in isolation. `manageServers` now also edits and removes connections, which widens
 that composition rather than narrowing it — hence the two rules on it: changing and removing always
 ask, and an approval is scoped to the one tool on the one server that was approved, so neither half
-of the composition can be assembled silently. Saying yes to a change covers further changes to that
-same connection for the rest of that session; it never covers a removal, another connection, or the
-next session. That composition is the reason for the three rules below, and none of
+of the composition can be assembled silently. **Approve once** covers the one change; the separate
+**Allow update_server on *server* for this session** answer also covers further changes to that same
+connection for the rest of that session. Neither covers a removal, another connection, or the next
+session. That composition is the reason for the three rules below, and none of
 them is a preference:
 
 - **Starting a VPN is always ASK**, on every group, including one a user has explicitly raised to

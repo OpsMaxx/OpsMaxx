@@ -28,6 +28,7 @@ const { listAudit } = await import('../src/main/services/auditLog')
 const { setAgentServerCreator, setAgentConfigWriter } = await import('../src/main/services/agentConfigWrite')
 type AgentServerRequest = import('../src/main/services/agentConfigWrite').AgentServerRequest
 type AgentConfigRequest = import('../src/main/services/agentConfigWrite').AgentConfigRequest
+type ApprovalRequest = import('../src/shared/mcp').ApprovalRequest
 
 const PORT = 18761
 
@@ -121,15 +122,20 @@ async function call(c: Client, name: string, args: Record<string, unknown>): Pro
   return r.content.map((x) => x.text).join('\n')
 }
 
-function autoRespond(decision: 'approved' | 'denied'): { stop: () => void; count: () => number } {
-  let seen = 0
+// `scope` is passed through untouched, including when it is absent: a missing
+// scope is one of the cases under test, and it must mean "once".
+function autoRespond(
+  decision: 'approved' | 'denied',
+  scope?: unknown
+): { stop: () => void; count: () => number; requests: ApprovalRequest[] } {
+  const requests: ApprovalRequest[] = []
   const off = onApprovalEvent((e) => {
     if (e.type === 'created') {
-      seen += 1
-      respondToApproval(e.request.id, decision)
+      requests.push({ ...e.request })
+      respondToApproval(e.request.id, decision, scope)
     }
   })
-  return { stop: off, count: () => seen }
+  return { stop: off, count: () => requests.length, requests }
 }
 
 describe('add_server jumpHosts', () => {
@@ -290,13 +296,17 @@ describe('one approval writes one server', () => {
   // audited as `approved-earlier` -- which is how one dialog leaves four
   // unwanted connections behind.
   it('asks again for a second add in the same session', async () => {
-    const a = autoRespond('approved')
+    // Answered FOR THE SESSION, which is the strongest yes there is, and it
+    // still covers one add: a per-call tool is offered no session grant, and
+    // main reads a session answer sent for one anyway as once.
+    const a = autoRespond('approved', 'session')
     const c = await clientFor('grp-full')
     try {
       await call(c, 'add_server', { name: 'First', host: '10.0.0.21' })
       await call(c, 'add_server', { name: 'Second', host: '10.0.0.22' })
       expect(created).toHaveLength(2)
       expect(a.count()).toBe(2)
+      expect(a.requests.map((r) => r.sessionGrant)).toEqual([undefined, undefined])
     } finally {
       a.stop()
       await c.close()
@@ -385,7 +395,7 @@ describe('update_server', () => {
   // dialog without reading it. The three tests below pin the edges of the
   // narrower grant: same server yes, other server no, other tool no.
   it('does not ask again for a second change to the same server in one session', async () => {
-    const a = autoRespond('approved')
+    const a = autoRespond('approved', 'session')
     const c = await clientFor('grp-full')
     try {
       await call(c, 'update_server', { serverName: 'Scanner01', port: 2201 })
@@ -402,7 +412,47 @@ describe('update_server', () => {
       // 'approved-earlier' with `result: 'success'` before the change had run,
       // and the tool then recorded 'approved' on top, which is the audit log
       // claiming a human had looked at a card nobody was shown.
-      expect(carried.map((e) => e.approval)).toEqual(['approved-earlier', 'approved'])
+      //
+      // The first row says the human answered for the session, not just for
+      // that call, so the carried row below it has something to point back to.
+      expect(carried.map((e) => e.approval)).toEqual(['approved-earlier', 'approved-for-session'])
+      // And the grant it offered was the narrow one: this tool, on this server.
+      expect(a.requests[0].sessionGrant).toBe('tool')
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  // "Approve once" used to mean the rest of the session. It now means once.
+  it('asks again after an "Approve once"', async () => {
+    const a = autoRespond('approved', 'once')
+    const c = await clientFor('grp-full')
+    try {
+      await call(c, 'update_server', { serverName: 'Scanner01', port: 2211 })
+      await call(c, 'update_server', { serverName: 'Scanner01', port: 2212 })
+      expect(a.count()).toBe(2)
+      expect(written).toHaveLength(2)
+      const rows = listAudit().filter((e) => /^Change server "Scanner01" \(port to 221[12]\)/.test(e.action))
+      expect(rows.map((e) => e.approval)).toEqual(['approved', 'approved'])
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  // Fail toward asking again: an answer with no scope -- an older preload, a
+  // renderer bug -- and one with a scope main does not recognise are both once.
+  it.each([
+    ['no scope', undefined],
+    ['an unrecognised scope', 'forever']
+  ])('treats an approval with %s as once', async (_label, scope) => {
+    const a = autoRespond('approved', scope)
+    const c = await clientFor('grp-full')
+    try {
+      await call(c, 'update_server', { serverName: 'Scanner01', port: 2221 })
+      await call(c, 'update_server', { serverName: 'Scanner01', port: 2222 })
+      expect(a.count()).toBe(2)
     } finally {
       a.stop()
       await c.close()
@@ -410,7 +460,7 @@ describe('update_server', () => {
   })
 
   it('asks again for a change to a different server', async () => {
-    const a = autoRespond('approved')
+    const a = autoRespond('approved', 'session')
     const c = await clientFor('grp-full')
     try {
       await call(c, 'update_server', { serverName: 'Scanner01', port: 2201 })
@@ -425,7 +475,7 @@ describe('update_server', () => {
   it('does not let a change approval buy the removal of that same server', async () => {
     // Both are `manageServers`. Keying the memory on the capability alone would
     // have made a yes about repointing a connection into a silent delete of it.
-    const a = autoRespond('approved')
+    const a = autoRespond('approved', 'session')
     const c = await clientFor('grp-full')
     try {
       await call(c, 'update_server', { serverName: 'Scanner01', port: 2201 })

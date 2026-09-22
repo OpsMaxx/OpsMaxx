@@ -749,6 +749,13 @@ interface GateSubject {
    * of the session, and nothing else.
    */
   elevationScope?: string
+  /**
+   * write_file's content, for the approval dialog to show. Raw here; approvals.ts
+   * redacts it against these secrets, caps it, and makes it visible-safe, and
+   * nothing else reads it. It never reaches the audit row (that is ctx.action,
+   * which carries a byte count) and never goes back to the agent.
+   */
+  writeContent?: { content: string; knownSecrets: string[] }
 }
 
 /**
@@ -795,10 +802,11 @@ function countSessionActions(sessionId: string): number | null {
 /**
  * Approvals already granted in this session, remembered.
  *
- * Keyed session + server + capability. Approving one `execute_command` on
- * Scanner01 stops the app asking again for terminal commands on Scanner01 for
- * the rest of that session -- and asks afresh for `sudo`, which is a different
- * capability and deliberately not covered by having said yes to `df`.
+ * Keyed session + server + capability. Answering one `execute_command` on
+ * Scanner01 with "Allow … for this session" stops the app asking again for
+ * terminal commands on Scanner01 for the rest of that session -- and asks
+ * afresh for `sudo`, which is a different capability and deliberately not
+ * covered by having said yes to `df`. "Approve once" writes nothing here.
  *
  * Why per server rather than session-wide: a person approving an action is
  * looking at a server name while they do it, and carrying that consent to a
@@ -886,6 +894,13 @@ async function gate(
       return { ok: true, approval: 'approved-earlier' }
     }
     if (extra) await noteAwaitingApproval(extra, ctx.action, ctx.serverName)
+    // "Approve once" used to mean exactly this -- and then add the elevation
+    // below anyway, so the button granted the rest of the session on every tool
+    // that was not per-call. The grant is now a second, separately labelled
+    // answer, and it is only OFFERED where the cache would honour it: a
+    // per-call tool sends no `sessionGrant`, so its dialog has one yes button
+    // and approvals.ts reads any session answer for it as once.
+    const sessionGrant = perCall ? undefined : subject.elevationScope ? ('tool' as const) : ('capability' as const)
     const decision = await requestApproval({
       sessionId: ctx.session.id,
       agentName: ctx.session.agentName,
@@ -910,10 +925,14 @@ async function gate(
       // The rule that produced this `ask`, which gate() has had in hand all
       // along and dropped on the floor.
       policyReason: check.reason,
-      actionsThisSession: countSessionActions(ctx.session.id) ?? undefined
+      actionsThisSession: countSessionActions(ctx.session.id) ?? undefined,
+      sessionGrant,
+      writeContent: subject.writeContent
     })
-    if (decision === 'approved' && !perCall) sessionElevations.add(key)
-    if (decision !== 'approved') {
+    // Only an explicit session answer is remembered. A plain `approved` is the
+    // "Approve once" button and covers this call alone.
+    if (decision === 'approved-for-session' && !perCall) sessionElevations.add(key)
+    if (decision !== 'approved' && decision !== 'approved-for-session') {
       recordAudit({
         agentName: ctx.session.agentName,
         sessionId: ctx.session.id,
@@ -949,11 +968,14 @@ async function gate(
         )
       }
     }
+    // A human answered this one just now; the audit row says whether they also
+    // answered for the ones like it, so the `approved-earlier` rows that follow
+    // have a row to point back to.
+    return { ok: true, approval: decision === 'approved-for-session' && !perCall ? 'approved-for-session' : 'approved' }
   }
 
-  // An `ask` that reached here was answered by a human just now; an `allow`
-  // never entered either branch above.
-  return { ok: true, approval: check.decision === 'ask' ? 'approved' : 'not-required' }
+  // Only an `allow` reaches here: every `ask` returned from its own branch.
+  return { ok: true, approval: 'not-required' }
 }
 
 /**
@@ -966,7 +988,7 @@ async function gate(
  * just looked at -- on top of the 'approved-earlier' row gate() had already
  * written for it. Two rows, and the louder one was the untrue one.
  */
-type GateApproval = 'not-required' | 'approved' | 'approved-earlier'
+type GateApproval = 'not-required' | 'approved' | 'approved-for-session' | 'approved-earlier'
 
 function auditSuccess(ctx: AuditContext, approval: GateApproval, extra: { exitCode?: number } = {}): void {
   recordAudit({
@@ -2111,7 +2133,11 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           toolName: 'write_file',
           level: 'medium',
           because: 'it overwrites a file on the host, and OpsMaxx keeps no copy of the previous contents',
-          intent
+          intent,
+          // The dialog used to show `write <path> (N bytes)` and nothing of the
+          // N bytes, so approving a write meant approving content nobody had
+          // been shown.
+          writeContent: { content, knownSecrets: knownSecretValuesForServer(s.id) }
         },
         extra
       )
