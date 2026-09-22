@@ -23,7 +23,7 @@
 .ops-sticky {
   position: sticky;
   top: calc(var(--sp-5) * -1);
-  z-index: 6;
+  z-index: var(--z-sticky);
   margin: calc(var(--sp-5) * -1) calc(var(--sp-5) * -1) var(--sp-4);
   padding: var(--sp-5) var(--sp-5) 10px;
   background: var(--bg-panel);
@@ -74,7 +74,7 @@
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  z-index: 20;
+  z-index: var(--z-popover);
   min-width: 200px;
   max-height: 60vh;
   overflow-y: auto;

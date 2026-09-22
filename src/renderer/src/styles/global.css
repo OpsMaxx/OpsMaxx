@@ -427,7 +427,7 @@ button {
   width: 6px;
   height: 100%;
   cursor: col-resize;
-  z-index: 5;
+  z-index: var(--z-resizer);
 }
 .resizer:hover,
 .resizer.dragging {
@@ -717,13 +717,13 @@ button {
 .tab-overflow-scrim {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: var(--z-dropdown);
 }
 .tab-overflow-menu {
   position: absolute;
   top: 100%;
   right: 0;
-  z-index: 41;
+  z-index: calc(var(--z-dropdown) + 1);
   min-width: 220px;
   max-height: 60vh;
   overflow-y: auto;
@@ -1033,7 +1033,7 @@ button {
   height: 6px;
   margin: -3px 0;
   cursor: row-resize;
-  z-index: 5;
+  z-index: var(--z-resizer);
 }
 .resizer-h:hover,
 .resizer-h.dragging {
@@ -1320,8 +1320,13 @@ button {
   /* Breathing room on short displays so the dialog never touches the edges. */
   padding: 3vh 2vw;
   overflow: auto;
-  z-index: 100;
+  /* `Modal` sets --modal-layer to its place among the open dialogs. */
+  z-index: calc(var(--z-modal) + var(--modal-layer, 0));
   animation: fade 0.12s ease;
+}
+/* The AI approval dialog: same scrim, top layer. See `--z-approval`. */
+.scrim.approval-scrim {
+  z-index: var(--z-approval);
 }
 @keyframes fade {
   from {
@@ -1441,7 +1446,7 @@ details[open] > .disclosure-head .chev {
   display: flex;
   justify-content: center;
   padding-top: 12vh;
-  z-index: 200;
+  z-index: var(--z-palette);
   animation: fade 0.1s ease;
 }
 .palette {
@@ -1539,7 +1544,7 @@ details[open] > .disclosure-head .chev {
   border-radius: var(--r-md);
   box-shadow: var(--shadow-md);
   padding: var(--sp-1);
-  z-index: 150;
+  z-index: var(--z-menu);
   animation: pop 0.1s ease;
 }
 .menu-item {
@@ -2312,7 +2317,7 @@ details[open] > .disclosure-head .chev {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-  z-index: 300;
+  z-index: var(--z-toast);
 }
 .toast {
   display: flex;
@@ -2692,7 +2697,7 @@ details[open] > .disclosure-head .chev {
   position: absolute;
   top: 8px;
   right: 18px;
-  z-index: 20;
+  z-index: var(--z-popover);
   display: flex;
   align-items: center;
   gap: 2px;
@@ -2905,7 +2910,7 @@ details[open] > .disclosure-head .chev {
   align-items: flex-end;
   justify-content: center;
   padding-bottom: 28px;
-  z-index: 4;
+  z-index: var(--z-pane-overlay);
   /* Only the box is interactive. The dead terminal underneath stays readable,
      scrollable and selectable, which is the whole reason to keep it around. */
   pointer-events: none;
@@ -3271,7 +3276,7 @@ details[open] > .disclosure-head .chev {
   position: fixed;
   right: 20px;
   bottom: 20px;
-  z-index: 900;
+  z-index: var(--z-onboarding);
   width: 380px;
   max-width: calc(100vw - 40px);
   padding: 14px 16px;
@@ -3291,7 +3296,7 @@ details[open] > .disclosure-head .chev {
   position: fixed;
   right: 20px;
   bottom: 20px;
-  z-index: 880;
+  z-index: var(--z-tip);
   width: 360px;
   max-width: calc(100vw - 40px);
   padding: 12px 14px;
@@ -3649,7 +3654,7 @@ details[open] > .disclosure-head .chev {
 .inv-table td:first-child {
   position: sticky;
   left: 0;
-  z-index: 1;
+  z-index: var(--z-raised);
   background: var(--bg-panel);
 }
 .inv-table tr:hover td:first-child {
@@ -4037,7 +4042,7 @@ details[open] > .disclosure-head .chev {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
-  z-index: 40;
+  z-index: var(--z-dropdown);
   width: min(46ch, 70vw);
   padding: var(--sp-3);
   border: 1px solid var(--border-strong);
@@ -5416,7 +5421,7 @@ details[open] > .disclosure-head .chev {
 .setup-scrim {
   position: fixed;
   inset: 0;
-  z-index: 900;
+  z-index: var(--z-onboarding);
   display: grid;
   place-items: center;
   padding: var(--sp-6);

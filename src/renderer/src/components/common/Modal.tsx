@@ -122,7 +122,7 @@ const byLayer = (): OpenModal[] =>
  * is about to be -- reporting it as covered would arm nothing and paint it at
  * the bottom for a frame.
  */
-function useModalLayer(priority: number): { zIndex: number; top: boolean } {
+function useModalLayer(priority: number): { layer: number; top: boolean } {
   const idRef = useRef(0)
   if (idRef.current === 0) idRef.current = nextModalId++
   const id = idRef.current
@@ -149,14 +149,15 @@ function useModalLayer(priority: number): { zIndex: number; top: boolean } {
   const order = byLayer()
   const pos = order.findIndex((m) => m.id === id)
   /**
-   * `.scrim`'s own z-index is 100; these ride on top of it in the same space.
+   * `.scrim` paints at `--z-modal` plus this; these ride on top of it in the
+   * same space.
    *
-   * The headroom above is `.menu` at 150, so this has room for fifty open
+   * The headroom above is `--z-menu`, fifty steps up, so this has room for fifty open
    * dialogs before it would reach something else — and `priority` costs one
    * step, not a band, for the same reason. If a design ever wants real bands here,
-   * raise `.menu` rather than widening the multiplier.
+   * raise `--z-menu` rather than widening the multiplier.
    */
-  return { zIndex: 100 + (pos < 0 ? order.length : pos), top: pos < 0 || pos === order.length - 1 }
+  return { layer: pos < 0 ? order.length : pos, top: pos < 0 || pos === order.length - 1 }
 }
 
 export function Modal({
@@ -173,14 +174,14 @@ export function Modal({
   dismissible = true
 }: ModalProps): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
-  const { zIndex, top } = useModalLayer(priority)
+  const { layer, top } = useModalLayer(priority)
   // Only the dialog in front. Both of these listen on `document`, so without
   // the guard one Escape closes every open dialog at once -- including ones
   // the user cannot see, whose close is not always harmless.
   useClickOutside(ref, onClose, dismissible && top)
   const hasFooter = confirm !== undefined || footer !== undefined || footerNote !== undefined
   return (
-    <div className="scrim" style={{ zIndex }}>
+    <div className="scrim" style={{ '--modal-layer': layer } as React.CSSProperties}>
       <div className={clsx('modal', size === 'lg' && 'lg')} ref={ref} role="dialog" aria-modal>
         <div className="modal-header">
           <div>

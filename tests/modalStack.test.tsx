@@ -28,7 +28,7 @@ import { Modal } from '../src/renderer/src/components/common/Modal'
  */
 
 const scrims = (): HTMLElement[] => [...document.querySelectorAll('.scrim')] as HTMLElement[]
-const layerOf = (el: HTMLElement): number => Number(el.style.zIndex)
+const layerOf = (el: HTMLElement): number => Number(el.style.getPropertyValue('--modal-layer'))
 
 describe('two dialogs on screen at once', () => {
   it('paints the one that opened later in front', () => {

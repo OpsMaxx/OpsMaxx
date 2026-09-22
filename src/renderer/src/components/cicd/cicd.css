@@ -459,7 +459,7 @@ button.cicd-step {
    there for one level up.
 
    It pins at the very TOP of the scrollport rather than below the module
-   header, and the z-index is above `.monitor-sticky`'s 6 on purpose: the header
+   header, and the z-index (`--z-sticky-nav`) is above `.monitor-sticky`'s `--z-sticky` on purpose: the header
    above it is a title and two sentences of description that are read once, and
    the navigation is what somebody scrolling needs. So the prose scrolls and the
    nav takes its place. `--cicd-nav-top` is the escape hatch for a host that
@@ -469,7 +469,7 @@ button.cicd-step {
 .cicd-nav {
   position: sticky;
   top: var(--cicd-nav-top, 0px);
-  z-index: 7;
+  z-index: var(--z-sticky-nav);
   padding-top: var(--sp-2);
   background: var(--bg-panel);
 }

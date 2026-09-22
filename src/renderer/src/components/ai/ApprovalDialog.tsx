@@ -172,7 +172,7 @@ export function ApprovalDialog({
     // component for exactly that reason. A stray click on the scrim used to
     // dismiss this dialog, and a dismissed dialog left an agent blocked with a
     // burning fuse and nothing on screen to say so.
-    <div className="scrim">
+    <div className="scrim approval-scrim">
       <div className="modal" role="dialog" aria-modal aria-label="AI action requires approval">
         <div className="modal-header">
           <div>

@@ -199,6 +199,44 @@
      which is a worse outcome than four pixels of column. */
   --activitybar-w: 96px;
   --statusbar-h: 24px;
+
+  /* Layers. Every z-index in the renderer is one of these, so the order of
+     things that can cover each other is readable in one place instead of being
+     reconstructed from a grep. The numbers are the ones each rule already had;
+     only the approval layer moved.
+
+     The in-pane layers only compete inside their own stacking context — a
+     resizer at 5 never meets a toast — but they are named here too, so that a
+     new rule picks a layer rather than a number.
+
+     Approvals are the top, and on purpose. An approval has a fuse on it: an
+     agent is blocked until it is answered and is refused when the fuse runs
+     out. The dialog used to share `.scrim`'s 100 with every other dialog, so
+     the command palette, a toast, the walkthrough or a later dialog could sit
+     over it while it burned down unseen. Nothing a person could be looking at
+     is worth more than the question that is timing out behind it. */
+  --z-raised: 1;
+  --z-pane-overlay: 4;
+  --z-resizer: 5;
+  --z-sticky: 6;
+  --z-sticky-nav: 7;
+  --z-pane-control: 15;
+  --z-popover: 20;
+  --z-dropdown: 40;
+  /* Dialogs. `Modal` stacks open dialogs on top of this one step at a time;
+     `--z-menu` is the headroom above them. */
+  --z-modal: 100;
+  --z-menu: 150;
+  --z-palette: 200;
+  --z-toast: 300;
+  --z-tip: 880;
+  --z-onboarding: 900;
+  /* A decision that owns the window: the sync conflict chooser. */
+  --z-blocking: 9000;
+  /* The revocation screen replaces the app rather than covering it, so nothing
+     else is mounted beside it — this only has to beat the window chrome. */
+  --z-revoked: 9900;
+  --z-approval: 10000;
 }
 
 :root[data-theme='light'] {
