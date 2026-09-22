@@ -187,17 +187,28 @@ export function ConnectionTree(): React.JSX.Element {
    */
   const treeRef = useRef<HTMLDivElement>(null)
   const [focusKey, setFocusKey] = useState<string | null>(null)
+  // The rows as of the last pass, so a row that has gone can be replaced by
+  // its neighbour rather than by the top of the list.
+  const lastKeys = useRef<string[]>([])
   useEffect(() => {
-    // The tab stop has to exist. First render, and a collapse or search that
-    // removed the focused row, both leave none — so fall back to the first.
+    // The tab stop has to exist. First render, and a delete, move, collapse or
+    // search that removed the focused row, all leave none.
     const items = [...(treeRef.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? [])]
-    if (items.length > 0 && !items.some((el) => el.dataset.key === focusKey)) {
-      // A focused row that is deleted or moved takes DOM focus with it, to the
-      // page body. If the tree held focus, it keeps it.
+    const keys = items.map((el) => el.dataset.key ?? '')
+    if (items.length > 0 && (focusKey === null || !keys.includes(focusKey))) {
+      // The next row that still exists, else the nearest one above it.
+      const prev = lastKeys.current
+      const at = focusKey === null ? -1 : prev.indexOf(focusKey)
+      const survivor =
+        at < 0 ? undefined : [...prev.slice(at + 1), ...prev.slice(0, at).reverse()].find((k) => keys.includes(k))
+      const target = items[survivor ? keys.indexOf(survivor) : 0]
+      // A focused row that is removed takes DOM focus with it, to the page
+      // body. If the tree held focus, it keeps it.
       const held = focusKey !== null && document.activeElement === document.body
-      setFocusKey(items[0].dataset.key ?? null)
-      if (held) items[0].focus()
+      setFocusKey(target.dataset.key ?? null)
+      if (held) target.focus()
     }
+    lastKeys.current = keys
     // Everything that decides which rows exist.
   }, [focusKey, query, collapsed, servers, folders])
 

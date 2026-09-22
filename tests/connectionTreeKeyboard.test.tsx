@@ -147,15 +147,17 @@ describe('connection tree keyboard', () => {
     expect(ev.defaultPrevented).toBe(false)
   })
 
-  it('keeps focus in the tree when the focused row is deleted', async () => {
+  it('moves focus to the next row when the focused row is deleted', async () => {
     seed()
     render(<ConnectionTree />)
-    const cache = rows().find((r) => r.textContent?.includes('cache') && r.getAttribute('aria-level'))!
-    cache.focus()
+    const bastion = rows().find((r) => r.dataset.key === 'srv:srv-b')!
+    bastion.focus()
     await act(async () => {
-      useApp.setState((st) => ({ servers: st.servers.filter((sv) => sv.id !== 'srv-c') }))
+      useApp.setState((st) => ({ servers: st.servers.filter((sv) => sv.id !== 'srv-b') }))
     })
-    expect(document.activeElement?.getAttribute('role')).toBe('treeitem')
+    // Not the page body, and not the top of the list: the row that followed.
+    expect((document.activeElement as HTMLElement).dataset.key).toBe('srv:srv-c')
+    expect(rows().filter((r) => r.tabIndex === 0)).toEqual([document.activeElement])
   })
 
   it('does not open the row menu from inside a folder being renamed', () => {
