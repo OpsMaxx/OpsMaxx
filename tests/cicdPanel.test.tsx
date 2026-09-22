@@ -1501,7 +1501,9 @@ describe('removing an account', () => {
       keys: '[MouseRight]',
       target: await screen.findByRole('tab', { name: /Tooling/ })
     })
-    await userEvent.click(await screen.findByRole('button', { name: /^remove…$/i }))
+    // A context-menu entry is a menuitem, not a button, since the shared
+    // ContextMenu took the WAI-ARIA menu pattern.
+    await userEvent.click(await screen.findByRole('menuitem', { name: /^remove…$/i }))
     expect(screen.getByText(/Remove Tooling\?/)).toBeTruthy()
 
     await userEvent.click(screen.getByRole('button', { name: /^remove$/i }))
