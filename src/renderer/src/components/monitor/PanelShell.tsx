@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { Info } from 'lucide-react'
+import { approvalShowing, inLayerAbove } from '../../hooks/useClickOutside'
 
 // The page template every monitoring and operations tab wears.
 //
@@ -100,10 +101,13 @@ export function PanelAbout({
   // fix, reintroduced by the fix.
   useEffect(() => {
     if (!open) return
+    // Not for a press on an approval or a toast, which paint above this; see
+    // useClickOutside.
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key === 'Escape' && !approvalShowing()) setOpen(false)
     }
     const onDown = (e: MouseEvent): void => {
+      if (inLayerAbove(e.target)) return
       if (!host.current?.contains(e.target as Node)) setOpen(false)
     }
     document.addEventListener('keydown', onKey)

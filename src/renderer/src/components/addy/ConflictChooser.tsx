@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { GitMerge, AlertTriangle } from 'lucide-react'
 import type { AddyStatusDevice, ConflictCopy } from '../../../../shared/addy'
+import { approvalShowing } from '../../hooks/useClickOutside'
 
 /**
  * Two versions of the same thing, and a person deciding.
@@ -132,7 +133,9 @@ export function ConflictChooser(): React.JSX.Element | null {
   useEffect(() => {
     if (currentId === undefined) return undefined
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setDeferred((d) => [...d, currentId])
+      // An approval paints above this chooser, so an Escape then was meant for
+      // it; see useClickOutside.
+      if (e.key === 'Escape' && !approvalShowing()) setDeferred((d) => [...d, currentId])
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)

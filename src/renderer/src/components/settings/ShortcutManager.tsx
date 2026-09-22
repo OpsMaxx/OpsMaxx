@@ -11,6 +11,7 @@ import {
   findConflicts,
   resolveBindings
 } from '../../lib/shortcuts'
+import { approvalShowing } from '../../hooks/useClickOutside'
 
 const SCOPE_LABEL: Record<string, string> = {
   app: 'Outside terminals',
@@ -35,6 +36,10 @@ export function ShortcutManager(): React.JSX.Element {
   useEffect(() => {
     if (!recording) return
     const handler = (e: KeyboardEvent): void => {
+      // Except while an approval is up: it paints above this page, and a
+      // recorder that swallowed Tab, Enter and Escape would leave the question
+      // on screen unanswerable from the keyboard. See useClickOutside.
+      if (approvalShowing()) return
       e.preventDefault()
       e.stopPropagation()
       if (e.key === 'Escape') return setRecording(null)
