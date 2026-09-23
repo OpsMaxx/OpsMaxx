@@ -37,19 +37,22 @@ export function useArming(key: string): {
   const keyDownAt = useRef<number | null>(null)
   const [ticks, tick] = useState(0)
 
-  // Re-run after every tick, not only on a new key. A timer can fire a
-  // fraction of a millisecond before performance.now() says the delay is up;
-  // with `[key]` alone that re-render still read "not armed" and nothing ever
-  // scheduled another, so the yes stayed inert until something else happened
-  // to re-render it. Now an early tick simply schedules the remainder.
-  useLayoutEffect(() => {
-    const left = since.current + ARM_MS - performance.now()
-    if (left <= 0) return
-    const t = setTimeout(() => tick((n) => n + 1), Math.ceil(left))
-    return () => clearTimeout(t)
-  }, [key, ticks])
-
   const armed = performance.now() >= since.current + ARM_MS
+
+  // Every render that shows the yes as not armed schedules another render —
+  // keyed on what THIS render decided, not on a fresh reading of the clock.
+  // A timer can fire a fraction of a millisecond before performance.now()
+  // says the delay is up, and the effect runs a moment after the render: with
+  // `[key]` alone, or with the effect re-measuring `left`, that render could
+  // read "not armed" while the effect found no time left, and nothing ever
+  // re-rendered. The yes then stayed inert until something else happened to
+  // re-render it. Re-running on `ticks` and `armed` closes both gaps.
+  useLayoutEffect(() => {
+    if (armed) return
+    const left = Math.max(0, Math.ceil(since.current + ARM_MS - performance.now()))
+    const t = setTimeout(() => tick((n) => n + 1), left)
+    return () => clearTimeout(t)
+  }, [key, ticks, armed])
 
   const allow = useCallback((e: React.MouseEvent): boolean => {
     const armAt = since.current + ARM_MS
