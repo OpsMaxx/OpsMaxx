@@ -15,6 +15,7 @@ import { dbConnectConfig } from '../../lib/dbConfig'
 import { adviseOnError } from '../../lib/connectionError'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import type { DbKind, UUID } from '../../types'
+import { Switch } from '../common/Switch'
 
 // Per-engine, and `dbLabel`/`dbPlaceholder` are REQUIRED fields rather than a
 // ternary at the input, because a ternary is how two of the five came to be
@@ -599,7 +600,7 @@ export function AddDatabaseModal(): React.JSX.Element {
             <div className="field">
               <label className="field-label">TLS / SSL</label>
               <label className="row" style={{ height: 34, gap: 10 }}>
-                <span className={clsx('switch', ssl && 'on')} onClick={() => setSsl((v) => !v)} />
+                <Switch checked={ssl} onChange={setSsl} />
                 <span className="muted">{ssl ? 'Enabled' : 'Disabled'}</span>
               </label>
             </div>

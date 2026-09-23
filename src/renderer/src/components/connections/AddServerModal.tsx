@@ -38,6 +38,7 @@ import { VpnTransportSelect } from '../vpn/VpnTransportSelect'
 import { classifyConnectionError, faultAdvice } from '../../lib/connectionError'
 import { MAX_TAGS, parseTags } from '../../lib/serverTags'
 import type { AuthMethod, Hop, UUID } from '../../types'
+import { Switch } from '../common/Switch'
 
 // `unavailable` says why rather than hiding the option.
 //
@@ -1333,15 +1334,15 @@ export function AddServerModal(): React.JSX.Element {
             </div>
             <label className="row" style={{ justifyContent: 'space-between' }}>
               <span className="s-title">Keep-alive</span>
-              <span className={clsx('switch', keepAlive && 'on')} onClick={() => setKeepAlive((v) => !v)} />
+              <Switch checked={keepAlive} onChange={setKeepAlive} />
             </label>
             <label className="row" style={{ justifyContent: 'space-between' }}>
               <span className="s-title">Compression</span>
-              <span className={clsx('switch', compression && 'on')} onClick={() => setCompression((v) => !v)} />
+              <Switch checked={compression} onChange={setCompression} />
             </label>
             <label className="row" style={{ justifyContent: 'space-between' }}>
               <span className="s-title">Strict host key verification</span>
-              <span className={clsx('switch', hostKeyCheck && 'on')} onClick={() => setHostKeyCheck((v) => !v)} />
+              <Switch checked={hostKeyCheck} onChange={setHostKeyCheck} />
             </label>
           </div>
         )}

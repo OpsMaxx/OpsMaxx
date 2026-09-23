@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Check, X } from 'lucide-react'
-import { clsx } from '../../lib/format'
 import type { AccessGroup } from '../../../../shared/mcp'
+import { Switch } from '../common/Switch'
 
 interface PendingAuthorization {
   id: string
@@ -157,17 +157,18 @@ export function AiAuthorizations(): React.JSX.Element {
                 ) : (
                   workspaces.map((w) => (
                     // The click target is the whole label, not just the switch.
-                    // This <label> wraps no form control, so a click on the name
-                    // is not forwarded anywhere -- put the handler only on the
-                    // span and the visible text is dead, which is how it reads
-                    // to anyone who aims at the word rather than the toggle.
+                    // The switch is this <label>'s control, so a click on the
+                    // workspace name presses it too — the name is what most
+                    // people aim at.
                     <label
                       key={w.id}
                       style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
-                      onClick={() => toggleWorkspace(request.id, w.id)}
                     >
                       {w.name}
-                      <span className={clsx('switch', picked.workspaceIds.includes(w.id) && 'on')} />
+                      <Switch
+                        checked={picked.workspaceIds.includes(w.id)}
+                        onChange={() => toggleWorkspace(request.id, w.id)}
+                      />
                     </label>
                   ))
                 )}

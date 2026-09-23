@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Plus, Copy, Eye, EyeOff, Ban, Octagon, Trash2, TriangleAlert } from 'lucide-react'
 import { toast } from '../../store/toast'
-import { clsx } from '../../lib/format'
 import { useApp } from '../../store/app'
 import { openAi } from '../../store/nav'
 import { SessionAccess } from './SessionAccess'
 import type { McpAgentSession, AccessGroup } from '../../../../shared/mcp'
 import { resolveDefaultSessionGroup } from '../../../../shared/mcp'
 import { maskToken } from '../../../../shared/tokenDisplay'
+import { Switch } from '../common/Switch'
 
 interface WorkspaceOpt {
   id: string
@@ -274,10 +274,7 @@ function CreateSessionForm({
           {workspaces.map((w) => (
             <label key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
               {w.name}
-              <span
-                className={clsx('switch', workspaceIds.includes(w.id) && 'on')}
-                onClick={() => toggleWorkspace(w.id)}
-              />
+              <Switch checked={workspaceIds.includes(w.id)} onChange={() => toggleWorkspace(w.id)} />
             </label>
           ))}
         </div>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { clsx, duration } from '../../lib/format'
 import { useApp } from '../../store/app'
 import type { WebhookConfig, WebhookDeliveryStatus } from '../../../../shared/webhook'
+import { Switch } from '../common/Switch'
 
 // The URL is never read back across the bridge — main reports only whether one
 // is set. It is a bearer credential (anyone holding a Slack webhook can post as
@@ -139,15 +140,15 @@ export function WebhookAlertSettings(): React.JSX.Element {
             this stays silent in exactly the case you set it up for.
           </div>
         </div>
-        {/* `.switch` is a styled span with an `.on` class; there is no
-            `:checked` selector anywhere in the stylesheet. These three rows
-            used a <label><input type=checkbox> instead, which meant they never
-            showed their on state and drew a raw checkbox over the pill. */}
-        <span
-          className={clsx('switch', cfg.enabled && 'on', !cfg.hasUrl && 'disabled')}
-          onClick={() => {
-            if (cfg.hasUrl) void apply({ enabled: !cfg.enabled })
-          }}
+        {/* The shared Switch, not a <label><input type=checkbox>: `.switch`
+            draws from an `.on` class, with no `:checked` selector anywhere, so
+            these rows once never showed their on state and drew a raw checkbox
+            over the pill. */}
+        <Switch
+          checked={cfg.enabled}
+          disabled={!cfg.hasUrl}
+          label="Send alerts to a webhook"
+          onChange={(v) => void apply({ enabled: v })}
         />
       </SettingRowSwitchLike>
 
@@ -199,11 +200,11 @@ export function WebhookAlertSettings(): React.JSX.Element {
             An alert with no resolution leaves the reader working out whether it is still happening.
           </div>
         </div>
-        <span
-          className={clsx('switch', cfg.notifyOnResolved && cfg.enabled && 'on', !cfg.enabled && 'disabled')}
-          onClick={() => {
-            if (cfg.enabled) void apply({ notifyOnResolved: !cfg.notifyOnResolved })
-          }}
+        <Switch
+          checked={cfg.notifyOnResolved && cfg.enabled}
+          disabled={!cfg.enabled}
+          label="Also send when it recovers"
+          onChange={(v) => void apply({ notifyOnResolved: v })}
         />
       </SettingRowSwitchLike>
     </>

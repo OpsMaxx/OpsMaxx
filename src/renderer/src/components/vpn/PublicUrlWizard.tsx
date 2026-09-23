@@ -3,11 +3,11 @@ import { Check, Copy, Globe, Loader2, Share2 } from 'lucide-react'
 import { Modal } from '../common/Modal'
 import { useApp } from '../../store/app'
 import { toast } from '../../store/toast'
-import { clsx } from '../../lib/format'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import { isVpnRunning } from '../../../../shared/vpn'
 import type { NgrokSpec, VpnProfile } from '../../../../shared/vpn'
 import { headline } from './useVpnProfiles'
+import { Switch } from '../common/Switch'
 
 /**
  * "Get a public URL", asked as the question it actually is.
@@ -228,20 +228,11 @@ export function PublicUrlWizard({
           </div>
 
           <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
-            <span
-              className={clsx('switch', acknowledged && 'on')}
+            <Switch
+              checked={acknowledged}
+              label={`Make ${local} reachable from the public internet`}
               style={{ marginTop: 1 }}
-              role="switch"
-              tabIndex={0}
-              aria-checked={acknowledged}
-              aria-label={`Make ${local} reachable from the public internet`}
-              onClick={() => setAcknowledged(!acknowledged)}
-              onKeyDown={(e) => {
-                if (e.key === ' ' || e.key === 'Enter') {
-                  e.preventDefault()
-                  setAcknowledged(!acknowledged)
-                }
-              }}
+              onChange={setAcknowledged}
             />
             <span
               style={{

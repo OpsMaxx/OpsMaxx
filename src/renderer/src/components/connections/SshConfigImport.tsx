@@ -6,6 +6,7 @@ import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
 import type { SshConfigHost } from '../../../../shared/sshconfig'
 import type { Hop } from '../../types'
+import { Switch } from '../common/Switch'
 
 let hopSeq = 0
 
@@ -187,7 +188,7 @@ export function SshConfigImport(): React.JSX.Element {
             </button>
             <span className="spacer" />
             <label className="row" style={{ gap: 8 }}>
-              <span className={clsx('switch', intoFolder && 'on')} onClick={() => setIntoFolder((v) => !v)} />
+              <Switch checked={intoFolder} onChange={setIntoFolder} />
               <span className="muted">
                 <FolderPlus size={13} /> Group into a folder
               </span>

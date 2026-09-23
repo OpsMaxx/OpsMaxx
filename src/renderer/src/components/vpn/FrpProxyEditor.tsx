@@ -1,7 +1,7 @@
 import { Trash2 } from 'lucide-react'
 import type { FrpProxy, FrpProxyType } from '../../types'
-import { clsx } from '../../lib/format'
 import { BindWarning } from './VpnStatusCard'
+import { Switch } from '../common/Switch'
 
 const TYPES: FrpProxyType[] = ['tcp', 'udp', 'http', 'https', 'stcp', 'sudp', 'xtcp', 'tcpmux']
 
@@ -141,25 +141,14 @@ export function FrpProxyEditor({
           because "expose this proxy" is a sentence that tells the user nothing
           they had not already assumed. start() refuses without this ticked. */}
       <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
-        <span
-          className={clsx('switch', proxy.acknowledgedExposure && 'on')}
+        <Switch
+          checked={!!proxy.acknowledgedExposure}
+          label={exposureSentence}
+          // Out of the tab order until there is something to confirm; the
+          // sentence beside it says what to set first.
+          tabIndex={missing ? -1 : undefined}
           style={{ marginTop: 1 }}
-          // This is the only thing standing between the user and publishing a
-          // local port, so it has to be operable and perceivable without a
-          // mouse. The bare `.switch` span used elsewhere in the app has no
-          // role, no tab stop and no key handling; clicking the sentence did
-          // nothing either, because the label wrapped no form control.
-          role="switch"
-          tabIndex={missing ? -1 : 0}
-          aria-checked={proxy.acknowledgedExposure}
-          aria-label={exposureSentence}
-          onClick={toggleExposure}
-          onKeyDown={(e) => {
-            if (e.key === ' ' || e.key === 'Enter') {
-              e.preventDefault()
-              toggleExposure()
-            }
-          }}
+          onChange={toggleExposure}
         />
         <span
           style={{

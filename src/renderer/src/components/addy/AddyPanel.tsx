@@ -33,6 +33,7 @@ import {
   type AddyStatus,
   type AddyStep
 } from './addyStatus'
+import { Switch } from '../common/Switch'
 
 /**
  * Sync & devices — the account, the machines on it, and whether anything moved.
@@ -613,12 +614,10 @@ function ClipboardShortcuts(): React.JSX.Element {
           <kbd>Cmd/Ctrl+Shift+C</kbd> is the developer tools in most browsers.
         </div>
       </div>
-      <span
-        className={clsx('switch', on && 'on')}
-        role="switch"
-        aria-checked={on ? 'true' : 'false'}
-        aria-label="Send and receive the clipboard with a keystroke"
-        onClick={() => setSettings({ addyClipboardShortcuts: !on })}
+      <Switch
+        checked={on}
+        label="Send and receive the clipboard with a keystroke"
+        onChange={(v) => setSettings({ addyClipboardShortcuts: v })}
       />
       {/* `held` is true when EITHER combination registered, because the
           release path has to unregister whatever did — so a blocked one is

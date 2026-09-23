@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { KeyRound } from 'lucide-react'
 import { Modal } from '../common/Modal'
-import { clsx } from '../../lib/format'
 import type { SshPromptRequest } from '../../../../preload/index'
 import { bridgeOn } from '../../lib/bridge'
+import { Switch } from '../common/Switch'
 
 // Answers keyboard-interactive challenges: the second factor on servers with
 // AuthenticationMethods publickey,keyboard-interactive, or the password on
@@ -132,7 +132,7 @@ export function SshPrompt(): React.JSX.Element | null {
 
         {canRemember && (
           <label className="row" style={{ gap: 8 }}>
-            <span className={clsx('switch', remember && 'on')} onClick={() => setRemember((v) => !v)} />
+            <Switch checked={remember} onChange={setRemember} />
             <span className="muted" style={{ fontSize: 12 }}>
               Remember this answer for {request.host} (stored in OS secure storage)
             </span>
