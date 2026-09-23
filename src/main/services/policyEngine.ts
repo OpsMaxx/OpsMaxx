@@ -708,12 +708,16 @@ function unwrapSegment(
     // them with spaces took `bash -lc "cat /etc/shadow"` apart; walking only
     // the first missed the rest.
     //
-    // A segment that STARTS with one of those actions is the tail of a find
-    // whose `;` was left unescaped: the shell split it there. It runs nothing
-    // in a real shell, and it is walked all the same -- the cheap direction to
-    // be wrong in.
+    // A segment that starts like the middle of a find expression -- a
+    // predicate or operator (`-o`, `-name`, `-fprint`, `-exec`), with `!`, `(`
+    // and `\(` already stepped over as grammar -- and holds an action is the
+    // tail of a find whose `;` was left unescaped: the shell split it there.
+    // It runs nothing in a real shell, and it is walked all the same -- the
+    // cheap direction to be wrong in. No real command word starts with `-`,
+    // so `echo -exec` or `grep -- -exec` are never read this way.
     const findAction = /^-(?:exec|execdir|ok|okdir)$/
-    if (name === 'find' || findAction.test(argv[0])) {
+    const findTail = argv[0].startsWith('-') && argv.some((a) => findAction.test(a))
+    if (name === 'find' || findTail) {
       const from = name === 'find' ? 1 : 0
       const targets: string[][] = []
       for (let i = from; i < argv.length; i++) {

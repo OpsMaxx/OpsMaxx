@@ -74,8 +74,8 @@ Regardless of which access group a session holds:
     anywhere in an option cluster: `bash -lc`, `sh -ec`, `zsh -ic`, `bash -lic`, with the string
     as the first operand after the options), `script -c` (`-qc` included), `su -c`, `sg`, `env -S`,
     `flock -c`, every `find -exec`/`-execdir`/`-ok`/`-okdir` group (each target walked as the argv
-    find passes, not a re-joined line, and a group left behind by an unescaped `;` the shell split
-    on walked too), a `parallel` template (or, with none, each of its
+    find passes, not a re-joined line, and the tail an unescaped `;` splits off -- whether it starts
+    with an action, a predicate or an operator -- walked too), a `parallel` template (or, with none, each of its
     arguments), `watch`, `eval`, and on Windows `cmd /c`, `/r` or
     `/k` (glued on or not, `cmd.exe/c` included), PowerShell's `-Command` (or `-c`, or the implicit
     command a bare `powershell Start-Process …` takes), `iex`/`Invoke-Expression`, the scriptblock
@@ -126,7 +126,10 @@ Regardless of which access group a session holds:
   (`tests/escalationQuotingMatrix.test.ts`): every nest of `eval '…'`, `sh -c '…'`, `sh -c "…"`,
   `env -S "…"`, `$(…)`, a `$(case … esac)` with parens of its own, `cat <(…)`, a backquote,
   `bash -lc`, `sh -ec`, `zsh -ic`, `bash -lic`, `script -qc` and `find -exec true \; -exec sh -c`
-  (a harmless first group before the payload) — 41,370 nests up to four deep,
+  (a harmless first group before the payload) — 41,370 nests up to four deep. CI runs depths one to
+  three in full and a fixed slice of depth four (every 29th nest, in generation order, so a failure
+  reproduces); `OPSMAXX_FULL_MATRIX=1 npx vitest run tests/escalationQuotingMatrix.test.ts` runs all
+  of depth four, and a change to the command walk should be checked that way. The nests are
   each quoted the way a careful tool quotes. Around `sudo reboot` under a group that denies sudo,
   and around `cat /etc/shadow` under a path rule that denies it, every nest to depth three must be
   denied and none at depth four allowed; the same nests around `ls /tmp` must never be denied.

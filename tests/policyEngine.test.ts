@@ -974,3 +974,25 @@ describe('every find action group', () => {
     expect(d.reason).not.toMatch(/computed/)
   })
 })
+
+// Security pass #9: a split find tail starts with a predicate or an operator
+// just as often as with an action.
+describe('a find tail that starts with a predicate or operator', () => {
+  const noSudo = group({ terminal: 'allow', sudo: 'deny' })
+
+  it.each([
+    'find . -name x -exec echo ; -o -name y -exec sudo reboot ;',
+    'find . -exec echo {} ; -fprint x -exec sudo reboot ;',
+    'find . -exec echo {} ; ! -name x -exec sudo reboot ;',
+    'find . -exec echo {} ; \\( -name x \\) -exec sudo reboot ;'
+  ])('denies %s under sudo=deny', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('deny')
+  })
+
+  it.each(['echo -exec sudo reboot', 'grep -e -exec file', 'grep -- -exec file', 'echo x; echo -exec'])(
+    'does not read %s as a find tail',
+    (cmd) => {
+      expect(evaluateCommand(noSudo, cmd).decision).toBe('allow')
+    }
+  )
+})
