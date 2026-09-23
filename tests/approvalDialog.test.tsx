@@ -20,6 +20,11 @@ import type { ApprovalRequest, McpAgentSession } from '../src/shared/mcp'
 // The default 1s for findBy/waitFor passed alone and failed five tests at
 // ~1006 ms under the full suite's load. Nothing here is slow; the machine is.
 configure({ asyncUtilTimeout: 5000 })
+// Every yes in this file now waits out the real ARM_MS click-arming delay, so a
+// test's own budget has to be larger than the wait inside it. At the default
+// 5 s, a loaded machine let the 5 s waitFor and the 5 s test timeout race, and
+// the test lost at 5026 ms.
+vi.setConfig({ testTimeout: 20_000 })
 
 /** A yes button once its click-arming delay has passed. */
 async function armed(button: HTMLElement): Promise<HTMLElement> {
